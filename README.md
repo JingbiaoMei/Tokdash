@@ -14,6 +14,10 @@ Local token & cost dashboard for AI coding tools (Codex, OpenCode, Claude Code, 
 - **Flexible ranges**: today / week / month / N days
 - **Contribution calendar**: 2D heatmap + 3D isometric view
 
+<p align="center">
+  <img src="docs/assets/demo.png" alt="Tokdash dashboard demo" width="900" />
+</p>
+
 ## Supported clients (explicit token fields)
 
 ✅ Supported:
@@ -87,7 +91,7 @@ Copy and paste this prompt to your LLM agent (Claude Code, AmpCode, Cursor, etc.
 Install and configure Tokdash to run in the background by following the instructions here:
 https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/agents/systemd/AGENTS.md
 
-Or read the Background Run guide, but seriously, let an agent do it. Humans fat-finger configs.
+Or read the Background Run guide, but seriously, let an agent do it.
 ```
 
 #### For LLM Agents
@@ -110,7 +114,7 @@ Copy and paste this prompt to your LLM agent (Claude Code, AmpCode, Cursor, etc.
 Install and configure scheduled Tokdash usage reports for OpenClaw by following the instructions here:
 https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/agents/openclaw_reporting/AGENTS.md
 
-Or read the guide yourself, but seriously, let an agent do it. Humans fat-finger configs.
+Or read the guide yourself, but seriously, let an agent do it.
 ```
 
 #### For LLM Agents

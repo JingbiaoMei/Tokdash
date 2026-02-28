@@ -3,7 +3,11 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#1E40AF" />
   <title>Tokdash</title>
+
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" href="/static/icons/icon-192.png" sizes="192x192" />
 
   <!-- Fonts (Design System: Fira Code / Fira Sans) -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -197,7 +201,7 @@
           </div>
           <div>
             <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight mono">Tokdash</h1>
-            <p class="text-sm sm:text-base" style="color: var(--color-muted);">OpenClaw + coding tools usage, cost, and activity.</p>
+            <p class="text-sm sm:text-base" style="color: var(--color-muted);"></p>
             <p id="lastUpdate" class="text-xs mt-2" style="color: rgba(71,85,105,0.9);">Loading...</p>
           </div>
         </div>
@@ -255,7 +259,7 @@
         <div class="surface p-5">
           <div class="text-xs font-semibold uppercase tracking-wider" style="color: rgba(71,85,105,0.9);">Top Model</div>
           <div id="topModel" class="text-lg sm:text-xl font-extrabold mt-2 mono" style="color: var(--color-text);">-</div>
-          <div id="topModelTokens" class="text-sm mt-1" style="color: var(--color-muted);">- tokens</div>
+          <div id="topModelMeta" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
         </div>
       </section>
 
@@ -341,7 +345,7 @@
     <div id="stats-content" class="tab-content">
       <section class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <div class="surface p-4">
-          <div class="text-xs font-semibold uppercase tracking-wider" style="color: rgba(71,85,105,0.9);">Favorite Model</div>
+          <div class="text-xs font-semibold uppercase tracking-wider" style="color: rgba(71,85,105,0.9);">Top Model (Cost)</div>
           <div id="statFavoriteModel" class="mt-2 font-extrabold mono">Loading…</div>
         </div>
         <div class="surface p-4">
@@ -413,9 +417,9 @@
               <h4 class="text-sm font-extrabold uppercase tracking-wider mb-4" style="color: rgba(71,85,105,0.9);">Month Stats</h4>
               
               <div class="space-y-4">
-                <!-- Favorite Model -->
+                <!-- Top model by cost -->
                 <div>
-                  <div class="text-xs font-semibold text-slate-500 mb-1">Favorite Model</div>
+                  <div class="text-xs font-semibold text-slate-500 mb-1">Top Model (Cost)</div>
                   <div id="monthFavoriteModel" class="font-bold text-base mono" style="color: var(--color-primary);">—</div>
                 </div>
 
@@ -707,7 +711,7 @@
         if (data.top_models && data.top_models.length > 0) {
           const top = data.top_models[0];
           document.getElementById('topModel').textContent = top.name;
-          document.getElementById('topModelTokens').textContent = formatNumber(top.tokens) + ' tokens';
+          document.getElementById('topModelMeta').textContent = `${formatCurrency(top.cost)} · ${formatNumber(top.tokens)} tokens`;
         }
 
         await nextFrame();
@@ -1066,7 +1070,7 @@
             if (lastUsageResponse.top_models && lastUsageResponse.top_models.length > 0) {
               const top = lastUsageResponse.top_models[0];
               document.getElementById('topModel').textContent = top.name;
-              document.getElementById('topModelTokens').textContent = formatNumber(top.tokens) + ' tokens';
+              document.getElementById('topModelMeta').textContent = `${formatCurrency(top.cost)} · ${formatNumber(top.tokens)} tokens`;
             }
             updateToolChart(lastUsageResponse.by_tool || {});
             updateModelChart(lastUsageResponse.top_models || []);
@@ -1290,7 +1294,8 @@
       let totalCost = 0;
       let totalMessages = 0;
       let activeDays = 0;
-      const modelCounts = new Map();
+      const modelCosts = new Map();
+      const modelTokens = new Map();
 
       monthDays.forEach((day) => {
         if (day && day.totals) {
@@ -1306,22 +1311,34 @@
           if (day.sources) {
             day.sources.forEach((source) => {
               const modelName = normalizeModelName(source.modelId || source.model || 'Unknown');
+              const cost = Number(source.cost || 0);
+              modelCosts.set(modelName, (modelCosts.get(modelName) || 0) + cost);
+
               const totalTokens = source.tokens ? (source.tokens.input || 0) + (source.tokens.output || 0) + (source.tokens.cacheRead || 0) : 0;
-              modelCounts.set(modelName, (modelCounts.get(modelName) || 0) + totalTokens);
+              modelTokens.set(modelName, (modelTokens.get(modelName) || 0) + totalTokens);
             });
           }
         }
       });
 
-      // Find favorite model (most tokens)
-      let favoriteModel = '—';
-      let maxTokens = 0;
-      modelCounts.forEach((tokens, model) => {
-        if (tokens > maxTokens) {
-          maxTokens = tokens;
-          favoriteModel = model;
+      // Top model by cost (fallback: tokens if all costs are zero)
+      let topModel = '—';
+      let maxCost = 0;
+      modelCosts.forEach((cost, model) => {
+        if (cost > maxCost) {
+          maxCost = cost;
+          topModel = model;
         }
       });
+      if (maxCost <= 0) {
+        let maxTokens = 0;
+        modelTokens.forEach((tokens, model) => {
+          if (tokens > maxTokens) {
+            maxTokens = tokens;
+            topModel = model;
+          }
+        });
+      }
 
       // Calculate streak within this month
       let monthStreak = 0;
@@ -1342,7 +1359,7 @@
       const longestEverStreak = calculateLongestStreak(calendarState.contributions || []);
 
       // Update UI - Month sidebar stats
-      document.getElementById('monthFavoriteModel').textContent = favoriteModel;
+      document.getElementById('monthFavoriteModel').textContent = topModel;
       document.getElementById('monthTotalTokens').textContent = formatNumber(totalTokens);
       document.getElementById('monthTotalCost').textContent = formatCurrency(totalCost);
       document.getElementById('monthTotalSessions').textContent = formatNumber(totalMessages);
@@ -1350,7 +1367,7 @@
       document.getElementById('monthCurrentStreak').textContent = monthStreak + (monthStreak === 1 ? ' day' : ' days');
 
       // Update top stats section for month view
-      document.getElementById('statFavoriteModel').textContent = favoriteModel;
+      document.getElementById('statFavoriteModel').textContent = topModel;
       document.getElementById('statTotalTokens').textContent = formatNumber(totalTokens);
       document.getElementById('statSessions').textContent = formatNumber(totalMessages);
       document.getElementById('statCurrentStreak').textContent = monthStreak + (monthStreak === 1 ? ' day' : ' days');
@@ -1366,7 +1383,7 @@
       
       // Filter to current year
       const yearDays = contributions.filter(d => {
-        const dateYear = new Date(d.date).getFullYear();
+        const dateYear = Number(String(d.date).slice(0, 4));
         return dateYear === year;
       });
 
@@ -1374,7 +1391,8 @@
       let totalCost = 0;
       let totalMessages = 0;
       let activeDays = 0;
-      const modelCounts = new Map();
+      const modelCosts = new Map();
+      const modelTokens = new Map();
 
       yearDays.forEach((day) => {
         if (day && day.totals) {
@@ -1389,21 +1407,33 @@
           if (day.sources) {
             day.sources.forEach((source) => {
               const modelName = normalizeModelName(source.modelId || source.model || 'Unknown');
+              const cost = Number(source.cost || 0);
+              modelCosts.set(modelName, (modelCosts.get(modelName) || 0) + cost);
+
               const totalTokens = source.tokens ? (source.tokens.input || 0) + (source.tokens.output || 0) + (source.tokens.cacheRead || 0) : 0;
-              modelCounts.set(modelName, (modelCounts.get(modelName) || 0) + totalTokens);
+              modelTokens.set(modelName, (modelTokens.get(modelName) || 0) + totalTokens);
             });
           }
         }
       });
 
-      let favoriteModel = '—';
-      let maxTokens = 0;
-      modelCounts.forEach((tokens, model) => {
-        if (tokens > maxTokens) {
-          maxTokens = tokens;
-          favoriteModel = model;
+      let topModel = '—';
+      let maxCost = 0;
+      modelCosts.forEach((cost, model) => {
+        if (cost > maxCost) {
+          maxCost = cost;
+          topModel = model;
         }
       });
+      if (maxCost <= 0) {
+        let maxTokens = 0;
+        modelTokens.forEach((tokens, model) => {
+          if (tokens > maxTokens) {
+            maxTokens = tokens;
+            topModel = model;
+          }
+        });
+      }
 
       // Calculate streak within this year
       let yearStreak = 0;
@@ -1425,7 +1455,7 @@
       const longestEverStreak = calculateLongestStreak(calendarState.contributions || []);
 
       // Update top stats section
-      document.getElementById('statFavoriteModel').textContent = favoriteModel;
+      document.getElementById('statFavoriteModel').textContent = topModel;
       document.getElementById('statTotalTokens').textContent = formatNumber(totalTokens);
       document.getElementById('statSessions').textContent = formatNumber(totalMessages);
       document.getElementById('statCurrentStreak').textContent = yearStreak + (yearStreak === 1 ? ' day' : ' days');
@@ -1446,7 +1476,8 @@
       let totalCost = 0;
       let totalMessages = 0;
       let activeDays = 0;
-      const modelCounts = new Map();
+      const modelCosts = new Map();
+      const modelTokens = new Map();
 
       contributions.forEach((day) => {
         if (day && day.totals) {
@@ -1461,21 +1492,33 @@
           if (day.sources) {
             day.sources.forEach((source) => {
               const modelName = normalizeModelName(source.modelId || source.model || 'Unknown');
+              const cost = Number(source.cost || 0);
+              modelCosts.set(modelName, (modelCosts.get(modelName) || 0) + cost);
+
               const totalTokens = source.tokens ? (source.tokens.input || 0) + (source.tokens.output || 0) + (source.tokens.cacheRead || 0) : 0;
-              modelCounts.set(modelName, (modelCounts.get(modelName) || 0) + totalTokens);
+              modelTokens.set(modelName, (modelTokens.get(modelName) || 0) + totalTokens);
             });
           }
         }
       });
 
-      let favoriteModel = '—';
-      let maxTokens = 0;
-      modelCounts.forEach((tokens, model) => {
-        if (tokens > maxTokens) {
-          maxTokens = tokens;
-          favoriteModel = model;
+      let topModel = '—';
+      let maxCost = 0;
+      modelCosts.forEach((cost, model) => {
+        if (cost > maxCost) {
+          maxCost = cost;
+          topModel = model;
         }
       });
+      if (maxCost <= 0) {
+        let maxTokens = 0;
+        modelTokens.forEach((tokens, model) => {
+          if (tokens > maxTokens) {
+            maxTokens = tokens;
+            topModel = model;
+          }
+        });
+      }
 
       // Calculate current ongoing streak from today backwards
       let currentStreak = 0;
@@ -1496,7 +1539,7 @@
       const longestEverStreak = calculateLongestStreak(contributions);
 
       // Update top stats section
-      document.getElementById('statFavoriteModel').textContent = favoriteModel;
+      document.getElementById('statFavoriteModel').textContent = topModel;
       document.getElementById('statTotalTokens').textContent = formatNumber(totalTokens);
       document.getElementById('statSessions').textContent = formatNumber(totalMessages);
       document.getElementById('statCurrentStreak').textContent = currentStreak + (currentStreak === 1 ? ' day' : ' days');
@@ -2089,6 +2132,13 @@
       if (!isOverviewActive()) return;
       updateDashboard();
     }, 5 * 60 * 1000);
+
+    // PWA install support (Android/Chrome requires manifest + service worker).
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').catch(() => {});
+      });
+    }
 
     // Initial load
     updateDashboard();

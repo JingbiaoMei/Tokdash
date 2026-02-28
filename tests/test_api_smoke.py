@@ -81,5 +81,11 @@ def test_api_endpoints_and_dashboard_smoke():
         assert "contributions" in stats
         assert "stats" in stats
 
+        manifest = _fetch(f"{base}/manifest.webmanifest")
+        assert "Tokdash" in manifest
+
+        sw = _fetch(f"{base}/sw.js")
+        assert "service worker" in sw.lower()
+
         html = _fetch(f"{base}/")
         assert "Tokdash" in html

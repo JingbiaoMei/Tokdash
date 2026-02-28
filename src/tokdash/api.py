@@ -92,6 +92,21 @@ def serve_dashboard():
         return HTMLResponse(content="<h1>Dashboard not found</h1><p>Please create static/index.html</p>", status_code=404)
     return FileResponse(html_path)
 
+@app.get("/manifest.webmanifest")
+def serve_manifest():
+    path = STATIC_DIR / "manifest.webmanifest"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Manifest not found")
+    return FileResponse(path, media_type="application/manifest+json", headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/sw.js")
+def serve_service_worker():
+    path = STATIC_DIR / "sw.js"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Service worker not found")
+    return FileResponse(path, media_type="application/javascript", headers={"Cache-Control": "no-cache"})
+
 
 @app.get("/api/stats")
 def get_stats(year: Optional[int] = None) -> Dict[str, Any]:

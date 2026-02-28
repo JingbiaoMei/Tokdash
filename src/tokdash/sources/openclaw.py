@@ -156,7 +156,7 @@ def get_session_usage(
             if until_date and msg_dt > until_date:
                 continue
 
-            msg_date = msg_dt.strftime("%Y-%m-%d")
+            msg_date = msg_dt.astimezone().strftime("%Y-%m-%d")
 
             total_messages += 1
 
@@ -288,10 +288,23 @@ def get_usage_for_days(days: int) -> Dict[str, Any]:
 
 
 def get_usage_for_month() -> Dict[str, Any]:
-    """Get usage for current month (UTC)."""
+    """Get usage for current month (local time)."""
     sessions_dir = glob.glob(os.path.expanduser("~/.openclaw/agents/*/sessions"))
 
-    now = datetime.now(timezone.utc)
-    start_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    now_local = datetime.now().astimezone()
+    start_of_month_local = now_local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    since = start_of_month_local.astimezone(timezone.utc)
+    until = datetime.now(timezone.utc)
 
-    return get_session_usage(sessions_dir, since_date=start_of_month, until_date=now)
+    return get_session_usage(sessions_dir, since_date=since, until_date=until)
+
+
+def get_usage_for_year(year: int) -> Dict[str, Any]:
+    """Get usage for a calendar year (local time)."""
+    sessions_dir = glob.glob(os.path.expanduser("~/.openclaw/agents/*/sessions"))
+
+    local_tz = datetime.now().astimezone().tzinfo or timezone.utc
+    start_of_year = datetime(year, 1, 1, tzinfo=local_tz).astimezone(timezone.utc)
+    end_of_year = (datetime(year + 1, 1, 1, tzinfo=local_tz).astimezone(timezone.utc) - timedelta(microseconds=1))
+
+    return get_session_usage(sessions_dir, since_date=start_of_year, until_date=end_of_year)

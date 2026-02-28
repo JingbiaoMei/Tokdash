@@ -6,6 +6,7 @@ Tokdash exposes a local HTTP API (default: `http://127.0.0.1:55423`) that OpenCl
 
 ## Questions to ask first
 - Where is Tokdash running (host/port)? Is it already in the background?
+- Should remote access use `tailscale serve` (recommended) instead of LAN exposure?
 - Report period: `today`, `week`, `month`, or `N` days?
 - Delivery schedule: what time + timezone? (cron uses machine local timezone)
 - Delivery channel:
@@ -32,7 +33,7 @@ curl 'http://127.0.0.1:55423/api/usage?period=today'
 ```
 
 ## Starting script (recommended)
-Use: `docs/agents/openclaw_reporting/openclaw_cron_job.py` from this repo, but **place it wherever the user wants** (typically under the OpenClaw workspace).
+Use: `https://github.com/JingbiaoMei/tokdash/blob/main/docs/agents/openclaw_reporting/openclaw_cron_job.py` from this repo, but **place it wherever the user wants** (typically under the OpenClaw workspace).
 
 Suggested install location (example):
 - `~/.openclaw/workspace/monitor/openclaw_cron_job.py`
@@ -48,7 +49,7 @@ cp /PATH/TO/tokdash/docs/agents/openclaw_reporting/openclaw_cron_job.py ~/.openc
 2) Or download the single file (if the user has access to the repo):
 ```bash
 mkdir -p ~/.openclaw/workspace/monitor
-curl -L '<RAW_URL_TO>/docs/agents/openclaw_reporting/openclaw_cron_job.py' -o ~/.openclaw/workspace/monitor/openclaw_cron_job.py
+curl -L 'https://raw.githubusercontent.com/JingbiaoMei/tokdash/main/docs/agents/openclaw_reporting/openclaw_cron_job.py' -o ~/.openclaw/workspace/monitor/openclaw_cron_job.py
 ```
 
 It calls `GET /api/usage` and prints a human-readable report.
@@ -67,11 +68,10 @@ python3 ~/.openclaw/workspace/monitor/openclaw_cron_job.py --base-url http://127
 
 Notes:
 - cron requires **absolute paths** (it won’t expand `~`).
-- Ensure Tokdash is already running at that `--base-url` (use the systemd/launchd prompt if needed).
+- Ensure Tokdash is already running at that `--base-url` (use the systemd/launchd prompt if needed: `https://github.com/JingbiaoMei/tokdash/blob/main/docs/agents/systemd/AGENTS.md`).
 
 ## Delivery notes
 - Default to “write report to stdout / a log file”.
 - If the user wants Slack/email/webhook delivery, ask for:
   - which workspace/channel
   - preferred message format (plain text vs Markdown)
-  - credentials handling (do **not** commit secrets; store locally, ideally under a gitignored `.api_keys/`)

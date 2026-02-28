@@ -5,6 +5,7 @@ Goal: help the user install Tokdash and keep it running in the background for lo
 ## Questions to ask first
 - OS: Linux (systemd) or macOS (launchd)?
 - Bind + security: keep `127.0.0.1` (recommended) or expose on LAN (`0.0.0.0`, only if the user explicitly wants this)?
+- Remote access: local-only, or do they want secure remote access via `tailscale serve`?
 - Port: keep default `55423` or change due to conflicts?
 - Install method: venv vs `pipx` vs system Python?
 
@@ -12,8 +13,8 @@ Goal: help the user install Tokdash and keep it running in the background for lo
 1. Install Tokdash (`pip install tokdash`) and record the **absolute path** of `tokdash` (`which tokdash`).
 2. Verify it works in foreground: `tokdash serve --bind 127.0.0.1 --port 55423`, then open `http://127.0.0.1:55423/`.
 3. Set up a user-level service using the repo templates:
-   - Linux: `docs/agents/systemd/templates/tokdash.service`
-   - macOS: `docs/agents/systemd/templates/com.tokdash.tokdash.plist`
+   - Linux: `https://github.com/JingbiaoMei/tokdash/blob/main/docs/agents/systemd/templates/tokdash.service`
+   - macOS: `https://github.com/JingbiaoMei/tokdash/blob/main/docs/agents/systemd/templates/com.tokdash.tokdash.plist`
 4. Edit the template to use the user’s **absolute** `tokdash` path and desired `--bind/--port`.
 5. Enable + start:
    - systemd: `systemctl --user enable --now tokdash`
@@ -23,9 +24,13 @@ Goal: help the user install Tokdash and keep it running in the background for lo
 7. Show where logs are:
    - systemd: `journalctl --user -u tokdash -f`
    - launchd: `/tmp/tokdash.out.log` and `/tmp/tokdash.err.log` (or whatever the plist sets)
+8. If the user wants remote/mobile access, ask if they want to run:
+   - `tailscale serve --bg 55423`
+   Keep Tokdash bound to `127.0.0.1`; avoid exposing `0.0.0.0` unless explicitly requested.
 
 ## Safety notes
 - Default to `127.0.0.1` unless the user explicitly requests LAN exposure.
+- Prefer `tailscale serve` over `0.0.0.0` for remote access.
 - If the user asks for `0.0.0.0`, warn them that anyone on the LAN may be able to access the dashboard unless they add auth / firewall rules.
 
-Reference: `docs/agents/systemd/BACKGROUND_RUN.md`.
+Reference: `https://github.com/JingbiaoMei/tokdash/blob/main/docs/agents/systemd/BACKGROUND_RUN.md`.

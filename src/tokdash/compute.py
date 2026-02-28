@@ -3,13 +3,14 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
 from .model_normalization import normalize_model_name
 from .pricing import PricingDatabase
 from .sources.openclaw import get_usage_for_days as get_session_usage_days
 from .sources.openclaw import get_usage_for_month as get_session_usage_month
+from .sources.openclaw import get_usage_for_year as get_session_usage_year
 from .sources.coding_tools import CodingToolsUsageTracker
 
 
@@ -38,17 +39,21 @@ def run_tokscale_json(period_args: list[str]) -> Dict[str, Any]:
 
 def _date_range_from_args(period_args: list[str]) -> tuple[Optional[datetime], Optional[datetime]]:
     if "--today" in period_args:
-        start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        start = datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
         return start, start + timedelta(days=1)
 
     since = None
     until = None
+    local_tz = datetime.now().astimezone().tzinfo or timezone.utc
     try:
         if "--since" in period_args:
-            since = datetime.strptime(period_args[period_args.index("--since") + 1], "%Y-%m-%d")
+            since = datetime.strptime(period_args[period_args.index("--since") + 1], "%Y-%m-%d").replace(tzinfo=local_tz)
         if "--until" in period_args:
             # CLI args are inclusive; tracker expects [since, until) exclusive.
-            until = datetime.strptime(period_args[period_args.index("--until") + 1], "%Y-%m-%d") + timedelta(days=1)
+            until = (
+                datetime.strptime(period_args[period_args.index("--until") + 1], "%Y-%m-%d").replace(tzinfo=local_tz)
+                + timedelta(days=1)
+            )
     except Exception:
         return None, None
 
@@ -183,6 +188,12 @@ def period_to_days(period: str) -> int:
 
 
 def period_to_range_args(period: str) -> list[str]:
+    if period == "month":
+        now_local = datetime.now().astimezone()
+        start_date = now_local.replace(day=1).date()
+        end_date = now_local.date()
+        return ["--since", start_date.strftime("%Y-%m-%d"), "--until", end_date.strftime("%Y-%m-%d")]
+
     days = period_to_days(period)
     if days == 1:
         return ["--today"]
@@ -192,9 +203,9 @@ def period_to_range_args(period: str) -> list[str]:
 
 
 def get_session_data(period: str) -> Dict[str, Any]:
-    days = period_to_days(period)
-    if period in ("month", "30"):
+    if period == "month":
         return get_session_usage_month()
+    days = period_to_days(period)
     return get_session_usage_days(days)
 
 
@@ -230,7 +241,7 @@ def _contributions_from_entries(entries: list[dict]) -> list[dict]:
         ts_ms = int(e.get("timestamp", 0) or 0)
         if ts_ms <= 0:
             continue
-        dt = datetime.utcfromtimestamp(ts_ms / 1000)
+        dt = datetime.fromtimestamp(ts_ms / 1000, timezone.utc).astimezone()
         date = dt.strftime("%Y-%m-%d")
 
         day = by_date.setdefault(
@@ -366,20 +377,18 @@ def compute_usage(period: str) -> Dict[str, Any]:
 
 def compute_stats(year: Optional[int] = None) -> Dict[str, Any]:
     """Contribution graph and stats (OpenClaw + coding tools)."""
-    session_data = get_session_usage_days(365)
+    session_data = get_session_usage_year(year) if year else get_session_usage_days(365)
     ocl_map = {c.get("date"): c for c in session_data.get("contributions", [])}
 
     if USE_LOCAL_CODING_TOOLS_BACKEND:
-        end_date = datetime.now()
         if year:
             start_date = datetime(year, 1, 1)
             end_date = datetime(year, 12, 31)
+            period_args = ["--since", start_date.strftime("%Y-%m-%d"), "--until", end_date.strftime("%Y-%m-%d")]
         else:
-            start_date = end_date - timedelta(days=365)
+            period_args = period_to_range_args("365")
 
-        coding_entries = run_local_coding_tools_json(
-            ["--since", start_date.strftime("%Y-%m-%d"), "--until", end_date.strftime("%Y-%m-%d")]
-        ).get("entries", [])
+        coding_entries = run_local_coding_tools_json(period_args).get("entries", [])
         coding_contribs = _contributions_from_entries(coding_entries)
     else:
         import tempfile

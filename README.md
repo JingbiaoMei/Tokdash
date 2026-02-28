@@ -67,9 +67,11 @@ If port conflicts:
 - `python3 main.py --port <port>`
 - `./tokdash serve --port <port>`
 
-If you want LAN access:
-- `python3 main.py --bind 0.0.0.0 --port <port>`
-- `tokdash serve --bind 0.0.0.0 --port <port>`
+If you want to access Tokdash from another device (recommended):
+- Tailscale Serve (private to your tailnet): `tailscale serve 55423`
+- SSH port-forward: `ssh -L 55423:127.0.0.1:55423 <user>@<host>`
+
+Binding to `0.0.0.0` is possible, but **not recommended**: it listens on all interfaces and can expose the dashboard beyond your LAN (VPN/Wi‑Fi/etc.). Only do this if you understand the risk and have firewall/auth in place.
 
 ### Run in background
 
@@ -107,19 +109,18 @@ Tokdash is **localhost-only by default**.
 - `TOKDASH_ALLOW_ORIGINS` (comma-separated, default: empty)
 - `TOKDASH_ALLOW_ORIGIN_REGEX` (default allows only localhost/127.0.0.1)
 
-Example (LAN access):
+Example (remote access via Tailscale Serve; recommended):
 
 ```bash
-export TOKDASH_HOST=0.0.0.0
-export TOKDASH_ALLOW_ORIGINS=http://192.168.1.10:55423
-python3 main.py
+tokdash serve --bind 127.0.0.1 --port 55423
+tailscale serve --bg 55423
 ```
 
 ## Privacy & security
 
 - **No telemetry**: Tokdash does not intentionally send your data anywhere.
 - **Local parsing**: usage is computed from local session files (see “Supported clients” paths above).
-- **Server exposure**: Tokdash binds to `127.0.0.1` by default. Only use `--bind 0.0.0.0` if you understand the LAN exposure risk.
+- **Server exposure**: Tokdash binds to `127.0.0.1` by default. Prefer Tailscale Serve or SSH tunneling for remote access; avoid `--bind 0.0.0.0` unless you understand it listens on all interfaces and have firewall/auth in place.
 
 ## API (local)
 

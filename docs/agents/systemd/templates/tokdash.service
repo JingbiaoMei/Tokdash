@@ -1,0 +1,24 @@
+[Unit]
+Description=Tokdash (local token & cost dashboard)
+After=network-online.target
+
+[Service]
+Type=simple
+
+# NOTE: Set this to the absolute path of your tokdash binary.
+# If you installed with `pip install --user tokdash`, this is often:
+#   %h/.local/bin/tokdash
+#
+# If you installed in a venv, it is typically:
+#   /path/to/venv/bin/tokdash
+ExecStart=%h/.local/bin/tokdash serve --bind 127.0.0.1 --port 55423
+
+Restart=on-failure
+RestartSec=3
+
+# Reduce log buffering so `journalctl -f` feels realtime.
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target
+

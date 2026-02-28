@@ -1,0 +1,569 @@
+{
+  "version": "2.0.1",
+  "lastUpdated": "2026-02-27T00:00:00Z",
+  "note": "Comprehensive pricing database with all Moonshot, MiniMax, GLM, and OpenAI models from OpenRouter. Cache pricing estimated at 10% of input for cache_read, 100% of input for cache_write.",
+  "aliases": {
+    "kimi-2.5": "kimi-k2.5",
+    "kimi2.5": "kimi-k2.5",
+    "vol-engine/kimi-2.5": "kimi-k2.5",
+    "volcengine/kimi-2.5": "kimi-k2.5",
+    "inficloud/kimi-2.5": "kimi-k2.5",
+    "kimi-coding/k2p5": "kimi-k2.5",
+    "kimi-ai/kimi-2.5": "kimi-k2.5",
+    "moonshot-ai/kimi-k2.5": "kimi-k2.5"
+  },
+  "models": {
+    "_comment_moonshot": "=== Moonshot AI / Kimi Models ===",
+    "kimi-k2.5": {
+      "provider": "moonshotai",
+      "input": 0.45,
+      "output": 2.25,
+      "cache_read": 0.045,
+      "cache_write": 0.45,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/moonshotai/kimi-k2.5"
+    },
+    "k2p5": {
+      "provider": "moonshotai",
+      "input": 0.45,
+      "output": 2.25,
+      "cache_read": 0.045,
+      "cache_write": 0.45,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/moonshotai/kimi-k2.5",
+      "note": "Alias for kimi-k2.5 (k2p5 naming variation)"
+    },
+    "kimi-k2-0905": {
+      "provider": "moonshotai",
+      "input": 0.39,
+      "output": 1.90,
+      "cache_read": 0.039,
+      "cache_write": 0.39,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/moonshotai/kimi-k2-0905"
+    },
+    "kimi-k2-thinking": {
+      "provider": "moonshotai",
+      "input": 0.40,
+      "output": 1.75,
+      "cache_read": 0.040,
+      "cache_write": 0.40,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/moonshotai/kimi-k2-thinking"
+    },
+    "kimi-k2": {
+      "provider": "moonshotai",
+      "input": 0.50,
+      "output": 2.40,
+      "cache_read": 0.050,
+      "cache_write": 0.50,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/moonshotai/kimi-k2"
+    },
+    "kimi-k2-0905:exacto": {
+      "provider": "moonshotai",
+      "input": 0.60,
+      "output": 2.50,
+      "cache_read": 0.060,
+      "cache_write": 0.60,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/moonshotai/kimi-k2-0905:exacto"
+    },
+    "_comment_minimax": "=== MiniMax Models ===",
+    "minimax-m2.5": {
+      "provider": "minimax",
+      "input": 0.30,
+      "output": 1.20,
+      "cache_read": 0.03,
+      "cache_write": 0.30,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/minimax/minimax-m2.5"
+    },
+    "minimax-m2.1": {
+      "provider": "minimax",
+      "input": 0.27,
+      "output": 0.95,
+      "cache_read": 0.03,
+      "cache_write": 0.27,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/minimax/minimax-m2.1"
+    },
+    "minimax-m2": {
+      "provider": "minimax",
+      "input": 0.255,
+      "output": 1.00,
+      "cache_read": 0.0255,
+      "cache_write": 0.255,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/minimax/minimax-m2"
+    },
+    "minimax-01": {
+      "provider": "minimax",
+      "input": 0.20,
+      "output": 1.10,
+      "cache_read": 0.020,
+      "cache_write": 0.20,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/minimax/minimax-01"
+    },
+    "minimax-m2-her": {
+      "provider": "minimax",
+      "input": 0.30,
+      "output": 1.20,
+      "cache_read": 0.030,
+      "cache_write": 0.30,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/minimax/minimax-m2-her"
+    },
+    "minimax-m1": {
+      "provider": "minimax",
+      "input": 0.40,
+      "output": 2.20,
+      "cache_read": 0.040,
+      "cache_write": 0.40,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/minimax/minimax-m1"
+    },
+    "_comment_glm": "=== GLM / Z.ai Models ===",
+    "glm-5": {
+      "provider": "z-ai",
+      "input": 0.80,
+      "output": 2.56,
+      "cache_read": 0.080,
+      "cache_write": 0.80,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/z-ai/glm-5"
+    },
+    "glm-4.7": {
+      "provider": "z-ai",
+      "input": 0.40,
+      "output": 1.50,
+      "cache_read": 0.040,
+      "cache_write": 0.40,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/z-ai/glm-4.7"
+    },
+    "glm-4.7-flash": {
+      "provider": "z-ai",
+      "input": 0.06,
+      "output": 0.40,
+      "cache_read": 0.006,
+      "cache_write": 0.06,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/z-ai/glm-4.7-flash"
+    },
+    "glm-4.6": {
+      "provider": "z-ai",
+      "input": 0.35,
+      "output": 1.50,
+      "cache_read": 0.035,
+      "cache_write": 0.35,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/z-ai/glm-4.6"
+    },
+    "glm-4.6:exacto": {
+      "provider": "z-ai",
+      "input": 0.44,
+      "output": 1.76,
+      "cache_read": 0.044,
+      "cache_write": 0.44,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/z-ai/glm-4.6:exacto"
+    },
+    "glm-4.6v": {
+      "provider": "z-ai",
+      "input": 0.30,
+      "output": 0.90,
+      "cache_read": 0.030,
+      "cache_write": 0.30,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/z-ai/glm-4.6v"
+    },
+    "glm-4.5": {
+      "provider": "z-ai",
+      "input": 0.35,
+      "output": 1.55,
+      "cache_read": 0.035,
+      "cache_write": 0.35,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/z-ai/glm-4.5"
+    },
+    "glm-4.5v": {
+      "provider": "z-ai",
+      "input": 0.60,
+      "output": 1.80,
+      "cache_read": 0.060,
+      "cache_write": 0.60,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/z-ai/glm-4.5v"
+    },
+    "glm-4.5-air": {
+      "provider": "z-ai",
+      "input": 0.13,
+      "output": 0.85,
+      "cache_read": 0.013,
+      "cache_write": 0.13,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/z-ai/glm-4.5-air"
+    },
+    "glm-4-32b": {
+      "provider": "z-ai",
+      "input": 0.10,
+      "output": 0.10,
+      "cache_read": 0.010,
+      "cache_write": 0.10,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/z-ai/glm-4-32b"
+    },
+    "_comment_openai": "=== OpenAI Models ===",
+    "gpt-5.2": {
+      "provider": "openai",
+      "input": 1.75,
+      "output": 14.00,
+      "cache_read": 0.175,
+      "cache_write": 1.75,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/openai/gpt-5.2"
+    },
+    "gpt-5.2-codex": {
+      "provider": "openai",
+      "input": 1.75,
+      "output": 14.00,
+      "cache_read": 0.175,
+      "cache_write": 1.75,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/openai/gpt-5.2-codex"
+    },
+    "gpt-5.3-codex": {
+      "provider": "openai",
+      "input": 1.75,
+      "output": 14.00,
+      "cache_read": 0.175,
+      "cache_write": 1.75,
+      "unit": "per_million_tokens",
+      "note": "Uses GPT-5.2-Codex pricing (model doesn't exist on OpenRouter)"
+    },
+    "gpt-5.2-chat": {
+      "provider": "openai",
+      "input": 1.75,
+      "output": 14.00,
+      "cache_read": 0.175,
+      "cache_write": 1.75,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/openai/gpt-5.2-chat"
+    },
+    "gpt-5.2-pro": {
+      "provider": "openai",
+      "input": 21.00,
+      "output": 168.00,
+      "cache_read": 2.10,
+      "cache_write": 21.00,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/openai/gpt-5.2-pro"
+    },
+    "gpt-5.1": {
+      "provider": "openai",
+      "input": 1.25,
+      "output": 10.00,
+      "cache_read": 0.125,
+      "cache_write": 1.25,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/openai/gpt-5.1"
+    },
+    "gpt-5.1-chat": {
+      "provider": "openai",
+      "input": 1.25,
+      "output": 10.00,
+      "cache_read": 0.125,
+      "cache_write": 1.25,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/openai/gpt-5.1-chat"
+    },
+    "gpt-5.1-codex": {
+      "provider": "openai",
+      "input": 1.25,
+      "output": 10.00,
+      "cache_read": 0.125,
+      "cache_write": 1.25,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/openai/gpt-5.1-codex"
+    },
+    "gpt-5.1-codex-max": {
+      "provider": "openai",
+      "input": 1.25,
+      "output": 10.00,
+      "cache_read": 0.125,
+      "cache_write": 1.25,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/openai/gpt-5.1-codex-max"
+    },
+    "gpt-5.1-codex-mini": {
+      "provider": "openai",
+      "input": 0.25,
+      "output": 2.00,
+      "cache_read": 0.025,
+      "cache_write": 0.25,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/openai/gpt-5.1-codex-mini"
+    },
+    "gpt-5": {
+      "provider": "openai",
+      "input": 1.25,
+      "output": 10.00,
+      "cache_read": 0.125,
+      "cache_write": 1.25,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/openai/gpt-5"
+    },
+    "gpt-5-chat": {
+      "provider": "openai",
+      "input": 1.25,
+      "output": 10.00,
+      "cache_read": 0.125,
+      "cache_write": 1.25,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/openai/gpt-5-chat"
+    },
+    "gpt-5-codex": {
+      "provider": "openai",
+      "input": 1.25,
+      "output": 10.00,
+      "cache_read": 0.125,
+      "cache_write": 1.25,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/openai/gpt-5-codex"
+    },
+    "gpt-5-mini": {
+      "provider": "openai",
+      "input": 0.25,
+      "output": 2.00,
+      "cache_read": 0.025,
+      "cache_write": 0.25,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/openai/gpt-5-mini"
+    },
+    "gpt-5-nano": {
+      "provider": "openai",
+      "input": 0.05,
+      "output": 0.40,
+      "cache_read": 0.005,
+      "cache_write": 0.05,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/openai/gpt-5-nano"
+    },
+    "gpt-4.1": {
+      "provider": "openai",
+      "input": 2.00,
+      "output": 8.00,
+      "cache_read": 0.20,
+      "cache_write": 2.00,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/openai/gpt-4.1"
+    },
+    "gpt-4.1-mini": {
+      "provider": "openai",
+      "input": 0.40,
+      "output": 1.60,
+      "cache_read": 0.040,
+      "cache_write": 0.40,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/openai/gpt-4.1-mini"
+    },
+    "gpt-4o": {
+      "provider": "openai",
+      "input": 2.50,
+      "output": 10.00,
+      "cache_read": 0.25,
+      "cache_write": 2.50,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/openai/gpt-4o"
+    },
+    "gpt-4o-mini": {
+      "provider": "openai",
+      "input": 0.15,
+      "output": 0.60,
+      "cache_read": 0.015,
+      "cache_write": 0.15,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/openai/gpt-4o-mini"
+    },
+    "gpt-oss-120b": {
+      "provider": "openai",
+      "input": 0.039,
+      "output": 0.19,
+      "cache_read": 0.0039,
+      "cache_write": 0.039,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/openai/gpt-oss-120b"
+    },
+    "gpt-oss-120b:exacto": {
+      "provider": "openai",
+      "input": 0.039,
+      "output": 0.19,
+      "cache_read": 0.0039,
+      "cache_write": 0.039,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/openai/gpt-oss-120b:exacto"
+    },
+    "gpt-oss-20b": {
+      "provider": "openai",
+      "input": 0.03,
+      "output": 0.14,
+      "cache_read": 0.003,
+      "cache_write": 0.03,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/openai/gpt-oss-20b"
+    },
+    "text-embedding-3-small": {
+      "provider": "openai",
+      "input": 0.02,
+      "output": 0.00,
+      "cache_read": 0.002,
+      "cache_write": 0.02,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/openai/text-embedding-3-small"
+    },
+    "_comment_anthropic": "=== Anthropic Claude Models ===",
+    "claude-opus-4": {
+      "provider": "anthropic",
+      "input": 15.00,
+      "output": 75.00,
+      "cache_read": 1.50,
+      "cache_write": 18.75,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/anthropic/claude-opus-4"
+    },
+    "claude-opus-4.5": {
+      "provider": "anthropic",
+      "input": 5.00,
+      "output": 25.00,
+      "cache_read": 0.50,
+      "cache_write": 6.25,
+      "unit": "per_million_tokens",
+      "note": "≤200K context pricing. >200K: $10/$37.50, cache $1/$12.50",
+      "source": "openrouter.ai/anthropic/claude-opus-4.5"
+    },
+    "claude-opus-4.6": {
+      "provider": "anthropic",
+      "input": 5.00,
+      "output": 25.00,
+      "cache_read": 0.50,
+      "cache_write": 6.25,
+      "unit": "per_million_tokens",
+      "note": "≤200K context pricing. >200K: $10/$37.50, cache $1/$12.50",
+      "source": "openrouter.ai/anthropic/claude-opus-4.6"
+    },
+    "claude-sonnet-4.5": {
+      "provider": "anthropic",
+      "input": 3.00,
+      "output": 15.00,
+      "cache_read": 0.30,
+      "cache_write": 3.75,
+      "unit": "per_million_tokens",
+      "note": "≤200K context pricing. >200K: $6/$22.50, cache $0.60/$7.50",
+      "source": "openrouter.ai/anthropic/claude-sonnet-4.5"
+    },
+    "claude-sonnet-4.6": {
+      "provider": "anthropic",
+      "input": 3.00,
+      "output": 15.00,
+      "cache_read": 0.30,
+      "cache_write": 3.75,
+      "unit": "per_million_tokens",
+      "note": "≤200K context pricing. >200K: $6/$22.50, cache $0.60/$7.50",
+      "source": "openrouter.ai/anthropic/claude-sonnet-4.6"
+    },
+    "_comment_google": "=== Google Gemini Models ===",
+    "gemini-3-pro-preview": {
+      "provider": "google",
+      "input": 2.00,
+      "output": 12.00,
+      "cache_read": 0.20,
+      "cache_write": 2.00,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/google/gemini-3-pro-preview"
+    },
+    "gemini-3-flash-preview": {
+      "provider": "google",
+      "input": 0.50,
+      "output": 3.00,
+      "cache_read": 0.05,
+      "cache_write": 0.50,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/google/gemini-3-flash-preview"
+    },
+    "_comment_antigravity": "=== Antigravity Models (mapped to base model pricing) ===",
+    "antigravity-claude-opus-4-5-thinking": {
+      "provider": "google",
+      "input": 5.00,
+      "output": 25.00,
+      "cache_read": 0.50,
+      "cache_write": 6.25,
+      "unit": "per_million_tokens",
+      "note": "Antigravity not on OpenRouter. Using Claude Opus 4.5 pricing."
+    },
+    "antigravity-claude-opus-4-6-thinking": {
+      "provider": "google",
+      "input": 5.00,
+      "output": 25.00,
+      "cache_read": 0.50,
+      "cache_write": 6.25,
+      "unit": "per_million_tokens",
+      "note": "Antigravity not on OpenRouter. Using Claude Opus 4.6 pricing."
+    },
+    "antigravity-claude-sonnet-4-5": {
+      "provider": "google",
+      "input": 3.00,
+      "output": 15.00,
+      "cache_read": 0.30,
+      "cache_write": 3.75,
+      "unit": "per_million_tokens",
+      "note": "Antigravity not on OpenRouter. Using Claude Sonnet 4.5 pricing."
+    },
+    "antigravity-claude-sonnet-4-6": {
+      "provider": "google",
+      "input": 3.00,
+      "output": 15.00,
+      "cache_read": 0.30,
+      "cache_write": 3.75,
+      "unit": "per_million_tokens",
+      "note": "Antigravity not on OpenRouter. Using Claude Sonnet 4.6 pricing."
+    },
+    "antigravity-claude-sonnet-4-5-thinking": {
+      "provider": "google",
+      "input": 3.00,
+      "output": 15.00,
+      "cache_read": 0.30,
+      "cache_write": 3.75,
+      "unit": "per_million_tokens",
+      "note": "Antigravity not on OpenRouter. Using Claude Sonnet 4.5 pricing."
+    },
+    "antigravity-claude-sonnet-4-6-thinking": {
+      "provider": "google",
+      "input": 3.00,
+      "output": 15.00,
+      "cache_read": 0.30,
+      "cache_write": 3.75,
+      "unit": "per_million_tokens",
+      "note": "Antigravity not on OpenRouter. Using Claude Sonnet 4.6 thinking pricing."
+    },
+    "antigravity-gemini-3-flash": {
+      "provider": "google",
+      "input": 0.50,
+      "output": 3.00,
+      "cache_read": 0.05,
+      "cache_write": 0.50,
+      "unit": "per_million_tokens",
+      "note": "Antigravity not on OpenRouter. Using Gemini 3 Flash pricing."
+    },
+    "antigravity-gemini-3-pro": {
+      "provider": "google",
+      "input": 2.00,
+      "output": 12.00,
+      "cache_read": 0.20,
+      "cache_write": 2.00,
+      "unit": "per_million_tokens",
+      "note": "Antigravity not on OpenRouter. Using Gemini 3 Pro pricing."
+    }
+  }
+}

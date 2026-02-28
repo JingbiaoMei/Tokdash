@@ -1,0 +1,2079 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tokdash</title>
+
+  <!-- Fonts (Design System: Fira Code / Fira Sans) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+
+  <style>
+    :root {
+      --color-primary: #1E40AF;
+      --color-secondary: #3B82F6;
+      --color-cta: #F59E0B;
+      --color-bg: #F8FAFC;
+      --color-text: #0F172A;
+      --color-muted: #475569;
+      --color-border: #E2E8F0;
+
+      --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+      --shadow-md: 0 8px 24px rgba(15, 23, 42, 0.08);
+      --shadow-lg: 0 16px 44px rgba(15, 23, 42, 0.12);
+
+      --radius-md: 12px;
+      --radius-lg: 16px;
+
+      --t-fast: 180ms;
+      --t-med: 240ms;
+    }
+
+    html, body { height: 100%; }
+
+    body {
+      font-family: "Fira Sans", ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
+      background: radial-gradient(1200px 600px at 20% -10%, rgba(59,130,246,0.16), transparent 65%),
+                  radial-gradient(900px 600px at 90% 10%, rgba(245,158,11,0.12), transparent 55%),
+                  var(--color-bg);
+      color: var(--color-text);
+    }
+
+    .mono { font-family: "Fira Code", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+
+    /* Card system */
+    .surface {
+      background: rgba(248, 250, 252, 0.9);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-md);
+      backdrop-filter: blur(10px);
+    }
+
+    .surface:hover { box-shadow: var(--shadow-lg); }
+
+    /* Inputs */
+    .ui-input {
+      border: 1px solid var(--color-border);
+      border-radius: 10px;
+      padding: 10px 12px;
+      background: white;
+      color: var(--color-text);
+      transition: box-shadow var(--t-fast) ease, border-color var(--t-fast) ease;
+      min-height: 44px;
+    }
+    .ui-input:focus { outline: none; border-color: rgba(30,64,175,0.6); box-shadow: 0 0 0 4px rgba(30,64,175,0.14); }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      border-radius: 10px;
+      padding: 10px 14px;
+      min-height: 44px;
+      font-weight: 600;
+      transition: transform var(--t-fast) ease, box-shadow var(--t-fast) ease, background var(--t-fast) ease, border-color var(--t-fast) ease;
+      cursor: pointer;
+      user-select: none;
+      white-space: nowrap;
+    }
+
+    .btn:focus { outline: none; box-shadow: 0 0 0 4px rgba(30,64,175,0.16); }
+
+    .btn-primary {
+      background: var(--color-primary);
+      color: white;
+      box-shadow: 0 10px 24px rgba(30, 64, 175, 0.22);
+    }
+    .btn-primary:hover { transform: translateY(-1px); background: #1D4ED8; }
+    .btn-primary:active { transform: translateY(0px); }
+
+    .btn-ghost {
+      background: rgba(15, 23, 42, 0.03);
+      color: var(--color-text);
+      border: 1px solid rgba(226,232,240,0.9);
+    }
+    .btn-ghost:hover { background: rgba(15, 23, 42, 0.05); transform: translateY(-1px); }
+
+    /* Tabs */
+    .tab-btn {
+      border-radius: 999px;
+      padding: 10px 14px;
+      font-weight: 700;
+      border: 1px solid rgba(226,232,240,1);
+      transition: background var(--t-fast) ease, color var(--t-fast) ease, border-color var(--t-fast) ease;
+      cursor: pointer;
+      min-height: 44px;
+    }
+    .tab-btn[aria-selected="true"] {
+      background: rgba(30,64,175,0.10);
+      border-color: rgba(30,64,175,0.28);
+      color: var(--color-primary);
+    }
+
+    /* Calendar heatmap styles - 10 levels */
+    .calendar-grid {
+      display: grid;
+      grid-template-columns: repeat(53, 14px);
+      gap: 3px;
+    }
+    .calendar-day {
+      width: 14px;
+      height: 14px;
+      border-radius: 3px;
+      cursor: pointer;
+      transition: transform var(--t-fast) ease, filter var(--t-fast) ease;
+      border: 1px solid rgba(226,232,240,0.55);
+    }
+    .calendar-day:hover { transform: translateY(-1px); filter: brightness(0.96); }
+    .calendar-day.level-0 { background: #EEF2F7; }
+    .calendar-day.level-1 { background: #C7D2FE; }
+    .calendar-day.level-2 { background: #A5B4FC; }
+    .calendar-day.level-3 { background: #818CF8; }
+    .calendar-day.level-4 { background: #60A5FA; }
+    .calendar-day.level-5 { background: #3B82F6; }
+    .calendar-day.level-6 { background: #2563EB; }
+    .calendar-day.level-7 { background: #1D4ED8; }
+    .calendar-day.level-8 { background: #1E40AF; }
+    .calendar-day.level-9 { background: #172554; }
+
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    /* Heatmap (GitHub-like) */
+    /* Heatmap sizing via CSS variables (responsive) */
+    :root{--hm-cell:24px;--hm-gap:6px;--hy-cell:14px;--hy-gap:4px;}
+    @media (max-width: 520px){:root{--hm-cell:22px;--hm-gap:6px;}}
+    @media (max-width: 420px){:root{--hm-cell:20px;--hm-gap:5px;}}
+
+    .heatmap-day-labels{display:grid;grid-template-columns:repeat(7,var(--hm-cell));gap:var(--hm-gap);margin-bottom:8px;justify-content:center;}
+    .heatmap-day-labels div{width:var(--hm-cell);height:14px;line-height:14px;text-align:center;font-size:11px;color:#64748B;font-weight:600;}
+    .heatmap-day-labels div.strong{color:var(--color-primary);font-weight:800;}
+    .heatmap-cell{width:var(--hm-cell);height:var(--hm-cell);border-radius:6px;border:1px solid rgba(226,232,240,0.7);cursor:pointer;transition:transform 160ms ease, filter 160ms ease;touch-action:manipulation;}
+    .heatmap-cell:hover{transform:translateY(-1px);filter:brightness(0.98);}
+    .heatmap-month-grid{display:grid;grid-template-columns:repeat(7,var(--hm-cell));gap:var(--hm-gap);width:max-content;margin:0 auto;}
+
+    /* Year heatmap + month labels */
+    .heatmap-year-wrap{display:flex;gap:12px;align-items:flex-start;overflow-x:auto;padding-bottom:6px;}
+    .heatmap-year-ylabels{display:grid;grid-template-rows:repeat(7,var(--hy-cell));gap:6px;min-width:32px;margin-top:18px;}
+    .heatmap-year-ylabels div{height:var(--hy-cell);line-height:var(--hy-cell);font-size:11px;color:#64748B;font-weight:600;}
+    .heatmap-year-ylabels div.strong{color:var(--color-primary);font-weight:800;}
+    .heatmap-year-main{display:flex;flex-direction:column;align-items:flex-start;}
+    .heatmap-year-months{display:grid;grid-auto-flow:column;grid-auto-columns:var(--hy-cell);gap:var(--hy-gap);height:14px;align-items:end;padding-top:0;}
+    .heatmap-year-months div{height:14px;line-height:14px;font-size:11px;color:#64748B;font-weight:700;letter-spacing:0.02em;white-space:nowrap;}
+    .heatmap-year-grid{display:grid;grid-auto-flow:column;grid-template-rows:repeat(7,var(--hy-cell));grid-auto-columns:var(--hy-cell);gap:var(--hy-gap);padding-top:4px;}
+    .heatmap-year-cell{width:var(--hy-cell);height:var(--hy-cell);border-radius:3px;border:1px solid rgba(226,232,240,0.6);cursor:pointer;}
+
+
+    /* Reduce motion */
+    @media (prefers-reduced-motion: reduce) {
+      * { transition: none !important; scroll-behavior: auto !important; }
+    }
+  </style>
+</head>
+
+<body class="p-4 sm:p-6 lg:p-8">
+  <div class="max-w-[1200px] mx-auto">
+
+    <!-- Top bar -->
+    <header class="surface p-5 sm:p-6 mb-6">
+      <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+        <div class="flex items-start gap-4">
+          <div class="h-11 w-11 rounded-xl flex items-center justify-center" style="background: rgba(30,64,175,0.10); border: 1px solid rgba(30,64,175,0.18);">
+            <!-- Simple inline SVG mark (no emoji icons) -->
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M5 12a7 7 0 1 1 14 0" stroke="#1E40AF" stroke-width="2" stroke-linecap="round"/>
+              <path d="M7 12a5 5 0 1 1 10 0" stroke="#3B82F6" stroke-width="2" stroke-linecap="round"/>
+              <path d="M12 12v7" stroke="#0F172A" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <div>
+            <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight mono">Tokdash</h1>
+            <p class="text-sm sm:text-base" style="color: var(--color-muted);">OpenClaw + coding tools usage, cost, and activity.</p>
+            <p id="lastUpdate" class="text-xs mt-2" style="color: rgba(71,85,105,0.9);">Loading...</p>
+          </div>
+        </div>
+
+        <div class="flex flex-col sm:flex-row gap-3 sm:items-center">
+          <div class="flex gap-2 items-center">
+            <label for="periodSelect" class="text-xs font-semibold uppercase tracking-wider" style="color: rgba(71,85,105,0.9);">Range</label>
+            <select id="periodSelect" class="ui-input">
+              <option value="today">Today</option>
+              <option value="3days">Last 3 Days</option>
+              <option value="week">Last 7 Days</option>
+              <option value="14days">Last 14 Days</option>
+              <option value="month">This Month</option>
+              <option value="90">Last 3 Months</option>
+              <option value="365">Last Year</option>
+              <option value="custom">Custom Days…</option>
+            </select>
+          </div>
+
+          <div id="customRangeInputs" class="hidden sm:flex gap-2 items-center">
+            <input type="number" id="customDays" placeholder="Days" min="1" max="9999" class="ui-input w-28" />
+            <button id="applyCustom" class="btn btn-ghost" aria-label="Apply custom day range">Apply</button>
+          </div>
+
+          <button id="refreshBtn" class="btn btn-primary" aria-label="Refresh dashboard">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M20 12a8 8 0 1 1-2.343-5.657" stroke="white" stroke-width="2" stroke-linecap="round"/>
+              <path d="M20 4v6h-6" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      <!-- Tabs -->
+      <nav class="mt-5 flex flex-wrap gap-2" aria-label="Dashboard sections">
+        <button class="tab-btn" data-tab="overview" aria-selected="true">Overview</button>
+        <button class="tab-btn" data-tab="stats" aria-selected="false">Stats</button>
+      </nav>
+    </header>
+
+    <!-- Overview Tab -->
+    <div id="overview-content" class="tab-content active">
+
+      <!-- KPI cards -->
+      <section class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <div class="surface p-5">
+          <div class="text-xs font-semibold uppercase tracking-wider" style="color: rgba(71,85,105,0.9);">Total Tokens</div>
+          <div id="totalTokens" class="text-3xl sm:text-4xl font-extrabold mt-2" style="color: var(--color-primary);">-</div>
+        </div>
+        <div class="surface p-5">
+          <div class="text-xs font-semibold uppercase tracking-wider" style="color: rgba(71,85,105,0.9);">Total Cost</div>
+          <div id="totalCost" class="text-3xl sm:text-4xl font-extrabold mt-2" style="color: #0F766E;">$-</div>
+        </div>
+        <div class="surface p-5">
+          <div class="text-xs font-semibold uppercase tracking-wider" style="color: rgba(71,85,105,0.9);">Top Model</div>
+          <div id="topModel" class="text-lg sm:text-xl font-extrabold mt-2 mono" style="color: var(--color-text);">-</div>
+          <div id="topModelTokens" class="text-sm mt-1" style="color: var(--color-muted);">- tokens</div>
+        </div>
+      </section>
+
+      <!-- Charts -->
+      <section class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+        <div class="surface p-5">
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="text-base font-extrabold mono">Usage by Tool</h2>
+            <div class="text-xs" style="color: var(--color-muted);">Tokens</div>
+          </div>
+          <div class="h-[280px]">
+            <canvas id="toolChart" aria-label="Usage by tool chart" role="img"></canvas>
+          </div>
+        </div>
+
+        <div class="surface p-5">
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="text-base font-extrabold mono">Top Models by Cost</h2>
+            <div class="text-xs" style="color: var(--color-muted);">USD</div>
+          </div>
+          <div class="h-[280px]">
+            <canvas id="modelChart" aria-label="Top models by cost chart" role="img"></canvas>
+          </div>
+        </div>
+      </section>
+
+      <!-- Tables -->
+      <section class="surface p-5 mb-6">
+        <h2 class="text-base font-extrabold mono mb-4">Tools Breakdown</h2>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm" aria-label="Tools breakdown table">
+            <thead>
+              <tr class="border-b" style="border-color: var(--color-border);">
+                <th class="text-left py-3 px-4 font-semibold" style="color: var(--color-muted);">Tool</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);">Tokens</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);">Cost</th>
+              </tr>
+            </thead>
+            <tbody id="toolsTable">
+              <tr><td colspan="3" class="text-center py-10" style="color: var(--color-muted);">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="surface p-5 mb-6">
+        <h2 class="text-base font-extrabold mono mb-4">Apps & Models Breakdown</h2>
+        <div id="appsBreakdown">
+          <p class="text-center py-10" style="color: var(--color-muted);">Loading…</p>
+        </div>
+      </section>
+
+      <section class="surface p-5">
+        <h2 class="text-base font-extrabold mono mb-4">Combined Models</h2>
+        <p class="text-xs mb-3" style="color: var(--color-muted);">Unified view across all apps and providers. Models with the same name are aggregated regardless of source.</p>
+        <div class="flex items-center justify-between mb-3">
+          <div id="combinedModelsInfo" class="text-xs" style="color: var(--color-muted);"></div>
+          <button id="combinedModelsToggle" class="btn btn-ghost" type="button" style="min-height: 36px; padding: 6px 10px; font-size: 12px; display:none;">Show all</button>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm" aria-label="Combined models table">
+            <thead>
+              <tr class="border-b" style="border-color: var(--color-border);">
+                <th class="text-left py-3 px-4 font-semibold" style="color: var(--color-muted);">Model</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);">Input</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);">Output</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);">Cache</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);">Total</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);">Cost</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);">Msgs</th>
+              </tr>
+            </thead>
+            <tbody id="allModelsTable">
+              <tr><td colspan="7" class="text-center py-10" style="color: var(--color-muted);">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+    </div>
+
+    <!-- Stats Tab -->
+    <div id="stats-content" class="tab-content">
+      <section class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <div class="surface p-4">
+          <div class="text-xs font-semibold uppercase tracking-wider" style="color: rgba(71,85,105,0.9);">Favorite Model</div>
+          <div id="statFavoriteModel" class="mt-2 font-extrabold mono">Loading…</div>
+        </div>
+        <div class="surface p-4">
+          <div class="text-xs font-semibold uppercase tracking-wider" style="color: rgba(71,85,105,0.9);">Total Tokens</div>
+          <div id="statTotalTokens" class="mt-2 font-extrabold">Loading…</div>
+        </div>
+        <div class="surface p-4">
+          <div class="text-xs font-semibold uppercase tracking-wider" style="color: rgba(71,85,105,0.9);">Sessions</div>
+          <div id="statSessions" class="mt-2 font-extrabold">Loading…</div>
+        </div>
+        <div class="surface p-4">
+          <div class="text-xs font-semibold uppercase tracking-wider" style="color: rgba(71,85,105,0.9);">Streak</div>
+          <div id="statCurrentStreak" class="mt-2 font-extrabold">Loading…</div>
+        </div>
+        <div class="surface p-4">
+          <div class="text-xs font-semibold uppercase tracking-wider" style="color: rgba(71,85,105,0.9);">Longest Streak</div>
+          <div id="statLongestStreak" class="mt-2 font-extrabold">Loading…</div>
+        </div>
+        <div class="surface p-4">
+          <div class="text-xs font-semibold uppercase tracking-wider" style="color: rgba(71,85,105,0.9);">Active Days</div>
+          <div id="statActiveDays" class="mt-2 font-extrabold">Loading…</div>
+        </div>
+        <div class="surface p-4">
+          <div class="text-xs font-semibold uppercase tracking-wider" style="color: rgba(71,85,105,0.9);">Total Days</div>
+          <div id="statTotalDays" class="mt-2 font-extrabold">Loading…</div>
+        </div>
+        <div class="surface p-4">
+          <div class="text-xs font-semibold uppercase tracking-wider" style="color: rgba(71,85,105,0.9);">Total Cost</div>
+          <div id="statTotalCost" class="mt-2 font-extrabold">Loading…</div>
+        </div>
+      </section>
+
+      <section class="surface p-5">
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+          <h2 class="text-base font-extrabold mono">Daily Activity</h2>
+          <div class="flex gap-2">
+            <button id="viewMonth" class="btn btn-primary" type="button">Month</button>
+            <button id="viewYear" class="btn btn-ghost" type="button">Year</button>
+            <button id="view3D" class="btn btn-ghost" type="button">3D</button>
+          </div>
+        </div>
+
+        <!-- Month view -->
+        <div id="calendarMonthView">
+          <div class="flex items-center gap-3 mb-4">
+            <button id="prevMonth" class="btn btn-ghost px-3" type="button" aria-label="Previous month">←</button>
+            <h3 id="monthTitle" class="text-lg font-extrabold mono mx-auto">—</h3>
+            <button id="nextMonth" class="btn btn-ghost px-3" type="button" aria-label="Next month">→</button>
+          </div>
+
+          <div class="grid grid-cols-1 lg:grid-cols-[1fr,auto] gap-6">
+            <!-- Left: Heatmap -->
+            <div>
+              <div class="flex items-center justify-between gap-4 mb-3">
+                <div class="text-sm" style="color: var(--color-muted);">Less</div>
+                <div id="heatLegend" class="flex gap-1 items-center"></div>
+                <div class="text-sm" style="color: var(--color-muted);">More</div>
+              </div>
+
+              <div id="monthDayLabels" class="heatmap-day-labels"></div>
+
+              <div id="calendarContainer" class="overflow-x-auto">
+                <div id="monthGrid" class="inline-block">Loading…</div>
+              </div>
+            </div>
+
+            <!-- Right: Statistics -->
+            <div class="surface p-5 lg:min-w-[280px]">
+              <h4 class="text-sm font-extrabold uppercase tracking-wider mb-4" style="color: rgba(71,85,105,0.9);">Month Stats</h4>
+              
+              <div class="space-y-4">
+                <!-- Favorite Model -->
+                <div>
+                  <div class="text-xs font-semibold text-slate-500 mb-1">Favorite Model</div>
+                  <div id="monthFavoriteModel" class="font-bold text-base mono" style="color: var(--color-primary);">—</div>
+                </div>
+
+                <!-- Total Tokens -->
+                <div>
+                  <div class="text-xs font-semibold text-slate-500 mb-1">Total Tokens</div>
+                  <div id="monthTotalTokens" class="font-extrabold text-xl" style="color: var(--color-primary);">0</div>
+                </div>
+
+                <!-- Total Cost -->
+                <div>
+                  <div class="text-xs font-semibold text-slate-500 mb-1">Total Cost</div>
+                  <div id="monthTotalCost" class="font-extrabold text-xl" style="color: #0F766E;">$0.00</div>
+                </div>
+
+                <!-- Sessions -->
+                <div>
+                  <div class="text-xs font-semibold text-slate-500 mb-1">Messages</div>
+                  <div id="monthTotalSessions" class="font-bold text-lg">0</div>
+                </div>
+
+                <!-- Active Days -->
+                <div>
+                  <div class="text-xs font-semibold text-slate-500 mb-1">Active Days</div>
+                  <div id="monthActiveDays" class="font-bold text-lg">0</div>
+                </div>
+
+                <!-- Streak -->
+                <div>
+                  <div class="text-xs font-semibold text-slate-500 mb-1">Streak</div>
+                  <div id="monthCurrentStreak" class="font-bold text-lg">0 days</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Year view -->
+        <div id="calendarYearView" style="display:none;">
+          <div class="flex items-center gap-3 mb-4">
+            <button id="prevYear" class="btn btn-ghost px-3" type="button" aria-label="Previous year">←</button>
+            <h3 id="yearTitle" class="text-lg font-extrabold mono mx-auto">—</h3>
+            <button id="nextYear" class="btn btn-ghost px-3" type="button" aria-label="Next year">→</button>
+          </div>
+
+          <div class="flex items-center justify-between gap-4 mb-3">
+            <div class="text-sm" style="color: var(--color-muted);">Less</div>
+            <div id="yearLegend" class="flex gap-1 items-center"></div>
+            <div class="text-sm" style="color: var(--color-muted);">More</div>
+          </div>
+
+          <div class="heatmap-year-wrap">
+            <div id="yearDayLabels" class="heatmap-year-ylabels"></div>
+            <div class="heatmap-year-main">
+              <div id="yearMonthLabels" class="heatmap-year-months"></div>
+              <div id="yearGrid" class="heatmap-year-grid">Loading…</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3D view -->
+        <div id="calendar3DView" style="display:none;">
+          <!-- Color Legend -->
+          <div class="flex items-center justify-between gap-4 mb-4">
+            <div class="text-sm font-semibold" style="color: var(--color-muted);">Cost (USD)</div>
+            <div class="flex items-center gap-2">
+              <span class="text-xs" style="color: var(--color-muted);">Less</span>
+              <div id="legend3D" class="flex gap-1"></div>
+              <span class="text-xs" style="color: var(--color-muted);">More</span>
+            </div>
+          </div>
+
+          <div class="relative surface" style="border-radius: var(--radius-lg); padding: 1.5rem;">
+            <div id="calendar3D" class="w-full" style="height: 750px;"></div>
+            
+            <!-- Stats Overlay -->
+            <div class="absolute top-4 right-4 surface px-5 py-4" style="border-radius: 14px; backdrop-filter: blur(10px); background: rgba(248, 250, 252, 0.95); min-width: 280px;">
+              <div class="text-xs font-semibold uppercase tracking-wider mb-3" style="color: #64748B;">Totals</div>
+              <div class="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
+                <div style="color: #64748B;">Cost</div>
+                <div id="stats3DTotalCost" class="font-extrabold text-right" style="color: #0F766E;">$0</div>
+                <div style="color: #64748B;">Tokens</div>
+                <div id="stats3DTotalTokens" class="font-extrabold text-right" style="color: #2563EB;">0</div>
+              </div>
+              <div class="mt-4 pt-4" style="border-top: 1px solid rgba(203, 213, 225, 0.4);">
+                <div class="text-xs font-semibold uppercase tracking-wider mb-3" style="color: #64748B;">Most Active Day</div>
+                <div class="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
+                  <div style="color: #64748B;">Date</div>
+                  <div id="stats3DActiveDate" class="font-semibold text-right" style="color: #334155;">—</div>
+                  <div style="color: #64748B;">Tokens</div>
+                  <div id="stats3DActiveTokens" class="font-bold text-right" style="color: #2563EB;">—</div>
+                  <div style="color: #64748B;">Cost</div>
+                  <div id="stats3DActiveCost" class="font-bold text-right" style="color: #0F766E;">—</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Help Text -->
+            <div class="absolute bottom-4 left-4 text-xs" style="color: rgba(71,85,105,0.7);">
+              💡 Click any cube to view day details
+            </div>
+          </div>
+        </div>
+
+        <div id="dayDetails" class="hidden mt-5">
+          <div class="surface p-5">
+            <div class="flex items-center justify-between mb-3">
+              <h3 class="text-base font-extrabold mono">Day Details</h3>
+              <button id="closeDayDetails" class="btn btn-ghost" type="button" aria-label="Close day details">Close</button>
+            </div>
+            <div id="dayDetailsContent"></div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+  </div>
+
+  <script>
+    // Dashboard v3.10.0 - Fixed streak calculations (2026-02-17)
+    // - "Streak" label (not "Current Streak")
+    // - Month/Year: streak within that view period
+    // - 3D/All-time: current ongoing streak from today
+    // - "Longest Streak" always shows longest ever across all data
+    console.log('📊 Token Dashboard v3.10.0 - Fixed streak calculations');
+
+    let toolChart = null;
+    let modelChart = null;
+
+    // Render perf controls
+    let updateInFlight = false;
+    let renderSeq = 0;
+    let lastUsageResponse = null;
+    let lastCombinedModels = [];
+    let lastAppsBreakdown = null;
+    const MAX_COMBINED_MODELS_ROWS = 300;
+    let combinedModelsShowAll = false;
+
+    function isOverviewActive() {
+      const el = document.getElementById('overview-content');
+      return !!el && el.classList.contains('active');
+    }
+
+    function nextFrame() {
+      return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+    }
+
+    function scheduleIdle(fn, timeoutMs = 750) {
+      if (typeof requestIdleCallback === 'function') {
+        requestIdleCallback(() => fn(), { timeout: timeoutMs });
+      } else {
+        setTimeout(fn, 0);
+      }
+    }
+
+    // Format numbers
+    function formatNumber(num) {
+      return (num ?? 0).toLocaleString();
+    }
+
+    // Format currency
+    function formatCurrency(num) {
+      const n = Number(num ?? 0);
+      return '$' + n.toFixed(2);
+    }
+
+    // Keep frontend model labels aligned with backend merge keys.
+    function normalizeModelName(name) {
+      let n = String(name || '').trim().toLowerCase();
+      if (!n) return 'unknown';
+
+      n = n.replace(/\\/g, '/').replace(/^(models?|model)[:/]/, '');
+      n = n.split('/').pop();
+      
+      // Strip provider prefixes (antigravity-, etc.)
+      n = n.replace(/^antigravity-/, '');
+      
+      n = n.replace(/[\s_]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+      n = n.replace(/-(latest|stable)$/, '');
+      n = n.replace(/-(preview|exp|experimental)(?:-[\w\d]+)?$/, '');
+      n = n.replace(/-(\d{4}-\d{2}-\d{2}|\d{8})$/, '');
+      
+      // Strip -thinking suffix to combine thinking/non-thinking variants
+      n = n.replace(/-thinking$/, '');
+
+      const alias = {
+        'gemini-3-pro-high': 'gemini-3-pro',
+        'gemini-3-pro-low': 'gemini-3-pro',
+        'gemini-3-pro-preview': 'gemini-3-pro',
+        'o3-mini-high': 'o3-mini',
+        'o3-mini-low': 'o3-mini',
+        'claude-3-5-sonnet': 'claude-3.5-sonnet',
+        'claude-3-7-sonnet': 'claude-3.7-sonnet',
+        'k2p5': 'k2.5',
+        'k2-5': 'k2.5',
+      };
+      n = alias[n] || n;
+      
+      // Normalize version numbers: 4-5 → 4.5, 4-6 → 4.6, etc.
+      n = n.replace(/-(\d)-(\d+)/g, '-$1.$2');
+      
+      // Merge Anthropic naming variants under one model key
+      n = n.replace(/^claude-opus/, 'opus');
+      
+      // Add claude- prefix to opus/sonnet models that don't have it
+      if (n.startsWith('opus') || n.startsWith('sonnet')) {
+        if (!n.startsWith('claude-')) {
+          n = 'claude-' + n;
+        }
+      }
+
+      return n || 'unknown';
+    }
+
+    // Custom range handling
+    document.getElementById('periodSelect').addEventListener('change', function (e) {
+      const customInputs = document.getElementById('customRangeInputs');
+      if (e.target.value === 'custom') {
+        customInputs.classList.remove('hidden');
+      } else {
+        customInputs.classList.add('hidden');
+        updateDashboard();
+      }
+    });
+
+    document.getElementById('applyCustom').addEventListener('click', function () {
+      const days = document.getElementById('customDays').value;
+      if (days && days > 0) updateDashboard(days);
+    });
+
+    // Update dashboard
+    async function updateDashboard(customDays = null) {
+      if (updateInFlight) return;
+
+      const period = document.getElementById('periodSelect').value;
+
+      // If custom days specified, use that
+      let apiUrl = '/api/usage?period=';
+      if (customDays) apiUrl += customDays;
+      else if (period !== 'custom') apiUrl += period;
+      else return; // Wait for custom input
+
+      const refreshBtn = document.getElementById('refreshBtn');
+      updateInFlight = true;
+      const seq = ++renderSeq;
+
+      refreshBtn.innerHTML = `
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M20 12a8 8 0 1 1-2.343-5.657" stroke="white" stroke-width="2" stroke-linecap="round"/>
+          <path d="M20 4v6h-6" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        Loading…
+      `;
+      refreshBtn.disabled = true;
+
+      try {
+        const response = await fetch(apiUrl);
+        const data = await response.json();
+        lastUsageResponse = data;
+
+        // Update timestamp early (header is always visible)
+        document.getElementById('lastUpdate').textContent = `Last updated: ${new Date(data.timestamp).toLocaleString()}`;
+
+        // Avoid heavy DOM work if user is on the Stats tab
+        if (!isOverviewActive()) return;
+
+        // Update summary cards
+        document.getElementById('totalTokens').textContent = formatNumber(data.total_tokens);
+        document.getElementById('totalCost').textContent = formatCurrency(data.total_cost);
+
+        if (data.top_models && data.top_models.length > 0) {
+          const top = data.top_models[0];
+          document.getElementById('topModel').textContent = top.name;
+          document.getElementById('topModelTokens').textContent = formatNumber(top.tokens) + ' tokens';
+        }
+
+        await nextFrame();
+
+        // Fast charts/tables first
+        updateToolChart(data.by_tool || {});
+        updateModelChart(data.top_models || []);
+        updateToolsTable(data.by_tool || {});
+
+        lastCombinedModels = data.combined_models || [];
+        lastAppsBreakdown = { apps: data.apps || null, openclawModels: data.openclaw_models || null };
+
+        // Defer large tables to idle time to keep scroll responsive
+        scheduleIdle(() => {
+          if (seq != renderSeq) return;
+          if (lastAppsBreakdown && lastAppsBreakdown.apps) {
+            updateAppsBreakdown(lastAppsBreakdown.apps, lastAppsBreakdown.openclawModels);
+          }
+        });
+
+        scheduleIdle(() => {
+          if (seq != renderSeq) return;
+          updateCombinedModelsTable(lastCombinedModels);
+        });
+      } catch (error) {
+        console.error('Error fetching data:', error);
+        alert('Failed to fetch data. Check console for details.');
+      } finally {
+        updateInFlight = false;
+        refreshBtn.innerHTML = `
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M20 12a8 8 0 1 1-2.343-5.657" stroke="white" stroke-width="2" stroke-linecap="round"/>
+            <path d="M20 4v6h-6" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          Refresh
+        `;
+        refreshBtn.disabled = false;
+      }
+    }
+
+    // Tool pie chart
+    function updateToolChart(byTool) {
+      const canvas = document.getElementById('toolChart');
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+
+      const entries = Object.entries(byTool || {}).filter(([, v]) => Number(v?.tokens || 0) > 0);
+      const labels = entries.map(([tool]) => tool.charAt(0).toUpperCase() + tool.slice(1));
+      const values = entries.map(([, v]) => Number(v?.tokens || 0));
+      const palette = ['#1E40AF', '#3B82F6', '#0F766E', '#F59E0B', '#64748B', '#94A3B8'];
+      const colors = values.map((_, i) => palette[i % palette.length]);
+
+      if (!toolChart) {
+        toolChart = new Chart(ctx, {
+          type: 'doughnut',
+          data: {
+            labels,
+            datasets: [{
+              data: values,
+              backgroundColor: colors,
+              borderWidth: 0,
+            }],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
+            plugins: {
+              legend: { position: 'bottom' },
+              tooltip: {
+                callbacks: {
+                  label: (context) => {
+                    const value = context.raw ?? 0;
+                    return `${context.label}: ${formatNumber(value)} tokens`;
+                  },
+                },
+              },
+            },
+          },
+        });
+        return;
+      }
+
+      toolChart.data.labels = labels;
+      toolChart.data.datasets[0].data = values;
+      toolChart.data.datasets[0].backgroundColor = colors;
+      toolChart.update('none');
+    }
+
+    // Model bar chart
+    function updateModelChart(topModels) {
+      const canvas = document.getElementById('modelChart');
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+
+      const labels = (topModels || []).slice(0, 5).map((m) => m.name);
+      const values = (topModels || []).slice(0, 5).map((m) => m.cost);
+
+      if (!modelChart) {
+        modelChart = new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels,
+            datasets: [{
+              label: 'Cost (USD)',
+              data: values,
+              backgroundColor: 'rgba(30, 64, 175, 0.75)',
+              borderColor: 'rgba(30, 64, 175, 1)',
+              borderWidth: 1.5,
+              borderRadius: 8,
+              maxBarThickness: 42,
+            }],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
+            scales: {
+              x: {
+                ticks: { color: '#475569', font: { size: 11 } },
+                grid: { display: false },
+              },
+              y: {
+                beginAtZero: true,
+                ticks: {
+                  color: '#475569',
+                  callback: (value) => `$${value}`,
+                },
+                grid: { color: 'rgba(226,232,240,0.8)' },
+              },
+            },
+            plugins: {
+              legend: { display: false },
+              tooltip: {
+                callbacks: {
+                  label: (context) => `Cost: ${formatCurrency(context.raw)}`,
+                },
+              },
+            },
+          },
+        });
+        return;
+      }
+
+      modelChart.data.labels = labels;
+      modelChart.data.datasets[0].data = values;
+      modelChart.update('none');
+    }
+
+    // Tools table
+    function updateToolsTable(byTool) {
+      const tbody = document.getElementById('toolsTable');
+      if (!tbody) return;
+
+      const visibleTools = Object.entries(byTool || {}).filter(([, data]) => Number(data?.tokens || 0) > 0);
+
+      if (visibleTools.length === 0) {
+        const row = document.createElement('tr');
+        row.innerHTML = `<td colspan="3" class="text-center py-10" style="color: var(--color-muted);">No data</td>`;
+        tbody.replaceChildren(row);
+        return;
+      }
+
+      const frag = document.createDocumentFragment();
+      visibleTools.forEach(([tool, data]) => {
+        const row = document.createElement('tr');
+        row.className = 'border-b hover:bg-slate-50 transition';
+        row.style.borderColor = 'rgba(226,232,240,0.9)';
+        row.innerHTML = `
+          <td class="py-3 px-4 font-semibold text-slate-800 capitalize">${tool}</td>
+          <td class="py-3 px-4 text-right text-slate-700">${formatNumber(data.tokens)}</td>
+          <td class="py-3 px-4 text-right font-bold" style="color:#0F766E">${formatCurrency(data.cost)}</td>
+        `;
+        frag.appendChild(row);
+      });
+
+      tbody.replaceChildren(frag);
+    }
+
+    function hasModelTokenUsage(model) {
+      const input = Number(model?.tokens_in || 0);
+      const output = Number(model?.tokens_out || 0);
+      const cache = Number(model?.tokens_cache || 0);
+      const total = Number(model?.tokens || (input + output + cache));
+      return input > 0 || output > 0 || cache > 0 || total > 0;
+    }
+
+    // Apps breakdown (hierarchical) - includes OpenClaw
+    function updateAppsBreakdown(apps, openclawModels) {
+      const container = document.getElementById('appsBreakdown');
+      container.innerHTML = '';
+
+      const allApps = { ...apps };
+      if (openclawModels && openclawModels.length > 0) {
+        const openclawTotal = {
+          tokens: openclawModels.reduce((sum, m) => sum + (m.tokens || 0), 0),
+          tokens_in: openclawModels.reduce((sum, m) => sum + (m.tokens_in || 0), 0),
+          tokens_out: openclawModels.reduce((sum, m) => sum + (m.tokens_out || 0), 0),
+          tokens_cache: openclawModels.reduce((sum, m) => sum + (m.tokens_cache || 0), 0),
+          cost: openclawModels.reduce((sum, m) => sum + (m.cost || 0), 0),
+          messages: openclawModels.reduce((sum, m) => sum + (m.messages || 0), 0),
+          models: openclawModels.map((m) => ({
+            name: m.name,
+            tokens: m.tokens,
+            tokens_in: m.tokens_in,
+            tokens_out: m.tokens_out,
+            tokens_cache: m.tokens_cache,
+            cost: m.cost,
+            messages: m.messages || 0,
+          })),
+        };
+        allApps['openclaw'] = openclawTotal;
+      }
+
+      const sortedApps = Object.entries(allApps).sort((a, b) => (b[1].cost || 0) - (a[1].cost || 0));
+      if (sortedApps.length === 0) {
+        container.innerHTML = '<p class="text-center py-10 text-slate-500">No data available</p>';
+        return;
+      }
+
+      sortedApps.forEach(([appName, appData]) => {
+        const visibleModels = (appData.models || []).filter(hasModelTokenUsage);
+        if (visibleModels.length === 0) return;
+
+        const appDiv = document.createElement('div');
+        appDiv.className = 'mb-6';
+
+        const appTokens = visibleModels.reduce((sum, m) => sum + Number(m.tokens || 0), 0);
+        const appCost = visibleModels.reduce((sum, m) => sum + Number(m.cost || 0), 0);
+        const appMessages = visibleModels.reduce((sum, m) => sum + Number(m.messages || 0), 0);
+
+        const header = document.createElement('div');
+        header.className = 'flex flex-wrap items-baseline gap-x-4 gap-y-1 mb-3';
+        header.innerHTML = `
+          <h4 class="text-sm font-extrabold mono uppercase tracking-wide" style="color: var(--color-primary);">${appName}</h4>
+          <span class="text-xs text-slate-600">${formatNumber(appTokens)} tokens · ${formatCurrency(appCost)} · ${formatNumber(appMessages)} msgs</span>
+        `;
+        appDiv.appendChild(header);
+
+        const table = document.createElement('table');
+        table.className = 'w-full text-sm';
+        table.innerHTML = `
+          <thead>
+            <tr class="border-b bg-slate-50">
+              <th class="text-left py-2 px-3 font-semibold text-slate-600">Model</th>
+              <th class="text-right py-2 px-3 font-semibold text-slate-600">Input</th>
+              <th class="text-right py-2 px-3 font-semibold text-slate-600">Output</th>
+              <th class="text-right py-2 px-3 font-semibold text-slate-600">Cache</th>
+              <th class="text-right py-2 px-3 font-semibold text-slate-600">Total</th>
+              <th class="text-right py-2 px-3 font-semibold text-slate-600">Cost</th>
+              <th class="text-right py-2 px-3 font-semibold text-slate-600">Msgs</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        `;
+
+        const tbody = table.querySelector('tbody');
+        visibleModels.forEach((model) => {
+          const row = document.createElement('tr');
+          row.className = 'border-b hover:bg-slate-50 transition';
+          row.innerHTML = `
+            <td class="py-2 px-3 text-slate-800">${model.name}</td>
+            <td class="py-2 px-3 text-right text-slate-700">${formatNumber(model.tokens_in)}</td>
+            <td class="py-2 px-3 text-right text-slate-700">${formatNumber(model.tokens_out)}</td>
+            <td class="py-2 px-3 text-right text-slate-700">${formatNumber(model.tokens_cache)}</td>
+            <td class="py-2 px-3 text-right font-semibold text-slate-800">${formatNumber(model.tokens)}</td>
+            <td class="py-2 px-3 text-right font-bold" style="color:#0F766E">${formatCurrency(model.cost)}</td>
+            <td class="py-2 px-3 text-right text-slate-500">${formatNumber(model.messages || 0)}</td>
+          `;
+          tbody.appendChild(row);
+        });
+
+        // Wrap table in overflow container for mobile scrolling
+        const tableWrapper = document.createElement('div');
+        tableWrapper.className = 'overflow-x-auto';
+        tableWrapper.appendChild(table);
+        appDiv.appendChild(tableWrapper);
+        container.appendChild(appDiv);
+      });
+
+      if (!container.children.length) {
+        container.innerHTML = '<p class="text-center py-10 text-slate-500">No data available</p>';
+      }
+    }
+
+    // All models combined table (combined by model, regardless of app)
+    function updateCombinedModelsTable(models) {
+      const tbody = document.getElementById('allModelsTable');
+      if (!tbody) return;
+
+      const visibleModels = (models || []).filter(hasModelTokenUsage);
+
+      const infoEl = document.getElementById('combinedModelsInfo');
+      const toggleBtn = document.getElementById('combinedModelsToggle');
+
+      const shouldCap = visibleModels.length > MAX_COMBINED_MODELS_ROWS;
+      const showAll = combinedModelsShowAll || !shouldCap;
+      const shown = showAll ? visibleModels : visibleModels.slice(0, MAX_COMBINED_MODELS_ROWS);
+
+      if (infoEl) {
+        if (visibleModels.length === 0) infoEl.textContent = '';
+        else if (showAll) infoEl.textContent = `${formatNumber(visibleModels.length)} models`;
+        else infoEl.textContent = `Showing top ${formatNumber(MAX_COMBINED_MODELS_ROWS)} of ${formatNumber(visibleModels.length)} models`;
+      }
+
+      if (toggleBtn) {
+        if (!shouldCap) {
+          toggleBtn.style.display = 'none';
+        } else {
+          toggleBtn.style.display = '';
+          toggleBtn.textContent = showAll ? 'Show top' : 'Show all';
+        }
+      }
+
+      if (shown.length === 0) {
+        const row = document.createElement('tr');
+        row.innerHTML = `<td colspan="7" class="text-center py-10" style="color: var(--color-muted);">No data</td>`;
+        tbody.replaceChildren(row);
+        return;
+      }
+
+      const frag = document.createDocumentFragment();
+      shown.forEach((model) => {
+        const row = document.createElement('tr');
+        row.className = 'border-b hover:bg-slate-50 transition';
+        row.innerHTML = `
+          <td class="py-2 px-3 text-slate-800">${model.name}</td>
+          <td class="py-2 px-3 text-right text-slate-700">${formatNumber(model.tokens_in)}</td>
+          <td class="py-2 px-3 text-right text-slate-700">${formatNumber(model.tokens_out)}</td>
+          <td class="py-2 px-3 text-right text-slate-700">${formatNumber(model.tokens_cache)}</td>
+          <td class="py-2 px-3 text-right font-semibold text-slate-800">${formatNumber(model.tokens)}</td>
+          <td class="py-2 px-3 text-right font-bold" style="color:#0F766E">${formatCurrency(model.cost)}</td>
+          <td class="py-2 px-3 text-right text-slate-500">${formatNumber(model.messages || 0)}</td>
+        `;
+        frag.appendChild(row);
+      });
+
+      tbody.replaceChildren(frag);
+    }
+
+    // Tabs
+    document.querySelectorAll('.tab-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const tab = btn.dataset.tab;
+        document.querySelectorAll('.tab-btn').forEach((b) => b.setAttribute('aria-selected', 'false'));
+        btn.setAttribute('aria-selected', 'true');
+
+        document.querySelectorAll('.tab-content').forEach((c) => c.classList.remove('active'));
+        document.getElementById(`${tab}-content`).classList.add('active');
+
+        if (tab === 'stats') loadStats();
+        if (tab === 'overview' && lastUsageResponse) {
+          try {
+            document.getElementById('totalTokens').textContent = formatNumber(lastUsageResponse.total_tokens);
+            document.getElementById('totalCost').textContent = formatCurrency(lastUsageResponse.total_cost);
+            if (lastUsageResponse.top_models && lastUsageResponse.top_models.length > 0) {
+              const top = lastUsageResponse.top_models[0];
+              document.getElementById('topModel').textContent = top.name;
+              document.getElementById('topModelTokens').textContent = formatNumber(top.tokens) + ' tokens';
+            }
+            updateToolChart(lastUsageResponse.by_tool || {});
+            updateModelChart(lastUsageResponse.top_models || []);
+            updateToolsTable(lastUsageResponse.by_tool || {});
+            lastCombinedModels = lastUsageResponse.combined_models || [];
+            lastAppsBreakdown = { apps: lastUsageResponse.apps || null, openclawModels: lastUsageResponse.openclaw_models || null };
+            scheduleIdle(() => {
+              if (lastAppsBreakdown && lastAppsBreakdown.apps) updateAppsBreakdown(lastAppsBreakdown.apps, lastAppsBreakdown.openclawModels);
+            });
+            scheduleIdle(() => updateCombinedModelsTable(lastCombinedModels));
+          } catch (e) {}
+        }
+      });
+    });
+
+    // Stats
+    async function loadStats() {
+      try {
+        const response = await fetch('/api/stats');
+        const data = await response.json();
+
+        const stats = data.stats || {};
+        document.getElementById('statFavoriteModel').textContent = stats.favorite_model || 'N/A';
+        document.getElementById('statTotalTokens').textContent = formatNumber(stats.total_tokens || 0);
+        document.getElementById('statSessions').textContent = formatNumber(stats.sessions || 0);
+        document.getElementById('statCurrentStreak').textContent = (stats.current_streak || 0) + ' days';
+        document.getElementById('statLongestStreak').textContent = (stats.longest_streak || 0) + ' days';
+        document.getElementById('statActiveDays').textContent = (stats.active_days || 0) + '/' + (stats.total_days || 0);
+        document.getElementById('statTotalDays').textContent = formatNumber(stats.total_days || 0);
+        document.getElementById('statTotalCost').textContent = formatCurrency((data.summary || {}).totalCost || 0);
+
+        const filledContributions = fillMissingDays(data.contributions);
+        renderCalendar(filledContributions);
+        contributionsData = filledContributions;
+      } catch (error) {
+        console.error('Error loading stats:', error);
+      }
+    }
+
+    function fillMissingDays(contributions) {
+      if (!contributions || contributions.length === 0) return [];
+      const sorted = contributions.slice().sort((a, b) => a.date.localeCompare(b.date));
+      const start = new Date(sorted[0].date);
+      const end = new Date(sorted[sorted.length - 1].date);
+
+      const map = new Map(sorted.map((d) => [d.date, d]));
+      const filled = [];
+
+      for (let dt = new Date(start); dt <= end; dt.setDate(dt.getDate() + 1)) {
+        const yyyy = dt.getFullYear();
+        const mm = String(dt.getMonth() + 1).padStart(2, '0');
+        const dd = String(dt.getDate()).padStart(2, '0');
+        const key = `${yyyy}-${mm}-${dd}`;
+
+        if (map.has(key)) filled.push(map.get(key));
+        else {
+          filled.push({
+            date: key,
+            totals: { cost: 0, tokens: 0, messages: 0 },
+            tokenBreakdown: { input: 0, output: 0, cacheRead: 0, reasoning: 0 },
+            sources: [],
+          });
+        }
+      }
+
+      return filled;
+    }
+
+    // ===== New Heatmap Calendar (Month / Year / 3D) =====
+    const HEAT_COLORS = ['#EEF2F7','#E0E7FF','#C7D2FE','#A5B4FC','#60A5FA','#3B82F6','#2563EB','#1E40AF'];
+
+    // Calculate longest ever streak across all data
+    function calculateLongestStreak(allContributions) {
+      const sorted = [...allContributions].sort((a, b) => a.date.localeCompare(b.date));
+      let longestStreak = 0;
+      let tempStreak = 0;
+      
+      for (let i = 0; i < sorted.length; i++) {
+        const day = sorted[i];
+        if ((day.totals.tokens || 0) > 0) {
+          tempStreak++;
+          if (tempStreak > longestStreak) longestStreak = tempStreak;
+        } else {
+          tempStreak = 0;
+        }
+      }
+      
+      return longestStreak;
+    }
+
+    function renderLegend(el) {
+      if (!el) return;
+      el.innerHTML = HEAT_COLORS.map((c) => `<span class="inline-block w-4 h-4 rounded-sm" style="background:${c}"></span>`).join('');
+    }
+
+    function quantileThresholds(values, levels) {
+      const v = (values || []).filter((x) => x && x > 0).slice().sort((a, b) => a - b);
+      if (v.length === 0) return [];
+      const t = [];
+      for (let i = 1; i < levels; i++) {
+        const idx = Math.floor((i / levels) * (v.length - 1));
+        t.push(v[idx]);
+      }
+      return t;
+    }
+
+    function quantileLevel(value, thresholds) {
+      if (!value || value <= 0) return 0;
+      for (let i = 0; i < thresholds.length; i++) {
+        if (value <= thresholds[i]) return i + 1;
+      }
+      return thresholds.length + 1;
+    }
+
+    function heatColor(level) {
+      const idx = Math.max(0, Math.min(HEAT_COLORS.length - 1, level));
+      return HEAT_COLORS[idx];
+    }
+
+    const calendarState = {
+      view: 'month',
+      monthCursor: new Date(),
+      yearCursor: new Date(),
+      contributions: [],
+    };
+
+    function setView(view) {
+      calendarState.view = view;
+
+      document.getElementById('calendarMonthView').style.display = view === 'month' ? 'block' : 'none';
+      document.getElementById('calendarYearView').style.display = view === 'year' ? 'block' : 'none';
+      document.getElementById('calendar3DView').style.display = view === '3d' ? 'block' : 'none';
+
+      document.getElementById('viewMonth').className = view === 'month' ? 'btn btn-primary' : 'btn btn-ghost';
+      document.getElementById('viewYear').className = view === 'year' ? 'btn btn-primary' : 'btn btn-ghost';
+      document.getElementById('view3D').className = view === '3d' ? 'btn btn-primary' : 'btn btn-ghost';
+
+      if (view === 'month') {
+        renderMonthHeatmap();
+      } else if (view === 'year') {
+        renderYearHeatmap();
+        updateTopStatsForYear();
+      } else if (view === '3d') {
+        render3DCalendar(calendarState.contributions || []);
+        updateTopStatsForAllTime();
+      }
+    }
+
+    function renderMonthDayLabels() {
+      const el = document.getElementById('monthDayLabels');
+      const labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+      const show = new Set(['Mon', 'Thu', 'Sun']); // Evenly spaced: Mon, Thu, Sun
+      el.innerHTML = labels
+        .map((l) => `<div class="${show.has(l) ? 'strong' : ''}">${show.has(l) ? l : ''}</div>`)
+        .join('');
+    }
+
+    function renderMonthHeatmap() {
+      renderLegend(document.getElementById('heatLegend'));
+      renderMonthDayLabels();
+
+      const gridEl = document.getElementById('monthGrid');
+      const titleEl = document.getElementById('monthTitle');
+      const dt = calendarState.monthCursor;
+      const year = dt.getFullYear();
+      const month = dt.getMonth();
+
+      titleEl.textContent = dt.toLocaleString(undefined, { month: 'long', year: 'numeric' });
+
+      const map = new Map((calendarState.contributions || []).map((d) => [d.date, d]));
+      const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+      // Monday-first calendar grid
+      const jsFirst = new Date(year, month, 1).getDay(); // Sun=0
+      const first = (jsFirst + 6) % 7; // Mon=0
+
+      const monthDays = [];
+      for (let i = 0; i < first; i++) monthDays.push(null);
+      for (let d = 1; d <= daysInMonth; d++) {
+        const key = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+        monthDays.push(
+          map.get(key) || {
+            date: key,
+            totals: { tokens: 0, cost: 0, messages: 0 },
+            tokenBreakdown: { input: 0, output: 0, cacheRead: 0, reasoning: 0 },
+            sources: [],
+          }
+        );
+      }
+
+      const tokenVals = monthDays.filter(Boolean).map((x) => x.totals.tokens || 0);
+      const thresholds = quantileThresholds(tokenVals, HEAT_COLORS.length - 1);
+
+      gridEl.innerHTML = '';
+      gridEl.className = 'heatmap-month-grid';
+
+      monthDays.forEach((day) => {
+        if (!day) {
+          const spacer = document.createElement('div');
+          spacer.style.width = 'var(--hm-cell)';
+          spacer.style.height = 'var(--hm-cell)';
+          gridEl.appendChild(spacer);
+          return;
+        }
+        const lvl = quantileLevel(day.totals.tokens || 0, thresholds);
+        const cell = document.createElement('div');
+        cell.className = 'heatmap-cell';
+        cell.style.backgroundColor = heatColor(lvl);
+        cell.title = `${day.date}: ${formatNumber(day.totals.tokens || 0)} tokens · ${formatCurrency(day.totals.cost || 0)} · ${formatNumber(day.totals.messages || 0)} msgs`;
+        cell.addEventListener('click', () => showDayDetails(day));
+        gridEl.appendChild(cell);
+      });
+
+      // Calculate and display month statistics
+      updateMonthStatistics(monthDays.filter(Boolean));
+    }
+
+    function updateMonthStatistics(monthDays) {
+      // Calculate totals
+      let totalTokens = 0;
+      let totalCost = 0;
+      let totalMessages = 0;
+      let activeDays = 0;
+      const modelCounts = new Map();
+
+      monthDays.forEach((day) => {
+        if (day && day.totals) {
+          totalTokens += day.totals.tokens || 0;
+          totalCost += day.totals.cost || 0;
+          totalMessages += day.totals.messages || 0;
+          
+          if ((day.totals.tokens || 0) > 0) {
+            activeDays++;
+          }
+
+          // Count models
+          if (day.sources) {
+            day.sources.forEach((source) => {
+              const modelName = normalizeModelName(source.modelId || source.model || 'Unknown');
+              const totalTokens = source.tokens ? (source.tokens.input || 0) + (source.tokens.output || 0) + (source.tokens.cacheRead || 0) : 0;
+              modelCounts.set(modelName, (modelCounts.get(modelName) || 0) + totalTokens);
+            });
+          }
+        }
+      });
+
+      // Find favorite model (most tokens)
+      let favoriteModel = '—';
+      let maxTokens = 0;
+      modelCounts.forEach((tokens, model) => {
+        if (tokens > maxTokens) {
+          maxTokens = tokens;
+          favoriteModel = model;
+        }
+      });
+
+      // Calculate streak within this month
+      let monthStreak = 0;
+      let tempStreak = 0;
+      const sortedByDate = [...monthDays].sort((a, b) => a.date.localeCompare(b.date));
+      
+      for (let i = 0; i < sortedByDate.length; i++) {
+        const day = sortedByDate[i];
+        if ((day.totals.tokens || 0) > 0) {
+          tempStreak++;
+          if (tempStreak > monthStreak) monthStreak = tempStreak;
+        } else {
+          tempStreak = 0;
+        }
+      }
+
+      // Calculate longest ever streak across all data
+      const longestEverStreak = calculateLongestStreak(calendarState.contributions || []);
+
+      // Update UI - Month sidebar stats
+      document.getElementById('monthFavoriteModel').textContent = favoriteModel;
+      document.getElementById('monthTotalTokens').textContent = formatNumber(totalTokens);
+      document.getElementById('monthTotalCost').textContent = formatCurrency(totalCost);
+      document.getElementById('monthTotalSessions').textContent = formatNumber(totalMessages);
+      document.getElementById('monthActiveDays').textContent = activeDays;
+      document.getElementById('monthCurrentStreak').textContent = monthStreak + (monthStreak === 1 ? ' day' : ' days');
+
+      // Update top stats section for month view
+      document.getElementById('statFavoriteModel').textContent = favoriteModel;
+      document.getElementById('statTotalTokens').textContent = formatNumber(totalTokens);
+      document.getElementById('statSessions').textContent = formatNumber(totalMessages);
+      document.getElementById('statCurrentStreak').textContent = monthStreak + (monthStreak === 1 ? ' day' : ' days');
+      document.getElementById('statLongestStreak').textContent = longestEverStreak + (longestEverStreak === 1 ? ' day' : ' days');
+      document.getElementById('statActiveDays').textContent = `${activeDays}/${monthDays.length}`;
+      document.getElementById('statTotalDays').textContent = String(monthDays.length);
+      document.getElementById('statTotalCost').textContent = formatCurrency(totalCost);
+    }
+
+    function updateTopStatsForYear() {
+      const contributions = calendarState.contributions || [];
+      const year = calendarState.yearCursor.getFullYear();
+      
+      // Filter to current year
+      const yearDays = contributions.filter(d => {
+        const dateYear = new Date(d.date).getFullYear();
+        return dateYear === year;
+      });
+
+      let totalTokens = 0;
+      let totalCost = 0;
+      let totalMessages = 0;
+      let activeDays = 0;
+      const modelCounts = new Map();
+
+      yearDays.forEach((day) => {
+        if (day && day.totals) {
+          totalTokens += day.totals.tokens || 0;
+          totalCost += day.totals.cost || 0;
+          totalMessages += day.totals.messages || 0;
+          
+          if ((day.totals.tokens || 0) > 0) {
+            activeDays++;
+          }
+
+          if (day.sources) {
+            day.sources.forEach((source) => {
+              const modelName = normalizeModelName(source.modelId || source.model || 'Unknown');
+              const totalTokens = source.tokens ? (source.tokens.input || 0) + (source.tokens.output || 0) + (source.tokens.cacheRead || 0) : 0;
+              modelCounts.set(modelName, (modelCounts.get(modelName) || 0) + totalTokens);
+            });
+          }
+        }
+      });
+
+      let favoriteModel = '—';
+      let maxTokens = 0;
+      modelCounts.forEach((tokens, model) => {
+        if (tokens > maxTokens) {
+          maxTokens = tokens;
+          favoriteModel = model;
+        }
+      });
+
+      // Calculate streak within this year
+      let yearStreak = 0;
+      let tempStreak = 0;
+      
+      const sortedDays = [...yearDays].sort((a, b) => a.date.localeCompare(b.date));
+      
+      for (let i = 0; i < sortedDays.length; i++) {
+        const day = sortedDays[i];
+        if ((day.totals.tokens || 0) > 0) {
+          tempStreak++;
+          if (tempStreak > yearStreak) yearStreak = tempStreak;
+        } else {
+          tempStreak = 0;
+        }
+      }
+      
+      // Calculate longest ever streak across all data
+      const longestEverStreak = calculateLongestStreak(calendarState.contributions || []);
+
+      // Update top stats section
+      document.getElementById('statFavoriteModel').textContent = favoriteModel;
+      document.getElementById('statTotalTokens').textContent = formatNumber(totalTokens);
+      document.getElementById('statSessions').textContent = formatNumber(totalMessages);
+      document.getElementById('statCurrentStreak').textContent = yearStreak + (yearStreak === 1 ? ' day' : ' days');
+      document.getElementById('statLongestStreak').textContent = longestEverStreak + (longestEverStreak === 1 ? ' day' : ' days');
+      
+      // Year has 365 or 366 days
+      const isLeapYear = (year % 4 === 0 && year % 100 !== 0) || (year % 400 === 0);
+      const totalDaysInYear = isLeapYear ? 366 : 365;
+      document.getElementById('statActiveDays').textContent = `${activeDays}/${totalDaysInYear}`;
+      document.getElementById('statTotalDays').textContent = String(totalDaysInYear);
+      document.getElementById('statTotalCost').textContent = formatCurrency(totalCost);
+    }
+
+    function updateTopStatsForAllTime() {
+      const contributions = calendarState.contributions || [];
+
+      let totalTokens = 0;
+      let totalCost = 0;
+      let totalMessages = 0;
+      let activeDays = 0;
+      const modelCounts = new Map();
+
+      contributions.forEach((day) => {
+        if (day && day.totals) {
+          totalTokens += day.totals.tokens || 0;
+          totalCost += day.totals.cost || 0;
+          totalMessages += day.totals.messages || 0;
+          
+          if ((day.totals.tokens || 0) > 0) {
+            activeDays++;
+          }
+
+          if (day.sources) {
+            day.sources.forEach((source) => {
+              const modelName = normalizeModelName(source.modelId || source.model || 'Unknown');
+              const totalTokens = source.tokens ? (source.tokens.input || 0) + (source.tokens.output || 0) + (source.tokens.cacheRead || 0) : 0;
+              modelCounts.set(modelName, (modelCounts.get(modelName) || 0) + totalTokens);
+            });
+          }
+        }
+      });
+
+      let favoriteModel = '—';
+      let maxTokens = 0;
+      modelCounts.forEach((tokens, model) => {
+        if (tokens > maxTokens) {
+          maxTokens = tokens;
+          favoriteModel = model;
+        }
+      });
+
+      // Calculate current ongoing streak from today backwards
+      let currentStreak = 0;
+      const today = new Date();
+      const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+      
+      const sortedDesc = [...contributions].sort((a, b) => b.date.localeCompare(a.date));
+      for (const day of sortedDesc) {
+        if (day.date > todayStr) continue;
+        if ((day.totals.tokens || 0) > 0) {
+          currentStreak++;
+        } else {
+          break;
+        }
+      }
+      
+      // Calculate longest ever streak
+      const longestEverStreak = calculateLongestStreak(contributions);
+
+      // Update top stats section
+      document.getElementById('statFavoriteModel').textContent = favoriteModel;
+      document.getElementById('statTotalTokens').textContent = formatNumber(totalTokens);
+      document.getElementById('statSessions').textContent = formatNumber(totalMessages);
+      document.getElementById('statCurrentStreak').textContent = currentStreak + (currentStreak === 1 ? ' day' : ' days');
+      document.getElementById('statLongestStreak').textContent = longestEverStreak + (longestEverStreak === 1 ? ' day' : ' days');
+      document.getElementById('statActiveDays').textContent = `${activeDays}/${contributions.length}`;
+      document.getElementById('statTotalDays').textContent = String(contributions.length);
+      document.getElementById('statTotalCost').textContent = formatCurrency(totalCost);
+    }
+
+    function renderYearHeatmap() {
+      renderLegend(document.getElementById('yearLegend'));
+
+      const year = calendarState.yearCursor.getFullYear();
+      document.getElementById('yearTitle').textContent = String(year);
+
+      const gridEl = document.getElementById('yearGrid');
+      const ylab = document.getElementById('yearDayLabels');
+
+      const map = new Map((calendarState.contributions || []).map((d) => [d.date, d]));
+      const start = new Date(year, 0, 1);
+      const end = new Date(year, 11, 31);
+
+      // START WITH MONDAY (not Sunday)
+      const startMonday = new Date(start);
+      const dayOfWeek = startMonday.getDay();
+      const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+      startMonday.setDate(startMonday.getDate() - daysToMonday);
+
+      // thresholds across the year (tokens)
+      const vals = [];
+      for (let dt = new Date(start); dt <= end; dt.setDate(dt.getDate() + 1)) {
+        const key = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+        const day = map.get(key);
+        vals.push(day ? day.totals.tokens || 0 : 0);
+      }
+      const thresholds = quantileThresholds(vals, HEAT_COLORS.length - 1);
+
+      // MONDAY-FIRST rows: Mon(0), Thu(3), Sun(6)
+      const rows = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+      const show = new Set(['Mon', 'Thu', 'Sun']);
+      ylab.innerHTML = rows.map((r) => `<div class="${show.has(r) ? 'strong' : ''}">${show.has(r) ? r : ''}</div>`).join('');
+
+      gridEl.innerHTML = '';
+
+      const totalDays = Math.floor((end - startMonday) / (24 * 3600 * 1000)) + 1;
+      const weeks = Math.ceil(totalDays / 7);
+
+      // Month labels aligned to week columns
+      const mlabelsEl = document.getElementById('yearMonthLabels');
+      if (mlabelsEl) {
+        const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+        const cols = new Array(weeks).fill('');
+        for (let m = 0; m < 12; m++) {
+          const md = new Date(year, m, 1);
+          const w = Math.floor((md - startMonday) / (24 * 3600 * 1000) / 7);
+          if (w >= 0 && w < cols.length) cols[w] = monthNames[m];
+        }
+        mlabelsEl.innerHTML = cols.map((t) => `<div>${t}</div>`).join('');
+      }
+
+      for (let i = 0; i < weeks * 7; i++) {
+        const dt = new Date(startMonday);
+        dt.setDate(dt.getDate() + i);
+
+        const cell = document.createElement('div');
+        cell.className = 'heatmap-year-cell';
+
+        if (dt < start || dt > end) {
+          cell.style.visibility = 'hidden';
+          gridEl.appendChild(cell);
+          continue;
+        }
+
+        const key = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+        const day =
+          map.get(key) ||
+          {
+            date: key,
+            totals: { tokens: 0, cost: 0, messages: 0 },
+            tokenBreakdown: { input: 0, output: 0, cacheRead: 0, reasoning: 0 },
+            sources: [],
+          };
+
+        const lvl = quantileLevel(day.totals.tokens || 0, thresholds);
+        cell.style.backgroundColor = heatColor(lvl);
+        cell.title = `${day.date}: ${formatNumber(day.totals.tokens || 0)} tokens · ${formatCurrency(day.totals.cost || 0)} · ${formatNumber(day.totals.messages || 0)} msgs`;
+        cell.addEventListener('click', () => showDayDetails(day));
+
+        gridEl.appendChild(cell);
+      }
+    }
+
+    function renderCalendar(contributions) {
+      calendarState.contributions = contributions || [];
+
+      const now = new Date();
+      calendarState.monthCursor = new Date(now.getFullYear(), now.getMonth(), 1);
+      calendarState.yearCursor = new Date(now.getFullYear(), 0, 1);
+
+      renderLegend(document.getElementById('yearLegend'));
+      setView(calendarState.view || 'month');
+    }
+    // ===== End Heatmap Calendar =====
+
+
+    function showDayDetails(day) {
+      const details = document.getElementById('dayDetails');
+      const content = document.getElementById('dayDetailsContent');
+
+      let html = `
+        <div class="grid grid-cols-2 gap-4 mb-4 text-sm">
+          <div><span class="text-slate-500">Date</span><div class="font-semibold">${day.date}</div></div>
+          <div><span class="text-slate-500">Cost</span><div class="font-semibold" style="color:#0F766E">${formatCurrency(day.totals.cost)}</div></div>
+          <div><span class="text-slate-500">Tokens</span><div class="font-semibold">${formatNumber(day.totals.tokens)}</div></div>
+          <div><span class="text-slate-500">Messages</span><div class="font-semibold">${formatNumber(day.totals.messages)}</div></div>
+        </div>
+        <div class="mb-2 text-sm font-semibold mono">Token Breakdown</div>
+        <div class="grid grid-cols-2 gap-2 text-sm mb-4">
+          <div><span class="text-slate-500">Input</span>: ${formatNumber(day.tokenBreakdown.input)}</div>
+          <div><span class="text-slate-500">Output</span>: ${formatNumber(day.tokenBreakdown.output)}</div>
+          <div><span class="text-slate-500">Cache Read</span>: ${formatNumber(day.tokenBreakdown.cacheRead)}</div>
+          <div><span class="text-slate-500">Reasoning</span>: ${formatNumber(day.tokenBreakdown.reasoning)}</div>
+        </div>
+      `;
+
+      if (day.sources && day.sources.length > 0) {
+        // Aggregate by source and model
+        const aggregated = new Map();
+        day.sources.forEach((src) => {
+          const key = `${src.source}|||${src.modelId}`;
+          if (!aggregated.has(key)) {
+            aggregated.set(key, {
+              source: src.source,
+              modelId: src.modelId,
+              cost: 0,
+              messages: 0,
+              tokens: {
+                input: 0,
+                output: 0,
+                cacheRead: 0,
+                reasoning: 0
+              }
+            });
+          }
+          const agg = aggregated.get(key);
+          agg.cost += Number(src.cost || 0);
+          agg.messages += Number(src.messages || 0);
+          if (src.tokens) {
+            agg.tokens.input += Number(src.tokens.input || 0);
+            agg.tokens.output += Number(src.tokens.output || 0);
+            agg.tokens.cacheRead += Number(src.tokens.cacheRead || 0);
+            agg.tokens.reasoning += Number(src.tokens.reasoning || 0);
+          }
+        });
+
+        const sourcesByCost = Array.from(aggregated.values()).sort((a, b) => b.cost - a.cost);
+
+        html += `
+          <div class="mb-2 text-sm font-semibold mono">Models Used</div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="border-b">
+                  <th class="text-left py-2">Source</th>
+                  <th class="text-left py-2">Model</th>
+                  <th class="text-right py-2">Cost</th>
+                  <th class="text-right py-2">Msgs</th>
+                </tr>
+              </thead>
+              <tbody>
+        `;
+
+        sourcesByCost.forEach((src) => {
+          html += `
+            <tr class="border-b">
+              <td class="py-2 capitalize text-slate-700">${src.source}</td>
+              <td class="py-2 text-slate-800">${src.modelId}</td>
+              <td class="py-2 text-right font-semibold" style="color:#0F766E">${formatCurrency(src.cost)}</td>
+              <td class="py-2 text-right text-slate-500">${formatNumber(src.messages)}</td>
+            </tr>
+          `;
+        });
+
+        html += `
+              </tbody>
+            </table>
+          </div>
+        `;
+      }
+
+      content.innerHTML = html;
+      details.classList.remove('hidden');
+      try { details.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) {}
+    }
+
+    document.getElementById('closeDayDetails').addEventListener('click', () => {
+      document.getElementById('dayDetails').classList.add('hidden');
+    });
+
+    // 3D calendar with Three.js (WebGL)
+    let contributionsData = null;
+    let scene3D, camera3D, renderer3D, raycaster3D, mouse3D;
+    let clickableObjects3D = [];
+
+    function render3DLegend() {
+      const legendEl = document.getElementById('legend3D');
+      if (!legendEl) return;
+      legendEl.innerHTML = HEAT_COLORS.map((c) => 
+        `<span class="inline-block w-5 h-5 rounded-sm border" style="background:${c}; border-color: rgba(226,232,240,0.8);"></span>`
+      ).join('');
+    }
+
+    function render3DCalendar(contributions) {
+      const container = document.getElementById('calendar3D');
+      if (!container) return;
+
+      render3DLegend();
+
+      const days = Array.isArray(contributions) ? contributions.slice() : [];
+      contributionsData = days;
+
+      if (days.length === 0) {
+        container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:750px;color:#64748B;font-size:16px;">No activity data for this period.</div>';
+        document.getElementById('stats3DTotalCost').textContent = formatCurrency(0);
+        document.getElementById('stats3DTotalTokens').textContent = formatNumber(0);
+        document.getElementById('stats3DActiveDate').textContent = '—';
+        document.getElementById('stats3DActiveTokens').textContent = '—';
+        document.getElementById('stats3DActiveCost').textContent = '—';
+        return;
+      }
+
+      // Clear existing content (remove old canvas and labels)
+      while (container.firstChild) {
+        container.removeChild(container.firstChild);
+      }
+      container.style.position = 'relative';
+
+      const width = Math.max(1100, Math.floor(container.getBoundingClientRect().width || 0));
+      const height = 750;
+
+      // Initialize Three.js scene
+      scene3D = new THREE.Scene();
+      scene3D.background = new THREE.Color(0xF8FAFC);
+
+      // Orthographic camera for isometric look
+      const aspect = width / height;
+      const frustumSize = 400;
+      camera3D = new THREE.OrthographicCamera(
+        frustumSize * aspect / -2,
+        frustumSize * aspect / 2,
+        frustumSize / 2,
+        frustumSize / -2,
+        1,
+        2000
+      );
+      
+      // Position for isometric view (similar to GitHub City style)
+      camera3D.position.set(200, 200, 200);
+      camera3D.lookAt(0, 0, 0);
+
+      // WebGL Renderer with high-DPI support
+      renderer3D = new THREE.WebGLRenderer({ 
+        antialias: true,
+        alpha: false
+      });
+      renderer3D.setSize(width, height);
+      renderer3D.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // KEY: Fix blur on high-DPI displays
+      container.appendChild(renderer3D.domElement);
+
+      // Lighting for depth perception
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+      scene3D.add(ambientLight);
+      
+      const directionalLight = new THREE.DirectionalLight(0xffffff, 0.6);
+      directionalLight.position.set(50, 100, 50);
+      scene3D.add(directionalLight);
+
+      // Raycaster for click detection
+      raycaster3D = new THREE.Raycaster();
+      mouse3D = new THREE.Vector2();
+      clickableObjects3D = [];
+
+      // Process data
+      const sorted = days.slice().sort((a, b) => a.date.localeCompare(b.date));
+      const firstDate = new Date(sorted[0].date + 'T00:00:00');
+      const lastDate = new Date(sorted[sorted.length - 1].date + 'T00:00:00');
+      
+      // Find Monday before or on first date
+      const startMonday = new Date(firstDate);
+      const dayOfWeek = startMonday.getDay();
+      const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+      startMonday.setDate(startMonday.getDate() - daysToMonday);
+
+      const dayMap = new Map(sorted.map(d => [d.date, d]));
+
+      const weeks = [];
+      let currentWeek = [];
+      const totalDays = Math.ceil((lastDate - startMonday) / (24 * 3600 * 1000)) + 7;
+      
+      for (let i = 0; i < totalDays; i++) {
+        const dt = new Date(startMonday);
+        dt.setDate(dt.getDate() + i);
+        if (dt > lastDate) break;
+        const dateKey = dt.toISOString().split('T')[0];
+        const dayData = dayMap.get(dateKey) || null;
+        
+        let isoDay = dt.getDay();
+        isoDay = isoDay === 0 ? 6 : isoDay - 1;
+        
+        currentWeek.push({ date: dateKey, data: dayData, dt, dayIdx: isoDay });
+        if (currentWeek.length === 7) {
+          weeks.push(currentWeek);
+          currentWeek = [];
+        }
+      }
+      if (currentWeek.length > 0) {
+        while (currentWeek.length < 7) currentWeek.push(null);
+        weeks.push(currentWeek);
+      }
+
+      // Cost-based coloring
+      const costVals = sorted.map((d) => Number(d?.totals?.cost ?? 0) || 0).filter(c => c > 0);
+      const thresholds = quantileThresholds(costVals, HEAT_COLORS.length - 1);
+      const maxCost = Math.max(...costVals, 0.01);
+
+      const cubeSize = 22;
+      const minHeight = 12;
+      const maxHeight = 180;
+      const weekCount = weeks.length;
+
+      // Center the grid
+      const offsetX = -(weekCount * cubeSize) / 2;
+      const offsetZ = -(7 * cubeSize) / 2;
+
+      // Draw precise grid floor matching cube positions
+      const gridMaterial = new THREE.LineBasicMaterial({ 
+        color: 0xCBD5E1, 
+        opacity: 0.4, 
+        transparent: true 
+      });
+
+      // Horizontal grid lines (along weeks, 8 lines for 7 days)
+      for (let i = 0; i <= 7; i++) {
+        const points = [];
+        const z = offsetZ + i * cubeSize;
+        points.push(new THREE.Vector3(offsetX, 0, z));
+        points.push(new THREE.Vector3(offsetX + weekCount * cubeSize, 0, z));
+        const geometry = new THREE.BufferGeometry().setFromPoints(points);
+        const line = new THREE.Line(geometry, gridMaterial);
+        scene3D.add(line);
+      }
+
+      // Vertical grid lines (along days, weekCount+1 lines)
+      for (let i = 0; i <= weekCount; i++) {
+        const points = [];
+        const x = offsetX + i * cubeSize;
+        points.push(new THREE.Vector3(x, 0, offsetZ));
+        points.push(new THREE.Vector3(x, 0, offsetZ + 7 * cubeSize));
+        const geometry = new THREE.BufferGeometry().setFromPoints(points);
+        const line = new THREE.Line(geometry, gridMaterial);
+        scene3D.add(line);
+      }
+
+      // Render cubes
+      weeks.forEach((week, weekIdx) => {
+        week.forEach((cell) => {
+          if (!cell || !cell.data) return;
+          const day = cell.data;
+          const cost = Number(day?.totals?.cost ?? 0) || 0;
+          if (cost <= 0) return;
+
+          const dayIdx = cell.dayIdx;
+          const lvl = quantileLevel(cost, thresholds);
+          const ratio = cost / maxCost;
+          const cubeHeight = Math.max(minHeight, Math.round(minHeight + ratio * (maxHeight - minHeight)));
+
+          // Create box
+          const geometry = new THREE.BoxGeometry(cubeSize, cubeHeight, cubeSize);
+          const colorHex = heatColor(lvl);
+          const material = new THREE.MeshBasicMaterial({ 
+            color: colorHex
+          });
+          const cube = new THREE.Mesh(geometry, material);
+
+          // Position cube centered in grid cell
+          const xPos = offsetX + weekIdx * cubeSize + cubeSize / 2;
+          const zPos = offsetZ + dayIdx * cubeSize + cubeSize / 2;
+          cube.position.set(xPos, cubeHeight / 2, zPos);
+
+          // Store day data for click handling
+          cube.userData = { day };
+          clickableObjects3D.push(cube);
+
+          scene3D.add(cube);
+        });
+      });
+
+      // Render WebGL scene
+      renderer3D.render(scene3D, camera3D);
+
+      // Add text labels as DOM overlays
+      const labelsContainer = document.createElement('div');
+      labelsContainer.style.position = 'absolute';
+      labelsContainer.style.top = '0';
+      labelsContainer.style.left = '0';
+      labelsContainer.style.width = '100%';
+      labelsContainer.style.height = '100%';
+      labelsContainer.style.pointerEvents = 'none';
+      labelsContainer.style.fontFamily = '"Fira Sans", sans-serif';
+      
+      // Helper to project 3D position to 2D screen coordinates
+      function project3DTo2D(x, y, z) {
+        const vector = new THREE.Vector3(x, y, z);
+        vector.project(camera3D);
+        
+        return {
+          x: (vector.x * 0.5 + 0.5) * width,
+          y: (-(vector.y) * 0.5 + 0.5) * height
+        };
+      }
+
+      // Day labels (Mon, Thu, Sun)
+      const dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+      const showDays = [0, 3, 6];
+      showDays.forEach((dayIdx) => {
+        const worldZ = offsetZ + dayIdx * cubeSize;
+        const worldX = offsetX - cubeSize * 1.5;
+        const screen = project3DTo2D(worldX, 0, worldZ);
+        
+        const label = document.createElement('div');
+        label.textContent = dayLabels[dayIdx];
+        label.style.position = 'absolute';
+        label.style.left = screen.x + 'px';
+        label.style.top = screen.y + 'px';
+        label.style.fontSize = '13px';
+        label.style.fontWeight = '700';
+        label.style.color = '#64748B';
+        label.style.transform = 'translate(-100%, -50%)';
+        labelsContainer.appendChild(label);
+      });
+
+      // Month labels
+      const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const labeledMonths = new Map();
+      const currentYear = new Date().getFullYear();
+
+      weeks.forEach((week, weekIdx) => {
+        const firstDay = week.find(c => c && c.data && c.dt);
+        if (firstDay && firstDay.dt) {
+          const year = firstDay.dt.getFullYear();
+          const month = firstDay.dt.getMonth();
+          const key = `${year}-${month}`;
+
+          if (!labeledMonths.has(key)) {
+            labeledMonths.set(key, weekIdx);
+            const showYear = year !== currentYear || month === 0;
+            const monthLabel = showYear ? `${monthNames[month]} ${year}` : monthNames[month];
+            
+            const worldX = offsetX + weekIdx * cubeSize;
+            const worldZ = offsetZ - cubeSize * 1.5;
+            const screen = project3DTo2D(worldX, 0, worldZ);
+            
+            const label = document.createElement('div');
+            label.textContent = monthLabel;
+            label.style.position = 'absolute';
+            label.style.left = screen.x + 'px';
+            label.style.top = screen.y + 'px';
+            label.style.fontSize = '13px';
+            label.style.fontWeight = '700';
+            label.style.color = '#475569';
+            label.style.transform = 'translate(-50%, -100%)';
+            labelsContainer.appendChild(label);
+          }
+        }
+      });
+
+      // Add labels container to the main container (relative parent)
+      container.appendChild(labelsContainer);
+
+      // Attach event listeners to renderer canvas for proper coordinate calculation
+      renderer3D.domElement.addEventListener('click', handle3DClick);
+      renderer3D.domElement.addEventListener('mousemove', handle3DMouseMove);
+
+      // Update stats
+      const totalCost = sorted.reduce((sum, d) => sum + (Number(d?.totals?.cost ?? 0) || 0), 0);
+      const totalTokens = sorted.reduce((sum, d) => sum + (Number(d?.totals?.tokens ?? 0) || 0), 0);
+      document.getElementById('stats3DTotalCost').textContent = formatCurrency(totalCost);
+      document.getElementById('stats3DTotalTokens').textContent = formatNumber(totalTokens);
+      
+      // Find most active day (highest cost)
+      const mostActiveDay = sorted.reduce((max, d) => {
+        const cost = Number(d?.totals?.cost ?? 0) || 0;
+        const maxCost = Number(max?.totals?.cost ?? 0) || 0;
+        return cost > maxCost ? d : max;
+      }, sorted[0] || null);
+      
+      if (mostActiveDay) {
+        const dayDate = new Date(mostActiveDay.date + 'T00:00:00');
+        const dayName = dayDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+        const dayTokens = formatNumber(mostActiveDay.totals.tokens || 0);
+        const dayCost = formatCurrency(mostActiveDay.totals.cost || 0);
+        document.getElementById('stats3DActiveDate').textContent = dayName;
+        document.getElementById('stats3DActiveTokens').textContent = dayTokens;
+        document.getElementById('stats3DActiveCost').textContent = dayCost;
+      } else {
+        document.getElementById('stats3DActiveDate').textContent = '—';
+        document.getElementById('stats3DActiveTokens').textContent = '—';
+        document.getElementById('stats3DActiveCost').textContent = '—';
+      }
+    }
+
+    // Click handler for Three.js
+    function handle3DClick(event) {
+      if (calendarState.view !== '3d' || !renderer3D) return;
+      
+      const rect = event.target.getBoundingClientRect();
+      mouse3D.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      mouse3D.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+      raycaster3D.setFromCamera(mouse3D, camera3D);
+      const intersects = raycaster3D.intersectObjects(clickableObjects3D);
+
+      if (intersects.length > 0) {
+        const day = intersects[0].object.userData.day;
+        if (day) showDayDetails(day);
+      }
+    }
+
+    // Hover cursor for Three.js
+    function handle3DMouseMove(event) {
+      if (calendarState.view !== '3d' || !renderer3D) return;
+      
+      const rect = event.target.getBoundingClientRect();
+      mouse3D.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      mouse3D.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+      raycaster3D.setFromCamera(mouse3D, camera3D);
+      const intersects = raycaster3D.intersectObjects(clickableObjects3D);
+
+      event.target.style.cursor = intersects.length > 0 ? 'pointer' : 'default';
+    }
+
+
+    // Heatmap view controls
+    document.getElementById('viewMonth').addEventListener('click', () => setView('month'));
+    document.getElementById('viewYear').addEventListener('click', () => setView('year'));
+    document.getElementById('view3D').addEventListener('click', () => setView('3d'));
+
+    document.getElementById('prevMonth').addEventListener('click', () => {
+      calendarState.monthCursor = new Date(calendarState.monthCursor.getFullYear(), calendarState.monthCursor.getMonth() - 1, 1);
+      renderMonthHeatmap();
+    });
+    document.getElementById('nextMonth').addEventListener('click', () => {
+      calendarState.monthCursor = new Date(calendarState.monthCursor.getFullYear(), calendarState.monthCursor.getMonth() + 1, 1);
+      renderMonthHeatmap();
+    });
+
+    document.getElementById('prevYear').addEventListener('click', () => {
+      calendarState.yearCursor = new Date(calendarState.yearCursor.getFullYear() - 1, 0, 1);
+      renderYearHeatmap();
+      updateTopStatsForYear();
+    });
+    document.getElementById('nextYear').addEventListener('click', () => {
+      calendarState.yearCursor = new Date(calendarState.yearCursor.getFullYear() + 1, 0, 1);
+      renderYearHeatmap();
+      updateTopStatsForYear();
+    });
+
+    document.getElementById('refreshBtn').addEventListener('click', () => updateDashboard());
+
+    const combinedModelsToggle = document.getElementById('combinedModelsToggle');
+    if (combinedModelsToggle) {
+      combinedModelsToggle.addEventListener('click', () => {
+        combinedModelsShowAll = !combinedModelsShowAll;
+        updateCombinedModelsTable(lastCombinedModels);
+      });
+    }
+
+    // Keep 3D view responsive on window resize.
+    let _resize3DTimer = null;
+    window.addEventListener('resize', () => {
+      if (calendarState.view !== '3d') return;
+      clearTimeout(_resize3DTimer);
+      _resize3DTimer = setTimeout(() => render3DCalendar(calendarState.contributions || []), 120);
+    });
+
+    // Auto-refresh every 5 minutes
+    setInterval(() => {
+      if (document.hidden) return;
+      if (!isOverviewActive()) return;
+      updateDashboard();
+    }, 5 * 60 * 1000);
+
+    // Initial load
+    updateDashboard();
+  </script>
+</body>
+</html>

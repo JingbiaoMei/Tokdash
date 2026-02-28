@@ -40,7 +40,6 @@ Local token & cost dashboard for AI coding tools (Codex, OpenCode, Claude Code, 
 
 - Python **3.10+**
 - One or more supported clients installed (above)
-- (Optional) Tokscale (only needed if you use the tokscale backend): `bunx tokscale@latest`
 
 ### Install (pip)
 

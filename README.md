@@ -79,6 +79,17 @@ See `docs/agents/systemd/BACKGROUND_RUN.md` for:
 - Linux systemd (user service) template
 - macOS launchd (LaunchAgent) template
 
+#### For Humans
+
+Copy and paste this prompt to your LLM agent (Claude Code, AmpCode, Cursor, etc.):
+
+```text
+Install and configure Tokdash to run in the background by following the instructions here:
+https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/agents/systemd/AGENTS.md
+
+Or read the Background Run guide, but seriously, let an agent do it. Humans fat-finger configs.
+```
+
 #### For LLM Agents
 
 Fetch the installation guide and follow it:
@@ -90,6 +101,17 @@ curl -s https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/agents/s
 ### OpenClaw digest (scheduled reports)
 
 Tokdash can power daily/weekly/monthly OpenClaw usage reports by querying the local API on a schedule.
+
+#### For Humans
+
+Copy and paste this prompt to your LLM agent (Claude Code, AmpCode, Cursor, etc.):
+
+```text
+Install and configure scheduled Tokdash usage reports for OpenClaw by following the instructions here:
+https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/agents/openclaw_reporting/AGENTS.md
+
+Or read the guide yourself, but seriously, let an agent do it. Humans fat-finger configs.
+```
 
 #### For LLM Agents
 

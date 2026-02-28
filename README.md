@@ -77,37 +77,24 @@ See `docs/agents/systemd/BACKGROUND_RUN.md` for:
 - Linux systemd (user service) template
 - macOS launchd (LaunchAgent) template
 
-If you want an AI agent (ChatGPT/Claude/Codex/etc.) to walk you through it, paste this prompt:
+#### For LLM Agents
 
-```text
-Help me install and run Tokdash in the background.
+Fetch the installation guide and follow it:
 
-Follow the instructions in:
-- docs/agents/systemd/AGENTS.md
-- docs/agents/systemd/BACKGROUND_RUN.md
-
-If you can't access local files, use the GitHub links:
-- https://github.com/JingbiaoMei/Tokdash/blob/main/docs/agents/systemd/AGENTS.md
-- https://github.com/JingbiaoMei/Tokdash/blob/main/docs/agents/systemd/BACKGROUND_RUN.md
+```bash
+curl -s https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/agents/systemd/AGENTS.md
 ```
 
 ### OpenClaw digest (scheduled reports)
 
 Tokdash can power daily/weekly/monthly OpenClaw usage reports by querying the local API on a schedule.
 
-If you want an AI agent to set this up, paste this prompt:
+#### For LLM Agents
 
-```text
-Help me set up scheduled Tokdash usage reports for OpenClaw.
+Fetch the installation guide and follow it:
 
-Follow the instructions in:
-- docs/agents/openclaw_reporting/AGENTS.md
-
-If you can't access local files, use the GitHub link:
-- https://github.com/JingbiaoMei/Tokdash/blob/main/docs/agents/openclaw_reporting/AGENTS.md
-
-Script referenced by the prompt:
-- docs/agents/openclaw_reporting/openclaw_cron_job.py
+```bash
+curl -s https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/agents/openclaw_reporting/AGENTS.md
 ```
 
 ## Configuration

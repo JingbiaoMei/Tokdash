@@ -31,8 +31,6 @@ Local token & cost dashboard for AI coding tools (Codex, OpenCode, Claude Code, 
 
 - **Linux (including WSL2):** supported
 - **macOS:** experimental
-- **Windows:** not supported (yet)
-
 
 ## Quick start
 
@@ -160,7 +158,7 @@ Example:
 curl 'http://127.0.0.1:55423/api/usage?period=today'
 ```
 
-## Accuracy note
+## Cost Accuracy Note
 
 Token counts depend on what each client logs locally. Costs are computed from `src/tokdash/pricing_db.json` and may lag real provider pricing — use as an estimate and verify against your billing source if it matters.
 

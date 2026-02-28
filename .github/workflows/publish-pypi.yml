@@ -75,10 +75,13 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       id-token: write
-    # Uncomment to use environment protection (requires manual approval):
-    # environment:
-    #   name: pypi
-    #   url: https://pypi.org/p/tokdash
+    # Keep an explicit environment so PyPI Trusted Publishing can match the OIDC
+    # claims (and so you can later enable GitHub Environment protections if you
+    # want). This does NOT require manual approval unless you configure
+    # protections for the `pypi` environment in GitHub settings.
+    environment:
+      name: pypi
+      url: https://pypi.org/p/tokdash
     steps:
       - name: Download dist
         uses: actions/download-artifact@v4

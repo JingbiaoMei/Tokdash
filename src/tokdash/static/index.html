@@ -582,6 +582,24 @@
       return '$' + n.toFixed(2);
     }
 
+    // Human-friendly source/tool labels
+    function formatToolName(tool) {
+      const key = String(tool || '').trim().toLowerCase();
+      const mapping = {
+        opencode: 'OpenCode',
+        codex: 'Codex',
+        claude: 'Claude Code',
+        gemini_cli: 'Gemini CLI',
+        amp: 'Amp',
+        openclaw: 'OpenClaw',
+      };
+      if (mapping[key]) return mapping[key];
+
+      const fallback = String(tool || '').replace(/[_-]+/g, ' ').trim();
+      if (!fallback) return 'Unknown';
+      return fallback.replace(/\b\w/g, (c) => c.toUpperCase());
+    }
+
     // Keep frontend model labels aligned with backend merge keys.
     function normalizeModelName(name) {
       let n = String(name || '').trim().toLowerCase();
@@ -737,7 +755,7 @@
       const ctx = canvas.getContext('2d');
 
       const entries = Object.entries(byTool || {}).filter(([, v]) => Number(v?.tokens || 0) > 0);
-      const labels = entries.map(([tool]) => tool.charAt(0).toUpperCase() + tool.slice(1));
+      const labels = entries.map(([tool]) => formatToolName(tool));
       const values = entries.map(([, v]) => Number(v?.tokens || 0));
       const palette = ['#1E40AF', '#3B82F6', '#0F766E', '#F59E0B', '#64748B', '#94A3B8'];
       const colors = values.map((_, i) => palette[i % palette.length]);
@@ -859,7 +877,7 @@
         row.className = 'border-b hover:bg-slate-50 transition';
         row.style.borderColor = 'rgba(226,232,240,0.9)';
         row.innerHTML = `
-          <td class="py-3 px-4 font-semibold text-slate-800 capitalize">${tool}</td>
+          <td class="py-3 px-4 font-semibold text-slate-800">${formatToolName(tool)}</td>
           <td class="py-3 px-4 text-right text-slate-700">${formatNumber(data.tokens)}</td>
           <td class="py-3 px-4 text-right font-bold" style="color:#0F766E">${formatCurrency(data.cost)}</td>
         `;
@@ -924,7 +942,7 @@
         const header = document.createElement('div');
         header.className = 'flex flex-wrap items-baseline gap-x-4 gap-y-1 mb-3';
         header.innerHTML = `
-          <h4 class="text-sm font-extrabold mono uppercase tracking-wide" style="color: var(--color-primary);">${appName}</h4>
+          <h4 class="text-sm font-extrabold mono tracking-wide" style="color: var(--color-primary);">${formatToolName(appName)}</h4>
           <span class="text-xs text-slate-600">${formatNumber(appTokens)} tokens · ${formatCurrency(appCost)} · ${formatNumber(appMessages)} msgs</span>
         `;
         appDiv.appendChild(header);
@@ -1654,7 +1672,7 @@
         sourcesByCost.forEach((src) => {
           html += `
             <tr class="border-b">
-              <td class="py-2 capitalize text-slate-700">${src.source}</td>
+              <td class="py-2 text-slate-700">${formatToolName(src.source)}</td>
               <td class="py-2 text-slate-800">${src.modelId}</td>
               <td class="py-2 text-right font-semibold" style="color:#0F766E">${formatCurrency(src.cost)}</td>
               <td class="py-2 text-right text-slate-500">${formatNumber(src.messages)}</td>

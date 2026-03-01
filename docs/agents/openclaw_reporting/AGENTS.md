@@ -117,6 +117,7 @@ openclaw cron remove <job-id>
 ```
 
 ## Prerequisites
+- Verify OpenClaw cron scheduler is running: `openclaw cron status`
 - Ensure Tokdash is already running at the specified base URL (use the systemd/launchd prompt if needed: `https://github.com/JingbiaoMei/Tokdash/blob/main/docs/agents/systemd/AGENTS.md`).
 - For remote Tokdash access, use `tailscale serve --bg 55423` and use the resulting HTTPS URL.
 

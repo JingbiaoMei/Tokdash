@@ -12,19 +12,34 @@ Goal: help the user install Tokdash and keep it running in the background for lo
 ## Procedure (do this, in order)
 1. Install Tokdash (`pip install tokdash`) and record the **absolute path** of `tokdash` (`which tokdash`).
 2. Verify it works in foreground: `tokdash serve --bind 127.0.0.1 --port 55423`, then open `http://127.0.0.1:55423/`.
-3. Set up a user-level service using the repo templates:
-   - Linux: `https://github.com/JingbiaoMei/tokdash/blob/main/docs/agents/systemd/templates/tokdash.service`
-   - macOS: `https://github.com/JingbiaoMei/tokdash/blob/main/docs/agents/systemd/templates/com.tokdash.tokdash.plist`
-4. Edit the template to use the user’s **absolute** `tokdash` path and desired `--bind/--port`.
-5. Enable + start:
+3. Download the service template and edit the `ExecStart` line to use the **absolute** `tokdash` path from step 1.
+
+   **Linux (systemd):**
+   ```bash
+   mkdir -p ~/.config/systemd/user
+   curl -L 'https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/agents/systemd/templates/tokdash.service' \
+     -o ~/.config/systemd/user/tokdash.service
+   # Edit ExecStart to use the absolute path from step 1
+   nano ~/.config/systemd/user/tokdash.service
+   ```
+
+   **macOS (launchd):**
+   ```bash
+   curl -L 'https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/agents/systemd/templates/com.tokdash.tokdash.plist' \
+     -o ~/Library/LaunchAgents/com.tokdash.tokdash.plist
+   # Edit ProgramArguments to use the absolute path from step 1
+   nano ~/Library/LaunchAgents/com.tokdash.tokdash.plist
+   ```
+
+4. Enable + start:
    - systemd: `systemctl --user enable --now tokdash`
    - launchd: `launchctl load -w ~/Library/LaunchAgents/com.tokdash.tokdash.plist`
-6. Validate via API:
+5. Validate via API:
    - `curl 'http://127.0.0.1:55423/api/usage?period=today'`
-7. Show where logs are:
+6. Show where logs are:
    - systemd: `journalctl --user -u tokdash -f`
    - launchd: `/tmp/tokdash.out.log` and `/tmp/tokdash.err.log` (or whatever the plist sets)
-8. If the user wants remote/mobile access, ask if they want to run:
+7. If the user wants remote/mobile access, ask if they want to run:
    - `tailscale serve --bg 55423`
    Keep Tokdash bound to `127.0.0.1`; avoid exposing `0.0.0.0` unless explicitly requested.
 

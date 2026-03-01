@@ -15,7 +15,7 @@ Local token & cost dashboard for AI coding tools (Codex, OpenCode, Claude Code, 
 - **Contribution calendar**: 2D heatmap + 3D isometric view
 
 <p align="center">
-  <img src="docs/assets/demo.png" alt="Tokdash dashboard demo" width="900" />
+  <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo.png" alt="Tokdash dashboard demo" width="900" />
 </p>
 
 ## Supported clients (explicit token fields)

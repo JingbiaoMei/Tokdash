@@ -12,23 +12,59 @@ Goal: help the user install Tokdash and keep it running in the background for lo
 ## Procedure (do this, in order)
 1. Install Tokdash (`pip install tokdash`) and record the **absolute path** of `tokdash` (`which tokdash`).
 2. Verify it works in foreground: `tokdash serve --bind 127.0.0.1 --port 55423`, then open `http://127.0.0.1:55423/`.
-3. Download the service template and edit the `ExecStart` line to use the **absolute** `tokdash` path from step 1.
+3. Download and configure the service template with the correct **absolute** `tokdash` path.
 
    **Linux (systemd):**
    ```bash
    mkdir -p ~/.config/systemd/user
-   curl -L 'https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/agents/systemd/templates/tokdash.service' \
-     -o ~/.config/systemd/user/tokdash.service
-   # Edit ExecStart to use the absolute path from step 1
-   nano ~/.config/systemd/user/tokdash.service
+   TOKDASH_PATH=$(which tokdash)
+   cat > ~/.config/systemd/user/tokdash.service << EOF
+   [Unit]
+   Description=Tokdash (local token & cost dashboard)
+   After=network-online.target
+
+   [Service]
+   Type=simple
+   ExecStart=$TOKDASH_PATH serve --bind 127.0.0.1 --port 55423
+   Restart=on-failure
+   RestartSec=3
+   Environment=PYTHONUNBUFFERED=1
+
+   [Install]
+   WantedBy=default.target
+   EOF
    ```
 
    **macOS (launchd):**
    ```bash
-   curl -L 'https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/agents/systemd/templates/com.tokdash.tokdash.plist' \
-     -o ~/Library/LaunchAgents/com.tokdash.tokdash.plist
-   # Edit ProgramArguments to use the absolute path from step 1
-   nano ~/Library/LaunchAgents/com.tokdash.tokdash.plist
+   TOKDASH_PATH=$(which tokdash)
+   cat > ~/Library/LaunchAgents/com.tokdash.tokdash.plist << EOF
+   <?xml version="1.0" encoding="UTF-8"?>
+   <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+   <plist version="1.0">
+   <dict>
+     <key>Label</key>
+     <string>com.tokdash.tokdash</string>
+     <key>ProgramArguments</key>
+     <array>
+       <string>$TOKDASH_PATH</string>
+       <string>serve</string>
+       <string>--bind</string>
+       <string>127.0.0.1</string>
+       <string>--port</string>
+       <string>55423</string>
+     </array>
+     <key>RunAtLoad</key>
+     <true/>
+     <key>KeepAlive</key>
+     <true/>
+     <key>StandardOutPath</key>
+     <string>/tmp/tokdash.out.log</string>
+     <key>StandardErrorPath</key>
+     <string>/tmp/tokdash.err.log</string>
+   </dict>
+   </plist>
+   EOF
    ```
 
 4. Enable + start:

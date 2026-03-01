@@ -8,12 +8,11 @@ Tokdash exposes a local HTTP API (default: `http://127.0.0.1:55423`) that OpenCl
 - Where is Tokdash running (host/port)? Is it already in the background?
 - Should remote access use `tailscale serve` (recommended) instead of LAN exposure?
 - Report period: `today`, `week`, `month`, or `N` days?
-- Delivery schedule: what time + timezone? (cron uses machine local timezone)
+- Delivery schedule: what time + timezone?
 - Delivery channel:
-  - stdout/log file only
-  - email
-  - Slack/Discord webhook
-  - OpenClaw agent-based delivery (needs details)
+  - `--announce` with `--channel` (WhatsApp, Telegram, Slack, Discord, etc.)
+  - `--webhook` URL for custom integrations
+  - `--announce` with no channel (posts to main session only)
 - Language: English vs Chinese vs both?
 
 ## Tokdash API quick reference
@@ -32,46 +31,97 @@ Example:
 curl 'http://127.0.0.1:55423/api/usage?period=today'
 ```
 
-## Starting script (recommended)
-Use: `https://github.com/JingbiaoMei/tokdash/blob/main/docs/agents/openclaw_reporting/openclaw_cron_job.py` from this repo, but **place it wherever the user wants** (typically under the OpenClaw workspace).
+## Scheduling (OpenClaw native cron)
 
-Suggested install location (example):
-- `~/.openclaw/workspace/monitor/openclaw_cron_job.py`
+Use OpenClaw's built-in cron scheduler. The isolated agent will query Tokdash and deliver the report.
 
-Install options:
+### Daily report (announce to channel)
 
-1) Copy from an existing tokdash checkout:
 ```bash
-mkdir -p ~/.openclaw/workspace/monitor
-cp /PATH/TO/tokdash/docs/agents/openclaw_reporting/openclaw_cron_job.py ~/.openclaw/workspace/monitor/openclaw_cron_job.py
+openclaw cron add \
+  --name "Tokdash daily report" \
+  --cron "0 8 * * *" \
+  --tz "America/Los_Angeles" \
+  --session isolated \
+  --message "Query the Tokdash API at http://127.0.0.1:55423/api/usage?period=today and generate a usage report. Format: show total cost, total tokens, top models by cost, and breakdown by tool (OpenClaw vs coding tools). Respond in both English and Chinese." \
+  --announce \
+  --channel whatsapp \
+  --to "+15551234567"
 ```
 
-2) Or download the single file (if the user has access to the repo):
+### Daily report (webhook delivery)
+
 ```bash
-mkdir -p ~/.openclaw/workspace/monitor
-curl -L 'https://raw.githubusercontent.com/JingbiaoMei/tokdash/main/docs/agents/openclaw_reporting/openclaw_cron_job.py' -o ~/.openclaw/workspace/monitor/openclaw_cron_job.py
+openclaw cron add \
+  --name "Tokdash daily webhook" \
+  --cron "0 8 * * *" \
+  --tz "America/Los_Angeles" \
+  --session isolated \
+  --message "Query the Tokdash API at http://127.0.0.1:55423/api/usage?period=today and generate a usage report in JSON format with: total_cost, total_tokens, top_models (by cost), and tool_breakdown." \
+  --webhook "https://your-webhook.example.com/tokdash"
 ```
 
-It calls `GET /api/usage` and prints a human-readable report.
+### Weekly report (Monday 08:00)
 
-Run it once manually before scheduling:
 ```bash
-python3 ~/.openclaw/workspace/monitor/openclaw_cron_job.py --base-url http://127.0.0.1:55423 --period today --lang both
+openclaw cron add \
+  --name "Tokdash weekly report" \
+  --cron "0 8 * * 1" \
+  --tz "America/Los_Angeles" \
+  --session isolated \
+  --message "Query the Tokdash API at http://127.0.0.1:55423/api/usage?period=week and generate a weekly usage summary. Include: total cost, token breakdown, top 5 models by cost, and day-by-day activity highlights." \
+  --announce \
+  --channel slack \
+  --to "channel:C1234567890"
 ```
 
-## Scheduling (cron)
-1. Pick a log directory (example: `~/tokdash_reports/`) and ensure it exists.
-2. Add a crontab entry (`crontab -e`). Example: every day at 08:00:
-```cron
-0 8 * * * /usr/bin/python3 /ABS/PATH/to/openclaw_cron_job.py --base-url http://127.0.0.1:55423 --period today --lang both >> /ABS/PATH/to/tokdash_reports/daily.log 2>&1
+### Monthly report (1st of each month)
+
+```bash
+openclaw cron add \
+  --name "Tokdash monthly report" \
+  --cron "0 8 1 * *" \
+  --tz "America/Los_Angeles" \
+  --session isolated \
+  --message "Query the Tokdash API at http://127.0.0.1:55423/api/usage?period=month and generate a monthly usage summary. Include: total cost, token breakdown, top models, cost trend vs previous month if available." \
+  --announce \
+  --channel telegram \
+  --to "-1001234567890"
 ```
 
-Notes:
-- cron requires **absolute paths** (it won’t expand `~`).
-- Ensure Tokdash is already running at that `--base-url` (use the systemd/launchd prompt if needed: `https://github.com/JingbiaoMei/tokdash/blob/main/docs/agents/systemd/AGENTS.md`).
+## Cron job management
+
+List existing jobs:
+```bash
+openclaw cron list
+```
+
+Run a job immediately (test):
+```bash
+openclaw cron run <job-id>
+```
+
+View run history:
+```bash
+openclaw cron runs --id <job-id>
+```
+
+Edit an existing job:
+```bash
+openclaw cron edit <job-id> --message "Updated prompt..." --tz "UTC"
+```
+
+Remove a job:
+```bash
+openclaw cron remove <job-id>
+```
+
+## Prerequisites
+- Ensure Tokdash is already running at the specified base URL (use the systemd/launchd prompt if needed: `https://github.com/JingbiaoMei/Tokdash/blob/main/docs/agents/systemd/AGENTS.md`).
+- For remote Tokdash access, use `tailscale serve --bg 55423` and use the resulting HTTPS URL.
 
 ## Delivery notes
-- Default to “write report to stdout / a log file”.
-- If the user wants Slack/email/webhook delivery, ask for:
-  - which workspace/channel
-  - preferred message format (plain text vs Markdown)
+- `--announce` delivers to the specified channel (WhatsApp, Telegram, Slack, Discord, etc.)
+- `--webhook` POSTs the result to a URL (useful for custom integrations)
+- If delivery channel is omitted, the report posts to the main session only
+- The isolated session has no prior context; include all necessary instructions in `--message`

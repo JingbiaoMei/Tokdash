@@ -99,6 +99,31 @@ Fetch the installation guide and follow it:
 curl -s https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/agents/systemd/AGENTS.md
 ```
 
+### Updating Tokdash
+
+If you installed Tokdash with pip and are running it via systemd:
+
+```bash
+# 1. Upgrade the package
+pip install --upgrade tokdash
+
+# 2. Restart the systemd service to pick up changes
+systemctl --user daemon-reload
+systemctl --user restart tokdash
+
+# 3. Verify the new version
+pip show tokdash | grep Version
+systemctl --user status tokdash --no-pager
+
+# 4. Test the API is responding
+curl 'http://127.0.0.1:55423/api/usage?period=today'
+```
+
+View logs if needed:
+```bash
+journalctl --user -u tokdash -f
+```
+
 ### OpenClaw digest (scheduled reports)
 
 Tokdash can power daily/weekly/monthly OpenClaw usage reports by querying the local API on a schedule.

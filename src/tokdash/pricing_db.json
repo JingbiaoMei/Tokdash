@@ -261,6 +261,16 @@
       "unit": "per_million_tokens",
       "source": "openrouter.ai/openai/gpt-5.2-pro"
     },
+    "gpt-5.4": {
+      "provider": "openai",
+      "input": 2.50,
+      "output": 15.00,
+      "cache_read": 0.25,
+      "cache_write": 2.50,
+      "unit": "per_million_tokens",
+      "note": "Released 2026-03-05",
+      "source": "openrouter.ai/openai/gpt-5.4"
+    },
     "gpt-5.1": {
       "provider": "openai",
       "input": 1.25,

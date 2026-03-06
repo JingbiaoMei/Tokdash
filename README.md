@@ -26,6 +26,7 @@ Local token & cost dashboard for AI coding tools (Codex, OpenCode, Claude Code, 
 - **Claude Code**: `~/.claude/projects/`
 - **Gemini CLI**: `~/.gemini/tmp/*/chats/session-*.json`
 - **OpenClaw**: `~/.openclaw/agents/*/sessions/`
+- **Kimi CLI**: `~/.kimi/sessions/*/*/wire.jsonl`
 
 ## Platform support
 

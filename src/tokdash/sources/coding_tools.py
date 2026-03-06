@@ -7,6 +7,7 @@ These parsers emit tokscale-compatible `entries[]` rows and are used by
 import argparse
 import glob
 import json
+import os
 import sqlite3
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta, timezone
@@ -432,10 +433,152 @@ class AmpParser(BaseParser):
         return []
 
 
+class KimiParser(BaseParser):
+    """
+    Parser for Kimi CLI session files.
+
+    =======================================================================
+    KIMI CLI SESSION FILE SCHEMA
+    =======================================================================
+    Location: ~/.kimi/sessions/<userId>/<sessionId>/wire.jsonl
+
+    The wire.jsonl file contains JSON lines with different message types.
+    Token usage is captured in "StatusUpdate" messages.
+
+    Relevant fields:
+      - timestamp: Unix timestamp (float, seconds since epoch)
+      - message.type: "StatusUpdate"
+      - message.payload.token_usage: object with token counts
+          - input_other: int (fresh input tokens)
+          - output: int (output/completion tokens)
+          - input_cache_read: int (cache read tokens)
+          - input_cache_creation: int (cache write tokens)
+      - message.payload.message_id: str (unique message ID for dedup)
+
+    Field mapping to normalized entry:
+      source <- "kimi"
+      provider <- "moonshotai" (Kimi is from Moonshot AI)
+      input <- token_usage.input_other
+      output <- token_usage.output
+      cacheRead <- token_usage.input_cache_read
+      cacheWrite <- token_usage.input_cache_creation
+      reasoning <- 0 (not exposed separately in Kimi CLI)
+      timestamp <- timestamp * 1000 (convert to milliseconds)
+
+    Dedup key: message.payload.message_id
+
+    Known schema versions: 2025-03 to present
+    =======================================================================
+    """
+
+    source_name = "kimi"
+
+    def __init__(self, pricing_db: PricingDatabase):
+        super().__init__(pricing_db)
+        kimi_share_dir = os.environ.get("KIMI_SHARE_DIR", "").strip()
+        self.kimi_root = Path(kimi_share_dir).expanduser() if kimi_share_dir else (Path.home() / ".kimi")
+
+    @staticmethod
+    def _default_model_for_timestamp(ts: datetime) -> str:
+        # Kimi's local session files do not currently expose the resolved model for each
+        # StatusUpdate event, so we infer a default billing model by time window.
+        #
+        # Current assumption: "kimi-for-coding" maps to kimi-k2.5 for the period we
+        # support today. When Kimi changes the default backend model, update this
+        # function to use a timestamp split, e.g. entries before <cutover timestamp>
+        # -> "kimi-k2.5", entries on/after that instant -> "kimi-k3.0".
+        return "kimi-k2.5"
+
+    def _build_entry(self, model: str, token_usage: Dict[str, Any], ts_ms: int, message_id: str) -> Dict[str, Any]:
+        """Build a normalized entry from Kimi token usage."""
+        input_other = self._i(token_usage.get("input_other"))
+        output_t = self._i(token_usage.get("output"))
+        cache_read = self._i(token_usage.get("input_cache_read"))
+        cache_write = self._i(token_usage.get("input_cache_creation"))
+
+        return {
+            "source": self.source_name,
+            "model": model or "kimi-k2.5",  # Default to kimi-k2.5 if unknown
+            "provider": "moonshotai",
+            "input": input_other,
+            "output": output_t,
+            "cacheRead": cache_read,
+            "cacheWrite": cache_write,
+            "reasoning": 0,  # Kimi doesn't expose reasoning separately
+            "cost": self.pricing_db.get_cost(model or "kimi-k2.5", input_other, output_t, cache_read, cache_write),
+            "timestamp": int(ts_ms),
+            "message_id": message_id,  # For deduplication
+        }
+
+    def collect(self, since_date: Optional[datetime], until_date: Optional[datetime]) -> List[Dict[str, Any]]:
+        """Collect token usage from Kimi CLI session files."""
+        out: List[Dict[str, Any]] = []
+        seen_message_ids: set[str] = set()
+
+        sessions_dir = self.kimi_root / "sessions"
+        if not sessions_dir.exists():
+            return out
+
+        # Pattern: ~/.kimi/sessions/<userId>/<sessionId>/wire.jsonl
+        pattern = str(sessions_dir / "*" / "*" / "wire.jsonl")
+
+        for file_path in glob.glob(pattern):
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            entry = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+
+                        # Only process StatusUpdate messages with token_usage
+                        msg = entry.get("message", {})
+                        if msg.get("type") != "StatusUpdate":
+                            continue
+
+                        payload = msg.get("payload", {})
+                        token_usage = payload.get("token_usage")
+                        if not isinstance(token_usage, dict):
+                            continue
+
+                        # Deduplicate by message_id
+                        message_id = payload.get("message_id", "")
+                        if not message_id:
+                            continue
+                        if message_id in seen_message_ids:
+                            continue
+                        seen_message_ids.add(message_id)
+
+                        # Parse timestamp
+                        ts_raw = entry.get("timestamp")
+                        if not ts_raw:
+                            continue
+                        try:
+                            ts = datetime.fromtimestamp(float(ts_raw), timezone.utc)
+                        except (ValueError, TypeError):
+                            continue
+
+                        if not self._in_range(ts, since_date, until_date):
+                            continue
+
+                        model = self._default_model_for_timestamp(ts)
+
+                        ts_ms = int(ts.timestamp() * 1000)
+                        out.append(self._build_entry(model, token_usage, ts_ms, message_id))
+
+            except Exception:
+                continue
+
+        return out
+
+
 class CodingToolsUsageTracker:
     """Registry-driven tracker for coding clients."""
 
-    # From `tokscale --help`: OpenCode, Claude Code, Codex, Gemini, Amp.
+    # From `tokscale --help`: OpenCode, Claude Code, Codex, Gemini, Amp, Kimi.
     # TODO: Amp parser is currently a placeholder until we have stable local fixtures
     # with explicit token fields.
 
@@ -448,6 +591,7 @@ class CodingToolsUsageTracker:
             "claude": ClaudeParser(self.pricing_db),
             "gemini_cli": GeminiCLIParser(self.pricing_db),
             "amp": AmpParser(self.pricing_db),
+            "kimi": KimiParser(self.pricing_db),
         }
 
     def collect(self, since_date: Optional[datetime] = None, until_date: Optional[datetime] = None, sources: Optional[List[str]] = None):
@@ -477,7 +621,7 @@ def main():
     parser.add_argument("--since", type=str)
     parser.add_argument("--until", type=str)
     parser.add_argument("--json", action="store_true")
-    parser.add_argument("--sources", type=str, default="opencode,codex,claude,gemini_cli,amp")
+    parser.add_argument("--sources", type=str, default="opencode,codex,claude,gemini_cli,amp,kimi")
     args = parser.parse_args()
 
     since_date, until_date = _date_range(args)

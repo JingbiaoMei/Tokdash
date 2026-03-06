@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tokdash"
-version = "0.0.6"
+version = "0.0.7"
 description = "Local token & cost dashboard for AI coding tools"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -12,7 +12,7 @@ license = { file = "LICENSE" }
 authors = [
   { name = "Jingbiao Mei" },
 ]
-keywords = ["token", "cost", "dashboard", "llm", "ai", "codex", "claude", "gemini"]
+keywords = ["token", "cost", "dashboard", "llm", "ai", "codex", "claude", "gemini", "kimi"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "License :: OSI Approved :: MIT License",

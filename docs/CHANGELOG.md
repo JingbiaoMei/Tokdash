@@ -13,6 +13,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Added a regression test for the Kimi parser and support for overriding the Kimi data directory with `KIMI_SHARE_DIR`.
 - Documented the current Kimi billing-model assumption (`kimi-for-coding` -> `kimi-k2.5`) in code for future timestamp-based model rollovers.
 
+## 0.0.6 - 2026-03-05
+
+- Added GPT-5.4 pricing support to the local pricing database.
+- Bumped the package version to `0.0.6`.
+
 ## 0.0.1 - 2026-02-25
 
 - Initial PyPI packaging (`pyproject.toml`) + `tokdash` CLI (`tokdash serve`, `tokdash export`).

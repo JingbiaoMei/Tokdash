@@ -35,3 +35,6 @@ Thumbs.db
 .api_keys/
 .env
 .env.*
+
+# Private agent instructions (not for public release)
+docs/agents/release/

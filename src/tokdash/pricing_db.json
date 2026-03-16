@@ -26,10 +26,10 @@
     },
     "k2p5": {
       "provider": "moonshotai",
-      "input": 0.45,
-      "output": 2.25,
-      "cache_read": 0.045,
-      "cache_write": 0.45,
+      "input": 0.6,
+      "output": 3.0,
+      "cache_read": 0.225,
+      "cache_write": 0.6,
       "unit": "per_million_tokens",
       "source": "openrouter.ai/moonshotai/kimi-k2.5",
       "note": "Alias for kimi-k2.5 (k2p5 naming variation)"

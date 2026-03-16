@@ -596,6 +596,7 @@
         gemini_cli: 'Gemini CLI',
         amp: 'Amp',
         openclaw: 'OpenClaw',
+        kimi: 'Kimi CLI',
       };
       if (mapping[key]) return mapping[key];
 
@@ -758,7 +759,8 @@
       if (!canvas) return;
       const ctx = canvas.getContext('2d');
 
-      const entries = Object.entries(byTool || {}).filter(([, v]) => Number(v?.tokens || 0) > 0);
+      const entries = Object.entries(byTool || {}).filter(([, v]) => Number(v?.tokens || 0) > 0)
+        .sort((a, b) => Number(b[1].tokens || 0) - Number(a[1].tokens || 0));
       const labels = entries.map(([tool]) => formatToolName(tool));
       const values = entries.map(([, v]) => Number(v?.tokens || 0));
       const palette = ['#1E40AF', '#3B82F6', '#0F766E', '#F59E0B', '#64748B', '#94A3B8'];
@@ -874,6 +876,8 @@
         tbody.replaceChildren(row);
         return;
       }
+
+      visibleTools.sort((a, b) => Number(b[1].tokens || 0) - Number(a[1].tokens || 0));
 
       const frag = document.createDocumentFragment();
       visibleTools.forEach(([tool, data]) => {

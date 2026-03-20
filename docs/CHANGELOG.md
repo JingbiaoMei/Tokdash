@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+## 0.0.10 - 2026-03-20
+
+### Reverted
+- Removed the unmerged multilingual README additions and deleted the Chinese README variant.
+- Reverted the dashboard language toggle, browser-language auto-selection, automatic night mode, and manual light/dark theme toggle to restore the previous light-only UI.
+
+## 0.0.9 - 2026-03-16
+
+- Renamed the Kimi tool label to `Kimi CLI` in the dashboard.
+- Sorted Tools Breakdown views by token count in descending order.
+- Bumped the package version to `0.0.9`.
+
 ## 0.0.8 - 2026-03-16
 
 ### Pricing DB

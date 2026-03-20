@@ -15,6 +15,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
 
   <script src="https://cdn.tailwindcss.com"></script>
+  <script>tailwind.config = { darkMode: 'class' }</script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
 
@@ -37,6 +38,10 @@
 
       --t-fast: 180ms;
       --t-med: 240ms;
+
+      --color-cost: #0F766E;
+      --color-label: rgba(71,85,105,0.9);
+      --color-surface-glass: rgba(248, 250, 252, 0.95);
     }
 
     html, body { height: 100%; }
@@ -159,7 +164,7 @@
     @media (max-width: 420px){:root{--hm-cell:20px;--hm-gap:5px;}}
 
     .heatmap-day-labels{display:grid;grid-template-columns:repeat(7,var(--hm-cell));gap:var(--hm-gap);margin-bottom:8px;justify-content:center;}
-    .heatmap-day-labels div{width:var(--hm-cell);height:14px;line-height:14px;text-align:center;font-size:11px;color:#64748B;font-weight:600;}
+    .heatmap-day-labels div{width:var(--hm-cell);height:14px;line-height:14px;text-align:center;font-size:11px;color:var(--color-muted);font-weight:600;}
     .heatmap-day-labels div.strong{color:var(--color-primary);font-weight:800;}
     .heatmap-cell{width:var(--hm-cell);height:var(--hm-cell);border-radius:6px;border:1px solid rgba(226,232,240,0.7);cursor:pointer;transition:transform 160ms ease, filter 160ms ease;touch-action:manipulation;}
     .heatmap-cell:hover{transform:translateY(-1px);filter:brightness(0.98);}
@@ -168,14 +173,93 @@
     /* Year heatmap + month labels */
     .heatmap-year-wrap{display:flex;gap:12px;align-items:flex-start;overflow-x:auto;padding-bottom:6px;}
     .heatmap-year-ylabels{display:grid;grid-template-rows:repeat(7,var(--hy-cell));gap:6px;min-width:32px;margin-top:18px;}
-    .heatmap-year-ylabels div{height:var(--hy-cell);line-height:var(--hy-cell);font-size:11px;color:#64748B;font-weight:600;}
+    .heatmap-year-ylabels div{height:var(--hy-cell);line-height:var(--hy-cell);font-size:11px;color:var(--color-muted);font-weight:600;}
     .heatmap-year-ylabels div.strong{color:var(--color-primary);font-weight:800;}
     .heatmap-year-main{display:flex;flex-direction:column;align-items:flex-start;}
     .heatmap-year-months{display:grid;grid-auto-flow:column;grid-auto-columns:var(--hy-cell);gap:var(--hy-gap);height:14px;align-items:end;padding-top:0;}
-    .heatmap-year-months div{height:14px;line-height:14px;font-size:11px;color:#64748B;font-weight:700;letter-spacing:0.02em;white-space:nowrap;}
+    .heatmap-year-months div{height:14px;line-height:14px;font-size:11px;color:var(--color-muted);font-weight:700;letter-spacing:0.02em;white-space:nowrap;}
     .heatmap-year-grid{display:grid;grid-auto-flow:column;grid-template-rows:repeat(7,var(--hy-cell));grid-auto-columns:var(--hy-cell);gap:var(--hy-gap);padding-top:4px;}
     .heatmap-year-cell{width:var(--hy-cell);height:var(--hy-cell);border-radius:3px;border:1px solid rgba(226,232,240,0.6);cursor:pointer;}
 
+    html.dark {
+      --color-primary: #60A5FA;
+      --color-secondary: #93C5FD;
+      --color-cta: #FBBF24;
+      --color-bg: #0F172A;
+      --color-text: #E2E8F0;
+      --color-muted: #94A3B8;
+      --color-border: #334155;
+      --color-cost: #34D399;
+      --color-label: rgba(148,163,184,0.9);
+      --color-surface-glass: rgba(15, 23, 42, 0.95);
+      --shadow-sm: 0 1px 2px rgba(0,0,0,0.4);
+      --shadow-md: 0 8px 24px rgba(0,0,0,0.4);
+      --shadow-lg: 0 16px 44px rgba(0,0,0,0.5);
+    }
+
+    html.dark body {
+      background: radial-gradient(1200px 600px at 20% -10%, rgba(59,130,246,0.06), transparent 65%),
+                  radial-gradient(900px 600px at 90% 10%, rgba(245,158,11,0.04), transparent 55%),
+                  var(--color-bg);
+    }
+
+    html.dark .surface {
+      background: rgba(30, 41, 59, 0.85);
+      border-color: var(--color-border);
+    }
+
+    html.dark .ui-input {
+      background: #1E293B;
+      border-color: #475569;
+      color: var(--color-text);
+    }
+
+    html.dark .ui-input:focus {
+      border-color: rgba(96,165,250,0.6);
+      box-shadow: 0 0 0 4px rgba(96,165,250,0.14);
+    }
+
+    html.dark select option {
+      background: #1E293B;
+      color: #E2E8F0;
+    }
+
+    html.dark .btn-primary {
+      background: #2563EB;
+      box-shadow: 0 10px 24px rgba(37,99,235,0.3);
+    }
+
+    html.dark .btn-primary:hover { background: #3B82F6; }
+
+    html.dark .btn-ghost {
+      background: rgba(148,163,184,0.06);
+      color: var(--color-text);
+      border-color: #475569;
+    }
+
+    html.dark .btn-ghost:hover { background: rgba(148,163,184,0.12); }
+
+    html.dark .tab-btn {
+      border-color: #475569;
+      color: #CBD5E1;
+    }
+
+    html.dark .tab-btn[aria-selected="true"] {
+      background: rgba(96,165,250,0.12);
+      border-color: rgba(96,165,250,0.3);
+      color: #60A5FA;
+    }
+
+    html.dark .heatmap-cell { border-color: rgba(71,85,105,0.4); }
+    html.dark .heatmap-year-cell { border-color: rgba(71,85,105,0.3); }
+    html.dark .calendar-day { border-color: rgba(71,85,105,0.4); }
+    html.dark .text-slate-800 { color: #E2E8F0; }
+    html.dark .text-slate-700 { color: #CBD5E1; }
+    html.dark .text-slate-600 { color: #94A3B8; }
+    html.dark .text-slate-500 { color: #94A3B8; }
+    html.dark .bg-slate-50 { background-color: rgba(30, 41, 59, 0.5); }
+    html.dark .hover\:bg-slate-50:hover { background-color: rgba(51, 65, 85, 0.3); }
+    html.dark .border-b { border-color: #334155; }
 
     /* Reduce motion */
     @media (prefers-reduced-motion: reduce) {
@@ -202,44 +286,57 @@
           <div>
             <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight mono">Tokdash</h1>
             <p class="text-sm sm:text-base" style="color: var(--color-muted);"></p>
-            <p id="lastUpdate" class="text-xs mt-2" style="color: rgba(71,85,105,0.9);">Loading...</p>
+            <p id="lastUpdate" class="text-xs mt-2" style="color: var(--color-label);">Loading...</p>
           </div>
         </div>
 
         <div class="flex flex-col sm:flex-row gap-3 sm:items-center">
           <div class="flex gap-2 items-center">
-            <label for="periodSelect" class="text-xs font-semibold uppercase tracking-wider" style="color: rgba(71,85,105,0.9);">Range</label>
+            <label id="periodSelectLabel" for="periodSelect" class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="range">Range</label>
             <select id="periodSelect" class="ui-input">
-              <option value="today">Today</option>
-              <option value="3days">Last 3 Days</option>
-              <option value="week">Last 7 Days</option>
-              <option value="14days">Last 14 Days</option>
-              <option value="month">This Month</option>
-              <option value="90">Last 3 Months</option>
-              <option value="365">Last Year</option>
-              <option value="custom">Custom Days…</option>
+              <option value="today" data-i18n="today">Today</option>
+              <option value="3days" data-i18n="last3days">Last 3 Days</option>
+              <option value="week" data-i18n="last7days">Last 7 Days</option>
+              <option value="14days" data-i18n="last14days">Last 14 Days</option>
+              <option value="month" data-i18n="thisMonth">This Month</option>
+              <option value="90" data-i18n="last3months">Last 3 Months</option>
+              <option value="365" data-i18n="lastYear">Last Year</option>
+              <option value="custom" data-i18n="customDays">Custom Days…</option>
             </select>
           </div>
 
           <div id="customRangeInputs" class="hidden sm:flex gap-2 items-center">
-            <input type="number" id="customDays" placeholder="Days" min="1" max="9999" class="ui-input w-28" />
-            <button id="applyCustom" class="btn btn-ghost" aria-label="Apply custom day range">Apply</button>
+            <input type="number" id="customDays" placeholder="Days" min="1" max="9999" class="ui-input w-28" data-i18n-placeholder="daysPlaceholder" />
+            <button id="applyCustom" class="btn btn-ghost" aria-label="Apply custom day range" data-i18n="apply">Apply</button>
           </div>
 
           <button id="refreshBtn" class="btn btn-primary" aria-label="Refresh dashboard">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path d="M20 12a8 8 0 1 1-2.343-5.657" stroke="white" stroke-width="2" stroke-linecap="round"/>
-              <path d="M20 4v6h-6" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M20 4v6h-6" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
-            Refresh
+            <span data-i18n="refresh">Refresh</span>
           </button>
+
+          <div class="flex gap-1 items-center">
+            <button id="langToggle" class="btn btn-ghost" style="min-height:36px; padding:6px 10px; font-size:12px; font-weight:700;" aria-label="Toggle language">中</button>
+            <button id="themeToggle" class="btn btn-ghost" style="min-height:36px; padding:6px 10px;" aria-label="Toggle theme">
+              <svg id="themeIconMoon" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              <svg id="themeIconSun" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="display:none;">
+                <circle cx="12" cy="12" r="5" stroke="currentColor" stroke-width="2"/>
+                <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+            </button>
+          </div>
         </div>
       </div>
 
       <!-- Tabs -->
       <nav class="mt-5 flex flex-wrap gap-2" aria-label="Dashboard sections">
-        <button class="tab-btn" data-tab="overview" aria-selected="true">Overview</button>
-        <button class="tab-btn" data-tab="stats" aria-selected="false">Stats</button>
+        <button class="tab-btn" data-tab="overview" aria-selected="true" data-i18n="overview">Overview</button>
+        <button class="tab-btn" data-tab="stats" aria-selected="false" data-i18n="stats">Stats</button>
       </nav>
     </header>
 
@@ -249,15 +346,15 @@
       <!-- KPI cards -->
       <section class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         <div class="surface p-5">
-          <div class="text-xs font-semibold uppercase tracking-wider" style="color: rgba(71,85,105,0.9);">Total Tokens</div>
+          <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="totalTokens">Total Tokens</div>
           <div id="totalTokens" class="text-3xl sm:text-4xl font-extrabold mt-2" style="color: var(--color-primary);">-</div>
         </div>
         <div class="surface p-5">
-          <div class="text-xs font-semibold uppercase tracking-wider" style="color: rgba(71,85,105,0.9);">Total Cost</div>
-          <div id="totalCost" class="text-3xl sm:text-4xl font-extrabold mt-2" style="color: #0F766E;">$-</div>
+          <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="totalCost">Total Cost</div>
+          <div id="totalCost" class="text-3xl sm:text-4xl font-extrabold mt-2" style="color: var(--color-cost);">$-</div>
         </div>
         <div class="surface p-5">
-          <div class="text-xs font-semibold uppercase tracking-wider" style="color: rgba(71,85,105,0.9);">Top Model</div>
+          <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="topModel">Top Model</div>
           <div id="topModel" class="text-lg sm:text-xl font-extrabold mt-2 mono" style="color: var(--color-text);">-</div>
           <div id="topModelMeta" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
         </div>
@@ -267,8 +364,8 @@
       <section class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
         <div class="surface p-5">
           <div class="flex items-center justify-between mb-3">
-            <h2 class="text-base font-extrabold mono">Usage by Tool</h2>
-            <div class="text-xs" style="color: var(--color-muted);">Tokens</div>
+            <h2 class="text-base font-extrabold mono" data-i18n="usageByTool">Usage by Tool</h2>
+            <div class="text-xs" style="color: var(--color-muted);" data-i18n="tokens">Tokens</div>
           </div>
           <div class="h-[280px]">
             <canvas id="toolChart" aria-label="Usage by tool chart" role="img"></canvas>
@@ -277,8 +374,8 @@
 
         <div class="surface p-5">
           <div class="flex items-center justify-between mb-3">
-            <h2 class="text-base font-extrabold mono">Top Models by Cost</h2>
-            <div class="text-xs" style="color: var(--color-muted);">USD</div>
+            <h2 class="text-base font-extrabold mono" data-i18n="topModelsByCost">Top Models by Cost</h2>
+            <div class="text-xs" style="color: var(--color-muted);" data-i18n="usd">USD</div>
           </div>
           <div class="h-[280px]">
             <canvas id="modelChart" aria-label="Top models by cost chart" role="img"></canvas>
@@ -288,52 +385,52 @@
 
       <!-- Tables -->
       <section class="surface p-5 mb-6">
-        <h2 class="text-base font-extrabold mono mb-4">Tools Breakdown</h2>
+        <h2 class="text-base font-extrabold mono mb-4" data-i18n="toolsBreakdown">Tools Breakdown</h2>
         <div class="overflow-x-auto">
           <table class="w-full text-sm" aria-label="Tools breakdown table">
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
-                <th class="text-left py-3 px-4 font-semibold" style="color: var(--color-muted);">Tool</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);">Tokens</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);">Cost</th>
+                <th class="text-left py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="tool">Tool</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="tokens">Tokens</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cost">Cost</th>
               </tr>
             </thead>
             <tbody id="toolsTable">
-              <tr><td colspan="3" class="text-center py-10" style="color: var(--color-muted);">Loading…</td></tr>
+              <tr><td colspan="3" class="text-center py-10" style="color: var(--color-muted);" data-i18n="loading">Loading…</td></tr>
             </tbody>
           </table>
         </div>
       </section>
 
       <section class="surface p-5 mb-6">
-        <h2 class="text-base font-extrabold mono mb-4">Apps & Models Breakdown</h2>
+        <h2 class="text-base font-extrabold mono mb-4" data-i18n="appsModelsBreakdown">Apps & Models Breakdown</h2>
         <div id="appsBreakdown">
-          <p class="text-center py-10" style="color: var(--color-muted);">Loading…</p>
+          <p class="text-center py-10" style="color: var(--color-muted);" data-i18n="loading">Loading…</p>
         </div>
       </section>
 
       <section class="surface p-5">
-        <h2 class="text-base font-extrabold mono mb-4">Combined Models</h2>
-        <p class="text-xs mb-3" style="color: var(--color-muted);">Unified view across all apps and providers. Models with the same name are aggregated regardless of source.</p>
+        <h2 class="text-base font-extrabold mono mb-4" data-i18n="combinedModels">Combined Models</h2>
+        <p class="text-xs mb-3" style="color: var(--color-muted);" data-i18n="combinedModelsDesc">Unified view across all apps and providers. Models with the same name are aggregated regardless of source.</p>
         <div class="flex items-center justify-between mb-3">
           <div id="combinedModelsInfo" class="text-xs" style="color: var(--color-muted);"></div>
-          <button id="combinedModelsToggle" class="btn btn-ghost" type="button" style="min-height: 36px; padding: 6px 10px; font-size: 12px; display:none;">Show all</button>
+          <button id="combinedModelsToggle" class="btn btn-ghost" type="button" style="min-height: 36px; padding: 6px 10px; font-size: 12px; display:none;" data-i18n="showAll">Show all</button>
         </div>
         <div class="overflow-x-auto">
           <table class="w-full text-sm" aria-label="Combined models table">
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
-                <th class="text-left py-3 px-4 font-semibold" style="color: var(--color-muted);">Model</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);">Input</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);">Output</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);">Cache</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);">Total</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);">Cost</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);">Msgs</th>
+                <th class="text-left py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="model">Model</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="input">Input</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="output">Output</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cache">Cache</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="total">Total</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cost">Cost</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="msgs">Msgs</th>
               </tr>
             </thead>
             <tbody id="allModelsTable">
-              <tr><td colspan="7" class="text-center py-10" style="color: var(--color-muted);">Loading…</td></tr>
+              <tr><td colspan="7" class="text-center py-10" style="color: var(--color-muted);" data-i18n="loading">Loading…</td></tr>
             </tbody>
           </table>
         </div>
@@ -345,46 +442,46 @@
     <div id="stats-content" class="tab-content">
       <section class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <div class="surface p-4">
-          <div class="text-xs font-semibold uppercase tracking-wider" style="color: rgba(71,85,105,0.9);">Top Model (Cost)</div>
+          <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="topModelCost">Top Model (Cost)</div>
           <div id="statFavoriteModel" class="mt-2 font-extrabold mono">Loading…</div>
         </div>
         <div class="surface p-4">
-          <div class="text-xs font-semibold uppercase tracking-wider" style="color: rgba(71,85,105,0.9);">Total Tokens</div>
+          <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="totalTokens">Total Tokens</div>
           <div id="statTotalTokens" class="mt-2 font-extrabold">Loading…</div>
         </div>
         <div class="surface p-4">
-          <div class="text-xs font-semibold uppercase tracking-wider" style="color: rgba(71,85,105,0.9);">Sessions</div>
+          <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="sessions">Sessions</div>
           <div id="statSessions" class="mt-2 font-extrabold">Loading…</div>
         </div>
         <div class="surface p-4">
-          <div class="text-xs font-semibold uppercase tracking-wider" style="color: rgba(71,85,105,0.9);">Streak</div>
+          <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="streak">Streak</div>
           <div id="statCurrentStreak" class="mt-2 font-extrabold">Loading…</div>
         </div>
         <div class="surface p-4">
-          <div class="text-xs font-semibold uppercase tracking-wider" style="color: rgba(71,85,105,0.9);">Longest Streak</div>
+          <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="longestStreak">Longest Streak</div>
           <div id="statLongestStreak" class="mt-2 font-extrabold">Loading…</div>
         </div>
         <div class="surface p-4">
-          <div class="text-xs font-semibold uppercase tracking-wider" style="color: rgba(71,85,105,0.9);">Active Days</div>
+          <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="activeDays">Active Days</div>
           <div id="statActiveDays" class="mt-2 font-extrabold">Loading…</div>
         </div>
         <div class="surface p-4">
-          <div class="text-xs font-semibold uppercase tracking-wider" style="color: rgba(71,85,105,0.9);">Total Days</div>
+          <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="totalDays">Total Days</div>
           <div id="statTotalDays" class="mt-2 font-extrabold">Loading…</div>
         </div>
         <div class="surface p-4">
-          <div class="text-xs font-semibold uppercase tracking-wider" style="color: rgba(71,85,105,0.9);">Total Cost</div>
+          <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="totalCost">Total Cost</div>
           <div id="statTotalCost" class="mt-2 font-extrabold">Loading…</div>
         </div>
       </section>
 
       <section class="surface p-5">
         <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
-          <h2 class="text-base font-extrabold mono">Daily Activity</h2>
+          <h2 class="text-base font-extrabold mono" data-i18n="dailyActivity">Daily Activity</h2>
           <div class="flex gap-2">
-            <button id="viewMonth" class="btn btn-primary" type="button">Month</button>
-            <button id="viewYear" class="btn btn-ghost" type="button">Year</button>
-            <button id="view3D" class="btn btn-ghost" type="button">3D</button>
+            <button id="viewMonth" class="btn btn-primary" type="button" data-i18n="month">Month</button>
+            <button id="viewYear" class="btn btn-ghost" type="button" data-i18n="year">Year</button>
+            <button id="view3D" class="btn btn-ghost" type="button" data-i18n="threeD">3D</button>
           </div>
         </div>
 
@@ -400,9 +497,9 @@
             <!-- Left: Heatmap -->
             <div>
               <div class="flex items-center justify-between gap-4 mb-3">
-                <div class="text-sm" style="color: var(--color-muted);">Less</div>
+                <div class="text-sm" style="color: var(--color-muted);" data-i18n="less">Less</div>
                 <div id="heatLegend" class="flex gap-1 items-center"></div>
-                <div class="text-sm" style="color: var(--color-muted);">More</div>
+                <div class="text-sm" style="color: var(--color-muted);" data-i18n="more">More</div>
               </div>
 
               <div id="monthDayLabels" class="heatmap-day-labels"></div>
@@ -414,42 +511,42 @@
 
             <!-- Right: Statistics -->
             <div class="surface p-5 lg:min-w-[280px]">
-              <h4 class="text-sm font-extrabold uppercase tracking-wider mb-4" style="color: rgba(71,85,105,0.9);">Month Stats</h4>
+              <h4 class="text-sm font-extrabold uppercase tracking-wider mb-4" style="color: var(--color-label);" data-i18n="monthStats">Month Stats</h4>
               
               <div class="space-y-4">
                 <!-- Top model by cost -->
                 <div>
-                  <div class="text-xs font-semibold text-slate-500 mb-1">Top Model (Cost)</div>
+                  <div class="text-xs font-semibold text-slate-500 mb-1" data-i18n="topModelCost">Top Model (Cost)</div>
                   <div id="monthFavoriteModel" class="font-bold text-base mono" style="color: var(--color-primary);">—</div>
                 </div>
 
                 <!-- Total Tokens -->
                 <div>
-                  <div class="text-xs font-semibold text-slate-500 mb-1">Total Tokens</div>
+                  <div class="text-xs font-semibold text-slate-500 mb-1" data-i18n="totalTokens">Total Tokens</div>
                   <div id="monthTotalTokens" class="font-extrabold text-xl" style="color: var(--color-primary);">0</div>
                 </div>
 
                 <!-- Total Cost -->
                 <div>
-                  <div class="text-xs font-semibold text-slate-500 mb-1">Total Cost</div>
-                  <div id="monthTotalCost" class="font-extrabold text-xl" style="color: #0F766E;">$0.00</div>
+                  <div class="text-xs font-semibold text-slate-500 mb-1" data-i18n="totalCost">Total Cost</div>
+                  <div id="monthTotalCost" class="font-extrabold text-xl" style="color: var(--color-cost);">$0.00</div>
                 </div>
 
                 <!-- Sessions -->
                 <div>
-                  <div class="text-xs font-semibold text-slate-500 mb-1">Messages</div>
+                  <div class="text-xs font-semibold text-slate-500 mb-1" data-i18n="messages">Messages</div>
                   <div id="monthTotalSessions" class="font-bold text-lg">0</div>
                 </div>
 
                 <!-- Active Days -->
                 <div>
-                  <div class="text-xs font-semibold text-slate-500 mb-1">Active Days</div>
+                  <div class="text-xs font-semibold text-slate-500 mb-1" data-i18n="activeDays">Active Days</div>
                   <div id="monthActiveDays" class="font-bold text-lg">0</div>
                 </div>
 
                 <!-- Streak -->
                 <div>
-                  <div class="text-xs font-semibold text-slate-500 mb-1">Streak</div>
+                  <div class="text-xs font-semibold text-slate-500 mb-1" data-i18n="streak">Streak</div>
                   <div id="monthCurrentStreak" class="font-bold text-lg">0 days</div>
                 </div>
               </div>
@@ -466,9 +563,9 @@
           </div>
 
           <div class="flex items-center justify-between gap-4 mb-3">
-            <div class="text-sm" style="color: var(--color-muted);">Less</div>
+            <div class="text-sm" style="color: var(--color-muted);" data-i18n="less">Less</div>
             <div id="yearLegend" class="flex gap-1 items-center"></div>
-            <div class="text-sm" style="color: var(--color-muted);">More</div>
+            <div class="text-sm" style="color: var(--color-muted);" data-i18n="more">More</div>
           </div>
 
           <div class="heatmap-year-wrap">
@@ -484,11 +581,11 @@
         <div id="calendar3DView" style="display:none;">
           <!-- Color Legend -->
           <div class="flex items-center justify-between gap-4 mb-4">
-            <div class="text-sm font-semibold" style="color: var(--color-muted);">Cost (USD)</div>
+            <div class="text-sm font-semibold" style="color: var(--color-muted);" data-i18n="costUsd">Cost (USD)</div>
             <div class="flex items-center gap-2">
-              <span class="text-xs" style="color: var(--color-muted);">Less</span>
+              <span class="text-xs" style="color: var(--color-muted);" data-i18n="less">Less</span>
               <div id="legend3D" class="flex gap-1"></div>
-              <span class="text-xs" style="color: var(--color-muted);">More</span>
+              <span class="text-xs" style="color: var(--color-muted);" data-i18n="more">More</span>
             </div>
           </div>
 
@@ -496,29 +593,29 @@
             <div id="calendar3D" class="w-full" style="height: 750px;"></div>
             
             <!-- Stats Overlay -->
-            <div class="absolute top-4 right-4 surface px-5 py-4" style="border-radius: 14px; backdrop-filter: blur(10px); background: rgba(248, 250, 252, 0.95); min-width: 280px;">
-              <div class="text-xs font-semibold uppercase tracking-wider mb-3" style="color: #64748B;">Totals</div>
+            <div class="absolute top-4 right-4 surface px-5 py-4" style="border-radius: 14px; backdrop-filter: blur(10px); background: var(--color-surface-glass); min-width: 280px;">
+              <div class="text-xs font-semibold uppercase tracking-wider mb-3" style="color: var(--color-muted);" data-i18n="totals">Totals</div>
               <div class="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
-                <div style="color: #64748B;">Cost</div>
-                <div id="stats3DTotalCost" class="font-extrabold text-right" style="color: #0F766E;">$0</div>
-                <div style="color: #64748B;">Tokens</div>
+                <div style="color: var(--color-muted);" data-i18n="cost">Cost</div>
+                <div id="stats3DTotalCost" class="font-extrabold text-right" style="color: var(--color-cost);">$0</div>
+                <div style="color: var(--color-muted);" data-i18n="tokens">Tokens</div>
                 <div id="stats3DTotalTokens" class="font-extrabold text-right" style="color: #2563EB;">0</div>
               </div>
-              <div class="mt-4 pt-4" style="border-top: 1px solid rgba(203, 213, 225, 0.4);">
-                <div class="text-xs font-semibold uppercase tracking-wider mb-3" style="color: #64748B;">Most Active Day</div>
+              <div class="mt-4 pt-4" style="border-top: 1px solid var(--color-border);">
+                <div class="text-xs font-semibold uppercase tracking-wider mb-3" style="color: var(--color-muted);" data-i18n="mostActiveDay">Most Active Day</div>
                 <div class="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
-                  <div style="color: #64748B;">Date</div>
+                  <div style="color: var(--color-muted);" data-i18n="date">Date</div>
                   <div id="stats3DActiveDate" class="font-semibold text-right" style="color: #334155;">—</div>
-                  <div style="color: #64748B;">Tokens</div>
+                  <div style="color: var(--color-muted);" data-i18n="tokens">Tokens</div>
                   <div id="stats3DActiveTokens" class="font-bold text-right" style="color: #2563EB;">—</div>
-                  <div style="color: #64748B;">Cost</div>
-                  <div id="stats3DActiveCost" class="font-bold text-right" style="color: #0F766E;">—</div>
+                  <div style="color: var(--color-muted);" data-i18n="cost">Cost</div>
+                  <div id="stats3DActiveCost" class="font-bold text-right" style="color: var(--color-cost);">—</div>
                 </div>
               </div>
             </div>
 
             <!-- Help Text -->
-            <div class="absolute bottom-4 left-4 text-xs" style="color: rgba(71,85,105,0.7);">
+            <div class="absolute bottom-4 left-4 text-xs" style="color: var(--color-label);" data-i18n="clickCubeHint">
               💡 Click any cube to view day details
             </div>
           </div>
@@ -527,8 +624,8 @@
         <div id="dayDetails" class="hidden mt-5">
           <div class="surface p-5">
             <div class="flex items-center justify-between mb-3">
-              <h3 class="text-base font-extrabold mono">Day Details</h3>
-              <button id="closeDayDetails" class="btn btn-ghost" type="button" aria-label="Close day details">Close</button>
+              <h3 class="text-base font-extrabold mono" data-i18n="dayDetails">Day Details</h3>
+              <button id="closeDayDetails" class="btn btn-ghost" type="button" aria-label="Close day details" data-i18n="close">Close</button>
             </div>
             <div id="dayDetailsContent"></div>
           </div>
@@ -539,12 +636,12 @@
   </div>
 
   <script>
-    // Dashboard v3.10.0 - Fixed streak calculations (2026-02-17)
+    // Dashboard v3.11.0 - i18n + dark mode
     // - "Streak" label (not "Current Streak")
     // - Month/Year: streak within that view period
     // - 3D/All-time: current ongoing streak from today
     // - "Longest Streak" always shows longest ever across all data
-    console.log('📊 Token Dashboard v3.10.0 - Fixed streak calculations');
+    console.log('📊 Token Dashboard v3.11.0 - i18n + dark mode');
 
     let toolChart = null;
     let modelChart = null;
@@ -557,6 +654,203 @@
     let lastAppsBreakdown = null;
     const MAX_COMBINED_MODELS_ROWS = 300;
     let combinedModelsShowAll = false;
+    const HEAT_COLORS_LIGHT = ['#EEF2F7','#E0E7FF','#C7D2FE','#A5B4FC','#60A5FA','#3B82F6','#2563EB','#1E40AF'];
+    const HEAT_COLORS_DARK = ['#172033','#1E293B','#1D4ED8','#2563EB','#3B82F6','#60A5FA','#93C5FD','#BFDBFE'];
+    let HEAT_COLORS = [...HEAT_COLORS_LIGHT];
+
+    const I18N = {
+      en: {
+        range: 'Range',
+        today: 'Today',
+        last3days: 'Last 3 Days',
+        last7days: 'Last 7 Days',
+        last14days: 'Last 14 Days',
+        thisMonth: 'This Month',
+        last3months: 'Last 3 Months',
+        lastYear: 'Last Year',
+        customDays: 'Custom Days…',
+        daysPlaceholder: 'Days',
+        apply: 'Apply',
+        refresh: 'Refresh',
+        loading: 'Loading…',
+        overview: 'Overview',
+        stats: 'Stats',
+        totalTokens: 'Total Tokens',
+        totalCost: 'Total Cost',
+        topModel: 'Top Model',
+        usageByTool: 'Usage by Tool',
+        tokens: 'Tokens',
+        topModelsByCost: 'Top Models by Cost',
+        usd: 'USD',
+        toolsBreakdown: 'Tools Breakdown',
+        appsModelsBreakdown: 'Apps & Models Breakdown',
+        combinedModels: 'Combined Models',
+        combinedModelsDesc: 'Unified view across all apps and providers. Models with the same name are aggregated regardless of source.',
+        showAll: 'Show all',
+        showTop: 'Show top',
+        tool: 'Tool',
+        cost: 'Cost',
+        model: 'Model',
+        input: 'Input',
+        output: 'Output',
+        cache: 'Cache',
+        total: 'Total',
+        msgs: 'Msgs',
+        noData: 'No data',
+        noDataAvailable: 'No data available',
+        topModelCost: 'Top Model (Cost)',
+        sessions: 'Sessions',
+        streak: 'Streak',
+        longestStreak: 'Longest Streak',
+        activeDays: 'Active Days',
+        totalDays: 'Total Days',
+        dailyActivity: 'Daily Activity',
+        month: 'Month',
+        year: 'Year',
+        threeD: '3D',
+        less: 'Less',
+        more: 'More',
+        monthStats: 'Month Stats',
+        messages: 'Messages',
+        dayDetails: 'Day Details',
+        close: 'Close',
+        tokenBreakdown: 'Token Breakdown',
+        cacheRead: 'Cache Read',
+        reasoning: 'Reasoning',
+        modelsUsed: 'Models Used',
+        source: 'Source',
+        date: 'Date',
+        costUsd: 'Cost (USD)',
+        totals: 'Totals',
+        mostActiveDay: 'Most Active Day',
+        clickCubeHint: '💡 Click any cube to view day details',
+        noActivityData: 'No activity data for this period.',
+        lastUpdated: 'Last updated',
+        day: 'day',
+        days: 'days',
+        tokensUnit: 'tokens',
+        nModels: '{n} models',
+        showingTopN: 'Showing top {top} of {total} models',
+        mon: 'Mon',
+        tue: 'Tue',
+        wed: 'Wed',
+        thu: 'Thu',
+        fri: 'Fri',
+        sat: 'Sat',
+        sun: 'Sun',
+        jan: 'Jan',
+        feb: 'Feb',
+        mar: 'Mar',
+        apr: 'Apr',
+        may: 'May',
+        jun: 'Jun',
+        jul: 'Jul',
+        aug: 'Aug',
+        sep: 'Sep',
+        oct: 'Oct',
+        nov: 'Nov',
+        dec: 'Dec',
+      },
+      zh: {
+        range: '范围',
+        today: '今天',
+        last3days: '最近 3 天',
+        last7days: '最近 7 天',
+        last14days: '最近 14 天',
+        thisMonth: '本月',
+        last3months: '最近 3 个月',
+        lastYear: '最近一年',
+        customDays: '自定义天数…',
+        daysPlaceholder: '天数',
+        apply: '应用',
+        refresh: '刷新',
+        loading: '加载中…',
+        overview: '概览',
+        stats: '统计',
+        totalTokens: '总 Token 数',
+        totalCost: '总费用',
+        topModel: '最常用模型',
+        usageByTool: '按工具使用量',
+        tokens: 'Tokens',
+        topModelsByCost: '按费用排序的模型',
+        usd: 'USD',
+        toolsBreakdown: '工具明细',
+        appsModelsBreakdown: '应用与模型明细',
+        combinedModels: '合并模型',
+        combinedModelsDesc: '跨所有应用和服务商的统一视图。同名模型会自动合并，无论其来源。',
+        showAll: '显示全部',
+        showTop: '显示前列',
+        tool: '工具',
+        cost: '费用',
+        model: '模型',
+        input: '输入',
+        output: '输出',
+        cache: '缓存',
+        total: '总计',
+        msgs: '消息',
+        noData: '暂无数据',
+        noDataAvailable: '暂无数据',
+        topModelCost: '最常用模型（费用）',
+        sessions: '会话数',
+        streak: '连续天数',
+        longestStreak: '最长连续天数',
+        activeDays: '活跃天数',
+        totalDays: '总天数',
+        dailyActivity: '每日活跃',
+        month: '月',
+        year: '年',
+        threeD: '3D',
+        less: '少',
+        more: '多',
+        monthStats: '月度统计',
+        messages: '消息数',
+        dayDetails: '日详情',
+        close: '关闭',
+        tokenBreakdown: 'Token 明细',
+        cacheRead: '缓存读取',
+        reasoning: '推理',
+        modelsUsed: '使用的模型',
+        source: '来源',
+        date: '日期',
+        costUsd: '费用 (USD)',
+        totals: '总计',
+        mostActiveDay: '最活跃的一天',
+        clickCubeHint: '💡 点击方块查看日详情',
+        noActivityData: '该时段无活跃数据。',
+        lastUpdated: '最后更新',
+        day: '天',
+        days: '天',
+        tokensUnit: 'tokens',
+        nModels: '{n} 个模型',
+        showingTopN: '显示前 {top} 个，共 {total} 个模型',
+        mon: '周一',
+        tue: '周二',
+        wed: '周三',
+        thu: '周四',
+        fri: '周五',
+        sat: '周六',
+        sun: '周日',
+        jan: '1月',
+        feb: '2月',
+        mar: '3月',
+        apr: '4月',
+        may: '5月',
+        jun: '6月',
+        jul: '7月',
+        aug: '8月',
+        sep: '9月',
+        oct: '10月',
+        nov: '11月',
+        dec: '12月',
+      },
+    };
+
+    let currentLang = (function() {
+      const stored = localStorage.getItem('tokdash-lang');
+      if (stored && I18N[stored]) return stored;
+      const browserLang = (navigator.language || navigator.userLanguage || 'en').toLowerCase();
+      return browserLang.startsWith('zh') ? 'zh' : 'en';
+    })();
 
     function isOverviewActive() {
       const el = document.getElementById('overview-content');
@@ -577,13 +871,118 @@
 
     // Format numbers
     function formatNumber(num) {
-      return (num ?? 0).toLocaleString();
+      return (num ?? 0).toLocaleString(currentLang === 'zh' ? 'zh-CN' : 'en-US');
     }
 
     // Format currency
     function formatCurrency(num) {
       const n = Number(num ?? 0);
       return '$' + n.toFixed(2);
+    }
+
+    function t(key) {
+      return (I18N[currentLang] || I18N.en)[key] || I18N.en[key] || key;
+    }
+
+    function getDayLabels() {
+      return [t('mon'), t('tue'), t('wed'), t('thu'), t('fri'), t('sat'), t('sun')];
+    }
+
+    function getMonthLabels() {
+      return [t('jan'), t('feb'), t('mar'), t('apr'), t('may'), t('jun'), t('jul'), t('aug'), t('sep'), t('oct'), t('nov'), t('dec')];
+    }
+
+    function pluralDays(n) {
+      return n + ' ' + (n === 1 ? t('day') : t('days'));
+    }
+
+    function getCssVar(name) {
+      return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    }
+
+    function isDark() {
+      return document.documentElement.classList.contains('dark');
+    }
+
+    function getAutoTheme() {
+      if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) return 'dark';
+      const hour = new Date().getHours();
+      return hour >= 19 || hour < 7 ? 'dark' : 'light';
+    }
+
+    function getDefaultTheme() {
+      const stored = localStorage.getItem('tokdash-theme');
+      if (stored === 'dark' || stored === 'light') return stored;
+      return getAutoTheme();
+    }
+
+    function applyTheme(theme) {
+      const dark = theme === 'dark';
+      document.documentElement.classList.toggle('dark', dark);
+      HEAT_COLORS = [...(dark ? HEAT_COLORS_DARK : HEAT_COLORS_LIGHT)];
+      const themeMeta = document.querySelector('meta[name="theme-color"]');
+      if (themeMeta) themeMeta.content = dark ? '#0F172A' : '#1E40AF';
+      const moon = document.getElementById('themeIconMoon');
+      const sun = document.getElementById('themeIconSun');
+      if (moon) moon.style.display = dark ? 'none' : '';
+      if (sun) sun.style.display = dark ? '' : 'none';
+    }
+
+    function updateTimestamp() {
+      if (!lastUsageResponse?.timestamp) return;
+      document.getElementById('lastUpdate').textContent = `${t('lastUpdated')}: ${new Date(lastUsageResponse.timestamp).toLocaleString(currentLang === 'zh' ? 'zh-CN' : undefined)}`;
+    }
+
+    function applyI18n() {
+      document.documentElement.lang = currentLang === 'zh' ? 'zh-CN' : 'en';
+      document.querySelectorAll('[data-i18n]').forEach((el) => {
+        const key = el.getAttribute('data-i18n');
+        el.textContent = t(key);
+      });
+      document.querySelectorAll('[data-i18n-placeholder]').forEach((el) => {
+        const key = el.getAttribute('data-i18n-placeholder');
+        el.setAttribute('placeholder', t(key));
+      });
+      const langBtn = document.getElementById('langToggle');
+      if (langBtn) langBtn.textContent = currentLang === 'zh' ? 'EN' : '中';
+      updateTimestamp();
+    }
+
+    function rerenderPresentation() {
+      if (toolChart) {
+        toolChart.destroy();
+        toolChart = null;
+      }
+      if (modelChart) {
+        modelChart.destroy();
+        modelChart = null;
+      }
+      if (lastUsageResponse && isOverviewActive()) {
+        document.getElementById('totalTokens').textContent = formatNumber(lastUsageResponse.total_tokens);
+        document.getElementById('totalCost').textContent = formatCurrency(lastUsageResponse.total_cost);
+        if (lastUsageResponse.top_models && lastUsageResponse.top_models.length > 0) {
+          const top = lastUsageResponse.top_models[0];
+          document.getElementById('topModel').textContent = top.name;
+          document.getElementById('topModelMeta').textContent = `${formatCurrency(top.cost)} · ${formatNumber(top.tokens)} ${t('tokensUnit')}`;
+        }
+        updateToolChart(lastUsageResponse.by_tool || {});
+        updateModelChart(lastUsageResponse.top_models || []);
+        updateToolsTable(lastUsageResponse.by_tool || {});
+        if (lastAppsBreakdown?.apps) updateAppsBreakdown(lastAppsBreakdown.apps, lastAppsBreakdown.openclawModels);
+        updateCombinedModelsTable(lastCombinedModels);
+      }
+      if (document.getElementById('stats-content').classList.contains('active')) {
+        loadStats({ preserveNavigation: true });
+      } else if (calendarState.contributions?.length) {
+        if (calendarState.view === 'month') renderMonthHeatmap();
+        else if (calendarState.view === 'year') {
+          renderYearHeatmap();
+          updateTopStatsForYear();
+        } else if (calendarState.view === '3d') {
+          render3DCalendar(calendarState.contributions);
+          updateTopStatsForAllTime();
+        }
+      }
     }
 
     // Human-friendly source/tool labels
@@ -690,7 +1089,7 @@
           <path d="M20 12a8 8 0 1 1-2.343-5.657" stroke="white" stroke-width="2" stroke-linecap="round"/>
           <path d="M20 4v6h-6" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
-        Loading…
+        ${t('loading')}
       `;
       refreshBtn.disabled = true;
 
@@ -700,7 +1099,7 @@
         lastUsageResponse = data;
 
         // Update timestamp early (header is always visible)
-        document.getElementById('lastUpdate').textContent = `Last updated: ${new Date(data.timestamp).toLocaleString()}`;
+        updateTimestamp();
 
         // Avoid heavy DOM work if user is on the Stats tab
         if (!isOverviewActive()) return;
@@ -712,7 +1111,7 @@
         if (data.top_models && data.top_models.length > 0) {
           const top = data.top_models[0];
           document.getElementById('topModel').textContent = top.name;
-          document.getElementById('topModelMeta').textContent = `${formatCurrency(top.cost)} · ${formatNumber(top.tokens)} tokens`;
+          document.getElementById('topModelMeta').textContent = `${formatCurrency(top.cost)} · ${formatNumber(top.tokens)} ${t('tokensUnit')}`;
         }
 
         await nextFrame();
@@ -747,7 +1146,7 @@
             <path d="M20 12a8 8 0 1 1-2.343-5.657" stroke="white" stroke-width="2" stroke-linecap="round"/>
             <path d="M20 4v6h-6" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
-          Refresh
+          ${t('refresh')}
         `;
         refreshBtn.disabled = false;
       }
@@ -787,7 +1186,7 @@
                 callbacks: {
                   label: (context) => {
                     const value = context.raw ?? 0;
-                    return `${context.label}: ${formatNumber(value)} tokens`;
+                    return `${context.label}: ${formatNumber(value)} ${t('tokensUnit')}`;
                   },
                 },
               },
@@ -818,7 +1217,7 @@
           data: {
             labels,
             datasets: [{
-              label: 'Cost (USD)',
+              label: t('costUsd'),
               data: values,
               backgroundColor: 'rgba(30, 64, 175, 0.75)',
               borderColor: 'rgba(30, 64, 175, 1)',
@@ -849,7 +1248,7 @@
               legend: { display: false },
               tooltip: {
                 callbacks: {
-                  label: (context) => `Cost: ${formatCurrency(context.raw)}`,
+                  label: (context) => `${t('cost')}: ${formatCurrency(context.raw)}`,
                 },
               },
             },
@@ -872,7 +1271,7 @@
 
       if (visibleTools.length === 0) {
         const row = document.createElement('tr');
-        row.innerHTML = `<td colspan="3" class="text-center py-10" style="color: var(--color-muted);">No data</td>`;
+        row.innerHTML = `<td colspan="3" class="text-center py-10" style="color: var(--color-muted);">${t('noData')}</td>`;
         tbody.replaceChildren(row);
         return;
       }
@@ -887,7 +1286,7 @@
         row.innerHTML = `
           <td class="py-3 px-4 font-semibold text-slate-800">${formatToolName(tool)}</td>
           <td class="py-3 px-4 text-right text-slate-700">${formatNumber(data.tokens)}</td>
-          <td class="py-3 px-4 text-right font-bold" style="color:#0F766E">${formatCurrency(data.cost)}</td>
+          <td class="py-3 px-4 text-right font-bold" style="color:var(--color-cost)">${formatCurrency(data.cost)}</td>
         `;
         frag.appendChild(row);
       });
@@ -932,7 +1331,7 @@
 
       const sortedApps = Object.entries(allApps).sort((a, b) => (b[1].cost || 0) - (a[1].cost || 0));
       if (sortedApps.length === 0) {
-        container.innerHTML = '<p class="text-center py-10 text-slate-500">No data available</p>';
+        container.innerHTML = `<p class="text-center py-10 text-slate-500">${t('noDataAvailable')}</p>`;
         return;
       }
 
@@ -951,7 +1350,7 @@
         header.className = 'flex flex-wrap items-baseline gap-x-4 gap-y-1 mb-3';
         header.innerHTML = `
           <h4 class="text-sm font-extrabold mono tracking-wide" style="color: var(--color-primary);">${formatToolName(appName)}</h4>
-          <span class="text-xs text-slate-600">${formatNumber(appTokens)} tokens · ${formatCurrency(appCost)} · ${formatNumber(appMessages)} msgs</span>
+          <span class="text-xs text-slate-600">${formatNumber(appTokens)} ${t('tokensUnit')} · ${formatCurrency(appCost)} · ${formatNumber(appMessages)} ${t('msgs')}</span>
         `;
         appDiv.appendChild(header);
 
@@ -960,13 +1359,13 @@
         table.innerHTML = `
           <thead>
             <tr class="border-b bg-slate-50">
-              <th class="text-left py-2 px-3 font-semibold text-slate-600">Model</th>
-              <th class="text-right py-2 px-3 font-semibold text-slate-600">Input</th>
-              <th class="text-right py-2 px-3 font-semibold text-slate-600">Output</th>
-              <th class="text-right py-2 px-3 font-semibold text-slate-600">Cache</th>
-              <th class="text-right py-2 px-3 font-semibold text-slate-600">Total</th>
-              <th class="text-right py-2 px-3 font-semibold text-slate-600">Cost</th>
-              <th class="text-right py-2 px-3 font-semibold text-slate-600">Msgs</th>
+              <th class="text-left py-2 px-3 font-semibold text-slate-600">${t('model')}</th>
+              <th class="text-right py-2 px-3 font-semibold text-slate-600">${t('input')}</th>
+              <th class="text-right py-2 px-3 font-semibold text-slate-600">${t('output')}</th>
+              <th class="text-right py-2 px-3 font-semibold text-slate-600">${t('cache')}</th>
+              <th class="text-right py-2 px-3 font-semibold text-slate-600">${t('total')}</th>
+              <th class="text-right py-2 px-3 font-semibold text-slate-600">${t('cost')}</th>
+              <th class="text-right py-2 px-3 font-semibold text-slate-600">${t('msgs')}</th>
             </tr>
           </thead>
           <tbody></tbody>
@@ -982,7 +1381,7 @@
             <td class="py-2 px-3 text-right text-slate-700">${formatNumber(model.tokens_out)}</td>
             <td class="py-2 px-3 text-right text-slate-700">${formatNumber(model.tokens_cache)}</td>
             <td class="py-2 px-3 text-right font-semibold text-slate-800">${formatNumber(model.tokens)}</td>
-            <td class="py-2 px-3 text-right font-bold" style="color:#0F766E">${formatCurrency(model.cost)}</td>
+            <td class="py-2 px-3 text-right font-bold" style="color:var(--color-cost)">${formatCurrency(model.cost)}</td>
             <td class="py-2 px-3 text-right text-slate-500">${formatNumber(model.messages || 0)}</td>
           `;
           tbody.appendChild(row);
@@ -997,7 +1396,7 @@
       });
 
       if (!container.children.length) {
-        container.innerHTML = '<p class="text-center py-10 text-slate-500">No data available</p>';
+        container.innerHTML = `<p class="text-center py-10 text-slate-500">${t('noDataAvailable')}</p>`;
       }
     }
 
@@ -1017,8 +1416,8 @@
 
       if (infoEl) {
         if (visibleModels.length === 0) infoEl.textContent = '';
-        else if (showAll) infoEl.textContent = `${formatNumber(visibleModels.length)} models`;
-        else infoEl.textContent = `Showing top ${formatNumber(MAX_COMBINED_MODELS_ROWS)} of ${formatNumber(visibleModels.length)} models`;
+        else if (showAll) infoEl.textContent = t('nModels').replace('{n}', formatNumber(visibleModels.length));
+        else infoEl.textContent = t('showingTopN').replace('{top}', formatNumber(MAX_COMBINED_MODELS_ROWS)).replace('{total}', formatNumber(visibleModels.length));
       }
 
       if (toggleBtn) {
@@ -1026,13 +1425,13 @@
           toggleBtn.style.display = 'none';
         } else {
           toggleBtn.style.display = '';
-          toggleBtn.textContent = showAll ? 'Show top' : 'Show all';
+          toggleBtn.textContent = showAll ? t('showTop') : t('showAll');
         }
       }
 
       if (shown.length === 0) {
         const row = document.createElement('tr');
-        row.innerHTML = `<td colspan="7" class="text-center py-10" style="color: var(--color-muted);">No data</td>`;
+        row.innerHTML = `<td colspan="7" class="text-center py-10" style="color: var(--color-muted);">${t('noData')}</td>`;
         tbody.replaceChildren(row);
         return;
       }
@@ -1047,7 +1446,7 @@
           <td class="py-2 px-3 text-right text-slate-700">${formatNumber(model.tokens_out)}</td>
           <td class="py-2 px-3 text-right text-slate-700">${formatNumber(model.tokens_cache)}</td>
           <td class="py-2 px-3 text-right font-semibold text-slate-800">${formatNumber(model.tokens)}</td>
-          <td class="py-2 px-3 text-right font-bold" style="color:#0F766E">${formatCurrency(model.cost)}</td>
+          <td class="py-2 px-3 text-right font-bold" style="color:var(--color-cost)">${formatCurrency(model.cost)}</td>
           <td class="py-2 px-3 text-right text-slate-500">${formatNumber(model.messages || 0)}</td>
         `;
         frag.appendChild(row);
@@ -1074,7 +1473,7 @@
             if (lastUsageResponse.top_models && lastUsageResponse.top_models.length > 0) {
               const top = lastUsageResponse.top_models[0];
               document.getElementById('topModel').textContent = top.name;
-              document.getElementById('topModelMeta').textContent = `${formatCurrency(top.cost)} · ${formatNumber(top.tokens)} tokens`;
+              document.getElementById('topModelMeta').textContent = `${formatCurrency(top.cost)} · ${formatNumber(top.tokens)} ${t('tokensUnit')}`;
             }
             updateToolChart(lastUsageResponse.by_tool || {});
             updateModelChart(lastUsageResponse.top_models || []);
@@ -1091,23 +1490,24 @@
     });
 
     // Stats
-    async function loadStats() {
+    async function loadStats(options = {}) {
+      const preserveNavigation = !!options.preserveNavigation;
       try {
         const response = await fetch('/api/stats');
         const data = await response.json();
 
         const stats = data.stats || {};
-        document.getElementById('statFavoriteModel').textContent = stats.favorite_model || 'N/A';
+        document.getElementById('statFavoriteModel').textContent = stats.favorite_model || '—';
         document.getElementById('statTotalTokens').textContent = formatNumber(stats.total_tokens || 0);
         document.getElementById('statSessions').textContent = formatNumber(stats.sessions || 0);
-        document.getElementById('statCurrentStreak').textContent = (stats.current_streak || 0) + ' days';
-        document.getElementById('statLongestStreak').textContent = (stats.longest_streak || 0) + ' days';
+        document.getElementById('statCurrentStreak').textContent = pluralDays(stats.current_streak || 0);
+        document.getElementById('statLongestStreak').textContent = pluralDays(stats.longest_streak || 0);
         document.getElementById('statActiveDays').textContent = (stats.active_days || 0) + '/' + (stats.total_days || 0);
         document.getElementById('statTotalDays').textContent = formatNumber(stats.total_days || 0);
         document.getElementById('statTotalCost').textContent = formatCurrency((data.summary || {}).totalCost || 0);
 
         const filledContributions = fillMissingDays(data.contributions);
-        renderCalendar(filledContributions);
+        renderCalendar(filledContributions, { preserveNavigation });
         contributionsData = filledContributions;
       } catch (error) {
         console.error('Error loading stats:', error);
@@ -1144,7 +1544,6 @@
     }
 
     // ===== New Heatmap Calendar (Month / Year / 3D) =====
-    const HEAT_COLORS = ['#EEF2F7','#E0E7FF','#C7D2FE','#A5B4FC','#60A5FA','#3B82F6','#2563EB','#1E40AF'];
 
     // Calculate longest ever streak across all data
     function calculateLongestStreak(allContributions) {
@@ -1225,10 +1624,10 @@
 
     function renderMonthDayLabels() {
       const el = document.getElementById('monthDayLabels');
-      const labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-      const show = new Set(['Mon', 'Thu', 'Sun']); // Evenly spaced: Mon, Thu, Sun
+      const labels = getDayLabels();
+      const show = new Set([0, 3, 6]); // Mon, Thu, Sun
       el.innerHTML = labels
-        .map((l) => `<div class="${show.has(l) ? 'strong' : ''}">${show.has(l) ? l : ''}</div>`)
+        .map((l, i) => `<div class="${show.has(i) ? 'strong' : ''}">${show.has(i) ? l : ''}</div>`)
         .join('');
     }
 
@@ -1242,7 +1641,7 @@
       const year = dt.getFullYear();
       const month = dt.getMonth();
 
-      titleEl.textContent = dt.toLocaleString(undefined, { month: 'long', year: 'numeric' });
+      titleEl.textContent = dt.toLocaleString(currentLang === 'zh' ? 'zh-CN' : 'en-US', { month: 'long', year: 'numeric' });
 
       const map = new Map((calendarState.contributions || []).map((d) => [d.date, d]));
       const daysInMonth = new Date(year, month + 1, 0).getDate();
@@ -1283,7 +1682,7 @@
         const cell = document.createElement('div');
         cell.className = 'heatmap-cell';
         cell.style.backgroundColor = heatColor(lvl);
-        cell.title = `${day.date}: ${formatNumber(day.totals.tokens || 0)} tokens · ${formatCurrency(day.totals.cost || 0)} · ${formatNumber(day.totals.messages || 0)} msgs`;
+        cell.title = `${day.date}: ${formatNumber(day.totals.tokens || 0)} ${t('tokensUnit')} · ${formatCurrency(day.totals.cost || 0)} · ${formatNumber(day.totals.messages || 0)} ${t('msgs')}`;
         cell.addEventListener('click', () => showDayDetails(day));
         gridEl.appendChild(cell);
       });
@@ -1368,14 +1767,14 @@
       document.getElementById('monthTotalCost').textContent = formatCurrency(totalCost);
       document.getElementById('monthTotalSessions').textContent = formatNumber(totalMessages);
       document.getElementById('monthActiveDays').textContent = activeDays;
-      document.getElementById('monthCurrentStreak').textContent = monthStreak + (monthStreak === 1 ? ' day' : ' days');
+      document.getElementById('monthCurrentStreak').textContent = pluralDays(monthStreak);
 
       // Update top stats section for month view
       document.getElementById('statFavoriteModel').textContent = topModel;
       document.getElementById('statTotalTokens').textContent = formatNumber(totalTokens);
       document.getElementById('statSessions').textContent = formatNumber(totalMessages);
-      document.getElementById('statCurrentStreak').textContent = monthStreak + (monthStreak === 1 ? ' day' : ' days');
-      document.getElementById('statLongestStreak').textContent = longestEverStreak + (longestEverStreak === 1 ? ' day' : ' days');
+      document.getElementById('statCurrentStreak').textContent = pluralDays(monthStreak);
+      document.getElementById('statLongestStreak').textContent = pluralDays(longestEverStreak);
       document.getElementById('statActiveDays').textContent = `${activeDays}/${monthDays.length}`;
       document.getElementById('statTotalDays').textContent = String(monthDays.length);
       document.getElementById('statTotalCost').textContent = formatCurrency(totalCost);
@@ -1462,8 +1861,8 @@
       document.getElementById('statFavoriteModel').textContent = topModel;
       document.getElementById('statTotalTokens').textContent = formatNumber(totalTokens);
       document.getElementById('statSessions').textContent = formatNumber(totalMessages);
-      document.getElementById('statCurrentStreak').textContent = yearStreak + (yearStreak === 1 ? ' day' : ' days');
-      document.getElementById('statLongestStreak').textContent = longestEverStreak + (longestEverStreak === 1 ? ' day' : ' days');
+      document.getElementById('statCurrentStreak').textContent = pluralDays(yearStreak);
+      document.getElementById('statLongestStreak').textContent = pluralDays(longestEverStreak);
       
       // Year has 365 or 366 days
       const isLeapYear = (year % 4 === 0 && year % 100 !== 0) || (year % 400 === 0);
@@ -1546,8 +1945,8 @@
       document.getElementById('statFavoriteModel').textContent = topModel;
       document.getElementById('statTotalTokens').textContent = formatNumber(totalTokens);
       document.getElementById('statSessions').textContent = formatNumber(totalMessages);
-      document.getElementById('statCurrentStreak').textContent = currentStreak + (currentStreak === 1 ? ' day' : ' days');
-      document.getElementById('statLongestStreak').textContent = longestEverStreak + (longestEverStreak === 1 ? ' day' : ' days');
+      document.getElementById('statCurrentStreak').textContent = pluralDays(currentStreak);
+      document.getElementById('statLongestStreak').textContent = pluralDays(longestEverStreak);
       document.getElementById('statActiveDays').textContent = `${activeDays}/${contributions.length}`;
       document.getElementById('statTotalDays').textContent = String(contributions.length);
       document.getElementById('statTotalCost').textContent = formatCurrency(totalCost);
@@ -1582,9 +1981,9 @@
       const thresholds = quantileThresholds(vals, HEAT_COLORS.length - 1);
 
       // MONDAY-FIRST rows: Mon(0), Thu(3), Sun(6)
-      const rows = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-      const show = new Set(['Mon', 'Thu', 'Sun']);
-      ylab.innerHTML = rows.map((r) => `<div class="${show.has(r) ? 'strong' : ''}">${show.has(r) ? r : ''}</div>`).join('');
+      const rows = getDayLabels();
+      const show = new Set([0, 3, 6]);
+      ylab.innerHTML = rows.map((r, i) => `<div class="${show.has(i) ? 'strong' : ''}">${show.has(i) ? r : ''}</div>`).join('');
 
       gridEl.innerHTML = '';
 
@@ -1594,7 +1993,7 @@
       // Month labels aligned to week columns
       const mlabelsEl = document.getElementById('yearMonthLabels');
       if (mlabelsEl) {
-        const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+        const monthNames = getMonthLabels();
         const cols = new Array(weeks).fill('');
         for (let m = 0; m < 12; m++) {
           const md = new Date(year, m, 1);
@@ -1629,19 +2028,22 @@
 
         const lvl = quantileLevel(day.totals.tokens || 0, thresholds);
         cell.style.backgroundColor = heatColor(lvl);
-        cell.title = `${day.date}: ${formatNumber(day.totals.tokens || 0)} tokens · ${formatCurrency(day.totals.cost || 0)} · ${formatNumber(day.totals.messages || 0)} msgs`;
+        cell.title = `${day.date}: ${formatNumber(day.totals.tokens || 0)} ${t('tokensUnit')} · ${formatCurrency(day.totals.cost || 0)} · ${formatNumber(day.totals.messages || 0)} ${t('msgs')}`;
         cell.addEventListener('click', () => showDayDetails(day));
 
         gridEl.appendChild(cell);
       }
     }
 
-    function renderCalendar(contributions) {
+    function renderCalendar(contributions, options = {}) {
+      const preserveNavigation = !!options.preserveNavigation;
       calendarState.contributions = contributions || [];
 
-      const now = new Date();
-      calendarState.monthCursor = new Date(now.getFullYear(), now.getMonth(), 1);
-      calendarState.yearCursor = new Date(now.getFullYear(), 0, 1);
+      if (!preserveNavigation) {
+        const now = new Date();
+        calendarState.monthCursor = new Date(now.getFullYear(), now.getMonth(), 1);
+        calendarState.yearCursor = new Date(now.getFullYear(), 0, 1);
+      }
 
       renderLegend(document.getElementById('yearLegend'));
       setView(calendarState.view || 'month');
@@ -1655,17 +2057,17 @@
 
       let html = `
         <div class="grid grid-cols-2 gap-4 mb-4 text-sm">
-          <div><span class="text-slate-500">Date</span><div class="font-semibold">${day.date}</div></div>
-          <div><span class="text-slate-500">Cost</span><div class="font-semibold" style="color:#0F766E">${formatCurrency(day.totals.cost)}</div></div>
-          <div><span class="text-slate-500">Tokens</span><div class="font-semibold">${formatNumber(day.totals.tokens)}</div></div>
-          <div><span class="text-slate-500">Messages</span><div class="font-semibold">${formatNumber(day.totals.messages)}</div></div>
+          <div><span class="text-slate-500">${t('date')}</span><div class="font-semibold">${day.date}</div></div>
+          <div><span class="text-slate-500">${t('cost')}</span><div class="font-semibold" style="color:var(--color-cost)">${formatCurrency(day.totals.cost)}</div></div>
+          <div><span class="text-slate-500">${t('tokens')}</span><div class="font-semibold">${formatNumber(day.totals.tokens)}</div></div>
+          <div><span class="text-slate-500">${t('messages')}</span><div class="font-semibold">${formatNumber(day.totals.messages)}</div></div>
         </div>
-        <div class="mb-2 text-sm font-semibold mono">Token Breakdown</div>
+        <div class="mb-2 text-sm font-semibold mono">${t('tokenBreakdown')}</div>
         <div class="grid grid-cols-2 gap-2 text-sm mb-4">
-          <div><span class="text-slate-500">Input</span>: ${formatNumber(day.tokenBreakdown.input)}</div>
-          <div><span class="text-slate-500">Output</span>: ${formatNumber(day.tokenBreakdown.output)}</div>
-          <div><span class="text-slate-500">Cache Read</span>: ${formatNumber(day.tokenBreakdown.cacheRead)}</div>
-          <div><span class="text-slate-500">Reasoning</span>: ${formatNumber(day.tokenBreakdown.reasoning)}</div>
+          <div><span class="text-slate-500">${t('input')}</span>: ${formatNumber(day.tokenBreakdown.input)}</div>
+          <div><span class="text-slate-500">${t('output')}</span>: ${formatNumber(day.tokenBreakdown.output)}</div>
+          <div><span class="text-slate-500">${t('cacheRead')}</span>: ${formatNumber(day.tokenBreakdown.cacheRead)}</div>
+          <div><span class="text-slate-500">${t('reasoning')}</span>: ${formatNumber(day.tokenBreakdown.reasoning)}</div>
         </div>
       `;
 
@@ -1702,15 +2104,15 @@
         const sourcesByCost = Array.from(aggregated.values()).sort((a, b) => b.cost - a.cost);
 
         html += `
-          <div class="mb-2 text-sm font-semibold mono">Models Used</div>
+          <div class="mb-2 text-sm font-semibold mono">${t('modelsUsed')}</div>
           <div class="overflow-x-auto">
             <table class="w-full text-sm">
               <thead>
                 <tr class="border-b">
-                  <th class="text-left py-2">Source</th>
-                  <th class="text-left py-2">Model</th>
-                  <th class="text-right py-2">Cost</th>
-                  <th class="text-right py-2">Msgs</th>
+                  <th class="text-left py-2">${t('source')}</th>
+                  <th class="text-left py-2">${t('model')}</th>
+                  <th class="text-right py-2">${t('cost')}</th>
+                  <th class="text-right py-2">${t('msgs')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -1721,7 +2123,7 @@
             <tr class="border-b">
               <td class="py-2 text-slate-700">${formatToolName(src.source)}</td>
               <td class="py-2 text-slate-800">${src.modelId}</td>
-              <td class="py-2 text-right font-semibold" style="color:#0F766E">${formatCurrency(src.cost)}</td>
+              <td class="py-2 text-right font-semibold" style="color:var(--color-cost)">${formatCurrency(src.cost)}</td>
               <td class="py-2 text-right text-slate-500">${formatNumber(src.messages)}</td>
             </tr>
           `;
@@ -1766,7 +2168,7 @@
       contributionsData = days;
 
       if (days.length === 0) {
-        container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:750px;color:#64748B;font-size:16px;">No activity data for this period.</div>';
+        container.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:750px;color:var(--color-muted);font-size:16px;">${t('noActivityData')}</div>`;
         document.getElementById('stats3DTotalCost').textContent = formatCurrency(0);
         document.getElementById('stats3DTotalTokens').textContent = formatNumber(0);
         document.getElementById('stats3DActiveDate').textContent = '—';
@@ -1786,7 +2188,7 @@
 
       // Initialize Three.js scene
       scene3D = new THREE.Scene();
-      scene3D.background = new THREE.Color(0xF8FAFC);
+      scene3D.background = new THREE.Color(isDark() ? 0x0F172A : 0xF8FAFC);
 
       // Orthographic camera for isometric look
       const aspect = width / height;
@@ -1880,7 +2282,7 @@
 
       // Draw precise grid floor matching cube positions
       const gridMaterial = new THREE.LineBasicMaterial({ 
-        color: 0xCBD5E1, 
+        color: isDark() ? 0x334155 : 0xCBD5E1, 
         opacity: 0.4, 
         transparent: true 
       });
@@ -1966,7 +2368,7 @@
       }
 
       // Day labels (Mon, Thu, Sun)
-      const dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+      const dayLabels = getDayLabels();
       const showDays = [0, 3, 6];
       showDays.forEach((dayIdx) => {
         const worldZ = offsetZ + dayIdx * cubeSize;
@@ -1980,13 +2382,13 @@
         label.style.top = screen.y + 'px';
         label.style.fontSize = '13px';
         label.style.fontWeight = '700';
-        label.style.color = '#64748B';
+        label.style.color = getCssVar('--color-muted');
         label.style.transform = 'translate(-100%, -50%)';
         labelsContainer.appendChild(label);
       });
 
       // Month labels
-      const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const monthNames = getMonthLabels();
       const labeledMonths = new Map();
       const currentYear = new Date().getFullYear();
 
@@ -2013,7 +2415,7 @@
             label.style.top = screen.y + 'px';
             label.style.fontSize = '13px';
             label.style.fontWeight = '700';
-            label.style.color = '#475569';
+            label.style.color = getCssVar('--color-muted');
             label.style.transform = 'translate(-50%, -100%)';
             labelsContainer.appendChild(label);
           }
@@ -2042,7 +2444,7 @@
       
       if (mostActiveDay) {
         const dayDate = new Date(mostActiveDay.date + 'T00:00:00');
-        const dayName = dayDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+        const dayName = dayDate.toLocaleDateString(currentLang === 'zh' ? 'zh-CN' : 'en-US', { weekday: 'short', month: 'short', day: 'numeric' });
         const dayTokens = formatNumber(mostActiveDay.totals.tokens || 0);
         const dayCost = formatCurrency(mostActiveDay.totals.cost || 0);
         document.getElementById('stats3DActiveDate').textContent = dayName;
@@ -2143,6 +2545,43 @@
         navigator.serviceWorker.register('/sw.js').catch(() => {});
       });
     }
+
+    applyTheme(getDefaultTheme());
+    applyI18n();
+
+    document.getElementById('themeToggle').addEventListener('click', () => {
+      const next = isDark() ? 'light' : 'dark';
+      localStorage.setItem('tokdash-theme', next);
+      applyTheme(next);
+      rerenderPresentation();
+    });
+
+    const themeMedia = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+    if (themeMedia && typeof themeMedia.addEventListener === 'function') {
+      themeMedia.addEventListener('change', () => {
+        if (!localStorage.getItem('tokdash-theme')) {
+          applyTheme(getAutoTheme());
+          rerenderPresentation();
+        }
+      });
+    }
+
+    setInterval(() => {
+      if (!localStorage.getItem('tokdash-theme')) {
+        const autoTheme = getAutoTheme();
+        if ((autoTheme === 'dark') !== isDark()) {
+          applyTheme(autoTheme);
+          rerenderPresentation();
+        }
+      }
+    }, 5 * 60 * 1000);
+
+    document.getElementById('langToggle').addEventListener('click', () => {
+      currentLang = currentLang === 'zh' ? 'en' : 'zh';
+      localStorage.setItem('tokdash-lang', currentLang);
+      applyI18n();
+      rerenderPresentation();
+    });
 
     // Initial load
     updateDashboard();

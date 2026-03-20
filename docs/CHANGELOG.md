@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+## 0.0.11 - 2026-03-20
+
+### Fixed
+- Restored the multilingual README setup with cross-links between the English and Chinese docs.
+- Added `README_CN.md` as the Chinese project README.
+- Restored dashboard language switching between English and Chinese, with browser-language detection used as the default.
+- Restored automatic night mode plus a manual light/dark toggle in the dashboard.
+- Preserved the current Stats calendar view when switching language or theme.
+
 ## 0.0.10 - 2026-03-20
 
 ### Reverted

@@ -1,3 +1,5 @@
+[English](README.md) | [中文](README_CN.md)
+
 # Tokdash
 
 Local token & cost dashboard for AI coding tools (Codex, OpenCode, Claude Code, Gemini CLI, OpenClaw, etc.).

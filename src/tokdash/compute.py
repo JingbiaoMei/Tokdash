@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from .model_normalization import normalize_model_name
@@ -480,3 +481,187 @@ def compute_stats(year: Optional[int] = None) -> Dict[str, Any]:
         },
         "timestamp": datetime.now().isoformat(),
     }
+
+
+def _dt_in_range(ts: datetime, since: Optional[datetime], until: Optional[datetime]) -> bool:
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    if since and ts < since:
+        return False
+    if until and ts >= until:
+        return False
+    return True
+
+
+def _session_project_name(repo_url: str | None, cwd: str | None) -> str:
+    if repo_url:
+        return repo_url.rstrip("/").split("/")[-1].replace(".git", "") or "unknown"
+    if cwd:
+        return Path(cwd).name or cwd
+    return "unknown"
+
+
+def _iter_codex_session_files() -> list[Path]:
+    sessions_root = Path.home() / ".codex" / "sessions"
+    if not sessions_root.exists():
+        return []
+    return list(sessions_root.rglob("*.jsonl"))
+
+
+def _read_codex_session(session_file: Path, since: Optional[datetime] = None, until: Optional[datetime] = None) -> Optional[Dict[str, Any]]:
+    pricing_db = PricingDatabase()
+    session_id = ""
+    cwd = ""
+    repo_url = ""
+    started_at: Optional[datetime] = None
+    last_seen_at: Optional[datetime] = None
+    tokens_in = 0
+    tokens_cache = 0
+    tokens_out = 0
+    tokens_reasoning = 0
+    total_cost = 0.0
+    token_events = 0
+    per_model_tokens: Dict[str, int] = {}
+    turn_rows: list[dict[str, Any]] = []
+    current_model = "gpt-5.3-codex"
+    current_provider = "openai"
+
+    try:
+        with session_file.open("r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    obj = json.loads(line)
+                except Exception:
+                    continue
+
+                ts_raw = obj.get("timestamp")
+                ts: Optional[datetime] = None
+                if ts_raw:
+                    try:
+                        ts = datetime.fromisoformat(str(ts_raw).replace("Z", "+00:00"))
+                    except Exception:
+                        ts = None
+
+                if ts is not None:
+                    if started_at is None or ts < started_at:
+                        started_at = ts
+                    if last_seen_at is None or ts > last_seen_at:
+                        last_seen_at = ts
+
+                obj_type = obj.get("type")
+                payload = obj.get("payload") if isinstance(obj.get("payload"), dict) else {}
+
+                if obj_type == "session_meta":
+                    session_id = str(payload.get("id") or session_id)
+                    cwd = str(payload.get("cwd") or cwd)
+                    repo_url = str(((payload.get("git") or {}).get("repository_url")) or repo_url)
+                    if payload.get("model_provider"):
+                        current_provider = str(payload.get("model_provider"))
+                elif obj_type == "turn_context":
+                    current_model = str(payload.get("model") or current_model)
+                    cwd = str(payload.get("cwd") or cwd)
+                elif obj_type == "event_msg" and payload.get("type") == "token_count":
+                    if ts is None or not _dt_in_range(ts, since, until):
+                        continue
+
+                    info = payload.get("info") if isinstance(payload.get("info"), dict) else {}
+                    usage = info.get("last_token_usage") if isinstance(info.get("last_token_usage"), dict) else {}
+                    if not usage:
+                        continue
+
+                    input_total = int(usage.get("input_tokens", 0) or 0)
+                    cache_read = int(usage.get("cached_input_tokens", 0) or 0)
+                    output_t = int(usage.get("output_tokens", 0) or 0)
+                    reasoning_t = int(usage.get("reasoning_output_tokens", 0) or 0)
+                    input_fresh = max(0, input_total - cache_read)
+                    total_turn = input_fresh + cache_read + output_t + reasoning_t
+
+                    full_model_name = f"{current_provider}/{current_model}" if current_provider else current_model
+                    turn_cost = pricing_db.get_cost(full_model_name, input_fresh, output_t, cache_read, 0)
+                    total_cost += turn_cost
+                    tokens_in += input_fresh
+                    tokens_cache += cache_read
+                    tokens_out += output_t
+                    tokens_reasoning += reasoning_t
+                    token_events += 1
+                    per_model_tokens[current_model] = per_model_tokens.get(current_model, 0) + total_turn
+                    turn_rows.append(
+                        {
+                            "turn_index": token_events,
+                            "timestamp": ts.isoformat(),
+                            "model": current_model,
+                            "tokens_in": input_fresh,
+                            "tokens_cache": cache_read,
+                            "tokens_out": output_t,
+                            "tokens_reasoning": reasoning_t,
+                            "tokens": total_turn,
+                            "cost": turn_cost,
+                        }
+                    )
+    except Exception:
+        return None
+
+    if token_events == 0:
+        return None
+
+    total_tokens = tokens_in + tokens_cache + tokens_out + tokens_reasoning
+    top_model = max(per_model_tokens.items(), key=lambda item: item[1])[0] if per_model_tokens else current_model
+    return {
+        "session_id": session_id or session_file.stem,
+        "session_path": str(session_file),
+        "project": _session_project_name(repo_url or None, cwd or None),
+        "repo_url": repo_url or None,
+        "cwd": cwd or None,
+        "model": top_model or "unknown",
+        "token_events": token_events,
+        "tokens_in": tokens_in,
+        "tokens_cache": tokens_cache,
+        "tokens_out": tokens_out,
+        "tokens_reasoning": tokens_reasoning,
+        "tokens": total_tokens,
+        "cache_ratio": (tokens_cache / total_tokens) if total_tokens > 0 else 0.0,
+        "cost": total_cost,
+        "started_at": started_at.isoformat() if started_at else None,
+        "last_seen_at": last_seen_at.isoformat() if last_seen_at else None,
+        "turns": turn_rows,
+    }
+
+
+def get_codex_sessions_data(period: str, limit: int = 100) -> Dict[str, Any]:
+    """Per-session Codex usage for the requested period."""
+    period_args = period_to_range_args(period)
+    since, until = _date_range_from_args(period_args)
+    sessions: list[dict[str, Any]] = []
+
+    for session_file in _iter_codex_session_files():
+        session = _read_codex_session(session_file, since=since, until=until)
+        if not session:
+            continue
+        session.pop("turns", None)
+        sessions.append(session)
+
+    sessions.sort(key=lambda row: ((row.get("last_seen_at") or ""), row.get("tokens") or 0), reverse=True)
+    current_session = sessions[0] if sessions else None
+    top_sessions = sorted(sessions, key=lambda row: row.get("tokens", 0), reverse=True)[:limit]
+
+    return {
+        "period": period,
+        "current_session": current_session,
+        "sessions": top_sessions,
+        "timestamp": datetime.now().isoformat(),
+    }
+
+
+def get_codex_session_detail(session_id: str) -> Dict[str, Any]:
+    """Turn-level token usage for a single Codex session."""
+    for session_file in _iter_codex_session_files():
+        session = _read_codex_session(session_file)
+        if not session:
+            continue
+        if session.get("session_id") == session_id:
+            return {
+                "session": {k: v for k, v in session.items() if k != "turns"},
+                "turns": session.get("turns", []),
+                "timestamp": datetime.now().isoformat(),
+            }
+    raise FileNotFoundError(f"Codex session not found: {session_id}")

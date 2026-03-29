@@ -1,5 +1,8 @@
 name: Publish to PyPI
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 on:
   push:
     tags:
@@ -20,18 +23,7 @@ jobs:
         with:
           python-version: "3.10"
 
-      - name: Install build tools
-        run: |
-          python -m pip install -U pip
-          python -m pip install build twine
-
-      - name: Build
-        run: python -m build
-
-      - name: Check dist
-        run: twine check dist/*
-
-      - name: Verify tag matches version
+      - name: Verify release metadata
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           python - <<'PY'
@@ -44,25 +36,45 @@ jobs:
           tag_version = m.group(1) if m else None
 
           pyproject = Path('pyproject.toml').read_text(encoding='utf-8')
-
-          # Extract [project] version = "..." without requiring toml parsers
           project_section = re.split(r'^\[project\]\s*$', pyproject, flags=re.M)
           if len(project_section) < 2:
               raise SystemExit('Could not find [project] section in pyproject.toml')
-          after = project_section[1]
-          # Stop at next section header
-          after = re.split(r'^\[', after, flags=re.M)[0]
-
-          m2 = re.search(r'^\s*version\s*=\s*"([^"]+)"\s*$', after, flags=re.M)
-          if not m2:
+          project_body = re.split(r'^\[', project_section[1], flags=re.M)[0]
+          project_match = re.search(r'^\s*version\s*=\s*"([^"]+)"\s*$', project_body, flags=re.M)
+          if not project_match:
               raise SystemExit('Could not find project.version in pyproject.toml')
-          project_version = m2.group(1)
+          project_version = project_match.group(1)
+
+          package_init = Path('src/tokdash/__init__.py').read_text(encoding='utf-8')
+          package_match = re.search(r'^__version__\s*=\s*"([^"]+)"\s*$', package_init, flags=re.M)
+          if not package_match:
+              raise SystemExit('Could not find __version__ in src/tokdash/__init__.py')
+          package_version = package_match.group(1)
+
+          if project_version != package_version:
+              raise SystemExit(
+                  f'pyproject version {project_version} does not match package version {package_version}.'
+              )
 
           if tag_version and tag_version != project_version:
-              raise SystemExit(f'Tag v{tag_version} does not match pyproject version {project_version}.')
+              raise SystemExit(
+                  f'Tag v{tag_version} does not match pyproject version {project_version}. '
+                  'Retag the release from the correct commit.'
+              )
 
           print('OK', project_version)
           PY
+
+      - name: Install build tools
+        run: |
+          python -m pip install -U pip
+          python -m pip install build twine
+
+      - name: Build
+        run: python -m build
+
+      - name: Check dist
+        run: twine check dist/*
 
       - name: Upload dist
         uses: actions/upload-artifact@v4

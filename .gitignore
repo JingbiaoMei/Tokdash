@@ -37,4 +37,6 @@ Thumbs.db
 .env.*
 
 # Private agent instructions (not for public release)
-docs/agents/release/
+AGENTS.md
+**/AGENTS.md
+docs/agents/release/release.py

@@ -40,4 +40,3 @@ pytest -q
 - Do **not** commit API keys, cookies, or tokens.
 - Use environment variables or local key files under `.api_keys/` (gitignored).
 - If you suspect a security issue, see `docs/SECURITY.md`.
-

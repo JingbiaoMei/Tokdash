@@ -1,101 +1,60 @@
-import json
-import socket
-import subprocess
-import sys
-import time
-import urllib.request
-from contextlib import contextmanager
+import pytest
 
 
-def _free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
-        return int(s.getsockname()[1])
+pytest.importorskip("fastapi")
+from fastapi.testclient import TestClient
 
-
-def _fetch(url: str, timeout_s: float = 2.0) -> str:
-    with urllib.request.urlopen(url, timeout=timeout_s) as resp:
-        return resp.read().decode("utf-8", errors="replace")
-
-
-@contextmanager
-def _run_uvicorn():
-    port = _free_port()
-    base = f"http://127.0.0.1:{port}"
-    proc = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "tokdash.api:app", "--host", "127.0.0.1", "--port", str(port)],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-    try:
-        deadline = time.time() + 10.0
-        last_err = None
-        while time.time() < deadline:
-            try:
-                health = json.loads(_fetch(f"{base}/health", timeout_s=0.5))
-            except Exception as e:
-                last_err = e
-                time.sleep(0.1)
-                continue
-
-            if health.get("status") == "ok":
-                break
-
-            time.sleep(0.1)
-        else:
-            out = ""
-            err = ""
-            try:
-                out, err = proc.communicate(timeout=1)
-            except Exception:
-                pass
-            raise AssertionError(f"uvicorn did not start in time (last_err={last_err}).\nstdout:\n{out}\nstderr:\n{err}")
-
-        yield base
-    finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except Exception:
-            proc.kill()
+from tokdash.api import app
 
 
 def test_api_endpoints_and_dashboard_smoke():
-    with _run_uvicorn() as base:
-        usage = json.loads(_fetch(f"{base}/api/usage?period=today"))
-        assert "total_tokens" in usage
-        assert "openclaw_models" in usage
-        assert "coding_apps" in usage
+    client = TestClient(app)
 
-        tools = json.loads(_fetch(f"{base}/api/tools?period=today"))
-        assert "apps" in tools
-        assert "all_models" in tools
+    usage = client.get("/api/usage", params={"period": "today"}).json()
+    assert "total_tokens" in usage
+    assert "openclaw_models" in usage
+    assert "coding_apps" in usage
 
-        codex_sessions = json.loads(_fetch(f"{base}/api/codex/sessions?period=today"))
-        assert "sessions" in codex_sessions
-        assert "current_session" in codex_sessions
+    tools = client.get("/api/tools", params={"period": "today"}).json()
+    assert "apps" in tools
+    assert "all_models" in tools
 
-        current_session = codex_sessions.get("current_session")
-        if current_session and current_session.get("session_id"):
-            codex_session = json.loads(_fetch(f"{base}/api/codex/session?session_id={current_session['session_id']}"))
-            assert "session" in codex_session
-            assert "turns" in codex_session
+    for tool in ("codex", "claude", "opencode"):
+        sessions = client.get("/api/sessions", params={"tool": tool, "period": "today"}).json()
+        assert "sessions" in sessions
+        assert "latest_session" in sessions
+        assert sessions.get("tool") == tool
 
-        openclaw = json.loads(_fetch(f"{base}/api/openclaw?period=today"))
-        assert "models" in openclaw
-        assert "contributions" in openclaw
+        latest = sessions.get("latest_session")
+        if latest and latest.get("session_id"):
+            detail = client.get("/api/session", params={"tool": tool, "session_id": latest["session_id"]}).json()
+            assert "session" in detail
+            assert "turns" in detail
 
-        # /api/stats can be expensive on large local histories.
-        stats = json.loads(_fetch(f"{base}/api/stats", timeout_s=20))
-        assert "contributions" in stats
-        assert "stats" in stats
+    codex_sessions = client.get("/api/codex/sessions", params={"period": "today"}).json()
+    assert "sessions" in codex_sessions
+    assert "latest_session" in codex_sessions
 
-        manifest = _fetch(f"{base}/manifest.webmanifest")
-        assert "Tokdash" in manifest
+    latest_codex = codex_sessions.get("latest_session")
+    if latest_codex and latest_codex.get("session_id"):
+        codex_detail = client.get("/api/codex/session", params={"session_id": latest_codex["session_id"]}).json()
+        assert "session" in codex_detail
+        assert "turns" in codex_detail
 
-        sw = _fetch(f"{base}/sw.js")
-        assert "service worker" in sw.lower()
+    openclaw = client.get("/api/openclaw", params={"period": "today"}).json()
+    assert "models" in openclaw
+    assert "contributions" in openclaw
 
-        html = _fetch(f"{base}/")
-        assert "Tokdash" in html
+    stats = client.get("/api/stats").json()
+    assert "contributions" in stats
+    assert "stats" in stats
+
+    manifest = client.get("/manifest.webmanifest").text
+    assert "Tokdash" in manifest
+
+    sw = client.get("/sw.js").text
+    assert "service worker" in sw.lower()
+
+    html = client.get("/").text
+    assert "Tokdash" in html
+    assert "Sessions" in html

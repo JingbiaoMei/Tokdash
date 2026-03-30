@@ -336,6 +336,7 @@
       <!-- Tabs -->
       <nav class="mt-5 flex flex-wrap gap-2" aria-label="Dashboard sections">
         <button class="tab-btn" data-tab="overview" aria-selected="true" data-i18n="overview">Overview</button>
+        <button class="tab-btn" data-tab="sessions" aria-selected="false" data-i18n="sessionsPage">Sessions</button>
         <button class="tab-btn" data-tab="stats" aria-selected="false" data-i18n="stats">Stats</button>
       </nav>
     </header>
@@ -435,52 +436,53 @@
           </table>
         </div>
       </section>
+    </div>
 
-      <section class="surface p-5 mt-6">
+    <!-- Sessions Tab -->
+    <div id="sessions-content" class="tab-content">
+      <section class="surface p-5 mb-6">
         <div class="flex items-center justify-between gap-3 mb-4">
           <div>
             <h2 class="text-base font-extrabold mono" data-i18n="codexSessions">Codex Sessions</h2>
-            <p class="text-xs mt-1" style="color: var(--color-muted);" data-i18n="codexSessionsDesc">Current conversation summary plus Codex sessions for the selected range.</p>
+            <p class="text-xs mt-1" style="color: var(--color-muted);" data-i18n="sessionsRangeDesc">Latest session plus sessions for the selected range.</p>
           </div>
         </div>
-
-        <div id="codexCurrentSession" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4 mb-5">
+        <div id="codexLatestSession" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4 mb-5">
           <div class="surface p-4">
-            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="currentSession">Current Session</div>
-            <div id="codexCurrentProject" class="mt-2 font-extrabold mono">Loading…</div>
-            <div id="codexCurrentModel" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="latestSession">Latest Session</div>
+            <div id="codexLatestProject" class="mt-2 font-extrabold mono">Loading…</div>
+            <div id="codexLatestMeta" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
           </div>
           <div class="surface p-4">
-            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="freshInput">Fresh Input</div>
-            <div id="codexCurrentInput" class="mt-2 font-extrabold">-</div>
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="input">Input</div>
+            <div id="codexLatestInput" class="mt-2 font-extrabold">-</div>
           </div>
           <div class="surface p-4">
             <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="cacheRead">Cache Read</div>
-            <div id="codexCurrentCache" class="mt-2 font-extrabold">-</div>
-            <div id="codexCurrentCachePct" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
+            <div id="codexLatestCache" class="mt-2 font-extrabold">-</div>
+            <div id="codexLatestCachePct" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
           </div>
           <div class="surface p-4">
             <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="output">Output</div>
-            <div id="codexCurrentOutput" class="mt-2 font-extrabold">-</div>
+            <div id="codexLatestOutput" class="mt-2 font-extrabold">-</div>
           </div>
           <div class="surface p-4">
             <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="totalTokens">Total Tokens</div>
-            <div id="codexCurrentTotal" class="mt-2 font-extrabold">-</div>
+            <div id="codexLatestTotal" class="mt-2 font-extrabold">-</div>
           </div>
           <div class="surface p-4">
             <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="events">Events</div>
-            <div id="codexCurrentEvents" class="mt-2 font-extrabold">-</div>
-            <div id="codexCurrentSeen" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
+            <div id="codexLatestEvents" class="mt-2 font-extrabold">-</div>
+            <div id="codexLatestSeen" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
           </div>
         </div>
-
         <div class="overflow-x-auto">
           <table class="w-full text-sm" aria-label="Codex sessions table">
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
                 <th class="text-left py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="session">Session</th>
                 <th class="text-left py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="model">Model</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="freshInput">Fresh Input</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="input">Input</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cache">Cache</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="output">Output</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="total">Total</th>
@@ -495,6 +497,177 @@
         </div>
       </section>
 
+      <section class="surface p-5 mb-6">
+        <div class="flex items-center justify-between gap-3 mb-4">
+          <div>
+            <h2 class="text-base font-extrabold mono" data-i18n="claudeSessions">Claude Code Sessions</h2>
+            <p class="text-xs mt-1" style="color: var(--color-muted);" data-i18n="sessionsRangeDesc">Latest session plus sessions for the selected range.</p>
+          </div>
+        </div>
+        <div id="claudeLatestSession" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4 mb-5">
+          <div class="surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="latestSession">Latest Session</div>
+            <div id="claudeLatestProject" class="mt-2 font-extrabold mono">Loading…</div>
+            <div id="claudeLatestMeta" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
+          </div>
+          <div class="surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="input">Input</div>
+            <div id="claudeLatestInput" class="mt-2 font-extrabold">-</div>
+          </div>
+          <div class="surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="cacheRead">Cache Read</div>
+            <div id="claudeLatestCache" class="mt-2 font-extrabold">-</div>
+            <div id="claudeLatestCachePct" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
+          </div>
+          <div class="surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="output">Output</div>
+            <div id="claudeLatestOutput" class="mt-2 font-extrabold">-</div>
+          </div>
+          <div class="surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="totalTokens">Total Tokens</div>
+            <div id="claudeLatestTotal" class="mt-2 font-extrabold">-</div>
+          </div>
+          <div class="surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="events">Events</div>
+            <div id="claudeLatestEvents" class="mt-2 font-extrabold">-</div>
+            <div id="claudeLatestSeen" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
+          </div>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm" aria-label="Claude Code sessions table">
+            <thead>
+              <tr class="border-b" style="border-color: var(--color-border);">
+                <th class="text-left py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="session">Session</th>
+                <th class="text-left py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="model">Model</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="input">Input</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cache">Cache</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="output">Output</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="total">Total</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cost">Cost</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="lastUpdated">Last updated</th>
+              </tr>
+            </thead>
+            <tbody id="claudeSessionsTable">
+              <tr><td colspan="8" class="text-center py-10" style="color: var(--color-muted);" data-i18n="loading">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="surface p-5 mb-6">
+        <div class="flex items-center justify-between gap-3 mb-4">
+          <div>
+            <h2 class="text-base font-extrabold mono" data-i18n="opencodeSessions">OpenCode Sessions</h2>
+            <p class="text-xs mt-1" style="color: var(--color-muted);" data-i18n="sessionsRangeDesc">Latest session plus sessions for the selected range.</p>
+          </div>
+        </div>
+        <div id="opencodeLatestSession" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4 mb-5">
+          <div class="surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="latestSession">Latest Session</div>
+            <div id="opencodeLatestProject" class="mt-2 font-extrabold mono">Loading…</div>
+            <div id="opencodeLatestMeta" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
+          </div>
+          <div class="surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="input">Input</div>
+            <div id="opencodeLatestInput" class="mt-2 font-extrabold">-</div>
+          </div>
+          <div class="surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="cacheRead">Cache Read</div>
+            <div id="opencodeLatestCache" class="mt-2 font-extrabold">-</div>
+            <div id="opencodeLatestCachePct" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
+          </div>
+          <div class="surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="output">Output</div>
+            <div id="opencodeLatestOutput" class="mt-2 font-extrabold">-</div>
+          </div>
+          <div class="surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="totalTokens">Total Tokens</div>
+            <div id="opencodeLatestTotal" class="mt-2 font-extrabold">-</div>
+          </div>
+          <div class="surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="events">Events</div>
+            <div id="opencodeLatestEvents" class="mt-2 font-extrabold">-</div>
+            <div id="opencodeLatestSeen" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
+          </div>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm" aria-label="OpenCode sessions table">
+            <thead>
+              <tr class="border-b" style="border-color: var(--color-border);">
+                <th class="text-left py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="session">Session</th>
+                <th class="text-left py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="model">Model</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="input">Input</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cache">Cache</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="output">Output</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="total">Total</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cost">Cost</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="lastUpdated">Last updated</th>
+              </tr>
+            </thead>
+            <tbody id="opencodeSessionsTable">
+              <tr><td colspan="8" class="text-center py-10" style="color: var(--color-muted);" data-i18n="loading">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="surface p-5">
+        <div class="flex items-center justify-between gap-3 mb-4">
+          <div>
+            <h2 class="text-base font-extrabold mono" data-i18n="combinedSessions">Combined Sessions</h2>
+            <p class="text-xs mt-1" style="color: var(--color-muted);" data-i18n="combinedSessionsDesc">Cross-tool session view grouped by project for the selected range.</p>
+          </div>
+        </div>
+        <div id="combinedLatestSession" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4 mb-5">
+          <div class="surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="latestSession">Latest Session</div>
+            <div id="combinedLatestProject" class="mt-2 font-extrabold mono">Loading…</div>
+            <div id="combinedLatestMeta" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
+          </div>
+          <div class="surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="input">Input</div>
+            <div id="combinedLatestInput" class="mt-2 font-extrabold">-</div>
+          </div>
+          <div class="surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="cacheRead">Cache Read</div>
+            <div id="combinedLatestCache" class="mt-2 font-extrabold">-</div>
+            <div id="combinedLatestCachePct" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
+          </div>
+          <div class="surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="output">Output</div>
+            <div id="combinedLatestOutput" class="mt-2 font-extrabold">-</div>
+          </div>
+          <div class="surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="totalTokens">Total Tokens</div>
+            <div id="combinedLatestTotal" class="mt-2 font-extrabold">-</div>
+          </div>
+          <div class="surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="events">Events</div>
+            <div id="combinedLatestEvents" class="mt-2 font-extrabold">-</div>
+            <div id="combinedLatestSeen" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
+          </div>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm" aria-label="Combined sessions table">
+            <thead>
+              <tr class="border-b" style="border-color: var(--color-border);">
+                <th class="text-left py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="session">Session</th>
+                <th class="text-left py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="tool">Tool</th>
+                <th class="text-left py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="model">Model</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="input">Input</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cache">Cache</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="output">Output</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="total">Total</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cost">Cost</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="lastUpdated">Last updated</th>
+              </tr>
+            </thead>
+            <tbody id="combinedSessionsTable">
+              <tr><td colspan="9" class="text-center py-10" style="color: var(--color-muted);" data-i18n="loading">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
 
     <!-- Stats Tab -->
@@ -694,37 +867,37 @@
 
   </div>
 
-  <div id="codexSessionModal" class="hidden fixed inset-0 z-50">
-    <div id="codexSessionModalBackdrop" class="absolute inset-0 bg-slate-950/50"></div>
+  <div id="sessionModal" class="hidden fixed inset-0 z-50">
+    <div id="sessionModalBackdrop" class="absolute inset-0 bg-slate-950/50"></div>
     <div class="absolute inset-0 p-4 sm:p-8 overflow-y-auto">
       <div class="max-w-5xl mx-auto surface p-5 sm:p-6 relative">
         <div class="flex items-start justify-between gap-4 mb-4">
           <div>
-            <h3 id="codexSessionModalTitle" class="text-lg font-extrabold mono">Session</h3>
-            <p id="codexSessionModalMeta" class="text-sm mt-1" style="color: var(--color-muted);">-</p>
+            <h3 id="sessionModalTitle" class="text-lg font-extrabold mono">Session</h3>
+            <p id="sessionModalMeta" class="text-sm mt-1" style="color: var(--color-muted);">-</p>
           </div>
-          <button id="codexSessionModalClose" class="btn btn-ghost" type="button" data-i18n="close">Close</button>
+          <button id="sessionModalClose" class="btn btn-ghost" type="button" data-i18n="close">Close</button>
         </div>
         <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-5">
           <div class="surface p-4">
-            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="freshInput">Fresh Input</div>
-            <div id="codexSessionModalInput" class="mt-2 font-extrabold">-</div>
-            <div id="codexSessionModalInputPct" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="input">Input</div>
+            <div id="sessionModalInput" class="mt-2 font-extrabold">-</div>
+            <div id="sessionModalInputPct" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
           </div>
           <div class="surface p-4">
             <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="cacheRead">Cache Read</div>
-            <div id="codexSessionModalCache" class="mt-2 font-extrabold">-</div>
-            <div id="codexSessionModalCachePct" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
+            <div id="sessionModalCache" class="mt-2 font-extrabold">-</div>
+            <div id="sessionModalCachePct" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
           </div>
           <div class="surface p-4">
             <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="output">Output</div>
-            <div id="codexSessionModalOutput" class="mt-2 font-extrabold">-</div>
-            <div id="codexSessionModalOutputPct" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
+            <div id="sessionModalOutput" class="mt-2 font-extrabold">-</div>
+            <div id="sessionModalOutputPct" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
           </div>
           <div class="surface p-4">
             <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="totalTokens">Total Tokens</div>
-            <div id="codexSessionModalTotal" class="mt-2 font-extrabold">-</div>
-            <div id="codexSessionModalReasoningPct" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
+            <div id="sessionModalTotal" class="mt-2 font-extrabold">-</div>
+            <div id="sessionModalReasoningPct" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
           </div>
         </div>
         <div class="surface p-4 mb-5">
@@ -735,31 +908,31 @@
           <div class="space-y-3">
             <div>
               <div class="flex items-center justify-between text-sm mb-1">
-                <span data-i18n="freshInput">Fresh Input</span>
-                <span id="codexSessionShareInputLabel">-</span>
+                <span data-i18n="input">Input</span>
+                <span id="sessionShareInputLabel">-</span>
               </div>
-              <div class="h-2 rounded-full bg-slate-200/80 overflow-hidden"><div id="codexSessionShareInputBar" class="h-full rounded-full" style="width:0%; background:#1E40AF;"></div></div>
+              <div class="h-2 rounded-full bg-slate-200/80 overflow-hidden"><div id="sessionShareInputBar" class="h-full rounded-full" style="width:0%; background:#1E40AF;"></div></div>
             </div>
             <div>
               <div class="flex items-center justify-between text-sm mb-1">
                 <span data-i18n="cacheRead">Cache Read</span>
-                <span id="codexSessionShareCacheLabel">-</span>
+                <span id="sessionShareCacheLabel">-</span>
               </div>
-              <div class="h-2 rounded-full bg-slate-200/80 overflow-hidden"><div id="codexSessionShareCacheBar" class="h-full rounded-full" style="width:0%; background:#0F766E;"></div></div>
+              <div class="h-2 rounded-full bg-slate-200/80 overflow-hidden"><div id="sessionShareCacheBar" class="h-full rounded-full" style="width:0%; background:#0F766E;"></div></div>
             </div>
             <div>
               <div class="flex items-center justify-between text-sm mb-1">
                 <span data-i18n="output">Output</span>
-                <span id="codexSessionShareOutputLabel">-</span>
+                <span id="sessionShareOutputLabel">-</span>
               </div>
-              <div class="h-2 rounded-full bg-slate-200/80 overflow-hidden"><div id="codexSessionShareOutputBar" class="h-full rounded-full" style="width:0%; background:#F59E0B;"></div></div>
+              <div class="h-2 rounded-full bg-slate-200/80 overflow-hidden"><div id="sessionShareOutputBar" class="h-full rounded-full" style="width:0%; background:#F59E0B;"></div></div>
             </div>
             <div>
               <div class="flex items-center justify-between text-sm mb-1">
                 <span data-i18n="reasoning">Reasoning</span>
-                <span id="codexSessionShareReasoningLabel">-</span>
+                <span id="sessionShareReasoningLabel">-</span>
               </div>
-              <div class="h-2 rounded-full bg-slate-200/80 overflow-hidden"><div id="codexSessionShareReasoningBar" class="h-full rounded-full" style="width:0%; background:#7C3AED;"></div></div>
+              <div class="h-2 rounded-full bg-slate-200/80 overflow-hidden"><div id="sessionShareReasoningBar" class="h-full rounded-full" style="width:0%; background:#7C3AED;"></div></div>
             </div>
           </div>
         </div>
@@ -769,16 +942,25 @@
             <div class="text-xs" style="color: var(--color-muted);" data-i18n="tokens">Tokens</div>
           </div>
           <div class="h-[320px]">
-            <canvas id="codexSessionPerTurnChart" aria-label="Codex session per-turn trend chart" role="img"></canvas>
+            <canvas id="sessionPerTurnChart" aria-label="Session per-turn trend chart" role="img"></canvas>
           </div>
         </div>
-        <div class="surface p-4">
+        <div class="surface p-4 mb-5">
           <div class="flex items-center justify-between mb-3">
             <h4 class="text-base font-extrabold mono" data-i18n="cumulativeTurnTrend">Cumulative Turn Trend</h4>
             <div class="text-xs" style="color: var(--color-muted);" data-i18n="tokens">Tokens</div>
           </div>
           <div class="h-[320px]">
-            <canvas id="codexSessionCumulativeChart" aria-label="Codex session cumulative turn trend chart" role="img"></canvas>
+            <canvas id="sessionCumulativeChart" aria-label="Session cumulative turn trend chart" role="img"></canvas>
+          </div>
+        </div>
+        <div class="surface p-4">
+          <div class="flex items-center justify-between mb-3">
+            <h4 class="text-base font-extrabold mono" data-i18n="cumulativeTrendByTime">Cumulative Trend by Time</h4>
+            <div class="text-xs" style="color: var(--color-muted);" data-i18n="tokens">Tokens</div>
+          </div>
+          <div class="h-[320px]">
+            <canvas id="sessionTimeCumulativeChart" aria-label="Session cumulative time trend chart" role="img"></canvas>
           </div>
         </div>
       </div>
@@ -786,23 +968,23 @@
   </div>
 
   <script>
-    // Dashboard v3.11.0 - i18n + dark mode
+    // Dashboard v3.12.0 - sessions tab + i18n + dark mode
     // - "Streak" label (not "Current Streak")
     // - Month/Year: streak within that view period
     // - 3D/All-time: current ongoing streak from today
     // - "Longest Streak" always shows longest ever across all data
-    console.log('📊 Token Dashboard v3.11.0 - i18n + dark mode');
+    console.log('📊 Token Dashboard v3.12.0 - sessions tab + i18n + dark mode');
 
     let toolChart = null;
     let modelChart = null;
-    let codexSessionPerTurnChart = null;
-    let codexSessionCumulativeChart = null;
+    let sessionPerTurnChart = null;
+    let sessionCumulativeChart = null;
+    let sessionTimeCumulativeChart = null;
 
     // Render perf controls
     let updateInFlight = false;
-    let renderSeq = 0;
     let lastUsageResponse = null;
-    let lastCodexSessionsResponse = null;
+    let lastSessionsResponses = { codex: null, claude: null, opencode: null, combined: null };
     let lastCombinedModels = [];
     let lastAppsBreakdown = null;
     const MAX_COMBINED_MODELS_ROWS = 300;
@@ -827,6 +1009,7 @@
         refresh: 'Refresh',
         loading: 'Loading…',
         overview: 'Overview',
+        sessionsPage: 'Sessions',
         stats: 'Stats',
         totalTokens: 'Total Tokens',
         totalCost: 'Total Cost',
@@ -840,8 +1023,12 @@
         combinedModels: 'Combined Models',
         combinedModelsDesc: 'Unified view across all apps and providers. Models with the same name are aggregated regardless of source.',
         codexSessions: 'Codex Sessions',
-        codexSessionsDesc: 'Current conversation summary plus Codex sessions for the selected range.',
-        currentSession: 'Current Session',
+        claudeSessions: 'Claude Code Sessions',
+        opencodeSessions: 'OpenCode Sessions',
+        combinedSessions: 'Combined Sessions',
+        combinedSessionsDesc: 'Cross-tool session view grouped by project for the selected range.',
+        sessionsRangeDesc: 'Latest session plus sessions for the selected range.',
+        latestSession: 'Latest Session',
         freshInput: 'Fresh Input',
         events: 'Events',
         session: 'Session',
@@ -849,6 +1036,7 @@
         tokenShare: 'Token Share',
         turnTrend: 'Turn Trend',
         cumulativeTurnTrend: 'Cumulative Turn Trend',
+        cumulativeTrendByTime: 'Cumulative Trend by Time',
         showAll: 'Show all',
         showTop: 'Show top',
         tool: 'Tool',
@@ -913,6 +1101,7 @@
         oct: 'Oct',
         nov: 'Nov',
         dec: 'Dec',
+        time: 'Time',
       },
       zh: {
         range: '范围',
@@ -929,6 +1118,7 @@
         refresh: '刷新',
         loading: '加载中…',
         overview: '概览',
+        sessionsPage: '会话',
         stats: '统计',
         totalTokens: '总 Token 数',
         totalCost: '总费用',
@@ -942,8 +1132,12 @@
         combinedModels: '合并模型',
         combinedModelsDesc: '跨所有应用和服务商的统一视图。同名模型会自动合并，无论其来源。',
         codexSessions: 'Codex 会话',
-        codexSessionsDesc: '显示当前这轮对话摘要，以及所选时间范围内的 Codex 会话列表。',
-        currentSession: '当前会话',
+        claudeSessions: 'Claude Code 会话',
+        opencodeSessions: 'OpenCode 会话',
+        combinedSessions: '合并会话',
+        combinedSessionsDesc: '按项目汇总所选时间范围内的跨工具会话视图。',
+        sessionsRangeDesc: '显示最近一条会话摘要，以及所选时间范围内的会话列表。',
+        latestSession: '最近会话',
         freshInput: '新输入',
         events: '事件数',
         session: '会话',
@@ -951,6 +1145,7 @@
         tokenShare: 'Token 占比',
         turnTrend: '轮次趋势',
         cumulativeTurnTrend: '累计轮次趋势',
+        cumulativeTrendByTime: '按时间累计趋势',
         showAll: '显示全部',
         showTop: '显示前列',
         tool: '工具',
@@ -1015,6 +1210,7 @@
         oct: '10月',
         nov: '11月',
         dec: '12月',
+        time: '时间',
       },
     };
 
@@ -1030,8 +1226,9 @@
       return !!el && el.classList.contains('active');
     }
 
-    function nextFrame() {
-      return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+    function isSessionsActive() {
+      const el = document.getElementById('sessions-content');
+      return !!el && el.classList.contains('active');
     }
 
     function scheduleIdle(fn, timeoutMs = 750) {
@@ -1051,6 +1248,16 @@
     function formatCurrency(num) {
       const n = Number(num ?? 0);
       return '$' + n.toFixed(2);
+    }
+
+    function formatMonthDayTime(value) {
+      if (!value) return '—';
+      const dt = new Date(value);
+      const mm = String(dt.getMonth() + 1).padStart(2, '0');
+      const dd = String(dt.getDate()).padStart(2, '0');
+      const hh = String(dt.getHours()).padStart(2, '0');
+      const minute = String(dt.getMinutes()).padStart(2, '0');
+      return `${mm}.${dd}-${hh}:${minute}`;
     }
 
     function t(key) {
@@ -1103,7 +1310,7 @@
 
     function updateTimestamp() {
       if (!lastUsageResponse?.timestamp) return;
-      document.getElementById('lastUpdate').textContent = `${t('lastUpdated')}: ${new Date(lastUsageResponse.timestamp).toLocaleString(currentLang === 'zh' ? 'zh-CN' : undefined)}`;
+      document.getElementById('lastUpdate').textContent = `${t('lastUpdated')}: ${formatMonthDayTime(lastUsageResponse.timestamp)}`;
     }
 
     function applyI18n() {
@@ -1131,19 +1338,10 @@
         modelChart = null;
       }
       if (lastUsageResponse && isOverviewActive()) {
-        document.getElementById('totalTokens').textContent = formatNumber(lastUsageResponse.total_tokens);
-        document.getElementById('totalCost').textContent = formatCurrency(lastUsageResponse.total_cost);
-        if (lastUsageResponse.top_models && lastUsageResponse.top_models.length > 0) {
-          const top = lastUsageResponse.top_models[0];
-          document.getElementById('topModel').textContent = top.name;
-          document.getElementById('topModelMeta').textContent = `${formatCurrency(top.cost)} · ${formatNumber(top.tokens)} ${t('tokensUnit')}`;
-        }
-        updateToolChart(lastUsageResponse.by_tool || {});
-        updateModelChart(lastUsageResponse.top_models || []);
-        updateToolsTable(lastUsageResponse.by_tool || {});
-        if (lastAppsBreakdown?.apps) updateAppsBreakdown(lastAppsBreakdown.apps, lastAppsBreakdown.openclawModels);
-        updateCombinedModelsTable(lastCombinedModels);
-        updateCodexSessionsPanel(lastCodexSessionsResponse);
+        renderOverviewTab(lastUsageResponse);
+      }
+      if (isSessionsActive()) {
+        renderSessionsTab();
       }
       if (document.getElementById('stats-content').classList.contains('active')) {
         loadStats({ preserveNavigation: true });
@@ -1242,21 +1440,46 @@
       if (days && days > 0) updateDashboard(days);
     });
 
-    // Update dashboard
+    function renderOverviewTab(data) {
+      if (!data) return;
+      document.getElementById('totalTokens').textContent = formatNumber(data.total_tokens);
+      document.getElementById('totalCost').textContent = formatCurrency(data.total_cost);
+
+      if (data.top_models && data.top_models.length > 0) {
+        const top = data.top_models[0];
+        document.getElementById('topModel').textContent = top.name;
+        document.getElementById('topModelMeta').textContent = `${formatCurrency(top.cost)} · ${formatNumber(top.tokens)} ${t('tokensUnit')}`;
+      } else {
+        document.getElementById('topModel').textContent = '—';
+        document.getElementById('topModelMeta').textContent = '—';
+      }
+
+      updateToolChart(data.by_tool || {});
+      updateModelChart(data.top_models || []);
+      updateToolsTable(data.by_tool || {});
+      lastCombinedModels = data.combined_models || [];
+      lastAppsBreakdown = { apps: data.apps || null, openclawModels: data.openclaw_models || null };
+
+      scheduleIdle(() => {
+        if (lastAppsBreakdown?.apps) {
+          updateAppsBreakdown(lastAppsBreakdown.apps, lastAppsBreakdown.openclawModels);
+        }
+      });
+      scheduleIdle(() => updateCombinedModelsTable(lastCombinedModels));
+    }
+
     async function updateDashboard(customDays = null) {
       if (updateInFlight) return;
 
       const period = document.getElementById('periodSelect').value;
+      let periodValue = null;
+      if (customDays) periodValue = String(customDays);
+      else if (period !== 'custom') periodValue = period;
+      else return;
 
-      // If custom days specified, use that
-      let apiUrl = '/api/usage?period=';
-      if (customDays) apiUrl += customDays;
-      else if (period !== 'custom') apiUrl += period;
-      else return; // Wait for custom input
-
+      const usageApiUrl = `/api/usage?period=${encodeURIComponent(periodValue)}`;
       const refreshBtn = document.getElementById('refreshBtn');
       updateInFlight = true;
-      const seq = ++renderSeq;
 
       refreshBtn.innerHTML = `
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -1268,52 +1491,35 @@
       refreshBtn.disabled = true;
 
       try {
-        const codexApiUrl = apiUrl.replace('/api/usage?', '/api/codex/sessions?');
-        const [response, codexResponse] = await Promise.all([fetch(apiUrl), fetch(codexApiUrl)]);
-        const data = await response.json();
-        const codexData = await codexResponse.json();
-        lastUsageResponse = data;
-        lastCodexSessionsResponse = codexData;
+        const sessionUrls = ["codex", "claude", "opencode"].map(
+          (tool) => `/api/sessions?tool=${tool}&period=${encodeURIComponent(periodValue)}`
+        );
+        const [usageResponse, codexResponse, claudeResponse, opencodeResponse] = await Promise.all([
+          fetch(usageApiUrl),
+          fetch(sessionUrls[0]),
+          fetch(sessionUrls[1]),
+          fetch(sessionUrls[2]),
+        ]);
 
-        // Update timestamp early (header is always visible)
+        const [usageData, codexData, claudeData, opencodeData] = await Promise.all([
+          usageResponse.json(),
+          codexResponse.json(),
+          claudeResponse.json(),
+          opencodeResponse.json(),
+        ]);
+
+        lastUsageResponse = usageData;
+        lastSessionsResponses = {
+          codex: codexData,
+          claude: claudeData,
+          opencode: opencodeData,
+          combined: buildCombinedSessionsData({ codex: codexData, claude: claudeData, opencode: opencodeData }),
+        };
+
         updateTimestamp();
 
-        // Avoid heavy DOM work if user is on the Stats tab
-        if (!isOverviewActive()) return;
-
-        // Update summary cards
-        document.getElementById('totalTokens').textContent = formatNumber(data.total_tokens);
-        document.getElementById('totalCost').textContent = formatCurrency(data.total_cost);
-
-        if (data.top_models && data.top_models.length > 0) {
-          const top = data.top_models[0];
-          document.getElementById('topModel').textContent = top.name;
-          document.getElementById('topModelMeta').textContent = `${formatCurrency(top.cost)} · ${formatNumber(top.tokens)} ${t('tokensUnit')}`;
-        }
-
-        await nextFrame();
-
-        // Fast charts/tables first
-        updateToolChart(data.by_tool || {});
-        updateModelChart(data.top_models || []);
-        updateToolsTable(data.by_tool || {});
-        updateCodexSessionsPanel(codexData);
-
-        lastCombinedModels = data.combined_models || [];
-        lastAppsBreakdown = { apps: data.apps || null, openclawModels: data.openclaw_models || null };
-
-        // Defer large tables to idle time to keep scroll responsive
-        scheduleIdle(() => {
-          if (seq != renderSeq) return;
-          if (lastAppsBreakdown && lastAppsBreakdown.apps) {
-            updateAppsBreakdown(lastAppsBreakdown.apps, lastAppsBreakdown.openclawModels);
-          }
-        });
-
-        scheduleIdle(() => {
-          if (seq != renderSeq) return;
-          updateCombinedModelsTable(lastCombinedModels);
-        });
+        if (isOverviewActive()) renderOverviewTab(usageData);
+        if (isSessionsActive()) renderSessionsTab();
       } catch (error) {
         console.error('Error fetching data:', error);
         alert('Failed to fetch data. Check console for details.');
@@ -1339,6 +1545,44 @@
       return raw ? raw.slice(0, 8) : '—';
     }
 
+    function formatSessionDateTime(value) {
+      return formatMonthDayTime(value);
+    }
+
+    function formatSessionTime(value) {
+      return formatMonthDayTime(value);
+    }
+
+    function buildCombinedSessionsData(responses) {
+      const toolKeys = ["codex", "claude", "opencode"];
+      const combinedSessions = [];
+      const summary = { session_count: 0, tokens: 0, cost: 0 };
+
+      toolKeys.forEach((tool) => {
+        const response = responses?.[tool];
+        if (!response) return;
+        const responseSummary = response.summary || {};
+        summary.session_count += Number(responseSummary.session_count || 0);
+        summary.tokens += Number(responseSummary.tokens || 0);
+        summary.cost += Number(responseSummary.cost || 0);
+        (response.sessions || []).forEach((session) => combinedSessions.push({ ...session, tool }));
+      });
+
+      combinedSessions.sort((a, b) => String(b.last_seen_at || "").localeCompare(String(a.last_seen_at || "")));
+
+      return {
+        tool: "combined",
+        tool_label: t("combinedSessions"),
+        latest_session: combinedSessions[0] || null,
+        sessions: combinedSessions,
+        summary,
+      };
+    }
+
+    function hasLoadedSessionResponses() {
+      return !!(lastSessionsResponses?.codex || lastSessionsResponses?.claude || lastSessionsResponses?.opencode);
+    }
+
     function groupSessionsByProject(sessions) {
       const groups = new Map();
       (sessions || []).forEach((session) => {
@@ -1356,101 +1600,129 @@
         .sort((a, b) => b.tokens - a.tokens);
     }
 
-    function updateCodexSessionsPanel(data) {
-      const current = data?.current_session || null;
+    function createNoDataRow(colSpan) {
+      const row = document.createElement("tr");
+      const cell = document.createElement("td");
+      cell.colSpan = colSpan;
+      cell.className = "text-center py-10";
+      cell.style.color = "var(--color-muted)";
+      cell.textContent = t("noData");
+      row.appendChild(cell);
+      return row;
+    }
+
+    function createTableCell(tag, className, text, style = null) {
+      const cell = document.createElement(tag);
+      cell.className = className;
+      cell.textContent = text;
+      if (style) cell.style.cssText = style;
+      return cell;
+    }
+
+    function updateSessionPanel(prefix, data, options = {}) {
+      const showTool = !!options.showTool;
+      const latest = data?.latest_session || null;
       const sessions = data?.sessions || [];
 
-      document.getElementById('codexCurrentProject').textContent = current?.project || t('noData');
-      document.getElementById('codexCurrentModel').textContent = current?.model || '—';
-      document.getElementById('codexCurrentInput').textContent = formatNumber(current?.tokens_in || 0);
-      document.getElementById('codexCurrentCache').textContent = formatNumber(current?.tokens_cache || 0);
-      document.getElementById('codexCurrentCachePct').textContent = current ? `${formatPercent(current.cache_ratio)} ${t('cache')}` : '—';
-      document.getElementById('codexCurrentOutput').textContent = formatNumber(current?.tokens_out || 0);
-      document.getElementById('codexCurrentTotal').textContent = formatNumber(current?.tokens || 0);
-      document.getElementById('codexCurrentEvents').textContent = formatNumber(current?.token_events || 0);
-      document.getElementById('codexCurrentSeen').textContent = current?.last_seen_at
-        ? new Date(current.last_seen_at).toLocaleString(currentLang === 'zh' ? 'zh-CN' : undefined)
-        : '—';
+      const latestProject = document.getElementById(`${prefix}LatestProject`);
+      const latestMeta = document.getElementById(`${prefix}LatestMeta`);
+      const latestInput = document.getElementById(`${prefix}LatestInput`);
+      const latestCache = document.getElementById(`${prefix}LatestCache`);
+      const latestCachePct = document.getElementById(`${prefix}LatestCachePct`);
+      const latestOutput = document.getElementById(`${prefix}LatestOutput`);
+      const latestTotal = document.getElementById(`${prefix}LatestTotal`);
+      const latestEvents = document.getElementById(`${prefix}LatestEvents`);
+      const latestSeen = document.getElementById(`${prefix}LatestSeen`);
 
-      const tbody = document.getElementById('codexSessionsTable');
+      if (latestProject) latestProject.textContent = latest?.project || t("noData");
+      if (latestMeta) {
+        if (!latest) latestMeta.textContent = "—";
+        else if (showTool) latestMeta.textContent = `${formatToolName(latest.tool)} · ${latest.model || "—"}`;
+        else latestMeta.textContent = latest.model || "—";
+      }
+      if (latestInput) latestInput.textContent = formatNumber(latest?.tokens_in || 0);
+      if (latestCache) latestCache.textContent = formatNumber(latest?.tokens_cache || 0);
+      if (latestCachePct) latestCachePct.textContent = latest ? `${formatPercent(latest.cache_ratio)} ${t("cache")}` : "—";
+      if (latestOutput) latestOutput.textContent = formatNumber(latest?.tokens_out || 0);
+      if (latestTotal) latestTotal.textContent = formatNumber(latest?.tokens || 0);
+      if (latestEvents) latestEvents.textContent = formatNumber(latest?.token_events || 0);
+      if (latestSeen) latestSeen.textContent = formatSessionDateTime(latest?.last_seen_at);
+
+      const tbody = document.getElementById(`${prefix}SessionsTable`);
       if (!tbody) return;
-
       if (!sessions.length) {
-        const row = document.createElement('tr');
-        row.innerHTML = `<td colspan="8" class="text-center py-10" style="color: var(--color-muted);">${t('noData')}</td>`;
-        tbody.replaceChildren(row);
+        tbody.replaceChildren(createNoDataRow(showTool ? 9 : 8));
         return;
       }
 
       const projectGroups = groupSessionsByProject(sessions);
       const frag = document.createDocumentFragment();
       projectGroups.forEach((group, groupIndex) => {
-        const detailsRow = document.createElement('tr');
-        detailsRow.className = 'border-b';
-        detailsRow.style.borderColor = 'rgba(226,232,240,0.9)';
+        const detailsRow = document.createElement("tr");
+        detailsRow.className = "border-b";
+        detailsRow.style.borderColor = "rgba(226,232,240,0.9)";
 
-        const projectCell = document.createElement('td');
-        projectCell.colSpan = 8;
-        projectCell.className = 'px-0 py-0';
+        const projectCell = document.createElement("td");
+        projectCell.colSpan = showTool ? 9 : 8;
+        projectCell.className = "px-0 py-0";
 
-        const details = document.createElement('details');
-        details.className = 'group';
+        const details = document.createElement("details");
+        details.className = "group";
         if (groupIndex === 0) details.open = true;
 
-        const summary = document.createElement('summary');
-        summary.className = 'list-none cursor-pointer px-4 py-3 hover:bg-slate-50 transition';
-        summary.innerHTML = `
-          <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
-            <div class="flex items-center gap-3">
-              <span class="mono font-extrabold text-slate-800">${group.project}</span>
-              <span class="text-xs text-slate-500">${formatNumber(group.sessions.length)} ${t('sessions')}</span>
-            </div>
-            <div class="flex flex-wrap items-center gap-3 text-xs md:text-sm">
-              <span class="text-slate-600">${formatNumber(group.tokens)} ${t('tokensUnit')}</span>
-              <span style="color:var(--color-cost)" class="font-bold">${formatCurrency(group.cost)}</span>
-              <span class="text-slate-500">${details.open ? '▾' : '▸'}</span>
-            </div>
-          </div>
-        `;
+        const summary = document.createElement("summary");
+        summary.className = "list-none cursor-pointer px-4 py-3 hover:bg-slate-50 transition";
 
-        summary.addEventListener('click', () => {
+        const summaryWrap = document.createElement("div");
+        summaryWrap.className = "flex flex-col md:flex-row md:items-center md:justify-between gap-2";
+
+        const left = document.createElement("div");
+        left.className = "flex items-center gap-3";
+        left.appendChild(createTableCell("span", "mono font-extrabold text-slate-800", group.project));
+        left.appendChild(createTableCell("span", "text-xs text-slate-500", `${formatNumber(group.sessions.length)} ${t("sessions")}`));
+
+        const right = document.createElement("div");
+        right.className = "flex flex-wrap items-center gap-3 text-xs md:text-sm";
+        right.appendChild(createTableCell("span", "text-slate-600", `${formatNumber(group.tokens)} ${t("tokensUnit")}`));
+        right.appendChild(createTableCell("span", "font-bold", formatCurrency(group.cost), "color: var(--color-cost);"));
+        const arrow = createTableCell("span", "text-slate-500", details.open ? "▾" : "▸");
+        right.appendChild(arrow);
+
+        summaryWrap.appendChild(left);
+        summaryWrap.appendChild(right);
+        summary.appendChild(summaryWrap);
+        summary.addEventListener("click", () => {
           requestAnimationFrame(() => {
-            const arrow = summary.querySelector('.text-slate-500:last-child');
-            if (arrow) arrow.textContent = details.open ? '▾' : '▸';
+            arrow.textContent = details.open ? "▾" : "▸";
           });
         });
 
-        const innerWrap = document.createElement('div');
-        innerWrap.className = 'px-4 pb-3';
+        const innerWrap = document.createElement("div");
+        innerWrap.className = "px-4 pb-3";
+        const innerTableWrap = document.createElement("div");
+        innerTableWrap.className = "overflow-x-auto";
+        const innerTable = document.createElement("table");
+        innerTable.className = "w-full text-sm";
+        const innerBody = document.createElement("tbody");
 
-        const innerTableWrap = document.createElement('div');
-        innerTableWrap.className = 'overflow-x-auto';
-
-        const innerTable = document.createElement('table');
-        innerTable.className = 'w-full text-sm';
-        innerTable.innerHTML = `
-          <tbody></tbody>
-        `;
-
-        const innerBody = innerTable.querySelector('tbody');
         group.sessions.forEach((session) => {
-          const row = document.createElement('tr');
-          row.className = 'border-t hover:bg-slate-50 transition cursor-pointer';
-          row.style.borderColor = 'rgba(226,232,240,0.65)';
-          row.innerHTML = `
-            <td class="py-3 px-4 text-slate-800 mono">${sessionShortId(session.session_id)}</td>
-            <td class="py-3 px-4 text-slate-700 mono">${session.model || '—'}</td>
-            <td class="py-3 px-4 text-right text-slate-700">${formatNumber(session.tokens_in || 0)}</td>
-            <td class="py-3 px-4 text-right text-slate-700">${formatNumber(session.tokens_cache || 0)}</td>
-            <td class="py-3 px-4 text-right text-slate-700">${formatNumber(session.tokens_out || 0)}</td>
-            <td class="py-3 px-4 text-right font-semibold text-slate-800">${formatNumber(session.tokens || 0)}</td>
-            <td class="py-3 px-4 text-right font-bold" style="color:var(--color-cost)">${formatCurrency(session.cost || 0)}</td>
-            <td class="py-3 px-4 text-right text-slate-500">${session.last_seen_at ? new Date(session.last_seen_at).toLocaleTimeString(currentLang === 'zh' ? 'zh-CN' : undefined, { hour: '2-digit', minute: '2-digit' }) : '—'}</td>
-          `;
-          row.addEventListener('click', () => openCodexSessionModal(session.session_id));
+          const row = document.createElement("tr");
+          row.className = "border-t hover:bg-slate-50 transition cursor-pointer";
+          row.style.borderColor = "rgba(226,232,240,0.65)";
+          row.appendChild(createTableCell("td", "py-3 px-4 text-slate-800 mono", sessionShortId(session.session_id)));
+          if (showTool) row.appendChild(createTableCell("td", "py-3 px-4 text-slate-700", formatToolName(session.tool)));
+          row.appendChild(createTableCell("td", "py-3 px-4 text-slate-700 mono", session.model || "—"));
+          row.appendChild(createTableCell("td", "py-3 px-4 text-right text-slate-700", formatNumber(session.tokens_in || 0)));
+          row.appendChild(createTableCell("td", "py-3 px-4 text-right text-slate-700", formatNumber(session.tokens_cache || 0)));
+          row.appendChild(createTableCell("td", "py-3 px-4 text-right text-slate-700", formatNumber(session.tokens_out || 0)));
+          row.appendChild(createTableCell("td", "py-3 px-4 text-right font-semibold text-slate-800", formatNumber(session.tokens || 0)));
+          row.appendChild(createTableCell("td", "py-3 px-4 text-right font-bold", formatCurrency(session.cost || 0), "color: var(--color-cost);"));
+          row.appendChild(createTableCell("td", "py-3 px-4 text-right text-slate-500", formatSessionTime(session.last_seen_at)));
+          row.addEventListener("click", () => openSessionModal(session.tool || prefix, session.session_id));
           innerBody.appendChild(row);
         });
 
+        innerTable.appendChild(innerBody);
         innerTableWrap.appendChild(innerTable);
         innerWrap.appendChild(innerTableWrap);
         details.appendChild(summary);
@@ -1460,6 +1732,15 @@
         frag.appendChild(detailsRow);
       });
       tbody.replaceChildren(frag);
+    }
+
+    function renderSessionsTab() {
+      if (!hasLoadedSessionResponses()) return;
+      updateSessionPanel("codex", lastSessionsResponses.codex);
+      updateSessionPanel("claude", lastSessionsResponses.claude);
+      updateSessionPanel("opencode", lastSessionsResponses.opencode);
+      lastSessionsResponses.combined = buildCombinedSessionsData(lastSessionsResponses);
+      updateSessionPanel("combined", lastSessionsResponses.combined, { showTool: true });
     }
 
     function setShareBar(prefix, value, total) {
@@ -1472,9 +1753,8 @@
       return pct;
     }
 
-    function closeCodexSessionModal() {
-      const modal = document.getElementById('codexSessionModal');
-      modal.classList.add('hidden');
+    function closeSessionModal() {
+      document.getElementById("sessionModal").classList.add("hidden");
     }
 
     function buildTurnSeries(turns) {
@@ -1507,124 +1787,190 @@
       return { labels, perTurn, cumulative };
     }
 
+    function formatTimeOnly(value) {
+      if (!value) return "—";
+      const dt = new Date(value);
+      const hh = String(dt.getHours()).padStart(2, "0");
+      const minute = String(dt.getMinutes()).padStart(2, "0");
+      return `${hh}:${minute}`;
+    }
+
+    function sameCalendarDay(a, b) {
+      return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+    }
+
+    function buildTimeBucketLabels(bucketTimes) {
+      const dates = bucketTimes.map((ts) => new Date(ts));
+      const allSameDay = dates.length <= 1 || dates.every((dt) => sameCalendarDay(dt, dates[0]));
+      return dates.map((dt, index) => {
+        if (allSameDay) return formatTimeOnly(dt.toISOString());
+        if (index === 0 || !sameCalendarDay(dt, dates[index - 1])) return formatMonthDayTime(dt.toISOString());
+        return formatTimeOnly(dt.toISOString());
+      });
+    }
+
+    function buildTimeCumulativeSeries(turns) {
+      const rows = (turns || []).map((turn) => ({
+        timestampMs: Number(new Date(turn.timestamp).getTime() || 0),
+        input: Number(turn.tokens_in || 0),
+        cache: Number(turn.tokens_cache || 0),
+        output: Number(turn.tokens_out || 0),
+        reasoning: Number(turn.tokens_reasoning || 0),
+        total: Number(turn.tokens || 0),
+      })).filter((row) => row.timestampMs > 0).sort((a, b) => a.timestampMs - b.timestampMs);
+
+      if (!rows.length) return { labels: [], cumulative: { input: [], cache: [], output: [], reasoning: [], total: [] } };
+      if (rows.length === 1 || rows[0].timestampMs === rows[rows.length - 1].timestampMs) {
+        return {
+          labels: [formatMonthDayTime(new Date(rows[0].timestampMs).toISOString())],
+          cumulative: {
+            input: [rows[0].input],
+            cache: [rows[0].cache],
+            output: [rows[0].output],
+            reasoning: [rows[0].reasoning],
+            total: [rows[0].total],
+          },
+        };
+      }
+
+      const minTs = rows[0].timestampMs;
+      const maxTs = rows[rows.length - 1].timestampMs;
+      const pointCount = Math.min(16, Math.max(8, Math.ceil(Math.sqrt(rows.length))));
+      const bucketTimes = [];
+      for (let i = 0; i < pointCount; i++) {
+        const ratio = pointCount === 1 ? 0 : i / (pointCount - 1);
+        bucketTimes.push(Math.round(minTs + (maxTs - minTs) * ratio));
+      }
+      bucketTimes[0] = minTs;
+      bucketTimes[bucketTimes.length - 1] = maxTs;
+
+      const cumulative = { input: [], cache: [], output: [], reasoning: [], total: [] };
+      let cursor = 0, inputSum = 0, cacheSum = 0, outputSum = 0, reasoningSum = 0, totalSum = 0;
+      bucketTimes.forEach((bucketTime) => {
+        while (cursor < rows.length && rows[cursor].timestampMs <= bucketTime) {
+          inputSum += rows[cursor].input;
+          cacheSum += rows[cursor].cache;
+          outputSum += rows[cursor].output;
+          reasoningSum += rows[cursor].reasoning;
+          totalSum += rows[cursor].total;
+          cursor += 1;
+        }
+        cumulative.input.push(inputSum);
+        cumulative.cache.push(cacheSum);
+        cumulative.output.push(outputSum);
+        cumulative.reasoning.push(reasoningSum);
+        cumulative.total.push(totalSum);
+      });
+      return { labels: buildTimeBucketLabels(bucketTimes), cumulative };
+    }
+
     function makeTurnDatasets(series) {
       return [
-        { label: t('freshInput'), data: series.input, borderColor: '#1E40AF', backgroundColor: 'rgba(30,64,175,0.12)', tension: 0.25, pointRadius: 2 },
-        { label: t('cacheRead'), data: series.cache, borderColor: '#0F766E', backgroundColor: 'rgba(15,118,110,0.12)', tension: 0.25, pointRadius: 2 },
-        { label: t('output'), data: series.output, borderColor: '#F59E0B', backgroundColor: 'rgba(245,158,11,0.12)', tension: 0.25, pointRadius: 2 },
-        { label: t('reasoning'), data: series.reasoning, borderColor: '#7C3AED', backgroundColor: 'rgba(124,58,237,0.12)', tension: 0.25, pointRadius: 2 },
-        { label: t('total'), data: series.total, borderColor: '#111827', backgroundColor: 'rgba(17,24,39,0.12)', tension: 0.25, pointRadius: 2, borderDash: [6, 4] },
+        { label: t("input"), data: series.input, borderColor: "#1E40AF", backgroundColor: "rgba(30,64,175,0.12)", tension: 0.25, pointRadius: 2 },
+        { label: t("cacheRead"), data: series.cache, borderColor: "#0F766E", backgroundColor: "rgba(15,118,110,0.12)", tension: 0.25, pointRadius: 2 },
+        { label: t("output"), data: series.output, borderColor: "#F59E0B", backgroundColor: "rgba(245,158,11,0.12)", tension: 0.25, pointRadius: 2 },
+        { label: t("reasoning"), data: series.reasoning, borderColor: "#7C3AED", backgroundColor: "rgba(124,58,237,0.12)", tension: 0.25, pointRadius: 2 },
+        { label: t("total"), data: series.total, borderColor: "#111827", backgroundColor: "rgba(17,24,39,0.12)", tension: 0.25, pointRadius: 2, borderDash: [6, 4] },
       ];
     }
 
-    function buildTurnChartOptions() {
+    function buildTurnChartOptions(xAxisTitle, options = {}) {
+      const maxTicksLimit = Number(options.maxTicksLimit || 0) || undefined;
       return {
         responsive: true,
         maintainAspectRatio: false,
         animation: false,
-        interaction: { mode: 'index', intersect: false },
+        interaction: { mode: "index", intersect: false },
         scales: {
           x: {
-            title: { display: true, text: 'Turn' },
-            ticks: { color: '#475569' },
-            grid: { color: 'rgba(226,232,240,0.55)' },
+            title: { display: true, text: xAxisTitle },
+            ticks: { color: "#475569", maxTicksLimit, autoSkip: true },
+            grid: { color: "rgba(226,232,240,0.55)" },
           },
           y: {
             beginAtZero: true,
-            ticks: {
-              color: '#475569',
-              callback: (value) => formatNumber(value),
-            },
-            grid: { color: 'rgba(226,232,240,0.55)' },
+            ticks: { color: "#475569", callback: (value) => formatNumber(value) },
+            grid: { color: "rgba(226,232,240,0.55)" },
           },
         },
         plugins: {
-          legend: { position: 'bottom' },
-          tooltip: {
-            callbacks: {
-              label: (context) => `${context.dataset.label}: ${formatNumber(context.raw || 0)}`,
-            },
-          },
+          legend: { position: "bottom" },
+          tooltip: { callbacks: { label: (context) => `${context.dataset.label}: ${formatNumber(context.raw || 0)}` } },
         },
       };
     }
 
-    function renderCodexSessionCharts(turns) {
+    function renderSessionCharts(turns) {
       const { labels, perTurn, cumulative } = buildTurnSeries(turns);
-      const perTurnCanvas = document.getElementById('codexSessionPerTurnChart');
-      const cumulativeCanvas = document.getElementById('codexSessionCumulativeChart');
-      if (!perTurnCanvas || !cumulativeCanvas) return;
+      const timeSeries = buildTimeCumulativeSeries(turns);
+      const perTurnCanvas = document.getElementById("sessionPerTurnChart");
+      const cumulativeCanvas = document.getElementById("sessionCumulativeChart");
+      const timeCumulativeCanvas = document.getElementById("sessionTimeCumulativeChart");
+      if (!perTurnCanvas || !cumulativeCanvas || !timeCumulativeCanvas) return;
 
-      if (codexSessionPerTurnChart) {
-        codexSessionPerTurnChart.destroy();
-        codexSessionPerTurnChart = null;
-      }
-      if (codexSessionCumulativeChart) {
-        codexSessionCumulativeChart.destroy();
-        codexSessionCumulativeChart = null;
-      }
+      if (sessionPerTurnChart) sessionPerTurnChart.destroy();
+      if (sessionCumulativeChart) sessionCumulativeChart.destroy();
+      if (sessionTimeCumulativeChart) sessionTimeCumulativeChart.destroy();
 
-      codexSessionPerTurnChart = new Chart(perTurnCanvas.getContext('2d'), {
-        type: 'line',
-        data: {
-          labels,
-          datasets: makeTurnDatasets(perTurn),
-        },
-        options: buildTurnChartOptions(),
+      sessionPerTurnChart = new Chart(perTurnCanvas.getContext("2d"), {
+        type: "line",
+        data: { labels, datasets: makeTurnDatasets(perTurn) },
+        options: buildTurnChartOptions("Turn", { maxTicksLimit: 12 }),
       });
-
-      codexSessionCumulativeChart = new Chart(cumulativeCanvas.getContext('2d'), {
-        type: 'line',
-        data: {
-          labels,
-          datasets: makeTurnDatasets(cumulative),
-        },
-        options: buildTurnChartOptions(),
+      sessionCumulativeChart = new Chart(cumulativeCanvas.getContext("2d"), {
+        type: "line",
+        data: { labels, datasets: makeTurnDatasets(cumulative) },
+        options: buildTurnChartOptions("Turn", { maxTicksLimit: 12 }),
+      });
+      sessionTimeCumulativeChart = new Chart(timeCumulativeCanvas.getContext("2d"), {
+        type: "line",
+        data: { labels: timeSeries.labels, datasets: makeTurnDatasets(timeSeries.cumulative) },
+        options: buildTurnChartOptions(t("time"), { maxTicksLimit: 8 }),
       });
     }
 
-    async function openCodexSessionModal(sessionId) {
-      const modal = document.getElementById('codexSessionModal');
-      modal.classList.remove('hidden');
-      document.getElementById('codexSessionModalTitle').textContent = sessionShortId(sessionId);
-      document.getElementById('codexSessionModalMeta').textContent = t('loading');
-      document.getElementById('codexSessionModalInput').textContent = '-';
-      document.getElementById('codexSessionModalInputPct').textContent = '-';
-      document.getElementById('codexSessionModalCache').textContent = '-';
-      document.getElementById('codexSessionModalCachePct').textContent = '-';
-      document.getElementById('codexSessionModalOutput').textContent = '-';
-      document.getElementById('codexSessionModalOutputPct').textContent = '-';
-      document.getElementById('codexSessionModalTotal').textContent = '-';
-      document.getElementById('codexSessionModalReasoningPct').textContent = '-';
+    async function openSessionModal(tool, sessionId) {
+      const modal = document.getElementById("sessionModal");
+      modal.classList.remove("hidden");
+      document.getElementById("sessionModalTitle").textContent = sessionShortId(sessionId);
+      document.getElementById("sessionModalMeta").textContent = t("loading");
+      document.getElementById("sessionModalInput").textContent = "-";
+      document.getElementById("sessionModalInputPct").textContent = "-";
+      document.getElementById("sessionModalCache").textContent = "-";
+      document.getElementById("sessionModalCachePct").textContent = "-";
+      document.getElementById("sessionModalOutput").textContent = "-";
+      document.getElementById("sessionModalOutputPct").textContent = "-";
+      document.getElementById("sessionModalTotal").textContent = "-";
+      document.getElementById("sessionModalReasoningPct").textContent = "-";
 
       try {
-        const response = await fetch(`/api/codex/session?session_id=${encodeURIComponent(sessionId)}`);
+        const response = await fetch(`/api/session?tool=${encodeURIComponent(tool)}&session_id=${encodeURIComponent(sessionId)}`);
         const data = await response.json();
         const session = data.session || {};
         const turns = data.turns || [];
-        document.getElementById('codexSessionModalTitle').textContent = `${session.project || '—'} · ${sessionShortId(session.session_id)}`;
-        document.getElementById('codexSessionModalMeta').textContent = `${session.model || '—'} · ${formatNumber(session.token_events || 0)} ${t('events')}`;
-        document.getElementById('codexSessionModalInput').textContent = formatNumber(session.tokens_in || 0);
-        document.getElementById('codexSessionModalCache').textContent = formatNumber(session.tokens_cache || 0);
-        document.getElementById('codexSessionModalOutput').textContent = formatNumber(session.tokens_out || 0);
-        document.getElementById('codexSessionModalTotal').textContent = formatNumber(session.tokens || 0);
+        document.getElementById("sessionModalTitle").textContent = `${session.project || "—"} · ${sessionShortId(session.session_id)}`;
+        document.getElementById("sessionModalMeta").textContent = `${formatToolName(tool)} · ${session.model || "—"} · ${formatNumber(session.token_events || 0)} ${t("events")}`;
+        document.getElementById("sessionModalInput").textContent = formatNumber(session.tokens_in || 0);
+        document.getElementById("sessionModalCache").textContent = formatNumber(session.tokens_cache || 0);
+        document.getElementById("sessionModalOutput").textContent = formatNumber(session.tokens_out || 0);
+        document.getElementById("sessionModalTotal").textContent = formatNumber(session.tokens || 0);
         const total = Number(session.tokens || 0);
         const inputPct = total > 0 ? Number(session.tokens_in || 0) / total : 0;
         const cachePct = total > 0 ? Number(session.tokens_cache || 0) / total : 0;
         const outputPct = total > 0 ? Number(session.tokens_out || 0) / total : 0;
         const reasoningPct = total > 0 ? Number(session.tokens_reasoning || 0) / total : 0;
-        document.getElementById('codexSessionModalInputPct').textContent = formatPercent(inputPct);
-        document.getElementById('codexSessionModalCachePct').textContent = formatPercent(cachePct);
-        document.getElementById('codexSessionModalOutputPct').textContent = formatPercent(outputPct);
-        document.getElementById('codexSessionModalReasoningPct').textContent = `${t('reasoning')}: ${formatPercent(reasoningPct)}`;
-        setShareBar('codexSessionShareInput', session.tokens_in || 0, total);
-        setShareBar('codexSessionShareCache', session.tokens_cache || 0, total);
-        setShareBar('codexSessionShareOutput', session.tokens_out || 0, total);
-        setShareBar('codexSessionShareReasoning', session.tokens_reasoning || 0, total);
-        renderCodexSessionCharts(turns);
+        document.getElementById("sessionModalInputPct").textContent = formatPercent(inputPct);
+        document.getElementById("sessionModalCachePct").textContent = formatPercent(cachePct);
+        document.getElementById("sessionModalOutputPct").textContent = formatPercent(outputPct);
+        document.getElementById("sessionModalReasoningPct").textContent = `${t("reasoning")}: ${formatPercent(reasoningPct)}`;
+        setShareBar("sessionShareInput", session.tokens_in || 0, total);
+        setShareBar("sessionShareCache", session.tokens_cache || 0, total);
+        setShareBar("sessionShareOutput", session.tokens_out || 0, total);
+        setShareBar("sessionShareReasoning", session.tokens_reasoning || 0, total);
+        renderSessionCharts(turns);
       } catch (error) {
-        console.error('Error loading codex session detail:', error);
-        document.getElementById('codexSessionModalMeta').textContent = 'Failed to load session detail';
+        console.error("Error loading session detail:", error);
+        document.getElementById("sessionModalMeta").textContent = "Failed to load session detail";
       }
     }
 
@@ -1942,34 +2288,15 @@
         document.getElementById(`${tab}-content`).classList.add('active');
 
         if (tab === 'stats') loadStats();
-        if (tab === 'overview' && lastUsageResponse) {
-          try {
-            document.getElementById('totalTokens').textContent = formatNumber(lastUsageResponse.total_tokens);
-            document.getElementById('totalCost').textContent = formatCurrency(lastUsageResponse.total_cost);
-            if (lastUsageResponse.top_models && lastUsageResponse.top_models.length > 0) {
-              const top = lastUsageResponse.top_models[0];
-              document.getElementById('topModel').textContent = top.name;
-              document.getElementById('topModelMeta').textContent = `${formatCurrency(top.cost)} · ${formatNumber(top.tokens)} ${t('tokensUnit')}`;
-            }
-            updateToolChart(lastUsageResponse.by_tool || {});
-            updateModelChart(lastUsageResponse.top_models || []);
-            updateToolsTable(lastUsageResponse.by_tool || {});
-            updateCodexSessionsPanel(lastCodexSessionsResponse);
-            lastCombinedModels = lastUsageResponse.combined_models || [];
-            lastAppsBreakdown = { apps: lastUsageResponse.apps || null, openclawModels: lastUsageResponse.openclaw_models || null };
-            scheduleIdle(() => {
-              if (lastAppsBreakdown && lastAppsBreakdown.apps) updateAppsBreakdown(lastAppsBreakdown.apps, lastAppsBreakdown.openclawModels);
-            });
-            scheduleIdle(() => updateCombinedModelsTable(lastCombinedModels));
-          } catch (e) {}
-        }
+        if (tab === 'overview' && lastUsageResponse) renderOverviewTab(lastUsageResponse);
+        if (tab === 'sessions' && hasLoadedSessionResponses()) renderSessionsTab();
       });
     });
 
-    document.getElementById('codexSessionModalClose').addEventListener('click', closeCodexSessionModal);
-    document.getElementById('codexSessionModalBackdrop').addEventListener('click', closeCodexSessionModal);
+    document.getElementById('sessionModalClose').addEventListener('click', closeSessionModal);
+    document.getElementById('sessionModalBackdrop').addEventListener('click', closeSessionModal);
     document.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape') closeCodexSessionModal();
+      if (event.key === 'Escape') closeSessionModal();
     });
 
     // Stats
@@ -3018,7 +3345,7 @@
     // Auto-refresh every 5 minutes
     setInterval(() => {
       if (document.hidden) return;
-      if (!isOverviewActive()) return;
+      if (!isOverviewActive() && !isSessionsActive()) return;
       updateDashboard();
     }, 5 * 60 * 1000);
 

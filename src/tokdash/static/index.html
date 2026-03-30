@@ -436,6 +436,65 @@
         </div>
       </section>
 
+      <section class="surface p-5 mt-6">
+        <div class="flex items-center justify-between gap-3 mb-4">
+          <div>
+            <h2 class="text-base font-extrabold mono" data-i18n="codexSessions">Codex Sessions</h2>
+            <p class="text-xs mt-1" style="color: var(--color-muted);" data-i18n="codexSessionsDesc">Current conversation summary plus Codex sessions for the selected range.</p>
+          </div>
+        </div>
+
+        <div id="codexCurrentSession" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4 mb-5">
+          <div class="surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="currentSession">Current Session</div>
+            <div id="codexCurrentProject" class="mt-2 font-extrabold mono">Loading…</div>
+            <div id="codexCurrentModel" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
+          </div>
+          <div class="surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="freshInput">Fresh Input</div>
+            <div id="codexCurrentInput" class="mt-2 font-extrabold">-</div>
+          </div>
+          <div class="surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="cacheRead">Cache Read</div>
+            <div id="codexCurrentCache" class="mt-2 font-extrabold">-</div>
+            <div id="codexCurrentCachePct" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
+          </div>
+          <div class="surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="output">Output</div>
+            <div id="codexCurrentOutput" class="mt-2 font-extrabold">-</div>
+          </div>
+          <div class="surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="totalTokens">Total Tokens</div>
+            <div id="codexCurrentTotal" class="mt-2 font-extrabold">-</div>
+          </div>
+          <div class="surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="events">Events</div>
+            <div id="codexCurrentEvents" class="mt-2 font-extrabold">-</div>
+            <div id="codexCurrentSeen" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
+          </div>
+        </div>
+
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm" aria-label="Codex sessions table">
+            <thead>
+              <tr class="border-b" style="border-color: var(--color-border);">
+                <th class="text-left py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="session">Session</th>
+                <th class="text-left py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="model">Model</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="freshInput">Fresh Input</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cache">Cache</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="output">Output</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="total">Total</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cost">Cost</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="lastUpdated">Last updated</th>
+              </tr>
+            </thead>
+            <tbody id="codexSessionsTable">
+              <tr><td colspan="8" class="text-center py-10" style="color: var(--color-muted);" data-i18n="loading">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
     </div>
 
     <!-- Stats Tab -->
@@ -635,6 +694,97 @@
 
   </div>
 
+  <div id="codexSessionModal" class="hidden fixed inset-0 z-50">
+    <div id="codexSessionModalBackdrop" class="absolute inset-0 bg-slate-950/50"></div>
+    <div class="absolute inset-0 p-4 sm:p-8 overflow-y-auto">
+      <div class="max-w-5xl mx-auto surface p-5 sm:p-6 relative">
+        <div class="flex items-start justify-between gap-4 mb-4">
+          <div>
+            <h3 id="codexSessionModalTitle" class="text-lg font-extrabold mono">Session</h3>
+            <p id="codexSessionModalMeta" class="text-sm mt-1" style="color: var(--color-muted);">-</p>
+          </div>
+          <button id="codexSessionModalClose" class="btn btn-ghost" type="button" data-i18n="close">Close</button>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-5">
+          <div class="surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="freshInput">Fresh Input</div>
+            <div id="codexSessionModalInput" class="mt-2 font-extrabold">-</div>
+            <div id="codexSessionModalInputPct" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
+          </div>
+          <div class="surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="cacheRead">Cache Read</div>
+            <div id="codexSessionModalCache" class="mt-2 font-extrabold">-</div>
+            <div id="codexSessionModalCachePct" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
+          </div>
+          <div class="surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="output">Output</div>
+            <div id="codexSessionModalOutput" class="mt-2 font-extrabold">-</div>
+            <div id="codexSessionModalOutputPct" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
+          </div>
+          <div class="surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="totalTokens">Total Tokens</div>
+            <div id="codexSessionModalTotal" class="mt-2 font-extrabold">-</div>
+            <div id="codexSessionModalReasoningPct" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
+          </div>
+        </div>
+        <div class="surface p-4 mb-5">
+          <div class="flex items-center justify-between mb-3">
+            <h4 class="text-base font-extrabold mono" data-i18n="tokenShare">Token Share</h4>
+            <div class="text-xs" style="color: var(--color-muted);" data-i18n="total">Total</div>
+          </div>
+          <div class="space-y-3">
+            <div>
+              <div class="flex items-center justify-between text-sm mb-1">
+                <span data-i18n="freshInput">Fresh Input</span>
+                <span id="codexSessionShareInputLabel">-</span>
+              </div>
+              <div class="h-2 rounded-full bg-slate-200/80 overflow-hidden"><div id="codexSessionShareInputBar" class="h-full rounded-full" style="width:0%; background:#1E40AF;"></div></div>
+            </div>
+            <div>
+              <div class="flex items-center justify-between text-sm mb-1">
+                <span data-i18n="cacheRead">Cache Read</span>
+                <span id="codexSessionShareCacheLabel">-</span>
+              </div>
+              <div class="h-2 rounded-full bg-slate-200/80 overflow-hidden"><div id="codexSessionShareCacheBar" class="h-full rounded-full" style="width:0%; background:#0F766E;"></div></div>
+            </div>
+            <div>
+              <div class="flex items-center justify-between text-sm mb-1">
+                <span data-i18n="output">Output</span>
+                <span id="codexSessionShareOutputLabel">-</span>
+              </div>
+              <div class="h-2 rounded-full bg-slate-200/80 overflow-hidden"><div id="codexSessionShareOutputBar" class="h-full rounded-full" style="width:0%; background:#F59E0B;"></div></div>
+            </div>
+            <div>
+              <div class="flex items-center justify-between text-sm mb-1">
+                <span data-i18n="reasoning">Reasoning</span>
+                <span id="codexSessionShareReasoningLabel">-</span>
+              </div>
+              <div class="h-2 rounded-full bg-slate-200/80 overflow-hidden"><div id="codexSessionShareReasoningBar" class="h-full rounded-full" style="width:0%; background:#7C3AED;"></div></div>
+            </div>
+          </div>
+        </div>
+        <div class="surface p-4 mb-5">
+          <div class="flex items-center justify-between mb-3">
+            <h4 class="text-base font-extrabold mono" data-i18n="turnTrend">Turn Trend</h4>
+            <div class="text-xs" style="color: var(--color-muted);" data-i18n="tokens">Tokens</div>
+          </div>
+          <div class="h-[320px]">
+            <canvas id="codexSessionPerTurnChart" aria-label="Codex session per-turn trend chart" role="img"></canvas>
+          </div>
+        </div>
+        <div class="surface p-4">
+          <div class="flex items-center justify-between mb-3">
+            <h4 class="text-base font-extrabold mono" data-i18n="cumulativeTurnTrend">Cumulative Turn Trend</h4>
+            <div class="text-xs" style="color: var(--color-muted);" data-i18n="tokens">Tokens</div>
+          </div>
+          <div class="h-[320px]">
+            <canvas id="codexSessionCumulativeChart" aria-label="Codex session cumulative turn trend chart" role="img"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script>
     // Dashboard v3.11.0 - i18n + dark mode
     // - "Streak" label (not "Current Streak")
@@ -645,11 +795,14 @@
 
     let toolChart = null;
     let modelChart = null;
+    let codexSessionPerTurnChart = null;
+    let codexSessionCumulativeChart = null;
 
     // Render perf controls
     let updateInFlight = false;
     let renderSeq = 0;
     let lastUsageResponse = null;
+    let lastCodexSessionsResponse = null;
     let lastCombinedModels = [];
     let lastAppsBreakdown = null;
     const MAX_COMBINED_MODELS_ROWS = 300;
@@ -686,6 +839,16 @@
         appsModelsBreakdown: 'Apps & Models Breakdown',
         combinedModels: 'Combined Models',
         combinedModelsDesc: 'Unified view across all apps and providers. Models with the same name are aggregated regardless of source.',
+        codexSessions: 'Codex Sessions',
+        codexSessionsDesc: 'Current conversation summary plus Codex sessions for the selected range.',
+        currentSession: 'Current Session',
+        freshInput: 'Fresh Input',
+        events: 'Events',
+        session: 'Session',
+        project: 'Project',
+        tokenShare: 'Token Share',
+        turnTrend: 'Turn Trend',
+        cumulativeTurnTrend: 'Cumulative Turn Trend',
         showAll: 'Show all',
         showTop: 'Show top',
         tool: 'Tool',
@@ -778,6 +941,16 @@
         appsModelsBreakdown: '应用与模型明细',
         combinedModels: '合并模型',
         combinedModelsDesc: '跨所有应用和服务商的统一视图。同名模型会自动合并，无论其来源。',
+        codexSessions: 'Codex 会话',
+        codexSessionsDesc: '显示当前这轮对话摘要，以及所选时间范围内的 Codex 会话列表。',
+        currentSession: '当前会话',
+        freshInput: '新输入',
+        events: '事件数',
+        session: '会话',
+        project: '项目',
+        tokenShare: 'Token 占比',
+        turnTrend: '轮次趋势',
+        cumulativeTurnTrend: '累计轮次趋势',
         showAll: '显示全部',
         showTop: '显示前列',
         tool: '工具',
@@ -970,6 +1143,7 @@
         updateToolsTable(lastUsageResponse.by_tool || {});
         if (lastAppsBreakdown?.apps) updateAppsBreakdown(lastAppsBreakdown.apps, lastAppsBreakdown.openclawModels);
         updateCombinedModelsTable(lastCombinedModels);
+        updateCodexSessionsPanel(lastCodexSessionsResponse);
       }
       if (document.getElementById('stats-content').classList.contains('active')) {
         loadStats({ preserveNavigation: true });
@@ -1094,9 +1268,12 @@
       refreshBtn.disabled = true;
 
       try {
-        const response = await fetch(apiUrl);
+        const codexApiUrl = apiUrl.replace('/api/usage?', '/api/codex/sessions?');
+        const [response, codexResponse] = await Promise.all([fetch(apiUrl), fetch(codexApiUrl)]);
         const data = await response.json();
+        const codexData = await codexResponse.json();
         lastUsageResponse = data;
+        lastCodexSessionsResponse = codexData;
 
         // Update timestamp early (header is always visible)
         updateTimestamp();
@@ -1120,6 +1297,7 @@
         updateToolChart(data.by_tool || {});
         updateModelChart(data.top_models || []);
         updateToolsTable(data.by_tool || {});
+        updateCodexSessionsPanel(codexData);
 
         lastCombinedModels = data.combined_models || [];
         lastAppsBreakdown = { apps: data.apps || null, openclawModels: data.openclaw_models || null };
@@ -1149,6 +1327,304 @@
           ${t('refresh')}
         `;
         refreshBtn.disabled = false;
+      }
+    }
+
+    function formatPercent(value) {
+      return `${(Number(value || 0) * 100).toFixed(1)}%`;
+    }
+
+    function sessionShortId(id) {
+      const raw = String(id || '');
+      return raw ? raw.slice(0, 8) : '—';
+    }
+
+    function groupSessionsByProject(sessions) {
+      const groups = new Map();
+      (sessions || []).forEach((session) => {
+        const key = session.project || 'unknown';
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(session);
+      });
+      return Array.from(groups.entries())
+        .map(([project, items]) => ({
+          project,
+          sessions: items.sort((a, b) => String(b.last_seen_at || '').localeCompare(String(a.last_seen_at || ''))),
+          tokens: items.reduce((sum, item) => sum + Number(item.tokens || 0), 0),
+          cost: items.reduce((sum, item) => sum + Number(item.cost || 0), 0),
+        }))
+        .sort((a, b) => b.tokens - a.tokens);
+    }
+
+    function updateCodexSessionsPanel(data) {
+      const current = data?.current_session || null;
+      const sessions = data?.sessions || [];
+
+      document.getElementById('codexCurrentProject').textContent = current?.project || t('noData');
+      document.getElementById('codexCurrentModel').textContent = current?.model || '—';
+      document.getElementById('codexCurrentInput').textContent = formatNumber(current?.tokens_in || 0);
+      document.getElementById('codexCurrentCache').textContent = formatNumber(current?.tokens_cache || 0);
+      document.getElementById('codexCurrentCachePct').textContent = current ? `${formatPercent(current.cache_ratio)} ${t('cache')}` : '—';
+      document.getElementById('codexCurrentOutput').textContent = formatNumber(current?.tokens_out || 0);
+      document.getElementById('codexCurrentTotal').textContent = formatNumber(current?.tokens || 0);
+      document.getElementById('codexCurrentEvents').textContent = formatNumber(current?.token_events || 0);
+      document.getElementById('codexCurrentSeen').textContent = current?.last_seen_at
+        ? new Date(current.last_seen_at).toLocaleString(currentLang === 'zh' ? 'zh-CN' : undefined)
+        : '—';
+
+      const tbody = document.getElementById('codexSessionsTable');
+      if (!tbody) return;
+
+      if (!sessions.length) {
+        const row = document.createElement('tr');
+        row.innerHTML = `<td colspan="8" class="text-center py-10" style="color: var(--color-muted);">${t('noData')}</td>`;
+        tbody.replaceChildren(row);
+        return;
+      }
+
+      const projectGroups = groupSessionsByProject(sessions);
+      const frag = document.createDocumentFragment();
+      projectGroups.forEach((group, groupIndex) => {
+        const detailsRow = document.createElement('tr');
+        detailsRow.className = 'border-b';
+        detailsRow.style.borderColor = 'rgba(226,232,240,0.9)';
+
+        const projectCell = document.createElement('td');
+        projectCell.colSpan = 8;
+        projectCell.className = 'px-0 py-0';
+
+        const details = document.createElement('details');
+        details.className = 'group';
+        if (groupIndex === 0) details.open = true;
+
+        const summary = document.createElement('summary');
+        summary.className = 'list-none cursor-pointer px-4 py-3 hover:bg-slate-50 transition';
+        summary.innerHTML = `
+          <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+            <div class="flex items-center gap-3">
+              <span class="mono font-extrabold text-slate-800">${group.project}</span>
+              <span class="text-xs text-slate-500">${formatNumber(group.sessions.length)} ${t('sessions')}</span>
+            </div>
+            <div class="flex flex-wrap items-center gap-3 text-xs md:text-sm">
+              <span class="text-slate-600">${formatNumber(group.tokens)} ${t('tokensUnit')}</span>
+              <span style="color:var(--color-cost)" class="font-bold">${formatCurrency(group.cost)}</span>
+              <span class="text-slate-500">${details.open ? '▾' : '▸'}</span>
+            </div>
+          </div>
+        `;
+
+        summary.addEventListener('click', () => {
+          requestAnimationFrame(() => {
+            const arrow = summary.querySelector('.text-slate-500:last-child');
+            if (arrow) arrow.textContent = details.open ? '▾' : '▸';
+          });
+        });
+
+        const innerWrap = document.createElement('div');
+        innerWrap.className = 'px-4 pb-3';
+
+        const innerTableWrap = document.createElement('div');
+        innerTableWrap.className = 'overflow-x-auto';
+
+        const innerTable = document.createElement('table');
+        innerTable.className = 'w-full text-sm';
+        innerTable.innerHTML = `
+          <tbody></tbody>
+        `;
+
+        const innerBody = innerTable.querySelector('tbody');
+        group.sessions.forEach((session) => {
+          const row = document.createElement('tr');
+          row.className = 'border-t hover:bg-slate-50 transition cursor-pointer';
+          row.style.borderColor = 'rgba(226,232,240,0.65)';
+          row.innerHTML = `
+            <td class="py-3 px-4 text-slate-800 mono">${sessionShortId(session.session_id)}</td>
+            <td class="py-3 px-4 text-slate-700 mono">${session.model || '—'}</td>
+            <td class="py-3 px-4 text-right text-slate-700">${formatNumber(session.tokens_in || 0)}</td>
+            <td class="py-3 px-4 text-right text-slate-700">${formatNumber(session.tokens_cache || 0)}</td>
+            <td class="py-3 px-4 text-right text-slate-700">${formatNumber(session.tokens_out || 0)}</td>
+            <td class="py-3 px-4 text-right font-semibold text-slate-800">${formatNumber(session.tokens || 0)}</td>
+            <td class="py-3 px-4 text-right font-bold" style="color:var(--color-cost)">${formatCurrency(session.cost || 0)}</td>
+            <td class="py-3 px-4 text-right text-slate-500">${session.last_seen_at ? new Date(session.last_seen_at).toLocaleTimeString(currentLang === 'zh' ? 'zh-CN' : undefined, { hour: '2-digit', minute: '2-digit' }) : '—'}</td>
+          `;
+          row.addEventListener('click', () => openCodexSessionModal(session.session_id));
+          innerBody.appendChild(row);
+        });
+
+        innerTableWrap.appendChild(innerTable);
+        innerWrap.appendChild(innerTableWrap);
+        details.appendChild(summary);
+        details.appendChild(innerWrap);
+        projectCell.appendChild(details);
+        detailsRow.appendChild(projectCell);
+        frag.appendChild(detailsRow);
+      });
+      tbody.replaceChildren(frag);
+    }
+
+    function setShareBar(prefix, value, total) {
+      const pct = total > 0 ? (Number(value || 0) / total) * 100 : 0;
+      const label = `${formatPercent(pct / 100)} · ${formatNumber(value || 0)}`;
+      const labelEl = document.getElementById(`${prefix}Label`);
+      const barEl = document.getElementById(`${prefix}Bar`);
+      if (labelEl) labelEl.textContent = label;
+      if (barEl) barEl.style.width = `${Math.max(0, Math.min(100, pct))}%`;
+      return pct;
+    }
+
+    function closeCodexSessionModal() {
+      const modal = document.getElementById('codexSessionModal');
+      modal.classList.add('hidden');
+    }
+
+    function buildTurnSeries(turns) {
+      const labels = (turns || []).map((turn) => turn.turn_index);
+      const perTurn = {
+        input: (turns || []).map((turn) => Number(turn.tokens_in || 0)),
+        cache: (turns || []).map((turn) => Number(turn.tokens_cache || 0)),
+        output: (turns || []).map((turn) => Number(turn.tokens_out || 0)),
+        reasoning: (turns || []).map((turn) => Number(turn.tokens_reasoning || 0)),
+        total: (turns || []).map((turn) => Number(turn.tokens || 0)),
+      };
+      const cumulative = { input: [], cache: [], output: [], reasoning: [], total: [] };
+      let inputSum = 0;
+      let cacheSum = 0;
+      let outputSum = 0;
+      let reasoningSum = 0;
+      let totalSum = 0;
+      (turns || []).forEach((turn) => {
+        inputSum += Number(turn.tokens_in || 0);
+        cacheSum += Number(turn.tokens_cache || 0);
+        outputSum += Number(turn.tokens_out || 0);
+        reasoningSum += Number(turn.tokens_reasoning || 0);
+        totalSum += Number(turn.tokens || 0);
+        cumulative.input.push(inputSum);
+        cumulative.cache.push(cacheSum);
+        cumulative.output.push(outputSum);
+        cumulative.reasoning.push(reasoningSum);
+        cumulative.total.push(totalSum);
+      });
+      return { labels, perTurn, cumulative };
+    }
+
+    function makeTurnDatasets(series) {
+      return [
+        { label: t('freshInput'), data: series.input, borderColor: '#1E40AF', backgroundColor: 'rgba(30,64,175,0.12)', tension: 0.25, pointRadius: 2 },
+        { label: t('cacheRead'), data: series.cache, borderColor: '#0F766E', backgroundColor: 'rgba(15,118,110,0.12)', tension: 0.25, pointRadius: 2 },
+        { label: t('output'), data: series.output, borderColor: '#F59E0B', backgroundColor: 'rgba(245,158,11,0.12)', tension: 0.25, pointRadius: 2 },
+        { label: t('reasoning'), data: series.reasoning, borderColor: '#7C3AED', backgroundColor: 'rgba(124,58,237,0.12)', tension: 0.25, pointRadius: 2 },
+        { label: t('total'), data: series.total, borderColor: '#111827', backgroundColor: 'rgba(17,24,39,0.12)', tension: 0.25, pointRadius: 2, borderDash: [6, 4] },
+      ];
+    }
+
+    function buildTurnChartOptions() {
+      return {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        interaction: { mode: 'index', intersect: false },
+        scales: {
+          x: {
+            title: { display: true, text: 'Turn' },
+            ticks: { color: '#475569' },
+            grid: { color: 'rgba(226,232,240,0.55)' },
+          },
+          y: {
+            beginAtZero: true,
+            ticks: {
+              color: '#475569',
+              callback: (value) => formatNumber(value),
+            },
+            grid: { color: 'rgba(226,232,240,0.55)' },
+          },
+        },
+        plugins: {
+          legend: { position: 'bottom' },
+          tooltip: {
+            callbacks: {
+              label: (context) => `${context.dataset.label}: ${formatNumber(context.raw || 0)}`,
+            },
+          },
+        },
+      };
+    }
+
+    function renderCodexSessionCharts(turns) {
+      const { labels, perTurn, cumulative } = buildTurnSeries(turns);
+      const perTurnCanvas = document.getElementById('codexSessionPerTurnChart');
+      const cumulativeCanvas = document.getElementById('codexSessionCumulativeChart');
+      if (!perTurnCanvas || !cumulativeCanvas) return;
+
+      if (codexSessionPerTurnChart) {
+        codexSessionPerTurnChart.destroy();
+        codexSessionPerTurnChart = null;
+      }
+      if (codexSessionCumulativeChart) {
+        codexSessionCumulativeChart.destroy();
+        codexSessionCumulativeChart = null;
+      }
+
+      codexSessionPerTurnChart = new Chart(perTurnCanvas.getContext('2d'), {
+        type: 'line',
+        data: {
+          labels,
+          datasets: makeTurnDatasets(perTurn),
+        },
+        options: buildTurnChartOptions(),
+      });
+
+      codexSessionCumulativeChart = new Chart(cumulativeCanvas.getContext('2d'), {
+        type: 'line',
+        data: {
+          labels,
+          datasets: makeTurnDatasets(cumulative),
+        },
+        options: buildTurnChartOptions(),
+      });
+    }
+
+    async function openCodexSessionModal(sessionId) {
+      const modal = document.getElementById('codexSessionModal');
+      modal.classList.remove('hidden');
+      document.getElementById('codexSessionModalTitle').textContent = sessionShortId(sessionId);
+      document.getElementById('codexSessionModalMeta').textContent = t('loading');
+      document.getElementById('codexSessionModalInput').textContent = '-';
+      document.getElementById('codexSessionModalInputPct').textContent = '-';
+      document.getElementById('codexSessionModalCache').textContent = '-';
+      document.getElementById('codexSessionModalCachePct').textContent = '-';
+      document.getElementById('codexSessionModalOutput').textContent = '-';
+      document.getElementById('codexSessionModalOutputPct').textContent = '-';
+      document.getElementById('codexSessionModalTotal').textContent = '-';
+      document.getElementById('codexSessionModalReasoningPct').textContent = '-';
+
+      try {
+        const response = await fetch(`/api/codex/session?session_id=${encodeURIComponent(sessionId)}`);
+        const data = await response.json();
+        const session = data.session || {};
+        const turns = data.turns || [];
+        document.getElementById('codexSessionModalTitle').textContent = `${session.project || '—'} · ${sessionShortId(session.session_id)}`;
+        document.getElementById('codexSessionModalMeta').textContent = `${session.model || '—'} · ${formatNumber(session.token_events || 0)} ${t('events')}`;
+        document.getElementById('codexSessionModalInput').textContent = formatNumber(session.tokens_in || 0);
+        document.getElementById('codexSessionModalCache').textContent = formatNumber(session.tokens_cache || 0);
+        document.getElementById('codexSessionModalOutput').textContent = formatNumber(session.tokens_out || 0);
+        document.getElementById('codexSessionModalTotal').textContent = formatNumber(session.tokens || 0);
+        const total = Number(session.tokens || 0);
+        const inputPct = total > 0 ? Number(session.tokens_in || 0) / total : 0;
+        const cachePct = total > 0 ? Number(session.tokens_cache || 0) / total : 0;
+        const outputPct = total > 0 ? Number(session.tokens_out || 0) / total : 0;
+        const reasoningPct = total > 0 ? Number(session.tokens_reasoning || 0) / total : 0;
+        document.getElementById('codexSessionModalInputPct').textContent = formatPercent(inputPct);
+        document.getElementById('codexSessionModalCachePct').textContent = formatPercent(cachePct);
+        document.getElementById('codexSessionModalOutputPct').textContent = formatPercent(outputPct);
+        document.getElementById('codexSessionModalReasoningPct').textContent = `${t('reasoning')}: ${formatPercent(reasoningPct)}`;
+        setShareBar('codexSessionShareInput', session.tokens_in || 0, total);
+        setShareBar('codexSessionShareCache', session.tokens_cache || 0, total);
+        setShareBar('codexSessionShareOutput', session.tokens_out || 0, total);
+        setShareBar('codexSessionShareReasoning', session.tokens_reasoning || 0, total);
+        renderCodexSessionCharts(turns);
+      } catch (error) {
+        console.error('Error loading codex session detail:', error);
+        document.getElementById('codexSessionModalMeta').textContent = 'Failed to load session detail';
       }
     }
 
@@ -1478,6 +1954,7 @@
             updateToolChart(lastUsageResponse.by_tool || {});
             updateModelChart(lastUsageResponse.top_models || []);
             updateToolsTable(lastUsageResponse.by_tool || {});
+            updateCodexSessionsPanel(lastCodexSessionsResponse);
             lastCombinedModels = lastUsageResponse.combined_models || [];
             lastAppsBreakdown = { apps: lastUsageResponse.apps || null, openclawModels: lastUsageResponse.openclaw_models || null };
             scheduleIdle(() => {
@@ -1487,6 +1964,12 @@
           } catch (e) {}
         }
       });
+    });
+
+    document.getElementById('codexSessionModalClose').addEventListener('click', closeCodexSessionModal);
+    document.getElementById('codexSessionModalBackdrop').addEventListener('click', closeCodexSessionModal);
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') closeCodexSessionModal();
     });
 
     // Stats

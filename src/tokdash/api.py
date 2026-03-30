@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from .compute import compute_stats, compute_usage, get_openclaw_data, get_tools_data
+from .compute import compute_stats, compute_usage, get_codex_session_detail, get_codex_sessions_data, get_openclaw_data, get_tools_data
 
 app = FastAPI(title="Tokdash")
 STATIC_DIR = Path(__file__).parent / "static"
@@ -81,6 +81,24 @@ def get_tools(period: str = "today") -> Dict[str, Any]:
             return data
 
         return get_cached_or_fetch(f"tools_{period}", fetch)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/codex/sessions")
+def get_codex_sessions(period: str = "today") -> Dict[str, Any]:
+    try:
+        return get_cached_or_fetch(f"codex_sessions_{period}", lambda: get_codex_sessions_data(period))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/codex/session")
+def get_codex_session(session_id: str) -> Dict[str, Any]:
+    try:
+        return get_codex_session_detail(session_id)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

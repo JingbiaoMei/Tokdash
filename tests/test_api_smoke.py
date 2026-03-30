@@ -72,6 +72,16 @@ def test_api_endpoints_and_dashboard_smoke():
         assert "apps" in tools
         assert "all_models" in tools
 
+        codex_sessions = json.loads(_fetch(f"{base}/api/codex/sessions?period=today"))
+        assert "sessions" in codex_sessions
+        assert "current_session" in codex_sessions
+
+        current_session = codex_sessions.get("current_session")
+        if current_session and current_session.get("session_id"):
+            codex_session = json.loads(_fetch(f"{base}/api/codex/session?session_id={current_session['session_id']}"))
+            assert "session" in codex_session
+            assert "turns" in codex_session
+
         openclaw = json.loads(_fetch(f"{base}/api/openclaw?period=today"))
         assert "models" in openclaw
         assert "contributions" in openclaw

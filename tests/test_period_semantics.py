@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from datetime import timedelta, timezone
 
 import tokdash.compute as compute
 
@@ -38,3 +39,15 @@ def test_period_to_range_args_month_is_calendar_month():
 
     assert since == now_local.replace(day=1).date()
     assert until == now_local.date()
+
+
+def test_previous_period_range_today_uses_same_elapsed_time_yesterday(monkeypatch):
+    current_since = datetime(2026, 3, 31, 0, 0, tzinfo=timezone.utc)
+    current_until = datetime(2026, 3, 31, 8, 20, tzinfo=timezone.utc)
+
+    monkeypatch.setattr(compute, "_current_period_range", lambda period: (current_since, current_until))
+
+    prev_since, prev_until = compute._compute_previous_period_range("today")
+
+    assert prev_since == current_since - timedelta(days=1)
+    assert prev_until == datetime(2026, 3, 30, 8, 20, tzinfo=timezone.utc)

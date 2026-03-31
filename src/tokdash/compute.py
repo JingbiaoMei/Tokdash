@@ -406,6 +406,11 @@ def _current_period_range(period: str) -> tuple[datetime, datetime]:
 
 def _compute_previous_period_range(period: str) -> tuple[datetime, datetime]:
     current_since, current_until = _current_period_range(period)
+    if period != "month" and period_to_days(period) == 1:
+        prev_since = current_since - timedelta(days=1)
+        prev_until = prev_since + (current_until - current_since)
+        return prev_since, prev_until
+
     elapsed = current_until - current_since
     prev_until = current_since
     prev_since = prev_until - elapsed

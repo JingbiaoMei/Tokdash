@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+## 0.1.0 - 2026-03-31
+
+### Changed
+- Promoted tokdash to its first minor release after stabilizing the new multi-tool Sessions workflow introduced in `0.0.13`.
+- Refined the Sessions tables with aligned grouped summary rows so headers, project summaries, and nested session rows line up consistently across Codex, Claude Code, OpenCode, and combined views.
+- Added click-to-sort ranking on the session tables for numeric and time columns: input, cache, output, total tokens, cost, and last updated.
+
+### Fixed
+- Fixed grouped project ordering so project rows now follow the active selected sort mode instead of staying token-sorted underneath a different header state.
+- Fixed `Last updated` sorting to compare real timestamps instead of plain strings.
+- Fixed GitHub CI to install dev requirements before running tests, ensuring `httpx` is available for the API smoke test path.
+
 ## 0.0.13 - 2026-03-31
 
 ### Added

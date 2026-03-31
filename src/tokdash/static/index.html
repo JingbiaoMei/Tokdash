@@ -129,6 +129,14 @@
       color: var(--color-primary);
     }
 
+    /* Session tables: fixed layout for column alignment between header and nested rows */
+    .session-table { table-layout: fixed; }
+    .session-table th, .session-table td { overflow: hidden; text-overflow: ellipsis; }
+    .session-table th[data-sortable] { cursor: pointer; user-select: none; }
+    .session-table th[data-sortable]:hover { color: var(--color-primary) !important; }
+    .sort-arrow { font-size: 10px; margin-left: 2px; opacity: 0.5; }
+    .sort-arrow.active { opacity: 1; }
+
     /* Calendar heatmap styles - 10 levels */
     .calendar-grid {
       display: grid;
@@ -485,17 +493,18 @@
           </div>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm" aria-label="Codex sessions table">
+          <table class="w-full text-sm session-table" aria-label="Codex sessions table" data-panel="codex">
+            <colgroup><col style="width:11%"><col style="width:14%"><col style="width:12%"><col style="width:12%"><col style="width:11%"><col style="width:13%"><col style="width:11%"><col style="width:16%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
                 <th class="text-left py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="session">Session</th>
                 <th class="text-left py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="model">Model</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="input">Input</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cache">Cache</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="output">Output</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="total">Total</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cost">Cost</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="lastUpdated">Last updated</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="input" data-sortable="tokens_in">Input</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cache" data-sortable="tokens_cache">Cache</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="output" data-sortable="tokens_out">Output</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="total" data-sortable="tokens">Total</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cost" data-sortable="cost">Cost</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="lastUpdated" data-sortable="last_seen_at">Last updated</th>
               </tr>
             </thead>
             <tbody id="codexSessionsTable">
@@ -542,17 +551,18 @@
           </div>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm" aria-label="Claude Code sessions table">
+          <table class="w-full text-sm session-table" aria-label="Claude Code sessions table" data-panel="claude">
+            <colgroup><col style="width:11%"><col style="width:14%"><col style="width:12%"><col style="width:12%"><col style="width:11%"><col style="width:13%"><col style="width:11%"><col style="width:16%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
                 <th class="text-left py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="session">Session</th>
                 <th class="text-left py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="model">Model</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="input">Input</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cache">Cache</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="output">Output</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="total">Total</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cost">Cost</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="lastUpdated">Last updated</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="input" data-sortable="tokens_in">Input</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cache" data-sortable="tokens_cache">Cache</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="output" data-sortable="tokens_out">Output</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="total" data-sortable="tokens">Total</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cost" data-sortable="cost">Cost</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="lastUpdated" data-sortable="last_seen_at">Last updated</th>
               </tr>
             </thead>
             <tbody id="claudeSessionsTable">
@@ -599,17 +609,18 @@
           </div>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm" aria-label="OpenCode sessions table">
+          <table class="w-full text-sm session-table" aria-label="OpenCode sessions table" data-panel="opencode">
+            <colgroup><col style="width:11%"><col style="width:14%"><col style="width:12%"><col style="width:12%"><col style="width:11%"><col style="width:13%"><col style="width:11%"><col style="width:16%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
                 <th class="text-left py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="session">Session</th>
                 <th class="text-left py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="model">Model</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="input">Input</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cache">Cache</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="output">Output</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="total">Total</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cost">Cost</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="lastUpdated">Last updated</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="input" data-sortable="tokens_in">Input</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cache" data-sortable="tokens_cache">Cache</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="output" data-sortable="tokens_out">Output</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="total" data-sortable="tokens">Total</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cost" data-sortable="cost">Cost</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="lastUpdated" data-sortable="last_seen_at">Last updated</th>
               </tr>
             </thead>
             <tbody id="opencodeSessionsTable">
@@ -656,18 +667,19 @@
           </div>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm" aria-label="Combined sessions table">
+          <table class="w-full text-sm session-table" aria-label="Combined sessions table" data-panel="combined">
+            <colgroup><col style="width:10%"><col style="width:10%"><col style="width:12%"><col style="width:11%"><col style="width:11%"><col style="width:10%"><col style="width:11%"><col style="width:10%"><col style="width:15%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
                 <th class="text-left py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="session">Session</th>
                 <th class="text-left py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="tool">Tool</th>
                 <th class="text-left py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="model">Model</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="input">Input</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cache">Cache</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="output">Output</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="total">Total</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cost">Cost</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="lastUpdated">Last updated</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="input" data-sortable="tokens_in">Input</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cache" data-sortable="tokens_cache">Cache</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="output" data-sortable="tokens_out">Output</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="total" data-sortable="tokens">Total</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cost" data-sortable="cost">Cost</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="lastUpdated" data-sortable="last_seen_at">Last updated</th>
               </tr>
             </thead>
             <tbody id="combinedSessionsTable">
@@ -1265,11 +1277,24 @@
     function formatMonthDayTime(value) {
       if (!value) return '—';
       const dt = new Date(value);
-      const mm = String(dt.getMonth() + 1).padStart(2, '0');
-      const dd = String(dt.getDate()).padStart(2, '0');
+      if (isNaN(dt.getTime())) return '—';
+      const now = new Date();
       const hh = String(dt.getHours()).padStart(2, '0');
       const minute = String(dt.getMinutes()).padStart(2, '0');
-      return `${mm}.${dd}-${hh}:${minute}`;
+      const time = `${hh}:${minute}`;
+
+      if (dt.getFullYear() === now.getFullYear() && dt.getMonth() === now.getMonth() && dt.getDate() === now.getDate()) {
+        return time;
+      }
+
+      const locale = currentLang === 'zh' ? 'zh-CN' : 'en-US';
+      if (dt.getFullYear() === now.getFullYear()) {
+        const monthDay = dt.toLocaleDateString(locale, { month: 'short', day: 'numeric' });
+        return `${monthDay}, ${time}`;
+      }
+
+      const full = dt.toLocaleDateString(locale, { year: 'numeric', month: 'short', day: 'numeric' });
+      return `${full}, ${time}`;
     }
 
     function renderDelta(elementId, pctChange) {
@@ -1623,21 +1648,48 @@
       return !!(lastSessionsResponses?.codex || lastSessionsResponses?.claude || lastSessionsResponses?.opencode);
     }
 
-    function groupSessionsByProject(sessions) {
+    function groupSessionsByProject(sessions, sortComparator) {
       const groups = new Map();
       (sessions || []).forEach((session) => {
         const key = session.project || 'unknown';
         if (!groups.has(key)) groups.set(key, []);
         groups.get(key).push(session);
       });
-      return Array.from(groups.entries())
-        .map(([project, items]) => ({
+      return Array.from(groups.entries()).map(([project, items]) => {
+        const sorted = sortComparator
+          ? [...items].sort(sortComparator)
+          : items.sort((a, b) => String(b.last_seen_at || '').localeCompare(String(a.last_seen_at || '')));
+        return {
           project,
-          sessions: items.sort((a, b) => String(b.last_seen_at || '').localeCompare(String(a.last_seen_at || ''))),
+          sessions: sorted,
+          tokens_in: items.reduce((sum, item) => sum + Number(item.tokens_in || 0), 0),
+          tokens_cache: items.reduce((sum, item) => sum + Number(item.tokens_cache || 0), 0),
+          tokens_out: items.reduce((sum, item) => sum + Number(item.tokens_out || 0), 0),
           tokens: items.reduce((sum, item) => sum + Number(item.tokens || 0), 0),
           cost: items.reduce((sum, item) => sum + Number(item.cost || 0), 0),
-        }))
-        .sort((a, b) => b.tokens - a.tokens);
+          token_events: items.reduce((sum, item) => sum + Number(item.token_events || 0), 0),
+          last_seen_at: sorted.length ? String(sorted.reduce((latest, s) =>
+            toTimestampMs(s.last_seen_at) > toTimestampMs(latest.last_seen_at) ? s : latest
+          ).last_seen_at || '') : '',
+        };
+      });
+    }
+
+    function sortProjectGroups(groups, field, direction) {
+      const numericFields = new Set(['tokens_in', 'tokens_cache', 'tokens_out', 'tokens', 'cost', 'token_events']);
+      const dir = direction === 'asc' ? 1 : -1;
+      return [...groups].sort((a, b) => {
+        let delta = 0;
+        if (field === 'last_seen_at') {
+          delta = toTimestampMs(a.last_seen_at) - toTimestampMs(b.last_seen_at);
+        } else if (numericFields.has(field)) {
+          delta = Number(a[field] || 0) - Number(b[field] || 0);
+        } else {
+          delta = String(a.project || '').localeCompare(String(b.project || ''));
+        }
+        if (delta !== 0) return delta * dir;
+        return String(a.project || '').localeCompare(String(b.project || ''));
+      });
     }
 
     function createNoDataRow(colSpan) {
@@ -1657,6 +1709,81 @@
       cell.textContent = text;
       if (style) cell.style.cssText = style;
       return cell;
+    }
+
+    function toTimestampMs(value) {
+      const ms = Date.parse(value || '');
+      return Number.isFinite(ms) ? ms : 0;
+    }
+
+    // Column widths for 8-col (no Tool) and 9-col (with Tool) session tables
+    const SESSION_COLS_8 = '<colgroup><col style="width:11%"><col style="width:14%"><col style="width:12%"><col style="width:12%"><col style="width:11%"><col style="width:13%"><col style="width:11%"><col style="width:16%"></colgroup>';
+    const SESSION_COLS_9 = '<colgroup><col style="width:10%"><col style="width:10%"><col style="width:12%"><col style="width:11%"><col style="width:11%"><col style="width:10%"><col style="width:11%"><col style="width:10%"><col style="width:15%"></colgroup>';
+
+    // Sort state per panel: { field, direction }
+    // Default: sort by last_seen_at descending (most recent first)
+    const DEFAULT_SORT = { field: 'last_seen_at', direction: 'desc' };
+    const sessionSortState = {
+      codex: { ...DEFAULT_SORT },
+      claude: { ...DEFAULT_SORT },
+      opencode: { ...DEFAULT_SORT },
+      combined: { ...DEFAULT_SORT },
+    };
+
+    function getSessionSortComparator(field, direction) {
+      const numericFields = new Set(['tokens_in', 'tokens_cache', 'tokens_out', 'tokens', 'cost', 'token_events']);
+      const dir = direction === 'asc' ? 1 : -1;
+      if (field === 'last_seen_at') {
+        return (a, b) => (toTimestampMs(a.last_seen_at) - toTimestampMs(b.last_seen_at)) * dir;
+      }
+      if (numericFields.has(field)) {
+        return (a, b) => (Number(a[field] || 0) - Number(b[field] || 0)) * dir;
+      }
+      return (a, b) => String(a[field] || '').localeCompare(String(b[field] || '')) * dir;
+    }
+
+    function applySortToSessions(sessions, field, direction) {
+      return [...sessions].sort(getSessionSortComparator(field, direction));
+    }
+
+    function updateSortArrows(panel) {
+      const table = document.querySelector(`table[data-panel="${panel}"]`);
+      if (!table) return;
+      const state = sessionSortState[panel];
+      table.querySelectorAll('th[data-sortable]').forEach(th => {
+        const field = th.getAttribute('data-sortable');
+        let arrow = th.querySelector('.sort-arrow');
+        if (!arrow) {
+          arrow = document.createElement('span');
+          arrow.className = 'sort-arrow';
+          th.appendChild(arrow);
+        }
+        if (state && state.field === field) {
+          arrow.textContent = state.direction === 'asc' ? ' \u25B2' : ' \u25BC';
+          arrow.classList.add('active');
+        } else {
+          arrow.textContent = '';
+          arrow.classList.remove('active');
+        }
+      });
+    }
+
+    function initSortHeaders(panel, rerenderFn) {
+      const table = document.querySelector(`table[data-panel="${panel}"]`);
+      if (!table || table.dataset.sortInit) return;
+      table.dataset.sortInit = '1';
+      table.querySelectorAll('th[data-sortable]').forEach(th => {
+        th.addEventListener('click', () => {
+          const field = th.getAttribute('data-sortable');
+          const prev = sessionSortState[panel];
+          if (prev && prev.field === field) {
+            sessionSortState[panel] = { field, direction: prev.direction === 'asc' ? 'desc' : 'asc' };
+          } else {
+            sessionSortState[panel] = { field, direction: 'asc' };
+          }
+          rerenderFn();
+        });
+      });
     }
 
     function updateSessionPanel(prefix, data, options = {}) {
@@ -1692,10 +1819,19 @@
       if (!tbody) return;
       if (!sessions.length) {
         tbody.replaceChildren(createNoDataRow(showTool ? 9 : 8));
+        updateSortArrows(prefix);
         return;
       }
 
-      const projectGroups = groupSessionsByProject(sessions);
+      // Apply sort
+      const sortState = sessionSortState[prefix] || DEFAULT_SORT;
+      const comparator = getSessionSortComparator(sortState.field, sortState.direction);
+      const sortedSessions = [...sessions].sort(comparator);
+      const isNonDefaultSort = sortState.field !== DEFAULT_SORT.field || sortState.direction !== DEFAULT_SORT.direction;
+
+      const groupedSessions = groupSessionsByProject(sortedSessions, comparator);
+      const projectGroups = sortProjectGroups(groupedSessions, sortState.field, sortState.direction);
+
       const frag = document.createDocumentFragment();
       projectGroups.forEach((group, groupIndex) => {
         const detailsRow = document.createElement("tr");
@@ -1708,29 +1844,51 @@
 
         const details = document.createElement("details");
         details.className = "group";
-        if (groupIndex === 0) details.open = true;
+        // Open all groups when user has actively sorted; otherwise only the first
+        if (isNonDefaultSort || groupIndex === 0) details.open = true;
 
         const summary = document.createElement("summary");
-        summary.className = "list-none cursor-pointer px-4 py-3 hover:bg-slate-50 transition";
+        summary.className = "list-none cursor-pointer hover:bg-slate-50 transition";
 
-        const summaryWrap = document.createElement("div");
-        summaryWrap.className = "flex flex-col md:flex-row md:items-center md:justify-between gap-2";
+        // Use a table matching the outer colgroup so summary cells align with headers
+        const summaryTable = document.createElement("table");
+        summaryTable.className = "w-full text-sm session-table";
+        summaryTable.innerHTML = showTool ? SESSION_COLS_9 : SESSION_COLS_8;
+        const summaryBody = document.createElement("tbody");
+        const summaryRow = document.createElement("tr");
 
-        const left = document.createElement("div");
-        left.className = "flex items-center gap-3";
-        left.appendChild(createTableCell("span", "mono font-extrabold text-slate-800", group.project));
-        left.appendChild(createTableCell("span", "text-xs text-slate-500", `${formatNumber(group.sessions.length)} ${t("sessions")}`));
+        // Project name + session count spans the first columns (Session + Model, or Session + Tool + Model)
+        const nameColSpan = showTool ? 3 : 2;
+        const nameCell = document.createElement("td");
+        nameCell.colSpan = nameColSpan;
+        nameCell.className = "py-3 px-4";
+        const nameSpan = createTableCell("span", "mono font-extrabold text-slate-800", group.project);
+        const countSpan = createTableCell("span", "text-xs text-slate-500 ml-3", `${formatNumber(group.sessions.length)} ${t("sessions")}`);
+        nameCell.appendChild(nameSpan);
+        nameCell.appendChild(countSpan);
+        summaryRow.appendChild(nameCell);
 
-        const right = document.createElement("div");
-        right.className = "flex flex-wrap items-center gap-3 text-xs md:text-sm";
-        right.appendChild(createTableCell("span", "text-slate-600", `${formatNumber(group.tokens)} ${t("tokensUnit")}`));
-        right.appendChild(createTableCell("span", "font-bold", formatCurrency(group.cost), "color: var(--color-cost);"));
-        const arrow = createTableCell("span", "text-slate-500", details.open ? "▾" : "▸");
-        right.appendChild(arrow);
+        // Empty cells for Input, Cache, Output (3 cols)
+        for (let i = 0; i < 3; i++) {
+          summaryRow.appendChild(createTableCell("td", "py-3 px-4", ""));
+        }
 
-        summaryWrap.appendChild(left);
-        summaryWrap.appendChild(right);
-        summary.appendChild(summaryWrap);
+        // Total tokens
+        summaryRow.appendChild(createTableCell("td", "py-3 px-4 text-right font-semibold text-slate-800", formatNumber(group.tokens)));
+        // Cost
+        summaryRow.appendChild(createTableCell("td", "py-3 px-4 text-right font-bold", formatCurrency(group.cost), "color: var(--color-cost);"));
+        // Last updated + arrow
+        const lastCell = document.createElement("td");
+        lastCell.className = "py-3 px-4 text-right text-slate-500";
+        const timeSpan = createTableCell("span", "", formatSessionTime(group.last_seen_at));
+        const arrow = createTableCell("span", "text-slate-400 ml-2", details.open ? "▾" : "▸");
+        lastCell.appendChild(timeSpan);
+        lastCell.appendChild(arrow);
+        summaryRow.appendChild(lastCell);
+
+        summaryBody.appendChild(summaryRow);
+        summaryTable.appendChild(summaryBody);
+        summary.appendChild(summaryTable);
         summary.addEventListener("click", () => {
           requestAnimationFrame(() => {
             arrow.textContent = details.open ? "▾" : "▸";
@@ -1738,11 +1896,12 @@
         });
 
         const innerWrap = document.createElement("div");
-        innerWrap.className = "px-4 pb-3";
+        innerWrap.className = "pb-3";
         const innerTableWrap = document.createElement("div");
         innerTableWrap.className = "overflow-x-auto";
         const innerTable = document.createElement("table");
-        innerTable.className = "w-full text-sm";
+        innerTable.className = "w-full text-sm session-table";
+        innerTable.innerHTML = showTool ? SESSION_COLS_9 : SESSION_COLS_8;
         const innerBody = document.createElement("tbody");
 
         group.sessions.forEach((session) => {
@@ -1772,6 +1931,7 @@
         frag.appendChild(detailsRow);
       });
       tbody.replaceChildren(frag);
+      updateSortArrows(prefix);
     }
 
     function renderSessionsTab() {
@@ -1781,6 +1941,12 @@
       updateSessionPanel("opencode", lastSessionsResponses.opencode);
       lastSessionsResponses.combined = buildCombinedSessionsData(lastSessionsResponses);
       updateSessionPanel("combined", lastSessionsResponses.combined, { showTool: true });
+
+      // Initialize sortable headers (idempotent — skips if already initialized)
+      initSortHeaders("codex", renderSessionsTab);
+      initSortHeaders("claude", renderSessionsTab);
+      initSortHeaders("opencode", renderSessionsTab);
+      initSortHeaders("combined", renderSessionsTab);
     }
 
     function setShareBar(prefix, value, total) {

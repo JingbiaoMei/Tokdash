@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+## 0.0.13 - 2026-03-31
+
+### Added
+- Added a dedicated `Sessions` page with Codex, Claude Code, OpenCode, and combined cross-tool session views.
+- Added per-session drill-down charts, including cumulative token trends over turn order and over time.
+- Added `Total Messages` to the Overview KPI bar, alongside period-over-period comparisons for tokens, cost, and messages.
+
+### Changed
+- Moved session analysis out of the Overview page so the top-level dashboard stays focused on aggregate usage.
+- Changed comparison semantics to use prior full calendar blocks: `today` now compares to the full previous day, fixed `N`-day ranges compare to the previous full `N` days, and `month` compares to the full previous calendar month.
+
+### Fixed
+- Fixed Claude Code session undercounting by merging subagent transcript files that share the same session ID.
+- Removed the OpenCode session display cap so long-range views no longer hide many sessions.
+- Replaced the old Codex-only session backend path with the shared multi-tool session API used by the new dashboard.
+- Added the explicit `httpx` dev dependency required by the API smoke tests and removed stale dead code from the previous Codex-only implementation.
+
 ## 0.0.11 - 2026-03-20
 
 ### Fixed

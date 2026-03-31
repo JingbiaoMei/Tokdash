@@ -40,6 +40,7 @@
       --t-med: 240ms;
 
       --color-cost: #0F766E;
+      --color-messages: #7C3AED;
       --color-label: rgba(71,85,105,0.9);
       --color-surface-glass: rgba(248, 250, 252, 0.95);
     }
@@ -345,14 +346,21 @@
     <div id="overview-content" class="tab-content active">
 
       <!-- KPI cards -->
-      <section class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <div class="surface p-5">
           <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="totalTokens">Total Tokens</div>
           <div id="totalTokens" class="text-3xl sm:text-4xl font-extrabold mt-2" style="color: var(--color-primary);">-</div>
+          <div id="tokensDelta" class="text-xs font-semibold mt-1" style="color: var(--color-muted);"></div>
         </div>
         <div class="surface p-5">
           <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="totalCost">Total Cost</div>
           <div id="totalCost" class="text-3xl sm:text-4xl font-extrabold mt-2" style="color: var(--color-cost);">$-</div>
+          <div id="costDelta" class="text-xs font-semibold mt-1" style="color: var(--color-muted);"></div>
+        </div>
+        <div class="surface p-5">
+          <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="totalMessages">Total Messages</div>
+          <div id="totalMessages" class="text-3xl sm:text-4xl font-extrabold mt-2" style="color: var(--color-messages);">-</div>
+          <div id="messagesDelta" class="text-xs font-semibold mt-1" style="color: var(--color-muted);"></div>
         </div>
         <div class="surface p-5">
           <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="topModel">Top Model</div>
@@ -1013,7 +1021,9 @@
         stats: 'Stats',
         totalTokens: 'Total Tokens',
         totalCost: 'Total Cost',
+        totalMessages: 'Total Messages',
         topModel: 'Top Model',
+        vsPrevPeriod: 'vs prev period',
         usageByTool: 'Usage by Tool',
         tokens: 'Tokens',
         topModelsByCost: 'Top Models by Cost',
@@ -1122,7 +1132,9 @@
         stats: '统计',
         totalTokens: '总 Token 数',
         totalCost: '总费用',
+        totalMessages: '总消息数',
         topModel: '最常用模型',
+        vsPrevPeriod: '较上一时段',
         usageByTool: '按工具使用量',
         tokens: 'Tokens',
         topModelsByCost: '按费用排序的模型',
@@ -1258,6 +1270,32 @@
       const hh = String(dt.getHours()).padStart(2, '0');
       const minute = String(dt.getMinutes()).padStart(2, '0');
       return `${mm}.${dd}-${hh}:${minute}`;
+    }
+
+    function renderDelta(elementId, pctChange) {
+      const el = document.getElementById(elementId);
+      if (!el) return;
+      if (pctChange === null || pctChange === undefined) {
+        el.textContent = '';
+        el.style.color = 'var(--color-muted)';
+        return;
+      }
+
+      const arrow = pctChange > 0 ? '↑' : pctChange < 0 ? '↓' : '→';
+      const abs = Math.abs(pctChange);
+      el.textContent = `${arrow} ${abs}% ${t('vsPrevPeriod')}`;
+      el.style.color = pctChange > 0 ? '#DC2626' : pctChange < 0 ? '#16A34A' : 'var(--color-muted)';
+    }
+
+    function updateComparisonDeltas(data) {
+      const cmp = data?.comparison;
+      if (!cmp) {
+        ['tokensDelta', 'costDelta', 'messagesDelta'].forEach((id) => renderDelta(id, null));
+        return;
+      }
+      renderDelta('tokensDelta', cmp.tokens_pct);
+      renderDelta('costDelta', cmp.cost_pct);
+      renderDelta('messagesDelta', cmp.messages_pct);
     }
 
     function t(key) {
@@ -1444,6 +1482,8 @@
       if (!data) return;
       document.getElementById('totalTokens').textContent = formatNumber(data.total_tokens);
       document.getElementById('totalCost').textContent = formatCurrency(data.total_cost);
+      document.getElementById('totalMessages').textContent = formatNumber(data.total_messages || 0);
+      updateComparisonDeltas(data);
 
       if (data.top_models && data.top_models.length > 0) {
         const top = data.top_models[0];

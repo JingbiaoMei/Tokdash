@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from .compute import compute_stats, compute_usage, get_openclaw_data, get_tools_data
+from .compute import compute_stats, compute_usage_with_comparison, get_openclaw_data, get_tools_data
 from .sessions import get_codex_session_detail, get_codex_sessions_data, get_session_detail, get_sessions_data
 
 app = FastAPI(title="Tokdash")
@@ -51,7 +51,7 @@ def get_cached_or_fetch(key: str, fetch_fn) -> Any:
 @app.get("/api/usage")
 def get_usage(period: str = "today") -> Dict[str, Any]:
     try:
-        return get_cached_or_fetch(f"usage_{period}", lambda: compute_usage(period))
+        return get_cached_or_fetch(f"usage_{period}", lambda: compute_usage_with_comparison(period))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

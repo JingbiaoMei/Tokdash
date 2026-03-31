@@ -299,6 +299,12 @@ def get_usage_for_month() -> Dict[str, Any]:
     return get_session_usage(sessions_dir, since_date=since, until_date=until)
 
 
+def get_usage_for_range(since_date: datetime, until_date: datetime) -> Dict[str, Any]:
+    """Get usage for an explicit datetime range."""
+    sessions_dir = glob.glob(os.path.expanduser("~/.openclaw/agents/*/sessions"))
+    return get_session_usage(sessions_dir, since_date=since_date, until_date=until_date)
+
+
 def get_usage_for_year(year: int) -> Dict[str, Any]:
     """Get usage for a calendar year (local time)."""
     sessions_dir = glob.glob(os.path.expanduser("~/.openclaw/agents/*/sessions"))

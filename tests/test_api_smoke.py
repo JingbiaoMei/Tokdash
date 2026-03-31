@@ -12,6 +12,8 @@ def test_api_endpoints_and_dashboard_smoke():
 
     usage = client.get("/api/usage", params={"period": "today"}).json()
     assert "total_tokens" in usage
+    assert "total_messages" in usage
+    assert "comparison" in usage
     assert "openclaw_models" in usage
     assert "coding_apps" in usage
 

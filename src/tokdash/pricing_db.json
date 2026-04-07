@@ -10,7 +10,11 @@
     "inficloud/kimi-2.5": "kimi-k2.5",
     "kimi-coding/k2p5": "kimi-k2.5",
     "kimi-ai/kimi-2.5": "kimi-k2.5",
-    "moonshot-ai/kimi-k2.5": "kimi-k2.5"
+    "moonshot-ai/kimi-k2.5": "kimi-k2.5",
+    "glm5.1": "glm-5.1",
+    "glm-5-1": "glm-5.1",
+    "z-ai/glm-5.1": "glm-5.1",
+    "zhipu/glm-5.1": "glm-5.1"
   },
   "models": {
     "_comment_moonshot": "=== Moonshot AI / Kimi Models ===",
@@ -217,6 +221,16 @@
       "cache_write": 1.2,
       "unit": "per_million_tokens",
       "source": "openrouter.ai/z-ai/glm-5-turbo",
+      "note": "Official price used (https://docs.z.ai/guides/overview/pricing)"
+    },
+    "glm-5.1": {
+      "provider": "z-ai",
+      "input": 1.0,
+      "output": 3.2,
+      "cache_read": 0.2,
+      "cache_write": 1.0,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/z-ai/glm-5.1",
       "note": "Official price used (https://docs.z.ai/guides/overview/pricing)"
     },
     "_comment_openai": "=== OpenAI Models ===",

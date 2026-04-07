@@ -19,6 +19,10 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
 
+  <!-- Flatpickr Date Picker -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.js"></script>
+
   <style>
     :root {
       --color-primary: #1E40AF;
@@ -59,26 +63,39 @@
 
     /* Card system */
     .surface {
-      background: rgba(248, 250, 252, 0.9);
+      background: rgba(255, 255, 255, 0.95);
       border: 1px solid var(--color-border);
       border-radius: var(--radius-lg);
-      box-shadow: var(--shadow-md);
-      backdrop-filter: blur(10px);
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+      backdrop-filter: blur(12px);
+      transition: all var(--t-med) ease;
     }
 
-    .surface:hover { box-shadow: var(--shadow-lg); }
+    .surface:hover {
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+      transform: translateY(-2px);
+    }
 
     /* Inputs */
     .ui-input {
-      border: 1px solid var(--color-border);
+      border: 2px solid var(--color-border);
       border-radius: 10px;
-      padding: 10px 12px;
+      padding: 10px 14px;
       background: white;
       color: var(--color-text);
-      transition: box-shadow var(--t-fast) ease, border-color var(--t-fast) ease;
+      transition: all var(--t-fast) ease;
       min-height: 44px;
+      font-size: 14px;
     }
-    .ui-input:focus { outline: none; border-color: rgba(30,64,175,0.6); box-shadow: 0 0 0 4px rgba(30,64,175,0.14); }
+    .ui-input:hover {
+      border-color: rgba(30,64,175,0.3);
+    }
+    .ui-input:focus {
+      outline: none;
+      border-color: var(--color-primary);
+      box-shadow: 0 0 0 4px rgba(30,64,175,0.1), 0 1px 3px rgba(0,0,0,0.1);
+      transform: translateY(-1px);
+    }
 
     /* Buttons */
     .btn {
@@ -90,43 +107,90 @@
       padding: 10px 14px;
       min-height: 44px;
       font-weight: 600;
-      transition: transform var(--t-fast) ease, box-shadow var(--t-fast) ease, background var(--t-fast) ease, border-color var(--t-fast) ease;
+      transition: all var(--t-fast) ease;
       cursor: pointer;
       user-select: none;
       white-space: nowrap;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .btn::before {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 0;
+      height: 0;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.3);
+      transform: translate(-50%, -50%);
+      transition: width 0.6s, height 0.6s;
+    }
+
+    .btn:active::before {
+      width: 300px;
+      height: 300px;
     }
 
     .btn:focus { outline: none; box-shadow: 0 0 0 4px rgba(30,64,175,0.16); }
 
     .btn-primary {
-      background: var(--color-primary);
+      background: linear-gradient(135deg, var(--color-primary) 0%, #2563EB 100%);
       color: white;
-      box-shadow: 0 10px 24px rgba(30, 64, 175, 0.22);
+      box-shadow: 0 10px 24px rgba(30, 64, 175, 0.25), 0 4px 8px rgba(30, 64, 175, 0.15);
+      border: none;
     }
-    .btn-primary:hover { transform: translateY(-1px); background: #1D4ED8; }
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 14px 28px rgba(30, 64, 175, 0.3), 0 6px 12px rgba(30, 64, 175, 0.2);
+    }
     .btn-primary:active { transform: translateY(0px); }
 
     .btn-ghost {
-      background: rgba(15, 23, 42, 0.03);
+      background: rgba(15, 23, 42, 0.04);
       color: var(--color-text);
       border: 1px solid rgba(226,232,240,0.9);
     }
-    .btn-ghost:hover { background: rgba(15, 23, 42, 0.05); transform: translateY(-1px); }
+    .btn-ghost:hover {
+      background: rgba(15, 23, 42, 0.08);
+      transform: translateY(-1px);
+      border-color: rgba(30,64,175,0.3);
+    }
 
     /* Tabs */
     .tab-btn {
-      border-radius: 999px;
-      padding: 10px 14px;
-      font-weight: 700;
-      border: 1px solid rgba(226,232,240,1);
-      transition: background var(--t-fast) ease, color var(--t-fast) ease, border-color var(--t-fast) ease;
+      border-radius: 12px;
+      padding: 12px 20px;
+      font-weight: 600;
+      font-size: 14px;
+      border: 2px solid rgba(226,232,240,1);
+      transition: all var(--t-med) ease;
       cursor: pointer;
       min-height: 44px;
+      position: relative;
+    }
+    .tab-btn:hover {
+      border-color: rgba(30,64,175,0.4);
+      background: rgba(30,64,175,0.05);
+      transform: translateY(-1px);
     }
     .tab-btn[aria-selected="true"] {
-      background: rgba(30,64,175,0.10);
-      border-color: rgba(30,64,175,0.28);
+      background: linear-gradient(135deg, rgba(30,64,175,0.12) 0%, rgba(59,130,246,0.08) 100%);
+      border-color: var(--color-primary);
       color: var(--color-primary);
+      box-shadow: 0 4px 12px rgba(30,64,175,0.15);
+    }
+    .tab-btn[aria-selected="true"]::after {
+      content: '';
+      position: absolute;
+      bottom: -2px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 60%;
+      height: 3px;
+      background: var(--color-primary);
+      border-radius: 3px 3px 0 0;
     }
 
     /* Session tables: fixed layout for column alignment between header and nested rows */
@@ -213,8 +277,13 @@
     }
 
     html.dark .surface {
-      background: rgba(30, 41, 59, 0.85);
-      border-color: var(--color-border);
+      background: rgba(30, 41, 59, 0.9);
+      border-color: #334155;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.2);
+    }
+
+    html.dark .surface:hover {
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.4), 0 10px 10px -5px rgba(0, 0, 0, 0.3);
     }
 
     html.dark .ui-input {
@@ -223,9 +292,13 @@
       color: var(--color-text);
     }
 
+    html.dark .ui-input:hover {
+      border-color: rgba(96,165,250,0.4);
+    }
+
     html.dark .ui-input:focus {
-      border-color: rgba(96,165,250,0.6);
-      box-shadow: 0 0 0 4px rgba(96,165,250,0.14);
+      border-color: #60A5FA;
+      box-shadow: 0 0 0 4px rgba(96,165,250,0.15), 0 1px 3px rgba(0,0,0,0.3);
     }
 
     html.dark select option {
@@ -234,29 +307,44 @@
     }
 
     html.dark .btn-primary {
-      background: #2563EB;
-      box-shadow: 0 10px 24px rgba(37,99,235,0.3);
+      background: linear-gradient(135deg, #2563EB 0%, #3B82F6 100%);
+      box-shadow: 0 10px 24px rgba(37,99,235,0.35), 0 4px 8px rgba(37,99,235,0.2);
     }
 
-    html.dark .btn-primary:hover { background: #3B82F6; }
+    html.dark .btn-primary:hover {
+      box-shadow: 0 14px 28px rgba(37,99,235,0.4), 0 6px 12px rgba(37,99,235,0.25);
+    }
 
     html.dark .btn-ghost {
-      background: rgba(148,163,184,0.06);
+      background: rgba(148,163,184,0.08);
       color: var(--color-text);
       border-color: #475569;
     }
 
-    html.dark .btn-ghost:hover { background: rgba(148,163,184,0.12); }
+    html.dark .btn-ghost:hover {
+      background: rgba(148,163,184,0.15);
+      border-color: rgba(96,165,250,0.4);
+    }
 
     html.dark .tab-btn {
       border-color: #475569;
       color: #CBD5E1;
     }
 
+    html.dark .tab-btn:hover {
+      border-color: rgba(96,165,250,0.5);
+      background: rgba(96,165,250,0.08);
+    }
+
     html.dark .tab-btn[aria-selected="true"] {
-      background: rgba(96,165,250,0.12);
-      border-color: rgba(96,165,250,0.3);
+      background: linear-gradient(135deg, rgba(96,165,250,0.15) 0%, rgba(59,130,246,0.1) 100%);
+      border-color: #60A5FA;
       color: #60A5FA;
+      box-shadow: 0 4px 12px rgba(96,165,250,0.2);
+    }
+
+    html.dark .tab-btn[aria-selected="true"]::after {
+      background: #60A5FA;
     }
 
     html.dark .heatmap-cell { border-color: rgba(71,85,105,0.4); }
@@ -269,6 +357,109 @@
     html.dark .bg-slate-50 { background-color: rgba(30, 41, 59, 0.5); }
     html.dark .hover\:bg-slate-50:hover { background-color: rgba(51, 65, 85, 0.3); }
     html.dark .border-b { border-color: #334155; }
+
+    /* Flatpickr Custom Styles */
+    .flatpickr-calendar {
+      background: white;
+      border: 1px solid var(--color-border);
+      border-radius: 12px;
+      box-shadow: var(--shadow-lg);
+      font-family: "Fira Sans", sans-serif;
+    }
+
+    .flatpickr-months {
+      background: var(--color-primary);
+      border-radius: 12px 12px 0 0;
+      padding: 12px;
+    }
+
+    .flatpickr-current-month {
+      color: white;
+      font-weight: 600;
+    }
+
+    .flatpickr-prev-month, .flatpickr-next-month {
+      fill: white;
+    }
+
+    .flatpickr-prev-month:hover, .flatpickr-next-month:hover {
+      fill: rgba(255,255,255,0.8);
+    }
+
+    .flatpickr-day {
+      border-radius: 8px;
+      font-weight: 500;
+      transition: all var(--t-fast) ease;
+    }
+
+    .flatpickr-day:hover {
+      background: rgba(30,64,175,0.1);
+      border-color: var(--color-primary);
+    }
+
+    .flatpickr-day.selected, .flatpickr-day.startRange, .flatpickr-day.endRange {
+      background: var(--color-primary);
+      border-color: var(--color-primary);
+      color: white;
+    }
+
+    .flatpickr-day.inRange {
+      background: rgba(30,64,175,0.15);
+      border-color: transparent;
+      box-shadow: none;
+    }
+
+    .flatpickr-day.today {
+      border-color: var(--color-cta);
+      font-weight: 700;
+    }
+
+    .flatpickr-day.today:hover {
+      background: rgba(245,158,11,0.1);
+      border-color: var(--color-cta);
+    }
+
+    /* Dark mode for Flatpickr */
+    html.dark .flatpickr-calendar {
+      background: #1E293B;
+      border-color: #475569;
+    }
+
+    html.dark .flatpickr-months {
+      background: #2563EB;
+    }
+
+    html.dark .flatpickr-day {
+      color: #E2E8F0;
+    }
+
+    html.dark .flatpickr-day:hover {
+      background: rgba(96,165,250,0.15);
+      border-color: #60A5FA;
+    }
+
+    html.dark .flatpickr-day.selected,
+    html.dark .flatpickr-day.startRange,
+    html.dark .flatpickr-day.endRange {
+      background: #2563EB;
+      border-color: #2563EB;
+    }
+
+    html.dark .flatpickr-day.inRange {
+      background: rgba(96,165,250,0.2);
+    }
+
+    html.dark .flatpickr-day.today {
+      border-color: #FBBF24;
+    }
+
+    html.dark .flatpickr-day.today:hover {
+      background: rgba(251,191,36,0.15);
+    }
+
+    html.dark .flatpickr-weekday {
+      color: #94A3B8;
+    }
 
     /* Reduce motion */
     @media (prefers-reduced-motion: reduce) {
@@ -300,23 +491,18 @@
         </div>
 
         <div class="flex flex-col sm:flex-row gap-3 sm:items-center">
-          <div class="flex gap-2 items-center">
-            <label id="periodSelectLabel" for="periodSelect" class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="range">Range</label>
-            <select id="periodSelect" class="ui-input">
-              <option value="today" data-i18n="today">Today</option>
-              <option value="3days" data-i18n="last3days">Last 3 Days</option>
-              <option value="week" data-i18n="last7days">Last 7 Days</option>
-              <option value="14days" data-i18n="last14days">Last 14 Days</option>
-              <option value="month" data-i18n="thisMonth">This Month</option>
-              <option value="90" data-i18n="last3months">Last 3 Months</option>
-              <option value="365" data-i18n="lastYear">Last Year</option>
-              <option value="custom" data-i18n="customDays">Custom Days…</option>
-            </select>
+          <!-- Date Range Picker -->
+          <div class="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
+            <label for="dateRangePicker" class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="range">Range</label>
+            <input type="text" id="dateRangePicker" class="ui-input" placeholder="Select date range" readonly style="min-width: 240px; cursor: pointer;" />
           </div>
 
-          <div id="customRangeInputs" class="hidden sm:flex gap-2 items-center">
-            <input type="number" id="customDays" placeholder="Days" min="1" max="9999" class="ui-input w-28" data-i18n-placeholder="daysPlaceholder" />
-            <button id="applyCustom" class="btn btn-ghost" aria-label="Apply custom day range" data-i18n="apply">Apply</button>
+          <!-- Quick Range Buttons -->
+          <div class="flex flex-wrap gap-2">
+            <button class="btn btn-ghost quick-range-btn" data-range="today" style="min-height:36px; padding:6px 12px; font-size:13px;" data-i18n="today">Today</button>
+            <button class="btn btn-ghost quick-range-btn" data-range="week" style="min-height:36px; padding:6px 12px; font-size:13px;" data-i18n="last7days">Last 7 Days</button>
+            <button class="btn btn-ghost quick-range-btn" data-range="month" style="min-height:36px; padding:6px 12px; font-size:13px;" data-i18n="thisMonth">This Month</button>
+            <button class="btn btn-ghost quick-range-btn" data-range="90" style="min-height:36px; padding:6px 12px; font-size:13px;" data-i18n="last3months">Last 3 Months</button>
           </div>
 
           <button id="refreshBtn" class="btn btn-primary" aria-label="Refresh dashboard">
@@ -1487,21 +1673,71 @@
       return n || 'unknown';
     }
 
-    // Custom range handling
-    document.getElementById('periodSelect').addEventListener('change', function (e) {
-      const customInputs = document.getElementById('customRangeInputs');
-      if (e.target.value === 'custom') {
-        customInputs.classList.remove('hidden');
-      } else {
-        customInputs.classList.add('hidden');
-        updateDashboard();
-      }
+    // Date range picker initialization
+    let flatpickrInstance = null;
+    let currentStartDate = null;
+    let currentEndDate = null;
+
+    function initDateRangePicker() {
+      const dateInput = document.getElementById('dateRangePicker');
+      if (!dateInput) return;
+
+      flatpickrInstance = flatpickr(dateInput, {
+        mode: 'range',
+        dateFormat: 'Y-m-d',
+        maxDate: 'today',
+        onChange: function(selectedDates) {
+          if (selectedDates.length === 2) {
+            currentStartDate = selectedDates[0];
+            currentEndDate = selectedDates[1];
+            updateDashboardByDateRange(currentStartDate, currentEndDate);
+          }
+        },
+        onReady: function(dateObj, dateStr, instance) {
+          // Set default to today
+          const today = new Date();
+          instance.setDate([today, today]);
+        }
+      });
+    }
+
+    // Quick range buttons
+    document.querySelectorAll('.quick-range-btn').forEach(btn => {
+      btn.addEventListener('click', function() {
+        const range = this.getAttribute('data-range');
+        const today = new Date();
+        let startDate = new Date();
+
+        switch(range) {
+          case 'today':
+            startDate = today;
+            break;
+          case 'week':
+            startDate.setDate(today.getDate() - 6);
+            break;
+          case 'month':
+            startDate.setDate(1); // First day of current month
+            break;
+          case '90':
+            startDate.setDate(today.getDate() - 89);
+            break;
+        }
+
+        if (flatpickrInstance) {
+          flatpickrInstance.setDate([startDate, today]);
+        }
+      });
     });
 
-    document.getElementById('applyCustom').addEventListener('click', function () {
-      const days = document.getElementById('customDays').value;
-      if (days && days > 0) updateDashboard(days);
-    });
+    function updateDashboardByDateRange(startDate, endDate) {
+      if (!startDate || !endDate) return;
+
+      // Calculate days difference
+      const diffTime = Math.abs(endDate - startDate);
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+
+      updateDashboard(diffDays);
+    }
 
     function renderOverviewTab(data) {
       if (!data) return;
@@ -1536,11 +1772,13 @@
     async function updateDashboard(customDays = null) {
       if (updateInFlight) return;
 
-      const period = document.getElementById('periodSelect').value;
       let periodValue = null;
-      if (customDays) periodValue = String(customDays);
-      else if (period !== 'custom') periodValue = period;
-      else return;
+      if (customDays) {
+        periodValue = String(customDays);
+      } else {
+        // Default to today if no custom days specified
+        periodValue = 'today';
+      }
 
       const usageApiUrl = `/api/usage?period=${encodeURIComponent(periodValue)}`;
       const refreshBtn = document.getElementById('refreshBtn');
@@ -3598,6 +3836,9 @@
       applyI18n();
       rerenderPresentation();
     });
+
+    // Initialize date range picker
+    initDateRangePicker();
 
     // Initial load
     updateDashboard();

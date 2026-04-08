@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tokdash"
-version = "0.3.0"
+dynamic = ["version"]
 description = "Local token & cost dashboard for AI coding tools"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -41,9 +41,12 @@ tokdash = "tokdash.cli:main"
 package-dir = {"" = "src"}
 include-package-data = true
 
+[tool.setuptools.dynamic]
+version = {attr = "tokdash.__version__"}
+
 [tool.setuptools.package-data]
 tokdash = [
   "pricing_db.json",
   "static/*",
-  "static/icons/*",
+  "static/**/*",
 ]

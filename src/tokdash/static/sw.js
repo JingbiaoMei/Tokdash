@@ -1,6 +1,6 @@
 /* Tokdash service worker (minimal PWA install support). */
 
-const CACHE_NAME = "tokdash-v1";
+const CACHE_NAME = "__TOKDASH_CACHE_NAME__";
 const CORE_ASSETS = [
   "/",
   "/manifest.webmanifest",
@@ -29,6 +29,8 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("fetch", (event) => {
+  if (event.request.method !== "GET") return;
+
   const url = new URL(event.request.url);
 
   // Avoid caching API requests.
@@ -40,17 +42,17 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Static assets: cache-first.
+  // Static assets: prefer fresh network content after upgrades, fall back to
+  // the most recent cached copy when offline.
   if (url.pathname.startsWith("/static/")) {
     event.respondWith(
-      caches.match(event.request).then((cached) => {
-        if (cached) return cached;
-        return fetch(event.request).then((resp) => {
+      fetch(event.request)
+        .then((resp) => {
           const copy = resp.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+          event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy)));
           return resp;
-        });
-      })
+        })
+        .catch(() => caches.match(event.request))
     );
   }
 });

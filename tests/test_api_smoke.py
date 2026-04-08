@@ -51,6 +51,10 @@ def test_api_endpoints_and_dashboard_smoke():
     assert "contributions" in stats
     assert "stats" in stats
 
+    stats_year = client.get("/api/stats", params={"year": 2025}).json()
+    assert "contributions" in stats_year
+    assert "stats" in stats_year
+
     manifest = client.get("/manifest.webmanifest").text
     assert "Tokdash" in manifest
 

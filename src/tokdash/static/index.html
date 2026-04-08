@@ -498,11 +498,22 @@
           </div>
 
           <!-- Quick Range Buttons -->
-          <div class="flex flex-wrap gap-2">
-            <button class="btn btn-ghost quick-range-btn" data-range="today" style="min-height:36px; padding:6px 12px; font-size:13px;" data-i18n="today">Today</button>
-            <button class="btn btn-ghost quick-range-btn" data-range="week" style="min-height:36px; padding:6px 12px; font-size:13px;" data-i18n="last7days">Last 7 Days</button>
-            <button class="btn btn-ghost quick-range-btn" data-range="month" style="min-height:36px; padding:6px 12px; font-size:13px;" data-i18n="thisMonth">This Month</button>
-            <button class="btn btn-ghost quick-range-btn" data-range="90" style="min-height:36px; padding:6px 12px; font-size:13px;" data-i18n="last3months">Last 3 Months</button>
+          <div class="flex flex-col gap-2 flex-1">
+            <!-- Row 1: Day ranges -->
+            <div class="flex flex-wrap gap-2">
+              <button class="btn btn-ghost quick-range-btn" data-range="today" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="today">Today</button>
+              <button class="btn btn-ghost quick-range-btn" data-range="yesterday" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="yesterday">Yesterday</button>
+              <button class="btn btn-ghost quick-range-btn" data-range="last7days" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="last7days">Last 7 Days</button>
+              <button class="btn btn-ghost quick-range-btn" data-range="last14days" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="last14days">Last 14 Days</button>
+              <button class="btn btn-ghost quick-range-btn" data-range="last4weeks" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="last4weeks">Last 4 Weeks</button>
+            </div>
+            <!-- Row 2: Month and Year ranges -->
+            <div class="flex flex-wrap gap-2">
+              <button class="btn btn-ghost quick-range-btn" data-range="thisMonth" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="thisMonth">This Month</button>
+              <button class="btn btn-ghost quick-range-btn" data-range="lastMonth" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="lastMonth">Last Month</button>
+              <button class="btn btn-ghost quick-range-btn" data-range="thisYear" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="thisYear">This Year</button>
+              <button class="btn btn-ghost quick-range-btn" data-range="lastYear" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="lastYear">Last Year</button>
+            </div>
           </div>
 
           <button id="refreshBtn" class="btn btn-primary" aria-label="Refresh dashboard">
@@ -913,13 +924,44 @@
         </div>
       </section>
 
+      <section class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+        <div class="surface p-4">
+          <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="peakDay">Peak Day</div>
+          <div id="statPeakDay" class="mt-2 font-extrabold mono">—</div>
+          <div id="statPeakDayMeta" class="text-sm mt-1" style="color: var(--color-muted);">—</div>
+        </div>
+        <div class="surface p-4">
+          <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="peakWeek">Peak Week</div>
+          <div id="statPeakWeek" class="mt-2 font-extrabold mono">—</div>
+          <div id="statPeakWeekMeta" class="text-sm mt-1" style="color: var(--color-muted);">—</div>
+        </div>
+        <div class="surface p-4">
+          <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="peakWeekday">Top Weekday</div>
+          <div id="statPeakWeekday" class="mt-2 font-extrabold mono">—</div>
+          <div id="statPeakWeekdayMeta" class="text-sm mt-1" style="color: var(--color-muted);">—</div>
+        </div>
+        <div class="surface p-4">
+          <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="avgActiveDay">Avg / Active Day</div>
+          <div id="statAvgActiveDay" class="mt-2 font-extrabold mono">—</div>
+          <div id="statAvgActiveDayMeta" class="text-sm mt-1" style="color: var(--color-muted);" data-i18n="activeDaysOnly">Across active days</div>
+        </div>
+      </section>
+
       <section class="surface p-5">
         <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
           <h2 class="text-base font-extrabold mono" data-i18n="dailyActivity">Daily Activity</h2>
-          <div class="flex gap-2">
-            <button id="viewMonth" class="btn btn-primary" type="button" data-i18n="month">Month</button>
-            <button id="viewYear" class="btn btn-ghost" type="button" data-i18n="year">Year</button>
-            <button id="view3D" class="btn btn-ghost" type="button" data-i18n="threeD">3D</button>
+          <div class="flex flex-col sm:flex-row gap-2 sm:items-center">
+            <div class="flex gap-2">
+              <button id="viewMonth" class="btn btn-primary" type="button" data-i18n="month">Month</button>
+              <button id="viewYear" class="btn btn-ghost" type="button" data-i18n="year">Year</button>
+              <button id="view3D" class="btn btn-ghost" type="button" data-i18n="threeD">3D</button>
+            </div>
+            <div class="flex items-center gap-2 rounded-xl border px-2 py-1.5" style="border-color: var(--color-border); background: rgba(255,255,255,0.42);">
+              <span class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="calendarMetric">Metric</span>
+              <button id="metricTokensBtn" class="btn btn-primary" type="button" style="min-height:36px; padding:8px 12px;" data-i18n="metricTokens">Tokens</button>
+              <button id="metricCostBtn" class="btn btn-ghost" type="button" style="min-height:36px; padding:8px 12px;" data-i18n="metricCost">Cost</button>
+              <button id="metricMessagesBtn" class="btn btn-ghost" type="button" style="min-height:36px; padding:8px 12px;" data-i18n="metricMessages">Messages</button>
+            </div>
           </div>
         </div>
 
@@ -937,6 +979,7 @@
               <div class="flex items-center justify-between gap-4 mb-3">
                 <div class="text-sm" style="color: var(--color-muted);" data-i18n="less">Less</div>
                 <div id="heatLegend" class="flex gap-1 items-center"></div>
+                <div id="heatMetricLabel" class="text-sm font-semibold" style="color: var(--color-primary);" data-i18n="metricTokens">Tokens</div>
                 <div class="text-sm" style="color: var(--color-muted);" data-i18n="more">More</div>
               </div>
 
@@ -1003,6 +1046,7 @@
           <div class="flex items-center justify-between gap-4 mb-3">
             <div class="text-sm" style="color: var(--color-muted);" data-i18n="less">Less</div>
             <div id="yearLegend" class="flex gap-1 items-center"></div>
+            <div id="yearMetricLabel" class="text-sm font-semibold" style="color: var(--color-primary);" data-i18n="metricTokens">Tokens</div>
             <div class="text-sm" style="color: var(--color-muted);" data-i18n="more">More</div>
           </div>
 
@@ -1019,7 +1063,7 @@
         <div id="calendar3DView" style="display:none;">
           <!-- Color Legend -->
           <div class="flex items-center justify-between gap-4 mb-4">
-            <div class="text-sm font-semibold" style="color: var(--color-muted);" data-i18n="costUsd">Cost (USD)</div>
+            <div id="legend3DMetricLabel" class="text-sm font-semibold" style="color: var(--color-muted);" data-i18n="metricTokens">Tokens</div>
             <div class="flex items-center gap-2">
               <span class="text-xs" style="color: var(--color-muted);" data-i18n="less">Less</span>
               <div id="legend3D" class="flex gap-1"></div>
@@ -1203,11 +1247,15 @@
       en: {
         range: 'Range',
         today: 'Today',
+        yesterday: 'Yesterday',
         last3days: 'Last 3 Days',
         last7days: 'Last 7 Days',
         last14days: 'Last 14 Days',
+        last4weeks: 'Last 4 Weeks',
         thisMonth: 'This Month',
+        lastMonth: 'Last Month',
         last3months: 'Last 3 Months',
+        thisYear: 'This Year',
         lastYear: 'Last Year',
         customDays: 'Custom Days…',
         daysPlaceholder: 'Days',
@@ -1264,6 +1312,15 @@
         activeDays: 'Active Days',
         totalDays: 'Total Days',
         dailyActivity: 'Daily Activity',
+        calendarMetric: 'Metric',
+        metricTokens: 'Tokens',
+        metricCost: 'Cost',
+        metricMessages: 'Messages',
+        peakDay: 'Peak Day',
+        peakWeek: 'Peak Week',
+        peakWeekday: 'Top Weekday',
+        avgActiveDay: 'Avg / Active Day',
+        activeDaysOnly: 'Across active days',
         month: 'Month',
         year: 'Year',
         threeD: '3D',
@@ -1314,12 +1371,16 @@
       zh: {
         range: '范围',
         today: '今天',
+        yesterday: '昨天',
         last3days: '最近 3 天',
-        last7days: '最近 7 天',
-        last14days: '最近 14 天',
+        last7days: '过去 7 天',
+        last14days: '过去 14 天',
+        last4weeks: '过去 4 周',
         thisMonth: '本月',
+        lastMonth: '上月',
         last3months: '最近 3 个月',
-        lastYear: '最近一年',
+        thisYear: '本年',
+        lastYear: '去年',
         customDays: '自定义天数…',
         daysPlaceholder: '天数',
         apply: '应用',
@@ -1375,6 +1436,15 @@
         activeDays: '活跃天数',
         totalDays: '总天数',
         dailyActivity: '每日活跃',
+        calendarMetric: '指标',
+        metricTokens: 'Tokens',
+        metricCost: '费用',
+        metricMessages: '消息数',
+        peakDay: '峰值日',
+        peakWeek: '峰值周',
+        peakWeekday: '最高活跃日',
+        avgActiveDay: '活跃日均值',
+        activeDaysOnly: '仅按活跃日计算',
         month: '月',
         year: '年',
         threeD: '3D',
@@ -1460,6 +1530,40 @@
       return '$' + n.toFixed(2);
     }
 
+    function parseDateKey(value) {
+      const [year, month, day] = String(value || '').split('-').map((v) => Number(v));
+      if (!year || !month || !day) return new Date(NaN);
+      return new Date(year, month - 1, day);
+    }
+
+    function formatDateKey(date) {
+      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    }
+
+    function startOfWeekMonday(date) {
+      const dt = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+      const dayOfWeek = dt.getDay();
+      const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+      dt.setDate(dt.getDate() - daysToMonday);
+      return dt;
+    }
+
+    function formatShortDate(value, includeYear = false) {
+      const dt = value instanceof Date ? value : parseDateKey(value);
+      if (isNaN(dt.getTime())) return '—';
+      const locale = currentLang === 'zh' ? 'zh-CN' : 'en-US';
+      const options = includeYear
+        ? { year: 'numeric', month: 'short', day: 'numeric' }
+        : { month: 'short', day: 'numeric' };
+      return dt.toLocaleDateString(locale, options);
+    }
+
+    function formatWeekRangeLabel(startDate) {
+      const endDate = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+      endDate.setDate(endDate.getDate() + 6);
+      return `${formatShortDate(startDate, true)} → ${formatShortDate(endDate, true)}`;
+    }
+
     function formatMonthDayTime(value) {
       if (!value) return '—';
       const dt = new Date(value);
@@ -1525,6 +1629,27 @@
       return n + ' ' + (n === 1 ? t('day') : t('days'));
     }
 
+    function getCalendarMetricMeta(metric = 'tokens') {
+      if (metric === 'cost') {
+        return { key: 'cost', label: t('metricCost'), format: formatCurrency };
+      }
+      if (metric === 'messages') {
+        return { key: 'messages', label: t('metricMessages'), format: formatNumber };
+      }
+      return { key: 'tokens', label: t('metricTokens'), format: formatNumber };
+    }
+
+    function getMetricValue(day, metric = 'tokens') {
+      const totals = day?.totals || {};
+      if (metric === 'cost') return Number(totals.cost || 0);
+      if (metric === 'messages') return Number(totals.messages || 0);
+      return Number(totals.tokens || 0);
+    }
+
+    function formatMetricValue(value, metric = 'tokens') {
+      return getCalendarMetricMeta(metric).format(value || 0);
+    }
+
     function getCssVar(name) {
       return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
     }
@@ -1575,6 +1700,7 @@
       const langBtn = document.getElementById('langToggle');
       if (langBtn) langBtn.textContent = currentLang === 'zh' ? 'EN' : '中';
       updateTimestamp();
+      updateMetricControls();
     }
 
     function rerenderPresentation() {
@@ -1600,7 +1726,7 @@
           renderYearHeatmap();
           updateTopStatsForYear();
         } else if (calendarState.view === '3d') {
-          render3DCalendar(calendarState.contributions);
+          render3DCalendar(getVisibleCalendarData('3d'));
           updateTopStatsForAllTime();
         }
       }
@@ -1677,6 +1803,7 @@
     let flatpickrInstance = null;
     let currentStartDate = null;
     let currentEndDate = null;
+    let isDatePickerInitializing = true;
 
     function initDateRangePicker() {
       const dateInput = document.getElementById('dateRangePicker');
@@ -1687,6 +1814,9 @@
         dateFormat: 'Y-m-d',
         maxDate: 'today',
         onChange: function(selectedDates) {
+          // Skip update during initialization
+          if (isDatePickerInitializing) return;
+
           if (selectedDates.length === 2) {
             currentStartDate = selectedDates[0];
             currentEndDate = selectedDates[1];
@@ -1694,9 +1824,13 @@
           }
         },
         onReady: function(dateObj, dateStr, instance) {
-          // Set default to today
+          // Set default to today (for display only, won't trigger onChange due to flag)
           const today = new Date();
           instance.setDate([today, today]);
+          currentStartDate = today;
+          currentEndDate = today;
+          // Allow onChange to work after initialization
+          setTimeout(() => { isDatePickerInitializing = false; }, 100);
         }
       });
     }
@@ -1707,24 +1841,53 @@
         const range = this.getAttribute('data-range');
         const today = new Date();
         let startDate = new Date();
+        let endDate = new Date(today);
 
         switch(range) {
           case 'today':
             startDate = today;
+            endDate = today;
             break;
-          case 'week':
+          case 'yesterday':
+            startDate.setDate(today.getDate() - 1);
+            endDate.setDate(today.getDate() - 1);
+            break;
+          case 'last7days':
             startDate.setDate(today.getDate() - 6);
+            endDate = today;
             break;
-          case 'month':
+          case 'last14days':
+            startDate.setDate(today.getDate() - 13);
+            endDate = today;
+            break;
+          case 'last4weeks':
+            startDate.setDate(today.getDate() - 27);
+            endDate = today;
+            break;
+          case 'thisMonth':
             startDate.setDate(1); // First day of current month
+            endDate = today;
             break;
-          case '90':
-            startDate.setDate(today.getDate() - 89);
+          case 'lastMonth':
+            startDate = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+            endDate = new Date(today.getFullYear(), today.getMonth(), 0); // Last day of last month
+            break;
+          case 'thisYear':
+            startDate = new Date(today.getFullYear(), 0, 1);
+            endDate = today;
+            break;
+          case 'lastYear':
+            startDate = new Date(today.getFullYear() - 1, 0, 1);
+            endDate = new Date(today.getFullYear() - 1, 11, 31);
             break;
         }
 
         if (flatpickrInstance) {
-          flatpickrInstance.setDate([startDate, today]);
+          flatpickrInstance.setDate([startDate, endDate]);
+          // Trigger update with date range
+          currentStartDate = startDate;
+          currentEndDate = endDate;
+          updateDashboardByDateRange(startDate, endDate);
         }
       });
     });
@@ -1732,11 +1895,11 @@
     function updateDashboardByDateRange(startDate, endDate) {
       if (!startDate || !endDate) return;
 
-      // Calculate days difference
-      const diffTime = Math.abs(endDate - startDate);
-      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+      // Format dates as YYYY-MM-DD
+      const dateFrom = startDate.toISOString().split('T')[0];
+      const dateTo = endDate.toISOString().split('T')[0];
 
-      updateDashboard(diffDays);
+      updateDashboard(null, dateFrom, dateTo);
     }
 
     function renderOverviewTab(data) {
@@ -1769,18 +1932,19 @@
       scheduleIdle(() => updateCombinedModelsTable(lastCombinedModels));
     }
 
-    async function updateDashboard(customDays = null) {
+    async function updateDashboard(customDays = null, dateFrom = null, dateTo = null) {
       if (updateInFlight) return;
 
-      let periodValue = null;
-      if (customDays) {
-        periodValue = String(customDays);
+      let usageApiUrl;
+      if (dateFrom && dateTo) {
+        // Use specific date range
+        usageApiUrl = `/api/usage?date_from=${encodeURIComponent(dateFrom)}&date_to=${encodeURIComponent(dateTo)}`;
       } else {
-        // Default to today if no custom days specified
-        periodValue = 'today';
+        // Use period-based query
+        let periodValue = customDays ? String(customDays) : 'today';
+        usageApiUrl = `/api/usage?period=${encodeURIComponent(periodValue)}`;
       }
 
-      const usageApiUrl = `/api/usage?period=${encodeURIComponent(periodValue)}`;
       const refreshBtn = document.getElementById('refreshBtn');
       updateInFlight = true;
 
@@ -1794,9 +1958,14 @@
       refreshBtn.disabled = true;
 
       try {
-        const sessionUrls = ["codex", "claude", "opencode"].map(
-          (tool) => `/api/sessions?tool=${tool}&period=${encodeURIComponent(periodValue)}`
-        );
+        const sessionUrls = ["codex", "claude", "opencode"].map((tool) => {
+          if (dateFrom && dateTo) {
+            return `/api/sessions?tool=${tool}&date_from=${encodeURIComponent(dateFrom)}&date_to=${encodeURIComponent(dateTo)}`;
+          } else {
+            const periodValue = customDays ? String(customDays) : 'today';
+            return `/api/sessions?tool=${tool}&period=${encodeURIComponent(periodValue)}`;
+          }
+        });
         const [usageResponse, codexResponse, claudeResponse, opencodeResponse] = await Promise.all([
           fetch(usageApiUrl),
           fetch(sessionUrls[0]),
@@ -2744,6 +2913,43 @@
     });
 
     // Stats
+    const statsCache = {
+      default: null,
+      years: new Map(),
+      pendingYears: new Map(),
+    };
+
+    function createEmptyContribution(key) {
+      return {
+        date: key,
+        totals: { cost: 0, tokens: 0, messages: 0 },
+        tokenBreakdown: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
+        sources: [],
+      };
+    }
+
+    function fillDateRange(start, end, map) {
+      const filled = [];
+      for (let dt = new Date(start.getFullYear(), start.getMonth(), start.getDate()); dt <= end; dt.setDate(dt.getDate() + 1)) {
+        const key = formatDateKey(dt);
+        filled.push(map.get(key) || createEmptyContribution(key));
+      }
+      return filled;
+    }
+
+    function fillMissingDays(contributions) {
+      if (!contributions || contributions.length === 0) return [];
+      const sorted = contributions.slice().sort((a, b) => a.date.localeCompare(b.date));
+      const start = parseDateKey(sorted[0].date);
+      const end = parseDateKey(sorted[sorted.length - 1].date);
+      return fillDateRange(start, end, new Map(sorted.map((d) => [d.date, d])));
+    }
+
+    function fillYearDays(contributions, year) {
+      const list = Array.isArray(contributions) ? contributions : [];
+      return fillDateRange(new Date(year, 0, 1), new Date(year, 11, 31), new Map(list.map((d) => [d.date, d])));
+    }
+
     async function loadStats(options = {}) {
       const preserveNavigation = !!options.preserveNavigation;
       try {
@@ -2761,40 +2967,59 @@
         document.getElementById('statTotalCost').textContent = formatCurrency((data.summary || {}).totalCost || 0);
 
         const filledContributions = fillMissingDays(data.contributions);
+        statsCache.default = filledContributions;
+        const currentYear = new Date().getFullYear();
+        const currentYearRows = filledContributions.filter((day) => Number(String(day.date).slice(0, 4)) === currentYear);
+        statsCache.years.set(currentYear, fillYearDays(currentYearRows, currentYear));
         renderCalendar(filledContributions, { preserveNavigation });
         contributionsData = filledContributions;
+        if (calendarState.view === 'year') {
+          ensureYearStatsLoaded(calendarState.yearCursor.getFullYear());
+        }
       } catch (error) {
         console.error('Error loading stats:', error);
       }
     }
 
-    function fillMissingDays(contributions) {
-      if (!contributions || contributions.length === 0) return [];
-      const sorted = contributions.slice().sort((a, b) => a.date.localeCompare(b.date));
-      const start = new Date(sorted[0].date);
-      const end = new Date(sorted[sorted.length - 1].date);
+    async function ensureYearStatsLoaded(year) {
+      if (statsCache.years.has(year)) return statsCache.years.get(year);
+      if (statsCache.pendingYears.has(year)) return statsCache.pendingYears.get(year);
 
-      const map = new Map(sorted.map((d) => [d.date, d]));
-      const filled = [];
+      const promise = (async () => {
+        const response = await fetch(`/api/stats?year=${year}`);
+        const data = await response.json();
+        const filled = fillYearDays(data.contributions || [], year);
+        statsCache.years.set(year, filled);
+        return filled;
+      })()
+        .catch((error) => {
+          console.error(`Error loading stats for year ${year}:`, error);
+          return [];
+        })
+        .finally(() => {
+          statsCache.pendingYears.delete(year);
+        });
 
-      for (let dt = new Date(start); dt <= end; dt.setDate(dt.getDate() + 1)) {
-        const yyyy = dt.getFullYear();
-        const mm = String(dt.getMonth() + 1).padStart(2, '0');
-        const dd = String(dt.getDate()).padStart(2, '0');
-        const key = `${yyyy}-${mm}-${dd}`;
+      statsCache.pendingYears.set(year, promise);
+      return promise;
+    }
 
-        if (map.has(key)) filled.push(map.get(key));
-        else {
-          filled.push({
-            date: key,
-            totals: { cost: 0, tokens: 0, messages: 0 },
-            tokenBreakdown: { input: 0, output: 0, cacheRead: 0, reasoning: 0 },
-            sources: [],
-          });
-        }
+    function getVisibleCalendarData(view = calendarState.view) {
+      if (view === 'year') {
+        return statsCache.years.get(calendarState.yearCursor.getFullYear()) || [];
       }
+      return calendarState.contributions || [];
+    }
 
-      return filled;
+    function getKnownCalendarData() {
+      const merged = new Map();
+      (calendarState.contributions || []).forEach((day) => merged.set(day.date, day));
+      statsCache.years.forEach((list) => {
+        (list || []).forEach((day) => {
+          if (!merged.has(day.date)) merged.set(day.date, day);
+        });
+      });
+      return Array.from(merged.values()).sort((a, b) => a.date.localeCompare(b.date));
     }
 
     // ===== New Heatmap Calendar (Month / Year / 3D) =====
@@ -2807,7 +3032,7 @@
       
       for (let i = 0; i < sorted.length; i++) {
         const day = sorted[i];
-        if ((day.totals.tokens || 0) > 0) {
+        if (getMetricValue(day, calendarState.metric) > 0) {
           tempStreak++;
           if (tempStreak > longestStreak) longestStreak = tempStreak;
         } else {
@@ -2852,7 +3077,107 @@
       monthCursor: new Date(),
       yearCursor: new Date(),
       contributions: [],
+      currentViewDays: [],
+      metric: 'tokens',
     };
+
+    function updateMetricControls() {
+      const activeMetric = calendarState.metric;
+      const buttonMap = {
+        tokens: document.getElementById('metricTokensBtn'),
+        cost: document.getElementById('metricCostBtn'),
+        messages: document.getElementById('metricMessagesBtn'),
+      };
+      Object.entries(buttonMap).forEach(([metric, btn]) => {
+        if (!btn) return;
+        btn.className = metric === activeMetric ? 'btn btn-primary' : 'btn btn-ghost';
+      });
+
+      const meta = getCalendarMetricMeta(activeMetric);
+      ['heatMetricLabel', 'yearMetricLabel', 'legend3DMetricLabel'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = meta.label;
+      });
+    }
+
+    function setInsightCard(valueId, metaId, value, meta) {
+      const valueEl = document.getElementById(valueId);
+      const metaEl = document.getElementById(metaId);
+      if (valueEl) valueEl.textContent = value;
+      if (metaEl) metaEl.textContent = meta;
+    }
+
+    function updateStatsInsights(days = calendarState.currentViewDays || []) {
+      const metric = calendarState.metric;
+      const metricMeta = getCalendarMetricMeta(metric);
+      const activeDays = (days || []).filter((day) => getMetricValue(day, metric) > 0);
+
+      if (!days.length || !activeDays.length) {
+        setInsightCard('statPeakDay', 'statPeakDayMeta', '—', t('noActivityData'));
+        setInsightCard('statPeakWeek', 'statPeakWeekMeta', '—', t('noActivityData'));
+        setInsightCard('statPeakWeekday', 'statPeakWeekdayMeta', '—', t('noActivityData'));
+        setInsightCard('statAvgActiveDay', 'statAvgActiveDayMeta', '—', t('activeDaysOnly'));
+        return;
+      }
+
+      const peakDay = activeDays.reduce((best, day) => {
+        if (!best) return day;
+        return getMetricValue(day, metric) > getMetricValue(best, metric) ? day : best;
+      }, null);
+      setInsightCard(
+        'statPeakDay',
+        'statPeakDayMeta',
+        formatShortDate(peakDay.date, true),
+        `${metricMeta.label}: ${formatMetricValue(getMetricValue(peakDay, metric), metric)}`
+      );
+
+      const weekTotals = new Map();
+      activeDays.forEach((day) => {
+        const weekStart = startOfWeekMonday(parseDateKey(day.date));
+        const key = formatDateKey(weekStart);
+        weekTotals.set(key, (weekTotals.get(key) || 0) + getMetricValue(day, metric));
+      });
+      const [peakWeekKey, peakWeekValue] = Array.from(weekTotals.entries()).sort((a, b) => b[1] - a[1])[0];
+      setInsightCard(
+        'statPeakWeek',
+        'statPeakWeekMeta',
+        formatWeekRangeLabel(parseDateKey(peakWeekKey)),
+        `${metricMeta.label}: ${formatMetricValue(peakWeekValue, metric)}`
+      );
+
+      const weekdayTotals = new Map();
+      activeDays.forEach((day) => {
+        const dt = parseDateKey(day.date);
+        const weekday = dt.getDay() === 0 ? 6 : dt.getDay() - 1;
+        weekdayTotals.set(weekday, (weekdayTotals.get(weekday) || 0) + getMetricValue(day, metric));
+      });
+      const [peakWeekdayKey, peakWeekdayValue] = Array.from(weekdayTotals.entries()).sort((a, b) => b[1] - a[1])[0];
+      const weekdayLabels = getDayLabels();
+      setInsightCard(
+        'statPeakWeekday',
+        'statPeakWeekdayMeta',
+        weekdayLabels[Number(peakWeekdayKey)] || '—',
+        `${metricMeta.label}: ${formatMetricValue(peakWeekdayValue, metric)}`
+      );
+
+      const totalMetric = activeDays.reduce((sum, day) => sum + getMetricValue(day, metric), 0);
+      const averageMetric = totalMetric / activeDays.length;
+      setInsightCard(
+        'statAvgActiveDay',
+        'statAvgActiveDayMeta',
+        formatMetricValue(averageMetric, metric),
+        `${formatNumber(activeDays.length)}/${formatNumber(days.length)} ${t('activeDays')}`
+      );
+    }
+
+    function setCalendarMetric(metric) {
+      if (!['tokens', 'cost', 'messages'].includes(metric)) return;
+      calendarState.metric = metric;
+      updateMetricControls();
+      if (document.getElementById('stats-content').classList.contains('active')) {
+        setView(calendarState.view);
+      }
+    }
 
     function setView(view) {
       calendarState.view = view;
@@ -2864,14 +3189,19 @@
       document.getElementById('viewMonth').className = view === 'month' ? 'btn btn-primary' : 'btn btn-ghost';
       document.getElementById('viewYear').className = view === 'year' ? 'btn btn-primary' : 'btn btn-ghost';
       document.getElementById('view3D').className = view === '3d' ? 'btn btn-primary' : 'btn btn-ghost';
+      updateMetricControls();
 
       if (view === 'month') {
         renderMonthHeatmap();
       } else if (view === 'year') {
-        renderYearHeatmap();
-        updateTopStatsForYear();
+        const year = calendarState.yearCursor.getFullYear();
+        ensureYearStatsLoaded(year).then(() => {
+          if (calendarState.view !== 'year' || calendarState.yearCursor.getFullYear() !== year) return;
+          renderYearHeatmap();
+          updateTopStatsForYear();
+        });
       } else if (view === '3d') {
-        render3DCalendar(calendarState.contributions || []);
+        render3DCalendar(getVisibleCalendarData('3d'));
         updateTopStatsForAllTime();
       }
     }
@@ -2897,7 +3227,7 @@
 
       titleEl.textContent = dt.toLocaleString(currentLang === 'zh' ? 'zh-CN' : 'en-US', { month: 'long', year: 'numeric' });
 
-      const map = new Map((calendarState.contributions || []).map((d) => [d.date, d]));
+      const map = new Map((getVisibleCalendarData('month') || []).map((d) => [d.date, d]));
       const daysInMonth = new Date(year, month + 1, 0).getDate();
 
       // Monday-first calendar grid
@@ -2908,21 +3238,15 @@
       for (let i = 0; i < first; i++) monthDays.push(null);
       for (let d = 1; d <= daysInMonth; d++) {
         const key = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-        monthDays.push(
-          map.get(key) || {
-            date: key,
-            totals: { tokens: 0, cost: 0, messages: 0 },
-            tokenBreakdown: { input: 0, output: 0, cacheRead: 0, reasoning: 0 },
-            sources: [],
-          }
-        );
+        monthDays.push(map.get(key) || createEmptyContribution(key));
       }
 
-      const tokenVals = monthDays.filter(Boolean).map((x) => x.totals.tokens || 0);
-      const thresholds = quantileThresholds(tokenVals, HEAT_COLORS.length - 1);
+      const metricVals = monthDays.filter(Boolean).map((x) => getMetricValue(x, calendarState.metric));
+      const thresholds = quantileThresholds(metricVals, HEAT_COLORS.length - 1);
 
       gridEl.innerHTML = '';
       gridEl.className = 'heatmap-month-grid';
+      calendarState.currentViewDays = monthDays.filter(Boolean);
 
       monthDays.forEach((day) => {
         if (!day) {
@@ -2932,7 +3256,7 @@
           gridEl.appendChild(spacer);
           return;
         }
-        const lvl = quantileLevel(day.totals.tokens || 0, thresholds);
+        const lvl = quantileLevel(getMetricValue(day, calendarState.metric), thresholds);
         const cell = document.createElement('div');
         cell.className = 'heatmap-cell';
         cell.style.backgroundColor = heatColor(lvl);
@@ -2943,6 +3267,7 @@
 
       // Calculate and display month statistics
       updateMonthStatistics(monthDays.filter(Boolean));
+      updateStatsInsights(monthDays.filter(Boolean));
     }
 
     function updateMonthStatistics(monthDays) {
@@ -3004,7 +3329,7 @@
       
       for (let i = 0; i < sortedByDate.length; i++) {
         const day = sortedByDate[i];
-        if ((day.totals.tokens || 0) > 0) {
+        if (getMetricValue(day, calendarState.metric) > 0) {
           tempStreak++;
           if (tempStreak > monthStreak) monthStreak = tempStreak;
         } else {
@@ -3013,7 +3338,7 @@
       }
 
       // Calculate longest ever streak across all data
-      const longestEverStreak = calculateLongestStreak(calendarState.contributions || []);
+      const longestEverStreak = calculateLongestStreak(getKnownCalendarData());
 
       // Update UI - Month sidebar stats
       document.getElementById('monthFavoriteModel').textContent = topModel;
@@ -3035,14 +3360,8 @@
     }
 
     function updateTopStatsForYear() {
-      const contributions = calendarState.contributions || [];
       const year = calendarState.yearCursor.getFullYear();
-      
-      // Filter to current year
-      const yearDays = contributions.filter(d => {
-        const dateYear = Number(String(d.date).slice(0, 4));
-        return dateYear === year;
-      });
+      const yearDays = getVisibleCalendarData('year');
 
       let totalTokens = 0;
       let totalCost = 0;
@@ -3100,7 +3419,7 @@
       
       for (let i = 0; i < sortedDays.length; i++) {
         const day = sortedDays[i];
-        if ((day.totals.tokens || 0) > 0) {
+        if (getMetricValue(day, calendarState.metric) > 0) {
           tempStreak++;
           if (tempStreak > yearStreak) yearStreak = tempStreak;
         } else {
@@ -3109,7 +3428,7 @@
       }
       
       // Calculate longest ever streak across all data
-      const longestEverStreak = calculateLongestStreak(calendarState.contributions || []);
+      const longestEverStreak = calculateLongestStreak(getKnownCalendarData());
 
       // Update top stats section
       document.getElementById('statFavoriteModel').textContent = topModel;
@@ -3127,7 +3446,7 @@
     }
 
     function updateTopStatsForAllTime() {
-      const contributions = calendarState.contributions || [];
+      const contributions = getVisibleCalendarData('3d');
 
       let totalTokens = 0;
       let totalCost = 0;
@@ -3185,7 +3504,7 @@
       const sortedDesc = [...contributions].sort((a, b) => b.date.localeCompare(a.date));
       for (const day of sortedDesc) {
         if (day.date > todayStr) continue;
-        if ((day.totals.tokens || 0) > 0) {
+        if (getMetricValue(day, calendarState.metric) > 0) {
           currentStreak++;
         } else {
           break;
@@ -3193,7 +3512,7 @@
       }
       
       // Calculate longest ever streak
-      const longestEverStreak = calculateLongestStreak(contributions);
+      const longestEverStreak = calculateLongestStreak(getKnownCalendarData());
 
       // Update top stats section
       document.getElementById('statFavoriteModel').textContent = topModel;
@@ -3215,7 +3534,8 @@
       const gridEl = document.getElementById('yearGrid');
       const ylab = document.getElementById('yearDayLabels');
 
-      const map = new Map((calendarState.contributions || []).map((d) => [d.date, d]));
+      const yearDays = getVisibleCalendarData('year');
+      const map = new Map((yearDays || []).map((d) => [d.date, d]));
       const start = new Date(year, 0, 1);
       const end = new Date(year, 11, 31);
 
@@ -3228,9 +3548,9 @@
       // thresholds across the year (tokens)
       const vals = [];
       for (let dt = new Date(start); dt <= end; dt.setDate(dt.getDate() + 1)) {
-        const key = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+        const key = formatDateKey(dt);
         const day = map.get(key);
-        vals.push(day ? day.totals.tokens || 0 : 0);
+        vals.push(day ? getMetricValue(day, calendarState.metric) : 0);
       }
       const thresholds = quantileThresholds(vals, HEAT_COLORS.length - 1);
 
@@ -3270,23 +3590,18 @@
           continue;
         }
 
-        const key = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
-        const day =
-          map.get(key) ||
-          {
-            date: key,
-            totals: { tokens: 0, cost: 0, messages: 0 },
-            tokenBreakdown: { input: 0, output: 0, cacheRead: 0, reasoning: 0 },
-            sources: [],
-          };
+        const key = formatDateKey(dt);
+        const day = map.get(key) || createEmptyContribution(key);
 
-        const lvl = quantileLevel(day.totals.tokens || 0, thresholds);
+        const lvl = quantileLevel(getMetricValue(day, calendarState.metric), thresholds);
         cell.style.backgroundColor = heatColor(lvl);
         cell.title = `${day.date}: ${formatNumber(day.totals.tokens || 0)} ${t('tokensUnit')} · ${formatCurrency(day.totals.cost || 0)} · ${formatNumber(day.totals.messages || 0)} ${t('msgs')}`;
         cell.addEventListener('click', () => showDayDetails(day));
 
         gridEl.appendChild(cell);
       }
+      calendarState.currentViewDays = yearDays;
+      updateStatsInsights(yearDays);
     }
 
     function renderCalendar(contributions, options = {}) {
@@ -3420,6 +3735,7 @@
 
       const days = Array.isArray(contributions) ? contributions.slice() : [];
       contributionsData = days;
+      calendarState.currentViewDays = days;
 
       if (days.length === 0) {
         container.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:750px;color:var(--color-muted);font-size:16px;">${t('noActivityData')}</div>`;
@@ -3428,6 +3744,7 @@
         document.getElementById('stats3DActiveDate').textContent = '—';
         document.getElementById('stats3DActiveTokens').textContent = '—';
         document.getElementById('stats3DActiveCost').textContent = '—';
+        updateStatsInsights([]);
         return;
       }
 
@@ -3484,14 +3801,11 @@
 
       // Process data
       const sorted = days.slice().sort((a, b) => a.date.localeCompare(b.date));
-      const firstDate = new Date(sorted[0].date + 'T00:00:00');
-      const lastDate = new Date(sorted[sorted.length - 1].date + 'T00:00:00');
+      const firstDate = parseDateKey(sorted[0].date);
+      const lastDate = parseDateKey(sorted[sorted.length - 1].date);
       
       // Find Monday before or on first date
-      const startMonday = new Date(firstDate);
-      const dayOfWeek = startMonday.getDay();
-      const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-      startMonday.setDate(startMonday.getDate() - daysToMonday);
+      const startMonday = startOfWeekMonday(firstDate);
 
       const dayMap = new Map(sorted.map(d => [d.date, d]));
 
@@ -3503,7 +3817,7 @@
         const dt = new Date(startMonday);
         dt.setDate(dt.getDate() + i);
         if (dt > lastDate) break;
-        const dateKey = dt.toISOString().split('T')[0];
+        const dateKey = formatDateKey(dt);
         const dayData = dayMap.get(dateKey) || null;
         
         let isoDay = dt.getDay();
@@ -3520,10 +3834,10 @@
         weeks.push(currentWeek);
       }
 
-      // Cost-based coloring
-      const costVals = sorted.map((d) => Number(d?.totals?.cost ?? 0) || 0).filter(c => c > 0);
-      const thresholds = quantileThresholds(costVals, HEAT_COLORS.length - 1);
-      const maxCost = Math.max(...costVals, 0.01);
+      const metric = calendarState.metric;
+      const metricVals = sorted.map((d) => getMetricValue(d, metric)).filter((value) => value > 0);
+      const thresholds = quantileThresholds(metricVals, HEAT_COLORS.length - 1);
+      const maxMetric = Math.max(...metricVals, 0.01);
 
       const cubeSize = 22;
       const minHeight = 12;
@@ -3568,12 +3882,12 @@
         week.forEach((cell) => {
           if (!cell || !cell.data) return;
           const day = cell.data;
-          const cost = Number(day?.totals?.cost ?? 0) || 0;
-          if (cost <= 0) return;
+          const metricValue = getMetricValue(day, metric);
+          if (metricValue <= 0) return;
 
           const dayIdx = cell.dayIdx;
-          const lvl = quantileLevel(cost, thresholds);
-          const ratio = cost / maxCost;
+          const lvl = quantileLevel(metricValue, thresholds);
+          const ratio = metricValue / maxMetric;
           const cubeHeight = Math.max(minHeight, Math.round(minHeight + ratio * (maxHeight - minHeight)));
 
           // Create box
@@ -3689,15 +4003,16 @@
       document.getElementById('stats3DTotalCost').textContent = formatCurrency(totalCost);
       document.getElementById('stats3DTotalTokens').textContent = formatNumber(totalTokens);
       
-      // Find most active day (highest cost)
-      const mostActiveDay = sorted.reduce((max, d) => {
-        const cost = Number(d?.totals?.cost ?? 0) || 0;
-        const maxCost = Number(max?.totals?.cost ?? 0) || 0;
-        return cost > maxCost ? d : max;
-      }, sorted[0] || null);
+      // Find most active day under the selected metric
+      const activeMetricDays = sorted.filter((day) => getMetricValue(day, metric) > 0);
+      const mostActiveDay = activeMetricDays.reduce((max, d) => {
+        const value = getMetricValue(d, metric);
+        const maxValue = max ? getMetricValue(max, metric) : 0;
+        return value > maxValue ? d : max;
+      }, activeMetricDays[0] || null);
       
       if (mostActiveDay) {
-        const dayDate = new Date(mostActiveDay.date + 'T00:00:00');
+        const dayDate = parseDateKey(mostActiveDay.date);
         const dayName = dayDate.toLocaleDateString(currentLang === 'zh' ? 'zh-CN' : 'en-US', { weekday: 'short', month: 'short', day: 'numeric' });
         const dayTokens = formatNumber(mostActiveDay.totals.tokens || 0);
         const dayCost = formatCurrency(mostActiveDay.totals.cost || 0);
@@ -3709,6 +4024,7 @@
         document.getElementById('stats3DActiveTokens').textContent = '—';
         document.getElementById('stats3DActiveCost').textContent = '—';
       }
+      updateStatsInsights(days);
     }
 
     // Click handler for Three.js
@@ -3747,6 +4063,9 @@
     document.getElementById('viewMonth').addEventListener('click', () => setView('month'));
     document.getElementById('viewYear').addEventListener('click', () => setView('year'));
     document.getElementById('view3D').addEventListener('click', () => setView('3d'));
+    document.getElementById('metricTokensBtn').addEventListener('click', () => setCalendarMetric('tokens'));
+    document.getElementById('metricCostBtn').addEventListener('click', () => setCalendarMetric('cost'));
+    document.getElementById('metricMessagesBtn').addEventListener('click', () => setCalendarMetric('messages'));
 
     document.getElementById('prevMonth').addEventListener('click', () => {
       calendarState.monthCursor = new Date(calendarState.monthCursor.getFullYear(), calendarState.monthCursor.getMonth() - 1, 1);
@@ -3759,16 +4078,22 @@
 
     document.getElementById('prevYear').addEventListener('click', () => {
       calendarState.yearCursor = new Date(calendarState.yearCursor.getFullYear() - 1, 0, 1);
-      renderYearHeatmap();
-      updateTopStatsForYear();
+      setView('year');
     });
     document.getElementById('nextYear').addEventListener('click', () => {
       calendarState.yearCursor = new Date(calendarState.yearCursor.getFullYear() + 1, 0, 1);
-      renderYearHeatmap();
-      updateTopStatsForYear();
+      setView('year');
     });
 
-    document.getElementById('refreshBtn').addEventListener('click', () => updateDashboard());
+    document.getElementById('refreshBtn').addEventListener('click', () => {
+      // Use current date range if set, otherwise use today
+      if (currentStartDate && currentEndDate) {
+        updateDashboardByDateRange(currentStartDate, currentEndDate);
+      } else {
+        const today = new Date();
+        updateDashboardByDateRange(today, today);
+      }
+    });
 
     const combinedModelsToggle = document.getElementById('combinedModelsToggle');
     if (combinedModelsToggle) {
@@ -3783,14 +4108,20 @@
     window.addEventListener('resize', () => {
       if (calendarState.view !== '3d') return;
       clearTimeout(_resize3DTimer);
-      _resize3DTimer = setTimeout(() => render3DCalendar(calendarState.contributions || []), 120);
+      _resize3DTimer = setTimeout(() => render3DCalendar(getVisibleCalendarData('3d')), 120);
     });
 
     // Auto-refresh every 5 minutes
     setInterval(() => {
       if (document.hidden) return;
       if (!isOverviewActive() && !isSessionsActive()) return;
-      updateDashboard();
+      // Use current date range if set, otherwise use today
+      if (currentStartDate && currentEndDate) {
+        updateDashboardByDateRange(currentStartDate, currentEndDate);
+      } else {
+        const today = new Date();
+        updateDashboardByDateRange(today, today);
+      }
     }, 5 * 60 * 1000);
 
     // PWA install support (Android/Chrome requires manifest + service worker).
@@ -3840,8 +4171,11 @@
     // Initialize date range picker
     initDateRangePicker();
 
-    // Initial load
-    updateDashboard();
+    // Initial load - use today as default
+    const today = new Date();
+    currentStartDate = today;
+    currentEndDate = today;
+    updateDashboardByDateRange(today, today);
   </script>
 </body>
 </html>

@@ -49,9 +49,10 @@ def get_cached_or_fetch(key: str, fetch_fn) -> Any:
 
 
 @app.get("/api/usage")
-def get_usage(period: str = "today") -> Dict[str, Any]:
+def get_usage(period: str = "today", date_from: Optional[str] = None, date_to: Optional[str] = None) -> Dict[str, Any]:
     try:
-        return get_cached_or_fetch(f"usage_{period}", lambda: compute_usage_with_comparison(period))
+        cache_key = f"usage_{period}_{date_from}_{date_to}"
+        return get_cached_or_fetch(cache_key, lambda: compute_usage_with_comparison(period, date_from, date_to))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -105,10 +106,10 @@ def get_codex_session(session_id: str) -> Dict[str, Any]:
 
 
 @app.get("/api/sessions")
-def get_sessions(tool: str, period: str = "today") -> Dict[str, Any]:
+def get_sessions(tool: str, period: str = "today", date_from: Optional[str] = None, date_to: Optional[str] = None) -> Dict[str, Any]:
     try:
-        cache_key = f"sessions_{tool.strip().lower()}_{period}"
-        return get_cached_or_fetch(cache_key, lambda: get_sessions_data(tool, period))
+        cache_key = f"sessions_{tool.strip().lower()}_{period}_{date_from}_{date_to}"
+        return get_cached_or_fetch(cache_key, lambda: get_sessions_data(tool, period, date_from, date_to))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

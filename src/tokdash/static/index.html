@@ -1851,6 +1851,21 @@
       if (sun) sun.style.display = dark ? '' : 'none';
     }
 
+    function renderRefreshButton() {
+      const refreshBtn = document.getElementById('refreshBtn');
+      if (!refreshBtn) return;
+      const labelKey = updateInFlight ? 'loading' : 'refresh';
+      refreshBtn.innerHTML = `
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M20 12a8 8 0 1 1-2.343-5.657" stroke="white" stroke-width="2" stroke-linecap="round"/>
+          <path d="M20 4v6h-6" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span data-i18n="${labelKey}">${t(labelKey)}</span>
+      `;
+      refreshBtn.setAttribute('aria-label', t(labelKey));
+      refreshBtn.disabled = updateInFlight;
+    }
+
     function updateTimestamp() {
       if (!lastUsageResponse?.timestamp) return;
       document.getElementById('lastUpdate').textContent = `${t('lastUpdated')}: ${formatMonthDayTime(lastUsageResponse.timestamp)}`;
@@ -1868,6 +1883,7 @@
       });
       const langBtn = document.getElementById('langToggle');
       if (langBtn) langBtn.textContent = currentLang === 'zh' ? 'EN' : '中';
+      renderRefreshButton();
       updateTimestamp();
       updateMetricControls();
     }
@@ -2121,17 +2137,8 @@
         usageApiUrl = `/api/usage?period=${encodeURIComponent(periodValue)}`;
       }
 
-      const refreshBtn = document.getElementById('refreshBtn');
       updateInFlight = true;
-
-      refreshBtn.innerHTML = `
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M20 12a8 8 0 1 1-2.343-5.657" stroke="white" stroke-width="2" stroke-linecap="round"/>
-          <path d="M20 4v6h-6" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-        ${t('loading')}
-      `;
-      refreshBtn.disabled = true;
+      renderRefreshButton();
 
       try {
         const sessionUrls = ["codex", "claude", "opencode"].map((tool) => {
@@ -2173,14 +2180,7 @@
         alert('Failed to fetch data. Check console for details.');
       } finally {
         updateInFlight = false;
-        refreshBtn.innerHTML = `
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path d="M20 12a8 8 0 1 1-2.343-5.657" stroke="white" stroke-width="2" stroke-linecap="round"/>
-            <path d="M20 4v6h-6" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-          ${t('refresh')}
-        `;
-        refreshBtn.disabled = false;
+        renderRefreshButton();
       }
     }
 

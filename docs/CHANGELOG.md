@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+## 0.2.0 - 2026-04-09
+
+### Added
+- Added calendar-based custom date range selection with quick presets spanning `Yesterday`, rolling day/week windows, month presets, and year presets.
+- Added a `Style` selector in the dashboard header with `Classic` and `Elevated` presentation modes, alongside the existing light/dark theme toggle.
+- Added `GLM-5.1` pricing and alias resolution (`glm5.1`, `glm-5-1`, `z-ai/glm-5.1`, `zhipu/glm-5.1`) to the local pricing database.
+
+### Changed
+- Reworked the dashboard header controls so the date picker, quick-range actions, refresh button, language toggle, theme toggle, and style selector align more cleanly across desktop widths.
+- Expanded packaged static assets to include the full `static/` tree, ensuring icons, manifest assets, and service-worker resources ship with the installed package.
+- Switched service-worker cache versioning to a content-derived cache name so upgraded installs pick up new static assets more reliably.
+
+### Fixed
+- Fixed custom date-range requests to serialize local calendar dates correctly instead of drifting backward in UTC-positive timezones.
+- Fixed API validation for incomplete, malformed, and reversed `date_from` / `date_to` query pairs.
+- Applied no-cache headers consistently to the dashboard shell, service worker, manifest, and static assets to reduce stale-client behavior after upgrades.
+- Hardened release metadata validation so packaging checks continue to work with the current static-version layout and remain compatible with future dynamic-version setups.
+
 ## 0.1.0 - 2026-03-31
 
 ### Changed

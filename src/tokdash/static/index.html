@@ -193,6 +193,91 @@
       border-radius: 3px 3px 0 0;
     }
 
+    .topbar-control-rail {
+      display: grid;
+      grid-template-areas:
+        "picker"
+        "quick"
+        "actions";
+      gap: 14px 18px;
+      align-items: start;
+      width: 100%;
+    }
+
+    .range-picker-group {
+      grid-area: picker;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px 14px;
+      align-items: center;
+      min-width: 0;
+    }
+
+    .quick-range-panel {
+      grid-area: quick;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: flex-start;
+      min-width: 0;
+    }
+
+    .topbar-actions {
+      grid-area: actions;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      justify-content: flex-start;
+    }
+
+    .view-toggle-cluster {
+      display: inline-flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .compact-control {
+      min-height: 36px;
+      padding: 6px 10px;
+    }
+
+    .style-select {
+      appearance: none;
+      min-width: 144px;
+      padding-right: 34px;
+      font-size: 12px;
+      font-weight: 700;
+      background-image:
+        linear-gradient(45deg, transparent 50%, currentColor 50%),
+        linear-gradient(135deg, currentColor 50%, transparent 50%);
+      background-position:
+        calc(100% - 16px) calc(50% - 2px),
+        calc(100% - 11px) calc(50% - 2px);
+      background-size: 5px 5px, 5px 5px;
+      background-repeat: no-repeat;
+    }
+
+    .style-select option {
+      color: var(--color-text);
+      background: white;
+    }
+
+    @media (min-width: 1024px) {
+      .topbar-control-rail {
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-areas:
+          "picker actions"
+          "quick actions";
+      }
+
+      .topbar-actions {
+        justify-content: flex-end;
+        align-self: start;
+      }
+    }
+
     /* Session tables: fixed layout for column alignment between header and nested rows */
     .session-table { table-layout: fixed; }
     .session-table th, .session-table td { overflow: hidden; text-overflow: ellipsis; }
@@ -347,6 +432,128 @@
       background: #60A5FA;
     }
 
+    html.dark .style-select option {
+      background: #1E293B;
+      color: var(--color-text);
+    }
+
+    html[data-ui-theme="classic"] body {
+      background: linear-gradient(180deg, #F8FAFC 0%, #EEF2FF 100%);
+    }
+
+    html[data-ui-theme="classic"] .surface {
+      background: rgba(248, 250, 252, 0.92);
+      border: 1px solid var(--color-border);
+      box-shadow: var(--shadow-md);
+      backdrop-filter: blur(8px);
+    }
+
+    html[data-ui-theme="classic"] .surface:hover {
+      transform: none;
+      box-shadow: var(--shadow-md);
+    }
+
+    html[data-ui-theme="classic"] .btn::before {
+      display: none;
+    }
+
+    html[data-ui-theme="classic"] .btn-primary {
+      background: var(--color-primary);
+      box-shadow: 0 10px 24px rgba(30, 64, 175, 0.22);
+    }
+
+    html[data-ui-theme="classic"] .btn-primary:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 12px 22px rgba(30, 64, 175, 0.24);
+    }
+
+    html[data-ui-theme="classic"] .btn-ghost {
+      background: rgba(15, 23, 42, 0.03);
+      border-color: rgba(226,232,240,0.9);
+    }
+
+    html[data-ui-theme="classic"] .btn-ghost:hover {
+      background: rgba(15, 23, 42, 0.05);
+      transform: translateY(-1px);
+      border-color: rgba(30,64,175,0.22);
+    }
+
+    html[data-ui-theme="classic"] .tab-btn {
+      border-radius: 999px;
+      padding: 10px 14px;
+      font-weight: 700;
+      border: 1px solid rgba(226,232,240,1);
+      background: rgba(255, 255, 255, 0.72);
+    }
+
+    html[data-ui-theme="classic"] .tab-btn:hover {
+      background: rgba(30,64,175,0.05);
+      transform: translateY(-1px);
+      border-color: rgba(30,64,175,0.20);
+    }
+
+    html[data-ui-theme="classic"] .tab-btn[aria-selected="true"] {
+      background: rgba(30,64,175,0.10);
+      border-color: rgba(30,64,175,0.28);
+      box-shadow: none;
+    }
+
+    html[data-ui-theme="classic"] .tab-btn[aria-selected="true"]::after {
+      display: none;
+    }
+
+    html.dark[data-ui-theme="classic"] body {
+      background: radial-gradient(1000px 500px at 15% -10%, rgba(59,130,246,0.05), transparent 60%),
+                  linear-gradient(180deg, #0F172A 0%, #111827 100%);
+    }
+
+    html.dark[data-ui-theme="classic"] .surface {
+      background: rgba(30, 41, 59, 0.85);
+      border-color: var(--color-border);
+      box-shadow: var(--shadow-md);
+    }
+
+    html.dark[data-ui-theme="classic"] .surface:hover {
+      transform: none;
+      box-shadow: var(--shadow-md);
+    }
+
+    html.dark[data-ui-theme="classic"] .btn-primary {
+      background: #2563EB;
+      box-shadow: 0 10px 24px rgba(37,99,235,0.3);
+    }
+
+    html.dark[data-ui-theme="classic"] .btn-primary:hover {
+      box-shadow: 0 12px 22px rgba(37,99,235,0.32);
+    }
+
+    html.dark[data-ui-theme="classic"] .btn-ghost {
+      background: rgba(148,163,184,0.06);
+      border-color: #475569;
+    }
+
+    html.dark[data-ui-theme="classic"] .btn-ghost:hover {
+      background: rgba(148,163,184,0.12);
+      border-color: rgba(96,165,250,0.22);
+    }
+
+    html.dark[data-ui-theme="classic"] .tab-btn {
+      border-color: #475569;
+      background: rgba(30, 41, 59, 0.82);
+      color: #CBD5E1;
+    }
+
+    html.dark[data-ui-theme="classic"] .tab-btn:hover {
+      background: rgba(96,165,250,0.08);
+      border-color: rgba(96,165,250,0.22);
+    }
+
+    html.dark[data-ui-theme="classic"] .tab-btn[aria-selected="true"] {
+      background: rgba(96,165,250,0.12);
+      border-color: rgba(96,165,250,0.3);
+      color: #60A5FA;
+    }
+
     html.dark .heatmap-cell { border-color: rgba(71,85,105,0.4); }
     html.dark .heatmap-year-cell { border-color: rgba(71,85,105,0.3); }
     html.dark .calendar-day { border-color: rgba(71,85,105,0.4); }
@@ -473,7 +680,7 @@
 
     <!-- Top bar -->
     <header class="surface p-5 sm:p-6 mb-6">
-      <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+      <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
         <div class="flex items-start gap-4">
           <div class="h-11 w-11 rounded-xl flex items-center justify-center" style="background: rgba(30,64,175,0.10); border: 1px solid rgba(30,64,175,0.18);">
             <!-- Simple inline SVG mark (no emoji icons) -->
@@ -490,51 +697,51 @@
           </div>
         </div>
 
-        <div class="flex flex-col sm:flex-row gap-3 sm:items-center">
+        <div class="topbar-control-rail">
           <!-- Date Range Picker -->
-          <div class="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
+          <div class="range-picker-group">
             <label for="dateRangePicker" class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="range">Range</label>
             <input type="text" id="dateRangePicker" class="ui-input" placeholder="Select date range" readonly style="min-width: 240px; cursor: pointer;" />
           </div>
 
           <!-- Quick Range Buttons -->
-          <div class="flex flex-col gap-2 flex-1">
-            <!-- Row 1: Day ranges -->
-            <div class="flex flex-wrap gap-2">
-              <button class="btn btn-ghost quick-range-btn" data-range="today" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="today">Today</button>
-              <button class="btn btn-ghost quick-range-btn" data-range="yesterday" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="yesterday">Yesterday</button>
-              <button class="btn btn-ghost quick-range-btn" data-range="last7days" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="last7days">Last 7 Days</button>
-              <button class="btn btn-ghost quick-range-btn" data-range="last14days" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="last14days">Last 14 Days</button>
-              <button class="btn btn-ghost quick-range-btn" data-range="last4weeks" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="last4weeks">Last 4 Weeks</button>
-            </div>
-            <!-- Row 2: Month and Year ranges -->
-            <div class="flex flex-wrap gap-2">
-              <button class="btn btn-ghost quick-range-btn" data-range="thisMonth" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="thisMonth">This Month</button>
-              <button class="btn btn-ghost quick-range-btn" data-range="lastMonth" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="lastMonth">Last Month</button>
-              <button class="btn btn-ghost quick-range-btn" data-range="thisYear" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="thisYear">This Year</button>
-              <button class="btn btn-ghost quick-range-btn" data-range="lastYear" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="lastYear">Last Year</button>
-            </div>
+          <div class="quick-range-panel">
+            <button class="btn btn-ghost quick-range-btn" data-range="today" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="today">Today</button>
+            <button class="btn btn-ghost quick-range-btn" data-range="yesterday" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="yesterday">Yesterday</button>
+            <button class="btn btn-ghost quick-range-btn" data-range="last7days" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="last7days">Last 7 Days</button>
+            <button class="btn btn-ghost quick-range-btn" data-range="last14days" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="last14days">Last 14 Days</button>
+            <button class="btn btn-ghost quick-range-btn" data-range="last4weeks" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="last4weeks">Last 4 Weeks</button>
+            <button class="btn btn-ghost quick-range-btn" data-range="thisMonth" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="thisMonth">This Month</button>
+            <button class="btn btn-ghost quick-range-btn" data-range="lastMonth" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="lastMonth">Last Month</button>
+            <button class="btn btn-ghost quick-range-btn" data-range="thisYear" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="thisYear">This Year</button>
+            <button class="btn btn-ghost quick-range-btn" data-range="lastYear" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="lastYear">Last Year</button>
           </div>
 
-          <button id="refreshBtn" class="btn btn-primary" aria-label="Refresh dashboard">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M20 12a8 8 0 1 1-2.343-5.657" stroke="white" stroke-width="2" stroke-linecap="round"/>
-            <path d="M20 4v6h-6" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-            <span data-i18n="refresh">Refresh</span>
-          </button>
-
-          <div class="flex gap-1 items-center">
-            <button id="langToggle" class="btn btn-ghost" style="min-height:36px; padding:6px 10px; font-size:12px; font-weight:700;" aria-label="Toggle language">中</button>
-            <button id="themeToggle" class="btn btn-ghost" style="min-height:36px; padding:6px 10px;" aria-label="Toggle theme">
-              <svg id="themeIconMoon" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <div class="topbar-actions">
+            <button id="refreshBtn" class="btn btn-primary" aria-label="Refresh dashboard">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M20 12a8 8 0 1 1-2.343-5.657" stroke="white" stroke-width="2" stroke-linecap="round"/>
+              <path d="M20 4v6h-6" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
               </svg>
-              <svg id="themeIconSun" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="display:none;">
-                <circle cx="12" cy="12" r="5" stroke="currentColor" stroke-width="2"/>
-                <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-              </svg>
+              <span data-i18n="refresh">Refresh</span>
             </button>
+
+            <div class="view-toggle-cluster">
+              <button id="langToggle" class="btn btn-ghost compact-control" style="font-size:12px; font-weight:700;" aria-label="Toggle language">中</button>
+              <button id="themeToggle" class="btn btn-ghost compact-control" aria-label="Toggle theme">
+                <svg id="themeIconMoon" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <svg id="themeIconSun" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="display:none;">
+                  <circle cx="12" cy="12" r="5" stroke="currentColor" stroke-width="2"/>
+                  <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+              </button>
+              <select id="styleThemeSelect" class="ui-input compact-control style-select" aria-label="Style theme">
+                <option value="classic" data-i18n="styleClassic">Classic</option>
+                <option value="elevated" data-i18n="styleElevated">Elevated</option>
+              </select>
+            </div>
           </div>
         </div>
       </div>
@@ -1261,6 +1468,9 @@
         daysPlaceholder: 'Days',
         apply: 'Apply',
         refresh: 'Refresh',
+        styleTheme: 'Style',
+        styleClassic: 'Classic',
+        styleElevated: 'Elevated',
         loading: 'Loading…',
         overview: 'Overview',
         sessionsPage: 'Sessions',
@@ -1385,6 +1595,9 @@
         daysPlaceholder: '天数',
         apply: '应用',
         refresh: '刷新',
+        styleTheme: '样式',
+        styleClassic: '经典',
+        styleElevated: '浮层',
         loading: '加载中…',
         overview: '概览',
         sessionsPage: '会话',
@@ -1664,10 +1877,23 @@
       return hour >= 19 || hour < 7 ? 'dark' : 'light';
     }
 
+    function getDefaultStyleTheme() {
+      const stored = localStorage.getItem('tokdash-style-theme');
+      if (stored === 'classic' || stored === 'elevated') return stored;
+      return 'elevated';
+    }
+
     function getDefaultTheme() {
       const stored = localStorage.getItem('tokdash-theme');
       if (stored === 'dark' || stored === 'light') return stored;
       return getAutoTheme();
+    }
+
+    function applyStyleTheme(theme) {
+      const normalized = theme === 'classic' ? 'classic' : 'elevated';
+      document.documentElement.dataset.uiTheme = normalized;
+      const select = document.getElementById('styleThemeSelect');
+      if (select) select.value = normalized;
     }
 
     function applyTheme(theme) {
@@ -4138,8 +4364,16 @@
       });
     }
 
+    applyStyleTheme(getDefaultStyleTheme());
     applyTheme(getDefaultTheme());
     applyI18n();
+
+    document.getElementById('styleThemeSelect').addEventListener('change', (event) => {
+      const next = event.target.value || 'elevated';
+      localStorage.setItem('tokdash-style-theme', next);
+      applyStyleTheme(next);
+      rerenderPresentation();
+    });
 
     document.getElementById('themeToggle').addEventListener('click', () => {
       const next = isDark() ? 'light' : 'dark';

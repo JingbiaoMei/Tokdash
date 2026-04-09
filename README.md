@@ -2,7 +2,7 @@
 
 # Tokdash
 
-Local token & cost dashboard for AI coding tools (Codex, OpenCode, Claude Code, Gemini CLI, OpenClaw, etc.).
+Local token & cost dashboard for AI coding tools (Codex, OpenCode, Claude Code, Gemini CLI, OpenClaw, Kimi CLI, etc.).
 
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat&logo=fastapi&logoColor=white)
 ![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=flat&logo=python&logoColor=white)
@@ -10,19 +10,25 @@ Local token & cost dashboard for AI coding tools (Codex, OpenCode, Claude Code, 
 
 ## Features
 
-- **Hierarchical breakdown**: app → model with full token precision
+- **Hierarchical breakdown**: app -> model with full token precision
 - **Multiple data sources**: local session files + optional `tokscale` fallback
 - **Exact token counts**: Input/Output/Cache token breakdowns
-- **Flexible ranges**: today / week / month / N days
-- **Contribution calendar**: 2D heatmap + 3D isometric view
+- **Custom date ranges**: Flatpickr date picker + quick range buttons (Today, Last 7 Days, This Month, etc.)
+- **Contribution calendar**: 2D heatmap + 3D isometric view with Tokens/Cost/Messages metrics
+- **Session explorer**: per-session drill-down for Codex, Claude Code, and OpenCode
+- **10 style themes**: Elevated, Classic, Vibrant, Midnight, Paper, Liquid, Terminal, Brutalist, Arcade, Studio
+- **Light & dark mode**: auto-detects system preference, manual toggle
+- **PWA support**: installable as a progressive web app
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo.png" alt="Tokdash dashboard demo" width="900" />
+  <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo.png" alt="Tokdash dashboard" width="900" />
+</p>
+<p align="center">
+  <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-stats.png" alt="Tokdash stats & heatmap" width="900" />
 </p>
 
-## Supported clients (explicit token fields)
+## Supported clients
 
-✅ Supported:
 - **OpenCode**: `~/.local/share/opencode/`
 - **Codex**: `~/.codex/sessions/`
 - **Claude Code**: `~/.claude/projects/`
@@ -43,8 +49,6 @@ Local token & cost dashboard for AI coding tools (Codex, OpenCode, Claude Code, 
 - One or more supported clients installed (above)
 
 ### Install (pip)
-
-From PyPI (after the first public release):
 
 ```bash
 pip install tokdash
@@ -75,7 +79,7 @@ If you want to access Tokdash from another device (recommended):
 - Tailscale Serve (private to your tailnet): `tailscale serve 55423`
 - SSH port-forward: `ssh -L 55423:127.0.0.1:55423 <user>@<host>`
 
-Binding to `0.0.0.0` is possible, but **not recommended**: it listens on all interfaces and can expose the dashboard beyond your LAN (VPN/Wi‑Fi/etc.). Only do this if you understand the risk and have firewall/auth in place.
+Binding to `0.0.0.0` is possible, but **not recommended**: it listens on all interfaces and can expose the dashboard beyond your LAN (VPN/Wi-Fi/etc.). Only do this if you understand the risk and have firewall/auth in place.
 
 ### Run in background
 
@@ -170,7 +174,7 @@ tailscale serve --bg 55423
 ## Privacy & security
 
 - **No telemetry**: Tokdash does not intentionally send your data anywhere.
-- **Local parsing**: usage is computed from local session files (see “Supported clients” paths above).
+- **Local parsing**: usage is computed from local session files (see "Supported clients" paths above).
 - **Server exposure**: Tokdash binds to `127.0.0.1` by default. Prefer Tailscale Serve or SSH tunneling for remote access; avoid `--bind 0.0.0.0` unless you understand it listens on all interfaces and have firewall/auth in place.
 
 ## API (local)
@@ -178,8 +182,11 @@ tailscale serve --bg 55423
 Tokdash is a local HTTP server. Common endpoints:
 
 - `GET /api/usage?period=today|week|month|N`
+- `GET /api/usage?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD`
 - `GET /api/tools?period=...` (coding tools only)
 - `GET /api/openclaw?period=...` (OpenClaw only)
+- `GET /api/sessions?tool=codex|claude|opencode&period=...`
+- `GET /api/stats` (contribution calendar & statistics)
 
 Example:
 ```bash
@@ -210,14 +217,19 @@ tokdash/
 │       ├── cli.py
 │       ├── api.py                # FastAPI routes/app
 │       ├── compute.py            # Aggregation/merging logic
+│       ├── dateutil.py           # Shared date-range parsing
+│       ├── sessions.py           # Session explorer logic
 │       ├── pricing.py            # PricingDatabase wrapper
+│       ├── assets.py             # Static asset management
 │       ├── model_normalization.py
 │       ├── pricing_db.json
 │       ├── sources/
 │       │   ├── openclaw.py       # OpenClaw session log parser
 │       │   └── coding_tools.py   # Local coding tools parsers
 │       └── static/
-│           └── index.html
+│           ├── index.html        # Single-page dashboard
+│           ├── theme-config.js   # Theme palettes & heatmap colors
+│           └── themes.css        # Per-theme CSS overrides
 └── docs/                   # Roadmap + background-run docs + agent prompts
 ```
 

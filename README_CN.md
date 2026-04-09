@@ -2,7 +2,7 @@
 
 # Tokdash
 
-适用于 AI 编程工具（Codex、OpenCode、Claude Code、Gemini CLI、OpenClaw 等）的本地 Token 与费用仪表盘。
+适用于 AI 编程工具（Codex、OpenCode、Claude Code、Gemini CLI、OpenClaw、Kimi CLI 等）的本地 Token 与费用仪表盘。
 
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat&logo=fastapi&logoColor=white)
 ![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=flat&logo=python&logoColor=white)
@@ -10,19 +10,25 @@
 
 ## 功能特性
 
-- **分层明细**：按 app → model 展示，并保留完整 Token 精度
+- **分层明细**：按 app -> model 展示，并保留完整 Token 精度
 - **多数据源**：本地会话文件 + 可选 `tokscale` 回退
 - **精确 Token 统计**：输入 / 输出 / 缓存 Token 明细
-- **灵活时间范围**：今天 / 最近一周 / 最近一月 / N 天
-- **贡献日历**：2D 热力图 + 3D 等距视图
+- **自定义日期范围**：Flatpickr 日期选择器 + 快捷按钮（今天、最近 7 天、本月等）
+- **贡献日历**：2D 热力图 + 3D 等距视图，支持 Tokens / Cost / Messages 切换
+- **会话浏览器**：Codex、Claude Code、OpenCode 的逐会话下钻
+- **10 款样式主题**：Elevated、Classic、Vibrant、Midnight、Paper、Liquid、Terminal、Brutalist、Arcade、Studio
+- **明暗模式**：自动跟随系统偏好，支持手动切换
+- **PWA 支持**：可作为渐进式 Web 应用安装
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo.png" alt="Tokdash 仪表盘演示" width="900" />
+  <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo.png" alt="Tokdash 仪表盘" width="900" />
+</p>
+<p align="center">
+  <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-stats.png" alt="Tokdash 统计与热力图" width="900" />
 </p>
 
-## 已支持客户端（显式 Token 字段）
+## 已支持客户端
 
-✅ 已支持：
 - **OpenCode**: `~/.local/share/opencode/`
 - **Codex**: `~/.codex/sessions/`
 - **Claude Code**: `~/.claude/projects/`
@@ -43,8 +49,6 @@
 - 已安装一个或多个上方支持的客户端
 
 ### 安装（pip）
-
-从 PyPI 安装（首次公开发布后）：
 
 ```bash
 pip install tokdash
@@ -75,7 +79,7 @@ python3 main.py
 - Tailscale Serve（仅对你的 tailnet 可见）：`tailscale serve 55423`
 - SSH 端口转发：`ssh -L 55423:127.0.0.1:55423 <user>@<host>`
 
-也可以绑定到 `0.0.0.0`，但**不推荐**：这会监听所有网络接口，可能把仪表盘暴露到你的局域网/VPN/Wi‑Fi 之外。只有在你清楚风险并已配置防火墙/认证时才这样做。
+也可以绑定到 `0.0.0.0`，但**不推荐**：这会监听所有网络接口，可能把仪表盘暴露到你的局域网/VPN/Wi-Fi 之外。只有在你清楚风险并已配置防火墙/认证时才这样做。
 
 ### 后台运行
 
@@ -171,7 +175,7 @@ tailscale serve --bg 55423
 ## 隐私与安全
 
 - **无遥测**：Tokdash 不会主动把你的数据发送到任何地方。
-- **本地解析**：使用量由本机会话文件计算得出（见上方“已支持客户端”路径）。
+- **本地解析**：使用量由本机会话文件计算得出（见上方"已支持客户端"路径）。
 - **服务暴露**：Tokdash 默认绑定 `127.0.0.1`。如需远程访问，优先使用 Tailscale Serve 或 SSH 隧道；除非你明确知道风险并配置好了防火墙/认证，否则不要使用 `--bind 0.0.0.0`。
 
 ## API（本地）
@@ -179,8 +183,11 @@ tailscale serve --bg 55423
 Tokdash 是一个本地 HTTP 服务。常用接口：
 
 - `GET /api/usage?period=today|week|month|N`
+- `GET /api/usage?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD`
 - `GET /api/tools?period=...`（仅编程工具）
 - `GET /api/openclaw?period=...`（仅 OpenClaw）
+- `GET /api/sessions?tool=codex|claude|opencode&period=...`
+- `GET /api/stats`（贡献日历与统计数据）
 
 示例：
 
@@ -212,14 +219,19 @@ tokdash/
 │       ├── cli.py
 │       ├── api.py                # FastAPI 路由 / 应用
 │       ├── compute.py            # 聚合 / 合并逻辑
+│       ├── dateutil.py           # 共享的日期范围解析
+│       ├── sessions.py           # 会话浏览器逻辑
 │       ├── pricing.py            # PricingDatabase 封装
+│       ├── assets.py             # 静态资源管理
 │       ├── model_normalization.py
 │       ├── pricing_db.json
 │       ├── sources/
 │       │   ├── openclaw.py       # OpenClaw 会话日志解析器
 │       │   └── coding_tools.py   # 本地编程工具解析器
 │       └── static/
-│           └── index.html
+│           ├── index.html        # 单页仪表盘
+│           ├── theme-config.js   # 主题调色板 & 热力图颜色
+│           └── themes.css        # 各主题 CSS 覆写
 └── docs/                   # 路线图 + 后台运行文档 + agent 提示词
 ```
 

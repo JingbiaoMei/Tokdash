@@ -43,3 +43,6 @@ Thumbs.db
 AGENTS.md
 **/AGENTS.md
 docs/agents/release/release.py
+
+
+.playwright-mcp

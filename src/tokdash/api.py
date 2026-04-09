@@ -7,19 +7,59 @@ from typing import Any, Dict, Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.staticfiles import StaticFiles
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from .assets import (
     NO_CACHE_HEADERS,
-    STATIC_CACHE_NAME,
     STATIC_DIR,
     SW_CACHE_NAME_PLACEHOLDER,
-    NoCacheStaticFiles,
+    get_static_cache_name,
 )
 from .compute import compute_stats, compute_usage_with_comparison, get_openclaw_data, get_tools_data
+from .dateutil import parse_date_range
 from .sessions import get_codex_session_detail, get_codex_sessions_data, get_session_detail, get_sessions_data
 
+
+def _validate_date_params(date_from: Optional[str], date_to: Optional[str]) -> None:
+    """Raise HTTPException(400) if date params are malformed or incomplete."""
+    if bool(date_from) != bool(date_to):
+        raise HTTPException(status_code=400, detail="Both date_from and date_to are required")
+    if date_from and date_to:
+        try:
+            parse_date_range(date_from, date_to)
+        except ValueError as exc:
+            detail = str(exc) or "Invalid date format, expected YYYY-MM-DD"
+            if "does not match format" in detail:
+                detail = "Invalid date format, expected YYYY-MM-DD"
+            raise HTTPException(status_code=400, detail=detail)
+
+
+class NoCacheMiddleware:
+    """ASGI middleware that adds no-cache headers to /static/ responses."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or not scope["path"].startswith("/static/"):
+            await self.app(scope, receive, send)
+            return
+
+        async def send_with_no_cache(message):
+            if message["type"] == "http.response.start":
+                headers = dict(message.get("headers", []))
+                for k, v in NO_CACHE_HEADERS.items():
+                    headers[k.lower().encode()] = v.encode()
+                message["headers"] = list(headers.items())
+            await send(message)
+
+        await self.app(scope, receive, send_with_no_cache)
+
+
 app = FastAPI(title="Tokdash")
-app.mount("/static", NoCacheStaticFiles(directory=str(STATIC_DIR)), name="static")
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+app.add_middleware(NoCacheMiddleware)
 
 
 cors_allow_origins = [o.strip() for o in os.environ.get("TOKDASH_ALLOW_ORIGINS", "").split(",") if o.strip()]
@@ -54,6 +94,7 @@ def get_cached_or_fetch(key: str, fetch_fn) -> Any:
 
 @app.get("/api/usage")
 def get_usage(period: str = "today", date_from: Optional[str] = None, date_to: Optional[str] = None) -> Dict[str, Any]:
+    _validate_date_params(date_from, date_to)
     try:
         cache_key = f"usage_{period}_{date_from}_{date_to}"
         return get_cached_or_fetch(cache_key, lambda: compute_usage_with_comparison(period, date_from, date_to))
@@ -111,6 +152,7 @@ def get_codex_session(session_id: str) -> Dict[str, Any]:
 
 @app.get("/api/sessions")
 def get_sessions(tool: str, period: str = "today", date_from: Optional[str] = None, date_to: Optional[str] = None) -> Dict[str, Any]:
+    _validate_date_params(date_from, date_to)
     try:
         cache_key = f"sessions_{tool.strip().lower()}_{period}_{date_from}_{date_to}"
         return get_cached_or_fetch(cache_key, lambda: get_sessions_data(tool, period, date_from, date_to))
@@ -153,7 +195,7 @@ def serve_service_worker():
     path = STATIC_DIR / "sw.js"
     if not path.exists():
         raise HTTPException(status_code=404, detail="Service worker not found")
-    content = path.read_text(encoding="utf-8").replace(SW_CACHE_NAME_PLACEHOLDER, STATIC_CACHE_NAME)
+    content = path.read_text(encoding="utf-8").replace(SW_CACHE_NAME_PLACEHOLDER, get_static_cache_name())
     return Response(content=content, media_type="application/javascript", headers=NO_CACHE_HEADERS)
 
 

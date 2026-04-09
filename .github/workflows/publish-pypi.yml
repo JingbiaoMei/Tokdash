@@ -31,25 +31,49 @@ jobs:
           import re
           from pathlib import Path
 
+
+          def get_toml_section(text: str, header: str) -> str:
+              parts = re.split(rf'^\[{re.escape(header)}\]\s*$', text, flags=re.M)
+              if len(parts) < 2:
+                  return ''
+              return re.split(r'^\[', parts[1], flags=re.M)[0]
+
+
           ref = os.environ.get('GITHUB_REF', '')
           m = re.match(r'^refs/tags/v(.+)$', ref)
           tag_version = m.group(1) if m else None
 
           pyproject = Path('pyproject.toml').read_text(encoding='utf-8')
-          project_section = re.split(r'^\[project\]\s*$', pyproject, flags=re.M)
-          if len(project_section) < 2:
+          project_body = get_toml_section(pyproject, 'project')
+          if not project_body:
               raise SystemExit('Could not find [project] section in pyproject.toml')
-          project_body = re.split(r'^\[', project_section[1], flags=re.M)[0]
-          project_match = re.search(r'^\s*version\s*=\s*"([^"]+)"\s*$', project_body, flags=re.M)
-          if not project_match:
-              raise SystemExit('Could not find project.version in pyproject.toml')
-          project_version = project_match.group(1)
 
           package_init = Path('src/tokdash/__init__.py').read_text(encoding='utf-8')
           package_match = re.search(r'^__version__\s*=\s*"([^"]+)"\s*$', package_init, flags=re.M)
           if not package_match:
               raise SystemExit('Could not find __version__ in src/tokdash/__init__.py')
           package_version = package_match.group(1)
+
+          project_match = re.search(r'^\s*version\s*=\s*"([^"]+)"\s*$', project_body, flags=re.M)
+          if project_match:
+              project_version = project_match.group(1)
+          else:
+              dynamic_match = re.search(r'^\s*dynamic\s*=\s*\[(.*?)\]\s*$', project_body, flags=re.M | re.S)
+              if not dynamic_match or '"version"' not in dynamic_match.group(1):
+                  raise SystemExit('Could not find project.version or dynamic version configuration in pyproject.toml')
+
+              dynamic_body = get_toml_section(pyproject, 'tool.setuptools.dynamic')
+              if not dynamic_body:
+                  raise SystemExit('Could not find [tool.setuptools.dynamic] section in pyproject.toml')
+
+              attr_match = re.search(r'^\s*version\s*=\s*\{\s*attr\s*=\s*"([^"]+)"\s*\}\s*$', dynamic_body, flags=re.M)
+              if not attr_match:
+                  raise SystemExit('Could not find tool.setuptools.dynamic.version attr in pyproject.toml')
+              if attr_match.group(1) != 'tokdash.__version__':
+                  raise SystemExit(
+                      'Expected tool.setuptools.dynamic.version to reference tokdash.__version__.'
+                  )
+              project_version = package_version
 
           if project_version != package_version:
               raise SystemExit(

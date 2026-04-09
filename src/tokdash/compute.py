@@ -6,6 +6,7 @@ import subprocess
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
+from .dateutil import parse_date_range
 from .model_normalization import normalize_model_name
 from .pricing import PricingDatabase
 from .sources.openclaw import get_usage_for_days as get_session_usage_days
@@ -217,9 +218,7 @@ def get_openclaw_data(period: str) -> Dict[str, Any]:
 
 def get_openclaw_data_for_range(date_from: str, date_to: str) -> Dict[str, Any]:
     """Get OpenClaw data for a date range specified as strings (YYYY-MM-DD)."""
-    local_tz = datetime.now().astimezone().tzinfo or timezone.utc
-    since = datetime.strptime(date_from, "%Y-%m-%d").replace(tzinfo=local_tz)
-    until = datetime.strptime(date_to, "%Y-%m-%d").replace(tzinfo=local_tz) + timedelta(days=1)
+    since, until = parse_date_range(date_from, date_to)
     return get_session_usage_range(since, until)
 
 
@@ -327,9 +326,7 @@ def get_tools_data_for_range(since: datetime, until: datetime) -> Dict[str, Any]
 
 def get_tools_data_for_range_str(date_from: str, date_to: str) -> Dict[str, Any]:
     """Get tools data for a date range specified as strings (YYYY-MM-DD)."""
-    local_tz = datetime.now().astimezone().tzinfo or timezone.utc
-    since = datetime.strptime(date_from, "%Y-%m-%d").replace(tzinfo=local_tz)
-    until = datetime.strptime(date_to, "%Y-%m-%d").replace(tzinfo=local_tz) + timedelta(days=1)
+    since, until = parse_date_range(date_from, date_to)
     return get_tools_data_for_range(since, until)
 
 
@@ -448,11 +445,7 @@ def _compute_previous_period_range(period: str) -> tuple[datetime, datetime]:
 def _compute_previous_usage(period: str, date_from: Optional[str] = None, date_to: Optional[str] = None) -> Dict[str, Any]:
     # If specific dates are provided, calculate previous period based on date range
     if date_from and date_to:
-        local_tz = datetime.now().astimezone().tzinfo or timezone.utc
-        current_since = datetime.strptime(date_from, "%Y-%m-%d").replace(tzinfo=local_tz)
-        current_until = datetime.strptime(date_to, "%Y-%m-%d").replace(tzinfo=local_tz) + timedelta(days=1)
-
-        # Calculate the duration and get the previous period
+        current_since, current_until = parse_date_range(date_from, date_to)
         duration = current_until - current_since
         prev_until = current_since
         prev_since = prev_until - duration

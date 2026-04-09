@@ -7,6 +7,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
 
+from .dateutil import parse_date_range
 from .pricing import PricingDatabase
 
 
@@ -548,9 +549,7 @@ def get_sessions_data(tool: str, period: str, date_from: Optional[str] = None, d
 
     # If specific dates are provided, use them instead of period
     if date_from and date_to:
-        local_tz = datetime.now().astimezone().tzinfo or timezone.utc
-        since_dt = datetime.strptime(date_from, "%Y-%m-%d").replace(tzinfo=local_tz)
-        until_dt = datetime.strptime(date_to, "%Y-%m-%d").replace(tzinfo=local_tz) + timedelta(days=1)
+        since_dt, until_dt = parse_date_range(date_from, date_to)
         since_ms = int(since_dt.timestamp() * 1000)
         until_ms = int(until_dt.timestamp() * 1000)
     else:

@@ -44,6 +44,26 @@ def test_alias_entries_resolve():
         )
 
 
+def test_glm_5_1_alias_entries_resolve():
+    """GLM-5.1 aliases must resolve to the canonical GLM-5.1 pricing."""
+    db = PricingDatabase()
+
+    representative_aliases = [
+        "glm5.1",
+        "glm-5-1",
+        "z-ai/glm-5.1",
+        "zhipu/glm-5.1",
+    ]
+    base_cost = db.get_cost("glm-5.1", 1000, 2000, 0, 0)
+    assert base_cost > 0.0
+
+    for alias in representative_aliases:
+        alias_cost = db.get_cost(alias, 1000, 2000, 0, 0)
+        assert abs(alias_cost - base_cost) < 1e-12, (
+            f"Alias {alias!r} should resolve to glm-5.1 pricing"
+        )
+
+
 def test_derived_antigravity_models_resolve():
     """Antigravity models must resolve and match their base model pricing."""
     db = PricingDatabase()
@@ -72,7 +92,7 @@ def test_core_provider_models_resolve():
         "google": "gemini-3-pro-preview",
         "moonshotai": "kimi-k2.5",
         "minimax": "minimax-m2.5",
-        "z-ai": "glm-5",
+        "z-ai": "glm-5.1",
     }
     for provider, model in representative.items():
         cost = db.get_cost(model, 1000, 2000, 0, 0)

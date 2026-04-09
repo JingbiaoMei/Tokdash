@@ -74,3 +74,30 @@ def test_api_endpoints_and_dashboard_smoke():
     icon_response = client.get("/static/icons/icon-192.png")
     assert icon_response.status_code == 200
     assert "no-store" in icon_response.headers["cache-control"]
+
+
+def test_api_custom_date_ranges_and_validation():
+    client = TestClient(app)
+
+    usage = client.get("/api/usage", params={"date_from": "2026-04-08", "date_to": "2026-04-08"})
+    assert usage.status_code == 200
+    assert "comparison" in usage.json()
+
+    sessions = client.get(
+        "/api/sessions",
+        params={"tool": "codex", "date_from": "2026-04-08", "date_to": "2026-04-08"},
+    )
+    assert sessions.status_code == 200
+    assert sessions.json()["tool"] == "codex"
+
+    missing_bound = client.get("/api/usage", params={"date_from": "2026-04-08"})
+    assert missing_bound.status_code == 400
+    assert "required" in missing_bound.json()["detail"]
+
+    malformed = client.get("/api/usage", params={"date_from": "2026/04/08", "date_to": "2026-04-08"})
+    assert malformed.status_code == 400
+    assert "Invalid date format" in malformed.json()["detail"]
+
+    reversed_range = client.get("/api/usage", params={"date_from": "2026-04-09", "date_to": "2026-04-08"})
+    assert reversed_range.status_code == 400
+    assert "on or before" in reversed_range.json()["detail"]

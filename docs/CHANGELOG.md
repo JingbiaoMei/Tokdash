@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+## 0.2.1 - 2026-04-09
+
+### Added
+- Added `Paper`, `Liquid`, `Vibrant`, `Midnight`, `Terminal`, `Brutalist`, `Arcade`, and `Studio` dashboard style themes, with localized labels in English and Chinese.
+- Added a dedicated `docs/RELEASING.md` checklist and linked it from `docs/CONTRIBUTING.md` so the manual tag, push, GitHub Release, and verification steps stay documented.
+
+### Changed
+- Moved theme-specific palettes and overrides out of `src/tokdash/static/index.html` into standalone static assets, reducing dashboard-shell sprawl and making future theme work easier to maintain.
+- Expanded the style selector into a broader theme gallery while keeping light/dark mode compatibility across the dashboard.
+
+### Fixed
+- Fixed charts, heatmaps, and browser `theme-color` metadata to stay synchronized with the selected style theme in both light and dark mode.
+
 ## 0.2.0 - 2026-04-09
 
 ### Added

@@ -436,123 +436,7 @@
       background: #1E293B;
       color: var(--color-text);
     }
-
-    html[data-ui-theme="classic"] body {
-      background: linear-gradient(180deg, #F8FAFC 0%, #EEF2FF 100%);
-    }
-
-    html[data-ui-theme="classic"] .surface {
-      background: rgba(248, 250, 252, 0.92);
-      border: 1px solid var(--color-border);
-      box-shadow: var(--shadow-md);
-      backdrop-filter: blur(8px);
-    }
-
-    html[data-ui-theme="classic"] .surface:hover {
-      transform: none;
-      box-shadow: var(--shadow-md);
-    }
-
-    html[data-ui-theme="classic"] .btn::before {
-      display: none;
-    }
-
-    html[data-ui-theme="classic"] .btn-primary {
-      background: var(--color-primary);
-      box-shadow: 0 10px 24px rgba(30, 64, 175, 0.22);
-    }
-
-    html[data-ui-theme="classic"] .btn-primary:hover {
-      transform: translateY(-1px);
-      box-shadow: 0 12px 22px rgba(30, 64, 175, 0.24);
-    }
-
-    html[data-ui-theme="classic"] .btn-ghost {
-      background: rgba(15, 23, 42, 0.03);
-      border-color: rgba(226,232,240,0.9);
-    }
-
-    html[data-ui-theme="classic"] .btn-ghost:hover {
-      background: rgba(15, 23, 42, 0.05);
-      transform: translateY(-1px);
-      border-color: rgba(30,64,175,0.22);
-    }
-
-    html[data-ui-theme="classic"] .tab-btn {
-      border-radius: 999px;
-      padding: 10px 14px;
-      font-weight: 700;
-      border: 1px solid rgba(226,232,240,1);
-      background: rgba(255, 255, 255, 0.72);
-    }
-
-    html[data-ui-theme="classic"] .tab-btn:hover {
-      background: rgba(30,64,175,0.05);
-      transform: translateY(-1px);
-      border-color: rgba(30,64,175,0.20);
-    }
-
-    html[data-ui-theme="classic"] .tab-btn[aria-selected="true"] {
-      background: rgba(30,64,175,0.10);
-      border-color: rgba(30,64,175,0.28);
-      box-shadow: none;
-    }
-
-    html[data-ui-theme="classic"] .tab-btn[aria-selected="true"]::after {
-      display: none;
-    }
-
-    html.dark[data-ui-theme="classic"] body {
-      background: radial-gradient(1000px 500px at 15% -10%, rgba(59,130,246,0.05), transparent 60%),
-                  linear-gradient(180deg, #0F172A 0%, #111827 100%);
-    }
-
-    html.dark[data-ui-theme="classic"] .surface {
-      background: rgba(30, 41, 59, 0.85);
-      border-color: var(--color-border);
-      box-shadow: var(--shadow-md);
-    }
-
-    html.dark[data-ui-theme="classic"] .surface:hover {
-      transform: none;
-      box-shadow: var(--shadow-md);
-    }
-
-    html.dark[data-ui-theme="classic"] .btn-primary {
-      background: #2563EB;
-      box-shadow: 0 10px 24px rgba(37,99,235,0.3);
-    }
-
-    html.dark[data-ui-theme="classic"] .btn-primary:hover {
-      box-shadow: 0 12px 22px rgba(37,99,235,0.32);
-    }
-
-    html.dark[data-ui-theme="classic"] .btn-ghost {
-      background: rgba(148,163,184,0.06);
-      border-color: #475569;
-    }
-
-    html.dark[data-ui-theme="classic"] .btn-ghost:hover {
-      background: rgba(148,163,184,0.12);
-      border-color: rgba(96,165,250,0.22);
-    }
-
-    html.dark[data-ui-theme="classic"] .tab-btn {
-      border-color: #475569;
-      background: rgba(30, 41, 59, 0.82);
-      color: #CBD5E1;
-    }
-
-    html.dark[data-ui-theme="classic"] .tab-btn:hover {
-      background: rgba(96,165,250,0.08);
-      border-color: rgba(96,165,250,0.22);
-    }
-
-    html.dark[data-ui-theme="classic"] .tab-btn[aria-selected="true"] {
-      background: rgba(96,165,250,0.12);
-      border-color: rgba(96,165,250,0.3);
-      color: #60A5FA;
-    }
+    /* Theme-specific overrides live in /static/themes.css. */
 
     html.dark .heatmap-cell { border-color: rgba(71,85,105,0.4); }
     html.dark .heatmap-year-cell { border-color: rgba(71,85,105,0.3); }
@@ -673,6 +557,7 @@
       * { transition: none !important; scroll-behavior: auto !important; }
     }
   </style>
+  <link rel="stylesheet" href="/static/themes.css" />
 </head>
 
 <body class="p-4 sm:p-6 lg:p-8">
@@ -740,6 +625,14 @@
               <select id="styleThemeSelect" class="ui-input compact-control style-select" aria-label="Style theme">
                 <option value="classic" data-i18n="styleClassic">Classic</option>
                 <option value="elevated" data-i18n="styleElevated">Elevated</option>
+                <option value="paper" data-i18n="stylePaper">Paper</option>
+                <option value="liquid" data-i18n="styleLiquid">Liquid</option>
+                <option value="vibrant" data-i18n="styleVibrant">Vibrant</option>
+                <option value="midnight" data-i18n="styleMidnight">Midnight</option>
+                <option value="terminal" data-i18n="styleTerminal">Terminal</option>
+                <option value="brutalist" data-i18n="styleBrutalist">Brutalist</option>
+                <option value="arcade" data-i18n="styleArcade">Arcade</option>
+                <option value="studio" data-i18n="styleStudio">Studio</option>
               </select>
             </div>
           </div>
@@ -1424,6 +1317,7 @@
     </div>
   </div>
 
+  <script src="/static/theme-config.js"></script>
   <script>
     // Dashboard v3.12.0 - sessions tab + i18n + dark mode
     // - "Streak" label (not "Current Streak")
@@ -1446,9 +1340,36 @@
     let lastAppsBreakdown = null;
     const MAX_COMBINED_MODELS_ROWS = 300;
     let combinedModelsShowAll = false;
-    const HEAT_COLORS_LIGHT = ['#EEF2F7','#E0E7FF','#C7D2FE','#A5B4FC','#60A5FA','#3B82F6','#2563EB','#1E40AF'];
-    const HEAT_COLORS_DARK = ['#172033','#1E293B','#1D4ED8','#2563EB','#3B82F6','#60A5FA','#93C5FD','#BFDBFE'];
+    const THEME_CONFIG = window.TOKDASH_THEME_CONFIG || {};
+    const DEFAULT_HEAT_COLORS_LIGHT = ['#EEF2F7','#E0E7FF','#C7D2FE','#A5B4FC','#60A5FA','#3B82F6','#2563EB','#1E40AF'];
+    const DEFAULT_HEAT_COLORS_DARK = ['#172033','#1E293B','#1D4ED8','#2563EB','#3B82F6','#60A5FA','#93C5FD','#BFDBFE'];
+    const HEAT_COLORS_LIGHT = THEME_CONFIG.heatColorsMap?.elevated?.light || DEFAULT_HEAT_COLORS_LIGHT;
+    const HEAT_COLORS_DARK = THEME_CONFIG.heatColorsMap?.elevated?.dark || DEFAULT_HEAT_COLORS_DARK;
     let HEAT_COLORS = [...HEAT_COLORS_LIGHT];
+
+    function getHeatColors(uiTheme, dark) {
+      const heatColorsMap = THEME_CONFIG.heatColorsMap || {};
+      const entry = heatColorsMap[uiTheme] || heatColorsMap.elevated || {
+        light: DEFAULT_HEAT_COLORS_LIGHT,
+        dark: DEFAULT_HEAT_COLORS_DARK,
+      };
+      return [...(dark ? entry.dark : entry.light)];
+    }
+
+    function getChartPalette(theme = document.documentElement.dataset.uiTheme || 'elevated', dark = isDark()) {
+      const chartPaletteMap = THEME_CONFIG.chartPaletteMap || {};
+      const entry = chartPaletteMap[theme] || chartPaletteMap.elevated || {
+        light: ['#1E40AF','#3B82F6','#0F766E','#F59E0B','#64748B','#94A3B8'],
+        dark: ['#60A5FA','#93C5FD','#34D399','#FBBF24','#CBD5E1','#94A3B8'],
+      };
+      return [...(dark ? entry.dark : entry.light)];
+    }
+
+    function getThemeMetaColor(theme = document.documentElement.dataset.uiTheme || 'elevated', dark = isDark()) {
+      const themeMetaColors = THEME_CONFIG.themeMetaColors || {};
+      const entry = themeMetaColors[theme] || themeMetaColors.elevated || { light: '#1E40AF', dark: '#0F172A' };
+      return dark ? entry.dark : entry.light;
+    }
 
     const I18N = {
       en: {
@@ -1471,6 +1392,14 @@
         styleTheme: 'Style',
         styleClassic: 'Classic',
         styleElevated: 'Elevated',
+        stylePaper: 'Paper',
+        styleLiquid: 'Liquid',
+        styleVibrant: 'Vibrant',
+        styleMidnight: 'Midnight',
+        styleTerminal: 'Terminal',
+        styleBrutalist: 'Brutalist',
+        styleArcade: 'Arcade',
+        styleStudio: 'Studio',
         loading: 'Loading…',
         overview: 'Overview',
         sessionsPage: 'Sessions',
@@ -1598,6 +1527,14 @@
         styleTheme: '样式',
         styleClassic: '经典',
         styleElevated: '浮层',
+        stylePaper: '纸感',
+        styleLiquid: '液态',
+        styleVibrant: '活力',
+        styleMidnight: '午夜',
+        styleTerminal: '终端',
+        styleBrutalist: '粗野主义',
+        styleArcade: '街机',
+        styleStudio: '工作室',
         loading: '加载中…',
         overview: '概览',
         sessionsPage: '会话',
@@ -1877,9 +1814,11 @@
       return hour >= 19 || hour < 7 ? 'dark' : 'light';
     }
 
+    const VALID_STYLE_THEMES = [...(THEME_CONFIG.validStyleThemes || ['classic', 'elevated'])];
+
     function getDefaultStyleTheme() {
       const stored = localStorage.getItem('tokdash-style-theme');
-      if (stored === 'classic' || stored === 'elevated') return stored;
+      if (VALID_STYLE_THEMES.includes(stored)) return stored;
       return 'elevated';
     }
 
@@ -1890,18 +1829,22 @@
     }
 
     function applyStyleTheme(theme) {
-      const normalized = theme === 'classic' ? 'classic' : 'elevated';
+      const normalized = VALID_STYLE_THEMES.includes(theme) ? theme : 'elevated';
       document.documentElement.dataset.uiTheme = normalized;
       const select = document.getElementById('styleThemeSelect');
       if (select) select.value = normalized;
+      HEAT_COLORS = getHeatColors(normalized, isDark());
+      const themeMeta = document.querySelector('meta[name="theme-color"]');
+      if (themeMeta) themeMeta.content = getThemeMetaColor(normalized, isDark());
     }
 
     function applyTheme(theme) {
       const dark = theme === 'dark';
       document.documentElement.classList.toggle('dark', dark);
-      HEAT_COLORS = [...(dark ? HEAT_COLORS_DARK : HEAT_COLORS_LIGHT)];
+      const uiTheme = document.documentElement.dataset.uiTheme || 'elevated';
+      HEAT_COLORS = getHeatColors(uiTheme, dark);
       const themeMeta = document.querySelector('meta[name="theme-color"]');
-      if (themeMeta) themeMeta.content = dark ? '#0F172A' : '#1E40AF';
+      if (themeMeta) themeMeta.content = getThemeMetaColor(uiTheme, dark);
       const moon = document.getElementById('themeIconMoon');
       const sun = document.getElementById('themeIconSun');
       if (moon) moon.style.display = dark ? 'none' : '';
@@ -2830,7 +2773,7 @@
         .sort((a, b) => Number(b[1].tokens || 0) - Number(a[1].tokens || 0));
       const labels = entries.map(([tool]) => formatToolName(tool));
       const values = entries.map(([, v]) => Number(v?.tokens || 0));
-      const palette = ['#1E40AF', '#3B82F6', '#0F766E', '#F59E0B', '#64748B', '#94A3B8'];
+      const palette = getChartPalette();
       const colors = values.map((_, i) => palette[i % palette.length]);
 
       if (!toolChart) {
@@ -2887,8 +2830,8 @@
             datasets: [{
               label: t('costUsd'),
               data: values,
-              backgroundColor: 'rgba(30, 64, 175, 0.75)',
-              borderColor: 'rgba(30, 64, 175, 1)',
+              backgroundColor: getChartPalette()[0] + 'BF',
+              borderColor: getChartPalette()[0],
               borderWidth: 1.5,
               borderRadius: 8,
               maxBarThickness: 42,

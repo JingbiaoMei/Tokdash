@@ -2,20 +2,24 @@ from __future__ import annotations
 
 import os
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, HTMLResponse, Response
 
+from .assets import (
+    NO_CACHE_HEADERS,
+    STATIC_CACHE_NAME,
+    STATIC_DIR,
+    SW_CACHE_NAME_PLACEHOLDER,
+    NoCacheStaticFiles,
+)
 from .compute import compute_stats, compute_usage_with_comparison, get_openclaw_data, get_tools_data
 from .sessions import get_codex_session_detail, get_codex_sessions_data, get_session_detail, get_sessions_data
 
 app = FastAPI(title="Tokdash")
-STATIC_DIR = Path(__file__).parent / "static"
-app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+app.mount("/static", NoCacheStaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
 cors_allow_origins = [o.strip() for o in os.environ.get("TOKDASH_ALLOW_ORIGINS", "").split(",") if o.strip()]
@@ -49,9 +53,10 @@ def get_cached_or_fetch(key: str, fetch_fn) -> Any:
 
 
 @app.get("/api/usage")
-def get_usage(period: str = "today") -> Dict[str, Any]:
+def get_usage(period: str = "today", date_from: Optional[str] = None, date_to: Optional[str] = None) -> Dict[str, Any]:
     try:
-        return get_cached_or_fetch(f"usage_{period}", lambda: compute_usage_with_comparison(period))
+        cache_key = f"usage_{period}_{date_from}_{date_to}"
+        return get_cached_or_fetch(cache_key, lambda: compute_usage_with_comparison(period, date_from, date_to))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -105,10 +110,10 @@ def get_codex_session(session_id: str) -> Dict[str, Any]:
 
 
 @app.get("/api/sessions")
-def get_sessions(tool: str, period: str = "today") -> Dict[str, Any]:
+def get_sessions(tool: str, period: str = "today", date_from: Optional[str] = None, date_to: Optional[str] = None) -> Dict[str, Any]:
     try:
-        cache_key = f"sessions_{tool.strip().lower()}_{period}"
-        return get_cached_or_fetch(cache_key, lambda: get_sessions_data(tool, period))
+        cache_key = f"sessions_{tool.strip().lower()}_{period}_{date_from}_{date_to}"
+        return get_cached_or_fetch(cache_key, lambda: get_sessions_data(tool, period, date_from, date_to))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -132,14 +137,15 @@ def serve_dashboard():
     html_path = STATIC_DIR / "index.html"
     if not html_path.exists():
         return HTMLResponse(content="<h1>Dashboard not found</h1><p>Please create static/index.html</p>", status_code=404)
-    return FileResponse(html_path)
+    return FileResponse(html_path, headers=NO_CACHE_HEADERS)
+
 
 @app.get("/manifest.webmanifest")
 def serve_manifest():
     path = STATIC_DIR / "manifest.webmanifest"
     if not path.exists():
         raise HTTPException(status_code=404, detail="Manifest not found")
-    return FileResponse(path, media_type="application/manifest+json", headers={"Cache-Control": "no-cache"})
+    return FileResponse(path, media_type="application/manifest+json", headers=NO_CACHE_HEADERS)
 
 
 @app.get("/sw.js")
@@ -147,7 +153,8 @@ def serve_service_worker():
     path = STATIC_DIR / "sw.js"
     if not path.exists():
         raise HTTPException(status_code=404, detail="Service worker not found")
-    return FileResponse(path, media_type="application/javascript", headers={"Cache-Control": "no-cache"})
+    content = path.read_text(encoding="utf-8").replace(SW_CACHE_NAME_PLACEHOLDER, STATIC_CACHE_NAME)
+    return Response(content=content, media_type="application/javascript", headers=NO_CACHE_HEADERS)
 
 
 @app.get("/api/stats")

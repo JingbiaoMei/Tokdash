@@ -51,12 +51,26 @@ def test_api_endpoints_and_dashboard_smoke():
     assert "contributions" in stats
     assert "stats" in stats
 
+    stats_year = client.get("/api/stats", params={"year": 2025}).json()
+    assert "contributions" in stats_year
+    assert "stats" in stats_year
+
     manifest = client.get("/manifest.webmanifest").text
     assert "Tokdash" in manifest
 
-    sw = client.get("/sw.js").text
+    sw_response = client.get("/sw.js")
+    assert "no-store" in sw_response.headers["cache-control"]
+    sw = sw_response.text
     assert "service worker" in sw.lower()
+    assert "__TOKDASH_CACHE_NAME__" not in sw
+    assert 'const CACHE_NAME = "tokdash-' in sw
 
-    html = client.get("/").text
+    html_response = client.get("/")
+    assert "no-store" in html_response.headers["cache-control"]
+    html = html_response.text
     assert "Tokdash" in html
     assert "Sessions" in html
+
+    icon_response = client.get("/static/icons/icon-192.png")
+    assert icon_response.status_code == 200
+    assert "no-store" in icon_response.headers["cache-control"]

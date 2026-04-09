@@ -541,12 +541,21 @@ def _raw_sessions_for_tool(tool: str) -> Dict[str, Dict[str, Any]]:
     raise ValueError(f"Unsupported session tool: {tool}")
 
 
-def get_sessions_data(tool: str, period: str, limit: Optional[int] = None) -> Dict[str, Any]:
+def get_sessions_data(tool: str, period: str, date_from: Optional[str] = None, date_to: Optional[str] = None, limit: Optional[int] = None) -> Dict[str, Any]:
     key = str(tool or "").strip().lower()
     if key not in SESSION_TOOLS:
         raise ValueError(f"Unsupported session tool: {tool}")
 
-    since_ms, until_ms = _period_range(period)
+    # If specific dates are provided, use them instead of period
+    if date_from and date_to:
+        local_tz = datetime.now().astimezone().tzinfo or timezone.utc
+        since_dt = datetime.strptime(date_from, "%Y-%m-%d").replace(tzinfo=local_tz)
+        until_dt = datetime.strptime(date_to, "%Y-%m-%d").replace(tzinfo=local_tz) + timedelta(days=1)
+        since_ms = int(since_dt.timestamp() * 1000)
+        until_ms = int(until_dt.timestamp() * 1000)
+    else:
+        since_ms, until_ms = _period_range(period)
+
     sessions = []
     for raw in _raw_sessions_for_tool(key).values():
         summary = _summarize_session(raw, since_ms=since_ms, until_ms=until_ms)

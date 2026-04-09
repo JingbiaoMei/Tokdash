@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install:*)",
+      "Bash(python3:*)",
+      "Bash(pipx list:*)",
+      "Bash(echo $PATH)",
+      "Bash(echo:*)",
+      "Bash(export PATH=\"$HOME/.local/bin:$PATH\")",
+      "Bash(tokdash --help)",
+      "Bash(kill:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(pipx upgrade:*)",
+      "Bash(pipx reinstall:*)",
+      "Bash(pipx uninstall:*)",
+      "Bash(pipx install:*)",
+      "Bash(python:*)",
+      "Bash(tokdash serve:*)",
+      "Bash(curl -s \"http://localhost:8765/api/usage?period=today\")",
+      "Bash(curl -s \"http://localhost:8765/api/usage?date_from=2026-04-08&date_to=2026-04-08\")",
+      "Bash(curl -s 'http://127.0.0.1:8000/api/sessions?tool=codex&period=today')",
+      "Bash(ls:*)",
+      "Bash(curl -s 'http://127.0.0.1:8000/')",
+      "Bash(find . -name \"*.pyc\" -delete)",
+      "Bash(find . -name \"__pycache__\" -type d -exec rm -rf {} +)",
+      "Bash(pip show:*)"
+    ]
+  }
+}

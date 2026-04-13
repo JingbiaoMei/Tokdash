@@ -47,6 +47,28 @@
       --color-messages: #7C3AED;
       --color-label: rgba(71,85,105,0.9);
       --color-surface-glass: rgba(248, 250, 252, 0.95);
+      --datepickr-panel-bg: #FFFFFF;
+      --datepickr-panel-border: var(--color-border);
+      --datepickr-header-bg: color-mix(in srgb, var(--color-primary) 84%, #0F172A 16%);
+      --datepickr-header-fg: #FFFFFF;
+      --datepickr-day-fg: var(--color-text);
+      --datepickr-day-hover-bg: color-mix(in srgb, var(--color-secondary) 16%, var(--datepickr-panel-bg));
+      --datepickr-day-hover-border: color-mix(in srgb, var(--color-primary) 82%, #0F172A 18%);
+      --datepickr-day-selected-bg: var(--color-primary);
+      --datepickr-day-selected-fg: #FFFFFF;
+      --datepickr-day-range-bg: color-mix(in srgb, var(--color-secondary) 18%, var(--datepickr-panel-bg));
+      --datepickr-day-range-fg: var(--color-text);
+      --datepickr-day-today-border: var(--color-cta);
+      --datepickr-day-today-bg: color-mix(in srgb, var(--color-cta) 16%, var(--datepickr-panel-bg));
+      --datepickr-weekday-fg: var(--color-label);
+      --datepickr-footer-bg: color-mix(in srgb, var(--datepickr-panel-bg) 84%, var(--color-bg));
+      --datepickr-footer-border: var(--color-border);
+      --datepickr-summary-bg: color-mix(in srgb, var(--color-text) 4%, var(--datepickr-panel-bg));
+      --datepickr-summary-border: color-mix(in srgb, var(--color-border) 76%, transparent);
+      --datepickr-summary-fg: var(--color-text);
+      --datepickr-radius: 12px;
+      --datepickr-day-radius: 8px;
+      --datepickr-range-join-size: 5px;
     }
 
     html, body { height: 100%; }
@@ -350,6 +372,24 @@
       --color-cost: #34D399;
       --color-label: rgba(148,163,184,0.9);
       --color-surface-glass: rgba(15, 23, 42, 0.95);
+      --datepickr-panel-bg: color-mix(in srgb, var(--color-surface-glass) 92%, #020617);
+      --datepickr-panel-border: color-mix(in srgb, var(--color-border) 88%, transparent);
+      --datepickr-header-bg: color-mix(in srgb, var(--color-primary) 38%, #020617 62%);
+      --datepickr-day-hover-bg: color-mix(in srgb, var(--color-secondary) 22%, var(--datepickr-panel-bg));
+      --datepickr-day-hover-border: color-mix(in srgb, var(--color-primary) 58%, #020617 42%);
+      --datepickr-day-selected-bg: color-mix(in srgb, var(--color-primary) 56%, #020617 44%);
+      --datepickr-day-selected-fg: #FFFFFF;
+      --datepickr-day-range-bg: color-mix(in srgb, var(--color-secondary) 28%, var(--datepickr-panel-bg));
+      --datepickr-day-range-fg: var(--color-text);
+      --datepickr-day-today-border: var(--color-cta);
+      --datepickr-day-today-bg: color-mix(in srgb, var(--color-cta) 18%, var(--datepickr-panel-bg));
+      --datepickr-weekday-fg: var(--color-muted);
+      --datepickr-footer-bg: color-mix(in srgb, var(--datepickr-panel-bg) 94%, #020617);
+      --datepickr-footer-border: color-mix(in srgb, var(--color-border) 86%, transparent);
+      --datepickr-summary-bg: color-mix(in srgb, var(--color-text) 8%, var(--datepickr-panel-bg));
+      --datepickr-summary-border: color-mix(in srgb, var(--color-border) 84%, transparent);
+      --datepickr-summary-fg: var(--color-text);
+      --datepickr-range-join-size: 5px;
       --shadow-sm: 0 1px 2px rgba(0,0,0,0.4);
       --shadow-md: 0 8px 24px rgba(0,0,0,0.4);
       --shadow-lg: 0 16px 44px rgba(0,0,0,0.5);
@@ -451,105 +491,187 @@
 
     /* Flatpickr Custom Styles */
     .flatpickr-calendar {
-      background: white;
-      border: 1px solid var(--color-border);
-      border-radius: 12px;
+      background: var(--datepickr-panel-bg);
+      border: 1px solid var(--datepickr-panel-border);
+      border-radius: var(--datepickr-radius);
       box-shadow: var(--shadow-lg);
       font-family: "Fira Sans", sans-serif;
+      overflow: hidden;
     }
 
     .flatpickr-months {
-      background: var(--color-primary);
-      border-radius: 12px 12px 0 0;
+      background: var(--datepickr-header-bg);
+      border-radius: var(--datepickr-radius) var(--datepickr-radius) 0 0;
       padding: 12px;
     }
 
     .flatpickr-current-month {
-      color: white;
+      color: var(--datepickr-header-fg);
       font-weight: 600;
     }
 
     .flatpickr-prev-month, .flatpickr-next-month {
-      fill: white;
+      fill: var(--datepickr-header-fg);
     }
 
     .flatpickr-prev-month:hover, .flatpickr-next-month:hover {
-      fill: rgba(255,255,255,0.8);
+      fill: color-mix(in srgb, var(--datepickr-header-fg) 82%, transparent);
     }
 
     .flatpickr-day {
-      border-radius: 8px;
+      border-radius: var(--datepickr-day-radius);
       font-weight: 500;
       transition: all var(--t-fast) ease;
+      color: var(--datepickr-day-fg);
     }
 
-    .flatpickr-day:hover {
-      background: rgba(30,64,175,0.1);
-      border-color: var(--color-primary);
+    .flatpickr-day:hover,
+    .flatpickr-day:focus {
+      background: var(--datepickr-day-hover-bg);
+      border-color: var(--datepickr-day-hover-border);
+      outline: none;
     }
 
-    .flatpickr-day.selected, .flatpickr-day.startRange, .flatpickr-day.endRange {
-      background: var(--color-primary);
-      border-color: var(--color-primary);
-      color: white;
+    .flatpickr-day.selected,
+    .flatpickr-day.startRange,
+    .flatpickr-day.endRange,
+    .flatpickr-day.selected.inRange,
+    .flatpickr-day.startRange.inRange,
+    .flatpickr-day.endRange.inRange,
+    .flatpickr-day.selected:hover,
+    .flatpickr-day.startRange:hover,
+    .flatpickr-day.endRange:hover,
+    .flatpickr-day.selected:focus,
+    .flatpickr-day.startRange:focus,
+    .flatpickr-day.endRange:focus {
+      background: var(--datepickr-day-selected-bg);
+      border-color: var(--datepickr-day-selected-bg);
+      color: var(--datepickr-day-selected-fg);
+      box-shadow: none;
     }
 
     .flatpickr-day.inRange {
-      background: rgba(30,64,175,0.15);
+      background: var(--datepickr-day-range-bg);
       border-color: transparent;
+      box-shadow:
+        calc(-1 * var(--datepickr-range-join-size)) 0 0 var(--datepickr-day-range-bg),
+        var(--datepickr-range-join-size) 0 0 var(--datepickr-day-range-bg);
+      color: var(--datepickr-day-range-fg);
+    }
+
+    .flatpickr-day.inRange:hover,
+    .flatpickr-day.inRange:focus,
+    .flatpickr-day.today.inRange,
+    .flatpickr-day.today.inRange:hover,
+    .flatpickr-day.today.inRange:focus {
+      background: var(--datepickr-day-range-bg);
+      border-color: transparent;
+      box-shadow:
+        calc(-1 * var(--datepickr-range-join-size)) 0 0 var(--datepickr-day-range-bg),
+        var(--datepickr-range-join-size) 0 0 var(--datepickr-day-range-bg);
+      color: var(--datepickr-day-range-fg);
+    }
+
+    .flatpickr-day.selected.startRange,
+    .flatpickr-day.startRange.startRange,
+    .flatpickr-day.endRange.startRange {
+      border-radius: var(--datepickr-day-radius) 0 0 var(--datepickr-day-radius);
+    }
+
+    .flatpickr-day.selected.endRange,
+    .flatpickr-day.startRange.endRange,
+    .flatpickr-day.endRange.endRange {
+      border-radius: 0 var(--datepickr-day-radius) var(--datepickr-day-radius) 0;
+    }
+
+    .flatpickr-day.selected.startRange.endRange,
+    .flatpickr-day.startRange.startRange.endRange,
+    .flatpickr-day.endRange.startRange.endRange {
+      border-radius: var(--datepickr-day-radius);
+    }
+
+    .flatpickr-day.selected.startRange + .endRange:not(:nth-child(7n+1)),
+    .flatpickr-day.startRange.startRange + .endRange:not(:nth-child(7n+1)),
+    .flatpickr-day.endRange.startRange + .endRange:not(:nth-child(7n+1)) {
+      box-shadow: calc(-2 * var(--datepickr-range-join-size)) 0 0 var(--datepickr-day-selected-bg);
+    }
+
+    .flatpickr-day.today.selected,
+    .flatpickr-day.today.startRange,
+    .flatpickr-day.today.endRange,
+    .flatpickr-day.today.selected:hover,
+    .flatpickr-day.today.startRange:hover,
+    .flatpickr-day.today.endRange:hover,
+    .flatpickr-day.today.selected:focus,
+    .flatpickr-day.today.startRange:focus,
+    .flatpickr-day.today.endRange:focus {
+      background: var(--datepickr-day-selected-bg);
+      border-color: var(--datepickr-day-selected-bg);
+      color: var(--datepickr-day-selected-fg);
       box-shadow: none;
     }
 
     .flatpickr-day.today {
-      border-color: var(--color-cta);
+      border-color: var(--datepickr-day-today-border);
       font-weight: 700;
     }
 
     .flatpickr-day.today:hover {
-      background: rgba(245,158,11,0.1);
-      border-color: var(--color-cta);
+      background: var(--datepickr-day-today-bg);
+      border-color: var(--datepickr-day-today-border);
     }
 
-    /* Dark mode for Flatpickr */
-    html.dark .flatpickr-calendar {
-      background: #1E293B;
-      border-color: #475569;
+    .flatpickr-weekday {
+      color: var(--datepickr-weekday-fg);
     }
 
-    html.dark .flatpickr-months {
-      background: #2563EB;
+    .flatpickr-calendar.arrowTop:before {
+      border-bottom-color: var(--datepickr-panel-border);
     }
 
-    html.dark .flatpickr-day {
-      color: #E2E8F0;
+    .flatpickr-calendar.arrowTop:after {
+      border-bottom-color: var(--datepickr-panel-bg);
     }
 
-    html.dark .flatpickr-day:hover {
-      background: rgba(96,165,250,0.15);
-      border-color: #60A5FA;
+    .flatpickr-footer {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 12px;
+      border-top: 1px solid var(--datepickr-footer-border);
+      background: var(--datepickr-footer-bg);
     }
 
-    html.dark .flatpickr-day.selected,
-    html.dark .flatpickr-day.startRange,
-    html.dark .flatpickr-day.endRange {
-      background: #2563EB;
-      border-color: #2563EB;
+    .flatpickr-footer-summary {
+      min-height: 40px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 8px 10px;
+      border-radius: var(--datepickr-day-radius);
+      border: 1px solid var(--datepickr-summary-border);
+      background: var(--datepickr-summary-bg);
+      color: var(--datepickr-summary-fg);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+      text-align: center;
     }
 
-    html.dark .flatpickr-day.inRange {
-      background: rgba(96,165,250,0.2);
+    .flatpickr-confirm-button {
+      width: 100%;
+      min-height: 40px;
     }
 
-    html.dark .flatpickr-day.today {
-      border-color: #FBBF24;
+    .flatpickr-confirm-button:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+      transform: none !important;
+      box-shadow: none !important;
     }
 
-    html.dark .flatpickr-day.today:hover {
-      background: rgba(251,191,36,0.15);
-    }
-
-    html.dark .flatpickr-weekday {
-      color: #94A3B8;
+    .flatpickr-confirm-button:disabled::before {
+      display: none;
     }
 
     /* Reduce motion */
@@ -1886,6 +2008,7 @@
       renderRefreshButton();
       updateTimestamp();
       updateMetricControls();
+      syncDatePickerFooter();
     }
 
     function rerenderPresentation() {
@@ -1988,7 +2111,104 @@
     let flatpickrInstance = null;
     let currentStartDate = null;
     let currentEndDate = null;
+    let pendingStartDate = null;
+    let pendingEndDate = null;
     let isDatePickerInitializing = true;
+    let isSyncingDatePicker = false;
+    let isCommittingDatePicker = false;
+
+    function cloneDate(date) {
+      return date ? new Date(date.getTime()) : null;
+    }
+
+    function getPendingRangeFromSelection(selectedDates = []) {
+      if (!selectedDates.length) return [null, null];
+      const start = cloneDate(selectedDates[0]);
+      const end = cloneDate(selectedDates[selectedDates.length - 1] || selectedDates[0]);
+      return [start, end];
+    }
+
+    function formatCalendarFooterDate(date) {
+      if (!date) return '----.--.--';
+      return `${date.getFullYear()}.${date.getMonth() + 1}.${date.getDate()}`;
+    }
+
+    function getDisplayRangeText(startDate, endDate) {
+      const start = startDate || endDate;
+      const end = endDate || startDate;
+      if (!start || !end) return '----.--.--';
+      return `${formatCalendarFooterDate(start)}-${formatCalendarFooterDate(end)}`;
+    }
+
+    function syncDatePickerFooter() {
+      if (!flatpickrInstance?.calendarContainer) return;
+      const summary = flatpickrInstance.calendarContainer.querySelector('.flatpickr-footer-summary');
+      const button = flatpickrInstance.calendarContainer.querySelector('.flatpickr-confirm-button');
+      if (summary) {
+        summary.textContent = getDisplayRangeText(pendingStartDate, pendingEndDate);
+      }
+      if (button) {
+        button.textContent = t('apply');
+        button.setAttribute('aria-label', t('apply'));
+        button.disabled = !(pendingStartDate || pendingEndDate);
+      }
+    }
+
+    function attachDatePickerFooter(instance) {
+      if (!instance?.calendarContainer || instance.calendarContainer.querySelector('.flatpickr-footer')) return;
+
+      const footer = document.createElement('div');
+      footer.className = 'flatpickr-footer';
+
+      const summary = document.createElement('div');
+      summary.className = 'flatpickr-footer-summary mono';
+      footer.appendChild(summary);
+
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'btn btn-primary flatpickr-confirm-button';
+      button.addEventListener('click', () => {
+        applyPendingDateSelection();
+      });
+      footer.appendChild(button);
+
+      instance.calendarContainer.appendChild(footer);
+      syncDatePickerFooter();
+    }
+
+    function commitDateSelection(startDate, endDate, options = {}) {
+      const { closePicker = false, triggerUpdate = true, triggerPickerSync = true } = options;
+      if (!startDate || !endDate) return;
+
+      currentStartDate = cloneDate(startDate);
+      currentEndDate = cloneDate(endDate);
+      pendingStartDate = cloneDate(startDate);
+      pendingEndDate = cloneDate(endDate);
+
+      if (flatpickrInstance && triggerPickerSync) {
+        isSyncingDatePicker = true;
+        flatpickrInstance.setDate([currentStartDate, currentEndDate], false);
+        isSyncingDatePicker = false;
+      }
+
+      syncDatePickerFooter();
+
+      if (triggerUpdate) {
+        updateDashboardByDateRange(currentStartDate, currentEndDate);
+      }
+
+      if (closePicker && flatpickrInstance) {
+        isCommittingDatePicker = true;
+        flatpickrInstance.close();
+      }
+    }
+
+    function applyPendingDateSelection() {
+      const startDate = pendingStartDate || pendingEndDate;
+      const endDate = pendingEndDate || pendingStartDate;
+      if (!startDate || !endDate) return;
+      commitDateSelection(startDate, endDate, { closePicker: true, triggerUpdate: true, triggerPickerSync: true });
+    }
 
     function initDateRangePicker() {
       const dateInput = document.getElementById('dateRangePicker');
@@ -1998,24 +2218,51 @@
         mode: 'range',
         dateFormat: 'Y-m-d',
         maxDate: 'today',
+        closeOnSelect: false,
         onChange: function(selectedDates) {
           // Skip update during initialization
-          if (isDatePickerInitializing) return;
+          if (isDatePickerInitializing || isSyncingDatePicker) return;
 
-          if (selectedDates.length === 2) {
-            currentStartDate = selectedDates[0];
-            currentEndDate = selectedDates[1];
-            updateDashboardByDateRange(currentStartDate, currentEndDate);
-          }
+          [pendingStartDate, pendingEndDate] = getPendingRangeFromSelection(selectedDates);
+          syncDatePickerFooter();
         },
         onReady: function(dateObj, dateStr, instance) {
           // Set default to today (for display only, won't trigger onChange due to flag)
           const today = new Date();
-          instance.setDate([today, today]);
-          currentStartDate = today;
-          currentEndDate = today;
+          currentStartDate = cloneDate(today);
+          currentEndDate = cloneDate(today);
+          pendingStartDate = cloneDate(today);
+          pendingEndDate = cloneDate(today);
+          attachDatePickerFooter(instance);
+          isSyncingDatePicker = true;
+          instance.setDate([today, today], false);
+          isSyncingDatePicker = false;
+          syncDatePickerFooter();
           // Allow onChange to work after initialization
           setTimeout(() => { isDatePickerInitializing = false; }, 100);
+        },
+        onOpen: function(selectedDates) {
+          [pendingStartDate, pendingEndDate] = selectedDates.length
+            ? getPendingRangeFromSelection(selectedDates)
+            : [cloneDate(currentStartDate), cloneDate(currentEndDate)];
+          syncDatePickerFooter();
+        },
+        onClose: function() {
+          if (isCommittingDatePicker) {
+            isCommittingDatePicker = false;
+            return;
+          }
+
+          pendingStartDate = cloneDate(currentStartDate);
+          pendingEndDate = cloneDate(currentEndDate);
+
+          if (flatpickrInstance) {
+            isSyncingDatePicker = true;
+            flatpickrInstance.setDate([currentStartDate, currentEndDate], false);
+            isSyncingDatePicker = false;
+          }
+
+          syncDatePickerFooter();
         }
       });
     }
@@ -2068,11 +2315,7 @@
         }
 
         if (flatpickrInstance) {
-          flatpickrInstance.setDate([startDate, endDate]);
-          // Trigger update with date range
-          currentStartDate = startDate;
-          currentEndDate = endDate;
-          updateDashboardByDateRange(startDate, endDate);
+          commitDateSelection(startDate, endDate, { closePicker: true, triggerUpdate: true, triggerPickerSync: true });
         }
       });
     });

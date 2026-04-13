@@ -1017,6 +1017,26 @@ html[data-ui-theme="brutalist"] {
   --color-border: #111827;
   --color-label: rgba(17, 24, 39, 0.76);
   --color-surface-glass: rgba(255,255,255,0.96);
+  --datepickr-panel-bg: #FFFDF8;
+  --datepickr-panel-border: #111827;
+  --datepickr-header-bg: #111827;
+  --datepickr-header-fg: #FFFFFF;
+  --datepickr-day-hover-bg: #FFF2D5;
+  --datepickr-day-hover-border: #111827;
+  --datepickr-day-selected-bg: #111827;
+  --datepickr-day-selected-fg: #FFFFFF;
+  --datepickr-day-range-bg: #FDE68A;
+  --datepickr-day-range-fg: #111827;
+  --datepickr-day-today-border: #F97316;
+  --datepickr-day-today-bg: #FFF2D5;
+  --datepickr-weekday-fg: rgba(17, 24, 39, 0.68);
+  --datepickr-footer-bg: #FFF8EA;
+  --datepickr-footer-border: #111827;
+  --datepickr-summary-bg: #FFFDF8;
+  --datepickr-summary-border: #111827;
+  --datepickr-summary-fg: #111827;
+  --datepickr-radius: 0px;
+  --datepickr-day-radius: 0px;
 }
 
 html[data-ui-theme="brutalist"] body {
@@ -1126,6 +1146,26 @@ html.dark[data-ui-theme="brutalist"] {
   --color-border: #F5F5F4;
   --color-label: rgba(245, 245, 244, 0.78);
   --color-surface-glass: rgba(17, 17, 17, 0.96);
+  --datepickr-panel-bg: #111111;
+  --datepickr-panel-border: #F5F5F4;
+  --datepickr-header-bg: #FDE047;
+  --datepickr-header-fg: #111111;
+  --datepickr-day-hover-bg: #1B1B1B;
+  --datepickr-day-hover-border: #FDE047;
+  --datepickr-day-selected-bg: #FDE047;
+  --datepickr-day-selected-fg: #111111;
+  --datepickr-day-range-bg: #2A2410;
+  --datepickr-day-range-fg: #F8FAFC;
+  --datepickr-day-today-border: #FB923C;
+  --datepickr-day-today-bg: #1B1B1B;
+  --datepickr-weekday-fg: rgba(245, 245, 244, 0.72);
+  --datepickr-footer-bg: #111111;
+  --datepickr-footer-border: #F5F5F4;
+  --datepickr-summary-bg: #171717;
+  --datepickr-summary-border: #F5F5F4;
+  --datepickr-summary-fg: #F8FAFC;
+  --datepickr-radius: 0px;
+  --datepickr-day-radius: 0px;
 }
 
 html.dark[data-ui-theme="brutalist"] body {

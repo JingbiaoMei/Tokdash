@@ -59,6 +59,22 @@ def _parse_message_datetime(ts: Any) -> Optional[datetime]:
     return None
 
 
+def _resolve_usage_datetime(entry: Dict[str, Any], message: Dict[str, Any], filepath: str) -> Optional[datetime]:
+    """Prefer OpenClaw's inner message timestamp, matching tokscale semantics."""
+    msg_dt = _parse_message_datetime(message.get("timestamp"))
+    if msg_dt is not None:
+        return msg_dt
+
+    entry_dt = _parse_message_datetime(entry.get("timestamp"))
+    if entry_dt is not None:
+        return entry_dt
+
+    try:
+        return datetime.fromtimestamp(os.path.getmtime(filepath), timezone.utc)
+    except Exception:
+        return None
+
+
 def _usage_cost_from_payload(usage: dict) -> float:
     cost_data = usage.get("cost", 0.0) or usage.get("totalCost", 0.0) or 0.0
     if isinstance(cost_data, dict):
@@ -119,11 +135,13 @@ def get_session_usage(
         # - <session>.jsonl
         # - <session>.jsonl.reset.<timestamp>
         # - <session>.jsonl.deleted.<timestamp>
+        # - <session>.checkpoint.<ckpt_id>.jsonl
         # Exclude:
         # - <session>.jsonl.lock
         all_files = glob.glob(os.path.join(d, "*.jsonl*"))
         for f in all_files:
-            if os.path.basename(f).endswith(".lock"):
+            base = os.path.basename(f)
+            if base.endswith(".lock"):
                 continue
             files.append(f)
 
@@ -145,7 +163,7 @@ def get_session_usage(
             if message.get("role") != "assistant":
                 continue
 
-            msg_dt = _parse_message_datetime(entry.get("timestamp"))
+            msg_dt = _resolve_usage_datetime(entry, message, filepath)
             if not msg_dt:
                 continue
             if msg_dt.tzinfo is None:
@@ -155,10 +173,6 @@ def get_session_usage(
                 continue
             if until_date and msg_dt > until_date:
                 continue
-
-            msg_date = msg_dt.astimezone().strftime("%Y-%m-%d")
-
-            total_messages += 1
 
             usage = message.get("usage", {})
             if not usage:
@@ -176,10 +190,12 @@ def get_session_usage(
             tokens_cache_read = _i(usage.get("cacheRead", 0) or usage.get("cacheReadTokens", 0) or 0)
             tokens_cache = tokens_cache_read
             tokens_total = tokens_in + tokens_out + tokens_cache
-
             # Prefer recomputed cost from local pricing DB (fall back to provider payload).
             cost_db = pricing_db.get_cost(model, tokens_input_raw, tokens_out, tokens_cache_read, tokens_cache_write)
             cost = cost_db if cost_db > 0.0 else _usage_cost_from_payload(usage)
+            msg_date = msg_dt.astimezone().strftime("%Y-%m-%d")
+
+            total_messages += 1
 
             stats = model_stats[model]
             stats["tokens_in"] += tokens_in

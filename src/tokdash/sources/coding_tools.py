@@ -9,10 +9,11 @@ import glob
 import json
 import os
 import sqlite3
+import time as _time
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, ClassVar, Dict, List, Optional, Tuple
 
 
 try:
@@ -22,15 +23,112 @@ except ImportError:  # pragma: no cover
     from pricing import PricingDatabase
 
 
+# ---------------------------------------------------------------------------
+# File-signature caching – avoids repeated rglob / glob.glob + stat() calls
+# when multiple API requests arrive within a short window.
+# ---------------------------------------------------------------------------
+_sig_cache: Dict[str, Tuple[float, tuple]] = {}
+_SIG_TTL = float(os.environ.get("TOKDASH_SIG_TTL", "5.0"))  # seconds; 0 to disable
+_OPENCODE_QUERY_CACHE_MAX = 32  # max date-range entries before eviction
+
+
+def _timed_sigs(cache_key: str, scan_fn) -> tuple:
+    """Return file signatures from *scan_fn*, reusing a cached value within TTL."""
+    now = _time.monotonic()
+    cached = _sig_cache.get(cache_key)
+    if cached and (now - cached[0]) < _SIG_TTL:
+        return cached[1]
+    result = scan_fn()
+    _sig_cache[cache_key] = (now, result)
+    return result
+
+
+def _rglob_sigs(root: Path, pattern: str = "*.jsonl") -> tuple:
+    """Build sorted (path, mtime_ns, size) signatures via Path.rglob."""
+    if not root.exists():
+        return ()
+    items: List[Tuple[str, int, int]] = []
+    for p in root.rglob(pattern):
+        try:
+            s = p.stat()
+            items.append((str(p), s.st_mtime_ns, s.st_size))
+        except (FileNotFoundError, OSError):
+            continue
+    return tuple(sorted(items))
+
+
+def _glob_sigs(pattern: str) -> tuple:
+    """Build sorted (path, mtime_ns, size) signatures via glob.glob."""
+    items: List[Tuple[str, int, int]] = []
+    for p_str in glob.glob(pattern):
+        try:
+            s = os.stat(p_str)
+            items.append((p_str, int(s.st_mtime_ns), int(s.st_size)))
+        except (FileNotFoundError, OSError):
+            continue
+    return tuple(sorted(items))
+
+
 class BaseParser(ABC):
     source_name: str
+
+    # Shared across all instances:
+    #   {source_name: ((file_sigs, pricing_sig), [entries])}
+    # pricing_sig is included so cost values are recomputed when pricing_db.json changes.
+    _entry_cache: ClassVar[Dict[str, Tuple[tuple, List[Dict[str, Any]]]]] = {}
 
     def __init__(self, pricing_db: PricingDatabase):
         self.pricing_db = pricing_db
 
+    def _file_signatures(self) -> tuple:
+        """Hashable snapshot of source files; override per parser."""
+        return ()
+
+    def _pricing_signature(self) -> tuple:
+        """Signature of pricing_db.json so cached costs are invalidated on update."""
+        try:
+            s = self.pricing_db.db_path.stat()
+            return (s.st_mtime_ns, s.st_size)
+        except (FileNotFoundError, OSError, AttributeError):
+            return ()
+
     @abstractmethod
-    def collect(self, since_date: Optional[datetime], until_date: Optional[datetime]) -> List[Dict[str, Any]]:
+    def _parse_all(self) -> List[Dict[str, Any]]:
+        """Parse all entries without date filtering."""
         raise NotImplementedError
+
+    def collect(self, since_date: Optional[datetime] = None, until_date: Optional[datetime] = None) -> List[Dict[str, Any]]:
+        """Cached collect: parse once per file-signature, filter by date in memory.
+
+        File signatures (path, mtime_ns, size) detect when source files change
+        on disk.  When signatures match the cache, we skip re-parsing entirely
+        and just filter the cached entry list by date – turning a multi-second
+        I/O-bound operation into a fast in-memory scan.
+
+        The cache key also includes the pricing DB file signature so that
+        cached cost values are recomputed when pricing_db.json is updated.
+
+        The cache is a ClassVar shared across all parser instances so that
+        separate ``CodingToolsUsageTracker`` objects (e.g. for current-period
+        and previous-period in ``compute_usage_with_comparison``) reuse the
+        same parsed data.
+        """
+        sig = (self._file_signatures(), self._pricing_signature())
+        cached = self._entry_cache.get(self.source_name)
+        if cached is not None and cached[0] == sig:
+            all_entries = cached[1]
+        else:
+            all_entries = self._parse_all()
+            self._entry_cache[self.source_name] = (sig, all_entries)
+
+        if since_date is None and until_date is None:
+            return list(all_entries)
+
+        s = self._to_utc(since_date)
+        u = self._to_utc(until_date)
+        s_ms = int(s.timestamp() * 1000) if s else 0
+        u_ms = int(u.timestamp() * 1000) if u else 9999999999999
+        return [e for e in all_entries if s_ms <= (e.get("timestamp") or 0) < u_ms]
 
     @staticmethod
     def _to_utc(dt: Optional[datetime]) -> Optional[datetime]:
@@ -64,6 +162,11 @@ class BaseParser(ABC):
 class OpenCodeParser(BaseParser):
     source_name = "opencode"
 
+    # Per-query cache: {(s_ms, u_ms): [entries]}, invalidated when DB or pricing changes.
+    # Bounded to _OPENCODE_QUERY_CACHE_MAX entries to prevent unbounded growth.
+    _query_cache: ClassVar[Dict[tuple, List[Dict[str, Any]]]] = {}
+    _query_cache_sig: ClassVar[tuple] = ()
+
     def __init__(self, pricing_db: PricingDatabase):
         super().__init__(pricing_db)
         self.messages_dir = Path.home() / ".local/share/opencode/storage/message"
@@ -89,7 +192,41 @@ class OpenCodeParser(BaseParser):
             "timestamp": int(ts_ms),
         }
 
-    def collect(self, since_date: Optional[datetime], until_date: Optional[datetime]) -> List[Dict[str, Any]]:
+    def _file_signatures(self) -> tuple:
+        if not self.db_path.exists():
+            return ()
+        try:
+            s = self.db_path.stat()
+            return ((str(self.db_path), s.st_mtime_ns, s.st_size),)
+        except (FileNotFoundError, OSError):
+            return ()
+
+    def _parse_all(self) -> List[Dict[str, Any]]:
+        return []  # collect() is overridden; this satisfies the ABC contract
+
+    def collect(self, since_date: Optional[datetime] = None, until_date: Optional[datetime] = None) -> List[Dict[str, Any]]:
+        """Override: use SQL date filtering with per-query caching.
+
+        The OpenCode DB can be very large (700MB+), so we keep SQL-level
+        date filtering instead of loading everything into memory.  Results
+        are cached per (db_signature, pricing_signature, date_range) and
+        invalidated when the DB file or pricing DB changes on disk.
+        The cache is bounded to ``_OPENCODE_QUERY_CACHE_MAX`` entries.
+        """
+        sig = (self._file_signatures(), self._pricing_signature())
+        # Invalidate all cached queries when the DB or pricing file changes.
+        if sig != type(self)._query_cache_sig:
+            type(self)._query_cache.clear()
+            type(self)._query_cache_sig = sig
+
+        s_ms = int(self._to_utc(since_date).timestamp() * 1000) if since_date else 0
+        u_ms = int(self._to_utc(until_date).timestamp() * 1000) if until_date else 9999999999999
+        cache_key = (s_ms, u_ms)
+
+        cached = type(self)._query_cache.get(cache_key)
+        if cached is not None:
+            return list(cached)
+
         out: List[Dict[str, Any]] = []
 
         # IMPORTANT: Only use SQLite DB to avoid double-counting!
@@ -98,8 +235,6 @@ class OpenCodeParser(BaseParser):
         # See: patchFixSetup/09-fixes/OpenCode_Double_Counting_Fix.md
 
         if self.db_path.exists():
-            s_ms = int(self._to_utc(since_date).timestamp() * 1000) if since_date else 0
-            u_ms = int(self._to_utc(until_date).timestamp() * 1000) if until_date else 9999999999999
             try:
                 conn = sqlite3.connect(str(self.db_path))
                 cur = conn.cursor()
@@ -118,7 +253,11 @@ class OpenCodeParser(BaseParser):
             except Exception:
                 pass
 
-        return out
+        # Evict all entries when cache exceeds bound to prevent unbounded growth.
+        if len(type(self)._query_cache) >= _OPENCODE_QUERY_CACHE_MAX:
+            type(self)._query_cache.clear()
+        type(self)._query_cache[cache_key] = out
+        return list(out)
 
 
 class CodexParser(BaseParser):
@@ -139,12 +278,14 @@ class CodexParser(BaseParser):
             return "openai"
         return fallback
 
-    def collect(self, since_date: Optional[datetime], until_date: Optional[datetime]) -> List[Dict[str, Any]]:
-        out: List[Dict[str, Any]] = []
-        if not self.sessions_dir.exists():
-            return out
+    def _file_signatures(self) -> tuple:
+        return _timed_sigs(f"codex:{self.sessions_dir}", lambda: _rglob_sigs(self.sessions_dir))
 
-        for session_file in self.sessions_dir.rglob("*.jsonl"):
+    def _parse_all(self) -> List[Dict[str, Any]]:
+        out: List[Dict[str, Any]] = []
+
+        for path_str, _, _ in self._file_signatures():
+            session_file = Path(path_str)
             try:
                 model = "gpt-5.3-codex"
                 provider = "openai"
@@ -172,13 +313,9 @@ class CodexParser(BaseParser):
                         ts = datetime.fromisoformat(str(ts_raw).replace("Z", "+00:00")).astimezone(timezone.utc)
                     except Exception:
                         continue
-                    
-                    # Only include entries within the date range
-                    if not self._in_range(ts, since_date, until_date):
-                        continue
 
                     info = p.get("info") if isinstance(p.get("info"), dict) else {}
-                    
+
                     # Use last_token_usage (per-turn delta) instead of total_token_usage (cumulative)
                     usage = info.get("last_token_usage") if isinstance(info.get("last_token_usage"), dict) else {}
                     if not usage:
@@ -191,7 +328,7 @@ class CodexParser(BaseParser):
                     input_t = total_input - cache_read  # Fresh input only
                     output_t = self._i(usage.get("output_tokens"))
                     reasoning = self._i(usage.get("reasoning_output_tokens"))
-                    
+
                     if input_t == 0 and output_t == 0 and cache_read == 0 and reasoning == 0:
                         continue
 
@@ -233,16 +370,18 @@ class ClaudeParser(BaseParser):
             return "openai"
         return ""
 
-    def collect(self, since_date: Optional[datetime], until_date: Optional[datetime]) -> List[Dict[str, Any]]:
+    def _file_signatures(self) -> tuple:
+        return _timed_sigs(f"claude:{self.projects_dir}", lambda: _rglob_sigs(self.projects_dir))
+
+    def _parse_all(self) -> List[Dict[str, Any]]:
         out: List[Dict[str, Any]] = []
-        if not self.projects_dir.exists():
-            return out
 
         # Track seen message IDs to avoid duplicates
         # Claude Code writes the same API message multiple times (for different content chunks)
         seen_message_ids = set()
 
-        for session_file in self.projects_dir.rglob("*.jsonl"):
+        for path_str, _, _ in self._file_signatures():
+            session_file = Path(path_str)
             try:
                 for line in session_file.read_text(encoding="utf-8").splitlines():
                     try:
@@ -269,8 +408,6 @@ class ClaudeParser(BaseParser):
                     try:
                         ts = datetime.fromisoformat(str(ts_raw).replace("Z", "+00:00")).astimezone(timezone.utc)
                     except Exception:
-                        continue
-                    if not self._in_range(ts, since_date, until_date):
                         continue
 
                     input_t = self._i(usage.get("input_tokens", usage.get("input")))
@@ -379,14 +516,16 @@ class GeminiCLIParser(BaseParser):
             "timestamp": int(ts_ms),
         }
 
-    def collect(self, since_date: Optional[datetime], until_date: Optional[datetime]) -> List[Dict[str, Any]]:
+    def _file_signatures(self) -> tuple:
+        pattern = str(self.gemini_root / "tmp" / "*" / "chats" / "session-*.json")
+        return _timed_sigs(f"gemini:{self.gemini_root}", lambda: _glob_sigs(pattern))
+
+    def _parse_all(self) -> List[Dict[str, Any]]:
         out: List[Dict[str, Any]] = []
         seen_ids = set()
-        # primary location: ~/.gemini/tmp/*/chats/session-*.json
-        pattern = self.gemini_root / "tmp" / "*" / "chats" / "session-*.json"
-        for file_path in glob.glob(str(pattern)):
+        for path_str, _, _ in self._file_signatures():
             try:
-                with open(file_path, "r", encoding="utf-8") as f:
+                with open(path_str, "r", encoding="utf-8") as f:
                     data = json.load(f)
             except Exception:
                 continue
@@ -410,8 +549,6 @@ class GeminiCLIParser(BaseParser):
                     # Convert ISO timestamp with Z to datetime
                     ts_str = ts_str.replace("Z", "+00:00")
                     ts = datetime.fromisoformat(ts_str).astimezone(timezone.utc)
-                    if not self._in_range(ts, since_date, until_date):
-                        continue
                     model = msg.get("model") or "unknown"
                     ts_ms = int(ts.timestamp() * 1000)
                     out.append(self._build_entry(model, tokens, ts_ms))
@@ -427,7 +564,7 @@ class AmpParser(BaseParser):
         super().__init__(pricing_db)
         self.amp_root = Path.home() / ".amp"
 
-    def collect(self, since_date: Optional[datetime], until_date: Optional[datetime]) -> List[Dict[str, Any]]:
+    def _parse_all(self) -> List[Dict[str, Any]]:
         # TODO(coding_tools): Amp parser placeholder.
         # Keep fail-soft until we have schema + fixtures.
         return []
@@ -510,21 +647,19 @@ class KimiParser(BaseParser):
             "message_id": message_id,  # For deduplication
         }
 
-    def collect(self, since_date: Optional[datetime], until_date: Optional[datetime]) -> List[Dict[str, Any]]:
+    def _file_signatures(self) -> tuple:
+        sessions_dir = self.kimi_root / "sessions"
+        pattern = str(sessions_dir / "*" / "*" / "wire.jsonl")
+        return _timed_sigs(f"kimi:{self.kimi_root}", lambda: _glob_sigs(pattern))
+
+    def _parse_all(self) -> List[Dict[str, Any]]:
         """Collect token usage from Kimi CLI session files."""
         out: List[Dict[str, Any]] = []
         seen_message_ids: set[str] = set()
 
-        sessions_dir = self.kimi_root / "sessions"
-        if not sessions_dir.exists():
-            return out
-
-        # Pattern: ~/.kimi/sessions/<userId>/<sessionId>/wire.jsonl
-        pattern = str(sessions_dir / "*" / "*" / "wire.jsonl")
-
-        for file_path in glob.glob(pattern):
+        for path_str, _, _ in self._file_signatures():
             try:
-                with open(file_path, "r", encoding="utf-8") as f:
+                with open(path_str, "r", encoding="utf-8") as f:
                     for line in f:
                         line = line.strip()
                         if not line:
@@ -559,9 +694,6 @@ class KimiParser(BaseParser):
                         try:
                             ts = datetime.fromtimestamp(float(ts_raw), timezone.utc)
                         except (ValueError, TypeError):
-                            continue
-
-                        if not self._in_range(ts, since_date, until_date):
                             continue
 
                         model = self._default_model_for_timestamp(ts)

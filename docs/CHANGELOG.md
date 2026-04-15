@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+## 0.2.2 - 2026-04-15
+
+### Added
+- Added regression coverage for OpenClaw's inner message timestamps and archived/checkpoint transcript discovery.
+
+### Changed
+- Reworked coding-tool parsing caches so repeated API requests can reuse short-lived file signatures, shared parser results, and bounded OpenCode query caches instead of rescanning logs for each date switch.
+
+### Fixed
+- Updated OpenClaw date filtering to prefer each assistant message's inner `message.timestamp`, with fallback to the outer entry timestamp and file mtime, matching current OpenClaw transcript semantics more closely.
+- Restored OpenClaw scanning for archived `.jsonl.deleted.*`, `.jsonl.reset.*`, and checkpoint `.jsonl` transcripts while still excluding `.lock` files.
+
 ## 0.2.1 - 2026-04-09
 
 ### Added

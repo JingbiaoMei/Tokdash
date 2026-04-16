@@ -1,6 +1,6 @@
 {
-  "version": "2.0.3",
-  "lastUpdated": "2026-03-26T16:29:43Z",
+  "version": "2.0.4",
+  "lastUpdated": "2026-04-16T16:05:36Z",
   "note": "Comprehensive pricing database with all Moonshot, MiniMax, GLM, and OpenAI models from OpenRouter. Cache pricing estimated at 10% of input for cache_read, 100% of input for cache_write.",
   "aliases": {
     "kimi-2.5": "kimi-k2.5",
@@ -14,7 +14,8 @@
     "glm5.1": "glm-5.1",
     "glm-5-1": "glm-5.1",
     "z-ai/glm-5.1": "glm-5.1",
-    "zhipu/glm-5.1": "glm-5.1"
+    "zhipu/glm-5.1": "glm-5.1",
+    "opus-4.7": "claude-opus-4.7"
   },
   "models": {
     "_comment_moonshot": "=== Moonshot AI / Kimi Models ===",
@@ -858,6 +859,16 @@
       "unit": "per_million_tokens",
       "note": "≤200K context pricing. >200K: $10/$37.50, cache $1/$12.50",
       "source": "openrouter.ai/anthropic/claude-opus-4.6"
+    },
+    "claude-opus-4.7": {
+      "provider": "anthropic",
+      "input": 5.0,
+      "output": 25.0,
+      "cache_read": 0.5,
+      "cache_write": 6.25,
+      "unit": "per_million_tokens",
+      "note": "≤200K context pricing. >200K: $10/$37.50, cache $1/$12.50",
+      "source": "openrouter.ai/anthropic/claude-opus-4.7"
     },
     "claude-sonnet-4": {
       "provider": "anthropic",

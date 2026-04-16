@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+## 0.2.3 - 2026-04-16
+
+### Added
+- Added `claude-opus-4.7` pricing to the local pricing database with the same rates as `claude-opus-4.6`, plus `opus-4.7` shorthand alias coverage.
+
 ## 0.2.2 - 2026-04-15
 
 ### Added

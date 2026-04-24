@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+## 0.2.4 - 2026-04-24
+
+### Added
+- Added a dashboard `Pricing` tab, contributed by StormTian, for viewing, formatting, validating, reloading, and saving the packaged `pricing_db.json` from the local Tokdash UI.
+- Added `/api/pricing-db` read and write endpoints with JSON parsing, schema-shape validation, atomic file replacement, and test coverage for valid saves, invalid JSON, and missing `models` data.
+- Added `gpt-5.5` pricing support to the local pricing database and release-safe contract tests.
+- Added `deepseek-v4-pro` pricing from OpenRouter at `$1.74` input / `$3.48` output per million tokens.
+- Added `deepseek-v4-flash` pricing from OpenRouter at `$0.14` input / `$0.28` output per million tokens.
+- Added `kimi-k2.6` Moonshot AI pricing at `$0.95` input / `$4.00` output / `$0.16` cache-read per million tokens, including `k2p6`, `k2-6`, `kimi-2.6`, `kimi2.6`, and `moonshot-ai/kimi-k2.6` aliases.
+
+### Changed
+- Normalized saved pricing JSON through the editor API so dashboard edits produce stable, readable formatting before replacing the on-disk database.
+- Expanded Kimi model normalization so K2.6 variants group under `kimi-k2.6` without collapsing into the existing `kimi-k2.5` dashboard bucket.
+- Extended pricing contract coverage so newly added DeepSeek V4 and Kimi K2.6 entries are verified through the same `PricingDatabase` lookup path used at runtime.
+
+### Fixed
+- Cleared cached API responses after pricing database saves so refreshed dashboard views use the updated pricing file.
+- Reloaded the session-level pricing database and cleared parsed session caches after pricing edits, preventing already-parsed Codex, Claude Code, and OpenCode session detail costs from staying stale until process restart.
+
 ## 0.2.3 - 2026-04-16
 
 ### Added

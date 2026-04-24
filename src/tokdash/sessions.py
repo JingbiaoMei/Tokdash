@@ -21,6 +21,16 @@ TOOL_LABELS = {
 _PRICING_DB = PricingDatabase()
 
 
+def reload_pricing_db() -> None:
+    """Reload session pricing and clear parsed session caches."""
+    _PRICING_DB.load()
+    _parse_codex_session_file.cache_clear()
+    _load_codex_sessions.cache_clear()
+    _parse_claude_session_file.cache_clear()
+    _load_claude_sessions.cache_clear()
+    _load_opencode_sessions.cache_clear()
+
+
 def _period_to_days(period: str) -> int:
     try:
         return max(1, int(period))

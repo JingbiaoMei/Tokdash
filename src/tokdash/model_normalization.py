@@ -16,8 +16,9 @@ def normalize_model_name(name: str) -> str:
        ``claude-3-5-sonnet`` → ``claude-3.5-sonnet``, ``k2p5`` / ``k2-5`` → ``k2.5``).
     8. Convert hyphenated version numbers: ``4-5`` → ``4.5``.
     9. Normalise Anthropic opus/sonnet names to ``claude-`` prefix.
-    10. Collapse all kimi-k2.5 variants (``kimi/kimi-k2p5``, ``kimi-coding/kimi-k2.5``,
-        ``infi/kimi-2.5``, ``kimi-k2-5``, ``kimi2.5``, etc.) → ``kimi-k2.5``.
+    10. Collapse Kimi K2 point-release variants (``kimi/kimi-k2p5``,
+        ``kimi-coding/kimi-k2.6``, ``infi/kimi-2.5``, ``kimi-k2-5``,
+        ``kimi2.6``, etc.) to their canonical ``kimi-k2.x`` key.
     """
     n = (name or "").strip().lower()
     if not n:
@@ -51,6 +52,8 @@ def normalize_model_name(name: str) -> str:
         "claude-3-7-sonnet": "claude-3.7-sonnet",
         "k2p5": "k2.5",
         "k2-5": "k2.5",
+        "k2p6": "k2.6",
+        "k2-6": "k2.6",
     }
     n = alias_map.get(n, n)
 
@@ -65,12 +68,16 @@ def normalize_model_name(name: str) -> str:
         if not n.startswith("claude-"):
             n = "claude-" + n
 
-    # Kimi variants: k2p5 vs k2.5 vs kimi-k2.5
-    n = re.sub(r"k2(?:p|-)5", "k2.5", n)
-    if n in {"k2.5", "kimi2.5", "kimi-2.5", "kimi-k2p5", "kimi-k2-5"}:
+    # Kimi variants: k2p5/k2p6 vs k2.5/k2.6 vs kimi-k2.x
+    n = re.sub(r"k2(?:p|-)([56])", r"k2.\1", n)
+    if n in {"k2.5", "kimi2.5", "kimi-2.5", "kimi-k2.5"}:
         n = "kimi-k2.5"
-    if n.startswith("kimi") and ("k2.5" in n or "k2p5" in n or "k2-5" in n or "2.5" in n):
-        n = "kimi-k2.5"
+    elif n in {"k2.6", "kimi2.6", "kimi-2.6", "kimi-k2.6"}:
+        n = "kimi-k2.6"
+    elif n.startswith("kimi"):
+        match = re.search(r"(?:k?2\.|k2p|k2-)([56])", n)
+        if match:
+            n = f"kimi-k2.{match.group(1)}"
 
     return n or "unknown"
 
@@ -95,4 +102,8 @@ NORMALIZATION_EXAMPLES = {
     "kimi-k2p5": "kimi-k2.5",
     "kimi-k2-5": "kimi-k2.5",
     "kimi2.5": "kimi-k2.5",
+    "kimi/kimi-k2p6": "kimi-k2.6",
+    "moonshot-ai/kimi-k2.6": "kimi-k2.6",
+    "kimi-2.6": "kimi-k2.6",
+    "k2p6": "kimi-k2.6",
 }

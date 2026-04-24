@@ -26,6 +26,15 @@ def test_manual_models_resolve():
     cost = db.get_cost("k2p5", 1000, 2000, 0, 0)
     assert cost > 0.0, "k2p5 should resolve"
 
+    cost = db.get_cost("deepseek/deepseek-v4-pro", 1000, 2000, 0, 0)
+    assert cost > 0.0, "deepseek-v4-pro should resolve"
+
+    cost = db.get_cost("deepseek/deepseek-v4-flash", 1000, 2000, 0, 0)
+    assert cost > 0.0, "deepseek-v4-flash should resolve"
+
+    cost = db.get_cost("kimi-k2.6", 1000, 2000, 0, 0)
+    assert cost > 0.0, "kimi-k2.6 should resolve"
+
 
 def test_alias_entries_resolve():
     """All aliases in pricing_db.json must resolve to a real model."""
@@ -45,6 +54,26 @@ def test_alias_entries_resolve():
         alias_cost = db.get_cost(alias, 1000, 2000, 0, 0)
         assert abs(alias_cost - base_cost) < 1e-12, (
             f"Alias {alias!r} should resolve to kimi-k2.5 pricing"
+        )
+
+
+def test_kimi_2_6_alias_entries_resolve():
+    """Kimi K2.6 aliases must resolve to the canonical Kimi K2.6 pricing."""
+    db = PricingDatabase()
+
+    representative_aliases = [
+        "k2p6",
+        "k2-6",
+        "kimi-2.6",
+        "moonshot-ai/kimi-k2.6",
+    ]
+    base_cost = db.get_cost("kimi-k2.6", 1000, 2000, 0, 0)
+    assert base_cost > 0.0
+
+    for alias in representative_aliases:
+        alias_cost = db.get_cost(alias, 1000, 2000, 0, 0)
+        assert abs(alias_cost - base_cost) < 1e-12, (
+            f"Alias {alias!r} should resolve to kimi-k2.6 pricing"
         )
 
 

@@ -41,6 +41,8 @@ def test_pricing_db_editor_reads_and_saves_valid_json(tmp_path, monkeypatch):
     }
     _write_pricing_db(pricing_path, original)
     monkeypatch.setattr(api, "PRICING_DB_PATH", pricing_path, raising=False)
+    reload_calls = []
+    monkeypatch.setattr(api, "reload_pricing_db", lambda: reload_calls.append(True))
     api._cache["stale"] = (0.0, {"old": True})
 
     read_response = api.get_pricing_db()
@@ -51,6 +53,7 @@ def test_pricing_db_editor_reads_and_saves_valid_json(tmp_path, monkeypatch):
     assert save_response["data"] == updated
     assert json.loads(pricing_path.read_text(encoding="utf-8")) == updated
     assert api._cache == {}
+    assert reload_calls == [True]
 
 
 def test_pricing_db_editor_rejects_invalid_json_without_overwriting(tmp_path, monkeypatch):

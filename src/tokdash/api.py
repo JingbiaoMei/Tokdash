@@ -21,7 +21,13 @@ from .assets import (
 )
 from .compute import compute_stats, compute_usage_with_comparison, get_openclaw_data, get_tools_data
 from .dateutil import parse_date_range
-from .sessions import get_codex_session_detail, get_codex_sessions_data, get_session_detail, get_sessions_data
+from .sessions import (
+    get_codex_session_detail,
+    get_codex_sessions_data,
+    get_session_detail,
+    get_sessions_data,
+    reload_pricing_db,
+)
 
 
 PRICING_DB_PATH = Path(__file__).parent / "pricing_db.json"
@@ -144,6 +150,7 @@ def update_pricing_db(payload: Dict[str, Any]) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=f"Failed to write pricing_db.json: {e}")
 
     _cache.clear()
+    reload_pricing_db()
     return {"path": str(PRICING_DB_PATH), "data": data, "text": formatted}
 
 

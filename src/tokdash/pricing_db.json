@@ -11,6 +11,14 @@
     "kimi-coding/k2p5": "kimi-k2.5",
     "kimi-ai/kimi-2.5": "kimi-k2.5",
     "moonshot-ai/kimi-k2.5": "kimi-k2.5",
+    "k2.6": "kimi-k2.6",
+    "k2p6": "kimi-k2.6",
+    "k2-6": "kimi-k2.6",
+    "kimi-2.6": "kimi-k2.6",
+    "kimi2.6": "kimi-k2.6",
+    "kimi-k2p6": "kimi-k2.6",
+    "kimi-k2-6": "kimi-k2.6",
+    "moonshot-ai/kimi-k2.6": "kimi-k2.6",
     "glm5.1": "glm-5.1",
     "glm-5-1": "glm-5.1",
     "z-ai/glm-5.1": "glm-5.1",
@@ -58,6 +66,16 @@
       "unit": "per_million_tokens",
       "source": "openrouter.ai/moonshotai/kimi-k2.5",
       "note": "Official price used (platform.moonshot.ai/docs/pricing/chat)"
+    },
+    "kimi-k2.6": {
+      "provider": "moonshotai",
+      "input": 0.95,
+      "output": 4,
+      "cache_read": 0.16,
+      "cache_write": 0.95,
+      "unit": "per_million_tokens",
+      "source": "moonshot-ai/kimi-k2.6",
+      "note": "Moonshot AI SG int4 price supplied 2026-04-24"
     },
     "_comment_minimax": "=== MiniMax Models ===",
     "minimax-01": {
@@ -1019,6 +1037,26 @@
       "unit": "per_million_tokens",
       "source": "openrouter.ai/deepseek/deepseek-v3.2-speciale",
       "note": "Official price used (api-docs.deepseek.com/quick_start/pricing)"
+    },
+    "deepseek-v4-pro": {
+      "provider": "deepseek",
+      "input": 1.74,
+      "output": 3.48,
+      "cache_read": 0.174,
+      "cache_write": 1.74,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/deepseek/deepseek-v4-pro",
+      "note": "OpenRouter price verified 2026-04-24"
+    },
+    "deepseek-v4-flash": {
+      "provider": "deepseek",
+      "input": 0.14,
+      "output": 0.28,
+      "cache_read": 0.014,
+      "cache_write": 0.14,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/deepseek/deepseek-v4-flash",
+      "note": "OpenRouter price verified 2026-04-24"
     },
     "_comment_google": "=== Google Gemini Models ===",
     "gemini-2.0-flash-001": {

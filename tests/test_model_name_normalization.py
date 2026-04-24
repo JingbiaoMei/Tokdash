@@ -52,3 +52,28 @@ def test_kimi_k25_variants():
         assert normalize_model_name(inp) == expected, (
             f"normalize_model_name({inp!r}) → {normalize_model_name(inp)!r}, expected {expected!r}"
         )
+
+
+def test_kimi_k26_variants():
+    """Kimi K2.6 variants must collapse without merging into K2.5."""
+    expected = "kimi-k2.6"
+    cases = [
+        "kimi/kimi-k2p6",
+        "moonshot-ai/kimi-k2.6",
+        "kimi/k2.6",
+        "kimi/k2p6",
+        "anything/kimi2.6",
+        "anything/kimi-2.6",
+        "kimi-k2p6",
+        "kimi-k2-6",
+        "kimi-k2.6",
+        "kimi2.6",
+        "kimi-2.6",
+        "Kimi/KIMI-K2P6",
+        "kimi-k2.6-2026-04-24",
+        "kimi-k2.6-thinking",
+    ]
+    for inp in cases:
+        assert normalize_model_name(inp) == expected, (
+            f"normalize_model_name({inp!r}) → {normalize_model_name(inp)!r}, expected {expected!r}"
+        )

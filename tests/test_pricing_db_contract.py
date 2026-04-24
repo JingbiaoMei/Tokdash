@@ -14,6 +14,10 @@ def test_manual_models_resolve():
     """Manual models (not on any source) must resolve."""
     db = PricingDatabase()
 
+    # gpt-5.5: official OpenAI pricing page lists it before OpenRouter has an entry.
+    cost = db.get_cost("gpt-5.5", 1000, 2000, 0, 0)
+    assert cost > 0.0, "gpt-5.5 should resolve"
+
     # gpt-5.3-codex: manually maintained, uses gpt-5.2-codex pricing.
     cost = db.get_cost("gpt-5.3-codex", 1000, 2000, 0, 0)
     assert cost > 0.0, "gpt-5.3-codex should resolve"
@@ -105,7 +109,7 @@ def test_core_provider_models_resolve():
     db = PricingDatabase()
 
     representative = {
-        "openai": "gpt-5.4",
+        "openai": "gpt-5.5",
         "anthropic": "claude-opus-4.6",
         "google": "gemini-3-pro-preview",
         "moonshotai": "kimi-k2.5",

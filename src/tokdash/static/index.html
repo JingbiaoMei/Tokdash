@@ -361,6 +361,27 @@
     .heatmap-year-grid{display:grid;grid-auto-flow:column;grid-template-rows:repeat(7,var(--hy-cell));grid-auto-columns:var(--hy-cell);gap:var(--hy-gap);padding-top:4px;}
     .heatmap-year-cell{width:var(--hy-cell);height:var(--hy-cell);border-radius:3px;border:1px solid rgba(226,232,240,0.6);cursor:pointer;}
 
+    .pricing-editor {
+      width: 100%;
+      min-height: 62vh;
+      resize: vertical;
+      border: 1px solid var(--color-border);
+      border-radius: 8px;
+      background: rgba(15, 23, 42, 0.96);
+      color: #E2E8F0;
+      padding: 16px;
+      line-height: 1.55;
+      tab-size: 2;
+      white-space: pre;
+      overflow: auto;
+    }
+
+    .pricing-editor:focus {
+      outline: none;
+      border-color: var(--color-primary);
+      box-shadow: 0 0 0 4px rgba(30,64,175,0.1);
+    }
+
     html.dark {
       --color-primary: #60A5FA;
       --color-secondary: #93C5FD;
@@ -481,6 +502,7 @@
     html.dark .heatmap-cell { border-color: rgba(71,85,105,0.4); }
     html.dark .heatmap-year-cell { border-color: rgba(71,85,105,0.3); }
     html.dark .calendar-day { border-color: rgba(71,85,105,0.4); }
+    html.dark .pricing-editor { background: rgba(2, 6, 23, 0.98); }
     html.dark .text-slate-800 { color: #E2E8F0; }
     html.dark .text-slate-700 { color: #CBD5E1; }
     html.dark .text-slate-600 { color: #94A3B8; }
@@ -766,6 +788,7 @@
         <button class="tab-btn" data-tab="overview" aria-selected="true" data-i18n="overview">Overview</button>
         <button class="tab-btn" data-tab="sessions" aria-selected="false" data-i18n="sessionsPage">Sessions</button>
         <button class="tab-btn" data-tab="stats" aria-selected="false" data-i18n="stats">Stats</button>
+        <button class="tab-btn" data-tab="pricing" aria-selected="false" data-i18n="pricingDb">Pricing</button>
       </nav>
     </header>
 
@@ -1337,6 +1360,39 @@
       </section>
     </div>
 
+    <!-- Pricing Tab -->
+    <div id="pricing-content" class="tab-content">
+      <section class="surface p-5">
+        <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-4">
+          <div>
+            <h2 class="text-base font-extrabold mono" data-i18n="pricingDb">Pricing</h2>
+            <div id="pricingDbPath" class="text-xs mono mt-1 break-all" style="color: var(--color-muted);">pricing_db.json</div>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <div id="pricingDbStatus" class="text-sm font-semibold mr-1" style="color: var(--color-muted);" data-i18n="loading">Loading…</div>
+            <button id="pricingDbReload" class="btn btn-ghost" type="button" data-i18n="reload">Reload</button>
+            <button id="pricingDbFormat" class="btn btn-ghost" type="button" data-i18n="formatJson">Format JSON</button>
+            <button id="pricingDbSave" class="btn btn-primary" type="button" data-i18n="save">Save</button>
+          </div>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+          <div class="rounded-lg border p-4" style="border-color: var(--color-border); background: color-mix(in srgb, var(--color-text) 3%, transparent);">
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="models">Models</div>
+            <div id="pricingDbModelCount" class="mt-2 font-extrabold">-</div>
+          </div>
+          <div class="rounded-lg border p-4" style="border-color: var(--color-border); background: color-mix(in srgb, var(--color-text) 3%, transparent);">
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="aliases">Aliases</div>
+            <div id="pricingDbAliasCount" class="mt-2 font-extrabold">-</div>
+          </div>
+          <div class="rounded-lg border p-4" style="border-color: var(--color-border); background: color-mix(in srgb, var(--color-text) 3%, transparent);">
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="jsonState">JSON</div>
+            <div id="pricingDbJsonState" class="mt-2 font-extrabold" style="color: var(--color-muted);" data-i18n="loading">Loading…</div>
+          </div>
+        </div>
+        <textarea id="pricingDbEditor" class="pricing-editor mono" spellcheck="false" aria-label="pricing_db.json editor"></textarea>
+      </section>
+    </div>
+
   </div>
 
   <div id="sessionModal" class="hidden fixed inset-0 z-50">
@@ -1460,6 +1516,9 @@
     let lastSessionsResponses = { codex: null, claude: null, opencode: null, combined: null };
     let lastCombinedModels = [];
     let lastAppsBreakdown = null;
+    let pricingDbLoaded = false;
+    let pricingDbDirty = false;
+    let pricingDbLastText = '';
     const MAX_COMBINED_MODELS_ROWS = 300;
     let combinedModelsShowAll = false;
     const THEME_CONFIG = window.TOKDASH_THEME_CONFIG || {};
@@ -1526,6 +1585,17 @@
         overview: 'Overview',
         sessionsPage: 'Sessions',
         stats: 'Stats',
+        pricingDb: 'Pricing',
+        reload: 'Reload',
+        save: 'Save',
+        formatJson: 'Format JSON',
+        models: 'Models',
+        aliases: 'Aliases',
+        jsonState: 'JSON',
+        validJson: 'Valid JSON',
+        invalidJson: 'Invalid JSON',
+        unsavedChanges: 'Unsaved changes',
+        saved: 'Saved',
         totalTokens: 'Total Tokens',
         totalCost: 'Total Cost',
         totalMessages: 'Total Messages',
@@ -1661,6 +1731,17 @@
         overview: '概览',
         sessionsPage: '会话',
         stats: '统计',
+        pricingDb: '价格库',
+        reload: '重新加载',
+        save: '保存',
+        formatJson: '格式化 JSON',
+        models: '模型数',
+        aliases: '别名数',
+        jsonState: 'JSON',
+        validJson: 'JSON 有效',
+        invalidJson: 'JSON 无效',
+        unsavedChanges: '未保存',
+        saved: '已保存',
         totalTokens: '总 Token 数',
         totalCost: '总费用',
         totalMessages: '总消息数',
@@ -1780,6 +1861,11 @@
 
     function isSessionsActive() {
       const el = document.getElementById('sessions-content');
+      return !!el && el.classList.contains('active');
+    }
+
+    function isPricingActive() {
+      const el = document.getElementById('pricing-content');
       return !!el && el.classList.contains('active');
     }
 
@@ -3309,6 +3395,129 @@
       tbody.replaceChildren(frag);
     }
 
+    function setPricingDbStatus(text, color = 'var(--color-muted)') {
+      const el = document.getElementById('pricingDbStatus');
+      if (!el) return;
+      el.removeAttribute('data-i18n');
+      el.textContent = text;
+      el.style.color = color;
+    }
+
+    function setPricingDbJsonState(text, color = 'var(--color-muted)') {
+      const el = document.getElementById('pricingDbJsonState');
+      if (!el) return;
+      el.removeAttribute('data-i18n');
+      el.textContent = text;
+      el.style.color = color;
+    }
+
+    function setPricingDbBusy(isBusy) {
+      ['pricingDbReload', 'pricingDbFormat', 'pricingDbSave'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.disabled = isBusy;
+      });
+    }
+
+    function updatePricingDbSummary(data) {
+      const models = data && typeof data.models === 'object' && data.models !== null ? data.models : {};
+      const aliases = data && typeof data.aliases === 'object' && data.aliases !== null ? data.aliases : {};
+      document.getElementById('pricingDbModelCount').textContent = formatNumber(Object.keys(models).length);
+      document.getElementById('pricingDbAliasCount').textContent = formatNumber(Object.keys(aliases).length);
+    }
+
+    function parsePricingDbEditor() {
+      const editor = document.getElementById('pricingDbEditor');
+      if (!editor) throw new Error('Editor not found');
+      const data = JSON.parse(editor.value || '{}');
+      if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('Root must be an object');
+      if (!data.models || typeof data.models !== 'object' || Array.isArray(data.models)) throw new Error('Missing models object');
+      return data;
+    }
+
+    function refreshPricingDbEditorState() {
+      const editor = document.getElementById('pricingDbEditor');
+      if (!editor) return;
+      pricingDbDirty = editor.value !== pricingDbLastText;
+      try {
+        const data = parsePricingDbEditor();
+        updatePricingDbSummary(data);
+        setPricingDbJsonState(t('validJson'), 'var(--color-cost)');
+        setPricingDbStatus(pricingDbDirty ? t('unsavedChanges') : t('saved'), pricingDbDirty ? '#D97706' : 'var(--color-muted)');
+      } catch (e) {
+        setPricingDbJsonState(t('invalidJson'), '#DC2626');
+        setPricingDbStatus(e.message || t('invalidJson'), '#DC2626');
+      }
+    }
+
+    async function loadPricingDb() {
+      setPricingDbBusy(true);
+      setPricingDbStatus(t('loading'));
+      try {
+        const response = await fetch('/api/pricing-db');
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.detail || response.statusText);
+        const editor = document.getElementById('pricingDbEditor');
+        if (editor) editor.value = payload.text || JSON.stringify(payload.data || {}, null, 2);
+        pricingDbLastText = editor ? editor.value : '';
+        pricingDbLoaded = true;
+        pricingDbDirty = false;
+        document.getElementById('pricingDbPath').textContent = payload.path || 'pricing_db.json';
+        updatePricingDbSummary(payload.data || {});
+        setPricingDbJsonState(t('validJson'), 'var(--color-cost)');
+        setPricingDbStatus(t('saved'), 'var(--color-muted)');
+      } catch (e) {
+        setPricingDbStatus(e.message || String(e), '#DC2626');
+      } finally {
+        setPricingDbBusy(false);
+      }
+    }
+
+    function formatPricingDbEditor() {
+      try {
+        const data = parsePricingDbEditor();
+        const editor = document.getElementById('pricingDbEditor');
+        if (editor) editor.value = JSON.stringify(data, null, 2) + '\n';
+        refreshPricingDbEditorState();
+      } catch (e) {
+        setPricingDbJsonState(t('invalidJson'), '#DC2626');
+        setPricingDbStatus(e.message || t('invalidJson'), '#DC2626');
+      }
+    }
+
+    async function savePricingDb() {
+      let data;
+      try {
+        data = parsePricingDbEditor();
+      } catch (e) {
+        setPricingDbJsonState(t('invalidJson'), '#DC2626');
+        setPricingDbStatus(e.message || t('invalidJson'), '#DC2626');
+        return;
+      }
+
+      setPricingDbBusy(true);
+      setPricingDbStatus(t('loading'));
+      try {
+        const response = await fetch('/api/pricing-db', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ data }),
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.detail || response.statusText);
+        const editor = document.getElementById('pricingDbEditor');
+        if (editor) editor.value = payload.text || JSON.stringify(payload.data || {}, null, 2);
+        pricingDbLastText = editor ? editor.value : '';
+        pricingDbDirty = false;
+        updatePricingDbSummary(payload.data || {});
+        setPricingDbJsonState(t('validJson'), 'var(--color-cost)');
+        setPricingDbStatus(t('saved'), 'var(--color-muted)');
+      } catch (e) {
+        setPricingDbStatus(e.message || String(e), '#DC2626');
+      } finally {
+        setPricingDbBusy(false);
+      }
+    }
+
     // Tabs
     document.querySelectorAll('.tab-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -3322,8 +3531,14 @@
         if (tab === 'stats') loadStats();
         if (tab === 'overview' && lastUsageResponse) renderOverviewTab(lastUsageResponse);
         if (tab === 'sessions' && hasLoadedSessionResponses()) renderSessionsTab();
+        if (tab === 'pricing' && !pricingDbLoaded) loadPricingDb();
       });
     });
+
+    document.getElementById('pricingDbReload').addEventListener('click', loadPricingDb);
+    document.getElementById('pricingDbFormat').addEventListener('click', formatPricingDbEditor);
+    document.getElementById('pricingDbSave').addEventListener('click', savePricingDb);
+    document.getElementById('pricingDbEditor').addEventListener('input', refreshPricingDbEditorState);
 
     document.getElementById('sessionModalClose').addEventListener('click', closeSessionModal);
     document.getElementById('sessionModalBackdrop').addEventListener('click', closeSessionModal);

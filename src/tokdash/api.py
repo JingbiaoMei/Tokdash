@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
 import os
 from datetime import datetime
+from json import JSONDecodeError
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, HTTPException
@@ -19,6 +22,9 @@ from .assets import (
 from .compute import compute_stats, compute_usage_with_comparison, get_openclaw_data, get_tools_data
 from .dateutil import parse_date_range
 from .sessions import get_codex_session_detail, get_codex_sessions_data, get_session_detail, get_sessions_data
+
+
+PRICING_DB_PATH = Path(__file__).parent / "pricing_db.json"
 
 
 def _validate_date_params(date_from: Optional[str], date_to: Optional[str]) -> None:
@@ -90,6 +96,55 @@ def get_cached_or_fetch(key: str, fetch_fn) -> Any:
     data = fetch_fn()
     _cache[key] = (now, data)
     return data
+
+
+def _format_pricing_db(data: Dict[str, Any]) -> str:
+    return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+
+
+def _validate_pricing_db(data: Any) -> Dict[str, Any]:
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=400, detail="pricing_db.json must be a JSON object")
+    if not isinstance(data.get("models"), dict):
+        raise HTTPException(status_code=400, detail="pricing_db.json must include a models object")
+    aliases = data.get("aliases")
+    if aliases is not None and not isinstance(aliases, dict):
+        raise HTTPException(status_code=400, detail="pricing_db.json aliases must be an object")
+    return data
+
+
+@app.get("/api/pricing-db")
+def get_pricing_db() -> Dict[str, Any]:
+    try:
+        data = _validate_pricing_db(json.loads(PRICING_DB_PATH.read_text(encoding="utf-8")))
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="pricing_db.json not found")
+    except JSONDecodeError as e:
+        raise HTTPException(status_code=500, detail=f"pricing_db.json is invalid JSON: {e.msg}")
+    return {"path": str(PRICING_DB_PATH), "data": data, "text": _format_pricing_db(data)}
+
+
+@app.put("/api/pricing-db")
+def update_pricing_db(payload: Dict[str, Any]) -> Dict[str, Any]:
+    try:
+        if "text" in payload:
+            data = json.loads(str(payload["text"]))
+        else:
+            data = payload.get("data")
+    except JSONDecodeError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON: {e.msg}")
+
+    data = _validate_pricing_db(data)
+    formatted = _format_pricing_db(data)
+    tmp_path = PRICING_DB_PATH.with_suffix(PRICING_DB_PATH.suffix + ".tmp")
+    try:
+        tmp_path.write_text(formatted, encoding="utf-8")
+        tmp_path.replace(PRICING_DB_PATH)
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"Failed to write pricing_db.json: {e}")
+
+    _cache.clear()
+    return {"path": str(PRICING_DB_PATH), "data": data, "text": formatted}
 
 
 @app.get("/api/usage")

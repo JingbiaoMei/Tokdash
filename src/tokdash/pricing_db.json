@@ -1040,13 +1040,13 @@
     },
     "deepseek-v4-pro": {
       "provider": "deepseek",
-      "input": 1.74,
-      "output": 3.48,
-      "cache_read": 0.174,
-      "cache_write": 1.74,
+      "input": 0.435,
+      "output": 0.87,
+      "cache_read": 0.0435,
+      "cache_write": 0.435,
       "unit": "per_million_tokens",
       "source": "openrouter.ai/deepseek/deepseek-v4-pro",
-      "note": "OpenRouter price verified 2026-04-24"
+      "note": "OpenRouter price verified 2026-04-28"
     },
     "deepseek-v4-flash": {
       "provider": "deepseek",

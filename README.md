@@ -8,6 +8,27 @@ Local token & cost dashboard for AI coding tools (Codex, OpenCode, Claude Code, 
 ![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=flat&logo=python&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat)
 
+## Table of Contents
+
+- [Features](#features)
+- [Supported clients](#supported-clients)
+- [Platform support](#platform-support)
+- [Quick start](#quick-start)
+  - [Prerequisites](#prerequisites)
+  - [Install (pip)](#install-pip)
+  - [Run (from source)](#run-from-source)
+  - [Run in background](#run-in-background)
+  - [Updating Tokdash](#updating-tokdash)
+  - [OpenClaw digest (scheduled reports)](#openclaw-digest-scheduled-reports)
+- [Configuration](#configuration)
+- [Privacy \& security](#privacy--security)
+- [API (local)](#api-local)
+- [Cost Accuracy Note](#cost-accuracy-note)
+- [Roadmap](#roadmap)
+- [Contributing / security](#contributing--security)
+- [Project structure](#project-structure)
+- [License](#license)
+
 ## Features
 
 - **Hierarchical breakdown**: app -> model with full token precision

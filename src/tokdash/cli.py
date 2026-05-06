@@ -9,6 +9,7 @@ import uvicorn
 
 from .api import app
 from .compute import compute_usage
+from .macos_app import create_macos_app_bundle
 
 
 def _port_type(value: str) -> int:
@@ -37,7 +38,7 @@ def build_parser(prog: str) -> argparse.ArgumentParser:
         "command",
         nargs="?",
         default="serve",
-        choices=["serve", "export"],
+        choices=["serve", "export", "macos-app"],
         help="Command (default: serve)",
     )
 
@@ -80,7 +81,17 @@ def build_parser(prog: str) -> argparse.ArgumentParser:
     parser.add_argument(
         "--output",
         type=str,
-        help="Write output to a file instead of stdout",
+        help="Export: write JSON to a file. macos-app: output .app path or parent directory.",
+    )
+    parser.add_argument(
+        "--app-name",
+        default="Tokdash",
+        help='macos-app: app bundle name (default: "Tokdash")',
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="macos-app: replace an existing app bundle",
     )
 
     return parser
@@ -102,6 +113,12 @@ def export(period: str, pretty: bool, output: str | None) -> None:
         print(payload)
 
 
+def macos_app(output: str | None, app_name: str, force: bool) -> None:
+    path = create_macos_app_bundle(output, app_name=app_name, force=force)
+    print(f"Created macOS app: {path}")
+    print(f"Open it with: open {path}")
+
+
 def cli(argv: list[str] | None = None, prog: str = "tokdash") -> int:
     parser = build_parser(prog=prog)
     args = parser.parse_args(argv)
@@ -113,6 +130,10 @@ def cli(argv: list[str] | None = None, prog: str = "tokdash") -> int:
 
     if args.command == "export":
         export(args.period, args.pretty, args.output)
+        return 0
+
+    if args.command == "macos-app":
+        macos_app(args.output, args.app_name, args.force)
         return 0
 
     parser.error(f"Unknown command: {args.command}")

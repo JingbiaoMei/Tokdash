@@ -57,6 +57,22 @@ tokdash serve
 
 Open: `http://localhost:55423`
 
+### macOS app
+
+Tokdash can generate a local native `Tokdash.app` dashboard for macOS:
+
+```bash
+pip install tokdash
+tokdash macos-app --output ~/Applications --force
+open ~/Applications/Tokdash.app
+```
+
+The app opens its own macOS window and reads Tokdash usage data directly from local session files. It does not start the HTTP server and does not open a browser.
+
+When Xcode's Swift compiler is available, Tokdash builds a SwiftUI app that uses system material effects and adopts Liquid Glass on macOS 26+. If Swift is unavailable, it falls back to a lightweight Tk-based native window.
+
+The generated app uses the Python environment that created it. If you upgrade or move that Python environment, regenerate the app with `tokdash macos-app --force`.
+
 ### Run (from source)
 
 ```bash

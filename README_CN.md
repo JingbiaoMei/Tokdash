@@ -57,6 +57,22 @@ tokdash serve
 
 打开：`http://localhost:55423`
 
+### macOS App
+
+Tokdash 可以生成一个本地原生 `Tokdash.app` 仪表盘：
+
+```bash
+pip install tokdash
+tokdash macos-app --output ~/Applications --force
+open ~/Applications/Tokdash.app
+```
+
+这个 App 会打开自己的 macOS 窗口，并直接从本地 session 文件读取 Tokdash 用量数据。它不会启动 HTTP 服务，也不会打开浏览器。
+
+如果系统里有 Xcode 的 Swift 编译器，Tokdash 会生成 SwiftUI App，并在 macOS 26+ 上采用系统 Liquid Glass 效果。如果没有 Swift 编译器，则回退到轻量的 Tk 原生窗口。
+
+生成的 App 会使用创建它时的 Python 环境。如果你升级或移动了该 Python 环境，请重新运行 `tokdash macos-app --force` 生成 App。
+
 ### 从源码运行
 
 ```bash

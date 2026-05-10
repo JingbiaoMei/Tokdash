@@ -7,6 +7,11 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat&logo=fastapi&logoColor=white)
 ![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=flat&logo=python&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat)
+[![在线体验](https://img.shields.io/badge/在线体验-tokdash.github.io-F59E0B?style=flat&logo=githubpages&logoColor=white)](https://tokdash.github.io)
+
+> **无需安装即可体验 → [tokdash.github.io](https://tokdash.github.io)**
+> 完整 UI（主题、日期范围、会话、热力图）均可点击试用，数据由浏览器本地合成，
+> 不会上传任何信息。
 
 ## 功能特性
 
@@ -21,11 +26,32 @@
 - **PWA 支持**：可作为渐进式 Web 应用安装
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo.png" alt="Tokdash 仪表盘" width="900" />
+  <a href="https://tokdash.github.io">
+    <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo.png" alt="Tokdash 仪表盘 — 点击体验在线 Demo" width="900" />
+  </a>
 </p>
 <p align="center">
-  <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-stats.png" alt="Tokdash 统计与热力图" width="900" />
+  <a href="https://tokdash.github.io">
+    <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-stats.png" alt="Tokdash 统计与热力图 — 点击体验在线 Demo" width="900" />
+  </a>
 </p>
+
+## 在线 Demo
+
+仪表盘的静态在线版本：**[tokdash.github.io](https://tokdash.github.io)**，
+无需安装即可体验。
+
+Demo 使用未经修改的 Tokdash 前端，配合浏览器内的 Mock 层返回确定性的合成数据。
+你可以：
+
+- 切换 Overview / Sessions / Stats / Pricing 各页签，
+- 选择任意日期范围（或 Today / 最近 7 天 / 最近 30 天 等快捷按钮），
+- 在浅色 / 深色模式与全部 10 款主题之间切换，
+- 进入 Codex / Claude Code / OpenCode 的合成会话查看明细，
+- 浏览只读的定价数据库。
+
+Demo 源码：[tokdash/tokdash.github.io](https://github.com/tokdash/tokdash.github.io)。
+不会上传任何数据，也不会读取你本地的任何文件。
 
 ## 已支持客户端
 

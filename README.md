@@ -7,9 +7,15 @@ Local token & cost dashboard for AI coding tools (Codex, OpenCode, Claude Code, 
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat&logo=fastapi&logoColor=white)
 ![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=flat&logo=python&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat)
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-tokdash.github.io-F59E0B?style=flat&logo=githubpages&logoColor=white)](https://tokdash.github.io)
+
+> **Try it without installing → [tokdash.github.io](https://tokdash.github.io)**
+> Click through the full UI (themes, date ranges, sessions, heatmap) backed by
+> in-browser synthetic data. Nothing is uploaded.
 
 ## Table of Contents
 
+- [Live demo](#live-demo)
 - [Features](#features)
 - [Supported clients](#supported-clients)
 - [Platform support](#platform-support)
@@ -42,11 +48,33 @@ Local token & cost dashboard for AI coding tools (Codex, OpenCode, Claude Code, 
 - **PWA support**: installable as a progressive web app
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo.png" alt="Tokdash dashboard" width="900" />
+  <a href="https://tokdash.github.io">
+    <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo.png" alt="Tokdash dashboard — click for live demo" width="900" />
+  </a>
 </p>
 <p align="center">
-  <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-stats.png" alt="Tokdash stats & heatmap" width="900" />
+  <a href="https://tokdash.github.io">
+    <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-stats.png" alt="Tokdash stats & heatmap — click for live demo" width="900" />
+  </a>
 </p>
+
+## Live demo
+
+A static demo of the current dashboard is hosted at
+**[tokdash.github.io](https://tokdash.github.io)** — no install required.
+
+The demo runs the unmodified Tokdash frontend against an in-browser shim that
+returns deterministic, fully synthetic data. You can:
+
+- switch between Overview / Sessions / Stats / Pricing tabs,
+- pick any date range (or the Today / 7-day / 30-day shortcuts),
+- toggle light/dark and all 10 style themes,
+- drill into a synthetic Codex / Claude Code / OpenCode session,
+- browse the read-only pricing database.
+
+Source for the demo lives at
+[tokdash/tokdash.github.io](https://github.com/tokdash/tokdash.github.io).
+Nothing is uploaded; nothing is read from your machine.
 
 ## Supported clients
 

@@ -1204,6 +1204,7 @@
             <div class="flex items-center gap-2 rounded-xl border px-2 py-1.5" style="border-color: var(--color-border); background: rgba(255,255,255,0.42);">
               <span class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="calendarMetric">Metric</span>
               <button id="metricTokensBtn" class="btn btn-primary" type="button" style="min-height:36px; padding:8px 12px;" data-i18n="metricTokens">Tokens</button>
+              <button id="metricEnergyBtn" class="btn btn-ghost" type="button" style="min-height:36px; padding:8px 12px;" data-i18n="metricEnergy">Energy</button>
               <button id="metricCostBtn" class="btn btn-ghost" type="button" style="min-height:36px; padding:8px 12px;" data-i18n="metricCost">Cost</button>
               <button id="metricMessagesBtn" class="btn btn-ghost" type="button" style="min-height:36px; padding:8px 12px;" data-i18n="metricMessages">Messages</button>
             </div>
@@ -1256,6 +1257,12 @@
                 <div>
                   <div class="text-xs font-semibold text-slate-500 mb-1" data-i18n="totalCost">Total Cost</div>
                   <div id="monthTotalCost" class="font-extrabold text-xl" style="color: var(--color-cost);">$0.00</div>
+                </div>
+
+                <!-- Total Energy -->
+                <div>
+                  <div class="text-xs font-semibold text-slate-500 mb-1" data-i18n="totalEnergy">Total Energy (kWh)</div>
+                  <div id="monthTotalEnergy" class="font-bold text-lg">0.00 kWh</div>
                 </div>
 
                 <!-- Sessions -->
@@ -1645,8 +1652,11 @@
         dailyActivity: 'Daily Activity',
         calendarMetric: 'Metric',
         metricTokens: 'Tokens',
+        metricEnergy: 'Energy',
         metricCost: 'Cost',
         metricMessages: 'Messages',
+        totalEnergy: 'Total Energy (kWh)',
+        energy: 'Energy',
         peakDay: 'Peak Day',
         peakWeek: 'Peak Week',
         peakWeekday: 'Top Weekday',
@@ -1791,8 +1801,11 @@
         dailyActivity: '每日活跃',
         calendarMetric: '指标',
         metricTokens: 'Tokens',
+        metricEnergy: '能耗',
         metricCost: '费用',
         metricMessages: '消息数',
+        totalEnergy: '总能耗 (kWh)',
+        energy: '能耗',
         peakDay: '峰值日',
         peakWeek: '峰值周',
         peakWeekday: '最高活跃日',
@@ -1887,6 +1900,111 @@
       const n = Number(num ?? 0);
       return '$' + n.toFixed(2);
     }
+
+    // ===== Energy estimation =====
+    // Coefficients: Joules per token for {prefill, cached, decode}.
+    // Source: ~/.openclaw/workspace/research/tokdash-energy-feasibility.md §4
+    // (TokenPowerBench AAAI 2026 + "How Hungry is AI?" + cost-as-proxy).
+    // Order-of-magnitude accuracy; excellent for relative comparisons.
+    const ENERGY_COEFFICIENTS = {
+      'gpt-5.5':       { prefill: 8.0,  cached: 0.8,   decode: 24.0 },
+      'gpt-5.4':       { prefill: 4.0,  cached: 0.4,   decode: 12.0 },
+      'gpt-5.4-mini':  { prefill: 1.2,  cached: 0.12,  decode: 3.6  },
+      'claude-opus':   { prefill: 6.0,  cached: 0.6,   decode: 18.0 },
+      'claude-sonnet': { prefill: 2.0,  cached: 0.2,   decode: 6.0  },
+      'claude-haiku':  { prefill: 0.3,  cached: 0.03,  decode: 0.9  },
+      'llama-405b':    { prefill: 3.0,  cached: 0.3,   decode: 8.0  },
+      'llama-70b':     { prefill: 0.4,  cached: 0.04,  decode: 1.2  },
+      'llama-8b':      { prefill: 0.05, cached: 0.005, decode: 0.15 },
+      'qwen-7b':       { prefill: 0.04, cached: 0.004, decode: 0.12 },
+      'mistral-7b':    { prefill: 0.05, cached: 0.005, decode: 0.14 },
+      'default':       { prefill: 1.0,  cached: 0.1,   decode: 3.0  },
+    };
+
+    // Map an arbitrary model name to a coefficient family.
+    // Order matters: the most specific patterns are tested first.
+    function energyCoefficientsFor(modelName) {
+      const raw = String(modelName || '').toLowerCase();
+      // Strip provider prefixes and aliases consistent with our model normalizer.
+      const n = raw.replace(/^(antigravity-)/, '').replace(/.*\//, '');
+
+      // OpenAI families
+      if (/(^|[^\d])gpt-?5\.5/.test(n) || /^o5/.test(n)) return ENERGY_COEFFICIENTS['gpt-5.5'];
+      if (/(^|[^\d])gpt-?5(?:\.\d+)?-(?:mini|nano)|codex-mini/.test(n)) return ENERGY_COEFFICIENTS['gpt-5.4-mini'];
+      if (/(^|[^\d])gpt-?5(?:\.\d+)?(?:$|-|_)|o3(?!-mini)|gpt-4(o|-turbo)/.test(n)) return ENERGY_COEFFICIENTS['gpt-5.4'];
+      if (/o3-mini|gpt-4o-mini|gpt-4-mini/.test(n)) return ENERGY_COEFFICIENTS['gpt-5.4-mini'];
+
+      // Anthropic families (handles claude-opus-*, opus-*, claude-3.5-sonnet, etc.)
+      if (/opus/.test(n)) return ENERGY_COEFFICIENTS['claude-opus'];
+      if (/haiku/.test(n)) return ENERGY_COEFFICIENTS['claude-haiku'];
+      if (/sonnet/.test(n)) return ENERGY_COEFFICIENTS['claude-sonnet'];
+
+      // Google Gemini — treat Pro as frontier, Flash as mid.
+      if (/gemini.*flash|gemini-2\.5-flash|gemini-flash/.test(n)) return ENERGY_COEFFICIENTS['claude-sonnet'];
+      if (/gemini-?3|gemini-2\.5-pro|gemini.*pro/.test(n)) return ENERGY_COEFFICIENTS['claude-opus'];
+
+      // Kimi K2.x — large open-weight class, treat as Llama-405B tier.
+      if (/k2\.[56]|kimi/.test(n)) return ENERGY_COEFFICIENTS['llama-405b'];
+
+      // Llama / open-weight matches
+      if (/llama.*405|llama-3\.1-405/.test(n)) return ENERGY_COEFFICIENTS['llama-405b'];
+      if (/llama.*70|llama-3\.1-70/.test(n)) return ENERGY_COEFFICIENTS['llama-70b'];
+      if (/llama.*8b|llama-3\.1-8/.test(n)) return ENERGY_COEFFICIENTS['llama-8b'];
+      if (/qwen.*7|qwen2\.5-7/.test(n)) return ENERGY_COEFFICIENTS['qwen-7b'];
+      if (/mistral.*7|mistral-7b/.test(n)) return ENERGY_COEFFICIENTS['mistral-7b'];
+
+      return ENERGY_COEFFICIENTS['default'];
+    }
+
+    // Energy in Joules for one source row.
+    // Mapping (per research doc §2):
+    //   prefill ← tokens.input  (which already includes cacheWrite — full prefill cost)
+    //   cached  ← tokens.cacheRead
+    //   decode  ← tokens.output + tokens.reasoning
+    function sourceEnergyJ(src) {
+      if (!src || !src.tokens) return 0;
+      const c = energyCoefficientsFor(src.modelId || src.model);
+      const t = src.tokens;
+      const prefill = Number(t.input || 0);
+      const cached  = Number(t.cacheRead || 0);
+      const decode  = Number(t.output || 0) + Number(t.reasoning || 0);
+      return prefill * c.prefill + cached * c.cached + decode * c.decode;
+    }
+
+    // Energy in Joules for one day (sums across all sources).
+    function dayEnergyJ(day) {
+      if (!day || !Array.isArray(day.sources)) return 0;
+      let total = 0;
+      for (const src of day.sources) total += sourceEnergyJ(src);
+      return total;
+    }
+
+    function joulesToWh(j) { return Number(j || 0) / 3600; }
+    function joulesToKwh(j) { return Number(j || 0) / 3_600_000; }
+
+    // Auto Wh / kWh formatter — switches above 1000 Wh.
+    // Day-level values (~10 Wh) read naturally; month-level (~hundreds of Wh
+    // up to a few kWh) get the kWh suffix.
+    function formatEnergy(joules) {
+      const wh = joulesToWh(joules);
+      if (wh >= 1000) {
+        const kwh = wh / 1000;
+        return kwh.toLocaleString(currentLang === 'zh' ? 'zh-CN' : 'en-US', {
+          minimumFractionDigits: 2, maximumFractionDigits: 2,
+        }) + ' kWh';
+      }
+      const decimals = wh >= 10 ? 1 : 2;
+      return wh.toLocaleString(currentLang === 'zh' ? 'zh-CN' : 'en-US', {
+        minimumFractionDigits: decimals, maximumFractionDigits: decimals,
+      }) + ' Wh';
+    }
+
+    function formatEnergyKwh(joules) {
+      return joulesToKwh(joules).toLocaleString(currentLang === 'zh' ? 'zh-CN' : 'en-US', {
+        minimumFractionDigits: 2, maximumFractionDigits: 2,
+      }) + ' kWh';
+    }
+    // ===== End energy estimation =====
 
     function parseDateKey(value) {
       const [year, month, day] = String(value || '').split('-').map((v) => Number(v));
@@ -1994,6 +2112,9 @@
       if (metric === 'messages') {
         return { key: 'messages', label: t('metricMessages'), format: formatNumber };
       }
+      if (metric === 'energy') {
+        return { key: 'energy', label: t('metricEnergy'), format: formatEnergy };
+      }
       return { key: 'tokens', label: t('metricTokens'), format: formatNumber };
     }
 
@@ -2001,6 +2122,7 @@
       const totals = day?.totals || {};
       if (metric === 'cost') return Number(totals.cost || 0);
       if (metric === 'messages') return Number(totals.messages || 0);
+      if (metric === 'energy') return dayEnergyJ(day);
       return Number(totals.tokens || 0);
     }
 
@@ -3719,6 +3841,7 @@
       const activeMetric = calendarState.metric;
       const buttonMap = {
         tokens: document.getElementById('metricTokensBtn'),
+        energy: document.getElementById('metricEnergyBtn'),
         cost: document.getElementById('metricCostBtn'),
         messages: document.getElementById('metricMessagesBtn'),
       };
@@ -3805,7 +3928,7 @@
     }
 
     function setCalendarMetric(metric) {
-      if (!['tokens', 'cost', 'messages'].includes(metric)) return;
+      if (!['tokens', 'energy', 'cost', 'messages'].includes(metric)) return;
       calendarState.metric = metric;
       updateMetricControls();
       if (document.getElementById('stats-content').classList.contains('active')) {
@@ -3909,6 +4032,7 @@
       let totalTokens = 0;
       let totalCost = 0;
       let totalMessages = 0;
+      let totalEnergyJ = 0;
       let activeDays = 0;
       const modelCosts = new Map();
       const modelTokens = new Map();
@@ -3918,7 +4042,8 @@
           totalTokens += day.totals.tokens || 0;
           totalCost += day.totals.cost || 0;
           totalMessages += day.totals.messages || 0;
-          
+          totalEnergyJ += dayEnergyJ(day);
+
           if ((day.totals.tokens || 0) > 0) {
             activeDays++;
           }
@@ -3978,6 +4103,7 @@
       document.getElementById('monthFavoriteModel').textContent = topModel;
       document.getElementById('monthTotalTokens').textContent = formatNumber(totalTokens);
       document.getElementById('monthTotalCost').textContent = formatCurrency(totalCost);
+      document.getElementById('monthTotalEnergy').textContent = formatEnergyKwh(totalEnergyJ);
       document.getElementById('monthTotalSessions').textContent = formatNumber(totalMessages);
       document.getElementById('monthActiveDays').textContent = activeDays;
       document.getElementById('monthCurrentStreak').textContent = pluralDays(monthStreak);
@@ -4264,6 +4390,7 @@
           <div><span class="text-slate-500">${t('cost')}</span><div class="font-semibold" style="color:var(--color-cost)">${formatCurrency(day.totals.cost)}</div></div>
           <div><span class="text-slate-500">${t('tokens')}</span><div class="font-semibold">${formatNumber(day.totals.tokens)}</div></div>
           <div><span class="text-slate-500">${t('messages')}</span><div class="font-semibold">${formatNumber(day.totals.messages)}</div></div>
+          <div><span class="text-slate-500">${t('energy')}</span><div class="font-semibold">${formatEnergy(dayEnergyJ(day))}</div></div>
         </div>
         <div class="mb-2 text-sm font-semibold mono">${t('tokenBreakdown')}</div>
         <div class="grid grid-cols-2 gap-2 text-sm mb-4">
@@ -4698,6 +4825,7 @@
     document.getElementById('viewYear').addEventListener('click', () => setView('year'));
     document.getElementById('view3D').addEventListener('click', () => setView('3d'));
     document.getElementById('metricTokensBtn').addEventListener('click', () => setCalendarMetric('tokens'));
+    document.getElementById('metricEnergyBtn').addEventListener('click', () => setCalendarMetric('energy'));
     document.getElementById('metricCostBtn').addEventListener('click', () => setCalendarMetric('cost'));
     document.getElementById('metricMessagesBtn').addEventListener('click', () => setCalendarMetric('messages'));
 

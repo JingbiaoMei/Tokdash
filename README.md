@@ -1,5 +1,9 @@
 [English](README.md) | [中文](README_CN.md)
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/JingbiaoMei/tokdash/main/docs/assets/tokdash_logo_full.png" alt="Tokdash" width="420" />
+</p>
+
 # Tokdash
 
 Local token & cost dashboard for AI coding tools (Codex, OpenCode, Claude Code, Gemini CLI, OpenClaw, Kimi CLI, etc.).

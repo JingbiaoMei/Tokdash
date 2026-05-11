@@ -1,5 +1,9 @@
 [English](README.md) | [中文](README_CN.md)
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/JingbiaoMei/tokdash/main/docs/assets/tokdash_logo_full.png" alt="Tokdash" width="420" />
+</p>
+
 # Tokdash
 
 适用于 AI 编程工具（Codex、OpenCode、Claude Code、Gemini CLI、OpenClaw、Kimi CLI 等）的本地 Token 与费用仪表盘。

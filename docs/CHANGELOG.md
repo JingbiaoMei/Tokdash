@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+## 0.2.6 - 2026-05-11
+
+### Changed
+- Updated the Tokdash logo across the dashboard header, PWA icons, and README assets.
+
 ## 0.2.5 - 2026-05-10
 
 ### Added

@@ -70,6 +70,26 @@ def run_local_coding_tools_json(period_args: list[str]) -> Dict[str, Any]:
     return tracker.to_json()
 
 
+def cache_hit_rate(tokens_in: Any, tokens_cache: Any) -> Optional[float]:
+    """Token-weighted prompt cache-hit rate.
+
+    The faithful definition shared across providers (DeepSeek prompt_cache_hit /
+    prompt_tokens, Anthropic cache_read / (input + cache_creation + cache_read),
+    OpenAI cached / prompt, Gemini cached / promptTokenCount) is the share of
+    *prompt input* tokens served from cache. In tokdash's normalized model the
+    denominator is ``tokens_in + tokens_cache`` because ``tokens_in`` already folds
+    cacheWrite into billable input (input_raw + cacheWrite) and ``tokens_cache`` is
+    the cacheRead hit count. Output and reasoning tokens are never cacheable and are
+    excluded. Returns ``None`` when there is no prompt input (render as ``n/a``);
+    never average per-row ratios — aggregate the raw token sums then call this.
+    """
+    num = int(tokens_cache or 0)
+    den = int(tokens_in or 0) + num
+    if den <= 0:
+        return None
+    return round(num / den, 4)
+
+
 def parse_entries_json(data: Dict[str, Any]) -> Dict[str, Any]:
     """Parse tokscale-compatible entries JSON and aggregate by app/model."""
     entries = data.get("entries", [])
@@ -177,12 +197,23 @@ def parse_entries_json(data: Dict[str, Any]) -> Dict[str, Any]:
     for app_data in apps.values():
         app_data["models"] = sorted(app_data["models_dict"].values(), key=lambda x: x["cost"], reverse=True)
         del app_data["models_dict"]
+        for model_ref in app_data["models"]:
+            model_ref["cache_hit_rate"] = cache_hit_rate(model_ref["tokens_in"], model_ref["tokens_cache"])
+        app_data["cache_hit_rate"] = cache_hit_rate(app_data["tokens_in"], app_data["tokens_cache"])
 
     all_models = sorted(all_models_dict.values(), key=lambda x: x["cost"], reverse=True)
+    for m in all_models:
+        m["cache_hit_rate"] = cache_hit_rate(m["tokens_in"], m["tokens_cache"])
+
+    # Tools-only (excludes openclaw, which is merged later in compute_usage) token-
+    # weighted aggregate, kept alongside the totals for any direct consumer of this fn.
+    tools_in = sum(x["tokens_in"] for x in all_models)
+    tools_cache = sum(x["tokens_cache"] for x in all_models)
     return {
         "total_cost": sum(x["cost"] for x in all_models),
         "total_tokens": sum(x["tokens"] for x in all_models),
         "total_messages": sum(x["messages"] for x in all_models),
+        "cache_hit_rate": cache_hit_rate(tools_in, tools_cache),
         "apps": apps,
         "all_models": all_models,
     }
@@ -362,8 +393,25 @@ def compute_usage(period: str, date_from: Optional[str] = None, date_to: Optiona
     total_tokens = openclaw_data["total_tokens"] + sum(v.get("tokens", 0) for v in coding_apps.values())
     total_cost = openclaw_data["total_cost"] + sum(v.get("cost", 0.0) for v in coding_apps.values())
 
-    by_tool = {name: {"tokens": data["tokens"], "cost": data["cost"]} for name, data in coding_apps.items()}
-    by_tool["openclaw"] = {"tokens": openclaw_data["total_tokens"], "cost": openclaw_data["total_cost"]}
+    by_tool = {
+        name: {
+            "tokens": data["tokens"],
+            "cost": data["cost"],
+            "tokens_in": data.get("tokens_in", 0),
+            "tokens_cache": data.get("tokens_cache", 0),
+            "cache_hit_rate": cache_hit_rate(data.get("tokens_in", 0), data.get("tokens_cache", 0)),
+        }
+        for name, data in coding_apps.items()
+    }
+    ocl_in = openclaw_data.get("total_tokens_in", 0)
+    ocl_cache = openclaw_data.get("total_tokens_cache", 0)
+    by_tool["openclaw"] = {
+        "tokens": openclaw_data["total_tokens"],
+        "cost": openclaw_data["total_cost"],
+        "tokens_in": ocl_in,
+        "tokens_cache": ocl_cache,
+        "cache_hit_rate": cache_hit_rate(ocl_in, ocl_cache),
+    }
 
     openclaw_models = sorted(
         [{"name": k, **v} for k, v in openclaw_data["models"].items() if _has_visible_token_usage(v)],
@@ -402,13 +450,20 @@ def compute_usage(period: str, date_from: Optional[str] = None, date_to: Optiona
         add_row(r)
 
     combined_models = sorted(combined_by_model.values(), key=lambda x: x.get("cost", 0.0), reverse=True)
+    for row in combined_models:
+        row["cache_hit_rate"] = cache_hit_rate(row["tokens_in"], row["tokens_cache"])
     total_messages = openclaw_data["total_messages"] + sum(v.get("messages", 0) for v in coding_apps.values())
+
+    # Header "Average Cache Hit Rate": token-weighted across every tool + openclaw.
+    global_in = sum(r["tokens_in"] for r in combined_models)
+    global_cache = sum(r["tokens_cache"] for r in combined_models)
 
     return {
         "period": period,
         "total_tokens": total_tokens,
         "total_cost": round(total_cost, 2),
         "total_messages": total_messages,
+        "cache_hit_rate": cache_hit_rate(global_in, global_cache),
         "by_tool": by_tool,
         "apps": coding_apps,
         "coding_apps": coding_apps,

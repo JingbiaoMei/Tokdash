@@ -68,6 +68,51 @@ def test_pi_agent_parser_basic(monkeypatch, tmp_path):
     assert e["timestamp"] == expected_ts
 
 
+def test_pi_agent_parser_nonzero_cache(monkeypatch, tmp_path):
+    """Non-zero camelCase cacheRead/cacheWrite map through, and input stays fresh.
+
+    Locks the cache mapping for the cache-hit-rate metric: usage.input is the fresh
+    (uncached) portion (not cache-inclusive), so the full prompt input is
+    input + cacheWrite + cacheRead and the hit rate is cacheRead over that.
+    """
+    pi_dir = tmp_path / "pi-agent"
+    session_dir = pi_dir / "--home-user--project"
+    session_dir.mkdir(parents=True)
+    msg = json.dumps({
+        "type": "message",
+        "id": "feedface",
+        "timestamp": "2026-05-21T20:30:00.000Z",
+        "message": {
+            "role": "assistant",
+            "provider": "minimax-cn",
+            "model": "MiniMax-M2.7",
+            "usage": {
+                "input": 1000,
+                "output": 200,
+                "cacheRead": 8000,
+                "cacheWrite": 500,
+                "totalTokens": 9700,
+                "cost": {"total": 0.01},
+            },
+        },
+    })
+    (session_dir / "session.jsonl").write_text(msg + "\n", encoding="utf-8")
+
+    monkeypatch.setenv("PI_AGENT_DIR", str(pi_dir))
+    _sig_cache.clear()
+    BaseParser._entry_cache.clear()
+
+    entries = PiAgentParser(PricingDatabase()).collect(None, None)
+    assert len(entries) == 1
+    e = entries[0]
+    assert e["input"] == 1000  # fresh input, not cache-inclusive
+    assert e["cacheRead"] == 8000
+    assert e["cacheWrite"] == 500
+    # Full prompt input = fresh + cacheWrite + cacheRead = 9500; hit rate = 8000/9500.
+    from tokdash.compute import cache_hit_rate
+    assert cache_hit_rate(e["input"] + e["cacheWrite"], e["cacheRead"]) == round(8000 / 9500, 4)
+
+
 def test_pi_agent_parser_dedup(monkeypatch, tmp_path):
     """Duplicate outer id is skipped."""
     pi_dir = tmp_path / "pi-agent"

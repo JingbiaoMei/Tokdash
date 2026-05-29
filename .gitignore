@@ -20,8 +20,8 @@ ENV/
 *.swp
 *.swo
 
-# Claude Code local settings
-.claude/settings.local.json
+# Claude Code
+.claude
 
 # OS
 .DS_Store
@@ -47,3 +47,6 @@ docs/agents/release/release.py
 
 .playwright-mcp
 .codex
+
+# Generated/disposable artifacts (sanity snapshots, etc.)
+output/

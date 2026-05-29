@@ -7,6 +7,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
 
+from .compute import cache_hit_rate
 from .dateutil import parse_date_range
 from .pricing import PricingDatabase
 
@@ -124,6 +125,7 @@ def _build_turn(
         "tokens_out": int(tokens_out),
         "tokens_reasoning": int(tokens_reasoning),
         "tokens": int(total_tokens),
+        "cache_hit_rate": cache_hit_rate(tokens_in, tokens_cache),
         "cost": float(cost or 0.0),
     }
 
@@ -173,7 +175,11 @@ def _summarize_session(
         "tokens_out": tokens_out,
         "tokens_reasoning": tokens_reasoning,
         "tokens": total_tokens,
+        # cache_ratio = cacheRead / ALL tokens (incl. output) — a cache SHARE, kept for
+        # back-compat. cache_hit_rate is the faithful prompt hit rate: cacheRead over
+        # prompt input only (tokens_in already folds cacheWrite into billable input).
         "cache_ratio": (tokens_cache / total_tokens) if total_tokens > 0 else 0.0,
+        "cache_hit_rate": cache_hit_rate(tokens_in, tokens_cache),
         "cost": total_cost,
         "started_at": _ms_to_iso(started_at_ms),
         "last_seen_at": _ms_to_iso(last_seen_at_ms),

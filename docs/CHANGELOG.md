@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+## 0.4.0 - 2026-05-29
+
+### Added
+- **Cache Hit Rate** across the dashboard. The metric is the token-weighted share of *prompt input* served from cache — `cacheRead / (input + cacheWrite + cacheRead)` — matching the published definitions of DeepSeek (`prompt_cache_hit_tokens / prompt_tokens`), Anthropic, OpenAI, and Gemini. Cache *writes* (cache creation) count as misses (they are prompt input not served from cache), and output/reasoning tokens are excluded. It appears as: an `Avg Cache Hit Rate` KPI card on the Overview header; a `Hit %` column in the Tools Breakdown, Apps & Models, and Combined Models tables (and per-app in the breakdown headers); a `Hit %` column plus a per-session figure in the Sessions tab (Codex/Claude/OpenCode/Combined); and a `Cache Hit Rate` figure in the Stats Month panel and the Day Details panel (Month and Year tabs). Sources that do not report cache data show `n/a`. Backend exposes `cache_hit_rate` on `/api/usage` (header + `by_tool` + `combined_models`), `/api/tools`, `/api/openclaw`, and `/api/sessions` / `/api/session` (per-session and per-turn).
+
+### Fixed
+- **Gemini CLI token & cost double-count.** Gemini CLI logs `tokens.input` *inclusive* of the cached prompt tokens (`tokens.cached`), but the parser previously also added `cached` separately as cache-read, counting those tokens twice in totals and cost on every cache-hit turn. The parser now subtracts (`input = tokens.input − tokens.cached`) to recover the fresh/uncached portion — matching how the Codex and Copilot parsers already handle cache-inclusive input. Effect: Gemini CLI total tokens and cost now match Gemini's own reported `total` (they decrease for sessions with cache hits); all other tools are unaffected. The session-level `cache_ratio` (cacheRead ÷ all tokens, incl. output) is retained for back-compat but is no longer surfaced as a hit rate; the Sessions panel now shows the faithful `cache_hit_rate`.
+
 ## 0.3.3 - 2026-05-29
 
 ### Added

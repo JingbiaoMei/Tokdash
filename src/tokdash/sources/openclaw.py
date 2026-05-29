@@ -14,6 +14,21 @@ except ImportError:  # pragma: no cover
     from pricing import PricingDatabase
 
 
+def _cache_hit_rate(tokens_in: Any, tokens_cache: Any) -> Optional[float]:
+    """Prompt cache-hit rate = cacheRead / (input_incl_cacheWrite + cacheRead).
+
+    Local copy of compute.cache_hit_rate to avoid a circular import (compute imports
+    this module). ``tokens_in`` already folds cacheWrite into billable input here, so
+    ``tokens_in + tokens_cache`` is the full prompt input. Returns None when there is
+    no prompt input.
+    """
+    num = int(tokens_cache or 0)
+    den = int(tokens_in or 0) + num
+    if den <= 0:
+        return None
+    return round(num / den, 4)
+
+
 def parse_session_file(filepath: str) -> List[Dict[str, Any]]:
     """Parse a single OpenClaw session JSONL file into a list of entries."""
     entries: List[Dict[str, Any]] = []
@@ -223,11 +238,15 @@ def get_session_usage(
     models: Dict[str, Any] = {}
     total_tokens = 0
     total_cost = 0.0
+    total_tokens_in = 0
+    total_tokens_cache = 0
 
     for model, stats in model_stats.items():
         model_total_tokens = int(stats["tokens_in"]) + int(stats["tokens_out"]) + int(stats["tokens_cache"])
         total_tokens += model_total_tokens
         total_cost += float(stats["cost"] or 0.0)
+        total_tokens_in += int(stats["tokens_in"])
+        total_tokens_cache += int(stats["tokens_cache"])
 
         models[model] = {
             "tokens": model_total_tokens,
@@ -236,6 +255,7 @@ def get_session_usage(
             "tokens_cache": int(stats["tokens_cache"]),
             "cost": float(stats["cost"] or 0.0),
             "messages": int(stats["messages"]),
+            "cache_hit_rate": _cache_hit_rate(stats["tokens_in"], stats["tokens_cache"]),
         }
 
     contributions: list[dict] = []
@@ -284,6 +304,9 @@ def get_session_usage(
         "total_tokens": int(total_tokens),
         "total_cost": float(total_cost),
         "total_messages": int(total_messages),
+        "total_tokens_in": int(total_tokens_in),
+        "total_tokens_cache": int(total_tokens_cache),
+        "cache_hit_rate": _cache_hit_rate(total_tokens_in, total_tokens_cache),
         "models": models,
         "contributions": contributions,
     }

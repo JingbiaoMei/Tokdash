@@ -477,17 +477,21 @@ class GeminiCLIParser(BaseParser):
       - content: string (for user/gemini messages)
       - model: string (e.g., "gemini-3-flash-preview")
       - tokens: object (only present for type="gemini")
-          - input: int (prompt tokens)
+          - input: int (TOTAL prompt tokens, INCLUSIVE of cached; like the Gemini
+                   API's promptTokenCount, this already contains tokens.cached)
           - output: int (completion tokens)
-          - cached: int (cache read tokens) -> maps to cacheRead
+          - cached: int (cache read tokens, a subset of input) -> maps to cacheRead
           - thoughts: int (reasoning tokens) -> maps to reasoning
           - tool: int (tool call tokens) -> currently ignored per spec
-          - total: int (sum of above, for validation)
+          - total: int (== input + output + thoughts + tool; cached is already
+                   inside input, so it is NOT added again here — used for validation)
 
     Field mapping to normalized entry:
       source <- "gemini_cli"
       provider <- "google"
-      input <- tokens.input
+      input <- tokens.input - tokens.cached   (fresh/uncached prompt only; tokens.input
+               is cache-inclusive, so subtract to avoid double-counting cached tokens in
+               totals/cost — matches the Codex/Copilot parsers; see _build_entry)
       output <- tokens.output
       cacheRead <- tokens.cached
       reasoning <- tokens.thoughts
@@ -497,7 +501,7 @@ class GeminiCLIParser(BaseParser):
     Dedup key: message.id (UUID, unique per response)
 
     Known schema versions: 2025-07 to present
-    Last verified: 2026-02-15
+    Last verified: 2026-05-29 (confirmed tokens.input is cache-inclusive across real sessions)
 
     FUTURE DATA-SHAPE UPDATES:
     - If token field names change, add fallback aliases in _build_entry()
@@ -513,10 +517,17 @@ class GeminiCLIParser(BaseParser):
         self.gemini_root = Path.home() / ".gemini"
 
     def _build_entry(self, model: str, tokens: Dict[str, Any], ts_ms: int) -> Dict[str, Any]:
-        input_t = self._i(tokens.get("input"))
+        raw_input = self._i(tokens.get("input"))
         output_t = self._i(tokens.get("output"))
         cache_r = self._i(tokens.get("cached"))
         cache_w = 0  # cache_write not present in Gemini CLI tokens
+        # Gemini CLI reports tokens.input INCLUSIVE of the cached prompt tokens
+        # (a session's `total` = input + output + thoughts confirms cached ⊆ input),
+        # so subtract to recover the fresh/uncached portion — matching the Codex and
+        # Copilot parsers. Without this, cached tokens are double-counted (once in
+        # input, once as cacheRead), inflating Gemini totals, cost, and depressing the
+        # cache-hit rate. See docs/CHANGELOG.md.
+        input_t = max(0, raw_input - cache_r)
         reasoning = self._i(tokens.get("thoughts"))
         provider = "google"
         return {

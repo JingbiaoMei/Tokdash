@@ -791,7 +791,7 @@
     <div id="overview-content" class="tab-content active">
 
       <!-- KPI cards -->
-      <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
         <div class="surface p-5">
           <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="totalTokens">Total Tokens</div>
           <div id="totalTokens" class="text-3xl sm:text-4xl font-extrabold mt-2" style="color: var(--color-primary);">-</div>
@@ -806,6 +806,14 @@
           <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="totalMessages">Total Messages</div>
           <div id="totalMessages" class="text-3xl sm:text-4xl font-extrabold mt-2" style="color: var(--color-messages);">-</div>
           <div id="messagesDelta" class="text-xs font-semibold mt-1" style="color: var(--color-muted);"></div>
+        </div>
+        <div class="surface p-5">
+          <div class="text-xs font-semibold uppercase tracking-wider flex items-center gap-1" style="color: var(--color-label);">
+            <span data-i18n="avgCacheHitRate">Avg Cache Hit Rate</span>
+            <span class="cursor-help select-none" style="opacity:0.6;" data-i18n-title="cacheHitRateHint" title="Share of prompt input served from cache (cache reads ÷ all prompt input). Cache writes count as misses; output excluded.">ⓘ</span>
+          </div>
+          <div id="avgCacheHitRate" class="text-3xl sm:text-4xl font-extrabold mt-2" style="color: var(--color-primary);">-</div>
+          <div id="avgCacheHitMeta" class="text-xs font-semibold mt-1" style="color: var(--color-muted);"></div>
         </div>
         <div class="surface p-5">
           <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="topModel">Top Model</div>
@@ -846,11 +854,12 @@
               <tr class="border-b" style="border-color: var(--color-border);">
                 <th class="text-left py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="tool">Tool</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="tokens">Tokens</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="hitPct" title="Cache hit rate — prompt input served from cache">Hit %</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cost">Cost</th>
               </tr>
             </thead>
             <tbody id="toolsTable">
-              <tr><td colspan="3" class="text-center py-10" style="color: var(--color-muted);" data-i18n="loading">Loading…</td></tr>
+              <tr><td colspan="4" class="text-center py-10" style="color: var(--color-muted);" data-i18n="loading">Loading…</td></tr>
             </tbody>
           </table>
         </div>
@@ -879,12 +888,13 @@
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="output">Output</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cache">Cache</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="total">Total</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="hitPct" title="Cache hit rate — prompt input served from cache">Hit %</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cost">Cost</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="msgs">Msgs</th>
               </tr>
             </thead>
             <tbody id="allModelsTable">
-              <tr><td colspan="7" class="text-center py-10" style="color: var(--color-muted);" data-i18n="loading">Loading…</td></tr>
+              <tr><td colspan="8" class="text-center py-10" style="color: var(--color-muted);" data-i18n="loading">Loading…</td></tr>
             </tbody>
           </table>
         </div>
@@ -931,13 +941,14 @@
         </div>
         <div class="overflow-x-auto">
           <table class="w-full text-sm session-table" aria-label="Codex sessions table" data-panel="codex">
-            <colgroup><col style="width:11%"><col style="width:14%"><col style="width:12%"><col style="width:12%"><col style="width:11%"><col style="width:13%"><col style="width:11%"><col style="width:16%"></colgroup>
+            <colgroup><col style="width:10%"><col style="width:13%"><col style="width:11%"><col style="width:11%"><col style="width:9%"><col style="width:10%"><col style="width:12%"><col style="width:10%"><col style="width:14%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
                 <th class="text-left py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="session">Session</th>
                 <th class="text-left py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="model">Model</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="input" data-sortable="tokens_in">Input</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cache" data-sortable="tokens_cache">Cache</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="hitPct" data-sortable="cache_hit_rate">Hit %</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="output" data-sortable="tokens_out">Output</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="total" data-sortable="tokens">Total</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cost" data-sortable="cost">Cost</th>
@@ -945,7 +956,7 @@
               </tr>
             </thead>
             <tbody id="codexSessionsTable">
-              <tr><td colspan="8" class="text-center py-10" style="color: var(--color-muted);" data-i18n="loading">Loading…</td></tr>
+              <tr><td colspan="9" class="text-center py-10" style="color: var(--color-muted);" data-i18n="loading">Loading…</td></tr>
             </tbody>
           </table>
         </div>
@@ -989,13 +1000,14 @@
         </div>
         <div class="overflow-x-auto">
           <table class="w-full text-sm session-table" aria-label="Claude Code sessions table" data-panel="claude">
-            <colgroup><col style="width:11%"><col style="width:14%"><col style="width:12%"><col style="width:12%"><col style="width:11%"><col style="width:13%"><col style="width:11%"><col style="width:16%"></colgroup>
+            <colgroup><col style="width:10%"><col style="width:13%"><col style="width:11%"><col style="width:11%"><col style="width:9%"><col style="width:10%"><col style="width:12%"><col style="width:10%"><col style="width:14%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
                 <th class="text-left py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="session">Session</th>
                 <th class="text-left py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="model">Model</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="input" data-sortable="tokens_in">Input</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cache" data-sortable="tokens_cache">Cache</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="hitPct" data-sortable="cache_hit_rate">Hit %</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="output" data-sortable="tokens_out">Output</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="total" data-sortable="tokens">Total</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cost" data-sortable="cost">Cost</th>
@@ -1003,7 +1015,7 @@
               </tr>
             </thead>
             <tbody id="claudeSessionsTable">
-              <tr><td colspan="8" class="text-center py-10" style="color: var(--color-muted);" data-i18n="loading">Loading…</td></tr>
+              <tr><td colspan="9" class="text-center py-10" style="color: var(--color-muted);" data-i18n="loading">Loading…</td></tr>
             </tbody>
           </table>
         </div>
@@ -1047,13 +1059,14 @@
         </div>
         <div class="overflow-x-auto">
           <table class="w-full text-sm session-table" aria-label="OpenCode sessions table" data-panel="opencode">
-            <colgroup><col style="width:11%"><col style="width:14%"><col style="width:12%"><col style="width:12%"><col style="width:11%"><col style="width:13%"><col style="width:11%"><col style="width:16%"></colgroup>
+            <colgroup><col style="width:10%"><col style="width:13%"><col style="width:11%"><col style="width:11%"><col style="width:9%"><col style="width:10%"><col style="width:12%"><col style="width:10%"><col style="width:14%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
                 <th class="text-left py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="session">Session</th>
                 <th class="text-left py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="model">Model</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="input" data-sortable="tokens_in">Input</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cache" data-sortable="tokens_cache">Cache</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="hitPct" data-sortable="cache_hit_rate">Hit %</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="output" data-sortable="tokens_out">Output</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="total" data-sortable="tokens">Total</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cost" data-sortable="cost">Cost</th>
@@ -1061,7 +1074,7 @@
               </tr>
             </thead>
             <tbody id="opencodeSessionsTable">
-              <tr><td colspan="8" class="text-center py-10" style="color: var(--color-muted);" data-i18n="loading">Loading…</td></tr>
+              <tr><td colspan="9" class="text-center py-10" style="color: var(--color-muted);" data-i18n="loading">Loading…</td></tr>
             </tbody>
           </table>
         </div>
@@ -1105,7 +1118,7 @@
         </div>
         <div class="overflow-x-auto">
           <table class="w-full text-sm session-table" aria-label="Combined sessions table" data-panel="combined">
-            <colgroup><col style="width:10%"><col style="width:10%"><col style="width:12%"><col style="width:11%"><col style="width:11%"><col style="width:10%"><col style="width:11%"><col style="width:10%"><col style="width:15%"></colgroup>
+            <colgroup><col style="width:9%"><col style="width:9%"><col style="width:11%"><col style="width:10%"><col style="width:10%"><col style="width:9%"><col style="width:9%"><col style="width:10%"><col style="width:9%"><col style="width:14%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
                 <th class="text-left py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="session">Session</th>
@@ -1113,6 +1126,7 @@
                 <th class="text-left py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="model">Model</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="input" data-sortable="tokens_in">Input</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cache" data-sortable="tokens_cache">Cache</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="hitPct" data-sortable="cache_hit_rate">Hit %</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="output" data-sortable="tokens_out">Output</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="total" data-sortable="tokens">Total</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cost" data-sortable="cost">Cost</th>
@@ -1120,7 +1134,7 @@
               </tr>
             </thead>
             <tbody id="combinedSessionsTable">
-              <tr><td colspan="9" class="text-center py-10" style="color: var(--color-muted);" data-i18n="loading">Loading…</td></tr>
+              <tr><td colspan="10" class="text-center py-10" style="color: var(--color-muted);" data-i18n="loading">Loading…</td></tr>
             </tbody>
           </table>
         </div>
@@ -1276,6 +1290,12 @@
                 <div>
                   <div class="text-xs font-semibold text-slate-500 mb-1" data-i18n="streak">Streak</div>
                   <div id="monthCurrentStreak" class="font-bold text-lg">0 days</div>
+                </div>
+
+                <!-- Cache Hit Rate -->
+                <div>
+                  <div class="text-xs font-semibold text-slate-500 mb-1" data-i18n="cacheHitRate">Cache Hit Rate</div>
+                  <div id="monthCacheHitRate" class="font-bold text-lg" style="color: var(--color-primary);">—</div>
                 </div>
               </div>
             </div>
@@ -1701,6 +1721,12 @@
         day: 'day',
         days: 'days',
         tokensUnit: 'tokens',
+        avgCacheHitRate: 'Avg Cache Hit Rate',
+        cacheHitRate: 'Cache Hit Rate',
+        hitPct: 'Hit %',
+        hit: 'hit',
+        na: 'n/a',
+        cacheHitRateHint: 'Share of prompt input served from cache (cache reads ÷ all prompt input). Cache writes count as misses; output excluded. Sources without cache data show n/a.',
         nModels: '{n} models',
         showingTopN: 'Showing top {top} of {total} models',
         mon: 'Mon',
@@ -1851,6 +1877,12 @@
         day: '天',
         days: '天',
         tokensUnit: 'tokens',
+        avgCacheHitRate: '平均缓存命中率',
+        cacheHitRate: '缓存命中率',
+        hitPct: '命中率',
+        hit: '命中',
+        na: '无',
+        cacheHitRateHint: '提示词输入中来自缓存的比例（缓存读取 ÷ 全部提示词输入）。缓存写入计为未命中；不含输出。无缓存数据的来源显示“无”。',
         nModels: '{n} 个模型',
         showingTopN: '显示前 {top} 个，共 {total} 个模型',
         mon: '周一',
@@ -2227,6 +2259,10 @@
         const key = el.getAttribute('data-i18n-placeholder');
         el.setAttribute('placeholder', t(key));
       });
+      document.querySelectorAll('[data-i18n-title]').forEach((el) => {
+        const key = el.getAttribute('data-i18n-title');
+        el.setAttribute('title', t(key));
+      });
       const langBtn = document.getElementById('langToggle');
       if (langBtn) langBtn.textContent = currentLang === 'zh' ? 'EN' : '中';
       renderRefreshButton();
@@ -2569,6 +2605,10 @@
       document.getElementById('totalTokens').textContent = formatNumber(data.total_tokens);
       document.getElementById('totalCost').textContent = formatCurrency(data.total_cost);
       document.getElementById('totalMessages').textContent = formatNumber(data.total_messages || 0);
+      const hitEl = document.getElementById('avgCacheHitRate');
+      if (hitEl) hitEl.textContent = formatHitRate(data.cache_hit_rate);
+      const hitMeta = document.getElementById('avgCacheHitMeta');
+      if (hitMeta) hitMeta.textContent = (data.cache_hit_rate === null || data.cache_hit_rate === undefined) ? '' : t('cacheHitRate');
       updateComparisonDeltas(data);
 
       if (data.top_models && data.top_models.length > 0) {
@@ -2658,6 +2698,20 @@
       return `${(Number(value || 0) * 100).toFixed(1)}%`;
     }
 
+    // Cache hit rate: cacheRead / (prompt input). null/undefined -> "n/a" (no prompt
+    // input, e.g. output-only rows). Mirrors backend compute.cache_hit_rate.
+    function formatHitRate(rate) {
+      if (rate === null || rate === undefined || Number.isNaN(Number(rate))) return t('na');
+      return `${(Number(rate) * 100).toFixed(1)}%`;
+    }
+
+    // Token-weighted hit rate from raw sums (tokens_in already folds in cacheWrite).
+    function hitRateFrom(tokensIn, tokensCache) {
+      const num = Number(tokensCache || 0);
+      const den = Number(tokensIn || 0) + num;
+      return den > 0 ? num / den : null;
+    }
+
     function sessionShortId(id) {
       const raw = String(id || '');
       return raw ? raw.slice(0, 8) : '—';
@@ -2717,6 +2771,10 @@
           sessions: sorted,
           tokens_in: items.reduce((sum, item) => sum + Number(item.tokens_in || 0), 0),
           tokens_cache: items.reduce((sum, item) => sum + Number(item.tokens_cache || 0), 0),
+          cache_hit_rate: hitRateFrom(
+            items.reduce((sum, item) => sum + Number(item.tokens_in || 0), 0),
+            items.reduce((sum, item) => sum + Number(item.tokens_cache || 0), 0)
+          ),
           tokens_out: items.reduce((sum, item) => sum + Number(item.tokens_out || 0), 0),
           tokens: items.reduce((sum, item) => sum + Number(item.tokens || 0), 0),
           cost: items.reduce((sum, item) => sum + Number(item.cost || 0), 0),
@@ -2729,7 +2787,7 @@
     }
 
     function sortProjectGroups(groups, field, direction) {
-      const numericFields = new Set(['tokens_in', 'tokens_cache', 'tokens_out', 'tokens', 'cost', 'token_events']);
+      const numericFields = new Set(['tokens_in', 'tokens_cache', 'tokens_out', 'tokens', 'cost', 'token_events', 'cache_hit_rate']);
       const dir = direction === 'asc' ? 1 : -1;
       return [...groups].sort((a, b) => {
         let delta = 0;
@@ -2770,8 +2828,8 @@
     }
 
     // Column widths for 8-col (no Tool) and 9-col (with Tool) session tables
-    const SESSION_COLS_8 = '<colgroup><col style="width:11%"><col style="width:14%"><col style="width:12%"><col style="width:12%"><col style="width:11%"><col style="width:13%"><col style="width:11%"><col style="width:16%"></colgroup>';
-    const SESSION_COLS_9 = '<colgroup><col style="width:10%"><col style="width:10%"><col style="width:12%"><col style="width:11%"><col style="width:11%"><col style="width:10%"><col style="width:11%"><col style="width:10%"><col style="width:15%"></colgroup>';
+    const SESSION_COLS_8 = '<colgroup><col style="width:10%"><col style="width:13%"><col style="width:11%"><col style="width:11%"><col style="width:9%"><col style="width:10%"><col style="width:12%"><col style="width:10%"><col style="width:14%"></colgroup>';
+    const SESSION_COLS_9 = '<colgroup><col style="width:9%"><col style="width:9%"><col style="width:11%"><col style="width:10%"><col style="width:10%"><col style="width:9%"><col style="width:9%"><col style="width:10%"><col style="width:9%"><col style="width:14%"></colgroup>';
 
     // Sort state per panel: { field, direction }
     // Default: sort by last_seen_at descending (most recent first)
@@ -2784,7 +2842,7 @@
     };
 
     function getSessionSortComparator(field, direction) {
-      const numericFields = new Set(['tokens_in', 'tokens_cache', 'tokens_out', 'tokens', 'cost', 'token_events']);
+      const numericFields = new Set(['tokens_in', 'tokens_cache', 'tokens_out', 'tokens', 'cost', 'token_events', 'cache_hit_rate']);
       const dir = direction === 'asc' ? 1 : -1;
       if (field === 'last_seen_at') {
         return (a, b) => (toTimestampMs(a.last_seen_at) - toTimestampMs(b.last_seen_at)) * dir;
@@ -2862,7 +2920,7 @@
       }
       if (latestInput) latestInput.textContent = formatNumber(latest?.tokens_in || 0);
       if (latestCache) latestCache.textContent = formatNumber(latest?.tokens_cache || 0);
-      if (latestCachePct) latestCachePct.textContent = latest ? `${formatPercent(latest.cache_ratio)} ${t("cache")}` : "—";
+      if (latestCachePct) latestCachePct.textContent = latest ? `${formatHitRate(latest.cache_hit_rate)} ${t("hit")}` : "—";
       if (latestOutput) latestOutput.textContent = formatNumber(latest?.tokens_out || 0);
       if (latestTotal) latestTotal.textContent = formatNumber(latest?.tokens || 0);
       if (latestEvents) latestEvents.textContent = formatNumber(latest?.token_events || 0);
@@ -2871,7 +2929,7 @@
       const tbody = document.getElementById(`${prefix}SessionsTable`);
       if (!tbody) return;
       if (!sessions.length) {
-        tbody.replaceChildren(createNoDataRow(showTool ? 9 : 8));
+        tbody.replaceChildren(createNoDataRow(showTool ? 10 : 9));
         updateSortArrows(prefix);
         return;
       }
@@ -2892,7 +2950,7 @@
         detailsRow.style.borderColor = "rgba(226,232,240,0.9)";
 
         const projectCell = document.createElement("td");
-        projectCell.colSpan = showTool ? 9 : 8;
+        projectCell.colSpan = showTool ? 10 : 9;
         projectCell.className = "px-0 py-0";
 
         const details = document.createElement("details");
@@ -2921,10 +2979,11 @@
         nameCell.appendChild(countSpan);
         summaryRow.appendChild(nameCell);
 
-        // Empty cells for Input, Cache, Output (3 cols)
-        for (let i = 0; i < 3; i++) {
-          summaryRow.appendChild(createTableCell("td", "py-3 px-4", ""));
-        }
+        // Empty cells for Input, Cache (2 cols), then the group's Hit %, then Output.
+        summaryRow.appendChild(createTableCell("td", "py-3 px-4", ""));
+        summaryRow.appendChild(createTableCell("td", "py-3 px-4", ""));
+        summaryRow.appendChild(createTableCell("td", "py-3 px-4 text-right text-slate-500", formatHitRate(group.cache_hit_rate)));
+        summaryRow.appendChild(createTableCell("td", "py-3 px-4", ""));
 
         // Total tokens
         summaryRow.appendChild(createTableCell("td", "py-3 px-4 text-right font-semibold text-slate-800", formatNumber(group.tokens)));
@@ -2966,6 +3025,7 @@
           row.appendChild(createTableCell("td", "py-3 px-4 text-slate-700 mono", session.model || "—"));
           row.appendChild(createTableCell("td", "py-3 px-4 text-right text-slate-700", formatNumber(session.tokens_in || 0)));
           row.appendChild(createTableCell("td", "py-3 px-4 text-right text-slate-700", formatNumber(session.tokens_cache || 0)));
+          row.appendChild(createTableCell("td", "py-3 px-4 text-right text-slate-700", formatHitRate(session.cache_hit_rate)));
           row.appendChild(createTableCell("td", "py-3 px-4 text-right text-slate-700", formatNumber(session.tokens_out || 0)));
           row.appendChild(createTableCell("td", "py-3 px-4 text-right font-semibold text-slate-800", formatNumber(session.tokens || 0)));
           row.appendChild(createTableCell("td", "py-3 px-4 text-right font-bold", formatCurrency(session.cost || 0), "color: var(--color-cost);"));
@@ -3352,7 +3412,7 @@
 
       if (visibleTools.length === 0) {
         const row = document.createElement('tr');
-        row.innerHTML = `<td colspan="3" class="text-center py-10" style="color: var(--color-muted);">${t('noData')}</td>`;
+        row.innerHTML = `<td colspan="4" class="text-center py-10" style="color: var(--color-muted);">${t('noData')}</td>`;
         tbody.replaceChildren(row);
         return;
       }
@@ -3367,6 +3427,7 @@
         row.innerHTML = `
           <td class="py-3 px-4 font-semibold text-slate-800">${formatToolName(tool)}</td>
           <td class="py-3 px-4 text-right text-slate-700">${formatNumber(data.tokens)}</td>
+          <td class="py-3 px-4 text-right text-slate-700">${formatHitRate(data.cache_hit_rate)}</td>
           <td class="py-3 px-4 text-right font-bold" style="color:var(--color-cost)">${formatCurrency(data.cost)}</td>
         `;
         frag.appendChild(row);
@@ -3405,6 +3466,7 @@
             tokens_cache: m.tokens_cache,
             cost: m.cost,
             messages: m.messages || 0,
+            cache_hit_rate: m.cache_hit_rate,
           })),
         };
         allApps['openclaw'] = openclawTotal;
@@ -3426,12 +3488,15 @@
         const appTokens = visibleModels.reduce((sum, m) => sum + Number(m.tokens || 0), 0);
         const appCost = visibleModels.reduce((sum, m) => sum + Number(m.cost || 0), 0);
         const appMessages = visibleModels.reduce((sum, m) => sum + Number(m.messages || 0), 0);
+        const appIn = visibleModels.reduce((sum, m) => sum + Number(m.tokens_in || 0), 0);
+        const appCache = visibleModels.reduce((sum, m) => sum + Number(m.tokens_cache || 0), 0);
+        const appHit = hitRateFrom(appIn, appCache);
 
         const header = document.createElement('div');
         header.className = 'flex flex-wrap items-baseline gap-x-4 gap-y-1 mb-3';
         header.innerHTML = `
           <h4 class="text-sm font-extrabold mono tracking-wide" style="color: var(--color-primary);">${formatToolName(appName)}</h4>
-          <span class="text-xs text-slate-600">${formatNumber(appTokens)} ${t('tokensUnit')} · ${formatCurrency(appCost)} · ${formatNumber(appMessages)} ${t('msgs')}</span>
+          <span class="text-xs text-slate-600">${formatNumber(appTokens)} ${t('tokensUnit')} · ${formatCurrency(appCost)} · ${formatNumber(appMessages)} ${t('msgs')} · ${t('cacheHitRate')} ${formatHitRate(appHit)}</span>
         `;
         appDiv.appendChild(header);
 
@@ -3445,6 +3510,7 @@
               <th class="text-right py-2 px-3 font-semibold text-slate-600">${t('output')}</th>
               <th class="text-right py-2 px-3 font-semibold text-slate-600">${t('cache')}</th>
               <th class="text-right py-2 px-3 font-semibold text-slate-600">${t('total')}</th>
+              <th class="text-right py-2 px-3 font-semibold text-slate-600">${t('hitPct')}</th>
               <th class="text-right py-2 px-3 font-semibold text-slate-600">${t('cost')}</th>
               <th class="text-right py-2 px-3 font-semibold text-slate-600">${t('msgs')}</th>
             </tr>
@@ -3462,6 +3528,7 @@
             <td class="py-2 px-3 text-right text-slate-700">${formatNumber(model.tokens_out)}</td>
             <td class="py-2 px-3 text-right text-slate-700">${formatNumber(model.tokens_cache)}</td>
             <td class="py-2 px-3 text-right font-semibold text-slate-800">${formatNumber(model.tokens)}</td>
+            <td class="py-2 px-3 text-right text-slate-700">${formatHitRate(model.cache_hit_rate)}</td>
             <td class="py-2 px-3 text-right font-bold" style="color:var(--color-cost)">${formatCurrency(model.cost)}</td>
             <td class="py-2 px-3 text-right text-slate-500">${formatNumber(model.messages || 0)}</td>
           `;
@@ -3512,7 +3579,7 @@
 
       if (shown.length === 0) {
         const row = document.createElement('tr');
-        row.innerHTML = `<td colspan="7" class="text-center py-10" style="color: var(--color-muted);">${t('noData')}</td>`;
+        row.innerHTML = `<td colspan="8" class="text-center py-10" style="color: var(--color-muted);">${t('noData')}</td>`;
         tbody.replaceChildren(row);
         return;
       }
@@ -3527,6 +3594,7 @@
           <td class="py-2 px-3 text-right text-slate-700">${formatNumber(model.tokens_out)}</td>
           <td class="py-2 px-3 text-right text-slate-700">${formatNumber(model.tokens_cache)}</td>
           <td class="py-2 px-3 text-right font-semibold text-slate-800">${formatNumber(model.tokens)}</td>
+          <td class="py-2 px-3 text-right text-slate-700">${formatHitRate(model.cache_hit_rate)}</td>
           <td class="py-2 px-3 text-right font-bold" style="color:var(--color-cost)">${formatCurrency(model.cost)}</td>
           <td class="py-2 px-3 text-right text-slate-500">${formatNumber(model.messages || 0)}</td>
         `;
@@ -4122,6 +4190,17 @@
       // Calculate longest ever streak across all data
       const longestEverStreak = calculateLongestStreak(getKnownCalendarData());
 
+      // Month cache hit rate: token-weighted over the month's days. tokenBreakdown.input
+      // already folds cacheWrite into billable input, so denominator = input + cacheRead.
+      let monthCacheRead = 0;
+      let monthPromptInput = 0;
+      monthDays.forEach((d) => {
+        if (!d) return;  // leading/trailing calendar padding cells are null
+        const tb = d.tokenBreakdown || {};
+        monthCacheRead += Number(tb.cacheRead || 0);
+        monthPromptInput += Number(tb.input || 0) + Number(tb.cacheRead || 0);
+      });
+
       // Update UI - Month sidebar stats
       document.getElementById('monthFavoriteModel').textContent = topModel;
       document.getElementById('monthTotalTokens').textContent = formatNumber(totalTokens);
@@ -4129,6 +4208,7 @@
       document.getElementById('monthTotalEnergy').textContent = formatEnergyKwh(totalEnergyJ);
       document.getElementById('monthTotalSessions').textContent = formatNumber(totalMessages);
       document.getElementById('monthActiveDays').textContent = activeDays;
+      document.getElementById('monthCacheHitRate').textContent = formatHitRate(monthPromptInput > 0 ? monthCacheRead / monthPromptInput : null);
       document.getElementById('monthCurrentStreak').textContent = pluralDays(monthStreak);
 
       // Update top stats section for month view
@@ -4475,6 +4555,7 @@
           <div><span class="text-slate-500">${t('tokens')}</span><div class="font-semibold">${formatNumber(day.totals.tokens)}</div></div>
           <div><span class="text-slate-500">${t('messages')}</span><div class="font-semibold">${formatNumber(day.totals.messages)}</div></div>
           <div><span class="text-slate-500">${t('energy')}</span><div class="font-semibold">${formatEnergy(dayEnergyJ(day))}</div></div>
+          <div><span class="text-slate-500">${t('cacheHitRate')}</span><div class="font-semibold" style="color:var(--color-primary)">${formatHitRate(hitRateFrom(day.tokenBreakdown.input, day.tokenBreakdown.cacheRead))}</div></div>
         </div>
         <div class="mb-2 text-sm font-semibold mono">${t('tokenBreakdown')}</div>
         <div class="grid grid-cols-2 gap-2 text-sm mb-4">

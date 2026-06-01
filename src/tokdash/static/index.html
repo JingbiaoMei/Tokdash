@@ -757,6 +757,13 @@
             </button>
 
             <div class="view-toggle-cluster">
+              <button id="installBtn" class="btn btn-ghost compact-control" style="display:none; gap:6px;" data-i18n-title="installApp" aria-label="Install app">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M12 3v12m0 0l-4-4m4 4l4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+                <span data-i18n="install">Install</span>
+              </button>
               <button id="langToggle" class="btn btn-ghost compact-control" style="font-size:12px; font-weight:700;" aria-label="Toggle language">中</button>
               <button id="themeToggle" class="btn btn-ghost compact-control" aria-label="Toggle theme">
                 <svg id="themeIconMoon" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -1618,6 +1625,8 @@
         daysPlaceholder: 'Days',
         apply: 'Apply',
         refresh: 'Refresh',
+        install: 'Install',
+        installApp: 'Install Tokdash as an app',
         styleTheme: 'Style',
         styleClassic: 'Classic',
         styleElevated: 'Elevated',
@@ -1774,6 +1783,8 @@
         daysPlaceholder: '天数',
         apply: '应用',
         refresh: '刷新',
+        install: '安装',
+        installApp: '将 Tokdash 安装为应用',
         styleTheme: '样式',
         styleClassic: '经典',
         styleElevated: '浮层',
@@ -2351,7 +2362,7 @@
         amp: 'Amp',
         openclaw: 'OpenClaw',
         kimi: 'Kimi CLI',
-        pi_agent: 'pi-agent',
+        pi_agent: 'Pi',
         copilot_cli: 'GitHub Copilot CLI',
         hermes: 'Hermes',
       };
@@ -5193,6 +5204,37 @@
         navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).catch(() => {});
       });
     }
+
+    // PWA install button: surface the browser's install prompt when available.
+    (function setupInstallPrompt() {
+      const btn = document.getElementById('installBtn');
+      if (!btn) return;
+      let deferredPrompt = null;
+      const isStandalone = () =>
+        (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) ||
+        window.navigator.standalone === true;
+
+      // beforeinstallprompt only fires on Chromium browsers when the app is
+      // installable and not already installed (iOS Safari has no equivalent).
+      window.addEventListener('beforeinstallprompt', (event) => {
+        event.preventDefault();
+        deferredPrompt = event;
+        if (!isStandalone()) btn.style.display = '';
+      });
+
+      btn.addEventListener('click', async () => {
+        if (!deferredPrompt) return;
+        deferredPrompt.prompt();
+        try { await deferredPrompt.userChoice; } catch (_) { /* dismissed */ }
+        deferredPrompt = null;
+        btn.style.display = 'none';
+      });
+
+      window.addEventListener('appinstalled', () => {
+        deferredPrompt = null;
+        btn.style.display = 'none';
+      });
+    })();
 
     applyStyleTheme(getDefaultStyleTheme());
     applyTheme(getDefaultTheme());

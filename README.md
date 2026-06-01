@@ -3,23 +3,39 @@
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/JingbiaoMei/tokdash/main/docs/assets/tokdash_logo_full.png" alt="Tokdash" width="420" />
+  <a href="https://tokdash.github.io/"><img src="https://raw.githubusercontent.com/JingbiaoMei/tokdash/main/docs/assets/tokdash_logo_full.png" alt="Tokdash" width="420" /></a>
 </p>
 
 <p align="center">
-  <b>Local token &amp; cost dashboard for AI coding tools</b><br/>
-  <sub>Codex · OpenCode · Claude Code · Gemini CLI · OpenClaw · Kimi CLI · pi-agent · GitHub Copilot CLI · Hermes &amp; more</sub>
+  <b>Local token &amp; cost dashboard for AI coding tools</b>
+</p>
+
+<p align="center">
+  <a href="https://opencode.ai/" title="OpenCode"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/opencode.png" alt="OpenCode" height="34"></a>
+  <a href="https://openai.com/codex/" title="Codex"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/codex.png" alt="Codex" height="34"></a>
+  <a href="https://www.claude.com/product/claude-code" title="Claude Code"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/claude.png" alt="Claude Code" height="34"></a>
+  <a href="https://github.com/google-gemini/gemini-cli" title="Gemini CLI"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/gemini.png" alt="Gemini CLI" height="34"></a>
+  <a href="https://openclaw.ai/" title="OpenClaw"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/openclaw.png" alt="OpenClaw" height="34"></a>
+  <a href="https://github.com/MoonshotAI/kimi-cli" title="Kimi CLI"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/kimi.png" alt="Kimi CLI" height="34"></a>
+  <a href="https://pi.dev/" title="Pi"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/pi.png" alt="Pi" height="34"></a>
+  <a href="https://github.com/features/copilot" title="GitHub Copilot CLI"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/copilot.png" alt="GitHub Copilot CLI" height="34"></a>
+  <a href="https://hermes-agent.nousresearch.com/" title="Hermes"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/hermes.png" alt="Hermes" height="34"></a>
+</p>
+
+<p align="center">
+  <sub><a href="docs/SUPPORTED_CLIENTS.md">Supported clients &amp; where they log →</a></sub>
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/FastAPI-009688?style=flat&logo=fastapi&logoColor=white" alt="FastAPI" />
   <img src="https://img.shields.io/badge/Python-3.10+-3776AB?style=flat&logo=python&logoColor=white" alt="Python" />
   <img src="https://img.shields.io/badge/License-MIT-green?style=flat" alt="License" />
-  <a href="https://tokdash.github.io"><img src="https://img.shields.io/badge/Live%20Demo-tokdash.github.io-F59E0B?style=flat&logo=githubpages&logoColor=white" alt="Live Demo" /></a>
+  <a href="https://tokdash.github.io/"><img src="https://img.shields.io/badge/Website-tokdash.github.io-1E40AF?style=flat&logo=githubpages&logoColor=white" alt="Website" /></a>
+  <a href="https://tokdash.github.io/demo/"><img src="https://img.shields.io/badge/Live%20Demo-tokdash.github.io%2Fdemo-F59E0B?style=flat&logo=githubpages&logoColor=white" alt="Live Demo" /></a>
 </p>
 
 <p align="center">
-  <b>Try it without installing → <a href="https://tokdash.github.io">tokdash.github.io</a></b><br/>
+  <b>Try it without installing → <a href="https://tokdash.github.io/demo/">tokdash.github.io/demo</a></b><br/>
   <sub>Click through the full UI (themes, date ranges, sessions, heatmap) backed by in-browser synthetic data — nothing is uploaded.</sub>
 </p>
 
@@ -27,7 +43,7 @@
 
 - [Live demo](#live-demo)
 - [Features](#features)
-- [Supported clients](#supported-clients)
+- [Supported clients](docs/SUPPORTED_CLIENTS.md)
 - [Platform support](#platform-support)
 - [Quick start](#quick-start)
 - [Configuration](#configuration)
@@ -51,12 +67,12 @@
 - **PWA support**: installable as a progressive web app
 
 <p align="center">
-  <a href="https://tokdash.github.io">
+  <a href="https://tokdash.github.io/demo/">
     <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo.png" alt="Tokdash dashboard — click for live demo" width="900" />
   </a>
 </p>
 <p align="center">
-  <a href="https://tokdash.github.io">
+  <a href="https://tokdash.github.io/demo/">
     <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-stats.png" alt="Tokdash stats & heatmap — click for live demo" width="900" />
   </a>
 </p>
@@ -64,7 +80,8 @@
 ## Live demo
 
 A static demo of the current dashboard is hosted at
-**[tokdash.github.io](https://tokdash.github.io)** — no install required.
+**[tokdash.github.io/demo](https://tokdash.github.io/demo/)** — no install required.
+(The project home page is **[tokdash.github.io](https://tokdash.github.io/)**.)
 
 The demo runs the unmodified Tokdash frontend against an in-browser shim that
 returns deterministic, fully synthetic data. You can:
@@ -79,18 +96,6 @@ Source for the demo lives at
 [tokdash/tokdash.github.io](https://github.com/tokdash/tokdash.github.io).
 Nothing is uploaded; nothing is read from your machine.
 
-## Supported clients
-
-- **OpenCode**: `~/.local/share/opencode/`
-- **Codex**: `~/.codex/sessions/`
-- **Claude Code**: `~/.claude/projects/`
-- **Gemini CLI**: `~/.gemini/tmp/*/chats/session-*.json` and `session-*.jsonl`
-- **OpenClaw**: `~/.openclaw/agents/*/sessions/`
-- **Kimi CLI**: `~/.kimi/sessions/*/*/wire.jsonl`
-- **pi-agent**: `~/.pi/agent/sessions/` (override via `PI_AGENT_DIR` env var, comma-separated list of dirs)
-- **GitHub Copilot CLI**: `~/.copilot/otel/` (full input/cache/cost data — set `COPILOT_OTEL_FILE_EXPORTER_PATH` to enable OTel export) and `~/.copilot/session-state/*/events.jsonl` (output-only fallback when OTel is not enabled)
-- **Hermes**: `~/.hermes/state.db` (override via `HERMES_HOME` env var, comma-separated list of dirs)
-
 ## Platform support
 
 - **Linux (including WSL2):** supported
@@ -101,7 +106,7 @@ Nothing is uploaded; nothing is read from your machine.
 ### Prerequisites
 
 - Python **3.10+**
-- One or more supported clients installed (above)
+- One or more [supported clients](docs/SUPPORTED_CLIENTS.md) installed
 
 ### Install (pip)
 
@@ -243,7 +248,7 @@ By default `tokdash serve` opens the dashboard in your browser once on startup. 
 ## Privacy & security
 
 - **No telemetry**: Tokdash does not intentionally send your data anywhere.
-- **Local parsing**: usage is computed from local session files (see "Supported clients" paths above).
+- **Local parsing**: usage is computed from local session files (see [supported clients](docs/SUPPORTED_CLIENTS.md)).
 - **Server exposure**: Tokdash binds to `127.0.0.1` by default. Prefer Tailscale Serve or SSH tunneling for remote access; avoid `--bind 0.0.0.0` unless you understand it listens on all interfaces and have firewall/auth in place.
 
 ## API (local)

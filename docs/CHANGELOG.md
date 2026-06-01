@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Added
+- **Install button for the PWA.** When the dashboard is installable (Chromium browsers, served with the manifest + service worker), an **Install** button appears in the header toolbar so you can pin Tokdash as a desktop/mobile app in one click. It hides itself automatically when the app is already installed or when the browser exposes no install prompt (e.g. iOS Safari).
+
+### Changed
+- Renamed the **pi-agent** client to **Pi** across the dashboard and docs. The detection path (`~/.pi/agent/sessions/`) and the `PI_AGENT_DIR` override are unchanged — this is a display-name change only.
+- README (English + 中文): added an agent logo strip under the tagline and moved the detailed client list + log paths to [`docs/SUPPORTED_CLIENTS.md`](SUPPORTED_CLIENTS.md). Demo links now point at `tokdash.github.io/demo/` (the root `tokdash.github.io` is the project home page).
+
 ## 0.5.1 - 2026-06-01
 
 ### Added

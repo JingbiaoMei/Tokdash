@@ -3,23 +3,39 @@
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/JingbiaoMei/tokdash/main/docs/assets/tokdash_logo_full.png" alt="Tokdash" width="420" />
+  <a href="https://tokdash.github.io/"><img src="https://raw.githubusercontent.com/JingbiaoMei/tokdash/main/docs/assets/tokdash_logo_full.png" alt="Tokdash" width="420" /></a>
 </p>
 
 <p align="center">
-  <b>适用于 AI 编程工具的本地 Token 与费用仪表盘</b><br/>
-  <sub>Codex · OpenCode · Claude Code · Gemini CLI · OpenClaw · Kimi CLI · pi-agent · GitHub Copilot CLI · Hermes 等</sub>
+  <b>适用于 AI 编程工具的本地 Token 与费用仪表盘</b>
+</p>
+
+<p align="center">
+  <a href="https://opencode.ai/" title="OpenCode"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/opencode.png" alt="OpenCode" height="34"></a>
+  <a href="https://openai.com/codex/" title="Codex"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/codex.png" alt="Codex" height="34"></a>
+  <a href="https://www.claude.com/product/claude-code" title="Claude Code"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/claude.png" alt="Claude Code" height="34"></a>
+  <a href="https://github.com/google-gemini/gemini-cli" title="Gemini CLI"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/gemini.png" alt="Gemini CLI" height="34"></a>
+  <a href="https://openclaw.ai/" title="OpenClaw"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/openclaw.png" alt="OpenClaw" height="34"></a>
+  <a href="https://github.com/MoonshotAI/kimi-cli" title="Kimi CLI"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/kimi.png" alt="Kimi CLI" height="34"></a>
+  <a href="https://pi.dev/" title="Pi"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/pi.png" alt="Pi" height="34"></a>
+  <a href="https://github.com/features/copilot" title="GitHub Copilot CLI"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/copilot.png" alt="GitHub Copilot CLI" height="34"></a>
+  <a href="https://hermes-agent.nousresearch.com/" title="Hermes"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/hermes.png" alt="Hermes" height="34"></a>
+</p>
+
+<p align="center">
+  <sub><a href="docs/SUPPORTED_CLIENTS.md">支持的客户端与日志位置 →</a></sub>
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/FastAPI-009688?style=flat&logo=fastapi&logoColor=white" alt="FastAPI" />
   <img src="https://img.shields.io/badge/Python-3.10+-3776AB?style=flat&logo=python&logoColor=white" alt="Python" />
   <img src="https://img.shields.io/badge/License-MIT-green?style=flat" alt="License" />
-  <a href="https://tokdash.github.io"><img src="https://img.shields.io/badge/%E5%9C%A8%E7%BA%BF%E4%BD%93%E9%AA%8C-tokdash.github.io-F59E0B?style=flat&logo=githubpages&logoColor=white" alt="在线体验" /></a>
+  <a href="https://tokdash.github.io/"><img src="https://img.shields.io/badge/%E5%AE%98%E7%BD%91-tokdash.github.io-1E40AF?style=flat&logo=githubpages&logoColor=white" alt="官网" /></a>
+  <a href="https://tokdash.github.io/demo/"><img src="https://img.shields.io/badge/%E5%9C%A8%E7%BA%BF%E4%BD%93%E9%AA%8C-tokdash.github.io%2Fdemo-F59E0B?style=flat&logo=githubpages&logoColor=white" alt="在线体验" /></a>
 </p>
 
 <p align="center">
-  <b>无需安装即可体验 → <a href="https://tokdash.github.io">tokdash.github.io</a></b><br/>
+  <b>无需安装即可体验 → <a href="https://tokdash.github.io/demo/">tokdash.github.io/demo</a></b><br/>
   <sub>完整 UI（主题、日期范围、会话、热力图）均可点击试用，数据由浏览器本地合成，不会上传任何信息。</sub>
 </p>
 
@@ -27,7 +43,7 @@
 
 - [功能特性](#功能特性)
 - [在线 Demo](#在线-demo)
-- [已支持客户端](#已支持客户端)
+- [已支持客户端](docs/SUPPORTED_CLIENTS.md)
 - [平台支持](#平台支持)
 - [快速开始](#快速开始)
 - [配置](#配置)
@@ -51,20 +67,20 @@
 - **PWA 支持**：可作为渐进式 Web 应用安装
 
 <p align="center">
-  <a href="https://tokdash.github.io">
+  <a href="https://tokdash.github.io/demo/">
     <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo.png" alt="Tokdash 仪表盘 — 点击体验在线 Demo" width="900" />
   </a>
 </p>
 <p align="center">
-  <a href="https://tokdash.github.io">
+  <a href="https://tokdash.github.io/demo/">
     <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-stats.png" alt="Tokdash 统计与热力图 — 点击体验在线 Demo" width="900" />
   </a>
 </p>
 
 ## 在线 Demo
 
-仪表盘的静态在线版本：**[tokdash.github.io](https://tokdash.github.io)**，
-无需安装即可体验。
+仪表盘的静态在线版本：**[tokdash.github.io/demo](https://tokdash.github.io/demo/)**，
+无需安装即可体验。（项目官网为 **[tokdash.github.io](https://tokdash.github.io/)**。）
 
 Demo 使用未经修改的 Tokdash 前端，配合浏览器内的 Mock 层返回确定性的合成数据。
 你可以：
@@ -78,18 +94,6 @@ Demo 使用未经修改的 Tokdash 前端，配合浏览器内的 Mock 层返回
 Demo 源码：[tokdash/tokdash.github.io](https://github.com/tokdash/tokdash.github.io)。
 不会上传任何数据，也不会读取你本地的任何文件。
 
-## 已支持客户端
-
-- **OpenCode**: `~/.local/share/opencode/`
-- **Codex**: `~/.codex/sessions/`
-- **Claude Code**: `~/.claude/projects/`
-- **Gemini CLI**: `~/.gemini/tmp/*/chats/session-*.json` 和 `session-*.jsonl`
-- **OpenClaw**: `~/.openclaw/agents/*/sessions/`
-- **Kimi CLI**: `~/.kimi/sessions/*/*/wire.jsonl`
-- **pi-agent**: `~/.pi/agent/sessions/`（可通过 `PI_AGENT_DIR` 环境变量覆盖，支持逗号分隔的多目录）
-- **GitHub Copilot CLI**: `~/.copilot/otel/`（完整输入/缓存/费用数据，需设置 `COPILOT_OTEL_FILE_EXPORTER_PATH` 启用 OTel 导出）和 `~/.copilot/session-state/*/events.jsonl`（未启用 OTel 时的仅输出 token 回退）
-- **Hermes**: `~/.hermes/state.db`（可通过 `HERMES_HOME` 环境变量覆盖，支持逗号分隔的多目录）
-
 ## 平台支持
 
 - **Linux（含 WSL2）**：支持
@@ -100,7 +104,7 @@ Demo 源码：[tokdash/tokdash.github.io](https://github.com/tokdash/tokdash.git
 ### 前置要求
 
 - Python **3.10+**
-- 已安装一个或多个上方支持的客户端
+- 已安装一个或多个[支持的客户端](docs/SUPPORTED_CLIENTS.md)
 
 ### 安装（pip）
 
@@ -243,7 +247,7 @@ tailscale serve --bg 55423
 ## 隐私与安全
 
 - **无遥测**：Tokdash 不会主动把你的数据发送到任何地方。
-- **本地解析**：使用量由本机会话文件计算得出（见上方"已支持客户端"路径）。
+- **本地解析**：使用量由本机会话文件计算得出（见[支持的客户端](docs/SUPPORTED_CLIENTS.md)）。
 - **服务暴露**：Tokdash 默认绑定 `127.0.0.1`。如需远程访问，优先使用 Tailscale Serve 或 SSH 隧道；除非你明确知道风险并配置好了防火墙/认证，否则不要使用 `--bind 0.0.0.0`。
 
 ## API（本地）

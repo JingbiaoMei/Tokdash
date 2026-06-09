@@ -143,6 +143,18 @@ def test_opus_4_8_matches_4_7_pricing():
     assert abs(cost_48 - cost_47) < 1e-12, "Opus 4.8 should match Opus 4.7 pricing"
 
 
+def test_fable_5_aliases_and_pricing():
+    """Fable 5 aliases must resolve to the published input/output pricing."""
+    db = PricingDatabase()
+
+    expected_cost = (1000 * 10 + 2000 * 50) / 1_000_000
+    for model in ["claude-fable-5", "fable-5", "fable5", "fable"]:
+        cost = db.get_cost(model, 1000, 2000, 0, 0)
+        assert abs(cost - expected_cost) < 1e-12, (
+            f"{model!r} should resolve to Claude Fable 5 pricing"
+        )
+
+
 def test_derived_antigravity_models_resolve():
     """Antigravity models must resolve and match their base model pricing."""
     db = PricingDatabase()

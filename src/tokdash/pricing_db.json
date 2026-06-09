@@ -24,7 +24,10 @@
     "z-ai/glm-5.1": "glm-5.1",
     "zhipu/glm-5.1": "glm-5.1",
     "opus-4.7": "claude-opus-4.7",
-    "opus-4.8": "claude-opus-4.8"
+    "opus-4.8": "claude-opus-4.8",
+    "fable-5": "claude-fable-5",
+    "fable5": "claude-fable-5",
+    "fable": "claude-fable-5"
   },
   "models": {
     "_comment_moonshot": "=== Moonshot AI / Kimi Models ===",
@@ -879,6 +882,15 @@
       "source": "openrouter.ai/openai/text-embedding-3-small"
     },
     "_comment_anthropic": "=== Anthropic Claude Models ===",
+    "claude-fable-5": {
+      "provider": "anthropic",
+      "input": 10,
+      "output": 50,
+      "cache_read": 1,
+      "cache_write": 12.5,
+      "unit": "per_million_tokens",
+      "source": "anthropic.com/pricing#api"
+    },
     "claude-3-haiku": {
       "provider": "anthropic",
       "input": 0.25,

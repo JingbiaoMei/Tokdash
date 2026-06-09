@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+## 0.5.6 - 2026-06-09
+
+### Added
+- Added Claude Fable 5 pricing and shorthand aliases (`fable-5`, `fable5`, and `fable`) to the bundled pricing database.
+
 ## 0.5.5 - 2026-06-05
 
 ### Fixed

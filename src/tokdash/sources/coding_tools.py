@@ -388,10 +388,8 @@ class ClaudeParser(BaseParser):
 
     def _parse_all(self) -> List[Dict[str, Any]]:
         out: List[Dict[str, Any]] = []
-
-        # Track seen message IDs to avoid duplicates
-        # Claude Code writes the same API message multiple times (for different content chunks)
         seen_message_ids = set()
+        snapshot_entries_by_message_id: Dict[str, Dict[str, Any]] = {}
 
         for path_str, _, _ in self._file_signatures():
             session_file = Path(path_str)
@@ -402,15 +400,12 @@ class ClaudeParser(BaseParser):
                     except Exception:
                         continue
                     msg = obj.get("message") if isinstance(obj.get("message"), dict) else {}
-                    if msg.get("role") != "assistant":
+                    role = msg.get("role")
+                    is_top_level_assistant = role is None and obj.get("type") == "assistant"
+                    if role != "assistant" and not is_top_level_assistant:
                         continue
                     usage = msg.get("usage") if isinstance(msg.get("usage"), dict) else {}
                     if not usage:
-                        continue
-
-                    # Deduplicate by message.id (API message ID)
-                    msg_id = msg.get("id")
-                    if msg_id in seen_message_ids:
                         continue
 
                     ts_raw = obj.get("timestamp")
@@ -426,30 +421,53 @@ class ClaudeParser(BaseParser):
                     cache_r = self._i(usage.get("cache_read_input_tokens", usage.get("cache_read_tokens")))
                     cache_w = self._i(usage.get("cache_creation_input_tokens", usage.get("cache_write_tokens")))
                     if input_t + output_t + cache_r + cache_w == 0:
-                        # Zero-token placeholder — don't claim msg_id so a later
-                        # entry sharing the same id (with real usage) is kept.
                         continue
-                    if msg_id:
-                        seen_message_ids.add(msg_id)
+
+                    msg_id = str(msg.get("id") or obj.get("uuid") or "")
+                    # Legacy role-bearing logs write the same message id many
+                    # times; skip the duplicates before building/pricing the entry.
+                    if msg_id and not is_top_level_assistant and msg_id in seen_message_ids:
+                        continue
 
                     model = str(msg.get("model") or "unknown")
-                    out.append(
-                        {
-                            "source": self.source_name,
-                            "model": model,
-                            "provider": self._infer_provider(model),
-                            "input": input_t,
-                            "output": output_t,
-                            "cacheRead": cache_r,
-                            "cacheWrite": cache_w,
-                            "reasoning": 0,
-                            "cost": self.pricing_db.get_cost(model, input_t, output_t, cache_r, cache_w),
-                            "timestamp": int(ts.timestamp() * 1000),
-                        }
-                    )
+                    entry = {
+                        "source": self.source_name,
+                        "model": model,
+                        "provider": self._infer_provider(model),
+                        "input": input_t,
+                        "output": output_t,
+                        "cacheRead": cache_r,
+                        "cacheWrite": cache_w,
+                        "reasoning": 0,
+                        "cost": self.pricing_db.get_cost(model, input_t, output_t, cache_r, cache_w),
+                        "timestamp": int(ts.timestamp() * 1000),
+                    }
+                    if not msg_id:
+                        out.append(entry)
+                        continue
+
+                    if is_top_level_assistant:
+                        # Newer Claude Code builds (so far seen via OpenAI-compatible
+                        # endpoints) log assistant turns as role-less streaming
+                        # snapshots sharing one id; keep the latest, which carries
+                        # the most complete usage.
+                        existing = snapshot_entries_by_message_id.get(msg_id)
+                        if existing is None or entry["timestamp"] >= existing["timestamp"]:
+                            snapshot_entries_by_message_id[msg_id] = entry
+                        continue
+
+                    # First non-zero occurrence of this legacy id.
+                    seen_message_ids.add(msg_id)
+                    out.append(entry)
             except Exception:
                 continue
 
+        out.extend(
+            entry
+            for msg_id, entry in snapshot_entries_by_message_id.items()
+            if msg_id not in seen_message_ids
+        )
+        out.sort(key=lambda entry: int(entry.get("timestamp", 0) or 0))
         return out
 
 

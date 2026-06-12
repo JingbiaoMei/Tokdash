@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Fixed
+- Claude Code session parsing now reads the role-less `type:"assistant"` streaming-snapshot format emitted by newer CLI builds (observed on 2.1.173+ via OpenAI-compatible endpoints). These assistant turns were previously skipped entirely, under-counting tokens and cost for affected sessions. Duplicate streaming snapshots are deduplicated by message id, keeping the latest (most complete) usage.
+
 ## 0.5.6 - 2026-06-09
 
 ### Added

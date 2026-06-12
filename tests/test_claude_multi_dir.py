@@ -108,3 +108,89 @@ def test_claude_session_drilldown_keeps_real_entry_when_zero_token_placeholder_s
 
     assert "sess-mi" in raw
     assert raw["sess-mi"]["turns"][0]["tokens_in"] == 42
+
+
+def test_legacy_claude_records_keep_first_nonzero_snapshot(monkeypatch, tmp_path):
+    session_dir = tmp_path / ".claude" / "projects" / "project"
+    session_dir.mkdir(parents=True)
+    session_file = session_dir / "sess-legacy.jsonl"
+    session_file.write_text(
+        (
+            '{"sessionId":"sess-legacy","timestamp":"2026-06-12T12:00:00Z",'
+            '"message":{"role":"assistant","id":"msg-legacy","model":"claude-sonnet-4.5",'
+            '"usage":{"input_tokens":42,"output_tokens":5}}}\n'
+            '{"sessionId":"sess-legacy","timestamp":"2026-06-12T12:00:01Z",'
+            '"message":{"role":"assistant","id":"msg-legacy","model":"claude-sonnet-4.5",'
+            '"usage":{"input_tokens":42,"output_tokens":9}}}\n'
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    _sig_cache.clear()
+    BaseParser._entry_cache.clear()
+    sessions._parse_claude_session_file.cache_clear()
+    sessions._load_claude_sessions.cache_clear()
+
+    entries = ClaudeParser(PricingDatabase()).collect(None, None)
+    raw = sessions._claude_sessions()
+
+    assert len(entries) == 1
+    assert entries[0]["output"] == 5
+    assert len(raw["sess-legacy"]["turns"]) == 1
+    assert raw["sess-legacy"]["turns"][0]["tokens_out"] == 5
+
+
+def _write_claude_open_streaming_session(root: Path) -> None:
+    session_dir = root / "projects" / "project"
+    session_dir.mkdir(parents=True)
+    session_file = session_dir / "sess-open.jsonl"
+
+    def _entry(output_tokens: int, timestamp: str) -> str:
+        return (
+            "{"
+            '"type":"assistant",'
+            '"sessionId":"sess-open",'
+            '"cwd":"/work/project",'
+            f'"timestamp":"{timestamp}",'
+            '"message":{'
+            '"id":"chatcmpl-open",'
+            '"model":"Qwen/Qwen3.6-27B-FP8",'
+            f'"usage":{{"input_tokens":42,"output_tokens":{output_tokens}}}'
+            "}"
+            "}\n"
+        )
+
+    session_file.write_text(
+        _entry(0, "2026-06-12T12:00:00Z")
+        + _entry(9, "2026-06-12T12:00:01Z")
+        + _entry(9, "2026-06-12T12:00:02Z"),
+        encoding="utf-8",
+    )
+
+
+def test_claude_parser_reads_top_level_assistant_and_keeps_latest_snapshot(monkeypatch, tmp_path):
+    _write_claude_open_streaming_session(tmp_path / ".claude-open")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    _sig_cache.clear()
+    BaseParser._entry_cache.clear()
+
+    entries = ClaudeParser(PricingDatabase()).collect(None, None)
+
+    assert len(entries) == 1
+    assert entries[0]["input"] == 42
+    assert entries[0]["output"] == 9
+
+
+def test_claude_session_drilldown_reads_top_level_assistant_and_keeps_latest_snapshot(
+    monkeypatch, tmp_path
+):
+    _write_claude_open_streaming_session(tmp_path / ".claude-open")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    sessions._parse_claude_session_file.cache_clear()
+    sessions._load_claude_sessions.cache_clear()
+
+    raw = sessions._claude_sessions()
+
+    assert len(raw["sess-open"]["turns"]) == 1
+    assert raw["sess-open"]["turns"][0]["tokens_in"] == 42
+    assert raw["sess-open"]["turns"][0]["tokens_out"] == 9

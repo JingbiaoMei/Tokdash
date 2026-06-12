@@ -348,7 +348,7 @@ def _parse_claude_session_file(path_str: str, _mtime_ns: int, _size: int) -> Opt
     project = "unknown"
     turns = []
     seen_message_ids = set()
-    turn_index = 0
+    snapshot_turns_by_message_id: Dict[str, Dict[str, Any]] = {}
 
     with session_path.open("r", encoding="utf-8") as handle:
         for line in handle:
@@ -362,7 +362,9 @@ def _parse_claude_session_file(path_str: str, _mtime_ns: int, _size: int) -> Opt
                 project = _project_from_repo_or_path(None, str(obj.get("cwd")))
 
             message = obj.get("message") if isinstance(obj.get("message"), dict) else {}
-            if message.get("role") != "assistant":
+            role = message.get("role")
+            is_top_level_assistant = role is None and obj.get("type") == "assistant"
+            if role != "assistant" and not is_top_level_assistant:
                 continue
 
             usage = message.get("usage") if isinstance(message.get("usage"), dict) else {}
@@ -370,9 +372,6 @@ def _parse_claude_session_file(path_str: str, _mtime_ns: int, _size: int) -> Opt
                 continue
 
             message_id = str(message.get("id") or obj.get("uuid") or "")
-            if message_id and message_id in seen_message_ids:
-                continue
-
             timestamp_ms = _parse_iso_to_ms(obj.get("timestamp"))
             if timestamp_ms is None:
                 continue
@@ -385,26 +384,47 @@ def _parse_claude_session_file(path_str: str, _mtime_ns: int, _size: int) -> Opt
             output_tokens = int(usage.get("output_tokens", usage.get("output", 0)) or 0)
             total_tokens = input_tokens + cache_read + output_tokens
             if total_tokens == 0:
-                # Zero-token placeholder — don't claim message_id; a later
-                # entry with the same id may carry the real usage.
                 continue
 
-            if message_id:
-                seen_message_ids.add(message_id)
+            # Legacy role-bearing logs repeat the same message id; skip the
+            # duplicates before pricing the turn.
+            if message_id and not is_top_level_assistant and message_id in seen_message_ids:
+                continue
 
-            turn_index += 1
-            turns.append(
-                _build_turn(
-                    turn_index=turn_index,
-                    timestamp_ms=timestamp_ms,
-                    model=model,
-                    tokens_in=input_tokens,
-                    tokens_cache=cache_read,
-                    tokens_out=output_tokens,
-                    tokens_reasoning=0,
-                    cost=_PRICING_DB.get_cost(model, input_tokens, output_tokens, cache_read, 0),
-                )
+            turn = _build_turn(
+                turn_index=0,
+                timestamp_ms=timestamp_ms,
+                model=model,
+                tokens_in=input_tokens,
+                tokens_cache=cache_read,
+                tokens_out=output_tokens,
+                tokens_reasoning=0,
+                cost=_PRICING_DB.get_cost(model, input_tokens, output_tokens, cache_read, 0),
             )
+            if not message_id:
+                turns.append(turn)
+                continue
+
+            if is_top_level_assistant:
+                # Newer Claude Code builds log assistant turns as role-less
+                # streaming snapshots sharing one id; keep the latest snapshot.
+                existing = snapshot_turns_by_message_id.get(message_id)
+                if existing is None or timestamp_ms >= int(existing.get("timestamp_ms", 0) or 0):
+                    snapshot_turns_by_message_id[message_id] = turn
+                continue
+
+            # First non-zero occurrence of this legacy id.
+            seen_message_ids.add(message_id)
+            turns.append(turn)
+
+    turns.extend(
+        turn
+        for message_id, turn in snapshot_turns_by_message_id.items()
+        if message_id not in seen_message_ids
+    )
+    turns.sort(key=lambda item: int(item.get("timestamp_ms", 0) or 0))
+    for turn_index, turn in enumerate(turns, start=1):
+        turn["turn_index"] = turn_index
 
     if not turns:
         return None

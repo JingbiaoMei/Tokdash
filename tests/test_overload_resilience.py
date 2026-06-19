@@ -247,6 +247,10 @@ def test_positive_int_env_defaults_and_validation(monkeypatch):
     assert api._positive_int_env("TOKDASH_TEST_KNOB", 2) == 3
 
 
+def test_default_cache_ttl_covers_dashboard_auto_refresh_interval():
+    assert api.CACHE_TTL >= 5 * 60
+
+
 def test_api_routes_return_503_when_cold_compute_cap_is_full(monkeypatch):
     monkeypatch.setattr(api, "_compute_semaphore", threading.BoundedSemaphore(0))
 

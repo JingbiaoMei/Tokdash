@@ -215,3 +215,44 @@ def test_pi_agent_parser_default_dir(monkeypatch, tmp_path):
     # No files → empty result without error
     entries = parser.collect(None, None)
     assert entries == []
+
+
+def test_pi_agent_parser_default_dir_is_recursive(monkeypatch, tmp_path):
+    """Default discovery matches session view and includes root + nested files."""
+    monkeypatch.delenv("PI_AGENT_DIR", raising=False)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    _sig_cache.clear()
+    BaseParser._entry_cache.clear()
+
+    root = tmp_path / ".pi" / "agent" / "sessions"
+    nested = root / "--home-user--project"
+    nested.mkdir(parents=True)
+    root.mkdir(parents=True, exist_ok=True)
+
+    def lines(session_id, message_id):
+        return "\n".join(
+            [
+                json.dumps({"type": "session", "id": session_id, "cwd": "/home/user/project"}),
+                json.dumps(
+                    {
+                        "type": "message",
+                        "id": message_id,
+                        "timestamp": "2026-05-21T20:12:12.189Z",
+                        "message": {
+                            "role": "assistant",
+                            "provider": "minimax-cn",
+                            "model": "MiniMax-M2.7",
+                            "usage": {"input": 10, "output": 5, "cacheRead": 0, "cacheWrite": 0},
+                        },
+                    }
+                ),
+            ]
+        ) + "\n"
+
+    (root / "root-session.jsonl").write_text(lines("root-session", "root-msg"), encoding="utf-8")
+    (nested / "nested-session.jsonl").write_text(lines("nested-session", "nested-msg"), encoding="utf-8")
+
+    entries = PiAgentParser(PricingDatabase()).collect(None, None)
+
+    assert len(entries) == 2
+    assert {entry["entry_id"] for entry in entries} == {"pi_agent:root-msg", "pi_agent:nested-msg"}

@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+## 0.6.2 - 2026-06-19
+
+### Added
+- Added Pi session drill-down support, Codex review-session (auto-permission approval) visibility controls, native session display names, and `scripts/benchmark_api_latency.py` for comparing stable/dev HTTP endpoint latency. The live benchmark can also be run from pytest with `TOKDASH_RUN_API_BENCHMARK=1`.
+
+### Changed
+- Codex session names now come from Codex's local `state_5.sqlite` thread titles when available, with a read-only/query-only SQLite lookup and a 50 ms busy timeout. Pi sessions use `session_info.name` when present and otherwise fall back to the first user message instead of only the project directory.
+- The Sessions frontend now fetches tools independently with short 503 retries, keeps review sessions (auto-permission) hidden by default, supports showing them from a persisted toggle, and includes Pi in the per-tool and combined session views.
+
+
 ## 0.6.1 - 2026-06-17
 
 ### Changed

@@ -8,8 +8,26 @@ from functools import lru_cache
 from pathlib import Path
 
 import tokdash.sessions as sessions_module
-from tokdash.sources.coding_tools import CodingToolsUsageTracker
+from tokdash.sources.coding_tools import BaseParser, CodingToolsUsageTracker, _sig_cache
 from tokdash.usage_store import UsageEntryStore, build_source_signature, parser_code_signature
+
+
+def _write_jsonl(path: Path, rows: list[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+
+
+def _clear_parser_caches() -> None:
+    _sig_cache.clear()
+    BaseParser._entry_cache.clear()
+    sessions_module._parse_codex_session_file.cache_clear()
+    sessions_module._load_codex_sessions.cache_clear()
+    sessions_module._load_codex_title_map.cache_clear()
+    sessions_module._parse_claude_session_file.cache_clear()
+    sessions_module._load_claude_sessions.cache_clear()
+    sessions_module._load_opencode_sessions.cache_clear()
+    sessions_module._parse_pi_session_file.cache_clear()
+    sessions_module._load_pi_sessions.cache_clear()
 
 
 def test_usage_store_syncs_and_queries_by_range(tmp_path):
@@ -442,6 +460,238 @@ def test_parser_code_signature_unwraps_lru_cache_functions():
     assert signature["object"].endswith(".parser_fn")
 
 
+def _codex_session_rows(
+    session_id: str,
+    *,
+    review: bool = False,
+    thread_name: str = "",
+    user_message: str = "",
+) -> list[dict]:
+    source = {"subagent": {"other": "guardian"}} if review else "cli"
+    rows = [
+        {
+            "timestamp": "2026-06-19T10:00:00.000Z",
+            "type": "session_meta",
+            "payload": {
+                "id": session_id,
+                "cwd": "/work/tokdash",
+                "source": source,
+                "model_provider": "openai",
+            },
+        },
+        {
+            "timestamp": "2026-06-19T10:00:01.000Z",
+            "type": "turn_context",
+            "payload": {"model": "gpt-5.3-codex", "cwd": "/work/tokdash"},
+        },
+    ]
+    if thread_name:
+        rows.append(
+            {
+                "timestamp": "2026-06-19T10:00:02.000Z",
+                "type": "event_msg",
+                "payload": {"type": "thread_name_updated", "thread_id": session_id, "thread_name": thread_name},
+            }
+        )
+    if user_message:
+        rows.append(
+            {
+                "timestamp": "2026-06-19T10:00:02.500Z",
+                "type": "event_msg",
+                "payload": {"type": "user_message", "message": user_message},
+            }
+        )
+    rows.append(
+        {
+            "timestamp": "2026-06-19T10:00:03.000Z",
+            "type": "event_msg",
+            "payload": {
+                "type": "token_count",
+                "info": {
+                    "last_token_usage": {
+                        "input_tokens": 11,
+                        "cached_input_tokens": 2,
+                        "output_tokens": 5,
+                        "reasoning_output_tokens": 3,
+                    }
+                },
+            },
+        }
+    )
+    return rows
+
+
+def test_codex_guardian_sessions_are_hidden_from_session_view_only(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("TOKDASH_INCLUDE_CODEX_GUARDIAN", raising=False)
+    _clear_parser_caches()
+    codex_dir = tmp_path / ".codex" / "sessions" / "2026" / "06" / "19"
+    _write_jsonl(codex_dir / "normal.jsonl", _codex_session_rows("normal-session"))
+    _write_jsonl(codex_dir / "review.jsonl", _codex_session_rows("review-session", review=True))
+
+    hidden = sessions_module.get_sessions_data("codex", "today", "2026-06-19", "2026-06-19")
+    shown = sessions_module.get_sessions_data(
+        "codex",
+        "today",
+        "2026-06-19",
+        "2026-06-19",
+        include_review_sessions=True,
+    )
+
+    assert [row["session_id"] for row in hidden["sessions"]] == ["normal-session"]
+    assert {row["session_id"] for row in shown["sessions"]} == {"normal-session", "review-session"}
+    assert next(row for row in shown["sessions"] if row["session_id"] == "review-session")["is_review_session"] is True
+
+    tracker = CodingToolsUsageTracker()
+    codex_entries = tracker.parsers["codex"].collect()
+    assert len(codex_entries) == 2
+
+
+def test_session_display_name_fallbacks(monkeypatch, tmp_path):
+    _clear_parser_caches()
+
+    codex_file = tmp_path / "codex.jsonl"
+    _write_jsonl(codex_file, _codex_session_rows("codex-session", thread_name="Fix busy refresh"))
+    stat = codex_file.stat()
+    codex_raw = sessions_module._parse_codex_session_file(str(codex_file), stat.st_mtime_ns, stat.st_size, ())
+    assert codex_raw["display_name"] == "Fix busy refresh"
+    assert sessions_module._summarize_session(codex_raw)["display_name"] == "Fix busy refresh"
+
+    codex_context_file = tmp_path / "codex-context.jsonl"
+    _write_jsonl(
+        codex_context_file,
+        _codex_session_rows(
+            "codex-context-session",
+            user_message="# Context from my IDE setup:\n\n## Active file: data/README.md",
+        ),
+    )
+    stat = codex_context_file.stat()
+    codex_context_raw = sessions_module._parse_codex_session_file(
+        str(codex_context_file), stat.st_mtime_ns, stat.st_size, ()
+    )
+    assert codex_context_raw["display_name"] == "tokdash"
+
+    claude_file = tmp_path / "claude.jsonl"
+    _write_jsonl(
+        claude_file,
+        [
+            {"type": "ai-title", "sessionId": "claude-session", "aiTitle": "Draft older title"},
+            {"type": "custom-title", "sessionId": "claude-session", "customTitle": "Polish sessions"},
+            {
+                "type": "assistant",
+                "sessionId": "claude-session",
+                "cwd": "/work/tokdash",
+                "timestamp": "2026-06-19T10:00:00.000Z",
+                "message": {
+                    "role": "assistant",
+                    "id": "m1",
+                    "model": "claude-sonnet-4",
+                    "usage": {"input_tokens": 3, "output_tokens": 4},
+                },
+            },
+        ],
+    )
+    stat = claude_file.stat()
+    claude_raw = sessions_module._parse_claude_session_file(str(claude_file), stat.st_mtime_ns, stat.st_size, ())
+    assert claude_raw["display_name"] == "Polish sessions"
+
+
+def test_codex_session_display_name_uses_state_db_title(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    _clear_parser_caches()
+
+    codex_dir = tmp_path / ".codex" / "sessions" / "2026" / "06" / "19"
+    _write_jsonl(
+        codex_dir / "codex.jsonl",
+        _codex_session_rows(
+            "codex-session",
+            user_message="# Context from my IDE setup:\n\n## Active file: data/README.md",
+        ),
+    )
+
+    state_db = tmp_path / ".codex" / "state_5.sqlite"
+    state_db.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(state_db))
+    try:
+        conn.execute(
+            "CREATE TABLE threads (id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', "
+            "preview TEXT NOT NULL DEFAULT '', first_user_message TEXT NOT NULL DEFAULT '')"
+        )
+        conn.execute(
+            "INSERT INTO threads (id, title, preview, first_user_message) VALUES (?, ?, ?, ?)",
+            ("codex-session", "Implement real Codex titles", "fallback preview", "fallback first user"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    data = sessions_module.get_sessions_data("codex", "today", "2026-06-19", "2026-06-19")
+
+    assert data["sessions"][0]["display_name"] == "Implement real Codex titles"
+
+
+def test_pi_agent_sessions_data_and_detail(monkeypatch, tmp_path):
+    pi_root = tmp_path / "pi-sessions"
+    monkeypatch.setenv("PI_AGENT_DIR", str(pi_root))
+    _clear_parser_caches()
+
+    _write_jsonl(
+        pi_root / "direct.jsonl",
+        [
+            {"type": "session", "id": "pi-direct", "cwd": "/tmp/direct-project", "timestamp": "2026-06-19T09:00:00.000Z"},
+            {"type": "model_change", "provider": "minimax-cn", "modelId": "MiniMax-M2.7"},
+            {
+                "type": "message",
+                "id": "u1",
+                "timestamp": "2026-06-19T09:30:00.000Z",
+                "message": {"role": "user", "content": "Investigate Pi session titles"},
+            },
+            {
+                "type": "message",
+                "id": "a1",
+                "timestamp": "2026-06-19T10:00:00.000Z",
+                "message": {
+                    "role": "assistant",
+                    "usage": {"input": 5, "cacheWrite": 2, "cacheRead": 3, "output": 4, "totalTokens": 14},
+                },
+            },
+        ],
+    )
+    _write_jsonl(
+        pi_root / "nested" / "2026-06-19T10-00-00-000Z_pi-named.jsonl",
+        [
+            {"type": "session", "id": "pi-named", "cwd": "/work/tokdash", "timestamp": "2026-06-19T10:00:00.000Z"},
+            {"type": "session_info", "name": "Plan Pi support"},
+            {
+                "type": "message",
+                "id": "b1",
+                "timestamp": "2026-06-19T11:00:00.000Z",
+                "message": {
+                    "role": "assistant",
+                    "provider": "openai",
+                    "model": "gpt-5.3-codex",
+                    "usage": {"input": 7, "cacheWrite": 1, "cacheRead": 2, "output": 6, "cost": {"total": 0.25}},
+                },
+            },
+        ],
+    )
+
+    data = sessions_module.get_sessions_data("pi_agent", "today", "2026-06-19", "2026-06-19")
+    rows = {row["session_id"]: row for row in data["sessions"]}
+
+    assert set(rows) == {"pi-direct", "pi-named"}
+    assert rows["pi-direct"]["display_name"] == "Investigate Pi session titles"
+    assert rows["pi-direct"]["tokens_in"] == 7
+    assert rows["pi-direct"]["tokens_cache"] == 3
+    assert rows["pi-direct"]["tokens_out"] == 4
+    assert rows["pi-named"]["display_name"] == "Plan Pi support"
+    assert rows["pi-named"]["cost"] == 0.25
+
+    detail = sessions_module.get_session_detail("pi_agent", "pi-named")
+    assert detail["session"]["display_name"] == "Plan Pi support"
+    assert detail["turns"][0]["tokens"] == 16
+
+
 def test_codex_stored_session_duplicate_policy_matches_live_loader():
     records = [
         {"tool": "codex", "session_id": "dup", "project": "old", "turns": [{"tokens": 10}]},
@@ -525,14 +775,14 @@ def _create_opencode_session_db(db_path: Path) -> tuple[tuple[str, int, int], ..
         conn.executescript(
             """
             CREATE TABLE project(id TEXT PRIMARY KEY, worktree TEXT);
-            CREATE TABLE session(id TEXT PRIMARY KEY, project_id TEXT, directory TEXT);
+            CREATE TABLE session(id TEXT PRIMARY KEY, project_id TEXT, directory TEXT, title TEXT, slug TEXT);
             CREATE TABLE message(id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, data TEXT);
             """
         )
         conn.execute("INSERT INTO project(id, worktree) VALUES('p1', '/workspace/tokdash')")
         conn.execute("INSERT INTO project(id, worktree) VALUES('p2', '/workspace/other')")
-        conn.execute("INSERT INTO session(id, project_id, directory) VALUES('s1', 'p1', '/tmp/fallback')")
-        conn.execute("INSERT INTO session(id, project_id, directory) VALUES('s2', 'p2', '/tmp/other')")
+        conn.execute("INSERT INTO session(id, project_id, directory, title, slug) VALUES('s1', 'p1', '/tmp/fallback', 'OpenCode title', 'open-slug')")
+        conn.execute("INSERT INTO session(id, project_id, directory, title, slug) VALUES('s2', 'p2', '/tmp/other', '', 'other-slug')")
         messages = [
             (
                 "before",
@@ -634,7 +884,9 @@ def test_opencode_session_loaders_use_sql_window_and_match_raw_json_fallback(tmp
     assert [turn["timestamp_ms"] for turn in scalar["s1"]["turns"]] == [1000, 1500]
     turn = next(turn for turn in scalar["s1"]["turns"] if turn["timestamp_ms"] == 1500)
     assert scalar["s1"]["project"] == "tokdash"
+    assert scalar["s1"]["display_name"] == "OpenCode title"
     assert scalar["s2"]["project"] == "other"
+    assert scalar["s2"]["display_name"] == "other-slug"
     assert turn["tokens_in"] == 13
     assert turn["tokens_cache"] == 4
     assert turn["tokens_out"] == 5

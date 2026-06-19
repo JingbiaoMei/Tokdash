@@ -883,7 +883,7 @@ class PiAgentParser(BaseParser):
             self.use_rglob = True
         else:
             self.search_dirs = [Path.home() / ".pi" / "agent" / "sessions"]
-            self.use_rglob = False
+            self.use_rglob = True
 
     @staticmethod
     def _infer_provider(model: str, fallback: str = "") -> str:

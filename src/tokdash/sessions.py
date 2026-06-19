@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
@@ -13,14 +14,16 @@ from .pricing import PricingDatabase
 from .usage_store import UsageEntryStore, parser_code_signature, persistent_usage_db_enabled
 
 
-SESSION_TOOLS = ("codex", "claude", "opencode")
+SESSION_TOOLS = ("codex", "claude", "opencode", "pi_agent")
 TOOL_LABELS = {
     "codex": "Codex",
     "claude": "Claude Code",
     "opencode": "OpenCode",
+    "pi_agent": "Pi",
 }
 
 _PRICING_DB = PricingDatabase()
+DISPLAY_NAME_MAX_CHARS = 96
 
 
 def reload_pricing_db() -> None:
@@ -28,9 +31,81 @@ def reload_pricing_db() -> None:
     _PRICING_DB.load()
     _parse_codex_session_file.cache_clear()
     _load_codex_sessions.cache_clear()
+    _load_codex_title_map.cache_clear()
     _parse_claude_session_file.cache_clear()
     _load_claude_sessions.cache_clear()
     _load_opencode_sessions.cache_clear()
+    _parse_pi_session_file.cache_clear()
+    _load_pi_sessions.cache_clear()
+
+
+def _truthy_env(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _short_session_id(session_id: Any) -> str:
+    raw = str(session_id or "").strip()
+    return raw[:8] if raw else "unknown"
+
+
+def _clean_display_name(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, dict):
+        for key in ("text", "content", "value", "name", "title"):
+            cleaned = _clean_display_name(value.get(key))
+            if cleaned:
+                return cleaned
+        return ""
+    if isinstance(value, list):
+        parts = [_clean_display_name(item) for item in value]
+        text = " ".join(part for part in parts if part)
+    else:
+        text = str(value)
+    text = " ".join(text.split())
+    if not text:
+        return ""
+    return text[: DISPLAY_NAME_MAX_CHARS - 1].rstrip() + "…" if len(text) > DISPLAY_NAME_MAX_CHARS else text
+
+
+def _fallback_display_name(session_id: Any, project: Any = "") -> str:
+    project_name = _clean_display_name(project)
+    if project_name and project_name != "unknown":
+        return project_name
+    return _short_session_id(session_id)
+
+
+def _is_codex_guardian_session(meta_payload: Dict[str, Any]) -> bool:
+    source = meta_payload.get("source")
+    if not isinstance(source, dict):
+        return False
+    subagent = source.get("subagent")
+    return isinstance(subagent, dict) and subagent.get("other") == "guardian"
+
+
+def _include_codex_review_sessions(include_review_sessions: Optional[bool]) -> bool:
+    if include_review_sessions is not None:
+        return bool(include_review_sessions)
+    return _truthy_env("TOKDASH_INCLUDE_CODEX_GUARDIAN")
+
+
+def _message_text_preview(message: Dict[str, Any]) -> str:
+    content = message.get("content")
+    if isinstance(content, str):
+        return _clean_display_name(content)
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, dict) and item.get("type") in {"text", "input_text"}:
+                text = _clean_display_name(item.get("text") or item.get("content"))
+                if text:
+                    parts.append(text)
+            else:
+                text = _clean_display_name(item)
+                if text:
+                    parts.append(text)
+        return _clean_display_name(parts)
+    return _clean_display_name(content)
 
 
 def _period_to_days(period: str) -> int:
@@ -83,6 +158,13 @@ def _parse_iso_to_ms(value: Any) -> Optional[int]:
     except Exception:
         return None
     return _dt_to_ms(dt.astimezone(timezone.utc))
+
+
+def _to_int(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except Exception:
+        return 0
 
 
 def _project_from_repo_or_path(repo_url: Optional[str], path: Optional[str]) -> str:
@@ -161,7 +243,10 @@ def _summarize_session(
     return {
         "tool": raw.get("tool", "unknown"),
         "session_id": raw.get("session_id", "unknown"),
+        "display_name": raw.get("display_name")
+        or _fallback_display_name(raw.get("session_id", "unknown"), raw.get("project", "unknown")),
         "project": raw.get("project", "unknown"),
+        "is_review_session": bool(raw.get("is_review_session", False)),
         "model": top_model,
         "token_events": len(turns),
         "tokens_in": tokens_in,
@@ -194,6 +279,8 @@ def _merge_raw_session(existing: Dict[str, Any], new: Dict[str, Any]) -> Dict[st
         "tool": existing.get("tool") or new.get("tool") or "unknown",
         "session_id": existing.get("session_id") or new.get("session_id") or "unknown",
         "project": existing.get("project") if existing.get("project") != "unknown" else new.get("project", "unknown"),
+        "display_name": existing.get("display_name") or new.get("display_name") or "",
+        "is_review_session": bool(existing.get("is_review_session") or new.get("is_review_session")),
         "turns": [],
     }
 
@@ -219,6 +306,8 @@ def _merge_raw_session(existing: Dict[str, Any], new: Dict[str, Any]) -> Dict[st
         turn["turn_index"] = index
 
     merged["turns"] = merged_turns
+    if not merged["display_name"]:
+        merged["display_name"] = _fallback_display_name(merged["session_id"], merged["project"])
     return merged
 
 
@@ -248,6 +337,69 @@ def _pricing_signature() -> tuple:
         return ()
 
 
+def _codex_state_db_path() -> Path:
+    return Path.home() / ".codex" / "state_5.sqlite"
+
+
+def _codex_state_signature() -> tuple:
+    db_path = _codex_state_db_path()
+    parts: list[tuple[str, int, int]] = []
+    for path in (db_path, Path(str(db_path) + "-wal")):
+        try:
+            stat = path.stat()
+        except (FileNotFoundError, OSError):
+            continue
+        parts.append((path.name, stat.st_mtime_ns, stat.st_size))
+    return tuple(parts)
+
+
+@lru_cache(maxsize=8)
+def _load_codex_title_map(_state_sig: tuple = ()) -> Dict[str, str]:
+    db_path = _codex_state_db_path()
+    if not db_path.exists():
+        return {}
+    titles: Dict[str, str] = {}
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=0.05)
+    except sqlite3.Error:
+        return {}
+    try:
+        conn.execute("PRAGMA query_only = ON")
+        conn.execute("PRAGMA busy_timeout = 50")
+        cols = _sqlite_columns(conn, "threads")
+        if "id" not in cols:
+            return {}
+        preferred = [name for name in ("title", "preview", "first_user_message") if name in cols]
+        if not preferred:
+            return {}
+        select_cols = ", ".join(["id", *preferred])
+        where_clause = " OR ".join(f"COALESCE({name}, '') <> ''" for name in preferred)
+        for row in conn.execute(f"SELECT {select_cols} FROM threads WHERE {where_clause}"):
+            session_id = str(row[0] or "")
+            if not session_id:
+                continue
+            for value in row[1:]:
+                title = _clean_display_name(value)
+                if title:
+                    titles[session_id] = title
+                    break
+    except sqlite3.Error:
+        return {}
+    finally:
+        conn.close()
+    return titles
+
+
+def _apply_codex_title_map(sessions: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    titles = _load_codex_title_map(_codex_state_signature())
+    copied = {session_id: dict(session) for session_id, session in sessions.items()}
+    for session_id, session in sessions.items():
+        title = titles.get(str(session_id))
+        if title:
+            copied[session_id]["display_name"] = title
+    return copied
+
+
 @lru_cache(maxsize=512)
 def _parse_codex_session_file(path_str: str, _mtime_ns: int, _size: int, _pricing_sig: tuple = ()) -> Optional[Dict[str, Any]]:
     session_path = Path(path_str)
@@ -259,6 +411,8 @@ def _parse_codex_session_file(path_str: str, _mtime_ns: int, _size: int, _pricin
     current_provider = "openai"
     cwd = ""
     repo_url = ""
+    thread_name = ""
+    is_review_session = False
     turns = []
     turn_index = 0
 
@@ -276,6 +430,7 @@ def _parse_codex_session_file(path_str: str, _mtime_ns: int, _size: int, _pricin
                 session_id = str(payload.get("id") or session_id)
                 cwd = str(payload.get("cwd") or cwd)
                 repo_url = str(((payload.get("git") or {}).get("repository_url")) or repo_url)
+                is_review_session = is_review_session or _is_codex_guardian_session(payload)
                 if payload.get("model_provider"):
                     current_provider = str(payload.get("model_provider"))
                 continue
@@ -283,6 +438,11 @@ def _parse_codex_session_file(path_str: str, _mtime_ns: int, _size: int, _pricin
             if obj_type == "turn_context":
                 current_model = str(payload.get("model") or current_model)
                 cwd = str(payload.get("cwd") or cwd)
+                continue
+
+            payload_type = payload.get("type")
+            if payload_type == "thread_name_updated":
+                thread_name = _clean_display_name(payload.get("thread_name")) or thread_name
                 continue
 
             if obj_type != "event_msg" or payload.get("type") != "token_count":
@@ -324,10 +484,13 @@ def _parse_codex_session_file(path_str: str, _mtime_ns: int, _size: int, _pricin
     if not turns:
         return None
 
+    project = _project_from_repo_or_path(repo_url or None, cwd or None)
     return {
         "tool": "codex",
         "session_id": session_id,
-        "project": _project_from_repo_or_path(repo_url or None, cwd or None),
+        "display_name": thread_name or _fallback_display_name(session_id, project),
+        "project": project,
+        "is_review_session": is_review_session,
         "turns": turns,
     }
 
@@ -344,7 +507,7 @@ def _load_codex_sessions(signature: tuple[tuple[str, int, int], ...], pricing_si
 
 def _codex_sessions() -> Dict[str, Dict[str, Any]]:
     root = Path.home() / ".codex" / "sessions"
-    return _load_codex_sessions(_iter_file_signatures(root), _pricing_signature())
+    return _apply_codex_title_map(_load_codex_sessions(_iter_file_signatures(root), _pricing_signature()))
 
 
 @lru_cache(maxsize=512)
@@ -355,6 +518,9 @@ def _parse_claude_session_file(path_str: str, _mtime_ns: int, _size: int, _prici
 
     session_id = session_path.stem
     project = "unknown"
+    custom_title = ""
+    ai_title = ""
+    agent_name = ""
     turns = []
     seen_message_ids = set()
     snapshot_turns_by_message_id: Dict[str, Dict[str, Any]] = {}
@@ -366,13 +532,24 @@ def _parse_claude_session_file(path_str: str, _mtime_ns: int, _size: int, _prici
             except Exception:
                 continue
 
+            obj_type = obj.get("type")
             session_id = str(obj.get("sessionId") or session_id)
             if project == "unknown" and obj.get("cwd"):
                 project = _project_from_repo_or_path(None, str(obj.get("cwd")))
 
+            if obj_type == "custom-title":
+                custom_title = _clean_display_name(obj.get("customTitle")) or custom_title
+                continue
+            if obj_type == "ai-title":
+                ai_title = _clean_display_name(obj.get("aiTitle")) or ai_title
+                continue
+            if obj_type == "agent-name":
+                agent_name = _clean_display_name(obj.get("agentName")) or agent_name
+                continue
+
             message = obj.get("message") if isinstance(obj.get("message"), dict) else {}
             role = message.get("role")
-            is_top_level_assistant = role is None and obj.get("type") == "assistant"
+            is_top_level_assistant = role is None and obj_type == "assistant"
             if role != "assistant" and not is_top_level_assistant:
                 continue
 
@@ -441,6 +618,7 @@ def _parse_claude_session_file(path_str: str, _mtime_ns: int, _size: int, _prici
     return {
         "tool": "claude",
         "session_id": session_id,
+        "display_name": custom_title or ai_title or agent_name or _fallback_display_name(session_id, project),
         "project": project,
         "turns": turns,
     }
@@ -523,6 +701,15 @@ def _opencode_project_path(directory: Any, worktree: Any, cwd: Any = "", root: A
     return project_path
 
 
+def _sqlite_columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    try:
+        cur = conn.cursor()
+        cur.execute(f"PRAGMA table_info({table})")
+        return {str(row[1]) for row in cur.fetchall()}
+    except sqlite3.Error:
+        return set()
+
+
 def _append_opencode_turn(
     sessions: Dict[str, Dict[str, Any]],
     turn_index_by_session: Dict[str, int],
@@ -540,6 +727,8 @@ def _append_opencode_turn(
     reasoning_tokens: Any,
     cwd: Any = "",
     root: Any = "",
+    title: Any = "",
+    slug: Any = "",
 ) -> None:
     fresh_input = int(fresh_input or 0)
     cache_write = int(cache_write or 0)
@@ -556,18 +745,23 @@ def _append_opencode_turn(
     full_model_name = f"{provider}/{model}" if provider else model
     project_path = _opencode_project_path(directory, worktree, cwd, root)
     sid = str(session_id)
+    project = _project_from_repo_or_path(None, project_path or None)
+    display_name = _clean_display_name(title) or _clean_display_name(slug) or _fallback_display_name(sid, project)
 
     raw = sessions.setdefault(
         sid,
         {
             "tool": "opencode",
             "session_id": sid,
-            "project": _project_from_repo_or_path(None, project_path or None),
+            "display_name": display_name,
+            "project": project,
             "turns": [],
         },
     )
     if raw.get("project") == "unknown":
         raw["project"] = _project_from_repo_or_path(None, project_path or None)
+    if not raw.get("display_name"):
+        raw["display_name"] = display_name
 
     turn_index = turn_index_by_session.get(sid, 0) + 1
     turn_index_by_session[sid] = turn_index
@@ -601,12 +795,17 @@ def _load_opencode_sessions_scalar(
     sessions: Dict[str, Dict[str, Any]] = {}
     conn = sqlite3.connect(str(db_path))
     try:
+        session_cols = _sqlite_columns(conn, "session")
+        title_expr = "s.title" if "title" in session_cols else "''"
+        slug_expr = "s.slug" if "slug" in session_cols else "''"
         cur = conn.cursor()
         cur.execute(
             f"""
             SELECT
               s.id,
               s.directory,
+              {title_expr},
+              {slug_expr},
               COALESCE(p.worktree, ''),
               m.time_created,
               json_extract(m.data, '$.tokens.input'),
@@ -630,6 +829,8 @@ def _load_opencode_sessions_scalar(
         for (
             session_id,
             directory,
+            title,
+            slug,
             worktree,
             created_ms,
             fresh_input,
@@ -658,6 +859,8 @@ def _load_opencode_sessions_scalar(
                 reasoning_tokens=reasoning_tokens,
                 cwd=cwd,
                 root=root,
+                title=title,
+                slug=slug,
             )
     finally:
         conn.close()
@@ -676,12 +879,17 @@ def _load_opencode_sessions_raw_json(
     sessions: Dict[str, Dict[str, Any]] = {}
     conn = sqlite3.connect(str(db_path))
     try:
+        session_cols = _sqlite_columns(conn, "session")
+        title_expr = "s.title" if "title" in session_cols else "''"
+        slug_expr = "s.slug" if "slug" in session_cols else "''"
         cur = conn.cursor()
         cur.execute(
             f"""
             SELECT
               s.id,
               s.directory,
+              {title_expr},
+              {slug_expr},
               COALESCE(p.worktree, ''),
               m.time_created,
               m.data
@@ -694,7 +902,7 @@ def _load_opencode_sessions_raw_json(
             args,
         )
         turn_index_by_session: Dict[str, int] = {}
-        for session_id, directory, worktree, created_ms, data_json in cur.fetchall():
+        for session_id, directory, title, slug, worktree, created_ms, data_json in cur.fetchall():
             try:
                 data = json.loads(data_json)
             except Exception:
@@ -725,6 +933,8 @@ def _load_opencode_sessions_raw_json(
                 reasoning_tokens=tokens.get("reasoning", 0),
                 cwd=path_info.get("cwd"),
                 root=path_info.get("root"),
+                title=title,
+                slug=slug,
             )
     finally:
         conn.close()
@@ -737,6 +947,167 @@ def _opencode_sessions(since_ms: Optional[int] = None, until_ms: Optional[int] =
     if not signature:
         return {}
     return _load_opencode_sessions(signature, _pricing_signature(), since_ms, until_ms)
+
+
+def _pi_session_roots() -> list[Path]:
+    raw = os.environ.get("PI_AGENT_DIR", "").strip()
+    if raw:
+        return [Path(item.strip()).expanduser() for item in raw.split(",") if item.strip()]
+    return [Path.home() / ".pi" / "agent" / "sessions"]
+
+
+def _pi_session_signatures() -> tuple[tuple[str, int, int], ...]:
+    signatures: list[tuple[str, int, int]] = []
+    for root in _pi_session_roots():
+        if root.is_file() and root.suffix == ".jsonl":
+            try:
+                signatures.append(_file_signature(root))
+            except FileNotFoundError:
+                continue
+        else:
+            signatures.extend(_iter_file_signatures(root))
+    signatures.sort(key=lambda item: item[0])
+    return tuple(signatures)
+
+
+def _pi_session_id_from_path(path: Path) -> str:
+    stem = path.stem
+    if "_" in stem:
+        tail = stem.rsplit("_", 1)[-1]
+        if tail:
+            return tail
+    return stem
+
+
+@lru_cache(maxsize=512)
+def _parse_pi_session_file(path_str: str, _mtime_ns: int, _size: int, _pricing_sig: tuple = ()) -> Optional[Dict[str, Any]]:
+    session_path = Path(path_str)
+    if not session_path.exists():
+        return None
+
+    session_id = _pi_session_id_from_path(session_path)
+    cwd = ""
+    session_name = ""
+    first_user_preview = ""
+    current_model = ""
+    current_provider = ""
+    turns: list[Dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    turn_index = 0
+
+    with session_path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            obj_type = obj.get("type")
+            if obj_type == "session":
+                session_id = str(obj.get("id") or session_id)
+                cwd = str(obj.get("cwd") or cwd)
+                continue
+            if obj_type == "session_info":
+                session_name = _clean_display_name(obj.get("name")) or session_name
+                cwd = str(obj.get("cwd") or cwd)
+                continue
+            if obj_type == "model_change":
+                current_provider = str(obj.get("provider") or current_provider)
+                current_model = str(obj.get("modelId") or current_model)
+                continue
+            if obj_type != "message":
+                continue
+
+            message = obj.get("message") if isinstance(obj.get("message"), dict) else {}
+            if message.get("role") == "user" and not first_user_preview:
+                first_user_preview = _message_text_preview(message)
+                continue
+            if message.get("role") != "assistant":
+                continue
+            usage = message.get("usage") if isinstance(message.get("usage"), dict) else {}
+            if not usage:
+                continue
+
+            entry_id = str(obj.get("id") or "")
+            if entry_id and entry_id in seen_ids:
+                continue
+            if entry_id:
+                seen_ids.add(entry_id)
+
+            timestamp_ms = _parse_iso_to_ms(obj.get("timestamp"))
+            if timestamp_ms is None:
+                continue
+
+            model = str(message.get("model") or current_model or "unknown")
+            provider = str(message.get("provider") or current_provider or "")
+            fresh_input = _to_int(usage.get("input"))
+            output_tokens = _to_int(usage.get("output"))
+            cache_read = _to_int(usage.get("cacheRead"))
+            cache_write = _to_int(usage.get("cacheWrite"))
+            total_tokens = _to_int(usage.get("totalTokens"))
+            if fresh_input == 0 and output_tokens == 0 and cache_read == 0 and cache_write == 0 and total_tokens > 0:
+                output_tokens = total_tokens
+            if fresh_input == 0 and output_tokens == 0 and cache_read == 0 and cache_write == 0:
+                continue
+
+            cost_obj = usage.get("cost") if isinstance(usage.get("cost"), dict) else {}
+            try:
+                cost_total = float(cost_obj.get("total") or 0.0)
+            except Exception:
+                cost_total = 0.0
+            full_model_name = f"{provider}/{model}" if provider else model
+            cost = (
+                cost_total
+                if cost_total > 0
+                else _PRICING_DB.get_cost(full_model_name, fresh_input, output_tokens, cache_read, cache_write)
+            )
+            turn_index += 1
+            turns.append(
+                _build_turn(
+                    turn_index=turn_index,
+                    timestamp_ms=timestamp_ms,
+                    model=model,
+                    tokens_in=fresh_input + cache_write,
+                    tokens_cache=cache_read,
+                    tokens_out=output_tokens,
+                    tokens_reasoning=0,
+                    cost=cost,
+                )
+            )
+
+    if not turns:
+        return None
+
+    project = _project_from_repo_or_path(None, cwd or None)
+    return {
+        "tool": "pi_agent",
+        "session_id": session_id,
+        "display_name": session_name or first_user_preview or _fallback_display_name(session_id, project),
+        "project": project,
+        "turns": turns,
+    }
+
+
+@lru_cache(maxsize=8)
+def _load_pi_sessions(signature: tuple[tuple[str, int, int], ...], pricing_sig: tuple = ()) -> Dict[str, Dict[str, Any]]:
+    sessions: Dict[str, Dict[str, Any]] = {}
+    for path_str, mtime_ns, size in signature:
+        raw = _parse_pi_session_file(path_str, mtime_ns, size, pricing_sig)
+        if not raw:
+            continue
+        session_id = str(raw["session_id"])
+        if session_id in sessions:
+            sessions[session_id] = _merge_raw_session(sessions[session_id], raw)
+        else:
+            sessions[session_id] = raw
+    return sessions
+
+
+def _pi_sessions() -> Dict[str, Dict[str, Any]]:
+    return _load_pi_sessions(_pi_session_signatures(), _pricing_signature())
 
 
 def _raw_sessions_for_tool(
@@ -756,6 +1127,8 @@ def _raw_sessions_for_tool(
         return _claude_sessions()
     if key == "opencode":
         return _opencode_sessions(since_ms=since_ms, until_ms=until_ms)
+    if key == "pi_agent":
+        return _pi_sessions()
     raise ValueError(f"Unsupported session tool: {tool}")
 
 
@@ -805,11 +1178,12 @@ def _session_records_to_raw_sessions(tool: str, records: Iterable[Dict[str, Any]
             session["turns"].append(dict(turn))
 
     for session in sessions.values():
-        if tool == "codex":
-            continue
-        session["turns"].sort(key=lambda item: (int(item.get("timestamp_ms", 0) or 0), int(item.get("turn_index", 0) or 0)))
-        for turn_index, turn in enumerate(session["turns"], start=1):
-            turn["turn_index"] = turn_index
+        session.setdefault("display_name", _fallback_display_name(session.get("session_id"), session.get("project")))
+        session["is_review_session"] = bool(session.get("is_review_session", False))
+        if tool != "codex":
+            session["turns"].sort(key=lambda item: (int(item.get("timestamp_ms", 0) or 0), int(item.get("turn_index", 0) or 0)))
+            for turn_index, turn in enumerate(session["turns"], start=1):
+                turn["turn_index"] = turn_index
     return sessions
 
 
@@ -844,10 +1218,20 @@ def _stored_sessions_for_tool(tool: str) -> Dict[str, Dict[str, Any]]:
     else:
         raise ValueError(f"Unsupported stored session tool: {tool}")
 
-    return _session_records_to_raw_sessions(tool, store.query_session_records(tool))
+    sessions = _session_records_to_raw_sessions(tool, store.query_session_records(tool))
+    if tool == "codex":
+        return _apply_codex_title_map(sessions)
+    return sessions
 
 
-def get_sessions_data(tool: str, period: str, date_from: Optional[str] = None, date_to: Optional[str] = None, limit: Optional[int] = None) -> Dict[str, Any]:
+def get_sessions_data(
+    tool: str,
+    period: str,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    limit: Optional[int] = None,
+    include_review_sessions: Optional[bool] = None,
+) -> Dict[str, Any]:
     key = str(tool or "").strip().lower()
     if key not in SESSION_TOOLS:
         raise ValueError(f"Unsupported session tool: {tool}")
@@ -863,7 +1247,10 @@ def get_sessions_data(tool: str, period: str, date_from: Optional[str] = None, d
     sessions = []
     window_since_ms = since_ms if key == "opencode" else None
     window_until_ms = until_ms if key == "opencode" else None
+    include_codex_review = _include_codex_review_sessions(include_review_sessions)
     for raw in _raw_sessions_for_tool(key, since_ms=window_since_ms, until_ms=window_until_ms).values():
+        if key == "codex" and raw.get("is_review_session") and not include_codex_review:
+            continue
         summary = _summarize_session(raw, since_ms=since_ms, until_ms=until_ms)
         if summary:
             sessions.append(summary)
@@ -907,8 +1294,12 @@ def get_session_detail(tool: str, session_id: str) -> Dict[str, Any]:
     }
 
 
-def get_codex_sessions_data(period: str, limit: Optional[int] = None) -> Dict[str, Any]:
-    return get_sessions_data("codex", period, limit=limit)
+def get_codex_sessions_data(
+    period: str,
+    limit: Optional[int] = None,
+    include_review_sessions: Optional[bool] = None,
+) -> Dict[str, Any]:
+    return get_sessions_data("codex", period, limit=limit, include_review_sessions=include_review_sessions)
 
 
 def get_codex_session_detail(session_id: str) -> Dict[str, Any]:

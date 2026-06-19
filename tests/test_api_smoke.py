@@ -1,16 +1,36 @@
 import os
+import asyncio
 
 import pytest
 
 
 pytest.importorskip("fastapi")
-from fastapi.testclient import TestClient
 
 import tokdash.api as api
 
 
 def _enabled(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _static_middleware_cache_control(path: str) -> str:
+    messages = []
+
+    async def dummy_app(scope, receive, send):
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message):
+        messages.append(message)
+
+    middleware = api.NoCacheMiddleware(dummy_app)
+    asyncio.run(middleware({"type": "http", "path": path}, receive, send))
+    response_start = next(message for message in messages if message["type"] == "http.response.start")
+    headers = {key.decode("latin-1"): value.decode("latin-1") for key, value in response_start["headers"]}
+    return headers["cache-control"]
 
 
 @pytest.fixture(autouse=True)
@@ -31,7 +51,9 @@ def synthetic_api_data(monkeypatch):
 
     The real local-log walk is useful as an integration/stress check, but it can
     reparse large session histories and compete with the installed dashboard
-    service. Default tests should only verify routing/response shape.
+    service. The local FastAPI/AnyIO stack deadlocks on synchronous route
+    handlers under TestClient/ASGITransport, so these tests call handlers
+    directly and keep ASGI/static middleware coverage narrow and explicit.
     """
 
     def fake_usage(period, date_from, date_to):
@@ -55,12 +77,13 @@ def synthetic_api_data(monkeypatch):
     def fake_stats(year):
         return {"contributions": [], "stats": {"year": year}}
 
-    def fake_sessions(tool, period, date_from=None, date_to=None):
+    def fake_sessions(tool, period, date_from=None, date_to=None, include_review_sessions=None):
         return {
             "tool": tool.strip().lower(),
             "period": period,
             "date_from": date_from,
             "date_to": date_to,
+            "include_review_sessions": include_review_sessions,
             "sessions": [{"session_id": "session-1"}],
             "latest_session": {"session_id": "session-1"},
         }
@@ -68,10 +91,11 @@ def synthetic_api_data(monkeypatch):
     def fake_session_detail(tool, session_id):
         return {"session": {"tool": tool, "session_id": session_id}, "turns": []}
 
-    def fake_codex_sessions(period):
+    def fake_codex_sessions(period, include_review_sessions=None):
         return {
             "tool": "codex",
             "period": period,
+            "include_review_sessions": include_review_sessions,
             "sessions": [{"session_id": "codex-session-1"}],
             "latest_session": {"session_id": "codex-session-1"},
         }
@@ -90,99 +114,100 @@ def synthetic_api_data(monkeypatch):
 
 
 def test_api_endpoints_and_dashboard_smoke(synthetic_api_data):
-    client = TestClient(api.app)
-
-    usage = client.get("/api/usage", params={"period": "today"}).json()
+    usage = api.get_usage(period="today")
     assert "total_tokens" in usage
     assert "total_messages" in usage
     assert "comparison" in usage
     assert "openclaw_models" in usage
     assert "coding_apps" in usage
 
-    tools = client.get("/api/tools", params={"period": "today"}).json()
+    tools = api.get_tools(period="today")
     assert "apps" in tools
     assert "all_models" in tools
 
-    for tool in ("codex", "claude", "opencode"):
-        sessions = client.get("/api/sessions", params={"tool": tool, "period": "today"}).json()
+    for tool in ("codex", "claude", "opencode", "pi_agent"):
+        sessions = api.get_sessions(tool=tool, period="today")
         assert "sessions" in sessions
         assert "latest_session" in sessions
         assert sessions.get("tool") == tool
 
         latest = sessions.get("latest_session")
         if latest and latest.get("session_id"):
-            detail = client.get("/api/session", params={"tool": tool, "session_id": latest["session_id"]}).json()
+            detail = api.get_session(tool=tool, session_id=latest["session_id"])
             assert "session" in detail
             assert "turns" in detail
 
-    codex_sessions = client.get("/api/codex/sessions", params={"period": "today"}).json()
+    codex_sessions = api.get_codex_sessions(period="today")
     assert "sessions" in codex_sessions
     assert "latest_session" in codex_sessions
+    assert api.get_codex_sessions(period="today", include_review_sessions=False)["include_review_sessions"] is False
+    assert api.get_codex_sessions(period="today", include_review_sessions=True)["include_review_sessions"] is True
+    assert (
+        api.get_sessions(tool="codex", period="today", include_review_sessions=False)["include_review_sessions"]
+        is False
+    )
+    assert api.get_sessions(tool="codex", period="today", include_review_sessions=True)["include_review_sessions"] is True
 
     latest_codex = codex_sessions.get("latest_session")
     if latest_codex and latest_codex.get("session_id"):
-        codex_detail = client.get("/api/codex/session", params={"session_id": latest_codex["session_id"]}).json()
+        codex_detail = api.get_codex_session(session_id=latest_codex["session_id"])
         assert "session" in codex_detail
         assert "turns" in codex_detail
 
-    openclaw = client.get("/api/openclaw", params={"period": "today"}).json()
+    openclaw = api.get_openclaw(period="today")
     assert "models" in openclaw
     assert "contributions" in openclaw
 
-    stats = client.get("/api/stats").json()
+    stats = api.get_stats()
     assert "contributions" in stats
     assert "stats" in stats
 
-    stats_year = client.get("/api/stats", params={"year": 2025}).json()
+    stats_year = api.get_stats(year=2025)
     assert "contributions" in stats_year
     assert "stats" in stats_year
 
-    manifest = client.get("/manifest.webmanifest").text
+    manifest = (api.STATIC_DIR / "manifest.webmanifest").read_text(encoding="utf-8")
     assert "Tokdash" in manifest
 
-    sw_response = client.get("/sw.js")
+    sw_response = asyncio.run(api.serve_service_worker())
     assert "no-store" in sw_response.headers["cache-control"]
-    sw = sw_response.text
+    sw = sw_response.body.decode("utf-8")
     assert "service worker" in sw.lower()
     assert "__TOKDASH_CACHE_NAME__" not in sw
     assert 'const CACHE_NAME = "tokdash-' in sw
 
-    html_response = client.get("/")
+    html_response = asyncio.run(api.serve_dashboard())
     assert "no-store" in html_response.headers["cache-control"]
-    html = html_response.text
+    html = (api.STATIC_DIR / "index.html").read_text(encoding="utf-8")
     assert "Tokdash" in html
     assert "Sessions" in html
 
-    icon_response = client.get("/static/icons/icon-192.png")
-    assert icon_response.status_code == 200
-    assert "no-store" in icon_response.headers["cache-control"]
+    icon_path = api.STATIC_DIR / "icons" / "icon-192.png"
+    assert icon_path.exists()
+    assert "no-store" in _static_middleware_cache_control("/static/icons/icon-192.png")
 
 
 def test_api_custom_date_ranges_and_validation(synthetic_api_data):
-    client = TestClient(api.app)
+    usage = api.get_usage(date_from="2026-04-08", date_to="2026-04-08")
+    assert "comparison" in usage
 
-    usage = client.get("/api/usage", params={"date_from": "2026-04-08", "date_to": "2026-04-08"})
-    assert usage.status_code == 200
-    assert "comparison" in usage.json()
+    sessions = api.get_sessions(tool="codex", date_from="2026-04-08", date_to="2026-04-08")
+    assert sessions["tool"] == "codex"
 
-    sessions = client.get(
-        "/api/sessions",
-        params={"tool": "codex", "date_from": "2026-04-08", "date_to": "2026-04-08"},
-    )
-    assert sessions.status_code == 200
-    assert sessions.json()["tool"] == "codex"
+    with pytest.raises(api.HTTPException) as excinfo:
+        api.get_usage(date_from="2026-04-08")
+    assert excinfo.value.status_code == 400
+    assert "required" in excinfo.value.detail
 
-    missing_bound = client.get("/api/usage", params={"date_from": "2026-04-08"})
-    assert missing_bound.status_code == 400
-    assert "required" in missing_bound.json()["detail"]
+    with pytest.raises(api.HTTPException) as excinfo:
+        api.get_usage(date_from="2026/04/08", date_to="2026-04-08")
+    assert excinfo.value.status_code == 400
+    assert "Invalid date format" in excinfo.value.detail
 
-    malformed = client.get("/api/usage", params={"date_from": "2026/04/08", "date_to": "2026-04-08"})
-    assert malformed.status_code == 400
-    assert "Invalid date format" in malformed.json()["detail"]
-
-    reversed_range = client.get("/api/usage", params={"date_from": "2026-04-09", "date_to": "2026-04-08"})
-    assert reversed_range.status_code == 400
-    assert "on or before" in reversed_range.json()["detail"]
+    with pytest.raises(api.HTTPException) as excinfo:
+        api.get_usage(date_from="2026-04-09", date_to="2026-04-08")
+    assert excinfo.value.status_code == 400
+    assert "on or before" in excinfo.value.detail
 
 
 @pytest.mark.skipif(
@@ -191,13 +216,11 @@ def test_api_custom_date_ranges_and_validation(synthetic_api_data):
 )
 def test_api_endpoints_against_real_local_logs():
     """Opt-in integration/stress check for the real parser stack."""
-    client = TestClient(api.app)
-
-    usage = client.get("/api/usage", params={"period": "today"}).json()
+    usage = api.get_usage(period="today")
     assert "total_tokens" in usage
     assert "total_messages" in usage
     assert "comparison" in usage
 
-    stats = client.get("/api/stats").json()
+    stats = api.get_stats()
     assert "contributions" in stats
     assert "stats" in stats

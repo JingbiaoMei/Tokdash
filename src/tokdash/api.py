@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import threading
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime
 from json import JSONDecodeError
@@ -33,6 +35,7 @@ from .sessions import (
 
 
 PRICING_DB_PATH = Path(__file__).parent / "pricing_db.json"
+logger = logging.getLogger(__name__)
 
 
 def _validate_date_params(date_from: Optional[str], date_to: Optional[str]) -> None:
@@ -140,7 +143,10 @@ def _positive_int_env(name: str, default: int) -> int:
     return value if value > 0 else default
 
 
-CACHE_TTL = _positive_int_env("TOKDASH_CACHE_TTL", 120)  # seconds
+# Keep the default comfortably above the dashboard's 5-minute auto-refresh so a
+# scheduled refresh does not always land on an expired key and compete for a cold
+# parse slot. Operators can still lower it with TOKDASH_CACHE_TTL.
+CACHE_TTL = _positive_int_env("TOKDASH_CACHE_TTL", 600)  # seconds
 
 
 class CacheBackpressureError(RuntimeError):
@@ -155,6 +161,30 @@ class CacheBackpressureError(RuntimeError):
 # This is the app-side companion to the uvicorn backpressure knobs in cli.py.
 _COMPUTE_CONCURRENCY = _positive_int_env("TOKDASH_COMPUTE_CONCURRENCY", 2)
 _compute_semaphore = threading.BoundedSemaphore(_COMPUTE_CONCURRENCY)
+
+
+def _raise_backpressure(message: str, *, key: str, reason: str, had_stale: bool) -> None:
+    logger.warning(
+        "tokdash cache backpressure key=%s reason=%s had_stale=%s compute_concurrency=%s",
+        key,
+        reason,
+        had_stale,
+        _COMPUTE_CONCURRENCY,
+    )
+    raise CacheBackpressureError(message)
+
+
+def _cached_route(route_name: str, cache_key: str, fetch_fn) -> Any:
+    started = time.monotonic()
+    try:
+        return get_cached_or_fetch(cache_key, fetch_fn)
+    finally:
+        logger.debug(
+            "tokdash route cache fetch route=%s key=%s duration_ms=%.1f",
+            route_name,
+            cache_key,
+            (time.monotonic() - started) * 1000,
+        )
 
 
 def _key_lock(key: str) -> threading.Lock:
@@ -218,7 +248,12 @@ def get_cached_or_fetch(key: str, fetch_fn) -> Any:
         # Another thread is already computing this key.
         if hit is not None:
             return hit[1]  # serve stale rather than stampede the parser
-        raise CacheBackpressureError(f"Cache fill already in progress for {key}")
+        _raise_backpressure(
+            f"Cache fill already in progress for {key}",
+            key=key,
+            reason="same_key_inflight",
+            had_stale=False,
+        )
     try:
         # Re-check under the lock: a prior holder may have just stored a fresh value.
         latest = _cache_get(key)
@@ -228,7 +263,12 @@ def get_cached_or_fetch(key: str, fetch_fn) -> Any:
         if not _compute_semaphore.acquire(blocking=False):
             if latest is not None:
                 return latest[1]
-            raise CacheBackpressureError("Too many cold requests; retry shortly")
+            _raise_backpressure(
+                "Too many cold requests; retry shortly",
+                key=key,
+                reason="compute_cap",
+                had_stale=False,
+            )
         try:
             fresh = fetch_fn()
         finally:
@@ -294,7 +334,11 @@ def get_usage(period: str = "today", date_from: Optional[str] = None, date_to: O
     _validate_date_params(date_from, date_to)
     try:
         cache_key = f"usage_{period}_{date_from}_{date_to}"
-        return get_cached_or_fetch(cache_key, lambda: compute_usage_with_comparison(period, date_from, date_to))
+        return _cached_route(
+            "/api/usage",
+            cache_key,
+            lambda: compute_usage_with_comparison(period, date_from, date_to),
+        )
     except CacheBackpressureError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
@@ -310,7 +354,7 @@ def get_openclaw(period: str = "today") -> Dict[str, Any]:
         return data
 
     try:
-        return get_cached_or_fetch(f"openclaw_{period}", fetch)
+        return _cached_route("/api/openclaw", f"openclaw_{period}", fetch)
     except CacheBackpressureError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
@@ -328,7 +372,7 @@ def get_tools(period: str = "today") -> Dict[str, Any]:
             data["timestamp"] = datetime.now().isoformat()
             return data
 
-        return get_cached_or_fetch(f"tools_{period}", fetch)
+        return _cached_route("/api/tools", f"tools_{period}", fetch)
     except CacheBackpressureError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
@@ -336,9 +380,14 @@ def get_tools(period: str = "today") -> Dict[str, Any]:
 
 
 @app.get("/api/codex/sessions")
-def get_codex_sessions(period: str = "today") -> Dict[str, Any]:
+def get_codex_sessions(period: str = "today", include_review_sessions: Optional[bool] = None) -> Dict[str, Any]:
     try:
-        return get_cached_or_fetch(f"codex_sessions_{period}", lambda: get_codex_sessions_data(period))
+        cache_key = f"codex_sessions_{period}_{include_review_sessions}"
+        return _cached_route(
+            "/api/codex/sessions",
+            cache_key,
+            lambda: get_codex_sessions_data(period, include_review_sessions=include_review_sessions),
+        )
     except CacheBackpressureError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
@@ -356,11 +405,27 @@ def get_codex_session(session_id: str) -> Dict[str, Any]:
 
 
 @app.get("/api/sessions")
-def get_sessions(tool: str, period: str = "today", date_from: Optional[str] = None, date_to: Optional[str] = None) -> Dict[str, Any]:
+def get_sessions(
+    tool: str,
+    period: str = "today",
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    include_review_sessions: Optional[bool] = None,
+) -> Dict[str, Any]:
     _validate_date_params(date_from, date_to)
     try:
-        cache_key = f"sessions_{tool.strip().lower()}_{period}_{date_from}_{date_to}"
-        return get_cached_or_fetch(cache_key, lambda: get_sessions_data(tool, period, date_from, date_to))
+        cache_key = f"sessions_{tool.strip().lower()}_{period}_{date_from}_{date_to}_{include_review_sessions}"
+        return _cached_route(
+            "/api/sessions",
+            cache_key,
+            lambda: get_sessions_data(
+                tool,
+                period,
+                date_from,
+                date_to,
+                include_review_sessions=include_review_sessions,
+            ),
+        )
     except CacheBackpressureError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except ValueError as e:
@@ -414,7 +479,7 @@ async def serve_service_worker():
 @app.get("/api/stats")
 def get_stats(year: Optional[int] = None) -> Dict[str, Any]:
     try:
-        return get_cached_or_fetch(f"stats_{year}", lambda: compute_stats(year))
+        return _cached_route("/api/stats", f"stats_{year}", lambda: compute_stats(year))
     except CacheBackpressureError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:

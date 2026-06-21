@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+## 1.0.3 - 2026-06-21
+
+### Changed
+- `tokdash update` now reports the managed runtime's Tokdash version before and after the upgrade command. If the version is unchanged, human output says Tokdash is already at that version instead of implying a new package was installed; `--json` includes `version_before`, `version_after`, and `updated`.
+- README and onboarding docs now include the explicit migration command for switching an existing conda/system/user-pip service to Tokdash's managed venv runtime: `tokdash setup --runtime venv --force`.
+
 ## 1.0.2 - 2026-06-21
 
 ### Fixed

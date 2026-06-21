@@ -177,6 +177,23 @@ checking `tokdash setup --dry-run`. `--force` also handles pre-1.0 services that
 occupy port `55423` but do not expose the new `/health` fingerprint: it rewrites and restarts
 the existing `tokdash.service`. Use `tokdash setup --no-service` to skip service creation.
 
+If your current setup uses a conda/system/user-pip interpreter and you want `tokdash update`
+to manage future upgrades, migrate the service to Tokdash's setup-owned venv:
+
+```bash
+# Upgrade the tokdash command you are about to run, for example:
+python3 -m pip install --user -U tokdash
+# or, for a conda base install:
+conda run -n base python -m pip install -U tokdash
+tokdash setup --runtime venv --force
+tokdash doctor
+```
+
+This keeps your usage history under `~/.tokdash`, rewrites the user service to run
+`~/.tokdash/runtime/python-venv/bin/python -m tokdash`, and lets future `tokdash update`
+upgrade that managed venv and restart the service. If you installed with pipx, you can
+instead keep the pipx runtime and upgrade with `tokdash update` or `pipx upgrade tokdash`.
+
 ### Update or remove
 
 ```bash
@@ -186,7 +203,9 @@ tokdash uninstall    # reverse exactly what setup created; keeps usage history b
 
 `update` only drives install methods Tokdash can safely manage. If your runtime was installed
 by a package manager Tokdash does not own, it prints the exact manual guidance instead of
-mutating that environment.
+mutating that environment. For managed runtimes, `update` reports the Tokdash version before
+and after the upgrade; if the version is unchanged, it says Tokdash is already at that version
+instead of implying a new package was installed.
 
 ### Remote access
 

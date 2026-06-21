@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -564,6 +565,7 @@ def cmd_update(opts: Options) -> int:
     method = (man or {}).get("install_method")
     service = (man or {}).get("service") or {}
     venv_python = (man or {}).get("python_path") or str(paths.managed_venv_python())
+    runtime_command = list((man or {}).get("runtime_command") or [])
 
     if method == "pipx":
         if not detect.find_pipx():
@@ -611,13 +613,34 @@ def cmd_update(opts: Options) -> int:
                     print(f"Would restart: systemctl --user restart {service_name}")
         return EXIT_OK
 
+    version_before = _runtime_tokdash_version(runtime_command, venv_python)
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
     except Exception as exc:
-        return _emit_update_result(opts, {"ok": False, "action": "update", "install_method": method, "error": f"upgrade failed: {exc}"})
+        return _emit_update_result(
+            opts,
+            {
+                "ok": False,
+                "action": "update",
+                "install_method": method,
+                "version_before": version_before,
+                "error": f"upgrade failed: {exc}",
+            },
+        )
     if proc.returncode != 0:
         detail = (proc.stderr or proc.stdout or "").strip()[-500:]
-        return _emit_update_result(opts, {"ok": False, "action": "update", "install_method": method, "error": detail or "upgrade failed"})
+        return _emit_update_result(
+            opts,
+            {
+                "ok": False,
+                "action": "update",
+                "install_method": method,
+                "version_before": version_before,
+                "error": detail or "upgrade failed",
+            },
+        )
+    version_after = _runtime_tokdash_version(runtime_command, venv_python)
+    updated = (version_before != version_after) if version_before and version_after else None
 
     # The upgrade landed, but a managed service is still running the OLD code until it
     # restarts. A failed restart must NOT be reported as success — otherwise the dashboard
@@ -653,6 +676,9 @@ def cmd_update(opts: Options) -> int:
             "action": "update",
             "install_method": method,
             "command": cmd,
+            "version_before": version_before,
+            "version_after": version_after,
+            "updated": updated,
             "has_managed_service": restart_managed,
             "service_type": service_type,
             "service_name": service_name,
@@ -660,6 +686,27 @@ def cmd_update(opts: Options) -> int:
             "restart_failed": restart_failed,
         },
     )
+
+
+def _runtime_tokdash_version(runtime_command: List[str], python_path: str = "") -> Optional[str]:
+    """Return the Tokdash version for a recorded runtime, or None if it cannot be read."""
+    cmd = list(runtime_command or [])
+    if not cmd and python_path:
+        cmd = [python_path, "-m", "tokdash"]
+    if not cmd:
+        return None
+    try:
+        proc = subprocess.run(cmd + ["--version"], capture_output=True, text=True, timeout=20)
+    except Exception:
+        return None
+    if proc.returncode != 0:
+        return None
+    text = (proc.stdout or proc.stderr or "").strip()
+    match = re.search(r"\btokdash\s+([^\s]+)", text, flags=re.I)
+    if match:
+        return match.group(1)
+    match = re.search(r"\b\d+(?:\.\d+)+(?:[a-zA-Z0-9_.+-]*)?\b", text)
+    return match.group(0) if match else None
 
 
 def _update_guidance(opts: Options, message: str) -> int:
@@ -676,7 +723,17 @@ def _emit_update_result(opts: Options, result: Dict[str, Any]) -> int:
     if opts.json:
         _print_json(result)
     elif result.get("ok"):
-        print(f"Updated Tokdash via {result.get('install_method')}.")
+        before = result.get("version_before")
+        after = result.get("version_after")
+        method = result.get("install_method")
+        if before and after and before == after:
+            print(f"Tokdash is already at {after} via {method}.")
+        elif before and after:
+            print(f"Updated Tokdash via {method}: {before} -> {after}.")
+        elif after:
+            print(f"Updated Tokdash via {method}: now {after}.")
+        else:
+            print(f"Updated Tokdash via {method}.")
         if result.get("service_restarted"):
             print("  • restarted the background service")
         elif not result.get("has_managed_service"):
@@ -689,7 +746,12 @@ def _emit_update_result(opts: Options, result: Dict[str, Any]) -> int:
             cmd = f"launchctl kickstart -k gui/$(id -u)/{name}"
         else:
             cmd = f"systemctl --user restart {name}"
-        print(f"Upgrade installed via {result.get('install_method')}, but the service restart FAILED —")
+        before = result.get("version_before")
+        after = result.get("version_after")
+        version = f" ({before} -> {after})" if before and after and before != after else (
+            f" (still {after})" if after else ""
+        )
+        print(f"Upgrade command completed via {result.get('install_method')}{version}, but the service restart FAILED —")
         print(f"  the service is still running the old code. Run: {cmd}")
     else:
         print(f"Update failed: {result.get('error')}")

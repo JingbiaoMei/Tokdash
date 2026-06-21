@@ -714,9 +714,10 @@ def _svc_block():
 
 
 def _capture_run(monkeypatch):
-    calls = {}
+    calls = {"cmds": []}
 
     def fake_run(cmd, *a, **k):
+        calls["cmds"].append(cmd)
         calls["cmd"] = cmd
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
@@ -737,7 +738,7 @@ def test_update_pipx_upgrades_and_restarts(monkeypatch, capsys):
     monkeypatch.setattr(systemd, "restart", fake_restart)
     rc, payload = run_json(["update", "--json"], capsys)
     assert rc == 0 and payload["ok"] is True
-    assert calls["cmd"] == ["pipx", "upgrade", "tokdash"]
+    assert ["pipx", "upgrade", "tokdash"] in calls["cmds"]
     assert payload["service_restarted"] is True and restarted["n"] == "tokdash"
 
 
@@ -758,8 +759,46 @@ def test_update_managed_venv_pip_installs(monkeypatch, capsys):
     manifest.write_manifest(_manifest("managed-venv", python=py, owned=True))
     calls = _capture_run(monkeypatch)
     rc, payload = run_json(["update", "--json"], capsys)
-    assert rc == 0 and calls["cmd"] == [py, "-m", "pip", "install", "-U", "tokdash"]
+    assert rc == 0 and [py, "-m", "pip", "install", "-U", "tokdash"] in calls["cmds"]
     assert payload["service_restarted"] is False  # no managed service in this manifest
+
+
+def test_update_reports_version_before_and_after(monkeypatch, capsys):
+    py = str(paths.managed_venv_python())
+    manifest.write_manifest(_manifest("managed-venv", python=py, owned=True))
+    versions = iter(["tokdash 1.0.1\n", "tokdash 1.0.2\n"])
+    calls = []
+
+    def fake_run(cmd, *a, **k):
+        calls.append(cmd)
+        if cmd == [py, "-m", "tokdash", "--version"]:
+            return subprocess.CompletedProcess(cmd, 0, next(versions), "")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(engine.subprocess, "run", fake_run)
+    rc, payload = run_json(["update", "--json"], capsys)
+    assert rc == 0 and payload["ok"] is True
+    assert payload["version_before"] == "1.0.1"
+    assert payload["version_after"] == "1.0.2"
+    assert payload["updated"] is True
+    assert [py, "-m", "pip", "install", "-U", "tokdash"] in calls
+
+
+def test_update_human_reports_no_version_change(monkeypatch, capsys):
+    py = str(paths.managed_venv_python())
+    manifest.write_manifest(_manifest("managed-venv", python=py, owned=True))
+
+    def fake_run(cmd, *a, **k):
+        if cmd == [py, "-m", "tokdash", "--version"]:
+            return subprocess.CompletedProcess(cmd, 0, "tokdash 1.0.2\n", "")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(engine.subprocess, "run", fake_run)
+    capsys.readouterr()
+    rc = run(["update"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "Tokdash is already at 1.0.2 via managed-venv." in out
 
 
 def test_update_existing_runtime_only_guides(monkeypatch, capsys):

@@ -78,6 +78,28 @@ want setup state without creating a background service.
 Setup never creates a `pipx` environment — pipx is *your* install path, so uninstall never
 touches it.
 
+### Migrating an existing setup to a managed venv
+
+If setup currently records `install_method: existing` (common for conda, system Python, or
+`python -m pip install --user` installs), `tokdash update` will not mutate that interpreter.
+To let Tokdash own the service runtime and manage future upgrades, re-run setup with a
+managed venv:
+
+```bash
+# Upgrade the tokdash command you are about to run, for example:
+python3 -m pip install --user -U tokdash
+# or, for a conda base install:
+conda run -n base python -m pip install -U tokdash
+tokdash setup --runtime venv --force
+tokdash doctor
+```
+
+This keeps usage history and config under `<data_dir>`, rewrites the user service to run
+`<data_dir>/runtime/python-venv/bin/python -m tokdash`, and records
+`install_method: managed-venv` in `install.json`. Future `tokdash update` runs
+`pip install -U tokdash` inside that venv and restarts the service. If your runtime is pipx,
+you can keep it instead; `tokdash update` knows how to call `pipx upgrade tokdash`.
+
 ### Background service by platform
 
 | Platform | Backend | Notes |
@@ -151,6 +173,10 @@ tokdash update --json     # machine-readable result
 `pip install -U` against your system/conda Python. If the upgrade installs but the managed
 service fails to restart, `update` reports failure (non-zero exit) rather than a misleading
 success — the service would otherwise keep running the old code.
+
+Human output and `--json` include the Tokdash runtime version before and after the upgrade
+when it can be read. A real version change is shown as `old -> new`; an unchanged version is
+reported as already current, while still noting whether the background service was restarted.
 
 ### Update checks (opt-in, default-off)
 

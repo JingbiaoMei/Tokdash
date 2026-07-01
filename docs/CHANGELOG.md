@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+## 1.0.5 - 2026-07-01
+
+### Added
+- Added native Windows support seams and CI coverage, including Windows-aware client path resolution, `msvcrt` file locking, Task Scheduler onboarding support, Windows venv path handling, and PowerShell statusline documentation.
+- Added Windows-focused tests for file locking, client path discovery, service selection, and Task Scheduler rendering.
+
 ## 1.0.4 - 2026-06-22
 
 ### Added

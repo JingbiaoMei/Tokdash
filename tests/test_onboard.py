@@ -101,6 +101,7 @@ def run_json(argv, capsys):
 
 def test_paths_follow_data_dir(tmp_path, monkeypatch):
     monkeypatch.setenv("TOKDASH_DATA_DIR", str(tmp_path / "x"))
+    monkeypatch.setattr(paths, "_windows_venv_layout", lambda: False)
     assert paths.manifest_path() == tmp_path / "x" / "install.json"
     assert paths.managed_venv_python() == tmp_path / "x" / "runtime" / "python-venv" / "bin" / "python"
     assert not paths.is_default_data_dir()
@@ -393,6 +394,7 @@ def test_setup_open_dashboard_uses_detached_opener(monkeypatch):
         return FakeProcess()
 
     monkeypatch.setattr(engine.sys, "platform", "linux")
+    monkeypatch.setattr(engine.os, "name", "posix")
     monkeypatch.setattr(detect, "os_kind", lambda: "linux")
     monkeypatch.setattr(engine.shutil, "which", fake_which)
     monkeypatch.setattr(engine.subprocess, "Popen", fake_popen)

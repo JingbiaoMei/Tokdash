@@ -2,6 +2,7 @@
 import sqlite3
 from pathlib import Path
 
+from tokdash import osinfo
 from tokdash.pricing import PricingDatabase
 from tokdash.sources.coding_tools import BaseParser, HermesParser, _sig_cache
 
@@ -196,6 +197,7 @@ def test_hermes_parser_dedup_across_dbs(monkeypatch, tmp_path):
 def test_hermes_parser_default_dir(monkeypatch, tmp_path):
     """Without HERMES_HOME, defaults to ~/.hermes."""
     monkeypatch.delenv("HERMES_HOME", raising=False)
+    monkeypatch.setattr(osinfo, "is_windows", lambda: False)
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     _sig_cache.clear()
     BaseParser._entry_cache.clear()

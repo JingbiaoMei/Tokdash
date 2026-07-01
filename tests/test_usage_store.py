@@ -523,6 +523,7 @@ def _codex_session_rows(
 
 def test_codex_guardian_sessions_are_hidden_from_session_view_only(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
     monkeypatch.delenv("TOKDASH_INCLUDE_CODEX_GUARDIAN", raising=False)
     _clear_parser_caches()
     codex_dir = tmp_path / ".codex" / "sessions" / "2026" / "06" / "19"
@@ -551,6 +552,7 @@ def test_codex_sessions_echo_effective_review_default(monkeypatch, tmp_path):
     """The response echoes the effective review-session default so the dashboard
     toggle can adopt the server's TOKDASH_INCLUDE_CODEX_GUARDIAN default."""
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
     codex_dir = tmp_path / ".codex" / "sessions" / "2026" / "06" / "19"
     _write_jsonl(codex_dir / "normal.jsonl", _codex_session_rows("normal-session"))
 
@@ -623,6 +625,7 @@ def test_session_display_name_fallbacks(monkeypatch, tmp_path):
 
 def test_codex_session_display_name_uses_state_db_title(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
     _clear_parser_caches()
 
     codex_dir = tmp_path / ".codex" / "sessions" / "2026" / "06" / "19"
@@ -974,6 +977,7 @@ def test_get_sessions_data_passes_period_window_to_opencode_loader(monkeypatch):
 
 def test_opencode_signatures_include_wal_and_shm(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
     opencode_dir = tmp_path / ".local" / "share" / "opencode"
     opencode_dir.mkdir(parents=True)
     for name in ("opencode.db", "opencode.db-wal", "opencode.db-shm"):

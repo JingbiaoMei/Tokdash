@@ -253,9 +253,9 @@ def test_managed_venv_python_windows_uses_scripts(monkeypatch, tmp_path):
 
 
 def test_managed_venv_python_posix_unchanged(tmp_path, monkeypatch):
-    # Explicit control: os.name is whatever the real test host reports (posix here); this
-    # locks in that the non-Windows shape is untouched by the Tier 2 addition.
+    # Explicitly force the POSIX branch so this remains meaningful on windows-latest too.
     monkeypatch.setenv("TOKDASH_DATA_DIR", str(tmp_path / "dd"))
+    monkeypatch.setattr(paths, "_windows_venv_layout", lambda: False)
     assert paths.managed_venv_python() == tmp_path / "dd" / "runtime" / "python-venv" / "bin" / "python"
 
 

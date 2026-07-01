@@ -27,8 +27,11 @@ def _isolate(monkeypatch, tmp_path):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
     # Deterministic, offline detection by default; individual tests override.
     monkeypatch.setattr(detect, "probe_port", lambda port=55423, *a, **k: {"port": port, "open": False, "is_tokdash": False, "version": None})
+    monkeypatch.setattr(detect, "os_kind", lambda: "linux")
     monkeypatch.setattr(detect, "is_tty", lambda: True)
     monkeypatch.setattr(detect, "systemd_user_available", lambda: True)
+    monkeypatch.setattr(detect, "launchd_available", lambda: False)
+    monkeypatch.setattr(detect, "winsched_available", lambda: False)
     updatecheck._cache.update({"ts": 0.0, "data": None})  # no cross-test cache leak
     yield
     updatecheck._cache.update({"ts": 0.0, "data": None})
@@ -1315,7 +1318,7 @@ def test_doctor_ignores_tokdash_port_prefers_manifest(monkeypatch, capsys):
     )
     manifest.write_manifest(man)
     capsys.readouterr()
-    rc = cli.cli(["doctor", "--json"])
+    cli.cli(["doctor", "--json"])
     payload = json.loads(capsys.readouterr().out)
     assert payload["port"]["port"] == 55555
 

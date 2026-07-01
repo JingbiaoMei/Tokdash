@@ -15,6 +15,7 @@ from tokdash import clientpaths, osinfo
 def test_hermes_search_dirs_posix_default(monkeypatch):
     """POSIX default (this host): ``~/.hermes``, unchanged."""
     monkeypatch.delenv("HERMES_HOME", raising=False)
+    monkeypatch.setattr(osinfo, "is_windows", lambda: False)
     assert clientpaths.hermes_search_dirs() == [Path.home() / ".hermes"]
 
 

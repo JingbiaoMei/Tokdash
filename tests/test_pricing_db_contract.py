@@ -174,6 +174,18 @@ def test_fable_5_aliases_and_pricing():
         )
 
 
+def test_sonnet_5_aliases_and_introductory_pricing():
+    """Sonnet 5 aliases must resolve to Anthropic's introductory API pricing."""
+    db = PricingDatabase()
+
+    expected_cost = (1000 * 2 + 2000 * 10 + 3000 * 0.20 + 4000 * 2.50) / 1_000_000
+    for model in ["claude-sonnet-5", "sonnet-5", "sonnet5", "claude-sonnet-5-20260630"]:
+        cost = db.get_cost(model, 1000, 2000, 3000, 4000)
+        assert abs(cost - expected_cost) < 1e-12, (
+            f"{model!r} should resolve to Claude Sonnet 5 introductory pricing"
+        )
+
+
 def test_derived_antigravity_models_resolve():
     """Antigravity models must resolve and match their base model pricing."""
     db = PricingDatabase()

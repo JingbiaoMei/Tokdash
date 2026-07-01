@@ -1,6 +1,6 @@
 {
   "version": "2.0.8",
-  "lastUpdated": "2026-06-15T14:40:31Z",
+  "lastUpdated": "2026-07-01T22:21:24Z",
   "note": "Comprehensive pricing database with all Moonshot, MiniMax, GLM, and OpenAI models from OpenRouter. Cache pricing estimated at 10% of input for cache_read, 100% of input for cache_write.",
   "aliases": {
     "kimi-2.5": "kimi-k2.5",
@@ -32,7 +32,10 @@
     "opus-4.8": "claude-opus-4.8",
     "fable-5": "claude-fable-5",
     "fable5": "claude-fable-5",
-    "fable": "claude-fable-5"
+    "fable": "claude-fable-5",
+    "sonnet-5": "claude-sonnet-5",
+    "sonnet5": "claude-sonnet-5",
+    "claude-sonnet-5-20260630": "claude-sonnet-5"
   },
   "models": {
     "_comment_moonshot": "=== Moonshot AI / Kimi Models ===",
@@ -1026,6 +1029,16 @@
       "cache_write": 12.5,
       "unit": "per_million_tokens",
       "source": "openrouter.ai/anthropic/claude-opus-4.8-fast"
+    },
+    "claude-sonnet-5": {
+      "provider": "anthropic",
+      "input": 2,
+      "output": 10,
+      "cache_read": 0.2,
+      "cache_write": 2.5,
+      "unit": "per_million_tokens",
+      "note": "Introductory pricing through 2026-08-31; standard pricing starts 2026-09-01.",
+      "source": "platform.claude.com/docs/en/about-claude/pricing"
     },
     "claude-sonnet-4": {
       "provider": "anthropic",

@@ -9,6 +9,7 @@ import secrets
 import threading
 import time
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import datetime
 from json import JSONDecodeError
 from pathlib import Path
@@ -362,6 +363,17 @@ class CacheBackpressureError(RuntimeError):
     """Raised when a cold cache fill would block request workers under load."""
 
 
+@dataclass(frozen=True)
+class CacheFetchResult:
+    value: Any
+    status: str
+    age_seconds: Optional[float]
+
+    @property
+    def served_from_cache(self) -> bool:
+        return self.status in {"hit", "stale"}
+
+
 # Bound the number of *heavy* computes (full-history reparses) running at once.
 # Without this, a burst of requests for distinct cache keys each grabs an AnyIO
 # worker token and runs a multi-second parse; the pool saturates (so even cache
@@ -383,10 +395,38 @@ def _raise_backpressure(message: str, *, key: str, reason: str, had_stale: bool)
     raise CacheBackpressureError(message)
 
 
-def _cached_route(route_name: str, cache_key: str, fetch_fn) -> Any:
+def _response_cache_metadata(result: CacheFetchResult) -> Dict[str, Any]:
+    return {
+        "status": result.status,
+        "served_from_cache": result.served_from_cache,
+        "age_seconds": result.age_seconds,
+    }
+
+
+def _cached_route(
+    route_name: str,
+    cache_key: str,
+    fetch_fn,
+    *,
+    force_refresh: bool = False,
+    include_cache_metadata: bool = False,
+) -> Any:
     started = time.monotonic()
     try:
-        return get_cached_or_fetch(cache_key, fetch_fn)
+        result = get_cached_or_fetch(
+            cache_key,
+            fetch_fn,
+            force_refresh=force_refresh,
+            return_metadata=include_cache_metadata,
+        )
+        if not include_cache_metadata:
+            return result
+        assert isinstance(result, CacheFetchResult)
+        if not isinstance(result.value, dict):
+            return result.value
+        payload = dict(result.value)
+        payload["response_cache"] = _response_cache_metadata(result)
+        return payload
     finally:
         logger.debug(
             "tokdash route cache fetch route=%s key=%s duration_ms=%.1f",
@@ -436,10 +476,17 @@ def _clear_cache() -> None:
         _cache.clear()
 
 
-def get_cached_or_fetch(key: str, fetch_fn) -> Any:
+def get_cached_or_fetch(
+    key: str,
+    fetch_fn,
+    *,
+    force_refresh: bool = False,
+    return_metadata: bool = False,
+) -> Any:
     """Cache with single-flight, stale-while-revalidate, and a heavy-compute cap.
 
     - Fresh hit (age < TTL): returned immediately with no locking or worker contention.
+      ``force_refresh=True`` skips this fast path so manual refreshes recompute.
     - Stale hit: at most one request refreshes the key; concurrent callers keep
       getting the stale value instead of stampeding the parser.
     - Cold miss: if this key or the global heavy-compute pool is already busy, fail
@@ -447,16 +494,20 @@ def get_cached_or_fetch(key: str, fetch_fn) -> Any:
       blocked. A later request can retry once the in-flight fill finishes.
     - A global semaphore bounds how many heavy computes run at once across all keys.
     """
+    def result(value: Any, status: str, age_seconds: Optional[float]) -> Any:
+        cache_result = CacheFetchResult(value=value, status=status, age_seconds=age_seconds)
+        return cache_result if return_metadata else value
+
     now = datetime.now().timestamp()
     hit = _cache_get(key)
-    if hit is not None and now - hit[0] < CACHE_TTL:
-        return hit[1]
+    if hit is not None and now - hit[0] < CACHE_TTL and not force_refresh:
+        return result(hit[1], "hit", now - hit[0])
 
     lock = _key_lock(key)
     if not lock.acquire(blocking=False):
         # Another thread is already computing this key.
         if hit is not None:
-            return hit[1]  # serve stale rather than stampede the parser
+            return result(hit[1], "stale", now - hit[0])  # serve cached rather than stampede the parser
         _raise_backpressure(
             f"Cache fill already in progress for {key}",
             key=key,
@@ -466,12 +517,13 @@ def get_cached_or_fetch(key: str, fetch_fn) -> Any:
     try:
         # Re-check under the lock: a prior holder may have just stored a fresh value.
         latest = _cache_get(key)
-        if latest is not None and datetime.now().timestamp() - latest[0] < CACHE_TTL:
-            return latest[1]
+        locked_now = datetime.now().timestamp()
+        if latest is not None and locked_now - latest[0] < CACHE_TTL and not force_refresh:
+            return result(latest[1], "hit", locked_now - latest[0])
         epoch = _cache_epoch_value()
         if not _compute_semaphore.acquire(blocking=False):
             if latest is not None:
-                return latest[1]
+                return result(latest[1], "stale", locked_now - latest[0])
             _raise_backpressure(
                 "Too many cold requests; retry shortly",
                 key=key,
@@ -483,7 +535,7 @@ def get_cached_or_fetch(key: str, fetch_fn) -> Any:
         finally:
             _compute_semaphore.release()
         _cache_set_if_epoch(key, fresh, epoch)
-        return fresh
+        return result(fresh, "recomputed", 0.0)
     finally:
         lock.release()
 
@@ -691,7 +743,12 @@ def update_pricing_db(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 @app.get("/api/usage")
-def get_usage(period: str = "today", date_from: Optional[str] = None, date_to: Optional[str] = None) -> Dict[str, Any]:
+def get_usage(
+    period: str = "today",
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    refresh: bool = False,
+) -> Dict[str, Any]:
     _validate_date_params(date_from, date_to)
     try:
         cache_key = _pricing_cache_key(f"usage_{period}_{date_from}_{date_to}")
@@ -699,6 +756,8 @@ def get_usage(period: str = "today", date_from: Optional[str] = None, date_to: O
             "/api/usage",
             cache_key,
             lambda: compute_usage_with_comparison(period, date_from, date_to),
+            force_refresh=refresh,
+            include_cache_metadata=True,
         )
     except CacheBackpressureError as e:
         raise HTTPException(status_code=503, detail=str(e))

@@ -202,6 +202,16 @@ def test_public_base_path_rendering():
     assert "__TOKDASH_BASE_PATH__" not in sw
 
 
+def test_dashboard_refresh_status_copy_and_auto_success_reset():
+    html = api._render_dashboard_html("")
+
+    assert "refreshFailed: 'Failed — retry'" in html
+    assert "refreshFailed: '失败，请重试'" in html
+    assert "Refresh browser" not in html
+    assert "刷新浏览器" not in html
+    assert "setRefreshUiState('idle');" in html
+
+
 def test_api_custom_date_ranges_and_validation(synthetic_api_data):
     usage = api.get_usage(date_from="2026-04-08", date_to="2026-04-08")
     assert "comparison" in usage
@@ -223,6 +233,31 @@ def test_api_custom_date_ranges_and_validation(synthetic_api_data):
         api.get_usage(date_from="2026-04-09", date_to="2026-04-08")
     assert excinfo.value.status_code == 400
     assert "on or before" in excinfo.value.detail
+
+
+def test_usage_refresh_param_forces_recompute_and_reports_cache_metadata(monkeypatch):
+    calls = []
+
+    def fake_usage(period, date_from, date_to):
+        calls.append((period, date_from, date_to))
+        return {"total_tokens": len(calls), "timestamp": f"ts-{len(calls)}"}
+
+    monkeypatch.setattr(api, "compute_usage_with_comparison", fake_usage)
+
+    first = api.get_usage(period="today")
+    cached = api.get_usage(period="today")
+    refreshed = api.get_usage(period="today", refresh=True)
+
+    assert first["total_tokens"] == 1
+    assert first["response_cache"]["status"] == "recomputed"
+    assert first["response_cache"]["served_from_cache"] is False
+    assert cached["total_tokens"] == 1
+    assert cached["response_cache"]["status"] == "hit"
+    assert cached["response_cache"]["served_from_cache"] is True
+    assert refreshed["total_tokens"] == 2
+    assert refreshed["response_cache"]["status"] == "recomputed"
+    assert refreshed["response_cache"]["served_from_cache"] is False
+    assert calls == [("today", None, None), ("today", None, None)]
 
 
 @pytest.mark.skipif(

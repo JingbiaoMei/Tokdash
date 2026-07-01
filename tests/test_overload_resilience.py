@@ -37,6 +37,70 @@ def test_fresh_hit_returns_cached_without_recomputing():
     assert len(calls) == 1
 
 
+def test_force_refresh_recomputes_fresh_hit_and_updates_cache():
+    calls = []
+
+    def fetch():
+        calls.append(1)
+        return f"v{len(calls)}"
+
+    assert api.get_cached_or_fetch("k-force", fetch) == "v1"
+    assert api.get_cached_or_fetch("k-force", fetch, force_refresh=True) == "v2"
+    assert api.get_cached_or_fetch("k-force", fetch) == "v2"
+    assert len(calls) == 2
+
+
+def test_force_refresh_returns_cached_value_under_same_key_contention():
+    api._cache["k-force-stale"] = (datetime.now().timestamp(), "cached")
+    calls = []
+    started = threading.Event()
+    release = threading.Event()
+
+    def slow_fetch():
+        calls.append(1)
+        started.set()
+        release.wait(timeout=5)
+        return "fresh"
+
+    refreshed: dict[str, str] = {}
+
+    def refresher():
+        refreshed["v"] = api.get_cached_or_fetch("k-force-stale", slow_fetch, force_refresh=True)
+
+    rt = threading.Thread(target=refresher)
+    rt.start()
+    assert started.wait(timeout=5)
+
+    assert api.get_cached_or_fetch("k-force-stale", slow_fetch, force_refresh=True) == "cached"
+
+    release.set()
+    rt.join(timeout=5)
+    assert refreshed["v"] == "fresh"
+    assert len(calls) == 1
+    assert api._cache["k-force-stale"][1] == "fresh"
+
+
+def test_cache_fetch_metadata_uses_shallow_copy_without_mutating_cached_dict():
+    calls = []
+
+    def fetch():
+        calls.append(1)
+        return {"value": len(calls)}
+
+    first = api.get_cached_or_fetch("k-meta", fetch, return_metadata=True)
+    second = api.get_cached_or_fetch("k-meta", fetch, return_metadata=True)
+
+    assert first.value == {"value": 1}
+    assert first.status == "recomputed"
+    assert first.served_from_cache is False
+    assert second.value == {"value": 1}
+    assert second.status == "hit"
+    assert second.served_from_cache is True
+    assert second.age_seconds is not None
+    assert "response_cache" not in api._cache["k-meta"][1]
+    assert len(calls) == 1
+
+
 def test_cold_same_key_waiters_fail_fast_instead_of_blocking_workers():
     """Same cold key -> one compute; concurrent waiters get backpressure."""
     calls = []

@@ -82,10 +82,16 @@ def test_api_response_cache_busts_when_override_changes_out_of_band(monkeypatch)
     monkeypatch.setattr(api, "compute_usage_with_comparison", fake_usage)
 
     try:
-        assert api.get_usage("today") == {"call": 1}
-        assert api.get_usage("today") == {"call": 1}
+        first = api.get_usage("today")
+        cached = api.get_usage("today")
+        assert first["call"] == 1
+        assert first["response_cache"]["status"] == "recomputed"
+        assert cached["call"] == 1
+        assert cached["response_cache"]["status"] == "hit"
         _write_override()
-        assert api.get_usage("today") == {"call": 2}
+        refreshed = api.get_usage("today")
+        assert refreshed["call"] == 2
+        assert refreshed["response_cache"]["status"] == "recomputed"
         assert calls == [("today", None, None), ("today", None, None)]
     finally:
         api._clear_cache()
@@ -108,12 +114,18 @@ def test_api_response_cache_busts_when_existing_override_changes_out_of_band(mon
     monkeypatch.setattr(api, "compute_usage_with_comparison", fake_usage)
 
     try:
-        assert api.get_usage("today") == {"call": 1}
-        assert api.get_usage("today") == {"call": 1}
+        first = api.get_usage("today")
+        cached = api.get_usage("today")
+        assert first["call"] == 1
+        assert first["response_cache"]["status"] == "recomputed"
+        assert cached["call"] == 1
+        assert cached["response_cache"]["status"] == "hit"
         ov.write_text(json.dumps({"models": {"foo": {"input": 2.0, "output": 2.0}}}), encoding="utf-8")
         st = ov.stat()
         os.utime(ov, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000))
-        assert api.get_usage("today") == {"call": 2}
+        refreshed = api.get_usage("today")
+        assert refreshed["call"] == 2
+        assert refreshed["response_cache"]["status"] == "recomputed"
         assert calls == [("today", None, None), ("today", None, None)]
     finally:
         api._clear_cache()

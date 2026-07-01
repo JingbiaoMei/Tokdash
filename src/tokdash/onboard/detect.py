@@ -9,42 +9,33 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
-import platform
 import shutil
 import socket
 import subprocess
 import sys
 import urllib.request
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
+from .. import osinfo
 from . import manifest, paths
 
 MIN_PYTHON = (3, 10)
 
 # --- OS / session ---------------------------------------------------------------
+#
+# Canonical implementation lives in ``tokdash.osinfo`` (Tier 0 seams refactor).
+# These wrappers exist so existing callers of ``detect.os_kind()`` / ``detect.is_wsl()``
+# (and tests that ``monkeypatch.setattr(detect, "os_kind", ...)``) keep working unchanged.
 
 
 def is_wsl() -> bool:
-    if sys.platform != "linux":
-        return False
-    if "microsoft" in platform.release().lower():
-        return True
-    try:
-        return "microsoft" in Path("/proc/version").read_text(encoding="utf-8").lower()
-    except OSError:
-        return False
+    return osinfo.is_wsl()
 
 
 def os_kind() -> str:
     """One of ``linux`` | ``wsl`` | ``macos`` | ``windows``."""
-    if sys.platform == "darwin":
-        return "macos"
-    if sys.platform.startswith("win"):
-        return "windows"
-    if is_wsl():
-        return "wsl"
-    return "linux"
+    return osinfo.os_kind()
 
 
 def is_tty() -> bool:
@@ -169,6 +160,11 @@ def launchd_available() -> bool:
     return os_kind() == "macos" and shutil.which("launchctl") is not None
 
 
+def winsched_available() -> bool:
+    """Whether a per-user Windows Task Scheduler task can be managed (Windows only)."""
+    return os_kind() == "windows" and shutil.which("schtasks") is not None
+
+
 def tailscale_available() -> bool:
     """Whether the `tailscale` CLI is present (for wizard-run Tailscale Serve)."""
     return shutil.which("tailscale") is not None
@@ -188,9 +184,17 @@ def pipx_tokdash_python() -> Optional[str]:
         home / ".local" / "pipx" / "venvs" / "tokdash" / "bin" / "python",
         home / ".local" / "share" / "pipx" / "venvs" / "tokdash" / "bin" / "python",
     ]
+    if os_kind() == "windows":
+        # pipx's default Windows venv layout puts the interpreter under Scripts/, same as
+        # any other Windows venv (paths.managed_venv_python() makes the same swap).
+        local_appdata = os.environ.get("LOCALAPPDATA", "").strip()
+        if local_appdata:
+            candidates.insert(0, Path(local_appdata).expanduser() / "pipx" / "venvs" / "tokdash" / "Scripts" / "python.exe")
+        candidates.append(home / "pipx" / "venvs" / "tokdash" / "Scripts" / "python.exe")
     pipx_home = os.environ.get("PIPX_HOME", "").strip()
     if pipx_home:
-        candidates.insert(0, Path(pipx_home).expanduser() / "venvs" / "tokdash" / "bin" / "python")
+        suffix = ("Scripts", "python.exe") if os_kind() == "windows" else ("bin", "python")
+        candidates.insert(0, Path(pipx_home).expanduser() / "venvs" / "tokdash" / suffix[0] / suffix[1])
     for c in candidates:
         if c.is_file():
             return str(c)
@@ -228,9 +232,11 @@ def existing_service() -> Dict[str, Any]:
     """Report any service file present (setup-written or manual)."""
     unit = paths.systemd_unit_path()
     plist = paths.launchd_plist_path()
+    task = paths.winsched_task_path() if os_kind() == "windows" else None
     return {
         "systemd_unit": str(unit) if unit.is_file() else None,
         "launchd_plist": str(plist) if plist.is_file() else None,
+        "winsched_task": str(task) if task and task.is_file() else None,
     }
 
 
@@ -296,6 +302,7 @@ def detect_all(port: int) -> Dict[str, Any]:
         "tty": is_tty(),
         "systemd_user": systemd_user_available(),
         "launchd": launchd_available(),
+        "winsched": winsched_available(),
         "tailscale": tailscale_available(),
         "python": python_fitness(),
         "pipx": find_pipx(),

@@ -159,7 +159,7 @@ def build_parser(prog: str) -> argparse.ArgumentParser:
     )
     lifecycle.add_argument(
         "--service",
-        choices=["auto", "systemd", "launchd", "none"],
+        choices=["auto", "systemd", "launchd", "winsched", "none"],
         default="auto",
         help="Background service type (default: auto)",
     )

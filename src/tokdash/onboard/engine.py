@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from . import detect, launchd, manifest, paths, plan, runtime, systemd, tailscale, updatecheck
+from . import detect, launchd, manifest, paths, plan, runtime, systemd, tailscale, updatecheck, winsched
 from .plan import DEFAULT_PORT, Options
 
 EXIT_OK = 0
@@ -108,7 +108,7 @@ def cmd_setup(opts: Options) -> int:
         and not opts.yes
         and detection["tty"]
         and detection.get("tailscale")
-        and result.get("service", {}).get("type") in {"systemd-user", "launchd"}
+        and result.get("service", {}).get("type") in {"systemd-user", "launchd", "winsched"}
         and plan._is_loopback(result.get("bind", ""))
     ):
         _offer_tailscale(result)
@@ -409,6 +409,43 @@ def _apply_setup(p: Dict[str, Any], opts: Options) -> Dict[str, Any]:
             "created_by_setup": True, "marker": manifest.marker_token(marker_id),
         }
         changed.append("service:launchd")
+    elif svc_type == "winsched":
+        task_text = winsched.render_task(
+            rt["command"], p["bind"], p["port"], marker_id=marker_id, env_data_dir=p["env_data_dir"]
+        )
+        task_path = winsched.write_task(task_text)
+        winsched_errors: List[str] = []
+        try:
+            # Non-zero is benign only in that `/F` already forces a clean replace; a genuine
+            # failure here means the task never got registered at all.
+            proc = winsched.create(task_path)
+            if proc.returncode != 0:
+                return {
+                    "ok": False, "action": "setup",
+                    "error": f"schtasks /Create failed: {_proc_failure_detail(proc, f'exit {proc.returncode}')}",
+                }
+        except subprocess.TimeoutExpired as exc:
+            return {"ok": False, "action": "setup", "error": _timeout_detail("schtasks /Create", exc)}
+        except Exception as exc:  # pragma: no cover - environment dependent
+            return {"ok": False, "action": "setup", "error": f"failed to register Task Scheduler task: {exc}"}
+        try:
+            run_proc = winsched.run_now()
+            if run_proc.returncode != 0:
+                winsched_errors.append(
+                    "schtasks /Run: " + _proc_failure_detail(run_proc, f"exit {run_proc.returncode}")
+                )
+        except subprocess.TimeoutExpired as exc:
+            winsched_errors.append(_timeout_detail("schtasks /Run", exc))
+        except Exception as exc:  # pragma: no cover - environment dependent
+            return {"ok": False, "action": "setup", "error": f"failed to start Task Scheduler task: {exc}"}
+        service_status = winsched.status()
+        if winsched_errors:
+            service_status["start_error"] = "; ".join(winsched_errors)
+        service_block = {
+            "type": "winsched", "unit": str(task_path), "name": winsched.TASK_NAME,
+            "created_by_setup": True, "marker": manifest.marker_token(marker_id),
+        }
+        changed.append("service:winsched")
 
     # 3. Record the manifest (the revert contract).
     fit = detect.python_fitness(rt.get("python"))
@@ -454,7 +491,7 @@ def _apply_setup(p: Dict[str, Any], opts: Options) -> Dict[str, Any]:
                 ),
             })
             return result
-    if svc_type in {"systemd-user", "launchd"}:
+    if svc_type in {"systemd-user", "launchd", "winsched"}:
         readiness = _wait_for_service_ready(p["bind"], p["port"])
         result["readiness"] = readiness
         if not readiness.get("ok"):
@@ -496,6 +533,7 @@ def cmd_doctor(opts: Options) -> int:
         "python": {"version": fit.get("version"), "fit": fit.get("fit"), "reason": fit.get("reason")},
         "systemd_user": detection["systemd_user"],
         "launchd": detection.get("launchd"),
+        "winsched": detection.get("winsched"),
         "data_dir": detection["data_dir"],
         "manifest_present": man is not None,
         "install_method": (man or {}).get("install_method"),
@@ -516,7 +554,12 @@ def cmd_doctor(opts: Options) -> int:
 def _doctor_service(man: Optional[Dict[str, Any]], detection: Dict[str, Any]) -> Dict[str, Any]:
     service = (man or {}).get("service") or {}
     existing = detection["existing_service"]
-    unit = service.get("unit") or existing.get("systemd_unit") or existing.get("launchd_plist")
+    unit = (
+        service.get("unit")
+        or existing.get("systemd_unit")
+        or existing.get("launchd_plist")
+        or existing.get("winsched_task")
+    )
     stype = service.get("type")
     info: Dict[str, Any] = {"type": stype, "unit": unit, "present": bool(unit and Path(unit).is_file())}
     if stype == "systemd-user" and detection["systemd_user"]:
@@ -530,6 +573,9 @@ def _doctor_service(man: Optional[Dict[str, Any]], detection: Dict[str, Any]) ->
     elif stype == "launchd" and detection.get("launchd"):
         loaded = launchd.is_loaded()
         info.update({"enabled": loaded, "active": loaded})
+    elif stype == "winsched" and detection.get("winsched"):
+        registered = winsched.is_registered()
+        info.update({"enabled": registered, "active": winsched.is_running() if registered else False})
     return info
 
 
@@ -554,7 +600,7 @@ def _append_service_issues(issues: List[str], man: Optional[Dict[str, Any]], ser
             )
         return
     stype = service.get("type")
-    if stype not in {"systemd-user", "launchd"}:
+    if stype not in {"systemd-user", "launchd", "winsched"}:
         return
     if not service.get("present"):
         issues.append(f"{stype} service unit is recorded in the manifest but the file is missing: {service.get('unit')}")
@@ -568,6 +614,9 @@ def _append_service_issues(issues: List[str], man: Optional[Dict[str, Any]], ser
             issues.append(
                 f"systemd service name resolves to {loaded}, not the manifest unit {service.get('unit')}."
             )
+    elif stype == "winsched" and not detection.get("winsched"):
+        issues.append("Task Scheduler (schtasks) is unavailable, but the manifest records a winsched service.")
+        return
     if "active" in service and not service.get("active"):
         issues.append(f"{stype} service is not active.")
     port = detection.get("port") or {}
@@ -625,12 +674,17 @@ def cmd_update(opts: Options) -> int:
         )
 
     service_type = service.get("type")
-    restart_managed = service_type in {"systemd-user", "launchd"}
+    restart_managed = service_type in {"systemd-user", "launchd", "winsched"}
     # Fallback must be service-type aware: the launchd label is com.tokdash.tokdash, not
     # "tokdash" — a literal-"tokdash" fallback would print a remediation command targeting a
     # non-existent agent. `or` (not dict.get default) so a manifest with name present-but-None
     # (hand-edited/corrupt) also degrades to the safe default instead of "...restart None".
-    default_name = launchd.LABEL if service_type == "launchd" else systemd.SERVICE_NAME
+    if service_type == "launchd":
+        default_name = launchd.LABEL
+    elif service_type == "winsched":
+        default_name = winsched.TASK_NAME
+    else:
+        default_name = systemd.SERVICE_NAME
     service_name = service.get("name") or default_name
 
     if opts.dry_run:
@@ -645,6 +699,8 @@ def cmd_update(opts: Options) -> int:
             if restart_managed:
                 if service_type == "launchd":
                     print(f"Would restart: launchctl kickstart -k gui/$(id -u)/{service_name}")
+                elif service_type == "winsched":
+                    print(f"Would restart: schtasks /End /TN {service_name} & schtasks /Run /TN {service_name}")
                 else:
                     print(f"Would restart: systemctl --user restart {service_name}")
         return EXIT_OK
@@ -696,6 +752,17 @@ def cmd_update(opts: Options) -> int:
                 restart_failed = not restarted
             else:
                 restart_failed = True  # managed agent exists but launchctl is unreachable
+        elif service_type == "winsched":
+            if detect.winsched_available():
+                # Mirrors the launchd arm: any failure (including a hung/missing schtasks)
+                # is a failed restart, never a raw traceback.
+                try:
+                    restarted = winsched.restart(service_name).returncode == 0
+                except Exception:
+                    restarted = False
+                restart_failed = not restarted
+            else:
+                restart_failed = True  # managed task exists but schtasks is unreachable
         elif detect.systemd_user_available():
             try:
                 restarted = systemd.restart(service_name).returncode == 0
@@ -780,6 +847,8 @@ def _emit_update_result(opts: Options, result: Dict[str, Any]) -> int:
         name = result.get("service_name", "tokdash")
         if result.get("service_type") == "launchd":
             cmd = f"launchctl kickstart -k gui/$(id -u)/{name}"
+        elif result.get("service_type") == "winsched":
+            cmd = f"schtasks /End /TN {name} & schtasks /Run /TN {name}"
         else:
             cmd = f"systemctl --user restart {name}"
         before = result.get("version_before")
@@ -905,6 +974,29 @@ def _apply_uninstall(p: Dict[str, Any], opts: Options) -> Dict[str, Any]:
                                 detail = (proc.stderr or proc.stdout or "").strip()
                                 raise OSError(
                                     "launchctl bootout failed and the agent is still loaded "
+                                    f"(or its state could not be confirmed): {detail}"
+                                )
+                    unit = Path(step["unit"])
+                    if unit.is_file():
+                        unit.unlink()
+                elif step.get("service_type") == "winsched":
+                    if detect.winsched_available():
+                        # `schtasks /Delete` returns non-zero when the task simply isn't
+                        # registered (benign — nothing to remove), so treat it as a failure
+                        # ONLY if the task is STILL registered afterwards. A genuine
+                        # "couldn't delete it" must abort BEFORE we unlink our recorded XML
+                        # (so a retry can still find it) and surface as an error — mirroring
+                        # the launchd arm above.
+                        proc = winsched.delete(name)
+                        if proc.returncode != 0:
+                            try:
+                                still_registered = winsched.is_registered_strict(name)
+                            except Exception:
+                                still_registered = True
+                            if still_registered:
+                                detail = (proc.stderr or proc.stdout or "").strip()
+                                raise OSError(
+                                    "schtasks /Delete failed and the task is still registered "
                                     f"(or its state could not be confirmed): {detail}"
                                 )
                     unit = Path(step["unit"])
@@ -1117,14 +1209,21 @@ def _print_setup_result(r: Dict[str, Any]) -> None:
         print(f"    Status:   systemctl --user status {svc['name']} --no-pager")
         print(f"    Logs:     journalctl --user -u {svc['name']} -f")
         print(f"    Restart:  systemctl --user restart {svc['name']}")
-        print(f"    Remove:   tokdash uninstall")
+        print("    Remove:   tokdash uninstall")
     elif svc.get("type") == "launchd":
         print(_ok(_bold("Tokdash is running as a launchd user agent.")) + "\n")
         _print_open_targets(r["url"], tailnet_url)
         print(f"\n  {_bold('Manage:')}")
         print(f"    Status:   launchctl print gui/$(id -u)/{svc['name']}")
         print(f"    Restart:  launchctl kickstart -k gui/$(id -u)/{svc['name']}")
-        print(f"    Remove:   tokdash uninstall")
+        print("    Remove:   tokdash uninstall")
+    elif svc.get("type") == "winsched":
+        print(_ok(_bold("Tokdash is running as a Windows Task Scheduler task.")) + "\n")
+        _print_open_targets(r["url"], tailnet_url)
+        print(f"\n  {_bold('Manage:')}")
+        print(f"    Status:   schtasks /Query /TN {svc['name']} /V")
+        print(f"    Restart:  schtasks /End /TN {svc['name']} & schtasks /Run /TN {svc['name']}")
+        print("    Remove:   tokdash uninstall")
     else:
         # Match the recorded port/bind exactly — setup may have auto-picked a free port,
         # so a bare `tokdash serve` (which defaults to 55423) would bind elsewhere.
@@ -1192,6 +1291,8 @@ def _print_doctor_human(r: Dict[str, Any]) -> None:
     print(f"  Python:       {py['version']} ({'fit' if py['fit'] else 'UNFIT: ' + str(py['reason'])})")
     if r["os"] == "macos":
         print(f"  launchd:      {'available' if r.get('launchd') else 'unavailable'}")
+    elif r["os"] == "windows":
+        print(f"  Task Scheduler: {'available' if r.get('winsched') else 'unavailable'}")
     else:
         print(f"  systemd user: {'available' if r['systemd_user'] else 'unavailable'}")
     print(f"  Data dir:     {r['data_dir']}")

@@ -19,9 +19,11 @@ from typing import Any, ClassVar, Dict, List, Optional, Tuple
 
 
 try:
+    from .. import clientpaths
     from ..pricing import PricingDatabase
 except ImportError:  # pragma: no cover
     # Allow running as a script by file path.
+    import clientpaths
     from pricing import PricingDatabase
 
 
@@ -199,8 +201,8 @@ class OpenCodeParser(BaseParser):
 
     def __init__(self, pricing_db: PricingDatabase):
         super().__init__(pricing_db)
-        self.messages_dir = Path.home() / ".local/share/opencode/storage/message"
-        self.db_path = Path.home() / ".local/share/opencode/opencode.db"
+        self.messages_dir = clientpaths.opencode_messages_dir()
+        self.db_path = clientpaths.opencode_db_path()
 
     def _build_entry(self, model: str, provider: str, tokens: Dict[str, Any], ts_ms: int) -> Dict[str, Any]:
         cache = tokens.get("cache") if isinstance(tokens.get("cache"), dict) else {}
@@ -303,7 +305,7 @@ class CodexParser(BaseParser):
 
     def __init__(self, pricing_db: PricingDatabase):
         super().__init__(pricing_db)
-        self.sessions_dir = Path.home() / ".codex/sessions"
+        self.sessions_dir = clientpaths.codex_sessions_dir()
 
     @staticmethod
     def _infer_provider(model: str, fallback: str = "openai") -> str:
@@ -401,11 +403,7 @@ class ClaudeParser(BaseParser):
 
     def __init__(self, pricing_db: PricingDatabase):
         super().__init__(pricing_db)
-        self.projects_dirs = [
-            p / "projects"
-            for p in sorted(Path.home().glob(".claude*"))
-            if (p / "projects").is_dir()
-        ]
+        self.projects_dirs = clientpaths.claude_project_dirs()
 
     @staticmethod
     def _infer_provider(model: str) -> str:
@@ -581,7 +579,7 @@ class GeminiCLIParser(BaseParser):
 
     def __init__(self, pricing_db: PricingDatabase):
         super().__init__(pricing_db)
-        self.gemini_root = Path.home() / ".gemini"
+        self.gemini_root = clientpaths.gemini_root()
 
     def _build_entry(self, model: str, tokens: Dict[str, Any], ts_ms: int) -> Dict[str, Any]:
         raw_input = self._i(tokens.get("input"))
@@ -612,8 +610,8 @@ class GeminiCLIParser(BaseParser):
 
     def _file_signatures(self) -> tuple:
         def scan() -> tuple:
-            json_pattern = str(self.gemini_root / "tmp" / "*" / "chats" / "session-*.json")
-            jsonl_pattern = str(self.gemini_root / "tmp" / "*" / "chats" / "session-*.jsonl")
+            json_pattern = clientpaths.gemini_chats_json_glob(self.gemini_root)
+            jsonl_pattern = clientpaths.gemini_chats_jsonl_glob(self.gemini_root)
             return tuple(sorted(_glob_sigs(json_pattern) + _glob_sigs(jsonl_pattern)))
 
         return _timed_sigs(f"gemini:{self.gemini_root}", scan)
@@ -687,7 +685,7 @@ class AmpParser(BaseParser):
 
     def __init__(self, pricing_db: PricingDatabase):
         super().__init__(pricing_db)
-        self.amp_root = Path.home() / ".amp"
+        self.amp_root = clientpaths.amp_root()
 
     def _parse_all(self) -> List[Dict[str, Any]]:
         # TODO(coding_tools): Amp parser placeholder.
@@ -742,8 +740,7 @@ class KimiParser(BaseParser):
 
     def __init__(self, pricing_db: PricingDatabase):
         super().__init__(pricing_db)
-        kimi_share_dir = os.environ.get("KIMI_SHARE_DIR", "").strip()
-        self.kimi_root = Path(kimi_share_dir).expanduser() if kimi_share_dir else (Path.home() / ".kimi")
+        self.kimi_root = clientpaths.kimi_root()
 
     @staticmethod
     def _default_model_for_timestamp(ts: datetime) -> str:
@@ -883,13 +880,8 @@ class PiAgentParser(BaseParser):
 
     def __init__(self, pricing_db: PricingDatabase):
         super().__init__(pricing_db)
-        pi_dir_env = os.environ.get("PI_AGENT_DIR", "").strip()
-        if pi_dir_env:
-            self.search_dirs = [Path(d.strip()).expanduser() for d in pi_dir_env.split(",") if d.strip()]
-            self.use_rglob = True
-        else:
-            self.search_dirs = [Path.home() / ".pi" / "agent" / "sessions"]
-            self.use_rglob = True
+        self.search_dirs = clientpaths.pi_agent_search_dirs()
+        self.use_rglob = True
 
     @staticmethod
     def _infer_provider(model: str, fallback: str = "") -> str:
@@ -1068,8 +1060,8 @@ class CopilotCLIParser(BaseParser):
 
     def __init__(self, pricing_db: PricingDatabase):
         super().__init__(pricing_db)
-        self.otel_dir = Path.home() / ".copilot" / "otel"
-        self.events_glob = str(Path.home() / ".copilot" / "session-state" / "*" / "events.jsonl")
+        self.otel_dir = clientpaths.copilot_otel_dir()
+        self.events_glob = clientpaths.copilot_events_glob()
 
     @staticmethod
     def _infer_provider(model: str) -> str:
@@ -1085,7 +1077,7 @@ class CopilotCLIParser(BaseParser):
     def _file_signatures(self) -> tuple:
         def scan() -> tuple:
             sigs = list(_rglob_sigs(self.otel_dir, "*.jsonl"))
-            otel_env = os.environ.get("COPILOT_OTEL_FILE_EXPORTER_PATH", "").strip()
+            otel_env = clientpaths.copilot_otel_exporter_path()
             if otel_env:
                 try:
                     s = os.stat(otel_env)
@@ -1381,7 +1373,7 @@ class CopilotCLIParser(BaseParser):
         otel_paths: List[str] = []
         for path_str, _, _ in _rglob_sigs(self.otel_dir, "*.jsonl"):
             otel_paths.append(path_str)
-        otel_env = os.environ.get("COPILOT_OTEL_FILE_EXPORTER_PATH", "").strip()
+        otel_env = clientpaths.copilot_otel_exporter_path()
         if otel_env and otel_env not in otel_paths:
             if os.path.isfile(otel_env):
                 otel_paths.append(otel_env)
@@ -1513,11 +1505,7 @@ class HermesParser(BaseParser):
 
     def __init__(self, pricing_db: PricingDatabase):
         super().__init__(pricing_db)
-        hermes_home_env = os.environ.get("HERMES_HOME", "").strip()
-        if hermes_home_env:
-            self.search_dirs = [Path(d.strip()).expanduser() for d in hermes_home_env.split(",") if d.strip()]
-        else:
-            self.search_dirs = [Path.home() / ".hermes"]
+        self.search_dirs = clientpaths.hermes_search_dirs()
 
     @staticmethod
     def _infer_provider(model: str) -> str:

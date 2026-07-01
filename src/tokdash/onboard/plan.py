@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from . import detect, launchd, manifest, paths, runtime, systemd, tailscale
+from . import detect, launchd, manifest, paths, runtime, service_base, systemd, tailscale, winsched
 
 DEFAULT_PORT = 55423
 LOOPBACK = {"127.0.0.1", "::1", "localhost"}
@@ -174,6 +174,28 @@ def build_setup_plan(opts: Options, detection: Dict[str, Any]) -> Dict[str, Any]
             "created_by_setup": True,
             "marker": manifest.marker_token(marker_id),
         }
+    elif service["type"] == "winsched" and rt["command"]:
+        # Same overwrite guard as systemd/launchd: refuse an unmarked, hand-installed task.
+        existing_task = detection["existing_service"].get("winsched_task")
+        if existing_task and not winsched.task_is_managed(Path(existing_task)) and not opts.force:
+            blockers.append(
+                f"{existing_task} already exists and was not created by tokdash setup; refusing to "
+                "overwrite it. Re-run with --force to replace it, or remove it first."
+            )
+        marker_id = manifest.new_marker_id()
+        unit_text = winsched.render_task(
+            rt["command"], bind, port, marker_id=marker_id, env_data_dir=env_data_dir
+        )
+        task_path = paths.winsched_task_path()
+        changes.append(f"write {task_path}")
+        changes.append("register + start the Windows Task Scheduler task")
+        service_block = {
+            "type": "winsched",
+            "unit": str(task_path),
+            "name": winsched.TASK_NAME,
+            "created_by_setup": True,
+            "marker": manifest.marker_token(marker_id),
+        }
     elif service["type"] == "none":
         notes.append("No background service will be created; start Tokdash with `tokdash serve` (see the URL above for the bind/port).")
 
@@ -222,52 +244,26 @@ def build_setup_plan(opts: Options, detection: Dict[str, Any]) -> Dict[str, Any]
 
 
 def _resolve_service(opts: Options, detection: Dict[str, Any], blockers: List[str], notes: List[str]) -> Dict[str, Any]:
-    if opts.no_service or opts.service == "none":
-        return {"type": "none", "reason": "requested"}
-    want = opts.service
-    os_kind = detection["os"]
+    """Decide the service backend; delegates to :func:`service_base.select_service`.
 
-    # macOS -> launchd.
-    if os_kind == "macos":
-        if want in {"auto", "launchd"}:
-            if detection.get("launchd"):
-                return {"type": "launchd", "reason": None}
-            reason = "launchctl is unavailable"
-            if want == "launchd":
-                blockers.append(reason + "; re-run with --no-service or run `tokdash serve` yourself.")
-            else:
-                notes.append(reason + "; falling back to foreground guidance.")
-            return {"type": "none", "reason": reason}
-        if want == "systemd":
-            blockers.append("--service systemd is not supported on macOS; use --service launchd.")
-            return {"type": "none", "reason": "unsupported"}
-        return {"type": "none", "reason": "unknown"}
-
-    # Linux / WSL -> systemd user service.
-    if os_kind in {"linux", "wsl"}:
-        if want in {"auto", "systemd"}:
-            if detection.get("systemd_user"):
-                return {"type": "systemd-user", "reason": None}
-            reason = (
-                "systemd user services are unavailable"
-                + (" (enable WSL systemd in /etc/wsl.conf)" if os_kind == "wsl" else "")
-            )
-            if want == "systemd":
-                blockers.append(reason + "; re-run without --service systemd or use --no-service.")
-            else:
-                notes.append(reason + "; falling back to foreground guidance.")
-            return {"type": "none", "reason": reason}
-        if want == "launchd":
-            blockers.append("--service launchd is only supported on macOS.")
-            return {"type": "none", "reason": "unsupported"}
-        return {"type": "none", "reason": "unknown"}
-
-    # Other (e.g. native Windows): no managed service yet.
-    if want in {"systemd", "launchd"}:
-        blockers.append(f"--service {want} is not supported on {os_kind}.")
-        return {"type": "none", "reason": "unsupported"}
-    notes.append(f"Background service setup for {os_kind} is not available yet; use `tokdash serve`.")
-    return {"type": "none", "reason": "deferred"}
+    Kept as a thin adapter (extract primitives from ``opts``/``detection``, call the
+    centralized selection factory, thread its blockers/notes back into the caller's
+    accumulating lists) so this function's name/signature — and therefore its single
+    caller in :func:`build_setup_plan` plus any external import of it — stays unchanged.
+    The actual branch logic and every message string now live in
+    :mod:`.service_base` (moved verbatim; see that module's docstring).
+    """
+    sel = service_base.select_service(
+        opts.service,
+        detection["os"],
+        no_service=opts.no_service,
+        systemd_available=bool(detection.get("systemd_user")),
+        launchd_available=bool(detection.get("launchd")),
+        winsched_available=bool(detection.get("winsched")),
+    )
+    blockers.extend(sel.blockers)
+    notes.extend(sel.notes)
+    return sel.result
 
 
 # --- uninstall ------------------------------------------------------------------
@@ -285,6 +281,8 @@ def _plan_service_removal(
     file_exists = unit_path.is_file()
     if service_type == "launchd":
         is_ours = launchd.plist_is_managed(unit_path, marker_id) if file_exists else False
+    elif service_type == "winsched":
+        is_ours = winsched.task_is_managed(unit_path, marker_id) if file_exists else False
     else:
         is_ours = systemd.unit_is_managed(unit_path, marker_id) if file_exists else False
     step = {"kind": "service", "unit": str(unit_path), "name": name, "service_type": service_type}
@@ -344,7 +342,7 @@ def build_uninstall_plan(opts: Options, detection: Dict[str, Any]) -> Dict[str, 
         _plan_service_removal(
             steps, removed, blockers, opts,
             unit_path=Path(manifest_unit), service_type=manifest_type, marker_id=marker_id,
-            name=service.get("name", launchd.LABEL if manifest_type == "launchd" else "tokdash"),
+            name=service.get("name", _default_service_name(manifest_type)),
             have_manifest=have_manifest, created_by_setup=service.get("created_by_setup"),
             block_unmarked=True,  # a recorded-but-replaced unit must warn, not be deleted
         )
@@ -355,13 +353,17 @@ def build_uninstall_plan(opts: Options, detection: Dict[str, Any]) -> Dict[str, 
         # disk and remove only marker-carrying (provably ours) units, so a single uninstall
         # truly removes the service it owns instead of leaving it running and lying.
         es = detection["existing_service"]
-        for stype, ustr in (("systemd-user", es.get("systemd_unit")), ("launchd", es.get("launchd_plist"))):
+        for stype, ustr in (
+            ("systemd-user", es.get("systemd_unit")),
+            ("launchd", es.get("launchd_plist")),
+            ("winsched", es.get("winsched_task")),
+        ):
             if not ustr:
                 continue
             _plan_service_removal(
                 steps, removed, blockers, opts,
                 unit_path=Path(ustr), service_type=stype, marker_id=None,
-                name=launchd.LABEL if stype == "launchd" else "tokdash",
+                name=_default_service_name(stype),
                 have_manifest=have_manifest, created_by_setup=False,
                 # Only the truly-unknown (no-manifest) case blocks an unmarked unit. When the
                 # manifest says we created no service, an unmarked unit is provably NOT ours —
@@ -433,3 +435,12 @@ def _marker_id_from(marker: Optional[str]) -> Optional[str]:
         if token.startswith("id="):
             return token[3:]
     return None
+
+
+def _default_service_name(service_type: Optional[str]) -> str:
+    """Fallback service ``name`` when a (possibly hand-edited/legacy) manifest omits it."""
+    if service_type == "launchd":
+        return launchd.LABEL
+    if service_type == "winsched":
+        return winsched.TASK_NAME
+    return "tokdash"

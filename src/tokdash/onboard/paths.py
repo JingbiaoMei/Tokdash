@@ -67,8 +67,24 @@ def managed_venv_dir() -> Path:
     return runtime_dir() / "python-venv"
 
 
+def _windows_venv_layout() -> bool:
+    """Whether the managed venv uses the Windows ``Scripts/`` layout (Tier 2).
+
+    A tiny monkeypatchable seam around ``os.name`` (not ``detect.os_kind()``, so this stays
+    free of the detect<->paths dependency) — tests simulate the Windows branch by
+    monkeypatching *this* function rather than the real ``os.name``, because pathlib's
+    ``Path()`` constructor itself reads ``os.name`` to pick ``WindowsPath``/``PosixPath``;
+    mutating the real global would make every other fresh ``Path(...)`` call in the process
+    (including ones this module makes internally) try to build an unusable ``WindowsPath`` on
+    a non-Windows test host.
+    """
+    return os.name == "nt"
+
+
 def managed_venv_python() -> Path:
-    # Windows venvs put the interpreter under Scripts/, but Phase 1 targets POSIX.
+    # Windows venvs put the interpreter under Scripts/ (Tier 2); POSIX stays under bin/.
+    if _windows_venv_layout():
+        return managed_venv_dir() / "Scripts" / "python.exe"
     return managed_venv_dir() / "bin" / "python"
 
 
@@ -96,3 +112,17 @@ def systemd_unit_path(name: str = "tokdash") -> Path:
 def launchd_plist_path() -> Path:
     """macOS LaunchAgent path (Phase 4; defined here so doctor can report it)."""
     return Path("~/Library/LaunchAgents/com.tokdash.tokdash.plist").expanduser()
+
+
+def winsched_task_path() -> Path:
+    """Windows Task Scheduler task-definition source path (Tier 2; defined here so doctor
+    can report it, mirroring :func:`launchd_plist_path`).
+
+    ``schtasks`` keeps the live task registration in its own store, not this file — this is
+    where setup keeps its own copy of the last XML it registered, so the ownership-marker
+    check (``winsched.task_is_managed``) and the ``unit_path.is_file()`` gate work the same
+    way here as they do for the systemd/launchd backends.
+    """
+    base = os.environ.get("LOCALAPPDATA", "").strip()
+    root = Path(base).expanduser() if base else Path("~/AppData/Local").expanduser()
+    return root / "Tokdash" / "Tokdash.xml"

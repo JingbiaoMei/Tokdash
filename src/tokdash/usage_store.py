@@ -11,10 +11,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
 
-try:
-    import fcntl
-except ImportError:  # pragma: no cover - Windows fallback
-    fcntl = None  # type: ignore[assignment]
+from . import clientpaths
+from .filelock import process_lock
 
 
 SCHEMA_VERSION = 4
@@ -31,29 +29,22 @@ def persistent_usage_db_enabled() -> bool:
 
 
 def usage_db_path() -> Path:
-    explicit = os.environ.get("TOKDASH_USAGE_DB_PATH", "").strip()
-    if explicit:
-        return Path(explicit).expanduser()
-    data_dir = Path(os.environ.get("TOKDASH_DATA_DIR", "~/.tokdash")).expanduser()
-    return data_dir / "usage.sqlite3"
+    """Delegates to :func:`tokdash.clientpaths.usage_db_path` (Tier 0 seams refactor)."""
+    return clientpaths.usage_db_path()
 
 
 @contextmanager
 def usage_db_process_lock(db_path: Optional[Path] = None):
-    """Serialize DB writes/resyncs across Tokdash processes when supported."""
+    """Serialize DB writes/resyncs across Tokdash processes when supported.
+
+    Thin wrapper delegating to :func:`tokdash.filelock.process_lock` (Tier 0 seams
+    refactor) so this module's lock contract — and the additional process-local
+    ``_WRITE_LOCK`` serialization below — stays exactly as it was for callers.
+    """
     path = db_path or usage_db_path()
-    lock_path = Path(str(path) + ".lock")
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
     with _WRITE_LOCK:
-        if fcntl is None:
+        with process_lock(Path(str(path) + ".lock")):
             yield
-            return
-        with lock_path.open("a+", encoding="utf-8") as handle:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def durable_usage_db_enabled() -> bool:

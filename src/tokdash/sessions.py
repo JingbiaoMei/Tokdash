@@ -8,6 +8,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
 
+from . import clientpaths
 from .compute import cache_hit_rate, period_to_days
 from .dateutil import parse_date_range
 from .pricing import PricingDatabase
@@ -366,7 +367,7 @@ def _pricing_signature() -> tuple:
 
 
 def _codex_state_db_path() -> Path:
-    return Path.home() / ".codex" / "state_5.sqlite"
+    return clientpaths.codex_state_db_path()
 
 
 def _codex_state_signature() -> tuple:
@@ -534,7 +535,7 @@ def _load_codex_sessions(signature: tuple[tuple[str, int, int], ...], pricing_si
 
 
 def _codex_sessions() -> Dict[str, Dict[str, Any]]:
-    root = Path.home() / ".codex" / "sessions"
+    root = clientpaths.codex_sessions_dir()
     return _apply_codex_title_map(_load_codex_sessions(_iter_file_signatures(root), _pricing_signature()))
 
 
@@ -668,16 +669,14 @@ def _load_claude_sessions(signature: tuple[tuple[str, int, int], ...], pricing_s
 
 def _claude_sessions() -> Dict[str, Dict[str, Any]]:
     all_sigs: list[tuple[str, int, int]] = []
-    for claude_dir in sorted(Path.home().glob(".claude*")):
-        projects_dir = claude_dir / "projects"
-        if projects_dir.is_dir():
-            all_sigs.extend(_iter_file_signatures(projects_dir))
+    for projects_dir in clientpaths.claude_project_dirs():
+        all_sigs.extend(_iter_file_signatures(projects_dir))
     all_sigs.sort(key=lambda item: item[0])
     return _load_claude_sessions(tuple(all_sigs), _pricing_signature())
 
 
 def _opencode_db_signature() -> tuple[tuple[str, int, int], ...]:
-    db_path = Path.home() / ".local/share/opencode/opencode.db"
+    db_path = clientpaths.opencode_db_path()
     if not db_path.exists():
         return ()
     signatures: list[tuple[str, int, int]] = []
@@ -978,10 +977,7 @@ def _opencode_sessions(since_ms: Optional[int] = None, until_ms: Optional[int] =
 
 
 def _pi_session_roots() -> list[Path]:
-    raw = os.environ.get("PI_AGENT_DIR", "").strip()
-    if raw:
-        return [Path(item.strip()).expanduser() for item in raw.split(",") if item.strip()]
-    return [Path.home() / ".pi" / "agent" / "sessions"]
+    return clientpaths.pi_agent_search_dirs()
 
 
 def _pi_session_signatures() -> tuple[tuple[str, int, int], ...]:
@@ -1218,7 +1214,7 @@ def _session_records_to_raw_sessions(tool: str, records: Iterable[Dict[str, Any]
 def _stored_sessions_for_tool(tool: str) -> Dict[str, Dict[str, Any]]:
     store = UsageEntryStore()
     if tool == "codex":
-        root = Path.home() / ".codex" / "sessions"
+        root = clientpaths.codex_sessions_dir()
         signatures = _iter_file_signatures(root)
         parser_sig = {"parser": parser_code_signature(_parse_codex_session_file), "pricing": _pricing_signature()}
         pricing_sig = _pricing_signature()
@@ -1230,10 +1226,8 @@ def _stored_sessions_for_tool(tool: str) -> Dict[str, Dict[str, Any]]:
         )
     elif tool == "claude":
         all_sigs: list[tuple[str, int, int]] = []
-        for claude_dir in sorted(Path.home().glob(".claude*")):
-            projects_dir = claude_dir / "projects"
-            if projects_dir.is_dir():
-                all_sigs.extend(_iter_file_signatures(projects_dir))
+        for projects_dir in clientpaths.claude_project_dirs():
+            all_sigs.extend(_iter_file_signatures(projects_dir))
         all_sigs.sort(key=lambda item: item[0])
         parser_sig = {"parser": parser_code_signature(_parse_claude_session_file), "pricing": _pricing_signature()}
         pricing_sig = _pricing_signature()

@@ -27,8 +27,11 @@ def _isolate(monkeypatch, tmp_path):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
     # Deterministic, offline detection by default; individual tests override.
     monkeypatch.setattr(detect, "probe_port", lambda port=55423, *a, **k: {"port": port, "open": False, "is_tokdash": False, "version": None})
+    monkeypatch.setattr(detect, "os_kind", lambda: "linux")
     monkeypatch.setattr(detect, "is_tty", lambda: True)
     monkeypatch.setattr(detect, "systemd_user_available", lambda: True)
+    monkeypatch.setattr(detect, "launchd_available", lambda: False)
+    monkeypatch.setattr(detect, "winsched_available", lambda: False)
     updatecheck._cache.update({"ts": 0.0, "data": None})  # no cross-test cache leak
     yield
     updatecheck._cache.update({"ts": 0.0, "data": None})
@@ -98,6 +101,7 @@ def run_json(argv, capsys):
 
 def test_paths_follow_data_dir(tmp_path, monkeypatch):
     monkeypatch.setenv("TOKDASH_DATA_DIR", str(tmp_path / "x"))
+    monkeypatch.setattr(paths, "_windows_venv_layout", lambda: False)
     assert paths.manifest_path() == tmp_path / "x" / "install.json"
     assert paths.managed_venv_python() == tmp_path / "x" / "runtime" / "python-venv" / "bin" / "python"
     assert not paths.is_default_data_dir()
@@ -390,6 +394,7 @@ def test_setup_open_dashboard_uses_detached_opener(monkeypatch):
         return FakeProcess()
 
     monkeypatch.setattr(engine.sys, "platform", "linux")
+    monkeypatch.setattr(engine.os, "name", "posix")
     monkeypatch.setattr(detect, "os_kind", lambda: "linux")
     monkeypatch.setattr(engine.shutil, "which", fake_which)
     monkeypatch.setattr(engine.subprocess, "Popen", fake_popen)
@@ -1315,7 +1320,7 @@ def test_doctor_ignores_tokdash_port_prefers_manifest(monkeypatch, capsys):
     )
     manifest.write_manifest(man)
     capsys.readouterr()
-    rc = cli.cli(["doctor", "--json"])
+    cli.cli(["doctor", "--json"])
     payload = json.loads(capsys.readouterr().out)
     assert payload["port"]["port"] == 55555
 

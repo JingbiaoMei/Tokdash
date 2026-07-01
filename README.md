@@ -103,6 +103,7 @@ Nothing is uploaded; nothing is read from your machine.
 
 - **Linux (including WSL2):** supported
 - **macOS:** experimental
+- **Windows (native):** in progress — foreground `tokdash serve` support and a Windows Task Scheduler backend for `tokdash setup` are implemented in this branch, but still need real-Windows validation before release. Until then, prefer WSL2 for fully verified support, or treat native Windows as experimental. See [`docs/WINDOWS_SUPPORT_PLAN.md`](docs/WINDOWS_SUPPORT_PLAN.md) for the tiered rollout and current status.
 
 ## Quick start
 
@@ -224,6 +225,13 @@ serve other tools there. After Serve succeeds, setup prints the exact
 Tailscale Serve is read-only for mutating dashboard/API actions because proxied requests fail
 Tokdash's loopback write gate. Use SSH forwarding when you need trusted remote writes.
 
+**Tailscale on Windows:** the Windows Tailscale client installs both a GUI and a `tailscale`
+CLI, and `tailscale serve` works the same way from PowerShell/cmd once the client is
+running. This has not yet been verified against Tokdash's native Windows support
+(implemented in this branch but not real-Windows validated — see
+[Platform support](#platform-support)), so treat it as experimental
+until confirmed.
+
 Binding Tokdash directly to `0.0.0.0` is possible but not recommended because the local API is
 not an internet-facing authenticated service.
 
@@ -273,8 +281,9 @@ The local API can power a statusline item in your coding agent (Claude Code, etc
 
 - [`statusline-minimal.sh`](docs/examples/statusline/statusline-minimal.sh) → one line: `[Claude Sonnet 4.6] 📁 myproject | 📊 12.3M ($4.56) today`
 - [`statusline-full.sh`](docs/examples/statusline/statusline-full.sh) → a four-row dashboard with today + week totals and a top-3 per-tool breakdown
+- [`statusline.ps1`](docs/examples/statusline/statusline.ps1) → the same one-line output as the minimal template, for Claude Code running natively on Windows (PowerShell, no `curl`/`jq` needed)
 
-Both are read-only, localhost-only, and fail silently if Tokdash isn't running. See the [folder README](docs/examples/statusline/README.md) for install/config and [`docs/API.md`](docs/API.md) for the endpoint reference.
+All are read-only, localhost-only, and fail silently if Tokdash isn't running. See the [folder README](docs/examples/statusline/README.md) for install/config and [`docs/API.md`](docs/API.md) for the endpoint reference.
 
 Prefer to roll your own? Hand your agent this prompt and point it at [`docs/API.md`](docs/API.md):
 

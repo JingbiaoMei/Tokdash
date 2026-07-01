@@ -101,6 +101,10 @@ Demo 源码：[tokdash/tokdash.github.io](https://github.com/tokdash/tokdash.git
 
 - **Linux（含 WSL2）**：支持
 - **macOS**：实验性支持
+- **Windows（原生）**：进行中 —— 前台 `tokdash serve` 支持和 `tokdash setup` 的 Windows
+  任务计划程序（Task Scheduler）后台服务已在本分支实现，但发布前仍需要真实 Windows 环境验证。
+  在此之前，完整验证过的 Windows 体验仍建议使用 WSL2；原生 Windows 请按实验性支持看待。分阶段计划与当前状态见
+  [`docs/WINDOWS_SUPPORT_PLAN.md`](docs/WINDOWS_SUPPORT_PLAN.md)（英文）。
 
 ## 快速开始
 
@@ -216,6 +220,11 @@ Serve 配置，交互式向导会提示是否运行一次性的 `sudo tailscale 
 Tailscale Serve 下的写接口会因 Tokdash 的回环写入保护而保持只读；如果你需要可信的远程写入，
 请使用 SSH 转发作为认证层。
 
+**Windows 上的 Tailscale：** Windows 版 Tailscale 客户端会同时安装图形界面和 `tailscale`
+命令行工具，客户端运行后，在 PowerShell/cmd 下使用 `tailscale serve` 的方式与其他平台相同。
+这一点尚未针对 Tokdash 的原生 Windows 支持（本分支已实现但尚未真实 Windows 验证——见[平台支持](#平台支持)）做过验证，
+请视为实验性功能，等待确认后再依赖它。
+
 可以直接绑定到 `0.0.0.0`，但不推荐：Tokdash 的本地 API 不是面向公网的认证服务。
 
 ### 前台运行备用方式
@@ -263,8 +272,9 @@ curl -s https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/agents/o
 
 - [`statusline-minimal.sh`](docs/examples/statusline/statusline-minimal.sh) → 单行：`[Claude Sonnet 4.6] 📁 myproject | 📊 12.3M ($4.56) today`
 - [`statusline-full.sh`](docs/examples/statusline/statusline-full.sh) → 四行面板，含今日 + 本周合计，以及按工具的 Top-3 明细
+- [`statusline.ps1`](docs/examples/statusline/statusline.ps1) → 输出与 minimal 模板相同的单行，供在原生 Windows 上运行 Claude Code 的用户使用（PowerShell 原生实现，无需 `curl`/`jq`）
 
-两者均为只读、仅本地访问，Tokdash 未运行时会静默隐藏 📊 段。安装与配置见[该目录的 README](docs/examples/statusline/README.md)，端点细节见 [`docs/API.md`](docs/API.md)。
+三者均为只读、仅本地访问，Tokdash 未运行时会静默隐藏 📊 段。安装与配置见[该目录的 README](docs/examples/statusline/README.md)，端点细节见 [`docs/API.md`](docs/API.md)。
 
 想自己定制？把下面这段提示词发给你的 Agent，并把 [`docs/API.md`](docs/API.md) 一起给它：
 

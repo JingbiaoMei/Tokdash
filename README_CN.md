@@ -365,7 +365,7 @@ tokdash quota show
 
 **轮询间隔。** 后台轮询默认每 **30 分钟** 记录一次快照。可在「额度」标签页、`tokdash setup` 过程中或用 `tokdash quota consent --poll-interval N` 选择 15/30/60/120 分钟，它会保存为 `config.json` 中的 `quota.poll_interval_minutes`。环境变量 `TOKDASH_QUOTA_POLL_INTERVAL`（单位秒，下限 300）会覆盖保存的值，标签页会显示当前生效的来源。间隔调整会在下一个轮询周期生效，无需重启服务。Codex 会话摄取采用增量方式——首次一次性回填历史后，每个周期只对增长过的会话文件做尾部读取，因此稳态轮询只需个位数毫秒。
 
-开启后，Tokdash 从 `$CODEX_HOME/auth.json`、`$CLAUDE_CONFIG_DIR/.credentials.json` 或 `CLAUDE_CODE_OAUTH_TOKEN`，以及 `~/.gemini/antigravity-cli/antigravity-oauth-token` 读取凭据，并只调用对应服务商的额度接口。在 macOS 上，Claude Code 的凭据保存在钥匙串（Keychain）而不是 `.credentials.json` 中；Tokdash 会直接只读读取钥匙串条目（`Claude Code-credentials`），首次读取可能弹出一次性的钥匙串授权提示。如果钥匙串不可用（已锁定、被拒绝或无界面会话），可设置 `CLAUDE_CODE_OAUTH_TOKEN`（可用 `claude setup-token` 生成）作为替代。Tokdash 从不刷新或写入服务商凭据。`TOKDASH_QUOTA_POLL=0` 是关闭全部额度跟踪的硬终止开关。`tokdash export` 默认排除额度数据；只有当你确实想把它写入 JSON 时才使用 `--include-quota`。
+开启后，Tokdash 从 `$CODEX_HOME/auth.json`、Claude 的 `CLAUDE_CODE_OAUTH_TOKEN` 覆盖值或 `$CLAUDE_CONFIG_DIR/.credentials.json`，以及 `~/.gemini/antigravity-cli/antigravity-oauth-token` 读取凭据，并只调用对应服务商的额度接口。在 macOS 上，Claude Code 的凭据保存在钥匙串（Keychain）而不是 `.credentials.json` 中；如果没有设置环境变量且不存在 `.credentials.json`，Tokdash 会直接只读读取钥匙串条目（`Claude Code-credentials`），首次读取可能弹出一次性的钥匙串授权提示。如果钥匙串不可用（已锁定、被拒绝或无界面会话），可设置 `CLAUDE_CODE_OAUTH_TOKEN`（可用 `claude setup-token` 生成）作为替代。Tokdash 从不刷新或写入服务商凭据。`TOKDASH_QUOTA_POLL=0` 是关闭全部额度跟踪的硬终止开关。`tokdash export` 默认排除额度数据；只有当你确实想把它写入 JSON 时才使用 `--include-quota`。
 
 `tokdash setup` 会提供一个可选的额度步骤（按服务商的网络授权，默认为否，以及轮询间隔），`tokdash doctor` 会报告额度状态：总开关、按服务商授权、终止开关、生效间隔及其来源、上次轮询时间，以及已保存的快照数量。
 

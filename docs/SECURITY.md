@@ -59,7 +59,7 @@ Codex session files and Claude credentials metadata. When a provider is explicit
 reads the local CLI credential file for that provider and calls that provider's quota endpoint:
 
 - Codex: `$CODEX_HOME/auth.json`, `https://chatgpt.com/backend-api/wham/usage`, and `.../wham/rate-limit-reset-credits`
-- Claude Code: `$CLAUDE_CONFIG_DIR/.credentials.json`, the macOS Keychain item `Claude Code-credentials` (read-only, via `security find-generic-password`), or `CLAUDE_CODE_OAUTH_TOKEN`, `https://api.anthropic.com/api/oauth/usage`
+- Claude Code: `CLAUDE_CODE_OAUTH_TOKEN` (highest-precedence override), `$CLAUDE_CONFIG_DIR/.credentials.json`, or the macOS Keychain item `Claude Code-credentials` (read-only, via `security find-generic-password`), `https://api.anthropic.com/api/oauth/usage`
 - Antigravity: `~/.gemini/antigravity-cli/antigravity-oauth-token`, `https://daily-cloudcode-pa.googleapis.com/v1internal:*`
 
 Tokdash never refreshes or writes provider tokens. Quota snapshots are stored locally in

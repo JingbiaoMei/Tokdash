@@ -65,7 +65,7 @@ tell "this is Tokdash" rather than trusting a generic `{"status":"ok"}` any app 
 
 **Response**
 ```json
-{ "status": "ok", "service": "tokdash", "version": "0.6.2" }
+{ "status": "ok", "service": "tokdash", "version": "1.0.7" }
 ```
 
 ---
@@ -79,7 +79,7 @@ Local version/provenance. `install_method` is read from the setup manifest
 ```json
 {
   "service": "tokdash",
-  "runtime_version": "0.6.2",
+  "runtime_version": "1.0.7",
   "install_method": "pipx",
   "update_check_enabled": false
 }
@@ -110,7 +110,7 @@ automatic/background call, and it only *reports* — it never runs an upgrade.
 
 **Response (enabled)**
 ```json
-{ "enabled": true, "current": "0.6.2", "latest": "0.7.0", "update_available": true, "error": null, "cached": false }
+{ "enabled": true, "current": "1.0.7", "latest": "1.0.8", "update_available": true, "error": null, "cached": false }
 ```
 **Response (disabled)**
 ```json

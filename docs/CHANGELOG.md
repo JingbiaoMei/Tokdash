@@ -6,13 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+## 1.0.7 - 2026-07-02
+
 ### Added
 - Added a **Quota tab** tracking subscription quota for Codex, Claude Code, and Antigravity: per-window remaining bars with reset countdowns, Codex reset-credit inventory, remaining/consumption history charts with range and provider-visibility controls, and per-provider consent cards. Provider API polling is opt-in per provider and **off by default**; without consent the tab uses local data only (see "Quota tracking (optional)" in the README and `docs/SECURITY.md`).
 - Added quota API routes: `GET /api/quota` and `GET /api/quota/history`, plus write-gated `POST /api/quota/consent`, `POST /api/quota/settings`, and `POST /api/quota/refresh` (60-second cooldown). Documented in `docs/API.md`.
 - Added `tokdash quota poll|show|consent` CLI verbs, an optional quota step in interactive `tokdash setup`, quota state in `tokdash doctor`, and `tokdash export --include-quota` (exports exclude quota data by default).
 - Added a background quota poller to `tokdash serve` (default every 30 minutes; `quota.poll_interval_minutes` in `config.json`, `TOKDASH_QUOTA_POLL_INTERVAL` env override, `TOKDASH_QUOTA_POLL=0` kill switch, `quota.enabled` master switch) with incremental watermark-based Codex session ingestion and a one-time history backfill.
 - Added `TOKDASH_QUOTA_RETENTION_DAYS` opt-in retention pruning for stored quota snapshots (default: off — snapshots are kept indefinitely).
-- Added macOS Keychain support for Claude quota credentials: Tokdash reads the `Claude Code-credentials` Keychain item (read-only, via `security find-generic-password`) when `.credentials.json` is absent, with `CLAUDE_CODE_OAUTH_TOKEN` as the override for locked/headless Keychains. Verified by a macOS CI job (new `macos-latest` matrix entry) — the first macOS CI coverage for the platform's experimental support.
+- Added macOS Keychain support for Claude quota credentials: Tokdash reads `CLAUDE_CODE_OAUTH_TOKEN` first, then `.credentials.json`, then the `Claude Code-credentials` Keychain item (read-only, via `security find-generic-password`). The env var is the locked/headless-Keychain override and short-circuits the Keychain subprocess. Verified by a macOS CI job (new `macos-latest` matrix entry) — the first macOS CI coverage for the platform's experimental support.
 
 ### Changed
 - Usage database schema v4 → v5 (additive): new `quota_snapshots` and `quota_file_state` tables.

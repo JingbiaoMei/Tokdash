@@ -1,9 +1,10 @@
 # Windows support plan
 
-Status: implemented in this branch through Tier 3, but not yet validated on a real
-Windows machine. This document records the agreed approach, the concrete gaps, and
-the tiered rollout; checkboxes marked complete indicate code/docs/tests present in
-the working tree, not released support.
+Status: released in `v1.0.5` as **experimental native Windows support**. Foreground
+`tokdash serve`, Windows-aware path/locking behavior, Windows CI, and a Windows Task
+Scheduler backend for `tokdash setup` are implemented. The release has CI coverage
+and initial real-Windows smoke validation, but broader real-world Task Scheduler
+create/start/update/uninstall validation is still ongoing.
 
 ## 1. Goal & scope
 
@@ -70,14 +71,14 @@ silver bullet. Each client's real Windows layout must still be verified empirica
 
 ## 3. Original gap analysis
 
-These were the gaps identified before the Windows-support branch. Some have now
-been closed in this working tree; they remain here as the rationale for the tiered
-plan and for the remaining real-Windows validation work.
+These were the gaps identified before the Windows-support work. Many are now closed
+in `v1.0.5`; they remain here as the rationale for the tiered plan and for the
+remaining real-Windows validation work.
 
-| # | Gap | Where | Impact on Windows today |
+| # | Gap | Where | Original Windows impact |
 | --- | --- | --- | --- |
 | 1 | File locking uses POSIX-only `fcntl` | `src/tokdash/usage_store.py:14-17` (`import fcntl` guarded by `except ImportError`), `usage_store.py:41-56` (`usage_db_process_lock`) | `fcntl` is `None` on Windows, so the lock silently no-ops (`if fcntl is None: yield; return`). Cross-process serialization between `tokdash serve` and `tokdash db watch`/resync is lost — a real correctness gap, not just a warning. |
-| 2 | No Windows background-service backend | `src/tokdash/onboard/systemd.py` (Linux only), `src/tokdash/onboard/launchd.py` (macOS only); dispatch in `src/tokdash/onboard/plan.py:_resolve_service()` | `plan.py:265-270` already has the explicit fallback branch: *"Other (e.g. native Windows): no managed service yet"* — `--service systemd`/`--service launchd` are blocked, and the default path appends the note `"Background service setup for {os_kind} is not available yet; use `tokdash serve`."` Native Windows users get foreground-only today, by design. |
+| 2 | No Windows background-service backend | `src/tokdash/onboard/systemd.py` (Linux only), `src/tokdash/onboard/launchd.py` (macOS only); dispatch in `src/tokdash/onboard/plan.py:_resolve_service()` | Before Tier 2, native Windows users got foreground-only behavior by design: `--service systemd`/`--service launchd` were blocked, and auto service setup fell back to foreground guidance. |
 | 3 | OpenCode data path hardcoded to XDG layout | `src/tokdash/sources/coding_tools.py:202-203` (`OpenCodeParser.__init__`: `Path.home() / ".local/share/opencode/storage/message"` and `.../opencode.db`); duplicated in `src/tokdash/sessions.py:369` (codex), `sessions.py:680` (`_opencode_db_signature`: same `~/.local/share/opencode/opencode.db` literal) | `~/.local/share/...` is an XDG/Linux convention. OpenCode does not necessarily store data there on Windows (likely `%LOCALAPPDATA%\opencode\` or similar — unverified, see §6). Until confirmed and branched, OpenCode usage will not be discovered on native Windows. |
 | 4 | venv interpreter path assumes `bin/python` | `src/tokdash/onboard/paths.py:70-72` (`managed_venv_python()`, with the existing comment *"Windows venvs put the interpreter under Scripts/, but Phase 1 targets POSIX"*); `src/tokdash/onboard/detect.py:188-189` (`pipx_tokdash_python()` candidate paths end in `.../venvs/tokdash/bin/python`); consumed by `src/tokdash/onboard/runtime.py:resolve()`/`create_managed_venv()` | On Windows, `python -m venv` creates `Scripts\python.exe`, not `bin/python`. Both the managed-venv runtime and pipx-detection candidates need an OS branch before `tokdash setup --runtime venv` or `--runtime pipx` can work natively on Windows. |
 | 5 | Other client paths need a Windows verification pass | `src/tokdash/sources/coding_tools.py`: Codex `:306` (`~/.codex/sessions`), Claude Code `:406` (`Path.home().glob(".claude*")`), Gemini CLI `:584` (`~/.gemini`), Amp `:690` (`~/.amp`), Kimi CLI `:746` (`~/.kimi`, override via env), Pi `:888-891` (`~/.pi/agent/sessions`, override via `PI_AGENT_DIR`), Copilot CLI `:1071-1072` (`~/.copilot/otel`, `~/.copilot/session-state/*/events.jsonl` — glob built via `str(Path.home() / ...)`), Hermes `:1518-1520` (`~/.hermes`, override via `HERMES_HOME`) | `~/.<client>` dotfiles resolve fine via `Path.home()` on Windows (`pathlib` handles `%USERPROFILE%`), so these are *probably* OK as-is — but each one needs an explicit verification pass against the real Windows install of that client, not an assumption. The Copilot CLI glob built with `str(Path / ... / "*" / "events.jsonl")` should also be checked for backslash-vs-glob interaction on Windows. |
@@ -86,7 +87,7 @@ plan and for the remaining real-Windows validation work.
 | 8 | Statusline templates are bash-only | `docs/examples/statusline/statusline-minimal.sh`, `docs/examples/statusline/statusline-full.sh` (both `curl`+`jq`, `#!/usr/bin/env bash`) | Claude Code on Windows can still run a bash script under WSL/Git Bash, but a native PowerShell statusline template is missing for users running Claude Code natively on Windows. |
 | 9 | CI is Ubuntu-only | `.github/workflows/ci.yml` (`runs-on: ubuntu-latest`, matrix `python-version: ["3.10", "3.12"]`) | No automated signal at all for Windows regressions; every gap above can silently break without CI catching it. |
 | 10 | Tests assume POSIX/systemd/launchd | `tests/test_onboard.py` (monkeypatches `systemd`/`launchd` modules directly), `tests/test_usage_store.py` (locking behavior assumes `fcntl` semantics), plus any test that builds paths assuming POSIX separators | Needs skip-markers for backend-specific tests (e.g. `@pytest.mark.skipif(os_kind() != "windows", ...)` for a future `winsched` backend) and new Windows-specific tests once Tier 1/2 land. |
-| 11 | Docs/metadata don't mention Windows | `README.md:102-105` (`## Platform support` lists only Linux/WSL2 = supported, macOS = experimental); `pyproject.toml` `classifiers` (no `Operating System ::` classifier at all today) | Cosmetic but user-facing: nothing currently tells a Windows user whether tokdash works for them, and PyPI's classifier list doesn't advertise Windows support once it exists. |
+| 11 | Docs/metadata did not mention Windows | Before `v1.0.5`, `README.md` listed Linux/WSL2 and macOS only, and `pyproject.toml` had no Windows OS classifier. | Cosmetic but user-facing: nothing told a Windows user whether tokdash worked for them, and PyPI's classifier list did not advertise Windows support. |
 
 ## 4. Tiered plan
 
@@ -118,8 +119,7 @@ users — it is pure refactoring with test coverage to prove parity.
       Tier 1.
 
 **Completed after Tier 0**: the real `msvcrt`-based lock implementation and the
-verified Hermes Windows path branch landed in later tiers. Remaining Windows behavior
-still needs real-machine validation before release.
+verified Hermes Windows path branch landed in later tiers.
 
 ### Tier 1 — Native Windows foreground
 
@@ -136,8 +136,11 @@ directly with a stock Windows Python install (no managed service yet).
       Windows; most are expected to need no change (`Path.home()` resolves
       `%USERPROFILE%` correctly), but each must be confirmed against a real install,
       not assumed.
-- [ ] Smoke-test `tokdash serve` end-to-end on Windows (`python -m tokdash serve` and
-      the packaged `tokdash` console script).
+- [x] Smoke-test `tokdash serve` end-to-end on Windows. The `v1.0.5` release was
+      installed from PyPI into Windows Python 3.13, `py -m tokdash --version` and
+      `doctor --json` passed, `setup --dry-run --service winsched --json` rendered a
+      `pythonw.exe` Task Scheduler plan, and a temporary server on port 55424 returned
+      `/health` with `version: 1.0.5`.
 - [x] Add `windows-latest` to `.github/workflows/ci.yml`'s matrix; add
       `skipif`/`xfail` markers to the POSIX-only tests identified in gap #10, and add
       new Windows-specific tests (lock behavior, path resolution).
@@ -175,9 +178,10 @@ what systemd/launchd already provide on Linux/macOS.
       `docs/examples/statusline/statusline-minimal.sh` /
       `statusline-full.sh` (gap #8), plus the matching Windows `settings.json`
       `statusLine` snippet for Claude Code.
-- [x] Document Tailscale-on-Windows notes for remote access (the existing
-      `onboard/tailscale.py` flow assumes a CLI on `PATH`; confirm behavior with the
-      Windows Tailscale client and document any differences).
+- [x] Document Tailscale-on-Windows notes for remote access. The Windows Tailscale
+      client exposes a `tailscale` CLI from PowerShell/cmd, but the combined native
+      Windows Tokdash + Tailscale Serve path should still be treated as experimental
+      until separately validated end to end.
 
 ## 5. Testing & CI strategy
 
@@ -188,40 +192,33 @@ PYTHONPATH=src python3 -m pytest -q
 python -m compileall -q src/tokdash main.py
 ```
 
-CI (`.github/workflows/ci.yml`) changes:
+CI (`.github/workflows/ci.yml`) now includes `ubuntu-latest` and `windows-latest` on
+Python 3.10 and 3.12. The existing `Compile` step and `pytest -q` run across the full
+matrix. Windows-specific tests cover file locking, client path resolution, service
+selection, and Task Scheduler rendering, while POSIX-specific assumptions are pinned
+inside their test harnesses.
 
-- Add `windows-latest` to the `runs-on` matrix (currently `ubuntu-latest` only,
-  `python-version: ["3.10", "3.12"]`).
-- Keep the existing `Compile` step (`python -m compileall -q src/tokdash main.py
-  docs/agents/openclaw_reporting/openclaw_cron_job.py`) and `Test` step (`pytest -q`)
-  unchanged in shape; they should run as-is on `windows-latest` once Tier 1's
-  skip-markers are in place.
-- Tests that exercise systemd/launchd-specific monkeypatching (`tests/test_onboard.py`)
-  need `skipif(os_kind() == "windows")` guards until the Tier 2 `winsched` backend has
-  its own equivalent coverage.
-- New Windows-only tests (file locking, client path resolution, winsched rendering)
-  should be guarded the other way — `skipif(os_kind() != "windows")` — so the suite
-  stays meaningful and fast on every platform rather than every test running everywhere.
+## 6. Remaining validation / research
 
-## 6. Open items / research needed before Tier 1
+The single biggest remaining risk is **guessing** a Windows client path instead of
+verifying it. Continue confirming empirically (real Windows installs, not documentation
+alone) where each client stores data:
 
-The single biggest risk in this plan is **guessing** a Windows path instead of
-verifying it. Before Tier 1 path branches are written, confirm empirically (real
-Windows install, not documentation alone) where each of these actually stores data:
-
-- **OpenCode** — currently assumed XDG-style (`~/.local/share/opencode/...`,
-  `sources/coding_tools.py:202-203`); Windows is plausibly
-  `%LOCALAPPDATA%\opencode\` but this is unverified.
+- **OpenCode** — research for `v1.0.5` found it keeps the XDG-style
+  `~/.local/share/opencode/...` layout on Windows; re-check if upstream changes its
+  storage layout.
 - **GitHub Copilot CLI** — currently `~/.copilot/otel` and
   `~/.copilot/session-state/*/events.jsonl` (`sources/coding_tools.py:1071-1072`);
   confirm whether the Windows install uses the same dotfile-style home directory or a
   `%APPDATA%`/`%LOCALAPPDATA%` convention instead.
-- **Gemini CLI** — currently `~/.gemini` (`sources/coding_tools.py:584`); confirm same
-  question.
-- Lower-priority but worth a pass during Tier 1's broader audit: Kimi CLI, Pi, Hermes,
-  Amp, Codex, Claude Code — all currently simple `~/.<client>` dotfiles that *should*
-  resolve correctly via `pathlib.Path.home()` on Windows, but each should still get a
-  one-time empirical check rather than being assumed correct by analogy.
+- **Gemini CLI** — currently `~/.gemini` (`sources/coding_tools.py:584`); confirm
+  whether the Windows install uses the same dotfile-style home directory or an
+  `%APPDATA%`/`%LOCALAPPDATA%` convention instead.
+- Lower-priority but worth continued spot checks: Kimi CLI, Pi, Amp, Codex, and Claude
+  Code currently use simple `~/.<client>` dotfiles that *should* resolve correctly via
+  `pathlib.Path.home()` on Windows, but each should still get a one-time empirical
+  check rather than being assumed correct by analogy. Hermes already has the
+  Windows-native `%LOCALAPPDATA%\hermes` branch.
 
 `platformdirs` (see §2) can help once the real per-client convention is known, but it
 cannot substitute for checking each client's actual behavior — several of them

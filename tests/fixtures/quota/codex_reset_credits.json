@@ -1,0 +1,45 @@
+{
+  "available_count": 3,
+  "credits": [
+    {
+      "description": "Thanks for using Codex! You've been granted one free rate limit reset.",
+      "expires_at": "2026-07-12T03:53:10.533876Z",
+      "granted_at": "2026-06-12T03:53:10.533876Z",
+      "id": "<redacted>",
+      "profile_image_url": "https://openaiassets.blob.core.windows.net/$web/codex/codex-icon-200.png",
+      "profile_user_id": "Codex Team",
+      "redeem_started_at": null,
+      "redeemed_at": null,
+      "reset_type": "codex_rate_limits",
+      "status": "available",
+      "title": "Full reset (Weekly + 5 hr)"
+    },
+    {
+      "description": "Thanks for using Codex! You've been granted one free rate limit reset.",
+      "expires_at": "2026-07-26T23:55:09.074602Z",
+      "granted_at": "2026-06-26T23:55:09.074602Z",
+      "id": "<redacted>",
+      "profile_image_url": "https://openaiassets.blob.core.windows.net/$web/codex/codex-icon-200.png",
+      "profile_user_id": "Codex Team",
+      "redeem_started_at": null,
+      "redeemed_at": null,
+      "reset_type": "codex_rate_limits",
+      "status": "available",
+      "title": "Full reset (Weekly + 5 hr)"
+    },
+    {
+      "description": "Thanks for using Codex! You've been granted one free rate limit reset.",
+      "expires_at": "2026-07-31T20:10:28.385496Z",
+      "granted_at": "2026-07-01T20:10:28.385496Z",
+      "id": "<redacted>",
+      "profile_image_url": "https://openaiassets.blob.core.windows.net/$web/codex/codex-icon-200.png",
+      "profile_user_id": "Codex Team",
+      "redeem_started_at": null,
+      "redeemed_at": null,
+      "reset_type": "codex_rate_limits",
+      "status": "available",
+      "title": "Full reset (Weekly + 5 hr)"
+    }
+  ],
+  "total_earned_count": 0
+}

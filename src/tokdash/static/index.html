@@ -291,6 +291,57 @@
       padding: 6px 10px;
     }
 
+    /* Provider-visibility dropdown on the Quota tab (show/hide Codex/Claude/Antigravity). */
+    .quota-visibility-wrap {
+      position: relative;
+      display: inline-flex;
+    }
+    .quota-visibility-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .quota-visibility-caret {
+      font-size: 10px;
+      color: var(--color-muted);
+    }
+    .quota-visibility-panel {
+      position: absolute;
+      top: calc(100% + 6px);
+      right: 0;
+      z-index: 60;
+      min-width: 176px;
+      padding: 6px;
+      background: var(--color-surface-glass);
+      border: 2px solid var(--color-border);
+      border-radius: 10px;
+      box-shadow: 0 12px 30px rgba(15, 23, 42, 0.18);
+      backdrop-filter: blur(8px);
+    }
+    .quota-visibility-panel.hidden {
+      display: none;
+    }
+    .quota-visibility-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 8px;
+      border-radius: 8px;
+      font-size: 13px;
+      cursor: pointer;
+      color: var(--color-text);
+    }
+    .quota-visibility-item:hover {
+      background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+    }
+    .quota-visibility-item input {
+      cursor: pointer;
+    }
+
     .style-select {
       appearance: none;
       min-width: 144px;
@@ -822,6 +873,7 @@
         <button class="tab-btn" data-tab="overview" aria-selected="true" data-i18n="overview">Overview</button>
         <button class="tab-btn" data-tab="sessions" aria-selected="false" data-i18n="sessionsPage">Sessions</button>
         <button class="tab-btn" data-tab="stats" aria-selected="false" data-i18n="stats">Stats</button>
+        <button class="tab-btn" data-tab="quota" aria-selected="false" data-i18n="quota">Quota</button>
         <button class="tab-btn" data-tab="pricing" aria-selected="false" data-i18n="pricingDb">Pricing</button>
       </nav>
     </header>
@@ -1509,6 +1561,79 @@
       </section>
     </div>
 
+    <!-- Quota Tab -->
+    <div id="quota-content" class="tab-content">
+      <section class="surface p-5 mb-6">
+        <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-5">
+          <div>
+            <h2 class="text-base font-extrabold mono" data-i18n="subscriptionQuota">Subscription Quota</h2>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <label class="flex items-center gap-2 text-sm font-semibold" for="quotaEnabledToggle">
+              <input type="checkbox" id="quotaEnabledToggle" class="align-middle">
+              <span data-i18n="quotaTracking">Quota tracking</span>
+            </label>
+            <label class="flex items-center gap-2 text-sm" for="quotaIntervalSelect">
+              <span style="color: var(--color-muted);" data-i18n="pollInterval">Poll every</span>
+              <select id="quotaIntervalSelect" class="ui-input compact-control" aria-label="Quota poll interval">
+                <option value="15">15 min</option>
+                <option value="30">30 min</option>
+                <option value="60">60 min</option>
+                <option value="120">120 min</option>
+              </select>
+            </label>
+            <span id="quotaIntervalSource" class="text-xs" style="color: var(--color-muted);"></span>
+            <select id="quotaRangeSelect" class="ui-input compact-control" aria-label="Quota history range">
+              <option value="24h" data-i18n="quotaRange24h">Last 24 Hours</option>
+              <option value="7d" data-i18n="quotaRange7d">Last 7 Days</option>
+              <option value="30d" data-i18n="quotaRange30d">Last 30 Days</option>
+              <option value="all" data-i18n="quotaRangeAll">All Time</option>
+            </select>
+            <div id="quotaVisibilityWrap" class="quota-visibility-wrap">
+              <button type="button" id="quotaVisibilityBtn" class="ui-input compact-control quota-visibility-btn" aria-haspopup="true" aria-expanded="false">
+                <span id="quotaVisibilityLabel" data-i18n="quotaVisibilityAll">Show: All</span>
+                <span aria-hidden="true" class="quota-visibility-caret">▾</span>
+              </button>
+              <div id="quotaVisibilityPanel" class="quota-visibility-panel hidden" role="menu" aria-label="Show providers">
+                <label class="quota-visibility-item"><input type="checkbox" data-quota-provider="codex" checked><span>Codex</span></label>
+                <label class="quota-visibility-item"><input type="checkbox" data-quota-provider="claude" checked><span>Claude Code</span></label>
+                <label class="quota-visibility-item"><input type="checkbox" data-quota-provider="antigravity" checked><span>Antigravity</span></label>
+              </div>
+            </div>
+            <!-- TASK 2: no dedicated quota refresh button anymore — the global #refreshBtn
+                 refreshes quota when this tab is active. This line keeps the poll.last_run
+                 freshness readout visible, and doubles as the transient status surface for
+                 consent/settings writes triggered from this tab (see setQuotaActionStatus). -->
+            <span id="quotaStatusLine" class="text-xs" style="color: var(--color-muted);"></span>
+          </div>
+        </div>
+        <div id="quotaProviderCards" class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div class="text-center py-10" style="color: var(--color-muted);" data-i18n="loading">Loading…</div>
+        </div>
+      </section>
+
+      <section class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div class="surface p-5">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-base font-extrabold mono" data-i18n="utilizationHistory">Remaining History</h3>
+            <div class="text-xs" style="color: var(--color-muted);">%</div>
+          </div>
+          <div class="h-[280px]">
+            <canvas id="quotaUtilizationChart" aria-label="Quota utilization history chart" role="img"></canvas>
+          </div>
+        </div>
+        <div class="surface p-5">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-base font-extrabold mono" data-i18n="consumptionHistory">Consumption History</h3>
+            <div id="quotaConsumptionUnit" class="text-xs" style="color: var(--color-muted);" data-i18n="consumptionUnit">percent used</div>
+          </div>
+          <div class="h-[280px]">
+            <canvas id="quotaConsumptionChart" aria-label="Quota consumption history chart" role="img"></canvas>
+          </div>
+        </div>
+      </section>
+    </div>
+
     <!-- Pricing Tab -->
     <div id="pricing-content" class="tab-content">
       <section class="surface p-5">
@@ -1662,12 +1787,18 @@
     let sessionPerTurnChart = null;
     let sessionCumulativeChart = null;
     let sessionTimeCumulativeChart = null;
+    let quotaUtilizationChart = null;
+    let quotaConsumptionChart = null;
 
     // Render perf controls
     let updateInFlight = false;
     let updateIsManualRefresh = false;
     let refreshUiState = 'idle';
     let refreshUiResetTimer = null;
+    // TASK 2: 'refreshing'/'cooldown' extend refreshUiState so the global #refreshBtn can
+    // also drive the Quota tab's explicit refresh action (see refreshQuotaViaGlobalButton).
+    let refreshCooldownTimer = null;
+    let refreshCooldownRemaining = 0;
     let lastUsageResponse = null;
     const SESSION_TOOL_KEYS = ['codex', 'claude', 'opencode', 'pi_agent'];
     let lastSessionsResponses = { codex: null, claude: null, opencode: null, pi_agent: null, combined: null };
@@ -1675,6 +1806,9 @@
     let lastAppsBreakdown = null;
     let lastByTool = {};
     let pricingDbLoaded = false;
+    let quotaLoaded = false;
+    let lastQuotaPayload = null;
+    let lastQuotaHistory = null;
     let pricingDbDirty = false;
     let pricingDbLastText = '';
     let pricingDbLastPayload = null;  // last GET/PUT payload, so the source line can re-localize
@@ -1743,6 +1877,7 @@
         refreshCached: 'Cached',
         refreshBusy: 'Busy',
         refreshFailed: 'Failed — retry',
+        refreshCooldown: 'Wait {n}s',
         install: 'Install',
         installApp: 'Install Tokdash as an app',
         styleTheme: 'Style',
@@ -1765,7 +1900,54 @@
         overview: 'Overview',
         sessionsPage: 'Sessions',
         stats: 'Stats',
+        quota: 'Quota',
         pricingDb: 'Pricing',
+        subscriptionQuota: 'Subscription Quota',
+        utilizationHistory: 'Remaining History',
+        consumptionHistory: 'Consumption History',
+        consumptionUnit: 'percent used',
+        localOnly: 'local only',
+        notDetected: 'not detected',
+        quotaNoData: 'No quota snapshots yet.',
+        enableQuotaApi: 'Enable API',
+        quotaConsentDesc: 'Optional live quota polling uses {endpoint} with credentials from {path}.',
+        resetCredits: 'Reset Credits',
+        available: 'available',
+        expires: 'expires',
+        quotaTracking: 'Quota tracking',
+        pollInterval: 'Poll every',
+        quotaDisabledTitle: 'Quota tracking is off',
+        quotaDisabledDesc: 'Enable quota tracking to record subscription windows, poll consented provider APIs, and chart history.',
+        enableQuotaTracking: 'Enable quota tracking',
+        quotaIntervalEnv: 'interval set by TOKDASH_QUOTA_POLL_INTERVAL',
+        quotaIntervalConfig: 'saved interval',
+        quotaIntervalDefault: 'default interval',
+        hour: 'Hour',
+        quotaRange24h: 'Last 24 Hours',
+        quotaRange7d: 'Last 7 Days',
+        quotaRange30d: 'Last 30 Days',
+        quotaRangeAll: 'All Time',
+        quotaVisibilityAll: 'Show: All',
+        quotaVisibilityNone: 'Show: None',
+        quotaVisibilityPrefix: 'Show:',
+        quotaAllHidden: 'All providers hidden — enable one from the Show menu.',
+        consumptionUnitDay: '% of window consumed per day',
+        consumptionUnitHour: '% of window consumed per hour',
+        quotaStaleToken: 'Sign-in token expired — open {app} once to refresh it. Tokdash never refreshes tokens itself.',
+        quotaProviderIssue: 'Unable to refresh quota ({status}). Last checked {time}.',
+        quotaUpdatedAgo: 'Updated {time}',
+        quotaRemainingPct: '{pct}% left',
+        quotaActionSaving: 'Saving…',
+        quotaActionSaved: 'Saved',
+        quotaActionFailed: 'Failed to save',
+        sourceLive: 'live',
+        sourceSession: 'session',
+        windowFiveHour: '5-hour',
+        windowWeekly: 'Weekly',
+        minAgo: '{n} min ago',
+        hourAgo: '{n} hr ago',
+        dayAgo: '{n} d ago',
+        justNow: 'just now',
         reload: 'Reload',
         save: 'Save',
         formatJson: 'Format JSON',
@@ -1916,6 +2098,7 @@
         refreshCached: '已用缓存',
         refreshBusy: '繁忙',
         refreshFailed: '失败，请重试',
+        refreshCooldown: '{n} 秒后重试',
         install: '安装',
         installApp: '将 Tokdash 安装为应用',
         styleTheme: '样式',
@@ -1938,7 +2121,54 @@
         overview: '概览',
         sessionsPage: '会话',
         stats: '统计',
+        quota: '额度',
         pricingDb: '价格库',
+        subscriptionQuota: '订阅额度',
+        utilizationHistory: '剩余额度历史',
+        consumptionHistory: '消耗历史',
+        consumptionUnit: '已用百分比',
+        localOnly: '仅本地',
+        notDetected: '未检测到',
+        quotaNoData: '暂无额度快照。',
+        enableQuotaApi: '启用 API',
+        quotaConsentDesc: '可选实时额度轮询会使用 {endpoint}，凭据来自 {path}。',
+        resetCredits: '重置额度',
+        available: '可用',
+        expires: '到期',
+        quotaTracking: '额度跟踪',
+        pollInterval: '轮询间隔',
+        quotaDisabledTitle: '额度跟踪已关闭',
+        quotaDisabledDesc: '启用额度跟踪后可记录订阅窗口、轮询已授权的服务商 API 并绘制历史曲线。',
+        enableQuotaTracking: '启用额度跟踪',
+        quotaIntervalEnv: '间隔由 TOKDASH_QUOTA_POLL_INTERVAL 指定',
+        quotaIntervalConfig: '已保存的间隔',
+        quotaIntervalDefault: '默认间隔',
+        hour: '小时',
+        quotaRange24h: '过去 24 小时',
+        quotaRange7d: '过去 7 天',
+        quotaRange30d: '过去 30 天',
+        quotaRangeAll: '全部',
+        quotaVisibilityAll: '显示：全部',
+        quotaVisibilityNone: '显示：无',
+        quotaVisibilityPrefix: '显示：',
+        quotaAllHidden: '已隐藏全部提供方 — 从“显示”菜单启用。',
+        consumptionUnitDay: '每天消耗的窗口百分比',
+        consumptionUnitHour: '每小时消耗的窗口百分比',
+        quotaStaleToken: '登录令牌已过期 — 请打开一次 {app} 以刷新它。Tokdash 不会自动刷新令牌。',
+        quotaProviderIssue: '无法刷新额度（{status}）。上次检查时间：{time}。',
+        quotaUpdatedAgo: '更新于 {time}',
+        quotaRemainingPct: '剩余 {pct}%',
+        quotaActionSaving: '保存中…',
+        quotaActionSaved: '已保存',
+        quotaActionFailed: '保存失败',
+        sourceLive: '实时',
+        sourceSession: '会话',
+        windowFiveHour: '5 小时',
+        windowWeekly: '每周',
+        minAgo: '{n} 分钟前',
+        hourAgo: '{n} 小时前',
+        dayAgo: '{n} 天前',
+        justNow: '刚刚',
         reload: '重新加载',
         save: '保存',
         formatJson: '格式化 JSON',
@@ -2083,6 +2313,11 @@
 
     function isSessionsActive() {
       const el = document.getElementById('sessions-content');
+      return !!el && el.classList.contains('active');
+    }
+
+    function isQuotaActive() {
+      const el = document.getElementById('quota-content');
       return !!el && el.classList.contains('active');
     }
 
@@ -2417,24 +2652,62 @@
       const refreshBtn = document.getElementById('refreshBtn');
       if (!refreshBtn) return;
       let labelKey = 'refresh';
-      if (updateInFlight) labelKey = updateIsManualRefresh ? 'refreshing' : 'loading';
-      else if (refreshUiState === 'updated') labelKey = 'refreshUpdated';
+      let spinning = false;
+      let disabled = false;
+      let label = null;
+      if (updateInFlight) {
+        labelKey = updateIsManualRefresh ? 'refreshing' : 'loading';
+        spinning = true;
+        disabled = true;
+      } else if (refreshUiState === 'refreshing') {
+        // Driven by refreshQuotaViaGlobalButton (Quota tab), not the dashboard fetch above.
+        labelKey = 'refreshing';
+        spinning = true;
+        disabled = true;
+      } else if (refreshUiState === 'cooldown') {
+        label = t('refreshCooldown').replace('{n}', String(refreshCooldownRemaining));
+        disabled = true;
+      } else if (refreshUiState === 'updated') labelKey = 'refreshUpdated';
       else if (refreshUiState === 'cached') labelKey = 'refreshCached';
       else if (refreshUiState === 'busy') labelKey = 'refreshBusy';
       else if (refreshUiState === 'failed') labelKey = 'refreshFailed';
-      const iconClass = updateInFlight ? ' class="refresh-icon-spin"' : '';
+      if (label === null) label = t(labelKey);
+      const iconClass = spinning ? ' class="refresh-icon-spin"' : '';
       refreshBtn.innerHTML = `
         <svg${iconClass} width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
           <path d="M20 12a8 8 0 1 1-2.343-5.657" stroke="white" stroke-width="2" stroke-linecap="round"/>
           <path d="M20 4v6h-6" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
-        <span data-i18n="${labelKey}">${t(labelKey)}</span>
+        <span>${label}</span>
       `;
-      refreshBtn.setAttribute('aria-label', t(labelKey));
-      refreshBtn.disabled = updateInFlight;
+      refreshBtn.setAttribute('aria-label', label);
+      refreshBtn.disabled = disabled;
+    }
+
+    function startRefreshCooldown(seconds) {
+      if (refreshCooldownTimer) {
+        clearInterval(refreshCooldownTimer);
+        refreshCooldownTimer = null;
+      }
+      refreshUiState = 'cooldown';
+      refreshCooldownRemaining = Math.max(1, Math.ceil(Number(seconds) || 1));
+      renderRefreshButton();
+      refreshCooldownTimer = setInterval(() => {
+        refreshCooldownRemaining -= 1;
+        if (refreshCooldownRemaining <= 0) {
+          clearInterval(refreshCooldownTimer);
+          refreshCooldownTimer = null;
+          refreshUiState = 'idle';
+        }
+        renderRefreshButton();
+      }, 1000);
     }
 
     function setRefreshUiState(state, { resetAfterMs = 0 } = {}) {
+      if (refreshCooldownTimer) {
+        clearInterval(refreshCooldownTimer);
+        refreshCooldownTimer = null;
+      }
       refreshUiState = state;
       if (refreshUiResetTimer) {
         clearTimeout(refreshUiResetTimer);
@@ -2495,6 +2768,17 @@
       throw lastError;
     }
 
+    async function postJsonWithCsrf(url, body = {}) {
+      const tokenResp = await fetch(appPath('/api/csrf-token'));
+      const tokenPayload = await tokenResp.json();
+      if (!tokenResp.ok) throw new Error(tokenPayload.detail || tokenResp.statusText);
+      return fetchJson(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Tokdash-Token': tokenPayload.token || '' },
+        body: JSON.stringify(body),
+      });
+    }
+
     function setDashboardFetchStatus(error) {
       const lastUpdate = document.getElementById('lastUpdate');
       if (!lastUpdate) return;
@@ -2536,6 +2820,15 @@
       // The pricing source line is set imperatively (no data-i18n), so re-derive it from the
       // last payload on a language switch — otherwise it stays frozen in the prior language.
       if (pricingDbLastPayload) setPricingDbSource(pricingDbLastPayload);
+      if (lastQuotaPayload) renderQuotaProviderCards(lastQuotaPayload);
+      if (lastQuotaHistory) renderQuotaCharts(lastQuotaHistory);
+      if (lastQuotaPayload) renderQuotaSettings(lastQuotaPayload);
+      updateQuotaVisibilityLabel();  // imperative label (data-i18n removed), re-derive on switch
+      const quotaUnitEl = document.getElementById('quotaConsumptionUnit');
+      if (quotaUnitEl && !quotaUnitEl.hasAttribute('data-i18n')) {
+        const granularity = currentQuotaRange() === '24h' ? 'hour' : 'day';
+        quotaUnitEl.textContent = granularity === 'hour' ? t('consumptionUnitHour') : t('consumptionUnitDay');
+      }
       renderRefreshButton();
       syncCodexReviewToggle();
       updateTimestamp();
@@ -4102,6 +4395,784 @@
       tbody.replaceChildren(frag);
     }
 
+    function formatEpochSeconds(value) {
+      if (!value) return '—';
+      const numeric = Number(value);
+      const dt = Number.isFinite(numeric) ? new Date(numeric * 1000) : new Date(value);
+      if (isNaN(dt.getTime())) return '—';
+      return formatMonthDayTime(dt.toISOString());
+    }
+
+    // Date-only label (no HH:MM), used by the quota history charts when the selected
+    // range is coarser than a day (granularity === 'day'): at 7d/30d/All-Time the clock
+    // time on each tick is noise, so we drop it and keep just month/day (+ year when the
+    // point falls outside the current year).
+    function formatMonthDayDateOnly(epochSeconds) {
+      const dt = new Date(Number(epochSeconds) * 1000);
+      if (isNaN(dt.getTime())) return '—';
+      const locale = currentLang === 'zh' ? 'zh-CN' : 'en-US';
+      const now = new Date();
+      const opts = dt.getFullYear() === now.getFullYear()
+        ? { month: 'short', day: 'numeric' }
+        : { year: 'numeric', month: 'short', day: 'numeric' };
+      return dt.toLocaleDateString(locale, opts);
+    }
+
+    // Granularity-aware axis/tooltip label for the quota charts: hour granularity (the
+    // 24h range) keeps the full date+time; day granularity shows the date only.
+    function formatQuotaAxisLabel(epochSeconds, granularity) {
+      if (!epochSeconds) return '—';
+      return granularity === 'day'
+        ? formatMonthDayDateOnly(epochSeconds)
+        : formatEpochSeconds(epochSeconds);
+    }
+
+    function formatRelativeAgo(epochSeconds) {
+      if (!epochSeconds) return null;
+      const diff = Math.max(0, Date.now() / 1000 - Number(epochSeconds));
+      if (diff < 60) return t('justNow');
+      const minutes = Math.floor(diff / 60);
+      if (minutes < 60) return t('minAgo').replace('{n}', minutes);
+      const hours = Math.floor(minutes / 60);
+      if (hours < 24) return t('hourAgo').replace('{n}', hours);
+      const days = Math.floor(hours / 24);
+      return t('dayAgo').replace('{n}', days);
+    }
+
+    function quotaProviderLabel(provider) {
+      if (provider === 'codex') return 'Codex';
+      if (provider === 'claude') return 'Claude Code';
+      if (provider === 'antigravity') return 'Antigravity';
+      return provider || '—';
+    }
+
+    function quotaConsentMeta(provider) {
+      if (provider === 'codex') return { key: 'codex_api', endpoint: 'chatgpt.com/backend-api/wham/*', path: '$CODEX_HOME/auth.json' };
+      if (provider === 'claude') return { key: 'claude_api', endpoint: 'api.anthropic.com/api/oauth/usage', path: '$CLAUDE_CONFIG_DIR/.credentials.json' };
+      if (provider === 'antigravity') return { key: 'antigravity_api', endpoint: 'daily-cloudcode-pa.googleapis.com/v1internal:*', path: '~/.gemini/antigravity-cli/antigravity-oauth-token' };
+      return { key: '', endpoint: '', path: '' };
+    }
+
+    // TASK 2 (simplification round): the dedicated #quotaRefresh control is gone — the
+    // global #refreshBtn now drives quota refreshes when the Quota tab is active (see
+    // refreshQuotaViaGlobalButton below, and setRefreshUiState/renderRefreshButton which
+    // gained a 'refreshing'/'cooldown' state for it). #quotaStatusLine is now purely the
+    // transient status surface for tab-local writes (consent grants, enabled toggle, poll
+    // interval): it shows a Saving/Saved/Failed message during a write and is otherwise
+    // empty. The per-poll "Updated x min ago" freshness readout was removed from here —
+    // it is redundant with the per-bar "Updated x min ago" shown on each provider card.
+    let quotaActionStatusResetTimer = null;
+
+    function setQuotaActionStatus(state) {
+      const el = document.getElementById('quotaStatusLine');
+      if (!el) return;
+      if (quotaActionStatusResetTimer) {
+        clearTimeout(quotaActionStatusResetTimer);
+        quotaActionStatusResetTimer = null;
+      }
+      if (state === 'saving') {
+        el.style.color = 'var(--color-muted)';
+        el.textContent = t('quotaActionSaving');
+        return;
+      }
+      if (state === 'saved' || state === 'error') {
+        el.style.color = state === 'error' ? '#DC2626' : 'var(--color-muted)';
+        el.textContent = t(state === 'error' ? 'quotaActionFailed' : 'quotaActionSaved');
+        quotaActionStatusResetTimer = setTimeout(() => {
+          el.style.color = 'var(--color-muted)';
+          el.textContent = '';
+          quotaActionStatusResetTimer = null;
+        }, state === 'error' ? 2600 : 1800);
+        return;
+      }
+      el.style.color = 'var(--color-muted)';
+      el.textContent = '';
+    }
+
+    // TASK 1: the card displays REMAINING quota, not used. Storage/API keep used_percent;
+    // remaining is a display-only inversion (100 - used_percent). Thresholds are the exact
+    // inverse of the old used>75/used>90 severity bands (used>90 <=> remaining<10, etc.),
+    // so the same color tokens fire at the same real utilization levels as before.
+    function quotaRemainingPercent(bucket) {
+      const used = bucket && bucket.used_percent;
+      if (used === null || used === undefined) return null;
+      return Math.max(0, Math.min(100, 100 - Number(used)));
+    }
+
+    function quotaRemainingColor(remaining) {
+      const pct = Number(remaining);
+      if (!Number.isFinite(pct)) return 'var(--color-primary)';
+      if (pct <= 10) return '#DC2626';
+      if (pct <= 25) return '#D97706';
+      return 'var(--color-primary)';
+    }
+
+    function isQuotaUsageBucket(bucket) {
+      if (!bucket || bucket.bucket === 'api' || bucket.bucket === 'reset_credits') return false;
+      return bucket.used_percent !== null && bucket.used_percent !== undefined;
+    }
+
+    // Normalized window label shown on the card bars: every tool shows "5-hour" and
+    // "Weekly" instead of tool-specific names (codex "5-hour window"/"7-day window",
+    // claude "Session"/"Weekly All"). Claude's scoped Fable bucket and any unmapped
+    // bucket keep their descriptive label.
+    function quotaWindowLabel(provider, bucket) {
+      const key = String(bucket.bucket || '');
+      if (provider === 'codex') {
+        // Generic across metered features: the backend emits primary windows as 5h/7d and
+        // any additional feature (Spark, future ones) as <feature>_5h / <feature>_7d.
+        if (key === '5h' || key.endsWith('_5h')) return t('windowFiveHour');
+        if (key === '7d' || key.endsWith('_7d')) return t('windowWeekly');
+      } else if (provider === 'claude') {
+        if (key === 'session') return t('windowFiveHour');
+        if (key === 'weekly_all') return t('windowWeekly');
+      }
+      return bucket.bucket_label || key || '—';
+    }
+
+    // A muted uppercase sub-heading grouping a set of bars (codex Spark, antigravity pools).
+    function quotaSubtitleEl(text, tight) {
+      const el = document.createElement('div');
+      el.className = `text-xs font-bold uppercase tracking-wide mb-2 ${tight ? 'mt-1' : 'mt-4'}`;
+      el.style.color = 'var(--color-muted)';
+      el.textContent = text;
+      return el;
+    }
+
+    function renderQuotaBucketRow(bucket, provider, labelOverride) {
+      const row = document.createElement('div');
+      row.className = 'mb-4';
+      const top = document.createElement('div');
+      top.className = 'flex items-center justify-between gap-3 mb-1 text-sm';
+      const label = document.createElement('span');
+      label.className = 'font-semibold';
+      label.textContent = labelOverride || quotaWindowLabel(provider, bucket);
+      // "live" tags were removed as noise; keep a "session" tag only when the row comes
+      // from session-file scanning (not the live API), since that data can lag.
+      const isLive = String(bucket.source || '').endsWith('_api');
+      if (!isLive) {
+        const sourceTag = document.createElement('span');
+        sourceTag.className = 'text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded ml-2';
+        sourceTag.style.background = 'color-mix(in srgb, var(--color-text) 8%, transparent)';
+        sourceTag.style.color = 'var(--color-muted)';
+        sourceTag.textContent = t('sourceSession');
+        label.appendChild(sourceTag);
+      }
+      const remaining = quotaRemainingPercent(bucket);
+      const pct = document.createElement('span');
+      pct.className = 'mono font-extrabold';
+      pct.style.color = remaining === null ? 'var(--color-muted)' : quotaRemainingColor(remaining);
+      pct.textContent = remaining === null ? '—' : t('quotaRemainingPct').replace('{pct}', remaining.toFixed(1));
+      top.appendChild(label);
+      top.appendChild(pct);
+
+      const bar = document.createElement('div');
+      bar.className = 'h-2 rounded-full overflow-hidden';
+      bar.style.background = 'color-mix(in srgb, var(--color-text) 10%, transparent)';
+      const fill = document.createElement('div');
+      fill.className = 'h-full rounded-full';
+      fill.style.width = `${remaining === null ? 0 : remaining}%`;
+      fill.style.background = remaining === null ? 'var(--color-primary)' : quotaRemainingColor(remaining);
+      bar.appendChild(fill);
+
+      const sub = document.createElement('div');
+      sub.className = 'text-xs mt-1';
+      sub.style.color = 'var(--color-muted)';
+      sub.textContent = `${formatEpochSeconds(bucket.captured_at)} · reset ${formatEpochSeconds(bucket.resets_at)}`;
+
+      row.appendChild(top);
+      row.appendChild(bar);
+      row.appendChild(sub);
+      return row;
+    }
+
+    function renderQuotaBucketGroups(card, buckets, provider) {
+      buckets.forEach((bucket) => card.appendChild(renderQuotaBucketRow(bucket, provider)));
+    }
+
+    // Codex card: the primary account windows (bucket ids exactly "5h"/"7d") render first,
+    // then every additional metered feature (Spark today, anything Codex adds later) is
+    // grouped under its own subtitle — derived from the bucket label prefix — so the long
+    // model name shows once instead of on every bar. No feature id is hardcoded: a primary
+    // window is just "5h"/"7d"; anything else is a metered feature that carries a "<name> ·
+    // <window>" label, and if that shape ever changes it degrades to its descriptive label.
+    function renderCodexBuckets(card, buckets) {
+      const isPrimary = (b) => { const k = String(b.bucket || ''); return k === '5h' || k === '7d'; };
+      const primary = buckets.filter(isPrimary);
+      primary.forEach((b) => card.appendChild(renderQuotaBucketRow(b, 'codex')));
+      const grouped = new Map(); // subtitle -> [buckets], insertion-ordered
+      buckets.filter((b) => !isPrimary(b)).forEach((b) => {
+        const subtitle = (String(b.bucket_label || '').split('·')[0] || '').trim() || 'Other';
+        if (!grouped.has(subtitle)) grouped.set(subtitle, []);
+        grouped.get(subtitle).push(b);
+      });
+      grouped.forEach((rows, subtitle) => {
+        card.appendChild(quotaSubtitleEl(subtitle));
+        rows.forEach((b) => card.appendChild(renderQuotaBucketRow(b, 'codex')));
+      });
+    }
+
+    // Antigravity quota is pooled per model family: every Gemini model shares one pool and
+    // every Claude/GPT model the other, so the card shows two groups. Each group gets a
+    // subtitle (the CLI's own group names) and one bar taking the MINIMUM remaining among
+    // matching models — the direct API (fetchAvailableModels) exposes only a single
+    // five-hour window per model, so that is the one bar shown (no weekly is returned).
+    const ANTIGRAVITY_POOLS = [
+      { key: 'gemini', label: 'Gemini Models', test: (n) => n.includes('gemini') },
+      { key: 'claude', label: 'Claude and GPT Models', test: (n) => n.includes('claude') || n.includes('gpt') || n.includes('oss') },
+    ];
+
+    function antigravityPoolBucket(buckets, pool) {
+      let best = null;
+      let bestRemaining = null;
+      buckets.forEach((bucket) => {
+        const name = String(bucket.bucket_label || bucket.bucket || '').toLowerCase();
+        if (!pool.test(name)) return;
+        const remaining = quotaRemainingPercent(bucket);
+        if (remaining === null) return;
+        if (bestRemaining === null || remaining < bestRemaining) {
+          bestRemaining = remaining;
+          best = bucket;
+        }
+      });
+      if (!best) return null;
+      return { ...best, bucket: `pool:${pool.key}`, bucket_label: pool.label };
+    }
+
+    function renderAntigravityPools(card, provider) {
+      const buckets = Array.isArray(provider.buckets) ? provider.buckets.filter(isQuotaUsageBucket) : [];
+      let rendered = 0;
+      ANTIGRAVITY_POOLS.forEach((pool) => {
+        const bucket = antigravityPoolBucket(buckets, pool);
+        if (bucket) {
+          card.appendChild(quotaSubtitleEl(pool.label, rendered === 0));
+          card.appendChild(renderQuotaBucketRow(bucket, 'antigravity', t('windowFiveHour')));
+          rendered += 1;
+        }
+      });
+      return rendered;
+    }
+
+    function renderQuotaSettings(payload) {
+      const enabled = payload?.enabled !== false;
+      const poll = payload?.poll || {};
+      const toggle = document.getElementById('quotaEnabledToggle');
+      if (toggle) toggle.checked = enabled;
+      const select = document.getElementById('quotaIntervalSelect');
+      const source = poll.interval_source || 'default';
+      if (select) {
+        if (poll.interval_minutes) select.value = String(poll.interval_minutes);
+        // An env override (or the kill switch) wins over the config value; make that read-only.
+        select.disabled = source === 'env' || !enabled;
+      }
+      const sourceEl = document.getElementById('quotaIntervalSource');
+      if (sourceEl) {
+        const key = source === 'env' ? 'quotaIntervalEnv' : (source === 'config' ? 'quotaIntervalConfig' : 'quotaIntervalDefault');
+        sourceEl.textContent = t(key);
+      }
+      // The freshness readout ("Updated x min ago") was removed from here — it is
+      // redundant with the per-bar readout on each provider card. #quotaStatusLine now
+      // only surfaces transient Saving/Saved/Failed messages (see setQuotaActionStatus),
+      // so on a normal settings render we leave whatever transient text is in flight
+      // untouched and clear nothing here.
+    }
+
+    function renderQuotaDisabledCard(container) {
+      const card = document.createElement('div');
+      card.className = 'surface p-8 text-center lg:col-span-3';
+      const title = document.createElement('h3');
+      title.className = 'text-base font-extrabold mono mb-2';
+      title.textContent = t('quotaDisabledTitle');
+      const desc = document.createElement('p');
+      desc.className = 'text-sm mb-4';
+      desc.style.color = 'var(--color-muted)';
+      desc.textContent = t('quotaDisabledDesc');
+      const button = document.createElement('button');
+      button.className = 'btn btn-primary';
+      button.type = 'button';
+      button.textContent = t('enableQuotaTracking');
+      button.addEventListener('click', () => setQuotaEnabled(true));
+      card.appendChild(title);
+      card.appendChild(desc);
+      card.appendChild(button);
+      container.replaceChildren(card);
+    }
+
+    function appendQuotaStatusNotice(card, providerKey, provider) {
+      const detail = provider.status_detail;
+      if (!detail || detail === 'ok') return;
+      const box = document.createElement('div');
+      box.className = 'text-xs mt-3 p-2 rounded';
+      if (detail === 'stale_token') {
+        box.style.background = 'color-mix(in srgb, #D97706 16%, transparent)';
+        box.style.color = '#D97706';
+        box.style.fontWeight = '600';
+        box.textContent = t('quotaStaleToken').replace('{app}', quotaProviderLabel(providerKey));
+      } else {
+        box.style.color = 'var(--color-muted)';
+        box.textContent = t('quotaProviderIssue')
+          .replace('{status}', detail)
+          .replace('{time}', formatRelativeAgo(provider.status_at) || t('na'));
+      }
+      card.appendChild(box);
+    }
+
+    function renderQuotaProviderCards(payload) {
+      const container = document.getElementById('quotaProviderCards');
+      if (!container) return;
+      if (payload?.enabled === false) {
+        renderQuotaDisabledCard(container);
+        return;
+      }
+      const providers = payload?.providers || {};
+      const order = ['codex', 'claude', 'antigravity'];
+      const cards = document.createDocumentFragment();
+      let renderedCards = 0;
+
+      order.forEach((providerKey) => {
+        // Provider-visibility dropdown: skip providers the user has hidden.
+        if (!quotaProviderVisible(providerKey)) return;
+        renderedCards += 1;
+        const provider = providers[providerKey] || {};
+        const buckets = Array.isArray(provider.buckets) ? provider.buckets.filter(isQuotaUsageBucket) : [];
+        const card = document.createElement('div');
+        card.className = 'surface p-5';
+
+        const header = document.createElement('div');
+        header.className = 'flex items-start justify-between gap-3 mb-4';
+        const titleWrap = document.createElement('div');
+        const title = document.createElement('h3');
+        title.className = 'text-base font-extrabold mono';
+        title.textContent = quotaProviderLabel(providerKey);
+        // Plan label (Pro Lite / Max 5x …) sits INLINE after the provider name as a muted
+        // suffix instead of on its own line, so the card reads "Codex · Pro Lite" and the
+        // window bars start higher. Antigravity has no plan line.
+        const plan = provider.plan || provider.tier || (providerKey === 'antigravity' ? '' : t('notDetected'));
+        if (plan) {
+          const planSuffix = document.createElement('span');
+          planSuffix.className = 'text-xs font-semibold ml-2';
+          planSuffix.style.color = 'var(--color-muted)';
+          planSuffix.textContent = `· ${plan}`;
+          title.appendChild(planSuffix);
+        }
+        titleWrap.appendChild(title);
+        if (provider.updated_at) {
+          const updatedAgo = document.createElement('div');
+          updatedAgo.className = 'text-xs mt-1';
+          updatedAgo.style.color = 'var(--color-muted)';
+          updatedAgo.textContent = t('quotaUpdatedAgo').replace('{time}', formatRelativeAgo(provider.updated_at));
+          titleWrap.appendChild(updatedAgo);
+        }
+
+        // The "live" / "local only" badge was removed — it was pure noise.
+        header.appendChild(titleWrap);
+        card.appendChild(header);
+
+        const antigravityPoolsRendered = providerKey === 'antigravity' && buckets.length
+          ? renderAntigravityPools(card, provider)
+          : 0;
+        if (!buckets.length || (providerKey === 'antigravity' && !antigravityPoolsRendered)) {
+          if (provider.status_detail && provider.status_detail !== 'ok') {
+            appendQuotaStatusNotice(card, providerKey, provider);
+          } else {
+            const empty = document.createElement('div');
+            empty.className = 'text-sm py-8 text-center';
+            empty.style.color = 'var(--color-muted)';
+            empty.textContent = t('quotaNoData');
+            card.appendChild(empty);
+          }
+        } else if (providerKey === 'antigravity') {
+          appendQuotaStatusNotice(card, providerKey, provider);
+        } else if (providerKey === 'codex') {
+          renderCodexBuckets(card, buckets);
+          appendQuotaStatusNotice(card, providerKey, provider);
+        } else {
+          renderQuotaBucketGroups(card, buckets, providerKey);
+          appendQuotaStatusNotice(card, providerKey, provider);
+        }
+        if (providerKey === 'codex' && provider.reset_credits) {
+          const reset = provider.reset_credits || {};
+          const section = document.createElement('div');
+          section.className = 'mt-4 pt-4';
+          section.style.borderTop = '1px solid var(--color-border)';
+          const titleLine = document.createElement('div');
+          titleLine.className = 'flex items-center justify-between gap-3 mb-2';
+          const title = document.createElement('div');
+          title.className = 'text-sm font-extrabold mono';
+          title.textContent = t('resetCredits');
+          const count = document.createElement('div');
+          count.className = 'text-sm font-semibold';
+          count.style.color = 'var(--color-primary)';
+          count.textContent = `${formatNumber(reset.available_count || 0)} ${t('available')}`;
+          titleLine.appendChild(title);
+          titleLine.appendChild(count);
+          section.appendChild(titleLine);
+          const credits = Array.isArray(reset.credits) ? reset.credits : [];
+          credits.slice(0, 5).forEach((credit) => {
+            const row = document.createElement('div');
+            row.className = 'text-xs flex items-center justify-between gap-3 py-1';
+            row.style.color = 'var(--color-muted)';
+            const name = document.createElement('span');
+            name.textContent = credit.title || credit.id || 'credit';
+            const expiry = document.createElement('span');
+            expiry.textContent = `${t('expires')} ${formatEpochSeconds(credit.expires_at)}`;
+            row.appendChild(name);
+            row.appendChild(expiry);
+            section.appendChild(row);
+          });
+          card.appendChild(section);
+        }
+        const consent = payload?.consent || {};
+        const consentMeta = quotaConsentMeta(providerKey);
+        if (consentMeta.key && !consent[consentMeta.key]) {
+          const consentBox = document.createElement('div');
+          consentBox.className = 'mt-4 pt-4';
+          consentBox.style.borderTop = '1px solid var(--color-border)';
+          const desc = document.createElement('div');
+          desc.className = 'text-xs mb-3';
+          desc.style.color = 'var(--color-muted)';
+          desc.textContent = t('quotaConsentDesc').replace('{endpoint}', consentMeta.endpoint).replace('{path}', consentMeta.path);
+          const button = document.createElement('button');
+          button.className = 'btn btn-ghost';
+          button.type = 'button';
+          button.textContent = t('enableQuotaApi');
+          button.addEventListener('click', () => enableQuotaProvider(consentMeta.key));
+          consentBox.appendChild(desc);
+          consentBox.appendChild(button);
+          card.appendChild(consentBox);
+        }
+        cards.appendChild(card);
+      });
+
+      if (!renderedCards) {
+        const empty = document.createElement('div');
+        empty.className = 'text-sm py-10 text-center lg:col-span-3';
+        empty.style.color = 'var(--color-muted)';
+        empty.textContent = t('quotaAllHidden');
+        container.replaceChildren(empty);
+        return;
+      }
+      container.replaceChildren(cards);
+    }
+
+    // TASK 1: the backend still returns one history series per antigravity model bucket;
+    // collapse those into one series per group here (display-only), picking the member
+    // series with the most points as the representative (quota is pooled, so members
+    // already track closely together). Ungrouped antigravity models, and all Codex/Claude
+    // series, pass through unchanged.
+    function collapseAntigravitySeriesForCharts(series) {
+      // One chart series per Antigravity pool (Claude / Gemini); per-model series are
+      // redundant because the pool quota is shared. Non-matching antigravity series are
+      // dropped; Codex/Claude series pass through unchanged.
+      const passthrough = [];
+      const bestByPool = new Map();
+      series.forEach((item) => {
+        if (item.provider !== 'antigravity') {
+          passthrough.push(item);
+          return;
+        }
+        const name = String(item.bucket_label || item.bucket || '').toLowerCase();
+        const pool = ANTIGRAVITY_POOLS.find((candidate) => candidate.test(name));
+        if (!pool) return;
+        const existing = bestByPool.get(pool.key);
+        if (!existing || (item.points || []).length > (existing.points || []).length) {
+          bestByPool.set(pool.key, item);
+        }
+      });
+      const pooled = [];
+      ANTIGRAVITY_POOLS.forEach((pool) => {
+        const item = bestByPool.get(pool.key);
+        if (item) pooled.push({ ...item, bucket: `pool:${pool.key}`, bucket_label: pool.label });
+      });
+      return [...passthrough, ...pooled];
+    }
+
+    // Provider-visibility dropdown state. The user can hide whole providers (Codex /
+    // Claude / Antigravity) from both the cards and the charts; the choice is persisted
+    // in localStorage and defaults to all-visible. Unknown providers default to visible.
+    const QUOTA_PROVIDERS = ['codex', 'claude', 'antigravity'];
+    const QUOTA_VISIBILITY_KEY = 'tokdash-quota-visible';
+    let quotaVisibilityState = null;
+
+    function loadQuotaVisibility() {
+      if (quotaVisibilityState) return quotaVisibilityState;
+      const state = { codex: true, claude: true, antigravity: true };
+      try {
+        const raw = localStorage.getItem(QUOTA_VISIBILITY_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          QUOTA_PROVIDERS.forEach((p) => { if (typeof parsed[p] === 'boolean') state[p] = parsed[p]; });
+        }
+      } catch (e) { /* malformed value — fall back to all-visible */ }
+      quotaVisibilityState = state;
+      return state;
+    }
+
+    function quotaProviderVisible(provider) {
+      return loadQuotaVisibility()[provider] !== false;
+    }
+
+    function persistQuotaVisibility() {
+      try { localStorage.setItem(QUOTA_VISIBILITY_KEY, JSON.stringify(loadQuotaVisibility())); } catch (e) { /* ignore */ }
+    }
+
+    function updateQuotaVisibilityLabel() {
+      const label = document.getElementById('quotaVisibilityLabel');
+      if (!label) return;
+      const state = loadQuotaVisibility();
+      const shown = QUOTA_PROVIDERS.filter((p) => state[p] !== false);
+      label.removeAttribute('data-i18n');
+      if (shown.length === QUOTA_PROVIDERS.length) label.textContent = t('quotaVisibilityAll');
+      else if (shown.length === 0) label.textContent = t('quotaVisibilityNone');
+      else label.textContent = `${t('quotaVisibilityPrefix')} ${shown.map(quotaProviderLabel).join(', ')}`;
+    }
+
+    function closeQuotaVisibilityPanel() {
+      const panel = document.getElementById('quotaVisibilityPanel');
+      const btn = document.getElementById('quotaVisibilityBtn');
+      if (panel) panel.classList.add('hidden');
+      if (btn) btn.setAttribute('aria-expanded', 'false');
+    }
+
+    function initQuotaVisibilityControls() {
+      const state = loadQuotaVisibility();
+      const panel = document.getElementById('quotaVisibilityPanel');
+      const btn = document.getElementById('quotaVisibilityBtn');
+      if (!panel || !btn) return;
+      panel.querySelectorAll('input[data-quota-provider]').forEach((input) => {
+        const provider = input.getAttribute('data-quota-provider');
+        input.checked = state[provider] !== false;
+        input.addEventListener('change', () => {
+          state[provider] = input.checked;
+          persistQuotaVisibility();
+          updateQuotaVisibilityLabel();
+          // Re-render from the cached payloads — a visibility change never needs a refetch.
+          if (lastQuotaPayload) renderQuotaProviderCards(lastQuotaPayload);
+          if (lastQuotaHistory) renderQuotaCharts(lastQuotaHistory);
+        });
+      });
+      btn.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const hidden = panel.classList.toggle('hidden');
+        btn.setAttribute('aria-expanded', String(!hidden));
+      });
+      document.addEventListener('click', (event) => {
+        if (panel.classList.contains('hidden')) return;
+        if (!panel.contains(event.target) && !btn.contains(event.target)) closeQuotaVisibilityPanel();
+      });
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') closeQuotaVisibilityPanel();
+      });
+      updateQuotaVisibilityLabel();
+    }
+
+    function renderQuotaCharts(history) {
+      // Provider-visibility filter (dropdown next to the interval selector): drop whole
+      // provider series the user has hidden before any dataset is built.
+      const series = collapseAntigravitySeriesForCharts(history?.series || [])
+        .filter((item) => quotaProviderVisible(item.provider));
+      const granularity = history?.granularity || 'hour';
+      const palette = getChartPalette();
+      const utilizationCanvas = document.getElementById('quotaUtilizationChart');
+      const consumptionCanvas = document.getElementById('quotaConsumptionChart');
+
+      // Utilization (line) chart keeps a real time axis: {x, y} points on a linear scale,
+      // each touched once via a cheap .map(); formatQuotaAxisLabel (the expensive
+      // toLocaleString call) fires only from the axis tick callback (bounded by
+      // maxTicksLimit) and the tooltip title (once per hover), never per-datapoint.
+      // TASK 1: this chart plots REMAINING quota (100 - used_percent), matching the
+      // bucket rows above.
+      const utilizationDatasets = series.map((item, index) => ({
+        label: `${quotaProviderLabel(item.provider)} ${item.bucket_label || item.bucket}`,
+        data: (item.points || []).map((p) => ({ x: p.captured_at * 1000, y: p.used_percent === null || p.used_percent === undefined ? null : 100 - p.used_percent })),
+        borderColor: palette[index % palette.length],
+        backgroundColor: palette[index % palette.length] + '33',
+        stepped: 'before',
+        spanGaps: true,
+        pointRadius: 0,
+        pointHoverRadius: 3,
+        borderWidth: 1.5,
+      }));
+
+      // Consumption (bar) chart uses a CATEGORY axis, not a linear time axis. On a linear
+      // axis a day-wide bar becomes a hairline when the data spans months (e.g. All Time,
+      // where codex backfill stretches ~8 months and most series carry a single period) —
+      // the bars were effectively invisible. A category axis gives every period an equal
+      // slot, so bars stay visible at any range. We build a shared, sorted period union
+      // (bounded by the number of distinct periods — cheap, single pass) and align each
+      // dataset to it by index, leaving gaps null. Labels are pre-formatted, so the axis
+      // ticks and the default tooltip title both read date-only at day granularity.
+      const periodSet = new Set();
+      series.forEach((item) => (item.consumption || []).forEach((p) => periodSet.add(p.period_start)));
+      const periods = Array.from(periodSet).sort((a, b) => a - b);
+      const periodIndex = new Map(periods.map((p, i) => [p, i]));
+      const consumptionLabels = periods.map((p) => formatQuotaAxisLabel(p, granularity));
+      const consumptionDatasets = series.map((item, index) => {
+        const data = new Array(periods.length).fill(null);
+        (item.consumption || []).forEach((p) => {
+          const i = periodIndex.get(p.period_start);
+          if (i !== undefined) data[i] = p.consumed_percent;
+        });
+        return {
+          label: `${quotaProviderLabel(item.provider)} ${item.bucket_label || item.bucket}`,
+          data,
+          backgroundColor: palette[index % palette.length] + 'BF',
+          borderColor: palette[index % palette.length],
+          borderWidth: 1,
+          borderRadius: 6,
+        };
+      });
+
+      // TASK C: at day granularity (7d / 30d / All Time) the clock time on each tick is
+      // noise, so formatQuotaAxisLabel drops it and shows the date only; hour granularity
+      // (24h) keeps date+time.
+      const xLinearTicks = {
+        ticks: { color: '#475569', maxTicksLimit: 8, callback: (value) => formatQuotaAxisLabel(Number(value) / 1000, granularity) },
+        grid: { color: 'rgba(226,232,240,0.55)' },
+        type: 'linear',
+      };
+      const linearTooltipTitle = (items) => (items[0] ? formatQuotaAxisLabel(Number(items[0].parsed.x) / 1000, granularity) : '');
+
+      if (utilizationCanvas) {
+        if (quotaUtilizationChart) quotaUtilizationChart.destroy();
+        quotaUtilizationChart = new Chart(utilizationCanvas.getContext('2d'), {
+          type: 'line',
+          data: { datasets: utilizationDatasets },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
+            interaction: { mode: 'nearest', axis: 'x', intersect: false },
+            scales: { x: xLinearTicks, y: { min: 0, max: 100, ticks: { color: '#475569' }, grid: { color: 'rgba(226,232,240,0.55)' } } },
+            plugins: { legend: { position: 'bottom' }, tooltip: { callbacks: { title: linearTooltipTitle } } },
+          },
+        });
+      }
+      if (consumptionCanvas) {
+        if (quotaConsumptionChart) quotaConsumptionChart.destroy();
+        quotaConsumptionChart = new Chart(consumptionCanvas.getContext('2d'), {
+          type: 'bar',
+          data: { labels: consumptionLabels, datasets: consumptionDatasets },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
+            interaction: { mode: 'nearest', axis: 'x', intersect: false },
+            scales: {
+              x: { type: 'category', ticks: { color: '#475569', autoSkip: true, maxTicksLimit: 8 }, grid: { color: 'rgba(226,232,240,0.55)' } },
+              y: { beginAtZero: true, ticks: { color: '#475569' }, grid: { color: 'rgba(226,232,240,0.55)' } },
+            },
+            plugins: { legend: { position: 'bottom' } },
+          },
+        });
+      }
+    }
+
+    function quotaRangeSeconds(range) {
+      if (range === '24h') return 86400;
+      if (range === '7d') return 7 * 86400;
+      if (range === '30d') return 30 * 86400;
+      return null; // 'all'
+    }
+
+    function currentQuotaRange() {
+      return document.getElementById('quotaRangeSelect')?.value || localStorage.getItem('tokdash-quota-range') || '7d';
+    }
+
+    function initQuotaRangeSelect() {
+      const select = document.getElementById('quotaRangeSelect');
+      if (!select) return;
+      select.value = localStorage.getItem('tokdash-quota-range') || '7d';
+    }
+
+    async function loadQuota(options = {}) {
+      try {
+        const range = currentQuotaRange();
+        const rangeSeconds = quotaRangeSeconds(range);
+        const granularity = range === '24h' ? 'hour' : 'day';
+        const start = rangeSeconds ? Math.floor(Date.now() / 1000) - rangeSeconds : null;
+        const unitEl = document.getElementById('quotaConsumptionUnit');
+        if (unitEl) {
+          unitEl.removeAttribute('data-i18n');
+          unitEl.textContent = granularity === 'hour' ? t('consumptionUnitHour') : t('consumptionUnitDay');
+        }
+        const payload = await fetchJsonWithRetry(appPath('/api/quota'));
+        const historyUrl = appPath(`/api/quota/history?granularity=${encodeURIComponent(granularity)}${start ? `&start=${start}` : ''}`);
+        const history = await fetchJsonWithRetry(historyUrl);
+        lastQuotaPayload = payload;
+        lastQuotaHistory = history;
+        quotaLoaded = true;
+        renderQuotaSettings(payload);
+        renderQuotaProviderCards(payload);
+        renderQuotaCharts(history);
+      } catch (error) {
+        console.error('Error loading quota:', error);
+        if (lastQuotaPayload) renderQuotaSettings(lastQuotaPayload);
+        if (lastQuotaPayload) renderQuotaProviderCards(lastQuotaPayload);
+        if (lastQuotaHistory) renderQuotaCharts(lastQuotaHistory);
+      }
+    }
+
+    async function enableQuotaProvider(key) {
+      setQuotaActionStatus('saving');
+      try {
+        await postJsonWithCsrf(appPath('/api/quota/consent'), { [key]: true });
+        await loadQuota({ force: true });
+        setQuotaActionStatus('saved');
+      } catch (error) {
+        setQuotaActionStatus('error');
+      }
+    }
+
+    async function setQuotaEnabled(enabled) {
+      setQuotaActionStatus('saving');
+      try {
+        await postJsonWithCsrf(appPath('/api/quota/settings'), { enabled: !!enabled });
+        await loadQuota({ force: true });
+        setQuotaActionStatus('saved');
+      } catch (error) {
+        setQuotaActionStatus('error');
+      }
+    }
+
+    async function setQuotaInterval(minutes) {
+      setQuotaActionStatus('saving');
+      try {
+        await postJsonWithCsrf(appPath('/api/quota/settings'), { poll_interval_minutes: Number(minutes) });
+        await loadQuota({ force: true });
+        setQuotaActionStatus('saved');
+      } catch (error) {
+        setQuotaActionStatus('error');
+      }
+    }
+
+    function parseCooldownSeconds(error) {
+      const text = String((error && error.payload && error.payload.detail) || (error && error.message) || '');
+      const match = /(\d+)\s*s\b/i.exec(text);
+      return match ? Number(match[1]) : 60;
+    }
+
+    // TASK 2: the global #refreshBtn drives quota refreshes when the Quota tab is active
+    // (see the refreshBtn click handler below). This mirrors the deleted refreshQuotaNow,
+    // but targets the global button's own state machine (setRefreshUiState/renderRefreshButton)
+    // instead of a quota-local one, per the task's "same global button states" requirement.
+    async function refreshQuotaViaGlobalButton() {
+      if (updateInFlight || refreshUiState === 'refreshing' || refreshUiState === 'cooldown') return;
+      setRefreshUiState('refreshing');
+      try {
+        await postJsonWithCsrf(appPath('/api/quota/refresh'), {});
+        await loadQuota({ force: true });
+        setRefreshUiState('updated', { resetAfterMs: 1800 });
+      } catch (error) {
+        if (error?.status === 429) {
+          await loadQuota({ force: true }).catch(() => {});
+          startRefreshCooldown(parseCooldownSeconds(error));
+          return;
+        }
+        setRefreshUiState(error?.status === 503 ? 'busy' : 'failed', { resetAfterMs: 2600 });
+      }
+    }
+
     function setPricingDbStatus(text, color = 'var(--color-muted)') {
       const el = document.getElementById('pricingDbStatus');
       if (!el) return;
@@ -4269,10 +5340,17 @@
         if (tab === 'stats') loadStats();
         if (tab === 'overview' && lastUsageResponse) renderOverviewTab(lastUsageResponse);
         if (tab === 'sessions') ensureSessionsLoaded();
+        if (tab === 'quota' && !quotaLoaded) loadQuota();
         if (tab === 'pricing' && !pricingDbLoaded) loadPricingDb();
       });
     });
 
+    document.getElementById('quotaRangeSelect')?.addEventListener('change', (e) => {
+      localStorage.setItem('tokdash-quota-range', e.target.value);
+      loadQuota({ force: true });
+    });
+    document.getElementById('quotaEnabledToggle')?.addEventListener('change', (event) => setQuotaEnabled(event.target.checked));
+    document.getElementById('quotaIntervalSelect')?.addEventListener('change', (event) => setQuotaInterval(event.target.value));
     document.getElementById('pricingDbReload').addEventListener('click', loadPricingDb);
     document.getElementById('pricingDbFormat').addEventListener('click', formatPricingDbEditor);
     document.getElementById('pricingDbSave').addEventListener('click', savePricingDb);
@@ -5598,6 +6676,12 @@
     });
 
     document.getElementById('refreshBtn').addEventListener('click', () => {
+      // TASK 2: on the Quota tab the global refresh button refreshes quota data instead
+      // of the Overview/Sessions dashboard fetch below (unchanged on every other tab).
+      if (isQuotaActive()) {
+        refreshQuotaViaGlobalButton();
+        return;
+      }
       // Use current date range if set, otherwise use today
       if (currentStartDate && currentEndDate) {
         updateDashboardByDateRange(currentStartDate, currentEndDate, { forceRefresh: true });
@@ -5634,6 +6718,10 @@
     // Auto-refresh every 5 minutes
     setInterval(() => {
       if (document.hidden) return;
+      if (isQuotaActive()) {
+        loadQuota();
+        return;
+      }
       if (!isOverviewActive() && !isSessionsActive()) return;
       // Use current date range if set, otherwise use today
       if (currentStartDate && currentEndDate) {
@@ -5685,6 +6773,8 @@
     applyStyleTheme(getDefaultStyleTheme());
     applyTheme(getDefaultTheme());
     applyI18n();
+    initQuotaRangeSelect();
+    initQuotaVisibilityControls();
 
     document.getElementById('styleThemeSelect').addEventListener('change', (event) => {
       const next = event.target.value || 'elevated';

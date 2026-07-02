@@ -46,3 +46,13 @@ def test_hermes_search_dirs_env_override_windows(monkeypatch):
     monkeypatch.setattr(osinfo, "is_windows", lambda: True)
     monkeypatch.setenv("HERMES_HOME", "/a/b,/c/d")
     assert clientpaths.hermes_search_dirs() == [Path("/a/b"), Path("/c/d")]
+
+
+def test_quota_client_roots_honor_environment_overrides(monkeypatch):
+    monkeypatch.setenv("CODEX_HOME", "/tmp/codex-home")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", "/tmp/claude-config")
+
+    assert clientpaths.codex_home() == Path("/tmp/codex-home")
+    assert clientpaths.codex_sessions_dir() == Path("/tmp/codex-home") / "sessions"
+    assert clientpaths.claude_config_dir() == Path("/tmp/claude-config")
+    assert clientpaths.antigravity_cli_dir() == Path.home() / ".gemini" / "antigravity-cli"

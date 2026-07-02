@@ -64,6 +64,13 @@ systemd services that occupy `55423` but do not expose the new `/health` fingerp
 `--force` rewrites and restarts the existing `tokdash.service`. Use `--no-service` when you
 want setup state without creating a background service.
 
+**Optional quota step (interactive only).** After a successful interactive setup, the wizard
+offers the same quota-tracking decisions the dashboard's Quota tab exposes: the master switch
+(`quota.enabled`), per-provider quota **API** consent (default No — without opting in, quota
+stays local-only), and the background poll interval (15/30/60/120 minutes). `--auto`, `--yes`,
+`--json`, and non-TTY runs skip the step entirely, so scripted setup never prompts; everything
+can be changed later from the Quota tab or with `tokdash quota consent`.
+
 ### Runtime selection
 
 - **`auto` / `existing`** (default): point the service at the interpreter that ran setup.
@@ -140,7 +147,10 @@ authentication layer there. See `docs/SECURITY.md` for the full write-protection
 
 Diagnoses runtime fitness, the service (systemd or launchd), the recorded port,
 prerequisites, and config/data locations — plus, if update checks are enabled, whether a
-newer version is available. `--json` for machine-readable output. It probes the **port
+newer version is available. It also reports quota-tracking state: the master switch,
+per-provider API consent, the `TOKDASH_QUOTA_POLL=0` kill switch, the effective poll
+interval and its source (env/config/default), the last poll time, and the stored snapshot
+count. `--json` for machine-readable output. It probes the **port
 recorded in the manifest** (setup may have auto-picked a free one), and flags a
 `TOKDASH_DATA_DIR` mismatch between the manifest and the current environment.
 

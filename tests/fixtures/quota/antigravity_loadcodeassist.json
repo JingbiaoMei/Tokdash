@@ -1,0 +1,44 @@
+{
+  "allowedTiers": [
+    {
+      "description": "Gemini-powered code suggestions and chat in multiple IDEs",
+      "id": "free-tier",
+      "isDefault": true,
+      "name": "Antigravity",
+      "privacyNotice": {
+        "noticeText": "This notice and our Privacy Policy - https://policies.google.com/privacy - describe how Gemini Code Assist for individuals handles your data. Please read them carefully.\n\nWhen you use Gemini Code Assist for individuals, Google collects your prompts, related code, generated output, code edits, related feature usage information, and your feedback to provide, improve, and develop Google products and services and machine learning technologies.\n\nTo help with quality and improve our products (such as generative machine-learning models), human reviewers may read, annotate, and process the data collected above. We take steps to protect your privacy as part of this process. This includes disconnecting the data from your Google Account before reviewers see or annotate it, and storing those disconnected copies for up to 18 months. Please don't submit confidential information or any data you wouldn't want a reviewer to see or Google to use to improve our products, services, and machine-learning technologies.\n\nIf you don't want this data used to improve Google's machine learning models, you can opt out below.",
+        "showNotice": true
+      }
+    },
+    {
+      "description": "Unlimited coding assistant with the most powerful Gemini models",
+      "id": "standard-tier",
+      "name": "Antigravity",
+      "privacyNotice": {},
+      "userDefinedCloudaicompanionProject": true,
+      "usesGcpTos": true
+    }
+  ],
+  "cloudaicompanionProject": "<redacted>",
+  "currentTier": {
+    "description": "Gemini-powered code suggestions and chat in multiple IDEs",
+    "id": "free-tier",
+    "name": "Antigravity",
+    "privacyNotice": {
+      "noticeText": "This notice and our Privacy Policy - https://policies.google.com/privacy - describe how Gemini Code Assist for individuals handles your data. Please read them carefully.\n\nWhen you use Gemini Code Assist for individuals, Google collects your prompts, related code, generated output, code edits, related feature usage information, and your feedback to provide, improve, and develop Google products and services and machine learning technologies.\n\nTo help with quality and improve our products (such as generative machine-learning models), human reviewers may read, annotate, and process the data collected above. We take steps to protect your privacy as part of this process. This includes disconnecting the data from your Google Account before reviewers see or annotate it, and storing those disconnected copies for up to 18 months. Please don't submit confidential information or any data you wouldn't want a reviewer to see or Google to use to improve our products, services, and machine-learning technologies.\n\nIf you don't want this data used to improve Google's machine learning models, you can opt out below.",
+      "showNotice": true
+    },
+    "upgradeSubscriptionText": "Upgrade to get 1,500 requests per day with Agent Mode and Gemini CLI, access to Gemini in Google Cloud, plus $1,000 in Google Cloud credits",
+    "upgradeSubscriptionType": "GDP_HELIUM",
+    "upgradeSubscriptionUri": "https://codeassist.google.com/upgrade"
+  },
+  "gcpManaged": false,
+  "paidTier": {
+    "description": "Google AI Pro",
+    "id": "g1-pro-tier",
+    "name": "Google AI Pro",
+    "upgradeSubscriptionText": "You can upgrade to a Google AI Ultra plan to receive higher rate limits.",
+    "upgradeSubscriptionUri": "https://antigravity.google/g1-upgrade"
+  },
+  "upgradeSubscriptionUri": "https://codeassist.google.com/upgrade"
+}

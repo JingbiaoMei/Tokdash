@@ -339,6 +339,10 @@ _cache_epoch = 0
 _pricing_sig_guard = threading.Lock()
 _pricing_baseline_sig_cache: Optional[tuple[str, tuple[str, int, int]]] = None
 _pricing_override_sig_cache: Optional[tuple[str, int, int, str]] = None
+_quota_refresh_guard = threading.Lock()
+_quota_last_refresh_monotonic = 0.0
+_quota_prev_refresh_monotonic = 0.0
+_QUOTA_REFRESH_COOLDOWN_SECONDS = 60.0
 
 
 def _positive_int_env(name: str, default: int) -> int:
@@ -797,6 +801,149 @@ def get_tools(period: str = "today") -> Dict[str, Any]:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/quota")
+def get_quota() -> Dict[str, Any]:
+    """Subscription quota state from local files and stored snapshots.
+
+    M1 is intentionally local-only: this route never performs provider network I/O.
+    """
+
+    try:
+        from .sources.quota import quota_state
+
+        return _cached_route("/api/quota", "quota_state", quota_state)
+    except CacheBackpressureError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/quota/history")
+def get_quota_history(
+    providers: Optional[str] = None,
+    granularity: str = "hour",
+    start: Optional[int] = None,
+    end: Optional[int] = None,
+    max_points: Optional[int] = 300,
+) -> Dict[str, Any]:
+    try:
+        from .usage_store import UsageEntryStore
+
+        provider_list = [p.strip() for p in (providers or "").split(",") if p.strip()]
+        return UsageEntryStore().quota_history(
+            providers=provider_list or None,
+            granularity=granularity,
+            start=start,
+            end=end,
+            max_points=max_points,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def _try_begin_quota_refresh() -> float:
+    """Atomically check the refresh cooldown and, if clear, reserve the slot.
+
+    Returns the remaining cooldown seconds: ``> 0`` means blocked (caller should 429);
+    ``0.0`` means the slot was reserved under the lock and the caller may proceed. Doing
+    the check and the record in one critical section closes the check-then-act race where
+    two concurrent refreshes could both pass a separate read-only check before either
+    recorded, doubling the provider calls.
+    """
+    global _quota_last_refresh_monotonic, _quota_prev_refresh_monotonic
+    with _quota_refresh_guard:
+        now = time.monotonic()
+        remaining = _QUOTA_REFRESH_COOLDOWN_SECONDS - (now - _quota_last_refresh_monotonic)
+        if remaining > 0:
+            return remaining
+        _quota_prev_refresh_monotonic = _quota_last_refresh_monotonic
+        _quota_last_refresh_monotonic = now
+        return 0.0
+
+
+def _abort_quota_refresh() -> None:
+    """Roll back a reservation made by :func:`_try_begin_quota_refresh`.
+
+    Called when the refresh fails after reserving the slot, so an error response does not
+    burn the user's cooldown window. Safe because only one caller can hold the reservation
+    per window (concurrent attempts 429 until it is released or expires), so restoring the
+    previous mark exactly restores the pre-reservation state.
+    """
+    global _quota_last_refresh_monotonic
+    with _quota_refresh_guard:
+        _quota_last_refresh_monotonic = _quota_prev_refresh_monotonic
+
+
+@app.post("/api/quota/consent")
+def set_quota_consent(payload: Dict[str, Any]) -> Dict[str, Any]:
+    from .sources.quota.config import set_quota_consent as _set_quota_consent
+
+    consent = _set_quota_consent(payload or {})
+    _clear_cache()
+    return {"consent": consent}
+
+
+@app.post("/api/quota/settings")
+def set_quota_settings(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Persist the quota master switch and poll interval (write-gated).
+
+    Body: ``{"enabled": bool, "poll_interval_minutes": 15|30|60|120}`` (either optional).
+    """
+    from .sources.quota import config as quota_config
+
+    payload = payload or {}
+    if "enabled" in payload:
+        quota_config.set_quota_enabled(bool(payload["enabled"]))
+    if "poll_interval_minutes" in payload:
+        try:
+            quota_config.set_poll_interval_minutes(int(payload["poll_interval_minutes"]))
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=400,
+                detail=f"poll_interval_minutes must be one of {list(quota_config.POLL_INTERVAL_CHOICES)}",
+            )
+    _clear_cache()
+    interval_seconds, interval_source = quota_config.effective_poll_interval()
+    return {
+        "enabled": quota_config.quota_tracking_enabled(),
+        "config_enabled": quota_config.quota_config_enabled(),
+        "poll_interval_minutes": quota_config.read_poll_interval_minutes()
+        or quota_config.DEFAULT_POLL_INTERVAL_MINUTES,
+        "interval": interval_seconds,
+        "interval_source": interval_source,
+    }
+
+
+@app.post("/api/quota/refresh")
+def refresh_quota() -> Dict[str, Any]:
+    from .sources.quota import config as quota_config
+
+    if not quota_config.quota_tracking_enabled():
+        raise HTTPException(status_code=409, detail="Quota tracking is disabled; enable it to refresh.")
+    # Atomically reserves the slot if the cooldown is clear (single critical section), so
+    # two concurrent refreshes can't both pass and double the provider calls.
+    remaining = _try_begin_quota_refresh()
+    if remaining > 0:
+        raise HTTPException(status_code=429, detail=f"Quota refresh cooldown active for {int(remaining)}s")
+    from .sources.quota import collect_enabled_snapshots, remember_current_snapshots
+    from .usage_store import UsageEntryStore, persistent_usage_db_enabled
+
+    try:
+        store = UsageEntryStore() if persistent_usage_db_enabled() else None
+        snapshots = collect_enabled_snapshots(include_network=True, store=store)
+        remember_current_snapshots(snapshots)
+        inserted = store.insert_quota_snapshots(snapshots) if store is not None else 0
+    except Exception:
+        # A failed refresh must not burn the cooldown slot: release the reservation so
+        # the user can retry immediately instead of being locked out for 60 s by a 500.
+        _abort_quota_refresh()
+        raise
+    _clear_cache()
+    return {"snapshots": len(snapshots), "inserted": inserted}
 
 
 @app.get("/api/codex/sessions")

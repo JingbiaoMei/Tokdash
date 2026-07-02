@@ -15,7 +15,7 @@ from . import clientpaths
 from .filelock import process_lock
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 SIGNATURE_VERSION = 2
 
 _WRITE_LOCK = threading.RLock()
@@ -291,6 +291,30 @@ class UsageEntryStore:
                 raw_json TEXT NOT NULL,
                 PRIMARY KEY (tool, file_path, session_id)
             );
+            CREATE TABLE IF NOT EXISTS quota_snapshots (
+                id INTEGER PRIMARY KEY,
+                provider TEXT NOT NULL,
+                account TEXT NOT NULL DEFAULT 'default',
+                bucket TEXT NOT NULL,
+                bucket_label TEXT,
+                used_percent REAL,
+                resets_at INTEGER,
+                plan TEXT,
+                captured_at INTEGER NOT NULL,
+                source TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'ok',
+                raw_json TEXT,
+                UNIQUE(provider, account, bucket, source, captured_at)
+            );
+            CREATE TABLE IF NOT EXISTS quota_file_state (
+                source TEXT NOT NULL,
+                path TEXT NOT NULL,
+                mtime_ns INTEGER NOT NULL,
+                size INTEGER NOT NULL,
+                safe_offset INTEGER NOT NULL DEFAULT 0,
+                updated_at_ms INTEGER NOT NULL,
+                PRIMARY KEY (source, path)
+            );
             CREATE INDEX IF NOT EXISTS idx_usage_entries_source_time
                 ON usage_entries(source, timestamp);
             CREATE INDEX IF NOT EXISTS idx_usage_entries_source_file
@@ -304,6 +328,8 @@ class UsageEntryStore:
                 ON usage_entries(source, provider, model, timestamp);
             CREATE INDEX IF NOT EXISTS idx_session_records_tool_session
                 ON session_records(tool, session_id);
+            CREATE INDEX IF NOT EXISTS idx_quota_snap_lookup
+                ON quota_snapshots(provider, bucket, captured_at);
             """
         )
         columns = {str(row["name"]) for row in conn.execute("PRAGMA table_info(usage_entries)").fetchall()}
@@ -1002,6 +1028,303 @@ class UsageEntryStore:
                 out.append(obj)
         return out
 
+    def quota_meta_get(self, key: str) -> Optional[str]:
+        with closing(self._connect()) as conn:
+            row = conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+            return str(row["value"]) if row else None
+
+    def quota_meta_set(self, key: str, value: str) -> None:
+        with usage_db_process_lock(self.path), closing(self._connect()) as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO meta(key, value) VALUES(?, ?)",
+                (str(key), str(value)),
+            )
+            conn.commit()
+
+    def quota_file_watermarks(self, source: str) -> dict[str, dict[str, int]]:
+        """Return ``{path: {mtime_ns, size, safe_offset}}`` for a quota session source."""
+        with closing(self._connect()) as conn:
+            rows = conn.execute(
+                "SELECT path, mtime_ns, size, safe_offset FROM quota_file_state WHERE source = ?",
+                (source,),
+            ).fetchall()
+        return {
+            str(row["path"]): {
+                "mtime_ns": int(row["mtime_ns"] or 0),
+                "size": int(row["size"] or 0),
+                "safe_offset": int(row["safe_offset"] or 0),
+            }
+            for row in rows
+        }
+
+    _QUOTA_SNAPSHOT_INSERT_SQL = """
+        INSERT OR IGNORE INTO quota_snapshots(
+            provider, account, bucket, bucket_label, used_percent,
+            resets_at, plan, captured_at, source, status, raw_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """
+    _QUOTA_WATERMARK_UPSERT_SQL = """
+        INSERT INTO quota_file_state(source, path, mtime_ns, size, safe_offset, updated_at_ms)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(source, path) DO UPDATE SET
+            mtime_ns = excluded.mtime_ns,
+            size = excluded.size,
+            safe_offset = excluded.safe_offset,
+            updated_at_ms = excluded.updated_at_ms
+    """
+
+    @staticmethod
+    def _quota_snapshot_rows(snapshots: Iterable[Any]) -> list[tuple[Any, ...]]:
+        rows: list[tuple[Any, ...]] = []
+        for snapshot in snapshots:
+            raw = snapshot.as_dict() if hasattr(snapshot, "as_dict") else dict(snapshot)
+            rows.append(
+                (
+                    str(raw.get("provider") or ""),
+                    str(raw.get("account") or "default"),
+                    str(raw.get("bucket") or ""),
+                    raw.get("bucket_label"),
+                    raw.get("used_percent"),
+                    raw.get("resets_at"),
+                    raw.get("plan"),
+                    int(raw.get("captured_at") or 0),
+                    str(raw.get("source") or ""),
+                    str(raw.get("status") or "ok"),
+                    stable_json(raw.get("raw") or {}),
+                )
+            )
+        return rows
+
+    def commit_quota_session_batch(
+        self,
+        snapshots: Iterable[Any],
+        source: str,
+        updates: Iterable[tuple[str, int, int, int]],
+        *,
+        backfill_meta_key: Optional[str] = None,
+    ) -> int:
+        """Insert session snapshots and advance their file watermarks in ONE transaction.
+
+        Watermarks — and the one-time backfill-done flag — must never outrun the snapshot
+        rows they cover: if they were committed first and the insert then failed (crash,
+        disk full), the skipped bytes would never be re-read and the snapshots lost
+        forever (worst case: the whole backfill marked done with nothing stored).
+        Committing everything together means a failure rolls the batch back and the next
+        cycle simply re-reads the same bytes. Returns the number of rows inserted.
+        """
+        rows = self._quota_snapshot_rows(snapshots)
+        watermark_rows = [
+            (source, str(path), int(mtime_ns), int(size), int(safe_offset))
+            for path, mtime_ns, size, safe_offset in updates
+        ]
+        if not rows and not watermark_rows and backfill_meta_key is None:
+            return 0
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        with usage_db_process_lock(self.path), closing(self._connect()) as conn:
+            before = int(conn.execute("SELECT COUNT(*) AS n FROM quota_snapshots").fetchone()["n"] or 0)
+            conn.execute("BEGIN IMMEDIATE")
+            if rows:
+                conn.executemany(self._QUOTA_SNAPSHOT_INSERT_SQL, rows)
+            if watermark_rows:
+                conn.executemany(
+                    self._QUOTA_WATERMARK_UPSERT_SQL,
+                    [(s, p, m, sz, off, now_ms) for (s, p, m, sz, off) in watermark_rows],
+                )
+            if backfill_meta_key is not None:
+                conn.execute(
+                    "INSERT OR REPLACE INTO meta(key, value) VALUES(?, '1')",
+                    (str(backfill_meta_key),),
+                )
+            self._prune_quota_snapshots(conn)
+            conn.commit()
+            after = int(conn.execute("SELECT COUNT(*) AS n FROM quota_snapshots").fetchone()["n"] or 0)
+            return max(0, after - before)
+
+    def insert_quota_snapshots(self, snapshots: Iterable[Any]) -> int:
+        rows = self._quota_snapshot_rows(snapshots)
+        if not rows:
+            return 0
+
+        with usage_db_process_lock(self.path), closing(self._connect()) as conn:
+            before = int(conn.execute("SELECT COUNT(*) AS n FROM quota_snapshots").fetchone()["n"] or 0)
+            conn.execute("BEGIN IMMEDIATE")
+            conn.executemany(self._QUOTA_SNAPSHOT_INSERT_SQL, rows)
+            self._prune_quota_snapshots(conn)
+            conn.commit()
+            after = int(conn.execute("SELECT COUNT(*) AS n FROM quota_snapshots").fetchone()["n"] or 0)
+            return max(0, after - before)
+
+    def _prune_quota_snapshots(self, conn: sqlite3.Connection) -> None:
+        # Retention is OFF by default (snapshots are small and the history charts are the
+        # feature); a positive TOKDASH_QUOTA_RETENTION_DAYS opts in to pruning.
+        try:
+            days = int(os.environ.get("TOKDASH_QUOTA_RETENTION_DAYS", "0") or 0)
+        except ValueError:
+            days = 0
+        if days <= 0:
+            return
+        cutoff = int(datetime.now(timezone.utc).timestamp()) - days * 86400
+        conn.execute("DELETE FROM quota_snapshots WHERE captured_at < ?", (cutoff,))
+
+    def latest_quota_snapshots(self) -> list[dict[str, Any]]:
+        query = """
+            SELECT q.*
+            FROM quota_snapshots q
+            JOIN (
+                SELECT provider, account, bucket, MAX(captured_at) AS captured_at
+                FROM quota_snapshots
+                GROUP BY provider, account, bucket
+            ) latest
+              ON q.provider = latest.provider
+             AND q.account = latest.account
+             AND q.bucket = latest.bucket
+             AND q.captured_at = latest.captured_at
+            ORDER BY q.provider, q.account, q.bucket
+        """
+        with closing(self._connect()) as conn:
+            rows = conn.execute(query).fetchall()
+        return [self._quota_row_to_dict(row) for row in rows]
+
+    def query_quota_snapshots(
+        self,
+        *,
+        providers: Optional[Iterable[str]] = None,
+        start: Optional[int] = None,
+        end: Optional[int] = None,
+    ) -> list[dict[str, Any]]:
+        where: list[str] = []
+        args: list[Any] = []
+        provider_list = [p for p in (providers or []) if p]
+        if provider_list:
+            placeholders = ",".join("?" for _ in provider_list)
+            where.append(f"provider IN ({placeholders})")
+            args.extend(provider_list)
+        if start is not None:
+            where.append("captured_at >= ?")
+            args.append(int(start))
+        if end is not None:
+            where.append("captured_at <= ?")
+            args.append(int(end))
+        query = "SELECT * FROM quota_snapshots"
+        if where:
+            query += " WHERE " + " AND ".join(where)
+        query += " ORDER BY provider, account, bucket, captured_at ASC, id ASC"
+        with closing(self._connect()) as conn:
+            rows = conn.execute(query, args).fetchall()
+        return [self._quota_row_to_dict(row) for row in rows]
+
+    def quota_history(
+        self,
+        *,
+        providers: Optional[Iterable[str]] = None,
+        granularity: str = "hour",
+        start: Optional[int] = None,
+        end: Optional[int] = None,
+        max_points: int | None = 300,
+    ) -> dict[str, Any]:
+        if granularity not in {"hour", "day"}:
+            raise ValueError("granularity must be 'hour' or 'day'")
+        if max_points is not None and max_points <= 0:
+            raise ValueError("max_points must be a positive integer")
+        period = 3600 if granularity == "hour" else 86400
+        where = ["used_percent IS NOT NULL", "bucket NOT IN ('api', 'reset_credits')"]
+        args: list[Any] = []
+        provider_list = [p for p in (providers or []) if p]
+        if provider_list:
+            where.append(f"provider IN ({','.join('?' for _ in provider_list)})")
+            args.extend(provider_list)
+        if start is not None:
+            where.append("captured_at >= ?")
+            args.append(int(start))
+        if end is not None:
+            where.append("captured_at <= ?")
+            args.append(int(end))
+        # Account is intentionally absent from ORDER BY: codex session rows (account
+        # "default") and network rows (real account id) describe the SAME window and must
+        # merge into one time-ordered series per (provider, bucket). On a timestamp
+        # collision the later insert (higher id) wins, mirroring `_freshest_usage_rows`.
+        # The single linear pass over sorted rows is what keeps this route fast on
+        # 100k-row tables — no per-row dicts, no raw_json parsing.
+        query = (
+            "SELECT provider, bucket, bucket_label, account, used_percent, captured_at"
+            " FROM quota_snapshots WHERE " + " AND ".join(where)
+            + " ORDER BY provider, bucket, captured_at ASC, id ASC"
+        )
+
+        series: list[dict[str, Any]] = []
+
+        def _flush(key: tuple[str, str] | None, ordered: list[tuple[int, float]], label: Any, account: Any) -> None:
+            if key is None or not ordered:
+                return
+            points = [{"captured_at": ts, "used_percent": pct} for ts, pct in ordered]
+            consumption: dict[int, float] = {}
+            previous: float | None = None
+            for ts, pct in ordered:
+                if previous is None:
+                    previous = pct
+                    continue
+                delta = pct if pct < previous else pct - previous
+                period_start = ts - (ts % period)
+                consumption[period_start] = round(consumption.get(period_start, 0.0) + max(0.0, delta), 4)
+                previous = pct
+            consumption_points = [
+                {"period_start": k, "consumed_percent": v} for k, v in sorted(consumption.items())
+            ]
+            series.append(
+                {
+                    "provider": key[0],
+                    "account": account,
+                    "bucket": key[1],
+                    "bucket_label": label or key[1],
+                    "points": _downsample_series_points(points, max_points),
+                    "consumption": _downsample_series_points(consumption_points, max_points),
+                }
+            )
+
+        with closing(self._connect()) as conn:
+            current_key: tuple[str, str] | None = None
+            ordered: list[tuple[int, float]] = []
+            label: Any = None
+            account: Any = None
+            for row in conn.execute(query, args):
+                key = (str(row["provider"]), str(row["bucket"]))
+                if key != current_key:
+                    _flush(current_key, ordered, label, account)
+                    current_key, ordered = key, []
+                ts = int(row["captured_at"])
+                pct = float(row["used_percent"])
+                if ordered and ordered[-1][0] == ts:
+                    ordered[-1] = (ts, pct)
+                else:
+                    ordered.append((ts, pct))
+                label = row["bucket_label"]
+                account = str(row["account"])
+            _flush(current_key, ordered, label, account)
+        return {"granularity": granularity, "series": series}
+
+    @staticmethod
+    def _quota_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+        raw_json = row["raw_json"] or "{}"
+        try:
+            raw = json.loads(raw_json)
+        except Exception:
+            raw = {}
+        keys = row.keys()
+        return {
+            "id": int(row["id"]) if "id" in keys and row["id"] is not None else None,
+            "provider": str(row["provider"]),
+            "account": str(row["account"]),
+            "bucket": str(row["bucket"]),
+            "bucket_label": row["bucket_label"],
+            "used_percent": None if row["used_percent"] is None else float(row["used_percent"]),
+            "resets_at": None if row["resets_at"] is None else int(row["resets_at"]),
+            "plan": row["plan"],
+            "captured_at": int(row["captured_at"]),
+            "source": str(row["source"]),
+            "status": str(row["status"]),
+            "raw": raw,
+        }
+
     def status(self) -> dict[str, Any]:
         with closing(self._connect()) as conn:
             meta = {str(row["key"]): str(row["value"]) for row in conn.execute("SELECT key, value FROM meta")}
@@ -1040,10 +1363,12 @@ class UsageEntryStore:
                 """
             ).fetchall()
             total_entries = conn.execute("SELECT COUNT(*) AS n FROM usage_entries").fetchone()["n"]
+            quota_snapshots = conn.execute("SELECT COUNT(*) AS n FROM quota_snapshots").fetchone()["n"]
         return {
             "path": str(self.path),
             "meta": meta,
             "usage_entries": int(total_entries or 0),
+            "quota_snapshots": int(quota_snapshots or 0),
             "sources": sources,
             "files": [dict(row) for row in file_rows],
             "sessions": [dict(row) for row in session_rows],
@@ -1143,3 +1468,15 @@ def _cache_hit_rate(tokens_in: Any, tokens_cache: Any) -> Optional[float]:
     if den <= 0:
         return None
     return round(num / den, 4)
+
+
+def _downsample_series_points(items: list[dict[str, Any]], max_points: int | None) -> list[dict[str, Any]]:
+    """Evenly-spaced downsample; always keeps the most recent (last) item."""
+    n = len(items)
+    if not max_points or max_points <= 0 or n <= max_points:
+        return items
+    step = n / max_points
+    indices = sorted({min(n - 1, int(i * step)) for i in range(max_points)})
+    if indices[-1] != n - 1:
+        indices[-1] = n - 1
+    return [items[i] for i in indices]

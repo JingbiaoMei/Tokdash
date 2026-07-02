@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import random
 import sys
 import time
 import threading
@@ -18,6 +19,18 @@ from .compute import compute_usage
 
 _DB_WATCH_THREAD_STARTED = False
 _DB_WATCH_THREAD_LOCK = threading.Lock()
+_QUOTA_POLL_THREAD_STARTED = False
+_QUOTA_POLL_THREAD_LOCK = threading.Lock()
+
+
+class TokdashArgumentParser(argparse.ArgumentParser):
+    def parse_args(self, args=None, namespace=None):
+        parsed = super().parse_args(args, namespace)
+        if getattr(parsed, "command", None) == "quota":
+            parsed.quota_action = getattr(parsed, "db_action", "show")
+        else:
+            parsed.quota_action = None
+        return parsed
 
 
 def _port_type(value: str) -> int:
@@ -56,7 +69,7 @@ def _positive_int_env(name: str, default: int) -> int:
 
 
 def build_parser(prog: str) -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog=prog, description="Tokdash")
+    parser = TokdashArgumentParser(prog=prog, description="Tokdash")
     parser.add_argument(
         "--version",
         action="version",
@@ -67,15 +80,15 @@ def build_parser(prog: str) -> argparse.ArgumentParser:
         "command",
         nargs="?",
         default="serve",
-        choices=["serve", "export", "db", "version", "setup", "doctor", "update", "uninstall"],
+        choices=["serve", "export", "db", "quota", "version", "setup", "doctor", "update", "uninstall"],
         help="Command (default: serve)",
     )
     parser.add_argument(
         "db_action",
         nargs="?",
         default="status",
-        choices=["status", "sync", "resync", "verify", "repair", "watch"],
-        help="Database action for `tokdash db` (default: status)",
+        choices=["status", "sync", "resync", "verify", "repair", "watch", "poll", "show", "consent"],
+        help="Database action for `tokdash db` or quota action for `tokdash quota` (default: status)",
     )
 
     # Serve options
@@ -125,6 +138,11 @@ def build_parser(prog: str) -> argparse.ArgumentParser:
         help="Write output to a file instead of stdout",
     )
     parser.add_argument(
+        "--include-quota",
+        action="store_true",
+        help="For `tokdash export`, include local quota state. Off by default.",
+    )
+    parser.add_argument(
         "--verify-period",
         default="today",
         help='Period for `tokdash db verify` (default: today)',
@@ -134,6 +152,16 @@ def build_parser(prog: str) -> argparse.ArgumentParser:
         action="store_true",
         help="For `tokdash db repair`, report checks without changing counters. "
         "For setup/update/uninstall, print the plan/command and change nothing.",
+    )
+    parser.add_argument("--codex-api", choices=["on", "off"], help="For `tokdash quota consent`: enable/disable Codex API quota polling.")
+    parser.add_argument("--claude-api", choices=["on", "off"], help="For `tokdash quota consent`: enable/disable Claude API quota polling.")
+    parser.add_argument("--antigravity-api", choices=["on", "off"], help="For `tokdash quota consent`: enable/disable Antigravity API quota polling.")
+    parser.add_argument("--enabled", choices=["on", "off"], help="For `tokdash quota consent`: master switch for all quota tracking.")
+    parser.add_argument(
+        "--poll-interval",
+        type=int,
+        choices=[15, 30, 60, 120],
+        help="For `tokdash quota consent`: background poll interval in minutes (15/30/60/120).",
     )
 
     # Lifecycle options (setup / doctor / update / uninstall). These reuse the global
@@ -249,6 +277,7 @@ def serve(host: str, port: int, log_level: str, open_browser: bool = True) -> No
         timer.daemon = True
         timer.start()
     _start_usage_db_sync_daemon()
+    _start_quota_poll_daemon()
     # Backpressure: cap accepted concurrency and keep-alive lifetime so a load burst
     # returns 503 fast instead of queuing forever and wedging the server. The limit
     # sits above the AnyIO worker pool (~40) so cheap cache hits aren't rejected, but
@@ -263,8 +292,12 @@ def serve(host: str, port: int, log_level: str, open_browser: bool = True) -> No
     )
 
 
-def export(period: str, pretty: bool, output: str | None) -> None:
+def export(period: str, pretty: bool, output: str | None, include_quota: bool = False) -> None:
     data = compute_usage(period)
+    if include_quota:
+        from .sources.quota import quota_state
+
+        data["quota"] = quota_state()
     payload = json.dumps(data, indent=2 if pretty else None)
 
     if output:
@@ -452,6 +485,71 @@ def _start_usage_db_sync_daemon() -> None:
         _DB_WATCH_THREAD_STARTED = True
 
 
+def _quota_poll_interval() -> int:
+    from .sources.quota.config import effective_poll_interval
+
+    return effective_poll_interval()[0]
+
+
+def _quota_jittered_interval() -> int:
+    base = _quota_poll_interval()
+    return max(300, int(base + random.uniform(-base * 0.05, base * 0.05)))
+
+
+def _quota_poll_once(*, include_network: bool = True) -> dict:
+    from .sources.quota import poll_quota
+
+    return poll_quota(include_network=include_network)
+
+
+def _quota_tracking_enabled() -> bool:
+    try:
+        from .sources.quota.config import quota_tracking_enabled
+
+        return quota_tracking_enabled()
+    except Exception:
+        return False
+
+
+def _quota_network_enabled() -> bool:
+    try:
+        from .sources.quota.config import enabled_network_sources
+
+        return bool(enabled_network_sources())
+    except Exception:
+        return False
+
+
+def _start_quota_poll_daemon() -> None:
+    global _QUOTA_POLL_THREAD_STARTED
+    try:
+        from .usage_store import persistent_usage_db_enabled
+
+        if not persistent_usage_db_enabled():
+            return
+    except Exception:
+        return
+
+    def loop() -> None:
+        time.sleep(60)
+        while True:
+            try:
+                # Re-read the master switch and interval every iteration so the tab's
+                # enable/disable + interval choice apply without a restart.
+                if _quota_tracking_enabled():
+                    _quota_poll_once(include_network=_quota_network_enabled())
+            except Exception:
+                pass
+            time.sleep(_quota_jittered_interval())
+
+    with _QUOTA_POLL_THREAD_LOCK:
+        if _QUOTA_POLL_THREAD_STARTED:
+            return
+        thread = threading.Thread(target=loop, name="tokdash-quota-poll", daemon=True)
+        thread.start()
+        _QUOTA_POLL_THREAD_STARTED = True
+
+
 def _watch_usage_database(pretty: bool, output: str | None) -> int:
     interval = _usage_db_watch_interval()
     try:
@@ -494,6 +592,57 @@ def db_command(action: str, pretty: bool, output: str | None, verify_period: str
     raise SystemExit(f"Unknown db action: {action}")
 
 
+def _parse_onoff(value: str | None) -> bool | None:
+    if value is None:
+        return None
+    return value == "on"
+
+
+def quota_command(args) -> int:
+    action = args.quota_action or "show"
+    if action == "poll":
+        _emit_json(_quota_poll_once(), args.pretty, args.output)
+        return 0
+    if action == "show" or action == "status":
+        from .sources.quota import quota_state
+
+        _emit_json(quota_state(), args.pretty, args.output)
+        return 0
+    if action == "consent":
+        from .sources.quota import config as quota_config
+
+        updates = {
+            key: value
+            for key, value in {
+                "codex_api": _parse_onoff(args.codex_api),
+                "claude_api": _parse_onoff(args.claude_api),
+                "antigravity_api": _parse_onoff(args.antigravity_api),
+            }.items()
+            if value is not None
+        }
+        consent = quota_config.set_quota_consent(updates) if updates else quota_config.read_quota_config()
+        enabled_arg = _parse_onoff(getattr(args, "enabled", None))
+        if enabled_arg is not None:
+            quota_config.set_quota_enabled(enabled_arg)
+        if getattr(args, "poll_interval", None) is not None:
+            quota_config.set_poll_interval_minutes(args.poll_interval)
+        interval_seconds, interval_source = quota_config.effective_poll_interval()
+        _emit_json(
+            {
+                "consent": consent,
+                "enabled": quota_config.quota_tracking_enabled(),
+                "poll_interval_minutes": quota_config.read_poll_interval_minutes()
+                or quota_config.DEFAULT_POLL_INTERVAL_MINUTES,
+                "interval_seconds": interval_seconds,
+                "interval_source": interval_source,
+            },
+            args.pretty,
+            args.output,
+        )
+        return 0
+    raise SystemExit(f"Unknown quota action: {action}")
+
+
 def cli(argv: list[str] | None = None, prog: str = "tokdash") -> int:
     parser = build_parser(prog=prog)
     args = parser.parse_args(argv)
@@ -521,11 +670,14 @@ def cli(argv: list[str] | None = None, prog: str = "tokdash") -> int:
         return 0
 
     if args.command == "export":
-        export(args.period, args.pretty, args.output)
+        export(args.period, args.pretty, args.output, include_quota=args.include_quota)
         return 0
 
     if args.command == "db":
         return db_command(args.db_action, args.pretty, args.output, args.verify_period, args.dry_run)
+
+    if args.command == "quota":
+        return quota_command(args)
 
     parser.error(f"Unknown command: {args.command}")
     return 2

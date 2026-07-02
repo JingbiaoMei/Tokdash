@@ -40,6 +40,49 @@ def test_db_watch_arg():
     assert args.db_action == "watch"
 
 
+def test_quota_command_parses_actions():
+    args = cli.build_parser("tokdash").parse_args(["quota", "poll"])
+    assert args.command == "quota"
+    assert args.quota_action == "poll"
+
+    args = cli.build_parser("tokdash").parse_args(["quota", "consent", "--codex-api", "on"])
+    assert args.command == "quota"
+    assert args.quota_action == "consent"
+    assert args.codex_api == "on"
+
+
+def test_quota_consent_cli_updates_config():
+    assert cli.cli(["quota", "consent", "--codex-api", "on", "--claude-api", "off", "--json"]) == 0
+
+    from tokdash.sources.quota.config import read_quota_config
+
+    assert read_quota_config() == {"codex_api": True, "claude_api": False, "antigravity_api": False}
+
+
+def test_quota_poll_cli_uses_collector(monkeypatch):
+    monkeypatch.setattr(cli, "_quota_poll_once", lambda: {"inserted": 0, "snapshots": 0})
+
+    assert cli.cli(["quota", "poll"]) == 0
+
+
+def test_quota_poll_interval_has_floor_and_jitter(monkeypatch):
+    monkeypatch.setenv("TOKDASH_QUOTA_POLL_INTERVAL", "120")
+    assert cli._quota_poll_interval() == 300
+    monkeypatch.setenv("TOKDASH_QUOTA_POLL_INTERVAL", "1000")
+    monkeypatch.setattr(cli.random, "uniform", lambda a, b: b)
+    assert cli._quota_jittered_interval() == 1050
+
+
+def test_export_include_quota_flag(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "compute_usage", lambda period: {"period": period, "total_tokens": 1})
+    monkeypatch.setattr("tokdash.sources.quota.quota_state", lambda: {"providers": {"codex": {"buckets": []}}})
+
+    assert cli.cli(["export", "--include-quota"]) == 0
+
+    payload = __import__("json").loads(capsys.readouterr().out)
+    assert payload["quota"]["providers"]["codex"]["buckets"] == []
+
+
 def test_has_display_false_in_ci(monkeypatch):
     monkeypatch.delenv("SSH_CONNECTION", raising=False)
     monkeypatch.delenv("SSH_TTY", raising=False)
@@ -172,3 +215,26 @@ def test_serve_starts_usage_db_watch_when_enabled(monkeypatch):
     monkeypatch.setattr(cli.threading, "Thread", FakeThread)
     cli.serve("127.0.0.1", 55423, "info", open_browser=False)
     assert started == ["tokdash-usage-db-watch"]
+
+
+def test_serve_starts_quota_poll_thread_before_network_consent(monkeypatch):
+    started: list[str] = []
+    monkeypatch.setattr(cli, "_QUOTA_POLL_THREAD_STARTED", False)
+    monkeypatch.setenv("TOKDASH_USAGE_DB", "1")
+    monkeypatch.setenv("TOKDASH_USAGE_DB_WATCH", "0")
+    monkeypatch.setattr(cli, "_quota_network_enabled", lambda: False)
+
+    class FakeThread:
+        def __init__(self, target, name, daemon):
+            self.target = target
+            self.name = name
+            self.daemon = daemon
+
+        def start(self):
+            started.append(self.name)
+
+    monkeypatch.setattr(cli.threading, "Thread", FakeThread)
+
+    cli._start_quota_poll_daemon()
+
+    assert started == ["tokdash-quota-poll"]

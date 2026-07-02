@@ -62,14 +62,17 @@ the ones that do NOT do this (Hermes) or that use a Linux-only convention on Win
   what tokdash parses).
 
 ### Codex
-- **Keep `Path.home() / ".codex"`** — portable dotfile via the Rust `dirs` crate. For robustness, resolve
-  `CODEX_HOME` first (works identically on Windows, any absolute path), then fall back to `Path.home()/".codex"`.
+- **Keep `Path.home() / ".codex"`** — portable dotfile via the Rust `dirs` crate. ✅ *Implemented:*
+  `clientpaths.codex_home()` resolves `CODEX_HOME` first (works identically on Windows, any absolute path) and
+  falls back to `Path.home()/".codex"`; the sessions dir and `state_5.sqlite` both derive from it.
 - Windows is natively supported (sandbox modes in `config.toml`); the in-repo `docs/install.md` "WSL2 only" line is
   stale — the live docs site supersedes it.
 
 ### Claude Code
 - **Keep the `Path.home().glob(".claude*")` + `/projects` logic** — docs state verbatim that on Windows `~/.claude`
-  resolves to `%USERPROFILE%\.claude`. Optionally resolve `CLAUDE_CONFIG_DIR` first (cross-platform).
+  resolves to `%USERPROFILE%\.claude`. ✅ *Implemented for the config/credentials dir:* `clientpaths.claude_config_dir()`
+  resolves `CLAUDE_CONFIG_DIR` first (cross-platform; used by quota tracking); the usage parsers keep the
+  `.claude*` glob for multi-install project discovery.
 - Do not confuse with `%APPDATA%\Claude\` (that's Claude Desktop, a different product).
 
 ### Kimi CLI

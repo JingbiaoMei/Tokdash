@@ -114,6 +114,14 @@ def cmd_setup(opts: Options) -> int:
         _offer_tailscale(result)
 
     _maybe_open_dashboard(result, opts, detection)
+
+    # Optional quota step (interactive only): per-provider network consent (default No) and
+    # the poll interval, mirroring the opt-in update-check consent UX. --auto/--yes/--json and
+    # non-tty runs skip it so scripted setup never blocks on a prompt. Runs last so it never
+    # steals input meant for the earlier setup/tailscale confirmations.
+    if result.get("ok") and not opts.auto and not opts.yes and not opts.json and detection["tty"]:
+        _quota_setup_wizard()
+
     _emit_result(result, opts)
     return EXIT_OK if result.get("ok") else EXIT_FAIL
 
@@ -541,6 +549,7 @@ def cmd_doctor(opts: Options) -> int:
         "service": service_info,
         "port": detection["port"],
         "update_check": _doctor_update_check(),
+        "quota": _doctor_quota(),
         "issues": issues,
     }
 
@@ -634,6 +643,40 @@ def _doctor_update_check() -> Dict[str, Any]:
     from .. import __version__
 
     return {"enabled": True, **updatecheck.check(__version__)}
+
+
+def _doctor_quota() -> Dict[str, Any]:
+    """Quota tracking state for `tokdash doctor` (read-only; never touches the network)."""
+    try:
+        from ..sources.quota import config as quota_config
+        from ..sources.quota import last_poll_at
+    except Exception:
+        return {"available": False}
+
+    interval_seconds, interval_source = quota_config.effective_poll_interval()
+    report: Dict[str, Any] = {
+        "available": True,
+        "enabled": quota_config.quota_tracking_enabled(),
+        "config_enabled": quota_config.quota_config_enabled(),
+        "kill_switch": quota_config.quota_poll_killed(),
+        "consent": quota_config.read_quota_config(),
+        "interval_seconds": interval_seconds,
+        "interval_source": interval_source,
+        "poll_interval_minutes": quota_config.read_poll_interval_minutes()
+        or quota_config.DEFAULT_POLL_INTERVAL_MINUTES,
+        "last_poll_at": None,
+        "snapshots": None,
+    }
+    try:
+        from ..usage_store import UsageEntryStore, persistent_usage_db_enabled
+
+        if persistent_usage_db_enabled():
+            store = UsageEntryStore()
+            report["last_poll_at"] = last_poll_at(store)
+            report["snapshots"] = int(store.status().get("quota_snapshots") or 0)
+    except Exception:
+        pass
+    return report
 
 
 # --- update ---------------------------------------------------------------------
@@ -1319,6 +1362,23 @@ def _print_doctor_human(r: Dict[str, Any]) -> None:
             print(f"  Updates:      {uc.get('latest')} available (you have {uc.get('current')}) — run `tokdash update`")
         else:
             print(f"  Updates:      up to date ({uc.get('current')})")
+    q = r.get("quota", {})
+    if q.get("available"):
+        state = "on" if q.get("enabled") else "off"
+        if q.get("kill_switch"):
+            state += ", TOKDASH_QUOTA_POLL=0 kill switch"
+        elif not q.get("config_enabled"):
+            state += ", disabled in config"
+        print(f"  Quota:        {state}")
+        consent = q.get("consent") or {}
+        on = [key for key, value in consent.items() if value]
+        print(f"  Quota network:{' ' + ', '.join(on) if on else ' none (local-only)'}")
+        minutes = q.get("interval_seconds", 0) // 60
+        print(f"  Quota poll:   every {minutes} min (from {q.get('interval_source')})")
+        last = q.get("last_poll_at")
+        snaps = q.get("snapshots")
+        last_str = "never" if not last else time.strftime("%Y-%m-%d %H:%M", time.localtime(int(last)))
+        print(f"  Quota data:   {snaps if snaps is not None else '—'} snapshots, last poll {last_str}")
     for issue in r["issues"]:
         print(f"  {_warn('⚠')} {issue}")
 
@@ -1328,6 +1388,88 @@ def _print_advisories(p: Dict[str, Any]) -> None:
         print(f"  {_ok('•')} {n}")
     for w in p.get("warnings", []):
         print(f"  {_warn('⚠')} {w}")
+
+
+def _quota_setup_wizard() -> None:
+    """Ask the optional quota decisions §4 wants — the SAME settings the Quota tab exposes:
+    the master on/off switch, per-provider network consent, and the poll interval.
+
+    The three writes here (:func:`set_quota_enabled`, :func:`set_quota_consent`,
+    :func:`set_poll_interval_minutes`) are exactly the ones the web UI's Quota-tracking
+    toggle, per-provider "Enable quota API" buttons, and interval selector call, so the two
+    entry points stay in lockstep. Any failure to persist is non-fatal — setup already
+    succeeded, so we warn and move on.
+    """
+    try:
+        from ..sources.quota import config as quota_config
+    except Exception:
+        return
+
+    print("\n" + _bold("Quota tracking (optional)"))
+    print("  Tokdash can track your subscription quota: local Codex session windows, plus")
+    print("  each provider's own quota API polled with your local CLI credentials (default: no).")
+
+    # Master switch — identical to the Quota tab's "Quota tracking" toggle (config
+    # quota.enabled). Off disables ALL quota work (including local session scanning); on
+    # (the default) proceeds to the per-provider network + interval questions. Any input
+    # failure (exhausted stdin / EOF / interrupt) means "accept the defaults and stop".
+    try:
+        enable = _confirm("  Enable quota tracking?", default=True)
+    except (EOFError, KeyboardInterrupt, StopIteration):
+        print()
+        return
+    try:
+        quota_config.set_quota_enabled(enable)
+    except Exception:
+        _err("  Could not save quota setting; change it later from the Quota tab.")
+    if not enable:
+        print("  Quota tracking disabled. Enable it any time from the Quota tab.")
+        return
+
+    # Any input failure (exhausted stdin / EOF / interrupt) means "accept the defaults and
+    # stop asking" — the wizard never blocks or crashes an otherwise-successful setup.
+    try:
+        consent_updates: Dict[str, Any] = {}
+        for key, label in (
+            ("codex_api", "Codex"),
+            ("claude_api", "Claude Code"),
+            ("antigravity_api", "Antigravity"),
+        ):
+            consent_updates[key] = _confirm(f"  Enable {label} quota API polling?", default=False)
+        try:
+            quota_config.set_quota_consent(consent_updates)
+        except Exception:
+            _err("  Could not save quota consent; enable it later from the Quota tab.")
+        if consent_updates.get("claude_api") and detect.os_kind() == "macos":
+            # Claude Code keeps its sign-in in the Keychain on macOS; Tokdash reads it
+            # (read-only), but the first access may need a one-time Keychain approval.
+            print("  macOS note: Tokdash reads Claude Code's sign-in from the Keychain. If a")
+            print("  Keychain permission prompt appears on the first poll, choose Always Allow.")
+            print("  Headless/locked-Keychain sessions can set CLAUDE_CODE_OAUTH_TOKEN instead")
+            print("  (create one with `claude setup-token`).")
+
+        choices = quota_config.POLL_INTERVAL_CHOICES
+        default_minutes = quota_config.DEFAULT_POLL_INTERVAL_MINUTES
+        answer = input(f"  Poll interval in minutes {list(choices)} [{default_minutes}]: ").strip()
+    except (EOFError, KeyboardInterrupt, StopIteration):
+        print()
+        return
+    if answer:
+        try:
+            minutes = int(answer)
+        except ValueError:
+            minutes = 0
+        if minutes in quota_config.POLL_INTERVAL_CHOICES:
+            try:
+                quota_config.set_poll_interval_minutes(minutes)
+            except Exception:
+                pass
+        else:
+            # Unrecognized input leaves the *existing* setting untouched — report whatever
+            # is actually in effect (a previously-saved value, else the default), not a
+            # blanket "default".
+            current = quota_config.read_poll_interval_minutes() or quota_config.DEFAULT_POLL_INTERVAL_MINUTES
+            print(f"  Unrecognized value; keeping the current interval ({current} min).")
 
 
 def _confirm(prompt: str, default: bool = True) -> bool:

@@ -24,6 +24,11 @@ per-session token); see [`docs/SECURITY.md`](SECURITY.md) and `PUT /api/pricing-
 | `POST` | `/api/update-check/consent` | Persist one-time update-check consent (write-gated) |
 | `GET` | `/api/usage` | Aggregated token usage and cost across all tools |
 | `GET` | `/api/tools` | Per-tool usage breakdown (coding apps only) |
+| `GET` | `/api/quota` | Current subscription quota state from local snapshots |
+| `GET` | `/api/quota/history` | Quota utilization and derived consumption history |
+| `POST` | `/api/quota/consent` | Persist per-provider quota API consent (write-gated) |
+| `POST` | `/api/quota/settings` | Persist the quota master switch and poll interval (write-gated) |
+| `POST` | `/api/quota/refresh` | Run an immediate consented quota API poll (write-gated, cooldown) |
 | `GET` | `/api/sessions` | List sessions for a given tool |
 | `GET` | `/api/session` | Detailed turns for a single session |
 | `GET` | `/api/codex/sessions` | Convenience wrapper: Codex sessions |
@@ -123,6 +128,94 @@ overrides saved consent.
 **Response**
 ```json
 { "enabled": true }
+```
+
+---
+
+## `GET /api/quota`
+
+Returns current subscription quota state. This route never performs provider network I/O; it reads the local `quota_snapshots` table (and local plan/tier metadata). Session files are not scanned here — the background poller ingests them. Provider API polling is default-off and happens only through `POST /api/quota/refresh`, the background poller after consent, or `tokdash quota poll`.
+
+`enabled` is the quota master switch (`config.json` `quota.enabled`, default `true`, forced `false` by the `TOKDASH_QUOTA_POLL=0` kill switch). When it is `false` the dashboard renders an *enable quota tracking* card instead of provider data. `poll.interval` is the **effective** interval in seconds and `poll.interval_source` is one of `env` / `config` / `default`.
+
+**Response shape**
+```json
+{
+  "providers": {
+    "codex": {
+      "network_enabled": false,
+      "plan": "pro",
+      "buckets": [
+        {"bucket": "5h", "bucket_label": "5-hour window", "used_percent": 25.0, "resets_at": 1782910800}
+      ]
+    }
+  },
+  "consent": {"codex_api": false, "claude_api": false, "antigravity_api": false},
+  "enabled": true,
+  "poll": {
+    "enabled": true,
+    "network_enabled": false,
+    "interval": 1800,
+    "interval_source": "default",
+    "interval_minutes": 30,
+    "interval_choices": [15, 30, 60, 120],
+    "last_run": null,
+    "kill_switch": false
+  }
+}
+```
+
+## `GET /api/quota/history`
+
+Returns stored quota utilization points and derived consumption deltas.
+
+**Query parameters**
+
+| Name | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `providers` | comma-separated string | no | all | Filter providers, e.g. `codex,claude` |
+| `granularity` | `hour` or `day` | no | `hour` | Period used to aggregate consumption deltas |
+| `start` | integer epoch seconds | no | – | Inclusive lower bound |
+| `end` | integer epoch seconds | no | – | Inclusive upper bound |
+| `max_points` | integer | no | `300` | Max points per series; series longer than this are evenly downsampled, always keeping the most recent point. Must be a positive integer. |
+
+History series are unified per `(provider, bucket)`: a Codex session row (account `default`) and an API row (real account id) for the same window merge into one series, keeping the freshest point on a timestamp collision. Series are always bounded by `max_points` (points and consumption deltas are downsampled independently).
+
+## `POST /api/quota/consent`
+
+Persists per-provider quota API **network** consent to `<data_dir>/config.json`. **Write-gated** like all mutations. `TOKDASH_QUOTA_POLL=0` remains a hard kill switch.
+
+**Request**
+```json
+{"codex_api": true, "claude_api": false, "antigravity_api": true}
+```
+
+**Response**
+```json
+{"consent": {"codex_api": true, "claude_api": false, "antigravity_api": true}}
+```
+
+## `POST /api/quota/settings`
+
+Persists the quota master switch and background poll interval to `<data_dir>/config.json` (`quota.enabled` and `quota.poll_interval_minutes`). Both fields are optional. **Write-gated** like all mutations. A `poll_interval_minutes` outside `[15, 30, 60, 120]` returns `400`.
+
+**Request**
+```json
+{"enabled": true, "poll_interval_minutes": 30}
+```
+
+**Response**
+```json
+{"enabled": true, "config_enabled": true, "poll_interval_minutes": 30, "interval": 1800, "interval_source": "config"}
+```
+
+## `POST /api/quota/refresh`
+
+Runs an immediate network poll for consented providers and stores snapshots in the local usage DB. **Write-gated** and rate-limited with a 60 second cooldown. It never refreshes provider tokens; expired tokens produce stale-token snapshots. Returns `409` when quota tracking is disabled (master switch off or `TOKDASH_QUOTA_POLL=0`).
+
+**Response**
+```json
+{"snapshots": 3, "inserted": 3}
 ```
 
 ---

@@ -218,6 +218,12 @@ def test_update_check_post_endpoints_are_write_gated(monkeypatch):
     assert updatecheck.is_enabled() is False
 
 
+def test_quota_post_endpoints_are_write_gated(monkeypatch):
+    monkeypatch.setenv("TOKDASH_WARM_ON_START", "0")
+    assert _asgi_status("POST", "/api/quota/consent", {"host": "evil.example.com", "content-type": "application/json"}) == 403
+    assert _asgi_status("POST", "/api/quota/refresh", {"host": "evil.example.com", "content-type": "application/json"}) == 403
+
+
 def test_authorized_consent_is_admitted_through_asgi(monkeypatch):
     monkeypatch.setenv("TOKDASH_WARM_ON_START", "0")
     monkeypatch.delenv("TOKDASH_UPDATE_CHECK", raising=False)

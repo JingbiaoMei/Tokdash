@@ -178,6 +178,13 @@ def test_api_endpoints_and_dashboard_smoke(synthetic_api_data):
     html = api._render_dashboard_html("")
     assert "Tokdash" in html
     assert "Sessions" in html
+    assert 'data-tab="quota"' in html
+    assert 'id="quota-content"' in html
+    assert "/api/quota" in html
+    assert "/api/quota/refresh" in html
+    assert "/api/quota/consent" in html
+    assert "resetCredits" in html
+    assert "renderQuotaBucketGroups" in html
     assert "__TOKDASH_BASE_PATH__" not in html
 
     icon_path = api.STATIC_DIR / "icons" / "icon-192.png"

@@ -40,15 +40,27 @@ def opencode_db_path() -> Path:
 # --- Codex --------------------------------------------------------------------
 
 
+def codex_home() -> Path:
+    """``$CODEX_HOME`` if set, else ``~/.codex``."""
+    explicit = os.environ.get("CODEX_HOME", "").strip()
+    return Path(explicit).expanduser() if explicit else Path.home() / ".codex"
+
+
 def codex_sessions_dir() -> Path:
-    return Path.home() / ".codex/sessions"
+    return codex_home() / "sessions"
 
 
 def codex_state_db_path() -> Path:
-    return Path.home() / ".codex" / "state_5.sqlite"
+    return codex_home() / "state_5.sqlite"
 
 
 # --- Claude Code ----------------------------------------------------------------
+
+
+def claude_config_dir() -> Path:
+    """``$CLAUDE_CONFIG_DIR`` if set, else ``~/.claude``."""
+    explicit = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
+    return Path(explicit).expanduser() if explicit else Path.home() / ".claude"
 
 
 def claude_project_dirs() -> List[Path]:
@@ -61,6 +73,10 @@ def claude_project_dirs() -> List[Path]:
 
 def gemini_root() -> Path:
     return Path.home() / ".gemini"
+
+
+def antigravity_cli_dir() -> Path:
+    return gemini_root() / "antigravity-cli"
 
 
 def gemini_chats_json_glob(root: Optional[Path] = None) -> str:

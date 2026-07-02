@@ -102,8 +102,8 @@ Nothing is uploaded; nothing is read from your machine.
 ## Platform support
 
 - **Linux (including WSL2):** supported
-- **macOS:** experimental
-- **Windows (native):** in progress — foreground `tokdash serve` support and a Windows Task Scheduler backend for `tokdash setup` are implemented in this branch, but still need real-Windows validation before release. Until then, prefer WSL2 for fully verified support, or treat native Windows as experimental. See [`docs/WINDOWS_SUPPORT_PLAN.md`](docs/WINDOWS_SUPPORT_PLAN.md) for the tiered rollout and current status.
+- **macOS:** experimental — `tokdash serve` and `tokdash setup` (per-user launchd LaunchAgent) are implemented, and the full test suite now runs on macOS CI (including the Claude quota Keychain integration test). Real-Mac validation of the launchd service flow is still pending; treat native macOS as experimental until confirmed.
+- **Windows (native):** experimental — foreground `tokdash serve` and `tokdash setup` via Windows Task Scheduler are available in `v1.0.5+`, with Windows CI and smoke-test coverage. Broader real-world Task Scheduler validation is still ongoing. WSL2 remains the most fully verified Windows path. See [`docs/WINDOWS_SUPPORT_PLAN.md`](docs/WINDOWS_SUPPORT_PLAN.md) for the tiered rollout and current status.
 
 ## Quick start
 
@@ -161,7 +161,7 @@ tokdash doctor
 `doctor` checks the runtime, background service, configured port, data paths, and update-check
 status. Use `tokdash doctor --json` for automation.
 
-### Existing installs
+### Existing installs (Migration from before V1.0)
 
 If you installed Tokdash before the onboarding flow, upgrade first:
 
@@ -227,10 +227,9 @@ Tokdash's loopback write gate. Use SSH forwarding when you need trusted remote w
 
 **Tailscale on Windows:** the Windows Tailscale client installs both a GUI and a `tailscale`
 CLI, and `tailscale serve` works the same way from PowerShell/cmd once the client is
-running. This has not yet been verified against Tokdash's native Windows support
-(implemented in this branch but not real-Windows validated — see
-[Platform support](#platform-support)), so treat it as experimental
-until confirmed.
+running. Native Windows support has initial CI and smoke-test coverage, but the
+Tailscale Serve + native Windows combination has not yet been validated end to end
+against Tokdash, so treat that specific path as experimental until confirmed.
 
 Binding Tokdash directly to `0.0.0.0` is possible but not recommended because the local API is
 not an internet-facing authenticated service.
@@ -355,7 +354,30 @@ By default `tokdash serve` opens the dashboard in your browser once on startup. 
 
 - **No telemetry**: Tokdash does not intentionally send your data anywhere.
 - **Local parsing**: usage is computed from local session files (see [supported clients](docs/SUPPORTED_CLIENTS.md)).
+- **Optional quota polling**: the Quota tab is local-only by default. Per-provider API polling can be enabled from the tab or with `tokdash quota consent`; it uses your local CLI credentials only to call that provider's own quota endpoint, and stores responses in the local usage SQLite DB.
 - **Server exposure**: Tokdash binds to `127.0.0.1` by default. Prefer Tailscale Serve or SSH tunneling for remote access; avoid `--bind 0.0.0.0` unless you understand it listens on all interfaces and have firewall/auth in place. Tailscale Serve is read-only for write endpoints by design because proxied requests fail Tokdash's loopback write gate; use SSH forwarding when you need authenticated remote writes.
+
+### Quota tracking (optional)
+
+The Quota tab shows subscription utilization windows and reset timers. Without consent, Tokdash reads only local files such as Codex session `rate_limits` and Claude's local plan/tier metadata. Live quota polling is off by default and can be enabled per provider:
+
+```bash
+tokdash quota consent --codex-api on --claude-api on --antigravity-api on
+tokdash quota consent --poll-interval 30      # background poll cadence: 15, 30, 60 or 120 min
+tokdash quota consent --enabled off           # master switch: turn ALL quota tracking off
+tokdash quota poll
+tokdash quota show
+```
+
+**Master switch.** `quota.enabled` (default on) turns *all* quota work on or off — session scanning, network polling, and snapshot writes. Toggle it from the Quota tab or with `tokdash quota consent --enabled on|off`. When it is off (or the `TOKDASH_QUOTA_POLL=0` kill switch is set), the background poller idles completely, `POST /api/quota/refresh` returns a "quota tracking disabled" error, and the tab shows an *enable quota tracking* card instead of data. Per-provider consent keys keep their narrower network-only meaning.
+
+**Poll interval.** The background poller snapshots every **30 minutes** by default. Choose 15/30/60/120 minutes from the Quota tab, during `tokdash setup`, or with `tokdash quota consent --poll-interval N`; it is saved as `quota.poll_interval_minutes` in `config.json`. The `TOKDASH_QUOTA_POLL_INTERVAL` env var (seconds, floor 300) overrides the saved value, and the tab shows which source is active. Interval changes apply on the next poll cycle without restarting the server. Codex session ingestion is incremental — after a one-time backfill of your history, each cycle only tail-reads session files that grew, so a steady-state poll costs single-digit milliseconds.
+
+When enabled, Tokdash reads credentials from `$CODEX_HOME/auth.json`, `$CLAUDE_CONFIG_DIR/.credentials.json` or `CLAUDE_CODE_OAUTH_TOKEN`, and `~/.gemini/antigravity-cli/antigravity-oauth-token`, then calls only the corresponding provider quota endpoints. On macOS, Claude Code stores its credentials in the Keychain rather than `.credentials.json`; Tokdash reads the Keychain item (`Claude Code-credentials`) directly — read-only, and the first read may show a one-time Keychain permission prompt. If the Keychain is unavailable (locked, denied, headless session), set `CLAUDE_CODE_OAUTH_TOKEN` (create one with `claude setup-token`) as an override. Tokdash never refreshes or writes provider credentials. `TOKDASH_QUOTA_POLL=0` is a hard kill switch for all quota tracking. `tokdash export` excludes quota data by default; use `--include-quota` only when you intentionally want it in the JSON.
+
+`tokdash setup` offers an optional quota step (per-provider network consent, default No, plus the poll interval), and `tokdash doctor` reports the quota state: master switch, per-provider consent, kill switch, effective interval and its source, last poll time, and the stored snapshot count.
+
+Quota snapshots and their history live in the local usage database (`usage.sqlite3`, enabled by default) and are **kept indefinitely by default** — set `TOKDASH_QUOTA_RETENTION_DAYS` to a positive number of days to prune older snapshots. If you opt out of local persistence with `TOKDASH_USAGE_DB=0`, the Quota tab loses its main data path: no snapshot history is kept, the background poller does not run, and the tab only shows in-memory results from a manual **Refresh** (network providers with consent) for the lifetime of the current server process. Keep the usage DB enabled (the default) for normal quota tracking.
 
 ## API (local)
 
@@ -366,6 +388,7 @@ Tokdash is a local HTTP server. Common endpoints:
 - `GET /api/tools?period=...` (coding tools only)
 - `GET /api/openclaw?period=...` (OpenClaw only)
 - `GET /api/sessions?tool=codex|claude|opencode|pi_agent&period=...` (append `&include_review_sessions=true` to include Codex review/permission sessions, hidden by default)
+- `GET /api/quota` and `GET /api/quota/history` (subscription quota snapshots; network refresh is write-gated and opt-in)
 - `GET /api/stats` (contribution calendar & statistics)
 
 Example:

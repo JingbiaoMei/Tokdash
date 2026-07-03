@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Added
+- Added Antigravity CLI (`agy`) token-usage parsing from `~/.gemini/antigravity-cli/conversations/*.db`, including WAL-aware change detection, protobuf wire decoding without a new runtime dependency, and pricing aliases for raw Gemini 3 Antigravity model IDs.
+
 ## 1.0.7 - 2026-07-02
 
 ### Added

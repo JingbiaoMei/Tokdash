@@ -27,6 +27,11 @@ non-disable-able cleanup or multi-machine history sync becomes a goal.
   - ✅ Codex
   - ✅ Claude Code
   - ✅ Gemini CLI
+  - ✅ Antigravity CLI (token usage; Session Explorer drill-down is future work)
+  - ✅ Kimi CLI
+  - ✅ Pi
+  - ✅ GitHub Copilot CLI
+  - ✅ Hermes
   - 🟡 Amp (placeholder)
 - OpenClaw parser in `src/tokdash/sources/openclaw.py` (reads `~/.openclaw/agents/*/sessions`).
 - Local pricing DB: `src/tokdash/pricing_db.json`.

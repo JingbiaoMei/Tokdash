@@ -138,6 +138,7 @@ class PricingDatabase:
         k = re.sub(r"-(latest|stable)$", "", k)
         k = re.sub(r"-(\d{4}-\d{2}-\d{2}|\d{8})$", "", k)
         k = re.sub(r"-thinking$", "", k)
+        k = re.sub(r"-(high|medium|low)$", "", k)
         # Quantization / precision format suffixes (e.g. qwen3.6-27B-FP8 -> qwen3.6-27b).
         k = re.sub(r"-(fp16|fp8|int8|int4|bf16|awq|gptq|gguf)$", "", k)
         return k

@@ -89,6 +89,82 @@ def _glob_sigs(pattern: str) -> tuple:
     return tuple(sorted(items))
 
 
+def _pb_read_varint(buf: bytes, pos: int) -> tuple[int, int]:
+    value = 0
+    shift = 0
+    while True:
+        if pos >= len(buf):
+            raise ValueError("truncated varint")
+        byte = buf[pos]
+        pos += 1
+        value |= (byte & 0x7F) << shift
+        if not byte & 0x80:
+            return value, pos
+        shift += 7
+        if shift > 70:
+            raise ValueError("varint too long")
+
+
+def _pb_parse_message(buf: bytes) -> Dict[int, list[Any]]:
+    """Parse a minimal protobuf wire message into field-number buckets."""
+    pos = 0
+    out: Dict[int, list[Any]] = {}
+    while pos < len(buf):
+        tag, pos = _pb_read_varint(buf, pos)
+        field = tag >> 3
+        wire_type = tag & 0x07
+        if field <= 0:
+            raise ValueError("invalid field number")
+        if wire_type == 0:
+            value, pos = _pb_read_varint(buf, pos)
+        elif wire_type == 1:
+            if pos + 8 > len(buf):
+                raise ValueError("truncated fixed64")
+            value = buf[pos : pos + 8]
+            pos += 8
+        elif wire_type == 2:
+            size, pos = _pb_read_varint(buf, pos)
+            if pos + size > len(buf):
+                raise ValueError("truncated length-delimited field")
+            value = buf[pos : pos + size]
+            pos += size
+        elif wire_type == 5:
+            if pos + 4 > len(buf):
+                raise ValueError("truncated fixed32")
+            value = buf[pos : pos + 4]
+            pos += 4
+        else:
+            raise ValueError(f"unsupported wire type {wire_type}")
+        out.setdefault(field, []).append(value)
+    return out
+
+
+def _pb_get_path(msg: Dict[int, list[Any]], path: tuple[int, ...]) -> Any:
+    cur: Any = msg
+    for index, field in enumerate(path):
+        if not isinstance(cur, dict):
+            return None
+        values = cur.get(field)
+        if not values:
+            return None
+        value = values[-1]
+        if index == len(path) - 1:
+            return value
+        if not isinstance(value, bytes):
+            return None
+        cur = _pb_parse_message(value)
+    return None
+
+
+def _pb_text(value: Any) -> str:
+    if not isinstance(value, bytes):
+        return ""
+    try:
+        return value.decode("utf-8")
+    except UnicodeDecodeError:
+        return ""
+
+
 class BaseParser(ABC):
     source_name: str
     sync_capability = SourceSyncCapability()
@@ -671,6 +747,205 @@ class GeminiCLIParser(BaseParser):
                     entry = self._build_entry(model, tokens, ts_ms)
                     entry["entry_id"] = f"gemini_cli:{msg_id}"
                     out.append(entry)
+                except Exception:
+                    continue
+        return out
+
+
+class AntigravityCLIParser(BaseParser):
+    """
+    Parser for Antigravity CLI (agy) generation metadata SQLite DBs.
+
+    ========================================================================
+    ANTIGRAVITY CLI GEN_METADATA SCHEMA (fixture-friendly notes)
+    ========================================================================
+    Location: ~/.gemini/antigravity-cli/conversations/<conversation_uuid>.db
+    Table: gen_metadata(idx INTEGER, data BLOB, size)
+
+    Each row is one LLM generation. The data BLOB is protobuf wire format. This
+    parser intentionally uses a small stdlib-only wire walker instead of adding
+    a protobuf runtime dependency.
+
+    Outer-message paths:
+      - 1.19: model id string, e.g. "gemini-3-flash-a" or
+        "claude-opus-4-6-thinking"
+      - 1.21: display name string, currently ignored
+      - 1.9.4.1 / 1.9.4.2: completion timestamp seconds / nanos
+      - 1.4: ModelUsageStats sub-message
+
+    ModelUsageStats fields at path 1.4:
+      - field 1: model enum, ignored
+      - field 2: input_tokens -> input (fresh/uncached; use directly)
+      - field 3: output_tokens, total output including thinking
+      - field 4: cache_write_tokens -> cacheWrite
+      - field 5: cache_read_tokens -> cacheRead
+      - field 6: api_provider enum, ignored
+      - field 9: thinking_output_tokens -> reasoning (additive in Tokdash totals)
+      - field 10: response_output_tokens -> output (visible output)
+
+    Field mapping to normalized entry:
+      source <- "antigravity_cli"
+      provider <- "anthropic" for model ids beginning with "claude", else
+                  "google"
+      input <- field 1.4.2, no cache subtraction
+      output <- field 1.4.10, falling back to field 1.4.3 - field 1.4.9 when
+                field 10 is absent. Field 1.4.3 includes thinking tokens, and
+                Tokdash totals add reasoning separately, so mapping field 3
+                directly would double-count Gemini thinking tokens.
+      cacheRead <- field 1.4.5
+      cacheWrite <- field 1.4.4
+      reasoning <- field 1.4.9
+      timestamp <- (1.9.4.1 * 1000) + (1.9.4.2 // 1_000_000)
+
+    Dedup key: entry_id = "antigravity_cli:<db_stem>:<idx>"
+
+    Known schema version: agy build verified 2026-07-02. The token mapping is
+    descriptor-pinned in docs/local/20260702_antigravity_usage/
+    antigravity_gen_metadata_schema.md. Legacy .pb files in the conversations
+    directory are intentionally skipped; only *.db is parsed.
+
+    WAL note: Antigravity DBs run in WAL mode. _file_signatures() folds -wal
+    and -shm metadata into each .db signature while preserving the .db path so
+    file_replace sync keys stay stable.
+    ========================================================================
+    """
+
+    source_name = "antigravity_cli"
+    sync_capability = SourceSyncCapability(
+        mode="file_replace",
+        reason="Each conversation is an independent SQLite DB; changed DBs are reparsed whole.",
+    )
+
+    def __init__(self, pricing_db: PricingDatabase):
+        super().__init__(pricing_db)
+        self.conversations_dir = clientpaths.antigravity_conversations_dir()
+
+    def _file_signatures(self) -> tuple:
+        def scan() -> tuple:
+            sigs: List[Tuple[str, int, int]] = []
+            for db_path_str in glob.glob(clientpaths.antigravity_conversations_glob()):
+                db_path = Path(db_path_str)
+                try:
+                    db_stat = db_path.stat()
+                except (FileNotFoundError, OSError):
+                    continue
+
+                max_mtime = int(db_stat.st_mtime_ns)
+                total_size = int(db_stat.st_size)
+                wal_path = Path(str(db_path) + "-wal")
+                shm_path = Path(str(db_path) + "-shm")
+                for sidecar in (wal_path, shm_path):
+                    try:
+                        sidecar_stat = sidecar.stat()
+                    except (FileNotFoundError, OSError):
+                        continue
+                    max_mtime = max(max_mtime, int(sidecar_stat.st_mtime_ns))
+                    if sidecar == wal_path:
+                        total_size += int(sidecar_stat.st_size)
+                sigs.append((str(db_path), max_mtime, total_size))
+            return tuple(sorted(sigs))
+
+        return _timed_sigs(f"antigravity_cli:{self.conversations_dir}", scan)
+
+    @staticmethod
+    def _connect_readonly(path: Path) -> sqlite3.Connection:
+        try:
+            return sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
+        except Exception:
+            return sqlite3.connect(str(path))
+
+    @classmethod
+    def _decode_row(cls, data: bytes) -> Optional[Dict[str, Any]]:
+        outer = _pb_parse_message(bytes(data))
+        usage_blob = _pb_get_path(outer, (1, 4))
+        if not isinstance(usage_blob, bytes):
+            return None
+        usage = _pb_parse_message(usage_blob)
+
+        sec = cls._i(_pb_get_path(outer, (1, 9, 4, 1)))
+        nanos = cls._i(_pb_get_path(outer, (1, 9, 4, 2)))
+        input_t = cls._i((usage.get(2) or [0])[-1])
+        output_total = cls._i((usage.get(3) or [0])[-1])
+        cache_w = cls._i((usage.get(4) or [0])[-1])
+        cache_r = cls._i((usage.get(5) or [0])[-1])
+        reasoning = cls._i((usage.get(9) or [0])[-1])
+        output_visible = usage.get(10)
+        output_t = cls._i(output_visible[-1]) if output_visible else max(0, output_total - reasoning)
+
+        return {
+            "model": _pb_text(_pb_get_path(outer, (1, 19))) or "unknown",
+            "input": input_t,
+            "output": output_t,
+            "cacheRead": cache_r,
+            "cacheWrite": cache_w,
+            "reasoning": reasoning,
+            "timestamp": int(sec * 1000 + nanos // 1_000_000),
+        }
+
+    def _build_entry(self, idx: int, db_stem: str, decoded: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        model = str(decoded.get("model") or "unknown")
+        input_t = self._i(decoded.get("input"))
+        output_t = self._i(decoded.get("output"))
+        cache_r = self._i(decoded.get("cacheRead"))
+        cache_w = self._i(decoded.get("cacheWrite"))
+        reasoning = self._i(decoded.get("reasoning"))
+        if input_t == 0 and output_t == 0 and cache_r == 0:
+            return None
+        provider = "anthropic" if model.lower().startswith("claude") else "google"
+        return {
+            "source": self.source_name,
+            "model": model,
+            "provider": provider,
+            "input": input_t,
+            "output": output_t,
+            "cacheRead": cache_r,
+            "cacheWrite": cache_w,
+            "reasoning": reasoning,
+            "cost": self.pricing_db.get_cost(model, input_t, output_t, cache_r, cache_w),
+            "timestamp": self._i(decoded.get("timestamp")),
+            "entry_id": f"antigravity_cli:{db_stem}:{idx}",
+        }
+
+    def _parse_all(self) -> List[Dict[str, Any]]:
+        out: List[Dict[str, Any]] = []
+        for path_str, _, _ in self._file_signatures():
+            db_path = Path(path_str)
+            rows = None
+            for use_readonly in (True, False):
+                try:
+                    conn = self._connect_readonly(db_path) if use_readonly else sqlite3.connect(str(db_path))
+                except Exception:
+                    if use_readonly:
+                        continue
+                    break
+                try:
+                    rows = conn.execute("SELECT idx, data FROM gen_metadata ORDER BY idx").fetchall()
+                    break
+                except Exception:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+                    if use_readonly:
+                        continue
+                    break
+                finally:
+                    if rows is not None:
+                        try:
+                            conn.close()
+                        except Exception:
+                            pass
+            if rows is None:
+                continue
+
+            for idx, data in rows:
+                try:
+                    decoded = self._decode_row(data)
+                    if decoded is None:
+                        continue
+                    entry = self._build_entry(self._i(idx), db_path.stem, decoded)
+                    if entry is not None:
+                        out.append(entry)
                 except Exception:
                     continue
         return out
@@ -1660,6 +1935,7 @@ class CodingToolsUsageTracker:
             "codex": CodexParser(self.pricing_db),
             "claude": ClaudeParser(self.pricing_db),
             "gemini_cli": GeminiCLIParser(self.pricing_db),
+            "antigravity_cli": AntigravityCLIParser(self.pricing_db),
             "amp": AmpParser(self.pricing_db),
             "kimi": KimiParser(self.pricing_db),
             "pi_agent": PiAgentParser(self.pricing_db),
@@ -1694,7 +1970,7 @@ def main():
     parser.add_argument("--since", type=str)
     parser.add_argument("--until", type=str)
     parser.add_argument("--json", action="store_true")
-    parser.add_argument("--sources", type=str, default="opencode,codex,claude,gemini_cli,amp,kimi,pi_agent,copilot_cli,hermes")
+    parser.add_argument("--sources", type=str, default="opencode,codex,claude,gemini_cli,antigravity_cli,amp,kimi,pi_agent,copilot_cli,hermes")
     args = parser.parse_args()
 
     since_date, until_date = _date_range(args)

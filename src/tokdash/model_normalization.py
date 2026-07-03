@@ -37,12 +37,14 @@ def normalize_model_name(name: str) -> str:
     n = re.sub(r"-(latest|stable)$", "", n)
     n = re.sub(r"-(preview|exp|experimental)(?:-[\w\d]+)?$", "", n)
     n = re.sub(r"-(\d{4}-\d{2}-\d{2}|\d{8})$", "", n)
+    n = re.sub(r"-(high|medium|low)$", "", n)
     
     # Strip -thinking suffix to combine thinking/non-thinking variants
     n = re.sub(r"-thinking$", "", n)
 
     # Common family-level aliases
     alias_map = {
+        "gemini-3-flash-a": "gemini-3-flash",
         "gemini-3-pro-high": "gemini-3-pro",
         "gemini-3-pro-low": "gemini-3-pro",
         "gemini-3-pro-preview": "gemini-3-pro",
@@ -88,7 +90,9 @@ NORMALIZATION_EXAMPLES = {
     "github-copilot/GPT_4O_MINI": "gpt-4o-mini",
     "openrouter/openai/gpt-4o-mini-2024-07-18": "gpt-4o-mini",
     # Alias / version-dot normalisation
+    "gemini-3-flash-a": "gemini-3-flash",
     "google/gemini-3-pro-high": "gemini-3-pro",
+    "google/gemini-3-pro-medium": "gemini-3-pro",
     "anthropic/claude-3-5-sonnet": "claude-3.5-sonnet",
     # Release-suffix stripping
     "models:claude-3.7-sonnet-latest": "claude-3.7-sonnet",

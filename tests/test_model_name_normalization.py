@@ -14,7 +14,11 @@ def test_snapshot_and_release_suffix_normalization():
 
 
 def test_alias_variants_normalization():
+    assert normalize_model_name("gemini-3-flash-a") == "gemini-3-flash"
     assert normalize_model_name("google/gemini-3-pro-high") == "gemini-3-pro"
+    assert normalize_model_name("google/gemini-3-pro-medium") == "gemini-3-pro"
+    assert normalize_model_name("google/gemini-3-pro-low") == "gemini-3-pro"
+    assert normalize_model_name("command-a") == "command-a"
     assert normalize_model_name("anthropic/claude-3-5-sonnet") == "claude-3.5-sonnet"
     assert normalize_model_name("kimi-coding/k2p5") == "kimi-k2.5"
     assert normalize_model_name("vol-engine/kimi-2.5") == "kimi-k2.5"

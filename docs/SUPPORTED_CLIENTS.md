@@ -20,6 +20,7 @@ Tokdash reads usage **locally** from each tool's own session/log files — nothi
 - **Codex**: `~/.codex/sessions/`
 - **Claude Code**: `~/.claude/projects/`
 - **Gemini CLI**: `~/.gemini/tmp/*/chats/session-*.json` and `session-*.jsonl`
+- **Antigravity CLI**: `~/.gemini/antigravity-cli/conversations/*.db` (token usage only; Session Explorer drill-down is not yet supported)
 - **OpenClaw**: `~/.openclaw/agents/*/sessions/`
 - **Kimi CLI**: `~/.kimi/sessions/*/*/wire.jsonl`
 - **Pi**: `~/.pi/agent/sessions/` (override via `PI_AGENT_DIR` env var, comma-separated list of dirs)

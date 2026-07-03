@@ -35,7 +35,8 @@
     "fable": "claude-fable-5",
     "sonnet-5": "claude-sonnet-5",
     "sonnet5": "claude-sonnet-5",
-    "claude-sonnet-5-20260630": "claude-sonnet-5"
+    "claude-sonnet-5-20260630": "claude-sonnet-5",
+    "gemini-3-flash-a": "antigravity-gemini-3-flash"
   },
   "models": {
     "_comment_moonshot": "=== Moonshot AI / Kimi Models ===",
@@ -1300,6 +1301,16 @@
       "unit": "per_million_tokens",
       "source": "openrouter.ai/google/gemini-3-flash-preview"
     },
+    "gemini-3-flash": {
+      "provider": "google",
+      "input": 0.5,
+      "output": 3,
+      "cache_read": 0.05,
+      "cache_write": 0.5,
+      "unit": "per_million_tokens",
+      "source": "Antigravity observed GA id; rates match antigravity-gemini-3-flash",
+      "note": "Plain Gemini 3 Flash id reported by Antigravity-style clients."
+    },
     "gemini-3-pro-image-preview": {
       "provider": "google",
       "input": 2,
@@ -1461,6 +1472,16 @@
       "cache_write": 0.375,
       "unit": "per_million_tokens",
       "source": "openrouter.ai/google/gemini-3-pro-preview"
+    },
+    "gemini-3-pro": {
+      "provider": "google",
+      "input": 2,
+      "output": 12,
+      "cache_read": 0.2,
+      "cache_write": 2,
+      "unit": "per_million_tokens",
+      "source": "Antigravity observed GA id; rates match antigravity-gemini-3-pro",
+      "note": "Plain Gemini 3 Pro id reported by Antigravity-style clients."
     },
     "_comment_xiaomi": "=== Xiaomi Models ===",
     "mimo-v2-flash": {

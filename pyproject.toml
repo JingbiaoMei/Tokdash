@@ -12,7 +12,7 @@ license = { file = "LICENSE" }
 authors = [
   { name = "Jingbiao Mei" },
 ]
-keywords = ["token", "cost", "dashboard", "llm", "ai", "codex", "claude", "gemini", "kimi"]
+keywords = ["token", "cost", "dashboard", "llm", "ai", "codex", "claude", "gemini", "antigravity", "kimi"]
 classifiers = [
   "Development Status :: 5 - Production/Stable",
   "License :: OSI Approved :: MIT License",

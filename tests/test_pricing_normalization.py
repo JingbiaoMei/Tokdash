@@ -49,3 +49,29 @@ def test_pricing_lookup_supports_kimi_k2p5_aliases():
     assert abs(base - provider_head) < 1e-12
     assert abs(base - alias_a) < 1e-12
     assert abs(base - alias_b) < 1e-12
+
+
+def test_pricing_lookup_strips_effort_suffixes_without_stripping_single_letters():
+    db = PricingDatabase()
+
+    pro = db.get_cost("gemini-3-pro", 1000, 2000, 0, 0)
+    pro_high = db.get_cost("gemini-3-pro-high", 1000, 2000, 0, 0)
+    pro_low = db.get_cost("gemini-3-pro-low", 1000, 2000, 0, 0)
+    command_a = db.get_cost("command-a", 1000, 2000, 0, 0)
+
+    assert pro > 0.0
+    assert abs(pro - pro_high) < 1e-12
+    assert abs(pro - pro_low) < 1e-12
+    assert command_a > 0.0
+
+
+def test_pricing_lookup_supports_real_antigravity_model_ids():
+    db = PricingDatabase()
+
+    for model in [
+        "gemini-3-flash-a",
+        "gemini-3-pro-high",
+        "gemini-3-pro-low",
+        "claude-opus-4-6-thinking",
+    ]:
+        assert db.get_cost(model, 1000, 2000, 300, 400) > 0.0

@@ -444,6 +444,7 @@ def test_coding_tool_parsers_declare_sync_capabilities():
     assert modes["opencode"] == "source_native_db"
     assert modes["codex"] == "file_replace"
     assert modes["claude"] == "file_replace"
+    assert modes["antigravity_cli"] == "file_replace"
     assert modes["copilot_cli"] == "source_replace"
     assert tracker.parsers["gemini_cli"].sync_capability.append_jsonl is True
     assert tracker.parsers["kimi"].sync_capability.append_jsonl is True

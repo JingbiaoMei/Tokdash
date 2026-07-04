@@ -45,10 +45,9 @@
 ## Table of Contents
 
 - [Features](#features)
-- [Live demo](#live-demo)
 - [Supported clients](docs/SUPPORTED_CLIENTS.md)
-- [Platform support](#platform-support)
 - [Quick start](#quick-start)
+  - [Platform support](#platform-support)
 - [Configuration](#configuration)
 - [Privacy \& security](#privacy--security)
 - [API (local)](#api-local)
@@ -63,13 +62,11 @@
 
 - **Exact token counts**: Input/Output/Cache token breakdowns
 - **Statusline integration** *[new]*: drop a live token-usage indicator into Claude Code's statusline (or any agent that can hit a local HTTP endpoint) — see [Statusline integration](#statusline-integration)
-- **Custom date ranges**: Flatpickr date picker + quick range buttons (Today, Last 7 Days, This Month, etc.)
+- **Custom date ranges**: Flatpickr date picker + quick range buttons
 - **Contribution calendar**: 2D heatmap + 3D isometric view with Tokens/Cost/Messages metrics
-- **Session explorer**: per-session drill-down for Codex, Claude Code, OpenCode, and Pi
+- **Session explorer**: per-session drill-down
 - **Quota tab** *[new]*: subscription window bars with reset countdowns for Codex, Claude Code, and Antigravity. Codex windows work out of the box from local logs; Codex reset credits, metered features, and all Claude/Antigravity quota need opt-in [live polling](#quota-tracking-optional)
-- **10 style themes**: Elevated, Classic, Vibrant, Midnight, Paper, Liquid, Terminal, Brutalist, Arcade, Studio
-- **Light & dark mode**: auto-detects system preference, manual toggle
-- **PWA support**: installable as a progressive web app
+- **Themes and app polish**: 10 style themes, light/dark mode, and PWA install support
 
 <p align="center">
   <b>Overview</b><br />
@@ -78,15 +75,21 @@
   </a>
 </p>
 <p align="center">
-  <b>Session detail</b><br />
+  <b>Sessions</b><br />
   <a href="https://tokdash.github.io/demo/">
-    <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-session-en.png" alt="Tokdash session detail - click for live demo" width="720" />
+    <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-session-en.png" alt="Tokdash sessions view - click for live demo" width="860" />
   </a>
 </p>
 <p align="center">
-  <b>Usage heatmap</b><br />
+  <b>Monthly usage heatmap</b><br />
   <a href="https://tokdash.github.io/demo/">
-    <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-heatmap-en.png" alt="Tokdash usage heatmap - click for live demo" width="860" />
+    <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-heatmap-en.png" alt="Tokdash monthly usage heatmap - click for live demo" width="860" />
+  </a>
+</p>
+<p align="center">
+  <b>Yearly usage heatmap</b><br />
+  <a href="https://tokdash.github.io/demo/">
+    <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-heatmap-year-en.png" alt="Tokdash yearly usage heatmap - click for live demo" width="860" />
   </a>
 </p>
 <p align="center">
@@ -96,38 +99,19 @@
   </a>
 </p>
 <p align="center">
-  <b>Codex quota close-up</b><br />
+  <b>Codex quota and reset credits</b><br />
   <a href="https://tokdash.github.io/demo/">
-    <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-quota-codex-en.png" alt="Tokdash Codex quota close-up - click for live demo" width="440" />
+    <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-quota-codex-en.png" alt="Tokdash Codex quota and reset credits - click for live demo" width="440" />
   </a>
 </p>
 
-## Live demo
+## Quick start
 
-A static demo of the current dashboard is hosted at
-**[tokdash.github.io/demo](https://tokdash.github.io/demo/)** — no install required.
-(The project home page is **[tokdash.github.io](https://tokdash.github.io/)**.)
-
-The demo runs the unmodified Tokdash frontend against an in-browser shim that
-returns deterministic, fully synthetic data. You can:
-
-- switch between Overview / Sessions / Stats / Pricing tabs,
-- pick any date range (or the Today / 7-day / 30-day shortcuts),
-- toggle light/dark and all 10 style themes,
-- drill into a synthetic Codex / Claude Code / OpenCode session,
-- browse the read-only pricing database.
-
-Source for the demo lives at
-[tokdash/tokdash.github.io](https://github.com/tokdash/tokdash.github.io).
-Nothing is uploaded; nothing is read from your machine.
-
-## Platform support
+### Platform support
 
 - **Linux (including WSL2):** supported
-- **macOS:** experimental — `tokdash serve` and `tokdash setup` (per-user launchd LaunchAgent) are implemented, and the full test suite now runs on macOS CI (including the Claude quota Keychain integration test). Real-Mac validation of the launchd service flow is still pending; treat native macOS as experimental until confirmed.
-- **Windows (native):** experimental — foreground `tokdash serve` and `tokdash setup` via Windows Task Scheduler are available in `v1.0.5+`, with Windows CI and smoke-test coverage. Broader real-world Task Scheduler validation is still ongoing. WSL2 remains the most fully verified Windows path. See [`docs/WINDOWS_SUPPORT_PLAN.md`](docs/WINDOWS_SUPPORT_PLAN.md) for the tiered rollout and current status.
-
-## Quick start
+- **macOS:** supported and verified, including `tokdash setup`, launchd, and Claude quota Keychain integration
+- **Windows (native):** experimental; WSL2 remains the recommended Windows path. See [`docs/WINDOWS_SUPPORT_PLAN.md`](docs/WINDOWS_SUPPORT_PLAN.md).
 
 ### Prerequisites
 
@@ -183,7 +167,21 @@ tokdash doctor
 `doctor` checks the runtime, background service, configured port, data paths, and update-check
 status. Use `tokdash doctor --json` for automation.
 
-### Existing installs (Migration from before V1.0)
+### Update or remove
+
+```bash
+tokdash update       # upgrade the managed runtime and restart the service when possible
+tokdash uninstall    # reverse exactly what setup created; keeps usage history by default
+```
+
+`update` only drives install methods Tokdash can safely manage. If your runtime was installed
+by a package manager Tokdash does not own, it prints the exact manual guidance instead of
+mutating that environment. For managed runtimes, `update` reports the Tokdash version before
+and after the upgrade; if the version is unchanged, it says Tokdash is already at that version
+instead of implying a new package was installed.
+
+<details>
+<summary>Existing installs: migration from before v1.0</summary>
 
 If you installed Tokdash before the onboarding flow, upgrade first:
 
@@ -217,18 +215,7 @@ This keeps your usage history under `~/.tokdash`, rewrites the user service to r
 upgrade that managed venv and restart the service. If you installed with pipx, you can
 instead keep the pipx runtime and upgrade with `tokdash update` or `pipx upgrade tokdash`.
 
-### Update or remove
-
-```bash
-tokdash update       # upgrade the managed runtime and restart the service when possible
-tokdash uninstall    # reverse exactly what setup created; keeps usage history by default
-```
-
-`update` only drives install methods Tokdash can safely manage. If your runtime was installed
-by a package manager Tokdash does not own, it prints the exact manual guidance instead of
-mutating that environment. For managed runtimes, `update` reports the Tokdash version before
-and after the upgrade; if the version is unchanged, it says Tokdash is already at that version
-instead of implying a new package was installed.
+</details>
 
 ### Remote access
 

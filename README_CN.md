@@ -44,10 +44,9 @@
 ## 目录
 
 - [功能特性](#功能特性)
-- [在线 Demo](#在线-demo)
 - [已支持客户端](docs/SUPPORTED_CLIENTS.md)
-- [平台支持](#平台支持)
 - [快速开始](#快速开始)
+  - [平台支持](#平台支持)
 - [配置](#配置)
 - [隐私与安全](#隐私与安全)
 - [API（本地）](#api本地)
@@ -62,12 +61,10 @@
 
 - **精确 Token 统计**：输入 / 输出 / 缓存 Token 明细
 - **状态栏集成** *[新]*：把实时 Token 使用量挂到 Claude Code（或任何能访问本地 HTTP 端点的 Agent）的状态栏中 — 见[状态栏集成](#状态栏集成statusline-integration)
-- **自定义日期范围**：Flatpickr 日期选择器 + 快捷按钮（今天、最近 7 天、本月等）
+- **自定义日期范围**：Flatpickr 日期选择器 + 快捷按钮
 - **贡献日历**：2D 热力图 + 3D 等距视图，支持 Tokens / Cost / Messages 切换
-- **会话浏览器**：Codex、Claude Code、OpenCode、Pi 的逐会话下钻
-- **10 款样式主题**：Elevated、Classic、Vibrant、Midnight、Paper、Liquid、Terminal、Brutalist、Arcade、Studio
-- **明暗模式**：自动跟随系统偏好，支持手动切换
-- **PWA 支持**：可作为渐进式 Web 应用安装
+- **会话浏览器**：逐会话下钻
+- **主题与应用体验**：10 款样式主题、明暗模式与 PWA 安装支持
 
 <p align="center">
   <b>总览</b><br />
@@ -76,15 +73,21 @@
   </a>
 </p>
 <p align="center">
-  <b>会话详情</b><br />
+  <b>会话列表</b><br />
   <a href="https://tokdash.github.io/demo/">
-    <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-session-cn.png" alt="Tokdash 会话详情 — 点击体验在线 Demo" width="720" />
+    <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-session-cn.png" alt="Tokdash 会话列表 — 点击体验在线 Demo" width="860" />
   </a>
 </p>
 <p align="center">
-  <b>使用热力图</b><br />
+  <b>月度使用热力图</b><br />
   <a href="https://tokdash.github.io/demo/">
-    <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-heatmap-cn.png" alt="Tokdash 使用热力图 — 点击体验在线 Demo" width="860" />
+    <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-heatmap-cn.png" alt="Tokdash 月度使用热力图 — 点击体验在线 Demo" width="860" />
+  </a>
+</p>
+<p align="center">
+  <b>年度使用热力图</b><br />
+  <a href="https://tokdash.github.io/demo/">
+    <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-heatmap-year-cn.png" alt="Tokdash 年度使用热力图 — 点击体验在线 Demo" width="860" />
   </a>
 </p>
 <p align="center">
@@ -94,40 +97,19 @@
   </a>
 </p>
 <p align="center">
-  <b>Codex 额度局部放大</b><br />
+  <b>Codex 额度与重置额度</b><br />
   <a href="https://tokdash.github.io/demo/">
-    <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-quota-codex-cn.png" alt="Tokdash Codex 额度局部放大 — 点击体验在线 Demo" width="440" />
+    <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-quota-codex-cn.png" alt="Tokdash Codex 额度与重置额度 — 点击体验在线 Demo" width="440" />
   </a>
 </p>
 
-## 在线 Demo
+## 快速开始
 
-仪表盘的静态在线版本：**[tokdash.github.io/demo](https://tokdash.github.io/demo/)**，
-无需安装即可体验。（项目官网为 **[tokdash.github.io](https://tokdash.github.io/)**。）
-
-Demo 使用未经修改的 Tokdash 前端，配合浏览器内的 Mock 层返回确定性的合成数据。
-你可以：
-
-- 切换 Overview / Sessions / Stats / Pricing 各页签，
-- 选择任意日期范围（或 Today / 最近 7 天 / 最近 30 天 等快捷按钮），
-- 在浅色 / 深色模式与全部 10 款主题之间切换，
-- 进入 Codex / Claude Code / OpenCode 的合成会话查看明细，
-- 浏览只读的定价数据库。
-
-Demo 源码：[tokdash/tokdash.github.io](https://github.com/tokdash/tokdash.github.io)。
-不会上传任何数据，也不会读取你本地的任何文件。
-
-## 平台支持
+### 平台支持
 
 - **Linux（含 WSL2）**：支持
-- **macOS**：实验性支持 —— `tokdash serve` 与 `tokdash setup`（用户级 launchd LaunchAgent）均已实现，完整测试套件现已在 macOS CI 上运行（含 Claude 额度钥匙串集成测试）。launchd 后台服务流程仍待真实 Mac 环境验证；在确认之前请按实验性支持看待。
-- **Windows（原生）**：实验性支持 —— `v1.0.5+` 已支持前台 `tokdash serve`，以及通过
-  Windows 任务计划程序（Task Scheduler）运行的 `tokdash setup` 后台服务，并已有 Windows CI
-  与基础 smoke test 覆盖。更广泛的真实 Task Scheduler 使用场景仍在验证中；WSL2 仍是 Windows
-  上验证最完整的路径。分阶段计划与当前状态见
-  [`docs/WINDOWS_SUPPORT_PLAN.md`](docs/WINDOWS_SUPPORT_PLAN.md)（英文）。
-
-## 快速开始
+- **macOS**：支持并已验证，包括 `tokdash setup`、launchd 与 Claude 额度钥匙串集成
+- **Windows（原生）**：实验性支持；Windows 上仍推荐 WSL2。见 [`docs/WINDOWS_SUPPORT_PLAN.md`](docs/WINDOWS_SUPPORT_PLAN.md)（英文）。
 
 ### 前置要求
 
@@ -181,7 +163,19 @@ tokdash doctor
 `doctor` 会检查运行时、后台服务、配置端口、数据路径以及更新检查状态。自动化场景可使用
 `tokdash doctor --json`。
 
-### 既有安装 (迁移到 V1.0)
+### 更新或移除
+
+```bash
+tokdash update       # 升级受管运行时，并在可能时重启服务
+tokdash uninstall    # 精确撤销 setup 创建的内容；默认保留使用历史
+```
+
+`update` 只会驱动 Tokdash 能安全管理的安装方式。如果当前运行时来自 Tokdash 不拥有的包管理器，
+它会打印明确的手动升级建议，而不是修改该环境。对于受管运行时，`update` 会显示升级前后的
+Tokdash 版本；如果版本没有变化，会明确说明 Tokdash 已经在该版本，而不是让人误以为安装了新包。
+
+<details>
+<summary>既有安装：从 v1.0 前迁移</summary>
 
 如果你是在 onboarding 流程加入前安装的 Tokdash，请先升级：
 
@@ -214,16 +208,7 @@ tokdash doctor
 受管 venv 并重启服务。如果你使用的是 pipx 安装，也可以继续使用 pipx 运行时，并通过
 `tokdash update` 或 `pipx upgrade tokdash` 升级。
 
-### 更新或移除
-
-```bash
-tokdash update       # 升级受管运行时，并在可能时重启服务
-tokdash uninstall    # 精确撤销 setup 创建的内容；默认保留使用历史
-```
-
-`update` 只会驱动 Tokdash 能安全管理的安装方式。如果当前运行时来自 Tokdash 不拥有的包管理器，
-它会打印明确的手动升级建议，而不是修改该环境。对于受管运行时，`update` 会显示升级前后的
-Tokdash 版本；如果版本没有变化，会明确说明 Tokdash 已经在该版本，而不是让人误以为安装了新包。
+</details>
 
 ### 远程访问
 

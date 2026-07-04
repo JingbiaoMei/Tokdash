@@ -62,7 +62,6 @@
 
 - **Exact token counts**: Input/Output/Cache token breakdowns
 - **Statusline integration** *[new]*: drop a live token-usage indicator into Claude Code's statusline (or any agent that can hit a local HTTP endpoint) — see [Statusline integration](#statusline-integration)
-- **Custom date ranges**: Flatpickr date picker + quick range buttons
 - **Contribution calendar**: 2D heatmap + 3D isometric view with Tokens/Cost/Messages metrics
 - **Session explorer**: per-session drill-down
 - **Quota tab** *[new]*: subscription window bars with reset countdowns for Codex, Claude Code, and Antigravity. Codex windows work out of the box from local logs; Codex reset credits, metered features, and all Claude/Antigravity quota need opt-in [live polling](#quota-tracking-optional)
@@ -110,8 +109,8 @@
 ### Platform support
 
 - **Linux (including WSL2):** supported
-- **macOS:** supported and verified, including `tokdash setup`, launchd, and Claude quota Keychain integration
-- **Windows (native):** experimental; WSL2 remains the recommended Windows path. See [`docs/WINDOWS_SUPPORT_PLAN.md`](docs/WINDOWS_SUPPORT_PLAN.md).
+- **macOS:** supported
+- **Windows (native):** experimental
 
 ### Prerequisites
 

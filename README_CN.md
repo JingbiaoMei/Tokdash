@@ -61,7 +61,6 @@
 
 - **精确 Token 统计**：输入 / 输出 / 缓存 Token 明细
 - **状态栏集成** *[新]*：把实时 Token 使用量挂到 Claude Code（或任何能访问本地 HTTP 端点的 Agent）的状态栏中 — 见[状态栏集成](#状态栏集成statusline-integration)
-- **自定义日期范围**：Flatpickr 日期选择器 + 快捷按钮
 - **贡献日历**：2D 热力图 + 3D 等距视图，支持 Tokens / Cost / Messages 切换
 - **会话浏览器**：逐会话下钻
 - **主题与应用体验**：10 款样式主题、明暗模式与 PWA 安装支持
@@ -108,8 +107,8 @@
 ### 平台支持
 
 - **Linux（含 WSL2）**：支持
-- **macOS**：支持并已验证，包括 `tokdash setup`、launchd 与 Claude 额度钥匙串集成
-- **Windows（原生）**：实验性支持；Windows 上仍推荐 WSL2。见 [`docs/WINDOWS_SUPPORT_PLAN.md`](docs/WINDOWS_SUPPORT_PLAN.md)（英文）。
+- **macOS**：支持
+- **Windows（原生）**：实验性支持
 
 ### 前置要求
 

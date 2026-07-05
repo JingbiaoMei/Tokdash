@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 1.1.1 - 2026-07-05
+
+### Fixed
+- **Model name normalization for date-snapshot suffixes.** Providers append release-date snapshots to model IDs (e.g. `volcengine-coding-plan/glm-5-2-260617` = 2026-06-17). The normalizer and pricing resolver previously stripped only `YYYY-MM-DD` / `YYYYMMDD`, so `YYMMDD` snapshots split into separate dashboard rows and priced as $0. The backend normalizer, pricing resolver, and the client-side JS normalizer now strip `YYMMDD` (with month/day bounds so arbitrary numeric identifiers are preserved), and the client-side normalizer was synced with the backend to stop frontend/backend label drift. 4-digit `YYMM` is stripped only in the DB-aware pricing resolver — where exact-match-first protects canonical version stamps like `mistral-large-2512` — never in the grouping normalizer, so distinct priced models stay distinct in the combined view. Adds a node-based frontend/backend normalizer-sync guard.
+- **Codex rolling-window quota consumption.** Codex's 7-day quota buckets are rolling windows where older usage can age out while the reset timestamp stays stable, so a later climb below the prior high is genuine new consumption but was treated as noise, undercounting daily usage. Quota history now uses adjacent-delta semantics for Codex `7d` / `*_7d` buckets and any bucket with a missing reset timestamp, with a recovery band that suppresses a transient low reading recovering to the prior high as fake usage. Fixed-window buckets (Claude weekly, distinct reset epochs) keep the existing running-high behavior.
+
 ## 1.1.0 - 2026-07-03
 
 ### Added

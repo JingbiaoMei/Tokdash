@@ -383,7 +383,7 @@ Tokdash 是一个本地 HTTP 服务。常用接口：
 - `GET /api/usage?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD`
 - `GET /api/tools?period=...`（仅编程工具）
 - `GET /api/openclaw?period=...`（仅 OpenClaw）
-- `GET /api/sessions?tool=codex|claude|opencode|pi_agent&period=...`（追加 `&include_review_sessions=true` 可包含默认隐藏的 Codex 审核/权限会话）
+- `GET /api/sessions?tool=codex|claude|opencode|pi_agent|mimo&period=...`（追加 `&include_review_sessions=true` 可包含默认隐藏的 Codex 审核/权限会话）
 - `GET /api/quota` 与 `GET /api/quota/history`（订阅额度快照；网络刷新受写入保护且需显式授权）
 - `GET /api/stats`（贡献日历与统计数据）
 

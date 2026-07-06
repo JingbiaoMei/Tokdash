@@ -743,6 +743,7 @@ def _append_opencode_turn(
     sessions: Dict[str, Dict[str, Any]],
     turn_index_by_session: Dict[str, int],
     *,
+    tool: str = "opencode",
     session_id: Any,
     directory: Any,
     worktree: Any,
@@ -758,6 +759,7 @@ def _append_opencode_turn(
     root: Any = "",
     title: Any = "",
     slug: Any = "",
+    recorded_cost: Any = None,
 ) -> None:
     fresh_input = int(fresh_input or 0)
     cache_write = int(cache_write or 0)
@@ -772,6 +774,11 @@ def _append_opencode_turn(
     model = str(model or "unknown")
     provider = str(provider or "")
     full_model_name = f"{provider}/{model}" if provider else model
+    try:
+        data_cost = float(recorded_cost or 0.0)
+    except (TypeError, ValueError):
+        data_cost = 0.0
+    cost = data_cost if data_cost > 0 else _PRICING_DB.get_cost(full_model_name, input_tokens, output_tokens, cache_read, 0)
     project_path = _opencode_project_path(directory, worktree, cwd, root)
     sid = str(session_id)
     project = _project_from_repo_or_path(None, project_path or None)
@@ -780,7 +787,7 @@ def _append_opencode_turn(
     raw = sessions.setdefault(
         sid,
         {
-            "tool": "opencode",
+            "tool": tool,
             "session_id": sid,
             "display_name": display_name,
             "project": project,
@@ -803,7 +810,7 @@ def _append_opencode_turn(
             tokens_cache=cache_read,
             tokens_out=output_tokens,
             tokens_reasoning=reasoning_tokens,
-            cost=_PRICING_DB.get_cost(full_model_name, input_tokens, output_tokens, cache_read, 0),
+            cost=cost,
         )
     )
 
@@ -1136,110 +1143,212 @@ def _pi_sessions() -> Dict[str, Dict[str, Any]]:
     return _load_pi_sessions(_pi_session_signatures(), _pricing_signature())
 
 
-@lru_cache(maxsize=4)
-def _load_mimo_sessions(signature: tuple, _pricing_sig: tuple = ()) -> Dict[str, Dict[str, Any]]:
+def _mimo_db_signature() -> tuple[tuple[str, int, int], ...]:
+    db_path = clientpaths.mimocode_db_path()
+    if not db_path.exists():
+        return ()
+    signatures: list[tuple[str, int, int]] = []
+    for candidate in (db_path, Path(str(db_path) + "-wal"), Path(str(db_path) + "-shm")):
+        try:
+            signatures.append(_file_signature(candidate))
+        except FileNotFoundError:
+            continue
+    return tuple(signatures)
+
+
+@lru_cache(maxsize=8)
+def _load_mimo_sessions(
+    signature: tuple[tuple[str, int, int], ...],
+    _pricing_sig: tuple = (),
+    since_ms: Optional[int] = None,
+    until_ms: Optional[int] = None,
+) -> Dict[str, Dict[str, Any]]:
     if not signature:
         return {}
     db_path = Path(signature[0][0])
     if not db_path.exists():
         return {}
 
-    sessions: Dict[str, Dict[str, Any]] = {}
-    turn_index_by_session: Dict[str, int] = {}
-
     try:
-        conn = sqlite3.connect(str(db_path))
+        return _load_mimo_sessions_scalar(db_path, since_ms=since_ms, until_ms=until_ms)
+    except sqlite3.Error:
+        return _load_mimo_sessions_raw_json(db_path, since_ms=since_ms, until_ms=until_ms)
+
+
+def _load_mimo_sessions_scalar(
+    db_path: Path,
+    *,
+    since_ms: Optional[int] = None,
+    until_ms: Optional[int] = None,
+) -> Dict[str, Dict[str, Any]]:
+    window_clause, args = _opencode_window_clause(since_ms, until_ms)
+    role_clause = "json_valid(m.data) AND json_extract(m.data, '$.role') = 'assistant'"
+    if window_clause:
+        where_clause = f"{window_clause} AND {role_clause}"
+    else:
+        where_clause = f" WHERE {role_clause}"
+
+    sessions: Dict[str, Dict[str, Any]] = {}
+    conn = sqlite3.connect(str(db_path))
+    try:
+        session_cols = _sqlite_columns(conn, "session")
+        title_expr = "s.title" if "title" in session_cols else "''"
+        slug_expr = "s.slug" if "slug" in session_cols else "''"
         cur = conn.cursor()
         cur.execute(
-            """
-            SELECT m.session_id, m.data, m.time_created,
-                   s.title, s.directory
+            f"""
+            SELECT
+              s.id,
+              s.directory,
+              {title_expr},
+              {slug_expr},
+              COALESCE(p.worktree, ''),
+              m.time_created,
+              json_extract(m.data, '$.tokens.input'),
+              json_extract(m.data, '$.tokens.cache.write'),
+              json_extract(m.data, '$.tokens.cache.read'),
+              json_extract(m.data, '$.tokens.output'),
+              json_extract(m.data, '$.tokens.reasoning'),
+              json_extract(m.data, '$.modelID'),
+              json_extract(m.data, '$.providerID'),
+              json_extract(m.data, '$.path.cwd'),
+              json_extract(m.data, '$.path.root'),
+              json_extract(m.data, '$.cost')
             FROM message m
-            LEFT JOIN session s ON s.id = m.session_id
-            ORDER BY m.session_id, m.time_created
-            """
+            JOIN session s ON m.session_id = s.id
+            LEFT JOIN project p ON s.project_id = p.id
+            {where_clause}
+            ORDER BY m.time_created ASC
+            """,
+            args,
         )
-        rows = cur.fetchall()
+        turn_index_by_session: Dict[str, int] = {}
+        for (
+            session_id,
+            directory,
+            title,
+            slug,
+            worktree,
+            created_ms,
+            fresh_input,
+            cache_write,
+            cache_read,
+            output_tokens,
+            reasoning_tokens,
+            model,
+            provider,
+            cwd,
+            root,
+            recorded_cost,
+        ) in cur.fetchall():
+            _append_opencode_turn(
+                sessions,
+                turn_index_by_session,
+                tool="mimo",
+                session_id=session_id,
+                directory=directory,
+                worktree=worktree,
+                created_ms=created_ms,
+                model=model,
+                provider=provider,
+                fresh_input=fresh_input,
+                cache_write=cache_write,
+                cache_read=cache_read,
+                output_tokens=output_tokens,
+                reasoning_tokens=reasoning_tokens,
+                cwd=cwd,
+                root=root,
+                title=title,
+                slug=slug,
+                recorded_cost=recorded_cost,
+            )
+    finally:
         conn.close()
-    except Exception:
-        return {}
 
-    for session_id, data_json, ts_ms, title, directory in rows:
-        try:
-            data = json.loads(data_json)
+    return sessions
+
+
+def _load_mimo_sessions_raw_json(
+    db_path: Path,
+    *,
+    since_ms: Optional[int] = None,
+    until_ms: Optional[int] = None,
+) -> Dict[str, Dict[str, Any]]:
+    window_clause, args = _opencode_window_clause(since_ms, until_ms)
+
+    sessions: Dict[str, Dict[str, Any]] = {}
+    conn = sqlite3.connect(str(db_path))
+    try:
+        session_cols = _sqlite_columns(conn, "session")
+        title_expr = "s.title" if "title" in session_cols else "''"
+        slug_expr = "s.slug" if "slug" in session_cols else "''"
+        cur = conn.cursor()
+        cur.execute(
+            f"""
+            SELECT
+              s.id,
+              s.directory,
+              {title_expr},
+              {slug_expr},
+              COALESCE(p.worktree, ''),
+              m.time_created,
+              m.data
+            FROM message m
+            JOIN session s ON m.session_id = s.id
+            LEFT JOIN project p ON s.project_id = p.id
+            {window_clause}
+            ORDER BY m.time_created ASC
+            """,
+            args,
+        )
+        turn_index_by_session: Dict[str, int] = {}
+        for session_id, directory, title, slug, worktree, created_ms, data_json in cur.fetchall():
+            try:
+                data = json.loads(data_json)
+            except Exception:
+                continue
+
             if data.get("role") != "assistant":
                 continue
+
             tokens = data.get("tokens")
             if not isinstance(tokens, dict):
                 continue
 
             cache = tokens.get("cache") if isinstance(tokens.get("cache"), dict) else {}
-            input_t = int(tokens.get("input") or 0)
-            output_t = int(tokens.get("output") or 0)
-            cache_r = int(cache.get("read") or 0)
-            cache_w = int(cache.get("write") or 0)
-            reasoning = int(tokens.get("reasoning") or 0)
-            total_tokens = input_t + output_t + cache_r + cache_w + reasoning
-            if total_tokens == 0:
-                continue
-
-            model = str(data.get("modelID") or "unknown")
-            provider = str(data.get("providerID") or "")
-            full_model = f"{provider}/{model}" if provider else model
-
-            data_cost = float(data.get("cost") or 0.0)
-            cost = data_cost if data_cost > 0 else _PRICING_DB.get_cost(full_model, input_t, output_t, cache_r, cache_w)
-
-            sid = str(session_id)
-            project = _project_from_repo_or_path(None, directory or None)
-            display_name = _clean_display_name(title) or _fallback_display_name(sid, project)
-
-            raw = sessions.setdefault(
-                sid,
-                {
-                    "tool": "mimo",
-                    "session_id": sid,
-                    "display_name": display_name,
-                    "project": project,
-                    "turns": [],
-                },
+            path_info = data.get("path") if isinstance(data.get("path"), dict) else {}
+            _append_opencode_turn(
+                sessions,
+                turn_index_by_session,
+                tool="mimo",
+                session_id=session_id,
+                directory=directory,
+                worktree=worktree,
+                created_ms=created_ms,
+                model=data.get("modelID"),
+                provider=data.get("providerID"),
+                fresh_input=tokens.get("input", 0),
+                cache_write=cache.get("write", 0),
+                cache_read=cache.get("read", 0),
+                output_tokens=tokens.get("output", 0),
+                reasoning_tokens=tokens.get("reasoning", 0),
+                cwd=path_info.get("cwd"),
+                root=path_info.get("root"),
+                title=title,
+                slug=slug,
+                recorded_cost=data.get("cost"),
             )
-            if not raw.get("display_name"):
-                raw["display_name"] = display_name
-
-            turn_index = turn_index_by_session.get(sid, 0) + 1
-            turn_index_by_session[sid] = turn_index
-            raw["turns"].append(
-                _build_turn(
-                    turn_index=turn_index,
-                    timestamp_ms=int(ts_ms or 0),
-                    model=model,
-                    tokens_in=input_t + cache_w,
-                    tokens_cache=cache_r,
-                    tokens_out=output_t,
-                    tokens_reasoning=reasoning,
-                    cost=cost,
-                )
-            )
-        except Exception:
-            continue
+    finally:
+        conn.close()
 
     return sessions
 
 
-def _mimo_session_signatures() -> tuple:
-    db_path = clientpaths.mimocode_db_path()
-    if not db_path.exists():
-        return ()
-    try:
-        s = db_path.stat()
-        return ((str(db_path), s.st_mtime_ns, s.st_size),)
-    except (FileNotFoundError, OSError):
-        return ()
-
-
-def _mimo_sessions() -> Dict[str, Dict[str, Any]]:
-    return _load_mimo_sessions(_mimo_session_signatures(), _pricing_signature())
+def _mimo_sessions(since_ms: Optional[int] = None, until_ms: Optional[int] = None) -> Dict[str, Dict[str, Any]]:
+    signature = _mimo_db_signature()
+    if not signature:
+        return {}
+    return _load_mimo_sessions(signature, _pricing_signature(), since_ms, until_ms)
 
 
 def _raw_sessions_for_tool(
@@ -1262,7 +1371,7 @@ def _raw_sessions_for_tool(
     if key == "pi_agent":
         return _pi_sessions()
     if key == "mimo":
-        return _mimo_sessions()
+        return _mimo_sessions(since_ms=since_ms, until_ms=until_ms)
     raise ValueError(f"Unsupported session tool: {tool}")
 
 
@@ -1377,8 +1486,8 @@ def get_sessions_data(
         since_ms, until_ms = _period_range(period)
 
     sessions = []
-    window_since_ms = since_ms if key == "opencode" else None
-    window_until_ms = until_ms if key == "opencode" else None
+    window_since_ms = since_ms if key in {"opencode", "mimo"} else None
+    window_until_ms = until_ms if key in {"opencode", "mimo"} else None
     include_codex_review = _include_codex_review_sessions(include_review_sessions)
     for raw in _raw_sessions_for_tool(key, since_ms=window_since_ms, until_ms=window_until_ms).values():
         if key == "codex" and raw.get("is_review_session") and not include_codex_review:

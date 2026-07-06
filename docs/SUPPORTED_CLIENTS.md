@@ -17,6 +17,7 @@ Tokdash reads usage **locally** from each tool's own session/log files — nothi
 ## Where each client logs
 
 - **OpenCode**: `~/.local/share/opencode/`
+- **Mimo / Mimocode**: `~/.local/share/mimocode/mimocode.db`
 - **Codex**: `~/.codex/sessions/`
 - **Claude Code**: `~/.claude/projects/`
 - **Gemini CLI**: `~/.gemini/tmp/*/chats/session-*.json` and `session-*.jsonl`

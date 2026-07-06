@@ -395,7 +395,7 @@ Tokdash is a local HTTP server. Common endpoints:
 - `GET /api/usage?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD`
 - `GET /api/tools?period=...` (coding tools only)
 - `GET /api/openclaw?period=...` (OpenClaw only)
-- `GET /api/sessions?tool=codex|claude|opencode|pi_agent&period=...` (append `&include_review_sessions=true` to include Codex review/permission sessions, hidden by default)
+- `GET /api/sessions?tool=codex|claude|opencode|pi_agent|mimo&period=...` (append `&include_review_sessions=true` to include Codex review/permission sessions, hidden by default)
 - `GET /api/quota` and `GET /api/quota/history` (subscription quota snapshots; network refresh is write-gated and opt-in)
 - `GET /api/stats` (contribution calendar & statistics)
 

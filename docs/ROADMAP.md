@@ -24,6 +24,7 @@ non-disable-able cleanup or multi-machine history sync becomes a goal.
   - `src/tokdash/compute.py` (aggregation/merging logic)
 - Local parsers in `src/tokdash/sources/coding_tools.py`:
   - ✅ OpenCode
+  - ✅ Mimo / Mimocode
   - ✅ Codex
   - ✅ Claude Code
   - ✅ Gemini CLI

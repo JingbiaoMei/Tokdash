@@ -1969,9 +1969,13 @@ class MimoParser(BaseParser):
 
     source_name = "mimo"
     sync_capability = SourceSyncCapability(
-        mode="source_replace",
-        reason="Mimocode stores messages in a SQLite DB; full source replacement on DB file change.",
+        mode="source_native_db",
+        session_store=False,
+        reason="Mimo is an OpenCode-shaped SQLite DB and supports SQL date windows.",
     )
+
+    _query_cache: ClassVar[Dict[tuple, List[Dict[str, Any]]]] = {}
+    _query_cache_sig: ClassVar[tuple] = ()
 
     def __init__(self, pricing_db: PricingDatabase):
         super().__init__(pricing_db)
@@ -1989,7 +1993,10 @@ class MimoParser(BaseParser):
         provider = str(data.get("providerID") or "")
 
         # Prefer direct cost from the data when available.
-        data_cost = float(data.get("cost") or 0.0)
+        try:
+            data_cost = float(data.get("cost") or 0.0)
+        except (TypeError, ValueError):
+            data_cost = 0.0
         if data_cost > 0:
             cost = data_cost
         else:
@@ -2026,10 +2033,12 @@ class MimoParser(BaseParser):
             return out
         try:
             conn = sqlite3.connect(str(self.db_path))
-            cur = conn.cursor()
-            cur.execute("SELECT id, data, time_created FROM message ORDER BY time_created")
-            rows = cur.fetchall()
-            conn.close()
+            try:
+                cur = conn.cursor()
+                cur.execute("SELECT id, data, time_created FROM message ORDER BY time_created")
+                rows = cur.fetchall()
+            finally:
+                conn.close()
             for msg_id, data_json, ts_ms in rows:
                 try:
                     data = json.loads(data_json)
@@ -2046,6 +2055,59 @@ class MimoParser(BaseParser):
         except Exception:
             pass
         return out
+
+    def collect(self, since_date: Optional[datetime] = None, until_date: Optional[datetime] = None) -> List[Dict[str, Any]]:
+        sig = (self._file_signatures(), self._pricing_signature())
+        if sig != type(self)._query_cache_sig:
+            type(self)._query_cache.clear()
+            type(self)._query_cache_sig = sig
+
+        s_ms = int(self._to_utc(since_date).timestamp() * 1000) if since_date else 0
+        u_ms = int(self._to_utc(until_date).timestamp() * 1000) if until_date else 9999999999999
+        cache_key = (s_ms, u_ms)
+
+        cached = type(self)._query_cache.get(cache_key)
+        if cached is not None:
+            return list(cached)
+
+        out: List[Dict[str, Any]] = []
+        if self.db_path.exists():
+            try:
+                conn = sqlite3.connect(str(self.db_path))
+                try:
+                    cur = conn.cursor()
+                    cur.execute(
+                        """
+                        SELECT id, data, time_created
+                        FROM message
+                        WHERE time_created >= ? AND time_created < ?
+                        ORDER BY time_created
+                        """,
+                        (s_ms, u_ms),
+                    )
+                    rows = cur.fetchall()
+                finally:
+                    conn.close()
+                for msg_id, data_json, ts_ms in rows:
+                    try:
+                        data = json.loads(data_json)
+                        if data.get("role") != "assistant":
+                            continue
+                        tokens = data.get("tokens")
+                        if not isinstance(tokens, dict):
+                            continue
+                        entry = self._build_entry(data, self._i(ts_ms))
+                        entry["entry_id"] = f"mimo:{msg_id}"
+                        out.append(entry)
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+
+        if len(type(self)._query_cache) >= _OPENCODE_QUERY_CACHE_MAX:
+            type(self)._query_cache.clear()
+        type(self)._query_cache[cache_key] = out
+        return list(out)
 
 
 class CodingToolsUsageTracker:

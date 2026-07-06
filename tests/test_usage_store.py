@@ -899,6 +899,39 @@ def _create_opencode_session_db(db_path: Path) -> tuple[tuple[str, int, int], ..
     return ((str(db_path), stat.st_mtime_ns, stat.st_size),)
 
 
+def _add_mimo_external_import(db_path: Path, message_ids: list[str]) -> tuple[tuple[str, int, int], ...]:
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute(
+            """
+            CREATE TABLE external_import(
+                source TEXT NOT NULL,
+                source_key TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                source_path TEXT NOT NULL,
+                source_mtime INTEGER NOT NULL,
+                time_imported INTEGER NOT NULL,
+                message_ids TEXT,
+                PRIMARY KEY(source, source_key)
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO external_import(
+                source, source_key, session_id, source_path, source_mtime, time_imported, message_ids
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("cc", "claude-session", "s1", "/home/howard/.claude/projects/session.jsonl", 1, 2, json.dumps(message_ids)),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    stat = db_path.stat()
+    return ((str(db_path), stat.st_mtime_ns, stat.st_size),)
+
+
 def test_opencode_session_loaders_use_sql_window_and_match_raw_json_fallback(tmp_path):
     db_path = tmp_path / "opencode.db"
     signature = _create_opencode_session_db(db_path)
@@ -1076,6 +1109,21 @@ def test_mimo_session_loader_uses_sql_window_and_project_worktree(tmp_path):
     assert result["s2"]["display_name"] == "other-slug"
 
 
+def test_mimo_session_loaders_exclude_external_import_messages(tmp_path):
+    db_path = tmp_path / "mimocode.db"
+    _create_opencode_session_db(db_path)
+    signature = _add_mimo_external_import(db_path, ["at_since", "inside"])
+
+    sessions_module._load_mimo_sessions.cache_clear()
+    result = sessions_module._load_mimo_sessions(signature, (), 1000, 2000)
+    raw = sessions_module._load_mimo_sessions_raw_json(db_path, since_ms=1000, until_ms=2000)
+
+    assert result == raw
+    assert set(result) == {"s2"}
+    assert [turn["timestamp_ms"] for turn in result["s2"]["turns"]] == [1500]
+    assert len(result["s2"]["turns"]) == 1
+
+
 def test_mimo_parser_collect_uses_sql_window(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
@@ -1095,3 +1143,26 @@ def test_mimo_parser_collect_uses_sql_window(monkeypatch, tmp_path):
     assert [entry["timestamp"] for entry in window_entries] == [1000, 1500, 1500]
     assert len(window_entries) == 3
     assert len(all_entries) == 5
+
+
+def test_mimo_parser_collect_excludes_external_import_messages(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    db_dir = tmp_path / ".local" / "share" / "mimocode"
+    db_dir.mkdir(parents=True)
+    db_path = db_dir / "mimocode.db"
+    _create_opencode_session_db(db_path)
+    _add_mimo_external_import(db_path, ["at_since", "inside"])
+
+    tracker = CodingToolsUsageTracker()
+    parser = tracker.parsers["mimo"]
+
+    window_entries = parser.collect(
+        datetime.fromtimestamp(1, timezone.utc),
+        datetime.fromtimestamp(2, timezone.utc),
+    )
+    all_entries = parser.collect(None, None)
+
+    assert [entry["entry_id"] for entry in window_entries] == ["mimo:other_inside"]
+    assert len(window_entries) == 1
+    assert len(all_entries) == 3

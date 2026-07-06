@@ -89,6 +89,37 @@ def _glob_sigs(pattern: str) -> tuple:
     return tuple(sorted(items))
 
 
+def _sqlite_table_exists(conn: sqlite3.Connection, table: str) -> bool:
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,))
+        return cur.fetchone() is not None
+    except sqlite3.Error:
+        return False
+
+
+def _mimo_imported_message_ids(conn: sqlite3.Connection) -> set[str]:
+    imported: set[str] = set()
+    for table in ("external_import", "claude_import"):
+        if not _sqlite_table_exists(conn, table):
+            continue
+        try:
+            cur = conn.cursor()
+            cur.execute(f"SELECT message_ids FROM {table} WHERE message_ids IS NOT NULL")
+            rows = cur.fetchall()
+        except sqlite3.Error:
+            continue
+        for (message_ids_json,) in rows:
+            try:
+                message_ids = json.loads(message_ids_json)
+            except (TypeError, ValueError):
+                continue
+            if not isinstance(message_ids, list):
+                continue
+            imported.update(str(message_id) for message_id in message_ids if message_id is not None)
+    return imported
+
+
 def _pb_read_varint(buf: bytes, pos: int) -> tuple[int, int]:
     value = 0
     shift = 0
@@ -2028,33 +2059,7 @@ class MimoParser(BaseParser):
         return tuple(out)
 
     def _parse_all(self) -> List[Dict[str, Any]]:
-        out: List[Dict[str, Any]] = []
-        if not self.db_path.exists():
-            return out
-        try:
-            conn = sqlite3.connect(str(self.db_path))
-            try:
-                cur = conn.cursor()
-                cur.execute("SELECT id, data, time_created FROM message ORDER BY time_created")
-                rows = cur.fetchall()
-            finally:
-                conn.close()
-            for msg_id, data_json, ts_ms in rows:
-                try:
-                    data = json.loads(data_json)
-                    if data.get("role") != "assistant":
-                        continue
-                    tokens = data.get("tokens")
-                    if not isinstance(tokens, dict):
-                        continue
-                    entry = self._build_entry(data, self._i(ts_ms))
-                    entry["entry_id"] = f"mimo:{msg_id}"
-                    out.append(entry)
-                except Exception:
-                    continue
-        except Exception:
-            pass
-        return out
+        return []
 
     def collect(self, since_date: Optional[datetime] = None, until_date: Optional[datetime] = None) -> List[Dict[str, Any]]:
         sig = (self._file_signatures(), self._pricing_signature())
@@ -2076,6 +2081,7 @@ class MimoParser(BaseParser):
                 conn = sqlite3.connect(str(self.db_path))
                 try:
                     cur = conn.cursor()
+                    imported_ids = _mimo_imported_message_ids(conn)
                     cur.execute(
                         """
                         SELECT id, data, time_created
@@ -2090,6 +2096,8 @@ class MimoParser(BaseParser):
                     conn.close()
                 for msg_id, data_json, ts_ms in rows:
                     try:
+                        if str(msg_id) in imported_ids:
+                            continue
                         data = json.loads(data_json)
                         if data.get("role") != "assistant":
                             continue

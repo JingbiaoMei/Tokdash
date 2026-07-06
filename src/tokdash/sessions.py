@@ -739,6 +739,32 @@ def _sqlite_columns(conn: sqlite3.Connection, table: str) -> set[str]:
         return set()
 
 
+def _sqlite_table_exists(conn: sqlite3.Connection, table: str) -> bool:
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,))
+        return cur.fetchone() is not None
+    except sqlite3.Error:
+        return False
+
+
+def _mimo_import_exclusion_clause(conn: sqlite3.Connection) -> str:
+    clauses: list[str] = []
+    for table in ("external_import", "claude_import"):
+        if not _sqlite_table_exists(conn, table):
+            continue
+        clauses.append(
+            f"""
+            m.id NOT IN (
+                SELECT value
+                FROM {table}, json_each({table}.message_ids)
+                WHERE {table}.message_ids IS NOT NULL
+            )
+            """
+        )
+    return " AND ".join(clauses)
+
+
 def _append_opencode_turn(
     sessions: Dict[str, Dict[str, Any]],
     turn_index_by_session: Dict[str, int],
@@ -1182,15 +1208,19 @@ def _load_mimo_sessions_scalar(
     until_ms: Optional[int] = None,
 ) -> Dict[str, Dict[str, Any]]:
     window_clause, args = _opencode_window_clause(since_ms, until_ms)
-    role_clause = "json_valid(m.data) AND json_extract(m.data, '$.role') = 'assistant'"
-    if window_clause:
-        where_clause = f"{window_clause} AND {role_clause}"
-    else:
-        where_clause = f" WHERE {role_clause}"
 
     sessions: Dict[str, Dict[str, Any]] = {}
     conn = sqlite3.connect(str(db_path))
     try:
+        role_clause = "json_valid(m.data) AND json_extract(m.data, '$.role') = 'assistant'"
+        import_clause = _mimo_import_exclusion_clause(conn)
+        if window_clause:
+            where_clause = f"{window_clause} AND {role_clause}"
+        else:
+            where_clause = f" WHERE {role_clause}"
+        if import_clause:
+            where_clause = f"{where_clause} AND {import_clause}"
+
         session_cols = _sqlite_columns(conn, "session")
         title_expr = "s.title" if "title" in session_cols else "''"
         slug_expr = "s.slug" if "slug" in session_cols else "''"
@@ -1279,6 +1309,14 @@ def _load_mimo_sessions_raw_json(
     sessions: Dict[str, Dict[str, Any]] = {}
     conn = sqlite3.connect(str(db_path))
     try:
+        import_clause = _mimo_import_exclusion_clause(conn)
+        if window_clause and import_clause:
+            where_clause = f"{window_clause} AND {import_clause}"
+        elif import_clause:
+            where_clause = f" WHERE {import_clause}"
+        else:
+            where_clause = window_clause
+
         session_cols = _sqlite_columns(conn, "session")
         title_expr = "s.title" if "title" in session_cols else "''"
         slug_expr = "s.slug" if "slug" in session_cols else "''"
@@ -1296,7 +1334,7 @@ def _load_mimo_sessions_raw_json(
             FROM message m
             JOIN session s ON m.session_id = s.id
             LEFT JOIN project p ON s.project_id = p.id
-            {window_clause}
+            {where_clause}
             ORDER BY m.time_created ASC
             """,
             args,

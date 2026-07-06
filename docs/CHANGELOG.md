@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 1.1.2 - 2026-07-06
+
+### Added
+- Added Mimo / Mimocode usage and session support from `~/.local/share/mimocode/mimocode.db`, including the Sessions tab, API/docs entries, and EN/CN frontend labels.
+
+### Fixed
+- Mimo now follows the OpenCode-style native SQLite design with SQL date windows, WAL/SHM-aware freshness checks, project worktree joins, and native session summaries.
+- Excluded Claude Code history imported into Mimo from Mimo usage and session totals, preventing double-counting with Tokdash's Claude parser.
+
 ## 1.1.1 - 2026-07-05
 
 ### Fixed

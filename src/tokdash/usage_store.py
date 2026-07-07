@@ -26,6 +26,16 @@ SIGNATURE_VERSION = 2
 RESET_JITTER_SECONDS = 5
 QUOTA_RECOVERY_EPSILON_PERCENT = 0.5
 
+# quota_history consumption/points: at a window rollover, providers can return the OLD
+# window's near-max used_percent stamped with the NEW window's resets_at for one ~15-minute
+# sample, then revert. Two shapes, opposite effects: an interior lone peak (0 -> 100 -> 2)
+# over-counts consumption by the spike; a leading carry-over (100 -> 2 as the first reading
+# of a new epoch) under-counts by becoming the running-high baseline and masking the whole
+# window. Both are physically impossible within one window (used_percent only rises until
+# reset), so a same-epoch reversion of at least this many percentage points is dropped as a
+# torn read before points/consumption are derived. See `_drop_torn_reads`.
+QUOTA_TORN_READ_MIN_PERCENT = 40.0
+
 _WRITE_LOCK = threading.RLock()
 _SCHEMA_LOCK = threading.RLock()
 _SCHEMA_READY: set[str] = set()
@@ -65,6 +75,43 @@ def _quota_adjacent_consumed_delta(prev: float, pct: float, prior_high: float | 
     if prior_high is not None and prev < prior_high and pct >= prior_high - QUOTA_RECOVERY_EPSILON_PERCENT:
         delta = max(0.0, pct - prior_high)
     return 0.0 if delta <= QUOTA_RECOVERY_EPSILON_PERCENT else delta
+
+
+def _drop_torn_reads(
+    ordered: list[tuple[int, float, Any]], reset_epoch: dict[Any, Any]
+) -> list[tuple[int, float, Any]]:
+    """Drop reset-boundary torn-read samples from a per-series ordered reading list.
+
+    Display/derivation-only: this filters the list used to build `points` and
+    `consumption`; it never touches raw DB rows. A reading is dropped when it is
+    >= QUOTA_TORN_READ_MIN_PERCENT above the *immediate next* reading in the same epoch,
+    and either it is that epoch's first reading (leading carry-over) or it is also
+    >= QUOTA_TORN_READ_MIN_PERCENT above the *immediate previous* reading in the same epoch
+    (interior lone peak). Neighbours in a different epoch (or missing) count as absent, so a
+    reversion that can't be confirmed within the same window is never dropped.
+    """
+
+    def epoch(resets_at: Any) -> Any:
+        return reset_epoch.get(resets_at, resets_at)
+
+    keep = [True] * len(ordered)
+    for i, (_ts, pct, rst) in enumerate(ordered):
+        e = epoch(rst)
+        nxt = (
+            ordered[i + 1][1]
+            if i + 1 < len(ordered) and epoch(ordered[i + 1][2]) == e
+            else None
+        )
+        if nxt is None or pct - nxt < QUOTA_TORN_READ_MIN_PERCENT:
+            continue
+        prv = (
+            ordered[i - 1][1]
+            if i - 1 >= 0 and epoch(ordered[i - 1][2]) == e
+            else None
+        )
+        if prv is None or pct - prv >= QUOTA_TORN_READ_MIN_PERCENT:  # leading OR interior peak
+            keep[i] = False
+    return [row for k, row in zip(keep, ordered) if k]
 
 
 def persistent_usage_db_enabled() -> bool:
@@ -1265,18 +1312,28 @@ class UsageEntryStore:
         start: Optional[int] = None,
         end: Optional[int] = None,
         max_points: int | None = 300,
+        network_only_providers: Optional[Iterable[str]] = None,
     ) -> dict[str, Any]:
         if granularity not in {"hour", "day"}:
             raise ValueError("granularity must be 'hour' or 'day'")
         if max_points is not None and max_points <= 0:
             raise ValueError("max_points must be a positive integer")
         period = 3600 if granularity == "hour" else 86400
+        # network_only_providers: providers whose caller has opted into live API polling, so
+        # the API is the sole oracle for their series — stale/cached session-source rows
+        # (currently only `codex_session`; see the module docstring on `_drop_torn_reads` for
+        # the reset-boundary issue those rows can compound) are excluded from the series
+        # entirely rather than merged in. Providers not in this set fall back to whatever
+        # sources they have (session rows included) and are marked `estimated` below.
+        network_only = {p for p in (network_only_providers or []) if p}
         where = ["used_percent IS NOT NULL", "bucket NOT IN ('api', 'reset_credits')"]
         args: list[Any] = []
         provider_list = [p for p in (providers or []) if p]
         if provider_list:
             where.append(f"provider IN ({','.join('?' for _ in provider_list)})")
             args.extend(provider_list)
+        if "codex" in network_only:
+            where.append("NOT (provider = 'codex' AND source = 'codex_session')")
         if start is not None:
             where.append("captured_at >= ?")
             args.append(int(start))
@@ -1300,7 +1357,6 @@ class UsageEntryStore:
         def _flush(key: tuple[str, str] | None, ordered: list[tuple[int, float, Any]], label: Any, account: Any) -> None:
             if key is None or not ordered:
                 return
-            points = [{"captured_at": ts, "used_percent": pct} for ts, pct, _ in ordered]
             # Consumption per period = how much the window FILLED. Fixed reset windows use a
             # running high per window and count only increases above that window's own high:
             #   * two windows with different reset times that get merged into one bucket
@@ -1331,6 +1387,12 @@ class UsageEntryStore:
                     anchor = value
                 reset_epoch[value] = anchor
 
+            # Drop reset-boundary torn reads before deriving EITHER points or consumption from
+            # this series, so the chart line and the consumption bars agree. Raw DB rows are
+            # untouched — this only filters the in-memory `ordered` list used below.
+            ordered = _drop_torn_reads(ordered, reset_epoch)
+            points = [{"captured_at": ts, "used_percent": pct} for ts, pct, _ in ordered]
+
             consumption: dict[int, float] = {}
             epoch_high: dict[Any, float] = {}
             epoch_prev: dict[Any, float] = {}
@@ -1359,6 +1421,11 @@ class UsageEntryStore:
             consumption_points = [
                 {"period_start": k, "consumed_percent": v} for k, v in sorted(consumption.items())
             ]
+            # A series is `estimated` when it is NOT covered by API-only mode and can include
+            # stale session-source rows. Only codex has a session source today; codex is
+            # estimated exactly when the caller has not opted it into network_only_providers
+            # (i.e. codex_api polling is off). Claude/Antigravity are always API-only.
+            estimated = key[0] == "codex" and "codex" not in network_only
             series.append(
                 {
                     "provider": key[0],
@@ -1367,6 +1434,7 @@ class UsageEntryStore:
                     "bucket_label": label or key[1],
                     "points": _downsample_series_points(points, max_points),
                     "consumption": _downsample_series_points(consumption_points, max_points),
+                    "estimated": estimated,
                 }
             )
 
@@ -1390,7 +1458,11 @@ class UsageEntryStore:
                 label = row["bucket_label"]
                 account = str(row["account"])
             _flush(current_key, ordered, label, account)
-        return {"granularity": granularity, "series": series}
+        return {
+            "granularity": granularity,
+            "series": series,
+            "any_estimated": any(s["estimated"] for s in series),
+        }
 
     @staticmethod
     def _quota_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:

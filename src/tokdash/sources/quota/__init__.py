@@ -147,6 +147,7 @@ def _provider_shell(name: str, consent: dict[str, bool]) -> dict[str, Any]:
         "status_at": None,
         "updated_at": None,
         "sources": [],
+        "estimated": False,
     }
 
 
@@ -176,6 +177,12 @@ def quota_state(store: UsageEntryStore | None = None) -> dict[str, Any]:
     consent = quota_network_consent()
     providers = {name: _provider_shell(name, consent) for name in ("codex", "claude", "antigravity")}
     last_network_run: int | None = _LAST_POLL_AT
+    # When Codex API polling is enabled, the API is the sole oracle for the current-quota
+    # cards: codex_session rows are excluded from bucket selection below so a newer cached
+    # session row can never override a fresher API observation. Prefer
+    # `config.network_enabled` (not raw `consent`) so the `TOKDASH_QUOTA_POLL` kill switch
+    # is honored consistently with `quota_history`'s `network_only_providers` gate.
+    network_only = {"codex"} if config.network_enabled("codex_api") else set()
     for row in latest:
         provider = str(row.get("provider") or "")
         if provider not in providers:
@@ -217,7 +224,20 @@ def quota_state(store: UsageEntryStore | None = None) -> dict[str, Any]:
             ref["status_at"] = None
             ref["status"] = "ok"
 
-    for row in _freshest_usage_rows(latest):
+    # Apply source authority ONLY to bucket selection (the status/reset_credits/
+    # network_enabled loop above must keep reading the full `latest`). Dropping
+    # codex_session rows here means: if codex is API-only and only session rows exist for a
+    # bucket, that bucket is simply omitted rather than falling back to stale session data.
+    bucket_rows = [
+        r
+        for r in latest
+        if not (
+            "codex" in network_only
+            and str(r.get("provider")) == "codex"
+            and str(r.get("source")) == "codex_session"
+        )
+    ]
+    for row in _freshest_usage_rows(bucket_rows):
         provider = str(row.get("provider") or "")
         if provider not in providers:
             providers[provider] = _provider_shell(provider, consent)
@@ -241,6 +261,9 @@ def quota_state(store: UsageEntryStore | None = None) -> dict[str, Any]:
         providers[provider]["buckets"].append(bucket_row)
 
     providers["codex"]["plan"] = _codex_plan_label(providers["codex"]["plan"])
+    # Codex cards are estimated (may include session-source data) exactly when codex_api
+    # polling is off; claude/antigravity have no session source and are never estimated.
+    providers["codex"]["estimated"] = "codex" not in network_only
 
     claude_plan = read_claude_plan()
     providers["claude"]["plan"] = claude_plan.get("plan")

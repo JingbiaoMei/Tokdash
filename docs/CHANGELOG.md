@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 1.1.3 - 2026-07-07
+
+### Fixed
+- Codex quota consumption now treats live API polling as authoritative when enabled: stale `codex_session` snapshots are excluded from both quota history and current quota cards, and session-log-only Codex quota data is clearly marked as estimated.
+- Added a guard for reset-boundary torn reads so impossible same-window spikes or carry-over samples do not distort quota history points or consumption bars.
+
 ## 1.1.2 - 2026-07-06
 
 ### Added

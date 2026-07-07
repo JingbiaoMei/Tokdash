@@ -1740,6 +1740,7 @@
             <h3 class="text-base font-extrabold mono" data-i18n="consumptionHistory">Consumption History</h3>
             <div id="quotaConsumptionUnit" class="text-xs" style="color: var(--color-muted);" data-i18n="consumptionUnit">percent used</div>
           </div>
+          <div id="quotaConsumptionEstimatedBanner" class="text-xs mb-2 hidden" style="color: var(--color-muted);" data-i18n="quotaConsumptionEstimated">Estimated from local session logs — approximate and may be wrong. Enable Codex API polling for accurate quota.</div>
           <div class="h-[280px]">
             <canvas id="quotaConsumptionChart" aria-label="Quota consumption history chart" role="img"></canvas>
           </div>
@@ -2025,6 +2026,8 @@
         utilizationHistory: 'Remaining History',
         consumptionHistory: 'Consumption History',
         consumptionUnit: 'percent used',
+        quotaConsumptionEstimated: 'Estimated from local session logs — approximate and may be wrong. Enable Codex API polling for accurate quota.',
+        quotaCardEstimated: 'Estimated (local logs)',
         localOnly: 'local only',
         notDetected: 'not detected',
         quotaNoData: 'No quota snapshots yet.',
@@ -2255,6 +2258,8 @@
         utilizationHistory: '剩余额度历史',
         consumptionHistory: '消耗历史',
         consumptionUnit: '已用百分比',
+        quotaConsumptionEstimated: '基于本地会话日志估算 — 数据近似，可能不准确。启用 Codex API 轮询以获得准确的额度消耗数据。',
+        quotaCardEstimated: '估算值（本地日志）',
         localOnly: '仅本地',
         notDetected: '未检测到',
         quotaNoData: '暂无额度快照。',
@@ -4955,6 +4960,17 @@
           updatedAgo.textContent = t('quotaUpdatedAgo').replace('{time}', formatRelativeAgo(provider.updated_at));
           titleWrap.appendChild(updatedAgo);
         }
+        // Small muted marker when this provider's card may include estimated
+        // (session-source, not API-authoritative) data — mirrors the consumption-chart
+        // banner's `estimated` semantics but scoped to the current-quota card.
+        if (provider.estimated) {
+          const estimatedTag = document.createElement('div');
+          estimatedTag.className = 'text-xs mt-1';
+          estimatedTag.style.color = 'var(--color-muted)';
+          estimatedTag.setAttribute('data-i18n', 'quotaCardEstimated');
+          estimatedTag.textContent = t('quotaCardEstimated');
+          titleWrap.appendChild(estimatedTag);
+        }
 
         // The "live" / "local only" badge was removed — it was pure noise.
         header.appendChild(titleWrap);
@@ -5171,6 +5187,15 @@
       const palette = getChartPalette();
       const utilizationCanvas = document.getElementById('quotaUtilizationChart');
       const consumptionCanvas = document.getElementById('quotaConsumptionChart');
+
+      // Estimation banner: session-source Codex data (API polling off) is an approximation
+      // of live usage (see quota_history's `estimated` flag) — warn near the consumption
+      // chart rather than silently charting numbers that can be materially wrong.
+      const estimatedBanner = document.getElementById('quotaConsumptionEstimatedBanner');
+      if (estimatedBanner) {
+        const isEstimated = series.some((item) => item.estimated) || !!history?.any_estimated;
+        estimatedBanner.classList.toggle('hidden', !isEstimated);
+      }
 
       // Utilization (line) chart keeps a real time axis: {x, y} points on a linear scale,
       // each touched once via a cheap .map(); formatQuotaAxisLabel (the expensive

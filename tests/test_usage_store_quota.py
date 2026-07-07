@@ -382,3 +382,175 @@ def test_quota_history_max_points_zero_raises(tmp_path):
 
     with pytest.raises(ValueError):
         store.quota_history(granularity="hour", max_points=0)
+
+
+# --- Torn-read guard regression tests -----------------------------------------------------
+# At a window rollover the API can return the OLD window's near-max used_percent stamped
+# with the NEW window's resets_at for one sample, then revert. Both shapes are physically
+# impossible within one window (used_percent only rises until reset), so the guard drops
+# them before EITHER points or consumption are derived. See `_drop_torn_reads` and
+# QUOTA_TORN_READ_MIN_PERCENT in usage_store.py.
+
+
+def test_quota_history_drops_interior_torn_read_for_weekly_over_count(tmp_path):
+    # Interior lone peak (7d over-count shape): within one epoch, 0 -> 100 -> 2 -> 3. The
+    # isolated 100 is a torn read; consumption must count only the real climb (0->3 = 3),
+    # not the +100 spike.
+    store = UsageEntryStore(tmp_path / "usage.sqlite3")
+    resets_at = BASE_TS + 7 * 86400
+    store.insert_quota_snapshots(
+        [
+            _snap_reset("7d", 0.0, BASE_TS, resets_at),
+            _snap_reset("7d", 100.0, BASE_TS + 900, resets_at),
+            _snap_reset("7d", 2.0, BASE_TS + 1800, resets_at),
+            _snap_reset("7d", 3.0, BASE_TS + 2700, resets_at),
+        ]
+    )
+
+    history = store.quota_history(granularity="hour")
+
+    series = history["series"][0]
+    assert [p["used_percent"] for p in series["points"]] == [0.0, 2.0, 3.0]
+    assert sum(c["consumed_percent"] for c in series["consumption"]) == 3.0
+
+
+def test_quota_history_drops_leading_torn_read_for_five_hour_under_count(tmp_path):
+    # Leading carry-over (5h under-count shape): the reset-boundary torn read lands as the
+    # FIRST reading of the new epoch (100), then reverts (2 -> 40). Left in place it becomes
+    # the running-high baseline and masks the whole window (0 counted instead of 38).
+    store = UsageEntryStore(tmp_path / "usage.sqlite3")
+    resets_at = BASE_TS + 3600
+    store.insert_quota_snapshots(
+        [
+            _snap_reset("5h", 100.0, BASE_TS, resets_at),
+            _snap_reset("5h", 2.0, BASE_TS + 900, resets_at),
+            _snap_reset("5h", 40.0, BASE_TS + 1800, resets_at),
+        ]
+    )
+
+    history = store.quota_history(granularity="hour")
+
+    series = history["series"][0]
+    assert [p["used_percent"] for p in series["points"]] == [2.0, 40.0]
+    assert sum(c["consumed_percent"] for c in series["consumption"]) == 38.0
+
+
+def test_quota_history_torn_read_guard_leaves_real_fast_fill_alone(tmp_path):
+    # The guard only fires on a same-epoch REVERSION (a drop back down within one window).
+    # A real fast fill that climbs and then plateaus at the top (0 -> 100 -> 100) must
+    # survive untouched: nothing dropped, full consumption counted.
+    store = UsageEntryStore(tmp_path / "usage.sqlite3")
+    resets_at = BASE_TS + 3600
+    store.insert_quota_snapshots(
+        [
+            _snap_reset("5h", 0.0, BASE_TS, resets_at),
+            _snap_reset("5h", 100.0, BASE_TS + 900, resets_at),
+            _snap_reset("5h", 100.0, BASE_TS + 1800, resets_at),
+        ]
+    )
+
+    history = store.quota_history(granularity="hour")
+
+    series = history["series"][0]
+    assert [p["used_percent"] for p in series["points"]] == [0.0, 100.0, 100.0]
+    assert sum(c["consumed_percent"] for c in series["consumption"]) == 100.0
+
+
+def test_quota_history_torn_read_guard_ignores_genuine_reset_across_epochs(tmp_path):
+    # A genuine reset (100 at the end of epoch A, 0 as the start of epoch B) must be left
+    # alone: the drop crosses an epoch boundary, so the guard can't confirm a same-window
+    # reversion and conservatively does not fire.
+    store = UsageEntryStore(tmp_path / "usage.sqlite3")
+    r1, r2 = BASE_TS + 3600, BASE_TS + 7200
+    store.insert_quota_snapshots(
+        [
+            _snap_reset("5h", 95.0, BASE_TS, r1),
+            _snap_reset("5h", 100.0, BASE_TS + 900, r1),  # epoch A ends near-full
+            _snap_reset("5h", 0.0, BASE_TS + 1800, r2),   # genuine reset: epoch B baseline
+            _snap_reset("5h", 10.0, BASE_TS + 2700, r2),
+        ]
+    )
+
+    history = store.quota_history(granularity="hour")
+
+    series = history["series"][0]
+    assert [p["used_percent"] for p in series["points"]] == [95.0, 100.0, 0.0, 10.0]
+    assert sum(c["consumed_percent"] for c in series["consumption"]) == 15.0  # +5 (A) + 10 (B)
+
+
+def test_quota_history_torn_read_guard_threshold_boundary(tmp_path):
+    # QUOTA_TORN_READ_MIN_PERCENT (40.0) is inclusive: a same-epoch reversion of exactly 39
+    # points is real noise and is kept; a reversion of 41 points is dropped.
+    store = UsageEntryStore(tmp_path / "usage.sqlite3")
+    resets_at = BASE_TS + 3600
+    store.insert_quota_snapshots(
+        [
+            # Kept: reversion of 39 (< 40) is not a torn read.
+            _snap_reset("5h", 50.0, BASE_TS, resets_at),
+            _snap_reset("5h", 11.0, BASE_TS + 900, resets_at),
+            # Dropped: isolated (leading) reversion of 41 (>= 40).
+            _snap_reset("codex_boundary_5h", 50.0, BASE_TS, resets_at),
+            _snap_reset("codex_boundary_5h", 9.0, BASE_TS + 900, resets_at),
+        ]
+    )
+
+    history = store.quota_history(granularity="hour")
+    by_bucket = {s["bucket"]: s for s in history["series"]}
+
+    assert [p["used_percent"] for p in by_bucket["5h"]["points"]] == [50.0, 11.0]
+    assert [p["used_percent"] for p in by_bucket["codex_boundary_5h"]["points"]] == [9.0]
+
+
+def test_quota_history_network_only_providers_excludes_codex_session_rows(tmp_path):
+    # Source authority: when the caller opts codex into API-only mode (Codex API polling
+    # enabled), stale codex_session rows are excluded entirely and only codex_api rows drive
+    # the series; it is not marked estimated.
+    store = UsageEntryStore(tmp_path / "usage.sqlite3")
+    resets_at = BASE_TS + 3600
+    store.insert_quota_snapshots(
+        [
+            _snap_reset("5h", 90.0, BASE_TS, resets_at),  # stale codex_session snapshot
+            _provider_snap_reset("codex", "5h", 10.0, BASE_TS + 60, resets_at),  # live codex_api
+        ]
+    )
+
+    history = store.quota_history(granularity="hour", network_only_providers={"codex"})
+
+    series = history["series"][0]
+    assert [p["used_percent"] for p in series["points"]] == [10.0]
+    assert series["estimated"] is False
+    assert history["any_estimated"] is False
+
+
+def test_quota_history_marks_codex_session_only_series_estimated_by_default(tmp_path):
+    # Without network_only_providers (Codex API polling off / not opted in), a codex series
+    # built from session rows is a local-log estimate and must be labelled as such.
+    store = UsageEntryStore(tmp_path / "usage.sqlite3")
+    store.insert_quota_snapshots([_snap_reset("5h", 10.0, BASE_TS, BASE_TS + 3600)])
+
+    history = store.quota_history(granularity="hour")
+
+    series = history["series"][0]
+    assert series["estimated"] is True
+    assert history["any_estimated"] is True
+
+
+def test_quota_history_counts_post_reset_refill_as_new_consumption(tmp_path):
+    # Regression: post-reset refills stay COUNTED (current, intended behaviour) -- the
+    # torn-read guard must not suppress a genuine reset+refill. Two sequential windows, each
+    # climbing, sum their climbs.
+    store = UsageEntryStore(tmp_path / "usage.sqlite3")
+    r1, r2 = BASE_TS + 3600, BASE_TS + 7200
+    store.insert_quota_snapshots(
+        [
+            _snap_reset("5h", 0.0, BASE_TS, r1),
+            _snap_reset("5h", 20.0, BASE_TS + 900, r1),   # window A climbs +20
+            _snap_reset("5h", 0.0, BASE_TS + 1800, r2),   # genuine reset: window B baseline
+            _snap_reset("5h", 15.0, BASE_TS + 2700, r2),  # window B climbs +15
+        ]
+    )
+
+    history = store.quota_history(granularity="hour")
+
+    series = history["series"][0]
+    assert sum(c["consumed_percent"] for c in series["consumption"]) == 35.0

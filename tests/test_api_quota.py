@@ -506,3 +506,83 @@ def test_codex_plan_label_normalized_in_state_only():
     payload = api.get_quota()
     assert payload["providers"]["codex"]["plan"] == "Pro Lite"
     assert store.latest_quota_snapshots()[0]["plan"] == "prolite"
+
+
+def test_get_quota_api_enabled_session_does_not_override_bucket():
+    """codex_api enabled: a newer codex_session row must not win the 7d bucket over an
+    older codex_api row — the API is the sole oracle once enabled."""
+    from tokdash.sources.quota.types import QuotaSnapshot
+    from tokdash.usage_store import UsageEntryStore
+
+    api._clear_cache()
+    api.set_quota_consent({"codex_api": True})
+    UsageEntryStore().insert_quota_snapshots(
+        [
+            QuotaSnapshot(
+                "codex", "acct", "7d", "7-day window", 70, 1_783_000_000, "pro",
+                1_782_907_200, "codex_api", "ok", {},
+            ),
+            QuotaSnapshot(
+                "codex", "default", "7d", "7-day window", 40, 1_783_100_000, "pro",
+                1_782_907_260, "codex_session", "ok", {},
+            ),
+        ]
+    )
+
+    buckets = api.get_quota()["providers"]["codex"]["buckets"]
+
+    assert len(buckets) == 1
+    bucket = buckets[0]
+    assert bucket["bucket"] == "7d"
+    assert bucket["source"] == "codex_api"
+    assert bucket["used_percent"] == 70.0
+    assert bucket["resets_at"] == 1_783_000_000
+
+
+def test_get_quota_api_enabled_session_only_omits_bucket():
+    """codex_api enabled but only session rows exist for a bucket: the bucket is omitted
+    rather than falling back to stale session data (accepted empty-card behavior)."""
+    from tokdash.sources.quota.types import QuotaSnapshot
+    from tokdash.usage_store import UsageEntryStore
+
+    api._clear_cache()
+    api.set_quota_consent({"codex_api": True})
+    UsageEntryStore().insert_quota_snapshots(
+        [
+            QuotaSnapshot(
+                "codex", "default", "7d", "7-day window", 40, 1_783_100_000, "pro",
+                1_782_907_200, "codex_session", "ok", {},
+            ),
+        ]
+    )
+
+    payload = api.get_quota()
+    codex = payload["providers"]["codex"]
+
+    assert [b["bucket"] for b in codex["buckets"]] == []
+    assert codex["estimated"] is False
+
+
+def test_get_quota_api_disabled_shows_session_and_marks_estimated():
+    """codex_api disabled: the session row is shown as the bucket, and the codex card is
+    marked estimated."""
+    from tokdash.sources.quota.types import QuotaSnapshot
+    from tokdash.usage_store import UsageEntryStore
+
+    api._clear_cache()
+    api.set_quota_consent({"codex_api": False})
+    UsageEntryStore().insert_quota_snapshots(
+        [
+            QuotaSnapshot(
+                "codex", "default", "7d", "7-day window", 40, 1_783_100_000, "pro",
+                1_782_907_200, "codex_session", "ok", {},
+            ),
+        ]
+    )
+
+    payload = api.get_quota()
+    codex = payload["providers"]["codex"]
+
+    assert [b["bucket"] for b in codex["buckets"]] == ["7d"]
+    assert codex["buckets"][0]["source"] == "codex_session"
+    assert codex["estimated"] is True

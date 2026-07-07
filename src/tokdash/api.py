@@ -829,15 +829,21 @@ def get_quota_history(
     max_points: Optional[int] = 300,
 ) -> Dict[str, Any]:
     try:
+        from .sources.quota.config import network_enabled
         from .usage_store import UsageEntryStore
 
         provider_list = [p.strip() for p in (providers or "").split(",") if p.strip()]
+        # When Codex API polling is enabled, the API is the sole oracle for Codex consumption:
+        # exclude codex_session rows (stale cached snapshots) so they can't contaminate the
+        # chart. See `quota_history`'s `network_only_providers` param.
+        network_only_providers = {"codex"} if network_enabled("codex_api") else set()
         return UsageEntryStore().quota_history(
             providers=provider_list or None,
             granularity=granularity,
             start=start,
             end=end,
             max_points=max_points,
+            network_only_providers=network_only_providers,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

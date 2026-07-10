@@ -58,7 +58,7 @@ def test_codex_api_collects_usage_and_reset_credits(monkeypatch, tmp_path):
             return FakeResponse(
                 {
                     "plan_type": "pro",
-                    "rate_limit": {"used_percent": 0.25, "resets_at": "2026-07-01T13:00:00Z"},
+                    "rate_limit": {"used_percent": 25, "resets_at": "2026-07-01T13:00:00Z"},
                     "additional_rate_limits": [
                         {"used_percent": 40, "resets_at": 1783467600, "window_minutes": 10080},
                     ],
@@ -99,12 +99,12 @@ def test_codex_api_unwraps_nested_additional_rate_limits(monkeypatch, tmp_path):
             return FakeResponse(
                 {
                     "plan_type": "pro",
-                    "rate_limit": {"used_percent": 0.25, "resets_at": "2026-07-01T13:00:00Z"},
+                    "rate_limit": {"used_percent": 25, "resets_at": "2026-07-01T13:00:00Z"},
                     "additional_rate_limits": [
                         {
                             "name": "weekly",
                             "rate_limit": {
-                                "used_percent": 0.4,
+                                "used_percent": 40,
                                 "resets_at": 1783467600,
                                 "window_minutes": 10080,
                             },
@@ -117,6 +117,29 @@ def test_codex_api_unwraps_nested_additional_rate_limits(monkeypatch, tmp_path):
     snapshots = codex.collect_codex_api_snapshots(opener=opener, now=1_782_907_200)
 
     assert [s.used_percent for s in snapshots if s.bucket == "7d"] == [40.0]
+
+
+def test_codex_api_resets_at_only_one_percent_is_not_scaled_to_full(monkeypatch, tmp_path):
+    codex_home = tmp_path / ".codex"
+    codex_home.mkdir()
+    token = _jwt({"exp": 4_000_000_000})
+    (codex_home / "auth.json").write_text(json.dumps({"tokens": {"access_token": token}}), encoding="utf-8")
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+
+    def opener(req, timeout=15):
+        if req.full_url.endswith("/wham/usage"):
+            return FakeResponse(
+                {
+                    "plan_type": "prolite",
+                    "rate_limit": {"used_percent": 1, "resets_at": "2026-07-10T13:10:55Z"},
+                }
+            )
+        return FakeResponse({"available_count": 0, "credits": []})
+
+    snapshots = codex.collect_codex_api_snapshots(opener=opener, now=1_783_674_889)
+
+    primary = next(s for s in snapshots if s.bucket == "5h")
+    assert primary.used_percent == 1.0
 
 
 def test_codex_api_omits_account_header_when_account_unresolved(monkeypatch, tmp_path):
@@ -470,6 +493,43 @@ def test_codex_usage_nested_primary_secondary_windows_parse_inline(monkeypatch, 
     assert by_bucket["7d"].used_percent == 33.0
     assert by_bucket["7d"].resets_at == 1_783_467_600
     assert all(s.plan == "pro" for s in by_bucket.values())
+
+
+def test_codex_usage_nested_one_percent_is_not_scaled_to_full(monkeypatch, tmp_path):
+    """Real wham/usage uses a 0-100 percent scale; 1 means 1%, not a unit fraction."""
+    codex_home = tmp_path / ".codex"
+    codex_home.mkdir()
+    token = _jwt({"exp": 4_000_000_000})
+    (codex_home / "auth.json").write_text(json.dumps({"tokens": {"access_token": token}}), encoding="utf-8")
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+
+    def opener(req, timeout=15):
+        if req.full_url.endswith("/wham/usage"):
+            return FakeResponse(
+                {
+                    "plan_type": "prolite",
+                    "rate_limit": {
+                        "primary_window": {
+                            "limit_window_seconds": 18000,
+                            "reset_after_seconds": 13975,
+                            "reset_at": 1_783_689_055,
+                            "used_percent": 1,
+                        },
+                        "secondary_window": {
+                            "limit_window_seconds": 604800,
+                            "reset_after_seconds": 600775,
+                            "reset_at": 1_784_275_855,
+                            "used_percent": 0,
+                        },
+                    },
+                }
+            )
+        return FakeResponse({"available_count": 0, "credits": []})
+
+    snapshots = codex.collect_codex_api_snapshots(opener=opener, now=1_783_674_889)
+
+    primary = next(s for s in snapshots if s.bucket == "5h")
+    assert primary.used_percent == 1.0
 
 
 def test_antigravity_models_frozen_fixture_parses(monkeypatch, tmp_path):

@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 
 import pytest
 
 from tokdash.sources.quota.types import QuotaSnapshot
-from tokdash.usage_store import UsageEntryStore
+from tokdash.usage_store import (
+    _CODEX_PERCENT_SCALE_REPAIR_META_KEY,
+    UsageEntryStore,
+    _repair_codex_api_percent_scale_rows,
+)
 
 
 BASE_TS = 1_782_907_200
@@ -39,6 +44,162 @@ def test_quota_snapshots_are_idempotent_and_reported_in_status(tmp_path):
     assert latest[0]["provider"] == "codex"
     assert latest[0]["raw"]["used"] in {10.0, 25.0}
     assert store.status()["quota_snapshots"] == 2
+
+
+def _codex_api_raw(primary_used: float, secondary_used: float) -> dict:
+    return {
+        "usage": {
+            "plan_type": "prolite",
+            "rate_limit": {
+                "primary_window": {
+                    "limit_window_seconds": 18000,
+                    "reset_after_seconds": 13975,
+                    "reset_at": BASE_TS + 18_000,
+                    "used_percent": primary_used,
+                },
+                "secondary_window": {
+                    "limit_window_seconds": 604800,
+                    "reset_after_seconds": 600775,
+                    "reset_at": BASE_TS + 604_800,
+                    "used_percent": secondary_used,
+                },
+            },
+        }
+    }
+
+
+_QUOTA_SNAPSHOTS_DDL = """
+    CREATE TABLE quota_snapshots (
+        id INTEGER PRIMARY KEY,
+        provider TEXT NOT NULL,
+        account TEXT NOT NULL DEFAULT 'default',
+        bucket TEXT NOT NULL,
+        bucket_label TEXT,
+        used_percent REAL,
+        resets_at INTEGER,
+        plan TEXT,
+        captured_at INTEGER NOT NULL,
+        source TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'ok',
+        raw_json TEXT,
+        UNIQUE(provider, account, bucket, source, captured_at)
+    )
+"""
+
+
+def _insert_codex_api_row(conn, bucket: str, used: float, captured_at: int, raw: dict) -> None:
+    conn.execute(
+        """
+        INSERT INTO quota_snapshots(
+            provider, account, bucket, bucket_label, used_percent,
+            resets_at, plan, captured_at, source, status, raw_json
+        ) VALUES ('codex', 'acct', ?, ?, ?, ?, 'prolite', ?, 'codex_api', 'ok', ?)
+        """,
+        (bucket, bucket, used, captured_at + 18_000, captured_at, json.dumps(raw)),
+    )
+
+
+def _create_legacy_quota_db(db_path, rows) -> None:
+    """A pre-upgrade DB: old schema_version plus rows the old fraction-scaling parser wrote."""
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+        conn.execute("INSERT INTO meta(key, value) VALUES('schema_version', '5')")
+        conn.execute(_QUOTA_SNAPSHOTS_DDL)
+        for bucket, used, captured_at, raw in rows:
+            _insert_codex_api_row(conn, bucket, used, captured_at, raw)
+
+
+def test_usage_store_repairs_legacy_codex_api_one_percent_rows_on_open(tmp_path):
+    db_path = tmp_path / "usage.sqlite3"
+    _create_legacy_quota_db(db_path, [("5h", 100.0, BASE_TS, _codex_api_raw(1, 0))])
+
+    store = UsageEntryStore(db_path)
+
+    row = store.latest_quota_snapshots()[0]
+    assert row["used_percent"] == 1.0
+    assert store.quota_history(granularity="hour")["series"][0]["points"] == [
+        {"captured_at": BASE_TS, "used_percent": 1.0}
+    ]
+
+
+def test_usage_store_repair_generalizes_beyond_the_one_percent_case(tmp_path):
+    db_path = tmp_path / "usage.sqlite3"
+    _create_legacy_quota_db(
+        db_path,
+        [
+            ("5h", 50.0, BASE_TS, _codex_api_raw(0.5, 40)),  # scaled fraction: really 0.5%
+            ("7d", 40.0, BASE_TS, _codex_api_raw(0.5, 40)),  # genuine 40%
+            ("5h", 100.0, BASE_TS + 3600, _codex_api_raw(100, 40)),  # genuine 100%
+        ],
+    )
+
+    store = UsageEntryStore(db_path)
+    store.status()  # opening the store runs the repair sweep
+
+    with sqlite3.connect(db_path) as conn:
+        values = {
+            (bucket, captured_at): used
+            for bucket, captured_at, used in conn.execute(
+                "SELECT bucket, captured_at, used_percent FROM quota_snapshots"
+            )
+        }
+    assert values == {
+        ("5h", BASE_TS): 0.5,
+        ("7d", BASE_TS): 40.0,
+        ("5h", BASE_TS + 3600): 100.0,
+    }
+
+
+def test_usage_store_repair_leaves_unprovable_flat_shape_7d_rows_alone(tmp_path):
+    # Flat legacy shape: "rate_limit" IS the 5h window, so a 7d row's original value
+    # cannot be re-derived from this payload and must not be guessed at.
+    flat_raw = {"usage": {"rate_limit": {"used_percent": 1, "resets_at": BASE_TS + 18_000}}}
+    db_path = tmp_path / "usage.sqlite3"
+    _create_legacy_quota_db(
+        db_path,
+        [("5h", 100.0, BASE_TS, flat_raw), ("7d", 100.0, BASE_TS, flat_raw)],
+    )
+
+    store = UsageEntryStore(db_path)
+    store.status()
+
+    with sqlite3.connect(db_path) as conn:
+        values = dict(conn.execute("SELECT bucket, used_percent FROM quota_snapshots"))
+    assert values == {"5h": 1.0, "7d": 100.0}
+
+
+def test_usage_store_repair_watches_for_stale_writers_then_stops(tmp_path):
+    db_path = tmp_path / "usage.sqlite3"
+    store = UsageEntryStore(db_path)
+    store.status()  # schema init; the empty scan proves nothing, watcher stays armed
+
+    def _state(conn) -> str:
+        return conn.execute(
+            "SELECT value FROM meta WHERE key = ?", (_CODEX_PERCENT_SCALE_REPAIR_META_KEY,)
+        ).fetchone()[0]
+
+    def _used_at(conn, captured_at: int) -> float:
+        return conn.execute(
+            "SELECT used_percent FROM quota_snapshots WHERE captured_at = ?", (captured_at,)
+        ).fetchone()[0]
+
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+
+        # A stale process still running the old parser writes another scaled row.
+        _insert_codex_api_row(conn, "5h", 100.0, BASE_TS, _codex_api_raw(1, 0))
+        assert _repair_codex_api_percent_scale_rows(conn) == 1
+        assert _used_at(conn, BASE_TS) == 1.0
+
+        # A fixed-parser row scans clean -> the watcher declares itself done.
+        _insert_codex_api_row(conn, "5h", 6.0, BASE_TS + 3600, _codex_api_raw(6, 0))
+        assert _repair_codex_api_percent_scale_rows(conn) == 0
+        assert _state(conn) == "done"
+
+        # After "done" the scan is permanently off, even for a would-match row.
+        _insert_codex_api_row(conn, "5h", 100.0, BASE_TS + 7200, _codex_api_raw(1, 0))
+        assert _repair_codex_api_percent_scale_rows(conn) == 0
+        assert _used_at(conn, BASE_TS + 7200) == 100.0
 
 
 def _snap_reset(bucket: str, used: float, captured_at: int, resets_at: int) -> QuotaSnapshot:

@@ -33,7 +33,7 @@ def _parse_time(value: Any) -> int | None:
         return None
 
 
-def _normalize_percent(value: Any) -> float | None:
+def _normalize_percent(value: Any, *, unit_interval_as_fraction: bool = True) -> float | None:
     try:
         if value is None:
             return None
@@ -42,7 +42,9 @@ def _normalize_percent(value: Any) -> float | None:
         return None
     if pct < 0:
         return None
-    return round(pct * 100.0, 4) if 0.0 <= pct <= 1.0 else round(pct, 4)
+    if unit_interval_as_fraction and 0.0 <= pct <= 1.0:
+        return round(pct * 100.0, 4)
+    return round(pct, 4)
 
 
 def _first_present(data: dict[str, Any], *keys: str) -> Any:
@@ -87,7 +89,10 @@ def _bucket_snapshot(
     bucket_payload: dict[str, Any],
     captured_at: int,
 ) -> QuotaSnapshot | None:
-    used_percent = _normalize_percent(_first_present(bucket_payload, "used_percent", "usage_percent", "usedPercent"))
+    used_percent = _normalize_percent(
+        _first_present(bucket_payload, "used_percent", "usage_percent", "usedPercent"),
+        unit_interval_as_fraction=False,
+    )
     if used_percent is None:
         return None
     account = str(rate_limits.get("account_id") or "default")

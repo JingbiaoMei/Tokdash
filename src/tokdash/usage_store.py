@@ -39,6 +39,129 @@ QUOTA_TORN_READ_MIN_PERCENT = 40.0
 _WRITE_LOCK = threading.RLock()
 _SCHEMA_LOCK = threading.RLock()
 _SCHEMA_READY: set[str] = set()
+_CODEX_PERCENT_SCALE_REPAIR_META_KEY = "quota_codex_percent_scale_repair_v2"
+_CODEX_PERCENT_SCALE_REPAIR_DONE = "done"
+
+
+def _as_float(value: Any) -> float | None:
+    try:
+        if value is None:
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _dict_or_none(value: Any) -> dict[str, Any] | None:
+    return value if isinstance(value, dict) else None
+
+
+def _codex_window_used_percent_from_raw(bucket: str, raw_json: str | None) -> float | None:
+    try:
+        raw = json.loads(raw_json or "{}")
+    except Exception:
+        return None
+    if not isinstance(raw, dict):
+        return None
+    usage = _dict_or_none(raw.get("usage"))
+    if usage is None:
+        return None
+
+    if bucket in {"5h", "7d"}:
+        # Mirror _usage_rate_limits precedence: an explicit rate_limits.primary/secondary
+        # wins; rate_limit windows only fill the gaps.
+        rate_limits = _dict_or_none(usage.get("rate_limits"))
+        if rate_limits is not None:
+            window = _dict_or_none(rate_limits.get("primary" if bucket == "5h" else "secondary"))
+            if window is not None:
+                return _as_float(window.get("used_percent"))
+        rate_limit = _dict_or_none(usage.get("rate_limit"))
+        if rate_limit is not None:
+            primary = _dict_or_none(rate_limit.get("primary_window"))
+            secondary = _dict_or_none(rate_limit.get("secondary_window"))
+            if primary is None and secondary is None:
+                # Flat legacy shape: "rate_limit" IS the 5h window. A 7d row's value came
+                # from additional_rate_limits, so it cannot be re-derived from here.
+                return _as_float(rate_limit.get("used_percent")) if bucket == "5h" else None
+            window = primary if bucket == "5h" else secondary
+            return _as_float(window.get("used_percent")) if window is not None else None
+        return None
+
+    item = _dict_or_none(raw.get("additional_rate_limit"))
+    if item is None:
+        return None
+    feature = str(item.get("metered_feature") or "")
+    if not feature:
+        return None
+    nested = _dict_or_none(item.get("rate_limit")) or item
+    primary = _dict_or_none(nested.get("primary_window"))
+    secondary = _dict_or_none(nested.get("secondary_window"))
+    if bucket == f"{feature}_5h" and primary is not None:
+        return _as_float(primary.get("used_percent"))
+    if bucket == f"{feature}_7d" and secondary is not None:
+        return _as_float(secondary.get("used_percent"))
+    if bucket == feature and primary is None and secondary is None:
+        # Legacy single-window shape keeps the unsuffixed bucket id (see codex.py).
+        return _as_float(nested.get("used_percent"))
+    return None
+
+
+def _repair_codex_api_percent_scale_rows(conn: sqlite3.Connection) -> int:
+    """Rewrite codex_api rows whose used_percent was fraction-scaled by the old parser.
+
+    A corrupted row is provable from its own raw payload: the API value sits in (0, 1]
+    (percent scale, so at most 1% used) while the stored value equals value*100. The scan
+    is incremental — the meta key holds the highest row id already checked, so rows a
+    stale old-parser process writes after the initial sweep still get repaired on a later
+    open. Once a scan over newly written rows finds nothing to repair (every writer is on
+    the fixed parser), the key flips to "done" and the scan never runs again.
+    """
+    state_row = conn.execute(
+        "SELECT value FROM meta WHERE key = ?", (_CODEX_PERCENT_SCALE_REPAIR_META_KEY,)
+    ).fetchone()
+    state = str(state_row["value"]) if state_row is not None else ""
+    if state == _CODEX_PERCENT_SCALE_REPAIR_DONE:
+        return 0
+    try:
+        watermark = int(state)
+    except ValueError:
+        watermark = 0
+    rows = conn.execute(
+        """
+        SELECT id, bucket, used_percent, raw_json
+        FROM quota_snapshots
+        WHERE id > ?
+          AND provider = 'codex'
+          AND source = 'codex_api'
+          AND status = 'ok'
+          AND used_percent > 0
+          AND raw_json IS NOT NULL
+        """,
+        (watermark,),
+    ).fetchall()
+    updates: list[tuple[float, int]] = []
+    max_id = watermark
+    for row in rows:
+        max_id = max(max_id, int(row["id"]))
+        stored = _as_float(row["used_percent"])
+        if stored is None:
+            continue
+        raw_used = _codex_window_used_percent_from_raw(str(row["bucket"]), row["raw_json"])
+        if raw_used is None or not (0.0 < raw_used <= 1.0):
+            continue
+        scaled = round(raw_used * 100.0, 4)
+        if abs(stored - scaled) <= 0.0001 and abs(stored - raw_used) > 0.0001:
+            updates.append((round(raw_used, 4), int(row["id"])))
+    if updates:
+        conn.executemany("UPDATE quota_snapshots SET used_percent = ? WHERE id = ?", updates)
+    # An empty scan range proves nothing about the writer fleet, so only a non-empty
+    # clean scan may declare the repair finished.
+    next_state = _CODEX_PERCENT_SCALE_REPAIR_DONE if (rows and not updates) else str(max_id)
+    conn.execute(
+        "INSERT OR REPLACE INTO meta(key, value) VALUES(?, ?)",
+        (_CODEX_PERCENT_SCALE_REPAIR_META_KEY, next_state),
+    )
+    return len(updates)
 
 
 def _quota_history_uses_adjacent_deltas(provider: str, bucket: str, resets_at: Any) -> bool:
@@ -446,6 +569,7 @@ class UsageEntryStore:
             "INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', ?)",
             (str(SCHEMA_VERSION),),
         )
+        _repair_codex_api_percent_scale_rows(conn)
         conn.commit()
 
     def source_signature(self, source: str) -> Optional[str]:

@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 1.1.5 - 2026-07-11
+
+### Added
+- Added pricing for OpenAI `gpt-5.6-luna-pro`, `gpt-5.6-sol-pro`, and `gpt-5.6-terra-pro`; xAI `grok-4.5`; and Tencent `hy3`.
+- Documented secure remote access options, including Tailscale Serve and Funnel, Cloudflare Tunnel, and reverse-proxy deployments.
+
 ## 1.1.4 - 2026-07-10
 
 ### Fixed

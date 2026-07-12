@@ -715,3 +715,38 @@ def test_quota_history_counts_post_reset_refill_as_new_consumption(tmp_path):
 
     series = history["series"][0]
     assert sum(c["consumed_percent"] for c in series["consumption"]) == 35.0
+
+
+def test_quota_history_codex_idle_to_active_5h_has_no_phantom_delta(tmp_path):
+    # Regression: `_bucket_snapshot` (codex.py) nulls `resets_at` for an idle Codex window
+    # (used_percent == 0) because Codex's rolling-window API stamps a phantom
+    # resets_at ~= captured_at + window_length even before the window has actually started.
+    # A `resets_at is None` row lands in the adjacent-delta "None" epoch
+    # (`_quota_history_uses_adjacent_deltas` returns True when resets_at is None). The
+    # concern raised in review: once the window goes active, does its first real reading get
+    # chained onto that idle 0% row as a phantom 0->30 delta? It must not -- the active
+    # reading carries its own genuine (non-None) resets_at, so it lives in its OWN real epoch,
+    # keyed separately from the None epoch, and is treated as that epoch's first
+    # sighting/baseline (fixed-window running-high path), never differenced against the idle
+    # row.
+    store = UsageEntryStore(tmp_path / "usage.sqlite3")
+    active_resets_at = BASE_TS + 3600 + 18_000  # a real 5h window, first seen on first use
+    store.insert_quota_snapshots(
+        [
+            _snap_reset("5h", 0.0, BASE_TS, None),  # idle: phantom resets_at nulled by the fix
+            _snap_reset("5h", 30.0, BASE_TS + 3600, active_resets_at),  # first use: real window
+        ]
+    )
+
+    history = store.quota_history(granularity="hour")
+
+    series = history["series"][0]
+    # Both raw readings still appear on the line chart.
+    assert [p["used_percent"] for p in series["points"]] == [0.0, 30.0]
+    # No consumption at all is derived from this pair -- NOT the phantom 30.0 a naive
+    # 0->30 adjacent delta would produce. The idle row (None epoch) only records itself as
+    # that epoch's baseline (nothing to delta against yet). The active row is the FIRST
+    # sighting of its own real epoch (active_resets_at), so the fixed-window path also just
+    # records it as that epoch's baseline -- the two rows never share an epoch, so they are
+    # never differenced against each other.
+    assert series["consumption"] == []

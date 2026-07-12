@@ -21,10 +21,20 @@ _TTL_SECONDS = 6 * 3600
 _cache: Dict[str, Any] = {"ts": 0.0, "data": None}
 
 
+def kill_switched() -> bool:
+    """True when ``TOKDASH_UPDATE_CHECK`` is set to a disabling value.
+
+    A hard override that wins over any persisted consent. Recognizes
+    ``0``/``false``/``no``/``off`` (case-insensitive). Shared with :func:`is_enabled` and
+    the setup consent step so the two never diverge on which forms count as "off".
+    """
+    return os.environ.get("TOKDASH_UPDATE_CHECK", "").strip().lower() in {"0", "false", "no", "off"}
+
+
 def is_enabled() -> bool:
-    env = os.environ.get("TOKDASH_UPDATE_CHECK", "").strip().lower()
-    if env in {"0", "false", "no", "off"}:
+    if kill_switched():
         return False  # hard kill switch wins over any consent
+    env = os.environ.get("TOKDASH_UPDATE_CHECK", "").strip().lower()
     if env in {"1", "true", "yes", "on"}:
         return True
     try:

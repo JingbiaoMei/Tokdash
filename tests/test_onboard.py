@@ -431,6 +431,77 @@ def test_setup_opens_dashboard_after_quota_wizard(monkeypatch, fake_systemd):
     assert calls == ["quota", "open"]
 
 
+# --- update-check setup step -----------------------------------------------------
+
+
+def test_setup_update_check_prompt_accepted_enables(monkeypatch, fake_systemd):
+    # Bare-Enter / accepted (default=True) prompt -> updatecheck.enable() is called and
+    # is_enabled() flips True, using the isolated config dir from the autouse fixture.
+    monkeypatch.setattr(engine, "_print_setup_human_plan", lambda p: None)
+    monkeypatch.setattr(engine, "_confirm", lambda prompt, default=True: True)
+    monkeypatch.setattr(engine, "_offer_tailscale", lambda result: None)
+    monkeypatch.setattr(engine, "_quota_setup_wizard", lambda: None)
+    monkeypatch.setattr(engine, "_maybe_open_dashboard", lambda result, opts, detection: True)
+
+    assert updatecheck.is_enabled() is False
+    assert run(["setup", "--service", "systemd"]) == 0
+    assert updatecheck.is_enabled() is True
+
+
+def test_setup_update_check_prompt_declined_stays_disabled(monkeypatch, fake_systemd):
+    def fake_confirm(prompt, default=True):
+        if "update notices" in prompt.lower():
+            return False
+        return True
+
+    monkeypatch.setattr(engine, "_print_setup_human_plan", lambda p: None)
+    monkeypatch.setattr(engine, "_confirm", fake_confirm)
+    monkeypatch.setattr(engine, "_offer_tailscale", lambda result: None)
+    monkeypatch.setattr(engine, "_quota_setup_wizard", lambda: None)
+    monkeypatch.setattr(engine, "_maybe_open_dashboard", lambda result, opts, detection: True)
+
+    assert run(["setup", "--service", "systemd"]) == 0
+    assert updatecheck.is_enabled() is False
+
+
+def test_setup_yes_skips_update_check_prompt(monkeypatch):
+    # --yes is the non-interactive signal: scripted/CI setups must never block on this
+    # prompt or silently enable a network-calling feature, so the step function itself
+    # must not even be invoked (not just "prompt answered with a default").
+    calls = []
+    monkeypatch.setattr(engine, "_update_check_setup_step", lambda: calls.append("update_check"))
+    monkeypatch.setattr(engine, "_quota_setup_wizard", lambda: calls.append("quota"))
+
+    assert run(["setup", "--yes", "--no-service"]) == 0
+    assert calls == []
+    assert updatecheck.is_enabled() is False
+
+
+@pytest.mark.parametrize("kill_value", ["0", "off", "false", "no", "OFF", "False"])
+def test_setup_update_check_kill_switch_skips_prompt(monkeypatch, fake_systemd, kill_value):
+    # TOKDASH_UPDATE_CHECK's disabling forms (0/false/no/off, case-insensitive) are a hard
+    # kill switch: even in an otherwise fully interactive setup, offering to enable something
+    # the env is force-disabling would be misleading, so the prompt must not appear at all.
+    # Regression: the step once matched only the literal "0", so off/false/no slipped through
+    # and could persist dormant consent that silently activated once the env var was removed.
+    monkeypatch.setenv("TOKDASH_UPDATE_CHECK", kill_value)
+    prompts = []
+
+    def fake_confirm(prompt, default=True):
+        prompts.append(prompt)
+        return True
+
+    monkeypatch.setattr(engine, "_print_setup_human_plan", lambda p: None)
+    monkeypatch.setattr(engine, "_confirm", fake_confirm)
+    monkeypatch.setattr(engine, "_offer_tailscale", lambda result: None)
+    monkeypatch.setattr(engine, "_quota_setup_wizard", lambda: None)
+    monkeypatch.setattr(engine, "_maybe_open_dashboard", lambda result, opts, detection: True)
+
+    assert run(["setup", "--service", "systemd"]) == 0
+    assert not any("update notices" in p.lower() for p in prompts)
+    assert updatecheck.is_enabled() is False
+
+
 def test_setup_overwrites_its_own_marked_unit(fake_systemd):
     # Re-running setup is idempotent: an existing *marked* unit is replaced without --force.
     assert run(["setup", "--auto", "--service", "systemd"]) == 0
@@ -1178,6 +1249,15 @@ def test_updatecheck_enabled_via_env(monkeypatch):
     assert updatecheck.is_enabled() is True
     monkeypatch.setenv("TOKDASH_UPDATE_CHECK", "0")
     assert updatecheck.is_enabled() is False  # hard kill switch wins
+
+
+@pytest.mark.parametrize("value", ["0", "off", "false", "no", "OFF", "False", "  no  "])
+def test_updatecheck_kill_switch_forms(monkeypatch, value):
+    # kill_switched() and is_enabled() must agree on every disabling form (case-insensitive,
+    # whitespace-trimmed), so the setup consent step and the runtime never diverge on "off".
+    monkeypatch.setenv("TOKDASH_UPDATE_CHECK", value)
+    assert updatecheck.kill_switched() is True
+    assert updatecheck.is_enabled() is False
 
 
 def test_updatecheck_enable_writes_config(monkeypatch):

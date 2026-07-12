@@ -146,7 +146,7 @@ def _label_for_limit(limit: dict[str, Any]) -> tuple[str, str]:
     kind = str(limit.get("kind") or "usage")
     # Defensive: the API could return scope/model as something other than a dict (schema
     # drift). isinstance guards keep a string scope from raising AttributeError and 500ing
-    # POST /api/quota/refresh — we simply fall back to the kind label.
+    # GET /api/quota/refresh — we simply fall back to the kind label.
     scope = limit.get("scope")
     scope = scope if isinstance(scope, dict) else {}
     model_obj = scope.get("model")

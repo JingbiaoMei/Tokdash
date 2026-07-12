@@ -41,7 +41,10 @@ Open that URL from Windows or any other device signed in to the same tailnet. To
 bound to `127.0.0.1`; Tailscale supplies the private HTTPS transport.
 
 Tailscale Serve is read-only for state-changing API actions. Proxied requests carry the
-tailnet hostname and HTTPS origin, which fail Tokdash's loopback write gate.
+tailnet hostname and HTTPS origin, which fail Tokdash's loopback write gate. The Quota tab's
+"Refresh now" button (`GET /api/quota/refresh`) still works over Serve — it only polls
+providers' read-only usage endpoints, so it is a `GET` and is exempt from the write gate like
+any other read.
 
 The wizard requires explicit confirmation. `tokdash setup --auto` never enables remote access.
 If onboarding creates the Serve rule, it records the matching teardown command in

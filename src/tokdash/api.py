@@ -924,7 +924,10 @@ def set_quota_settings(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-@app.post("/api/quota/refresh")
+# Read-only poll (no quota consumed): providers' usage endpoints are read-only, so this is
+# intentionally GET, not POST, so it works over Tailscale/WSL/any forward while genuine
+# config-write endpoints stay loopback-guarded.
+@app.get("/api/quota/refresh")
 def refresh_quota() -> Dict[str, Any]:
     from .sources.quota import config as quota_config
 
@@ -1154,11 +1157,13 @@ async def update_check_consent() -> Dict[str, Any]:
     return {"enabled": True}
 
 
-@app.post("/api/update-check")
+# Read-only poll (PyPI read + in-memory cache only, no disk write): intentionally GET, not
+# POST, so it works over Tailscale/WSL/any forward while the CONSENT endpoint above (which
+# writes config.json) stays loopback-guarded. Opt-in still applies: it only ever *reports*
+# availability when the user has enabled update checks — never an automatic/background call
+# (§14) — and it never runs an upgrade (no web-triggered shell, §15).
+@app.get("/api/update-check")
 async def run_update_check() -> Dict[str, Any]:
-    # Opt-in + write-gated. Performs a single, cached, short-timeout PyPI check ONLY when
-    # the user has enabled update checks — never an automatic/background call (§14). This
-    # only *reports* availability; it never runs an upgrade (no web-triggered shell, §15).
     from .onboard import updatecheck
 
     if not updatecheck.is_enabled():

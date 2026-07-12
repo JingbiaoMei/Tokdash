@@ -113,12 +113,14 @@ def cmd_setup(opts: Options) -> int:
     ):
         _offer_tailscale(result)
 
-    # Optional quota step (interactive only): per-provider network consent (default No) and
-    # the poll interval, mirroring the opt-in update-check consent UX. --auto/--yes/--json and
-    # non-tty runs skip it so scripted setup never blocks on a prompt. Runs last so it never
-    # steals input meant for the earlier setup/tailscale confirmations. Browser opening happens
-    # after this wizard so the dashboard does not interrupt the remaining terminal questions.
+    # Optional interactive-only steps: update-notice consent (default Yes) runs first, then
+    # the quota step (per-provider network consent, default No, and the poll interval).
+    # --auto/--yes/--json and non-tty runs skip both — scripted/CI setups must never block on
+    # a prompt or silently enable a network-calling feature. They run last so neither steals
+    # input meant for the earlier setup/tailscale confirmations. Browser opening happens after
+    # these wizards so the dashboard does not interrupt the remaining terminal questions.
     if result.get("ok") and not opts.auto and not opts.yes and not opts.json and detection["tty"]:
+        _update_check_setup_step()
         _quota_setup_wizard()
 
     _maybe_open_dashboard(result, opts, detection)
@@ -1393,6 +1395,43 @@ def _print_advisories(p: Dict[str, Any]) -> None:
         print(f"  {_ok('•')} {n}")
     for w in p.get("warnings", []):
         print(f"  {_warn('⚠')} {w}")
+
+
+def _update_check_setup_step() -> None:
+    """Ask whether to enable opt-in PyPI update-check notices (§14) — default YES.
+
+    Unlike quota tracking this is a small, fully read-only check (no credentials, one cached
+    PyPI GET) that only ever *reports* availability and never auto-upgrades anything, so
+    consenting by default keeps the dashboard's "update available" badge useful out of the
+    box while still requiring an explicit accept. Skipped entirely when the
+    ``TOKDASH_UPDATE_CHECK`` kill switch (``0``/``false``/``no``/``off``) is set (offering to
+    enable something the env is force-disabling would be misleading), or when update checks
+    are already enabled.
+    """
+    if updatecheck.kill_switched():
+        return
+    if updatecheck.is_enabled():
+        return
+
+    print("\n" + _bold("Update notices (optional)"))
+    print("  Tokdash can do a one-time, opt-in PyPI version check when the dashboard loads")
+    print("  and show an \"update available\" badge. Read-only; it never auto-upgrades")
+    print("  anything. Toggle it later from the dashboard's \"Enable update notices\" link.")
+
+    # Any input failure (exhausted stdin / EOF / interrupt) means "accept the default and
+    # stop asking" — matches the quota wizard so a broken terminal never blocks setup.
+    try:
+        enable = _confirm("  Enable update notices?", default=True)
+    except (EOFError, KeyboardInterrupt, StopIteration):
+        print()
+        return
+    if not enable:
+        print("  Update notices disabled. Enable them any time from the dashboard.")
+        return
+    try:
+        updatecheck.enable()
+    except Exception:
+        _err("  Could not save update-check setting; enable it later from the dashboard.")
 
 
 def _quota_setup_wizard() -> None:

@@ -96,13 +96,20 @@ def _bucket_snapshot(
     if used_percent is None:
         return None
     account = str(rate_limits.get("account_id") or "default")
+    resets_at = _parse_time(_first_present(bucket_payload, "resets_at", "reset_at", "resetAt"))
+    if not used_percent:
+        # Codex's rolling-window API returns resets_at ~= captured_at + window_length even
+        # for an idle window (0% used, timer hasn't actually started on first use yet). That
+        # is a phantom reset, not a real one -- null it out so idle buckets render "reset --",
+        # mirroring how Claude already treats its null buckets.
+        resets_at = None
     return QuotaSnapshot(
         provider="codex",
         account=account,
         bucket=bucket,
         bucket_label=bucket_label,
         used_percent=used_percent,
-        resets_at=_parse_time(_first_present(bucket_payload, "resets_at", "reset_at", "resetAt")),
+        resets_at=resets_at,
         plan=str(rate_limits.get("plan_type") or "") or None,
         captured_at=captured_at,
         source="codex_session",

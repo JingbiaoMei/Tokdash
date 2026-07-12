@@ -5381,7 +5381,7 @@
       if (updateInFlight || refreshUiState === 'refreshing' || refreshUiState === 'cooldown') return;
       setRefreshUiState('refreshing');
       try {
-        await postJsonWithCsrf(appPath('/api/quota/refresh'), {});
+        await fetchJsonWithRetry(appPath('/api/quota/refresh'), { cache: 'no-store' });
         await loadQuota({ force: true });
         setRefreshUiState('updated', { resetAfterMs: 1800 });
       } catch (error) {
@@ -7058,12 +7058,12 @@
             try {
               await postUpdateEndpoint('/api/update-check/consent');
               enableLink.hidden = true;
-              renderUpdateBadge(await postUpdateEndpoint('/api/update-check'));
+              renderUpdateBadge(await fetchJsonWithRetry(appPath('/api/update-check'), { cache: 'no-store' }));
             } catch (_) { /* leave the link so the user can retry */ }
           });
           return;
         }
-        renderUpdateBadge(await postUpdateEndpoint('/api/update-check'));
+        renderUpdateBadge(await fetchJsonWithRetry(appPath('/api/update-check'), { cache: 'no-store' }));
       } catch (_) { /* fail-soft: the dashboard must never depend on this */ }
     }
 

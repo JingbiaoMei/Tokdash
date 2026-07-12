@@ -97,7 +97,7 @@ service worker), which covers the "standalone app window" want with zero code.
 
 ## Dashboard update notice — ✅ shipped (Unreleased)
 Opt-in update badge in the dashboard header backed by the existing `§14` update-check endpoints
-(`/api/version`, `POST /api/update-check`, `POST /api/update-check/consent`). Constraints that
+(`/api/version`, `GET /api/update-check`, `POST /api/update-check/consent`). Constraints that
 must hold for any future change: no network check without consent (§14), and the web UI never
 executes the upgrade — it shows a copyable `tokdash update` command only (§15).
 

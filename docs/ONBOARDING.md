@@ -64,6 +64,13 @@ systemd services that occupy `55423` but do not expose the new `/health` fingerp
 `--force` rewrites and restarts the existing `tokdash.service`. Use `--no-service` when you
 want setup state without creating a background service.
 
+**Optional update-notices step (interactive only).** Just before the quota step, an
+interactive setup also asks whether to enable opt-in update notices (default **Yes** — bare
+Enter enables), calling the same `updatecheck.enable()` the dashboard's consent link uses.
+The `TOKDASH_UPDATE_CHECK=0` hard kill switch (see "Update checks" below) skips the prompt
+entirely, and it is skipped if update checks are already enabled. Like the quota step,
+`--auto`, `--yes`, `--json`, and non-TTY runs skip it so scripted setup never prompts.
+
 **Optional quota step (interactive only).** After a successful interactive setup, the wizard
 offers the same quota-tracking decisions the dashboard's Quota tab exposes: the master switch
 (`quota.enabled`), per-provider quota **API** consent (default No — without opting in, quota
@@ -187,7 +194,8 @@ you explicitly ask:
   which the dashboard can call). `TOKDASH_UPDATE_CHECK=0` is a hard kill switch that overrides
   saved consent.
 - When enabled, `tokdash doctor` reports whether a newer version is on PyPI, and
-  `POST /api/update-check` (loopback + token-gated, like all writes) returns the comparison.
+  `GET /api/update-check` (read-only — PyPI read + in-memory cache, not write-gated, so it
+  works over Tailscale/WSL/any forward) returns the comparison.
   Results are cached for hours; there are no automatic background checks. The check only
   *reports* availability — it never runs an upgrade (run `tokdash update` for that).
 

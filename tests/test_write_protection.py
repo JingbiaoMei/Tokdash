@@ -206,13 +206,14 @@ def test_write_guard_registered_and_blocks_through_asgi(monkeypatch):
 
 
 def test_update_check_post_endpoints_are_write_gated(monkeypatch):
-    # The two POST /api/update-check* endpoints must be gated end-to-end, not just the PUT.
+    # POST /api/update-check/consent writes config.json, so it must stay gated end-to-end,
+    # not just the PUT. /api/update-check itself is now GET (see
+    # test_update_check_get_is_not_write_gated below) since it is read-only.
     monkeypatch.setenv("TOKDASH_WARM_ON_START", "0")
     monkeypatch.delenv("TOKDASH_UPDATE_CHECK", raising=False)
     from tokdash.onboard import updatecheck
 
     assert updatecheck.is_enabled() is False
-    assert _asgi_status("POST", "/api/update-check", {"host": "evil.example.com", "content-type": "application/json"}) == 403
     assert _asgi_status("POST", "/api/update-check/consent", {"host": "evil.example.com", "content-type": "application/json"}) == 403
     # the denied consent must NOT have persisted (the gate stopped it before the handler)
     assert updatecheck.is_enabled() is False
@@ -221,7 +222,57 @@ def test_update_check_post_endpoints_are_write_gated(monkeypatch):
 def test_quota_post_endpoints_are_write_gated(monkeypatch):
     monkeypatch.setenv("TOKDASH_WARM_ON_START", "0")
     assert _asgi_status("POST", "/api/quota/consent", {"host": "evil.example.com", "content-type": "application/json"}) == 403
-    assert _asgi_status("POST", "/api/quota/refresh", {"host": "evil.example.com", "content-type": "application/json"}) == 403
+
+
+def test_quota_refresh_get_is_not_write_gated(monkeypatch):
+    # /api/quota/refresh is GET, not a mutating method (see _MUTATING_METHODS), because it
+    # only polls providers' read-only usage endpoints -- no quota is consumed. It must NOT be
+    # blocked by the loopback write-guard, even from a non-loopback Host, so it keeps working
+    # over Tailscale/WSL/any forward.
+    #
+    # Verified with pure, I/O-free checks -- deliberately NOT by driving the handler through
+    # the raw-ASGI helper. refresh_quota is a SYNC (`def`) handler, which FastAPI dispatches
+    # on a threadpool (anyio.to_thread.run_sync); doing that under a bare asyncio.run(app())
+    # deadlocks in some environments. (The update-check GET test may use the ASGI helper only
+    # because its handler is `async def`, run directly on the loop -- no threadpool.)
+    from fastapi import HTTPException
+
+    # 1) The route is registered as GET, not a mutating method.
+    route = next(r for r in api.app.routes if getattr(r, "path", "") == "/api/quota/refresh")
+    assert "GET" in route.methods and "POST" not in route.methods
+    # 2) The write-guard admits a GET regardless of Host/Origin (pure function, no I/O).
+    assert api.mutation_denied_reason("GET", {"host": "evil.example.com"}) is None
+    # 3) The handler short-circuits to 409 under the kill switch, before any network/session
+    #    I/O -- called directly (no ASGI, no threadpool) so it can never hang.
+    monkeypatch.setenv("TOKDASH_QUOTA_POLL", "0")
+    with pytest.raises(HTTPException) as exc:
+        api.refresh_quota()
+    assert exc.value.status_code == 409
+
+
+def test_update_check_get_is_not_write_gated(monkeypatch):
+    # /api/update-check is GET, not a mutating method (see _MUTATING_METHODS), because it only
+    # does a read-only PyPI check plus an in-memory cache -- no disk write. It must NOT be
+    # blocked by the loopback write-guard, even from a non-loopback Host, so the "update
+    # available" badge keeps working over Tailscale/WSL/any forward.
+    #
+    # Primary, I/O-free check (cannot hang): the guard admits a GET regardless of Host/Origin.
+    assert api.mutation_denied_reason("GET", {"host": "evil.example.com"}) is None
+    # End-to-end check through the real middleware+routing. Update checks are disabled by
+    # default (isolated data dir) so the handler short-circuits to enabled:False; stubbing
+    # updatecheck.check keeps the test hermetic (no real PyPI network call) even if that
+    # short-circuit ever regressed -- this test exercises the guard, not the PyPI-check logic.
+    from tokdash.onboard import updatecheck
+
+    monkeypatch.setenv("TOKDASH_WARM_ON_START", "0")
+    monkeypatch.delenv("TOKDASH_UPDATE_CHECK", raising=False)
+    monkeypatch.setattr(
+        updatecheck,
+        "check",
+        lambda *a, **k: {"current": "x", "latest": None, "update_available": False, "error": None, "cached": False},
+    )
+    status = _asgi_status("GET", "/api/update-check", {"host": "evil.example.com"})
+    assert status == 200  # reached the handler; the write-guard did not 403 it
 
 
 def test_authorized_consent_is_admitted_through_asgi(monkeypatch):

@@ -340,7 +340,7 @@ tokdash quota poll
 tokdash quota show
 ```
 
-**总开关。** `quota.enabled`（默认开启）控制*所有*额度工作——会话扫描、网络轮询与快照写入。可在「额度」标签页或用 `tokdash quota consent --enabled on|off` 切换。关闭后（或设置了 `TOKDASH_QUOTA_POLL=0` 终止开关时），后台轮询会完全停摆，`POST /api/quota/refresh` 会返回「额度跟踪已禁用」错误，标签页也会显示「启用额度跟踪」卡片而非数据。按服务商的授权键仍保留其更窄的、仅网络的含义。
+**总开关。** `quota.enabled`（默认开启）控制*所有*额度工作——会话扫描、网络轮询与快照写入。可在「额度」标签页或用 `tokdash quota consent --enabled on|off` 切换。关闭后（或设置了 `TOKDASH_QUOTA_POLL=0` 终止开关时），后台轮询会完全停摆，`GET /api/quota/refresh` 会返回「额度跟踪已禁用」错误，标签页也会显示「启用额度跟踪」卡片而非数据。按服务商的授权键仍保留其更窄的、仅网络的含义。
 
 **轮询间隔。** 后台轮询默认每 **30 分钟** 记录一次快照。可在「额度」标签页、`tokdash setup` 过程中或用 `tokdash quota consent --poll-interval N` 选择 15/30/60/120 分钟，它会保存为 `config.json` 中的 `quota.poll_interval_minutes`。环境变量 `TOKDASH_QUOTA_POLL_INTERVAL`（单位秒，下限 300）会覆盖保存的值，标签页会显示当前生效的来源。间隔调整会在下一个轮询周期生效，无需重启服务。Codex 会话摄取采用增量方式——首次一次性回填历史后，每个周期只对增长过的会话文件做尾部读取，因此稳态轮询只需个位数毫秒。
 

@@ -112,6 +112,25 @@ def test_collect_codex_session_rate_limits_downsamples_one_snapshot_per_bucket_h
     assert by_key[("5h", 1782911100)].used_percent == 4.0
 
 
+def test_idle_window_nulls_phantom_resets_at(tmp_path):
+    """A used_percent == 0 window's resets_at is a phantom captured_at + window_length
+    reset for a rolling-window timer that hasn't actually started -- it must be nulled
+    so the UI shows "reset --", mirroring how Claude already treats its idle/null
+    buckets. A window with used_percent > 0 must keep its real resets_at unchanged."""
+    _write_jsonl(
+        tmp_path / "sessions" / "rollout-idle.jsonl",
+        [_token_count("2026-07-01T12:01:00Z", 0.0, 40.0)],
+    )
+
+    snapshots = collect_codex_session_snapshots(tmp_path / "sessions")
+    by_bucket = {s.bucket: s for s in snapshots}
+
+    assert by_bucket["5h"].used_percent == 0.0
+    assert by_bucket["5h"].resets_at is None
+    assert by_bucket["7d"].used_percent == 40.0
+    assert by_bucket["7d"].resets_at == 1783467600
+
+
 def test_collect_codex_session_rate_limits_keeps_info_fallback(tmp_path):
     _write_jsonl(
         tmp_path / "sessions" / "rollout-legacy.jsonl",

@@ -19,8 +19,8 @@ If that’s not available for your fork:
 ## Write-protection model
 
 The API is unauthenticated, so **every state-changing request** — today `PUT /api/pricing-db`,
-`POST /api/update-check`, `POST /api/update-check/consent`, `POST /api/quota/consent`,
-`POST /api/quota/settings`, and `POST /api/quota/refresh` (any `POST`/`PUT`/`PATCH`/`DELETE`) —
+`POST /api/update-check/consent`, `POST /api/quota/consent`, and `POST /api/quota/settings`
+(any `POST`/`PUT`/`PATCH`/`DELETE`) —
 must clear a gate before it reaches a handler — it fails closed (an unknown bind is treated
 as non-loopback):
 
@@ -48,11 +48,33 @@ distinguishing a forwarded-localhost connection from a genuine local one is not 
 HTTP headers. If you do not want SSH-forwarded writes, bind to a non-loopback address (which
 disables all writes) or stop the service when you are done.
 
+### Quota refresh and update-check are read-only GETs
+
+`GET /api/quota/refresh` (the Quota tab's "Refresh now" button) only calls providers'
+read-only usage endpoints — no quota is consumed and nothing provider-side is mutated — so it
+is served as `GET`, like the other read routes, and is **not** subject to the write-protection
+gate above. Likewise, `GET /api/update-check` only performs a read-only PyPI version check plus
+an in-memory cache (no disk write, no config change) and is also served as `GET`. That means
+both keep working over Tailscale Serve, WSL port-forwarding, or any other forward that only
+proxies loopback traffic, even though those paths reject genuine writes. The config-write
+endpoints (`PUT /api/pricing-db`, `POST /api/quota/consent`, `POST /api/quota/settings`,
+`POST /api/update-check/consent`) are unaffected and remain loopback-only as described above.
+
+`TOKDASH_ALLOW_ORIGINS` / `TOKDASH_ALLOW_ORIGIN_REGEX` only widen the CORS allowlist (which
+browser-page origins may issue cross-origin `fetch` calls); they are unrelated to the write
+gate and never grant write access to a non-loopback bind — loopback bind + Host/Origin + token
+are still required for every mutating request.
+
+On WSL2, bind to `127.0.0.1` (the default), not `0.0.0.0`. Windows' localhost forwarding into
+WSL preserves a loopback `Host` header, so the guarded writes above keep working from Windows;
+binding `0.0.0.0` makes the effective bind non-loopback and disables writes entirely (see
+[`REMOTE_ACCESS.md`](REMOTE_ACCESS.md)).
+
 ## Quota tracking
 
 Quota tracking has a master switch, `quota.enabled` in `config.json` (default on), that governs
 *all* quota work. When it is off — or the `TOKDASH_QUOTA_POLL=0` kill switch is set — the poller
-idles entirely: no session scanning, no network calls, and no database writes. `POST /api/quota/refresh`
+idles entirely: no session scanning, no network calls, and no database writes. `GET /api/quota/refresh`
 then returns a "quota tracking disabled" error. The per-provider consent keys are narrower: they only
 govern the opt-in *network* tiers and never enable the master switch on their own.
 

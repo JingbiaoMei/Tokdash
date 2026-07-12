@@ -20,7 +20,7 @@ per-session token); see [`docs/SECURITY.md`](SECURITY.md) and `PUT /api/pricing-
 | `GET` | `/health` | Liveness probe (with a Tokdash fingerprint) |
 | `GET` | `/api/version` | Runtime version + setup install method |
 | `GET` | `/api/csrf-token` | Per-session write token (loopback/same-origin only) |
-| `POST` | `/api/update-check` | Opt-in cached PyPI version check (write-gated) |
+| `GET` | `/api/update-check` | Opt-in cached PyPI version check (read-only) |
 | `POST` | `/api/update-check/consent` | Persist one-time update-check consent (write-gated) |
 | `GET` | `/api/usage` | Aggregated token usage and cost across all tools |
 | `GET` | `/api/tools` | Per-tool usage breakdown (coding apps only) |
@@ -28,7 +28,7 @@ per-session token); see [`docs/SECURITY.md`](SECURITY.md) and `PUT /api/pricing-
 | `GET` | `/api/quota/history` | Quota utilization and derived consumption history |
 | `POST` | `/api/quota/consent` | Persist per-provider quota API consent (write-gated) |
 | `POST` | `/api/quota/settings` | Persist the quota master switch and poll interval (write-gated) |
-| `POST` | `/api/quota/refresh` | Run an immediate consented quota API poll (write-gated, cooldown) |
+| `GET` | `/api/quota/refresh` | Run an immediate consented quota API poll (read-only, cooldown) |
 | `GET` | `/api/sessions` | List sessions for a given tool |
 | `GET` | `/api/session` | Detailed turns for a single session |
 | `GET` | `/api/codex/sessions` | Convenience wrapper: Codex sessions |
@@ -101,12 +101,14 @@ read it).
 
 ---
 
-## `POST /api/update-check`
+## `GET /api/update-check`
 
-Opt-in, default-off PyPI version check (see `docs/ONBOARDING.md` → Update checks). **Write-gated**
-(loopback bind + `Host`/`Origin` allowlist + `X-Tokdash-Token`). No-op unless update checks are
-enabled (`TOKDASH_UPDATE_CHECK=1` or saved consent). Result is cached for hours; never an
-automatic/background call, and it only *reports* — it never runs an upgrade.
+Opt-in, default-off PyPI version check (see `docs/ONBOARDING.md` → Update checks). **Read-only**
+— PyPI read plus an in-memory cache, no disk write — so it is served as `GET` and is **not**
+write-gated; it works over Tailscale/WSL/any forward like `GET /api/quota/refresh` (see
+`docs/SECURITY.md`). No-op unless update checks are enabled (`TOKDASH_UPDATE_CHECK=1` or saved
+consent). Result is cached for hours; never an automatic/background call, and it only *reports*
+— it never runs an upgrade.
 
 **Response (enabled)**
 ```json
@@ -134,7 +136,7 @@ overrides saved consent.
 
 ## `GET /api/quota`
 
-Returns current subscription quota state. This route never performs provider network I/O; it reads the local `quota_snapshots` table (and local plan/tier metadata). Session files are not scanned here — the background poller ingests them. Provider API polling is default-off and happens only through `POST /api/quota/refresh`, the background poller after consent, or `tokdash quota poll`.
+Returns current subscription quota state. This route never performs provider network I/O; it reads the local `quota_snapshots` table (and local plan/tier metadata). Session files are not scanned here — the background poller ingests them. Provider API polling is default-off and happens only through `GET /api/quota/refresh`, the background poller after consent, or `tokdash quota poll`.
 
 `enabled` is the quota master switch (`config.json` `quota.enabled`, default `true`, forced `false` by the `TOKDASH_QUOTA_POLL=0` kill switch). When it is `false` the dashboard renders an *enable quota tracking* card instead of provider data. `poll.interval` is the **effective** interval in seconds and `poll.interval_source` is one of `env` / `config` / `default`.
 
@@ -209,9 +211,9 @@ Persists the quota master switch and background poll interval to `<data_dir>/con
 {"enabled": true, "config_enabled": true, "poll_interval_minutes": 30, "interval": 1800, "interval_source": "config"}
 ```
 
-## `POST /api/quota/refresh`
+## `GET /api/quota/refresh`
 
-Runs an immediate network poll for consented providers and stores snapshots in the local usage DB. **Write-gated** and rate-limited with a 60 second cooldown. It never refreshes provider tokens; expired tokens produce stale-token snapshots. Returns `409` when quota tracking is disabled (master switch off or `TOKDASH_QUOTA_POLL=0`).
+Runs an immediate network poll for consented providers and stores snapshots in the local usage DB. This only reads providers' usage endpoints (no quota is consumed), so it is served as `GET`, not write-gated, and works over Tailscale Serve/WSL/any forward — see [`SECURITY.md`](SECURITY.md#quota-refresh-and-update-check-are-read-only-gets). It is still rate-limited with a 60 second cooldown (`429`). It never refreshes provider tokens; expired tokens produce stale-token snapshots. Returns `409` when quota tracking is disabled (master switch off or `TOKDASH_QUOTA_POLL=0`).
 
 **Response**
 ```json

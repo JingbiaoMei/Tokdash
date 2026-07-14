@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 1.2.2 - 2026-07-14
+
+### Fixed
+
+- Unified Codex live-quota window classification across singular, plural, and metered-feature API schemas. Exact 5-hour and 7-day duration metadata is authoritative; without recognized durations, two returned windows retain primary/secondary semantics while a single pair-shaped live window is treated as weekly during Codex temporary 5-hour disablement. Flat legacy API payloads and local session-log behavior remain unchanged.
+- Kept quota ingestion and stored raw-history re-derivation on the same shared classifier, with round-trip regression coverage for normal, swapped, partial-duration, weekly-only, legacy, and metered response shapes.
+
 ## 1.2.1 - 2026-07-12
 
 ### Fixed

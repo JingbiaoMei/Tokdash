@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
 
 from . import clientpaths
+from .codex_quota_windows import classify_codex_api_windows
 from .filelock import process_lock
 
 
@@ -56,38 +57,6 @@ def _dict_or_none(value: Any) -> dict[str, Any] | None:
     return value if isinstance(value, dict) else None
 
 
-def _codex_window_seconds(window: dict[str, Any]) -> int:
-    try:
-        seconds = window.get("limit_window_seconds") or window.get("window_seconds")
-        if seconds is not None:
-            return int(float(seconds))
-        minutes = window.get("window_minutes")
-        return int(float(minutes) * 60) if minutes is not None else 0
-    except (TypeError, ValueError):
-        return 0
-
-
-def _codex_nested_window_for_bucket(
-    primary: dict[str, Any] | None,
-    secondary: dict[str, Any] | None,
-    bucket: str,
-) -> dict[str, Any] | None:
-    wanted = "7d" if bucket.endswith("_7d") or bucket == "7d" else "5h"
-    present = (("5h", primary), ("7d", secondary))
-    duration_aware = False
-    for fallback, window in present:
-        if window is None:
-            continue
-        seconds = _codex_window_seconds(window)
-        duration_aware = duration_aware or bool(seconds)
-        actual = "7d" if seconds >= 24 * 60 * 60 else "5h" if seconds else fallback
-        if actual == wanted:
-            return window
-    if duration_aware:
-        return None
-    return primary if wanted == "5h" else secondary
-
-
 def _codex_window_used_percent_from_raw(bucket: str, raw_json: str | None) -> float | None:
     try:
         raw = json.loads(raw_json or "{}")
@@ -104,7 +73,11 @@ def _codex_window_used_percent_from_raw(bucket: str, raw_json: str | None) -> fl
         # wins; rate_limit windows only fill the gaps.
         rate_limits = _dict_or_none(usage.get("rate_limits"))
         if rate_limits is not None:
-            window = _dict_or_none(rate_limits.get("primary" if bucket == "5h" else "secondary"))
+            windows = classify_codex_api_windows(
+                _dict_or_none(rate_limits.get("primary")),
+                _dict_or_none(rate_limits.get("secondary")),
+            )
+            window = windows.get(bucket)
             if window is not None:
                 return _as_float(window.get("used_percent"))
         rate_limit = _dict_or_none(usage.get("rate_limit"))
@@ -115,7 +88,7 @@ def _codex_window_used_percent_from_raw(bucket: str, raw_json: str | None) -> fl
                 # Flat legacy shape: "rate_limit" IS the 5h window. A 7d row's value came
                 # from additional_rate_limits, so it cannot be re-derived from here.
                 return _as_float(rate_limit.get("used_percent")) if bucket == "5h" else None
-            window = _codex_nested_window_for_bucket(primary, secondary, bucket)
+            window = classify_codex_api_windows(primary, secondary).get(bucket)
             return _as_float(window.get("used_percent")) if window is not None else None
         return None
 
@@ -129,7 +102,8 @@ def _codex_window_used_percent_from_raw(bucket: str, raw_json: str | None) -> fl
     primary = _dict_or_none(nested.get("primary_window"))
     secondary = _dict_or_none(nested.get("secondary_window"))
     if bucket in {f"{feature}_5h", f"{feature}_7d"}:
-        window = _codex_nested_window_for_bucket(primary, secondary, bucket)
+        suffix = "7d" if bucket.endswith("_7d") else "5h"
+        window = classify_codex_api_windows(primary, secondary).get(suffix)
         return _as_float(window.get("used_percent")) if window is not None else None
     if bucket == feature and primary is None and secondary is None:
         # Legacy single-window shape keeps the unsuffixed bucket id (see codex.py).

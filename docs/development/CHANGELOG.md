@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Unreleased
+
+## 1.3.1 - 2026-07-17
+
+### Fixed
+
+- Persistent parse-cache signatures are now content-based instead of path/mtime-based. After the one-time `v1.3.1` signature migration, a reinstall or upgrade that leaves parser code byte-identical (e.g. `pipx upgrade` restamping every installed file) no longer invalidates the entire usage/session store, so later updates avoid a full-corpus reparse caused only by installer timestamps.
+- Startup cache warming now also precomputes each Sessions tool panel's default view (today), so the first Sessions tab visit after a server restart no longer pays the codex/claude session-store sync serially per tool.
+- Quota polling now samples fixed windows before and after resets without creating provider-wide request bursts: boundary targets are provider-scoped, nearby targets are coalesced, daemon cycles remain at least five minutes apart, HTTP 429 responses are not retried immediately, and post-reset samples stay anchored to the observed reset epoch when a poll crosses the rollover.
+
 ## 1.3.0 - 2026-07-16
 
 ### Added

@@ -186,7 +186,7 @@ def collect_claude_api_snapshots(
                     payload = json.loads(resp.read().decode("utf-8"))
                 break
             except HTTPError as exc:
-                if exc.code not in {429, 500, 502, 503, 504} or attempt == 1:
+                if exc.code not in {500, 502, 503, 504} or attempt == 1:
                     raise
                 time.sleep(0.2)
     except HTTPError as exc:

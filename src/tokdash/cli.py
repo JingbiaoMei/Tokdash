@@ -16,6 +16,7 @@ import uvicorn
 from . import __version__
 from .api import app
 from .compute import compute_usage
+from .sources.quota.config import POLL_INTERVAL_FLOOR_SECONDS
 
 _DB_WATCH_THREAD_STARTED = False
 _DB_WATCH_THREAD_LOCK = threading.Lock()
@@ -493,13 +494,104 @@ def _quota_poll_interval() -> int:
 
 def _quota_jittered_interval() -> int:
     base = _quota_poll_interval()
-    return max(300, int(base + random.uniform(-base * 0.05, base * 0.05)))
+    return max(POLL_INTERVAL_FLOOR_SECONDS, int(base + random.uniform(-base * 0.05, base * 0.05)))
 
 
-def _quota_poll_once(*, include_network: bool = True) -> dict:
+# Boundary sampling must not bypass the same provider-call floor as regular polling.
+# Besides avoiding bursts, this lets one delayed poll coalesce nearby reset targets.
+_QUOTA_POLL_SLEEP_FLOOR_SECONDS = POLL_INTERVAL_FLOOR_SECONDS
+
+
+def _quota_latest_snapshots_for_scheduling() -> list[dict]:
+    """Latest snapshot rows for boundary-poll scheduling, or ``[]`` when boundary polling
+    is off (skips the DB read entirely, so a disabled feature costs nothing extra per
+    cycle) or on any failure (DB not ready yet, locked, etc.) — the daemon must always fall
+    back cleanly to the regular jittered interval."""
+    try:
+        from .sources.quota import config as quota_config
+
+        if not quota_config.effective_boundary_config().enabled:
+            return []
+        enabled_providers = {
+            source.removesuffix("_api") for source in quota_config.enabled_network_sources()
+        }
+        if not enabled_providers:
+            return []
+        from .usage_store import UsageEntryStore
+
+        return [
+            row
+            for row in UsageEntryStore().latest_quota_snapshots()
+            if str(row.get("provider") or "") in enabled_providers
+        ]
+    except Exception:
+        return []
+
+
+def _plan_next_quota_poll(
+    now: int,
+    latest_snapshots,
+    *,
+    anchored_post_targets=(),
+):
+    """Compute ``(sleep_seconds, boundary_target)`` for the daemon's next poll cycle.
+
+    Boundary targets are delayed to the regular 300-second provider-call floor and
+    coalesced there. The returned target carries the provider set so a boundary wake does
+    not poll unrelated enabled APIs.
+    """
+    from .sources.quota import config as quota_config
+    from .sources.quota import plan_boundary_poll
+
+    regular_delay = _quota_jittered_interval()
+    try:
+        boundary = plan_boundary_poll(
+            now,
+            latest_snapshots,
+            quota_config.effective_boundary_config(),
+            minimum_delay_seconds=_QUOTA_POLL_SLEEP_FLOOR_SECONDS,
+            anchored_post_targets=anchored_post_targets,
+        )
+    except Exception:
+        return regular_delay, None
+    if boundary is None or boundary.at - now >= regular_delay:
+        return regular_delay, None
+    return boundary.at - now, boundary
+
+
+def _next_poll_sleep_seconds(now: int, latest_snapshots) -> int:
+    """Seconds to sleep before the next quota poll (see `_plan_next_quota_poll`)."""
+    return _plan_next_quota_poll(now, latest_snapshots)[0]
+
+
+def _record_boundary_poll_metric(kind: str) -> None:
+    """Best-effort `quota_meta` counter bump for a fired boundary poll.
+
+    Purely for later measuring the payoff of boundary sampling (see feature background);
+    never allowed to break the poll loop, so every failure mode (DB not ready, locked,
+    disabled) is swallowed.
+    """
+    try:
+        from .usage_store import UsageEntryStore, persistent_usage_db_enabled
+
+        if not persistent_usage_db_enabled():
+            return
+        meta_key = "quota_boundary_pre_polls" if kind == "pre" else "quota_boundary_post_polls"
+        store = UsageEntryStore()
+        current = store.quota_meta_get(meta_key)
+        try:
+            count = int(current) if current else 0
+        except ValueError:
+            count = 0
+        store.quota_meta_set(meta_key, str(count + 1))
+    except Exception:
+        pass
+
+
+def _quota_poll_once(*, include_network: bool = True, network_sources=None) -> dict:
     from .sources.quota import poll_quota
 
-    return poll_quota(include_network=include_network)
+    return poll_quota(include_network=include_network, network_sources=network_sources)
 
 
 def _quota_tracking_enabled() -> bool:
@@ -512,12 +604,55 @@ def _quota_tracking_enabled() -> bool:
 
 
 def _quota_network_enabled() -> bool:
+    return bool(_quota_network_sources())
+
+
+def _quota_network_sources() -> tuple[str, ...]:
     try:
         from .sources.quota.config import enabled_network_sources
 
-        return bool(enabled_network_sources())
+        return tuple(enabled_network_sources())
     except Exception:
-        return False
+        return ()
+
+
+def _reset_epochs(rows) -> dict[tuple[str, str, str], int]:
+    epochs: dict[tuple[str, str, str], int] = {}
+    for row in rows:
+        resets_at = row.get("resets_at")
+        if resets_at is None:
+            continue
+        try:
+            reset = int(resets_at)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        key = (
+            str(row.get("provider") or ""),
+            str(row.get("account") or "default"),
+            str(row.get("bucket") or ""),
+        )
+        epochs[key] = reset
+    return epochs
+
+
+def _advanced_reset_post_targets(before_rows, after_rows, now: int) -> list[tuple[int, str]]:
+    """Post-reset targets anchored to reset epochs observed before a rollover poll."""
+    from .sources.quota import RESET_JITTER_SECONDS, config as quota_config
+
+    cfg = quota_config.effective_boundary_config()
+    if not cfg.enabled or not cfg.post_reset_enabled:
+        return []
+    before = _reset_epochs(before_rows)
+    after = _reset_epochs(after_rows)
+    targets: list[tuple[int, str]] = []
+    for key, old_reset in before.items():
+        new_reset = after.get(key)
+        if new_reset is None or new_reset - old_reset <= RESET_JITTER_SECONDS:
+            continue
+        target = old_reset + cfg.post_seconds
+        if target > now + RESET_JITTER_SECONDS:
+            targets.append((target, key[0]))
+    return targets
 
 
 def _start_quota_poll_daemon() -> None:
@@ -532,15 +667,66 @@ def _start_quota_poll_daemon() -> None:
 
     def loop() -> None:
         time.sleep(60)
+        pending_boundary = None
+        anchored_post_targets: list[tuple[int, str]] = []
         while True:
+            # Re-read the master switch and interval every iteration so the tab's
+            # enable/disable + interval choice apply without a restart.
+            tracking_enabled = _quota_tracking_enabled()
+            before_snapshots = _quota_latest_snapshots_for_scheduling() if tracking_enabled else []
+            poll_succeeded = False
             try:
-                # Re-read the master switch and interval every iteration so the tab's
-                # enable/disable + interval choice apply without a restart.
-                if _quota_tracking_enabled():
-                    _quota_poll_once(include_network=_quota_network_enabled())
+                if tracking_enabled:
+                    enabled_sources = _quota_network_sources()
+                    if pending_boundary is None:
+                        selected_sources = enabled_sources
+                    else:
+                        selected_sources = tuple(
+                            source
+                            for source in enabled_sources
+                            if source.removesuffix("_api") in pending_boundary.providers
+                        )
+                    _quota_poll_once(
+                        include_network=bool(selected_sources),
+                        network_sources=selected_sources,
+                    )
+                    poll_succeeded = True
+                    if pending_boundary is not None:
+                        for kind in pending_boundary.kinds:
+                            _record_boundary_poll_metric(kind)
             except Exception:
                 pass
-            time.sleep(_quota_jittered_interval())
+            # Re-read boundary config AND latest snapshots each iteration (post-poll, so a
+            # rollover this cycle just wrote is already reflected) so a window's rollover
+            # reschedules the next boundary target immediately. With tracking off there is
+            # nothing to poll for, so skip the DB read and fall back to exactly the regular
+            # jittered interval — identical to pre-boundary-polling behavior.
+            now = int(time.time())
+            latest_snapshots = _quota_latest_snapshots_for_scheduling() if tracking_enabled else []
+            if poll_succeeded:
+                covered_providers = (
+                    set(pending_boundary.providers)
+                    if pending_boundary is not None
+                    else {source.removesuffix("_api") for source in _quota_network_sources()}
+                )
+                anchored_post_targets = [
+                    (target, provider)
+                    for target, provider in anchored_post_targets
+                    if target > now or provider not in covered_providers
+                ]
+                for target in _advanced_reset_post_targets(before_snapshots, latest_snapshots, now):
+                    if target not in anchored_post_targets:
+                        anchored_post_targets.append(target)
+            try:
+                sleep_seconds, pending_boundary = _plan_next_quota_poll(
+                    now,
+                    latest_snapshots,
+                    anchored_post_targets=anchored_post_targets,
+                )
+            except Exception:
+                sleep_seconds = max(_QUOTA_POLL_SLEEP_FLOOR_SECONDS, _quota_jittered_interval())
+                pending_boundary = None
+            time.sleep(sleep_seconds)
 
     with _QUOTA_POLL_THREAD_LOCK:
         if _QUOTA_POLL_THREAD_STARTED:

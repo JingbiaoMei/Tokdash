@@ -386,7 +386,7 @@ def test_codex_retries_transient_http_error_once(monkeypatch, tmp_path):
     assert any(s.bucket == "5h" and s.status == "ok" for s in snapshots)
 
 
-def test_antigravity_retries_transient_http_error_once(monkeypatch, tmp_path):
+def test_antigravity_does_not_retry_rate_limit(monkeypatch, tmp_path):
     ag_dir = tmp_path / ".gemini" / "antigravity-cli"
     ag_dir.mkdir(parents=True)
     (ag_dir / "antigravity-oauth-token").write_text(json.dumps({"access_token": "ya29.token"}), encoding="utf-8")
@@ -396,9 +396,7 @@ def test_antigravity_retries_transient_http_error_once(monkeypatch, tmp_path):
     def opener(req, timeout=15):
         if req.full_url.endswith(":loadCodeAssist"):
             calls["load"] += 1
-            if calls["load"] == 1:
-                raise HTTPError(req.full_url, 429, "Too Many Requests", {}, None)
-            return FakeResponse({"projectId": "project-1"})
+            raise HTTPError(req.full_url, 429, "Too Many Requests", {}, None)
         return FakeResponse(
             {
                 "models": [
@@ -413,8 +411,8 @@ def test_antigravity_retries_transient_http_error_once(monkeypatch, tmp_path):
 
     snapshots = antigravity.collect_antigravity_api_snapshots(opener=opener, now=1_782_907_200)
 
-    assert calls["load"] == 2
-    assert snapshots[0].status == "ok"
+    assert calls["load"] == 1
+    assert snapshots[0].status == "fetch_error"
 
 
 def _load_quota_fixture(name: str) -> dict:

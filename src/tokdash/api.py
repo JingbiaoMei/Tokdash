@@ -31,6 +31,7 @@ from .assets import (
 from .compute import compute_stats, compute_usage_with_comparison, get_openclaw_data, get_tools_data
 from .dateutil import parse_date_range
 from .sessions import (
+    SESSION_TOOLS,
     get_codex_session_detail,
     get_codex_sessions_data,
     get_session_detail,
@@ -142,20 +143,33 @@ def _warm_caches() -> None:
     """Best-effort background warm so the first user request hits hot caches.
 
     Populates the parser caches (coding_tools._entry_cache, openclaw._ENTRY_CACHE)
-    and the API response cache for the dashboard's initial loads — Overview (today)
-    and Stats. Without this, the first cold request pays the full multi-second parse.
+    and the API response cache for the dashboard's initial loads — Overview (today),
+    Stats, and each Sessions tool panel. Without this, the first cold request pays
+    the full multi-second parse (the Sessions tab defers its /api/sessions fan-out
+    until the tab opens, so a cold first visit would pay the codex/claude session
+    store sync serially, per tool, in-request).
     Disable with TOKDASH_WARM_ON_START=0.
     Failures are swallowed; warming must never crash `serve`.
     """
     today = datetime.now().astimezone().strftime("%Y-%m-%d")
-    for key, fetch in (
+    warmers = [
         (_pricing_cache_key("usage_today_None_None"), lambda: compute_usage_with_comparison("today", None, None)),
         (
             _pricing_cache_key(f"usage_today_{today}_{today}"),
             lambda: compute_usage_with_comparison("today", today, today),
         ),
         (_pricing_cache_key("stats_None"), lambda: compute_stats(None)),
-    ):
+    ]
+    # Mirror the dashboard's default Sessions-tab request: period=today, no date
+    # range, server-default review-session toggle (None).
+    for tool in SESSION_TOOLS:
+        warmers.append(
+            (
+                _pricing_cache_key(f"sessions_{tool}_today_None_None_None"),
+                lambda tool=tool: get_sessions_data(tool, "today", None, None, include_review_sessions=None),
+            )
+        )
+    for key, fetch in warmers:
         try:
             get_cached_or_fetch(key, fetch)
         except Exception:

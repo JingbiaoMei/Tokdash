@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,16 @@ POLL_INTERVAL_CHOICES = (15, 30, 60, 120)
 DEFAULT_POLL_INTERVAL_MINUTES = 30
 DEFAULT_POLL_INTERVAL_SECONDS = DEFAULT_POLL_INTERVAL_MINUTES * 60
 POLL_INTERVAL_FLOOR_SECONDS = 300
+
+# Boundary polling: sample shortly before and after each fixed-reset window's reset so the
+# running-high consumption model (see `usage_store.quota_history`) catches the true
+# pre-reset peak and the true post-reset baseline instead of whatever the coarse regular
+# interval happens to land on. This changes only WHEN a poll fires, not the consumption
+# algorithm or schema.
+DEFAULT_BOUNDARY_POLL_ENABLED = True
+DEFAULT_BOUNDARY_PRE_RESET_SECONDS = 120
+DEFAULT_BOUNDARY_POST_RESET_ENABLED = True
+DEFAULT_BOUNDARY_POST_RESET_SECONDS = 120
 
 
 def config_path() -> Path:
@@ -148,7 +159,50 @@ def effective_poll_interval() -> tuple[int, str]:
     return DEFAULT_POLL_INTERVAL_SECONDS, "default"
 
 
+def _env_off_switch(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"0", "false", "no", "off"}
 
+
+def _env_positive_int(name: str) -> int | None:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return None
+    try:
+        value = int(raw)
+    except ValueError:
+        return None
+    return value if value > 0 else None
+
+
+@dataclass(frozen=True)
+class BoundaryPollConfig:
+    """Resolved boundary-poll knobs for one scheduling decision (see `effective_boundary_config`)."""
+
+    enabled: bool
+    pre_seconds: int
+    post_reset_enabled: bool
+    post_seconds: int
+
+
+def effective_boundary_config() -> BoundaryPollConfig:
+    """Resolve boundary-poll settings: env override, else the module default.
+
+    Unlike ``poll_interval_minutes`` there is no persisted ``config.json`` key for these
+    yet (no setup-wizard UI exposes them), so precedence per knob is simply env-or-default.
+    ``TOKDASH_QUOTA_BOUNDARY_POLL`` gates the whole feature; the narrower
+    ``TOKDASH_QUOTA_BOUNDARY_POST`` only turns off the post-reset half while leaving the
+    pre-reset sample enabled.
+    """
+    enabled = DEFAULT_BOUNDARY_POLL_ENABLED and not _env_off_switch("TOKDASH_QUOTA_BOUNDARY_POLL")
+    pre_seconds = _env_positive_int("TOKDASH_QUOTA_BOUNDARY_PRE_SECONDS") or DEFAULT_BOUNDARY_PRE_RESET_SECONDS
+    post_reset_enabled = DEFAULT_BOUNDARY_POST_RESET_ENABLED and not _env_off_switch("TOKDASH_QUOTA_BOUNDARY_POST")
+    post_seconds = _env_positive_int("TOKDASH_QUOTA_BOUNDARY_POST_SECONDS") or DEFAULT_BOUNDARY_POST_RESET_SECONDS
+    return BoundaryPollConfig(
+        enabled=enabled,
+        pre_seconds=pre_seconds,
+        post_reset_enabled=post_reset_enabled,
+        post_seconds=post_seconds,
+    )
 
 
 def network_enabled(key: str) -> bool:

@@ -337,7 +337,7 @@ def _get_json(url: str, token: str, account: str | None, opener, timeout: float)
                 return json.loads(resp.read().decode("utf-8"))
         except HTTPError as exc:
             last_error = exc
-            if exc.code not in {429, 500, 502, 503, 504} or attempt == 1:
+            if exc.code not in {500, 502, 503, 504} or attempt == 1:
                 raise
             time.sleep(0.2)
     assert last_error is not None

@@ -105,6 +105,46 @@ def test_settings_preserve_consent_and_unrelated_keys():
     assert config.quota_config_enabled() is False
 
 
+def test_effective_boundary_config_defaults():
+    cfg = config.effective_boundary_config()
+
+    assert cfg.enabled is True
+    assert cfg.pre_seconds == 120
+    assert cfg.post_reset_enabled is True
+    assert cfg.post_seconds == 120
+
+
+def test_effective_boundary_config_kill_switches(monkeypatch):
+    monkeypatch.setenv("TOKDASH_QUOTA_BOUNDARY_POLL", "0")
+    assert config.effective_boundary_config().enabled is False
+
+    monkeypatch.delenv("TOKDASH_QUOTA_BOUNDARY_POLL", raising=False)
+    monkeypatch.setenv("TOKDASH_QUOTA_BOUNDARY_POST", "off")
+    cfg = config.effective_boundary_config()
+    assert cfg.enabled is True  # narrower switch only disables the post-reset half
+    assert cfg.post_reset_enabled is False
+
+
+def test_effective_boundary_config_seconds_env_overrides(monkeypatch):
+    monkeypatch.setenv("TOKDASH_QUOTA_BOUNDARY_PRE_SECONDS", "45")
+    monkeypatch.setenv("TOKDASH_QUOTA_BOUNDARY_POST_SECONDS", "90")
+
+    cfg = config.effective_boundary_config()
+
+    assert cfg.pre_seconds == 45
+    assert cfg.post_seconds == 90
+
+
+def test_effective_boundary_config_ignores_malformed_seconds_env(monkeypatch):
+    monkeypatch.setenv("TOKDASH_QUOTA_BOUNDARY_PRE_SECONDS", "not-an-int")
+    monkeypatch.setenv("TOKDASH_QUOTA_BOUNDARY_POST_SECONDS", "-10")
+
+    cfg = config.effective_boundary_config()
+
+    assert cfg.pre_seconds == 120  # falls back to default
+    assert cfg.post_seconds == 120  # non-positive is rejected, falls back to default
+
+
 def test_set_quota_consent_preserves_enabled_and_interval():
     # Regression: set_quota_consent used to rebuild the quota block from the consent keys
     # alone, dropping the master switch and interval. Changing consent while tracking is

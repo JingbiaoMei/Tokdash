@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Iterable
 
-from ...usage_store import UsageEntryStore, persistent_usage_db_enabled
+from ...usage_store import (
+    RESET_JITTER_SECONDS,
+    UsageEntryStore,
+    _quota_history_uses_adjacent_deltas,
+    persistent_usage_db_enabled,
+)
 from . import config
 from .antigravity import collect_antigravity_api_snapshots
 from .claude import read_claude_plan
@@ -36,9 +42,13 @@ def collect_local_snapshots(store: UsageEntryStore | None = None) -> list[QuotaS
     return collect_codex_session_snapshots_incremental(store or UsageEntryStore())
 
 
-def collect_network_snapshots() -> list[QuotaSnapshot]:
+def collect_network_snapshots(sources: Iterable[str] | None = None) -> list[QuotaSnapshot]:
+    enabled = config.enabled_network_sources()
+    if sources is not None:
+        requested = {str(source) for source in sources}
+        enabled = [source for source in enabled if source in requested]
     snapshots: list[QuotaSnapshot] = []
-    for key in config.enabled_network_sources():
+    for key in enabled:
         if key == "codex_api":
             snapshots.extend(collect_codex_api_snapshots())
         elif key == "claude_api":
@@ -49,11 +59,17 @@ def collect_network_snapshots() -> list[QuotaSnapshot]:
 
 
 def collect_enabled_snapshots(
-    *, include_network: bool = True, store: UsageEntryStore | None = None
+    *,
+    include_network: bool = True,
+    store: UsageEntryStore | None = None,
+    network_sources: Iterable[str] | None = None,
 ) -> list[QuotaSnapshot]:
     snapshots = collect_local_snapshots(store)
     if include_network:
-        snapshots.extend(collect_network_snapshots())
+        if network_sources is None:
+            snapshots.extend(collect_network_snapshots())
+        else:
+            snapshots.extend(collect_network_snapshots(network_sources))
     return snapshots
 
 
@@ -71,13 +87,26 @@ def sync_local_snapshots(store: UsageEntryStore | None = None) -> int:
     return len(collect_local_snapshots(store or UsageEntryStore()))
 
 
-def poll_quota(store: UsageEntryStore | None = None, *, include_network: bool = True) -> dict[str, Any]:
+def poll_quota(
+    store: UsageEntryStore | None = None,
+    *,
+    include_network: bool = True,
+    network_sources: Iterable[str] | None = None,
+) -> dict[str, Any]:
     """Run one collect+store cycle. Idles entirely when quota tracking is disabled."""
     global _LAST_POLL_AT
     if not config.quota_tracking_enabled():
         return {"snapshots": 0, "inserted": 0, "network_sources": [], "disabled": True}
     store = store or UsageEntryStore() if persistent_usage_db_enabled() else None
-    snapshots = collect_enabled_snapshots(include_network=include_network, store=store)
+    requested_sources = None if network_sources is None else tuple(str(source) for source in network_sources)
+    if requested_sources is None:
+        snapshots = collect_enabled_snapshots(include_network=include_network, store=store)
+    else:
+        snapshots = collect_enabled_snapshots(
+            include_network=include_network,
+            store=store,
+            network_sources=requested_sources,
+        )
     remember_current_snapshots(snapshots)
     now = int(datetime.now(timezone.utc).timestamp())
     _LAST_POLL_AT = now
@@ -89,7 +118,11 @@ def poll_quota(store: UsageEntryStore | None = None, *, include_network: bool = 
             # ``inserted`` counts the network rows this cycle added.
             inserted = store.insert_quota_snapshots(snapshots)
         store.quota_meta_set(_LAST_POLL_META_KEY, str(now))
-    return {"snapshots": len(snapshots), "inserted": inserted, "network_sources": config.enabled_network_sources()}
+    enabled_sources = config.enabled_network_sources() if include_network else []
+    if requested_sources is not None:
+        requested = set(requested_sources)
+        enabled_sources = [source for source in enabled_sources if source in requested]
+    return {"snapshots": len(snapshots), "inserted": inserted, "network_sources": enabled_sources}
 
 
 def last_poll_at(store: UsageEntryStore | None = None) -> int | None:
@@ -103,6 +136,147 @@ def last_poll_at(store: UsageEntryStore | None = None) -> int | None:
         return int(value) if value else None
     except Exception:
         return None
+
+
+def _boundary_candidate_details(
+    now: int, latest_snapshots: Iterable[dict[str, Any]], cfg: config.BoundaryPollConfig
+) -> list[tuple[int, str, str]]:
+    """Future pre-reset and post-reset candidate fire times for qualifying fixed windows.
+
+    Only fixed-reset windows qualify: `_quota_history_uses_adjacent_deltas` is reused
+    (not reimplemented) so this scheduler and `quota_history`'s consumption math can never
+    disagree about which (provider, bucket, resets_at) rows are fixed-reset vs
+    rolling/reset-less.
+
+    Candidates within RESET_JITTER_SECONDS of `now` are dropped, not just those at or before
+    it. `resets_at` jitters +/-1s poll-to-poll (providers round the wall clock differently
+    each poll — the same reason `quota_history` chains reset times into one epoch), so a
+    bare ``> now`` guard re-arms the boundary we just fired: firing at ``resets_at - lead``
+    off a 13:39:59 reading, the next poll reports 13:40:00, putting that same physical
+    boundary 1s in the future and triggering a duplicate poll one sleep-floor later
+    (measured: 5 pre fires across 4 real resets). One physical boundary must fire once, so
+    a candidate that close to `now` is treated as the one already handled.
+    """
+    candidates: list[tuple[int, str, str]] = []
+    horizon = now + RESET_JITTER_SECONDS
+    for row in latest_snapshots:
+        resets_at = row.get("resets_at")
+        if resets_at is None:
+            continue
+        provider = str(row.get("provider") or "")
+        bucket = str(row.get("bucket") or "")
+        if _quota_history_uses_adjacent_deltas(provider, bucket, resets_at):
+            continue
+        try:
+            resets_at = int(resets_at)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        pre_candidate = resets_at - cfg.pre_seconds
+        if pre_candidate > horizon:
+            candidates.append((pre_candidate, "pre", provider))
+        if cfg.post_reset_enabled:
+            post_candidate = resets_at + cfg.post_seconds
+            if post_candidate > horizon:
+                candidates.append((post_candidate, "post", provider))
+    return candidates
+
+
+def _boundary_candidates(
+    now: int, latest_snapshots: Iterable[dict[str, Any]], cfg: config.BoundaryPollConfig
+) -> tuple[list[int], list[int]]:
+    details = _boundary_candidate_details(now, latest_snapshots, cfg)
+    return (
+        [target for target, kind, _provider in details if kind == "pre"],
+        [target for target, kind, _provider in details if kind == "post"],
+    )
+
+
+@dataclass(frozen=True)
+class BoundaryPollTarget:
+    at: int
+    kinds: frozenset[str]
+    providers: frozenset[str]
+
+
+def plan_boundary_poll(
+    now: int,
+    latest_snapshots: Iterable[dict[str, Any]],
+    cfg: config.BoundaryPollConfig,
+    *,
+    minimum_delay_seconds: int = 0,
+    anchored_post_targets: Iterable[tuple[int, str]] = (),
+) -> BoundaryPollTarget | None:
+    """Return one coalesced boundary plan, optionally delayed by a call-spacing floor.
+
+    When the floor delays the earliest candidate, every other candidate due by that
+    delayed time is folded into the same provider-scoped poll. Anchored post targets are
+    reset epochs observed before a poll that rolled the provider into its next window.
+    """
+    if not cfg.enabled:
+        return None
+    candidates = _boundary_candidate_details(now, latest_snapshots, cfg)
+    horizon = now + RESET_JITTER_SECONDS
+    if cfg.post_reset_enabled:
+        for target, provider in anchored_post_targets:
+            try:
+                target = int(target)
+            except (TypeError, ValueError, OverflowError):
+                continue
+            # An anchor remains owed until its provider is actually sampled. If another
+            # provider's scoped boundary poll let it become overdue, schedule it at the
+            # next call floor instead of silently discarding the old reset epoch.
+            candidates.append((max(target, horizon + 1), "post", str(provider or "")))
+    if not candidates:
+        return None
+
+    earliest = min(target for target, _kind, _provider in candidates)
+    scheduled_at = max(earliest, now + max(0, int(minimum_delay_seconds)))
+    coalesce_until = scheduled_at + RESET_JITTER_SECONDS
+    due = [candidate for candidate in candidates if candidate[0] <= coalesce_until]
+    return BoundaryPollTarget(
+        at=scheduled_at,
+        kinds=frozenset(kind for _target, kind, _provider in due),
+        providers=frozenset(provider for _target, _kind, provider in due if provider),
+    )
+
+
+def next_boundary_poll_at(
+    now: int, latest_snapshots: Iterable[dict[str, Any]], cfg: config.BoundaryPollConfig
+) -> int | None:
+    """Earliest future boundary-poll fire time across all qualifying fixed-reset windows.
+
+    Pure and side-effect free (no clock/DB access of its own) so it is unit-testable in
+    isolation: `now` and `latest_snapshots` (the shape returned by
+    `UsageEntryStore.latest_quota_snapshots()`) are both passed in explicitly. Returns
+    ``None`` when boundary polling is disabled, or no qualifying window has a future
+    pre/post-reset candidate.
+    """
+    if not cfg.enabled:
+        return None
+    pre, post = _boundary_candidates(now, latest_snapshots, cfg)
+    candidates = pre + post
+    return min(candidates) if candidates else None
+
+
+def next_boundary_poll_target_with_kind(
+    now: int, latest_snapshots: Iterable[dict[str, Any]], cfg: config.BoundaryPollConfig
+) -> tuple[int, str] | None:
+    """Like `next_boundary_poll_at`, but also names which kind of boundary won: ``"pre"``
+    or ``"post"``.
+
+    Kept as a small compatibility helper for callers that need the winning kind without
+    provider coalescing. The daemon uses :func:`plan_boundary_poll`.
+    """
+    if not cfg.enabled:
+        return None
+    pre, post = _boundary_candidates(now, latest_snapshots, cfg)
+    best_pre = min(pre) if pre else None
+    best_post = min(post) if post else None
+    if best_pre is None and best_post is None:
+        return None
+    if best_post is None or (best_pre is not None and best_pre <= best_post):
+        return best_pre, "pre"
+    return best_post, "post"
 
 
 _CODEX_PLAN_LABELS = {

@@ -162,6 +162,7 @@ def test_startup_warmer_populates_initial_overview_date_range(monkeypatch):
     api._clear_cache()
     usage_calls = []
     stats_calls = []
+    session_calls = []
 
     def fake_usage(period, date_from, date_to):
         usage_calls.append((period, date_from, date_to))
@@ -171,8 +172,13 @@ def test_startup_warmer_populates_initial_overview_date_range(monkeypatch):
         stats_calls.append(year)
         return {"year": year}
 
+    def fake_sessions(tool, period, date_from, date_to, *, include_review_sessions):
+        session_calls.append((tool, period, date_from, date_to, include_review_sessions))
+        return {"tool": tool, "period": period}
+
     monkeypatch.setattr(api, "compute_usage_with_comparison", fake_usage)
     monkeypatch.setattr(api, "compute_stats", fake_stats)
+    monkeypatch.setattr(api, "get_sessions_data", fake_sessions)
 
     try:
         api._warm_caches()
@@ -186,5 +192,8 @@ def test_startup_warmer_populates_initial_overview_date_range(monkeypatch):
         assert api._pricing_cache_key(f"usage_today_{date_from}_{date_to}") in api._cache
         assert api._pricing_cache_key("stats_None") in api._cache
         assert stats_calls == [None]
+        assert session_calls == [(tool, "today", None, None, None) for tool in api.SESSION_TOOLS]
+        for tool in api.SESSION_TOOLS:
+            assert api._pricing_cache_key(f"sessions_{tool}_today_None_None_None") in api._cache
     finally:
         api._clear_cache()

@@ -17,7 +17,7 @@ from .filelock import process_lock
 
 
 SCHEMA_VERSION = 5
-SIGNATURE_VERSION = 2
+SIGNATURE_VERSION = 3
 
 # quota_history consumption: reset times within this many seconds are treated as the same
 # physical window, absorbing the ±1s poll-to-poll jitter (and Codex start-of-window
@@ -287,12 +287,35 @@ def stable_json(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), default=_json_default)
 
 
+# Parser source content hashes, cached on (mtime_ns, size) so repeated API
+# requests do not re-hash the same unchanged file.
+_parser_hash_cache: dict[str, tuple[tuple[int, int], str]] = {}
+_parser_hash_cache_guard = threading.Lock()
+
+
+def _parser_file_content_hash(path: Path, stat_result: os.stat_result) -> str:
+    key = str(path)
+    file_sig = (int(stat_result.st_mtime_ns), int(stat_result.st_size))
+    with _parser_hash_cache_guard:
+        cached = _parser_hash_cache.get(key)
+        if cached is not None and cached[0] == file_sig:
+            return cached[1]
+    digest = hashlib.sha1(path.read_bytes()).hexdigest()
+    with _parser_hash_cache_guard:
+        _parser_hash_cache[key] = (file_sig, digest)
+    return digest
+
+
 def parser_code_signature(obj: Any) -> dict[str, Any]:
     """Return a cheap signature for the parser implementation module.
 
     The persistent store is a parse cache, not a source of truth. Including the
-    parser module file in the signature invalidates cached rows after package
+    parser module content in the signature invalidates cached rows after package
     upgrades or local parser edits, even when the source logs did not change.
+    The signature is content-based (NOT path/mtime-based) so a reinstall or
+    upgrade that leaves the parser code byte-identical — e.g. ``pipx upgrade``
+    restamping every installed file's mtime — keeps the cache instead of
+    forcing a full-corpus reparse on the next dashboard load.
     """
     try:
         obj = getattr(obj, "__wrapped__", obj)
@@ -308,12 +331,11 @@ def parser_code_signature(obj: Any) -> dict[str, Any]:
             path = inspect.getsourcefile(cls)
         if not path:
             return {"object": label}
-        stat = Path(path).stat()
+        file_path = Path(path)
+        stat = file_path.stat()
         return {
             "object": label,
-            "path": str(Path(path).resolve()),
-            "mtime_ns": stat.st_mtime_ns,
-            "size": stat.st_size,
+            "content_sha1": _parser_file_content_hash(file_path, stat),
         }
     except Exception:
         return {"object": obj.__class__.__name__}

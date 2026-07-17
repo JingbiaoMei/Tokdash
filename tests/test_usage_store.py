@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 
 from datetime import datetime, timezone
@@ -462,6 +463,46 @@ def test_parser_code_signature_unwraps_lru_cache_functions():
     signature = parser_code_signature(parser_fn)
 
     assert signature["object"].endswith(".parser_fn")
+
+
+def _load_fn_from_module_file(path: Path, module_name: str):
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(module)
+    return module.parser_fn
+
+
+def test_parser_code_signature_is_content_based_not_mtime_based(tmp_path):
+    module_path = tmp_path / "fake_parser.py"
+    module_path.write_text("def parser_fn():\n    return 'v1'\n", encoding="utf-8")
+    fn = _load_fn_from_module_file(module_path, "fake_parser")
+    sig_v1 = parser_code_signature(fn)
+
+    # A reinstall/upgrade (e.g. `pipx upgrade`) restamps file mtimes without
+    # changing content; the signature must survive so the persistent parse
+    # cache is not invalidated and the next dashboard load stays fast.
+    st = module_path.stat()
+    os.utime(module_path, ns=(st.st_atime_ns, st.st_mtime_ns + 5_000_000_000))
+    assert parser_code_signature(fn) == sig_v1
+    restamped_mtime_ns = module_path.stat().st_mtime_ns
+
+    # A real parser code change must still bust the cache.
+    module_path.write_text("def parser_fn():\n    return 'v2'\n", encoding="utf-8")
+    st = module_path.stat()
+    os.utime(module_path, ns=(st.st_atime_ns, restamped_mtime_ns + 5_000_000_000))
+    fn_v2 = _load_fn_from_module_file(module_path, "fake_parser")
+    sig_v2 = parser_code_signature(fn_v2)
+    assert sig_v2["object"] == sig_v1["object"]
+    assert sig_v2["content_sha1"] != sig_v1["content_sha1"]
+
+    relocated_path = tmp_path / "relocated" / "fake_parser.py"
+    relocated_path.parent.mkdir()
+    relocated_path.write_bytes(module_path.read_bytes())
+    relocated_fn = _load_fn_from_module_file(relocated_path, "fake_parser")
+    assert parser_code_signature(relocated_fn) == sig_v2
 
 
 def _codex_session_rows(

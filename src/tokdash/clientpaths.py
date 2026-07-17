@@ -115,9 +115,29 @@ def amp_root() -> Path:
 
 
 def kimi_root() -> Path:
-    """``$KIMI_SHARE_DIR`` if set, else ``~/.kimi``."""
+    """Legacy Kimi CLI root: ``$KIMI_SHARE_DIR`` if set, else ``~/.kimi``."""
     kimi_share_dir = os.environ.get("KIMI_SHARE_DIR", "").strip()
     return Path(kimi_share_dir).expanduser() if kimi_share_dir else (Path.home() / ".kimi")
+
+
+def kimi_code_root() -> Path:
+    """Kimi Code (>=0.26) root: ``$KIMI_CODE_HOME`` if set, else ``~/.kimi-code``."""
+    kimi_code_home = os.environ.get("KIMI_CODE_HOME", "").strip()
+    return Path(kimi_code_home).expanduser() if kimi_code_home else (Path.home() / ".kimi-code")
+
+
+def kimi_roots() -> List[Path]:
+    """All candidate Kimi data roots, newest install first, deduplicated.
+
+    Kimi Code 0.26 moved the data dir from ``~/.kimi`` to ``~/.kimi-code`` and
+    dropped ``KIMI_SHARE_DIR`` in favour of ``KIMI_CODE_HOME``. Old sessions are
+    not migrated, so both roots may hold data and callers should scan each one.
+    """
+    roots: List[Path] = []
+    for root in (kimi_code_root(), kimi_root()):
+        if root not in roots:
+            roots.append(root)
+    return roots
 
 
 # --- Pi Agent -----------------------------------------------------------------

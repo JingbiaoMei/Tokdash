@@ -19,6 +19,7 @@
     "kimi-k2p6": "kimi-k2.6",
     "kimi-k2-6": "kimi-k2.6",
     "moonshot-ai/kimi-k2.6": "kimi-k2.6",
+    "kimi-code/k3": "kimi-k3",
     "glm5.1": "glm-5.1",
     "glm-5-1": "glm-5.1",
     "z-ai/glm-5.1": "glm-5.1",
@@ -98,6 +99,16 @@
       "cache_write": 0.75,
       "unit": "per_million_tokens",
       "source": "openrouter.ai/moonshotai/kimi-k2.7-code"
+    },
+    "kimi-k3": {
+      "provider": "moonshotai",
+      "input": 3.0,
+      "output": 15.0,
+      "cache_read": 0.3,
+      "cache_write": 3.0,
+      "unit": "per_million_tokens",
+      "source": "Moonshot AI Kimi K3 launch pricing, verified 2026-07-16",
+      "note": "cache_write uses the input rate because the launch pricing lists only cache-hit input ($0.30), cache-miss input ($3.00), and output ($15.00)."
     },
     "kimi-k2-0905:exacto": {
       "provider": "moonshotai",

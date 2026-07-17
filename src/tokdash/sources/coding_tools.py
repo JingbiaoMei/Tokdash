@@ -6,6 +6,7 @@ These parsers emit tokscale-compatible `entries[]` rows and are used by
 
 import argparse
 import glob
+import hashlib
 import json
 import os
 import re
@@ -1042,39 +1043,58 @@ class AmpParser(BaseParser):
 
 class KimiParser(BaseParser):
     """
-    Parser for Kimi CLI session files.
+    Parser for Kimi CLI / Kimi Code session files.
 
     =======================================================================
-    KIMI CLI SESSION FILE SCHEMA
+    SCHEMA A — legacy Kimi CLI (<0.26)
     =======================================================================
     Location: ~/.kimi/sessions/<userId>/<sessionId>/wire.jsonl
+    Root override: $KIMI_SHARE_DIR
 
-    The wire.jsonl file contains JSON lines with different message types.
-    Token usage is captured in "StatusUpdate" messages.
+    Token usage is captured in "StatusUpdate" messages:
 
-    Relevant fields:
-      - timestamp: Unix timestamp (float, seconds since epoch)
-      - message.type: "StatusUpdate"
-      - message.payload.token_usage: object with token counts
-          - input_other: int (fresh input tokens)
-          - output: int (output/completion tokens)
-          - input_cache_read: int (cache read tokens)
-          - input_cache_creation: int (cache write tokens)
-      - message.payload.message_id: str (unique message ID for dedup)
+      {"timestamp": <float seconds>,
+       "message": {"type": "StatusUpdate",
+                   "payload": {"token_usage": {"input_other": int,
+                                               "output": int,
+                                               "input_cache_read": int,
+                                               "input_cache_creation": int},
+                               "message_id": str}}}
 
-    Field mapping to normalized entry:
+    Dedup key: message.payload.message_id. The resolved model is not exposed,
+    so a default billing model is inferred by time window.
+
+    =======================================================================
+    SCHEMA B — Kimi Code (>=0.26)
+    =======================================================================
+    Location: ~/.kimi-code/sessions/<workspace>/<sessionId>/agents/<agent>/wire.jsonl
+    Root override: $KIMI_CODE_HOME (KIMI_SHARE_DIR was removed in 0.26)
+
+    Token usage is captured in top-level "usage.record" rows. Each row is an
+    incremental per-step delta (one row per LLM request, not per user turn):
+
+      {"type": "usage.record", "model": "kimi-code/k3",
+       "usage": {"inputOther": int, "output": int,
+                 "inputCacheRead": int, "inputCacheCreation": int},
+       "usageScope": "turn", "time": <int milliseconds>}
+
+    usageScope is attribution metadata only — the CLI derives it as
+    `source?.type === "turn" ? "turn" : "session"` and its own aggregator sums
+    every usage.record row without inspecting the scope. Rows emitted from
+    non-turn paths (e.g. compaction calls) carry "session" and MUST be counted
+    too, so no scope filter is applied here. There is no message id, so the
+    dedup key is a SHA-1 of (file path, time, model, usage): including the
+    path keeps identical rows from distinct sessions/agents countable while
+    still collapsing duplicated lines within one file.
+
+    Field mapping to normalized entry (both schemas):
       source <- "kimi"
       provider <- "moonshotai" (Kimi is from Moonshot AI)
-      input <- token_usage.input_other
-      output <- token_usage.output
-      cacheRead <- token_usage.input_cache_read
-      cacheWrite <- token_usage.input_cache_creation
-      reasoning <- 0 (not exposed separately in Kimi CLI)
-      timestamp <- timestamp * 1000 (convert to milliseconds)
+      input / output / cacheRead / cacheWrite <- usage fields
+      reasoning <- 0 (not exposed separately)
+      timestamp <- epoch milliseconds
 
-    Dedup key: message.payload.message_id
-
-    Known schema versions: 2025-03 to present
+    Known schema versions: 2025-03 to present (legacy), 0.26+ (Kimi Code)
     =======================================================================
     """
 
@@ -1082,12 +1102,28 @@ class KimiParser(BaseParser):
     sync_capability = SourceSyncCapability(
         mode="file_replace",
         append_jsonl=True,
-        reason="Kimi wire JSONL rows expose stable message IDs and are append-safe for token usage rows.",
+        reason=(
+            "Kimi wire JSONL usage rows are append-safe: legacy rows carry stable message IDs, "
+            "Kimi Code usage.record rows dedup on a content hash."
+        ),
     )
+
+    # Wire model names emitted by Kimi Code usage.record rows, mapped to
+    # canonical TokDash pricing keys. The display names in the CLI's own
+    # config (~/.kimi-code/config.toml) identify kimi-for-coding* as
+    # "K2.7 Coding"; "k3" is the current flagship with its own pricing key.
+    _WIRE_MODEL_MAP: ClassVar[Dict[str, str]] = {
+        "kimi-for-coding": "kimi-k2.7-code",
+        "kimi-for-coding-highspeed": "kimi-k2.7-code",
+        "k3": "kimi-k3",
+    }
 
     def __init__(self, pricing_db: PricingDatabase):
         super().__init__(pricing_db)
+        # Legacy root, kept for backward compatibility (tests, external refs).
         self.kimi_root = clientpaths.kimi_root()
+        # All roots to scan: Kimi Code (>=0.26) first, then the legacy root.
+        self.kimi_roots = clientpaths.kimi_roots()
 
     @staticmethod
     def _default_model_for_timestamp(ts: datetime) -> str:
@@ -1122,13 +1158,118 @@ class KimiParser(BaseParser):
             "entry_id": f"kimi:{message_id}",
         }
 
+    @staticmethod
+    def _model_for_wire_name(wire_name: Any) -> str:
+        """Map a Kimi Code wire model (e.g. ``kimi-code/k3``) to a TokDash model key.
+
+        ``kimi-for-coding(-highspeed)`` is the managed subscription alias whose
+        backend is K2.7 Coding, so it maps to the ``kimi-k2.7-code`` pricing
+        key; ``k3`` maps to the canonical ``kimi-k3`` key (the pricing DB also
+        carries a namespaced ``kimi-code/k3`` alias). Unknown models keep their
+        bare id; ids missing from the pricing DB cost 0 until the DB learns
+        them, but token counts stay correct.
+        """
+        name = str(wire_name or "").strip().lower().split("/")[-1]
+        if not name:
+            return "kimi-k2.5"
+        return KimiParser._WIRE_MODEL_MAP.get(name, name)
+
     def _file_signatures(self) -> tuple:
-        sessions_dir = self.kimi_root / "sessions"
-        pattern = str(sessions_dir / "*" / "*" / "wire.jsonl")
-        return _timed_sigs(f"kimi:{self.kimi_root}", lambda: _glob_sigs(pattern))
+        def _scan() -> tuple:
+            sigs: List[Tuple[str, int, int]] = []
+            for root in self.kimi_roots:
+                sessions_dir = root / "sessions"
+                # Legacy layout: sessions/<userId>/<sessionId>/wire.jsonl
+                sigs.extend(_glob_sigs(str(sessions_dir / "*" / "*" / "wire.jsonl")))
+                # Kimi Code >=0.26: sessions/<ws>/<sessionId>/agents/<agent>/wire.jsonl
+                sigs.extend(_glob_sigs(str(sessions_dir / "*" / "*" / "agents" / "*" / "wire.jsonl")))
+            return tuple(sorted(set(sigs)))
+
+        cache_key = "kimi:" + "|".join(str(r) for r in self.kimi_roots)
+        return _timed_sigs(cache_key, _scan)
+
+    def _entry_from_status_update(self, record: Dict[str, Any], seen_message_ids: set) -> Optional[Dict[str, Any]]:
+        """Parse a legacy-schema row (StatusUpdate message); None if not applicable."""
+        msg = record.get("message", {})
+        if not isinstance(msg, dict) or msg.get("type") != "StatusUpdate":
+            return None
+
+        payload = msg.get("payload", {})
+        token_usage = payload.get("token_usage")
+        if not isinstance(token_usage, dict):
+            return None
+
+        # Deduplicate by message_id
+        message_id = payload.get("message_id", "")
+        if not message_id or message_id in seen_message_ids:
+            return None
+        seen_message_ids.add(message_id)
+
+        # Parse timestamp (float seconds)
+        ts_raw = record.get("timestamp")
+        if not ts_raw:
+            return None
+        try:
+            ts = datetime.fromtimestamp(float(ts_raw), timezone.utc)
+        except (ValueError, TypeError, OSError):
+            return None
+
+        model = self._default_model_for_timestamp(ts)
+        ts_ms = int(ts.timestamp() * 1000)
+        return self._build_entry(model, token_usage, ts_ms, message_id)
+
+    def _entry_from_usage_record(self, record: Dict[str, Any], path_str: str, seen_message_ids: set) -> Optional[Dict[str, Any]]:
+        """Parse a Kimi Code >=0.26 usage.record row; None if not applicable."""
+        if record.get("type") != "usage.record":
+            return None
+
+        # No usageScope filter: every row is an incremental delta. The CLI
+        # derives scope as `source?.type === "turn" ? "turn" : "session"` and
+        # its own aggregator sums all rows regardless of scope, so "session"
+        # rows (e.g. compaction calls) are real usage that must be counted.
+
+        usage = record.get("usage")
+        if not isinstance(usage, dict):
+            return None
+
+        # `time` is already epoch milliseconds.
+        ts_ms = self._i(record.get("time"))
+        if ts_ms <= 0:
+            return None
+
+        model = self._model_for_wire_name(record.get("model"))
+
+        # No message id in this schema; dedup on (path, content) instead. The
+        # path keeps identical rows from distinct sessions/agents countable,
+        # while duplicated lines within one file still collapse.
+        dedup_key = hashlib.sha1(
+            json.dumps(
+                [
+                    path_str,
+                    ts_ms,
+                    model,
+                    usage.get("inputOther"),
+                    usage.get("output"),
+                    usage.get("inputCacheRead"),
+                    usage.get("inputCacheCreation"),
+                ],
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        if dedup_key in seen_message_ids:
+            return None
+        seen_message_ids.add(dedup_key)
+
+        token_usage = {
+            "input_other": usage.get("inputOther"),
+            "output": usage.get("output"),
+            "input_cache_read": usage.get("inputCacheRead"),
+            "input_cache_creation": usage.get("inputCacheCreation"),
+        }
+        return self._build_entry(model, token_usage, ts_ms, dedup_key)
 
     def _parse_all(self) -> List[Dict[str, Any]]:
-        """Collect token usage from Kimi CLI session files."""
+        """Collect token usage from Kimi CLI / Kimi Code session files."""
         out: List[Dict[str, Any]] = []
         seen_message_ids: set[str] = set()
 
@@ -1140,41 +1281,15 @@ class KimiParser(BaseParser):
                         if not line:
                             continue
                         try:
-                            entry = json.loads(line)
+                            record = json.loads(line)
                         except json.JSONDecodeError:
                             continue
 
-                        # Only process StatusUpdate messages with token_usage
-                        msg = entry.get("message", {})
-                        if msg.get("type") != "StatusUpdate":
-                            continue
-
-                        payload = msg.get("payload", {})
-                        token_usage = payload.get("token_usage")
-                        if not isinstance(token_usage, dict):
-                            continue
-
-                        # Deduplicate by message_id
-                        message_id = payload.get("message_id", "")
-                        if not message_id:
-                            continue
-                        if message_id in seen_message_ids:
-                            continue
-                        seen_message_ids.add(message_id)
-
-                        # Parse timestamp
-                        ts_raw = entry.get("timestamp")
-                        if not ts_raw:
-                            continue
-                        try:
-                            ts = datetime.fromtimestamp(float(ts_raw), timezone.utc)
-                        except (ValueError, TypeError):
-                            continue
-
-                        model = self._default_model_for_timestamp(ts)
-
-                        ts_ms = int(ts.timestamp() * 1000)
-                        out.append(self._build_entry(model, token_usage, ts_ms, message_id))
+                        entry = self._entry_from_usage_record(record, path_str, seen_message_ids)
+                        if entry is None:
+                            entry = self._entry_from_status_update(record, seen_message_ids)
+                        if entry is not None:
+                            out.append(entry)
 
             except Exception:
                 continue

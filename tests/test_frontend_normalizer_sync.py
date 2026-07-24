@@ -40,9 +40,9 @@ SYNC_CASES = [
 ]
 
 
-def _extract_js_normalize_model_name(src: str) -> str:
-    start = src.find("function normalizeModelName(name) {")
-    assert start != -1, "JS normalizeModelName not found in index.html"
+def _extract_js_function(src: str, signature: str) -> str:
+    start = src.find(signature)
+    assert start != -1, f"{signature} not found in index.html"
     depth = 0
     for j in range(src.find("{", start), len(src)):
         if src[j] == "{":
@@ -51,7 +51,11 @@ def _extract_js_normalize_model_name(src: str) -> str:
             depth -= 1
             if depth == 0:
                 return src[start : j + 1]
-    raise AssertionError("unterminated JS normalizeModelName function")
+    raise AssertionError(f"unterminated JS function: {signature}")
+
+
+def _extract_js_normalize_model_name(src: str) -> str:
+    return _extract_js_function(src, "function normalizeModelName(name) {")
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
@@ -92,3 +96,35 @@ def test_frontend_normalize_model_name_matches_backend(tmp_path):
         if normalize_model_name(c) != js_out.get(c)
     ]
     assert not mismatches, "frontend/backend normalizer drift:\n  " + "\n  ".join(mismatches)
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_quota_plan_label_does_not_call_detected_providers_undetected(tmp_path):
+    src = INDEX_HTML.read_text(encoding="utf-8")
+    js_fn = _extract_js_function(
+        src, "function quotaProviderPlanLabel(providerKey, provider) {"
+    )
+    harness = tmp_path / "quota-plan-label.js"
+    harness.write_text(
+        "function t(key) { return key === 'notDetected' ? 'not detected' : key; }\n"
+        + js_fn
+        + "\nconst cases = JSON.parse(process.argv[2]);\n"
+        + "process.stdout.write(JSON.stringify(cases.map(([key, provider]) => "
+        + "quotaProviderPlanLabel(key, provider))));\n",
+        encoding="utf-8",
+    )
+    cases = [
+        ["minimax", {"detected": True, "plan": None}],
+        ["grok", {"detected": True, "plan": None}],
+        ["kimi", {"detected": True, "plan": "Intermediate"}],
+        ["minimax", {"detected": False, "plan": None}],
+        ["antigravity", {"detected": False, "plan": None}],
+    ]
+    result = subprocess.run(
+        ["node", str(harness), json.dumps(cases)],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert json.loads(result.stdout) == ["", "", "Intermediate", "not detected", ""]

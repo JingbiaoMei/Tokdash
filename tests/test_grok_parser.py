@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 from tokdash.pricing import PricingDatabase
 from tokdash.sources.coding_tools import BaseParser, GrokParser
@@ -128,4 +129,4 @@ def test_grok_signature_tracks_the_unified_log(monkeypatch, tmp_path):
 
     signatures = parser._file_signatures()
 
-    assert {str(entry[0]).rsplit("/", 1)[-1] for entry in signatures} == {"unified.jsonl"}
+    assert {Path(entry[0]).name for entry in signatures} == {"unified.jsonl"}

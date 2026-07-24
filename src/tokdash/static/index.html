@@ -4630,6 +4630,13 @@
       return provider || '—';
     }
 
+    function quotaProviderPlanLabel(providerKey, provider) {
+      const plan = provider?.plan || provider?.tier;
+      if (plan) return plan;
+      if (providerKey === 'antigravity' || provider?.detected === true) return '';
+      return t('notDetected');
+    }
+
     function quotaConsentMeta(provider) {
       if (provider === 'codex') return { key: 'codex_api', endpoint: 'chatgpt.com/backend-api/wham/*', path: '$CODEX_HOME/auth.json' };
       if (provider === 'claude') return { key: 'claude_api', endpoint: 'api.anthropic.com/api/oauth/usage', path: '$CLAUDE_CONFIG_DIR/.credentials.json' };
@@ -4974,7 +4981,7 @@
         // Plan label (Pro Lite / Max 5x …) sits INLINE after the provider name as a muted
         // suffix instead of on its own line, so the card reads "Codex · Pro Lite" and the
         // window bars start higher. Antigravity has no plan line.
-        const plan = provider.plan || provider.tier || (providerKey === 'antigravity' ? '' : t('notDetected'));
+        const plan = quotaProviderPlanLabel(providerKey, provider);
         if (plan) {
           const planSuffix = document.createElement('span');
           planSuffix.className = 'text-xs font-semibold ml-2';

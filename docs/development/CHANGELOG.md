@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+## 1.4.1 - 2026-07-24
+
+### Fixed
+
+- Fixed the Grok log-signature test on Windows by using platform-native filename extraction.
+- Fixed MiniMax and Grok quota cards showing “not detected” after successful detection when their APIs omit a plan name. Kimi's “Intermediate” suffix remains because it is the membership level returned by Kimi.
+
 ## 1.4.0 - 2026-07-24
 
 ### Added

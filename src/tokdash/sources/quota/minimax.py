@@ -183,7 +183,6 @@ def _snapshots_from_payload(payload: dict[str, Any], credential: _Credential, ca
             continue
         name = str(item.get("model_name") or "general")
         label = name.replace("_", " ").strip().title() or "General"
-        region_label = "Mainland China" if credential.region == "cn" else "Global"
 
         if item.get("current_interval_status") != 3:
             used = _percent(
@@ -195,7 +194,7 @@ def _snapshots_from_payload(payload: dict[str, Any], credential: _Credential, ca
                 out.append(
                     QuotaSnapshot(
                         "minimax", credential.region, f"{credential.region}_{name}_5h",
-                        f"{label} · 5-hour ({region_label})",
+                        f"{label} · 5-hour",
                         used, _parse_time(item.get("end_time")), str(plan) if plan else None,
                         captured_at, "minimax_api", "ok", {"model_remain": item, "region": credential.region},
                     )
@@ -211,7 +210,7 @@ def _snapshots_from_payload(payload: dict[str, Any], credential: _Credential, ca
                 out.append(
                     QuotaSnapshot(
                         "minimax", credential.region, f"{credential.region}_{name}_7d",
-                        f"{label} · Weekly ({region_label})",
+                        f"{label} · Weekly",
                         used, _parse_time(item.get("weekly_end_time")), str(plan) if plan else None,
                         captured_at, "minimax_api", "ok", {"model_remain": item, "region": credential.region},
                     )

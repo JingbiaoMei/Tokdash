@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+## 1.4.2 - 2026-07-24
+
+### Changed
+
+- Display MiniMax's mainland-China region in the quota-card title instead of repeating it on every bucket, and map Kimi's internal paid `LEVEL_*` API enums to its advertised membership names.
+
 ## 1.4.1 - 2026-07-24
 
 ### Fixed

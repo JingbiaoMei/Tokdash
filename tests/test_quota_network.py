@@ -76,6 +76,7 @@ def test_minimax_api_collects_global_short_and_weekly_windows(monkeypatch, tmp_p
     snapshots = minimax.collect_minimax_api_snapshots(opener=opener, now=1_782_907_200)
 
     assert [s.bucket for s in snapshots] == ["global_general_5h", "global_general_7d"]
+    assert [s.bucket_label for s in snapshots] == ["General · 5-hour", "General · Weekly"]
     assert [s.used_percent for s in snapshots] == [25.0, 60.0]
     assert all(s.account == "global" and s.source == "minimax_api" for s in snapshots)
 
@@ -148,6 +149,27 @@ def test_minimax_tracks_global_and_mainland_china_plans_separately(monkeypatch, 
         ("global", "global_general_5h"),
         ("cn", "cn_general_5h"),
     ]
+    assert [snapshot.bucket_label for snapshot in snapshots] == [
+        "General · 5-hour",
+        "General · 5-hour",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("region", "level", "expected"),
+    [
+        ("REGION_CN", "LEVEL_BASIC", "Andante"),
+        ("REGION_GLOBAL", "LEVEL_BASIC", "Moderato"),
+        ("REGION_CN", "LEVEL_STANDARD", "Moderato"),
+        ("REGION_CN", "LEVEL_INTERMEDIATE", "Allegretto"),
+        ("REGION_CN", "LEVEL_ADVANCED", "Allegro"),
+        ("REGION_GLOBAL", "LEVEL_PREMIUM", "Vivace"),
+    ],
+)
+def test_kimi_maps_internal_membership_levels_to_public_plan_names(region, level, expected):
+    assert kimi._membership_plan(
+        {"region": region, "membership": {"level": level}}
+    ) == expected
 
 
 def test_kimi_api_key_collects_membership_windows(monkeypatch, tmp_path):
@@ -205,14 +227,17 @@ def test_kimi_distinct_top_level_usage_surfaces_as_plan_not_weekly(monkeypatch, 
                     },
                 ],
                 "usage": {"limit": "100", "used": "87", "remaining": "13", "resetTime": "2026-07-23T16:45:50Z"},
-                "user": {"membership": {"level": "LEVEL_INTERMEDIATE"}},
+                "user": {
+                    "region": "REGION_CN",
+                    "membership": {"level": "LEVEL_INTERMEDIATE"},
+                },
             }
         )
 
     snapshots = kimi.collect_kimi_api_snapshots(opener=opener, now=1_784_800_000)
 
     assert [(s.bucket, s.used_percent) for s in snapshots] == [("5h", 0.0), ("plan", 87.0)]
-    assert all(s.plan == "Intermediate" for s in snapshots)
+    assert all(s.plan == "Allegretto" for s in snapshots)
 
 
 def test_kimi_static_config_api_key_works(monkeypatch, tmp_path):

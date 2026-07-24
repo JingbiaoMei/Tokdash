@@ -129,6 +129,29 @@ def _usage_url(base_url: str) -> str:
     return f"{base}/v1/usages" if base.endswith("/coding") else f"{base}/usages"
 
 
+def _membership_plan(user: dict[str, Any]) -> str | None:
+    membership = user.get("membership") if isinstance(user.get("membership"), dict) else {}
+    plan_value = membership.get("level") or membership.get("name")
+    if not plan_value:
+        return None
+
+    level = str(plan_value).strip().upper()
+    region = str(user.get("region") or "").strip().upper()
+    # The usage API exposes internal LEVEL_* enums while Kimi advertises tempo-named
+    # memberships. Mainland China has Andante below Moderato; the global lineup starts
+    # at Moderato. The remaining enum names map consistently across both regions.
+    if level == "LEVEL_BASIC":
+        return "Andante" if region in {"CN", "CHINA", "REGION_CN"} else "Moderato"
+    names = {
+        "LEVEL_FREE": "Free",
+        "LEVEL_STANDARD": "Moderato",
+        "LEVEL_INTERMEDIATE": "Allegretto",
+        "LEVEL_ADVANCED": "Allegro",
+        "LEVEL_PREMIUM": "Vivace",
+    }
+    return names.get(level) or level.removeprefix("LEVEL_").replace("_", " ").title()
+
+
 def _window_bucket(item: dict[str, Any], index: int) -> tuple[str, str]:
     window = item.get("window") if isinstance(item.get("window"), dict) else {}
     duration = _number(window.get("duration") or item.get("duration"))
@@ -170,9 +193,7 @@ def _usage_snapshot(detail: dict[str, Any], bucket: str, label: str, captured_at
 
 def _snapshots_from_payload(payload: dict[str, Any], captured_at: int) -> list[QuotaSnapshot]:
     user = payload.get("user") if isinstance(payload.get("user"), dict) else {}
-    membership = user.get("membership") if isinstance(user.get("membership"), dict) else {}
-    plan_value = membership.get("level") or membership.get("name")
-    plan = str(plan_value).removeprefix("LEVEL_").replace("_", " ").title() if plan_value else None
+    plan = _membership_plan(user)
 
     out: list[QuotaSnapshot] = []
     seen: set[tuple[str, float, int | None]] = set()

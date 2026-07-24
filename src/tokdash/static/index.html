@@ -2037,6 +2037,8 @@
         quotaCardEstimated: 'Estimated (local logs)',
         localOnly: 'local only',
         notDetected: 'not detected',
+        quotaRegionChina: 'China',
+        quotaRegionGlobal: 'Global',
         quotaNoData: 'No quota snapshots yet.',
         enableQuotaApi: 'Enable live polling',
         enableQuotaCredentialScan: 'Allow local credential reads',
@@ -2272,6 +2274,8 @@
         quotaCardEstimated: '估算值（本地日志）',
         localOnly: '仅本地',
         notDetected: '未检测到',
+        quotaRegionChina: '中国',
+        quotaRegionGlobal: '全球',
         quotaNoData: '暂无额度快照。',
         enableQuotaApi: '启用实时轮询',
         enableQuotaCredentialScan: '允许读取本地凭据',
@@ -4631,10 +4635,29 @@
     }
 
     function quotaProviderPlanLabel(providerKey, provider) {
+      if (providerKey === 'minimax') {
+        const regions = new Set(
+          (provider?.buckets || []).map((bucket) => String(bucket.account || '')).filter(Boolean)
+        );
+        // MiniMax Global and China may be on different plans. The backend currently
+        // exposes one provider-level plan, so showing it on a dual-region card would
+        // incorrectly imply that it applies to both groups.
+        if (regions.size > 1) return '';
+      }
       const plan = provider?.plan || provider?.tier;
       if (plan) return plan;
       if (providerKey === 'antigravity' || provider?.detected === true) return '';
       return t('notDetected');
+    }
+
+    function quotaProviderCardLabel(providerKey, provider) {
+      if (providerKey !== 'minimax') return quotaProviderLabel(providerKey);
+      const regions = new Set(
+        (provider?.buckets || []).map((bucket) => String(bucket.account || '')).filter(Boolean)
+      );
+      return regions.size === 1 && regions.has('cn')
+        ? `MiniMax (${t('quotaRegionChina')})`
+        : 'MiniMax';
     }
 
     function quotaConsentMeta(provider) {
@@ -4723,6 +4746,11 @@
       } else if (provider === 'kimi' || provider === 'grok') {
         if (key === '5h') return t('windowFiveHour');
         if (key === '7d') return t('windowWeekly');
+      } else if (provider === 'minimax') {
+        // Older stored snapshots included the region in every row. Region now belongs
+        // in the card title (or group heading when both regions are configured).
+        return String(bucket.bucket_label || key || '—')
+          .replace(/\s*\((?:Mainland China|Global)\)\s*$/, '');
       }
       return bucket.bucket_label || key || '—';
     }
@@ -4752,6 +4780,12 @@
       if (provider === 'antigravity') {
         // Pooled series already carry the group name ("Gemini Models" / "Claude and GPT Models").
         return item.bucket_label || 'Antigravity';
+      }
+      if (provider === 'minimax') {
+        const region = item.account === 'cn' ? ` (${t('quotaRegionChina')})` : '';
+        const label = String(item.bucket_label || key)
+          .replace(/\s*\((?:Mainland China|Global)\)\s*$/, '');
+        return `MiniMax${region} ${label}`;
       }
       return `${quotaProviderLabel(provider)} ${item.bucket_label || key}`;
     }
@@ -4815,6 +4849,35 @@
 
     function renderQuotaBucketGroups(card, buckets, provider) {
       buckets.forEach((bucket) => card.appendChild(renderQuotaBucketRow(bucket, provider)));
+    }
+
+    function miniMaxBucketGroups(buckets) {
+      const accounts = new Set(buckets.map((bucket) => String(bucket.account || '')).filter(Boolean));
+      if (accounts.size <= 1) return [{ account: Array.from(accounts)[0] || '', rows: buckets }];
+      const order = ['global', 'cn', ...Array.from(accounts).filter((account) => !['global', 'cn'].includes(account))];
+      return order
+        .map((account) => ({
+          account,
+          rows: buckets.filter((bucket) => String(bucket.account || '') === account),
+        }))
+        .filter((group) => group.rows.length);
+    }
+
+    function renderMiniMaxBuckets(card, buckets) {
+      const groups = miniMaxBucketGroups(buckets);
+      if (groups.length <= 1) {
+        renderQuotaBucketGroups(card, buckets, 'minimax');
+        return;
+      }
+      let rendered = 0;
+      groups.forEach(({ account, rows }) => {
+        const label = account === 'cn'
+          ? t('quotaRegionChina')
+          : account === 'global' ? t('quotaRegionGlobal') : account;
+        card.appendChild(quotaSubtitleEl(label, rendered === 0));
+        rows.forEach((bucket) => card.appendChild(renderQuotaBucketRow(bucket, 'minimax')));
+        rendered += 1;
+      });
     }
 
     // Codex card: the primary account windows (bucket ids exactly "5h"/"7d") render first,
@@ -4977,7 +5040,7 @@
         const titleWrap = document.createElement('div');
         const title = document.createElement('h3');
         title.className = 'text-base font-extrabold mono';
-        title.textContent = quotaProviderLabel(providerKey);
+        title.textContent = quotaProviderCardLabel(providerKey, provider);
         // Plan label (Pro Lite / Max 5x …) sits INLINE after the provider name as a muted
         // suffix instead of on its own line, so the card reads "Codex · Pro Lite" and the
         // window bars start higher. Antigravity has no plan line.
@@ -5030,6 +5093,9 @@
           appendQuotaStatusNotice(card, providerKey, provider);
         } else if (providerKey === 'codex') {
           renderCodexBuckets(card, buckets);
+          appendQuotaStatusNotice(card, providerKey, provider);
+        } else if (providerKey === 'minimax') {
+          renderMiniMaxBuckets(card, buckets);
           appendQuotaStatusNotice(card, providerKey, provider);
         } else {
           renderQuotaBucketGroups(card, buckets, providerKey);

@@ -119,6 +119,14 @@ def test_quota_plan_label_does_not_call_detected_providers_undetected(tmp_path):
         ["kimi", {"detected": True, "plan": "Intermediate"}],
         ["minimax", {"detected": False, "plan": None}],
         ["antigravity", {"detected": False, "plan": None}],
+        [
+            "minimax",
+            {
+                "detected": True,
+                "plan": "one-region-plan",
+                "buckets": [{"account": "global"}, {"account": "cn"}],
+            },
+        ],
     ]
     result = subprocess.run(
         ["node", str(harness), json.dumps(cases)],
@@ -127,4 +135,61 @@ def test_quota_plan_label_does_not_call_detected_providers_undetected(tmp_path):
         check=True,
     )
 
-    assert json.loads(result.stdout) == ["", "", "Intermediate", "not detected", ""]
+    assert json.loads(result.stdout) == [
+        "",
+        "",
+        "Intermediate",
+        "not detected",
+        "",
+        "",
+    ]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_minimax_china_region_moves_from_bucket_to_card_title(tmp_path):
+    src = INDEX_HTML.read_text(encoding="utf-8")
+    card_fn = _extract_js_function(
+        src, "function quotaProviderCardLabel(providerKey, provider) {"
+    )
+    window_fn = _extract_js_function(
+        src, "function quotaWindowLabel(provider, bucket) {"
+    )
+    groups_fn = _extract_js_function(
+        src, "function miniMaxBucketGroups(buckets) {"
+    )
+    harness = tmp_path / "minimax-region-label.js"
+    harness.write_text(
+        "function t(key) { return key === 'quotaRegionChina' ? 'China' : key; }\n"
+        + "function quotaProviderLabel(key) { return key; }\n"
+        + card_fn
+        + "\n"
+        + window_fn
+        + "\n"
+        + groups_fn
+        + "\nconst cases = JSON.parse(process.argv[2]);\n"
+        + "const titles = cases.map((buckets) => quotaProviderCardLabel('minimax', { buckets }));\n"
+        + "const oldBucket = quotaWindowLabel('minimax', "
+        + "{ bucket: 'cn_general_5h', bucket_label: 'General · 5-hour (Mainland China)' });\n"
+        + "const groups = miniMaxBucketGroups(["
+        + "{ account: 'cn', bucket: 'cn-row' }, { account: 'global', bucket: 'global-row' }"
+        + "]).map((group) => [group.account, group.rows.map((row) => row.bucket)]);\n"
+        + "process.stdout.write(JSON.stringify({ titles, oldBucket, groups }));\n",
+        encoding="utf-8",
+    )
+    cases = [
+        [{"account": "cn"}],
+        [{"account": "global"}],
+        [{"account": "global"}, {"account": "cn"}],
+    ]
+    result = subprocess.run(
+        ["node", str(harness), json.dumps(cases)],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert json.loads(result.stdout) == {
+        "titles": ["MiniMax (China)", "MiniMax", "MiniMax"],
+        "oldBucket": "General · 5-hour",
+        "groups": [["global", ["global-row"]], ["cn", ["cn-row"]]],
+    }

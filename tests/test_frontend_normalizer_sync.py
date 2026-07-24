@@ -85,7 +85,7 @@ def test_frontend_normalize_model_name_matches_backend(tmp_path):
     result = subprocess.run(
         ["node", str(harness), json.dumps(SYNC_CASES)],
         capture_output=True,
-        text=True,
+        encoding="utf-8",
         check=True,
     )
     js_out = json.loads(result.stdout)
@@ -131,7 +131,7 @@ def test_quota_plan_label_does_not_call_detected_providers_undetected(tmp_path):
     result = subprocess.run(
         ["node", str(harness), json.dumps(cases)],
         capture_output=True,
-        text=True,
+        encoding="utf-8",
         check=True,
     )
 
@@ -184,7 +184,7 @@ def test_minimax_china_region_moves_from_bucket_to_card_title(tmp_path):
     result = subprocess.run(
         ["node", str(harness), json.dumps(cases)],
         capture_output=True,
-        text=True,
+        encoding="utf-8",
         check=True,
     )
 

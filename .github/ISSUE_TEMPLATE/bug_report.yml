@@ -1,0 +1,62 @@
+name: Bug Report
+description: Report a bug in tokdash
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe the bug and what you expected to happen.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Provide clear steps to reproduce the behavior.
+      placeholder: |
+        1. Run `...`
+        2. Open `...`
+        3. See error
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: tokdash version
+      description: Output of `tokdash --version` or `pip show tokdash`.
+      placeholder: "e.g. 1.4.2"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Linux
+        - macOS
+        - Windows
+        - WSL
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or screenshots
+      description: Paste any error output, stack traces, or screenshots. Wrap code in ``` for formatting.
+      render: shell
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I have searched existing issues and this is not a duplicate.
+          required: true
+        - label: I am using the latest released version of tokdash.
+          required: false

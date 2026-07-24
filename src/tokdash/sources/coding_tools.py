@@ -1297,6 +1297,171 @@ class KimiParser(BaseParser):
         return out
 
 
+class GrokParser(BaseParser):
+    """Parse Grok Build's global usage log for per-inference token counts.
+
+    Grok Build appends one JSON object per line to ``$GROK_HOME/logs/unified.jsonl``.
+    ``shell.turn.inference_done`` rows carry the real prompt / cached / completion /
+    reasoning split — everything needed to price a turn accurately — but no model id, so the
+    active model is tracked per CLI process (``pid``) from the model-change events the CLI
+    also logs. This mirrors the Grok CLI's own (and openusage's) billing accounting; the
+    older cumulative ``updates.jsonl`` reader could only lump every token into ``input`` and
+    mark it estimated.
+    """
+
+    source_name = "grok"
+    sync_capability = SourceSyncCapability(
+        mode="source_replace",
+        reason=(
+            "Grok usage is a single append-only unified.jsonl with no stable per-row id, so a "
+            "change reparses the whole file."
+        ),
+    )
+
+    _UNKNOWN_MODEL = "grok-unknown"
+    _MODEL_EVENTS = frozenset(
+        {
+            "model changed",
+            "model catalog: notifying clients",
+            "backend_search: model switch",
+            "subagent model resolved",
+        }
+    )
+
+    def __init__(self, pricing_db: PricingDatabase):
+        super().__init__(pricing_db)
+        self.log_path = clientpaths.grok_home() / "logs" / "unified.jsonl"
+
+    def _file_signatures(self) -> tuple:
+        def _scan() -> tuple:
+            try:
+                st = self.log_path.stat()
+            except OSError:
+                return ()
+            return ((str(self.log_path), st.st_mtime_ns, st.st_size),)
+
+        return _timed_sigs(f"grok:{self.log_path}", _scan)
+
+    @staticmethod
+    def _int(value: Any) -> int:
+        if value is None or isinstance(value, bool):
+            return 0
+        try:
+            return int(value)
+        except (TypeError, ValueError, OverflowError):
+            return 0
+
+    @staticmethod
+    def _timestamp_ms(raw: Any) -> Optional[int]:
+        if not isinstance(raw, str) or not raw.strip():
+            return None
+        try:
+            parsed = datetime.fromisoformat(raw.strip().replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        try:
+            return int(parsed.timestamp() * 1000)
+        except (OSError, OverflowError):
+            return None
+
+    @staticmethod
+    def _model_change(msg: str, ctx: Dict[str, Any]) -> Optional[str]:
+        # The active model is announced through several event shapes, all keyed by pid.
+        if msg == "model changed":
+            raw = ctx.get("model")
+        elif msg == "model catalog: notifying clients":
+            raw = ctx.get("current_model_id")
+        elif msg == "backend_search: model switch":
+            raw = ctx.get("model") or ctx.get("current_model_id") or ctx.get("model_id")
+        elif msg == "subagent model resolved":
+            raw = ctx.get("model_id") or ctx.get("model")
+        else:
+            return None
+        model = str(raw or "").strip()
+        return model or None
+
+    def _entry(
+        self, pid: Any, loop_index: int, model: str, timestamp: int, input_tokens: int, cache_read: int, output: int
+    ) -> Dict[str, Any]:
+        entry_id = f"grok:{pid}:{timestamp}:{loop_index}"
+        return {
+            "source": self.source_name,
+            "model": model or self._UNKNOWN_MODEL,
+            "provider": "xai",
+            "input": input_tokens,
+            "output": output,
+            "cacheRead": cache_read,
+            "cacheWrite": 0,
+            "reasoning": 0,
+            # A real per-inference split, so the compute layer prices it accurately and it is
+            # NOT an estimate — unlike the old cumulative-delta reader.
+            "cost": 0.0,
+            "timestamp": timestamp,
+            "message_id": entry_id,
+            "entry_id": entry_id,
+            "estimated": False,
+        }
+
+    def _parse_all(self) -> List[Dict[str, Any]]:
+        if not self.log_path.is_file():
+            return []
+        model_by_pid: Dict[Any, str] = {}
+        seen: set = set()
+        out: List[Dict[str, Any]] = []
+        try:
+            with self.log_path.open("r", encoding="utf-8", errors="replace") as handle:
+                for line in handle:
+                    # Cheap pre-filter before JSON parsing: only model events and token rows matter.
+                    if "inference_done" not in line and "model" not in line:
+                        continue
+                    try:
+                        row = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if not isinstance(row, dict):
+                        continue
+                    msg = str(row.get("msg") or "")
+                    ctx = row.get("ctx") if isinstance(row.get("ctx"), dict) else {}
+                    pid = row.get("pid")
+
+                    if msg in self._MODEL_EVENTS:
+                        model = self._model_change(msg, ctx)
+                        if model and pid is not None:
+                            model_by_pid[pid] = model
+                        continue
+
+                    if msg != "shell.turn.inference_done":
+                        continue
+                    timestamp = self._timestamp_ms(row.get("ts"))
+                    if timestamp is None:
+                        continue
+                    prompt = self._int(ctx.get("prompt_tokens"))
+                    cache_read = min(self._int(ctx.get("cached_prompt_tokens")), prompt)
+                    input_tokens = max(0, prompt - cache_read)
+                    # reasoning is billed as output; fold it in (pricing has no reasoning rate).
+                    output = self._int(ctx.get("completion_tokens")) + self._int(ctx.get("reasoning_tokens"))
+                    if input_tokens + cache_read + output <= 0:
+                        continue
+                    # Token rows carry no model id — attribute via the row's process. A row we
+                    # can't attribute can't be priced, so exclude it rather than bucket it under
+                    # an unpriceable unknown model.
+                    model = model_by_pid.get(pid)
+                    if not model:
+                        continue
+                    entry = self._entry(
+                        pid, self._int(ctx.get("loop_index")), model, timestamp, input_tokens, cache_read, output
+                    )
+                    if entry["entry_id"] in seen:
+                        continue
+                    seen.add(entry["entry_id"])
+                    out.append(entry)
+        except (OSError, UnicodeError):
+            return []
+        return out
+
+
 class PiAgentParser(BaseParser):
     """
     Parser for pi-agent session files.
@@ -2292,6 +2457,7 @@ class CodingToolsUsageTracker:
             "antigravity_cli": AntigravityCLIParser(self.pricing_db),
             "amp": AmpParser(self.pricing_db),
             "kimi": KimiParser(self.pricing_db),
+            "grok": GrokParser(self.pricing_db),
             "pi_agent": PiAgentParser(self.pricing_db),
             "copilot_cli": CopilotCLIParser(self.pricing_db),
             "hermes": HermesParser(self.pricing_db),
@@ -2325,7 +2491,7 @@ def main():
     parser.add_argument("--since", type=str)
     parser.add_argument("--until", type=str)
     parser.add_argument("--json", action="store_true")
-    parser.add_argument("--sources", type=str, default="opencode,codex,claude,gemini_cli,antigravity_cli,amp,kimi,pi_agent,copilot_cli,hermes,mimo")
+    parser.add_argument("--sources", type=str, default="opencode,codex,claude,gemini_cli,antigravity_cli,amp,kimi,grok,pi_agent,copilot_cli,hermes,mimo")
     args = parser.parse_args()
 
     since_date, until_date = _date_range(args)

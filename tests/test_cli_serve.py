@@ -50,13 +50,29 @@ def test_quota_command_parses_actions():
     assert args.quota_action == "consent"
     assert args.codex_api == "on"
 
+    args = cli.build_parser("tokdash").parse_args(
+        ["quota", "consent", "--credential-scan", "on", "--minimax-api", "on", "--kimi-api", "on", "--grok-api", "off"]
+    )
+    assert args.credential_scan == "on"
+    assert args.minimax_api == "on"
+    assert args.kimi_api == "on"
+    assert args.grok_api == "off"
+
 
 def test_quota_consent_cli_updates_config():
     assert cli.cli(["quota", "consent", "--codex-api", "on", "--claude-api", "off", "--json"]) == 0
 
     from tokdash.sources.quota.config import read_quota_config
 
-    assert read_quota_config() == {"codex_api": True, "claude_api": False, "antigravity_api": False}
+    assert read_quota_config() == {
+        "credential_scan": False,
+        "codex_api": True,
+        "claude_api": False,
+        "antigravity_api": False,
+        "minimax_api": False,
+        "kimi_api": False,
+        "grok_api": False,
+    }
 
 
 def test_quota_poll_cli_uses_collector(monkeypatch):

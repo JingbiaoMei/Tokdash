@@ -8,7 +8,23 @@ from typing import Any
 
 from ...onboard import paths
 
-QUOTA_KEYS = ("codex_api", "claude_api", "antigravity_api")
+QUOTA_KEYS = (
+    "codex_api",
+    "claude_api",
+    "antigravity_api",
+    "minimax_api",
+    "kimi_api",
+    "grok_api",
+)
+CREDENTIAL_SCAN_KEY = "credential_scan"
+CONSENT_KEYS = (CREDENTIAL_SCAN_KEY, *QUOTA_KEYS)
+
+# Providers that predate the credential_scan consent gate. On upgrade, an install
+# that already consented to polling one of these implicitly authorized reading its
+# credential — polling is strictly broader than reading — so credential access is
+# grandfathered for them until the user makes an explicit credential_scan choice.
+# New providers and fresh installs have no such prior consent and stay default-off.
+_LEGACY_PROVIDER_KEYS = ("codex_api", "claude_api", "antigravity_api")
 
 # Poll-interval choices offered in the UI / setup wizard and the effective default
 # (Rev 3: 30 min balances snapshot freshness against provider-call volume).
@@ -49,10 +65,22 @@ def _write_config(data: dict[str, Any]) -> None:
     tmp.replace(p)
 
 
+def _raw_quota() -> dict[str, Any]:
+    """The stored ``quota`` block verbatim, so callers can tell an absent consent
+    key (upgrade) apart from one explicitly set to ``False``."""
+    cfg = _read_config()
+    quota = cfg.get("quota")
+    return quota if isinstance(quota, dict) else {}
+
+
+def _grandfathered_credential_scan(raw: dict[str, Any]) -> bool:
+    return any(bool(raw.get(key)) for key in _LEGACY_PROVIDER_KEYS)
+
+
 def read_quota_config() -> dict[str, bool]:
     cfg = _read_config()
     quota = cfg.get("quota") if isinstance(cfg.get("quota"), dict) else {}
-    return {key: bool(quota.get(key)) for key in QUOTA_KEYS}
+    return {key: bool(quota.get(key)) for key in CONSENT_KEYS}
 
 
 def set_quota_consent(updates: dict[str, Any]) -> dict[str, bool]:
@@ -62,14 +90,20 @@ def set_quota_consent(updates: dict[str, Any]) -> dict[str, bool]:
     # resetting the interval whenever consent changes.
     cfg = _read_config()
     quota = dict(cfg.get("quota")) if isinstance(cfg.get("quota"), dict) else {}
-    for key in QUOTA_KEYS:
+    # Preserve the upgrade grandfather: if credential_scan was never stored and this
+    # call isn't setting it, seed it from the legacy providers before the normalize
+    # loop materializes it. Otherwise it would be written as False here and silently
+    # revoke credential access the install already had.
+    if CREDENTIAL_SCAN_KEY not in quota and CREDENTIAL_SCAN_KEY not in updates:
+        quota[CREDENTIAL_SCAN_KEY] = _grandfathered_credential_scan(quota)
+    for key in CONSENT_KEYS:
         # Apply the update if present, otherwise normalize the existing value — either way
-        # all three consent keys stay materialized, while sibling keys (enabled,
+        # all consent keys stay materialized, while sibling keys (enabled,
         # poll_interval_minutes) are left untouched.
         quota[key] = bool(updates[key]) if key in updates else bool(quota.get(key))
     cfg["quota"] = quota
     _write_config(cfg)
-    return {key: bool(quota.get(key)) for key in QUOTA_KEYS}
+    return {key: bool(quota.get(key)) for key in CONSENT_KEYS}
 
 
 def quota_poll_killed() -> bool:
@@ -97,6 +131,31 @@ def quota_tracking_enabled() -> bool:
     if quota_poll_killed():
         return False
     return quota_config_enabled()
+
+
+def credential_scan_enabled() -> bool:
+    """Whether Tokdash may open allowlisted local credential/config stores.
+
+    An explicit ``quota.credential_scan`` value always wins. When it was never
+    stored — an upgrade from a version without this gate — fall back to the legacy
+    grandfather (see ``_LEGACY_PROVIDER_KEYS``) so existing polling keeps working.
+    """
+    if not quota_tracking_enabled():
+        return False
+    raw = _raw_quota()
+    if CREDENTIAL_SCAN_KEY in raw:
+        return bool(raw.get(CREDENTIAL_SCAN_KEY))
+    return _grandfathered_credential_scan(raw)
+
+
+def ensure_quota_consent_migrated() -> None:
+    """Persist the credential_scan grandfather once, so later reads and consent
+    writes see an explicit value instead of re-deriving it. Idempotent; a no-op
+    on fresh installs (nothing stored) and once credential_scan is materialized."""
+    raw = _raw_quota()
+    if not raw or CREDENTIAL_SCAN_KEY in raw:
+        return
+    set_quota_consent({CREDENTIAL_SCAN_KEY: _grandfathered_credential_scan(raw)})
 
 
 def set_quota_enabled(enabled: bool) -> bool:
@@ -206,13 +265,13 @@ def effective_boundary_config() -> BoundaryPollConfig:
 
 
 def network_enabled(key: str) -> bool:
-    if not quota_tracking_enabled():
+    if not credential_scan_enabled():
         return False
     return bool(read_quota_config().get(key))
 
 
 def enabled_network_sources() -> list[str]:
-    if not quota_tracking_enabled():
+    if not credential_scan_enabled():
         return []
     consent = read_quota_config()
     return [key for key in QUOTA_KEYS if consent.get(key)]

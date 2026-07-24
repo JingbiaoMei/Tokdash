@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Iterable
 
+from ... import clientpaths
 from ...usage_store import (
     RESET_JITTER_SECONDS,
     UsageEntryStore,
@@ -17,6 +19,9 @@ from .claude import collect_claude_api_snapshots
 from .codex import collect_codex_session_snapshots
 from .codex import collect_codex_session_snapshots_incremental
 from .codex import collect_codex_api_snapshots
+from .grok import collect_grok_api_snapshots
+from .kimi import collect_kimi_api_snapshots
+from .minimax import collect_minimax_api_snapshots
 from .types import QuotaSnapshot
 
 _CURRENT_SNAPSHOTS: list[QuotaSnapshot] = []
@@ -55,6 +60,12 @@ def collect_network_snapshots(sources: Iterable[str] | None = None) -> list[Quot
             snapshots.extend(collect_claude_api_snapshots())
         elif key == "antigravity_api":
             snapshots.extend(collect_antigravity_api_snapshots())
+        elif key == "minimax_api":
+            snapshots.extend(collect_minimax_api_snapshots())
+        elif key == "kimi_api":
+            snapshots.extend(collect_kimi_api_snapshots())
+        elif key == "grok_api":
+            snapshots.extend(collect_grok_api_snapshots())
     return snapshots
 
 
@@ -307,13 +318,17 @@ def _network_key_for_provider(name: str) -> str:
         "codex": "codex_api",
         "claude": "claude_api",
         "antigravity": "antigravity_api",
+        "minimax": "minimax_api",
+        "kimi": "kimi_api",
+        "grok": "grok_api",
     }.get(name, f"{name}_api")
 
 
 def _provider_shell(name: str, consent: dict[str, bool]) -> dict[str, Any]:
+    network_key = _network_key_for_provider(name)
     return {
         "provider": name,
-        "network_enabled": bool(consent.get(_network_key_for_provider(name), False)),
+        "network_enabled": config.network_enabled(network_key),
         "plan": None,
         "buckets": [],
         "status": "unavailable",
@@ -322,21 +337,70 @@ def _provider_shell(name: str, consent: dict[str, bool]) -> dict[str, Any]:
         "updated_at": None,
         "sources": [],
         "estimated": False,
+        "detected": False,
     }
 
 
+def _detected_local_providers() -> set[str]:
+    """Providers with a local CLI directory or explicit credential override.
+
+    This is intentionally read-only and shallow: directory existence and env-var
+    presence are enough to drive dashboard visibility. It never opens a provider
+    connection or refreshes credentials.
+    """
+    detected: set[str] = set()
+    checks = {
+        "codex": (clientpaths.codex_home(), ()),
+        "claude": (clientpaths.claude_config_dir(), ("CLAUDE_CODE_OAUTH_TOKEN",)),
+        "antigravity": (clientpaths.antigravity_cli_dir(), ()),
+        "minimax": (
+            clientpaths.minimax_cli_root(),
+            (
+                "MINIMAX_API_KEY",
+                "MINIMAX_TOKEN_PLAN_GLOBAL_KEY",
+                "MINIMAX_TOKEN_PLAN_CN_KEY",
+            ),
+        ),
+        "grok": (clientpaths.grok_home(), ()),
+    }
+    for provider, (path, env_names) in checks.items():
+        if path.exists() or any(os.environ.get(name, "").strip() for name in env_names):
+            detected.add(provider)
+    if os.environ.get("KIMI_API_KEY", "").strip() or any(root.exists() for root in clientpaths.kimi_roots()):
+        detected.add("kimi")
+    if config.credential_scan_enabled():
+        try:
+            from .credential_sources import discover_provider_sources
+
+            detected.update(discover_provider_sources())
+        except Exception:
+            pass
+    return detected
+
+
 def _freshest_usage_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    selected: dict[tuple[str, str], dict[str, Any]] = {}
+    selected: dict[tuple[str, str, str], dict[str, Any]] = {}
     for row in rows:
         if row.get("bucket") in {"api", "reset_credits"}:
             continue
         provider = str(row.get("provider") or "")
+        # Existing providers deliberately collapse stale placeholder/default accounts into
+        # the freshest real account. MiniMax is the exception: global and mainland-China
+        # Token Plans are separate and may both be configured intentionally.
+        account = str(row.get("account") or "") if provider == "minimax" else ""
         bucket = str(row.get("bucket") or "")
-        key = (provider, bucket)
+        key = (provider, account, bucket)
         current = selected.get(key)
         if current is None or int(row.get("captured_at") or 0) > int(current.get("captured_at") or 0):
             selected[key] = row
-    return sorted(selected.values(), key=lambda item: (str(item.get("provider") or ""), str(item.get("bucket") or "")))
+    return sorted(
+        selected.values(),
+        key=lambda item: (
+            str(item.get("provider") or ""),
+            str(item.get("account") or ""),
+            str(item.get("bucket") or ""),
+        ),
+    )
 
 
 def quota_state(store: UsageEntryStore | None = None) -> dict[str, Any]:
@@ -349,7 +413,12 @@ def quota_state(store: UsageEntryStore | None = None) -> dict[str, Any]:
         latest = [s.as_dict() for s in _CURRENT_SNAPSHOTS]
 
     consent = quota_network_consent()
-    providers = {name: _provider_shell(name, consent) for name in ("codex", "claude", "antigravity")}
+    providers = {
+        name: _provider_shell(name, consent)
+        for name in ("codex", "claude", "antigravity", "minimax", "kimi", "grok")
+    }
+    for name in _detected_local_providers():
+        providers[name]["detected"] = True
     last_network_run: int | None = _LAST_POLL_AT
     # When Codex API polling is enabled, the API is the sole oracle for the current-quota
     # cards: codex_session rows are excluded from bucket selection below so a newer cached
@@ -362,6 +431,9 @@ def quota_state(store: UsageEntryStore | None = None) -> dict[str, Any]:
         if provider not in providers:
             providers[provider] = _provider_shell(provider, consent)
         ref = providers[provider]
+        # Stored quota data is evidence that the provider was configured even if its CLI
+        # directory is temporarily unavailable (mounted home, migrated install, etc.).
+        ref["detected"] = True
         source = str(row.get("source") or "")
         if source.endswith("_api"):
             ref["network_enabled"] = True
@@ -462,12 +534,18 @@ def quota_state(store: UsageEntryStore | None = None) -> dict[str, Any]:
     # polling is off; claude/antigravity have no session source and are never estimated.
     providers["codex"]["estimated"] = "codex" not in network_only
 
-    claude_plan = read_claude_plan()
-    providers["claude"]["plan"] = claude_plan.get("plan")
-    if claude_plan.get("status") == "ok" and providers["claude"]["status"] == "unavailable":
-        providers["claude"]["status"] = "local_plan"
-    providers["claude"]["credential_path"] = claude_plan.get("credential_path")
-    providers["claude"]["tier"] = claude_plan.get("tier")
+    # Reading the Claude local plan opens .credentials.json / the macOS Keychain — that is a
+    # credential access, so gate it on credential-scan consent. Without it, a dashboard load
+    # must never touch those stores or trigger a Keychain permission prompt.
+    if config.credential_scan_enabled():
+        claude_plan = read_claude_plan()
+        providers["claude"]["plan"] = claude_plan.get("plan")
+        if claude_plan.get("status") == "ok" and providers["claude"]["status"] == "unavailable":
+            providers["claude"]["status"] = "local_plan"
+        if claude_plan.get("status") == "ok":
+            providers["claude"]["detected"] = True
+        providers["claude"]["credential_path"] = claude_plan.get("credential_path")
+        providers["claude"]["tier"] = claude_plan.get("tier")
 
     interval_seconds, interval_source = config.effective_poll_interval()
     now = int(datetime.now(timezone.utc).timestamp())

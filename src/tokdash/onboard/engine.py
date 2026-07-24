@@ -1418,8 +1418,8 @@ def _update_check_setup_step() -> None:
     print("  and show an \"update available\" badge. Read-only; it never auto-upgrades")
     print("  anything. Toggle it later from the dashboard's \"Enable update notices\" link.")
 
-    # Any input failure (exhausted stdin / EOF / interrupt) means "accept the default and
-    # stop asking" — matches the quota wizard so a broken terminal never blocks setup.
+    # A broken/non-interactive terminal must never block setup or silently opt into a network
+    # version check: _confirm (non-strict) returns False on EOF/interrupt, leaving notices off.
     try:
         enable = _confirm("  Enable update notices?", default=True)
     except (EOFError, KeyboardInterrupt, StopIteration):
@@ -1456,15 +1456,18 @@ def _quota_setup_wizard() -> None:
     print("      works out of the box, Codex only, updates only when you use Codex.")
     print("    - Live polling (off by default): asks each provider's quota endpoint using")
     print("      the sign-in your CLI already has. Fresher, adds Codex reset credits, and")
-    print("      is the ONLY source for Claude Code and Antigravity. Read-only; Tokdash")
-    print("      never refreshes or writes credentials.")
+    print("      is the only source for Claude, Antigravity, MiniMax, Kimi, and Grok quota.")
+    print("      Read-only; Tokdash never refreshes or writes credentials.")
 
     # Master switch — identical to the Quota tab's "Quota tracking" toggle (config
     # quota.enabled). Off disables ALL quota work (including local session scanning); on
     # (the default) proceeds to the per-provider network + interval questions. Any input
     # failure (exhausted stdin / EOF / interrupt) means "accept the defaults and stop".
+    # Re-run safety: every prompt defaults to the CURRENT persisted choice so pressing
+    # Enter through a repeat setup is a no-op, never a silent mass opt-out. On a fresh
+    # install these getters return the defaults (tracking on, credential access off).
     try:
-        enable = _confirm("  Enable quota tracking?", default=True)
+        enable = _confirm("  Enable quota tracking?", default=quota_config.quota_config_enabled(), strict=True)
     except (EOFError, KeyboardInterrupt, StopIteration):
         print()
         return
@@ -1476,20 +1479,65 @@ def _quota_setup_wizard() -> None:
         print("  Quota tracking disabled. Enable it any time from the Quota tab.")
         return
 
-    # Any input failure (exhausted stdin / EOF / interrupt) means "accept the defaults and
-    # stop asking" — the wizard never blocks or crashes an otherwise-successful setup.
+    print("\n  Local credential access is separate from provider network consent.")
+    print("  If allowed, Tokdash may read only these credential/config stores:")
+    print("    - native Codex, Claude, Antigravity, mmx, Kimi Code, and Grok auth/config files")
+    print("    - OpenCode auth.json plus its global provider config")
+    print("    - CC Switch's providers table, opened read-only")
+    print("  Tokdash never reads provider logs, shell profiles, or arbitrary referenced files.")
     try:
+        credential_scan = _confirm(
+            "  Allow these local credential reads for quota tracking?",
+            default=quota_config.credential_scan_enabled(),
+            strict=True,
+        )
+    except (EOFError, KeyboardInterrupt, StopIteration):
+        print()
+        return
+    try:
+        quota_config.set_quota_consent({"credential_scan": credential_scan})
+    except Exception:
+        _err("  Could not save local credential-access consent; live polling remains disabled.")
+        return
+    if not credential_scan:
+        print("  Local credential access disabled. Live quota polling remains off.")
+        return
+
+    try:
+        from ..sources.quota.credential_sources import discover_provider_sources
+
+        provider_sources = discover_provider_sources()
+    except Exception:
+        provider_sources = {}
+    if provider_sources:
+        print("  Detected quota credential sources (secret values are never displayed):")
+        for provider, sources in provider_sources.items():
+            print(f"    - {provider}: {', '.join(sources)}")
+    else:
+        print("  No supported local quota credentials were detected.")
+
+    # Any input failure aborts this group without persisting partial provider answers.
+    try:
+        current = quota_config.read_quota_config()
         consent_updates: Dict[str, Any] = {}
         for key, label, hint in (
             ("codex_api", "Codex", "fresher than local logs; adds reset credits"),
             ("claude_api", "Claude Code", "required for any Claude quota data"),
             ("antigravity_api", "Antigravity", "required for any Antigravity quota data"),
+            ("minimax_api", "MiniMax", "requires a Token Plan key or mmx sign-in"),
+            ("kimi_api", "Kimi Code", "requires a Kimi Code key or sign-in"),
+            ("grok_api", "Grok Build", "requires xAI OAuth; API keys cannot read this quota"),
         ):
-            consent_updates[key] = _confirm(f"  Enable live quota polling for {label} ({hint})?", default=False)
-        try:
+            provider = key.removesuffix("_api")
+            if provider not in provider_sources:
+                continue
+            consent_updates[key] = _confirm(
+                f"  Enable live quota polling for {label} ({hint})?",
+                default=bool(current.get(key)),
+                strict=True,
+            )
+        if consent_updates:
             quota_config.set_quota_consent(consent_updates)
-        except Exception:
-            _err("  Could not save quota consent; enable it later from the Quota tab.")
         if consent_updates.get("claude_api") and detect.os_kind() == "macos":
             # Claude Code keeps its sign-in in the Keychain on macOS; Tokdash reads it
             # (read-only), but the first access may need a one-time Keychain approval.
@@ -1498,11 +1546,17 @@ def _quota_setup_wizard() -> None:
             print("  Headless/locked-Keychain sessions can set CLAUDE_CODE_OAUTH_TOKEN instead")
             print("  (create one with `claude setup-token`).")
 
-        choices = quota_config.POLL_INTERVAL_CHOICES
-        default_minutes = quota_config.DEFAULT_POLL_INTERVAL_MINUTES
-        answer = input(f"  Poll interval in minutes {list(choices)} [{default_minutes}]: ").strip()
+        answer = ""
+        saved_consent = quota_config.read_quota_config()
+        if any(saved_consent.get(key) for key in quota_config.QUOTA_KEYS):
+            choices = quota_config.POLL_INTERVAL_CHOICES
+            default_minutes = quota_config.DEFAULT_POLL_INTERVAL_MINUTES
+            answer = input(f"  Poll interval in minutes {list(choices)} [{default_minutes}]: ").strip()
     except (EOFError, KeyboardInterrupt, StopIteration):
         print()
+        return
+    except Exception:
+        _err("  Could not save quota consent; enable it later from the Quota tab.")
         return
     if answer:
         try:
@@ -1522,11 +1576,24 @@ def _quota_setup_wizard() -> None:
             print(f"  Unrecognized value; keeping the current interval ({current} min).")
 
 
-def _confirm(prompt: str, default: bool = True) -> bool:
+def _confirm(prompt: str, default: bool = True, *, strict: bool = False) -> bool:
+    """Yes/no prompt.
+
+    ``strict=False`` (default): an EOF or Ctrl-C returns ``False`` — i.e. "don't do the
+    action being confirmed" — so a broken/non-interactive terminal never crashes a
+    setup/uninstall/Tailscale prompt with a traceback.
+
+    ``strict=True``: EOF/interrupt PROPAGATE to the caller. The quota wizard relies on this
+    to abort a multi-prompt sequence without persisting the partial answers it collected so
+    far; those callers wrap the sequence in their own ``except (EOFError, KeyboardInterrupt,
+    StopIteration)``.
+    """
     suffix = " [Y/n] " if default else " [y/N] "
     try:
         answer = input(prompt + suffix).strip().lower()
     except (EOFError, KeyboardInterrupt):
+        if strict:
+            raise
         print()
         return False
     if not answer:

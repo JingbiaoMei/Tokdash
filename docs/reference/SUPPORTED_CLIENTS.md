@@ -23,7 +23,8 @@ Tokdash reads usage **locally** from each tool's own session/log files — nothi
 - **Gemini CLI**: `~/.gemini/tmp/*/chats/session-*.json` and `session-*.jsonl`
 - **Antigravity CLI**: `~/.gemini/antigravity-cli/conversations/*.db` (token usage only; Session Explorer drill-down is not yet supported)
 - **OpenClaw**: `~/.openclaw/agents/*/sessions/`
-- **Kimi CLI**: `~/.kimi/sessions/*/*/wire.jsonl`
+- **Kimi Code**: `~/.kimi-code/sessions/*/*/agents/*/wire.jsonl` (legacy Kimi CLI: `~/.kimi/sessions/*/*/wire.jsonl`)
+- **Grok Build**: `$GROK_HOME/logs/unified.jsonl` (defaults to `~/.grok`; per-inference prompt/cache/completion/reasoning tokens with model attribution)
 - **Pi**: `~/.pi/agent/sessions/` (override via `PI_AGENT_DIR` env var, comma-separated list of dirs)
 - **GitHub Copilot CLI**: `~/.copilot/otel/` (full input/cache/cost data — set `COPILOT_OTEL_FILE_EXPORTER_PATH` to enable OTel export) and `~/.copilot/session-state/*/events.jsonl` (output-only fallback when OTel is not enabled)
 - **Hermes**: `~/.hermes/state.db` (override via `HERMES_HOME` env var, comma-separated list of dirs)

@@ -3,8 +3,8 @@
 
 Run this MANUALLY when you want to refresh the frozen quota fixtures. It:
 
-  * reads the SAME local CLI credentials the runtime uses (``sources/quota/codex.py``
-    and ``sources/quota/antigravity.py``) — it never refreshes or writes any token;
+  * reads the SAME local CLI credentials the runtime uses — only after the saved
+    local-credential and per-provider network consents are both enabled;
   * performs read-only calls: Codex ``wham/usage`` + ``wham/rate-limit-reset-credits``,
     and Antigravity ``loadCodeAssist`` -> ``fetchAvailableModels``;
   * deeply scrubs ALL token material and every account identifier / email before
@@ -16,7 +16,7 @@ It is intentionally NOT wired into the app, the poller, or CI — nothing runs i
 
 Usage (from the repo root):
 
-    python scripts/probe_quota_endpoints.py                 # both providers
+    python scripts/probe_quota_endpoints.py                 # all consented providers
     python scripts/probe_quota_endpoints.py --only codex    # just Codex
     python scripts/probe_quota_endpoints.py --out /tmp/q    # custom output dir
 """
@@ -180,19 +180,92 @@ def probe_antigravity(out_dir: Path, timeout: float) -> None:
     _write(out_dir, "antigravity_models.json", models)
 
 
+def probe_minimax(out_dir: Path, timeout: float) -> None:
+    import urllib.request
+
+    from tokdash.sources.quota import minimax
+
+    print("MiniMax:")
+    credentials = minimax._credentials()
+    if not credentials:
+        print("  no usable MiniMax candidate — skipping.")
+        return
+    for credential in credentials:
+        url = minimax._quota_url(credential.base_url)
+        request = urllib.request.Request(
+            url,
+            headers={
+                "Authorization": f"Bearer {credential.token}",
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "User-Agent": "tokdash-quota-probe",
+            },
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except Exception as exc:  # noqa: BLE001
+            print(f"  {credential.region}: request failed ({_error_detail(exc)})")
+            continue
+        _write(out_dir, f"minimax_{credential.region}_remains.json", payload)
+
+
+def probe_kimi(out_dir: Path, timeout: float) -> None:
+    import time
+    import urllib.request
+
+    from tokdash.sources.quota import kimi
+
+    print("Kimi:")
+    credentials = kimi._credentials()
+    if not credentials:
+        print("  no usable Kimi Code candidate — skipping.")
+        return
+    for index, credential in enumerate(credentials):
+        if credential.expires_at is not None and credential.expires_at <= int(time.time()):
+            print(f"  candidate {index + 1}: OAuth token is stale — skipping.")
+            continue
+        request = urllib.request.Request(
+            kimi._usage_url(credential.base_url),
+            headers={
+                "Authorization": f"Bearer {credential.token}",
+                "Accept": "application/json",
+                "User-Agent": "tokdash-quota-probe",
+            },
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except Exception as exc:  # noqa: BLE001
+            print(f"  candidate {index + 1}: request failed ({_error_detail(exc)})")
+            continue
+        _write(out_dir, "kimi_usages.json", payload)
+        return
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--out", default=str(_DEFAULT_OUT), help="output directory for scrubbed fixtures")
-    parser.add_argument("--only", choices=["codex", "antigravity"], help="probe just one provider")
+    parser.add_argument("--only", choices=["codex", "antigravity", "minimax", "kimi"], help="probe just one provider")
     parser.add_argument("--timeout", type=float, default=15.0, help="per-request timeout in seconds")
     args = parser.parse_args(argv)
 
     out_dir = Path(args.out).expanduser()
     print(f"Writing scrubbed quota fixtures to {out_dir}")
-    if args.only in (None, "codex"):
+    from tokdash.sources.quota import config as quota_config
+
+    if not quota_config.credential_scan_enabled():
+        print("Local credential access is not consented. Enable quota.credential_scan first.")
+        return 2
+
+    if args.only in (None, "codex") and quota_config.network_enabled("codex_api"):
         probe_codex(out_dir, args.timeout)
-    if args.only in (None, "antigravity"):
+    if args.only in (None, "antigravity") and quota_config.network_enabled("antigravity_api"):
         probe_antigravity(out_dir, args.timeout)
+    if args.only in (None, "minimax") and quota_config.network_enabled("minimax_api"):
+        probe_minimax(out_dir, args.timeout)
+    if args.only in (None, "kimi") and quota_config.network_enabled("kimi_api"):
+        probe_kimi(out_dir, args.timeout)
     print("Done. Review the scrubbed JSON before committing.")
     return 0
 

@@ -7,7 +7,7 @@ from urllib.error import HTTPError
 
 import pytest
 
-from tokdash.sources.quota import antigravity, claude, codex
+from tokdash.sources.quota import antigravity, claude, codex, grok, kimi, minimax
 from tokdash.usage_store import _codex_window_used_percent_from_raw
 
 _FIXTURE_DIR = Path(__file__).parent / "fixtures" / "quota"
@@ -40,6 +40,388 @@ def _header(req, name: str) -> str | None:
         if key.lower() == name.lower():
             return value
     return None
+
+
+def test_minimax_api_collects_global_short_and_weekly_windows(monkeypatch, tmp_path):
+    mmx_home = tmp_path / ".mmx"
+    mmx_home.mkdir()
+    (mmx_home / "config.json").write_text(
+        json.dumps({"api_key": "sk-token-plan", "region": "global"}), encoding="utf-8"
+    )
+    monkeypatch.setenv("MMX_CONFIG_DIR", str(mmx_home))
+    monkeypatch.delenv("MINIMAX_API_KEY", raising=False)
+    monkeypatch.delenv("MINIMAX_TOKEN_PLAN_GLOBAL_KEY", raising=False)
+    monkeypatch.delenv("MINIMAX_TOKEN_PLAN_CN_KEY", raising=False)
+
+    def opener(req, timeout=15):
+        assert req.full_url == "https://api.minimax.io/v1/token_plan/remains"
+        assert _header(req, "Authorization") == "Bearer sk-token-plan"
+        return FakeResponse(
+            {
+                "model_remains": [
+                    {
+                        "model_name": "general",
+                        "end_time": 1_782_925_200_000,
+                        "weekly_end_time": 1_783_530_000_000,
+                        "current_interval_remaining_percent": 75,
+                        "current_weekly_remaining_percent": 40,
+                        "current_interval_status": 1,
+                        "current_weekly_status": 1,
+                    }
+                ],
+                "base_resp": {"status_code": 0},
+            }
+        )
+
+    snapshots = minimax.collect_minimax_api_snapshots(opener=opener, now=1_782_907_200)
+
+    assert [s.bucket for s in snapshots] == ["global_general_5h", "global_general_7d"]
+    assert [s.used_percent for s in snapshots] == [25.0, 60.0]
+    assert all(s.account == "global" and s.source == "minimax_api" for s in snapshots)
+
+
+def test_minimax_api_marks_expired_oauth_read_only(monkeypatch, tmp_path):
+    mmx_home = tmp_path / ".mmx"
+    mmx_home.mkdir()
+    (mmx_home / "config.json").write_text(
+        json.dumps(
+            {
+                "oauth": {
+                    "access_token": "expired",
+                    "refresh_token": "must-not-be-used",
+                    "expires_at": "2026-07-01T00:00:00Z",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MMX_CONFIG_DIR", str(mmx_home))
+    monkeypatch.delenv("MINIMAX_API_KEY", raising=False)
+    monkeypatch.delenv("MINIMAX_TOKEN_PLAN_GLOBAL_KEY", raising=False)
+    monkeypatch.delenv("MINIMAX_TOKEN_PLAN_CN_KEY", raising=False)
+
+    snapshots = minimax.collect_minimax_api_snapshots(
+        opener=lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("network called")),
+        now=1_782_907_200,
+    )
+
+    assert len(snapshots) == 1
+    assert snapshots[0].status == "stale_token"
+
+
+def test_minimax_prefers_observed_counts_and_avoids_double_v1_path():
+    assert minimax._percent(90, 30, 100) == 30.0
+    assert minimax._percent(75, None, None) == 25.0
+    assert minimax._quota_url("https://api.minimax.io/v1") == "https://api.minimax.io/v1/token_plan/remains"
+
+
+def test_minimax_tracks_global_and_mainland_china_plans_separately(monkeypatch, tmp_path):
+    monkeypatch.setenv("MMX_CONFIG_DIR", str(tmp_path / "missing-mmx"))
+    monkeypatch.setenv("MINIMAX_TOKEN_PLAN_GLOBAL_KEY", "global-plan-key")
+    monkeypatch.setenv("MINIMAX_TOKEN_PLAN_CN_KEY", "cn-plan-key")
+    monkeypatch.delenv("MINIMAX_API_KEY", raising=False)
+    calls = []
+
+    def opener(req, timeout=15):
+        calls.append((req.full_url, _header(req, "Authorization")))
+        return FakeResponse(
+            {
+                "model_remains": [
+                    {
+                        "model_name": "general",
+                        "current_interval_remaining_percent": 80,
+                        "end_time": "2026-07-20T15:00:00Z",
+                        "current_weekly_status": 3,
+                    }
+                ],
+                "base_resp": {"status_code": 0},
+            }
+        )
+
+    snapshots = minimax.collect_minimax_api_snapshots(opener=opener, now=1_782_907_200)
+
+    assert calls == [
+        ("https://api.minimax.io/v1/token_plan/remains", "Bearer global-plan-key"),
+        ("https://api.minimaxi.com/v1/token_plan/remains", "Bearer cn-plan-key"),
+    ]
+    assert [(snapshot.account, snapshot.bucket) for snapshot in snapshots] == [
+        ("global", "global_general_5h"),
+        ("cn", "cn_general_5h"),
+    ]
+
+
+def test_kimi_api_key_collects_membership_windows(monkeypatch, tmp_path):
+    home = tmp_path / "home"
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setenv("KIMI_API_KEY", "sk-kimi-code")
+    monkeypatch.delenv("KIMI_CODE_HOME", raising=False)
+    monkeypatch.delenv("KIMI_SHARE_DIR", raising=False)
+
+    def opener(req, timeout=15):
+        assert req.full_url == "https://api.kimi.com/coding/v1/usages"
+        assert _header(req, "Authorization") == "Bearer sk-kimi-code"
+        return FakeResponse(
+            {
+                "limits": [
+                    {
+                        "window": {"duration": 300, "timeUnit": "MINUTE"},
+                        "detail": {"limit": "100", "remaining": "70", "resetTime": "2026-07-20T15:00:00Z"},
+                    },
+                    {
+                        "window": {"duration": 7, "timeUnit": "DAY"},
+                        "detail": {"limit": "1000", "remaining": "600", "resetTime": "2026-07-25T00:00:00Z"},
+                    },
+                ],
+                "usage": {"limit": "1000", "remaining": "600", "resetTime": "2026-07-25T00:00:00Z"},
+                "user": {"membership": {"level": "LEVEL_ALLEGRO"}},
+            }
+        )
+
+    snapshots = kimi.collect_kimi_api_snapshots(opener=opener, now=1_782_907_200)
+
+    assert [s.bucket for s in snapshots] == ["5h", "7d"]
+    assert [s.used_percent for s in snapshots] == [30.0, 40.0]
+    assert all(s.plan == "Allegro" and s.source == "kimi_api" for s in snapshots)
+
+
+def test_kimi_distinct_top_level_usage_surfaces_as_plan_not_weekly(monkeypatch, tmp_path):
+    # Real-endpoint shape (verified 2026-07-23): the top-level `usage` object carries
+    # no window/duration and resets the SAME day — it is not weekly. When it does not
+    # echo any `limits` window it must surface under a neutral "plan" bucket, never a
+    # fabricated "7d"/"Weekly".
+    home = tmp_path / "home"
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setenv("KIMI_API_KEY", "sk-kimi-code")
+    monkeypatch.delenv("KIMI_CODE_HOME", raising=False)
+    monkeypatch.delenv("KIMI_SHARE_DIR", raising=False)
+
+    def opener(req, timeout=15):
+        return FakeResponse(
+            {
+                "limits": [
+                    {
+                        "window": {"duration": 300, "timeUnit": "TIME_UNIT_MINUTE"},
+                        "detail": {"limit": "100", "remaining": "100", "resetTime": "2026-07-23T08:45:50Z"},
+                    },
+                ],
+                "usage": {"limit": "100", "used": "87", "remaining": "13", "resetTime": "2026-07-23T16:45:50Z"},
+                "user": {"membership": {"level": "LEVEL_INTERMEDIATE"}},
+            }
+        )
+
+    snapshots = kimi.collect_kimi_api_snapshots(opener=opener, now=1_784_800_000)
+
+    assert [(s.bucket, s.used_percent) for s in snapshots] == [("5h", 0.0), ("plan", 87.0)]
+    assert all(s.plan == "Intermediate" for s in snapshots)
+
+
+def test_kimi_static_config_api_key_works(monkeypatch, tmp_path):
+    root = tmp_path / ".kimi-code"
+    root.mkdir()
+    (root / "config.toml").write_text(
+        '[providers.kimi-for-coding]\ntype = "kimi"\nbase_url = "https://api.kimi.com/coding/v1"\napi_key = "sk-static"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("KIMI_CODE_HOME", str(root))
+    monkeypatch.setenv("KIMI_SHARE_DIR", str(tmp_path / ".kimi"))
+    monkeypatch.delenv("KIMI_API_KEY", raising=False)
+
+    def opener(req, timeout=15):
+        assert _header(req, "Authorization") == "Bearer sk-static"
+        return FakeResponse({"usage": {"limit": 10, "used": 2}})
+
+    snapshots = kimi.collect_kimi_api_snapshots(opener=opener, now=1_782_907_200)
+    assert len(snapshots) == 1
+    assert snapshots[0].used_percent == 20.0
+
+
+def test_kimi_rejects_open_platform_payg_endpoint_without_network(monkeypatch, tmp_path):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.setenv("KIMI_API_KEY", "payg-key")
+    monkeypatch.setenv("KIMI_BASE_URL", "https://api.moonshot.ai/v1")
+    monkeypatch.delenv("KIMI_CODE_HOME", raising=False)
+    monkeypatch.delenv("KIMI_SHARE_DIR", raising=False)
+
+    snapshots = kimi.collect_kimi_api_snapshots(
+        opener=lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("network called")),
+        now=1_782_907_200,
+    )
+
+    assert len(snapshots) == 1
+    assert snapshots[0].status == "unavailable"
+    assert snapshots[0].raw["error"] == "not_kimi_code_endpoint"
+
+
+def test_grok_oauth_collects_build_billing(monkeypatch, tmp_path):
+    grok_home = tmp_path / ".grok"
+    grok_home.mkdir()
+    (grok_home / "auth.json").write_text(
+        json.dumps(
+            {
+                "https://auth.x.ai::client": {
+                    "key": "oauth-access",
+                    "auth_mode": "oidc",
+                    "oidc_issuer": "https://auth.x.ai",
+                    "user_id": "user-42",
+                    "email": "user@example.com",
+                    "expires_at": "2030-01-01T00:00:00Z",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("GROK_HOME", str(grok_home))
+
+    def opener(req, timeout=15):
+        assert req.full_url == grok.GROK_BILLING_URL
+        assert _header(req, "Authorization") == "Bearer oauth-access"
+        assert _header(req, "X-XAI-Token-Auth") == "xai-grok-cli"
+        assert _header(req, "x-userid") == "user-42"
+        return FakeResponse(
+            {
+                "config": {
+                    "creditUsagePercent": 32.5,
+                    "currentPeriod": {
+                        "type": "USAGE_PERIOD_TYPE_WEEKLY",
+                        "start": "2026-07-18T00:00:00Z",
+                        "end": "2026-07-25T00:00:00Z",
+                    },
+                },
+                "subscriptionTier": "SuperGrok Heavy",
+            }
+        )
+
+    snapshots = grok.collect_grok_api_snapshots(opener=opener, now=1_782_907_200)
+
+    assert len(snapshots) == 1
+    assert snapshots[0].bucket == "7d"
+    assert snapshots[0].used_percent == 32.5
+    assert snapshots[0].plan == "SuperGrok Heavy"
+    assert snapshots[0].account == "user-42"
+    assert "user@example.com" not in json.dumps(snapshots[0].raw)
+
+
+def _grok_auth(tmp_path, monkeypatch):
+    grok_home = tmp_path / ".grok"
+    grok_home.mkdir()
+    (grok_home / "auth.json").write_text(
+        json.dumps(
+            {
+                "https://auth.x.ai::client": {
+                    "key": "oauth-access",
+                    "auth_mode": "oidc",
+                    "oidc_issuer": "https://auth.x.ai",
+                    "user_id": "user-7",
+                    "expires_at": "2030-01-01T00:00:00Z",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("GROK_HOME", str(grok_home))
+
+
+def test_grok_absent_credit_percent_is_zero_not_missing(monkeypatch, tmp_path):
+    # Real endpoint shape (verified 2026-07-23 against cli-chat-proxy.grok.com and openusage):
+    # the credits response is proto3-JSON, which OMITS zero-valued fields. An absent
+    # creditUsagePercent means 0% used this week — the card must render at 0%, not vanish as
+    # "no_usage". Validity keys off currentPeriod, which is always present.
+    _grok_auth(tmp_path, monkeypatch)
+
+    def opener(req, timeout=15):
+        return FakeResponse(
+            {
+                "config": {
+                    "currentPeriod": {
+                        "type": "USAGE_PERIOD_TYPE_WEEKLY",
+                        "start": "2026-07-22T00:00:00+00:00",
+                        "end": "2026-07-29T00:00:00+00:00",
+                    },
+                    "onDemandCap": {"val": 0},
+                    "isUnifiedBillingUser": True,
+                }
+            }
+        )
+
+    snapshots = grok.collect_grok_api_snapshots(opener=opener, now=1_782_907_200)
+
+    assert len(snapshots) == 1
+    assert snapshots[0].status == "ok"
+    assert snapshots[0].bucket == "7d"
+    assert snapshots[0].used_percent == 0.0
+
+
+def test_grok_non_numeric_credit_percent_is_schema_drift_not_zero(monkeypatch, tmp_path):
+    # A present-but-non-numeric percent is real drift, not an idle 0 — it must not render a
+    # bogus card; the parser reports no_usage so the mismatch is visible.
+    _grok_auth(tmp_path, monkeypatch)
+
+    def opener(req, timeout=15):
+        return FakeResponse(
+            {
+                "config": {
+                    "creditUsagePercent": "lots",
+                    "currentPeriod": {
+                        "type": "USAGE_PERIOD_TYPE_WEEKLY",
+                        "start": "2026-07-22T00:00:00+00:00",
+                        "end": "2026-07-29T00:00:00+00:00",
+                    },
+                }
+            }
+        )
+
+    snapshots = grok.collect_grok_api_snapshots(opener=opener, now=1_782_907_200)
+
+    assert len(snapshots) == 1
+    assert snapshots[0].status == "unavailable"
+    assert snapshots[0].raw.get("error") == "no_usage"
+
+
+def test_grok_error_snapshot_does_not_persist_email(monkeypatch, tmp_path):
+    grok_home = tmp_path / ".grok"
+    grok_home.mkdir()
+    (grok_home / "auth.json").write_text(
+        json.dumps({
+            "https://auth.x.ai::client": {
+                "key": "expired",
+                "auth_mode": "oidc",
+                "oidc_issuer": "https://auth.x.ai",
+                "user_id": "user-42",
+                "email": "user@example.com",
+                "expires_at": "2020-01-01T00:00:00Z",
+            }
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("GROK_HOME", str(grok_home))
+
+    snapshots = grok.collect_grok_api_snapshots(
+        opener=lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("network called")),
+        now=1_782_907_200,
+    )
+
+    assert snapshots[0].status == "stale_token"
+    assert "email" not in json.dumps(snapshots[0].raw).lower()
+    assert "user@example.com" not in json.dumps(snapshots[0].raw)
+
+
+def test_grok_plain_api_key_does_not_query_subscription_billing(monkeypatch, tmp_path):
+    grok_home = tmp_path / ".grok"
+    grok_home.mkdir()
+    (grok_home / "auth.json").write_text(
+        json.dumps({"xai::api_key": {"key": "xai-payg", "auth_mode": "api_key", "user_id": "user-42"}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("GROK_HOME", str(grok_home))
+
+    snapshots = grok.collect_grok_api_snapshots(
+        opener=lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("network called")),
+        now=1_782_907_200,
+    )
+
+    assert len(snapshots) == 1
+    assert snapshots[0].status == "unavailable"
+    assert snapshots[0].raw["error"] == "xai_oauth_not_found"
 
 
 def test_codex_api_collects_usage_and_reset_credits(monkeypatch, tmp_path):
@@ -873,3 +1255,33 @@ def test_codex_api_window_used_percent_round_trips_from_raw(monkeypatch, tmp_pat
     # Guards against a future refactor that silently stops producing snapshots (e.g. an
     # opener/bucket-filter mismatch) making this test vacuously pass with zero assertions.
     assert saw >= 1
+
+
+def test_kimi_rejects_token_exfil_host_without_network(monkeypatch, tmp_path):
+    # Regression (#2): a base_url whose HOST isn't exactly api.kimi.com must not receive the
+    # bearer token, even when the path embeds "api.kimi.com/coding".
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.setenv("KIMI_API_KEY", "sk-kimi")
+    monkeypatch.setenv("KIMI_BASE_URL", "https://evil.example/api.kimi.com/coding/v1")
+    monkeypatch.delenv("KIMI_CODE_HOME", raising=False)
+    monkeypatch.delenv("KIMI_SHARE_DIR", raising=False)
+
+    snaps = kimi.collect_kimi_api_snapshots(
+        opener=lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("network called")),
+        now=1_782_907_200,
+    )
+    assert len(snaps) == 1
+    assert snaps[0].status == "unavailable"
+    assert snaps[0].raw["error"] == "not_kimi_code_endpoint"
+
+
+def test_minimax_rejects_untrusted_host_without_network(monkeypatch, tmp_path):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.setenv("MINIMAX_API_KEY", "mm-key")
+    monkeypatch.setenv("MINIMAX_BASE_URL", "https://evil.example/v1")
+
+    snaps = minimax.collect_minimax_api_snapshots(
+        opener=lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("network called")),
+        now=1_782_907_200,
+    )
+    assert any(s.status == "unavailable" and s.raw.get("error") == "untrusted_endpoint" for s in snaps)

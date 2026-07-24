@@ -8,11 +8,27 @@ from tokdash.sources.quota import config
 
 
 def test_quota_network_consent_defaults_off_and_round_trips(tmp_path):
-    assert config.read_quota_config() == {"codex_api": False, "claude_api": False, "antigravity_api": False}
+    assert config.read_quota_config() == {
+        "credential_scan": False,
+        "codex_api": False,
+        "claude_api": False,
+        "antigravity_api": False,
+        "minimax_api": False,
+        "kimi_api": False,
+        "grok_api": False,
+    }
 
     updated = config.set_quota_consent({"codex_api": True, "claude_api": True})
 
-    assert updated == {"codex_api": True, "claude_api": True, "antigravity_api": False}
+    assert updated == {
+        "credential_scan": False,
+        "codex_api": True,
+        "claude_api": True,
+        "antigravity_api": False,
+        "minimax_api": False,
+        "kimi_api": False,
+        "grok_api": False,
+    }
     assert config.read_quota_config() == updated
 
 
@@ -37,7 +53,15 @@ def test_quota_config_preserves_unrelated_config_keys():
 
     saved = json.loads(path.read_text(encoding="utf-8"))
     assert saved["update_check"] is True
-    assert saved["quota"] == {"codex_api": False, "claude_api": False, "antigravity_api": True}
+    assert saved["quota"] == {
+        "credential_scan": False,
+        "codex_api": False,
+        "claude_api": False,
+        "antigravity_api": True,
+        "minimax_api": False,
+        "kimi_api": False,
+        "grok_api": False,
+    }
 
 
 def test_poll_interval_precedence_env_over_config_over_default(monkeypatch):
@@ -78,12 +102,22 @@ def test_master_switch_defaults_on_and_round_trips():
 
 
 def test_master_switch_disables_network_sources():
-    config.set_quota_consent({"codex_api": True, "claude_api": True})
+    config.set_quota_consent({"credential_scan": True, "codex_api": True, "claude_api": True})
     assert config.enabled_network_sources() == ["codex_api", "claude_api"]
 
     config.set_quota_enabled(False)
     assert config.enabled_network_sources() == []
     assert config.network_enabled("codex_api") is False
+
+
+def test_local_credential_consent_is_required_for_network_polling():
+    config.set_quota_consent({"codex_api": True})
+    assert config.enabled_network_sources() == []
+    assert config.network_enabled("codex_api") is False
+
+    config.set_quota_consent({"credential_scan": True})
+    assert config.enabled_network_sources() == ["codex_api"]
+    assert config.network_enabled("codex_api") is True
 
 
 def test_kill_switch_overrides_config_enabled(monkeypatch):
@@ -157,3 +191,52 @@ def test_set_quota_consent_preserves_enabled_and_interval():
     assert config.quota_config_enabled() is False
     assert config.read_poll_interval_minutes() == 60
     assert config.read_quota_config()["codex_api"] is True
+
+
+def _write_quota_block(quota: dict) -> None:
+    """Write a raw quota block, simulating a pre-existing config.json on upgrade."""
+    path = config.config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"quota": quota}), encoding="utf-8")
+
+
+def test_credential_scan_grandfathered_for_legacy_provider_on_upgrade():
+    # An install upgraded from a version without credential_scan: a legacy provider was
+    # already consented, so credential access is grandfathered — no card regression.
+    _write_quota_block({"enabled": True, "codex_api": True})
+    assert config.credential_scan_enabled() is True
+    assert config.network_enabled("codex_api") is True
+    # A brand-new provider is not grandfathered by a legacy provider's prior consent.
+    assert config.network_enabled("minimax_api") is False
+
+
+def test_credential_scan_not_grandfathered_on_fresh_install():
+    _write_quota_block({"enabled": True})
+    assert config.credential_scan_enabled() is False
+    assert config.enabled_network_sources() == []
+
+
+def test_explicit_credential_scan_off_overrides_grandfather():
+    # If the user explicitly declined credential access, a stored legacy consent must
+    # NOT resurrect it.
+    _write_quota_block({"enabled": True, "codex_api": True, "credential_scan": False})
+    assert config.credential_scan_enabled() is False
+    assert config.network_enabled("codex_api") is False
+
+
+def test_set_quota_consent_preserves_grandfather_when_scan_key_absent():
+    # Touching an unrelated consent on an upgraded install must not clobber the
+    # grandfather to False.
+    _write_quota_block({"enabled": True, "codex_api": True})
+    config.set_quota_consent({"claude_api": True})
+    assert config._raw_quota().get("credential_scan") is True
+    assert config.network_enabled("codex_api") is True
+
+
+def test_ensure_quota_consent_migrated_persists_grandfather():
+    _write_quota_block({"enabled": True, "antigravity_api": True})
+    config.ensure_quota_consent_migrated()
+    assert config._raw_quota().get("credential_scan") is True
+    # Idempotent: a second call is a no-op.
+    config.ensure_quota_consent_migrated()
+    assert config._raw_quota().get("credential_scan") is True

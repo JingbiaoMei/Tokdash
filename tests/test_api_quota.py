@@ -37,7 +37,15 @@ def test_get_quota_returns_stored_codex_session_data_without_collecting(monkeypa
     assert payload["providers"]["codex"]["network_enabled"] is False
     assert payload["providers"]["codex"]["buckets"][0]["bucket"] == "5h"
     assert payload["providers"]["codex"]["buckets"][0]["used_percent"] == 50.0
-    assert payload["consent"] == {"codex_api": False, "claude_api": False, "antigravity_api": False}
+    assert payload["consent"] == {
+        "credential_scan": False,
+        "codex_api": False,
+        "claude_api": False,
+        "antigravity_api": False,
+        "minimax_api": False,
+        "kimi_api": False,
+        "grok_api": False,
+    }
 
 
 def test_get_quota_does_not_call_network_collectors(monkeypatch):
@@ -47,6 +55,46 @@ def test_get_quota_does_not_call_network_collectors(monkeypatch):
     payload = api.get_quota()
 
     assert "providers" in payload
+
+
+def test_get_quota_exposes_new_provider_shells_and_consent_keys():
+    api._clear_cache()
+
+    payload = api.get_quota()
+
+    assert {"minimax", "kimi", "grok"}.issubset(payload["providers"])
+    assert {"minimax_api", "kimi_api", "grok_api"}.issubset(payload["consent"])
+
+
+def test_quota_state_marks_only_locally_present_provider_shells_detected(monkeypatch, tmp_path):
+    from tokdash.sources import quota
+
+    api._clear_cache()
+    present = tmp_path / "present"
+    present.mkdir()
+    missing = tmp_path / "missing"
+    monkeypatch.setattr(quota.clientpaths, "codex_home", lambda: present)
+    monkeypatch.setattr(quota.clientpaths, "claude_config_dir", lambda: missing)
+    monkeypatch.setattr(quota.clientpaths, "antigravity_cli_dir", lambda: missing)
+    monkeypatch.setattr(quota.clientpaths, "minimax_cli_root", lambda: missing)
+    monkeypatch.setattr(quota.clientpaths, "grok_home", lambda: missing)
+    monkeypatch.setattr(quota.clientpaths, "kimi_roots", lambda: [missing])
+    for name in (
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "MINIMAX_API_KEY",
+        "MINIMAX_TOKEN_PLAN_GLOBAL_KEY",
+        "MINIMAX_TOKEN_PLAN_CN_KEY",
+        "KIMI_API_KEY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    payload = quota.quota_state()
+
+    assert payload["providers"]["codex"]["detected"] is True
+    assert all(
+        payload["providers"][provider]["detected"] is False
+        for provider in ("claude", "antigravity", "minimax", "kimi", "grok")
+    )
 
 
 def test_quota_history_route_uses_stored_snapshots(tmp_path):
@@ -71,7 +119,15 @@ def test_quota_consent_route_persists_provider_flags():
     api._clear_cache()
     payload = api.set_quota_consent({"codex_api": True, "claude_api": False})
 
-    assert payload["consent"] == {"codex_api": True, "claude_api": False, "antigravity_api": False}
+    assert payload["consent"] == {
+        "credential_scan": False,
+        "codex_api": True,
+        "claude_api": False,
+        "antigravity_api": False,
+        "minimax_api": False,
+        "kimi_api": False,
+        "grok_api": False,
+    }
     assert api.get_quota()["consent"]["codex_api"] is True
 
 
@@ -217,7 +273,7 @@ def test_get_quota_marks_network_enabled_and_last_run_for_api_rows():
     from tokdash.usage_store import UsageEntryStore
 
     api._clear_cache()
-    api.set_quota_consent({"codex_api": True})
+    api.set_quota_consent({"credential_scan": True, "codex_api": True})
     UsageEntryStore().insert_quota_snapshots(
         [
             QuotaSnapshot(
@@ -515,7 +571,7 @@ def test_get_quota_api_enabled_session_does_not_override_bucket():
     from tokdash.usage_store import UsageEntryStore
 
     api._clear_cache()
-    api.set_quota_consent({"codex_api": True})
+    api.set_quota_consent({"credential_scan": True, "codex_api": True})
     UsageEntryStore().insert_quota_snapshots(
         [
             QuotaSnapshot(
@@ -546,7 +602,7 @@ def test_get_quota_api_enabled_session_only_omits_bucket():
     from tokdash.usage_store import UsageEntryStore
 
     api._clear_cache()
-    api.set_quota_consent({"codex_api": True})
+    api.set_quota_consent({"credential_scan": True, "codex_api": True})
     UsageEntryStore().insert_quota_snapshots(
         [
             QuotaSnapshot(
@@ -586,3 +642,36 @@ def test_get_quota_api_disabled_shows_session_and_marks_estimated():
     assert [b["bucket"] for b in codex["buckets"]] == ["7d"]
     assert codex["buckets"][0]["source"] == "codex_session"
     assert codex["estimated"] is True
+
+
+def test_quota_state_does_not_read_claude_credentials_without_scan_consent(monkeypatch):
+    # Regression (#1): read_claude_plan() opens .credentials.json and may trigger the macOS
+    # Keychain. A dashboard load must NOT touch it without credential-scan consent (default off).
+    import tokdash.sources.quota as quota
+
+    called = []
+
+    def tracked(*_a, **_k):
+        called.append(True)
+        return {"status": "ok", "plan": "Pro"}
+
+    monkeypatch.setattr(quota, "read_claude_plan", tracked)
+    quota.quota_state()
+    assert called == []
+
+
+def test_quota_state_reads_claude_plan_with_scan_consent(monkeypatch):
+    import tokdash.sources.quota as quota
+    from tokdash.sources.quota import config
+
+    config.set_quota_consent({"credential_scan": True})
+    called = []
+
+    def tracked(*_a, **_k):
+        called.append(True)
+        return {"status": "ok", "plan": "Pro", "tier": "pro", "credential_path": None}
+
+    monkeypatch.setattr(quota, "read_claude_plan", tracked)
+    payload = quota.quota_state()
+    assert called == [True]
+    assert payload["providers"]["claude"]["plan"] == "Pro"

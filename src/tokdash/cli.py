@@ -157,6 +157,14 @@ def build_parser(prog: str) -> argparse.ArgumentParser:
     parser.add_argument("--codex-api", choices=["on", "off"], help="For `tokdash quota consent`: enable/disable Codex API quota polling.")
     parser.add_argument("--claude-api", choices=["on", "off"], help="For `tokdash quota consent`: enable/disable Claude API quota polling.")
     parser.add_argument("--antigravity-api", choices=["on", "off"], help="For `tokdash quota consent`: enable/disable Antigravity API quota polling.")
+    parser.add_argument("--minimax-api", choices=["on", "off"], help="For `tokdash quota consent`: enable/disable MiniMax Token Plan quota polling.")
+    parser.add_argument("--kimi-api", choices=["on", "off"], help="For `tokdash quota consent`: enable/disable Kimi Code quota polling.")
+    parser.add_argument("--grok-api", choices=["on", "off"], help="For `tokdash quota consent`: enable/disable Grok Build quota polling.")
+    parser.add_argument(
+        "--credential-scan",
+        choices=["on", "off"],
+        help="For `tokdash quota consent`: allow/deny read-only access to allowlisted local credential stores.",
+    )
     parser.add_argument("--enabled", choices=["on", "off"], help="For `tokdash quota consent`: master switch for all quota tracking.")
     parser.add_argument(
         "--poll-interval",
@@ -278,6 +286,10 @@ def serve(host: str, port: int, log_level: str, open_browser: bool = True) -> No
         timer.daemon = True
         timer.start()
     _start_usage_db_sync_daemon()
+    # Materialize the credential_scan grandfather once so upgraded installs keep
+    # their existing polling and the persisted consent state is explicit.
+    from .sources.quota import config as quota_config
+    quota_config.ensure_quota_consent_migrated()
     _start_quota_poll_daemon()
     # Backpressure: cap accepted concurrency and keep-alive lifetime so a load burst
     # returns 503 fast instead of queuing forever and wedging the server. The limit
@@ -800,9 +812,13 @@ def quota_command(args) -> int:
         updates = {
             key: value
             for key, value in {
+                "credential_scan": _parse_onoff(args.credential_scan),
                 "codex_api": _parse_onoff(args.codex_api),
                 "claude_api": _parse_onoff(args.claude_api),
                 "antigravity_api": _parse_onoff(args.antigravity_api),
+                "minimax_api": _parse_onoff(args.minimax_api),
+                "kimi_api": _parse_onoff(args.kimi_api),
+                "grok_api": _parse_onoff(args.grok_api),
             }.items()
             if value is not None
         }

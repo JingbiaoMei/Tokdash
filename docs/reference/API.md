@@ -152,7 +152,15 @@ Returns current subscription quota state. This route never performs provider net
       ]
     }
   },
-  "consent": {"codex_api": false, "claude_api": false, "antigravity_api": false},
+  "consent": {
+    "credential_scan": false,
+    "codex_api": false,
+    "claude_api": false,
+    "antigravity_api": false,
+    "minimax_api": false,
+    "kimi_api": false,
+    "grok_api": false
+  },
   "enabled": true,
   "poll": {
     "enabled": true,
@@ -181,20 +189,20 @@ Returns stored quota utilization points and derived consumption deltas.
 | `end` | integer epoch seconds | no | – | Inclusive upper bound |
 | `max_points` | integer | no | `300` | Max points per series; series longer than this are evenly downsampled, always keeping the most recent point. Must be a positive integer. |
 
-History series are unified per `(provider, bucket)`: a Codex session row (account `default`) and an API row (real account id) for the same window merge into one series, keeping the freshest point on a timestamp collision. Series are always bounded by `max_points` (points and consumption deltas are downsampled independently).
+History series are unified per `(provider, bucket)`: a Codex session row (account `default`) and an API row (real account id) for the same window merge into one series, keeping the freshest point on a timestamp collision. MiniMax uses region-qualified bucket IDs so global and mainland-China Token Plans remain separate series. Series are always bounded by `max_points` (points and consumption deltas are downsampled independently).
 
 ## `POST /api/quota/consent`
 
-Persists per-provider quota API **network** consent to `<data_dir>/config.json`. **Write-gated** like all mutations. `TOKDASH_QUOTA_POLL=0` remains a hard kill switch.
+Persists the separate local-credential-read consent (`credential_scan`) and per-provider quota API **network** consent to `<data_dir>/config.json`. Network polling requires both `credential_scan=true` and the matching provider flag. **Write-gated** like all mutations. `TOKDASH_QUOTA_POLL=0` remains a hard kill switch.
 
 **Request**
 ```json
-{"codex_api": true, "claude_api": false, "antigravity_api": true}
+{"credential_scan": true, "codex_api": true, "minimax_api": true, "kimi_api": true, "grok_api": true}
 ```
 
 **Response**
 ```json
-{"consent": {"codex_api": true, "claude_api": false, "antigravity_api": true}}
+{"consent": {"credential_scan": true, "codex_api": true, "claude_api": false, "antigravity_api": false, "minimax_api": true, "kimi_api": true, "grok_api": true}}
 ```
 
 ## `POST /api/quota/settings`

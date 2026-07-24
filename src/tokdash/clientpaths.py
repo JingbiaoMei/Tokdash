@@ -29,12 +29,36 @@ from . import osinfo
 # --- OpenCode ---------------------------------------------------------------
 
 
+def opencode_data_dir() -> Path:
+    explicit = os.environ.get("XDG_DATA_HOME", "").strip()
+    base = Path(explicit).expanduser() if explicit else Path.home() / ".local/share"
+    return base / "opencode"
+
+
+def opencode_config_dir() -> Path:
+    explicit = os.environ.get("XDG_CONFIG_HOME", "").strip()
+    base = Path(explicit).expanduser() if explicit else Path.home() / ".config"
+    return base / "opencode"
+
+
+def opencode_auth_path() -> Path:
+    return opencode_data_dir() / "auth.json"
+
+
+def opencode_config_paths() -> List[Path]:
+    explicit = os.environ.get("OPENCODE_CONFIG", "").strip()
+    if explicit:
+        return [Path(explicit).expanduser()]
+    root = opencode_config_dir()
+    return [root / "opencode.json", root / "opencode.jsonc"]
+
+
 def opencode_messages_dir() -> Path:
-    return Path.home() / ".local/share/opencode/storage/message"
+    return opencode_data_dir() / "storage/message"
 
 
 def opencode_db_path() -> Path:
-    return Path.home() / ".local/share/opencode/opencode.db"
+    return opencode_data_dir() / "opencode.db"
 
 
 # --- Mimo / Mimocode -----------------------------------------------------------
@@ -138,6 +162,40 @@ def kimi_roots() -> List[Path]:
         if root not in roots:
             roots.append(root)
     return roots
+
+
+# --- MiniMax CLI ------------------------------------------------------------
+
+
+def minimax_cli_root() -> Path:
+    """``$MMX_CONFIG_DIR`` if set, else ``~/.mmx``."""
+    explicit = os.environ.get("MMX_CONFIG_DIR", "").strip()
+    return Path(explicit).expanduser() if explicit else Path.home() / ".mmx"
+
+
+# --- Grok Build -------------------------------------------------------------
+
+
+def grok_home() -> Path:
+    """``$GROK_HOME`` if set, else ``~/.grok``."""
+    explicit = os.environ.get("GROK_HOME", "").strip()
+    return Path(explicit).expanduser() if explicit else Path.home() / ".grok"
+
+
+def grok_sessions_dir() -> Path:
+    return grok_home() / "sessions"
+
+
+# --- CC Switch --------------------------------------------------------------
+
+
+def cc_switch_root() -> Path:
+    explicit = os.environ.get("CC_SWITCH_CONFIG_DIR", "").strip()
+    return Path(explicit).expanduser() if explicit else Path.home() / ".cc-switch"
+
+
+def cc_switch_db_path() -> Path:
+    return cc_switch_root() / "cc-switch.db"
 
 
 # --- Pi Agent -----------------------------------------------------------------

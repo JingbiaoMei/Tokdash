@@ -10,6 +10,7 @@ from tokdash.usage_store import (
     _CODEX_PERCENT_SCALE_REPAIR_META_KEY,
     UsageEntryStore,
     _repair_codex_api_percent_scale_rows,
+    _repair_grok_snapshot_email_rows,
 )
 
 
@@ -200,6 +201,27 @@ def test_usage_store_repair_watches_for_stale_writers_then_stops(tmp_path):
         _insert_codex_api_row(conn, "5h", 100.0, BASE_TS + 7200, _codex_api_raw(1, 0))
         assert _repair_codex_api_percent_scale_rows(conn) == 0
         assert _used_at(conn, BASE_TS + 7200) == 100.0
+
+
+def test_usage_store_scrubs_legacy_grok_email_once(tmp_path):
+    db_path = tmp_path / "usage.sqlite3"
+    UsageEntryStore(db_path).status()
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        conn.execute("DELETE FROM meta WHERE key = 'quota_grok_email_scrub_v1'")
+        conn.execute(
+            """
+            INSERT INTO quota_snapshots(
+                provider, account, bucket, captured_at, source, status, raw_json
+            ) VALUES ('grok', 'acct', 'api', ?, 'grok_api', 'fetch_error', ?)
+            """,
+            (BASE_TS, json.dumps({"email": "user@example.com", "error": "HTTP 500"})),
+        )
+
+        assert _repair_grok_snapshot_email_rows(conn) == 1
+        raw = conn.execute("SELECT raw_json FROM quota_snapshots WHERE provider = 'grok'").fetchone()[0]
+        assert json.loads(raw) == {"error": "HTTP 500"}
+        assert _repair_grok_snapshot_email_rows(conn) == 0
 
 
 def _snap_reset(bucket: str, used: float, captured_at: int, resets_at: int) -> QuotaSnapshot:

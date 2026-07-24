@@ -1499,6 +1499,77 @@ def test_version_compare_fallback_handles_trailing_zero(monkeypatch):
     assert updatecheck._is_newer("0.7.0", "0.6.2") is True
 
 
+def test_quota_wizard_separates_local_credential_and_minimax_network_consent(monkeypatch):
+    from tokdash.sources.quota import config as quota_config
+    from tokdash.sources.quota import credential_sources
+
+    answers = iter(["", "y", "y", ""])
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
+    monkeypatch.setattr(credential_sources, "discover_provider_sources", lambda: {"minimax": ["opencode"]})
+
+    engine._quota_setup_wizard()
+
+    consent = quota_config.read_quota_config()
+    assert consent["credential_scan"] is True
+    assert consent["minimax_api"] is True
+    assert consent["kimi_api"] is False
+
+
+def test_quota_wizard_eof_does_not_persist_partial_provider_answers(monkeypatch):
+    from tokdash.sources.quota import config as quota_config
+    from tokdash.sources.quota import credential_sources
+
+    answers = iter(["", "y", "y"])
+
+    def answer(_prompt):
+        try:
+            return next(answers)
+        except StopIteration:
+            raise EOFError
+
+    monkeypatch.setattr("builtins.input", answer)
+    monkeypatch.setattr(
+        credential_sources,
+        "discover_provider_sources",
+        lambda: {"minimax": ["opencode"], "kimi": ["cc switch"]},
+    )
+
+    engine._quota_setup_wizard()
+
+    consent = quota_config.read_quota_config()
+    assert consent["credential_scan"] is True
+    assert consent["minimax_api"] is False
+    assert consent["kimi_api"] is False
+
+
+def test_quota_wizard_rerun_with_empty_answers_preserves_existing_consent(monkeypatch):
+    # Re-run safety: a repeat setup where the user presses Enter through every prompt
+    # must be a no-op, not a silent mass opt-out. Each prompt defaults to the current
+    # persisted choice, so empty answers leave prior consent intact.
+    from tokdash.sources.quota import config as quota_config
+    from tokdash.sources.quota import credential_sources
+
+    quota_config.set_quota_enabled(True)
+    quota_config.set_quota_consent({"credential_scan": True, "minimax_api": True, "kimi_api": False})
+    quota_config.set_poll_interval_minutes(15)
+
+    monkeypatch.setattr("builtins.input", lambda _prompt: "")
+    monkeypatch.setattr(
+        credential_sources,
+        "discover_provider_sources",
+        lambda: {"minimax": ["opencode"], "kimi": ["opencode auth"]},
+    )
+
+    engine._quota_setup_wizard()
+
+    consent = quota_config.read_quota_config()
+    assert quota_config.quota_config_enabled() is True
+    assert consent["credential_scan"] is True
+    assert consent["minimax_api"] is True
+    assert consent["kimi_api"] is False
+    assert quota_config.read_poll_interval_minutes() == 15
+
+
 def test_update_launchd_restart_failure_message_uses_launchctl(macos, fake_launchd, monkeypatch, capsys):
     svc = {"type": "launchd", "unit": str(paths.launchd_plist_path()), "name": launchd.LABEL,
            "created_by_setup": True, "marker": "X-Tokdash-Managed id=x"}
@@ -1752,3 +1823,25 @@ def test_update_restart_message_label_when_name_is_null(macos, fake_launchd, mon
     rc = run(["update"])  # human output
     out = capsys.readouterr().out
     assert rc == 1 and "com.tokdash.tokdash" in out and "None" not in out
+
+
+def test_confirm_non_strict_returns_false_on_eof_not_traceback(monkeypatch):
+    # Regression (#4): setup/uninstall/Tailscale prompts don't wrap _confirm, so on a broken
+    # or piped terminal EOF/Ctrl-C must resolve to "don't do the action", never a traceback.
+    def boom(_prompt):
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", boom)
+    assert engine._confirm("Proceed with uninstall?", default=True) is False
+    assert engine._confirm("Run it now?", default=False) is False
+
+
+def test_confirm_strict_propagates_eof_for_quota_wizard(monkeypatch):
+    # The quota wizard needs the raise so its own handler can abort without persisting the
+    # partial answers collected so far.
+    def boom(_prompt):
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", boom)
+    with pytest.raises(EOFError):
+        engine._confirm("Enable X?", default=True, strict=True)

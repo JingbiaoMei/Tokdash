@@ -1686,6 +1686,10 @@
               <input type="checkbox" id="quotaEnabledToggle" class="align-middle">
               <span data-i18n="quotaTracking">Quota tracking</span>
             </label>
+            <label class="flex items-center gap-2 text-sm font-semibold" for="quotaCredentialScanToggle">
+              <input type="checkbox" id="quotaCredentialScanToggle" class="align-middle">
+              <span data-i18n="quotaCredentialScan">Allow local credential reads</span>
+            </label>
             <label class="flex items-center gap-2 text-sm" for="quotaIntervalSelect">
               <span style="color: var(--color-muted);" data-i18n="pollInterval">Poll every</span>
               <select id="quotaIntervalSelect" class="ui-input compact-control" aria-label="Quota poll interval">
@@ -1711,6 +1715,9 @@
                 <label class="quota-visibility-item"><input type="checkbox" data-quota-provider="codex" checked><span>Codex</span></label>
                 <label class="quota-visibility-item"><input type="checkbox" data-quota-provider="claude" checked><span>Claude Code</span></label>
                 <label class="quota-visibility-item"><input type="checkbox" data-quota-provider="antigravity" checked><span>Antigravity</span></label>
+                <label class="quota-visibility-item"><input type="checkbox" data-quota-provider="minimax" checked><span>MiniMax</span></label>
+                <label class="quota-visibility-item"><input type="checkbox" data-quota-provider="kimi" checked><span>Kimi Code</span></label>
+                <label class="quota-visibility-item"><input type="checkbox" data-quota-provider="grok" checked><span>Grok Build</span></label>
               </div>
             </div>
             <!-- TASK 2: no dedicated quota refresh button anymore — the global #refreshBtn
@@ -2032,6 +2039,9 @@
         notDetected: 'not detected',
         quotaNoData: 'No quota snapshots yet.',
         enableQuotaApi: 'Enable live polling',
+        enableQuotaCredentialScan: 'Allow local credential reads',
+        quotaCredentialScan: 'Allow local credential reads',
+        quotaCredentialConsent: 'Before live polling, allow Tokdash to read only the listed native CLI auth/config files, OpenCode auth/provider config, and CC Switch provider records. Logs and arbitrary files are never scanned.',
         quotaConsentLeadCodex: 'Quota is currently read from local Codex logs: 5-hour and weekly windows only, updated only when you use Codex (so it can lag). Enable live polling for fresh data plus reset credits — it uses {endpoint} with your existing sign-in from {path}, read-only.',
         quotaConsentLeadOther: 'No quota data without this — {provider} has no local fallback. Live polling uses {endpoint} with your existing sign-in from {path}, read-only.',
         resetCredits: 'Reset Credits',
@@ -2264,6 +2274,9 @@
         notDetected: '未检测到',
         quotaNoData: '暂无额度快照。',
         enableQuotaApi: '启用实时轮询',
+        enableQuotaCredentialScan: '允许读取本地凭据',
+        quotaCredentialScan: '允许读取本地凭据',
+        quotaCredentialConsent: '实时轮询前，请允许 Tokdash 仅读取列出的 CLI 认证/配置文件、OpenCode 认证与供应商配置，以及 CC Switch 供应商记录。不会扫描日志或任意文件。',
         quotaConsentLeadCodex: '当前额度读取自本地 Codex 日志：仅 5 小时和每周窗口，且仅在使用 Codex 时更新（可能滞后）。开启实时轮询可获得最新数据和重置点数 — 使用 {endpoint}，凭据来自本地已有登录 {path}，只读。',
         quotaConsentLeadOther: '不开启则没有任何额度数据 — {provider} 没有本地数据来源。实时轮询使用 {endpoint}，凭据来自本地已有登录 {path}，只读。',
         resetCredits: '重置额度',
@@ -3013,6 +3026,7 @@
         amp: 'Amp',
         openclaw: 'OpenClaw',
         kimi: 'Kimi CLI',
+        grok: 'Grok Build',
         pi_agent: 'Pi',
         copilot_cli: 'GitHub Copilot CLI',
         hermes: 'Hermes',
@@ -4610,6 +4624,9 @@
       if (provider === 'codex') return 'Codex';
       if (provider === 'claude') return 'Claude Code';
       if (provider === 'antigravity') return 'Antigravity';
+      if (provider === 'minimax') return 'MiniMax';
+      if (provider === 'kimi') return 'Kimi Code';
+      if (provider === 'grok') return 'Grok Build';
       return provider || '—';
     }
 
@@ -4617,6 +4634,9 @@
       if (provider === 'codex') return { key: 'codex_api', endpoint: 'chatgpt.com/backend-api/wham/*', path: '$CODEX_HOME/auth.json' };
       if (provider === 'claude') return { key: 'claude_api', endpoint: 'api.anthropic.com/api/oauth/usage', path: '$CLAUDE_CONFIG_DIR/.credentials.json' };
       if (provider === 'antigravity') return { key: 'antigravity_api', endpoint: 'daily-cloudcode-pa.googleapis.com/v1internal:*', path: '~/.gemini/antigravity-cli/antigravity-oauth-token' };
+      if (provider === 'minimax') return { key: 'minimax_api', endpoint: 'api.minimax.io or api.minimaxi.com/v1/token_plan/remains', path: '$MMX_CONFIG_DIR/config.json or a MiniMax Token Plan key' };
+      if (provider === 'kimi') return { key: 'kimi_api', endpoint: 'api.kimi.com/coding/v1/usages', path: '$KIMI_CODE_HOME credentials/config or KIMI_API_KEY' };
+      if (provider === 'grok') return { key: 'grok_api', endpoint: 'cli-chat-proxy.grok.com/v1/billing', path: '$GROK_HOME/auth.json (xAI OAuth only)' };
       return { key: '', endpoint: '', path: '' };
     }
 
@@ -4693,6 +4713,9 @@
       } else if (provider === 'claude') {
         if (key === 'session') return t('windowFiveHour');
         if (key === 'weekly_all') return t('windowWeekly');
+      } else if (provider === 'kimi' || provider === 'grok') {
+        if (key === '5h') return t('windowFiveHour');
+        if (key === '7d') return t('windowWeekly');
       }
       return bucket.bucket_label || key || '—';
     }
@@ -4852,9 +4875,15 @@
 
     function renderQuotaSettings(payload) {
       const enabled = payload?.enabled !== false;
+      const consent = payload?.consent || {};
       const poll = payload?.poll || {};
       const toggle = document.getElementById('quotaEnabledToggle');
       if (toggle) toggle.checked = enabled;
+      const credentialToggle = document.getElementById('quotaCredentialScanToggle');
+      if (credentialToggle) {
+        credentialToggle.checked = !!consent.credential_scan;
+        credentialToggle.disabled = !enabled;
+      }
       const select = document.getElementById('quotaIntervalSelect');
       const source = poll.interval_source || 'default';
       if (select) {
@@ -4917,12 +4946,13 @@
     function renderQuotaProviderCards(payload) {
       const container = document.getElementById('quotaProviderCards');
       if (!container) return;
+      updateQuotaProviderPresence(payload);
       if (payload?.enabled === false) {
         renderQuotaDisabledCard(container);
         return;
       }
       const providers = payload?.providers || {};
-      const order = ['codex', 'claude', 'antigravity'];
+      const order = ['codex', 'claude', 'antigravity', 'minimax', 'kimi', 'grok'];
       const cards = document.createDocumentFragment();
       let renderedCards = 0;
 
@@ -5032,23 +5062,30 @@
         }
         const consent = payload?.consent || {};
         const consentMeta = quotaConsentMeta(providerKey);
-        if (consentMeta.key && !consent[consentMeta.key]) {
+        if (consentMeta.key && (!consent.credential_scan || !consent[consentMeta.key])) {
           const consentBox = document.createElement('div');
           consentBox.className = 'mt-4 pt-4';
           consentBox.style.borderTop = '1px solid var(--color-border)';
           const desc = document.createElement('div');
           desc.className = 'text-xs mb-3';
           desc.style.color = 'var(--color-muted)';
-          const leadKey = providerKey === 'codex' ? 'quotaConsentLeadCodex' : 'quotaConsentLeadOther';
-          desc.textContent = t(leadKey)
-            .replace('{provider}', quotaProviderLabel(providerKey))
-            .replace('{endpoint}', consentMeta.endpoint)
-            .replace('{path}', consentMeta.path);
+          if (!consent.credential_scan) {
+            desc.textContent = t('quotaCredentialConsent');
+          } else {
+            const leadKey = providerKey === 'codex' ? 'quotaConsentLeadCodex' : 'quotaConsentLeadOther';
+            desc.textContent = t(leadKey)
+              .replace('{provider}', quotaProviderLabel(providerKey))
+              .replace('{endpoint}', consentMeta.endpoint)
+              .replace('{path}', consentMeta.path);
+          }
           const button = document.createElement('button');
           button.className = 'btn btn-ghost';
           button.type = 'button';
-          button.textContent = t('enableQuotaApi');
-          button.addEventListener('click', () => enableQuotaProvider(consentMeta.key));
+          button.textContent = t(consent.credential_scan ? 'enableQuotaApi' : 'enableQuotaCredentialScan');
+          button.addEventListener('click', () => {
+            if (consent.credential_scan) enableQuotaProvider(consentMeta.key);
+            else setQuotaCredentialScan(true);
+          });
           consentBox.appendChild(desc);
           consentBox.appendChild(button);
           card.appendChild(consentBox);
@@ -5099,16 +5136,36 @@
       return [...passthrough, ...pooled];
     }
 
-    // Provider-visibility dropdown state. The user can hide whole providers (Codex /
-    // Claude / Antigravity) from both the cards and the charts; the choice is persisted
+    // Provider-visibility dropdown state. The user can hide whole providers from both
+    // the cards and the charts; the choice is persisted
     // in localStorage and defaults to all-visible. Unknown providers default to visible.
-    const QUOTA_PROVIDERS = ['codex', 'claude', 'antigravity'];
+    const QUOTA_PROVIDERS = ['codex', 'claude', 'antigravity', 'minimax', 'kimi', 'grok'];
     const QUOTA_VISIBILITY_KEY = 'tokdash-quota-visible';
     let quotaVisibilityState = null;
+    let quotaPresentProviders = null;
+
+    function updateQuotaProviderPresence(payload) {
+      const providers = payload?.providers || {};
+      quotaPresentProviders = new Set(QUOTA_PROVIDERS.filter((provider) => {
+        const item = providers[provider] || {};
+        const buckets = Array.isArray(item.buckets) ? item.buckets : [];
+        return item.detected === true || item.network_enabled === true || buckets.length > 0;
+      }));
+      document.querySelectorAll('#quotaVisibilityPanel input[data-quota-provider]').forEach((input) => {
+        const provider = input.getAttribute('data-quota-provider');
+        const row = input.closest('.quota-visibility-item');
+        if (row) row.classList.toggle('hidden', !quotaPresentProviders.has(provider));
+      });
+      updateQuotaVisibilityLabel();
+    }
+
+    function quotaProviderPresent(provider) {
+      return quotaPresentProviders === null || quotaPresentProviders.has(provider);
+    }
 
     function loadQuotaVisibility() {
       if (quotaVisibilityState) return quotaVisibilityState;
-      const state = { codex: true, claude: true, antigravity: true };
+      const state = Object.fromEntries(QUOTA_PROVIDERS.map((provider) => [provider, true]));
       try {
         const raw = localStorage.getItem(QUOTA_VISIBILITY_KEY);
         if (raw) {
@@ -5121,7 +5178,7 @@
     }
 
     function quotaProviderVisible(provider) {
-      return loadQuotaVisibility()[provider] !== false;
+      return quotaProviderPresent(provider) && loadQuotaVisibility()[provider] !== false;
     }
 
     function persistQuotaVisibility() {
@@ -5132,10 +5189,11 @@
       const label = document.getElementById('quotaVisibilityLabel');
       if (!label) return;
       const state = loadQuotaVisibility();
-      const shown = QUOTA_PROVIDERS.filter((p) => state[p] !== false);
+      const available = QUOTA_PROVIDERS.filter(quotaProviderPresent);
+      const shown = available.filter((p) => state[p] !== false);
       label.removeAttribute('data-i18n');
-      if (shown.length === QUOTA_PROVIDERS.length) label.textContent = t('quotaVisibilityAll');
-      else if (shown.length === 0) label.textContent = t('quotaVisibilityNone');
+      if (available.length === 0 || shown.length === 0) label.textContent = t('quotaVisibilityNone');
+      else if (shown.length === available.length) label.textContent = t('quotaVisibilityAll');
       else label.textContent = `${t('quotaVisibilityPrefix')} ${shown.map(quotaProviderLabel).join(', ')}`;
     }
 
@@ -5338,6 +5396,17 @@
       setQuotaActionStatus('saving');
       try {
         await postJsonWithCsrf(appPath('/api/quota/consent'), { [key]: true });
+        await loadQuota({ force: true });
+        setQuotaActionStatus('saved');
+      } catch (error) {
+        setQuotaActionStatus('error');
+      }
+    }
+
+    async function setQuotaCredentialScan(enabled) {
+      setQuotaActionStatus('saving');
+      try {
+        await postJsonWithCsrf(appPath('/api/quota/consent'), { credential_scan: !!enabled });
         await loadQuota({ force: true });
         setQuotaActionStatus('saved');
       } catch (error) {
@@ -5571,6 +5640,7 @@
       loadQuota({ force: true });
     });
     document.getElementById('quotaEnabledToggle')?.addEventListener('change', (event) => setQuotaEnabled(event.target.checked));
+    document.getElementById('quotaCredentialScanToggle')?.addEventListener('change', (event) => setQuotaCredentialScan(event.target.checked));
     document.getElementById('quotaIntervalSelect')?.addEventListener('change', (event) => setQuotaInterval(event.target.value));
     document.getElementById('pricingDbReload').addEventListener('click', loadPricingDb);
     document.getElementById('pricingDbFormat').addEventListener('click', formatPricingDbEditor);

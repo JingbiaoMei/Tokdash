@@ -30,6 +30,7 @@ non-disable-able cleanup or multi-machine history sync becomes a goal.
   - ✅ Gemini CLI
   - ✅ Antigravity CLI (token usage; Session Explorer drill-down is future work)
   - ✅ Kimi CLI
+  - ✅ Grok Build (per-inference token split and model-attributed cost)
   - ✅ Pi
   - ✅ GitHub Copilot CLI
   - ✅ Hermes
@@ -111,17 +112,12 @@ Principle: **no inference**. Only emit entries when numeric token fields exist.
 - VS Code extensions (Continue/Cline/Roo/Windsurf/Amazon Q):
   - Probe VS Code storage dirs for explicit token fields (JSON/SQLite).
 
-## Quota tab — additional providers (planned)
-The Quota tab currently tracks Codex, Claude Code, and Antigravity (per-provider opt-in network
-polling + local sources). Same principles for every addition: read the user's own local CLI
-credentials, call only that provider's own quota/usage endpoint, never refresh or write tokens,
-default-off consent. Candidates, pending research into each provider's quota surface:
+## Quota tab — additional providers
+The Quota tab tracks Codex, Claude Code, Antigravity, MiniMax, Kimi Code, and SuperGrok/Grok
+Build (separate local-credential-read consent, per-provider network consent, and local sources). Same principles for every addition: read only disclosed allowlisted credential stores, call only that provider's own quota/usage endpoint, never refresh or write tokens, and never scan logs for secrets. Candidates, pending research into each provider's quota surface:
 
 - **Z.ai Coding Plan** (GLM) — CN and Global variants; plan-quota endpoints to be researched.
-- **MiniMax coding/token plans** — Global (`minimax.io`) and CN (`minimaxi.com`) variants.
 - **Xiaomi MiMo plans** — MiMo CLI/API subscription quota.
-- **Moonshot Kimi plans** — Kimi CLI already has token accounting in Tokdash; add plan-quota
-  polling if Moonshot exposes a usage/limits endpoint.
 
 Each addition needs: (1) a local credential seam (like `clientpaths` resolvers), (2) a probed +
 fixture-frozen response shape, (3) a consent key, and (4) a provider card/series in the tab.

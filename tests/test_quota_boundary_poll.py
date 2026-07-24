@@ -235,6 +235,19 @@ def test_boundary_network_collection_calls_only_triggering_provider(monkeypatch)
     assert calls == ["claude"]
 
 
+def test_network_collection_dispatches_new_provider_collectors(monkeypatch):
+    calls = []
+    enabled = ["minimax_api", "kimi_api", "grok_api"]
+    monkeypatch.setattr(config, "enabled_network_sources", lambda: enabled)
+    monkeypatch.setattr(quota, "collect_minimax_api_snapshots", lambda: calls.append("minimax") or [])
+    monkeypatch.setattr(quota, "collect_kimi_api_snapshots", lambda: calls.append("kimi") or [])
+    monkeypatch.setattr(quota, "collect_grok_api_snapshots", lambda: calls.append("grok") or [])
+
+    quota.collect_network_snapshots()
+
+    assert calls == ["minimax", "kimi", "grok"]
+
+
 def test_record_boundary_poll_metric_increments_quota_meta():
     from tokdash.usage_store import UsageEntryStore
 

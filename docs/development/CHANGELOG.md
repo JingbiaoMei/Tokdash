@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+## 1.4.0 - 2026-07-24
+
+### Added
+
+- Added opt-in quota polling for MiniMax Token Plans (global and mainland China), Kimi Code, and SuperGrok/Grok Build. Static subscription keys work for MiniMax and Kimi; Grok consumer billing requires the CLI's xAI OAuth sign-in and rejects normal xAI API keys.
+- Added separate local-credential-read consent plus allowlisted OpenCode, active Claude-settings, and read-only CC Switch provider discovery for MiniMax and Kimi. Provider logs and arbitrary file references are never scanned.
+- Added local Grok Build token and cost tracking from `$GROK_HOME/logs/unified.jsonl`, using per-inference prompt, cache, completion, and reasoning counters with per-process model attribution.
+- Added pricing for Gemini 3.5 Flash Lite and Gemini 3.6 Flash.
+
+### Security
+
+- Restricted MiniMax and Kimi quota requests to their official HTTPS hosts before attaching credentials.
+- Gated Claude credential-file and macOS Keychain reads behind the separate local-credential consent.
+
 ## 1.3.1 - 2026-07-17
 
 ### Fixed

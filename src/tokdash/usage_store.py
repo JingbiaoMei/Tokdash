@@ -42,6 +42,7 @@ _SCHEMA_LOCK = threading.RLock()
 _SCHEMA_READY: set[str] = set()
 _CODEX_PERCENT_SCALE_REPAIR_META_KEY = "quota_codex_percent_scale_repair_v2"
 _CODEX_PERCENT_SCALE_REPAIR_DONE = "done"
+_GROK_EMAIL_REPAIR_META_KEY = "quota_grok_email_scrub_v1"
 
 
 def _as_float(value: Any) -> float | None:
@@ -165,6 +166,45 @@ def _repair_codex_api_percent_scale_rows(conn: sqlite3.Connection) -> int:
     conn.execute(
         "INSERT OR REPLACE INTO meta(key, value) VALUES(?, ?)",
         (_CODEX_PERCENT_SCALE_REPAIR_META_KEY, next_state),
+    )
+    return len(updates)
+
+
+def _scrub_json_key(value: Any, key_to_remove: str) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _scrub_json_key(child, key_to_remove)
+            for key, child in value.items()
+            if key.lower() != key_to_remove.lower()
+        }
+    if isinstance(value, list):
+        return [_scrub_json_key(child, key_to_remove) for child in value]
+    return value
+
+
+def _repair_grok_snapshot_email_rows(conn: sqlite3.Connection) -> int:
+    """Remove email fields persisted by the early Grok error-snapshot parser."""
+    done = conn.execute(
+        "SELECT 1 FROM meta WHERE key = ?", (_GROK_EMAIL_REPAIR_META_KEY,)
+    ).fetchone()
+    if done is not None:
+        return 0
+    rows = conn.execute(
+        "SELECT id, raw_json FROM quota_snapshots WHERE provider = 'grok' AND raw_json LIKE '%\"email\"%'"
+    ).fetchall()
+    updates: list[tuple[str, int]] = []
+    for row in rows:
+        try:
+            raw = json.loads(row["raw_json"] or "{}")
+        except Exception:
+            continue
+        scrubbed = _scrub_json_key(raw, "email")
+        updates.append((json.dumps(scrubbed, separators=(",", ":"), sort_keys=True), int(row["id"])))
+    if updates:
+        conn.executemany("UPDATE quota_snapshots SET raw_json = ? WHERE id = ?", updates)
+    conn.execute(
+        "INSERT OR REPLACE INTO meta(key, value) VALUES(?, 'done')",
+        (_GROK_EMAIL_REPAIR_META_KEY,),
     )
     return len(updates)
 
@@ -597,6 +637,7 @@ class UsageEntryStore:
             (str(SCHEMA_VERSION),),
         )
         _repair_codex_api_percent_scale_rows(conn)
+        _repair_grok_snapshot_email_rows(conn)
         conn.commit()
 
     def source_signature(self, source: str) -> Optional[str]:

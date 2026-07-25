@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+## 1.4.4 - 2026-07-25
+
+### Added
+
+- Added pricing for `moonshotai/k3-256k` (Kimi K3 256k context variant), aliased as `kimi-code/k3-256k` and `kimi-k3-256k`, using the same pricing as Kimi K3.
+
 ## 1.4.3 - 2026-07-25
 
 ### Added

@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+## 1.4.3 - 2026-07-25
+
+### Added
+
+- Added pricing for Claude Opus 5 and Opus 5 Fast, plus Gemini 3 Pro Image, Gemini 3.1 Flash Image, and Gemini 3.1 Flash Lite Image.
+
+### Fixed
+
+- Price Grok inference entries during ingestion so persistent usage totals no longer show known Grok models at zero cost.
+- Keep persistent Overview and Stats costs aligned with live parsing when a model group mixes priced rows with historical zero-cost placeholders.
+
 ## 1.4.2 - 2026-07-24
 
 ### Changed

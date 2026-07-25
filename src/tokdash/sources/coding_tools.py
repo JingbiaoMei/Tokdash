@@ -1386,18 +1386,20 @@ class GrokParser(BaseParser):
         self, pid: Any, loop_index: int, model: str, timestamp: int, input_tokens: int, cache_read: int, output: int
     ) -> Dict[str, Any]:
         entry_id = f"grok:{pid}:{timestamp}:{loop_index}"
+        resolved = model or self._UNKNOWN_MODEL
         return {
             "source": self.source_name,
-            "model": model or self._UNKNOWN_MODEL,
+            "model": resolved,
             "provider": "xai",
             "input": input_tokens,
             "output": output,
             "cacheRead": cache_read,
             "cacheWrite": 0,
             "reasoning": 0,
-            # A real per-inference split, so the compute layer prices it accurately and it is
-            # NOT an estimate — unlike the old cumulative-delta reader.
-            "cost": 0.0,
+            # Price at ingest like every other parser; cache_read is billable input
+            # at the Grok cached-input rate (no separate cache_write dimension).
+            # The store also has a defensive fallback for historical zero-cost rows.
+            "cost": self.pricing_db.get_cost(resolved, input_tokens, output, cache_read, 0),
             "timestamp": timestamp,
             "message_id": entry_id,
             "entry_id": entry_id,

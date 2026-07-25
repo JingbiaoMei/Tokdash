@@ -14,6 +14,7 @@ from typing import Any, Callable, Iterable, Optional
 from . import clientpaths
 from .codex_quota_windows import classify_codex_api_windows
 from .filelock import process_lock
+from .pricing import PricingDatabase
 
 
 SCHEMA_VERSION = 5
@@ -495,6 +496,17 @@ class UsageEntryStore:
     def __init__(self, db_path: Optional[Path] = None):
         self.path = db_path or usage_db_path()
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._pricing_db_cache: Optional[PricingDatabase] = None
+
+    def _pricing_db(self) -> PricingDatabase:
+        """Lazily built PricingDatabase for cost recompute fallbacks.
+
+        Constructed on first use (not at store init) so importing this module
+        stays cheap and the DB reflects the current override file at read time.
+        """
+        if self._pricing_db_cache is None:
+            self._pricing_db_cache = PricingDatabase()
+        return self._pricing_db_cache
 
     def _connect(self, *, ensure_schema: bool = True) -> sqlite3.Connection:
         conn = sqlite3.connect(str(self.path), timeout=30)
@@ -1017,8 +1029,12 @@ class UsageEntryStore:
                 SUM(cache_read) AS cache_read_sum,
                 SUM(cache_write) AS cache_write_sum,
                 SUM(reasoning) AS reasoning_sum,
-                SUM(cost) AS cost_sum,
-                SUM(message_count) AS message_count_sum
+                SUM(message_count) AS message_count_sum,
+                SUM(CASE WHEN cost > 0 THEN cost ELSE 0 END) AS cost_priced_sum,
+                SUM(CASE WHEN cost <= 0 THEN input ELSE 0 END) AS input_unpriced,
+                SUM(CASE WHEN cost <= 0 THEN output ELSE 0 END) AS output_unpriced,
+                SUM(CASE WHEN cost <= 0 THEN cache_read ELSE 0 END) AS cache_read_unpriced,
+                SUM(CASE WHEN cost <= 0 THEN cache_write ELSE 0 END) AS cache_write_unpriced
             FROM usage_entries
         """
         if where:
@@ -1046,7 +1062,7 @@ class UsageEntryStore:
             cache_read = int(row["cache_read_sum"] or 0)
             cache_write = int(row["cache_write_sum"] or 0)
             reasoning = int(row["reasoning_sum"] or 0)
-            cost = float(row["cost_sum"] or 0.0)
+            cost = float(row["cost_priced_sum"] or 0.0)
             messages = int(row["message_count_sum"] or 0)
 
             tokens_in = input_raw + cache_write
@@ -1054,6 +1070,25 @@ class UsageEntryStore:
             tokens = tokens_in + output + tokens_cache + reasoning
             if tokens == 0:
                 continue
+
+            # Recompute the zero-cost rows' share separately. A parser may store
+            # cost=0.0 (historically the Grok parser did so; any model unresolved
+            # at ingest also lands here). Grouping mixes priced and unpriced rows
+            # for the same model, so checking the summed cost is not enough - a
+            # positive priced sum would mask the free rows. Sum the unpriced rows'
+            # token fields in SQL and recompute them here, then add to the priced
+            # share. get_cost is linear per token dimension, so the grouped recompute
+            # equals the sum of per-row recomputes. Mirrors the parse_entries_json
+            # fallback so the persistent-store and live paths agree.
+            in_unpriced = int(row["input_unpriced"] or 0)
+            if in_unpriced or int(row["output_unpriced"] or 0) or int(row["cache_read_unpriced"] or 0) or int(row["cache_write_unpriced"] or 0):
+                cost += self._pricing_db().get_cost(
+                    full_model_name,
+                    in_unpriced,
+                    int(row["output_unpriced"] or 0),
+                    int(row["cache_read_unpriced"] or 0),
+                    int(row["cache_write_unpriced"] or 0),
+                )
 
             app_ref = apps.setdefault(
                 source,
@@ -1126,8 +1161,12 @@ class UsageEntryStore:
                 SUM(cache_read) AS cache_read_sum,
                 SUM(cache_write) AS cache_write_sum,
                 SUM(reasoning) AS reasoning_sum,
-                SUM(cost) AS cost_sum,
-                COUNT(*) AS row_count
+                COUNT(*) AS row_count,
+                SUM(CASE WHEN cost > 0 THEN cost ELSE 0 END) AS cost_priced_sum,
+                SUM(CASE WHEN cost <= 0 THEN input ELSE 0 END) AS input_unpriced,
+                SUM(CASE WHEN cost <= 0 THEN output ELSE 0 END) AS output_unpriced,
+                SUM(CASE WHEN cost <= 0 THEN cache_read ELSE 0 END) AS cache_read_unpriced,
+                SUM(CASE WHEN cost <= 0 THEN cache_write ELSE 0 END) AS cache_write_unpriced
             FROM usage_entries
         """
         if where:
@@ -1148,9 +1187,29 @@ class UsageEntryStore:
             output = int(row["output_sum"] or 0)
             cache_read = int(row["cache_read_sum"] or 0)
             reasoning = int(row["reasoning_sum"] or 0)
-            cost = float(row["cost_sum"] or 0.0)
+            cost = float(row["cost_priced_sum"] or 0.0)
             messages = int(row["row_count"] or 0)
             tokens = input_tokens + output + cache_read + reasoning
+
+            # Recompute the zero-cost rows' share separately (same reason and
+            # linearity argument as aggregate_entries): a group can mix priced
+            # and unpriced rows for one model, and a positive priced sum would
+            # otherwise mask the free rows. Mirrors parse_entries_json so the
+            # Stats contribution grid stays consistent with Overview.
+            in_unpriced = int(row["input_unpriced"] or 0)
+            if in_unpriced or int(row["output_unpriced"] or 0) or int(row["cache_read_unpriced"] or 0) or int(row["cache_write_unpriced"] or 0):
+                full_model_name = (
+                    f"{str(row['provider'] or '')}/{str(row['model'] or 'unknown')}"
+                    if row["provider"]
+                    else str(row["model"] or "unknown")
+                )
+                cost += self._pricing_db().get_cost(
+                    full_model_name,
+                    in_unpriced,
+                    int(row["output_unpriced"] or 0),
+                    int(row["cache_read_unpriced"] or 0),
+                    int(row["cache_write_unpriced"] or 0),
+                )
 
             day = by_date.setdefault(
                 date,

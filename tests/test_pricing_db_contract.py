@@ -182,6 +182,35 @@ def test_opus_4_8_matches_4_7_pricing():
     assert abs(cost_48 - cost_47) < 1e-12, "Opus 4.8 should match Opus 4.7 pricing"
 
 
+def test_opus_5_alias_entries_resolve():
+    """Opus 5 shorthand aliases must resolve to the canonical pricing."""
+    db = PricingDatabase()
+
+    representative_aliases = [
+        "opus-5",
+        "claude-opus-5",
+    ]
+    base_cost = db.get_cost("claude-opus-5", 1000, 2000, 0, 0)
+    assert base_cost > 0.0
+
+    for alias in representative_aliases:
+        alias_cost = db.get_cost(alias, 1000, 2000, 0, 0)
+        assert abs(alias_cost - base_cost) < 1e-12, (
+            f"Alias {alias!r} should resolve to claude-opus-5 pricing"
+        )
+
+
+def test_opus_5_matches_published_pricing():
+    """Opus 5 must resolve at $5/$25 per 1M (cache $0.50/$6.25)."""
+    db = PricingDatabase()
+
+    expected_cost = (
+        1000 * 5 + 2000 * 25 + 3000 * 0.5 + 4000 * 6.25
+    ) / 1_000_000
+    cost = db.get_cost("claude-opus-5", 1000, 2000, 3000, 4000)
+    assert abs(cost - expected_cost) < 1e-12, "Opus 5 should match published pricing"
+
+
 def test_fable_5_aliases_and_pricing():
     """Fable 5 aliases must resolve to the published input/output pricing."""
     db = PricingDatabase()

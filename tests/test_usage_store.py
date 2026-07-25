@@ -218,6 +218,72 @@ def test_usage_store_contribution_days_use_sql_date_window(tmp_path):
     assert days[0]["sources"][0]["providerId"] == "anthropic"
 
 
+def test_usage_store_recompute_fallback_for_mixed_zero_and_priced_rows(tmp_path):
+    """A group mixing zero-cost and priced rows must price the zero-cost share.
+
+    Regression: the fallback used to check the *summed* cost, so a positive priced
+    sum masked the free rows and the zero-cost rows stayed $0. The store path must
+    agree with parse_entries_json, which recomputes each zero-cost row.
+    """
+    from tokdash.compute import parse_entries_json
+
+    store = UsageEntryStore(tmp_path / "usage.sqlite3")
+    # grok-4.5 is $2 input / $6 output per 1M in the packaged pricing DB.
+    rows = [
+        {
+            "source": "grok",
+            "model": "grok-4.5",
+            "provider": "xai",
+            "timestamp": 1_784_900_000_000,
+            "input": 1_000_000,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "reasoning": 0,
+            "cost": 2.0,  # priced at ingest
+            "messageCount": 1,
+        },
+        {
+            "source": "grok",
+            "model": "grok-4.5",
+            "provider": "xai",
+            "timestamp": 1_784_900_001_000,
+            "input": 1_000_000,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "reasoning": 0,
+            "cost": 0.0,  # placeholder, must be recomputed
+            "messageCount": 1,
+        },
+    ]
+    store.sync_source(
+        "grok",
+        build_source_signature(files=[["unified.jsonl", 1, 1]], parser={"v": 1}),
+        lambda: rows,
+    )
+
+    store_data = store.aggregate_entries(sources=["grok"])
+    parse_data = parse_entries_json({"entries": rows})
+
+    store_cost = store_data["apps"]["grok"]["cost"]
+    parse_cost = parse_data["apps"]["grok"]["cost"]
+    assert abs(store_cost - parse_cost) < 1e-9, (
+        f"store {store_cost} != parse_entries_json {parse_cost} for mixed group"
+    )
+    # $2 (priced) + $2 (recomputed) = $4.
+    assert abs(store_cost - 4.0) < 1e-9
+
+    # contribution_days must agree too.
+    days = store.contribution_days(
+        sources=["grok"],
+        since=datetime.fromtimestamp(1_784_899_999, timezone.utc),
+        until=datetime.fromtimestamp(1_784_900_002, timezone.utc),
+    )
+    assert len(days) == 1
+    assert abs(days[0]["totals"]["cost"] - 4.0) < 1e-9
+
+
 def test_usage_store_sync_files_replaces_only_changed_files(tmp_path):
     store = UsageEntryStore(tmp_path / "usage.sqlite3")
     calls: list[str] = []

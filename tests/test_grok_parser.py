@@ -62,7 +62,8 @@ def test_grok_parses_inference_done_with_real_token_split(monkeypatch, tmp_path)
     assert e["cacheWrite"] == 0
     # Real per-inference counts, not a cumulative-delta estimate.
     assert e["estimated"] is False
-    assert e["cost"] == 0.0  # priced by the compute layer from the split above
+    # Priced at ingest like every other parser; grok-4.5 is $2/$6 per 1M.
+    assert e["cost"] == 0.031384
 
 
 def test_grok_splits_cached_prompt_tokens_from_input(monkeypatch, tmp_path):
@@ -117,7 +118,7 @@ def test_grok_dedupes_identical_rows(monkeypatch, tmp_path):
 
 
 def test_grok_cost_priced_from_split_is_nonzero_for_known_model(monkeypatch, tmp_path):
-    # The parser leaves cost 0.0; pricing grok-4.5 against the real split yields a real cost.
+    # The parser prices at ingest; grok-4.5 against the real split yields a real cost.
     db = PricingDatabase()
     cost = db.get_cost("grok-4.5", 15482, 70, 0, 0)
     assert cost > 0.0

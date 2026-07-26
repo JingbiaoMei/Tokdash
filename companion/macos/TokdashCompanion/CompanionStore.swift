@@ -24,7 +24,7 @@ final class CompanionStore: ObservableObject {
     /// Rebuild the client with a new base URL (called when settings change).
     func updateBaseURL(_ urlString: String) {
         guard let url = URL(string: urlString) else { return }
-        client.updateBaseURL(url)
+        Task { await client.updateBaseURL(url) }
         refresh()
     }
 

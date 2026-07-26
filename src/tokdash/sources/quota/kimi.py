@@ -209,15 +209,19 @@ def _snapshots_from_payload(payload: dict[str, Any], captured_at: int) -> list[Q
             if key not in seen:
                 seen.add(key)
                 out.append(snapshot)
-    # The top-level `usage` object carries no window/duration field, so its period
-    # is unknown (observed live resetting the same day, i.e. NOT weekly). Label it
-    # neutrally rather than asserting a period the payload does not state. Some plans
-    # echo one of the `limits` windows here; dedup on (used%, reset) across buckets so
-    # that echo collapses, while a genuinely distinct usage window still surfaces.
+    # Consecutive live captures move the top-level reset by exactly seven days, so this is
+    # the plan-wide weekly allowance even though the object has no duration field. Some
+    # payloads echo an explicit seven-day limit here; collapse only an exact (used%, reset)
+    # echo and retain a genuinely distinct top-level series.
     seen_window = {(float(s.used_percent or 0), s.resets_at) for s in out}
     usage = payload.get("usage") if isinstance(payload.get("usage"), dict) else {}
-    snapshot = _usage_snapshot(usage, "plan", "Plan usage", captured_at, plan) if usage else None
-    if snapshot is not None and (float(snapshot.used_percent or 0), snapshot.resets_at) not in seen_window:
+    # Keep the existing `plan` bucket id so upgrades do not leave a stale Plan usage
+    # series beside a new `7d` series in the persistent quota database.
+    snapshot = _usage_snapshot(usage, "plan", "Weekly", captured_at, plan) if usage else None
+    if (
+        snapshot is not None
+        and (float(snapshot.used_percent or 0), snapshot.resets_at) not in seen_window
+    ):
         out.append(snapshot)
     return out
 

@@ -446,6 +446,7 @@ def test_quota_history_skips_status_and_reset_credit_rows(tmp_path):
             _snapshot("5h", 10.0, BASE_TS),
             QuotaSnapshot("codex", "acct", "reset_credits", "Reset credits", 3, None, "pro", BASE_TS, "codex_api", "ok", {}),
             QuotaSnapshot("codex", "acct", "api", "Codex API", None, None, None, BASE_TS, "codex_api", "stale_token", {}),
+            QuotaSnapshot("minimax", "cn", "cn_general_7d", "Weekly", None, BASE_TS + 604800, None, BASE_TS, "minimax_api", "ok", {"unlimited": True}),
         ]
     )
 

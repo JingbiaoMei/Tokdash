@@ -76,7 +76,7 @@ def test_minimax_api_collects_global_short_and_weekly_windows(monkeypatch, tmp_p
     snapshots = minimax.collect_minimax_api_snapshots(opener=opener, now=1_782_907_200)
 
     assert [s.bucket for s in snapshots] == ["global_general_5h", "global_general_7d"]
-    assert [s.bucket_label for s in snapshots] == ["General · 5-hour", "General · Weekly"]
+    assert [s.bucket_label for s in snapshots] == ["5-hour", "Weekly"]
     assert [s.used_percent for s in snapshots] == [25.0, 60.0]
     assert all(s.account == "global" and s.source == "minimax_api" for s in snapshots)
 
@@ -110,10 +110,92 @@ def test_minimax_api_marks_expired_oauth_read_only(monkeypatch, tmp_path):
     assert snapshots[0].status == "stale_token"
 
 
-def test_minimax_prefers_observed_counts_and_avoids_double_v1_path():
-    assert minimax._percent(90, 30, 100) == 30.0
-    assert minimax._percent(75, None, None) == 25.0
+def test_minimax_uses_explicit_bounded_remaining_percent_only():
+    assert minimax._percent(90) == 10.0
+    assert minimax._percent(75) == 25.0
+    assert minimax._percent(120) == 0.0
+    assert minimax._percent(None) is None
     assert minimax._quota_url("https://api.minimax.io/v1") == "https://api.minimax.io/v1/token_plan/remains"
+
+
+def test_minimax_keeps_unused_finite_weekly_allowance():
+    credential = minimax._Credential("token", "global", "https://api.minimax.io", "test")
+    snapshots = minimax._snapshots_from_payload(
+        {
+            "model_remains": [
+                {
+                    "model_name": "general",
+                    "current_interval_status": 1,
+                    "current_interval_remaining_percent": 100,
+                    "current_weekly_status": 1,
+                    "current_weekly_remaining_percent": 100,
+                    "current_weekly_usage_count": 1000,
+                    "current_weekly_total_count": 1000,
+                    "weekly_end_time": 1_785_081_600_000,
+                }
+            ]
+        },
+        credential,
+        1_785_030_000,
+    )
+
+    assert [(s.bucket, s.bucket_label, s.used_percent) for s in snapshots] == [
+        ("global_general_5h", "5-hour", 0.0),
+        ("global_general_7d", "Weekly", 0.0),
+    ]
+
+
+def test_minimax_preserves_unlimited_weekly_as_non_numeric_allowance():
+    credential = minimax._Credential("token", "cn", "https://api.minimaxi.com", "test")
+    snapshots = minimax._snapshots_from_payload(
+        {
+            "model_remains": [
+                {
+                    "model_name": "general",
+                    "current_interval_status": 1,
+                    "current_interval_remaining_percent": 91,
+                    "end_time": 1_785_067_200_000,
+                    "current_weekly_status": 3,
+                    "current_weekly_remaining_percent": 100,
+                    "current_weekly_usage_count": 0,
+                    "current_weekly_total_count": 0,
+                    "weekly_end_time": 1_785_081_600_000,
+                }
+            ]
+        },
+        credential,
+        1_785_030_000,
+    )
+
+    assert [(s.bucket, s.bucket_label, s.used_percent) for s in snapshots] == [
+        ("cn_general_5h", "5-hour", 9.0),
+        ("cn_general_7d", "Weekly", None),
+    ]
+    assert snapshots[1].raw["unlimited"] is True
+
+
+@pytest.mark.parametrize("include_zero_totals", [False, True])
+def test_minimax_suppresses_model_absent_from_plan(include_zero_totals):
+    credential = minimax._Credential("token", "global", "https://api.minimax.io", "test")
+    item = {
+        "model_name": "video",
+        "current_interval_status": 3,
+        "current_weekly_status": 3,
+    }
+    if include_zero_totals:
+        item.update(
+            {
+                "current_interval_total_count": 0,
+                "current_weekly_total_count": 0,
+            }
+        )
+    snapshots = minimax._snapshots_from_payload(
+        {"model_remains": [item]},
+        credential,
+        1_785_030_000,
+    )
+
+    assert snapshots == []
 
 
 def test_minimax_tracks_global_and_mainland_china_plans_separately(monkeypatch, tmp_path):
@@ -150,8 +232,40 @@ def test_minimax_tracks_global_and_mainland_china_plans_separately(monkeypatch, 
         ("cn", "cn_general_5h"),
     ]
     assert [snapshot.bucket_label for snapshot in snapshots] == [
-        "General · 5-hour",
-        "General · 5-hour",
+        "5-hour",
+        "5-hour",
+    ]
+
+
+def test_minimax_live_shape_trusts_percent_when_counts_are_zero():
+    credential = minimax._Credential("token", "cn", "https://api.minimaxi.com", "evidence")
+    snapshots = minimax._snapshots_from_payload(
+        {
+            "model_remains": [
+                {
+                    "start_time": 1_785_049_200_000,
+                    "end_time": 1_785_067_200_000,
+                    "current_interval_total_count": 0,
+                    "current_interval_usage_count": 0,
+                    "model_name": "general",
+                    "current_weekly_total_count": 0,
+                    "current_weekly_usage_count": 0,
+                    "weekly_start_time": 1_784_476_800_000,
+                    "weekly_end_time": 1_785_081_600_000,
+                    "current_interval_status": 1,
+                    "current_interval_remaining_percent": 69,
+                    "current_weekly_status": 3,
+                    "current_weekly_remaining_percent": 100,
+                }
+            ]
+        },
+        credential,
+        1_785_056_659,
+    )
+
+    assert [(s.bucket, s.used_percent, s.raw.get("unlimited")) for s in snapshots] == [
+        ("cn_general_5h", 31.0, None),
+        ("cn_general_7d", None, True),
     ]
 
 
@@ -206,11 +320,9 @@ def test_kimi_api_key_collects_membership_windows(monkeypatch, tmp_path):
     assert all(s.plan == "Allegro" and s.source == "kimi_api" for s in snapshots)
 
 
-def test_kimi_distinct_top_level_usage_surfaces_as_plan_not_weekly(monkeypatch, tmp_path):
-    # Real-endpoint shape (verified 2026-07-23): the top-level `usage` object carries
-    # no window/duration and resets the SAME day — it is not weekly. When it does not
-    # echo any `limits` window it must surface under a neutral "plan" bucket, never a
-    # fabricated "7d"/"Weekly".
+def test_kimi_distinct_top_level_usage_surfaces_as_weekly(monkeypatch, tmp_path):
+    # First live reset observation in the saved seven-day sequence; the next captured
+    # top-level reset was 2026-07-30T16:45:50Z.
     home = tmp_path / "home"
     monkeypatch.setattr(Path, "home", lambda: home)
     monkeypatch.setenv("KIMI_API_KEY", "sk-kimi-code")
@@ -236,8 +348,36 @@ def test_kimi_distinct_top_level_usage_surfaces_as_plan_not_weekly(monkeypatch, 
 
     snapshots = kimi.collect_kimi_api_snapshots(opener=opener, now=1_784_800_000)
 
-    assert [(s.bucket, s.used_percent) for s in snapshots] == [("5h", 0.0), ("plan", 87.0)]
+    assert [(s.bucket, s.bucket_label, s.used_percent) for s in snapshots] == [
+        ("5h", "5-hour window", 0.0),
+        ("plan", "Weekly", 87.0),
+    ]
     assert all(s.plan == "Allegretto" for s in snapshots)
+
+
+def test_kimi_keeps_distinct_explicit_and_plan_weekly_windows():
+    snapshots = kimi._snapshots_from_payload(
+        {
+            "limits": [
+                {
+                    "window": {"duration": 300, "timeUnit": "MINUTE"},
+                    "detail": {"limit": 100, "used": 10, "resetTime": "2026-07-26T11:45:50Z"},
+                },
+                {
+                    "window": {"duration": 7, "timeUnit": "DAY"},
+                    "detail": {"limit": 100, "used": 20, "resetTime": "2026-07-30T00:00:00Z"},
+                },
+            ],
+            "usage": {"limit": 100, "used": 30, "resetTime": "2026-07-30T16:45:50Z"},
+        },
+        1_785_056_659,
+    )
+
+    assert [(s.bucket, s.used_percent, s.resets_at) for s in snapshots] == [
+        ("5h", 10.0, 1_785_066_350),
+        ("7d", 20.0, 1_785_369_600),
+        ("plan", 30.0, 1_785_429_950),
+    ]
 
 
 def test_kimi_static_config_api_key_works(monkeypatch, tmp_path):
@@ -257,6 +397,8 @@ def test_kimi_static_config_api_key_works(monkeypatch, tmp_path):
 
     snapshots = kimi.collect_kimi_api_snapshots(opener=opener, now=1_782_907_200)
     assert len(snapshots) == 1
+    assert snapshots[0].bucket == "plan"
+    assert snapshots[0].bucket_label == "Weekly"
     assert snapshots[0].used_percent == 20.0
 
 

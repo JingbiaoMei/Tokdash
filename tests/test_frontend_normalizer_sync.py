@@ -154,6 +154,9 @@ def test_minimax_china_region_moves_from_bucket_to_card_title(tmp_path):
     window_fn = _extract_js_function(
         src, "function quotaWindowLabel(provider, bucket) {"
     )
+    series_fn = _extract_js_function(
+        src, "function quotaSeriesLabel(item) {"
+    )
     groups_fn = _extract_js_function(
         src, "function miniMaxBucketGroups(buckets) {"
     )
@@ -165,15 +168,24 @@ def test_minimax_china_region_moves_from_bucket_to_card_title(tmp_path):
         + "\n"
         + window_fn
         + "\n"
+        + series_fn
+        + "\n"
         + groups_fn
         + "\nconst cases = JSON.parse(process.argv[2]);\n"
         + "const titles = cases.map((buckets) => quotaProviderCardLabel('minimax', { buckets }));\n"
         + "const oldBucket = quotaWindowLabel('minimax', "
-        + "{ bucket: 'cn_general_5h', bucket_label: 'General · 5-hour (Mainland China)' });\n"
+        + "{ account: 'cn', bucket: 'cn_general_5h', bucket_label: 'General · 5-hour (Mainland China)' });\n"
+        + "const weeklyBucket = quotaWindowLabel('minimax', "
+        + "{ account: 'cn', bucket: 'cn_general_7d', bucket_label: 'General · Weekly' });\n"
+        + "const nestedGeneral = quotaWindowLabel('minimax', "
+        + "{ account: 'global', bucket: 'global_text_general_5h', bucket_label: 'Text General · 5-hour' });\n"
+        + "const nestedSeries = quotaSeriesLabel("
+        + "{ provider: 'minimax', account: 'global', bucket: 'global_text_general_5h', "
+        + "bucket_label: 'Text General · 5-hour' });\n"
         + "const groups = miniMaxBucketGroups(["
         + "{ account: 'cn', bucket: 'cn-row' }, { account: 'global', bucket: 'global-row' }"
         + "]).map((group) => [group.account, group.rows.map((row) => row.bucket)]);\n"
-        + "process.stdout.write(JSON.stringify({ titles, oldBucket, groups }));\n",
+        + "process.stdout.write(JSON.stringify({ titles, oldBucket, weeklyBucket, nestedGeneral, nestedSeries, groups }));\n",
         encoding="utf-8",
     )
     cases = [
@@ -190,6 +202,64 @@ def test_minimax_china_region_moves_from_bucket_to_card_title(tmp_path):
 
     assert json.loads(result.stdout) == {
         "titles": ["MiniMax (China)", "MiniMax", "MiniMax"],
-        "oldBucket": "General · 5-hour",
+        "oldBucket": "windowFiveHour",
+        "weeklyBucket": "windowWeekly",
+        "nestedGeneral": "Text General · 5-hour",
+        "nestedSeries": "MiniMax Text General · 5-hour",
         "groups": [["global", ["global-row"]], ["cn", ["cn-row"]]],
     }
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_kimi_legacy_plan_bucket_is_labeled_weekly(tmp_path):
+    src = INDEX_HTML.read_text(encoding="utf-8")
+    window_fn = _extract_js_function(
+        src, "function quotaWindowLabel(provider, bucket) {"
+    )
+    harness = tmp_path / "kimi-window-label.js"
+    harness.write_text(
+        "function t(key) { return key; }\n"
+        + window_fn
+        + "\nprocess.stdout.write(quotaWindowLabel('kimi', "
+        + "{ bucket: 'plan', bucket_label: 'Plan usage' }));\n",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ["node", str(harness)],
+        capture_output=True,
+        encoding="utf-8",
+        check=True,
+    )
+
+    assert result.stdout == "windowWeekly"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_unlimited_quota_bucket_remains_visible_without_numeric_percent(tmp_path):
+    src = INDEX_HTML.read_text(encoding="utf-8")
+    usage_fn = _extract_js_function(
+        src, "function isQuotaUsageBucket(bucket) {"
+    )
+    harness = tmp_path / "quota-usage-bucket.js"
+    harness.write_text(
+        usage_fn
+        + "\nconst cases = JSON.parse(process.argv[2]);\n"
+        + "process.stdout.write(JSON.stringify(cases.map(isQuotaUsageBucket)));\n",
+        encoding="utf-8",
+    )
+    cases = [
+        {"bucket": "cn_general_7d", "used_percent": None, "unlimited": True},
+        {"bucket": "global_general_7d", "used_percent": 0, "unlimited": False},
+        {"bucket": "api", "used_percent": None, "unlimited": True},
+        {"bucket": "global_general_7d", "used_percent": None, "unlimited": False},
+    ]
+
+    result = subprocess.run(
+        ["node", str(harness), json.dumps(cases)],
+        capture_output=True,
+        encoding="utf-8",
+        check=True,
+    )
+
+    assert json.loads(result.stdout) == [True, True, False, False]

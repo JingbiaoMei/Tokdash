@@ -2072,6 +2072,7 @@
         quotaProviderIssue: 'Unable to refresh quota ({status}). Last checked {time}.',
         quotaUpdatedAgo: 'Updated {time}',
         quotaRemainingPct: '{pct}% left',
+        quotaUnlimited: 'Unlimited',
         quotaActionSaving: 'Saving…',
         quotaActionSaved: 'Saved',
         quotaActionFailed: 'Failed to save',
@@ -2309,6 +2310,7 @@
         quotaProviderIssue: '无法刷新额度（{status}）。上次检查时间：{time}。',
         quotaUpdatedAgo: '更新于 {time}',
         quotaRemainingPct: '剩余 {pct}%',
+        quotaUnlimited: '无限',
         quotaActionSaving: '保存中…',
         quotaActionSaved: '已保存',
         quotaActionFailed: '保存失败',
@@ -4726,7 +4728,8 @@
 
     function isQuotaUsageBucket(bucket) {
       if (!bucket || bucket.bucket === 'api' || bucket.bucket === 'reset_credits') return false;
-      return bucket.used_percent !== null && bucket.used_percent !== undefined;
+      return bucket.unlimited === true
+        || (bucket.used_percent !== null && bucket.used_percent !== undefined);
     }
 
     // Normalized window label shown on the card bars: every tool shows "5-hour" and
@@ -4745,8 +4748,11 @@
         if (key === 'weekly_all') return t('windowWeekly');
       } else if (provider === 'kimi' || provider === 'grok') {
         if (key === '5h') return t('windowFiveHour');
-        if (key === '7d') return t('windowWeekly');
+        if (key === '7d' || (provider === 'kimi' && key === 'plan')) return t('windowWeekly');
       } else if (provider === 'minimax') {
+        const account = String(bucket.account || '');
+        if (account && key === `${account}_general_5h`) return t('windowFiveHour');
+        if (account && key === `${account}_general_7d`) return t('windowWeekly');
         // Older stored snapshots included the region in every row. Region now belongs
         // in the card title (or group heading when both regions are configured).
         return String(bucket.bucket_label || key || '—')
@@ -4777,14 +4783,22 @@
         if (key === 'weekly_all') return `Claude ${t('windowWeekly')}`;
         return `Claude ${item.bucket_label || key}`; // Fable etc.
       }
+      if (provider === 'kimi' && key === 'plan') {
+        return `Kimi Code ${t('windowWeekly')}`;
+      }
       if (provider === 'antigravity') {
         // Pooled series already carry the group name ("Gemini Models" / "Claude and GPT Models").
         return item.bucket_label || 'Antigravity';
       }
       if (provider === 'minimax') {
         const region = item.account === 'cn' ? ` (${t('quotaRegionChina')})` : '';
-        const label = String(item.bucket_label || key)
-          .replace(/\s*\((?:Mainland China|Global)\)\s*$/, '');
+        const account = String(item.account || '');
+        const label = account && key === `${account}_general_5h`
+          ? t('windowFiveHour')
+          : account && key === `${account}_general_7d`
+            ? t('windowWeekly')
+            : String(item.bucket_label || key)
+              .replace(/\s*\((?:Mainland China|Global)\)\s*$/, '');
         return `MiniMax${region} ${label}`;
       }
       return `${quotaProviderLabel(provider)} ${item.bucket_label || key}`;
@@ -4819,11 +4833,14 @@
         sourceTag.title = t('sourceSessionTitle');
         label.appendChild(sourceTag);
       }
-      const remaining = quotaRemainingPercent(bucket);
+      const unlimited = bucket?.unlimited === true;
+      const remaining = unlimited ? 100 : quotaRemainingPercent(bucket);
       const pct = document.createElement('span');
       pct.className = 'mono font-extrabold';
       pct.style.color = remaining === null ? 'var(--color-muted)' : quotaRemainingColor(remaining);
-      pct.textContent = remaining === null ? '—' : t('quotaRemainingPct').replace('{pct}', remaining.toFixed(1));
+      pct.textContent = unlimited
+        ? t('quotaUnlimited')
+        : remaining === null ? '—' : t('quotaRemainingPct').replace('{pct}', remaining.toFixed(1));
       top.appendChild(label);
       top.appendChild(pct);
 

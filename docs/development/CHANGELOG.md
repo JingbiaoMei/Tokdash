@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+## 1.4.5 - 2026-07-26
+
+### Added
+
+- Added MiMo Code and Grok Build icons to the supported-client strips in the README, 中文 README, and supported-clients reference, and added the missing Antigravity icon to the latter two.
+
+### Changed
+
+- Show MiniMax's general quota labels as `5-hour` and `Weekly`, and render status-3 weekly allowances as `Unlimited` without treating them as numeric history data.
+- Follow MiniMax's explicit remaining-percentage and status fields; ambiguous 0/0 count fields are not used as a fallback.
+- Label Kimi Code's plan-wide quota as `Weekly` without changing its stored bucket identity.
+- Preserve distinct Kimi explicit-weekly and plan-weekly windows while deduplicating exact echoes.
+
 ## 1.4.4 - 2026-07-25
 
 ### Added

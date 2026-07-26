@@ -144,19 +144,12 @@ def _status_snapshot(status: str, captured_at: int, credential: _Credential | No
     )
 
 
-def _percent(remaining: Any, used: Any, total: Any) -> float | None:
-    try:
-        total_f = float(total)
-        used_f = float(used)
-        if total_f > 0:
-            return round(max(0.0, min(100.0, used_f / total_f * 100.0)), 4)
-    except Exception:
-        pass
+def _percent(remaining: Any) -> float | None:
+    # The live endpoint provides an explicit remaining percentage even when both count
+    # fields are 0/0. Keep Tokdash's normalized utilization bounded to 0–100; MiniMax's
+    # separate weekly_boost_permille presentation is not a second utilization scale.
     try:
         if remaining is not None:
-            # The official MiniMax CLI defines this field as a 0–100 remaining
-            # percentage. Counts remain the preferred source above because boosted
-            # weekly plans can render more than 100% remaining.
             return round(100.0 - max(0.0, min(100.0, float(remaining))), 4)
     except Exception:
         pass
@@ -166,6 +159,10 @@ def _percent(remaining: Any, used: Any, total: Any) -> float | None:
 def _quota_url(base_url: str) -> str:
     base = base_url.rstrip("/")
     return f"{base}/token_plan/remains" if base.endswith("/v1") else f"{base}/v1/token_plan/remains"
+
+
+def _bucket_label(name: str, label: str, window: str) -> str:
+    return window if name.strip().lower() == "general" else f"{label} · {window}"
 
 
 def _snapshots_from_payload(payload: dict[str, Any], credential: _Credential, captured_at: int) -> list[QuotaSnapshot]:
@@ -185,32 +182,39 @@ def _snapshots_from_payload(payload: dict[str, Any], credential: _Credential, ca
         label = name.replace("_", " ").strip().title() or "General"
 
         if item.get("current_interval_status") != 3:
-            used = _percent(
-                item.get("current_interval_remaining_percent"),
-                item.get("current_interval_usage_count"),
-                item.get("current_interval_total_count"),
-            )
+            used = _percent(item.get("current_interval_remaining_percent"))
             if used is not None:
                 out.append(
                     QuotaSnapshot(
                         "minimax", credential.region, f"{credential.region}_{name}_5h",
-                        f"{label} · 5-hour",
+                        _bucket_label(name, label, "5-hour"),
                         used, _parse_time(item.get("end_time")), str(plan) if plan else None,
                         captured_at, "minimax_api", "ok", {"model_remain": item, "region": credential.region},
                     )
                 )
 
-        if item.get("current_weekly_status") != 3:
-            used = _percent(
-                item.get("current_weekly_remaining_percent"),
-                item.get("current_weekly_usage_count"),
-                item.get("current_weekly_total_count"),
+        interval_status = item.get("current_interval_status")
+        weekly_status = item.get("current_weekly_status")
+        # Status 3 is weekly-unlimited only alongside an explicit active/exhausted
+        # interval status. Both-status-3 is MiniMax's "not in plan" shape; incomplete
+        # payloads do not provide enough evidence to invent an unlimited row.
+        if weekly_status == 3 and interval_status in {1, 2}:
+            out.append(
+                QuotaSnapshot(
+                    "minimax", credential.region, f"{credential.region}_{name}_7d",
+                    _bucket_label(name, label, "Weekly"),
+                    None, _parse_time(item.get("weekly_end_time")), str(plan) if plan else None,
+                    captured_at, "minimax_api", "ok",
+                    {"model_remain": item, "region": credential.region, "unlimited": True},
+                )
             )
+        elif weekly_status != 3:
+            used = _percent(item.get("current_weekly_remaining_percent"))
             if used is not None:
                 out.append(
                     QuotaSnapshot(
                         "minimax", credential.region, f"{credential.region}_{name}_7d",
-                        f"{label} · Weekly",
+                        _bucket_label(name, label, "Weekly"),
                         used, _parse_time(item.get("weekly_end_time")), str(plan) if plan else None,
                         captured_at, "minimax_api", "ok", {"model_remain": item, "region": credential.region},
                     )

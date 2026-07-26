@@ -521,6 +521,27 @@ def test_get_quota_exposes_remaining_percent_alongside_used_percent():
     assert bucket["remaining_percent"] == 1.0
 
 
+def test_get_quota_exposes_unlimited_bucket_without_finite_percent():
+    from tokdash.sources.quota.types import QuotaSnapshot
+    from tokdash.usage_store import UsageEntryStore
+
+    api._clear_cache()
+    UsageEntryStore().insert_quota_snapshots(
+        [
+            QuotaSnapshot(
+                "minimax", "cn", "cn_general_7d", "Weekly", None, 1_785_081_600, None,
+                1_785_030_000, "minimax_api", "ok", {"unlimited": True},
+            )
+        ]
+    )
+
+    bucket = api.get_quota()["providers"]["minimax"]["buckets"][0]
+
+    assert bucket["used_percent"] is None
+    assert bucket["remaining_percent"] is None
+    assert bucket["unlimited"] is True
+
+
 def test_stale_token_banner_shows_when_failure_is_newest():
     from tokdash.sources.quota.types import QuotaSnapshot
     from tokdash.usage_store import UsageEntryStore

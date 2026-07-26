@@ -24,7 +24,7 @@ final class TokdashClientTests: XCTestCase {
         let usage = try JSONDecoder().decode(UsageResponse.self, from: json)
         XCTAssertEqual(usage.totalTokens, 18700000)
         XCTAssertEqual(usage.totalCost, 3.42, accuracy: 0.001)
-        XCTAssertEqual(usage.byTool?["codex"]?.cost, 2.0, accuracy: 0.001)
+        XCTAssertEqual(usage.byTool?["codex"]?.cost ?? -1, 2.0, accuracy: 0.001)
         XCTAssertEqual(usage.comparison?.costPct ?? 0, -12.0, accuracy: 0.001)
     }
 

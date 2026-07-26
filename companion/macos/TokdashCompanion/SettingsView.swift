@@ -43,12 +43,12 @@ struct SettingsView: View {
         .padding(20)
         .frame(width: 380)
         .onAppear { loadSettings() }
-        .onChange(of: baseURL) { _, _ in saveSettings() }
-        .onChange(of: launchAtLogin) { _, _ in saveSettings() }
-        .onChange(of: lowQuotaNotifications) { _, _ in saveSettings() }
-        .onChange(of: fiveHourThreshold) { _, _ in saveSettings() }
-        .onChange(of: weeklyThreshold) { _, _ in saveSettings() }
-        .onChange(of: otherThreshold) { _, _ in saveSettings() }
+        .onChange(of: baseURL) { _ in saveSettings() }
+        .onChange(of: launchAtLogin) { _ in saveSettings() }
+        .onChange(of: lowQuotaNotifications) { _ in saveSettings() }
+        .onChange(of: fiveHourThreshold) { _ in saveSettings() }
+        .onChange(of: weeklyThreshold) { _ in saveSettings() }
+        .onChange(of: otherThreshold) { _ in saveSettings() }
     }
 
     private func loadSettings() {

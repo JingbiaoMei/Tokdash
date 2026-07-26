@@ -1,0 +1,16 @@
+{
+  "case": "partial",
+  "fixtures": {
+    "health": "health.json",
+    "usage_today": "usage-today.json",
+    "usage_month": "503",
+    "quota": "503"
+  },
+  "expected": {
+    "connection": "Local · Connected",
+    "dot": "ok",
+    "today": { "cost": "$3.42" },
+    "failed_sections": ["month", "quota"],
+    "inline_warning_contains": "will retry shortly"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "period": "today",
+  "total_tokens": 0,
+  "total_cost": 0.0,
+  "total_messages": 0,
+  "cache_hit_rate": 0.0,
+  "by_tool": {},
+  "apps": {},
+  "coding_apps": {},
+  "top_models": [],
+  "combined_models": [],
+  "comparison": {
+    "tokens_prev": 0,
+    "cost_prev": 0.0,
+    "messages_prev": 0,
+    "tokens_pct": null,
+    "cost_pct": null,
+    "messages_pct": null
+  },
+  "timestamp": "2026-07-26T20:20:00+00:00",
+  "response_cache": { "age_seconds": 5 }
+}

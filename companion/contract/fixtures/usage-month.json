@@ -1,0 +1,22 @@
+{
+  "period": "month",
+  "total_tokens": 281000000,
+  "total_cost": 48.90,
+  "total_messages": 4218,
+  "cache_hit_rate": 0.9602,
+  "by_tool": {
+    "codex": { "tokens": 162000000, "cost": 30.20, "tokens_in": 6500000, "tokens_cache": 154000000, "cache_hit_rate": 0.9603 },
+    "claude": { "tokens": 89000000, "cost": 15.40, "tokens_in": 2100000, "tokens_cache": 86000000, "cache_hit_rate": 0.9758 },
+    "kimi": { "tokens": 21000000, "cost": 2.30, "tokens_in": 470000, "tokens_cache": 20300000, "cache_hit_rate": 0.9777 }
+  },
+  "comparison": {
+    "tokens_prev": 312000000,
+    "cost_prev": 54.10,
+    "messages_prev": 4810,
+    "tokens_pct": -9.9,
+    "cost_pct": -9.6,
+    "messages_pct": -12.4
+  },
+  "timestamp": "2026-07-26T20:20:00+00:00",
+  "response_cache": { "age_seconds": 120 }
+}

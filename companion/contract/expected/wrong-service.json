@@ -1,0 +1,12 @@
+{
+  "case": "wrong-service",
+  "fixtures": {
+    "health": "health-wrong-service.json"
+  },
+  "expected": {
+    "connection": null,
+    "message": "This address is not a Tokdash service",
+    "usage_calls_made": 0,
+    "quota_calls_made": 0
+  }
+}

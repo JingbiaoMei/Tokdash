@@ -1,0 +1,26 @@
+{
+  "case": "empty",
+  "fixtures": {
+    "health": "health.json",
+    "usage_today": "usage-today-empty.json",
+    "usage_month": "usage-month.json",
+    "quota": "quota.json"
+  },
+  "expected": {
+    "connection": "Local · Connected",
+    "dot": "ok",
+    "today": {
+      "hero_title": "No usage recorded today",
+      "hero_sub_contains": "Tokdash is running",
+      "cost": null,
+      "comparison": null
+    },
+    "month": {
+      "label": "JULY",
+      "cost": "$48.90",
+      "tokens_compact": "281M"
+    },
+    "activity": null,
+    "banner": null
+  }
+}

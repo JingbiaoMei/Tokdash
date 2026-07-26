@@ -1,0 +1,122 @@
+{
+  "providers": {
+    "codex": {
+      "provider": "codex",
+      "network_enabled": true,
+      "plan": "Pro Lite",
+      "buckets": [
+        {
+          "account": "637ec3ac-da60-4adf-bedd-d3623d593441",
+          "bucket": "5h",
+          "bucket_label": "5-hour window",
+          "used_percent": 86.0,
+          "resets_at": 1782910800,
+          "captured_at": 1782907200,
+          "source": "codex_api",
+          "status": "ok",
+          "remaining_percent": 14.0
+        },
+        {
+          "account": "637ec3ac-da60-4adf-bedd-d3623d593441",
+          "bucket": "weekly",
+          "bucket_label": "weekly window",
+          "used_percent": 37.0,
+          "resets_at": 1785613451,
+          "captured_at": 1785080061,
+          "source": "codex_api",
+          "status": "ok",
+          "remaining_percent": 63.0
+        }
+      ],
+      "status": "ok",
+      "status_detail": null,
+      "status_at": null,
+      "updated_at": 1785080061,
+      "sources": ["codex_api", "codex_session"],
+      "estimated": false,
+      "detected": true
+    },
+    "claude": {
+      "provider": "claude",
+      "network_enabled": false,
+      "plan": "Pro",
+      "buckets": [
+        {
+          "account": "default",
+          "bucket": "5h",
+          "bucket_label": "5-hour window",
+          "used_percent": 29.0,
+          "resets_at": 1782919500,
+          "captured_at": 1782907200,
+          "source": "claude_session",
+          "status": "ok",
+          "remaining_percent": 71.0
+        },
+        {
+          "account": "default",
+          "bucket": "weekly",
+          "bucket_label": "weekly window",
+          "used_percent": 92.0,
+          "resets_at": 1785700000,
+          "captured_at": 1785080061,
+          "source": "claude_session",
+          "status": "ok",
+          "remaining_percent": 8.0
+        }
+      ],
+      "status": "ok",
+      "status_detail": null,
+      "status_at": null,
+      "updated_at": 1785080061,
+      "sources": ["claude_session"],
+      "estimated": true,
+      "detected": true
+    },
+    "kimi": {
+      "provider": "kimi",
+      "network_enabled": false,
+      "plan": null,
+      "buckets": [
+        {
+          "account": "default",
+          "bucket": "weekly",
+          "bucket_label": "weekly window",
+          "used_percent": 48.0,
+          "resets_at": 1785786400,
+          "captured_at": 1785080061,
+          "source": "kimi_session",
+          "status": "ok",
+          "remaining_percent": 52.0
+        }
+      ],
+      "status": "ok",
+      "status_detail": null,
+      "status_at": null,
+      "updated_at": 1785080061,
+      "sources": ["kimi_session"],
+      "estimated": true,
+      "detected": true
+    }
+  },
+  "consent": {
+    "credential_scan": false,
+    "codex_api": true,
+    "claude_api": false,
+    "antigravity_api": false,
+    "minimax_api": false,
+    "kimi_api": false,
+    "grok_api": false
+  },
+  "enabled": true,
+  "poll": {
+    "enabled": true,
+    "network_enabled": true,
+    "interval": 1800,
+    "interval_source": "default",
+    "interval_minutes": 30,
+    "interval_choices": [15, 30, 60, 120],
+    "last_run": 1785080061,
+    "kill_switch": false
+  },
+  "timestamp": 1785080120
+}

@@ -1,0 +1,24 @@
+{
+  "providers": {},
+  "consent": {
+    "credential_scan": false,
+    "codex_api": false,
+    "claude_api": false,
+    "antigravity_api": false,
+    "minimax_api": false,
+    "kimi_api": false,
+    "grok_api": false
+  },
+  "enabled": false,
+  "poll": {
+    "enabled": false,
+    "network_enabled": false,
+    "interval": 1800,
+    "interval_source": "default",
+    "interval_minutes": 30,
+    "interval_choices": [15, 30, 60, 120],
+    "last_run": null,
+    "kill_switch": false
+  },
+  "timestamp": 1785080120
+}

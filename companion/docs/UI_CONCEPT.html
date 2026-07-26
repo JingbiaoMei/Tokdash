@@ -1,0 +1,1191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Tokdash Companion — UI Concept</title>
+<style>
+/* ============================================================
+   Page chrome (prototype scaffolding — not part of the concept)
+   ============================================================ */
+:root {
+  --page-bg: #111418;
+  --page-fg: #E8EAED;
+  --page-muted: #9AA1A9;
+  --page-border: #2A2F36;
+  --page-accent: #3B82F6;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--page-bg);
+  color: var(--page-fg);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.45;
+  padding: 28px 20px 64px;
+}
+.page-head { max-width: 920px; margin: 0 auto 18px; }
+.page-head h1 { font-size: 18px; font-weight: 650; margin: 0 0 4px; }
+.page-head p { color: var(--page-muted); margin: 0; font-size: 13px; }
+
+.controls {
+  max-width: 920px; margin: 0 auto 20px;
+  display: flex; flex-wrap: wrap; gap: 18px 28px; align-items: flex-end;
+  padding: 14px 16px;
+  border: 1px solid var(--page-border);
+  border-radius: 10px;
+  background: #171B21;
+}
+.ctl { display: flex; flex-direction: column; gap: 6px; }
+.ctl > .ctl-label {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--page-muted);
+}
+.seg { display: inline-flex; border: 1px solid var(--page-border); border-radius: 8px; overflow: hidden; }
+.seg button {
+  appearance: none; border: 0; background: transparent; color: var(--page-muted);
+  font: inherit; font-size: 13px; padding: 6px 14px; cursor: pointer;
+}
+.seg button[aria-pressed="true"] { background: #253041; color: var(--page-fg); }
+.seg button + button { border-left: 1px solid var(--page-border); }
+.ctl select {
+  appearance: none; font: inherit; font-size: 13px; color: var(--page-fg);
+  background: #1E242C url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%239AA1A9' stroke-width='1.5'/%3E%3C/svg%3E") no-repeat right 10px center;
+  border: 1px solid var(--page-border); border-radius: 8px;
+  padding: 6px 30px 6px 10px; cursor: pointer;
+}
+.seg button:focus-visible, .ctl select:focus-visible, button:focus-visible, a:focus-visible {
+  outline: 2px solid var(--page-accent);
+  outline-offset: 2px;
+}
+.hint { max-width: 920px; margin: 0 auto 14px; color: var(--page-muted); font-size: 12.5px; }
+
+.stage { max-width: 920px; margin: 0 auto; }
+.stage.hidden { display: none; }
+
+/* ============================================================
+   Shared
+   ============================================================ */
+.os-frame {
+  position: relative;
+  border: 1px solid var(--page-border);
+  border-radius: 12px;
+  overflow: hidden;
+  min-height: 560px;
+  user-select: none;
+}
+.mac-frame { min-height: 700px; }
+.win-frame { min-height: 700px; }
+@media (prefers-reduced-motion: reduce) {
+  .spin { animation: none !important; }
+  .skel { animation: none !important; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .mac-pop, .win-fly { backdrop-filter: none !important; }
+}
+
+/* skeleton placeholder */
+.skel {
+  display: inline-block; border-radius: 4px; vertical-align: baseline;
+  background: currentColor; opacity: 0.18;
+  animation: skel-pulse 1.6s ease-in-out infinite;
+}
+@keyframes skel-pulse { 50% { opacity: 0.09; } }
+.spin { animation: spin 1s linear infinite; transform-origin: center; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ============================================================
+   macOS concept
+   ============================================================ */
+.mac-frame { background: linear-gradient(160deg, #8FA8B8 0%, #6E8899 34%, #51697C 62%, #3B4F61 100%); }
+.mac-frame.dark { background: linear-gradient(160deg, #37444F 0%, #2A3540 45%, #1C242D 100%); }
+
+.mac-menubar {
+  position: absolute; top: 0; left: 0; right: 0; height: 26px;
+  display: flex; align-items: center; gap: 16px; padding: 0 12px;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  font-size: 13px; color: rgba(0,0,0,0.85);
+  background: rgba(246, 246, 248, 0.55);
+  backdrop-filter: blur(24px) saturate(1.5);
+  -webkit-backdrop-filter: blur(24px) saturate(1.5);
+}
+.mac-frame.dark .mac-menubar { color: rgba(255,255,255,0.92); background: rgba(28,28,30,0.45); }
+.mac-menubar .app { font-weight: 700; }
+.mac-menubar .dim { opacity: 0.75; }
+.mac-menubar .spacer { flex: 1; }
+.mac-menubar .mb-right { display: flex; align-items: center; gap: 14px; }
+.mac-menubar svg { display: block; }
+
+/* menu-bar extra (closed state) */
+.mac-extra {
+  position: relative;
+  display: flex; align-items: center; justify-content: center;
+  width: 26px; height: 22px; margin: 0 -4px;
+  border: 0; background: transparent; border-radius: 4px;
+  cursor: pointer; color: inherit; padding: 0;
+}
+.mac-extra:hover, .mac-extra.active { background: rgba(0,0,0,0.10); }
+.mac-frame.dark .mac-extra:hover, .mac-frame.dark .mac-extra.active { background: rgba(255,255,255,0.14); }
+
+/* macOS tooltip */
+.mac-tip {
+  position: absolute; top: 30px; left: 50%; transform: translateX(-50%);
+  white-space: nowrap;
+  font-size: 12px; padding: 3px 8px; border-radius: 5px;
+  background: rgba(240, 240, 242, 0.96); color: #1D1D1F;
+  border: 0.5px solid rgba(0,0,0,0.15);
+  box-shadow: 0 3px 10px rgba(0,0,0,0.18);
+  pointer-events: none; opacity: 0; transition: opacity 120ms ease;
+  z-index: 30;
+}
+.mac-frame.dark .mac-tip { background: rgba(56,56,58,0.97); color: #F2F2F2; border-color: rgba(255,255,255,0.18); }
+.mac-extra:hover .mac-tip { opacity: 1; }
+
+/* popover (MenuBarExtra .window style — no arrow, floating panel) */
+.mac-pop {
+  position: absolute; top: 34px; right: 96px; width: 352px;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  color: #1D1D1F;
+  background: rgba(242, 242, 245, 0.78);
+  backdrop-filter: blur(30px) saturate(1.7);
+  -webkit-backdrop-filter: blur(30px) saturate(1.7);
+  border: 0.5px solid rgba(0,0,0,0.12);
+  border-radius: 14px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.28), 0 1px 4px rgba(0,0,0,0.12);
+  z-index: 20;
+}
+.mac-frame.dark .mac-pop {
+  color: #F2F2F2;
+  background: rgba(34, 34, 37, 0.74);
+  border-color: rgba(255,255,255,0.16);
+}
+@media (prefers-reduced-transparency: reduce) {
+  .mac-pop { background: #F2F2F5; }
+  .mac-frame.dark .mac-pop { background: #222225; }
+}
+.mac-pop .inner { padding: 4px 0; }
+.mac-pop section { padding: 12px 16px; }
+.mac-pop .hairline { border-top: 0.5px solid rgba(60,60,67,0.16); }
+.mac-frame.dark .mac-pop .hairline { border-top-color: rgba(235,235,245,0.14); }
+
+.mac-head { display: flex; align-items: center; gap: 8px; }
+.mac-head .wordmark { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 7px; }
+.mac-head .conn { font-size: 12px; color: rgba(60,60,67,0.75); display: flex; align-items: center; gap: 5px; }
+.mac-frame.dark .mac-head .conn { color: rgba(235,235,245,0.62); }
+.dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+.dot.ok { background: #30A74C; }
+.dot.warn { background: #FF9F0A; }
+.dot.err { background: #FF453A; }
+.dot.busy { background: #FF9F0A; }
+.mac-head .grow { flex: 1; }
+
+.mac-icon-btn {
+  appearance: none; border: 0; background: transparent; color: rgba(60,60,67,0.8);
+  width: 26px; height: 26px; border-radius: 6px; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; padding: 0;
+}
+.mac-icon-btn:hover { background: rgba(0,0,0,0.07); }
+.mac-frame.dark .mac-icon-btn { color: rgba(235,235,245,0.75); }
+.mac-frame.dark .mac-icon-btn:hover { background: rgba(255,255,255,0.10); }
+
+.mac-hero .kicker {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.05em;
+  color: rgba(60,60,67,0.62); text-transform: uppercase; margin: 0 0 2px;
+}
+.mac-frame.dark .mac-hero .kicker { color: rgba(235,235,245,0.55); }
+.mac-hero .big { font-size: 30px; font-weight: 650; letter-spacing: -0.01em; line-height: 1.15; margin: 0; }
+.mac-hero .sub { font-size: 12.5px; color: rgba(60,60,67,0.78); margin: 2px 0 0; }
+.mac-frame.dark .mac-hero .sub { color: rgba(235,235,245,0.65); }
+.mac-hero .cmp { font-size: 12.5px; margin: 5px 0 0; display: flex; align-items: center; gap: 4px; }
+.cmp.down { color: #248A3D; }
+.cmp.up { color: #D70015; }
+.mac-frame.dark .cmp.down { color: #32D74B; }
+.mac-frame.dark .cmp.up { color: #FF6961; }
+
+.mac-month { display: flex; align-items: baseline; gap: 10px; font-size: 12.5px; }
+.mac-month .kicker {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase;
+  color: rgba(60,60,67,0.62);
+}
+.mac-frame.dark .mac-month .kicker { color: rgba(235,235,245,0.55); }
+.mac-month .val { font-weight: 600; }
+.mac-month .muted { color: rgba(60,60,67,0.72); }
+.mac-frame.dark .mac-month .muted { color: rgba(235,235,245,0.6); }
+
+.mac-quota .kicker {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase;
+  color: rgba(60,60,67,0.62); margin: 0 0 8px;
+}
+.mac-frame.dark .mac-quota .kicker { color: rgba(235,235,245,0.55); }
+.qrow { margin: 0 0 10px; }
+.qrow:last-child { margin-bottom: 0; }
+.qrow .qtop { display: flex; align-items: baseline; gap: 8px; font-size: 12.5px; }
+.qrow .qname { font-weight: 500; }
+.qrow .qleft { margin-left: auto; font-weight: 600; font-variant-numeric: tabular-nums; }
+.qrow .qreset { color: rgba(60,60,67,0.65); font-size: 12px; }
+.mac-frame.dark .qrow .qreset { color: rgba(235,235,245,0.55); }
+.qrow .est { font-size: 10.5px; color: rgba(60,60,67,0.55); border: 0.5px solid rgba(60,60,67,0.3); border-radius: 4px; padding: 0 4px; }
+.mac-frame.dark .qrow .est { color: rgba(235,235,245,0.5); border-color: rgba(235,235,245,0.3); }
+.qbar { height: 4px; border-radius: 2px; background: rgba(60,60,67,0.14); margin-top: 5px; overflow: hidden; }
+.mac-frame.dark .qbar { background: rgba(235,235,245,0.16); }
+.qbar > i { display: block; height: 100%; border-radius: 2px; }
+.qbar > i.fine { background: #30A74C; }
+.qbar > i.mid { background: #FF9F0A; }
+.qbar > i.low { background: #FF453A; }
+
+.mac-activity { font-size: 12px; color: rgba(60,60,67,0.68); }
+.mac-frame.dark .mac-activity { color: rgba(235,235,245,0.55); }
+.mac-activity b { font-weight: 500; color: rgba(29,29,31,0.85); }
+.mac-frame.dark .mac-activity b { color: rgba(242,242,242,0.8); }
+
+.mac-actions { display: flex; gap: 8px; align-items: center; }
+.mac-btn {
+  appearance: none; font: inherit; font-size: 13px; cursor: pointer;
+  border-radius: 6px; border: 0.5px solid rgba(0,0,0,0.16);
+  background: rgba(255,255,255,0.65); color: #1D1D1F;
+  padding: 3px 12px 4px; box-shadow: 0 0.5px 1.5px rgba(0,0,0,0.08);
+}
+.mac-btn:hover { background: rgba(255,255,255,0.85); }
+.mac-frame.dark .mac-btn {
+  background: rgba(255,255,255,0.16); color: #F2F2F2; border-color: rgba(255,255,255,0.12);
+}
+.mac-frame.dark .mac-btn:hover { background: rgba(255,255,255,0.22); }
+.mac-btn.primary { background: #0A6CFF; border-color: transparent; color: #fff; font-weight: 500; }
+.mac-btn.primary:hover { background: #0A5FE8; }
+.mac-frame.dark .mac-btn.primary { background: #0A84FF; }
+.mac-frame.dark .mac-btn.primary:hover { background: #2E94FF; }
+.mac-btn.icon { padding: 3px 7px 4px; display: inline-flex; align-items: center; }
+
+.mac-foot { display: flex; align-items: center; padding-top: 8px !important; padding-bottom: 10px !important; }
+.mac-foot .fresh { font-size: 11px; color: rgba(60,60,67,0.55); }
+.mac-frame.dark .mac-foot .fresh { color: rgba(235,235,245,0.45); }
+.mac-foot .grow { flex: 1; }
+.mac-foot .quit {
+  appearance: none; border: 0; background: transparent; cursor: pointer;
+  font: inherit; font-size: 11px; color: rgba(60,60,67,0.55); padding: 2px 4px; border-radius: 4px;
+}
+.mac-foot .quit:hover { color: #1D1D1F; background: rgba(0,0,0,0.06); }
+.mac-frame.dark .mac-foot .quit { color: rgba(235,235,245,0.45); }
+.mac-frame.dark .mac-foot .quit:hover { color: #F2F2F2; background: rgba(255,255,255,0.1); }
+
+/* dropdown menu (NSMenu style) */
+.mac-menu {
+  position: absolute; top: 30px; right: 10px; min-width: 208px;
+  background: rgba(242,242,245,0.92);
+  backdrop-filter: blur(30px) saturate(1.7);
+  border: 0.5px solid rgba(0,0,0,0.14); border-radius: 8px;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.25);
+  padding: 4px; z-index: 40; font-size: 13px;
+}
+.mac-frame.dark .mac-menu { background: rgba(40,40,43,0.94); border-color: rgba(255,255,255,0.16); color: #F2F2F2; }
+.mac-menu button {
+  appearance: none; display: flex; width: 100%; text-align: left; align-items: center;
+  border: 0; background: transparent; font: inherit; color: inherit;
+  padding: 3px 10px; border-radius: 5px; cursor: pointer;
+}
+.mac-menu button:hover { background: #0A6CFF; color: #fff; }
+.mac-frame.dark .mac-menu button:hover { background: #0A84FF; }
+.mac-menu .sep { height: 0.5px; background: rgba(60,60,67,0.18); margin: 4px 10px; }
+.mac-frame.dark .mac-menu .sep { background: rgba(235,235,245,0.15); }
+.mac-menu .check { width: 14px; display: inline-block; }
+
+/* state banners inside mac popover */
+.banner { display: flex; gap: 9px; align-items: flex-start; font-size: 12.5px; }
+.banner .b-title { font-weight: 600; margin: 0; font-size: 13px; }
+.banner .b-body { margin: 1px 0 0; color: rgba(60,60,67,0.75); font-size: 12px; }
+.mac-frame.dark .banner .b-body { color: rgba(235,235,245,0.62); }
+.banner .b-actions { margin-top: 8px; display: flex; gap: 8px; }
+.banner svg { flex: none; margin-top: 1px; }
+.dimmed { opacity: 0.45; filter: saturate(0.6); }
+.stale-note { font-size: 11px; color: rgba(60,60,67,0.55); }
+.mac-frame.dark .stale-note { color: rgba(235,235,245,0.45); }
+
+.inline-warn {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 12px; color: #8A5A00;
+}
+.mac-frame.dark .inline-warn { color: #FFD60A; }
+.inline-warn button {
+  appearance: none; border: 0; background: transparent; font: inherit; cursor: pointer;
+  color: #0A6CFF; padding: 0; text-decoration: underline; text-underline-offset: 2px;
+}
+.mac-frame.dark .inline-warn button { color: #64A8FF; }
+
+.empty-today { font-size: 13px; font-weight: 500; }
+.empty-sub { font-size: 12px; color: rgba(60,60,67,0.7); margin-top: 2px; }
+.mac-frame.dark .empty-sub { color: rgba(235,235,245,0.6); }
+
+/* ============================================================
+   Windows concept
+   ============================================================ */
+.win-frame {
+  background:
+    radial-gradient(700px 380px at 30% 30%, rgba(90,140,200,0.35), transparent 70%),
+    radial-gradient(600px 400px at 75% 65%, rgba(70,110,160,0.30), transparent 70%),
+    linear-gradient(150deg, #24425E 0%, #1B3349 50%, #14273A 100%);
+}
+.win-frame.dark {
+  background:
+    radial-gradient(700px 380px at 30% 30%, rgba(60,100,150,0.25), transparent 70%),
+    linear-gradient(150deg, #16242F 0%, #0F1A24 55%, #0A1219 100%);
+}
+.win-frame, .win-frame * { font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; }
+
+.win-taskbar {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 48px;
+  display: flex; align-items: center; justify-content: center; gap: 4px;
+  background: rgba(238, 243, 249, 0.78);
+  backdrop-filter: blur(24px) saturate(1.4);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  border-top: 1px solid rgba(0,0,0,0.08);
+  z-index: 25;
+}
+.win-frame.dark .win-taskbar { background: rgba(28, 32, 38, 0.82); border-top-color: rgba(255,255,255,0.09); }
+.win-tb-btn {
+  appearance: none; border: 0; background: transparent; cursor: pointer;
+  width: 40px; height: 40px; border-radius: 5px;
+  display: inline-flex; align-items: center; justify-content: center; padding: 0;
+}
+.win-tb-btn:hover { background: rgba(0,0,0,0.06); }
+.win-frame.dark .win-tb-btn:hover { background: rgba(255,255,255,0.09); }
+
+.win-tray {
+  position: absolute; right: 0; bottom: 0; height: 48px;
+  display: flex; align-items: center; gap: 2px; padding-right: 4px;
+  z-index: 26;
+}
+.win-tray .sys { display: flex; align-items: center; gap: 2px; }
+.win-clock {
+  appearance: none; border: 0; background: transparent; cursor: pointer;
+  font: inherit; font-size: 12px; line-height: 1.25; text-align: right;
+  color: #1B1B1B; padding: 4px 8px; border-radius: 5px;
+}
+.win-frame.dark .win-clock { color: #F3F3F3; }
+.win-clock:hover { background: rgba(0,0,0,0.06); }
+.win-frame.dark .win-clock:hover { background: rgba(255,255,255,0.09); }
+.win-tray-icon {
+  appearance: none; border: 0; background: transparent; cursor: pointer;
+  width: 32px; height: 40px; border-radius: 5px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  position: relative;
+}
+.win-tray-icon:hover { background: rgba(0,0,0,0.06); }
+.win-frame.dark .win-tray-icon:hover { background: rgba(255,255,255,0.09); }
+.win-tray-icon.active { background: rgba(0,0,0,0.10); }
+.win-frame.dark .win-tray-icon.active { background: rgba(255,255,255,0.14); }
+.win-desktop-edge { position: absolute; right: 0; bottom: 0; width: 4px; height: 48px; border-left: 1px solid rgba(0,0,0,0.15); z-index: 27; }
+
+/* Windows tooltip */
+.win-tip {
+  position: absolute; bottom: 52px; right: 0; transform: translateX(30%);
+  white-space: nowrap; font-size: 12px; padding: 5px 9px;
+  background: #F9F9F9; color: #1B1B1B;
+  border: 1px solid #767676; border-radius: 4px;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.25);
+  pointer-events: none; opacity: 0; transition: opacity 100ms ease;
+  z-index: 50;
+}
+.win-frame.dark .win-tip { background: #2B2B2B; color: #F3F3F3; border-color: #8A8A8A; }
+.win-tray-icon:hover .win-tip { opacity: 1; }
+
+/* Windows context menu */
+.win-menu {
+  position: absolute; bottom: 54px; min-width: 188px;
+  background: rgba(249,249,249,0.92);
+  backdrop-filter: blur(28px) saturate(1.4);
+  border: 1px solid rgba(0,0,0,0.10); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.28);
+  padding: 4px; z-index: 60; font-size: 12.5px; color: #1B1B1B;
+}
+.win-frame.dark .win-menu { background: rgba(43,43,43,0.94); border-color: rgba(255,255,255,0.10); color: #F3F3F3; }
+.win-menu button {
+  appearance: none; display: flex; width: 100%; align-items: center; gap: 9px;
+  border: 0; background: transparent; font: inherit; color: inherit; text-align: left;
+  padding: 6px 10px; border-radius: 4px; cursor: pointer;
+}
+.win-menu button:hover { background: rgba(0,0,0,0.06); }
+.win-frame.dark .win-menu button:hover { background: rgba(255,255,255,0.09); }
+.win-menu button:focus-visible { outline: 2px solid #0067C0; outline-offset: -2px; }
+.win-menu .sep { height: 1px; background: rgba(0,0,0,0.10); margin: 4px 10px; }
+.win-frame.dark .win-menu .sep { background: rgba(255,255,255,0.12); }
+.win-menu svg { opacity: 0.85; }
+
+/* Acrylic flyout */
+.win-fly {
+  position: absolute; right: 8px; bottom: 56px; width: 384px;
+  color: #1B1B1B;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.03 0'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)'/%3E%3C/svg%3E"),
+    rgba(242, 244, 247, 0.86);
+  backdrop-filter: blur(32px) saturate(1.25);
+  -webkit-backdrop-filter: blur(32px) saturate(1.25);
+  border: 1px solid rgba(0,0,0,0.10);
+  border-radius: 8px;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.35), 0 2px 8px rgba(0,0,0,0.18);
+  z-index: 40;
+}
+.win-frame.dark .win-fly {
+  color: #F3F3F3;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.04 0'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)'/%3E%3C/svg%3E"),
+    rgba(38, 42, 48, 0.88);
+  border-color: rgba(255,255,255,0.10);
+}
+@media (prefers-reduced-transparency: reduce) {
+  .win-fly { background: #F2F4F7; }
+  .win-frame.dark .win-fly { background: #26292F; }
+}
+.win-fly .inner { display: flex; flex-direction: column; }
+.win-fly section { padding: 14px 16px; }
+.win-fly .divider { border-top: 1px solid rgba(0,0,0,0.07); }
+.win-frame.dark .win-fly .divider { border-top-color: rgba(255,255,255,0.08); }
+
+.win-head { display: flex; align-items: center; gap: 8px; }
+.win-head .wordmark { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.win-head .conn { font-size: 12px; color: #5F5F5F; display: flex; align-items: center; gap: 6px; }
+.win-frame.dark .win-head .conn { color: #B5B5B5; }
+.win-head .grow { flex: 1; }
+.win-icon-btn {
+  appearance: none; border: 0; background: transparent; cursor: pointer; color: inherit;
+  width: 30px; height: 30px; border-radius: 4px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.win-icon-btn:hover { background: rgba(0,0,0,0.06); }
+.win-icon-btn:active { background: rgba(0,0,0,0.10); }
+.win-frame.dark .win-icon-btn:hover { background: rgba(255,255,255,0.09); }
+.win-frame.dark .win-icon-btn:active { background: rgba(255,255,255,0.13); }
+
+.win-hero .kicker { font-size: 11px; font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase; color: #5F5F5F; margin: 0 0 2px; }
+.win-frame.dark .win-hero .kicker { color: #B0B0B0; }
+.win-hero .big { font-size: 28px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.2; margin: 0; }
+.win-hero .sub { font-size: 12.5px; color: #4D4D4D; margin: 3px 0 0; }
+.win-frame.dark .win-hero .sub { color: #C2C2C2; }
+.win-hero .cmp { font-size: 12.5px; margin: 6px 0 0; display: flex; align-items: center; gap: 5px; }
+.win-frame .cmp.down { color: #0F7B0F; }
+.win-frame .cmp.up { color: #C42B1C; }
+.win-frame.dark .cmp.down { color: #6CCB5F; }
+.win-frame.dark .cmp.up { color: #FF99A4; }
+
+.win-month { display: flex; align-items: baseline; gap: 10px; font-size: 12.5px; }
+.win-month .kicker { font-size: 11px; font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase; color: #5F5F5F; }
+.win-frame.dark .win-month .kicker { color: #B0B0B0; }
+.win-month .val { font-weight: 600; }
+.win-month .muted { color: #4D4D4D; }
+.win-frame.dark .win-month .muted { color: #C2C2C2; }
+
+.win-quota .kicker { font-size: 11px; font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase; color: #5F5F5F; margin: 0 0 10px; }
+.win-frame.dark .win-quota .kicker { color: #B0B0B0; }
+.win-fly .qrow { margin: 0 0 12px; }
+.win-fly .qrow:last-child { margin-bottom: 0; }
+.win-fly .qrow .qtop { display: flex; align-items: baseline; gap: 8px; font-size: 12.5px; }
+.win-fly .qrow .qreset { color: #5F5F5F; font-size: 12px; }
+.win-frame.dark .win-fly .qrow .qreset { color: #B0B0B0; }
+.win-fly .qrow .est { font-size: 10.5px; color: #5F5F5F; border: 1px solid #ADADAD; border-radius: 3px; padding: 0 4px; }
+.win-frame.dark .win-fly .qrow .est { color: #B0B0B0; border-color: #6E6E6E; }
+.win-fly .qbar { height: 4px; border-radius: 2px; background: rgba(0,0,0,0.10); margin-top: 6px; }
+.win-frame.dark .win-fly .qbar { background: rgba(255,255,255,0.14); }
+.win-fly .qbar > i.fine { background: #0F7B0F; }
+.win-fly .qbar > i.mid { background: #CA5010; }
+.win-fly .qbar > i.low { background: #C42B1C; }
+.win-frame.dark .win-fly .qbar > i.fine { background: #6CCB5F; }
+.win-frame.dark .win-fly .qbar > i.mid { background: #F7630C; }
+.win-frame.dark .win-fly .qbar > i.low { background: #FF99A4; }
+
+.win-activity { font-size: 12px; color: #5F5F5F; }
+.win-frame.dark .win-activity { color: #B0B0B0; }
+.win-activity b { font-weight: 600; color: #2B2B2B; }
+.win-frame.dark .win-activity b { color: #E0E0E0; }
+
+.win-actions { display: flex; gap: 8px; align-items: center; }
+.win-btn {
+  appearance: none; font: inherit; font-size: 13px; cursor: pointer;
+  border-radius: 4px; border: 1px solid rgba(0,0,0,0.14);
+  border-bottom-color: rgba(0,0,0,0.28);
+  background: rgba(255,255,255,0.7); color: #1B1B1B;
+  padding: 5px 14px 6px;
+}
+.win-btn:hover { background: rgba(0,0,0,0.04); }
+.win-frame.dark .win-btn {
+  background: rgba(255,255,255,0.09); color: #F3F3F3;
+  border-color: rgba(255,255,255,0.10); border-bottom-color: rgba(255,255,255,0.20);
+}
+.win-frame.dark .win-btn:hover { background: rgba(255,255,255,0.13); }
+.win-btn.primary {
+  background: #0067C0; border-color: transparent; border-bottom-color: rgba(0,0,0,0.30);
+  color: #fff;
+}
+.win-btn.primary:hover { background: #1975C5; }
+.win-frame.dark .win-btn.primary { background: #4CC2FF; color: #0F1A24; font-weight: 600; }
+.win-frame.dark .win-btn.primary:hover { background: #69CDFF; }
+.win-btn.icon { padding: 5px 8px 6px; display: inline-flex; align-items: center; }
+.win-btn:focus-visible, .win-icon-btn:focus-visible, .win-tray-icon:focus-visible,
+.win-tb-btn:focus-visible, .win-clock:focus-visible, .win-menu button:focus-visible {
+  outline: 2px solid #0067C0; outline-offset: 1px;
+}
+.win-frame.dark .win-btn:focus-visible, .win-frame.dark .win-icon-btn:focus-visible,
+.win-frame.dark .win-tray-icon:focus-visible, .win-frame.dark .win-menu button:focus-visible {
+  outline-color: #4CC2FF;
+}
+
+.win-foot {
+  display: flex; align-items: center;
+  background: rgba(0,0,0,0.03);
+  border-top: 1px solid rgba(0,0,0,0.06);
+  border-radius: 0 0 8px 8px;
+  padding: 8px 16px !important;
+}
+.win-frame.dark .win-foot { background: rgba(255,255,255,0.04); border-top-color: rgba(255,255,255,0.08); }
+.win-foot .fresh { font-size: 11px; color: #767676; }
+.win-frame.dark .win-foot .fresh { color: #9A9A9A; }
+.win-foot .grow { flex: 1; }
+
+.win-fly .banner .b-body { color: #4D4D4D; }
+.win-frame.dark .win-fly .banner .b-body { color: #C2C2C2; }
+.win-fly .inline-warn { color: #8A5A00; }
+.win-frame.dark .win-fly .inline-warn { color: #FCE100; }
+.win-fly .inline-warn button { color: #0067C0; }
+.win-frame.dark .win-fly .inline-warn button { color: #4CC2FF; }
+.win-fly .empty-sub { color: #4D4D4D; }
+.win-frame.dark .win-fly .empty-sub { color: #C2C2C2; }
+.win-fly .stale-note { color: #767676; }
+.win-frame.dark .win-fly .stale-note { color: #9A9A9A; }
+
+.closed-caption {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  color: rgba(255,255,255,0.85); font-size: 13px; text-align: center;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.4); pointer-events: none; padding: 0 60px;
+}
+.closed-caption[hidden] { display: none; }
+
+/* quota section: header row + urgent/all segmented control */
+.mac-pop .qhead, .win-fly .qhead { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 0 0 8px; }
+.mac-pop .qhead .kicker, .win-fly .qhead .kicker { margin: 0; }
+.qseg { display: inline-flex; border-radius: 6px; padding: 1px; background: rgba(60,60,67,0.10); }
+.mac-frame.dark .qseg, .win-frame.dark .qseg { background: rgba(235,235,245,0.12); }
+.qseg button {
+  appearance: none; border: 0; background: transparent; cursor: pointer;
+  font: inherit; font-size: 11px; padding: 1px 9px 2px; border-radius: 5px;
+  color: rgba(60,60,67,0.75);
+}
+.mac-frame.dark .qseg button, .win-frame.dark .qseg button { color: rgba(235,235,245,0.65); }
+.qseg button[aria-pressed="true"] {
+  background: rgba(255,255,255,0.95); color: #1D1D1F; font-weight: 500;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.12);
+}
+.mac-frame.dark .qseg button[aria-pressed="true"] { background: rgba(99,99,102,0.85); color: #F2F2F2; }
+.win-fly .qseg { border-radius: 4px; }
+.win-fly .qseg button { border-radius: 3px; }
+.win-fly .qseg button[aria-pressed="true"] { background: #fff; color: #1B1B1B; font-weight: 600; }
+.win-frame.dark .win-fly .qseg button[aria-pressed="true"] { background: rgba(255,255,255,0.18); color: #F3F3F3; }
+.qscroll { max-height: 160px; overflow-y: auto; overscroll-behavior: contain; } /* 4 rows + sliver of the 5th */
+.win-fly .qscroll { max-height: 172px; }
+/* Prototype-only: thin unobtrusive scrollbar. Production should use the platform's
+   native/overlay scrollbar (NSScroller overlay style / WinUI ScrollViewer defaults). */
+.qscroll { scrollbar-width: thin; scrollbar-color: rgba(140,140,145,0.35) transparent; }
+.qscroll::-webkit-scrollbar { width: 5px; }
+.qscroll::-webkit-scrollbar-track { background: transparent; }
+.qscroll::-webkit-scrollbar-thumb { background: rgba(140,140,145,0.35); border-radius: 3px; }
+.qscroll .qrow:last-child { margin-bottom: 2px; }
+.qgroup {
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase;
+  color: rgba(60,60,67,0.55); margin: 10px 0 6px;
+}
+.qgroup:first-child { margin-top: 0; }
+.mac-frame.dark .qgroup, .win-frame.dark .qgroup { color: rgba(235,235,245,0.45); }
+.qnone { font-size: 12px; color: rgba(60,60,67,0.68); margin: 0; }
+.mac-frame.dark .qnone, .win-frame.dark .qnone { color: rgba(235,235,245,0.55); }
+
+/* ============================================================
+   Review panel
+   ============================================================ */
+.review {
+  max-width: 920px; margin: 36px auto 0;
+  border: 1px solid var(--page-border); border-radius: 10px;
+  background: #171B21; padding: 20px 24px;
+}
+.review h2 { font-size: 15px; margin: 0 0 12px; }
+.review h3 { font-size: 13px; margin: 18px 0 6px; color: #C6CDD4; }
+.review p, .review li { color: var(--page-muted); font-size: 13px; }
+.review ul { margin: 6px 0 0; padding-left: 18px; }
+.review li { margin: 4px 0; }
+.review code { color: #C6CDD4; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<header class="page-head">
+  <h1>Tokdash Companion — UI concept</h1>
+  <p>Interactive HTML prototype. Fake data only; no network calls. Companion reads the local Tokdash HTTP API — it does not parse logs or replace the dashboard.</p>
+</header>
+
+<div class="controls" role="group" aria-label="Prototype controls">
+  <div class="ctl">
+    <span class="ctl-label" id="lbl-platform">Platform</span>
+    <div class="seg" role="group" aria-labelledby="lbl-platform">
+      <button id="seg-mac" aria-pressed="true">macOS</button>
+      <button id="seg-win" aria-pressed="false">Windows</button>
+    </div>
+  </div>
+  <div class="ctl">
+    <label class="ctl-label" for="sel-state">Data state</label>
+    <select id="sel-state">
+      <option value="healthy">Healthy</option>
+      <option value="loading">Loading</option>
+      <option value="refreshing">Refreshing with previous data</option>
+      <option value="offline">Offline</option>
+      <option value="busy">Tokdash busy</option>
+      <option value="partial">Partial data</option>
+      <option value="empty">Empty today</option>
+    </select>
+  </div>
+  <div class="ctl">
+    <span class="ctl-label" id="lbl-appearance">Appearance</span>
+    <div class="seg" role="group" aria-labelledby="lbl-appearance">
+      <button id="seg-light" aria-pressed="true">Light</button>
+      <button id="seg-dark" aria-pressed="false">Dark</button>
+    </div>
+  </div>
+  <div class="ctl">
+    <span class="ctl-label" id="lbl-surface">Surface</span>
+    <div class="seg" role="group" aria-labelledby="lbl-surface">
+      <button id="seg-open" aria-pressed="true">Open</button>
+      <button id="seg-closed" aria-pressed="false">Closed</button>
+    </div>
+  </div>
+</div>
+
+<p class="hint">Hover the menu-bar / tray icon for its tooltip. On Windows, right-click the tray icon for its context menu. On macOS, click the gear in the popover header for the app menu.</p>
+
+<!-- ==================== macOS stage ==================== -->
+<div class="stage" id="stage-mac">
+  <div class="os-frame mac-frame" id="mac-frame">
+    <div class="mac-menubar" aria-hidden="true">
+      <svg width="14" height="14" viewBox="0 0 384 512" fill="currentColor" aria-hidden="true"><path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z"/></svg>
+      <span class="app">Finder</span>
+      <span class="dim">File</span><span class="dim">Edit</span><span class="dim">View</span><span class="dim">Go</span><span class="dim">Window</span><span class="dim">Help</span>
+      <span class="spacer"></span>
+      <span class="mb-right">
+        <svg width="15" height="11" viewBox="0 0 20 14" fill="currentColor" aria-hidden="true"><path d="M10 12.5a1.7 1.7 0 1 0 0 .01M10 9c-1.9 0-3.6.7-4.9 1.9l1.4 1.4A4.9 4.9 0 0 1 10 11c1.3 0 2.6.5 3.5 1.3l1.4-1.4A6.9 6.9 0 0 0 10 9zm0-4C7 5 4.2 6.1 2 8.3l1.4 1.4A9.3 9.3 0 0 1 10 7c2.5 0 4.8 1 6.6 2.7L18 8.3A11.3 11.3 0 0 0 10 5zm0-4C6.1 1 2.5 2.6-.6 5.6L.8 7A14.6 14.6 0 0 1 10 3c3.6 0 6.9 1.4 9.2 4l1.4-1.4A16.6 16.6 0 0 0 10 1z"/></svg>
+        <svg width="22" height="11" viewBox="0 0 25 12" fill="none" stroke="currentColor" aria-hidden="true"><rect x="0.5" y="0.5" width="21" height="11" rx="3"/><rect x="2" y="2" width="14" height="8" rx="1.5" fill="currentColor" stroke="none"/><path d="M23.5 4v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" stroke="none"/></svg>
+        <button class="mac-extra" id="mac-extra" aria-label="Tokdash, menu bar extra" title="Tokdash — Today $3.42 · 18.7M tokens">
+          <!-- Monochrome template variant of the Tokdash logo (docs/assets) -->
+          <svg id="mac-extra-icon" width="16" height="17" viewBox="0 0 371 394" fill="currentColor" aria-hidden="true">
+            <rect x="24" y="24" width="323" height="296" rx="56" fill="none" stroke="currentColor" stroke-width="26"/>
+            <path d="M146 312 L146 380 L226 312 Z"/>
+            <rect x="90" y="228" width="46" height="70" rx="7"/>
+            <rect x="170" y="192" width="46" height="106" rx="7"/>
+            <rect x="250" y="142" width="46" height="156" rx="7"/>
+            <path d="M98 240 L160 158 L216 184 L294 84" fill="none" stroke="currentColor" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/>
+            <circle cx="98" cy="240" r="20"/><circle cx="160" cy="158" r="20"/><circle cx="216" cy="184" r="20"/><circle cx="294" cy="84" r="20"/>
+          </svg>
+          <span class="mac-tip" role="tooltip">Tokdash — Today $3.42 · 18.7M tokens</span>
+        </button>
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><circle cx="7" cy="7" r="5.2"/><path d="m11 11 3.4 3.4" stroke-linecap="round"/></svg>
+        <svg width="15" height="11" viewBox="0 0 16 12" fill="currentColor" aria-hidden="true"><rect x="0" y="0" width="16" height="3.4" rx="1.7"/><rect x="0" y="4.3" width="16" height="3.4" rx="1.7"/><rect x="0" y="8.6" width="16" height="3.4" rx="1.7"/></svg>
+        <span class="dim" id="mac-clock">Sat 25 Jul&nbsp;&nbsp;20:20</span>
+      </span>
+    </div>
+    <div class="mac-pop" id="mac-pop" role="dialog" aria-label="Tokdash companion"></div>
+    <div class="closed-caption" id="mac-closed-cap" hidden>Closed state — monochrome template icon only, no permanent menu-bar text.<br/>Hover the icon to see its tooltip.</div>
+  </div>
+</div>
+
+<!-- ==================== Windows stage ==================== -->
+<div class="stage hidden" id="stage-win">
+  <div class="os-frame win-frame" id="win-frame">
+    <div class="win-taskbar" aria-hidden="true">
+      <button class="win-tb-btn" tabindex="-1" aria-label="Start">
+        <svg width="18" height="18" viewBox="0 0 20 20" aria-hidden="true"><rect x="1" y="1" width="8.5" height="8.5" fill="#00A2ED"/><rect x="10.5" y="1" width="8.5" height="8.5" fill="#00A2ED"/><rect x="1" y="10.5" width="8.5" height="8.5" fill="#00A2ED"/><rect x="10.5" y="10.5" width="8.5" height="8.5" fill="#00A2ED"/></svg>
+      </button>
+      <button class="win-tb-btn" tabindex="-1" aria-label="Search">
+        <svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="#4A4A4A" stroke-width="1.6" aria-hidden="true"><circle cx="7" cy="7" r="5"/><path d="m11 11 3.6 3.6" stroke-linecap="round"/></svg>
+      </button>
+      <button class="win-tb-btn" tabindex="-1" aria-label="Task view">
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true"><rect x="1" y="2.5" width="10" height="8" rx="1.5" stroke="#4A4A4A" stroke-width="1.4"/><rect x="7" y="7.5" width="10" height="8" rx="1.5" fill="#E8ECF2" stroke="#4A4A4A" stroke-width="1.4"/></svg>
+      </button>
+      <button class="win-tb-btn" tabindex="-1" aria-label="Terminal">
+        <svg width="19" height="19" viewBox="0 0 20 20" aria-hidden="true"><rect x="1" y="1.5" width="18" height="17" rx="2.5" fill="#1F1F1F"/><path d="m4.5 6 3.5 3.5L4.5 13" stroke="#fff" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M9.5 13.5H15" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/></svg>
+      </button>
+      <button class="win-tb-btn" tabindex="-1" aria-label="Editor">
+        <svg width="18" height="18" viewBox="0 0 20 20" aria-hidden="true"><rect x="1.5" y="1.5" width="17" height="17" rx="3" fill="#2C2C32"/><path d="M6 5.5h8M6 9h8M6 12.5h5" stroke="#7AB8F5" stroke-width="1.5" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <div class="win-tray">
+      <div class="sys">
+        <button class="win-tray-icon" tabindex="-1" aria-label="Show hidden icons">
+          <svg width="11" height="11" viewBox="0 0 10 10" fill="none" stroke="#4A4A4A" stroke-width="1.5" aria-hidden="true"><path d="M2.2 3.8 5 6.6l2.8-2.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <button class="win-tray-icon" id="win-tray-icon" aria-label="Tokdash, notification area icon. Right-click for menu." title="Tokdash — Today $3.42 · 18.7M tokens">
+          <!-- Color Tokdash logo, white interior for taskbar contrast (docs/assets) -->
+          <svg id="win-tray-glyph" width="17" height="18" viewBox="0 0 371 394" aria-hidden="true">
+            <rect x="24" y="24" width="323" height="296" rx="56" fill="#fff" stroke="#08253F" stroke-width="26"/>
+            <path d="M146 312 L146 380 L226 312 Z" fill="#08253F"/>
+            <rect x="90" y="228" width="46" height="70" rx="7" fill="#437C76"/>
+            <rect x="170" y="192" width="46" height="106" rx="7" fill="#437C76"/>
+            <rect x="250" y="142" width="46" height="156" rx="7" fill="#437C76"/>
+            <path d="M98 240 L160 158 L216 184 L294 84" fill="none" stroke="#B9967D" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/>
+            <circle cx="98" cy="240" r="20" fill="#B9967D"/><circle cx="160" cy="158" r="20" fill="#B9967D"/><circle cx="216" cy="184" r="20" fill="#B9967D"/><circle cx="294" cy="84" r="20" fill="#B9967D"/>
+          </svg>
+          <span class="win-tip" role="tooltip">Tokdash — Today $3.42 · 18.7M tokens</span>
+        </button>
+        <button class="win-tray-icon" tabindex="-1" aria-label="Network, volume, battery">
+          <svg width="30" height="14" viewBox="0 0 34 14" fill="none" aria-hidden="true">
+            <path d="M3 11.5a1.4 1.4 0 1 0 0 .01M3 8.4c-1.6 0-3.1.6-4.2 1.6" stroke="#4A4A4A" stroke-width="1.3" stroke-linecap="round" transform="translate(4 0)"/>
+            <path d="M7 3.4C5.4 3.4 3.9 4 2.8 5M7 6c-1.1 0-2.2.4-3 1.2" stroke="#4A4A4A" stroke-width="1.3" stroke-linecap="round" fill="none"/>
+            <path d="M17 5.5v5m3-6.5v8m3-9.5v10" stroke="#4A4A4A" stroke-width="1.6" stroke-linecap="round"/>
+            <rect x="26" y="3.5" width="7" height="8" rx="1.5" stroke="#4A4A4A" stroke-width="1.2"/>
+            <rect x="27.2" y="5" width="4.6" height="5" rx="0.8" fill="#4A4A4A"/>
+          </svg>
+        </button>
+      </div>
+      <button class="win-clock" tabindex="-1" aria-label="Date and time">8:20 PM<br/>25/07/2026</button>
+    </div>
+    <div class="win-desktop-edge" aria-hidden="true"></div>
+    <div class="win-menu" id="win-menu" role="menu" aria-label="Tokdash" hidden></div>
+    <div class="win-fly" id="win-fly" role="dialog" aria-label="Tokdash companion"></div>
+    <div class="closed-caption" id="win-closed-cap" hidden>Closed state — one stable notification-area icon.<br/>Hover for the tooltip, right-click for the context menu.</div>
+  </div>
+</div>
+
+<!-- ==================== Review panel ==================== -->
+<section class="review" aria-label="Design review notes">
+  <h2>Review notes</h2>
+
+  <h3>Why Today is the primary content</h3>
+  <p>The three product questions are "what did I spend today", "how am I tracking this month", and "which quota is closest to its limit". Today answers the first and most frequent question and is the number a user checks habitually; month and quota are context. Making month or quota primary would optimize for a weekly check at the cost of the several-times-daily one. The hero carries its context (tokens, messages, comparison) on the same lines so the big number never floats alone.</p>
+
+  <h3>Which quota windows the main surface shows</h3>
+  <p>The main surface shows low windows only: a subscription window appears when it drops below its low-quota threshold — 5-hour windows at 20% remaining, weekly windows at 10% remaining. Both thresholds are configurable in Settings (macOS app menu → Quota Alert Thresholds…). In practice this means the 5-hour window is the one that earns a slot when it runs hot, while a weekly window only interrupts when it is genuinely close to exhaustion. At most two entries are shown, sorted by lowest remaining percentage; when nothing is low the section collapses to one quiet line, so Today is never competing with healthy quota.</p>
+  <p>The toggle is labelled <b>Low / All</b>, not "Urgent": the section is a filtered view of current state, not an alarm list, and the thresholds already carry the urgency semantics. <b>All</b> lists every detected window <b>grouped by provider</b> (provider order as detected, window order within a provider as returned by the API) — not ranked by usage, because grouping answers "how is each subscription doing" faster than a flat ranking. The list is capped at four visible rows with the fifth row peeking in, then scrolls — it must never stretch the surface.</p>
+  <p>Everything quota-related lives inside the status-bar surface; there is no separate subscriptions window. Two production notes: the prototype's thin custom scrollbar stands in for the platform's native/overlay scrollbar (NSScroller overlay style on macOS, WinUI <code>ScrollViewer</code> defaults on Windows) — do not ship custom scrollbar styling. Per-window detail (plan tier, data source, exact reset time) stays one click away in the full dashboard rather than expanding rows here.</p>
+
+  <h3>What could be removed if the surface feels crowded</h3>
+  <ul>
+    <li>First: the activity line ("Most used today"). It is interesting, not actionable, and the spec already marks it as first to cut.</li>
+    <li>Second: the month context line, if Today plus quota answers the check-in. It survives in the Empty state where it is the only real data.</li>
+    <li>Third: nothing else — the "price estimate, not a provider invoice" disclaimer under the hero was already cut for noise; the dashboard remains the place for that caveat.</li>
+  </ul>
+
+  <h3>Meaningful differences between the two concepts</h3>
+  <ul>
+    <li><b>Anchoring and shape:</b> macOS is a <code>MenuBarExtra(.window)</code> floating panel below the menu bar with 14px continuous corners and hairline separators. Windows is a light-dismiss Acrylic flyout anchored to the taskbar corner with 8px corners and a distinct footer band.</li>
+    <li><b>Materials:</b> the production macOS app uses the system's Liquid Glass material (macOS 26) through standard SwiftUI controls — this prototype approximates it with CSS translucency and deliberately does not try to fully demonstrate Liquid Glass. Windows uses Acrylic with a noise layer and lower tint, plus a solid fallback for battery saver and high contrast.</li>
+    <li><b>Typography:</b> SF Pro sizing/weights (650-weight hero, 11px uppercase kickers) vs. Segoe UI Variable (600-weight hero, looser line-height).</li>
+    <li><b>Commands:</b> macOS puts Settings and Quit in an NSMenu-style dropdown from the header gear plus a quiet Quit in the footer; Windows puts Exit in the tray right-click menu and keeps the flyout commands to Open Dashboard + Refresh. Neither is a recolor of the other.</li>
+    <li><b>Controls:</b> macOS buttons are capsule-adjacent push buttons with a 0.5px border; Windows buttons are 4px-radius with the characteristic bottom border edge. Focus rings follow each platform's convention.</li>
+  </ul>
+
+  <h3>Decided since the first draft</h3>
+  <ul>
+    <li>Quota display: main surface shows only windows below their low-quota threshold, max two entries. Defaults: 5-hour 20%, weekly 10%; both configurable in Settings.</li>
+    <li>Full quota list: a Low / All toggle inside the surface; All is grouped by provider, capped at four rows, and scrolls. No separate subscriptions window — everything stays in the status-bar surface.</li>
+    <li>Naming: "Low" over "Urgent" — the section filters state; it is not an alarm list.</li>
+    <li>Branding: the concepts use the Tokdash logo from <code>docs/assets</code>, recreated inline so the file stays self-contained. macOS gets a monochrome template variant for the menu bar (per platform convention); Windows uses the color logo with a white interior so it stays readable on light and dark taskbars. Production should ship real rendered assets at each required size rather than scaled SVG.</li>
+    <li>Contribution heatmap: rejected. The dashboard's Stats tab already provides one; the companion answers three glance questions, and a heatmap answers none of them. It would also need year-range data the companion contract deliberately avoids fetching, and it conflicts with the "no decorative charts" direction.</li>
+  </ul>
+
+  <h3>Open product decisions</h3>
+  <ul>
+    <li>Should the hero stay spend-first, or switch to quota-first when any window crosses its low threshold?</li>
+    <li>macOS optional menu-bar text (<code>$3.42</code> beside the icon) — MVP or later setting?</li>
+    <li>Accept a manually configured Tailscale/HTTPS base URL in MVP, or loopback only?</li>
+    <li>Should crossing a low-quota threshold produce an opt-in notification, or stay display-only in MVP (current plan: display-only)?</li>
+    <li>Does the activity line survive user testing, or is it noise?</li>
+    <li>Should the busy/offline banner replace the hero or sit above dimmed last-good data (currently: above, data dimmed)?</li>
+  </ul>
+</section>
+
+<script>
+"use strict";
+
+/* ---------------- Fake data ---------------- */
+const DATA = {
+  status: "Local · Connected",
+  today: { cost: "$3.42", tokens: "18.7M", tokensExact: "18,700,000", messages: "248", cmp: "12% below yesterday" },
+  month: { label: "July", cost: "$48.90", tokens: "281M" },
+  // Low-quota thresholds (defaults; configurable in Settings).
+  quotaThresholds: { "5-hour": 20, "weekly": 10, default: 15 },
+  // All detected subscription windows, grouped by provider.
+  quotaAll: [
+    { provider: "Codex", bucket: "5-hour", window: "5-hour", left: 14, resets: "resets 14:40", estimated: false },
+    { provider: "Codex", bucket: "weekly", window: "weekly", left: 63, resets: "resets Friday", estimated: false },
+    { provider: "Claude", bucket: "5-hour", window: "5-hour", left: 71, resets: "resets 16:05", estimated: true },
+    { provider: "Claude", bucket: "weekly", window: "weekly", left: 8, resets: "resets Monday", estimated: true },
+    { provider: "Kimi", bucket: "weekly", window: "weekly", left: 52, resets: "resets Sunday", estimated: false }
+  ],
+  activity: { tool: "Codex", model: "gpt-5.6" },
+  fresh: "Updated 2 min ago",
+  stale: "Last data from 3 min ago"
+};
+
+const ICON = {
+  logo: (w) => `<svg width="${w}" height="${Math.round(w * 394 / 371)}" viewBox="0 0 371 394" aria-hidden="true"><rect x="24" y="24" width="323" height="296" rx="56" fill="#fff" stroke="#08253F" stroke-width="26"/><path d="M146 312 L146 380 L226 312 Z" fill="#08253F"/><rect x="90" y="228" width="46" height="70" rx="7" fill="#437C76"/><rect x="170" y="192" width="46" height="106" rx="7" fill="#437C76"/><rect x="250" y="142" width="46" height="156" rx="7" fill="#437C76"/><path d="M98 240 L160 158 L216 184 L294 84" fill="none" stroke="#B9967D" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/><circle cx="98" cy="240" r="20" fill="#B9967D"/><circle cx="160" cy="158" r="20" fill="#B9967D"/><circle cx="216" cy="184" r="20" fill="#B9967D"/><circle cx="294" cy="84" r="20" fill="#B9967D"/></svg>`,
+  gear: '<svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>',
+  refresh: '<svg class="rfs" width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M12.2 7A5.2 5.2 0 1 1 11 3.2"/><path d="M12.4 1.4v2.6H9.8" stroke-linejoin="round"/></svg>',
+  warn: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#FF9F0A" stroke-width="1.4" aria-hidden="true"><path d="M8 1.8 15 14H1z" stroke-linejoin="round"/><path d="M8 6v3.4" stroke-linecap="round"/><circle cx="8" cy="11.8" r="0.9" fill="#FF9F0A" stroke="none"/></svg>',
+  err: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#FF453A" stroke-width="1.4" aria-hidden="true"><circle cx="8" cy="8" r="6.4"/><path d="M8 4.6v4" stroke-linecap="round"/><circle cx="8" cy="11.3" r="0.9" fill="#FF453A" stroke="none"/></svg>',
+  down: '<svg width="9" height="9" viewBox="0 0 10 10" fill="currentColor" aria-hidden="true"><path d="M5 8.5 1 3.2h8z"/></svg>',
+  ext: '<svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M5.5 3h5.5v5.5M11 3 6.5 7.5M4 5H2.5v6.5H9V10" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  check: '<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="m2 6.5 2.6 2.6L10 3.5" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+};
+
+function quotaClass(left) { return left < 25 ? "low" : left < 50 ? "mid" : "fine"; }
+
+function isLow(q) {
+  const t = DATA.quotaThresholds;
+  return q.left <= (t[q.window] ?? t.default);
+}
+
+function urgentQuota() {
+  return DATA.quotaAll.filter(isLow).sort((a, b) => a.left - b.left).slice(0, 2);
+}
+
+function allQuotaGrouped() {
+  // Provider order as detected; windows within a provider keep API order.
+  const groups = [];
+  for (const q of DATA.quotaAll) {
+    let g = groups.find(g => g.provider === q.provider);
+    if (!g) { g = { provider: q.provider, rows: [] }; groups.push(g); }
+    g.rows.push(q);
+  }
+  return groups;
+}
+
+function stateInfo(state) {
+  switch (state) {
+    case "healthy":    return { conn: DATA.status, dot: "ok",    fresh: DATA.fresh };
+    case "loading":    return { conn: "Connecting…", dot: "warn",  fresh: "" };
+    case "refreshing": return { conn: DATA.status, dot: "ok",    fresh: DATA.fresh };
+    case "offline":    return { conn: "Offline", dot: "err",       fresh: "Last updated 14 min ago" };
+    case "busy":       return { conn: "Busy", dot: "busy",         fresh: DATA.stale };
+    case "partial":    return { conn: DATA.status, dot: "ok",    fresh: DATA.fresh };
+    case "empty":      return { conn: DATA.status, dot: "ok",    fresh: DATA.fresh };
+  }
+}
+
+/* ---------------- Shared content fragments ---------------- */
+
+function heroHTML(state) {
+  if (state === "loading") {
+    return `<p class="kicker">Today</p>
+      <p class="big"><span class="skel" style="width:96px;height:26px"></span></p>
+      <p class="sub"><span class="skel" style="width:180px;height:11px"></span></p>
+      <p class="cmp"><span class="skel" style="width:130px;height:11px"></span></p>`;
+  }
+  if (state === "empty") {
+    return `<p class="kicker">Today</p>
+      <p class="empty-today">No usage recorded today</p>
+      <p class="empty-sub">Tokdash is running. Today's totals will appear as tools report usage.</p>`;
+  }
+  const dim = (state === "offline" || state === "busy") ? "dimmed" : "";
+  return `<p class="kicker">Today</p>
+    <p class="big ${dim}">${DATA.today.cost}</p>
+    <p class="sub ${dim}"><span title="${DATA.today.tokensExact} tokens">${DATA.today.tokens} tokens</span> · ${DATA.today.messages} messages</p>
+    <p class="cmp down ${dim}">${ICON.down} ${DATA.today.cmp}</p>`;
+}
+
+function monthHTML(state, platform) {
+  if (state === "loading") {
+    return `<span class="kicker">July</span><span class="skel" style="width:150px;height:11px"></span>`;
+  }
+  const dim = (state === "offline" || state === "busy") ? "dimmed" : "";
+  return `<span class="kicker">${DATA.month.label}</span>
+    <span class="val ${dim}">${DATA.month.cost}</span>
+    <span class="muted ${dim}">${DATA.month.tokens} tokens</span>`;
+}
+
+function quotaRowHTML(q, dim, label) {
+  const aria = `${q.provider} ${q.bucket} window`;
+  return `
+    <div class="qrow ${dim}">
+      <div class="qtop">
+        <span class="qname">${label}</span>
+        ${q.estimated ? '<span class="est" title="Estimated from local session data">Estimated</span>' : ""}
+        <span class="qleft">${q.left}% left</span>
+        <span class="qreset">${q.resets}</span>
+      </div>
+      <div class="qbar" role="img" aria-label="${aria}: ${q.left} percent remaining"><i class="${quotaClass(q.left)}" style="width:${q.left}%"></i></div>
+    </div>`;
+}
+
+function quotaSegHTML() {
+  const low = view.quotaView === "low";
+  return `<span class="qseg" role="group" aria-label="Subscription view">
+    <button type="button" data-qv="low" aria-pressed="${low}" title="Only windows below their alert threshold">Low</button><button type="button" data-qv="all" aria-pressed="${!low}" title="Every detected subscription window">All</button>
+  </span>`;
+}
+
+function quotaHTML(state) {
+  if (state === "loading") {
+    return `<div class="qhead"><p class="kicker">Subscription</p></div>
+      <div class="qrow"><div class="qtop"><span class="skel" style="width:120px;height:11px"></span><span class="qleft"><span class="skel" style="width:52px;height:11px"></span></span></div><div class="qbar"><i style="width:100%;background:currentColor;opacity:.12"></i></div></div>
+      <div class="qrow"><div class="qtop"><span class="skel" style="width:140px;height:11px"></span><span class="qleft"><span class="skel" style="width:52px;height:11px"></span></span></div><div class="qbar"><i style="width:100%;background:currentColor;opacity:.12"></i></div></div>`;
+  }
+  if (state === "partial") {
+    return `<div class="qhead"><p class="kicker">Subscription</p></div>
+      <div class="inline-warn">${ICON.warn}<span>Quota data unavailable — will retry shortly.</span><button type="button">Retry now</button></div>`;
+  }
+  const dim = (state === "offline" || state === "busy") ? "dimmed" : "";
+  if (view.quotaView === "all") {
+    const body = allQuotaGrouped().map(g =>
+      `<p class="qgroup ${dim}">${g.provider}</p>` +
+      g.rows.map(q => quotaRowHTML(q, dim, q.bucket)).join("")
+    ).join("");
+    return `<div class="qhead"><p class="kicker">All subscriptions</p>${quotaSegHTML()}</div>
+      <div class="qscroll">${body}</div>`;
+  }
+  const urgent = urgentQuota();
+  const rows = urgent.length
+    ? urgent.map(q => quotaRowHTML(q, dim, `${q.provider} · ${q.bucket}`)).join("")
+    : `<p class="qnone ${dim}">No subscription window is below its alert threshold.</p>`;
+  return `<div class="qhead"><p class="kicker">Subscription</p>${quotaSegHTML()}</div>${rows}`;
+}
+
+function activityHTML(state) {
+  if (state === "loading") return `<span class="skel" style="width:190px;height:11px"></span>`;
+  if (state === "empty") return "";
+  const dim = (state === "offline" || state === "busy") ? "dimmed" : "";
+  return `<span class="${dim}">Most used today&nbsp;&nbsp;<b>${DATA.activity.tool} · ${DATA.activity.model}</b></span>`;
+}
+
+function bannerHTML(state, platform) {
+  if (state === "offline") {
+    const btnCls = platform === "win" ? "win-btn" : "mac-btn";
+    return `<div class="banner">${ICON.err}<div>
+      <p class="b-title">Tokdash is not reachable</p>
+      <p class="b-body">Start Tokdash, or check the server address in Settings.</p>
+      <div class="b-actions"><button type="button" class="${btnCls}">Retry</button><button type="button" class="${btnCls}">Settings</button></div>
+    </div></div>`;
+  }
+  if (state === "busy") {
+    return `<div class="banner">${ICON.warn}<div>
+      <p class="b-title">Tokdash is busy — retrying</p>
+      <p class="b-body">${DATA.stale}. Backing off automatically.</p>
+    </div></div>`;
+  }
+  return "";
+}
+
+/* ---------------- macOS render ---------------- */
+
+function renderMac(state) {
+  const info = stateInfo(state);
+  const refreshing = state === "refreshing";
+  const showBanner = state === "offline" || state === "busy";
+  const act = activityHTML(state);
+
+  document.getElementById("mac-pop").innerHTML = `
+  <div class="inner">
+    <section class="mac-head">
+      <span class="wordmark">${ICON.logo(14)} Tokdash</span>
+      <span class="conn"><span class="dot ${info.dot}" aria-hidden="true"></span>${info.conn}</span>
+      <span class="grow"></span>
+      <button type="button" class="mac-icon-btn" id="mac-gear" aria-label="Tokdash menu" aria-haspopup="menu" aria-expanded="false">${ICON.gear}</button>
+    </section>
+    ${showBanner ? `<section class="hairline">${bannerHTML(state, "mac")}</section>` : ""}
+    <section class="mac-hero hairline">${heroHTML(state)}</section>
+    <section class="mac-month hairline">${monthHTML(state, "mac")}</section>
+    <section class="mac-quota hairline">${quotaHTML(state)}</section>
+    ${act ? `<section class="mac-activity hairline">${act}</section>` : ""}
+    <section class="mac-actions hairline">
+      <button type="button" class="mac-btn primary">${ICON.ext}&nbsp;Open Dashboard</button>
+      <button type="button" class="mac-btn icon ${refreshing ? "" : ""}" aria-label="Refresh${refreshing ? ", refreshing" : ""}" ${refreshing ? 'aria-busy="true"' : ""}>
+        <span class="${refreshing ? "spin" : ""}" style="display:inline-flex">${ICON.refresh}</span>
+      </button>
+    </section>
+    <section class="mac-foot hairline">
+      <span class="fresh">${info.fresh}${state === "offline" ? " · stale" : ""}</span>
+      <span class="grow"></span>
+      <button type="button" class="quit">Quit</button>
+    </section>
+  </div>
+  <div class="mac-menu" id="mac-menu" role="menu" aria-label="Tokdash" hidden>
+    <button type="button" role="menuitem"><span class="check"></span>Settings…</button>
+    <button type="button" role="menuitem"><span class="check"></span>Quota Alert Thresholds…</button>
+    <button type="button" role="menuitem"><span class="check">${ICON.check}</span>Launch at Login</button>
+    <div class="sep" role="separator"></div>
+    <button type="button" role="menuitem"><span class="check"></span>Quit Tokdash Companion</button>
+  </div>`;
+
+  const gear = document.getElementById("mac-gear");
+  const menu = document.getElementById("mac-menu");
+  gear.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const open = menu.hidden;
+    menu.hidden = !open;
+    gear.setAttribute("aria-expanded", String(open));
+  });
+  document.addEventListener("click", () => { if (!menu.hidden) { menu.hidden = true; gear.setAttribute("aria-expanded", "false"); } }, { once: true });
+}
+
+/* ---------------- Windows render ---------------- */
+
+function renderWin(state) {
+  const info = stateInfo(state);
+  const refreshing = state === "refreshing";
+  const showBanner = state === "offline" || state === "busy";
+  const act = activityHTML(state);
+
+  document.getElementById("win-fly").innerHTML = `
+  <div class="inner">
+    <section class="win-head">
+      <span class="wordmark">${ICON.logo(15)} Tokdash</span>
+      <span class="conn"><span class="dot ${info.dot}" aria-hidden="true"></span>${info.conn}</span>
+      <span class="grow"></span>
+      <button type="button" class="win-icon-btn" aria-label="Refresh${refreshing ? ", refreshing" : ""}" ${refreshing ? 'aria-busy="true"' : ""}>
+        <span class="${refreshing ? "spin" : ""}" style="display:inline-flex">${ICON.refresh}</span>
+      </button>
+      <button type="button" class="win-icon-btn" aria-label="Settings">${ICON.gear}</button>
+    </section>
+    ${showBanner ? `<section class="divider">${bannerHTML(state, "win")}</section>` : ""}
+    <section class="win-hero divider">${heroHTML(state)}</section>
+    <section class="win-month divider">${monthHTML(state, "win")}</section>
+    <section class="win-quota divider">${quotaHTML(state)}</section>
+    ${act ? `<section class="win-activity divider">${act}</section>` : ""}
+    <section class="win-actions divider">
+      <button type="button" class="win-btn primary">Open Dashboard</button>
+    </section>
+    <div class="win-foot">
+      <span class="fresh">${info.fresh}${state === "offline" ? " · stale" : ""}</span>
+      <span class="grow"></span>
+      <span class="fresh">Right-click tray icon for more commands</span>
+    </div>
+  </div>`;
+}
+
+function renderWinMenu() {
+  const menu = document.getElementById("win-menu");
+  menu.innerHTML = `
+    <button type="button" role="menuitem">${ICON.ext}Open Tokdash</button>
+    <button type="button" role="menuitem">${ICON.refresh}Refresh</button>
+    <button type="button" role="menuitem">${ICON.gear}Settings</button>
+    <div class="sep" role="separator"></div>
+    <button type="button" role="menuitem">Exit</button>`;
+}
+
+/* ---------------- Controller ---------------- */
+
+const view = { platform: "mac", state: "healthy", appearance: "light", surface: "open", quotaView: "low" };
+
+function apply() {
+  const macStage = document.getElementById("stage-mac");
+  const winStage = document.getElementById("stage-win");
+  macStage.classList.toggle("hidden", view.platform !== "mac");
+  winStage.classList.toggle("hidden", view.platform !== "win");
+
+  document.querySelectorAll(".mac-frame").forEach(f => f.classList.toggle("dark", view.appearance === "dark"));
+  document.querySelectorAll(".win-frame").forEach(f => f.classList.toggle("dark", view.appearance === "dark"));
+
+  const open = view.surface === "open";
+  document.getElementById("mac-pop").hidden = !open;
+  document.getElementById("mac-closed-cap").hidden = open;
+  document.getElementById("mac-extra").classList.toggle("active", open);
+  document.getElementById("win-fly").hidden = !open;
+  document.getElementById("win-closed-cap").hidden = open;
+  document.getElementById("win-tray-icon").classList.toggle("active", open);
+  if (!open) document.getElementById("win-menu").hidden = true;
+
+  if (open) {
+    renderMac(view.state);
+    renderWin(view.state);
+  }
+
+  // closed-state icon variants: monochrome on macOS, stable on Windows (offline swaps stroke only)
+  const offlineish = view.state === "offline";
+  document.getElementById("mac-extra-icon").style.opacity = offlineish ? "0.45" : "1";
+  document.getElementById("win-tray-glyph").style.opacity = offlineish ? "0.45" : "1";
+}
+
+function wireSeg(ids, key, values) {
+  ids.forEach((id, i) => {
+    document.getElementById(id).addEventListener("click", () => {
+      view[key] = values[i];
+      ids.forEach((other, j) => document.getElementById(other).setAttribute("aria-pressed", String(j === i)));
+      apply();
+    });
+  });
+}
+
+wireSeg(["seg-mac", "seg-win"], "platform", ["mac", "win"]);
+wireSeg(["seg-light", "seg-dark"], "appearance", ["light", "dark"]);
+wireSeg(["seg-open", "seg-closed"], "surface", ["open", "closed"]);
+
+document.getElementById("sel-state").addEventListener("change", (e) => {
+  view.state = e.target.value;
+  apply();
+});
+
+// Windows right-click context menu
+const winIcon = document.getElementById("win-tray-icon");
+const winMenu = document.getElementById("win-menu");
+renderWinMenu();
+winIcon.addEventListener("contextmenu", (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  winMenu.hidden = false;
+  const iconBox = winIcon.getBoundingClientRect();
+  const frameBox = document.getElementById("win-frame").getBoundingClientRect();
+  winMenu.style.right = Math.max(4, frameBox.right - iconBox.right - 40) + "px";
+});
+winIcon.addEventListener("click", () => {
+  if (view.surface === "closed") {
+    view.surface = "open";
+    document.getElementById("seg-open").setAttribute("aria-pressed", "true");
+    document.getElementById("seg-closed").setAttribute("aria-pressed", "false");
+    apply();
+  }
+});
+document.addEventListener("click", () => { winMenu.hidden = true; });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") { winMenu.hidden = true; } });
+
+// Urgent / All subscription toggle (delegated; surfaces re-render on each apply)
+document.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-qv]");
+  if (btn) { view.quotaView = btn.dataset.qv; apply(); }
+});
+
+// macOS menu-bar extra click toggles surface
+document.getElementById("mac-extra").addEventListener("click", () => {
+  view.surface = view.surface === "open" ? "closed" : "open";
+  document.getElementById("seg-open").setAttribute("aria-pressed", String(view.surface === "open"));
+  document.getElementById("seg-closed").setAttribute("aria-pressed", String(view.surface === "closed"));
+  apply();
+});
+
+// Deep-link a view for review/screenshots, e.g.
+// #platform=win&state=offline&appearance=dark&surface=open&menu=context
+(function applyHash() {
+  const params = new URLSearchParams(location.hash.slice(1));
+  if (params.get("platform")) view.platform = params.get("platform");
+  if (params.get("state")) view.state = params.get("state");
+  if (params.get("appearance")) view.appearance = params.get("appearance");
+  if (params.get("surface")) view.surface = params.get("surface");
+  if (params.get("qv")) view.quotaView = params.get("qv");
+
+  const segMap = {
+    platform: [["seg-mac", "mac"], ["seg-win", "win"]],
+    appearance: [["seg-light", "light"], ["seg-dark", "dark"]],
+    surface: [["seg-open", "open"], ["seg-closed", "closed"]]
+  };
+  for (const [key, pairs] of Object.entries(segMap)) {
+    pairs.forEach(([id, val]) => document.getElementById(id).setAttribute("aria-pressed", String(view[key] === val)));
+  }
+  document.getElementById("sel-state").value = view.state;
+  apply();
+
+  const menu = params.get("menu");
+  if (menu === "context" && view.platform === "win") {
+    winMenu.hidden = false;
+    const iconBox = winIcon.getBoundingClientRect();
+    const frameBox = document.getElementById("win-frame").getBoundingClientRect();
+    winMenu.style.right = Math.max(4, frameBox.right - iconBox.right - 40) + "px";
+  }
+  if (menu === "gear" && view.platform === "mac") {
+    const gearMenu = document.getElementById("mac-menu");
+    if (gearMenu) { gearMenu.hidden = false; document.getElementById("mac-gear").setAttribute("aria-expanded", "true"); }
+  }
+})();
+</script>
+</body>
+</html>

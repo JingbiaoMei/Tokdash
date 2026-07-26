@@ -5,6 +5,7 @@ import SwiftUI
 /// One surface, no view switching. Matches the approved UI_CONCEPT.html.
 struct ContentView: View {
     @EnvironmentObject var store: CompanionStore
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         VStack(spacing: 0) {
@@ -52,6 +53,7 @@ struct ContentView: View {
 
 private struct HeaderSection: View {
     @EnvironmentObject var store: CompanionStore
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         HStack(spacing: 8) {
@@ -69,13 +71,13 @@ private struct HeaderSection: View {
             }
             Spacer()
             Button {
-                NSApplication.shared.terminate(nil)
+                openSettings()
             } label: {
                 Image(systemName: "gearshape")
                     .font(.system(size: 13))
             }
             .buttonStyle(.plain)
-            .help("Tokdash menu")
+            .help("Settings")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)

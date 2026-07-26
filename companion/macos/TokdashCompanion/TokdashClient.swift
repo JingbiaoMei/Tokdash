@@ -7,7 +7,7 @@ import Foundation
 /// absent optional fields are tolerated.
 actor TokdashClient {
     private let session: URLSession
-    private let baseURL: URL
+    private var baseURL: URL
 
     init(baseURL: URL) {
         self.baseURL = baseURL
@@ -16,6 +16,10 @@ actor TokdashClient {
         config.timeoutIntervalForResource = 30
         config.waitsForConnectivity = false
         self.session = URLSession(configuration: config)
+    }
+
+    func updateBaseURL(_ url: URL) {
+        baseURL = url
     }
 
     // MARK: - Endpoints

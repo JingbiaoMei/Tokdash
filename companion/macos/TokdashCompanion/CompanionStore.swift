@@ -15,10 +15,17 @@ final class CompanionStore: ObservableObject {
     private var refreshTask: Task<Void, Never>?
     private var lastFetchAt: Date?
 
-    init(baseURL: URL = URL(string: "http://127.0.0.1:55423")!) {
+    init() {
         self.settings = CompanionSettings.load()
-        let url = baseURL
+        let url = URL(string: settings.baseURL) ?? URL(string: "http://127.0.0.1:55423")!
         self.client = TokdashClient(baseURL: url)
+    }
+
+    /// Rebuild the client with a new base URL (called when settings change).
+    func updateBaseURL(_ urlString: String) {
+        guard let url = URL(string: urlString) else { return }
+        client.updateBaseURL(url)
+        refresh()
     }
 
     // MARK: - Refresh
@@ -234,8 +241,16 @@ struct CompanionSettings: Codable {
     var lowQuotaNotifications: Bool = false
     var thresholds: QuotaThresholds = .defaults
 
-    static let defaultsURL = URL(fileURLWithPath: NSTemporaryDirectory())
-        .appendingPathComponent("tokdash-companion-settings.json")
+    static let defaultsURL: URL = {
+        let fm = FileManager.default
+        let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        let dir = appSupport.appendingPathComponent("TokdashCompanion", isDirectory: true)
+        if !fm.fileExists(atPath: dir.path) {
+            try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+        return dir.appendingPathComponent("settings.json")
+    }()
 
     static func load() -> CompanionSettings {
         guard let data = try? Data(contentsOf: defaultsURL),

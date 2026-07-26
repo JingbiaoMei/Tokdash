@@ -19,16 +19,24 @@ public partial class FlyoutWindow : Window
     {
         InitializeComponent();
         Loaded += FlyoutWindow_Loaded;
-        Store.PropertyChanged += Store_PropertyChanged;
+        Closed += FlyoutWindow_Closed;
     }
 
     private void FlyoutWindow_Loaded(object sender, RoutedEventArgs e)
     {
+        // Subscribe now - Store is assigned via object initializer after ctor.
+        Store.PropertyChanged += Store_PropertyChanged;
         // Acrylic backdrop: apply via Win32 interop on Windows 11.
         // Falls back to the translucent solid background declared in XAML on older OS.
         try { ApplyAcrylic(); } catch { }
         _loaded = true;
         UpdateView();
+    }
+
+    private void FlyoutWindow_Closed(object? sender, EventArgs e)
+    {
+        if (_loaded) Store.PropertyChanged -= Store_PropertyChanged;
+        _loaded = false;
     }
 
     private void ApplyAcrylic()

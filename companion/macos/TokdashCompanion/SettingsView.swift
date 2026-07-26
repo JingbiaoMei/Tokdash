@@ -61,6 +61,7 @@ struct SettingsView: View {
     }
 
     private func saveSettings() {
+        let urlChanged = baseURL != store.settings.baseURL
         store.settings.baseURL = baseURL
         store.settings.launchAtLogin = launchAtLogin
         store.settings.lowQuotaNotifications = lowQuotaNotifications
@@ -70,5 +71,6 @@ struct SettingsView: View {
             other: otherThreshold
         )
         store.settings.save()
+        if urlChanged { store.updateBaseURL(baseURL) }
     }
 }

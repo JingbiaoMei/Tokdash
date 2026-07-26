@@ -1,18 +1,15 @@
-using Microsoft.UI;
-using Microsoft.UI.Windowing;
-using Microsoft.UI.Xaml;
-using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Media;
-using Windows.Graphics;
-using WinRT.Interop;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Media;
+using TokdashCompanion.Interop;
 
 namespace TokdashCompanion;
 
 /// <summary>
-/// WinUI 3 flyout window with Acrylic backdrop, positioned near the tray icon.
+/// WPF flyout window with Acrylic backdrop, positioned near the tray icon.
 /// Light-dismiss on deactivate. Escape closes.
 /// </summary>
-public sealed partial class FlyoutWindow : Window
+public partial class FlyoutWindow : Window
 {
     private bool _loaded;
 
@@ -21,65 +18,88 @@ public sealed partial class FlyoutWindow : Window
     public FlyoutWindow()
     {
         InitializeComponent();
-        Title = "Tokdash";
-        var appWindow = AppWindow;
-        appWindow.SetPresenter(AppWindowPresenterKind.Overlapped);
-        if (appWindow.Presenter is OverlappedPresenter p)
-        {
-            p.IsAlwaysOnTop = true;
-            p.SetBorderAndTitleBar(true, false);
-            p.IsMinimizable = false;
-            p.IsMaximizable = false;
-            p.IsResizable = false;
-        }
-        Activated += FlyoutWindow_Activated;
+        Loaded += FlyoutWindow_Loaded;
         Store.PropertyChanged += Store_PropertyChanged;
+    }
+
+    private void FlyoutWindow_Loaded(object sender, RoutedEventArgs e)
+    {
+        // Acrylic backdrop: apply via Win32 interop on Windows 11.
+        // Falls back to the translucent solid background declared in XAML on older OS.
+        try { ApplyAcrylic(); } catch { }
+        _loaded = true;
+        UpdateView();
+    }
+
+    private void ApplyAcrylic()
+    {
+        var hwnd = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+        var accent = new AccentPolicy { AccentState = 4, GradientColor = 0x99000000 }; // ACCENT_ENABLE_ACRYLICBLURBEHIND
+        var accentSize = System.Runtime.InteropServices.Marshal.SizeOf(accent);
+        var accentPtr = System.Runtime.InteropServices.Marshal.AllocHGlobal(accentSize);
+        try
+        {
+            System.Runtime.InteropServices.Marshal.StructureToPtr(accent, accentPtr, false);
+            var data = new WindowCompositionAttributeData
+            {
+                Attribute = 19, // WCA_ACCENT_POLICY
+                Data = accentPtr,
+                SizeOfData = accentSize,
+            };
+            Win32Acrylic.SetWindowCompositionAttribute(hwnd, ref data);
+        }
+        finally
+        {
+            System.Runtime.InteropServices.Marshal.FreeHGlobal(accentPtr);
+        }
     }
 
     public void PositionNear(int x, int y)
     {
-        AppWindow.MoveAndResize(new RectInt32(x - 360, y, 360, 560));
+        Left = x - 360;
+        Top = y;
     }
 
-    private void FlyoutWindow_Activated(object sender, WindowActivatedEventArgs e)
+    private void FlyoutWindow_Deactivated(object sender, EventArgs e)
     {
-        if (e.WindowActivationState == WindowActivationState.Deactivated && _loaded)
-        {
-            // Light dismiss when the flyout loses focus.
-            Close();
-        }
-        _loaded = true;
+        // Light dismiss when the flyout loses focus.
+        if (_loaded) Close();
+    }
+
+    private void FlyoutWindow_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key == System.Windows.Input.Key.Escape) Close();
     }
 
     private void Store_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        DispatcherQueue.TryEnqueue(UpdateView);
+        Dispatcher.BeginInvoke(UpdateView);
     }
 
     private void UpdateView()
     {
-        ConnDot.Fill = new SolidColorBrush(MediaHelper.ColorFromString(Store.DotColor));
+        if (Store == null) return;
+
+        ConnDot.Fill = new SolidColorBrush((Color)ColorConverter.ConvertFromString(Store.DotColor));
+        ConnText.Text = Store.ConnectionLabel;
 
         bool showBanner = Store.ShowsBanner;
         Banner.Visibility = showBanner ? Visibility.Visible : Visibility.Collapsed;
+        SepBanner.Visibility = showBanner ? Visibility.Visible : Visibility.Collapsed;
         if (showBanner)
         {
-            BannerIcon.Foreground = new SolidColorBrush(MediaHelper.ColorFromString(
+            BannerIcon.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(
                 Store.ConnectionState == ConnectionState.Offline ? "#FF453A" : "#FF9F0A"));
+            BannerTitle.Text = Store.BannerTitle;
+            BannerBody.Text = Store.BannerBody;
         }
 
         var snap = Store.Snapshot;
         if (snap is null && Store.ConnectionState == ConnectionState.Connecting)
         {
             TodayCost.Text = "…";
-            TodaySub.Text = "";
-            TodayCmp.Text = "";
-            MonthLabel.Text = "";
-            MonthCost.Text = "";
-            MonthTokens.Text = "";
             return;
         }
-
         if (snap is null) return;
 
         if (snap.Today.TotalTokens == 0)
@@ -104,24 +124,32 @@ public sealed partial class FlyoutWindow : Window
         RenderQuota(snap);
 
         var activity = snap.ActivityText;
-        ActivityBorder.Visibility = activity is null ? Visibility.Collapsed : Visibility.Visible;
+        ActivityText.Visibility = activity is null ? Visibility.Collapsed : Visibility.Visible;
+        SepActivity.Visibility = activity is null ? Visibility.Collapsed : Visibility.Visible;
         ActivityText.Text = activity ?? "";
 
         FreshnessText.Text = Store.FreshnessText;
+
+        // Dim last-good data when offline/busy.
+        double opacity = (Store.ConnectionState == ConnectionState.Offline || Store.ConnectionState == ConnectionState.Busy) ? 0.45 : 1.0;
+        HeroPanel.Opacity = opacity;
+        QuotaPanel.Opacity = opacity;
     }
 
     private void RenderQuota(Snapshot snap)
     {
         QuotaRows.Children.Clear();
+        UpdateToggleButtons();
+
         if (!snap.Quota.Enabled)
         {
             QuotaRows.Children.Add(new TextBlock
             {
                 Text = "Subscription tracking is off",
                 FontSize = 12.5,
-                Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+                Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#5F5F5F")),
             });
-            var openBtn = new HyperlinkButton { Content = "Open Dashboard" };
+            var openBtn = new Button { Content = "Open Dashboard", Margin = new Thickness(0, 4, 0, 0) };
             openBtn.Click += (s, e) => OpenDashboard_Click(s, e);
             QuotaRows.Children.Add(openBtn);
             QuotaHeader.Text = "SUBSCRIPTION";
@@ -139,7 +167,7 @@ public sealed partial class FlyoutWindow : Window
                 {
                     Text = "No subscription window is below its alert threshold.",
                     FontSize = 12.5,
-                    Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+                    Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#5F5F5F")),
                 });
             }
             else
@@ -149,20 +177,17 @@ public sealed partial class FlyoutWindow : Window
         }
         else
         {
-            var scroll = new ScrollViewer
-            {
-                MaxHeight = 172,
-                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            };
-            var panel = new StackPanel { Spacing = 8 };
+            var scroll = new ScrollViewer { MaxHeight = 172, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+            var panel = new StackPanel();
             foreach (var group in snap.AllQuotaGroups)
             {
                 panel.Children.Add(new TextBlock
                 {
                     Text = group.Provider,
                     FontSize = 11,
-                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                    Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+                    FontWeight = FontWeights.SemiBold,
+                    Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#5F5F5F")),
+                    Margin = new Thickness(0, 6, 0, 2),
                 });
                 foreach (var row in group.Rows) panel.Children.Add(MakeQuotaRow(row, showProvider: false));
             }
@@ -173,36 +198,40 @@ public sealed partial class FlyoutWindow : Window
 
     private UIElement MakeQuotaRow(QuotaRow row, bool showProvider)
     {
-        var panel = new StackPanel { Spacing = 5 };
-        var top = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        var panel = new StackPanel { Margin = new Thickness(0, 0, 0, 8) };
+        var top = new StackPanel { Orientation = Orientation.Horizontal };
         top.Children.Add(new TextBlock
         {
             Text = showProvider ? $"{row.Provider} · {row.BucketLabel}" : row.BucketLabel,
             FontSize = 12.5,
-            FontWeight = Microsoft.UI.Text.FontWeights.Medium,
+            FontWeight = FontWeights.Medium,
         });
         if (row.Estimated)
         {
-            top.Children.Add(new Border
+            var estBorder = new Border
             {
-                BorderBrush = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+                BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#5F5F5F")),
                 BorderThickness = new Thickness(0.5),
                 CornerRadius = new CornerRadius(4),
                 Padding = new Thickness(4, 0, 4, 0),
+                Margin = new Thickness(6, 0, 0, 0),
                 Child = new TextBlock { Text = "Estimated", FontSize = 10.5 },
-            });
+            };
+            top.Children.Add(estBorder);
         }
         top.Children.Add(new TextBlock
         {
             Text = $"{(int)row.Left}% left",
             FontSize = 12.5,
-            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            FontWeight = FontWeights.SemiBold,
+            Margin = new Thickness(8, 0, 0, 0),
         });
         top.Children.Add(new TextBlock
         {
             Text = row.ResetsText,
             FontSize = 12,
-            Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+            Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#5F5F5F")),
+            Margin = new Thickness(8, 0, 0, 0),
         });
         panel.Children.Add(top);
 
@@ -211,10 +240,16 @@ public sealed partial class FlyoutWindow : Window
             Value = row.Left,
             Maximum = 100,
             Height = 4,
-            CornerRadius = new CornerRadius(2),
+            Margin = new Thickness(0, 5, 0, 0),
         };
         panel.Children.Add(bar);
         return panel;
+    }
+
+    private void UpdateToggleButtons()
+    {
+        LowBtn.FontWeight = Store.QuotaView == QuotaView.Low ? FontWeights.SemiBold : FontWeights.Normal;
+        AllBtn.FontWeight = Store.QuotaView == QuotaView.All ? FontWeights.SemiBold : FontWeights.Normal;
     }
 
     private void OpenDashboard_Click(object sender, RoutedEventArgs e)
@@ -228,14 +263,17 @@ public sealed partial class FlyoutWindow : Window
 
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await Store.RefreshAsync();
 
-    private void Gear_Click(object sender, RoutedEventArgs e)
+    private void Gear_Click(object sender, RoutedEventArgs e) { /* Settings window deferred */ }
+
+    private void Low_Click(object sender, RoutedEventArgs e)
     {
-        // Settings window deferred; for now toggle Quit via context menu.
+        Store.QuotaView = QuotaView.Low;
+        if (Store.Snapshot is not null) RenderQuota(Store.Snapshot);
     }
 
-    private void QuotaToggle_Toggled(object sender, RoutedEventArgs e)
+    private void All_Click(object sender, RoutedEventArgs e)
     {
-        Store.QuotaView = QuotaToggle.IsOn ? QuotaView.All : QuotaView.Low;
+        Store.QuotaView = QuotaView.All;
         if (Store.Snapshot is not null) RenderQuota(Store.Snapshot);
     }
 }

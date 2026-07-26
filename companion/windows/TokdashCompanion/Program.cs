@@ -75,7 +75,7 @@ internal static class Program
     [STAThread]
     private static void Main()
     {
-        // WinUI App constructor initializes the XAML application context.
+        // WPF Application must be created on the STA thread before any UI is used.
         var app = new App();
         _app = app;
 

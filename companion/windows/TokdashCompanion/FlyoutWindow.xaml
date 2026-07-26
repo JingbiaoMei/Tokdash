@@ -2,99 +2,100 @@
     x:Class="TokdashCompanion.FlyoutWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    Activated="FlyoutWindow_Activated">
-    <Grid x:Name="RootGrid">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-        </Grid.RowDefinitions>
-
-        <!-- Header -->
-        <Grid Grid.Row="0" Padding="16,10,16,10" x:Name="HeaderRow">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="Auto"/>
-            </Grid.ColumnDefinitions>
-            <TextBlock Grid.Column="0" Text="Tokdash" FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center"/>
-            <Ellipse Grid.Column="1" Width="7" Height="7" Margin="8,0,5,0" VerticalAlignment="Center" x:Name="ConnDot"/>
-            <TextBlock Grid.Column="2" Text="{x:Bind Store.ConnectionLabel, Mode=OneWay}" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center"/>
-            <Button Grid.Column="3" x:Name="GearBtn" Click="Gear_Click" Background="Transparent" BorderThickness="0" Padding="6" ToolTipService.ToolTip="Settings">
-                <FontIcon Glyph="&#xE713;" FontSize="13"/>
-            </Button>
-        </Grid>
-
-        <!-- Banner (offline/busy) -->
-        <Border Grid.Row="1" Padding="16,10,16,10" x:Name="Banner" Visibility="Collapsed">
-            <StackPanel Orientation="Horizontal" Spacing="9">
-                <FontIcon Glyph="&#xE783;" FontSize="14" Foreground="#FF453A" x:Name="BannerIcon"/>
-                <StackPanel Spacing="2">
-                    <TextBlock Text="{x:Bind Store.BannerTitle, Mode=OneWay}" FontWeight="SemiBold" FontSize="13"/>
-                    <TextBlock Text="{x:Bind Store.BannerBody, Mode=OneWay}" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
-                </StackPanel>
-            </StackPanel>
-        </Border>
-
-        <!-- Today hero -->
-        <StackPanel Grid.Row="2" Padding="16,12,16,12" Spacing="2" x:Name="HeroPanel">
-            <TextBlock Text="TODAY" FontSize="11" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-            <TextBlock x:Name="TodayCost" Text="{x:Bind Store.Snapshot.TodayCostText, Mode=OneWay}" FontSize="30" FontWeight="SemiBold"/>
-            <TextBlock x:Name="TodaySub" FontSize="12.5" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-            <TextBlock x:Name="TodayCmp" FontSize="12.5" Foreground="#248A3D"/>
-        </StackPanel>
-
-        <!-- Month context -->
-        <StackPanel Grid.Row="3" Padding="16,10,16,10" Orientation="Horizontal" Spacing="10" x:Name="MonthPanel">
-            <TextBlock x:Name="MonthLabel" FontSize="11" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-            <TextBlock x:Name="MonthCost" FontWeight="SemiBold" FontSize="12.5"/>
-            <TextBlock x:Name="MonthTokens" FontSize="12.5" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-        </StackPanel>
-
-        <!-- Quota section -->
-        <StackPanel Grid.Row="4" Padding="16,12,16,12" Spacing="8" x:Name="QuotaPanel">
-            <Grid>
+    Title="Tokdash"
+    Width="360"
+    SizeToContent="Height"
+    ResizeMode="NoResize"
+    WindowStyle="None"
+    ShowInTaskbar="False"
+    Topmost="True"
+    ShowActivated="True"
+    Background="Transparent"
+    AllowsTransparency="True"
+    Deactivated="FlyoutWindow_Deactivated"
+    KeyDown="FlyoutWindow_KeyDown">
+    <Border x:Name="RootBorder" CornerRadius="8" Padding="0">
+        <Border.Background>
+            <SolidColorBrush x:Name="RootBg" Color="#F2F2F5" Opacity="0.92"/>
+        </Border.Background>
+        <Border.Resources>
+            <Style TargetType="TextBlock">
+                <Setter Property="FontFamily" Value="Segoe UI Variable"/>
+            </Style>
+        </Border.Resources>
+        <StackPanel>
+            <!-- Header -->
+            <Grid Margin="16,12,16,10">
                 <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <TextBlock Grid.Column="0" x:Name="QuotaHeader" Text="SUBSCRIPTION" FontSize="11" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                <ToggleSwitch Grid.Column="1" x:Name="QuotaToggle" OffContent="Low" OnContent="All" Toggled="QuotaToggle_Toggled" MinWidth="92"/>
+                <TextBlock Grid.Column="0" Text="Tokdash" FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center"/>
+                <Ellipse Grid.Column="1" Width="7" Height="7" Margin="8,0,5,0" VerticalAlignment="Center" x:Name="ConnDot" Fill="#30A74C"/>
+                <TextBlock Grid.Column="2" x:Name="ConnText" Text="Connecting…" FontSize="12" Foreground="#5F5F5F" VerticalAlignment="Center"/>
+                <Button Grid.Column="3" x:Name="GearBtn" Click="Gear_Click" Background="Transparent" BorderThickness="0" Padding="6" ToolTip="Settings" Content="⚙"/>
             </Grid>
-            <StackPanel x:Name="QuotaRows" Spacing="10"/>
-        </StackPanel>
+            <Separator x:Name="Sep1" Opacity="0.4"/>
 
-        <!-- Activity line -->
-        <Border Grid.Row="5" Padding="16,10,16,10" x:Name="ActivityBorder" Visibility="Collapsed">
-            <TextBlock x:Name="ActivityText" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-        </Border>
-
-        <!-- Action row -->
-        <StackPanel Grid.Row="6" Padding="16,10,16,10" Orientation="Horizontal" Spacing="8">
-            <Button Click="OpenDashboard_Click" x:Name="OpenBtn">
-                <StackPanel Orientation="Horizontal" Spacing="6">
-                    <FontIcon Glyph="&#xE8A7;" FontSize="12"/>
-                    <TextBlock Text="Open Dashboard"/>
+            <!-- Banner (offline/busy) -->
+            <StackPanel x:Name="Banner" Margin="16,10" Orientation="Horizontal" Visibility="Collapsed">
+                <TextBlock x:Name="BannerIcon" Text="⚠" FontSize="14" Foreground="#FF453A" Margin="0,0,9,0" VerticalAlignment="Top"/>
+                <StackPanel>
+                    <TextBlock x:Name="BannerTitle" Text="" FontWeight="SemiBold" FontSize="13"/>
+                    <TextBlock x:Name="BannerBody" Text="" FontSize="12" Foreground="#5F5F5F" TextWrapping="Wrap" MaxWidth="280"/>
                 </StackPanel>
-            </Button>
-            <Button Click="Refresh_Click" x:Name="RefreshBtn" ToolTipService.ToolTip="Refresh" Padding="10,6,10,6">
-                <FontIcon Glyph="&#xE72C;" FontSize="13"/>
-            </Button>
-        </StackPanel>
+            </StackPanel>
+            <Separator x:Name="SepBanner" Opacity="0.4" Visibility="Collapsed"/>
 
-        <!-- Freshness footer -->
-        <Grid Grid.Row="7" Padding="16,8,16,10">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="Auto"/>
-            </Grid.ColumnDefinitions>
-            <TextBlock Grid.Column="0" x:Name="FreshnessText" FontSize="11" Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
-        </Grid>
-    </Grid>
+            <!-- Today hero -->
+            <StackPanel Margin="16,12" x:Name="HeroPanel">
+                <TextBlock Text="TODAY" FontSize="11" FontWeight="SemiBold" Foreground="#5F5F5F"/>
+                <TextBlock x:Name="TodayCost" Text="…" FontSize="30" FontWeight="SemiBold"/>
+                <TextBlock x:Name="TodaySub" Text="" FontSize="12.5" Foreground="#5F5F5F"/>
+                <TextBlock x:Name="TodayCmp" Text="" FontSize="12.5" Foreground="#248A3D"/>
+            </StackPanel>
+            <Separator Opacity="0.4"/>
+
+            <!-- Month context -->
+            <StackPanel Margin="16,10" Orientation="Horizontal">
+                <TextBlock x:Name="MonthLabel" Text="" FontSize="11" FontWeight="SemiBold" Foreground="#5F5F5F"/>
+                <TextBlock x:Name="MonthCost" Text="" FontSize="12.5" FontWeight="SemiBold" Margin="10,0,0,0"/>
+                <TextBlock x:Name="MonthTokens" Text="" FontSize="12.5" Foreground="#5F5F5F" Margin="10,0,0,0"/>
+            </StackPanel>
+            <Separator Opacity="0.4"/>
+
+            <!-- Quota section -->
+            <StackPanel Margin="16,12" x:Name="QuotaPanel">
+                <Grid Margin="0,0,0,8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" x:Name="QuotaHeader" Text="SUBSCRIPTION" FontSize="11" FontWeight="SemiBold" Foreground="#5F5F5F"/>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal">
+                        <Button x:Name="LowBtn" Click="Low_Click" Content="Low" Padding="10,3" FontSize="12"/>
+                        <Button x:Name="AllBtn" Click="All_Click" Content="All" Padding="10,3" FontSize="12" Margin="4,0,0,0"/>
+                    </StackPanel>
+                </Grid>
+                <StackPanel x:Name="QuotaRows"/>
+            </StackPanel>
+            <Separator Opacity="0.4"/>
+
+            <!-- Activity line -->
+            <TextBlock x:Name="ActivityText" Margin="16,10" FontSize="12" Foreground="#5F5F5F" Visibility="Collapsed"/>
+            <Separator x:Name="SepActivity" Opacity="0.4" Visibility="Collapsed"/>
+
+            <!-- Action row -->
+            <StackPanel Margin="16,10" Orientation="Horizontal">
+                <Button Click="OpenDashboard_Click" Content="Open Dashboard" Padding="12,5" FontSize="13"/>
+                <Button Click="Refresh_Click" Content="↻" Padding="10,5" Margin="8,0,0,0" FontSize="13" ToolTip="Refresh"/>
+            </StackPanel>
+            <Separator Opacity="0.4"/>
+
+            <!-- Freshness footer -->
+            <TextBlock x:Name="FreshnessText" Margin="16,8" FontSize="11" Foreground="#767676"/>
+        </StackPanel>
+    </Border>
 </Window>

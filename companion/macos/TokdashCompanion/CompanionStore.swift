@@ -16,8 +16,9 @@ final class CompanionStore: ObservableObject {
     private var lastFetchAt: Date?
 
     init() {
-        self.settings = CompanionSettings.load()
-        let url = URL(string: settings.baseURL) ?? URL(string: "http://127.0.0.1:55423")!
+        let loaded = CompanionSettings.load()
+        let url = URL(string: loaded.baseURL) ?? URL(string: "http://127.0.0.1:55423")!
+        self.settings = loaded
         self.client = TokdashClient(baseURL: url)
     }
 

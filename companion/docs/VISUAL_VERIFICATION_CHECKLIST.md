@@ -109,18 +109,15 @@ Start the Tokdash service first.
 
 ### Open state (flyout)
 
-> Note: the current spike is Win32-tray-only. The WinUI 3 Acrylic flyout
-> requires the VS WinUI workload (install pending elevation). When the flyout
-> is built, verify the following:
-
 - [ ] Single left-click the tray icon -> flyout opens anchored to the notification-area corner.
-- [ ] Flyout uses **Acrylic** material (translucent, with a solid fallback in battery saver / high contrast).
+- [ ] Flyout uses **Acrylic** material (Win32 `SetWindowCompositionAttribute`, `ACCENT_ENABLE_ACRYLICBLURBEHIND`) with a translucent solid fallback in battery saver / high contrast.
+- [ ] Flyout is a WPF window: `AllowsTransparency`, `WindowStyle=None`, `Topmost`, 8px rounded corners.
 - [ ] Flyout positions correctly when the taskbar is on the **bottom**, **top**, **left**, or **right**.
 - [ ] Flyout positions correctly on **multi-monitor** setups (opens on the screen with the tray, not always primary).
 - [ ] **DPI change**: move between displays with different DPI/scale -> flyout repositions and resizes correctly.
 - [ ] Same content layout as macOS (header, today hero, month, quota with Low/All, activity, actions, freshness).
 
-### Context menu (current spike supports this)
+### Context menu
 
 - [ ] Right-click the tray icon -> native context menu: `Open Tokdash`, `Refresh`, `Settings`, `Exit`.
 - [ ] Click `Exit` -> app exits cleanly (icon disappears).

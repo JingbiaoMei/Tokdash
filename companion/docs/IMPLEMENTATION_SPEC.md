@@ -173,7 +173,7 @@ CompanionStore @MainActor
   settings
 ```
 
-### Windows (C#/WinUI 3 + Win32 interop)
+### Windows (C#/WPF + Win32 interop)
 
 - Windows 11 only.
 - `Shell_NotifyIconW` with `NOTIFYICON_VERSION_4` through an isolated interop
@@ -183,30 +183,37 @@ CompanionStore @MainActor
   swaps stroke opacity only; do not animate rapid changes.
 - Single click and keyboard activation open the flyout. Right-click opens a
   short native menu: Open Tokdash, Refresh, Settings, Exit.
-- Flyout is a real WinUI 3 window positioned against the notification-area
+- Flyout is a **WPF** window (`AllowsTransparency`, `WindowStyle=None`,
+  `Topmost`, 8px rounded corners) positioned against the notification-area
   work area. Handles top/side taskbars, multiple displays, DPI changes, focus,
   Escape, outside-click dismissal, keyboard activation.
-- **Acrylic** for the flyout. Solid fallback for battery saver / high contrast
-  / unsupported configs. Mica reserved for a long-lived settings window.
-- MSIX packaging for release. Unpackaged debug runs only for the initial
-  interop spike.
+- **Acrylic** via Win32 `SetWindowCompositionAttribute`
+  (`ACCENT_ENABLE_ACRYLICBLURBEHIND`) with a translucent solid fallback for
+  battery saver / high contrast / unsupported configs.
+- MSIX packaging for release (deferred). Unpackaged debug builds for now.
 - Launch at login via the Startup folder shortcut or registry Run key.
 
+> Note: the original plan called for WinUI 3. The VS Build Tools install on
+> this host is too stripped to offer the Windows App SDK workload, and the
+> WinUI 3 PRI resource tooling only ships with that workload. WPF builds with
+> the .NET 10 SDK + WindowsDesktop runtime already installed (no VS workload),
+> supports Acrylic via the same Win32 interop, and uses the same tray host +
+> API client. Visually equivalent for a flyout.
+
 ```
-App (single instance)
+App (single instance, WPF)
   NotificationIconHost
     hidden/message-only Win32 window
     Shell_NotifyIconW lifecycle
   FlyoutWindow
-    WinUI 3 content
-    Acrylic transient backdrop
+    WPF content (AllowsTransparency, WindowStyle=None, Topmost)
+    Acrylic via SetWindowCompositionAttribute
     taskbar-edge positioning + light dismiss
-  SettingsWindow
 
 TokdashClient              (HttpClient)
   health / usage / quota
 
-CompanionViewModel          (INotifyPropertyChanged)
+CompanionViewModel          (BindableBase / INotifyPropertyChanged)
   connectionState
   decodedSnapshot
   refreshScheduler

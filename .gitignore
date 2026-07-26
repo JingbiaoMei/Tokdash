@@ -54,5 +54,9 @@ docs/guides/agents/release/release.py
 # Generated/disposable artifacts (sanity snapshots, etc.)
 output/
 
+# Companion dev run logs
+companion/windows/stderr.txt
+companion/windows/stdout.txt
+
 # Local-only analysis & planning notes (machine-specific usage data; not for the public repo)
 docs/local/

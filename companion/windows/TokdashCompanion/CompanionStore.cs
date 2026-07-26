@@ -158,12 +158,12 @@ public sealed class Snapshot
     {
         get
         {
-            var leadTool = Today.ByTool?.OrderByDescending(kv => kv.Value.Cost).FirstOrDefault();
+            var leadTool = Today.ByTool?.OrderByDescending(kv => kv.Value.Cost).Select(kv => (KeyValuePair<string, ToolAgg>?)kv).FirstOrDefault();
             var leadModel = (Today.CombinedModels ?? Today.TopModels ?? [])
                 .OrderByDescending(m => m.Cost).FirstOrDefault();
             if (leadTool is null || leadModel is null) return null;
             string modelName = leadModel.Name.Split('/').LastOrDefault() ?? leadModel.Name;
-            return $"Most used today  {leadTool.Key} · {modelName}";
+            return $"Most used today  {leadTool.Value.Key} · {modelName}";
         }
     }
 

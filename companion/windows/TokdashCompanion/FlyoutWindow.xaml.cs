@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Windows.Graphics;
+using WinRT.Interop;
 
 namespace TokdashCompanion;
 
@@ -15,16 +16,13 @@ public sealed partial class FlyoutWindow : Window
 {
     private bool _loaded;
 
-    public required CompanionStore Store { get; set; }
+    public CompanionStore Store { get; set; } = null!;
 
     public FlyoutWindow()
     {
         InitializeComponent();
         Title = "Tokdash";
-        // No taskbar button, no system caption, stays-on-top flyout.
-        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
-        var windowId = Win32Interop.GetWindowIdFromWindowHandle(hwnd);
-        var appWindow = AppWindow.GetFromWindowId(windowId);
+        var appWindow = AppWindow;
         appWindow.SetPresenter(AppWindowPresenterKind.Overlapped);
         if (appWindow.Presenter is OverlappedPresenter p)
         {
@@ -40,10 +38,7 @@ public sealed partial class FlyoutWindow : Window
 
     public void PositionNear(int x, int y)
     {
-        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
-        var windowId = Win32Interop.GetWindowIdFromWindowHandle(hwnd);
-        var appWindow = AppWindow.GetFromWindowId(windowId);
-        appWindow.MoveAndResize(new RectInt32(x - 360, y, 360, 560));
+        AppWindow.MoveAndResize(new RectInt32(x - 360, y, 360, 560));
     }
 
     private void FlyoutWindow_Activated(object sender, WindowActivatedEventArgs e)
@@ -56,8 +51,6 @@ public sealed partial class FlyoutWindow : Window
         _loaded = true;
     }
 
-    private void FlyoutWindow_Closed(object sender, WindowEventArgs e) { }
-
     private void Store_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
         DispatcherQueue.TryEnqueue(UpdateView);
@@ -65,13 +58,13 @@ public sealed partial class FlyoutWindow : Window
 
     private void UpdateView()
     {
-        ConnDot.Fill = new SolidColorBrush(Microsoft.UI.Xaml.MediaHelper.ColorFromString(Store.DotColor));
+        ConnDot.Fill = new SolidColorBrush(MediaHelper.ColorFromString(Store.DotColor));
 
         bool showBanner = Store.ShowsBanner;
         Banner.Visibility = showBanner ? Visibility.Visible : Visibility.Collapsed;
         if (showBanner)
         {
-            BannerIcon.Foreground = new SolidColorBrush(Microsoft.UI.Xaml.MediaHelper.ColorFromString(
+            BannerIcon.Foreground = new SolidColorBrush(MediaHelper.ColorFromString(
                 Store.ConnectionState == ConnectionState.Offline ? "#FF453A" : "#FF9F0A"));
         }
 
@@ -168,7 +161,7 @@ public sealed partial class FlyoutWindow : Window
                 {
                     Text = group.Provider,
                     FontSize = 11,
-                    FontWeight = Microsoft.UI.Text.FontWeight.SemiBold,
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
                     Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
                 });
                 foreach (var row in group.Rows) panel.Children.Add(MakeQuotaRow(row, showProvider: false));
@@ -186,7 +179,7 @@ public sealed partial class FlyoutWindow : Window
         {
             Text = showProvider ? $"{row.Provider} · {row.BucketLabel}" : row.BucketLabel,
             FontSize = 12.5,
-            FontWeight = Microsoft.UI.Text.FontWeight.Medium,
+            FontWeight = Microsoft.UI.Text.FontWeights.Medium,
         });
         if (row.Estimated)
         {
@@ -203,7 +196,7 @@ public sealed partial class FlyoutWindow : Window
         {
             Text = $"{(int)row.Left}% left",
             FontSize = 12.5,
-            FontWeight = Microsoft.UI.Text.FontWeight.SemiBold,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
         });
         top.Children.Add(new TextBlock
         {

@@ -26,7 +26,7 @@ public partial class App : Application
             _flyout.Closed += (_, _) => _flyout = null;
             _flyout.PositionNear(x, y);
             _flyout.Activate();
-            Store.Refresh();
+            _ = Store.RefreshAsync();
         }
         else
         {

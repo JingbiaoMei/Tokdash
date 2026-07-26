@@ -2,8 +2,7 @@
     x:Class="TokdashCompanion.FlyoutWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    Activated="FlyoutWindow_Activated"
-    Closed="FlyoutWindow_Closed">
+    Activated="FlyoutWindow_Activated">
     <Grid x:Name="RootGrid">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>

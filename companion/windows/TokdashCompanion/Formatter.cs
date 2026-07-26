@@ -22,16 +22,14 @@ public static class Formatter
         _ => "fine",
     };
 
-    public static string ComparisonText(double? costPct)
-    {
-        if (costPct is null) return "";
-        double abs = Math.Abs(costPct.Value);
-        string dir = costPct.Value <= 0 ? "below" : "above";
-        return $"{(int)abs}% {dir} yesterday";
-    }
+public static string ComparisonText(double? costPct)
+{
+    if (costPct is null) return "";
+    double abs = Math.Abs(costPct.Value);
+    string dir = costPct.Value <= 0 ? "below" : "above";
+    return $"{(int)abs}% {dir} yesterday";
 }
-
-public enum QuotaView { Low, All }
+}
 
 public sealed record QuotaThresholds(double FiveHour, double Weekly, double Other)
 {

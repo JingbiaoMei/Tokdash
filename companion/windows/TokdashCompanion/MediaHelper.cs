@@ -1,4 +1,3 @@
-using Microsoft.UI.Xaml.Media;
 using Windows.UI;
 
 namespace TokdashCompanion;
@@ -13,7 +12,7 @@ internal static class MediaHelper
         {
             6 => Color.FromArgb(255, Convert.ToByte(h[0..2], 16), Convert.ToByte(h[2..4], 16), Convert.ToByte(h[4..6], 16)),
             8 => Color.FromArgb(Convert.ToByte(h[0..2], 16), Convert.ToByte(h[2..4], 16), Convert.ToByte(h[4..6], 16), Convert.ToByte(h[6..8], 16)),
-            _ => Colors.Transparent,
+            _ => Color.FromArgb(0, 0, 0, 0),
         };
     }
 }

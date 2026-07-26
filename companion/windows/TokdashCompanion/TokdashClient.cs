@@ -54,7 +54,7 @@ public sealed class TokdashClient : IDisposable
             if (resp.StatusCode == System.Net.HttpStatusCode.ServiceUnavailable)
                 throw new TokdashException(TokdashError.Busy);
             if (!resp.IsSuccessStatusCode)
-                throw new TokdashException(TokdashError.HttpStatus((int)resp.StatusCode));
+                throw new TokdashException(TokdashError.HttpStatus, (int)resp.StatusCode);
             var stream = await resp.Content.ReadAsStreamAsync(ct);
             return await JsonSerializer.DeserializeAsync<T>(stream, JsonOpts, ct)
                 ?? throw new TokdashException(TokdashError.Decode);
@@ -87,7 +87,8 @@ public enum TokdashError { Busy, Timeout, Offline, HttpStatus, Decode, Other }
 public sealed class TokdashException : Exception
 {
     public TokdashError Error { get; }
-    public TokdashException(TokdashError e) : base(e.ToString()) => Error = e;
+    public int? StatusCode { get; }
+    public TokdashException(TokdashError e, int? statusCode = null) : base(e.ToString()) { Error = e; StatusCode = statusCode; }
 }
 
 public sealed record HealthResponse(string Status, string Service, string Version);

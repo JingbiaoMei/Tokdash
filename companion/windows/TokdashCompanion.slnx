@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="TokdashCompanion.Tests/TokdashCompanion.Tests.csproj" />
+  <Project Path="TokdashCompanion/TokdashCompanion.csproj" />
+</Solution>

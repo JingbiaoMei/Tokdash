@@ -1,0 +1,48 @@
+name: TokdashCompanion
+options:
+  bundleIdPrefix: com.tokdash
+  deploymentTarget:
+    macOS: "13.0"
+  developmentLanguage: en
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MACOSX_DEPLOYMENT_TARGET: "13.0"
+    PRODUCT_BUNDLE_IDENTIFIER: com.tokdash.companion
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    GENERATE_INFOPLIST_FILE: NO
+    INFOPLIST_FILE: TokdashCompanion/Info.plist
+    SWIFT_STRICT_CONCURRENCY: minimal
+
+targets:
+  TokdashCompanion:
+    type: application
+    platform: macOS
+    sources:
+      - path: TokdashCompanion
+        excludes:
+          - "Info.plist"
+    resources:
+      - path: TokdashCompanion/Assets.xcassets
+    info:
+      path: TokdashCompanion/Info.plist
+      properties:
+        LSUIElement: true
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+    settings:
+      base:
+        PRODUCT_NAME: TokdashCompanion
+
+  TokdashCompanionTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - TokdashCompanionTests
+    dependencies:
+      - target: TokdashCompanion
+    settings:
+      base:
+        BUNDLE_LOADER: $(TEST_HOST)
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/TokdashCompanion.app/Contents/MacOS/TokdashCompanion

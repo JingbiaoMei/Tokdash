@@ -25,7 +25,7 @@ final class TokdashClientTests: XCTestCase {
         XCTAssertEqual(usage.totalTokens, 18700000)
         XCTAssertEqual(usage.totalCost, 3.42, accuracy: 0.001)
         XCTAssertEqual(usage.byTool?["codex"]?.cost, 2.0, accuracy: 0.001)
-        XCTAssertEqual(usage.comparison?.costPct, -12.0)
+        XCTAssertEqual(usage.comparison?.costPct ?? 0, -12.0, accuracy: 0.001)
     }
 
     func testQuotaDecode() throws {
@@ -37,7 +37,7 @@ final class TokdashClientTests: XCTestCase {
         """.data(using: .utf8)!
         let quota = try JSONDecoder().decode(QuotaResponse.self, from: json)
         XCTAssertTrue(quota.enabled)
-        XCTAssertEqual(quota.providers?["codex"]?.buckets?.first?.remainingPercent, 14.0)
+        XCTAssertEqual(quota.providers?["codex"]?.buckets?.first?.remainingPercent ?? -1, 14.0, accuracy: 0.001)
     }
 
     func testQuotaDecodeDisabled() throws {

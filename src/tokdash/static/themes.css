@@ -130,6 +130,15 @@ html[data-ui-theme="paper"] {
   --color-surface-glass: rgba(255, 250, 241, 0.95);
 }
 
+html[data-ui-theme="paper"] .profile-activity-shell,
+html[data-ui-theme="paper"] .overview-profile-band {
+  --profile-milestone-1: #20AE9B;
+  --profile-milestone-2: #796DE2;
+  --profile-milestone-3: #F28D42;
+  --profile-milestone-4: #E95078;
+  --profile-milestone-keyline: var(--color-bg);
+}
+
 html[data-ui-theme="paper"] body {
   background:
     radial-gradient(900px 480px at 10% -5%, rgba(194,124,44,0.08), transparent 60%),
@@ -230,6 +239,15 @@ html.dark[data-ui-theme="paper"] {
   --color-border: #4B3E2F;
   --color-label: rgba(220, 204, 176, 0.84);
   --color-surface-glass: rgba(38, 30, 21, 0.94);
+}
+
+html.dark[data-ui-theme="paper"] .profile-activity-shell,
+html.dark[data-ui-theme="paper"] .overview-profile-band {
+  --profile-milestone-1: #4ED1BA;
+  --profile-milestone-2: #9A8CFF;
+  --profile-milestone-3: #FFB467;
+  --profile-milestone-4: #FF7398;
+  --profile-milestone-keyline: var(--color-bg);
 }
 
 html.dark[data-ui-theme="paper"] body {

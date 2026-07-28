@@ -841,24 +841,24 @@ def test_profile_milestone_toggle_defaults_off_persists_and_syncs_both_views():
     assert "if (!profileMilestonesEnabled || !milestone) return;" in applier
 
 
-def test_paper_uses_rain_cleared_sky_heat_palette():
+def test_paper_uses_warm_terracotta_heat_palette():
     light, dark = _heat_palette_for("paper")
     assert light == [
-        "#F6F2EA", "#E4EFF0", "#CCE4E6", "#A9D4DA",
-        "#7FBCC8", "#559FB2", "#39798F", "#27566F",
+        "#F4EDE0", "#ECDDC8", "#DFC5A4", "#CEA475",
+        "#B97C4A", "#9D5E35", "#7D432C", "#5C2E23",
     ]
     assert dark == [
-        "#1C2026", "#223039", "#293E48", "#31505E",
-        "#3B6575", "#4C7E8F", "#6A9EAC", "#9CC6CD",
+        "#1F1914", "#2B2018", "#3A291D", "#513523",
+        "#70442B", "#985D38", "#C47E50", "#E8B080",
     ]
 
     profile_indices = [round((level / 4) * (len(light) - 1)) for level in range(5)]
     assert profile_indices == [0, 2, 4, 5, 7]
     assert [light[index] for index in profile_indices] == [
-        "#F6F2EA", "#CCE4E6", "#7FBCC8", "#559FB2", "#27566F",
+        "#F4EDE0", "#DFC5A4", "#B97C4A", "#9D5E35", "#5C2E23",
     ]
     assert [dark[index] for index in profile_indices] == [
-        "#1C2026", "#293E48", "#3B6575", "#4C7E8F", "#9CC6CD",
+        "#1F1914", "#3A291D", "#70442B", "#985D38", "#E8B080",
     ]
 
     classic_light, classic_dark = _heat_palette_for("classic")

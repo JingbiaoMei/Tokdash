@@ -126,6 +126,31 @@ def _run_profile_tooltip_js(tmp_path: Path, expression: str, payload: dict) -> o
     return json.loads(result.stdout)
 
 
+def _run_profile_tooltip_position_js(
+    tmp_path: Path, expression: str, payload: dict
+) -> object:
+    source = INDEX_HTML.read_text(encoding="utf-8")
+    function = _extract_js_function(
+        source,
+        "function calculateProfileActivityTooltipPosition(targetRect, tooltipRect, viewport, gap = 8) {",
+    )
+    harness = tmp_path / "profile-tooltip-position.js"
+    harness.write_text(
+        function
+        + "\nconst payload = JSON.parse(process.argv[2]);\n"
+        + f"const result = {expression};\n"
+        + "process.stdout.write(JSON.stringify(result));\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        ["node", str(harness), json.dumps(payload)],
+        check=True,
+        capture_output=True,
+        encoding="utf-8",
+    )
+    return json.loads(result.stdout)
+
+
 def _day(date: str, tokens: int, *, cost: float = 0.0) -> dict:
     return {
         "date": date,
@@ -762,6 +787,109 @@ def test_profile_visual_polish_contract():
     )
     assert "dataset.profileTooltipId" in resolver
     assert "profileActivityTooltip" in resolver
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_profile_tooltip_position_handles_zoomed_viewport_and_edges(tmp_path: Path):
+    payload = {
+        "cases": [
+            {
+                "target": {
+                    "left": 1500,
+                    "top": 900,
+                    "bottom": 920,
+                    "width": 20,
+                },
+                "tooltip": {"width": 260, "height": 180},
+                "viewport": {"width": 3072, "height": 1728},
+            },
+            {
+                "target": {
+                    "left": 3060,
+                    "top": 500,
+                    "bottom": 512,
+                    "width": 12,
+                },
+                "tooltip": {"width": 260, "height": 180},
+                "viewport": {"width": 3072, "height": 1728},
+            },
+            {
+                "target": {"left": 10, "top": 3, "bottom": 15, "width": 12},
+                "tooltip": {"width": 260, "height": 180},
+                "viewport": {"width": 3072, "height": 1728},
+            },
+            {
+                "target": {
+                    "left": 500,
+                    "top": 1700,
+                    "bottom": 1712,
+                    "width": 20,
+                },
+                "tooltip": {"width": 260, "height": 180},
+                "viewport": {"width": 3072, "height": 1728},
+            },
+            {
+                "target": {"left": 90, "top": 50, "bottom": 60, "width": 10},
+                "tooltip": {"width": 260, "height": 180},
+                "viewport": {"width": 200, "height": 120},
+            },
+        ]
+    }
+    result = _run_profile_tooltip_position_js(
+        tmp_path,
+        "payload.cases.map((item) => calculateProfileActivityTooltipPosition(item.target, item.tooltip, item.viewport))",
+        payload,
+    )
+
+    assert result == [
+        {"left": 1380, "top": 712},
+        {"left": 2804, "top": 312},
+        {"left": 8, "top": 23},
+        {"left": 380, "top": 1512},
+        {"left": 8, "top": 8},
+    ]
+
+
+def test_profile_tooltips_use_viewport_portal_and_reflow_on_zoom():
+    source = INDEX_HTML.read_text(encoding="utf-8")
+    compact = re.sub(r"\s+", "", source)
+    portal_markup = """
+  <!-- Viewport-level tooltips must stay outside filtered/transformed cards. -->
+  <div id="overviewProfileTooltip" class="profile-activity-tooltip overview-profile-tooltip" role="tooltip" hidden></div>
+  <div id="profileActivityTooltip" class="profile-activity-tooltip" role="tooltip" hidden></div>
+""".strip()
+
+    assert portal_markup in source
+    assert source.count('id="overviewProfileTooltip"') == 1
+    assert source.count('id="profileActivityTooltip"') == 1
+    assert "max-height:calc(100dvh-16px)" in compact
+    assert "contain:layoutpaintstyle" in compact
+
+    viewport = _extract_js_function(
+        source,
+        "function getProfileActivityViewport() {",
+    )
+    positioner = _extract_js_function(
+        source,
+        "function positionActiveProfileActivityTooltip() {",
+    )
+    shower = _extract_js_function(
+        source,
+        "function showProfileActivityTooltip(target, model) {",
+    )
+    assert "window.visualViewport" in viewport
+    assert "target.getBoundingClientRect()" in positioner
+    assert "tooltip.getBoundingClientRect()" in positioner
+    assert "tooltip.style.maxWidth" in positioner
+    assert "tooltip.style.maxHeight" in positioner
+    assert "snapProfileActivityTooltipCoordinate" in positioner
+    assert "offsetWidth" not in shower
+    assert "offsetHeight" not in shower
+    assert "window.innerWidth" not in shower
+    assert "window.innerHeight" not in shower
+    assert "window.addEventListener('resize', scheduleProfileActivityTooltipPosition" in source
+    assert "window.addEventListener('scroll', scheduleProfileActivityTooltipPosition" in source
+    assert "window.visualViewport?.addEventListener(" in source
 
 
 def test_profile_activity_legend_is_safe_localized_and_mode_aware():

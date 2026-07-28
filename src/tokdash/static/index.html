@@ -488,7 +488,7 @@
     .profile-activity-tooltip-label{min-width:0;color:var(--color-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
     .profile-activity-tooltip-value{color:var(--profile-tooltip-tone);font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-variant-numeric:tabular-nums;font-weight:750;text-align:right;white-space:nowrap;}
     .profile-activity-tooltip-row[data-prominent="true"] .profile-activity-tooltip-value{font-size:13px;font-weight:850;}
-    .profile-activity-shell,.overview-profile-band{--profile-milestone-1:#06b6d4;--profile-milestone-2:#8b5cf6;--profile-milestone-3:#f59e0b;--profile-milestone-4:#ec4899;--profile-milestone-keyline:transparent;}
+    .profile-activity-shell,.overview-profile-band{--profile-milestone-1:color-mix(in srgb,var(--color-primary) 46%,var(--color-border));--profile-milestone-2:color-mix(in srgb,var(--color-primary) 64%,var(--color-border));--profile-milestone-3:color-mix(in srgb,var(--color-primary) 82%,var(--color-border));--profile-milestone-4:var(--color-primary);--profile-milestone-keyline:transparent;}
     .profile-activity-cell[data-milestone="1"],.profile-activity-week-hit[data-milestone="1"],.profile-activity-tooltip-badge[data-milestone="1"]{--profile-milestone-tone:var(--profile-milestone-1);}
     .profile-activity-cell[data-milestone="2"],.profile-activity-week-hit[data-milestone="2"],.profile-activity-tooltip-badge[data-milestone="2"]{--profile-milestone-tone:var(--profile-milestone-2);}
     .profile-activity-cell[data-milestone="3"],.profile-activity-week-hit[data-milestone="3"],.profile-activity-tooltip-badge[data-milestone="3"]{--profile-milestone-tone:var(--profile-milestone-3);}
@@ -521,8 +521,17 @@
     .profile-activity-legend-bar{width:6px;border-radius:2px 2px 1px 1px;background:var(--color-primary);opacity:.82;}
     .profile-activity-legend-bar:nth-child(1){height:3px;}.profile-activity-legend-bar:nth-child(2){height:5px;}.profile-activity-legend-bar:nth-child(3){height:7px;}.profile-activity-legend-bar:nth-child(4){height:9px;}.profile-activity-legend-bar:nth-child(5){height:12px;}
     .profile-activity-legend-divider{width:1px;height:12px;background:var(--color-border);}
-    .profile-activity-legend-badge{padding:3px 5px;border:1px solid color-mix(in srgb,var(--profile-milestone-tone) 54%,transparent);border-radius:999px;background:color-mix(in srgb,var(--profile-milestone-tone) 7%,transparent);color:var(--profile-milestone-tone);font-size:8px;font-weight:850;letter-spacing:.02em;}
+    .profile-activity-legend-badge{padding:3px 5px;border:1px solid color-mix(in srgb,var(--profile-milestone-tone) 54%,transparent);border-radius:999px;background:color-mix(in srgb,var(--profile-milestone-tone) 7%,transparent);color:var(--profile-milestone-tone);font-size:8px;font-weight:850;letter-spacing:.02em;transition:opacity .15s ease,filter .15s ease;}
     .profile-activity-legend-badge[data-milestone="1"]{--profile-milestone-tone:var(--profile-milestone-1);}.profile-activity-legend-badge[data-milestone="2"]{--profile-milestone-tone:var(--profile-milestone-2);}.profile-activity-legend-badge[data-milestone="3"]{--profile-milestone-tone:var(--profile-milestone-3);}.profile-activity-legend-badge[data-milestone="4"]{--profile-milestone-tone:var(--profile-milestone-4);}
+    .profile-activity-legend[data-milestones-enabled="false"] .profile-activity-legend-badge{opacity:.42;filter:saturate(.55);}
+    .profile-milestone-toggle{display:inline-flex;align-items:center;gap:5px;margin-left:1px;padding:2px 3px 2px 6px;border:1px solid color-mix(in srgb,var(--color-text) 13%,var(--color-border));border-radius:999px;background:color-mix(in srgb,var(--color-surface-glass) 82%,transparent);color:var(--color-muted);font:inherit;font-size:9px;font-weight:750;line-height:1;cursor:pointer;transition:color .15s ease,border-color .15s ease,background .15s ease,box-shadow .15s ease;}
+    .profile-milestone-toggle:is(:hover,:focus-visible){color:var(--color-text);border-color:color-mix(in srgb,var(--color-primary) 36%,var(--color-border));background:color-mix(in srgb,var(--color-primary) 8%,var(--color-surface-glass));}
+    .profile-milestone-toggle:focus-visible{outline:2px solid color-mix(in srgb,var(--color-primary) 48%,transparent);outline-offset:2px;}
+    .profile-milestone-toggle[aria-pressed="true"]{color:var(--color-primary);border-color:color-mix(in srgb,var(--color-primary) 42%,var(--color-border));background:color-mix(in srgb,var(--color-primary) 11%,var(--color-surface-glass));box-shadow:0 0 10px color-mix(in srgb,var(--color-primary) 10%,transparent);}
+    .profile-milestone-toggle-track{position:relative;width:23px;height:13px;border-radius:999px;background:color-mix(in srgb,var(--color-muted) 28%,var(--color-border));box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--color-text) 9%,transparent);transition:background .15s ease;}
+    .profile-milestone-toggle-track::after{content:"";position:absolute;top:2px;left:2px;width:9px;height:9px;border-radius:50%;background:var(--color-bg);box-shadow:0 1px 3px color-mix(in srgb,var(--color-text) 28%,transparent);transition:transform .15s ease,background .15s ease;}
+    .profile-milestone-toggle[aria-pressed="true"] .profile-milestone-toggle-track{background:var(--color-primary);}
+    .profile-milestone-toggle[aria-pressed="true"] .profile-milestone-toggle-track::after{transform:translateX(10px);background:var(--color-bg);}
     @media(max-width:640px){.profile-activity-head{gap:6px;flex-wrap:wrap;font-size:13px;}.profile-activity-head h3{flex:1 0 100%;margin-bottom:2px;}.profile-activity-mode{padding:5px 8px;}.profile-activity-shell{max-width:100%;}}
 
     .overview-profile-band{display:grid;grid-template-columns:minmax(180px,220px) minmax(0,1fr);gap:20px;align-items:stretch;min-height:128px;padding:16px 18px;border-color:color-mix(in srgb,var(--color-primary) 18%,var(--color-border));background:linear-gradient(105deg,var(--color-surface-glass),color-mix(in srgb,var(--color-primary) 7%,var(--color-surface-glass)));box-shadow:0 10px 28px color-mix(in srgb,var(--color-primary) 6%,transparent);}
@@ -558,6 +567,7 @@
     .overview-profile-legend .profile-activity-legend-glyph{height:10px;}
     .overview-profile-legend .profile-activity-legend-bar:nth-child(5){height:10px;}
     .overview-profile-legend .profile-activity-legend-badge{padding:2px 4px;font-size:7px;}
+    .overview-profile-legend .profile-milestone-toggle{gap:4px;padding-left:5px;font-size:8px;}
     @media(max-width:800px){.overview-profile-band{grid-template-columns:1fr;gap:14px;}.overview-profile-copy{padding:0 0 12px;border-right:0;border-bottom:1px solid color-mix(in srgb,var(--color-primary) 16%,var(--color-border));}.overview-profile-metrics{flex-wrap:wrap;}.overview-profile-heat-head{align-items:flex-start;flex-wrap:wrap;}.overview-profile-modes{margin-left:auto;}}
     @media(prefers-reduced-motion:reduce){.overview-profile-skeleton-grid{animation:none;}.overview-profile-cell{transform:none!important;}}
 
@@ -2355,6 +2365,9 @@
         cumulative: 'Cumulative',
         estimatedCost: 'Estimated cost',
         milestone: 'Milestone',
+        milestones: 'Milestones',
+        showMilestones: 'Show milestone colors',
+        hideMilestones: 'Hide milestone colors',
         calendarMetric: 'Metric',
         metricTokens: 'Tokens',
         metricEnergy: 'Energy',
@@ -2609,6 +2622,9 @@
         cumulative: '累计',
         estimatedCost: '预估费用',
         milestone: '里程碑',
+        milestones: '里程碑',
+        showMilestones: '显示里程碑颜色',
+        hideMilestones: '隐藏里程碑颜色',
         calendarMetric: '指标',
         metricTokens: 'Tokens',
         metricEnergy: '能耗',
@@ -3011,6 +3027,7 @@
       const select = document.getElementById('styleThemeSelect');
       if (select) select.value = normalized;
       HEAT_COLORS = getHeatColors(normalized, isDark());
+      syncProfileMilestonePalette();
       const themeMeta = document.querySelector('meta[name="theme-color"]');
       if (themeMeta) themeMeta.content = getThemeMetaColor(normalized, isDark());
     }
@@ -3020,6 +3037,7 @@
       document.documentElement.classList.toggle('dark', dark);
       const uiTheme = document.documentElement.dataset.uiTheme || 'paper';
       HEAT_COLORS = getHeatColors(uiTheme, dark);
+      syncProfileMilestonePalette();
       const themeMeta = document.querySelector('meta[name="theme-color"]');
       if (themeMeta) themeMeta.content = getThemeMetaColor(uiTheme, dark);
       const moon = document.getElementById('themeIconMoon');
@@ -6250,13 +6268,38 @@
       };
     }
 
+    const PROFILE_MILESTONES_STORAGE_KEY = 'tokdash-profile-milestones';
     let profileActivityMode = 'daily';
+    let profileMilestonesEnabled = localStorage.getItem(PROFILE_MILESTONES_STORAGE_KEY) === 'on';
     let profileActivityDidInitialScroll = false;
 
     function getProfileActivityColor(level) {
       const safeLevel = Math.max(0, Math.min(4, Number(level) || 0));
       const index = Math.round((safeLevel / 4) * Math.max(0, HEAT_COLORS.length - 1));
       return HEAT_COLORS[index] || 'var(--color-border)';
+    }
+
+    function syncProfileMilestonePalette() {
+      document.querySelectorAll('.profile-activity-shell, .overview-profile-band').forEach((shell) => {
+        for (let level = 1; level <= 4; level += 1) {
+          shell.style.setProperty(`--profile-milestone-${level}`, getProfileActivityColor(level));
+        }
+      });
+    }
+
+    function syncProfileMilestoneControls() {
+      document.querySelectorAll('.profile-milestone-toggle').forEach((toggle) => {
+        toggle.setAttribute('aria-pressed', String(profileMilestonesEnabled));
+        toggle.setAttribute(
+          'aria-label',
+          t(profileMilestonesEnabled ? 'hideMilestones' : 'showMilestones'),
+        );
+        toggle.title = t(profileMilestonesEnabled ? 'hideMilestones' : 'showMilestones');
+        toggle.closest('.profile-activity-legend')?.setAttribute(
+          'data-milestones-enabled',
+          String(profileMilestonesEnabled),
+        );
+      });
     }
 
     function renderProfileActivityLegend(targetId, mode) {
@@ -6310,7 +6353,22 @@
         milestones.appendChild(badge);
       });
 
-      legend.replaceChildren(scale, divider, milestones);
+      const toggle = document.createElement('button');
+      toggle.className = 'profile-milestone-toggle';
+      toggle.type = 'button';
+      const toggleLabel = document.createElement('span');
+      toggleLabel.textContent = t('milestones');
+      const toggleTrack = document.createElement('span');
+      toggleTrack.className = 'profile-milestone-toggle-track';
+      toggleTrack.setAttribute('aria-hidden', 'true');
+      toggle.append(toggleLabel, toggleTrack);
+      toggle.addEventListener('click', () => {
+        setProfileMilestonesEnabled(!profileMilestonesEnabled);
+      });
+
+      legend.replaceChildren(scale, divider, milestones, toggle);
+      syncProfileMilestonePalette();
+      syncProfileMilestoneControls();
     }
 
     function formatProfileMetricNumber(value) {
@@ -6320,7 +6378,7 @@
       }).format(safeProfileNumber(value));
     }
 
-    function formatProfileAggregateTooltip(aggregate, cumulative = false) {
+    function formatProfileAggregateTooltip(aggregate, cumulative = false, milestonesEnabled = false) {
       const range = aggregate?.startDate && aggregate?.endDate
         ? `${formatShortDate(aggregate.startDate, true)} → ${formatShortDate(aggregate.endDate, true)}`
         : '—';
@@ -6330,7 +6388,7 @@
         : (singleDate ? formatShortDate(aggregate.startDate, true) : range);
       const breakdown = aggregate?.tokenBreakdown || {};
       const tokenTotal = safeProfileNumber(aggregate?.totals?.tokens);
-      const milestone = getProfileMilestoneTier(tokenTotal);
+      const milestone = milestonesEnabled ? getProfileMilestoneTier(tokenTotal) : null;
       const definitions = [
         {
           key: 'total',
@@ -6370,13 +6428,13 @@
       return { title, rows, milestone, accessibleText };
     }
 
-    function formatProfileDayTooltip(day) {
+    function formatProfileDayTooltip(day, milestonesEnabled = false) {
       return formatProfileAggregateTooltip({
         startDate: day.date,
         endDate: day.date,
         totals: day.totals || {},
         tokenBreakdown: day.tokenBreakdown || {},
-      });
+      }, false, milestonesEnabled);
     }
 
     function renderProfileActivityTooltipContent(tooltip, model) {
@@ -6496,7 +6554,9 @@
     }
 
     function applyProfileMilestone(target, milestone) {
-      if (!target || !milestone) return;
+      if (!target) return;
+      delete target.dataset.milestone;
+      if (!profileMilestonesEnabled || !milestone) return;
       target.dataset.milestone = String(milestone.level);
     }
 
@@ -6528,7 +6588,7 @@
             cell.setAttribute('aria-hidden', 'true');
           } else {
             applyProfileMilestone(cell, definition.milestone);
-            const tooltip = formatProfileDayTooltip(definition.day);
+            const tooltip = formatProfileDayTooltip(definition.day, profileMilestonesEnabled);
             bindProfileActivityTooltip(cell, tooltip);
           }
         } else {
@@ -6543,7 +6603,11 @@
       if (profileActivityMode !== 'daily') {
         series.forEach((aggregate, weekIndex) => {
           const hit = document.createElement('button');
-          const tooltip = formatProfileAggregateTooltip(aggregate, profileActivityMode === 'cumulative');
+          const tooltip = formatProfileAggregateTooltip(
+            aggregate,
+            profileActivityMode === 'cumulative',
+            profileMilestonesEnabled,
+          );
           hit.type = 'button';
           hit.className = 'profile-activity-week-hit';
           const milestone = getProfileMilestoneTier(aggregate?.totals?.tokens);
@@ -6639,7 +6703,7 @@
           } else {
             applyProfileMilestone(cell, definition.milestone);
             cell.dataset.profileTooltipId = 'overviewProfileTooltip';
-            const tooltip = formatProfileDayTooltip(definition.day);
+            const tooltip = formatProfileDayTooltip(definition.day, profileMilestonesEnabled);
             bindProfileActivityTooltip(cell, tooltip);
           }
         } else {
@@ -6655,7 +6719,11 @@
         series.forEach((aggregate, weekIndex) => {
           const hit = document.createElement('button');
           const milestone = getProfileMilestoneTier(aggregate?.totals?.tokens);
-          const tooltip = formatProfileAggregateTooltip(aggregate, profileActivityMode === 'cumulative');
+          const tooltip = formatProfileAggregateTooltip(
+            aggregate,
+            profileActivityMode === 'cumulative',
+            profileMilestonesEnabled,
+          );
           hit.type = 'button';
           hit.className = 'profile-activity-week-hit';
           hit.dataset.profileTooltipId = 'overviewProfileTooltip';
@@ -6679,6 +6747,18 @@
       if (!['daily', 'weekly', 'cumulative'].includes(mode)) return;
       profileActivityMode = mode;
       syncProfileActivityModeControls();
+      if (calendarState.view === 'profile' && statsLoaded) renderProfileView();
+      if (isOverviewActive()) renderOverviewProfilePreview();
+    }
+
+    function setProfileMilestonesEnabled(enabled) {
+      profileMilestonesEnabled = Boolean(enabled);
+      localStorage.setItem(
+        PROFILE_MILESTONES_STORAGE_KEY,
+        profileMilestonesEnabled ? 'on' : 'off',
+      );
+      hideProfileActivityTooltip();
+      syncProfileMilestoneControls();
       if (calendarState.view === 'profile' && statsLoaded) renderProfileView();
       if (isOverviewActive()) renderOverviewProfilePreview();
     }

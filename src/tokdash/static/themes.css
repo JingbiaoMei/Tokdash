@@ -132,10 +132,6 @@ html[data-ui-theme="paper"] {
 
 html[data-ui-theme="paper"] .profile-activity-shell,
 html[data-ui-theme="paper"] .overview-profile-band {
-  --profile-milestone-1: #20AE9B;
-  --profile-milestone-2: #796DE2;
-  --profile-milestone-3: #F28D42;
-  --profile-milestone-4: #E95078;
   --profile-milestone-keyline: var(--color-bg);
 }
 
@@ -243,10 +239,6 @@ html.dark[data-ui-theme="paper"] {
 
 html.dark[data-ui-theme="paper"] .profile-activity-shell,
 html.dark[data-ui-theme="paper"] .overview-profile-band {
-  --profile-milestone-1: #4ED1BA;
-  --profile-milestone-2: #9A8CFF;
-  --profile-milestone-3: #FFB467;
-  --profile-milestone-4: #FF7398;
   --profile-milestone-keyline: var(--color-bg);
 }
 

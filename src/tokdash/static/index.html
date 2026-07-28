@@ -473,7 +473,7 @@
     .profile-activity-week-hits{position:absolute;inset:0;display:grid;grid-template-columns:repeat(52,minmax(8px,1fr));gap:3.5px;pointer-events:none;}
     .profile-activity-week-hit{position:relative;min-width:8px;border:0;background:transparent;padding:0;pointer-events:auto;cursor:pointer;}
     .profile-activity-week-hit:focus-visible{outline:2px solid color-mix(in srgb,var(--color-primary) 62%,transparent);outline-offset:2px;border-radius:2px;}
-    .profile-activity-tooltip{position:fixed;z-index:120;width:min(260px,calc(100vw - 16px));padding:0;overflow:hidden;border:1px solid color-mix(in srgb,var(--color-primary) 24%,var(--color-border));border-radius:10px;background:color-mix(in srgb,var(--color-surface-glass) 96%,var(--color-bg));color:var(--color-text);box-shadow:var(--shadow-md),0 0 24px color-mix(in srgb,var(--color-primary) 10%,transparent);white-space:normal;text-align:left;font-size:11px;line-height:1.35;pointer-events:none;backdrop-filter:blur(18px);}
+    .profile-activity-tooltip{position:fixed;z-index:120;width:min(260px,calc(100vw - 16px));max-height:calc(100dvh - 16px);padding:0;overflow:hidden;contain:layout paint style;border:1px solid color-mix(in srgb,var(--color-primary) 24%,var(--color-border));border-radius:10px;background:color-mix(in srgb,var(--color-surface-glass) 96%,var(--color-bg));color:var(--color-text);box-shadow:var(--shadow-md),0 0 24px color-mix(in srgb,var(--color-primary) 10%,transparent);white-space:normal;text-align:left;font-size:11px;line-height:1.35;pointer-events:none;backdrop-filter:blur(18px);}
     .profile-activity-tooltip[hidden]{display:none;}
     .profile-activity-tooltip-header{padding:8px 10px;border-bottom:1px solid color-mix(in srgb,var(--color-primary) 20%,var(--color-border));background:color-mix(in srgb,var(--color-primary) 12%,transparent);color:var(--color-primary);font-weight:800;letter-spacing:.01em;}
     .profile-activity-tooltip-body{padding:6px 10px 8px;}
@@ -1159,7 +1159,6 @@
             </div>
           </div>
         </div>
-        <div id="overviewProfileTooltip" class="profile-activity-tooltip overview-profile-tooltip" role="tooltip" hidden></div>
       </section>
 
       <!-- Tables -->
@@ -1692,7 +1691,6 @@
               <div id="profileActivityMonths" class="profile-activity-months" aria-hidden="true"></div>
               <div id="profileActivityLegend" class="profile-activity-legend"></div>
             </div>
-            <div id="profileActivityTooltip" class="profile-activity-tooltip" role="tooltip" hidden></div>
           </div>
         </div>
 
@@ -2093,6 +2091,10 @@
       </div>
     </div>
   </div>
+
+  <!-- Viewport-level tooltips must stay outside filtered/transformed cards. -->
+  <div id="overviewProfileTooltip" class="profile-activity-tooltip overview-profile-tooltip" role="tooltip" hidden></div>
+  <div id="profileActivityTooltip" class="profile-activity-tooltip" role="tooltip" hidden></div>
 
   <script>document.write(`<script src="${window.tokdashPath('/static/theme-config.js')}"><\/script>`);</script>
   <script>
@@ -6280,7 +6282,9 @@
     }
 
     function syncProfileMilestonePalette() {
-      document.querySelectorAll('.profile-activity-shell, .overview-profile-band').forEach((shell) => {
+      document.querySelectorAll(
+        '.profile-activity-shell, .overview-profile-band, .profile-activity-tooltip',
+      ).forEach((shell) => {
         for (let level = 1; level <= 4; level += 1) {
           shell.style.setProperty(`--profile-milestone-${level}`, getProfileActivityColor(level));
         }
@@ -6484,28 +6488,126 @@
       return document.getElementById(tooltipId);
     }
 
+    function calculateProfileActivityTooltipPosition(targetRect, tooltipRect, viewport, gap = 8) {
+      const viewportWidth = Math.max(0, Number(viewport?.width) || 0);
+      const viewportHeight = Math.max(0, Number(viewport?.height) || 0);
+      const tooltipWidth = Math.max(0, Number(tooltipRect?.width) || 0);
+      const tooltipHeight = Math.max(0, Number(tooltipRect?.height) || 0);
+      const targetLeft = Number(targetRect?.left) || 0;
+      const targetTop = Number(targetRect?.top) || 0;
+      const targetWidth = Math.max(0, Number(targetRect?.width) || 0);
+      const targetBottom = Number(targetRect?.bottom) || targetTop;
+      const safeGap = Math.max(0, Number(gap) || 0);
+      const maxLeft = Math.max(safeGap, viewportWidth - tooltipWidth - safeGap);
+      const maxTop = Math.max(safeGap, viewportHeight - tooltipHeight - safeGap);
+      const centeredLeft = targetLeft + (targetWidth - tooltipWidth) / 2;
+      const left = Math.max(safeGap, Math.min(maxLeft, centeredLeft));
+      const above = targetTop - tooltipHeight - safeGap;
+      const below = targetBottom + safeGap;
+      const fitsAbove = above >= safeGap;
+      const fitsBelow = below + tooltipHeight <= viewportHeight - safeGap;
+      let top;
+      if (fitsAbove) {
+        top = above;
+      } else if (fitsBelow) {
+        top = below;
+      } else {
+        const spaceAbove = Math.max(0, targetTop - safeGap);
+        const spaceBelow = Math.max(0, viewportHeight - targetBottom - safeGap);
+        top = spaceBelow >= spaceAbove ? below : above;
+      }
+      return {
+        left: Math.max(safeGap, Math.min(maxLeft, left)),
+        top: Math.max(safeGap, Math.min(maxTop, top)),
+      };
+    }
+
+    function getProfileActivityViewport() {
+      const visualViewport = window.visualViewport;
+      return {
+        width: visualViewport?.width || document.documentElement.clientWidth || window.innerWidth,
+        height: visualViewport?.height || document.documentElement.clientHeight || window.innerHeight,
+      };
+    }
+
+    function snapProfileActivityTooltipCoordinate(value) {
+      const scale = Math.max(1, Number(window.devicePixelRatio) || 1);
+      return Math.round(value * scale) / scale;
+    }
+
+    let activeProfileActivityTooltipTarget = null;
+    let profileActivityTooltipPositionFrame = 0;
+
+    function positionActiveProfileActivityTooltip() {
+      profileActivityTooltipPositionFrame = 0;
+      const target = activeProfileActivityTooltipTarget;
+      const tooltip = resolveProfileActivityTooltip(target);
+      if (!target?.isConnected || !tooltip || tooltip.hidden) return;
+      const viewport = getProfileActivityViewport();
+      tooltip.style.maxWidth = `${Math.max(0, viewport.width - 16)}px`;
+      tooltip.style.maxHeight = `${Math.max(0, viewport.height - 16)}px`;
+      const targetRect = target.getBoundingClientRect();
+      if (
+        targetRect.bottom < 0
+        || targetRect.top > viewport.height
+        || targetRect.right < 0
+        || targetRect.left > viewport.width
+      ) {
+        hideProfileActivityTooltip(target);
+        return;
+      }
+      const position = calculateProfileActivityTooltipPosition(
+        targetRect,
+        tooltip.getBoundingClientRect(),
+        viewport,
+      );
+      tooltip.style.left = `${snapProfileActivityTooltipCoordinate(position.left)}px`;
+      tooltip.style.top = `${snapProfileActivityTooltipCoordinate(position.top)}px`;
+      tooltip.style.visibility = '';
+    }
+
+    function scheduleProfileActivityTooltipPosition() {
+      if (!activeProfileActivityTooltipTarget || profileActivityTooltipPositionFrame) return;
+      profileActivityTooltipPositionFrame = window.requestAnimationFrame(
+        positionActiveProfileActivityTooltip,
+      );
+    }
+
     function showProfileActivityTooltip(target, model) {
       const tooltip = resolveProfileActivityTooltip(target);
       if (!tooltip || !target || !model?.title) return;
+      activeProfileActivityTooltipTarget = target;
       renderProfileActivityTooltipContent(tooltip, model);
+      tooltip.style.visibility = 'hidden';
       tooltip.hidden = false;
       target.setAttribute('aria-describedby', tooltip.id);
-      const rect = target.getBoundingClientRect();
-      const gap = 8;
-      const left = Math.max(gap, Math.min(
-        window.innerWidth - tooltip.offsetWidth - gap,
-        rect.left + (rect.width - tooltip.offsetWidth) / 2,
-      ));
-      let top = rect.top - tooltip.offsetHeight - gap;
-      if (top < gap) top = Math.min(window.innerHeight - tooltip.offsetHeight - gap, rect.bottom + gap);
-      tooltip.style.left = `${left}px`;
-      tooltip.style.top = `${Math.max(gap, top)}px`;
+      positionActiveProfileActivityTooltip();
     }
 
     function hideProfileActivityTooltip(target) {
-      const tooltip = resolveProfileActivityTooltip(target);
-      if (tooltip) tooltip.hidden = true;
-      if (target) target.removeAttribute('aria-describedby');
+      if (
+        target
+        && activeProfileActivityTooltipTarget
+        && activeProfileActivityTooltipTarget !== target
+      ) {
+        target.removeAttribute('aria-describedby');
+        return;
+      }
+      const describedTarget = target || activeProfileActivityTooltipTarget;
+      const tooltips = target
+        ? [resolveProfileActivityTooltip(target)]
+        : Array.from(document.querySelectorAll('.profile-activity-tooltip'));
+      tooltips.forEach((tooltip) => {
+        if (tooltip) tooltip.hidden = true;
+      });
+      if (!target || activeProfileActivityTooltipTarget === target) {
+        activeProfileActivityTooltipTarget = null;
+      }
+      if (profileActivityTooltipPositionFrame) {
+        window.cancelAnimationFrame(profileActivityTooltipPositionFrame);
+        profileActivityTooltipPositionFrame = 0;
+      }
+      describedTarget?.removeAttribute('aria-describedby');
     }
 
     function bindProfileActivityTooltip(target, model) {
@@ -6515,6 +6617,22 @@
       target.addEventListener('focus', () => showProfileActivityTooltip(target, model));
       target.addEventListener('blur', () => hideProfileActivityTooltip(target));
     }
+
+    window.addEventListener('resize', scheduleProfileActivityTooltipPosition, { passive: true });
+    window.addEventListener('scroll', scheduleProfileActivityTooltipPosition, {
+      passive: true,
+      capture: true,
+    });
+    window.visualViewport?.addEventListener(
+      'resize',
+      scheduleProfileActivityTooltipPosition,
+      { passive: true },
+    );
+    window.visualViewport?.addEventListener(
+      'scroll',
+      scheduleProfileActivityTooltipPosition,
+      { passive: true },
+    );
 
     function renderProfileSummary(summary) {
       document.getElementById('profileStatRecordedTokens').textContent = formatProfileMetricNumber(summary.recordedTokens || 0);

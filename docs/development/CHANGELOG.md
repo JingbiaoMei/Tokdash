@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+## 1.5.1 - 2026-07-28
+
+### Added
+
+- Added a synchronized, locally persisted Milestones switch to the Overview and Profile activity legends. Milestone highlighting defaults to off.
+
+### Changed
+
+- Matched milestone badges and cell glows to each active heatmap theme.
+- Reworked the Paper activity palette around parchment, warm copper, and aged-ink tones in light and dark modes.
+
 ## 1.5.0 - 2026-07-28
 
 ### Added

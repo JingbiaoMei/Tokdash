@@ -444,6 +444,123 @@
     .heatmap-year-grid{display:grid;grid-auto-flow:column;grid-template-rows:repeat(7,var(--hy-cell));grid-auto-columns:var(--hy-cell);gap:var(--hy-gap);padding-top:4px;}
     .heatmap-year-cell{width:var(--hy-cell);height:var(--hy-cell);border-radius:3px;border:1px solid rgba(226,232,240,0.6);cursor:pointer;}
 
+    .profile-activity-shell{max-width:732px;margin:0 auto;}
+    .profile-activity-summary-scroll{overflow-x:auto;padding-bottom:2px;}
+    .profile-activity-summary{display:grid;grid-template-columns:repeat(5,minmax(120px,1fr));min-width:600px;border:1px solid color-mix(in srgb,var(--color-primary) 18%,var(--color-border));border-radius:16px;overflow:hidden;background:color-mix(in srgb,var(--color-surface-glass) 88%,transparent);box-shadow:inset 0 1px 0 color-mix(in srgb,var(--color-primary) 13%,transparent),0 12px 32px color-mix(in srgb,var(--color-primary) 7%,transparent);}
+    .profile-activity-stat{--profile-stat-tone:var(--color-primary);position:relative;padding:12px 8px;text-align:center;}
+    .profile-activity-stat[data-tone="secondary"]{--profile-stat-tone:var(--color-secondary);}
+    .profile-activity-stat[data-tone="cost"]{--profile-stat-tone:var(--color-cost);}
+    .profile-activity-stat[data-tone="cta"]{--profile-stat-tone:var(--color-cta);}
+    .profile-activity-stat+.profile-activity-stat::before{content:"";position:absolute;left:0;top:14px;bottom:14px;width:1px;background:var(--color-border);}
+    .profile-activity-stat dd{margin:0;color:var(--profile-stat-tone);font-weight:850;font-size:15px;text-shadow:0 0 14px color-mix(in srgb,var(--profile-stat-tone) 20%,transparent);}
+    .profile-activity-stat dt{margin-top:3px;color:var(--color-muted);font-size:12px;white-space:nowrap;}
+    .profile-activity-head{display:flex;align-items:center;gap:8px;margin:32px 0 12px;}
+    .profile-activity-head h3{display:flex;align-items:center;gap:8px;margin-right:auto;font-size:16px;font-weight:800;}
+    .profile-activity-head h3::before{content:"";width:4px;height:16px;border-radius:999px;background:var(--color-primary);box-shadow:0 0 12px color-mix(in srgb,var(--color-primary) 38%,transparent);}
+    .profile-activity-mode{border:1px solid transparent;border-radius:999px;padding:5px 9px;background:transparent;color:var(--color-muted);font:inherit;line-height:1.2;cursor:pointer;transition:color .15s ease,background .15s ease,border-color .15s ease,box-shadow .15s ease;}
+    .profile-activity-mode:is(:hover,:focus-visible){color:var(--color-text);border-color:color-mix(in srgb,var(--color-primary) 18%,transparent);background:color-mix(in srgb,var(--color-primary) 8%,transparent);}
+    .profile-activity-mode:focus-visible{outline:2px solid color-mix(in srgb,var(--color-primary) 52%,transparent);outline-offset:2px;}
+    .profile-activity-mode[aria-pressed="true"]{color:var(--color-primary);border-color:color-mix(in srgb,var(--color-primary) 32%,transparent);background:color-mix(in srgb,var(--color-primary) 13%,transparent);box-shadow:inset 0 1px 0 color-mix(in srgb,var(--color-primary) 18%,transparent),0 0 14px color-mix(in srgb,var(--color-primary) 10%,transparent);}
+    .profile-activity-scroll{--profile-interactive-aura-reserve:26px;--profile-edge-safety-gutter:8px;overflow-x:auto;padding-block:8px 12px;padding-inline:0 calc(var(--profile-interactive-aura-reserve) + var(--profile-edge-safety-gutter));}
+    .profile-activity-grid-wrap{position:relative;min-width:595px;}
+    .profile-activity-grid{display:grid;grid-auto-flow:column;grid-template-columns:repeat(52,minmax(8px,1fr));grid-template-rows:repeat(7,minmax(8px,1fr));gap:3.5px;width:100%;}
+    .profile-activity-cell{width:100%;aspect-ratio:1;border:0;border-radius:2px;background:var(--profile-activity-empty,var(--color-border));padding:0;position:relative;transition:filter .12s ease,transform .12s ease,box-shadow .12s ease;}
+    button.profile-activity-cell{cursor:pointer;}
+    button.profile-activity-cell:not(:disabled):is(:hover,:focus-visible){z-index:1;outline:none;filter:brightness(1.14);transform:translateY(-1px);box-shadow:0 0 0 1px color-mix(in srgb,var(--color-primary) 62%,transparent),0 4px 10px color-mix(in srgb,var(--color-primary) 20%,transparent);}
+    .profile-activity-cell.is-aggregate{background:var(--profile-activity-strong,var(--color-primary));}
+    .profile-activity-cell.is-column-hover.is-aggregate{filter:brightness(1.16);box-shadow:0 0 0 1px color-mix(in srgb,var(--profile-activity-strong,var(--color-primary)) 72%,transparent),0 0 9px color-mix(in srgb,var(--color-primary) 18%,transparent);}
+    .profile-activity-cell.is-column-hover:not(.is-aggregate){background:color-mix(in srgb,var(--color-primary) 16%,var(--color-border));box-shadow:0 0 0 1px color-mix(in srgb,var(--color-primary) 30%,transparent);}
+    .profile-activity-week-hits{position:absolute;inset:0;display:grid;grid-template-columns:repeat(52,minmax(8px,1fr));gap:3.5px;pointer-events:none;}
+    .profile-activity-week-hit{position:relative;min-width:8px;border:0;background:transparent;padding:0;pointer-events:auto;cursor:pointer;}
+    .profile-activity-week-hit:focus-visible{outline:2px solid color-mix(in srgb,var(--color-primary) 62%,transparent);outline-offset:2px;border-radius:2px;}
+    .profile-activity-tooltip{position:fixed;z-index:120;width:min(260px,calc(100vw - 16px));padding:0;overflow:hidden;border:1px solid color-mix(in srgb,var(--color-primary) 24%,var(--color-border));border-radius:10px;background:color-mix(in srgb,var(--color-surface-glass) 96%,var(--color-bg));color:var(--color-text);box-shadow:var(--shadow-md),0 0 24px color-mix(in srgb,var(--color-primary) 10%,transparent);white-space:normal;text-align:left;font-size:11px;line-height:1.35;pointer-events:none;backdrop-filter:blur(18px);}
+    .profile-activity-tooltip[hidden]{display:none;}
+    .profile-activity-tooltip-header{padding:8px 10px;border-bottom:1px solid color-mix(in srgb,var(--color-primary) 20%,var(--color-border));background:color-mix(in srgb,var(--color-primary) 12%,transparent);color:var(--color-primary);font-weight:800;letter-spacing:.01em;}
+    .profile-activity-tooltip-body{padding:6px 10px 8px;}
+    .profile-activity-tooltip-row{--profile-tooltip-tone:var(--color-primary);display:grid;grid-template-columns:6px minmax(0,1fr) auto;align-items:center;gap:7px;padding:3px 0;}
+    .profile-activity-tooltip-row[data-tone="secondary"]{--profile-tooltip-tone:var(--color-secondary);}
+    .profile-activity-tooltip-row[data-tone="cost"]{--profile-tooltip-tone:var(--color-cost);}
+    .profile-activity-tooltip-row[data-tone="cta"]{--profile-tooltip-tone:var(--color-cta);}
+    .profile-activity-tooltip-row[data-tone="reasoning"]{--profile-tooltip-tone:color-mix(in srgb,var(--color-primary) 55%,var(--color-secondary));}
+    .profile-activity-tooltip-row[data-prominent="true"]{margin:1px 0 4px;padding:6px;border:1px solid color-mix(in srgb,var(--profile-tooltip-tone) 18%,transparent);border-radius:7px;background:color-mix(in srgb,var(--profile-tooltip-tone) 8%,transparent);}
+    .profile-activity-tooltip-row[data-key="estimatedCost"]{margin-top:4px;padding-top:7px;border-top:1px solid var(--color-border);}
+    .profile-activity-tooltip-dot{width:6px;height:6px;border-radius:50%;background:var(--profile-tooltip-tone);box-shadow:0 0 7px color-mix(in srgb,var(--profile-tooltip-tone) 42%,transparent);}
+    .profile-activity-tooltip-label{min-width:0;color:var(--color-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .profile-activity-tooltip-value{color:var(--profile-tooltip-tone);font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-variant-numeric:tabular-nums;font-weight:750;text-align:right;white-space:nowrap;}
+    .profile-activity-tooltip-row[data-prominent="true"] .profile-activity-tooltip-value{font-size:13px;font-weight:850;}
+    .profile-activity-shell,.overview-profile-band{--profile-milestone-1:#06b6d4;--profile-milestone-2:#8b5cf6;--profile-milestone-3:#f59e0b;--profile-milestone-4:#ec4899;--profile-milestone-keyline:transparent;}
+    .profile-activity-cell[data-milestone="1"],.profile-activity-week-hit[data-milestone="1"],.profile-activity-tooltip-badge[data-milestone="1"]{--profile-milestone-tone:var(--profile-milestone-1);}
+    .profile-activity-cell[data-milestone="2"],.profile-activity-week-hit[data-milestone="2"],.profile-activity-tooltip-badge[data-milestone="2"]{--profile-milestone-tone:var(--profile-milestone-2);}
+    .profile-activity-cell[data-milestone="3"],.profile-activity-week-hit[data-milestone="3"],.profile-activity-tooltip-badge[data-milestone="3"]{--profile-milestone-tone:var(--profile-milestone-3);}
+    .profile-activity-cell[data-milestone="4"],.profile-activity-week-hit[data-milestone="4"],.profile-activity-tooltip-badge[data-milestone="4"]{--profile-milestone-tone:var(--profile-milestone-4);}
+    .profile-activity-cell[data-milestone="1"]{box-shadow:inset 0 0 0 1px var(--profile-milestone-keyline),0 0 0 2px color-mix(in srgb,var(--profile-milestone-tone) 86%,transparent),0 0 11px color-mix(in srgb,var(--profile-milestone-tone) 72%,transparent);}
+    .profile-activity-cell[data-milestone="2"]{box-shadow:inset 0 0 0 1px var(--profile-milestone-keyline),0 0 0 2px color-mix(in srgb,var(--profile-milestone-tone) 92%,transparent),0 0 14px color-mix(in srgb,var(--profile-milestone-tone) 80%,transparent);}
+    .profile-activity-cell[data-milestone="3"]{box-shadow:inset 0 0 0 1px var(--profile-milestone-keyline),0 0 0 1px color-mix(in srgb,var(--color-text) 82%,transparent),0 0 0 3px color-mix(in srgb,var(--profile-milestone-tone) 72%,transparent),0 0 17px color-mix(in srgb,var(--profile-milestone-tone) 88%,transparent);}
+    .profile-activity-cell[data-milestone="4"]{box-shadow:inset 0 0 0 1px var(--profile-milestone-keyline),0 0 0 2px color-mix(in srgb,var(--color-text) 92%,transparent),0 0 0 4px color-mix(in srgb,var(--profile-milestone-tone) 78%,transparent),0 0 22px color-mix(in srgb,var(--profile-milestone-tone) 96%,transparent);}
+    button.profile-activity-cell[data-milestone]:not(:disabled):is(:hover,:focus-visible),.profile-activity-cell[data-milestone].is-column-hover{box-shadow:inset 0 0 0 1px var(--profile-milestone-keyline),0 0 0 2px color-mix(in srgb,var(--color-text) 94%,transparent),0 0 0 4px color-mix(in srgb,var(--profile-milestone-tone) 84%,transparent),0 0 26px color-mix(in srgb,var(--profile-milestone-tone) 96%,transparent);}
+    .profile-activity-week-hit[data-milestone]:focus-visible{outline-color:var(--profile-milestone-tone);box-shadow:0 0 12px color-mix(in srgb,var(--profile-milestone-tone) 24%,transparent);}
+    .profile-activity-tooltip-header{display:flex;align-items:center;justify-content:space-between;gap:8px;}
+    .profile-activity-tooltip-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+    .profile-activity-tooltip-badge{flex:0 0 auto;padding:2px 6px;border:1px solid color-mix(in srgb,var(--profile-milestone-tone) 48%,transparent);border-radius:999px;background:color-mix(in srgb,var(--profile-milestone-tone) 13%,transparent);color:var(--profile-milestone-tone);box-shadow:0 0 10px color-mix(in srgb,var(--profile-milestone-tone) 22%,transparent);font-size:9px;font-weight:900;letter-spacing:.04em;}
+    .profile-activity-tooltip-row[data-tone="milestone-1"]{--profile-tooltip-tone:var(--profile-milestone-1);}
+    .profile-activity-tooltip-row[data-tone="milestone-2"]{--profile-tooltip-tone:var(--profile-milestone-2);}
+    .profile-activity-tooltip-row[data-tone="milestone-3"]{--profile-tooltip-tone:var(--profile-milestone-3);}
+    .profile-activity-tooltip-row[data-tone="milestone-4"]{--profile-tooltip-tone:var(--profile-milestone-4);}
+    .overview-profile-cell[data-milestone="1"]{box-shadow:inset 0 0 0 1px var(--profile-milestone-keyline),0 0 0 1px color-mix(in srgb,var(--profile-milestone-tone) 72%,transparent),0 0 6px color-mix(in srgb,var(--profile-milestone-tone) 42%,transparent);}
+    .overview-profile-cell[data-milestone="2"]{box-shadow:inset 0 0 0 1px var(--profile-milestone-keyline),0 0 0 1px color-mix(in srgb,var(--profile-milestone-tone) 78%,transparent),0 0 8px color-mix(in srgb,var(--profile-milestone-tone) 52%,transparent);}
+    .overview-profile-cell[data-milestone="3"]{box-shadow:inset 0 0 0 1px var(--profile-milestone-keyline),0 0 0 1px color-mix(in srgb,var(--color-text) 74%,transparent),0 0 0 2px color-mix(in srgb,var(--profile-milestone-tone) 48%,transparent),0 0 10px color-mix(in srgb,var(--profile-milestone-tone) 62%,transparent);}
+    .overview-profile-cell[data-milestone="4"]{box-shadow:inset 0 0 0 1px var(--profile-milestone-keyline),0 0 0 1px color-mix(in srgb,var(--color-text) 82%,transparent),0 0 0 3px color-mix(in srgb,var(--profile-milestone-tone) 58%,transparent),0 0 13px color-mix(in srgb,var(--profile-milestone-tone) 72%,transparent);}
+    .overview-profile-grid button.overview-profile-cell[data-milestone]:not(:disabled):is(:hover,:focus-visible),.overview-profile-grid .overview-profile-cell[data-milestone].is-column-hover{box-shadow:inset 0 0 0 1px var(--profile-milestone-keyline),0 0 0 1px color-mix(in srgb,var(--color-text) 88%,transparent),0 0 0 3px color-mix(in srgb,var(--profile-milestone-tone) 68%,transparent),0 0 16px color-mix(in srgb,var(--profile-milestone-tone) 82%,transparent);}
+    .profile-activity-months{display:flex;justify-content:space-between;min-width:595px;margin-top:8px;color:var(--color-muted);font-size:12px;}
+    .profile-activity-legend{display:flex;align-items:center;justify-content:flex-end;gap:8px;min-width:595px;margin-top:10px;color:var(--color-muted);font-size:10px;line-height:1;white-space:nowrap;}
+    .profile-activity-legend-scale,.profile-activity-legend-milestones{display:flex;align-items:center;gap:5px;}
+    .profile-activity-legend-glyph{display:flex;align-items:center;gap:3px;height:12px;}
+    .profile-activity-legend-swatches{align-items:center;}
+    .profile-activity-legend-swatch{width:10px;height:10px;border-radius:2px;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--color-text) 7%,transparent);}
+    .profile-activity-legend-bars{align-items:flex-end;}
+    .profile-activity-legend-bar{width:6px;border-radius:2px 2px 1px 1px;background:var(--color-primary);opacity:.82;}
+    .profile-activity-legend-bar:nth-child(1){height:3px;}.profile-activity-legend-bar:nth-child(2){height:5px;}.profile-activity-legend-bar:nth-child(3){height:7px;}.profile-activity-legend-bar:nth-child(4){height:9px;}.profile-activity-legend-bar:nth-child(5){height:12px;}
+    .profile-activity-legend-divider{width:1px;height:12px;background:var(--color-border);}
+    .profile-activity-legend-badge{padding:3px 5px;border:1px solid color-mix(in srgb,var(--profile-milestone-tone) 54%,transparent);border-radius:999px;background:color-mix(in srgb,var(--profile-milestone-tone) 7%,transparent);color:var(--profile-milestone-tone);font-size:8px;font-weight:850;letter-spacing:.02em;}
+    .profile-activity-legend-badge[data-milestone="1"]{--profile-milestone-tone:var(--profile-milestone-1);}.profile-activity-legend-badge[data-milestone="2"]{--profile-milestone-tone:var(--profile-milestone-2);}.profile-activity-legend-badge[data-milestone="3"]{--profile-milestone-tone:var(--profile-milestone-3);}.profile-activity-legend-badge[data-milestone="4"]{--profile-milestone-tone:var(--profile-milestone-4);}
+    @media(max-width:640px){.profile-activity-head{gap:6px;flex-wrap:wrap;font-size:13px;}.profile-activity-head h3{flex:1 0 100%;margin-bottom:2px;}.profile-activity-mode{padding:5px 8px;}.profile-activity-shell{max-width:100%;}}
+
+    .overview-profile-band{display:grid;grid-template-columns:minmax(180px,220px) minmax(0,1fr);gap:20px;align-items:stretch;min-height:128px;padding:16px 18px;border-color:color-mix(in srgb,var(--color-primary) 18%,var(--color-border));background:linear-gradient(105deg,var(--color-surface-glass),color-mix(in srgb,var(--color-primary) 7%,var(--color-surface-glass)));box-shadow:0 10px 28px color-mix(in srgb,var(--color-primary) 6%,transparent);}
+    .overview-profile-copy{display:flex;flex-direction:column;justify-content:center;padding-right:18px;border-right:1px solid color-mix(in srgb,var(--color-primary) 16%,var(--color-border));}
+    .overview-profile-eyebrow{color:var(--color-primary);font-size:10px;font-weight:850;letter-spacing:.08em;text-transform:uppercase;}
+    .overview-profile-copy h2{margin-top:5px;font-size:15px;font-weight:850;}
+    .overview-profile-copy p{margin-top:2px;color:var(--color-muted);font-size:11px;}
+    .overview-profile-open{display:inline-flex;align-items:center;gap:5px;width:max-content;margin-top:11px;border:0;background:transparent;color:var(--color-primary);font:inherit;font-size:11px;font-weight:800;cursor:pointer;}
+    .overview-profile-open:is(:hover,:focus-visible){text-decoration:underline;text-underline-offset:3px;}
+    .overview-profile-open:focus-visible{outline:2px solid color-mix(in srgb,var(--color-primary) 52%,transparent);outline-offset:3px;border-radius:4px;}
+    .overview-profile-main{display:flex;min-width:0;align-items:center;}
+    .overview-profile-state,.overview-profile-ready{width:100%;}
+    .overview-profile-band:not([data-state="loading"]) .overview-profile-loading,.overview-profile-band:not([data-state="error"]) .overview-profile-unavailable,.overview-profile-band:not([data-state="ready"]) .overview-profile-ready{display:none;}
+    .overview-profile-skeleton-metrics{display:flex;gap:18px;margin-bottom:12px;}.overview-profile-skeleton-metrics i{display:block;width:82px;height:20px;border-radius:6px;background:color-mix(in srgb,var(--color-border) 72%,transparent);}
+    .overview-profile-skeleton-grid{height:57px;border-radius:4px;background:linear-gradient(90deg,color-mix(in srgb,var(--color-border) 58%,transparent),color-mix(in srgb,var(--color-primary) 10%,var(--color-border)),color-mix(in srgb,var(--color-border) 58%,transparent));background-size:200% 100%;animation:overview-profile-pulse 1.4s ease-in-out infinite;}
+    @keyframes overview-profile-pulse{50%{background-position:100% 0;}}
+    .overview-profile-unavailable{color:var(--color-muted);font-size:12px;}
+    .overview-profile-metrics{display:flex;align-items:baseline;gap:18px;margin-bottom:10px;}
+    .overview-profile-metrics>div{--overview-profile-tone:var(--color-primary);display:flex;align-items:baseline;gap:5px;}.overview-profile-metrics>div[data-tone="cost"]{--overview-profile-tone:var(--color-cost);}.overview-profile-metrics>div[data-tone="cta"]{--overview-profile-tone:var(--color-cta);}
+    .overview-profile-metrics dd{margin:0;color:var(--overview-profile-tone);font-size:15px;font-weight:850;font-variant-numeric:tabular-nums;}.overview-profile-metrics dt{color:var(--color-muted);font-size:10px;white-space:nowrap;}
+    .overview-profile-heat-head{display:flex;align-items:center;gap:10px;margin-bottom:6px;color:var(--color-muted);font-size:10px;}
+    .overview-profile-heat-head>span{margin-right:auto;}
+    .overview-profile-modes{display:flex;align-items:center;gap:2px;}
+    .overview-profile-mode{padding:4px 7px;font-size:10px;}
+    .overview-profile-scroll{--overview-profile-interactive-aura-reserve:16px;--profile-edge-safety-gutter:8px;overflow-x:auto;padding-block:2px 4px;padding-inline:0 calc(var(--overview-profile-interactive-aura-reserve) + var(--profile-edge-safety-gutter));}
+    .overview-profile-grid-wrap{position:relative;min-width:595px;}
+    .overview-profile-grid{display:grid;grid-auto-flow:column;grid-template-columns:repeat(52,minmax(8px,1fr));grid-template-rows:repeat(7,minmax(8px,1fr));gap:3.5px;width:100%;}
+    .overview-profile-week-hits{grid-template-columns:repeat(52,minmax(8px,1fr));gap:3.5px;}
+    .overview-profile-cell{border-radius:2px;}
+    .overview-profile-legend{margin-top:7px;gap:6px;font-size:9px;}
+    .overview-profile-legend .profile-activity-legend-scale,.overview-profile-legend .profile-activity-legend-milestones{gap:4px;}
+    .overview-profile-legend .profile-activity-legend-swatch{width:8px;height:8px;}
+    .overview-profile-legend .profile-activity-legend-glyph{height:10px;}
+    .overview-profile-legend .profile-activity-legend-bar:nth-child(5){height:10px;}
+    .overview-profile-legend .profile-activity-legend-badge{padding:2px 4px;font-size:7px;}
+    @media(max-width:800px){.overview-profile-band{grid-template-columns:1fr;gap:14px;}.overview-profile-copy{padding:0 0 12px;border-right:0;border-bottom:1px solid color-mix(in srgb,var(--color-primary) 16%,var(--color-border));}.overview-profile-metrics{flex-wrap:wrap;}.overview-profile-heat-head{align-items:flex-start;flex-wrap:wrap;}.overview-profile-modes{margin-left:auto;}}
+    @media(prefers-reduced-motion:reduce){.overview-profile-skeleton-grid{animation:none;}.overview-profile-cell{transform:none!important;}}
+
     .pricing-editor {
       width: 100%;
       min-height: 62vh;
@@ -824,6 +941,8 @@
     /* Reduce motion */
     @media (prefers-reduced-motion: reduce) {
       * { transition: none !important; scroll-behavior: auto !important; }
+      .profile-activity-cell{transform:none!important;}
+      button.profile-activity-cell[data-milestone]:not(:disabled):is(:hover,:focus-visible){transform:none;transition:none;}
     }
   </style>
   <script>document.write(`<link rel="stylesheet" href="${window.tokdashPath('/static/themes.css')}" />`);</script>
@@ -988,6 +1107,49 @@
             <canvas id="modelChart" aria-label="Top models by cost chart" role="img"></canvas>
           </div>
         </div>
+      </section>
+
+      <section id="overviewProfileSummary" class="surface overview-profile-band mb-6" data-state="loading" aria-labelledby="overviewProfileTitle" aria-busy="true">
+        <div class="overview-profile-copy">
+          <div class="overview-profile-eyebrow" data-i18n="overviewProfileEyebrow">Profile activity</div>
+          <h2 id="overviewProfileTitle" data-i18n="overviewProfileTitle">Your year in tokens</h2>
+          <p data-i18n="overviewProfileRange">Past 52 weeks</p>
+          <button id="overviewProfileOpen" class="overview-profile-open" type="button">
+            <span data-i18n="viewFullProfile">View full profile</span>
+            <span aria-hidden="true">→</span>
+          </button>
+        </div>
+        <div class="overview-profile-main">
+          <div id="overviewProfileLoading" class="overview-profile-state overview-profile-loading" aria-live="polite">
+            <span class="sr-only" data-i18n="loading">Loading…</span>
+            <div class="overview-profile-skeleton-metrics" aria-hidden="true"><i></i><i></i><i></i></div>
+            <div class="overview-profile-skeleton-grid" aria-hidden="true"></div>
+          </div>
+          <div id="overviewProfileUnavailable" class="overview-profile-state overview-profile-unavailable" data-i18n="overviewProfileUnavailable">Profile activity is temporarily unavailable.</div>
+          <div id="overviewProfileReady" class="overview-profile-ready">
+            <dl class="overview-profile-metrics">
+              <div data-tone="cost"><dd id="overviewProfileActiveDays">—</dd><dt data-i18n="activeDays">Active Days</dt></div>
+              <div data-tone="cta"><dd id="overviewProfileCurrentStreak">—</dd><dt data-i18n="streak">Streak</dt></div>
+              <div data-tone="primary"><dd id="overviewProfileLongestStreak">—</dd><dt data-i18n="longestStreak">Longest Streak</dt></div>
+            </dl>
+            <div class="overview-profile-heat-head">
+              <span id="overviewProfileActivityLabel" data-i18n="tokenActivity">Token activity</span>
+              <div class="overview-profile-modes" role="group" aria-labelledby="overviewProfileActivityLabel">
+                <button id="overviewProfileModeDaily" class="profile-activity-mode overview-profile-mode" type="button" aria-pressed="true" data-i18n="daily">Daily</button>
+                <button id="overviewProfileModeWeekly" class="profile-activity-mode overview-profile-mode" type="button" aria-pressed="false" data-i18n="weekly">Weekly</button>
+                <button id="overviewProfileModeCumulative" class="profile-activity-mode overview-profile-mode" type="button" aria-pressed="false" data-i18n="cumulative">Cumulative</button>
+              </div>
+            </div>
+            <div id="overviewProfileScroller" class="overview-profile-scroll">
+              <div id="overviewProfileGridWrap" class="overview-profile-grid-wrap">
+                <div id="overviewProfileGrid" class="overview-profile-grid" role="grid" aria-label="Token activity"></div>
+                <div id="overviewProfileWeekHits" class="profile-activity-week-hits overview-profile-week-hits" hidden></div>
+              </div>
+              <div id="overviewProfileLegend" class="profile-activity-legend overview-profile-legend"></div>
+            </div>
+          </div>
+        </div>
+        <div id="overviewProfileTooltip" class="profile-activity-tooltip overview-profile-tooltip" role="tooltip" hidden></div>
       </section>
 
       <!-- Tables -->
@@ -1410,7 +1572,7 @@
 
     <!-- Stats Tab -->
     <div id="stats-content" class="tab-content">
-      <section class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <section id="statsSummaryCards" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <div class="surface p-4">
           <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="topModelCost">Top Model (Cost)</div>
           <div id="statFavoriteModel" class="mt-2 font-extrabold mono">Loading…</div>
@@ -1445,7 +1607,7 @@
         </div>
       </section>
 
-      <section class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+      <section id="statsInsightCards" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
         <div class="surface p-4">
           <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="peakDay">Peak Day</div>
           <div id="statPeakDay" class="mt-2 font-extrabold mono">—</div>
@@ -1470,14 +1632,15 @@
 
       <section class="surface p-5">
         <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
-          <h2 class="text-base font-extrabold mono" data-i18n="dailyActivity">Daily Activity</h2>
+          <h2 id="statsViewTitle" class="text-base font-extrabold mono" data-i18n="dailyActivity">Daily Activity</h2>
           <div class="flex flex-col sm:flex-row gap-2 sm:items-center">
             <div class="flex gap-2">
               <button id="viewMonth" class="btn btn-primary" type="button" data-i18n="month">Month</button>
               <button id="viewYear" class="btn btn-ghost" type="button" data-i18n="year">Year</button>
               <button id="view3D" class="btn btn-ghost" type="button" data-i18n="threeD">3D</button>
+              <button id="viewProfile" class="btn btn-ghost" type="button" data-i18n="profileView">Profile</button>
             </div>
-            <div class="flex items-center gap-2 rounded-xl border px-2 py-1.5" style="border-color: var(--color-border); background: rgba(255,255,255,0.42);">
+            <div id="statsMetricControls" class="flex items-center gap-2 rounded-xl border px-2 py-1.5" style="border-color: var(--color-border); background: rgba(255,255,255,0.42);">
               <span class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="calendarMetric">Metric</span>
               <button id="metricTokensBtn" class="btn btn-primary" type="button" style="min-height:36px; padding:8px 12px;" data-i18n="metricTokens">Tokens</button>
               <button id="metricEnergyBtn" class="btn btn-ghost" type="button" style="min-height:36px; padding:8px 12px;" data-i18n="metricEnergy">Energy</button>
@@ -1491,6 +1654,36 @@
         <div id="statsStatus" class="text-center py-10" style="display:none; color: var(--color-muted);">
           <div id="statsStatusMsg" class="font-semibold">Loading…</div>
           <button id="statsRetryBtn" class="btn btn-primary mt-3" type="button" style="display:none;" data-i18n="retry">Retry</button>
+        </div>
+
+        <!-- Profile view -->
+        <div id="calendarProfileView" style="display:none;">
+          <div class="profile-activity-shell">
+            <div class="profile-activity-summary-scroll">
+              <dl class="profile-activity-summary">
+                <div class="profile-activity-stat" data-tone="primary"><dd id="profileStatRecordedTokens">—</dd><dt data-i18n="recordedTokens">Recorded tokens</dt></div>
+                <div class="profile-activity-stat" data-tone="secondary"><dd id="profileStatPeakDay">—</dd><dt data-i18n="profilePeakTokens">Peak tokens</dt></div>
+                <div class="profile-activity-stat" data-tone="cost"><dd id="profileStatActiveDays">—</dd><dt data-i18n="activeDays">Active Days</dt></div>
+                <div class="profile-activity-stat" data-tone="cta"><dd id="profileStatCurrentStreak">—</dd><dt data-i18n="streak">Streak</dt></div>
+                <div class="profile-activity-stat" data-tone="primary"><dd id="profileStatLongestStreak">—</dd><dt data-i18n="longestStreak">Longest Streak</dt></div>
+              </dl>
+            </div>
+            <div class="profile-activity-head">
+              <h3 data-i18n="tokenActivity">Token activity</h3>
+              <button id="profileModeDaily" class="profile-activity-mode" type="button" aria-pressed="true" data-i18n="daily">Daily</button>
+              <button id="profileModeWeekly" class="profile-activity-mode" type="button" aria-pressed="false" data-i18n="weekly">Weekly</button>
+              <button id="profileModeCumulative" class="profile-activity-mode" type="button" aria-pressed="false" data-i18n="cumulative">Cumulative</button>
+            </div>
+            <div id="profileActivityScroller" class="profile-activity-scroll">
+              <div class="profile-activity-grid-wrap">
+                <div id="profileActivityGrid" class="profile-activity-grid" role="grid" aria-label="Token activity"></div>
+                <div id="profileActivityWeekHits" class="profile-activity-week-hits" hidden></div>
+              </div>
+              <div id="profileActivityMonths" class="profile-activity-months" aria-hidden="true"></div>
+              <div id="profileActivityLegend" class="profile-activity-legend"></div>
+            </div>
+            <div id="profileActivityTooltip" class="profile-activity-tooltip" role="tooltip" hidden></div>
+          </div>
         </div>
 
         <!-- Month view -->
@@ -2148,6 +2341,20 @@
         activeDays: 'Active Days',
         totalDays: 'Total Days',
         dailyActivity: 'Daily Activity',
+        overviewProfileEyebrow: 'Profile activity',
+        overviewProfileTitle: 'Your year in tokens',
+        overviewProfileRange: 'Past 52 weeks',
+        viewFullProfile: 'View full profile',
+        overviewProfileUnavailable: 'Profile activity is temporarily unavailable.',
+        profileView: 'Profile',
+        recordedTokens: 'Recorded tokens',
+        profilePeakTokens: 'Peak tokens',
+        tokenActivity: 'Token activity',
+        daily: 'Daily',
+        weekly: 'Weekly',
+        cumulative: 'Cumulative',
+        estimatedCost: 'Estimated cost',
+        milestone: 'Milestone',
         calendarMetric: 'Metric',
         metricTokens: 'Tokens',
         metricEnergy: 'Energy',
@@ -2165,6 +2372,7 @@
         threeD: '3D',
         less: 'Less',
         more: 'More',
+        activityLegend: 'Token activity legend',
         monthStats: 'Month Stats',
         monthlyTotals: 'Monthly Totals',
         messages: 'Messages',
@@ -2172,6 +2380,7 @@
         close: 'Close',
         tokenBreakdown: 'Token Breakdown',
         cacheRead: 'Cache Read',
+        cacheWrite: 'Cache write',
         reasoning: 'Reasoning',
         modelsUsed: 'Models Used',
         source: 'Source',
@@ -2386,6 +2595,20 @@
         activeDays: '活跃天数',
         totalDays: '总天数',
         dailyActivity: '每日活跃',
+        overviewProfileEyebrow: 'Profile 活动',
+        overviewProfileTitle: '你的 Token 年度足迹',
+        overviewProfileRange: '过去 52 周',
+        viewFullProfile: '查看完整 Profile',
+        overviewProfileUnavailable: 'Profile 活动暂时不可用。',
+        profileView: '活动概览',
+        recordedTokens: '已记录 Token',
+        profilePeakTokens: '峰值 Token',
+        tokenActivity: 'Token 活跃度',
+        daily: '每日',
+        weekly: '每周',
+        cumulative: '累计',
+        estimatedCost: '预估费用',
+        milestone: '里程碑',
         calendarMetric: '指标',
         metricTokens: 'Tokens',
         metricEnergy: '能耗',
@@ -2403,6 +2626,7 @@
         threeD: '3D',
         less: '少',
         more: '多',
+        activityLegend: 'Token 活跃度图例',
         monthStats: '月度统计',
         monthlyTotals: '每月汇总',
         messages: '消息数',
@@ -2410,6 +2634,7 @@
         close: '关闭',
         tokenBreakdown: 'Token 明细',
         cacheRead: '缓存读取',
+        cacheWrite: '缓存写入',
         reasoning: '推理',
         modelsUsed: '使用的模型',
         source: '来源',
@@ -2989,6 +3214,10 @@
       updateTimestamp();
       updateMetricControls();
       syncDatePickerFooter();
+      if (typeof profileActivityMode !== 'undefined') {
+        renderProfileActivityLegend('profileActivityLegend', profileActivityMode);
+        renderProfileActivityLegend('overviewProfileLegend', profileActivityMode);
+      }
     }
 
     function rerenderPresentation() {
@@ -3009,7 +3238,8 @@
       if (document.getElementById('stats-content').classList.contains('active')) {
         loadStats({ preserveNavigation: true });
       } else if (calendarState.contributions?.length) {
-        if (calendarState.view === 'month') renderMonthHeatmap();
+        if (calendarState.view === 'profile') renderProfileView();
+        else if (calendarState.view === 'month') renderMonthHeatmap();
         else if (calendarState.view === 'year') {
           renderYearHeatmap();
           updateTopStatsForYear();
@@ -3383,6 +3613,7 @@
         }
       });
       scheduleIdle(() => updateCombinedModelsTable(lastCombinedModels));
+      renderOverviewProfilePreview();
     }
 
     // Window key for the data currently displayed, so deferred session loads
@@ -5708,21 +5939,41 @@
     }
 
     // Tabs
-    document.querySelectorAll('.tab-btn').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const tab = btn.dataset.tab;
-        document.querySelectorAll('.tab-btn').forEach((b) => b.setAttribute('aria-selected', 'false'));
-        btn.setAttribute('aria-selected', 'true');
+    let preserveStatsNavigationOnNextActivation = false;
 
-        document.querySelectorAll('.tab-content').forEach((c) => c.classList.remove('active'));
-        document.getElementById(`${tab}-content`).classList.add('active');
+    function activateDashboardTab(tab) {
+      const button = document.querySelector(`.tab-btn[data-tab="${tab}"]`);
+      const content = document.getElementById(`${tab}-content`);
+      if (!button || !content) return;
 
-        if (tab === 'stats') loadStats();
-        if (tab === 'overview' && lastUsageResponse) renderOverviewTab(lastUsageResponse);
-        if (tab === 'sessions') ensureSessionsLoaded();
-        if (tab === 'quota' && !quotaLoaded) loadQuota();
-        if (tab === 'pricing' && !pricingDbLoaded) loadPricingDb();
-      });
+      document.querySelectorAll('.tab-btn').forEach((item) => item.setAttribute('aria-selected', 'false'));
+      button.setAttribute('aria-selected', 'true');
+      document.querySelectorAll('.tab-content').forEach((item) => item.classList.remove('active'));
+      content.classList.add('active');
+
+      if (tab !== 'overview') {
+        const tooltip = document.getElementById('overviewProfileTooltip');
+        if (tooltip) tooltip.hidden = true;
+      }
+      if (tab === 'stats') {
+        const preserveNavigation = preserveStatsNavigationOnNextActivation;
+        preserveStatsNavigationOnNextActivation = false;
+        loadStats({ preserveNavigation });
+      }
+      if (tab === 'overview' && lastUsageResponse) renderOverviewTab(lastUsageResponse);
+      if (tab === 'sessions') ensureSessionsLoaded();
+      if (tab === 'quota' && !quotaLoaded) loadQuota();
+      if (tab === 'pricing' && !pricingDbLoaded) loadPricingDb();
+    }
+
+    function openOverviewProfile() {
+      preserveStatsNavigationOnNextActivation = true;
+      activateDashboardTab('stats');
+      setView('profile');
+    }
+
+    document.querySelectorAll('.tab-btn').forEach((button) => {
+      button.addEventListener('click', () => activateDashboardTab(button.dataset.tab));
     });
 
     document.getElementById('quotaRangeSelect')?.addEventListener('change', (e) => {
@@ -5765,7 +6016,7 @@
         return; // setView() restores the active view container
       }
       banner.style.display = 'block';
-      ['calendarMonthView', 'calendarYearView', 'calendar3DView'].forEach((id) => {
+      ['calendarProfileView', 'calendarMonthView', 'calendarYearView', 'calendar3DView'].forEach((id) => {
         const el = document.getElementById(id);
         if (el) el.style.display = 'none';
       });
@@ -5804,6 +6055,632 @@
     function fillYearDays(contributions, year) {
       const list = Array.isArray(contributions) ? contributions : [];
       return fillDateRange(new Date(year, 0, 1), new Date(year, 11, 31), new Map(list.map((d) => [d.date, d])));
+    }
+
+    function safeProfileNumber(value) {
+      const number = Number(value ?? 0);
+      return Number.isFinite(number) ? Math.max(0, number) : 0;
+    }
+
+    function getProfileActivityWindow(contributions, today, weekCount = 52) {
+      const safeToday = today instanceof Date && !isNaN(today.getTime()) ? today : new Date();
+      const todayKey = formatDateKey(safeToday);
+      const firstMonday = startOfWeekMonday(safeToday);
+      firstMonday.setDate(firstMonday.getDate() - (Math.max(1, weekCount) - 1) * 7);
+      const contributionMap = new Map(
+        (Array.isArray(contributions) ? contributions : []).map((day) => [day.date, day])
+      );
+
+      return Array.from({ length: Math.max(1, weekCount) * 7 }, (_, index) => {
+        const date = new Date(firstMonday.getFullYear(), firstMonday.getMonth(), firstMonday.getDate());
+        date.setDate(date.getDate() + index);
+        const key = formatDateKey(date);
+        const empty = createEmptyContribution(key);
+        const source = contributionMap.get(key) || empty;
+        return {
+          ...empty,
+          ...source,
+          totals: { ...empty.totals, ...(source.totals || {}) },
+          tokenBreakdown: {
+            ...empty.tokenBreakdown,
+            ...(source.tokenBreakdown || {}),
+          },
+          sources: Array.isArray(source.sources) ? source.sources : [],
+          isFuture: key > todayKey,
+        };
+      });
+    }
+
+    function profileDayTokens(day) {
+      return day?.isFuture ? 0 : safeProfileNumber(day?.totals?.tokens);
+    }
+
+    function summarizeProfileActivity(days) {
+      const visible = (Array.isArray(days) ? days : []).filter((day) => !day?.isFuture);
+      const active = visible.map((day) => profileDayTokens(day) > 0);
+      const peakDay = visible.reduce((best, day) => {
+        if (profileDayTokens(day) <= 0) return best;
+        return !best || profileDayTokens(day) > profileDayTokens(best) ? day : best;
+      }, null);
+      let currentStreak = 0;
+      for (let index = active.length - 1; index >= 0 && active[index]; index -= 1) currentStreak += 1;
+      let longestStreak = 0;
+      let runningStreak = 0;
+      active.forEach((isActive) => {
+        runningStreak = isActive ? runningStreak + 1 : 0;
+        longestStreak = Math.max(longestStreak, runningStreak);
+      });
+      return {
+        recordedTokens: visible.reduce((sum, day) => sum + profileDayTokens(day), 0),
+        peakDay,
+        activeDays: active.filter(Boolean).length,
+        currentStreak,
+        longestStreak,
+      };
+    }
+
+    function groupProfileActivityWeeks(days) {
+      const breakdownKeys = ['input', 'output', 'cacheRead', 'cacheWrite', 'reasoning'];
+      const list = Array.isArray(days) ? days : [];
+      return Array.from({ length: Math.ceil(list.length / 7) }, (_, weekIndex) => {
+        const weekDays = list.slice(weekIndex * 7, weekIndex * 7 + 7);
+        const visibleDays = weekDays.filter((day) => !day?.isFuture);
+        const tokenBreakdown = Object.fromEntries(breakdownKeys.map((key) => [key, 0]));
+        const totals = { tokens: 0, cost: 0, messages: 0 };
+        visibleDays.forEach((day) => {
+          totals.tokens += safeProfileNumber(day?.totals?.tokens);
+          totals.cost += safeProfileNumber(day?.totals?.cost);
+          totals.messages += safeProfileNumber(day?.totals?.messages);
+          breakdownKeys.forEach((key) => {
+            tokenBreakdown[key] += safeProfileNumber(day?.tokenBreakdown?.[key]);
+          });
+        });
+        return {
+          weekIndex,
+          startDate: weekDays[0]?.date || null,
+          endDate: weekDays[6]?.date || weekDays.at(-1)?.date || null,
+          totals,
+          tokenBreakdown,
+          sources: visibleDays.flatMap((day) => day.sources || []),
+          isFuture: visibleDays.length === 0,
+        };
+      });
+    }
+
+    function buildProfileActivitySeries(mode, weeks) {
+      if (mode !== 'cumulative') return weeks.map((week) => ({ ...week }));
+      const breakdownKeys = ['input', 'output', 'cacheRead', 'cacheWrite', 'reasoning'];
+      const runningTotals = { tokens: 0, cost: 0, messages: 0 };
+      const runningBreakdown = Object.fromEntries(breakdownKeys.map((key) => [key, 0]));
+      return weeks.map((week) => {
+        Object.keys(runningTotals).forEach((key) => {
+          runningTotals[key] += safeProfileNumber(week?.totals?.[key]);
+        });
+        breakdownKeys.forEach((key) => {
+          runningBreakdown[key] += safeProfileNumber(week?.tokenBreakdown?.[key]);
+        });
+        return {
+          ...week,
+          startDate: weeks[0]?.startDate || week.startDate,
+          totals: { ...runningTotals },
+          tokenBreakdown: { ...runningBreakdown },
+        };
+      });
+    }
+
+    function getProfileDailyLevel(value, peak) {
+      const safeValue = safeProfileNumber(value);
+      const safePeak = safeProfileNumber(peak);
+      if (safeValue <= 0 || safePeak <= 0) return 0;
+      const ratio = safeValue / safePeak;
+      if (ratio > 0.75) return 4;
+      if (ratio > 0.5) return 3;
+      if (ratio > 0.25) return 2;
+      return 1;
+    }
+
+    function getProfileAggregateHeight(value, peak) {
+      const safeValue = safeProfileNumber(value);
+      const safePeak = safeProfileNumber(peak);
+      return safeValue <= 0 || safePeak <= 0 ? 0 : Math.max(1, Math.ceil((safeValue / safePeak) * 7));
+    }
+
+    function getProfileMilestoneTier(value) {
+      const safeValue = Math.max(0, safeProfileNumber(value));
+      const tiers = [
+        { level: 4, minTokens: 1_000_000_000, label: '1B+', tone: 'milestone-4' },
+        { level: 3, minTokens: 500_000_000, label: '500M+', tone: 'milestone-3' },
+        { level: 2, minTokens: 300_000_000, label: '300M+', tone: 'milestone-2' },
+        { level: 1, minTokens: 100_000_000, label: '100M+', tone: 'milestone-1' },
+      ];
+      return tiers.find((tier) => safeValue >= tier.minTokens) || null;
+    }
+
+    function buildProfileActivityCells(mode, days, weeks) {
+      if (mode === 'daily') {
+        const peak = Math.max(0, ...(days || []).map(profileDayTokens));
+        return {
+          series: [],
+          cells: (days || []).map((day, index) => {
+            const value = profileDayTokens(day);
+            return {
+              index,
+              day,
+              value,
+              level: getProfileDailyLevel(value, peak),
+              active: value > 0,
+              milestone: day.isFuture ? null : getProfileMilestoneTier(value),
+            };
+          }),
+        };
+      }
+      const series = buildProfileActivitySeries(mode, weeks || []);
+      const peak = Math.max(0, ...series.map((week) => safeProfileNumber(week?.totals?.tokens)));
+      const cells = series.flatMap((week, weekIndex) => {
+        const value = safeProfileNumber(week?.totals?.tokens);
+        const height = getProfileAggregateHeight(value, peak);
+        const milestone = getProfileMilestoneTier(value);
+        return Array.from({ length: 7 }, (_, row) => {
+          const active = 7 - row <= height;
+          const isCap = active && row === 7 - height;
+          return {
+            weekIndex,
+            row,
+            active,
+            isCap,
+            value,
+            milestone: isCap ? milestone : null,
+          };
+        });
+      });
+      return { cells, series };
+    }
+
+    function buildOverviewProfilePreview(contributions, today = new Date(), mode = 'daily') {
+      const days = getProfileActivityWindow(contributions || [], today);
+      const weeks = groupProfileActivityWeeks(days);
+      const activity = buildProfileActivityCells(mode, days, weeks);
+      return {
+        mode,
+        days,
+        weeks,
+        summary: summarizeProfileActivity(days),
+        cells: activity.cells,
+        series: activity.series,
+      };
+    }
+
+    let profileActivityMode = 'daily';
+    let profileActivityDidInitialScroll = false;
+
+    function getProfileActivityColor(level) {
+      const safeLevel = Math.max(0, Math.min(4, Number(level) || 0));
+      const index = Math.round((safeLevel / 4) * Math.max(0, HEAT_COLORS.length - 1));
+      return HEAT_COLORS[index] || 'var(--color-border)';
+    }
+
+    function renderProfileActivityLegend(targetId, mode) {
+      const legend = document.getElementById(targetId);
+      if (!legend) return;
+      const safeMode = ['daily', 'weekly', 'cumulative'].includes(mode) ? mode : 'daily';
+      legend.dataset.mode = safeMode;
+      legend.setAttribute('aria-label', t('activityLegend'));
+      mode = safeMode;
+
+      const scale = document.createElement('div');
+      scale.className = 'profile-activity-legend-scale';
+      const less = document.createElement('span');
+      less.dataset.i18n = 'less';
+      less.textContent = t('less');
+      const glyph = document.createElement('span');
+      glyph.className = mode === 'daily'
+        ? 'profile-activity-legend-glyph profile-activity-legend-swatches'
+        : 'profile-activity-legend-glyph profile-activity-legend-bars';
+      glyph.setAttribute('aria-hidden', 'true');
+      for (let level = 0; level < 5; level += 1) {
+        const item = document.createElement('span');
+        if (mode === 'daily') {
+          item.className = 'profile-activity-legend-swatch';
+          item.style.background = getProfileActivityColor(level);
+        } else {
+          item.className = 'profile-activity-legend-bar';
+        }
+        glyph.appendChild(item);
+      }
+      const more = document.createElement('span');
+      more.dataset.i18n = 'more';
+      more.textContent = t('more');
+      scale.append(less, glyph, more);
+
+      const divider = document.createElement('span');
+      divider.className = 'profile-activity-legend-divider';
+      divider.setAttribute('aria-hidden', 'true');
+      const milestones = document.createElement('div');
+      milestones.className = 'profile-activity-legend-milestones';
+      [
+        { level: 1, label: '100M' },
+        { level: 2, label: '300M' },
+        { level: 3, label: '500M' },
+        { level: 4, label: '1B' },
+      ].forEach(({ level, label }) => {
+        const badge = document.createElement('span');
+        badge.className = 'profile-activity-legend-badge';
+        badge.dataset.milestone = String(level);
+        badge.textContent = label;
+        milestones.appendChild(badge);
+      });
+
+      legend.replaceChildren(scale, divider, milestones);
+    }
+
+    function formatProfileMetricNumber(value) {
+      return new Intl.NumberFormat(currentLang === 'zh' ? 'zh-CN' : 'en-US', {
+        notation: 'compact',
+        maximumFractionDigits: 1,
+      }).format(safeProfileNumber(value));
+    }
+
+    function formatProfileAggregateTooltip(aggregate, cumulative = false) {
+      const range = aggregate?.startDate && aggregate?.endDate
+        ? `${formatShortDate(aggregate.startDate, true)} → ${formatShortDate(aggregate.endDate, true)}`
+        : '—';
+      const singleDate = aggregate?.startDate === aggregate?.endDate;
+      const title = cumulative
+        ? `${t('cumulative')} · ${range}`
+        : (singleDate ? formatShortDate(aggregate.startDate, true) : range);
+      const breakdown = aggregate?.tokenBreakdown || {};
+      const tokenTotal = safeProfileNumber(aggregate?.totals?.tokens);
+      const milestone = getProfileMilestoneTier(tokenTotal);
+      const definitions = [
+        {
+          key: 'total',
+          label: t('total'),
+          value: `${formatNumber(tokenTotal)} ${t('tokensUnit')}`,
+          tone: milestone?.tone || 'primary',
+          prominent: true,
+        },
+        { key: 'input', label: t('input'), value: formatNumber(safeProfileNumber(breakdown.input)), tone: 'primary', prominent: false },
+        { key: 'output', label: t('output'), value: formatNumber(safeProfileNumber(breakdown.output)), tone: 'secondary', prominent: false },
+        { key: 'cacheRead', label: t('cacheRead'), value: formatNumber(safeProfileNumber(breakdown.cacheRead)), tone: 'cost', prominent: false },
+        { key: 'cacheWrite', label: t('cacheWrite'), value: formatNumber(safeProfileNumber(breakdown.cacheWrite)), tone: 'cta', prominent: false },
+        {
+          key: 'reasoning',
+          label: t('reasoning'),
+          value: formatNumber(safeProfileNumber(breakdown.reasoning)),
+          tone: 'reasoning',
+          prominent: false,
+          include: safeProfileNumber(breakdown.reasoning) > 0,
+        },
+        {
+          key: 'estimatedCost',
+          label: t('estimatedCost'),
+          value: formatCurrency(safeProfileNumber(aggregate?.totals?.cost)),
+          tone: 'cost',
+          prominent: false,
+        },
+      ];
+      const rows = definitions
+        .filter((row) => row.include !== false)
+        .map(({ include, ...row }) => row);
+      const accessibleText = [
+        title,
+        milestone ? `${t('milestone')}: ${milestone.label}` : '',
+        ...rows.map((row) => `${row.label}: ${row.value}`),
+      ].filter(Boolean).join('. ');
+      return { title, rows, milestone, accessibleText };
+    }
+
+    function formatProfileDayTooltip(day) {
+      return formatProfileAggregateTooltip({
+        startDate: day.date,
+        endDate: day.date,
+        totals: day.totals || {},
+        tokenBreakdown: day.tokenBreakdown || {},
+      });
+    }
+
+    function renderProfileActivityTooltipContent(tooltip, model) {
+      const header = document.createElement('div');
+      header.className = 'profile-activity-tooltip-header';
+      const headerTitle = document.createElement('span');
+      headerTitle.className = 'profile-activity-tooltip-title';
+      headerTitle.textContent = model.title;
+      header.appendChild(headerTitle);
+      if (model.milestone) {
+        const badge = document.createElement('span');
+        badge.className = 'profile-activity-tooltip-badge';
+        badge.dataset.milestone = String(model.milestone.level);
+        badge.textContent = model.milestone.label;
+        header.appendChild(badge);
+        tooltip.dataset.milestone = String(model.milestone.level);
+      } else {
+        delete tooltip.dataset.milestone;
+      }
+
+      const body = document.createElement('div');
+      body.className = 'profile-activity-tooltip-body';
+      model.rows.forEach((row) => {
+        const item = document.createElement('div');
+        item.className = 'profile-activity-tooltip-row';
+        item.dataset.key = row.key;
+        item.dataset.tone = row.tone;
+        if (row.prominent) item.dataset.prominent = 'true';
+
+        const dot = document.createElement('span');
+        dot.className = 'profile-activity-tooltip-dot';
+        dot.setAttribute('aria-hidden', 'true');
+        const label = document.createElement('span');
+        label.className = 'profile-activity-tooltip-label';
+        label.textContent = row.label;
+        const value = document.createElement('span');
+        value.className = 'profile-activity-tooltip-value';
+        value.textContent = row.value;
+        item.append(dot, label, value);
+        body.appendChild(item);
+      });
+      tooltip.replaceChildren(header, body);
+    }
+
+    function resolveProfileActivityTooltip(target) {
+      const tooltipId = target?.dataset.profileTooltipId || 'profileActivityTooltip';
+      return document.getElementById(tooltipId);
+    }
+
+    function showProfileActivityTooltip(target, model) {
+      const tooltip = resolveProfileActivityTooltip(target);
+      if (!tooltip || !target || !model?.title) return;
+      renderProfileActivityTooltipContent(tooltip, model);
+      tooltip.hidden = false;
+      target.setAttribute('aria-describedby', tooltip.id);
+      const rect = target.getBoundingClientRect();
+      const gap = 8;
+      const left = Math.max(gap, Math.min(
+        window.innerWidth - tooltip.offsetWidth - gap,
+        rect.left + (rect.width - tooltip.offsetWidth) / 2,
+      ));
+      let top = rect.top - tooltip.offsetHeight - gap;
+      if (top < gap) top = Math.min(window.innerHeight - tooltip.offsetHeight - gap, rect.bottom + gap);
+      tooltip.style.left = `${left}px`;
+      tooltip.style.top = `${Math.max(gap, top)}px`;
+    }
+
+    function hideProfileActivityTooltip(target) {
+      const tooltip = resolveProfileActivityTooltip(target);
+      if (tooltip) tooltip.hidden = true;
+      if (target) target.removeAttribute('aria-describedby');
+    }
+
+    function bindProfileActivityTooltip(target, model) {
+      target.setAttribute('aria-label', model.accessibleText);
+      target.addEventListener('mouseenter', () => showProfileActivityTooltip(target, model));
+      target.addEventListener('mouseleave', () => hideProfileActivityTooltip(target));
+      target.addEventListener('focus', () => showProfileActivityTooltip(target, model));
+      target.addEventListener('blur', () => hideProfileActivityTooltip(target));
+    }
+
+    function renderProfileSummary(summary) {
+      document.getElementById('profileStatRecordedTokens').textContent = formatProfileMetricNumber(summary.recordedTokens || 0);
+      const peakValue = summary.peakDay ? profileDayTokens(summary.peakDay) : 0;
+      const peak = document.getElementById('profileStatPeakDay');
+      peak.textContent = formatProfileMetricNumber(peakValue);
+      peak.title = summary.peakDay ? formatShortDate(summary.peakDay.date, true) : '';
+      document.getElementById('profileStatActiveDays').textContent = formatNumber(summary.activeDays || 0);
+      document.getElementById('profileStatCurrentStreak').textContent = pluralDays(summary.currentStreak || 0);
+      document.getElementById('profileStatLongestStreak').textContent = pluralDays(summary.longestStreak || 0);
+    }
+
+    function renderProfileMonths(today = new Date()) {
+      const labels = [];
+      for (let offset = 11; offset >= 0; offset -= 1) {
+        labels.push(new Date(today.getFullYear(), today.getMonth() - offset, 1)
+          .toLocaleString(currentLang === 'zh' ? 'zh-CN' : 'en-US', { month: 'short' }));
+      }
+      document.getElementById('profileActivityMonths').replaceChildren(
+        ...labels.map((label) => Object.assign(document.createElement('span'), { textContent: label }))
+      );
+    }
+
+    function setProfileColumnHover(weekIndex, active) {
+      document.querySelectorAll(`#profileActivityGrid [data-week-index="${weekIndex}"]`).forEach((cell) => {
+        cell.classList.toggle('is-column-hover', active);
+      });
+    }
+
+    function ensureProfileActivityInitialScroll() {
+      if (profileActivityDidInitialScroll) return;
+      const scroller = document.getElementById('profileActivityScroller');
+      if (scroller && scroller.scrollWidth > scroller.clientWidth) {
+        scroller.scrollLeft = scroller.scrollWidth;
+        profileActivityDidInitialScroll = true;
+      }
+    }
+
+    function applyProfileMilestone(target, milestone) {
+      if (!target || !milestone) return;
+      target.dataset.milestone = String(milestone.level);
+    }
+
+    function renderProfileView() {
+      const today = new Date();
+      const days = getProfileActivityWindow(statsCache.default || calendarState.contributions || [], today);
+      const weeks = groupProfileActivityWeeks(days);
+      const { cells, series } = buildProfileActivityCells(profileActivityMode, days, weeks);
+      const grid = document.getElementById('profileActivityGrid');
+      const hits = document.getElementById('profileActivityWeekHits');
+      hideProfileActivityTooltip();
+      grid.replaceChildren();
+      hits.replaceChildren();
+      grid.style.setProperty('--profile-activity-empty', getProfileActivityColor(0));
+      grid.style.setProperty('--profile-activity-strong', getProfileActivityColor(4));
+      renderProfileSummary(summarizeProfileActivity(days));
+      renderProfileMonths(today);
+      renderProfileActivityLegend('profileActivityLegend', profileActivityMode);
+
+      cells.forEach((definition) => {
+        const cell = document.createElement(profileActivityMode === 'daily' ? 'button' : 'span');
+        cell.className = 'profile-activity-cell';
+        cell.setAttribute('role', 'gridcell');
+        if (profileActivityMode === 'daily') {
+          cell.type = 'button';
+          cell.style.background = getProfileActivityColor(definition.level);
+          if (definition.day.isFuture) {
+            cell.disabled = true;
+            cell.setAttribute('aria-hidden', 'true');
+          } else {
+            applyProfileMilestone(cell, definition.milestone);
+            const tooltip = formatProfileDayTooltip(definition.day);
+            bindProfileActivityTooltip(cell, tooltip);
+          }
+        } else {
+          cell.dataset.weekIndex = String(definition.weekIndex);
+          cell.classList.toggle('is-aggregate', definition.active);
+          applyProfileMilestone(cell, definition.milestone);
+        }
+        grid.appendChild(cell);
+      });
+
+      hits.hidden = profileActivityMode === 'daily';
+      if (profileActivityMode !== 'daily') {
+        series.forEach((aggregate, weekIndex) => {
+          const hit = document.createElement('button');
+          const tooltip = formatProfileAggregateTooltip(aggregate, profileActivityMode === 'cumulative');
+          hit.type = 'button';
+          hit.className = 'profile-activity-week-hit';
+          const milestone = getProfileMilestoneTier(aggregate?.totals?.tokens);
+          applyProfileMilestone(hit, milestone);
+          bindProfileActivityTooltip(hit, tooltip);
+          hit.addEventListener('mouseenter', () => setProfileColumnHover(weekIndex, true));
+          hit.addEventListener('mouseleave', () => setProfileColumnHover(weekIndex, false));
+          hit.addEventListener('focus', () => setProfileColumnHover(weekIndex, true));
+          hit.addEventListener('blur', () => setProfileColumnHover(weekIndex, false));
+          hits.appendChild(hit);
+        });
+      }
+
+      syncProfileActivityModeControls();
+
+      requestAnimationFrame(ensureProfileActivityInitialScroll);
+    }
+
+    let overviewProfileDidInitialScroll = false;
+
+    function setOverviewProfileState(state) {
+      const shell = document.getElementById('overviewProfileSummary');
+      if (!shell) return;
+      shell.dataset.state = state;
+      shell.setAttribute('aria-busy', String(state === 'loading'));
+    }
+
+    function setOverviewProfileColumnHover(weekIndex, active) {
+      document.querySelectorAll(`#overviewProfileGrid [data-week-index="${weekIndex}"]`).forEach((cell) => {
+        cell.classList.toggle('is-column-hover', active);
+      });
+    }
+
+    function syncProfileActivityModeControls() {
+      const controls = {
+        daily: ['profileModeDaily', 'overviewProfileModeDaily'],
+        weekly: ['profileModeWeekly', 'overviewProfileModeWeekly'],
+        cumulative: ['profileModeCumulative', 'overviewProfileModeCumulative'],
+      };
+      Object.entries(controls).forEach(([mode, ids]) => {
+        ids.forEach((id) => {
+          document.getElementById(id)?.setAttribute(
+            'aria-pressed',
+            String(profileActivityMode === mode),
+          );
+        });
+      });
+    }
+
+    function ensureOverviewProfileInitialScroll() {
+      const scroller = document.getElementById('overviewProfileScroller');
+      if (!scroller) return;
+      if (scroller.scrollWidth <= scroller.clientWidth) {
+        overviewProfileDidInitialScroll = false;
+        return;
+      }
+      if (overviewProfileDidInitialScroll) return;
+      scroller.scrollLeft = scroller.scrollWidth;
+      overviewProfileDidInitialScroll = true;
+    }
+
+    function renderOverviewProfilePreview(contributions = statsCache.default) {
+      const grid = document.getElementById('overviewProfileGrid');
+      const hits = document.getElementById('overviewProfileWeekHits');
+      if (!grid || !hits) return;
+      syncProfileActivityModeControls();
+      if (!Array.isArray(contributions)) {
+        const shell = document.getElementById('overviewProfileSummary');
+        if (shell?.dataset.state !== 'error') setOverviewProfileState('loading');
+        return;
+      }
+
+      const { summary, cells, series } = buildOverviewProfilePreview(contributions, new Date(), profileActivityMode);
+      document.getElementById('overviewProfileActiveDays').textContent = formatNumber(summary.activeDays || 0);
+      document.getElementById('overviewProfileCurrentStreak').textContent = pluralDays(summary.currentStreak || 0);
+      document.getElementById('overviewProfileLongestStreak').textContent = pluralDays(summary.longestStreak || 0);
+      grid.style.setProperty('--profile-activity-empty', getProfileActivityColor(0));
+      grid.style.setProperty('--profile-activity-strong', getProfileActivityColor(4));
+      document.getElementById('overviewProfileTooltip').hidden = true;
+      grid.replaceChildren();
+      hits.replaceChildren();
+
+      cells.forEach((definition) => {
+        const cell = document.createElement(profileActivityMode === 'daily' ? 'button' : 'span');
+        cell.className = 'profile-activity-cell overview-profile-cell';
+        cell.setAttribute('role', 'gridcell');
+        if (profileActivityMode === 'daily') {
+          cell.type = 'button';
+          cell.style.background = getProfileActivityColor(definition.level);
+          if (definition.day.isFuture) {
+            cell.disabled = true;
+            cell.setAttribute('aria-hidden', 'true');
+          } else {
+            applyProfileMilestone(cell, definition.milestone);
+            cell.dataset.profileTooltipId = 'overviewProfileTooltip';
+            const tooltip = formatProfileDayTooltip(definition.day);
+            bindProfileActivityTooltip(cell, tooltip);
+          }
+        } else {
+          cell.dataset.weekIndex = String(definition.weekIndex);
+          cell.classList.toggle('is-aggregate', definition.active);
+          applyProfileMilestone(cell, definition.milestone);
+        }
+        grid.appendChild(cell);
+      });
+
+      hits.hidden = profileActivityMode === 'daily';
+      if (profileActivityMode !== 'daily') {
+        series.forEach((aggregate, weekIndex) => {
+          const hit = document.createElement('button');
+          const milestone = getProfileMilestoneTier(aggregate?.totals?.tokens);
+          const tooltip = formatProfileAggregateTooltip(aggregate, profileActivityMode === 'cumulative');
+          hit.type = 'button';
+          hit.className = 'profile-activity-week-hit';
+          hit.dataset.profileTooltipId = 'overviewProfileTooltip';
+          applyProfileMilestone(hit, milestone);
+          bindProfileActivityTooltip(hit, tooltip);
+          hit.addEventListener('mouseenter', () => setOverviewProfileColumnHover(weekIndex, true));
+          hit.addEventListener('mouseleave', () => setOverviewProfileColumnHover(weekIndex, false));
+          hit.addEventListener('focus', () => setOverviewProfileColumnHover(weekIndex, true));
+          hit.addEventListener('blur', () => setOverviewProfileColumnHover(weekIndex, false));
+          hits.appendChild(hit);
+        });
+      }
+
+      syncProfileActivityModeControls();
+      renderProfileActivityLegend('overviewProfileLegend', profileActivityMode);
+      setOverviewProfileState('ready');
+      requestAnimationFrame(ensureOverviewProfileInitialScroll);
+    }
+
+    function setProfileActivityMode(mode) {
+      if (!['daily', 'weekly', 'cumulative'].includes(mode)) return;
+      profileActivityMode = mode;
+      syncProfileActivityModeControls();
+      if (calendarState.view === 'profile' && statsLoaded) renderProfileView();
+      if (isOverviewActive()) renderOverviewProfilePreview();
     }
 
     async function loadStats(options = {}) {
@@ -5849,9 +6726,16 @@
       statsWarmScheduled = true;
       setTimeout(() => {
         scheduleIdle(() => {
-          fetchJsonWithRetry(appPath('/api/stats'), {}, { attempts: 2, baseDelayMs: 600 }).catch(() => {
-            statsWarmScheduled = false;
-          });
+          fetchJsonWithRetry(appPath('/api/stats'), {}, { attempts: 2, baseDelayMs: 600 })
+            .then((data) => {
+              const filledContributions = fillMissingDays(data.contributions || []);
+              statsCache.default = filledContributions;
+              if (isOverviewActive()) renderOverviewProfilePreview(filledContributions);
+            })
+            .catch(() => {
+              statsWarmScheduled = false;
+              if (isOverviewActive()) setOverviewProfileState('error');
+            });
         }, 1500);
       }, 750);
     }
@@ -6055,11 +6939,21 @@
     }
 
     function setView(view) {
+      if (!['profile', 'month', 'year', '3d'].includes(view)) return;
       calendarState.view = view;
 
+      document.getElementById('viewProfile').className = view === 'profile' ? 'btn btn-primary' : 'btn btn-ghost';
       document.getElementById('viewMonth').className = view === 'month' ? 'btn btn-primary' : 'btn btn-ghost';
       document.getElementById('viewYear').className = view === 'year' ? 'btn btn-primary' : 'btn btn-ghost';
       document.getElementById('view3D').className = view === '3d' ? 'btn btn-primary' : 'btn btn-ghost';
+      const statsViewTitle = document.getElementById('statsViewTitle');
+      statsViewTitle.dataset.i18n = view === 'profile' ? 'profileView' : 'dailyActivity';
+      statsViewTitle.textContent = t(statsViewTitle.dataset.i18n);
+      if (view !== 'profile') hideProfileActivityTooltip();
+      document.getElementById('statsMetricControls').style.display = view === 'profile' ? 'none' : '';
+      document.getElementById('statsSummaryCards').style.display = view === 'profile' ? 'none' : '';
+      document.getElementById('statsInsightCards').style.display = view === 'profile' ? 'none' : '';
+      document.getElementById('dayDetails').style.display = view === 'profile' ? 'none' : '';
       updateMetricControls();
 
       // Before the first successful stats load, keep the loading/error banner up
@@ -6068,11 +6962,14 @@
       // user toggled Month/Year while /api/stats was still loading or had failed.
       if (!statsLoaded) return;
 
+      document.getElementById('calendarProfileView').style.display = view === 'profile' ? 'block' : 'none';
       document.getElementById('calendarMonthView').style.display = view === 'month' ? 'block' : 'none';
       document.getElementById('calendarYearView').style.display = view === 'year' ? 'block' : 'none';
       document.getElementById('calendar3DView').style.display = view === '3d' ? 'block' : 'none';
 
-      if (view === 'month') {
+      if (view === 'profile') {
+        renderProfileView();
+      } else if (view === 'month') {
         renderMonthHeatmap();
       } else if (view === 'year') {
         const year = calendarState.yearCursor.getFullYear();
@@ -7032,6 +7929,16 @@
     document.getElementById('viewMonth').addEventListener('click', () => setView('month'));
     document.getElementById('viewYear').addEventListener('click', () => setView('year'));
     document.getElementById('view3D').addEventListener('click', () => setView('3d'));
+    document.getElementById('viewProfile').addEventListener('click', () => setView('profile'));
+    document.getElementById('profileModeDaily').addEventListener('click', () => setProfileActivityMode('daily'));
+    document.getElementById('profileModeWeekly').addEventListener('click', () => setProfileActivityMode('weekly'));
+    document.getElementById('profileModeCumulative').addEventListener('click', () => setProfileActivityMode('cumulative'));
+    document.getElementById('overviewProfileModeDaily').addEventListener('click', () => setProfileActivityMode('daily'));
+    document.getElementById('overviewProfileModeWeekly').addEventListener('click', () => setProfileActivityMode('weekly'));
+    document.getElementById('overviewProfileModeCumulative').addEventListener('click', () => setProfileActivityMode('cumulative'));
+    document.getElementById('overviewProfileOpen')?.addEventListener('click', openOverviewProfile);
+    window.addEventListener('resize', ensureProfileActivityInitialScroll, { passive: true });
+    window.addEventListener('resize', ensureOverviewProfileInitialScroll, { passive: true });
     document.getElementById('statsRetryBtn')?.addEventListener('click', () => loadStats());
     document.getElementById('metricTokensBtn').addEventListener('click', () => setCalendarMetric('tokens'));
     document.getElementById('metricEnergyBtn').addEventListener('click', () => setCalendarMetric('energy'));

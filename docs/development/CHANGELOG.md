@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+## 1.5.2 - 2026-07-28
+
+### Fixed
+
+- Keep Profile activity tooltips aligned with their heatmap cells across browser zoom, display scaling, scrolling, and viewport edges without hover-position jitter.
+
 ## 1.5.1 - 2026-07-28
 
 ### Added

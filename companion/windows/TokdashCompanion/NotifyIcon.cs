@@ -12,10 +12,12 @@ internal static class NotifyIcon
     public const uint NIM_ADD = 0x00000000;
     public const uint NIM_MODIFY = 0x00000001;
     public const uint NIM_DELETE = 0x00000002;
+    public const uint NIM_SETVERSION = 0x00000004;
 
     public const uint NIF_MESSAGE = 0x00000001;
     public const uint NIF_ICON = 0x00000002;
     public const uint NIF_TIP = 0x00000004;
+    public const uint NIF_INFO = 0x00000010;
     public const uint NIF_SHOWTIP = 0x00000080;
 
     public const uint WM_USER = 0x0400;
@@ -29,6 +31,7 @@ internal static class NotifyIcon
     public const uint WM_RBUTTONDOWN = 0x0204;
     public const uint NIN_SELECT = WM_USER + 0;
     public const uint NIN_KEYSELECT = WM_USER + 1;
+    public const uint NIN_BALLOONUSERCLICK = WM_USER + 5;
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     public struct NOTIFYICONDATA
@@ -51,8 +54,9 @@ internal static class NotifyIcon
         public uint dwInfoFlags;
         // GUID item; left as default for V3 compatibility.
         public Guid guidItem;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)]
-        public string szBalloonTipCustom;
+        // NOTIFYICONDATA ends with HICON hBalloonIcon (Vista+, the version-4 field).
+        // A trailing string here would inflate cbSize and corrupt the layout the shell reads.
+        public IntPtr hBalloonIcon;
     }
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)]

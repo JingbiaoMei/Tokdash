@@ -47,4 +47,28 @@ final class TokdashClientTests: XCTestCase {
         let quota = try JSONDecoder().decode(QuotaResponse.self, from: json)
         XCTAssertFalse(quota.enabled)
     }
+
+    // MARK: - Request URL building (would have caught the P0 where ?period=today was
+    // folded into the path as /api/usage%3Fperiod=today).
+
+    func testBuildURL_Keeps_Query_Out_Of_Path() throws {
+        let base = URL(string: "https://wsl.example/tokdash")!
+        let url = try XCTUnwrap(TokdashClient.buildURL(baseURL: base, path: "/api/usage?period=today"))
+        XCTAssertEqual(url.absoluteString, "https://wsl.example/tokdash/api/usage?period=today")
+        let comps = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
+        XCTAssertEqual(comps.query, "period=today")
+        XCTAssertEqual(comps.path, "/tokdash/api/usage")
+    }
+
+    func testBuildURL_No_Query() throws {
+        let base = URL(string: "http://127.0.0.1:55423")!
+        let url = try XCTUnwrap(TokdashClient.buildURL(baseURL: base, path: "/health"))
+        XCTAssertEqual(url.absoluteString, "http://127.0.0.1:55423/health")
+    }
+
+    func testBuildURL_Strips_Trailing_Slash() throws {
+        let base = URL(string: "https://host/tokdash/")!
+        let url = try XCTUnwrap(TokdashClient.buildURL(baseURL: base, path: "/api/quota"))
+        XCTAssertEqual(url.absoluteString, "https://host/tokdash/api/quota")
+    }
 }

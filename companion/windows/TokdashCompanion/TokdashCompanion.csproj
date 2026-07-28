@@ -20,7 +20,13 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="H.NotifyIcon.Wpf" Version="2.2.0" />
+    <Content Include="Assets\tray.ico">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="TokdashCompanion.Tests" />
   </ItemGroup>
 
 </Project>

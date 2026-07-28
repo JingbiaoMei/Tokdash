@@ -8,6 +8,7 @@ struct SettingsView: View {
     @State private var fiveHourThreshold: Double = 20
     @State private var weeklyThreshold: Double = 10
     @State private var otherThreshold: Double = 15
+    @State private var urlDebounce: Task<Void, Never>?
 
     var body: some View {
         Form {
@@ -43,7 +44,14 @@ struct SettingsView: View {
         .padding(20)
         .frame(width: 380)
         .onAppear { loadSettings() }
-        .onChange(of: baseURL) { _ in saveSettings() }
+        .onChange(of: baseURL) { _ in
+            // Debounce the URL: don't reconnect on every keystroke.
+            urlDebounce?.cancel()
+            urlDebounce = Task {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                if !Task.isCancelled { saveSettings() }
+            }
+        }
         .onChange(of: launchAtLogin) { _ in saveSettings() }
         .onChange(of: lowQuotaNotifications) { _ in saveSettings() }
         .onChange(of: fiveHourThreshold) { _ in saveSettings() }
@@ -61,16 +69,28 @@ struct SettingsView: View {
     }
 
     private func saveSettings() {
-        let urlChanged = baseURL != store.settings.baseURL
-        store.settings.baseURL = baseURL
-        store.settings.launchAtLogin = launchAtLogin
+        let trimmed = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let urlValid = isValidURL(trimmed)
+        let urlChanged = urlValid && trimmed != store.settings.baseURL
+        let launchChanged = launchAtLogin != store.settings.launchAtLogin
+
+        // Only persist the URL when it's a valid absolute http/https URL.
+        if urlValid { store.settings.baseURL = trimmed }
         store.settings.lowQuotaNotifications = lowQuotaNotifications
-        store.settings.thresholds = QuotaThresholds(
-            fiveHour: fiveHourThreshold,
-            weekly: weeklyThreshold,
-            other: otherThreshold
-        )
+        let thresholds = QuotaThresholds(fiveHour: fiveHourThreshold, weekly: weeklyThreshold, other: otherThreshold)
+        let thresholdsChanged = store.settings.thresholds != thresholds
+        store.settings.thresholds = thresholds
         store.settings.save()
-        if urlChanged { store.updateBaseURL(baseURL) }
+        if thresholdsChanged { store.applyThresholds() } // rebuild the Low view immediately
+        if launchChanged { store.setLaunchAtLogin(launchAtLogin) }
+        if urlChanged { store.updateBaseURL(trimmed) }
+    }
+
+    private func isValidURL(_ s: String) -> Bool {
+        guard let url = URL(string: s),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              url.host != nil else { return false }
+        return true
     }
 }

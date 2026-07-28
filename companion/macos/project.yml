@@ -2,12 +2,12 @@ name: TokdashCompanion
 options:
   bundleIdPrefix: com.tokdash
   deploymentTarget:
-    macOS: "13.0"
+    macOS: "14.0"
   developmentLanguage: en
 settings:
   base:
     SWIFT_VERSION: "6.0"
-    MACOSX_DEPLOYMENT_TARGET: "13.0"
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
     PRODUCT_BUNDLE_IDENTIFIER: com.tokdash.companion
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"

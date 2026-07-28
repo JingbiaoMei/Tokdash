@@ -39,12 +39,7 @@ actor TokdashClient {
     // MARK: - Core
 
     private func get<T: Decodable>(_ path: String, timeout: TimeInterval) async throws -> T {
-        var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
-        let base = components?.path.hasSuffix("/") ?? false
-            ? String(components!.path.dropLast())
-            : (components?.path ?? "")
-        components?.path = base + path
-        guard let url = components?.url else {
+        guard let url = Self.buildURL(baseURL: baseURL, path: path) else {
             throw TokdashError.badBaseURL
         }
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: timeout)
@@ -77,6 +72,19 @@ actor TokdashClient {
         } catch {
             throw TokdashError.other(error)
         }
+    }
+
+    /// Build a request URL by joining `path` (which may include a `?query`) onto the
+    /// base URL, keeping the query out of the path. Pure/testable.
+    nonisolated static func buildURL(baseURL: URL, path: String) -> URL? {
+        var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
+        let basePath = components?.path ?? ""
+        let trimmed = basePath.hasSuffix("/") ? String(basePath.dropLast()) : basePath
+        let parts = path.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false)
+        components?.path = trimmed + String(parts[0])
+        if parts.count > 1 { components?.query = String(parts[1]) }
+        else { components?.query = nil }
+        return components?.url
     }
 }
 
@@ -174,6 +182,24 @@ struct QuotaResponse: Decodable {
 struct ProviderQuota: Decodable {
     let estimated: Bool?
     let buckets: [BucketQuota]?
+    // "ok" (or absent) is healthy; anything else means the provider's quota couldn't
+    // be refreshed and its buckets are last-known. Spec §7.
+    let status: String?
+    let statusDetail: String?
+
+    enum CodingKeys: String, CodingKey {
+        case estimated, buckets, status
+        case statusDetail = "status_detail"
+    }
+
+    // Explicit memberwise init (with defaults) so test construction with status/
+    // statusDetail resolves; Decodable's init(from:) is still synthesized.
+    init(estimated: Bool? = nil, buckets: [BucketQuota]? = nil, status: String? = nil, statusDetail: String? = nil) {
+        self.estimated = estimated
+        self.buckets = buckets
+        self.status = status
+        self.statusDetail = statusDetail
+    }
 }
 
 struct BucketQuota: Decodable {
@@ -190,4 +216,17 @@ struct BucketQuota: Decodable {
         case resetsAt = "resets_at"
         case account
     }
+}
+
+extension UsageResponse {
+    /// Sentinel for a section that has never fetched successfully.
+    static let empty = UsageResponse(
+        period: "", totalTokens: 0, totalCost: 0, totalMessages: 0,
+        byTool: nil, topModels: nil, combinedModels: nil,
+        comparison: nil, timestamp: nil, responseCache: nil
+    )
+}
+
+extension QuotaResponse {
+    static let empty = QuotaResponse(enabled: false, providers: nil, timestamp: nil)
 }

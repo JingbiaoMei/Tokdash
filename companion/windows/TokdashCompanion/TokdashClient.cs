@@ -4,12 +4,19 @@ using System.Text.Json.Serialization;
 
 namespace TokdashCompanion;
 
+public interface ITokdashClient : IDisposable
+{
+    Task<HealthResponse> HealthAsync(CancellationToken ct = default);
+    Task<UsageResponse> UsageAsync(string period, CancellationToken ct = default);
+    Task<QuotaResponse> QuotaAsync(CancellationToken ct = default);
+}
+
 /// <summary>
 /// Tokdash API client. Read-only; never writes, never polls providers.
 /// Additive JSON decoding: unknown fields ignored, absent optional fields
 /// tolerated. Treats 503 as busy (not offline). Never sends a browser Origin.
 /// </summary>
-public sealed class TokdashClient : IDisposable
+public sealed class TokdashClient : ITokdashClient
 {
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
@@ -96,22 +103,26 @@ public sealed record HealthResponse(string Status, string Service, string Versio
 public sealed class UsageResponse
 {
     public string Period { get; set; } = "";
-    public long TotalTokens { get; set; }
-    public double TotalCost { get; set; }
-    public long TotalMessages { get; set; }
-    public Dictionary<string, ToolAgg>? ByTool { get; set; }
-    public List<ModelAgg>? TopModels { get; set; }
-    public List<ModelAgg>? CombinedModels { get; set; }
+    [JsonPropertyName("total_tokens")] public long TotalTokens { get; set; }
+    [JsonPropertyName("total_cost")] public double TotalCost { get; set; }
+    [JsonPropertyName("total_messages")] public long TotalMessages { get; set; }
+    [JsonPropertyName("by_tool")] public Dictionary<string, ToolAgg>? ByTool { get; set; }
+    [JsonPropertyName("top_models")] public List<ModelAgg>? TopModels { get; set; }
+    [JsonPropertyName("combined_models")] public List<ModelAgg>? CombinedModels { get; set; }
     public Comparison? Comparison { get; set; }
     public string? Timestamp { get; set; }
-    [JsonPropertyName("response_cache")]
-    public CacheInfo? ResponseCache { get; set; }
+    [JsonPropertyName("response_cache")] public CacheInfo? ResponseCache { get; set; }
 }
 
 public sealed class ToolAgg { public long Tokens { get; set; } public double Cost { get; set; } }
 public sealed class ModelAgg { public string Name { get; set; } = ""; public long Tokens { get; set; } public double Cost { get; set; } }
-public sealed class Comparison { public double? TokensPct { get; set; } public double? CostPct { get; set; } public double? MessagesPct { get; set; } }
-public sealed class CacheInfo { public int? AgeSeconds { get; set; } }
+public sealed class Comparison
+{
+    [JsonPropertyName("tokens_pct")] public double? TokensPct { get; set; }
+    [JsonPropertyName("cost_pct")] public double? CostPct { get; set; }
+    [JsonPropertyName("messages_pct")] public double? MessagesPct { get; set; }
+}
+public sealed class CacheInfo { [JsonPropertyName("age_seconds")] public int? AgeSeconds { get; set; } }
 
 public sealed class QuotaResponse
 {
@@ -123,14 +134,18 @@ public sealed class QuotaResponse
 public sealed class ProviderQuota
 {
     public bool? Estimated { get; set; }
+    // Provider fetch status: "ok" (or absent) is healthy; anything else means the
+    // provider's quota couldn't be refreshed and its buckets are last-known. Spec §7.
+    public string? Status { get; set; }
+    [JsonPropertyName("status_detail")] public string? StatusDetail { get; set; }
     public List<BucketQuota>? Buckets { get; set; }
 }
 
 public sealed class BucketQuota
 {
     public string Bucket { get; set; } = "";
-    public string? BucketLabel { get; set; }
-    public double? RemainingPercent { get; set; }
-    public int? ResetsAt { get; set; }
+    [JsonPropertyName("bucket_label")] public string? BucketLabel { get; set; }
+    [JsonPropertyName("remaining_percent")] public double? RemainingPercent { get; set; }
+    [JsonPropertyName("resets_at")] public int? ResetsAt { get; set; }
     public string? Account { get; set; }
 }

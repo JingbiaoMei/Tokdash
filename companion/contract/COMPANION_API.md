@@ -83,7 +83,7 @@ derived client-side from the local calendar, not from the response.
 
 ### `GET /api/quota`
 
-Fixture: `fixtures/quota.json` (enabled, multi-provider), `fixtures/quota-disabled.json` (disabled).
+Fixture: `fixtures/quota.json` (enabled, multi-provider), `fixtures/quota-disabled.json` (disabled), `fixtures/quota-provider-error.json` (one provider failed refresh).
 
 Fields used:
 
@@ -175,7 +175,10 @@ an `Open Dashboard` path. Do not configure consent in the companion.
 ### Provider failures
 
 A failed provider produces an inline warning on that provider's rows, not a
-full-surface failure.
+full-surface failure. A provider's `status` is `"ok"` (or absent on older
+servers) when healthy; any other value means its quota couldn't be refreshed
+this cycle, so its `buckets` are last-known and are shown with the warning
+(fixture `fixtures/quota-provider-error.json`).
 
 ## Low-quota notifications
 
@@ -203,6 +206,7 @@ given fixture combination. Both native test suites assert against these.
 | `busy` | health.json | 503 | 503 | 503 | "Tokdash is busy - retrying"; last-good data dimmed; back off |
 | `partial` | health.json | usage-today.json | 503 | 503 | Connected; Today hero normal; month + quota show inline "will retry shortly" warnings |
 | `loading` | (pending) | (pending) | (pending) | (pending) | "Connecting…"; skeletons for Today/month/quota values; no spinner |
+| `provider-error` | health.json | usage-today.json | usage-month.json | quota-provider-error.json | Connected; Today/month normal; quota All view shows an inline "Couldn't refresh - showing last known" warning under the failed provider's header, its rows still visible; healthy providers render normally; Low view prefixes ⚠ on the failed provider's low row |
 
 ## Freshness text
 

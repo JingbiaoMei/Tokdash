@@ -11,10 +11,13 @@ human-input layer that automated tests cannot cover.
 
 ### macOS (on the MacBook)
 
+The `.xcodeproj` is tracked in the repo (deployment target macOS 14, for SwiftUI
+`openSettings`), so a fresh checkout builds directly. Regenerate with
+`xcodegen generate` only if `project.yml` changes.
+
 ```bash
 ssh macbook
 cd ~/Projects/tokdash/companion/macos
-/tmp/xg/xcodegen/bin/xcodegen generate
 xcodebuild -project TokdashCompanion.xcodeproj -scheme TokdashCompanion -configuration Debug build
 APP=$(find ~/Library/Developer/Xcode/DerivedData/TokdashCompanion-*/Build/Products/Debug/TokdashCompanion.app -maxdepth 0 | head -1)
 open "$APP"
@@ -23,8 +26,8 @@ open "$APP"
 ### Windows (on the Windows host)
 
 ```powershell
-dotnet build H:\developing\agent\tokdash_project\tokdash\companion\windows\TokdashCompanion.slnx --configuration Debug
-Start-Process H:\developing\agent\tokdash_project\tokdash\companion\windows\TokdashCompanion\bin\Debug\net10.0-windows10.0.26100.0\TokdashCompanion.exe
+dotnet build H:\Developing\Agent\Tokdash_Project\tokdash\companion\windows\TokdashCompanion\TokdashCompanion.csproj --configuration Debug
+Start-Process H:\Developing\Agent\Tokdash_Project\tokdash\companion\windows\TokdashCompanion\bin\Debug\net10.0-windows10.0.26100.0\TokdashCompanion.exe
 ```
 
 ---
@@ -67,6 +70,7 @@ With Tokdash running, stop it (`systemctl --user stop tokdash`), then:
 Restart Tokdash, then trigger a busy state if possible (heavy usage recompute):
 
 - [ ] **Busy (503)**: header shows `Busy` with an amber dot. Banner: `Tokdash is busy - retrying / Last data shown below. Backing off automatically.` Last-good data dimmed. Backoff auto-retries.
+- [ ] **Sleep / wake**: sleep the Mac and wake it -> the menu-bar tooltip / open popover refresh within a few seconds via one coalesced request (no burst); freshness no longer reads `· stale` once it lands.
 
 ### Settings
 
@@ -150,6 +154,8 @@ Both apps must behave identically for data and states, differing only in native 
 - [ ] **Tailscale URL**: set base URL to `https://wsl.tail76535.ts.net/tokdash` -> connects over HTTPS, all endpoints work.
 - [ ] **Refresh cadence**: open the flyout, wait 61s -> auto-refresh. Close it, wait 10min -> background refresh. Observe no more than one refresh per 60s while open.
 - [ ] **Low-quota notification** (opt-in): enable in Settings, let a window cross its threshold -> one notification per (provider, bucket, reset epoch). Clicking it opens the companion to the quota section. No repeat on subsequent refreshes until the reset epoch changes.
+- [ ] **Provider failure**: point at a Tokdash whose `codex` provider reports `status: "error"` (see `contract/fixtures/quota-provider-error.json`) -> All view shows an inline `⚠ Couldn't refresh - showing last known` warning under the Codex header, Codex's last-known rows still visible, Claude/Kimi render normally; Low view prefixes `⚠` on the Codex low row. No full-surface quota failure.
+- [ ] **Sleep / wake**: sleep the host, wake it -> stale data refreshes within a few seconds via one coalesced request (no burst of refreshes); the open flyout/popover updates.
 
 ---
 

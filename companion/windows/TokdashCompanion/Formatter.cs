@@ -50,9 +50,12 @@ public sealed record QuotaRow(
     string BucketLabel,
     double Left,
     DateTimeOffset? ResetsAt,
-    bool Estimated)
+    bool Estimated,
+    string Account,
+    bool HasPercent,
+    bool Failed = false)
 {
-    public bool IsLow(QuotaThresholds t) => Left <= t.ThresholdFor(Bucket);
+    public bool IsLow(QuotaThresholds t) => HasPercent && Left <= t.ThresholdFor(Bucket);
 
     public string ResetsText
     {

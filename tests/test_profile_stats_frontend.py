@@ -103,7 +103,7 @@ def _run_profile_tooltip_js(tmp_path: Path, expression: str, payload: dict) -> o
             _extract_js_function(source, "function getProfileMilestoneTier(value) {"),
             _extract_js_function(
                 source,
-                "function formatProfileAggregateTooltip(aggregate, cumulative = false) {",
+                "function formatProfileAggregateTooltip(aggregate, cumulative = false, milestonesEnabled = false) {",
             ),
         ]
     )
@@ -507,7 +507,7 @@ def test_profile_tooltip_exposes_milestone_badge_tone_and_accessible_text(
     }
     result = _run_profile_tooltip_js(
         tmp_path,
-        "({ high: formatProfileAggregateTooltip(payload.high), normal: formatProfileAggregateTooltip(payload.normal) })",
+        "({ high: formatProfileAggregateTooltip(payload.high, false, true), hidden: formatProfileAggregateTooltip(payload.high), normal: formatProfileAggregateTooltip(payload.normal, false, true) })",
         payload,
     )
 
@@ -522,6 +522,9 @@ def test_profile_tooltip_exposes_milestone_badge_tone_and_accessible_text(
     assert result["normal"]["milestone"] is None
     assert result["normal"]["rows"][0]["tone"] == "primary"
     assert "Milestone:" not in result["normal"]["accessibleText"]
+    assert result["hidden"]["milestone"] is None
+    assert result["hidden"]["rows"][0]["tone"] == "primary"
+    assert "Milestone:" not in result["hidden"]["accessibleText"]
 
 
 def test_profile_milestone_tooltip_and_tier_aura_contract():
@@ -529,7 +532,7 @@ def test_profile_milestone_tooltip_and_tier_aura_contract():
     compact = re.sub(r"\s+", "", source)
     formatter = _extract_js_function(
         source,
-        "function formatProfileAggregateTooltip(aggregate, cumulative = false) {",
+        "function formatProfileAggregateTooltip(aggregate, cumulative = false, milestonesEnabled = false) {",
     )
     renderer = _extract_js_function(
         source,
@@ -553,7 +556,7 @@ def test_profile_milestone_tooltip_and_tier_aura_contract():
     assert "prefers-reduced-motion:reduce" in compact
 
 
-def test_paper_uses_rain_cleared_sky_milestones_and_keyline():
+def test_profile_milestones_follow_active_heat_palette_and_keep_paper_keyline():
     source = INDEX_HTML.read_text(encoding="utf-8")
     compact = re.sub(r"\s+", "", source)
     themes = THEMES_CSS.read_text(encoding="utf-8")
@@ -561,20 +564,12 @@ def test_paper_uses_rain_cleared_sky_milestones_and_keyline():
     light_rule = """
 html[data-ui-theme="paper"] .profile-activity-shell,
 html[data-ui-theme="paper"] .overview-profile-band {
-  --profile-milestone-1: #20AE9B;
-  --profile-milestone-2: #796DE2;
-  --profile-milestone-3: #F28D42;
-  --profile-milestone-4: #E95078;
   --profile-milestone-keyline: var(--color-bg);
 }
 """.strip()
     dark_rule = """
 html.dark[data-ui-theme="paper"] .profile-activity-shell,
 html.dark[data-ui-theme="paper"] .overview-profile-band {
-  --profile-milestone-1: #4ED1BA;
-  --profile-milestone-2: #9A8CFF;
-  --profile-milestone-3: #FFB467;
-  --profile-milestone-4: #FF7398;
   --profile-milestone-keyline: var(--color-bg);
 }
 """.strip()
@@ -586,10 +581,18 @@ html.dark[data-ui-theme="paper"] .overview-profile-band {
         "inset0001pxvar(--profile-milestone-keyline)"
     ) >= 8
 
-    assert "--profile-milestone-1:#06b6d4;" in compact
-    assert "--profile-milestone-2:#8b5cf6;" in compact
-    assert "--profile-milestone-3:#f59e0b;" in compact
-    assert "--profile-milestone-4:#ec4899;" in compact
+    palette_sync = _extract_js_function(
+        source,
+        "function syncProfileMilestonePalette() {",
+    )
+    assert "for (let level = 1; level <= 4; level += 1)" in palette_sync
+    assert "getProfileActivityColor(level)" in palette_sync
+    assert "shell.style.setProperty(`--profile-milestone-${level}`" in palette_sync
+
+    style_setter = _extract_js_function(source, "function applyStyleTheme(theme) {")
+    color_mode_setter = _extract_js_function(source, "function applyTheme(theme) {")
+    assert "syncProfileMilestonePalette();" in style_setter
+    assert "syncProfileMilestonePalette();" in color_mode_setter
 
 
 def test_profile_uses_github_geometry_stronger_auras_and_edge_gutter():
@@ -777,11 +780,12 @@ def test_profile_activity_legend_is_safe_localized_and_mode_aware():
         "function renderProfileActivityLegend(targetId, mode) {",
     )
     assert "document.createElement(" in renderer
-    assert "legend.replaceChildren(scale, divider, milestones);" in renderer
+    assert "legend.replaceChildren(scale, divider, milestones, toggle);" in renderer
     assert "mode === 'daily'" in renderer
     assert "getProfileActivityColor(level)" in renderer
     assert "profile-activity-legend-bars" in renderer
     assert "profile-activity-legend-badge" in renderer
+    assert "profile-milestone-toggle" in renderer
     assert "glyph.setAttribute('aria-hidden', 'true');" in renderer
     assert ".innerHTML" not in renderer
 
@@ -795,24 +799,66 @@ def test_profile_activity_legend_is_safe_localized_and_mode_aware():
     )
 
 
-def test_paper_uses_rain_cleared_sky_heat_palette():
+def test_profile_milestone_toggle_defaults_off_persists_and_syncs_both_views():
+    source = INDEX_HTML.read_text(encoding="utf-8")
+    compact = re.sub(r"\s+", "", source)
+
+    assert "const PROFILE_MILESTONES_STORAGE_KEY = 'tokdash-profile-milestones';" in source
+    assert (
+        "let profileMilestonesEnabled = "
+        "localStorage.getItem(PROFILE_MILESTONES_STORAGE_KEY) === 'on';"
+        in source
+    )
+    assert source.count("milestones: '") == 2
+    assert source.count("showMilestones: '") == 2
+    assert source.count("hideMilestones: '") == 2
+    assert ".profile-milestone-toggle{" in compact
+    assert '[data-milestones-enabled="false"]' in source
+
+    setter = _extract_js_function(
+        source,
+        "function setProfileMilestonesEnabled(enabled) {",
+    )
+    assert "profileMilestonesEnabled = Boolean(enabled);" in setter
+    assert "localStorage.setItem(" in setter
+    assert "profileMilestonesEnabled ? 'on' : 'off'" in setter
+    assert "renderProfileView();" in setter
+    assert "renderOverviewProfilePreview();" in setter
+
+    syncer = _extract_js_function(
+        source,
+        "function syncProfileMilestoneControls() {",
+    )
+    assert "document.querySelectorAll('.profile-milestone-toggle')" in syncer
+    assert "'aria-pressed'" in syncer
+    assert "'data-milestones-enabled'" in syncer
+
+    applier = _extract_js_function(
+        source,
+        "function applyProfileMilestone(target, milestone) {",
+    )
+    assert "delete target.dataset.milestone;" in applier
+    assert "if (!profileMilestonesEnabled || !milestone) return;" in applier
+
+
+def test_paper_uses_warm_terracotta_heat_palette():
     light, dark = _heat_palette_for("paper")
     assert light == [
-        "#F6F2EA", "#E4EFF0", "#CCE4E6", "#A9D4DA",
-        "#7FBCC8", "#559FB2", "#39798F", "#27566F",
+        "#F4EDE0", "#ECDDC8", "#DFC5A4", "#CEA475",
+        "#B97C4A", "#9D5E35", "#7D432C", "#5C2E23",
     ]
     assert dark == [
-        "#1C2026", "#223039", "#293E48", "#31505E",
-        "#3B6575", "#4C7E8F", "#6A9EAC", "#9CC6CD",
+        "#1F1914", "#2B2018", "#3A291D", "#513523",
+        "#70442B", "#985D38", "#C47E50", "#E8B080",
     ]
 
     profile_indices = [round((level / 4) * (len(light) - 1)) for level in range(5)]
     assert profile_indices == [0, 2, 4, 5, 7]
     assert [light[index] for index in profile_indices] == [
-        "#F6F2EA", "#CCE4E6", "#7FBCC8", "#559FB2", "#27566F",
+        "#F4EDE0", "#DFC5A4", "#B97C4A", "#9D5E35", "#5C2E23",
     ]
     assert [dark[index] for index in profile_indices] == [
-        "#1C2026", "#293E48", "#3B6575", "#4C7E8F", "#9CC6CD",
+        "#1F1914", "#3A291D", "#70442B", "#985D38", "#E8B080",
     ]
 
     classic_light, classic_dark = _heat_palette_for("classic")
@@ -1013,7 +1059,8 @@ def test_overview_profile_modes_share_state_and_render_aggregate_hits_contract()
     assert "buildOverviewProfilePreview(contributions, new Date(), profileActivityMode)" in overview_renderer
     assert "profileActivityMode === 'daily' ? 'button' : 'span'" in overview_renderer
     assert "overviewProfileWeekHits" in overview_renderer
-    assert "formatProfileAggregateTooltip(aggregate, profileActivityMode === 'cumulative')" in overview_renderer
+    assert "formatProfileAggregateTooltip(" in overview_renderer
+    assert "profileMilestonesEnabled" in overview_renderer
     assert "setOverviewProfileColumnHover(weekIndex, true)" in overview_renderer
     assert "applyProfileMilestone(hit, milestone);" in overview_renderer
     assert "fetch(" not in overview_renderer

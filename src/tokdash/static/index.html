@@ -3755,7 +3755,7 @@
         updateInFlight = false;
         updateIsManualRefresh = false;
         renderRefreshButton();
-        scheduleStatsWarm();
+        scheduleStatsWarm(forceRefresh);
       }
     }
 
@@ -6721,8 +6721,9 @@
       }
     }
 
-    function scheduleStatsWarm() {
-      if (statsWarmScheduled || statsLoaded) return;
+    function scheduleStatsWarm(force = false) {
+      force = !!force;
+      if (statsWarmScheduled || (!force && (statsLoaded || statsCache.default))) return;
       statsWarmScheduled = true;
       setTimeout(() => {
         scheduleIdle(() => {
@@ -6733,8 +6734,10 @@
               if (isOverviewActive()) renderOverviewProfilePreview(filledContributions);
             })
             .catch(() => {
-              statsWarmScheduled = false;
               if (isOverviewActive()) setOverviewProfileState('error');
+            })
+            .finally(() => {
+              statsWarmScheduled = false;
             });
         }, 1500);
       }, 750);

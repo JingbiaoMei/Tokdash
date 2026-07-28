@@ -834,7 +834,9 @@ def test_paper_uses_rain_cleared_sky_heat_palette():
 
 def test_overview_profile_renderer_reuses_stats_warm_response():
     source = INDEX_HTML.read_text(encoding="utf-8")
-    warm = _extract_js_function(source, "function scheduleStatsWarm() {")
+    warm = _extract_js_function(
+        source, "function scheduleStatsWarm(force = false) {"
+    )
     renderer = _extract_js_function(
         source, "function renderOverviewProfilePreview(contributions = statsCache.default) {"
     )
@@ -856,6 +858,74 @@ def test_overview_profile_renderer_reuses_stats_warm_response():
     assert "renderOverviewProfilePreview();" in _extract_js_function(
         source, "function renderOverviewTab(data) {"
     )
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_overview_profile_warm_cache_refreshes_only_when_forced(tmp_path: Path):
+    source = INDEX_HTML.read_text(encoding="utf-8")
+    scheduler = _extract_js_function(
+        source, "function scheduleStatsWarm(force = false) {"
+    )
+    harness = tmp_path / "profile-warm-cache.js"
+    harness.write_text(
+        """
+let statsWarmScheduled = false;
+let statsLoaded = false;
+const statsCache = { default: null };
+let fetchCount = 0;
+let renderCount = 0;
+function setTimeout(callback) { callback(); }
+function scheduleIdle(callback) { callback(); }
+function appPath(value) { return value; }
+function fetchJsonWithRetry() {
+  fetchCount += 1;
+  return Promise.resolve({ contributions: [] });
+}
+function fillMissingDays(contributions) { return contributions; }
+function isOverviewActive() { return true; }
+function renderOverviewProfilePreview() { renderCount += 1; }
+function setOverviewProfileState() {}
+"""
+        + scheduler
+        + """
+async function flushPromises() {
+  await Promise.resolve();
+  await Promise.resolve();
+  await new Promise((resolve) => setImmediate(resolve));
+}
+(async () => {
+  scheduleStatsWarm();
+  await flushPromises();
+  const initial = { fetchCount, renderCount, pending: statsWarmScheduled };
+
+  scheduleStatsWarm();
+  await flushPromises();
+  const cached = { fetchCount, renderCount, pending: statsWarmScheduled };
+
+  scheduleStatsWarm(true);
+  await flushPromises();
+  const forced = { fetchCount, renderCount, pending: statsWarmScheduled };
+
+  process.stdout.write(JSON.stringify({ initial, cached, forced }));
+})().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
+""",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        ["node", str(harness)],
+        check=True,
+        capture_output=True,
+        encoding="utf-8",
+    )
+    assert json.loads(result.stdout) == {
+        "initial": {"fetchCount": 1, "renderCount": 1, "pending": False},
+        "cached": {"fetchCount": 1, "renderCount": 1, "pending": False},
+        "forced": {"fetchCount": 2, "renderCount": 2, "pending": False},
+    }
+    assert "scheduleStatsWarm(forceRefresh);" in source
 
 
 def test_overview_profile_summary_markup_and_style_contract():

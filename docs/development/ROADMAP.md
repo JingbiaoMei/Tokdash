@@ -139,7 +139,7 @@ Shipped:
 - ✅ Prevent overlapping dashboard refreshes.
 
 Remaining:
-- Reuse Chart.js instances and disable animations.
+- Reuse the session-detail Chart.js instances; chart animations are already disabled.
 
 ## Pricing DB updates
 - Keep `src/tokdash/pricing_db.json` open-source.

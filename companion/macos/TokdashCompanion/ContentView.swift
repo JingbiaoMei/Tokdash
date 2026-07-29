@@ -52,7 +52,6 @@ struct ContentView: View {
 
 private struct HeaderSection: View {
     @EnvironmentObject var store: CompanionStore
-    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         HStack(spacing: 8) {
@@ -69,9 +68,7 @@ private struct HeaderSection: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Button {
-                openSettings()
-            } label: {
+            SettingsLink {
                 Image(systemName: "gearshape")
                     .font(.system(size: 13))
             }
@@ -85,7 +82,6 @@ private struct HeaderSection: View {
 
 private struct BannerSection: View {
     @EnvironmentObject var store: CompanionStore
-    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         HStack(alignment: .top, spacing: 9) {
@@ -105,8 +101,10 @@ private struct BannerSection: View {
                             Button("Retry") { store.refresh() }
                                 .font(.system(size: 12))
                         }
-                        Button("Settings") { openSettings() }
-                            .font(.system(size: 12))
+                        SettingsLink {
+                            Text("Settings")
+                        }
+                        .font(.system(size: 12))
                     }
                 }
             }

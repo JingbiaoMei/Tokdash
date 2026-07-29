@@ -7,7 +7,7 @@ import ServiceManagement
 /// Companion store: holds connection state, the decoded snapshot, the refresh
 /// scheduler, and settings. All mutations happen on the main actor.
 @MainActor
-final class CompanionStore: ObservableObject {
+final class CompanionStore: NSObject, ObservableObject {
     @Published private(set) var connectionState: ConnectionState = .connecting
     @Published private(set) var snapshot: Snapshot? = nil
     @Published private(set) var lastError: String? = nil
@@ -48,6 +48,7 @@ final class CompanionStore: ObservableObject {
         let url = URL(string: loaded.baseURL) ?? URL(string: CompanionSettings.defaultBaseURL)!
         self.settings = loaded
         self.client = TokdashClient(baseURL: url)
+        super.init()
     }
 
     /// Short name for the configured server, shown beside the connection state.
@@ -222,17 +223,24 @@ final class CompanionStore: ObservableObject {
         refresh()
     }
 
-    private var wakeObserver: NSObjectProtocol?
+    private var observesWake = false
 
     /// On wake, fire one coalesced refresh (refresh() cancels any in-flight request)
     /// so stale post-sleep data refreshes promptly. Periodic work was naturally paused
     /// while asleep - timers don't fire. Spec §cadence.
     private func observeWake() {
-        guard wakeObserver == nil else { return }
-        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
-            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor in self?.refresh() }
-        }
+        guard !observesWake else { return }
+        observesWake = true
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(didWake(_:)),
+            name: NSWorkspace.didWakeNotification,
+            object: nil
+        )
+    }
+
+    @objc private func didWake(_ notification: Notification) {
+        refresh()
     }
 
     /// Notify the scheduler the popover opened/closed (changes cadence).

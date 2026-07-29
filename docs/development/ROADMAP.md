@@ -1,16 +1,16 @@
 # Tokdash Roadmap / Notes
 
-_Last updated: 2026-06-02_
+_Last updated: 2026-07-29_
 
-## History retention / durable usage store (deferred)
-Tokdash recomputes everything live from client logs, so history erodes when a client deletes its
-old logs — notably **Claude Code** and **Gemini CLI** (30-day default cleanup). **Decision
-(2026-06): use config-based retention** — keep each client's own logs by raising/disabling its
-cleanup window — rather than building an in-app snapshot store. Rationale, the full per-client
-survey, and the one-line fixes live in [`docs/HISTORY_RETENTION.md`](../reference/HISTORY_RETENTION.md). A
-fully-reviewed design for an in-app snapshot/durable store is **parked** in
-[`docs/SNAPSHOTS_PLAN.md`](SNAPSHOTS_PLAN.md), to revisit only if a client ships
-non-disable-able cleanup or multi-machine history sync becomes a goal.
+## History retention / durable usage store
+Tokdash now keeps a local SQLite usage index at `~/.tokdash/usage.sqlite3` by default. Durable
+mode keeps rows that were already indexed when a source file later disappears, but it cannot
+recover logs deleted before Tokdash indexed them. Client retention settings therefore still
+matter — notably for **Claude Code** and **Gemini CLI** (30-day default cleanup). The full
+per-client survey and one-line retention fixes live in
+[`docs/reference/HISTORY_RETENTION.md`](../reference/HISTORY_RETENTION.md). The separate
+snapshot-store design remains parked in [`docs/SNAPSHOTS_PLAN.md`](SNAPSHOTS_PLAN.md) for a
+future need such as non-disable-able client cleanup or multi-machine history sync.
 
 ## Goals
 - **Easy install**: `pip install tokdash` (no Docker on the roadmap for now).
@@ -44,9 +44,9 @@ _Target UX:_
 - `tokdash serve` → open `http://127.0.0.1:55423`
 
 _Phased approach:_
-1. Add `pyproject.toml` and a `src/tokdash/` package layout.
+1. ✅ Add `pyproject.toml` and a `src/tokdash/` package layout.
 2. ✅ Moved backend + parsers into `src/tokdash/` and removed `sys.path` hacks.
-3. Bundle `static/` + `pricing_db.json` as package data (setuptools package-data).
+3. ✅ Bundle `static/` + `pricing_db.json` as package data (setuptools package-data).
 4. ✅ Added a small CLI (`tokdash`) with subcommands:
    - `tokdash serve` (host/port/CORS/cache-ttl flags; env vars still supported)
    - `tokdash export --json` (one-shot terminal output)
@@ -96,7 +96,7 @@ service worker), which covers the "standalone app window" want with zero code.
 - Non-goals: an Electron/Tauri desktop app (heavy, separate release train; the PWA already
   provides an app window).
 
-## Dashboard update notice — ✅ shipped (Unreleased)
+## Dashboard update notice — ✅ shipped
 Opt-in update badge in the dashboard header backed by the existing `§14` update-check endpoints
 (`/api/version`, `GET /api/update-check`, `POST /api/update-check/consent`). Constraints that
 must hold for any future change: no network check without consent (§14), and the web UI never
@@ -123,26 +123,23 @@ Each addition needs: (1) a local credential seam (like `clientpaths` resolvers),
 fixture-frozen response shape, (3) a consent key, and (4) a provider card/series in the tab.
 
 ## README / polish
-- Add a clear “Supported clients” matrix (✅ implemented vs 🟡 placeholder).
-- Create a Tokdash logo (AIGC is fine) and set dashboard favicon to it.
-- Add supported-client logos/badges (probably via shields.io) and a security note (LAN binding + CORS).
-- Add UI demo assets:
-  - screenshots in `docs/assets/` (overview + stats)
-  - optional short GIF of refresh + scrolling
+- ✅ Add a clear “Supported clients” matrix (implemented vs placeholder).
+- ✅ Create a Tokdash logo and set the dashboard favicon to it.
+- ✅ Add supported-client logos/badges and a security note (LAN binding + CORS).
+- ✅ Add screenshots in `docs/assets/` (Overview, Sessions, Stats, and Quota).
+- Optional: add a short GIF of refresh + scrolling.
 
 ## Performance
 Symptom: browser becomes less responsive while refreshing/scrolling.
 
-Likely causes:
-- Recreating Chart.js objects each refresh (and animating).
-- Large DOM updates (apps breakdown + combined models) happening immediately.
-- Overlapping refreshes (manual + auto refresh).
+Shipped:
+- ✅ Defer big table renders via `requestIdleCallback` (with a timer fallback).
+- ✅ Cap combined-model rows by default with a “Show all” toggle.
+- ✅ Skip Overview rendering while another tab is active.
+- ✅ Prevent overlapping dashboard refreshes.
 
-Fixes to keep:
+Remaining:
 - Reuse Chart.js instances and disable animations.
-- Defer big table renders via `requestIdleCallback`.
-- Cap combined-model rows by default with a “Show all” toggle.
-- Skip Overview DOM work while user is on Stats.
 
 ## Pricing DB updates
 - Keep `src/tokdash/pricing_db.json` open-source.
@@ -155,6 +152,4 @@ Fixes to keep:
 - Keep `requirements-dev.txt` (optional) as a pinned convenience file for contributors.
 
 ## Open questions
-- Publish to PyPI immediately, or start with `pip install git+https://...`?
 - If we allow `0.0.0.0`, do we want an auth token / basic auth option?
-- Do we want Windows path support in v1?

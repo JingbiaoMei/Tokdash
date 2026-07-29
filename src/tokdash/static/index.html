@@ -999,6 +999,7 @@
             <button class="btn btn-ghost quick-range-btn" data-range="today" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="today">Today</button>
             <button class="btn btn-ghost quick-range-btn" data-range="yesterday" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="yesterday">Yesterday</button>
             <button class="btn btn-ghost quick-range-btn" data-range="last7days" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="last7days">Last 7 Days</button>
+            <button class="btn btn-ghost quick-range-btn" data-range="lastWeek" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="lastWeek">Last Week</button>
             <button class="btn btn-ghost quick-range-btn" data-range="last14days" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="last14days">Last 14 Days</button>
             <button class="btn btn-ghost quick-range-btn" data-range="last4weeks" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="last4weeks">Last 4 Weeks</button>
             <button class="btn btn-ghost quick-range-btn" data-range="thisMonth" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="thisMonth">This Month</button>
@@ -2193,6 +2194,7 @@
         yesterday: 'Yesterday',
         last3days: 'Last 3 Days',
         last7days: 'Last 7 Days',
+        lastWeek: 'Last Week',
         last14days: 'Last 14 Days',
         last4weeks: 'Last 4 Weeks',
         thisMonth: 'This Month',
@@ -2450,6 +2452,7 @@
         yesterday: '昨天',
         last3days: '最近 3 天',
         last7days: '过去 7 天',
+        lastWeek: '上周',
         last14days: '过去 14 天',
         last4weeks: '过去 4 周',
         thisMonth: '本月',
@@ -3529,52 +3532,61 @@
       });
     }
 
+    function getQuickRangeDates(range, today = new Date()) {
+      const referenceDate = new Date(today.getTime());
+      let startDate = new Date(referenceDate.getTime());
+      let endDate = new Date(referenceDate.getTime());
+
+      switch(range) {
+        case 'today':
+          break;
+        case 'yesterday':
+          startDate.setDate(referenceDate.getDate() - 1);
+          endDate.setDate(referenceDate.getDate() - 1);
+          break;
+        case 'last7days':
+          startDate.setDate(referenceDate.getDate() - 6);
+          break;
+        case 'lastWeek': {
+          const daysSinceMonday = (referenceDate.getDay() + 6) % 7;
+          const currentMonday = new Date(referenceDate.getTime());
+          currentMonday.setDate(referenceDate.getDate() - daysSinceMonday);
+          startDate = new Date(currentMonday.getTime());
+          startDate.setDate(currentMonday.getDate() - 7);
+          endDate = new Date(currentMonday.getTime());
+          endDate.setDate(currentMonday.getDate() - 1);
+          break;
+        }
+        case 'last14days':
+          startDate.setDate(referenceDate.getDate() - 13);
+          break;
+        case 'last4weeks':
+          startDate.setDate(referenceDate.getDate() - 27);
+          break;
+        case 'thisMonth':
+          startDate.setDate(1); // First day of current month
+          break;
+        case 'lastMonth':
+          startDate = new Date(referenceDate.getFullYear(), referenceDate.getMonth() - 1, 1);
+          endDate = new Date(referenceDate.getFullYear(), referenceDate.getMonth(), 0); // Last day of last month
+          break;
+        case 'thisYear':
+          startDate = new Date(referenceDate.getFullYear(), 0, 1);
+          break;
+        case 'lastYear':
+          startDate = new Date(referenceDate.getFullYear() - 1, 0, 1);
+          endDate = new Date(referenceDate.getFullYear() - 1, 11, 31);
+          break;
+      }
+
+      return { startDate, endDate };
+    }
+
     // Quick range buttons
     document.querySelectorAll('.quick-range-btn').forEach(btn => {
       btn.addEventListener('click', function() {
         const range = this.getAttribute('data-range');
-        const today = new Date();
-        let startDate = new Date();
-        let endDate = new Date(today);
-
-        switch(range) {
-          case 'today':
-            startDate = today;
-            endDate = today;
-            break;
-          case 'yesterday':
-            startDate.setDate(today.getDate() - 1);
-            endDate.setDate(today.getDate() - 1);
-            break;
-          case 'last7days':
-            startDate.setDate(today.getDate() - 6);
-            endDate = today;
-            break;
-          case 'last14days':
-            startDate.setDate(today.getDate() - 13);
-            endDate = today;
-            break;
-          case 'last4weeks':
-            startDate.setDate(today.getDate() - 27);
-            endDate = today;
-            break;
-          case 'thisMonth':
-            startDate.setDate(1); // First day of current month
-            endDate = today;
-            break;
-          case 'lastMonth':
-            startDate = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-            endDate = new Date(today.getFullYear(), today.getMonth(), 0); // Last day of last month
-            break;
-          case 'thisYear':
-            startDate = new Date(today.getFullYear(), 0, 1);
-            endDate = today;
-            break;
-          case 'lastYear':
-            startDate = new Date(today.getFullYear() - 1, 0, 1);
-            endDate = new Date(today.getFullYear() - 1, 11, 31);
-            break;
-        }
+        const { startDate, endDate } = getQuickRangeDates(range);
 
         if (flatpickrInstance) {
           commitDateSelection(startDate, endDate, { closePicker: true, triggerUpdate: true, triggerPickerSync: true });

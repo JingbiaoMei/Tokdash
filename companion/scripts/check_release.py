@@ -38,6 +38,10 @@ def main() -> None:
         fail("macOS project.yml must enable Hardened Runtime")
     if 'CURRENT_PROJECT_VERSION: "1"' not in project_yml:
         fail("macOS CURRENT_PROJECT_VERSION must be the committed build number 1")
+    if 'xcodeVersion: "15.4"' not in project_yml:
+        fail("macOS project.yml must remain compatible with the macOS 14 CI toolchain")
+    if 'SWIFT_VERSION: "5.0"' not in project_yml:
+        fail("macOS project.yml must compile with the Swift 5 language mode")
 
     pbxproj = (
         COMPANION_ROOT
@@ -55,6 +59,18 @@ def main() -> None:
         )
     if "ENABLE_HARDENED_RUNTIME = YES;" not in pbxproj:
         fail("tracked Xcode project must enable Hardened Runtime")
+    object_versions = re.findall(r"^\s*objectVersion = (\d+);", pbxproj, re.MULTILINE)
+    if object_versions != ["60"]:
+        fail(
+            "tracked Xcode project must use objectVersion 60 for Xcode 15.4: "
+            f"{object_versions}"
+        )
+    swift_versions = set(re.findall(r"SWIFT_VERSION = ([^;]+);", pbxproj))
+    if swift_versions != {"5.0"}:
+        fail(
+            "tracked Xcode project must use Swift 5 language mode: "
+            f"{sorted(swift_versions)}"
+        )
     current_versions = set(
         re.findall(r"CURRENT_PROJECT_VERSION = ([^;]+);", pbxproj)
     )

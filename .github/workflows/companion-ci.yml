@@ -104,10 +104,8 @@ jobs:
         include:
           - runner: macos-14
             arch: arm64
-            package: true
           - runner: macos-15-intel
             arch: x86_64
-            package: false
     timeout-minutes: 35
     steps:
       - name: Checkout
@@ -131,12 +129,30 @@ jobs:
             -configuration Release \
             -destination "platform=macOS" \
             CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
             SWIFT_TREAT_WARNINGS_AS_ERRORS=YES \
             GCC_TREAT_WARNINGS_AS_ERRORS=YES \
             test
 
+  macos-package:
+    name: macOS universal package
+    runs-on: macos-15
+    timeout-minutes: 35
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Toolchain
+        run: |
+          echo "ImageOS=${ImageOS:-unknown}"
+          echo "ImageVersion=${ImageVersion:-unknown}"
+          uname -m
+          xcodebuild -version
+          swift --version
+
       - name: Exercise universal DMG packaging
-        if: matrix.package
         env:
           COMPANION_OUTPUT_DIR: ${{ runner.temp }}/tokdash-companion-macos
         run: bash companion/scripts/build_macos_release.sh

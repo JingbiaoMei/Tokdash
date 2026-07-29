@@ -40,6 +40,8 @@ def test_companion_version_is_single_authority() -> None:
     project_yml = (COMPANION / "macos/project.yml").read_text(encoding="utf-8")
     assert f'MARKETING_VERSION: "{version}"' in project_yml
     assert 'CURRENT_PROJECT_VERSION: "1"' in project_yml
+    assert 'xcodeVersion: "15.4"' in project_yml
+    assert 'SWIFT_VERSION: "5.0"' in project_yml
 
     global_json = json.loads((REPO_ROOT / "global.json").read_text(encoding="utf-8"))
     assert re.fullmatch(r"10\.0\.\d+", global_json["sdk"]["version"])
@@ -56,6 +58,12 @@ def test_companion_version_is_single_authority() -> None:
 def test_macos_release_metadata_and_icons_are_complete() -> None:
     project_yml = (COMPANION / "macos/project.yml").read_text(encoding="utf-8")
     assert "ENABLE_HARDENED_RUNTIME: YES" in project_yml
+
+    pbxproj = (
+        COMPANION / "macos/TokdashCompanion.xcodeproj/project.pbxproj"
+    ).read_text(encoding="utf-8")
+    assert re.findall(r"^\s*objectVersion = (\d+);", pbxproj, re.MULTILINE) == ["60"]
+    assert set(re.findall(r"SWIFT_VERSION = ([^;]+);", pbxproj)) == {"5.0"}
 
     info = (COMPANION / "macos/TokdashCompanion/Info.plist").read_text(
         encoding="utf-8"
@@ -123,6 +131,7 @@ def test_companion_workflows_avoid_temporary_artifact_storage() -> None:
     assert "gh release" not in companion_release
     assert "run: bash companion/scripts/build_macos_release.sh" in companion_ci
     assert "-configuration Release" in companion_ci
+    assert "ENABLE_TESTABILITY=YES" in companion_ci
     assert "SWIFT_TREAT_WARNINGS_AS_ERRORS=YES" in companion_ci
     assert "GCC_TREAT_WARNINGS_AS_ERRORS=YES" in companion_ci
 

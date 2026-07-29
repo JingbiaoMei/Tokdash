@@ -125,10 +125,18 @@ def test_companion_workflows_avoid_temporary_artifact_storage() -> None:
     )
     assert "actions/upload-artifact" not in companion_ci
     assert "actions/upload-artifact" not in companion_release
+    assert "actions/download-artifact" not in companion_release
     assert 'tags:\n      - "companion-v*"' in companion_release
-    assert "No unsigned companion release is permitted." in companion_release
-    assert "contents: write" not in companion_release
-    assert "gh release" not in companion_release
+    assert "name: Companion unsigned prerelease" in companion_release
+    assert "contents: write" in companion_release
+    assert "gh release create" in companion_release
+    assert "gh release upload" in companion_release
+    assert "gh release download" in companion_release
+    assert "gh release edit" in companion_release
+    assert "--clobber" not in companion_release
+    assert "environment: companion-release-publish" in companion_release
+    assert "macos-universal-unsigned.dmg" in companion_release
+    assert "windows-x64-unsigned.zip" in companion_release
     assert "run: bash companion/scripts/build_macos_release.sh" in companion_ci
     assert "-configuration Release" in companion_ci
     assert "ENABLE_TESTABILITY=YES" in companion_ci
@@ -168,7 +176,9 @@ def test_companion_docs_do_not_misidentify_windows_ui() -> None:
     assert "C#/WinUI 3" not in readme
 
     release = (COMPANION / "docs/RELEASE.md").read_text(encoding="utf-8")
-    assert "Unsigned native binaries must not be published" in release
+    assert "explicitly accepted unsigned distribution" in release
+    assert "macos-universal-unsigned.dmg" in release
+    assert "windows-x64-unsigned.zip" in release
     assert "MSIX is deferred" in release
 
 

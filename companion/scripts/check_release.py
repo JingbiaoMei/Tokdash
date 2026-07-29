@@ -139,9 +139,36 @@ def main() -> None:
     release_workflow = (
         workflows / "companion-release.yml"
     ).read_text(encoding="utf-8")
-    for forbidden in ("contents: write", "gh release create", "gh release upload"):
+    for required in (
+        "name: Companion unsigned prerelease",
+        "gh release create",
+        "gh release upload",
+        "gh release download",
+        "gh release edit",
+        "--draft",
+        "--prerelease",
+        "environment: companion-release-publish",
+        "macos-universal-unsigned.dmg",
+        "windows-x64-unsigned.zip",
+        "SHA256SUMS",
+    ):
+        if required not in release_workflow:
+            fail(f"unsigned companion release workflow is missing {required!r}")
+    for forbidden in (
+        "actions/upload-artifact",
+        "actions/download-artifact",
+        "--clobber",
+        "id-token: write",
+    ):
         if forbidden in release_workflow:
-            fail(f"unsigned companion release guard must not contain {forbidden!r}")
+            fail(f"unsigned companion release workflow must not contain {forbidden!r}")
+
+    release_notes = (
+        COMPANION_ROOT / "RELEASE_NOTES.md"
+    ).read_text(encoding="utf-8")
+    for required in ("unsigned", "Gatekeeper", "SmartScreen", "SHA256SUMS"):
+        if required not in release_notes:
+            fail(f"companion release notes are missing {required!r}")
 
     native_source = "\n".join(
         path.read_text(encoding="utf-8", errors="ignore")

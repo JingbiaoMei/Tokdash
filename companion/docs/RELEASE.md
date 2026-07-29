@@ -10,8 +10,8 @@ or newer.
 Publish one GitHub **prerelease** with exactly these assets:
 
 ```text
-Tokdash-Companion-0.1.0-macos-universal.dmg
-Tokdash-Companion-0.1.0-windows-x64.zip
+Tokdash-Companion-0.1.0-macos-universal-unsigned.dmg
+Tokdash-Companion-0.1.0-windows-x64-unsigned.zip
 SHA256SUMS
 ```
 
@@ -24,26 +24,25 @@ SHA256SUMS
   unpackaged Tokdash service and packaged startup behavior without developer
   exemptions.
 
-## Non-negotiable signing policy
+## v0.1.0 unsigned-preview policy
 
-Unsigned native binaries must not be published, even as a prerelease.
+The maintainer explicitly accepted unsigned distribution for this first GitHub
+prerelease. Every user-facing surface must say that the binaries are unsigned:
 
-- macOS requires Developer ID Application signing, Hardened Runtime,
-  notarization, ticket stapling, and Gatekeeper verification.
-- Windows requires an Authenticode signature and RFC 3161 timestamp on
-  `TokdashCompanion.exe` before the executable is compressed.
-- GitHub attestations and SHA-256 checksums supplement platform signatures;
-  they do not replace them.
+- Both binary filenames end in `-unsigned`.
+- The release title includes `unsigned preview`.
+- Release notes explain the Gatekeeper and SmartScreen warnings.
+- `SHA256SUMS` covers the final GitHub Release assets.
+- The GitHub Release remains marked as a prerelease.
 
-The active `companion-release.yml` is therefore a read-only guard that rejects
-release tags while signing is unconfigured. Replace the guard only after the
-Windows signing provider, Apple credentials, and protected environments have
-been reviewed.
+Checksums detect file changes but do not establish a trusted publisher.
+Developer ID/notarization and Windows Authenticode remain goals for a later
+release. Do not silently replace the unsigned assets with signed binaries under
+the same tag; publish a new companion version.
 
-## Unsigned CI builds
+## Build and publication flow
 
-Unsigned builds are permitted only inside local development or secret-free CI.
-They are never uploaded:
+The same builders are available for local validation:
 
 ```powershell
 powershell -NoProfile -File companion/scripts/build_windows_release.ps1
@@ -54,25 +53,38 @@ bash companion/scripts/build_macos_release.sh
 ```
 
 The scripts build in Release mode, keep WPF trimming disabled, use the
-committed build number, and put `unsigned` in diagnostic filenames. Companion
-CI uploads no Actions artifacts. Repository artifact and log retention is set
-to one day for any other workflow that needs temporary storage.
+committed build number, and put `unsigned` in the filenames. The tag workflow:
+
+1. verifies `companion-vX.Y.Z` against `companion/VERSION` and checks that the
+   tagged commit is on `main`;
+2. creates a draft GitHub prerelease;
+3. builds and tests Windows x64 and the macOS universal application;
+4. uploads both binaries directly to the draft release;
+5. downloads those final assets, generates `SHA256SUMS`, and publishes.
+
+No Actions artifacts are uploaded. Repository artifact and log retention is
+set to one day for any other workflow that needs temporary storage.
 
 ## Install, update, and remove
 
 ### macOS
 
-1. Open the notarized DMG and drag TokdashCompanion to Applications.
-2. Start Tokdash, then open TokdashCompanion.
-3. To update, quit the companion and replace the application.
-4. To remove it, disable **Launch at Login**, quit, and delete the application.
-5. Optional settings cleanup: delete
+1. Verify the DMG against `SHA256SUMS`.
+2. Open the DMG and drag TokdashCompanion to Applications.
+3. Because this preview is unsigned, Control-click the app, choose **Open**,
+   then confirm **Open** if you trust this repository and checksum.
+4. Start Tokdash, then open TokdashCompanion.
+5. To update, quit the companion and replace the application.
+6. To remove it, disable **Launch at Login**, quit, and delete the application.
+7. Optional settings cleanup: delete
    `~/Library/Application Support/TokdashCompanion`.
 
 ### Windows portable ZIP
 
-1. Extract the complete ZIP to a stable directory.
-2. Verify the executable signature, then run `TokdashCompanion.exe`.
+1. Verify the ZIP against `SHA256SUMS`, then extract it to a stable directory.
+2. Run `TokdashCompanion.exe`. SmartScreen may report an unknown publisher;
+   choose **More info** and **Run anyway** only if you trust this repository and
+   checksum.
 3. Launch at login is opt-in. It uses only the named
    `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` value, quotes the
    absolute executable path, and passes `--startup`.
@@ -99,12 +111,9 @@ Before merging:
 
 Before tagging:
 
-- Choose and configure one Windows signing provider.
-- Configure Apple Developer ID and App Store Connect notarization credentials.
-- Protect separate Windows, macOS, and publish environments and restrict them
-  to `companion-v*`.
-- Replace the release guard with a reviewed build → sign → verify → package →
-  checksum → attest → prerelease workflow.
+- Record the maintainer's explicit acceptance of unsigned preview distribution.
+- Protect the publish environment and restrict it to `companion-v*`.
+- Confirm both filenames and the release title clearly say `unsigned`.
 - Complete `VISUAL_VERIFICATION_CHECKLIST.md` on clean standard-user Windows
   and macOS systems.
 - Verify the downloaded ZIP and DMG, not runner staging files.

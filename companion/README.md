@@ -59,8 +59,9 @@ frameworks. The companion is a read-only client.
 ## Status
 
 Release preparation on branch `feat/companion-mvp`. Native builds and automated
-tests pass; packaging and CI are tracked in the repository. Signing and the
-manual visual/accessibility/privacy sign-off remain release gates.
+tests pass; packaging and CI are tracked in the repository. The maintainer
+accepted explicitly labelled unsigned binaries for the first GitHub
+prerelease. Signing remains a later distribution improvement.
 
-Release details, artifact names, install/update/uninstall steps, and the signed
+Release details, artifact names, install/update/uninstall steps, and the unsigned
 prerelease policy are in [`docs/RELEASE.md`](docs/RELEASE.md).

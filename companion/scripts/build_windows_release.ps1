@@ -91,10 +91,10 @@ try {
         "$($hash.Hash.ToLowerInvariant()) *$([System.IO.Path]::GetFileName($_))"
     } | Set-Content -Path $checksumPath -Encoding ascii
 
-    Write-Host "Windows companion CI artifact:"
+    Write-Host "Windows companion unsigned release artifact:"
     Write-Host "  $zipPath"
     Write-Host "  $checksumPath"
-    Write-Warning "Artifact is unsigned and must not be published. The release workflow must sign TokdashCompanion.exe before compression."
+    Write-Warning "Artifact is unsigned. Windows will report an unknown publisher; publish only as an explicitly labelled unsigned preview."
 }
 finally {
     if (Test-Path $workRoot) {

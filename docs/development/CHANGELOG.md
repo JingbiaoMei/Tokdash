@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+## 1.5.3 - 2026-07-29
+
+### Added
+
+- Added a Last Week quick range that selects the previous Monday-through-Sunday calendar week in English and Chinese.
+
 ## 1.5.2 - 2026-07-28
 
 ### Fixed

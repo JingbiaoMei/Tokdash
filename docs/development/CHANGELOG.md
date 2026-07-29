@@ -6,6 +6,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+## 1.5.2 - 2026-07-28
+
+### Fixed
+
+- Keep Profile activity tooltips aligned with their heatmap cells across browser zoom, display scaling, scrolling, and viewport edges without hover-position jitter.
+
+## 1.5.1 - 2026-07-28
+
+### Added
+
+- Added a synchronized, locally persisted Milestones switch to the Overview and Profile activity legends. Milestone highlighting defaults to off.
+
+### Changed
+
+- Matched milestone badges and cell glows to each active heatmap theme.
+- Reworked the Paper activity palette around parchment, warm copper, and aged-ink tones in light and dark modes.
+
+## 1.5.0 - 2026-07-28
+
+### Added
+
+- Added a Profile activity dashboard under Stats with recorded-token, peak-day, active-day, and streak summaries.
+- Added synchronized Daily, Weekly, and Cumulative 52-week activity views with token breakdown tooltips, milestone highlights, responsive scrolling, and accessible labels.
+- Embedded a compact Profile activity summary in Overview with shared aggregation controls and a direct path to the full Profile view.
+
+### Changed
+
+- Updated the Paper theme heatmap palette and added theme-aware milestone colors while preserving the existing Month, Year, and 3D Stats views.
+
+### Fixed
+
+- Refresh Profile activity after a manual dashboard update while retaining the one-time background warm cache during normal updates.
+
 ## 1.4.5 - 2026-07-26
 
 ### Added

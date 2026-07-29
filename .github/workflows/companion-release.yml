@@ -172,6 +172,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: companion-release-publish
+    env:
+      GH_REPO: ${{ github.repository }}
     permissions:
       contents: write
     steps:

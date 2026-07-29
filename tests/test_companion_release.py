@@ -133,6 +133,7 @@ def test_companion_workflows_avoid_temporary_artifact_storage() -> None:
     assert "gh release upload" in companion_release
     assert "gh release download" in companion_release
     assert "gh release edit" in companion_release
+    assert "GH_REPO: ${{ github.repository }}" in companion_release
     assert "--clobber" not in companion_release
     assert "environment: companion-release-publish" in companion_release
     assert "macos-universal-unsigned.dmg" in companion_release

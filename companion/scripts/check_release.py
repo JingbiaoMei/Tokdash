@@ -145,6 +145,7 @@ def main() -> None:
         "gh release upload",
         "gh release download",
         "gh release edit",
+        "GH_REPO: ${{ github.repository }}",
         "--draft",
         "--prerelease",
         "environment: companion-release-publish",

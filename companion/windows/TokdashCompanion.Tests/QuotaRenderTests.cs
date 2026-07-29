@@ -93,7 +93,8 @@ public class QuotaRenderTests
                 Pump();
                 allCount = flyout.QuotaRows.Items.Count;
 
-                flyout.Close();
+                flyout.Dismiss();
+                flyout.Dismiss(); // Deactivation/other close paths may race; dismissal is idempotent.
                 Pump();
             }
             catch (Exception ex)
@@ -174,7 +175,7 @@ public class QuotaRenderTests
                 flyoutBottom = flyout.Top + flyout.ActualHeight;
                 workAreaBottom = SystemParameters.WorkArea.Bottom;
 
-                flyout.Close();
+                flyout.Dismiss();
                 Pump();
             }
             catch (Exception ex) { caught = ex; }

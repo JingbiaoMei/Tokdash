@@ -101,7 +101,7 @@ jobs:
         env:
           COMPANION_OUTPUT_DIR: ${{ runner.temp }}/tokdash-companion-macos
           COMPANION_BUILD_NUMBER: ${{ github.run_number }}
-        run: companion/scripts/build_macos_release.sh
+        run: bash companion/scripts/build_macos_release.sh
 
       # CI intentionally uploads nothing. Packaging output dies with the runner,
       # avoiding temporary artifact storage entirely.

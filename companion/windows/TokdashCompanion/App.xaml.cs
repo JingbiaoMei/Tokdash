@@ -74,7 +74,7 @@ public partial class App : Application
         }
         else
         {
-            _flyout.Close();
+            _flyout.Dismiss();
             _flyout = null;
             Store.SetOpen(false);
         }
@@ -82,7 +82,7 @@ public partial class App : Application
 
     public void CloseFlyout()
     {
-        _flyout?.Close();
+        _flyout?.Dismiss();
         _flyout = null;
         Store.SetOpen(false);
     }

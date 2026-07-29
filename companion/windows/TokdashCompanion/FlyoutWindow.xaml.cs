@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
@@ -17,6 +18,7 @@ namespace TokdashCompanion;
 public partial class FlyoutWindow : Window
 {
     private bool _loaded;
+    private bool _closing;
     private bool _highContrast;
     private bool _dark;
     private bool _positionQueued;
@@ -56,8 +58,36 @@ public partial class FlyoutWindow : Window
     {
         if (_loaded) Store.PropertyChanged -= Store_PropertyChanged;
         _loaded = false;
+        _closing = true;
         _positionQueued = false;
         _updateQueued = false;
+    }
+
+    /// <summary>
+    /// Close the light-dismiss flyout at most once. Deactivation can be raised while
+    /// another close path is already running, so calling Window.Close directly from
+    /// both paths can re-enter WPF's closing lifecycle and throw.
+    /// </summary>
+    internal void Dismiss()
+    {
+        if (_closing) return;
+        _closing = true;
+        try
+        {
+            Close();
+        }
+        catch
+        {
+            _closing = false;
+            throw;
+        }
+    }
+
+    protected override void OnClosing(CancelEventArgs e)
+    {
+        _closing = true;
+        base.OnClosing(e);
+        if (e.Cancel) _closing = false;
     }
 
     private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
@@ -361,12 +391,12 @@ public partial class FlyoutWindow : Window
     private void FlyoutWindow_Deactivated(object sender, EventArgs e)
     {
         // Light dismiss when the flyout loses focus.
-        if (_loaded) Close();
+        if (_loaded) Dismiss();
     }
 
     private void FlyoutWindow_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
-        if (e.Key == System.Windows.Input.Key.Escape) Close();
+        if (e.Key == System.Windows.Input.Key.Escape) Dismiss();
     }
 
     private void Store_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)

@@ -121,7 +121,7 @@ jobs:
       - name: Build universal DMG
         env:
           COMPANION_BUILD_NUMBER: ${{ github.run_number }}
-        run: companion/scripts/build_macos_release.sh
+        run: bash companion/scripts/build_macos_release.sh
 
       - name: Attest macOS asset
         uses: actions/attest@v4

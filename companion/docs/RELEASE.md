@@ -31,7 +31,7 @@ powershell -NoProfile -File companion/scripts/build_windows_release.ps1
 macOS:
 
 ```bash
-companion/scripts/build_macos_release.sh
+bash companion/scripts/build_macos_release.sh
 ```
 
 Both scripts read `companion/VERSION`, produce SHA-256 checksums, and label

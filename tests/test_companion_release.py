@@ -100,6 +100,8 @@ def test_companion_workflows_avoid_temporary_artifact_storage() -> None:
     assert 'tags:\n      - "companion-v*"' in companion_release
     assert "environment: companion-release" in companion_release
     assert "--prerelease" in companion_release
+    assert "run: bash companion/scripts/build_macos_release.sh" in companion_ci
+    assert "run: bash companion/scripts/build_macos_release.sh" in companion_release
 
 
 def test_every_actions_artifact_upload_has_one_day_retention() -> None:

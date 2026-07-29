@@ -37,7 +37,7 @@ final class CompanionStore: NSObject, ObservableObject {
     private var notifiedKeys = Set<String>()
     private var prevQuotaLeft: [String: Double] = [:]
 
-    init() {
+    override init() {
         var loaded = CompanionSettings.load()
         // Repair a blank/malformed base URL saved by an earlier build so the client can't
         // point at nothing, and persist the fix so it isn't re-applied every launch.

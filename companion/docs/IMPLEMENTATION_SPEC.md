@@ -144,7 +144,7 @@ consent in the companion.
 - `SMAppService` for opt-in launch at login.
 - Settings and Quit in an NSMenu-style dropdown from the header gear, plus a
   quiet Quit in the footer.
-- Deployment target: macOS 13 (MenuBarExtra availability). Build against
+- Deployment target: macOS 14. Build against
   macOS 26.5 SDK on the MacBook.
 
 ```
@@ -283,8 +283,9 @@ CompanionViewModel          (BindableBase / INotifyPropertyChanged)
 
 - Do not modify the Tokdash server unless an evidenced API-contract gap
   requires it. Document the gap and ask before changing the server.
-- Do not publish, sign a release, create tags, or alter the live released
-  Tokdash installation.
+- Release-preparation work may add packaging, CI, documentation, and explicit
+  unsigned-prerelease support. Publishing, signing, or creating a tag still
+  requires Howard's explicit approval.
 - Do not switch the conda base env to `pip install -e .` (see AGENTS.md).
 
 ## 10. Build authority
@@ -310,5 +311,6 @@ Git sync carries edits to each native host.
 9. Build, test, install, launch, and inspect logs on both native systems.
 10. Prepare a manual visual-verification checklist for Howard.
 
-Stop after verified development builds and the manual visual-test checklist.
-No release, no tags, no signing.
+The development stop condition was met. Release preparation now follows
+`companion/docs/RELEASE.md`; the physical visual/accessibility/privacy
+checklist and signing decision remain release gates.

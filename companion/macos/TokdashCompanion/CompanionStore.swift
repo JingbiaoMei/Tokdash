@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 import SwiftUI
 import ServiceManagement
-import UserNotifications
+@preconcurrency import UserNotifications
 
 /// Companion store: holds connection state, the decoded snapshot, the refresh
 /// scheduler, and settings. All mutations happen on the main actor.

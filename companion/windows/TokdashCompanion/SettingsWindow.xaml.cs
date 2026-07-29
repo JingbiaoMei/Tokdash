@@ -176,7 +176,7 @@ public partial class SettingsWindow : Window
     private static SolidColorBrush HexBrush(string hex) =>
         new((Color)ColorConverter.ConvertFromString(hex));
 
-    private void Save_Click(object sender, RoutedEventArgs e)
+    private async void Save_Click(object sender, RoutedEventArgs e)
     {
         var url = BaseUrlBox.Text.Trim();
         if (!CompanionStore.IsValidBaseURL(url))
@@ -187,18 +187,29 @@ public partial class SettingsWindow : Window
 
         var s = Store.Settings;
         bool urlChanged = s.BaseURL != url;
-        bool launchChanged = s.LaunchAtLogin != (LaunchBox.IsChecked == true);
+        bool requestedLaunch = LaunchBox.IsChecked == true;
+        bool launchChanged = s.LaunchAtLogin != requestedLaunch;
 
         s.BaseURL = url;
-        s.LaunchAtLogin = LaunchBox.IsChecked == true;
         s.LowQuotaNotifications = NotifyBox.IsChecked == true;
         s.Thresholds = new QuotaThresholds(
             (int)FiveHourSlider.Value,
             (int)WeeklySlider.Value,
             (int)OtherSlider.Value);
+        if (launchChanged)
+        {
+            bool actualLaunch = await LaunchAtLogin.SetEnabledAsync(requestedLaunch);
+            s.LaunchAtLogin = actualLaunch;
+            if (requestedLaunch && !actualLaunch)
+            {
+                MessageBox.Show(
+                    "Windows did not enable launch at login. Check Settings > Apps > Startup.",
+                    "Tokdash",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+        }
         s.Save();
-
-        if (launchChanged) LaunchAtLogin.SetEnabled(s.LaunchAtLogin);
         if (urlChanged)
         {
             Store.UpdateBaseURL(s.BaseURL);

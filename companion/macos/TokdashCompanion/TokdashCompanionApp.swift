@@ -1,6 +1,6 @@
 import AppKit
 import SwiftUI
-import UserNotifications
+@preconcurrency import UserNotifications
 
 /// Shared popover metrics. The menu-bar popover and the notification-tap window must
 /// stay the same width, so both read these rather than repeating literals.

@@ -1,0 +1,163 @@
+name: Companion unsigned prerelease
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+on:
+  push:
+    tags:
+      - "companion-v*"
+
+concurrency:
+  group: companion-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate tag and release commit
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate version and tag
+        run: python3 companion/scripts/check_release.py --tag "$GITHUB_REF_NAME"
+
+      - name: Require the release commit on main
+        run: |
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || {
+            echo "Companion release tags must point to a commit already on main." >&2
+            exit 1
+          }
+
+  prepare:
+    name: Create protected draft prerelease
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: companion-release
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create draft GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="Tokdash Companion ${GITHUB_REF_NAME#companion-v} (unsigned prerelease)"
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" \
+              --verify-tag \
+              --draft \
+              --prerelease \
+              --title "$title" \
+              --notes-file companion/docs/UNSIGNED_PRERELEASE_NOTES.md
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --verify-tag \
+              --draft \
+              --prerelease \
+              --title "$title" \
+              --notes-file companion/docs/UNSIGNED_PRERELEASE_NOTES.md
+          fi
+
+  windows:
+    name: Build Windows x64 assets
+    needs: prepare
+    runs-on: windows-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Build ZIP and MSIX
+        shell: pwsh
+        run: companion/scripts/build_windows_release.ps1
+
+      - name: Attest Windows assets
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            dist/companion/*/windows/*.zip
+            dist/companion/*/windows/*.msix
+
+      - name: Upload directly to the draft release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $assets = Get-ChildItem "dist/companion/*/windows/*" -File |
+            Select-Object -ExpandProperty FullName
+          gh release upload $env:GITHUB_REF_NAME $assets --clobber
+
+  macos:
+    name: Build macOS universal asset
+    needs: prepare
+    runs-on: macos-15
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build universal DMG
+        env:
+          COMPANION_BUILD_NUMBER: ${{ github.run_number }}
+        run: companion/scripts/build_macos_release.sh
+
+      - name: Attest macOS asset
+        uses: actions/attest@v4
+        with:
+          subject-path: dist/companion/*/macos/*.dmg
+
+      - name: Upload directly to the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" dist/companion/*/macos/* --clobber
+
+  publish-prerelease:
+    name: Publish unsigned prerelease
+    needs:
+      - windows
+      - macos
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Verify assets and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          asset_count="$(gh release view "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json assets \
+            --jq '.assets | length')"
+          if [[ "$asset_count" -ne 5 ]]; then
+            echo "Expected 5 release assets, found $asset_count." >&2
+            exit 1
+          fi
+          gh release edit "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft=false \
+            --prerelease
+
+      # Release jobs attach final assets directly to GitHub Releases. They do
+      # not consume temporary Actions artifact storage.

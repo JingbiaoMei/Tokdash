@@ -1,6 +1,7 @@
 # Tokdash Companion - Manual Visual-Verification Checklist
 
-Branch: `feat/companion-mvp`. Dev builds only - no signing, no release.
+Branch: `feat/companion-mvp`. Complete this on the exact release candidate
+before creating a production/latest companion release.
 
 Howard performs these checks on each native host. The implementation agent
 has already verified: compilation, unit tests, bundle/assembly structure,
@@ -171,6 +172,6 @@ Both apps must behave identically for data and states, differing only in native 
 - [ ] No provider credentials, logs, or SQLite files read by the companion (verify with Process Monitor / `fs_usage`).
 - [ ] No telemetry or third-party network requests (verify with a network monitor; only the configured Tokdash base URL should be contacted).
 
-When all boxes are checked, the companion MVP is ready for release preparation
-(signing, notarization, MSIX packaging, GitHub Release) - which is explicitly
-out of scope for this branch.
+When all boxes are checked, the companion MVP has completed its physical
+release gate. Packaging and workflow checks are separate automated gates in
+`companion/docs/RELEASE.md`.

@@ -1,7 +1,7 @@
 # Tokdash Companion
 
 Native, lightweight menu-bar / notification-area clients for the Tokdash
-service. macOS uses SwiftUI `MenuBarExtra`; Windows uses C#/WinUI 3 with
+service. macOS uses SwiftUI `MenuBarExtra`; Windows uses C#/WPF with
 Win32 `Shell_NotifyIconW` interop. Both read the existing Tokdash HTTP API -
 they do not parse logs, calculate prices, scan credentials, or replace the
 web dashboard.
@@ -22,7 +22,9 @@ companion/
     expected/           observable UI outcomes per state
   assets/               logo assets (PNG)
   macos/                SwiftUI app + tests (built on the MacBook via SSH)
-  windows/              C#/WinUI 3 app + tests (built on Windows via PowerShell)
+  windows/              C#/WPF app + tests (built on Windows via PowerShell)
+  scripts/              version checks and native release packaging
+  VERSION               companion release version (independent of Python)
 ```
 
 ## Authority order
@@ -56,6 +58,9 @@ frameworks. The companion is a read-only client.
 
 ## Status
 
-Development in progress on branch `feat/companion-mvp`. No releases, tags, or
-signing yet. Stop condition: verified development builds + a manual
-visual-verification checklist for Howard.
+Release preparation on branch `feat/companion-mvp`. Native builds and automated
+tests pass; packaging and CI are tracked in the repository. Signing and the
+manual visual/accessibility/privacy sign-off remain release gates.
+
+Release details, artifact names, install/update/uninstall steps, and the
+unsigned-prerelease policy are in [`docs/RELEASE.md`](docs/RELEASE.md).

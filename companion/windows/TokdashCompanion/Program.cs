@@ -7,7 +7,7 @@ namespace TokdashCompanion;
 
 /// <summary>
 /// Win32 tray host: owns the Shell_NotifyIconW lifecycle and the message loop.
-/// Left-click toggles the WinUI 3 flyout (managed by App); right-click opens
+/// Left-click toggles the WPF flyout (managed by App); right-click opens
 /// the native context menu. This is the resident process - it never shows a
 /// taskbar button or main window.
 /// </summary>

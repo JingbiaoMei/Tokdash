@@ -1,0 +1,9 @@
+<Project>
+  <PropertyGroup>
+    <CompanionVersion>$([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)..\VERSION').Trim())</CompanionVersion>
+    <Version>$(CompanionVersion)</Version>
+    <AssemblyVersion>$(CompanionVersion).0</AssemblyVersion>
+    <FileVersion>$(CompanionVersion).0</FileVersion>
+    <InformationalVersion>$(CompanionVersion)</InformationalVersion>
+  </PropertyGroup>
+</Project>

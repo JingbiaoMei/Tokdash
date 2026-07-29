@@ -60,7 +60,7 @@ struct SettingsView: View {
         .padding(20)
         .frame(width: 380)
         .onAppear { loadSettings() }
-        .onChange(of: baseURL) { _ in
+        .onChange(of: baseURL) { _, _ in
             // Debounce the URL: don't reconnect on every keystroke.
             urlDebounce?.cancel()
             urlDebounce = Task {
@@ -68,11 +68,11 @@ struct SettingsView: View {
                 if !Task.isCancelled { saveSettings() }
             }
         }
-        .onChange(of: launchAtLogin) { _ in saveSettings() }
-        .onChange(of: lowQuotaNotifications) { _ in saveSettings() }
-        .onChange(of: fiveHourThreshold) { _ in saveSettings() }
-        .onChange(of: weeklyThreshold) { _ in saveSettings() }
-        .onChange(of: otherThreshold) { _ in saveSettings() }
+        .onChange(of: launchAtLogin) { _, _ in saveSettings() }
+        .onChange(of: lowQuotaNotifications) { _, _ in saveSettings() }
+        .onChange(of: fiveHourThreshold) { _, _ in saveSettings() }
+        .onChange(of: weeklyThreshold) { _, _ in saveSettings() }
+        .onChange(of: otherThreshold) { _, _ in saveSettings() }
     }
 
     @ViewBuilder private var testResultView: some View {

@@ -1,0 +1,107 @@
+name: Companion CI
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+on:
+  pull_request:
+    paths:
+      - "companion/**"
+      - "tests/test_companion_*.py"
+      - ".github/workflows/companion-*.yml"
+  push:
+    branches:
+      - main
+      - feat/companion-mvp
+    paths:
+      - "companion/**"
+      - "tests/test_companion_*.py"
+      - ".github/workflows/companion-*.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: companion-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  metadata:
+    name: Release metadata
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate release metadata
+        run: python companion/scripts/check_release.py
+
+  windows:
+    name: Windows 11 x64
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Test
+        run: dotnet test companion/windows/TokdashCompanion.slnx --configuration Release
+
+      - name: Exercise portable ZIP and MSIX packaging
+        shell: pwsh
+        run: >
+          companion/scripts/build_windows_release.ps1
+          -SkipTests
+          -OutputDirectory "${{ runner.temp }}/tokdash-companion-windows"
+
+      # CI intentionally uploads nothing. Packaging output dies with the runner,
+      # avoiding temporary artifact storage entirely.
+
+  macos:
+    name: macOS (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+            package: true
+          - runner: macos-15-intel
+            arch: x86_64
+            package: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Test
+        run: |
+          xcodebuild \
+            -project companion/macos/TokdashCompanion.xcodeproj \
+            -scheme TokdashCompanion \
+            -configuration Debug \
+            -destination "platform=macOS" \
+            CODE_SIGNING_ALLOWED=NO \
+            test
+
+      - name: Exercise universal DMG packaging
+        if: matrix.package
+        env:
+          COMPANION_OUTPUT_DIR: ${{ runner.temp }}/tokdash-companion-macos
+          COMPANION_BUILD_NUMBER: ${{ github.run_number }}
+        run: companion/scripts/build_macos_release.sh
+
+      # CI intentionally uploads nothing. Packaging output dies with the runner,
+      # avoiding temporary artifact storage entirely.

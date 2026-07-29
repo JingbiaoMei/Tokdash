@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.Windows.Threading;
 
 namespace TokdashCompanion;
@@ -43,6 +44,9 @@ public sealed class CompanionStore : BindableBase
     public void SetOpen(bool open)
     {
         _open = open;
+        // The open/closed refresh window also decides FreshnessText's "· stale" suffix;
+        // republish it or the transition never re-renders the footer.
+        OnPropertyChanged(nameof(FreshnessText));
         Reschedule();
     }
 
@@ -86,7 +90,31 @@ public sealed class CompanionStore : BindableBase
         return TimeSpan.FromMinutes(10);
     }
 
-    public CompanionStore() : this(new TokdashClient(CompanionSettings.Load().BaseURL)) { }
+    public CompanionStore() : this(CreateDefaultClient()) { }
+
+    /// <summary>
+    /// True when a base URL is usable: an absolute http/https URL with a host. Every
+    /// write path (settings window, UpdateBaseURL) validates with this, so the startup
+    /// migration below stops being a recurring patch. Mirrors the macOS isValidBaseURL.
+    /// </summary>
+    public static bool IsValidBaseURL(string? url) =>
+        Uri.TryCreate(url?.Trim(), UriKind.Absolute, out var uri) &&
+        (uri.Scheme == "http" || uri.Scheme == "https") &&
+        !string.IsNullOrEmpty(uri.Host);
+
+    // Migrate a blank/malformed base URL saved by an earlier build so it can't crash
+    // startup (new Uri throws) or point the client at nothing. Resets to the default
+    // and persists the fix.
+    private static ITokdashClient CreateDefaultClient()
+    {
+        var settings = CompanionSettings.Load();
+        if (!IsValidBaseURL(settings.BaseURL))
+        {
+            settings.BaseURL = CompanionSettings.DefaultBaseURL;
+            settings.Save();
+        }
+        return new TokdashClient(settings.BaseURL);
+    }
 
     public CompanionStore(ITokdashClient client)
     {
@@ -101,13 +129,14 @@ public sealed class CompanionStore : BindableBase
     /// in-flight refresh before disposing the old client.</summary>
     public bool UpdateBaseURL(string url)
     {
-        if (!Uri.TryCreate(url?.Trim(), UriKind.Absolute, out var uri) ||
-            (uri.Scheme != "http" && uri.Scheme != "https"))
-            return false;
+        if (!IsValidBaseURL(url)) return false;
         _cts?.Cancel();
         var old = _client;
-        _client = new TokdashClient(uri.ToString());
+        _client = new TokdashClient(url.Trim());
         old.Dispose();
+        // ConnectionLabel embeds the server name, so it has to re-render on a URL change.
+        OnPropertyChanged(nameof(ServerName));
+        OnPropertyChanged(nameof(ConnectionLabel));
         return true;
     }
 
@@ -115,13 +144,39 @@ public sealed class CompanionStore : BindableBase
     public ConnectionState ConnectionState
     {
         get => _connectionState;
-        set { _connectionState = value; OnPropertyChanged(); OnPropertyChanged(nameof(ConnectionLabel)); OnPropertyChanged(nameof(DotColor)); }
+        set
+        {
+            if (!SetProperty(ref _connectionState, value)) return;
+            OnPropertyChanged(nameof(ConnectionLabel));
+            OnPropertyChanged(nameof(DotColor));
+        }
     }
 
+    /// <summary>
+    /// Short name for the configured server, shown beside the connection state.
+    /// Loopback reads "Local"; anything else uses the host's first DNS label, so a
+    /// Tailscale URL like https://wsl.tail76535.ts.net/tokdash reads "wsl" rather than
+    /// claiming to be local. Bare IPs are shown as-is. Mirrors the macOS serverLabel.
+    /// </summary>
+    public static string ServerLabel(string? url)
+    {
+        if (!Uri.TryCreate(url?.Trim(), UriKind.Absolute, out var uri)) return "Local";
+        string host = uri.Host.ToLowerInvariant();
+        if (host.Length == 0 || host == "localhost" || host == "127.0.0.1" || host == "::1") return "Local";
+        // An IPv4/IPv6 literal has no name to shorten; splitting it would be misleading.
+        if (host.Contains(':') || host.All(c => char.IsDigit(c) || c == '.')) return host;
+        string first = host.Split('.')[0];
+        return first.Length == 0 ? host : first;
+    }
+
+    public string ServerName => ServerLabel(Settings.BaseURL);
+
+    // Only the connected state is prefixed with the server label; the failure states are
+    // about reachability, not which host.
     public string ConnectionLabel => ConnectionState switch
     {
         ConnectionState.Connecting => "Connecting…",
-        ConnectionState.Connected => "Local · Connected",
+        ConnectionState.Connected => $"{ServerName} · Connected",
         ConnectionState.Busy => "Busy",
         ConnectionState.Offline => "Offline",
         ConnectionState.WrongService => "Not Tokdash",
@@ -138,9 +193,12 @@ public sealed class CompanionStore : BindableBase
     };
 
     private Snapshot? _snapshot;
-    public Snapshot? Snapshot { get => _snapshot; set { _snapshot = value; OnPropertyChanged(); } }
+    public Snapshot? Snapshot { get => _snapshot; set => SetProperty(ref _snapshot, value); }
 
-    public QuotaView QuotaView { get; set; } = QuotaView.Low;
+    private QuotaView _quotaView = QuotaView.Low;
+    // Observable so a notification-activation assignment (QuotaView.Low) re-renders an
+    // already-open flyout via Store_PropertyChanged -> UpdateView, not just a closed one.
+    public QuotaView QuotaView { get => _quotaView; set => SetProperty(ref _quotaView, value); }
 
     /// <summary>Raised with quota windows that just crossed their threshold (opt-in).</summary>
     public event Action<IReadOnlyList<QuotaRow>>? LowQuotaAlert;
@@ -166,6 +224,7 @@ public sealed class CompanionStore : BindableBase
         foreach (var r in rows)
         {
             if (r.ResetsAt is null) continue; // suppress buckets without a reset time
+            if (r.Failed) continue; // suppress rows whose own bucket failed (last-known, unreliable for alerts)
             long epoch = r.ResetsAt.Value.ToUnixTimeSeconds();
             string stateKey = $"{r.Provider}|{r.Account}|{r.Bucket}|{epoch}";
             currentKeys.Add(stateKey);
@@ -188,6 +247,17 @@ public sealed class CompanionStore : BindableBase
         if (fresh.Count > 0) LowQuotaAlert?.Invoke(fresh);
     }
 
+    /// <summary>
+    /// Parse the API `timestamp`: a full ISO 8601 string with offset/Z, or a naive UTC
+    /// datetime with arbitrary fractional-second digits (e.g. "2026-07-28T17:57:43.500951").
+    /// Naive forms are read as UTC. Mirrors the macOS parseTimestamp. Spec §freshness.
+    /// </summary>
+    internal static DateTimeOffset? ParseTimestamp(string? s) =>
+        DateTimeOffset.TryParse(s, CultureInfo.InvariantCulture,
+            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var dt)
+            ? dt
+            : null;
+
     public string FreshnessText
     {
         get
@@ -199,8 +269,10 @@ public sealed class CompanionStore : BindableBase
                 : age.TotalMinutes < 60 ? $"Updated {(int)age.TotalMinutes} min ago"
                 : age.TotalHours < 24 ? $"Updated {(int)age.TotalHours} h ago"
                 : $"Updated {(int)age.TotalDays} d ago";
-            // Offline/Busy show last-good data - mark it stale.
-            if (ConnectionState is ConnectionState.Offline or ConnectionState.Busy) text += " · stale";
+            // Append "· stale" only when last-good data is older than the refresh window
+            // (60s while open, 600s while closed) and the last fetch failed (offline/busy).
+            double window = _open ? 60 : 600;
+            if ((ConnectionState is ConnectionState.Offline or ConnectionState.Busy) && age.TotalSeconds > window) text += " · stale";
             return text;
         }
     }
@@ -283,11 +355,24 @@ public sealed class CompanionStore : BindableBase
             else
             {
                 _lastFetchAt = DateTimeOffset.Now;
-                _lastDataTime = DateTimeOffset.TryParse(Snapshot.Today.Timestamp, out var dt) ? dt : _lastFetchAt;
+                // Data time: prefer the API timestamp (naive UTC -> treated as UTC), else
+                // fall back to fetch time minus the cache age, else fetch time. Spec §freshness.
+                if (ParseTimestamp(Snapshot.Today.Timestamp) is { } dt)
+                    _lastDataTime = dt;
+                else if (Snapshot.Today.ResponseCache?.AgeSeconds is double age)
+                    _lastDataTime = _lastFetchAt - TimeSpan.FromSeconds(age);
+                else
+                    _lastDataTime = _lastFetchAt;
                 _failures = 0;
                 _partial = todayFailed || monthFailed || quotaFailed; // partial -> 15s short retry
                 EvaluateLowQuotaNotifications(Snapshot);
             }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // A superseding refresh canceled this one; don't count it as a failure
+            // or overwrite the connection state. The newer refresh wins.
+            return;
         }
         catch (TokdashException ex)
         {
@@ -382,21 +467,22 @@ public sealed class Snapshot
                 .Where(kv => kv.Value.Buckets is { Count: > 0 })
                 .Select(kv =>
                 {
-                    // A failed provider (status != "ok") still shows its last-known
-                    // rows, flagged so the UI can render an inline warning per spec §7
-                    // rather than a full-surface failure.
-                    bool failed = !IsProviderOk(kv.Value.Status);
-                    return new QuotaGroup(
-                        Capitalize(kv.Key),
-                        kv.Value.Buckets!.Select(b => new QuotaRow(
-                            Capitalize(kv.Key), b.Bucket, b.BucketLabel ?? b.Bucket,
-                            b.RemainingPercent ?? 100,
-                            b.ResetsAt is null ? null : DateTimeOffset.FromUnixTimeSeconds(b.ResetsAt.Value),
-                            kv.Value.Estimated ?? false,
-                            b.Account ?? "",
-                            b.RemainingPercent is not null,
-                            failed)).ToList(),
-                        failed);
+                    // GROUP failure drives the provider-header warning: status != "ok" OR a
+                    // non-empty status_detail (e.g. stale_token, even when status is "ok").
+                    // A provider with several credentials reports the detail for the whole
+                    // provider, so this stays broad. Spec §7.
+                    bool failed = !IsProviderOk(kv.Value.Status) || !string.IsNullOrWhiteSpace(kv.Value.StatusDetail);
+                    var rows = kv.Value.Buckets!.Select(b => new QuotaRow(
+                        Capitalize(kv.Key), b.Bucket, QuotaRow.DisplayLabel(b.BucketLabel ?? b.Bucket),
+                        b.RemainingPercent ?? 100,
+                        b.ResetsAt is null ? null : DateTimeOffset.FromUnixTimeSeconds(b.ResetsAt.Value),
+                        kv.Value.Estimated ?? false,
+                        b.Account ?? "",
+                        b.RemainingPercent is not null,
+                        IsRowFailed(b.CapturedAt, kv.Value.StatusAt, failed))).ToList();
+                    if (kv.Key.Equals("antigravity", StringComparison.OrdinalIgnoreCase))
+                        rows = AntigravityPools(rows);
+                    return new QuotaGroup(Capitalize(kv.Key), rows, failed);
                 })
                 .ToList();
         }
@@ -405,10 +491,51 @@ public sealed class Snapshot
     private static string Capitalize(string s) =>
         string.IsNullOrEmpty(s) ? s : char.ToUpperInvariant(s[0]) + s[1..];
 
-    // A provider is healthy when its status is absent (older servers) or "ok"; any
-    // other value means its quota couldn't be refreshed this cycle. Spec §7.
+    // "ok" or absent (older servers) is healthy; any other value means that quota
+    // couldn't be refreshed this cycle. Spec §7.
+    /// <summary>
+    /// Antigravity reports one bucket per model, which floods the list. The web dashboard
+    /// collapses them into two pools and shows the worst remaining in each; the companion
+    /// matches so the two surfaces agree. Falls back to the raw rows if nothing matches,
+    /// so an unrecognised model can never silently vanish. Mirrors macOS antigravityPools.
+    /// </summary>
+    public static List<QuotaRow> AntigravityPools(List<QuotaRow> rows)
+    {
+        (string Key, string Label, Func<string, bool> Test)[] pools =
+        [
+            ("gemini", "Gemini Models", n => n.Contains("gemini")),
+            ("claude", "Claude and GPT Models", n => n.Contains("claude") || n.Contains("gpt") || n.Contains("oss")),
+        ];
+        var pooled = new List<QuotaRow>();
+        foreach (var pool in pools)
+        {
+            QuotaRow? worst = rows
+                .Where(r => r.HasPercent && pool.Test($"{r.BucketLabel} {r.Bucket}".ToLowerInvariant()))
+                .OrderBy(r => r.Left)
+                .FirstOrDefault();
+            if (worst is not null)
+                pooled.Add(worst with { Bucket = $"pool:{pool.Key}", BucketLabel = pool.Label });
+        }
+        return pooled.Count == 0 ? rows : pooled;
+    }
+
     private static bool IsProviderOk(string? status) =>
         string.IsNullOrEmpty(status) || status.Equals("ok", StringComparison.OrdinalIgnoreCase);
+
+    // ROW failure drives the inline ⚠ and notification eligibility. buckets[].status is
+    // always "ok" (the server only writes failure statuses to the filtered-out "api"
+    // bucket), so freshness is the real discriminator: a row is last-known when the
+    // provider's failure is NEWER than the row's data. Strict "<" makes same-cycle
+    // equality count as fresh, which is what rescues a healthy credential's window when a
+    // sibling credential is broken - every credential in a cycle shares captured_at.
+    // Missing timestamps (older servers) fall back to the group rather than silently
+    // un-suppressing. Spec §7.
+    private static bool IsRowFailed(int? capturedAt, int? statusAt, bool groupFailed)
+    {
+        if (!groupFailed) return false;
+        if (capturedAt is null || statusAt is null) return true;
+        return capturedAt.Value < statusAt.Value;
+    }
 }
 
 public sealed record QuotaGroup(string Provider, List<QuotaRow> Rows, bool Failed);

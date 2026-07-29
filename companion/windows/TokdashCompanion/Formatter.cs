@@ -55,6 +55,34 @@ public sealed record QuotaRow(
     bool HasPercent,
     bool Failed = false)
 {
+    /// <summary>
+    /// Drop a trailing "window" from a server bucket label: the flyout is narrow and the
+    /// word carries no information ("5-hour window" -> "5-hour", "7-day window" -> "7-day").
+    /// Applied at display time so stored labels from older servers shorten too. Labels that
+    /// don't end in it (MiniMax "5-hour", Kimi "Weekly") pass through unchanged.
+    /// Mirrors the macOS QuotaRow.displayLabel.
+    /// </summary>
+    public static string DisplayLabel(string raw)
+    {
+        string s = (raw ?? "").Trim();
+        if (s.EndsWith(" window", StringComparison.OrdinalIgnoreCase))
+        {
+            string shortened = s[..^" window".Length].TrimEnd();
+            if (shortened.Length > 0) s = shortened;
+        }
+        // Codex names metered features "GPT-<ver>-Codex-<feature>", which eats the whole
+        // row at flyout width. Keep only the feature and the window: "Spark · 5-hour".
+        // Only applies to "<name> · <window>" labels whose name is hyphenated, so plain
+        // names (MiniMax "Video · Weekly") and bare windows ("5-hour") are untouched.
+        string[] parts = s.Split(" · ");
+        if (parts.Length == 2 && parts[0].Contains('-'))
+        {
+            string feature = parts[0].Split('-')[^1];
+            if (feature.Length > 0) s = $"{feature} · {parts[1]}";
+        }
+        return s;
+    }
+
     public bool IsLow(QuotaThresholds t) => HasPercent && Left <= t.ThresholdFor(Bucket);
 
     public string ResetsText

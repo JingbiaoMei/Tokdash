@@ -69,7 +69,7 @@ Fields used by the companion:
 | `by_tool` | object | Leading tool by cost (activity line) |
 | `combined_models` / `top_models` | array | Leading model by cost (activity line) |
 | `timestamp` | string (ISO 8601) | Freshness calculation |
-| `response_cache.age_seconds` | int | Freshness "· cached" hint when useful |
+| `response_cache.age_seconds` | float | Freshness "· cached" hint when useful |
 
 Additive decoding: ignore unknown fields, tolerate absent optional fields. A
 valid response with `total_tokens == 0` is the **empty state**, not an error.
@@ -92,12 +92,14 @@ Fields used:
 | `enabled` | bool | When `false`, show "Subscription tracking is off" |
 | `providers.*` | object | One entry per detected provider; key is the provider id |
 | `providers.*.estimated` | bool | Show "Estimated" badge on that provider's rows |
+| `providers.*.status_at` | int \| null | Epoch seconds the failure status was observed; see Provider failures |
 | `providers.*.buckets[]` | array | Quota windows |
 | `buckets[].bucket` | string | Window id, e.g. `"5h"`, `"weekly"` |
 | `buckets[].bucket_label` | string | Display label, e.g. `"5-hour window"` |
 | `buckets[].remaining_percent` | float \| null | Display "14% left"; bar fill width |
 | `buckets[].resets_at` | int \| null | Epoch seconds; humanize to user locale/TZ |
 | `buckets[].account` | string | Part of the notification dedup key |
+| `buckets[].captured_at` | int \| null | Epoch seconds this window was observed; see Provider failures |
 
 Buckets with `remaining_percent == null` are rendered without a percentage and
 without a bar fill; they are not candidates for the Low view.
@@ -174,11 +176,52 @@ an `Open Dashboard` path. Do not configure consent in the companion.
 
 ### Provider failures
 
-A failed provider produces an inline warning on that provider's rows, not a
-full-surface failure. A provider's `status` is `"ok"` (or absent on older
-servers) when healthy; any other value means its quota couldn't be refreshed
-this cycle, so its `buckets` are last-known and are shown with the warning
-(fixture `fixtures/quota-provider-error.json`).
+A failed provider produces an inline warning, not a full-surface failure. Its
+`buckets` are last-known and stay visible (fixture
+`fixtures/quota-provider-error.json`).
+
+Failure is evaluated at two levels, because a provider can hold several
+credentials and fail for only some of them (e.g. MiniMax global + CN, where the
+CN token is stale). The two levels must not be collapsed.
+
+**Group failed** - drives the `⚠ Couldn't refresh - showing last known` warning
+under the provider header in the All view. True when the provider's `status` is
+present and not `"ok"`, **or** its `status_detail` is non-empty (e.g.
+`stale_token`, even when `status` is `"ok"`). Absent `status` with an empty
+`status_detail` is healthy. This stays deliberately broad: a single broken
+credential should still warn about the provider.
+
+**Row failed** - drives the inline `⚠` prefix on a quota row and its eligibility
+for low-quota notifications. True when the group is failed **and**
+`buckets[].captured_at < providers.*.status_at`: the failure is newer than this
+row's data, so the row is last-known. The comparison is strictly `<`, so a row
+captured in the same cycle as the failure counts as fresh. When either timestamp
+is absent or null (older servers), fall back to the group's value rather than
+un-suppressing a row that may well be stale.
+
+Do **not** use `buckets[].status` for this. It is always `"ok"`: the server only
+writes failure statuses to a synthetic `api` bucket, which it then filters out of
+the payload. Freshness is the only field that discriminates.
+
+Worked examples:
+
+| Provider | `captured_at` | `status_at` | Row failed | Why |
+|---|---|---|---|---|
+| codex, fully failed | 1785000000 | 1785030000 | yes | data predates the failure; last-known |
+| minimax, healthy credential | 1785030000 | 1785030000 | no | refreshed in the failing cycle |
+| minimax, broken credential | 1785000000 | 1785030000 | yes | not refreshed this cycle |
+
+So a healthy window inside a partially-failed provider renders without a `⚠` and
+still notifies, while its broken sibling is marked and suppressed - both under one
+warned provider header. Collapsing the two levels silences alerts on healthy
+windows for as long as any sibling credential stays broken, because the server
+only clears `status_detail` once a *newer* successful observation exists and all
+credentials in a cycle share one `captured_at`. Conversely, treating every row of
+a failed provider as fresh would alert on stale numbers.
+
+`status_detail` is one of `unavailable`, `fetch_error`, or `stale_token` (the
+only values the server writes). Treat any other non-empty value as a failure
+too, and an absent/empty value as healthy.
 
 ## Low-quota notifications
 
@@ -190,6 +233,8 @@ this cycle, so its `buckets` are last-known and are shown with the warning
 - Click -> open companion to quota section (Low view).
 - Do not notify for: offline, busy, estimated-data staleness, quota recovery.
 - If a bucket has no `resets_at`, suppress until an explicit re-arm rule exists.
+- Suppress a window whose own row is failed (see Provider failures). A group
+  failure alone must not suppress its healthy sibling windows.
 
 ## Expected behavior cases
 
@@ -206,7 +251,8 @@ given fixture combination. Both native test suites assert against these.
 | `busy` | health.json | 503 | 503 | 503 | "Tokdash is busy - retrying"; last-good data dimmed; back off |
 | `partial` | health.json | usage-today.json | 503 | 503 | Connected; Today hero normal; month + quota show inline "will retry shortly" warnings |
 | `loading` | (pending) | (pending) | (pending) | (pending) | "Connecting…"; skeletons for Today/month/quota values; no spinner |
-| `provider-error` | health.json | usage-today.json | usage-month.json | quota-provider-error.json | Connected; Today/month normal; quota All view shows an inline "Couldn't refresh - showing last known" warning under the failed provider's header, its rows still visible; healthy providers render normally; Low view prefixes ⚠ on the failed provider's low row |
+| `provider-error` | health.json | usage-today.json | usage-month.json | quota-provider-error.json | Connected; Today/month normal; quota All view shows an inline "Couldn't refresh - showing last known" warning under the failed provider's header, its rows still visible; healthy providers render normally; Low view prefixes ⚠ on the failed provider's low row (both Codex buckets have `captured_at` older than its `status_at`) |
+| `partial-failure` | health.json | usage-today.json | usage-month.json | quota-partial-failure.json | Connected; MiniMax header carries the "Couldn't refresh - showing last known" warning, but only `cn_general_5h` (older `captured_at`) gets the row ⚠ — `global_general_5h` was captured in the failing cycle and renders clean; Low view shows both, ⚠ on the 9% row only; notifications fire for `global_general_5h` and are suppressed for `cn_general_5h` |
 
 ## Freshness text
 

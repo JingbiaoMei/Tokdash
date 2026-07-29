@@ -22,7 +22,9 @@ public abstract class BindableBase : INotifyPropertyChanged
 
 public sealed class CompanionSettings
 {
-    public string BaseURL { get; set; } = "http://127.0.0.1:55423";
+    public const string DefaultBaseURL = "http://127.0.0.1:55423";
+
+    public string BaseURL { get; set; } = DefaultBaseURL;
     public bool LaunchAtLogin { get; set; } = false;
     public bool LowQuotaNotifications { get; set; } = false;
     public QuotaThresholds Thresholds { get; set; } = QuotaThresholds.Defaults;

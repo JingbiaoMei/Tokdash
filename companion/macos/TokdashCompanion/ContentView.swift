@@ -64,7 +64,7 @@ private struct HeaderSection: View {
                 Circle()
                     .fill(store.connectionState.dotColor)
                     .frame(width: 7, height: 7)
-                Text(store.connectionState.label)
+                Text(store.connectionLabel)
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
             }
@@ -149,9 +149,13 @@ private struct TodayHeroSection: View {
             } else if let snap = store.snapshot, snap.today.totalTokens == 0 {
                 Text(snap.todayFailed ? "Today's data unavailable" : "No usage recorded today")
                     .font(.system(size: 14, weight: .medium))
-                Text(snap.todayFailed ? "Will retry shortly." : "Tokdash is running. Today's totals will appear as tools report usage.")
+                // Kept short deliberately: the longer form truncated to "…" at popover
+                // width and the trailing clause added nothing. fixedSize keeps it wrapping
+                // rather than ellipsizing if the text ever grows again.
+                Text(snap.todayFailed ? "Will retry shortly." : "Tokdash is running.")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             } else if let snap = store.snapshot {
                 Text(snap.todayCostText)
                     .font(.system(size: 30, weight: .semibold))
@@ -311,7 +315,7 @@ private struct QuotaSection: View {
                     }
                 }
             }
-            .frame(maxHeight: 172)
+            .frame(minHeight: CompanionLayout.quotaMinHeight, maxHeight: CompanionLayout.quotaMaxHeight)
         }
     }
 }

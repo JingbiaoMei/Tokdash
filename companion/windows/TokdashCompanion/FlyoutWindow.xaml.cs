@@ -9,14 +9,18 @@ using TokdashCompanion.Interop;
 namespace TokdashCompanion;
 
 /// <summary>
-/// WPF flyout window with Acrylic backdrop, positioned near the tray icon.
-/// Light-dismiss on deactivate. Escape closes.
+/// WPF flyout window, positioned near the tray icon. Light-dismiss on deactivate.
+/// Escape closes. Opaque (not layered) so ClearType subpixel text rendering works -
+/// the window silhouette's rounded corners and edge come from DWM (Win32Dwm), not from
+/// AllowsTransparency, which forces software rendering and grayscale-only AA.
 /// </summary>
 public partial class FlyoutWindow : Window
 {
     private bool _loaded;
     private bool _highContrast;
     private bool _dark;
+    private bool _positionQueued;
+    private bool _updateQueued;
     private int _anchorX, _anchorY;
 
     public CompanionStore Store { get; set; } = null!;
@@ -26,6 +30,7 @@ public partial class FlyoutWindow : Window
         InitializeComponent();
         Loaded += FlyoutWindow_Loaded;
         Closed += FlyoutWindow_Closed;
+        SizeChanged += (_, _) => QueuePosition();
     }
 
     private void FlyoutWindow_Loaded(object sender, RoutedEventArgs e)
@@ -34,9 +39,10 @@ public partial class FlyoutWindow : Window
         Store.PropertyChanged += Store_PropertyChanged;
         // Apply the system theme (light / dark / high-contrast) before rendering.
         ApplyTheme();
-        // Acrylic backdrop via Win32 interop on Windows 11. Skipped for high-contrast
-        // (solid fallback) where translucency hurts readability.
-        if (!_highContrast) { try { ApplyAcrylic(_dark ? ColorFromHex("#26292F") : ColorFromHex("#F2F4F7")); } catch { } }
+        // Rounded corners + themed border via DWM on Windows 11. Zero-cost and correctly
+        // antialiased (unlike the old layered-window acrylic backdrop this replaces),
+        // since DWM composites the shape rather than WPF software-blurring it.
+        ApplyDwmAttributes();
         _loaded = true;
         UpdateView();
         // Final placement needs the measured ActualHeight; refine now.
@@ -50,31 +56,52 @@ public partial class FlyoutWindow : Window
     {
         if (_loaded) Store.PropertyChanged -= Store_PropertyChanged;
         _loaded = false;
+        _positionQueued = false;
+        _updateQueued = false;
     }
 
-    private void ApplyAcrylic(Color tint)
+    private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
+    private const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
+    private const int DWMWA_BORDER_COLOR = 34;
+    private const int DWMWCP_ROUND = 2;
+
+    /// <summary>
+    /// Rounded corners, dark-mode-matched chrome, and a themed edge colour - all via DWM
+    /// window attributes, all Win11-only. Each is independent and non-fatal: an older
+    /// Windows build (or a failed call) just leaves that one attribute at its default,
+    /// never throws into the window lifecycle (spec: FlyoutLaunchTests constructs and
+    /// shows this window on an STA thread, so any exception here fails the whole suite).
+    /// </summary>
+    private void ApplyDwmAttributes()
     {
         var hwnd = new System.Windows.Interop.WindowInteropHelper(this).Handle;
-        // GradientColor is 0xAABBGGRR; tint the blur to match the chosen background.
-        uint abgr = (uint)((0x99 << 24) | (tint.B << 16) | (tint.G << 8) | tint.R);
-        var accent = new AccentPolicy { AccentState = 4, GradientColor = abgr }; // ACCENT_ENABLE_ACRYLICBLURBEHIND
-        var accentSize = System.Runtime.InteropServices.Marshal.SizeOf(accent);
-        var accentPtr = System.Runtime.InteropServices.Marshal.AllocHGlobal(accentSize);
+
         try
         {
-            System.Runtime.InteropServices.Marshal.StructureToPtr(accent, accentPtr, false);
-            var data = new WindowCompositionAttributeData
-            {
-                Attribute = 19, // WCA_ACCENT_POLICY
-                Data = accentPtr,
-                SizeOfData = accentSize,
-            };
-            Win32Acrylic.SetWindowCompositionAttribute(hwnd, ref data);
+            int corner = DWMWCP_ROUND;
+            int hr = Win32Dwm.DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, ref corner, sizeof(int));
+            if (hr < 0) Diag.Log($"DWM corner failed hr=0x{hr:X8}");
         }
-        finally
+        catch (Exception ex) { Diag.Log($"  Loaded: DWM corner FAILED {ex.GetType().Name}: {ex.Message}"); }
+
+        try
         {
-            System.Runtime.InteropServices.Marshal.FreeHGlobal(accentPtr);
+            int dark = _dark ? 1 : 0;
+            int hr = Win32Dwm.DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, ref dark, sizeof(int));
+            if (hr < 0) Diag.Log($"DWM dark-mode failed hr=0x{hr:X8}");
         }
+        catch (Exception ex) { Diag.Log($"  Loaded: DWM dark-mode FAILED {ex.GetType().Name}: {ex.Message}"); }
+
+        try
+        {
+            // COLORREF is 0x00BBGGRR. Matches the divider colour so the flyout edge still
+            // reads against a similar-coloured desktop even with the system shadow off.
+            Color divider = _dark ? ColorFromHex("#3C3E44") : ColorFromHex("#DFE0E3");
+            int colorref = divider.R | (divider.G << 8) | (divider.B << 16);
+            int hr = Win32Dwm.DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, ref colorref, sizeof(int));
+            if (hr < 0) Diag.Log($"DWM border colour failed hr=0x{hr:X8}");
+        }
+        catch (Exception ex) { Diag.Log($"  Loaded: DWM border colour FAILED {ex.GetType().Name}: {ex.Message}"); }
     }
 
     public void PositionNear(int x, int y)
@@ -96,10 +123,12 @@ public partial class FlyoutWindow : Window
     private void ApplyPosition()
     {
         IntPtr hMon = MonitorFromPoint(new POINT { X = _anchorX, Y = _anchorY }, MONITOR_DEFAULTTONEAREST);
+        if (hMon == IntPtr.Zero) return;
         var mi = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
-        GetMonitorInfoW(hMon, ref mi);
+        if (!GetMonitorInfoW(hMon, ref mi)) return;
 
-        GetDpiForMonitor(hMon, 0, out uint dpiX, out uint dpiY);
+        int dpiResult = GetDpiForMonitor(hMon, 0, out uint dpiX, out uint dpiY);
+        if (dpiResult != 0 || dpiX == 0 || dpiY == 0) dpiX = dpiY = 96;
         double scaleX = dpiX / 96.0;
         double scaleY = dpiY / 96.0;
 
@@ -111,6 +140,22 @@ public partial class FlyoutWindow : Window
             ActualWidth, ActualHeight);
         Left = leftDip;
         Top = topDip;
+    }
+
+    /// <summary>
+    /// SizeToContent can grow after Loaded when an ItemsControl realizes its templates.
+    /// Re-anchor after the final layout pass so the flyout's bottom remains above the
+    /// taskbar instead of extending below the work area.
+    /// </summary>
+    private void QueuePosition()
+    {
+        if (!_loaded || _positionQueued) return;
+        _positionQueued = true;
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, () =>
+        {
+            _positionQueued = false;
+            if (_loaded && IsVisible) ApplyPosition();
+        });
     }
 
     /// <summary>
@@ -153,8 +198,20 @@ public partial class FlyoutWindow : Window
 
     private IntPtr WndProcHook(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
-        // Re-position if the effective DPI changes while the flyout is open (mixed-DPI).
-        if (msg == 0x02E0 /* WM_DPICHANGED */) ApplyPosition();
+        // NEVER let an exception escape here. This runs as a Win32 window-procedure
+        // callback, and an unhandled managed exception crossing that native boundary
+        // terminates the process with STATUS_FATAL_USER_CALLBACK_EXCEPTION (0xc000041d)
+        // - no dialog, no stack, the tray app just vanishes. Repositioning is cosmetic;
+        // a mispositioned flyout is always better than a dead app.
+        try
+        {
+            // Re-position if the effective DPI changes while the flyout is open (mixed-DPI).
+            if (msg == 0x02E0 /* WM_DPICHANGED */) ApplyPosition();
+        }
+        catch (Exception ex)
+        {
+            Diag.Log($"  WndProcHook msg=0x{msg:X4} THREW {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
+        }
         return IntPtr.Zero;
     }
 
@@ -170,6 +227,7 @@ public partial class FlyoutWindow : Window
         if (_highContrast)
         {
             SetBrush("FlyoutBg", SystemColors.WindowBrush);
+            SetBrush("WindowBg", SystemColors.WindowBrush);
             SetBrush("TextBrush", SystemColors.WindowTextBrush);
             SetBrush("MutedBrush", SystemColors.WindowTextBrush);
             SetBrush("FaintBrush", SystemColors.GrayTextBrush);
@@ -194,9 +252,10 @@ public partial class FlyoutWindow : Window
         else if (_dark)
         {
             SetBrush("FlyoutBg", HexBrush("#26292F", 0.92));
+            SetBrush("WindowBg", HexBrush("#26292F"));
             SetBrush("TextBrush", HexBrush("#F3F3F3"));
-            SetBrush("MutedBrush", HexBrush("#B0B0B0"));
-            SetBrush("FaintBrush", HexBrush("#9A9A9A"));
+            SetBrush("MutedBrush", HexBrush("#B4B4B4"));
+            SetBrush("FaintBrush", HexBrush("#909090"));
             SetBrush("DividerBrush", HexBrush("#FFFFFF", 0.10));
             SetBrush("BtnBg", HexBrush("#FFFFFF", 0.09));
             SetBrush("BtnBorder", HexBrush("#FFFFFF", 0.10));
@@ -208,19 +267,20 @@ public partial class FlyoutWindow : Window
             SetBrush("SegIdleBg", Brushes.Transparent);
             SetBrush("SegSelBg", HexBrush("#FFFFFF", 0.18));
             SetBrush("SegSelText", HexBrush("#F3F3F3"));
-            SetBrush("SegText", HexBrush("#B0B0B0"));
+            SetBrush("SegText", HexBrush("#B4B4B4"));
             SetBrush("FooterBg", HexBrush("#FFFFFF", 0.04));
             SetBrush("FooterBorder", HexBrush("#FFFFFF", 0.08));
             SetBrush("BarTrack", HexBrush("#FFFFFF", 0.14));
             RootBg.Color = ColorFromHex("#26292F");
-            RootBg.Opacity = 0.88;
+            RootBg.Opacity = 1;
         }
         else
         {
             SetBrush("FlyoutBg", HexBrush("#F2F4F7", 0.92));
+            SetBrush("WindowBg", HexBrush("#F2F4F7"));
             SetBrush("TextBrush", HexBrush("#1B1B1B"));
-            SetBrush("MutedBrush", HexBrush("#5F5F5F"));
-            SetBrush("FaintBrush", HexBrush("#767676"));
+            SetBrush("MutedBrush", HexBrush("#616161"));
+            SetBrush("FaintBrush", HexBrush("#8A8A8A"));
             SetBrush("DividerBrush", HexBrush("#000000", 0.08));
             SetBrush("BtnBg", HexBrush("#FFFFFF", 0.70));
             SetBrush("BtnBorder", HexBrush("#000000", 0.14));
@@ -237,7 +297,7 @@ public partial class FlyoutWindow : Window
             SetBrush("FooterBorder", HexBrush("#000000", 0.06));
             SetBrush("BarTrack", HexBrush("#000000", 0.10));
             RootBg.Color = ColorFromHex("#F2F4F7");
-            RootBg.Opacity = 0.92;
+            RootBg.Opacity = 1;
         }
     }
 
@@ -256,6 +316,7 @@ public partial class FlyoutWindow : Window
     private static SolidColorBrush HexBrush(string hex, double opacity = 1.0)
         => new((Color)ColorConverter.ConvertFromString(hex)) { Opacity = opacity };
     private static Color ColorFromHex(string hex) => (Color)ColorConverter.ConvertFromString(hex);
+    private double FontRes(string key) => (double)FindResource(key);
 
     private Color QuotaBarColor(double left) => left switch
     {
@@ -310,7 +371,13 @@ public partial class FlyoutWindow : Window
 
     private void Store_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        Dispatcher.BeginInvoke(UpdateView);
+        if (!_loaded || _updateQueued) return;
+        _updateQueued = true;
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.DataBind, () =>
+        {
+            _updateQueued = false;
+            if (_loaded) UpdateView();
+        });
     }
 
     private void UpdateView()
@@ -346,14 +413,14 @@ public partial class FlyoutWindow : Window
         if (snap.Today.TotalTokens == 0)
         {
             TodayCost.Text = snap.TodayFailed ? "Today's data unavailable" : "No usage recorded today";
-            TodayCost.FontSize = 14;
-            TodaySub.Text = snap.TodayFailed ? "Will retry shortly." : "Tokdash is running. Today's totals will appear as tools report usage.";
+            TodayCost.FontSize = FontRes("FontHeroEmpty");
+            TodaySub.Text = snap.TodayFailed ? "Will retry shortly." : "Tokdash is running.";
             TodayCmp.Text = "";
         }
         else
         {
             TodayCost.Text = snap.TodayCostText;
-            TodayCost.FontSize = 28;
+            TodayCost.FontSize = FontRes("FontHero");
             TodaySub.Text = $"{snap.TodayTokensCompact} tokens · {snap.Today.TotalMessages} messages" + (snap.TodayFailed ? " · retrying" : "");
             TodayCmp.Text = snap.ComparisonText ?? "";
             TodayCmp.Foreground = ComparisonBrush(snap.Today.Comparison?.CostPct);
@@ -394,7 +461,7 @@ public partial class FlyoutWindow : Window
 
     private void RenderQuota(Snapshot snap)
     {
-        QuotaRows.Children.Clear();
+        QuotaRows.Items.Clear();
         UpdateToggleButtons();
 
         if (snap.QuotaFailed)
@@ -412,7 +479,7 @@ public partial class FlyoutWindow : Window
             warn.Children.Add(new TextBlock
             {
                 Text = "Quota data unavailable - will retry shortly.",
-                FontSize = 12.5,
+                FontSize = FontRes("FontSecondary"),
                 Foreground = (Brush)FindResource("MutedBrush"),
                 VerticalAlignment = VerticalAlignment.Center,
             });
@@ -421,23 +488,23 @@ public partial class FlyoutWindow : Window
             var row = new StackPanel { Orientation = Orientation.Horizontal };
             row.Children.Add(warn);
             row.Children.Add(retryBtn);
-            QuotaRows.Children.Add(row);
+            QuotaRows.Items.Add(row);
             if (!snap.Quota.Enabled) return; // no last-good quota to show
-            QuotaRows.Children.Add(new Separator { Opacity = 0.3, Margin = new Thickness(0, 10, 0, 4) });
+            QuotaRows.Items.Add(new Border { Height = 1, Background = (Brush)FindResource("DividerBrush"), Margin = new Thickness(0, 8, 0, 4) });
             // Fall through: render last-good quota rows below the warning.
         }
 
         if (!snap.Quota.Enabled)
         {
-            QuotaRows.Children.Add(new TextBlock
+            QuotaRows.Items.Add(new TextBlock
             {
                 Text = "Subscription tracking is off",
-                FontSize = 12.5,
+                FontSize = FontRes("FontSecondary"),
                 Foreground = (Brush)FindResource("MutedBrush"),
             });
             var openBtn = new Button { Content = "Open Dashboard", Margin = new Thickness(0, 4, 0, 0), Style = (Style)FindResource("WinBtn") };
             openBtn.Click += (s, e) => OpenDashboard_Click(s, e);
-            QuotaRows.Children.Add(openBtn);
+            QuotaRows.Items.Add(openBtn);
             QuotaHeader.Text = "SUBSCRIPTION";
             return;
         }
@@ -449,150 +516,64 @@ public partial class FlyoutWindow : Window
             var low = snap.LowQuotaRows;
             if (low.Count == 0)
             {
-                QuotaRows.Children.Add(new TextBlock
+                QuotaRows.Items.Add(new TextBlock
                 {
                     Text = "No subscription window is below its alert threshold.",
-                    FontSize = 12.5,
+                    FontSize = FontRes("FontSecondary"),
                     Foreground = (Brush)FindResource("MutedBrush"),
                 });
             }
             else
             {
-                foreach (var row in low) QuotaRows.Children.Add(MakeQuotaRow(row, showProvider: true));
+                foreach (var row in low) QuotaRows.Items.Add(MakeQuotaRowVM(row, showProvider: true));
             }
         }
         else
         {
             var scroll = new ScrollViewer { MaxHeight = 172, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
-            var panel = new StackPanel();
-            foreach (var group in snap.AllQuotaGroups)
+            var groups = new ItemsControl
             {
-                panel.Children.Add(new TextBlock
-                {
-                    Text = group.Provider,
-                    FontSize = 11,
-                    FontWeight = FontWeights.SemiBold,
-                    Foreground = (Brush)FindResource("MutedBrush"),
-                    Margin = new Thickness(0, 6, 0, 2),
-                });
-                // A failed provider shows an inline warning above its last-known rows,
-                // not a full-surface failure (spec §7).
-                if (group.Failed) panel.Children.Add(MakeProviderWarning());
-                foreach (var row in group.Rows) panel.Children.Add(MakeQuotaRow(row, showProvider: false));
-            }
-            scroll.Content = panel;
-            QuotaRows.Children.Add(scroll);
+                ItemTemplate = (DataTemplate)FindResource("QuotaGroupTemplate"),
+                ItemsSource = snap.AllQuotaGroups.Select(MakeQuotaGroupVM).ToList(),
+            };
+            scroll.Content = groups;
+            QuotaRows.Items.Add(scroll);
         }
     }
 
-    private UIElement MakeQuotaRow(QuotaRow row, bool showProvider)
+    /// <summary>
+    /// Presentation shape for one quota row, consumed by QuotaRowTemplate. Built here
+    /// (not via converters) because the bar colour depends on the resolved theme, which
+    /// lives in this class.
+    /// </summary>
+    private QuotaRowVM MakeQuotaRowVM(QuotaRow row, bool showProvider)
     {
-        var textBrush = (Brush)FindResource("TextBrush");
-        var muted = (Brush)FindResource("MutedBrush");
-
-        var panel = new StackPanel { Margin = new Thickness(0, 0, 0, 12) };
-        var top = new DockPanel { LastChildFill = false };
-
-        // A failed provider's rows get a ⚠ prefix so the Low view (cross-provider,
-        // no group header) still signals the warning inline.
+        // A failed provider's rows get a ⚠ prefix so the Low view (cross-provider, no
+        // group header) still signals the warning inline.
         string prefix = row.Failed ? "⚠ " : "";
-        var name = new TextBlock
+        double pct = Math.Clamp(row.Left, 0, 100);
+        return new QuotaRowVM
         {
-            Text = prefix + (showProvider ? $"{row.Provider} · {row.BucketLabel}" : row.BucketLabel),
-            FontSize = 12.5,
-            FontWeight = FontWeights.Medium,
-            Foreground = textBrush,
+            Label = prefix + (showProvider ? $"{row.Provider} · {row.BucketLabel}" : row.BucketLabel),
+            PercentText = row.HasPercent ? $"{(int)row.Left}% left" : "",
+            ResetsText = row.ResetsText,
+            EstimatedVisibility = row.Estimated ? Visibility.Visible : Visibility.Collapsed,
+            BarVisibility = row.HasPercent ? Visibility.Visible : Visibility.Collapsed,
+            BarBrush = row.HasPercent ? new SolidColorBrush(QuotaBarColor(row.Left)) : Brushes.Transparent,
+            FillStar = new GridLength(pct, GridUnitType.Star),
+            RestStar = new GridLength(100 - pct, GridUnitType.Star),
         };
-        DockPanel.SetDock(name, Dock.Left);
-        top.Children.Add(name);
-
-        if (row.Estimated)
-        {
-            var estBorder = new Border
-            {
-                BorderBrush = muted,
-                BorderThickness = new Thickness(0.5),
-                CornerRadius = new CornerRadius(4),
-                Padding = new Thickness(4, 0, 4, 0),
-                Margin = new Thickness(6, 0, 0, 0),
-                Child = new TextBlock { Text = "Estimated", FontSize = 10.5, Foreground = muted },
-            };
-            DockPanel.SetDock(estBorder, Dock.Left);
-            top.Children.Add(estBorder);
-        }
-
-        var resets = new TextBlock
-        {
-            Text = row.ResetsText,
-            FontSize = 12,
-            Foreground = muted,
-        };
-        DockPanel.SetDock(resets, Dock.Right);
-        top.Children.Add(resets);
-        if (row.HasPercent)
-        {
-            var left = new TextBlock
-            {
-                Text = $"{(int)row.Left}% left",
-                FontSize = 12.5,
-                FontWeight = FontWeights.SemiBold,
-                Foreground = textBrush,
-                Margin = new Thickness(8, 0, 0, 0),
-            };
-            DockPanel.SetDock(left, Dock.Right);
-            top.Children.Add(left);
-        }
-        panel.Children.Add(top);
-
-        // Coloured quota bar: light track with a coloured fill sized to the % left.
-        // Buckets without a remaining_percent render without a bar.
-        if (row.HasPercent)
-        {
-            double pct = Math.Clamp(row.Left, 0, 100);
-            var track = new Border
-            {
-                CornerRadius = new CornerRadius(2),
-                Background = (Brush)FindResource("BarTrack"),
-                Height = 4,
-                Margin = new Thickness(0, 6, 0, 0),
-            };
-            var inner = new Grid();
-            inner.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(pct, GridUnitType.Star) });
-            inner.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(100 - pct, GridUnitType.Star) });
-            var fill = new Border
-            {
-                CornerRadius = new CornerRadius(2),
-                Background = new SolidColorBrush(QuotaBarColor(row.Left)),
-            };
-            Grid.SetColumn(fill, 0);
-            inner.Children.Add(fill);
-            track.Child = inner;
-            panel.Children.Add(track);
-        }
-        return panel;
     }
 
-    /// <summary>Inline warning rendered above a failed provider's last-known rows.</summary>
-    private UIElement MakeProviderWarning()
+    /// <summary>Presentation shape for one provider group in the All view (QuotaGroupTemplate).</summary>
+    private QuotaGroupVM MakeQuotaGroupVM(QuotaGroup group) => new()
     {
-        var warn = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 4) };
-        warn.Children.Add(new TextBlock
-        {
-            Text = "⚠",
-            FontSize = 12,
-            Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FF9F0A")),
-            Margin = new Thickness(0, 0, 6, 0),
-            VerticalAlignment = VerticalAlignment.Center,
-        });
-        warn.Children.Add(new TextBlock
-        {
-            Text = "Couldn't refresh - showing last known",
-            FontSize = 11.5,
-            Foreground = (Brush)FindResource("MutedBrush"),
-            VerticalAlignment = VerticalAlignment.Center,
-        });
-        return warn;
-    }
+        Provider = group.Provider,
+        // GROUP failure drives the provider-header warning (spec §7); rendered inline by
+        // QuotaGroupTemplate rather than a separate MakeProviderWarning() element.
+        WarningVisibility = group.Failed ? Visibility.Visible : Visibility.Collapsed,
+        Rows = group.Rows.Select(r => MakeQuotaRowVM(r, showProvider: false)).ToList(),
+    };
 
     private void UpdateToggleButtons()
     {
@@ -621,18 +602,40 @@ public partial class FlyoutWindow : Window
 
     private void Gear_Click(object sender, RoutedEventArgs e)
     {
-        new SettingsWindow { Store = Store }.Show();
+        if (Application.Current is App app) app.ShowSettings();
     }
 
     private void Low_Click(object sender, RoutedEventArgs e)
     {
         Store.QuotaView = QuotaView.Low;
-        if (Store.Snapshot is not null) RenderQuota(Store.Snapshot);
     }
 
     private void All_Click(object sender, RoutedEventArgs e)
     {
         Store.QuotaView = QuotaView.All;
-        if (Store.Snapshot is not null) RenderQuota(Store.Snapshot);
     }
+}
+
+/// <summary>
+/// Presentation shape for one quota row. Built in code-behind because the bar colour
+/// and warning brushes depend on the resolved theme, which lives here — this keeps the
+/// DataTemplate pure XAML with no converters.
+/// </summary>
+internal sealed class QuotaRowVM
+{
+    public string Label { get; init; } = "";
+    public string PercentText { get; init; } = "";   // "" when !HasPercent
+    public string ResetsText { get; init; } = "";
+    public Visibility EstimatedVisibility { get; init; }
+    public Visibility BarVisibility { get; init; }
+    public Brush BarBrush { get; init; } = Brushes.Transparent;
+    public GridLength FillStar { get; init; }        // GridLength(pct, Star)
+    public GridLength RestStar { get; init; }        // GridLength(100-pct, Star)
+}
+
+internal sealed class QuotaGroupVM
+{
+    public string Provider { get; init; } = "";
+    public Visibility WarningVisibility { get; init; }
+    public List<QuotaRowVM> Rows { get; init; } = new();
 }

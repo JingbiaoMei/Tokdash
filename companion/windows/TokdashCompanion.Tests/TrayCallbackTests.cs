@@ -40,4 +40,14 @@ public class TrayCallbackTests
         Assert.IsTrue(pmsg == NotifyIcon.WM_LBUTTONUP || pmsg == NotifyIcon.NIN_SELECT,
             "WM_LBUTTONUP must map to the toggle path");
     }
+
+    [DataTestMethod]
+    [DataRow(0x0202u)]
+    [DataRow(0x0205u)]
+    [DataRow(0x007Bu)]
+    public void ParseLegacyTrayMessage_Reads_Message_Not_IconId(uint mouseMsg)
+    {
+        var parsed = Program.ParseLegacyTrayMessage(new IntPtr(mouseMsg));
+        Assert.AreEqual(mouseMsg, parsed);
+    }
 }

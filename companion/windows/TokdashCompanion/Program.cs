@@ -25,15 +25,6 @@ internal static class Program
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool DestroyWindow(IntPtr hWnd);
 
-    [DllImport("user32.dll")]
-    private static extern int GetMessage(out MSG msg, IntPtr hWnd, uint wMsgFilterMin, uint wMsgFilterMax);
-
-    [DllImport("user32.dll")]
-    private static extern bool TranslateMessage(ref MSG msg);
-
-    [DllImport("user32.dll")]
-    private static extern IntPtr DispatchMessage(ref MSG msg);
-
     [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     private static extern IntPtr LoadIconW(IntPtr hInstance, IntPtr lpIconName);
 
@@ -43,8 +34,24 @@ internal static class Program
     private const uint IMAGE_ICON = 1;
     private const uint LR_LOADFROMFILE = 0x00000010;
 
+    [DllImport("user32.dll")]
+    private static extern int GetSystemMetrics(int nIndex);
+
+    // Small-icon metrics, DPI-scaled for this PerMonitorV2 process. The tray wants this
+    // size, not SM_CXICON.
+    private const int SM_CXSMICON = 49;
+    private const int SM_CYSMICON = 50;
+
+    [DllImport("user32.dll")]
+    private static extern void PostQuitMessage(int nExitCode);
+
     [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool PostQuitMessage(int nExitCode);
+    private static extern bool PostMessageW(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetCursorPos(out POINT point);
+
+    private const uint WM_NULL = 0x0000;
 
     [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     private static extern uint TrackPopupMenuEx(IntPtr hMenu, uint uFlags, int x, int y, IntPtr hwnd, IntPtr lptpm);
@@ -97,7 +104,7 @@ internal static class Program
         // Without it, WPF's default OnLastWindowClose takes effect: closing the first
         // flyout begins shutdown, and the next tray click's new FlyoutWindow() throws
         // "The Application object is being shut down." Program owns the Win32 message
-        // loop, so app.Run() is intentionally not called.
+        // loop through app.Run().
         var app = new App();
         app.InitializeComponent();
         _app = app;
@@ -135,7 +142,7 @@ internal static class Program
         // Activate NOTIFYICON_VERSION_4 callbacks. Without this the shell delivers
         // legacy callbacks (no coordinates); with it, the cursor x/y arrive in wParam
         // and the mouse message in LOWORD(lParam). Must be sent after NIM_ADD.
-        NotifyIcon.Shell_NotifyIconW(NotifyIcon.NIM_SETVERSION, ref _nid);
+        _version4 = NotifyIcon.Shell_NotifyIconW(NotifyIcon.NIM_SETVERSION, ref _nid);
 
         // Start the resident refresh scheduler (60s while open, 10min while closed, backoff on failure).
         app.Store.UIDispatcher = app.Dispatcher;
@@ -151,19 +158,24 @@ internal static class Program
         };
 
         // Keep the tray tooltip in sync with connection state + usage.
-        app.Store.PropertyChanged += (_, _) => app.Dispatcher.BeginInvoke(UpdateTooltip);
+        app.Store.PropertyChanged += (_, _) => QueueTooltipUpdate();
         // Opt-in low-quota notifications: show a tray balloon when a window crosses its threshold.
         app.Store.LowQuotaAlert += rows => app.Dispatcher.BeginInvoke(() => ShowLowQuotaBalloon(rows));
 
-        // Kick off the first refresh so the tooltip updates with real data.
-        _ = app.Store.RefreshAsync();
+        // The first refresh is driven by the scheduler's timer (StartScheduler above) so
+        // we don't kick two startup fetches - an immediate RefreshAsync here would be
+        // canceled and restarted by the timer's tick at 2s, wasting a cold server request.
 
-        // Message loop.
-        while (GetMessage(out MSG msg, IntPtr.Zero, 0, 0) > 0)
-        {
-            TranslateMessage(ref msg);
-            DispatchMessage(ref msg);
-        }
+        // Message loop. Application.Run() pumps the WPF Dispatcher *and* the raw thread
+        // message queue, so WM_TRAYICON still reaches the hidden window's WndProc while
+        // Dispatcher work actually runs. The previous hand-rolled GetMessage loop
+        // dispatched window messages only and left the Dispatcher queue permanently
+        // undrained, which silently killed everything deferred onto it: DispatcherTimer
+        // never ticked (no refresh ever - the app never contacted the server) and
+        // Dispatcher.BeginInvoke(UpdateView/UpdateTooltip) never ran, so the flyout
+        // opened unlaid-out and blank. App.xaml sets ShutdownMode=OnExplicitShutdown, and
+        // PostQuitMessage(0) still exits the frame, so the tray Quit path is unchanged.
+        app.Run();
 
         if (_added) NotifyIcon.Shell_NotifyIconW(NotifyIcon.NIM_DELETE, ref _nid);
         if (_hIcon != IntPtr.Zero) DestroyIcon(_hIcon);
@@ -175,16 +187,86 @@ internal static class Program
     {
         string path = Path.Combine(AppContext.BaseDirectory, "Assets", "tray.ico");
         if (!File.Exists(path)) return null;
-        IntPtr h = LoadImageW(IntPtr.Zero, path, IMAGE_ICON, 0, 0, LR_LOADFROMFILE);
+        // Ask for the shell's small-icon size explicitly. Passing 0,0 means LR_DEFAULTSIZE,
+        // which for IMAGE_ICON picks SM_CXICON (32px) and leaves the shell to downsample it
+        // into a ~16px tray slot - visibly blurry. tray.ico ships 16/32/48/64/256, so
+        // requesting the exact metric selects a crisp frame instead of resampling one.
+        int cx = GetSystemMetrics(SM_CXSMICON);
+        int cy = GetSystemMetrics(SM_CYSMICON);
+        IntPtr h = LoadImageW(IntPtr.Zero, path, IMAGE_ICON, cx, cy, LR_LOADFROMFILE);
+        if (h == IntPtr.Zero) h = LoadImageW(IntPtr.Zero, path, IMAGE_ICON, 0, 0, LR_LOADFROMFILE);
         return h == IntPtr.Zero ? null : h;
     }
 
     private static IntPtr WndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam)
     {
+        // Same rule as FlyoutWindow.WndProcHook: an unhandled managed exception crossing
+        // this native callback boundary kills the process outright (0xc000041d), which is
+        // indistinguishable from the user's point of view from the app quitting on click.
+        // Swallow and log so a bad click degrades to "nothing happened", not "app gone".
+        try { return WndProcCore(hWnd, msg, wParam, lParam); }
+        catch (Exception ex)
+        {
+            Diag.Log($"WndProc msg=0x{msg:X4} THREW {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
+            return DefWindowProcW(hWnd, msg, wParam, lParam);
+        }
+    }
+
+    private static bool _version4;
+    private static uint _lastActivationTick;
+
+    /// <summary>
+    /// True when this tray callback should toggle the flyout.
+    ///
+    /// With v4 active, NIN_SELECT/NIN_KEYSELECT are authoritative and WM_LBUTTONUP is
+    /// ignored; WM_LBUTTONUP is only honoured if NIM_SETVERSION failed and the shell is
+    /// using the legacy callback layout.
+    ///
+    /// The 250ms guard is belt-and-braces: shells (and RDP sessions) vary in what they
+    /// coalesce, and a duplicate activation must never cost the user their click.
+    /// </summary>
+    private static bool IsActivation(uint mouseMsg)
+    {
+        bool activation = mouseMsg == NotifyIcon.NIN_SELECT
+            || mouseMsg == NotifyIcon.NIN_KEYSELECT
+            || (!_version4 && mouseMsg == NotifyIcon.WM_LBUTTONUP);
+        if (!activation) return false;
+
+        uint now = GetTickCount();
+        if (now - _lastActivationTick < 250)
+        {
+            return false;
+        }
+        _lastActivationTick = now;
+        return true;
+    }
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetTickCount();
+
+    private static IntPtr WndProcCore(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam)
+    {
         if (msg == NotifyIcon.WM_TRAYICON)
         {
-            var (x, y, mouseMsg) = ParseTrayCallback(wParam, lParam);
-            if (mouseMsg == NotifyIcon.WM_LBUTTONUP || mouseMsg == NotifyIcon.NIN_SELECT || mouseMsg == NotifyIcon.NIN_KEYSELECT)
+            int x, y;
+            uint mouseMsg;
+            if (_version4)
+            {
+                (x, y, mouseMsg) = ParseTrayCallback(wParam, lParam);
+            }
+            else
+            {
+                // Legacy callbacks put the icon id in wParam and only the mouse message
+                // in lParam. Never interpret the icon id as screen coordinates: that is
+                // the old "(1,0)" flyout-placement failure.
+                mouseMsg = ParseLegacyTrayMessage(lParam);
+                if (!TryGetTrayIconRect(out x, out y) && GetCursorPos(out POINT cursor))
+                {
+                    x = cursor.X;
+                    y = cursor.Y;
+                }
+            }
+            if (IsActivation(mouseMsg))
             {
                 _app?.ToggleFlyout(x, y);
             }
@@ -226,6 +308,9 @@ internal static class Program
 
         SetForegroundWindow(_hwnd);
         uint cmd = TrackPopupMenuEx(hMenu, TPM_RIGHTBUTTON | TPM_BOTTOMALIGN | TPM_RETURNCMD, x, y, _hwnd, IntPtr.Zero);
+        // Required by the Win32 notification-area menu pattern: without a benign
+        // follow-up message, the next context menu can open and immediately disappear.
+        PostMessageW(_hwnd, WM_NULL, IntPtr.Zero, IntPtr.Zero);
         DestroyMenu(hMenu);
 
         switch (cmd)
@@ -241,7 +326,7 @@ internal static class Program
                 _ = _app?.Store.RefreshAsync();
                 break;
             case IDM_SETTINGS:
-                _app?.Dispatcher.BeginInvoke(new Action(() => new SettingsWindow { Store = _app!.Store }.Show()));
+                _app?.Dispatcher.BeginInvoke(new Action(() => _app.ShowSettings()));
                 break;
         }
     }
@@ -257,10 +342,26 @@ internal static class Program
         return (x, y, mouseMsg);
     }
 
+    internal static uint ParseLegacyTrayMessage(IntPtr lParam) =>
+        unchecked((uint)lParam.ToInt64());
+
     private static int SignedLOWORD(IntPtr p) => unchecked((short)(int)(long)p);
     private static int SignedHIWORD(IntPtr p) => unchecked((short)(((int)(long)p) >> 16));
 
     /// <summary>Refresh the tray tooltip from the store's current state + usage.</summary>
+    private static bool _tooltipUpdateQueued;
+
+    private static void QueueTooltipUpdate()
+    {
+        if (_app is null || _tooltipUpdateQueued) return;
+        _tooltipUpdateQueued = true;
+        _app.Dispatcher.BeginInvoke(() =>
+        {
+            _tooltipUpdateQueued = false;
+            UpdateTooltip();
+        });
+    }
+
     private static void UpdateTooltip()
     {
         if (!_added || _app is null) return;
@@ -314,18 +415,6 @@ internal static class Program
 
     private delegate IntPtr WndProcDelegate(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
 
-    [StructLayout(LayoutKind.Sequential)]
-    private struct MSG
-    {
-        public IntPtr hwnd;
-        public uint message;
-        public IntPtr wParam;
-        public IntPtr lParam;
-        public uint time;
-        public int pt_x;
-        public int pt_y;
-    }
-
     [DllImport("user32.dll")]
     private static extern IntPtr DefWindowProcW(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
 
@@ -343,6 +432,9 @@ internal static class Program
 
     [StructLayout(LayoutKind.Sequential)]
     private struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT { public int X; public int Y; }
 
     /// <summary>Get the tray icon's bounding rect (for balloon-click anchoring). Returns false if unavailable.</summary>
     private static bool TryGetTrayIconRect(out int x, out int y)

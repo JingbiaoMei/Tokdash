@@ -1,4 +1,5 @@
 using System.Threading;
+using System.Linq;
 using System.Windows;
 using System.Windows.Threading;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -43,6 +44,18 @@ public class FlyoutLaunchTests
                 app.ToggleFlyout(100, 100); // re-open
                 Pump();
                 app.ToggleFlyout(100, 100); // close
+                Pump();
+
+                // Settings is singleton, foregroundable, and carries the Tokdash icon.
+                app.ShowSettings();
+                Pump();
+                app.ShowSettings();
+                Pump();
+                var settings = app.Windows.OfType<SettingsWindow>().ToList();
+                Assert.AreEqual(1, settings.Count, "reopening Settings must activate the existing window");
+                Assert.IsTrue(settings[0].IsVisible);
+                Assert.IsNotNull(settings[0].Icon, "Settings title bar must use the Tokdash icon");
+                settings[0].Close();
                 Pump();
             }
             catch (Exception ex)

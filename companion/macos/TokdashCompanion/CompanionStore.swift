@@ -29,25 +29,65 @@ final class CompanionStore: ObservableObject {
     // 15s short retry while a section is in partial failure.
     private var failures = 0
     private var partial = false
-    private var isOpen = false
+    // @Published: the open/closed window also decides freshnessText's "· stale" suffix,
+    // so the transition must re-render the footer.
+    @Published private var isOpen = false
     private var scheduler: Timer?
     // Low-quota notification dedup + crossing detection.
     private var notifiedKeys = Set<String>()
     private var prevQuotaLeft: [String: Double] = [:]
 
     init() {
-        let loaded = CompanionSettings.load()
-        let url = URL(string: loaded.baseURL) ?? URL(string: "http://127.0.0.1:55423")!
+        var loaded = CompanionSettings.load()
+        // Repair a blank/malformed base URL saved by an earlier build so the client can't
+        // point at nothing, and persist the fix so it isn't re-applied every launch.
+        if !Self.isValidBaseURL(loaded.baseURL) {
+            loaded.baseURL = CompanionSettings.defaultBaseURL
+            loaded.save()
+        }
+        let url = URL(string: loaded.baseURL) ?? URL(string: CompanionSettings.defaultBaseURL)!
         self.settings = loaded
         self.client = TokdashClient(baseURL: url)
+    }
+
+    /// Short name for the configured server, shown beside the connection state.
+    /// Loopback reads "Local"; anything else uses the host's first DNS label, so a
+    /// Tailscale URL like https://wsl.tail76535.ts.net/tokdash reads "wsl" rather than
+    /// claiming to be local. Bare IPs are shown as-is (no meaningful label to extract).
+    nonisolated static func serverLabel(for urlString: String) -> String {
+        let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let host = URL(string: trimmed)?.host?.lowercased(), !host.isEmpty else { return "Local" }
+        if host == "localhost" || host == "127.0.0.1" || host == "::1" { return "Local" }
+        // An IPv4/IPv6 literal has no name to shorten; splitting it would be misleading.
+        if host.allSatisfy({ $0.isNumber || $0 == "." }) || host.contains(":") { return host }
+        let first = host.split(separator: ".").first.map(String.init) ?? host
+        return first.isEmpty ? host : first
+    }
+
+    var serverLabel: String { Self.serverLabel(for: settings.baseURL) }
+
+    /// Connection state for display. Only the connected state is prefixed with the
+    /// server label; the failure states are about reachability, not which host.
+    var connectionLabel: String {
+        connectionState == .connected ? "\(serverLabel) · Connected" : connectionState.label
+    }
+
+    /// True when a base URL is usable: an absolute http/https URL with a host. Every
+    /// write path (settings save, updateBaseURL) validates with this so a bad value can
+    /// never be persisted and re-applied on the next launch. Mirrors Windows IsValidBaseURL.
+    nonisolated static func isValidBaseURL(_ s: String) -> Bool {
+        guard let url = URL(string: s.trimmingCharacters(in: .whitespacesAndNewlines)),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              let host = url.host, !host.isEmpty else { return false }
+        return true
     }
 
     /// Rebuild the client with a new base URL (called when settings change). Only
     /// accepts an absolute http/https URL; otherwise the current client is kept.
     func updateBaseURL(_ urlString: String) {
-        guard let url = URL(string: urlString),
-              let scheme = url.scheme?.lowercased(),
-              scheme == "http" || scheme == "https", url.host != nil else { return }
+        let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard Self.isValidBaseURL(trimmed), let url = URL(string: trimmed) else { return }
         Task {
             await client.updateBaseURL(url)
             refresh()
@@ -124,15 +164,20 @@ final class CompanionStore: ObservableObject {
                 partial = false
             } else {
                 lastFetchAt = Date()
+                // Data time: prefer the API timestamp (naive UTC parsed via parseTimestamp),
+                // else fall back to fetch time minus the cache age, else fetch time. Spec §freshness.
                 if let ts = lastToday?.timestamp,
-                   let parsed = ISO8601DateFormatter().date(from: ts) {
+                   let parsed = Self.parseTimestamp(ts) {
                     lastDataTime = parsed
+                } else if let age = lastToday?.responseCache?.ageSeconds {
+                    lastDataTime = (lastFetchAt ?? Date()).addingTimeInterval(-age)
                 } else {
                     lastDataTime = lastFetchAt
                 }
                 failures = 0
                 partial = todayFailed || monthFailed || quotaFailed // partial -> 15s short retry
-                evaluateLowQuotaNotifications(snap)
+                let fresh = evaluateLowQuotaNotifications(snap)
+                if !fresh.isEmpty { postLowQuotaNotification(fresh) }
             }
         } catch let error as TokdashError {
             if Task.isCancelled { return }
@@ -223,6 +268,38 @@ final class CompanionStore: ObservableObject {
         return 600
     }
 
+    /// Parse the API `timestamp`, which may be a full ISO 8601 string with offset/Z or
+    /// a naive UTC datetime with fractional seconds and no timezone (e.g.
+    /// "2026-07-28T17:57:43.500951"). ISO8601DateFormatter.withInternetDateTime rejects
+    /// the naive form, so retry after appending "Z" (assume UTC). Spec §freshness.
+    nonisolated static func parseTimestamp(_ s: String) -> Date? {
+        let normalized = normalizeFractionalSeconds(s)
+        let withFrac = ISO8601DateFormatter()
+        withFrac.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let noFrac = ISO8601DateFormatter()
+        noFrac.formatOptions = [.withInternetDateTime]
+        if let d = withFrac.date(from: normalized) { return d }
+        if let d = noFrac.date(from: normalized) { return d }
+        if let d = withFrac.date(from: normalized + "Z") { return d }
+        if let d = noFrac.date(from: normalized + "Z") { return d }
+        return nil
+    }
+
+    /// ISO8601DateFormatter.withFractionalSeconds only accepts exactly three fractional
+    /// digits, but the server emits six ("…:43.500951"). Truncate/pad the fraction to
+    /// three so the parse can't silently miss and fall back to the cache-age path.
+    private nonisolated static func normalizeFractionalSeconds(_ s: String) -> String {
+        guard let dot = s.firstIndex(of: ".") else { return s }
+        let start = s.index(after: dot)
+        let digits = s[start...].prefix(while: { $0.isASCII && $0.isNumber })
+        guard !digits.isEmpty else { return s }
+        let three = digits.count >= 3
+            ? String(digits.prefix(3))
+            : String(digits) + String(repeating: "0", count: 3 - digits.count)
+        let rest = s[s.index(start, offsetBy: digits.count)...]
+        return String(s[...dot]) + three + String(rest)
+    }
+
     // MARK: - Low-quota notifications
 
     /// Notify only on a crossing from above to at-or-below the threshold, evaluated
@@ -230,12 +307,14 @@ final class CompanionStore: ObservableObject {
     /// (provider, account, bucket, reset epoch, threshold); a new reset epoch re-arms.
     /// Buckets without a reset time are suppressed (spec §7). Not called for offline/
     /// busy (only on a successful health check) or recovery (only above->below).
-    private func evaluateLowQuotaNotifications(_ snap: Snapshot) {
-        guard settings.lowQuotaNotifications, snap.quota.enabled, !snap.quotaFailed else { return }
+    /// Returns the freshly-crossed rows; the caller posts the notification (testable).
+    internal func evaluateLowQuotaNotifications(_ snap: Snapshot) -> [QuotaRow] {
+        guard settings.lowQuotaNotifications, snap.quota.enabled, !snap.quotaFailed else { return [] }
         var fresh: [QuotaRow] = []
         var current = Set<String>()
         for r in snap.allQuotaGroups.flatMap({ $0.rows }) {
             guard let resets = r.resetsAt else { continue } // suppress buckets without a reset time
+            if r.failed { continue } // suppress rows whose own bucket failed (last-known, unreliable for alerts)
             let epoch = Int(resets.timeIntervalSince1970)
             let stateKey = "\(r.provider)|\(r.account)|\(r.bucket)|\(epoch)"
             current.insert(stateKey)
@@ -249,7 +328,7 @@ final class CompanionStore: ObservableObject {
         }
         // Re-arm: drop state for windows no longer reported (reset epoch advanced / dropped).
         for k in prevQuotaLeft.keys where !current.contains(k) { prevQuotaLeft.removeValue(forKey: k) }
-        if !fresh.isEmpty { postLowQuotaNotification(fresh) }
+        return fresh
     }
 
     private func postLowQuotaNotification(_ rows: [QuotaRow]) {
@@ -295,8 +374,10 @@ final class CompanionStore: ObservableObject {
         else if age < 3600 { text = "Updated \(Int(age / 60)) min ago" }
         else if age < 86400 { text = "Updated \(Int(age / 3600)) h ago" }
         else { text = "Updated \(Int(age / 86400)) d ago" }
-        // Offline/Busy show last-good data - mark it stale.
-        if connectionState == .offline || connectionState == .busy { text += " · stale" }
+        // Append "· stale" only when last-good data is older than the refresh window
+        // (60s while open, 600s while closed) and the last fetch failed (offline/busy).
+        let window: TimeInterval = isOpen ? 60 : 600
+        if (connectionState == .offline || connectionState == .busy) && age > window { text += " · stale" }
         return text
     }
 
@@ -325,7 +406,9 @@ enum ConnectionState {
     var label: String {
         switch self {
         case .connecting: return "Connecting…"
-        case .connected: return "Local · Connected"
+        // The server label prefix is added by CompanionStore.connectionLabel, which is
+        // the only thing that knows the configured base URL.
+        case .connected: return "Connected"
         case .busy: return "Busy"
         case .offline: return "Offline"
         case .wrongService: return "Not Tokdash"
@@ -401,26 +484,64 @@ struct Snapshot {
     }
 
     /// All windows grouped by provider (provider order as detected). A failed provider
-    /// (status != "ok") is flagged so the All view can render an inline warning above
-    /// its last-known rows (spec §7), not a full-surface failure.
+    /// is flagged so the All view can render an inline warning above its last-known rows
+    /// (spec §7), not a full-surface failure. GROUP failure = status != "ok" OR a non-empty
+    /// status_detail (e.g. stale_token, even when status is "ok"); a provider with several
+    /// credentials reports the detail for the whole provider, so this stays broad.
     var allQuotaGroups: [(provider: String, rows: [QuotaRow], failed: Bool)] {
         guard quota.enabled else { return [] }
         let providers = quota.providers ?? [:]
         return providers.compactMap { (name, prov) -> (provider: String, rows: [QuotaRow], failed: Bool)? in
             let display = name.capitalized
             let estimated = prov.estimated ?? false
-            let failed = !Self.isProviderOk(prov.status)
-            let rows = (prov.buckets ?? []).compactMap { QuotaRow(provider: display, bucket: $0, estimated: estimated, failed: failed) }
+            let failed = !Self.isProviderOk(prov.status) || !(prov.statusDetail?.isEmpty ?? true)
+            var rows = (prov.buckets ?? []).compactMap {
+                QuotaRow(provider: display, bucket: $0, estimated: estimated,
+                         failed: Self.isRowFailed(capturedAt: $0.capturedAt, statusAt: prov.statusAt, groupFailed: failed))
+            }
+            if name.lowercased() == "antigravity" { rows = Self.antigravityPools(rows) }
             guard !rows.isEmpty else { return nil }
             return (display, rows, failed)
         }
     }
 
-    // A provider is healthy when its status is absent (older servers) or "ok"; any
-    // other value means its quota couldn't be refreshed this cycle. Spec §7.
+    // "ok" or absent (older servers) is healthy; any other value means that quota
+    // couldn't be refreshed this cycle. Spec §7.
     private static func isProviderOk(_ status: String?) -> Bool {
         guard let s = status, !s.isEmpty else { return true }
         return s.lowercased() == "ok"
+    }
+
+    // ROW failure drives the inline ⚠ and notification eligibility. buckets[].status is
+    // always "ok" (the server only writes failure statuses to the filtered-out "api"
+    // bucket), so freshness is the real discriminator: a row is last-known when the
+    // provider's failure is NEWER than the row's data. Strict "<" makes same-cycle
+    // equality count as fresh, which is what rescues a healthy credential's window when a
+    // sibling credential is broken - every credential in a cycle shares capturedAt.
+    // Missing timestamps (older servers) fall back to the group rather than silently
+    // un-suppressing. Spec §7.
+    /// Antigravity reports one bucket per model, which floods the list. The web dashboard
+    /// collapses them into two pools and shows the worst remaining in each; the companion
+    /// matches so the two surfaces agree. Falls back to the raw rows if nothing matches,
+    /// so an unrecognised model can never silently vanish.
+    static func antigravityPools(_ rows: [QuotaRow]) -> [QuotaRow] {
+        let pools: [(key: String, label: String, test: (String) -> Bool)] = [
+            ("gemini", "Gemini Models", { $0.contains("gemini") }),
+            ("claude", "Claude and GPT Models", { $0.contains("claude") || $0.contains("gpt") || $0.contains("oss") }),
+        ]
+        var out: [QuotaRow] = []
+        for pool in pools {
+            let matching = rows.filter { pool.test("\($0.bucketLabel) \($0.bucket)".lowercased()) && $0.hasPercent }
+            guard let worst = matching.min(by: { $0.left < $1.left }) else { continue }
+            out.append(QuotaRow(copying: worst, bucket: "pool:\(pool.key)", bucketLabel: pool.label))
+        }
+        return out.isEmpty ? rows : out
+    }
+
+    private static func isRowFailed(capturedAt: Int?, statusAt: Int?, groupFailed: Bool) -> Bool {
+        guard groupFailed else { return false }
+        guard let captured = capturedAt, let status = statusAt else { return true }
+        return captured < status
     }
 }
 
@@ -436,10 +557,45 @@ struct QuotaRow: Identifiable {
     let hasPercent: Bool
     let failed: Bool
 
+    /// Drop a trailing "window" from a server bucket label: the flyout is narrow and the
+    /// word carries no information ("5-hour window" -> "5-hour", "7-day window" -> "7-day").
+    /// Applied at display time so stored labels from older servers shorten too. Labels that
+    /// don't end in it (MiniMax "5-hour", Kimi "Weekly") pass through unchanged.
+    static func displayLabel(_ raw: String) -> String {
+        var s = raw.trimmingCharacters(in: .whitespaces)
+        if s.lowercased().hasSuffix(" window") {
+            let shortened = String(s.dropLast(" window".count)).trimmingCharacters(in: .whitespaces)
+            if !shortened.isEmpty { s = shortened }
+        }
+        // Codex names metered features "GPT-<ver>-Codex-<feature>", which eats the whole
+        // row at flyout width. Keep only the feature and the window: "Spark · 5-hour".
+        // Only applies to "<name> · <window>" labels whose name is hyphenated, so plain
+        // names (MiniMax "Video · Weekly") and bare windows ("5-hour") are untouched.
+        let parts = s.components(separatedBy: " · ")
+        if parts.count == 2, parts[0].contains("-"),
+           let feature = parts[0].split(separator: "-").last.map(String.init), !feature.isEmpty {
+            s = "\(feature) · \(parts[1])"
+        }
+        return s
+    }
+
+    /// Copy with a new bucket id + label, used to present a pooled Antigravity row.
+    init(copying other: QuotaRow, bucket: String, bucketLabel: String) {
+        self.provider = other.provider
+        self.bucket = bucket
+        self.bucketLabel = bucketLabel
+        self.left = other.left
+        self.resetsAt = other.resetsAt
+        self.estimated = other.estimated
+        self.account = other.account
+        self.hasPercent = other.hasPercent
+        self.failed = other.failed
+    }
+
     init(provider: String, bucket: BucketQuota, estimated: Bool = false, failed: Bool = false) {
         self.provider = provider
         self.bucket = bucket.bucket
-        self.bucketLabel = bucket.bucketLabel ?? bucket.bucket
+        self.bucketLabel = Self.displayLabel(bucket.bucketLabel ?? bucket.bucket)
         self.left = bucket.remainingPercent ?? 100
         self.resetsAt = bucket.resetsAt.map { Date(timeIntervalSince1970: TimeInterval($0)) }
         self.estimated = estimated
@@ -472,7 +628,9 @@ struct QuotaRow: Identifiable {
 // MARK: - Settings
 
 struct CompanionSettings: Codable {
-    var baseURL: String = "http://127.0.0.1:55423"
+    static let defaultBaseURL = "http://127.0.0.1:55423"
+
+    var baseURL: String = CompanionSettings.defaultBaseURL
     var launchAtLogin: Bool = false
     var lowQuotaNotifications: Bool = false
     var thresholds: QuotaThresholds = .defaults

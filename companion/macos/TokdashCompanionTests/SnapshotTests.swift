@@ -106,17 +106,25 @@ final class SnapshotTests: XCTestCase {
     // MARK: - Provider-level quota failures (spec §7)
 
     func testProviderFailureFlagsGroupAndRows() {
-        // codex failed to refresh (status "error"); claude is healthy (status absent).
-        // The failed provider's last-known rows stay visible but are flagged for an
-        // inline warning - not a full-surface failure.
+        // Group failure (provider status != "ok" OR a non-empty status_detail) drives the
+        // header warning; row failure compares each bucket's capturedAt against the
+        // provider's statusAt. Every bucket reports status "ok" - that field cannot
+        // discriminate, which is exactly why freshness does. codex is fully failed (its
+        // bucket predates statusAt); antigravity is partially failed (one bucket captured
+        // in the failing cycle, one older); claude is healthy.
+        let statusAt = 1785030000
         let quota = QuotaResponse(
             enabled: true,
             providers: [
                 "codex": ProviderQuota(estimated: false, buckets: [
-                    BucketQuota(bucket: "5h", bucketLabel: "5h", remainingPercent: 14, resetsAt: nil, account: "a")
-                ], status: "error", statusDetail: "unreachable"),
+                    BucketQuota(bucket: "5h", bucketLabel: "5h", remainingPercent: 14, resetsAt: nil, account: "a", capturedAt: statusAt - 30000)
+                ], status: "error", statusDetail: "unreachable", statusAt: statusAt),
+                "antigravity": ProviderQuota(estimated: false, buckets: [
+                    BucketQuota(bucket: "5h", bucketLabel: "5h", remainingPercent: 80, resetsAt: nil, account: "c", capturedAt: statusAt),
+                    BucketQuota(bucket: "weekly", bucketLabel: "weekly", remainingPercent: 5, resetsAt: nil, account: "d", capturedAt: statusAt - 30000)
+                ], status: "ok", statusDetail: "stale_token", statusAt: statusAt),
                 "claude": ProviderQuota(estimated: true, buckets: [
-                    BucketQuota(bucket: "5h", bucketLabel: "5h", remainingPercent: 71, resetsAt: nil, account: "b")
+                    BucketQuota(bucket: "5h", bucketLabel: "5h", remainingPercent: 71, resetsAt: nil, account: "b", capturedAt: statusAt)
                 ])
             ],
             timestamp: nil
@@ -124,16 +132,242 @@ final class SnapshotTests: XCTestCase {
         let snap = Snapshot(today: .empty, month: .empty, quota: quota, thresholds: .defaults)
         let groups = snap.allQuotaGroups
         let codex = groups.first(where: { $0.provider == "Codex" })!
+        let antigravity = groups.first(where: { $0.provider == "Antigravity" })!
         let claude = groups.first(where: { $0.provider == "Claude" })!
         XCTAssertTrue(codex.failed, "error-status provider must be flagged failed")
-        XCTAssertFalse(claude.failed, "absent-status provider must not be failed")
-        XCTAssertTrue(codex.rows.allSatisfy { $0.failed }, "failed flag propagates to the provider's rows")
-        XCTAssertFalse(claude.rows.allSatisfy { $0.failed })
+        XCTAssertTrue(antigravity.failed, "status=ok with non-empty status_detail must be flagged failed")
+        XCTAssertFalse(claude.failed, "absent-status provider with no detail must not be failed")
+        XCTAssertTrue(codex.rows.allSatisfy { $0.failed }, "capturedAt < statusAt -> last-known")
+        XCTAssertFalse(antigravity.rows.first(where: { $0.bucket == "5h" })!.failed, "capturedAt == statusAt is fresh, not failed")
+        XCTAssertTrue(antigravity.rows.first(where: { $0.bucket == "weekly" })!.failed, "the older sibling window is last-known")
+        XCTAssertFalse(claude.rows.contains { $0.failed }, "a healthy provider never flags rows")
 
-        // Low view: the failed provider's low window carries the flag for an inline ⚠.
+        // Low view: rows carry their own flag, so the ⚠ lands only on the last-known ones.
         let low = snap.lowQuotaRows
-        XCTAssertEqual(low.count, 1)
-        XCTAssertTrue(low[0].failed)
-        XCTAssertEqual(low[0].provider, "Codex")
+        XCTAssertEqual(low.count, 2)
+        XCTAssertEqual(low[0].provider, "Antigravity")
+        XCTAssertTrue(low[0].failed, "the last-known window keeps the inline warning")
+        XCTAssertEqual(low[1].provider, "Codex")
+        XCTAssertTrue(low[1].failed)
+    }
+
+    // MARK: - Low-quota notification evaluation (spec §7)
+
+    @MainActor
+    private func makeStore(notifications: Bool) -> CompanionStore {
+        let store = CompanionStore()
+        store.settings.lowQuotaNotifications = notifications
+        store.settings.thresholds = .defaults
+        return store
+    }
+
+    private func makeQuotaSnapshot(remaining: Double, status: String = "ok", detail: String? = nil, resetsAt: Int? = 1782910800) -> Snapshot {
+        let quota = QuotaResponse(enabled: true, providers: [
+            "codex": ProviderQuota(estimated: false, buckets: [
+                BucketQuota(bucket: "5h", bucketLabel: "5-hour", remainingPercent: remaining, resetsAt: resetsAt, account: "a")
+            ], status: status, statusDetail: detail)
+        ], timestamp: nil)
+        return Snapshot(today: .empty, month: .empty, quota: quota, thresholds: .defaults)
+    }
+
+    @MainActor
+    func testEvaluateLowQuotaCrossesAndDedups() {
+        let store = makeStore(notifications: true)
+        XCTAssertTrue(store.evaluateLowQuotaNotifications(makeQuotaSnapshot(remaining: 80)).isEmpty, "above threshold: no alert")
+        let fresh = store.evaluateLowQuotaNotifications(makeQuotaSnapshot(remaining: 10))
+        XCTAssertEqual(fresh.count, 1, "crossing below threshold fires once")
+        XCTAssertEqual(fresh.first?.left ?? -1, 10, accuracy: 0.001)
+        XCTAssertTrue(store.evaluateLowQuotaNotifications(makeQuotaSnapshot(remaining: 10)).isEmpty, "dedup: no repeat at same level")
+    }
+
+    @MainActor
+    func testEvaluateLowQuotaSuppressesMissingResetAndFailedProvider() {
+        let store = makeStore(notifications: true)
+        _ = store.evaluateLowQuotaNotifications(makeQuotaSnapshot(remaining: 80))  // baseline above
+
+        XCTAssertTrue(store.evaluateLowQuotaNotifications(makeQuotaSnapshot(remaining: 10, resetsAt: nil)).isEmpty, "missing resets_at suppressed")
+        XCTAssertTrue(store.evaluateLowQuotaNotifications(makeQuotaSnapshot(remaining: 10, status: "error", detail: "unreachable")).isEmpty, "failed-provider rows suppressed")
+    }
+
+    @MainActor
+    func testEvaluateLowQuotaOptIn() {
+        let store = makeStore(notifications: false)
+        _ = store.evaluateLowQuotaNotifications(makeQuotaSnapshot(remaining: 80))
+        XCTAssertTrue(store.evaluateLowQuotaNotifications(makeQuotaSnapshot(remaining: 10)).isEmpty, "opt-in: no alerts when disabled")
+    }
+
+    private static let statusAt = 1785030000
+
+    // The motivating shape: a provider with several credentials where one is broken. The
+    // server reports status "ok" + status_detail "stale_token" for the whole provider (its
+    // recovery suppression is ok_at > status_at, and every credential in a cycle shares
+    // captured_at, so the detail can't clear while the sibling stays broken). Both buckets
+    // report status "ok" - only capturedAt vs statusAt separates them.
+    private func makePartiallyFailedSnapshot(okRemaining: Double, staleRemaining: Double, statusAt: Int? = SnapshotTests.statusAt) -> Snapshot {
+        let quota = QuotaResponse(enabled: true, providers: [
+            "minimax": ProviderQuota(estimated: false, buckets: [
+                // Refreshed in the same cycle as the failure -> fresh.
+                BucketQuota(bucket: "global_general_5h", bucketLabel: "Global 5-hour", remainingPercent: okRemaining, resetsAt: 1782910800, account: "global", capturedAt: SnapshotTests.statusAt),
+                // Last observed before the failure -> last-known.
+                BucketQuota(bucket: "cn_general_5h", bucketLabel: "CN 5-hour", remainingPercent: staleRemaining, resetsAt: 1782910800, account: "cn", capturedAt: SnapshotTests.statusAt - 30000),
+            ], status: "ok", statusDetail: "stale_token", statusAt: statusAt)
+        ], timestamp: nil)
+        return Snapshot(today: .empty, month: .empty, quota: quota, thresholds: .defaults)
+    }
+
+    // A fully failed provider: every bucket predates the failure, so no row is eligible.
+    private func makeFullyFailedSnapshot(remaining: Double) -> Snapshot {
+        let quota = QuotaResponse(enabled: true, providers: [
+            "codex": ProviderQuota(estimated: false, buckets: [
+                BucketQuota(bucket: "5h", bucketLabel: "5-hour", remainingPercent: remaining, resetsAt: 1782910800, account: "a", capturedAt: SnapshotTests.statusAt - 30000)
+            ], status: "error", statusDetail: "fetch_error", statusAt: SnapshotTests.statusAt)
+        ], timestamp: nil)
+        return Snapshot(today: .empty, month: .empty, quota: quota, thresholds: .defaults)
+    }
+
+    @MainActor
+    func testPartiallyFailedProviderAlertsHealthyRowOnly() {
+        // Group failed (header warning) must not silence a sibling window that refreshed
+        // in the same cycle: only the row whose data predates the failure is suppressed.
+        let store = makeStore(notifications: true)
+        let baseline = makePartiallyFailedSnapshot(okRemaining: 80, staleRemaining: 80)
+        let group = baseline.allQuotaGroups.first!
+        XCTAssertTrue(group.failed, "a non-empty status_detail still warns on the provider header")
+        XCTAssertFalse(group.rows.first(where: { $0.bucket == "global_general_5h" })!.failed, "capturedAt == statusAt is fresh, not failed")
+        XCTAssertTrue(group.rows.first(where: { $0.bucket == "cn_general_5h" })!.failed, "capturedAt < statusAt is last-known, so it keeps the inline warning")
+
+        XCTAssertTrue(store.evaluateLowQuotaNotifications(baseline).isEmpty, "above threshold: no alert")
+        let fresh = store.evaluateLowQuotaNotifications(makePartiallyFailedSnapshot(okRemaining: 10, staleRemaining: 10))
+        XCTAssertEqual(fresh.count, 1, "the healthy sibling still fires; the stale row stays suppressed")
+        XCTAssertEqual(fresh.first?.bucket, "global_general_5h")
+    }
+
+    @MainActor
+    func testFullyFailedProviderSuppressesItsLastKnownRows() {
+        // Regression guard: every bucket predates the failure, so nothing may alert on
+        // stale data even though buckets[].status is "ok".
+        let store = makeStore(notifications: true)
+        let baseline = makeFullyFailedSnapshot(remaining: 80)
+        XCTAssertTrue(baseline.allQuotaGroups.first!.rows.allSatisfy { $0.failed }, "rows older than statusAt are all last-known")
+
+        _ = store.evaluateLowQuotaNotifications(baseline)
+        XCTAssertTrue(store.evaluateLowQuotaNotifications(makeFullyFailedSnapshot(remaining: 10)).isEmpty,
+                      "a fully failed provider's last-known rows never alert")
+    }
+
+    @MainActor
+    func testMissingStatusAtFallsBackToTheGroup() {
+        // Older servers omit status_at; without it the freshness comparison is impossible,
+        // so keep today's behavior (group failed -> every row failed) rather than
+        // un-suppressing rows that may well be stale.
+        let store = makeStore(notifications: true)
+        let baseline = makePartiallyFailedSnapshot(okRemaining: 80, staleRemaining: 80, statusAt: nil)
+        XCTAssertTrue(baseline.allQuotaGroups.first!.rows.allSatisfy { $0.failed }, "no statusAt -> fall back to the group")
+
+        _ = store.evaluateLowQuotaNotifications(baseline)
+        XCTAssertTrue(store.evaluateLowQuotaNotifications(makePartiallyFailedSnapshot(okRemaining: 10, staleRemaining: 10, statusAt: nil)).isEmpty,
+                      "the fallback suppresses every row of a failed provider")
+    }
+
+    // MARK: - API timestamp parsing (spec §freshness)
+
+    func testParseTimestampNaiveFormsAreUTC() {
+        // The server emits a naive UTC datetime with six fractional digits;
+        // ISO8601DateFormatter only accepts three, so the fraction is normalized first.
+        let epoch = 1785261463.0   // 2026-07-28T17:57:43Z
+        XCTAssertEqual(CompanionStore.parseTimestamp("2026-07-28T17:57:43.500951")?.timeIntervalSince1970 ?? -1, epoch + 0.5, accuracy: 0.001)
+        XCTAssertEqual(CompanionStore.parseTimestamp("2026-07-28T17:57:43.500")?.timeIntervalSince1970 ?? -1, epoch + 0.5, accuracy: 0.001)
+        XCTAssertEqual(CompanionStore.parseTimestamp("2026-07-28T17:57:43")?.timeIntervalSince1970 ?? -1, epoch, accuracy: 0.001)
+    }
+
+    func testParseTimestampExplicitOffsets() {
+        let epoch = 1785261463.0
+        XCTAssertEqual(CompanionStore.parseTimestamp("2026-07-28T17:57:43Z")?.timeIntervalSince1970 ?? -1, epoch, accuracy: 0.001)
+        XCTAssertEqual(CompanionStore.parseTimestamp("2026-07-28T17:57:43+00:00")?.timeIntervalSince1970 ?? -1, epoch, accuracy: 0.001)
+        // A non-UTC offset must be honored, not assumed UTC.
+        XCTAssertEqual(CompanionStore.parseTimestamp("2026-07-28T17:57:43+02:00")?.timeIntervalSince1970 ?? -1, epoch - 7200, accuracy: 0.001)
+    }
+
+    func testParseTimestampRejectsGarbage() {
+        XCTAssertNil(CompanionStore.parseTimestamp("not-a-timestamp"))
+        XCTAssertNil(CompanionStore.parseTimestamp(""))
+    }
+
+    // MARK: - Base URL validation
+
+    private func antigravityRow(_ bucket: String, _ label: String, _ left: Double) -> QuotaRow {
+        QuotaRow(provider: "Antigravity",
+                 bucket: BucketQuota(bucket: bucket, bucketLabel: label, remainingPercent: left, account: "default"))
+    }
+
+    func testAntigravityPoolsCollapseToTwoWorstRows() {
+        // One bucket per model floods the popover; collapse to the two dashboard pools,
+        // each showing the worst remaining. Pinned to the Windows AntigravityPools cases.
+        let pooled = Snapshot.antigravityPools([
+            antigravityRow("gemini_3_pro", "Gemini 3 Pro", 62),
+            antigravityRow("gemini_3_flash", "Gemini 3 Flash", 41),   // worst gemini
+            antigravityRow("claude_sonnet", "Claude Sonnet", 88),
+            antigravityRow("gpt_oss", "GPT OSS", 12),                 // worst claude/gpt
+        ])
+
+        XCTAssertEqual(pooled.count, 2, "exactly two pooled rows")
+        XCTAssertEqual(pooled[0].bucketLabel, "Gemini Models")
+        XCTAssertEqual(pooled[0].left, 41, accuracy: 0.001, "pool shows the worst remaining")
+        XCTAssertEqual(pooled[0].bucket, "pool:gemini")
+        XCTAssertEqual(pooled[1].bucketLabel, "Claude and GPT Models")
+        XCTAssertEqual(pooled[1].left, 12, accuracy: 0.001)
+    }
+
+    func testAntigravityPoolsKeepUnmatchedRows() {
+        // A model matching neither pool must not silently vanish.
+        let pooled = Snapshot.antigravityPools([antigravityRow("mystery_model", "Mystery Model", 30)])
+        XCTAssertEqual(pooled.count, 1)
+        XCTAssertEqual(pooled[0].bucketLabel, "Mystery Model", "falls back to the raw rows")
+    }
+
+    func testDisplayLabelShortensWindowsAndMeteredFeatures() {
+        // Pinned to the Windows DisplayLabel cases.
+        XCTAssertEqual(QuotaRow.displayLabel("5-hour window"), "5-hour")
+        XCTAssertEqual(QuotaRow.displayLabel("7-day window"), "7-day")
+        XCTAssertEqual(QuotaRow.displayLabel("weekly window"), "weekly")
+        XCTAssertEqual(QuotaRow.displayLabel("5-hour Window"), "5-hour", "case-insensitive")
+        // Labels that never carried the word are untouched.
+        XCTAssertEqual(QuotaRow.displayLabel("5-hour"), "5-hour")
+        XCTAssertEqual(QuotaRow.displayLabel("Weekly"), "Weekly")
+        XCTAssertEqual(QuotaRow.displayLabel("Global 5-hour"), "Global 5-hour")
+        XCTAssertEqual(QuotaRow.displayLabel("window"), "window", "would shorten to nothing")
+        // Codex metered features collapse to the feature, keeping the window.
+        XCTAssertEqual(QuotaRow.displayLabel("GPT-5.3-Codex-Spark · 5-hour"), "Spark · 5-hour")
+        XCTAssertEqual(QuotaRow.displayLabel("GPT-5.3-Codex-Spark · 7-day"), "Spark · 7-day")
+        XCTAssertEqual(QuotaRow.displayLabel("Video · Weekly"), "Video · Weekly", "plain names untouched")
+    }
+
+    func testServerLabelNamesTheConfiguredHost() {
+        // Loopback stays "Local"; a remote host uses its first DNS label so a Tailscale
+        // URL doesn't claim to be local. Pinned to the Windows ServerLabel cases.
+        XCTAssertEqual(CompanionStore.serverLabel(for: "http://127.0.0.1:55423"), "Local")
+        XCTAssertEqual(CompanionStore.serverLabel(for: "http://localhost:55423"), "Local")
+        XCTAssertEqual(CompanionStore.serverLabel(for: "https://wsl.tail76535.ts.net/tokdash"), "wsl")
+        XCTAssertEqual(CompanionStore.serverLabel(for: "  https://WSL.tail76535.ts.net/tokdash  "), "wsl",
+                       "trimmed and lowercased")
+        XCTAssertEqual(CompanionStore.serverLabel(for: "http://homelab:8080"), "homelab")
+        // A bare IP has no name to shorten - showing "192" would be nonsense.
+        XCTAssertEqual(CompanionStore.serverLabel(for: "http://192.168.1.50:55423"), "192.168.1.50")
+        // Unparseable input must not throw; fall back to the default label.
+        XCTAssertEqual(CompanionStore.serverLabel(for: "not a url"), "Local")
+    }
+
+    func testIsValidBaseURL() {
+        XCTAssertTrue(CompanionStore.isValidBaseURL("http://127.0.0.1:55423"))
+        XCTAssertTrue(CompanionStore.isValidBaseURL("https://wsl.tail76535.ts.net/tokdash"))
+        XCTAssertTrue(CompanionStore.isValidBaseURL("  http://127.0.0.1:55423  "), "surrounding whitespace is trimmed")
+        // Rejecting these at every write path is what stops a blank base URL from
+        // recurring on the next launch (init only repairs it on read).
+        XCTAssertFalse(CompanionStore.isValidBaseURL(""))
+        XCTAssertFalse(CompanionStore.isValidBaseURL("   "))
+        XCTAssertFalse(CompanionStore.isValidBaseURL("127.0.0.1:55423"), "no scheme")
+        XCTAssertFalse(CompanionStore.isValidBaseURL("/tokdash"), "relative")
+        XCTAssertFalse(CompanionStore.isValidBaseURL("ftp://host/tokdash"), "wrong scheme")
+        XCTAssertFalse(CompanionStore.isValidBaseURL("http:///tokdash"), "no host")
     }
 }

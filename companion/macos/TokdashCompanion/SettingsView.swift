@@ -9,12 +9,28 @@ struct SettingsView: View {
     @State private var weeklyThreshold: Double = 10
     @State private var otherThreshold: Double = 15
     @State private var urlDebounce: Task<Void, Never>?
+    @State private var testResult: ConnectionTest = .idle
+    @State private var testTask: Task<Void, Never>?
+
+    /// Result of the Settings "Test" button. Probes the URL in the field, not the saved
+    /// one, so a bad address can be caught before committing it.
+    private enum ConnectionTest: Equatable {
+        case idle
+        case testing
+        case ok(String)
+        case failed(String)
+    }
 
     var body: some View {
         Form {
             Section("Server") {
-                TextField("Base URL", text: $baseURL)
-                    .textFieldStyle(.roundedBorder)
+                HStack(spacing: 8) {
+                    TextField("Base URL", text: $baseURL)
+                        .textFieldStyle(.roundedBorder)
+                    Button("Test") { runConnectionTest() }
+                        .disabled(!CompanionStore.isValidBaseURL(baseURL) || testResult == .testing)
+                }
+                testResultView
                 Text("Default: http://127.0.0.1:55423. Tailscale HTTPS URLs are supported.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -59,6 +75,54 @@ struct SettingsView: View {
         .onChange(of: otherThreshold) { _ in saveSettings() }
     }
 
+    @ViewBuilder private var testResultView: some View {
+        switch testResult {
+        case .idle:
+            EmptyView()
+        case .testing:
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text("Testing…").font(.caption).foregroundStyle(.secondary)
+            }
+        case .ok(let detail):
+            Label(detail, systemImage: "checkmark.circle.fill")
+                .font(.caption)
+                .foregroundStyle(.green)
+        case .failed(let reason):
+            Label(reason, systemImage: "xmark.circle.fill")
+                .font(.caption)
+                .foregroundStyle(.red)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// Probe the URL currently in the field with its own short-lived client, so testing
+    /// never disturbs the live connection or persists an address that turns out to be bad.
+    private func runConnectionTest() {
+        let candidate = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard CompanionStore.isValidBaseURL(candidate), let url = URL(string: candidate) else {
+            testResult = .failed("Enter an absolute http:// or https:// URL.")
+            return
+        }
+        testTask?.cancel()
+        testResult = .testing
+        testTask = Task {
+            let client = TokdashClient(baseURL: url)
+            do {
+                let health = try await client.health()
+                if Task.isCancelled { return }
+                // A reachable server that isn't Tokdash is a failure, not a success -
+                // otherwise a proxy or a wrong port would test green.
+                testResult = health.service == "tokdash"
+                    ? .ok("Connected to \(CompanionStore.serverLabel(for: candidate)) · Tokdash \(health.version)")
+                    : .failed("Reachable, but not a Tokdash server.")
+            } catch {
+                if Task.isCancelled { return }
+                testResult = .failed("Couldn't reach it: \(error.localizedDescription)")
+            }
+        }
+    }
+
     private func loadSettings() {
         baseURL = store.settings.baseURL
         launchAtLogin = store.settings.launchAtLogin
@@ -70,7 +134,7 @@ struct SettingsView: View {
 
     private func saveSettings() {
         let trimmed = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        let urlValid = isValidURL(trimmed)
+        let urlValid = CompanionStore.isValidBaseURL(trimmed)
         let urlChanged = urlValid && trimmed != store.settings.baseURL
         let launchChanged = launchAtLogin != store.settings.launchAtLogin
 
@@ -84,13 +148,5 @@ struct SettingsView: View {
         if thresholdsChanged { store.applyThresholds() } // rebuild the Low view immediately
         if launchChanged { store.setLaunchAtLogin(launchAtLogin) }
         if urlChanged { store.updateBaseURL(trimmed) }
-    }
-
-    private func isValidURL(_ s: String) -> Bool {
-        guard let url = URL(string: s),
-              let scheme = url.scheme?.lowercased(),
-              scheme == "http" || scheme == "https",
-              url.host != nil else { return false }
-        return true
     }
 }

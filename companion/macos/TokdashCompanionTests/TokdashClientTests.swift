@@ -18,7 +18,7 @@ final class TokdashClientTests: XCTestCase {
         {"period":"today","total_tokens":18700000,"total_cost":3.42,"total_messages":248,
          "cache_hit_rate":0.9274,"by_tool":{"codex":{"tokens":1,"cost":2.0}},
          "comparison":{"tokens_pct":-12.0,"cost_pct":-12.0,"messages_pct":-11.7},
-         "timestamp":"2026-07-26T20:20:00+00:00","response_cache":{"age_seconds":120},
+         "timestamp":"2026-07-26T20:20:00+00:00","response_cache":{"age_seconds":120.487},
          "unknown_future_field":"ignored"}
         """.data(using: .utf8)!
         let usage = try JSONDecoder().decode(UsageResponse.self, from: json)
@@ -26,6 +26,8 @@ final class TokdashClientTests: XCTestCase {
         XCTAssertEqual(usage.totalCost, 3.42, accuracy: 0.001)
         XCTAssertEqual(usage.byTool?["codex"]?.cost ?? -1, 2.0, accuracy: 0.001)
         XCTAssertEqual(usage.comparison?.costPct ?? 0, -12.0, accuracy: 0.001)
+        // age_seconds is a float in live responses; must decode as Double, not Int.
+        XCTAssertEqual(usage.responseCache?.ageSeconds ?? -1, 120.487, accuracy: 0.001)
     }
 
     func testQuotaDecode() throws {

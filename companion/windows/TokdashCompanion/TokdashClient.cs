@@ -122,7 +122,7 @@ public sealed class Comparison
     [JsonPropertyName("cost_pct")] public double? CostPct { get; set; }
     [JsonPropertyName("messages_pct")] public double? MessagesPct { get; set; }
 }
-public sealed class CacheInfo { [JsonPropertyName("age_seconds")] public int? AgeSeconds { get; set; } }
+public sealed class CacheInfo { [JsonPropertyName("age_seconds")] public double? AgeSeconds { get; set; } }
 
 public sealed class QuotaResponse
 {
@@ -138,6 +138,9 @@ public sealed class ProviderQuota
     // provider's quota couldn't be refreshed and its buckets are last-known. Spec §7.
     public string? Status { get; set; }
     [JsonPropertyName("status_detail")] public string? StatusDetail { get; set; }
+    // Epoch seconds the failure status was observed. Compared against each bucket's
+    // captured_at to tell last-known rows from ones that refreshed fine. Spec §7.
+    [JsonPropertyName("status_at")] public int? StatusAt { get; set; }
     public List<BucketQuota>? Buckets { get; set; }
 }
 
@@ -148,4 +151,7 @@ public sealed class BucketQuota
     [JsonPropertyName("remaining_percent")] public double? RemainingPercent { get; set; }
     [JsonPropertyName("resets_at")] public int? ResetsAt { get; set; }
     public string? Account { get; set; }
+    // Epoch seconds this window was observed. Older than the provider's status_at means
+    // the failure is newer than the data, i.e. this row is last-known. Spec §7.
+    [JsonPropertyName("captured_at")] public int? CapturedAt { get; set; }
 }

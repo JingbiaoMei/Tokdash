@@ -169,7 +169,9 @@ struct Comparison: Decodable {
 }
 
 struct CacheInfo: Decodable {
-    let ageSeconds: Int?
+    // The server emits age_seconds as a float (e.g. 454.18947); decoding as Int
+    // throws and fails the whole usage response on cached requests.
+    let ageSeconds: Double?
     enum CodingKeys: String, CodingKey { case ageSeconds = "age_seconds" }
 }
 
@@ -186,19 +188,25 @@ struct ProviderQuota: Decodable {
     // be refreshed and its buckets are last-known. Spec §7.
     let status: String?
     let statusDetail: String?
+    // Epoch seconds the failure status was observed. Compared against each bucket's
+    // capturedAt to tell last-known rows from ones that refreshed fine. Spec §7.
+    let statusAt: Int?
 
     enum CodingKeys: String, CodingKey {
         case estimated, buckets, status
         case statusDetail = "status_detail"
+        case statusAt = "status_at"
     }
 
     // Explicit memberwise init (with defaults) so test construction with status/
     // statusDetail resolves; Decodable's init(from:) is still synthesized.
-    init(estimated: Bool? = nil, buckets: [BucketQuota]? = nil, status: String? = nil, statusDetail: String? = nil) {
+    init(estimated: Bool? = nil, buckets: [BucketQuota]? = nil, status: String? = nil,
+         statusDetail: String? = nil, statusAt: Int? = nil) {
         self.estimated = estimated
         self.buckets = buckets
         self.status = status
         self.statusDetail = statusDetail
+        self.statusAt = statusAt
     }
 }
 
@@ -208,13 +216,29 @@ struct BucketQuota: Decodable {
     let remainingPercent: Double?
     let resetsAt: Int?
     let account: String?
+    // Epoch seconds this window was observed. Older than the provider's statusAt means
+    // the failure is newer than the data, i.e. this row is last-known. Spec §7.
+    let capturedAt: Int?
 
     enum CodingKeys: String, CodingKey {
         case bucket
         case bucketLabel = "bucket_label"
         case remainingPercent = "remaining_percent"
         case resetsAt = "resets_at"
+        case capturedAt = "captured_at"
         case account
+    }
+
+    // Explicit memberwise init (with defaults) so test construction without `capturedAt`
+    // resolves; Decodable's init(from:) is still synthesized.
+    init(bucket: String, bucketLabel: String? = nil, remainingPercent: Double? = nil,
+         resetsAt: Int? = nil, account: String? = nil, capturedAt: Int? = nil) {
+        self.bucket = bucket
+        self.bucketLabel = bucketLabel
+        self.remainingPercent = remainingPercent
+        self.resetsAt = resetsAt
+        self.account = account
+        self.capturedAt = capturedAt
     }
 }
 

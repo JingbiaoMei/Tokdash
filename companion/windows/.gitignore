@@ -1,0 +1,14 @@
+# .NET build artifacts
+bin/
+obj/
+*.user
+*.suo
+.vs/
+*.lock.json
+!packages.lock.json
+*.nuget.props
+*.nuget.targets
+
+# Build outputs
+[Tt]est[Rr]esult*/
+[Bb]uild[Ll]og.*

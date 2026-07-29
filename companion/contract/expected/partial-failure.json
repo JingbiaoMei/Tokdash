@@ -1,0 +1,36 @@
+{
+  "case": "partial-failure",
+  "fixtures": {
+    "health": "health.json",
+    "usage_today": "usage-today.json",
+    "usage_month": "usage-month.json",
+    "quota": "quota-partial-failure.json"
+  },
+  "expected": {
+    "connection": "Local · Connected",
+    "dot": "ok",
+    "today": { "cost": "$3.42" },
+    "quota_section": {
+      "provider_failures": ["Minimax"],
+      "inline_warning_contains": "Couldn't refresh - showing last known",
+      "healthy_providers": ["Claude"],
+      "rows_visible": true,
+      "full_surface_failure": false,
+      "row_warnings": {
+        "cn_general_5h": true,
+        "global_general_5h": false
+      }
+    },
+    "quota_low": {
+      "visible_count_max": 2,
+      "rows": [
+        { "label": "⚠ Minimax · 5-hour", "left": 9, "failed": true },
+        { "label": "Minimax · 5-hour", "left": 12, "failed": false }
+      ]
+    },
+    "notifications": {
+      "eligible_buckets": ["global_general_5h"],
+      "suppressed_buckets": ["cn_general_5h"]
+    }
+  }
+}

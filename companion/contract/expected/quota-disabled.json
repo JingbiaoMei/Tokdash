@@ -1,0 +1,19 @@
+{
+  "case": "quota-disabled",
+  "fixtures": {
+    "health": "health.json",
+    "usage_today": "usage-today.json",
+    "usage_month": "usage-month.json",
+    "quota": "quota-disabled.json"
+  },
+  "expected": {
+    "connection": "Local · Connected",
+    "dot": "ok",
+    "today": { "cost": "$3.42" },
+    "quota_section": {
+      "message": "Subscription tracking is off",
+      "has_open_dashboard": true,
+      "rows": []
+    }
+  }
+}

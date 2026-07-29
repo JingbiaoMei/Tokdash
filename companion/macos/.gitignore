@@ -1,0 +1,17 @@
+# The Xcode project is tracked so fresh checkouts build without xcodegen.
+# Regenerate with `xcodegen generate` only if project.yml changes.
+# xcuserdata/xcuserstate stay ignored (per-user).
+
+# Xcode / Swift build artifacts
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xcscmblueprint
+*.swp
+*.swo
+.DS_Store
+
+# SPM
+.build/
+Package.resolved

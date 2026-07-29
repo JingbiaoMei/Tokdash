@@ -1,0 +1,21 @@
+{
+  "case": "provider-error",
+  "fixtures": {
+    "health": "health.json",
+    "usage_today": "usage-today.json",
+    "usage_month": "usage-month.json",
+    "quota": "quota-provider-error.json"
+  },
+  "expected": {
+    "connection": "Local · Connected",
+    "dot": "ok",
+    "today": { "cost": "$3.42" },
+    "quota_section": {
+      "provider_failures": ["Codex"],
+      "inline_warning_contains": "Couldn't refresh - showing last known",
+      "healthy_providers": ["Claude", "Kimi"],
+      "rows_visible": true,
+      "full_surface_failure": false
+    }
+  }
+}

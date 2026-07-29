@@ -1,0 +1,109 @@
+<Window
+    x:Class="TokdashCompanion.SettingsWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:sys="clr-namespace:System;assembly=System.Runtime"
+    Title="Tokdash Settings"
+    Width="440"
+    SizeToContent="Height"
+    ResizeMode="NoResize"
+    WindowStartupLocation="CenterScreen"
+    ShowActivated="True"
+    Background="{DynamicResource SettingsBg}"
+    Foreground="{DynamicResource SettingsText}"
+    UseLayoutRounding="True"
+    TextOptions.TextFormattingMode="Display"
+    TextOptions.TextRenderingMode="ClearType"
+    SnapsToDevicePixels="True">
+    <Window.Resources>
+        <SolidColorBrush x:Key="SettingsBg" Color="#F2F4F7"/>
+        <SolidColorBrush x:Key="SettingsText" Color="#1B1B1B"/>
+        <SolidColorBrush x:Key="SettingsMuted" Color="#616161"/>
+        <SolidColorBrush x:Key="SettingsControlBg" Color="#FFFFFF"/>
+        <SolidColorBrush x:Key="SettingsControlBorder" Color="#8A8A8A"/>
+        <SolidColorBrush x:Key="SettingsSuccess" Color="#187A32"/>
+        <SolidColorBrush x:Key="SettingsError" Color="#C42B1C"/>
+
+        <!-- Same spacing/type scale as FlyoutWindow.xaml, duplicated here since there's no
+             shared App.xaml resource dictionary - keeps the two windows visually matched. -->
+        <Thickness x:Key="SectionPad">16,12,16,12</Thickness>
+        <Thickness x:Key="BandPad">16,10,16,10</Thickness>
+        <Thickness x:Key="FooterPad">16,8,16,8</Thickness>
+        <sys:Double x:Key="GapXS">4</sys:Double>
+        <sys:Double x:Key="GapS">8</sys:Double>
+        <sys:Double x:Key="GapM">12</sys:Double>
+        <sys:Double x:Key="GapL">16</sys:Double>
+        <sys:Double x:Key="FontHero">30</sys:Double>
+        <sys:Double x:Key="FontHeroEmpty">15</sys:Double>
+        <sys:Double x:Key="FontBody">13</sys:Double>
+        <sys:Double x:Key="FontSecondary">12</sys:Double>
+        <sys:Double x:Key="FontCaption">11</sys:Double>
+        <sys:Double x:Key="FontMicro">10</sys:Double>
+
+        <Style TargetType="Button">
+            <Setter Property="FontFamily" Value="Segoe UI Variable Text"/>
+            <Setter Property="Foreground" Value="{DynamicResource SettingsText}"/>
+            <Setter Property="Background" Value="{DynamicResource SettingsControlBg}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource SettingsControlBorder}"/>
+        </Style>
+        <Style TargetType="TextBox">
+            <Setter Property="FontFamily" Value="Segoe UI Variable Text"/>
+            <Setter Property="Foreground" Value="{DynamicResource SettingsText}"/>
+            <Setter Property="Background" Value="{DynamicResource SettingsControlBg}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource SettingsControlBorder}"/>
+        </Style>
+        <Style TargetType="CheckBox">
+            <Setter Property="FontFamily" Value="Segoe UI Variable Text"/>
+            <Setter Property="Foreground" Value="{DynamicResource SettingsText}"/>
+        </Style>
+    </Window.Resources>
+    <StackPanel Margin="16">
+        <StackPanel.Resources>
+            <Style TargetType="TextBlock">
+                <Setter Property="FontFamily" Value="Segoe UI Variable Text"/>
+                <Setter Property="Foreground" Value="{DynamicResource SettingsText}"/>
+            </Style>
+        </StackPanel.Resources>
+
+        <TextBlock Text="Server" FontWeight="SemiBold" FontSize="{StaticResource FontBody}" Margin="0,0,0,8"/>
+        <DockPanel Margin="0,0,0,4">
+            <Button x:Name="TestButton" DockPanel.Dock="Right" Content="Test" Click="Test_Click"
+                    Padding="14,3" Margin="8,0,0,0"/>
+            <TextBox x:Name="BaseUrlBox"/>
+        </DockPanel>
+        <!-- Test result: green when the URL answers as a Tokdash server, red otherwise. -->
+        <TextBlock x:Name="TestResult" Text="" FontSize="{StaticResource FontCaption}" TextWrapping="Wrap"
+                   Visibility="Collapsed" Margin="0,0,0,4"/>
+        <TextBlock Text="Default: http://127.0.0.1:55423. Tailscale HTTPS URLs are supported."
+                   FontSize="{StaticResource FontCaption}" Foreground="{DynamicResource SettingsMuted}" Margin="0,0,0,16"/>
+
+        <TextBlock Text="Startup" FontWeight="SemiBold" FontSize="{StaticResource FontBody}" Margin="0,0,0,8"/>
+        <CheckBox x:Name="LaunchBox" Content="Launch at login" Margin="0,0,0,16"/>
+
+        <TextBlock Text="Notifications" FontWeight="SemiBold" FontSize="{StaticResource FontBody}" Margin="0,0,0,8"/>
+        <CheckBox x:Name="NotifyBox" Content="Low-quota notifications" Margin="0,0,0,4"/>
+        <TextBlock Text="Notifies when a subscription window crosses its threshold. Opt-in."
+                   FontSize="{StaticResource FontCaption}" Foreground="{DynamicResource SettingsMuted}" Margin="0,0,0,16"/>
+
+        <TextBlock Text="Quota alert thresholds (% remaining)" FontWeight="SemiBold" FontSize="{StaticResource FontBody}" Margin="0,0,0,8"/>
+        <StackPanel Margin="0,0,0,16">
+            <DockPanel Margin="0,0,0,8">
+                <TextBlock x:Name="FiveHourLabel" DockPanel.Dock="Left" Text="5-hour: 20%" VerticalAlignment="Center" Width="110"/>
+                <Slider x:Name="FiveHourSlider" Minimum="5" Maximum="50" TickFrequency="1" IsSnapToTickEnabled="True" Value="20" ValueChanged="Slider_Changed"/>
+            </DockPanel>
+            <DockPanel Margin="0,0,0,8">
+                <TextBlock x:Name="WeeklyLabel" DockPanel.Dock="Left" Text="Weekly: 10%" VerticalAlignment="Center" Width="110"/>
+                <Slider x:Name="WeeklySlider" Minimum="5" Maximum="50" TickFrequency="1" IsSnapToTickEnabled="True" Value="10" ValueChanged="Slider_Changed"/>
+            </DockPanel>
+            <DockPanel>
+                <TextBlock x:Name="OtherLabel" DockPanel.Dock="Left" Text="Default: 15%" VerticalAlignment="Center" Width="110"/>
+                <Slider x:Name="OtherSlider" Minimum="5" Maximum="50" TickFrequency="1" IsSnapToTickEnabled="True" Value="15" ValueChanged="Slider_Changed"/>
+            </DockPanel>
+        </StackPanel>
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="Cancel" Click="Cancel_Click" Margin="0,0,8,0" Padding="16,5"/>
+            <Button Content="Save" Click="Save_Click" Padding="16,5" FontWeight="SemiBold"/>
+        </StackPanel>
+    </StackPanel>
+</Window>

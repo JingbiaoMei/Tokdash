@@ -1,0 +1,9 @@
+/.github/workflows/ @JingbiaoMei
+/.github/dependabot.yml @JingbiaoMei
+/global.json @JingbiaoMei
+/companion/VERSION @JingbiaoMei
+/companion/scripts/ @JingbiaoMei
+/companion/macos/project.yml @JingbiaoMei
+/companion/macos/TokdashCompanion.xcodeproj/ @JingbiaoMei
+/companion/windows/Directory.Build.props @JingbiaoMei
+/companion/windows/packaging/ @JingbiaoMei

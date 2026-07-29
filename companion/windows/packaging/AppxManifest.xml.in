@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
+  xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap uap5 uap10 rescap">
+  <Identity
+    Name="Tokdash.Companion"
+    Publisher="@@PUBLISHER@@"
+    Version="@@VERSION@@"
+    ProcessorArchitecture="x64" />
+  <Properties>
+    <DisplayName>Tokdash Companion</DisplayName>
+    <PublisherDisplayName>Tokdash</PublisherDisplayName>
+    <Description>Native usage and quota companion for the local Tokdash service.</Description>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+  <Resources>
+    <Resource Language="en-us" />
+  </Resources>
+  <Dependencies>
+    <TargetDeviceFamily
+      Name="Windows.Desktop"
+      MinVersion="10.0.22000.0"
+      MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+  <Applications>
+    <Application
+      Id="TokdashCompanion"
+      Executable="TokdashCompanion.exe"
+      uap10:RuntimeBehavior="packagedClassicApp"
+      uap10:TrustLevel="mediumIL">
+      <uap:VisualElements
+        DisplayName="Tokdash Companion"
+        Description="Native usage and quota companion for Tokdash."
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png">
+        <uap:DefaultTile ShortName="Tokdash" />
+      </uap:VisualElements>
+      <Extensions>
+        <uap5:Extension
+          Category="windows.startupTask"
+          Executable="TokdashCompanion.exe"
+          EntryPoint="Windows.FullTrustApplication">
+          <uap5:StartupTask
+            TaskId="TokdashCompanionStartup"
+            Enabled="false"
+            DisplayName="Tokdash Companion" />
+        </uap5:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+</Package>

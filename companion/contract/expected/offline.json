@@ -1,0 +1,17 @@
+{
+  "case": "offline",
+  "fixtures": {
+    "health": "timeout"
+  },
+  "expected": {
+    "connection": "Offline",
+    "dot": "err",
+    "banner": {
+      "title": "Tokdash is not reachable",
+      "body_contains": "Start Tokdash",
+      "actions": ["Retry", "Settings"]
+    },
+    "last_good_data": "dimmed",
+    "freshness_suffix": "stale"
+  }
+}

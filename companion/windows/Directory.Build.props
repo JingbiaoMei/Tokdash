@@ -1,0 +1,12 @@
+<Project>
+  <PropertyGroup>
+    <CompanionVersion>$([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)..\VERSION').Trim())</CompanionVersion>
+    <CompanionBuildNumber>1</CompanionBuildNumber>
+    <Version>$(CompanionVersion)</Version>
+    <AssemblyVersion>$(CompanionVersion).0</AssemblyVersion>
+    <FileVersion>$(CompanionVersion).$(CompanionBuildNumber)</FileVersion>
+    <InformationalVersion Condition="'$(SourceRevisionId)' == ''">$(CompanionVersion)</InformationalVersion>
+    <InformationalVersion Condition="'$(SourceRevisionId)' != ''">$(CompanionVersion)+$(SourceRevisionId)</InformationalVersion>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+  </PropertyGroup>
+</Project>

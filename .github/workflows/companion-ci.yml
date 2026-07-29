@@ -1,0 +1,161 @@
+name: Companion CI
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+on:
+  pull_request:
+    paths:
+      - "companion/**"
+      - "tests/test_companion_*.py"
+      - "global.json"
+      - ".github/workflows/companion-*.yml"
+  push:
+    branches:
+      - main
+      - feat/companion-mvp
+    paths:
+      - "companion/**"
+      - "tests/test_companion_*.py"
+      - "global.json"
+      - ".github/workflows/companion-*.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: companion-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  metadata:
+    name: Release metadata
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Toolchain
+        run: |
+          echo "ImageOS=${ImageOS:-unknown}"
+          echo "ImageVersion=${ImageVersion:-unknown}"
+          python --version
+
+      - name: Validate release metadata
+        run: python companion/scripts/check_release.py
+
+  windows:
+    name: Windows 11 x64
+    runs-on: windows-2025
+    timeout-minutes: 35
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - name: Toolchain
+        shell: pwsh
+        run: |
+          "ImageOS=$env:ImageOS"
+          "ImageVersion=$env:ImageVersion"
+          dotnet --info
+
+      - name: Restore locked dependencies
+        run: dotnet restore companion/windows/TokdashCompanion.slnx --locked-mode
+
+      - name: Release tests
+        run: >
+          dotnet test companion/windows/TokdashCompanion.slnx
+          --configuration Release --no-restore
+
+      - name: Exercise unsigned portable ZIP packaging
+        shell: pwsh
+        run: >
+          companion/scripts/build_windows_release.ps1
+          -SkipTests
+          -OutputDirectory "${{ runner.temp }}/tokdash-companion-windows"
+
+      # CI intentionally uploads nothing. Packaging output dies with the runner,
+      # avoiding temporary artifact storage entirely.
+
+  macos:
+    name: macOS (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+    timeout-minutes: 35
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Toolchain
+        run: |
+          echo "ImageOS=${ImageOS:-unknown}"
+          echo "ImageVersion=${ImageVersion:-unknown}"
+          uname -m
+          xcodebuild -version
+          swift --version
+
+      - name: Release tests with warnings as errors
+        run: |
+          xcodebuild \
+            -project companion/macos/TokdashCompanion.xcodeproj \
+            -scheme TokdashCompanion \
+            -configuration Release \
+            -destination "platform=macOS" \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            SWIFT_TREAT_WARNINGS_AS_ERRORS=YES \
+            GCC_TREAT_WARNINGS_AS_ERRORS=YES \
+            test
+
+  macos-package:
+    name: macOS universal package
+    runs-on: macos-15
+    timeout-minutes: 35
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Toolchain
+        run: |
+          echo "ImageOS=${ImageOS:-unknown}"
+          echo "ImageVersion=${ImageVersion:-unknown}"
+          uname -m
+          xcodebuild -version
+          swift --version
+
+      - name: Exercise universal DMG packaging
+        env:
+          COMPANION_OUTPUT_DIR: ${{ runner.temp }}/tokdash-companion-macos
+        run: bash companion/scripts/build_macos_release.sh
+
+      # CI intentionally uploads nothing. Packaging output dies with the runner,
+      # avoiding temporary artifact storage entirely.

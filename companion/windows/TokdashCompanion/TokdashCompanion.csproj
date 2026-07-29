@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>TokdashCompanion</AssemblyName>
+    <RootNamespace>TokdashCompanion</RootNamespace>
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <PlatformTarget Condition="'$(RuntimeIdentifier)' == '' or '$(RuntimeIdentifier)' == 'win-x64'">x64</PlatformTarget>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <PublishTrimmed>false</PublishTrimmed>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\tray.ico</ApplicationIcon>
+    <DefineConstants>DISABLE_XAML_GENERATED_MAIN</DefineConstants>
+    <StartupObject>TokdashCompanion.Program</StartupObject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Page Include="App.xaml" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="Assets\tray.ico">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="TokdashCompanion.Tests" />
+  </ItemGroup>
+
+</Project>

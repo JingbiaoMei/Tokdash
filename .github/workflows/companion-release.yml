@@ -1,0 +1,213 @@
+name: Companion unsigned prerelease
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+on:
+  push:
+    tags:
+      - "companion-v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: companion-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Release preflight
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Toolchain
+        run: |
+          echo "ImageOS=${ImageOS:-unknown}"
+          echo "ImageVersion=${ImageVersion:-unknown}"
+          python3 --version
+
+      - name: Validate version and tag
+        id: version
+        run: |
+          set -euo pipefail
+          python3 companion/scripts/check_release.py --tag "$GITHUB_REF_NAME"
+          version="${GITHUB_REF_NAME#companion-v}"
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Require the tagged commit on main
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || {
+            echo "Companion release tags must point to a commit already on main." >&2
+            exit 1
+          }
+
+  prepare:
+    name: Prepare draft prerelease
+    needs: preflight
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout release notes
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Create an empty draft prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "A GitHub Release already exists for $GITHUB_REF_NAME." >&2
+            echo "Release assets are immutable; publish a new companion version." >&2
+            exit 1
+          fi
+          gh release create "$GITHUB_REF_NAME" \
+            --verify-tag \
+            --draft \
+            --prerelease \
+            --title "Tokdash Companion ${{ needs.preflight.outputs.version }} (unsigned preview)" \
+            --notes-file companion/RELEASE_NOTES.md
+
+  windows:
+    name: Build Windows x64
+    needs: [preflight, prepare]
+    runs-on: windows-2025
+    timeout-minutes: 35
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - name: Toolchain
+        shell: pwsh
+        run: |
+          "ImageOS=$env:ImageOS"
+          "ImageVersion=$env:ImageVersion"
+          dotnet --info
+
+      - name: Restore locked dependencies
+        run: dotnet restore companion/windows/TokdashCompanion.slnx --locked-mode
+
+      - name: Build and test unsigned portable ZIP
+        shell: pwsh
+        run: >
+          companion/scripts/build_windows_release.ps1
+          -OutputDirectory "${{ runner.temp }}/tokdash-companion-windows"
+
+      - name: Upload unsigned ZIP to draft prerelease
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMPANION_VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          $asset = Join-Path $env:RUNNER_TEMP "tokdash-companion-windows\Tokdash-Companion-$env:COMPANION_VERSION-windows-x64-unsigned.zip"
+          gh release upload $env:GITHUB_REF_NAME $asset
+          if ($LASTEXITCODE -ne 0) {
+              throw "Failed to upload $asset"
+          }
+
+  macos:
+    name: Build macOS universal
+    needs: [preflight, prepare]
+    runs-on: macos-15
+    timeout-minutes: 35
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Toolchain
+        run: |
+          echo "ImageOS=${ImageOS:-unknown}"
+          echo "ImageVersion=${ImageVersion:-unknown}"
+          uname -m
+          xcodebuild -version
+          swift --version
+
+      - name: Build unsigned universal DMG
+        env:
+          COMPANION_OUTPUT_DIR: ${{ runner.temp }}/tokdash-companion-macos
+        run: bash companion/scripts/build_macos_release.sh
+
+      - name: Upload unsigned DMG to draft prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMPANION_VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+          gh release upload "$GITHUB_REF_NAME" \
+            "$RUNNER_TEMP/tokdash-companion-macos/Tokdash-Companion-$COMPANION_VERSION-macos-universal-unsigned.dmg"
+
+  publish:
+    name: Publish checksummed prerelease
+    needs: [preflight, windows, macos]
+    if: ${{ !cancelled() && needs.windows.result == 'success' && needs.macos.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: companion-release-publish
+    permissions:
+      contents: write
+    steps:
+      - name: Download final release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir dist
+          gh release download "$GITHUB_REF_NAME" \
+            --dir dist \
+            --pattern "Tokdash-Companion-*-unsigned.zip" \
+            --pattern "Tokdash-Companion-*-unsigned.dmg"
+          test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 2
+
+      - name: Generate and upload SHA256SUMS
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum \
+            Tokdash-Companion-*-macos-universal-unsigned.dmg \
+            Tokdash-Companion-*-windows-x64-unsigned.zip \
+            > SHA256SUMS
+          gh release upload "$GITHUB_REF_NAME" SHA256SUMS
+
+      - name: Publish GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release edit "$GITHUB_REF_NAME" \
+            --draft=false \
+            --prerelease \
+            --title "Tokdash Companion ${{ needs.preflight.outputs.version }} (unsigned preview)"
+
+# Release assets move directly through a draft GitHub Release. No Actions
+# artifacts are uploaded, so this workflow consumes no artifact-storage quota.

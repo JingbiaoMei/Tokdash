@@ -1,0 +1,51 @@
+{
+  "case": "healthy",
+  "fixtures": {
+    "health": "health.json",
+    "usage_today": "usage-today.json",
+    "usage_month": "usage-month.json",
+    "quota": "quota.json"
+  },
+  "expected": {
+    "connection": "Local · Connected",
+    "dot": "ok",
+    "today": {
+      "cost": "$3.42",
+      "tokens_compact": "18.7M",
+      "tokens_exact": "18700000",
+      "messages": "248",
+      "comparison": "12% below yesterday",
+      "comparison_direction": "down"
+    },
+    "month": {
+      "label": "JULY",
+      "cost": "$48.90",
+      "tokens_compact": "281M"
+    },
+    "quota_low": {
+      "visible_count_max": 2,
+      "rows": [
+        { "label": "Claude · weekly", "left": 8, "estimated": true },
+        { "label": "Codex · 5-hour", "left": 14, "estimated": false }
+      ]
+    },
+    "quota_all": {
+      "groups": [
+        { "provider": "Codex", "rows": [
+          { "label": "5-hour", "left": 14 },
+          { "label": "weekly", "left": 63 }
+        ]},
+        { "provider": "Claude", "rows": [
+          { "label": "5-hour", "left": 71, "estimated": true },
+          { "label": "weekly", "left": 8, "estimated": true }
+        ]},
+        { "provider": "Kimi", "rows": [
+          { "label": "weekly", "left": 52, "estimated": true }
+        ]}
+      ]
+    },
+    "activity": "Most used today  Codex · gpt-5.6-sol",
+    "banner": null,
+    "freshness_contains": "Updated"
+  }
+}

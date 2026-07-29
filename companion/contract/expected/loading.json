@@ -1,0 +1,15 @@
+{
+  "case": "loading",
+  "fixtures": {
+    "health": "pending",
+    "usage_today": "pending",
+    "usage_month": "pending",
+    "quota": "pending"
+  },
+  "expected": {
+    "connection": "Connecting…",
+    "dot": "warn",
+    "has_full_screen_spinner": false,
+    "skeletons_present": ["today_cost", "today_sub", "month", "quota_rows"]
+  }
+}

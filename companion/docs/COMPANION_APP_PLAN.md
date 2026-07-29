@@ -236,15 +236,17 @@ Implementation notes:
 - Use `Shell_NotifyIconW` directly through a small, isolated interop layer. The Windows
   App SDK does not currently provide a complete modern notification-area abstraction.
 - Use `NOTIFYICON_VERSION_4` so mouse and keyboard activation follow current semantics.
-- Build the flyout as a real WinUI 3 window positioned against the notification-area
+- Build the flyout as a real WPF window positioned against the notification-area
   work area. It must handle top/side taskbars, multiple displays, DPI changes, focus,
   Escape, outside-click dismissal, and keyboard activation.
-- Use Acrylic for the transient flyout. Reserve Mica for a long-lived settings window.
+- Use DWM-composited rounded corners and native opaque WPF surfaces so ClearType
+  remains sharp in the transient flyout and settings window.
 - Use one stable icon. Change it only for high-level disconnected/warning state; do not
   animate rapid usage changes.
 - Use an icon-only notification-area presence. Put today's short summary in the tooltip.
-- Package with MSIX for release. Keep unpackaged debug runs only if they simplify the
-  initial interop spike.
+- Ship a signed self-contained portable ZIP for v0.1.0. Defer MSIX until an
+  installed clean-machine test proves loopback access to unpackaged Tokdash and
+  packaged startup behavior without developer exemptions.
 
 The first Windows milestone should be a throwaway technical spike that proves icon
 activation, accessible keyboard invocation, correct flyout placement, light dismiss,
@@ -274,9 +276,9 @@ Exit: installable unsigned development bundle that survives offline/restart case
 ### Phase 2 — Windows tray spike and vertical slice
 
 - Complete the Windows toolchain.
-- Prove `Shell_NotifyIconW` plus the WinUI flyout mechanics.
+- Prove `Shell_NotifyIconW` plus the WPF flyout mechanics.
 - Reuse the same fixtures and behavior contract.
-- Build, install, launch, update, and uninstall an MSIX development package.
+- Build, extract, launch, update, and remove a portable x64 development package.
 
 Exit: both platforms meet the same data/state acceptance suite.
 
@@ -293,7 +295,8 @@ Exit: both platforms meet the same data/state acceptance suite.
 ### Phase 4 — release
 
 - macOS Developer ID signing, notarization, and a signed ZIP or DMG.
-- Windows code signing and MSIX distribution.
+- Windows Authenticode signing for the portable executable. MSIX distribution
+  remains a later milestone.
 - GitHub Actions builds on `macos-*` and `windows-*`.
 - Checksums, release notes, install/uninstall docs, and upgrade verification.
 
@@ -312,8 +315,8 @@ Exit: both platforms meet the same data/state acceptance suite.
 - Both apps support keyboard open, keyboard navigation, Escape dismissal, screen-reader
   labels, high contrast, and reduced transparency.
 - The macOS build passes unit tests and `xcodebuild` on the MacBook.
-- The Windows build passes unit tests, MSIX install, launch, update, and uninstall on the
-  Windows host.
+- The Windows build passes unit tests plus portable extraction, launch, update,
+  launch-at-login, and removal checks on the Windows host.
 
 ## 9. Decisions Howard should make after the UI prototype
 

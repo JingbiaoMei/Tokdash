@@ -92,8 +92,14 @@ internal static class Program
     private static readonly WndProcDelegate _wndProc = WndProc;
 
     [STAThread]
-    private static void Main()
+    private static void Main(string[] args)
     {
+        // Launch-at-login uses an explicit marker for auditability and future startup-
+        // specific behavior. This tray-only app is already minimized by design.
+        bool startupLaunch = args.Any(arg =>
+            string.Equals(arg, "--startup", StringComparison.OrdinalIgnoreCase));
+        if (startupLaunch) Diag.Log("Started by the per-user launch-at-login entry.");
+
         // Single-instance guard: a second launch (e.g. at login while already
         // running) exits silently instead of spawning a second tray icon.
         using var singleton = new Mutex(initiallyOwned: true, name: @"Global\TokdashCompanion_SingleInstance", out bool createdNew);

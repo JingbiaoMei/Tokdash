@@ -28,9 +28,12 @@ public partial class SettingsWindow : Window
         Loaded += SettingsWindow_Loaded;
     }
 
-    private void SettingsWindow_Loaded(object sender, RoutedEventArgs e)
+    private async void SettingsWindow_Loaded(object sender, RoutedEventArgs e)
     {
         var s = Store.Settings;
+        // Registry/StartupTask is authoritative. This also removes a stale portable
+        // Run entry if the extracted directory was moved.
+        s.LaunchAtLogin = await LaunchAtLogin.GetEnabledAsync();
         BaseUrlBox.Text = s.BaseURL;
         LaunchBox.IsChecked = s.LaunchAtLogin;
         NotifyBox.IsChecked = s.LowQuotaNotifications;

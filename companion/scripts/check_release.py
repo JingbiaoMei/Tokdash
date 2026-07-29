@@ -36,6 +36,8 @@ def main() -> None:
         fail("macOS project.yml MARKETING_VERSION does not match companion/VERSION")
     if "ENABLE_HARDENED_RUNTIME: YES" not in project_yml:
         fail("macOS project.yml must enable Hardened Runtime")
+    if 'CURRENT_PROJECT_VERSION: "1"' not in project_yml:
+        fail("macOS CURRENT_PROJECT_VERSION must be the committed build number 1")
 
     pbxproj = (
         COMPANION_ROOT
@@ -53,6 +55,14 @@ def main() -> None:
         )
     if "ENABLE_HARDENED_RUNTIME = YES;" not in pbxproj:
         fail("tracked Xcode project must enable Hardened Runtime")
+    current_versions = set(
+        re.findall(r"CURRENT_PROJECT_VERSION = ([^;]+);", pbxproj)
+    )
+    if current_versions != {"1"}:
+        fail(
+            "tracked Xcode project CURRENT_PROJECT_VERSION values must be 1: "
+            f"{sorted(current_versions)}"
+        )
 
     info_plist = (
         COMPANION_ROOT / "macos" / "TokdashCompanion" / "Info.plist"
@@ -79,6 +89,64 @@ def main() -> None:
     ).read_text(encoding="utf-8")
     if r"..\VERSION" not in props or "<Version>$(CompanionVersion)</Version>" not in props:
         fail("Windows Directory.Build.props must derive Version from companion/VERSION")
+    if "<CompanionBuildNumber>1</CompanionBuildNumber>" not in props:
+        fail("Windows build number must match macOS CURRENT_PROJECT_VERSION 1")
+    for lockfile in (
+        COMPANION_ROOT / "windows" / "TokdashCompanion" / "packages.lock.json",
+        COMPANION_ROOT / "windows" / "TokdashCompanion.Tests" / "packages.lock.json",
+    ):
+        if not lockfile.is_file():
+            fail(f"missing locked .NET dependency graph: {lockfile.relative_to(REPO_ROOT)}")
+
+    windows_builder = (
+        COMPANION_ROOT / "scripts" / "build_windows_release.ps1"
+    ).read_text(encoding="utf-8")
+    if "makeappx.exe" in windows_builder or "unsigned.msix" in windows_builder:
+        fail("v0.1.0 Windows builder must not produce deferred MSIX assets")
+    for required in (
+        "-p:PublishSingleFile=true",
+        "-p:PublishTrimmed=false",
+        "-p:ContinuousIntegrationBuild=true",
+        "THIRD-PARTY-NOTICES.txt",
+    ):
+        if required not in windows_builder:
+            fail(f"Windows portable builder is missing {required}")
+
+    workflows = REPO_ROOT / ".github" / "workflows"
+    action_pattern = re.compile(r"^\s*uses:\s+([^@\s]+)@([^\s#]+)", re.MULTILINE)
+    for workflow in workflows.glob("*.yml"):
+        text = workflow.read_text(encoding="utf-8")
+        for action, ref in action_pattern.findall(text):
+            if not action.startswith("./") and not re.fullmatch(r"[0-9a-f]{40}", ref):
+                fail(f"{workflow.name}: {action}@{ref} is not pinned to a full commit SHA")
+
+    release_workflow = (
+        workflows / "companion-release.yml"
+    ).read_text(encoding="utf-8")
+    for forbidden in ("contents: write", "gh release create", "gh release upload"):
+        if forbidden in release_workflow:
+            fail(f"unsigned companion release guard must not contain {forbidden!r}")
+
+    native_source = "\n".join(
+        path.read_text(encoding="utf-8", errors="ignore")
+        for root in (
+            COMPANION_ROOT / "windows" / "TokdashCompanion",
+            COMPANION_ROOT / "macos" / "TokdashCompanion",
+        )
+        for path in root.rglob("*")
+        if path.suffix in {".cs", ".swift"}
+    ).lower()
+    for forbidden in (
+        ".credentials.json",
+        "browsercookies",
+        "getextendedtcptable",
+        "ipglobalproperties",
+        "tcplistener",
+        "checknetisolation",
+        "telemetryclient",
+    ):
+        if forbidden in native_source:
+            fail(f"native companion privacy contract forbids {forbidden!r}")
 
     icon_dir = (
         COMPANION_ROOT

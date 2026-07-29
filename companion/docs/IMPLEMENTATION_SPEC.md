@@ -283,8 +283,8 @@ CompanionViewModel          (BindableBase / INotifyPropertyChanged)
 
 - Do not modify the Tokdash server unless an evidenced API-contract gap
   requires it. Document the gap and ask before changing the server.
-- Release-preparation work may add packaging, CI, documentation, and explicit
-  unsigned-prerelease support. Publishing, signing, or creating a tag still
+- Release-preparation work may add packaging, CI, documentation, and unsigned
+  build validation. Publishing, signing, or creating a tag still
   requires Howard's explicit approval.
 - Do not switch the conda base env to `pip install -e .` (see AGENTS.md).
 

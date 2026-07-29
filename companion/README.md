@@ -62,5 +62,5 @@ Release preparation on branch `feat/companion-mvp`. Native builds and automated
 tests pass; packaging and CI are tracked in the repository. Signing and the
 manual visual/accessibility/privacy sign-off remain release gates.
 
-Release details, artifact names, install/update/uninstall steps, and the
-unsigned-prerelease policy are in [`docs/RELEASE.md`](docs/RELEASE.md).
+Release details, artifact names, install/update/uninstall steps, and the signed
+prerelease policy are in [`docs/RELEASE.md`](docs/RELEASE.md).

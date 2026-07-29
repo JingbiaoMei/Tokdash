@@ -8,7 +8,11 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>TokdashCompanion</AssemblyName>
     <RootNamespace>TokdashCompanion</RootNamespace>
-    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <PlatformTarget Condition="'$(RuntimeIdentifier)' == '' or '$(RuntimeIdentifier)' == 'win-x64'">x64</PlatformTarget>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <PublishTrimmed>false</PublishTrimmed>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\tray.ico</ApplicationIcon>
     <DefineConstants>DISABLE_XAML_GENERATED_MAIN</DefineConstants>

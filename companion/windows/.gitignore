@@ -5,6 +5,7 @@ obj/
 *.suo
 .vs/
 *.lock.json
+!packages.lock.json
 *.nuget.props
 *.nuget.targets
 

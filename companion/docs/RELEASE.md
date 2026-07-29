@@ -1,129 +1,115 @@
 # Tokdash Companion release guide
 
-Tokdash Companion has its own version and tags. `companion/VERSION` is the
-authority; release tags use `companion-vX.Y.Z`. Python/PyPI releases continue
-to use `vX.Y.Z`.
+Tokdash Companion is versioned independently from the Python package.
+`companion/VERSION` is the authority and release tags use
+`companion-vX.Y.Z`. The first release is `0.1.0` and requires Tokdash `1.5.2`
+or newer.
 
-The first supported companion version is `0.1.0`. It targets Tokdash `1.5.2`
-or newer, Windows 11 x64, and macOS 14 or newer.
+## v0.1.0 assets
 
-## Artifacts
+Publish one GitHub **prerelease** with exactly these assets:
 
-| Platform | Artifact | Architecture | Intended use |
-|---|---|---|---|
-| macOS | `TokdashCompanion-X.Y.Z-macos-universal-*.dmg` | arm64 + x86_64 | Primary macOS install |
-| Windows | `TokdashCompanion-X.Y.Z-windows-x64-*.msix` | x64 | Primary Windows install after signing |
-| Windows | `TokdashCompanion-X.Y.Z-windows-x64-portable-*.zip` | x64 | Portable/fallback install |
+```text
+Tokdash-Companion-0.1.0-macos-universal.dmg
+Tokdash-Companion-0.1.0-windows-x64.zip
+SHA256SUMS
+```
 
-Windows x86 is not supported. Windows on Arm can run the x64 portable build
-through Windows 11 emulation, but native ARM64 is not a `0.1.0` release target.
+- The DMG contains one native `arm64 + x86_64` application.
+- The ZIP contains one self-contained, single-file Windows x64 executable,
+  the icon, Tokdash license, .NET third-party notices, and this guide.
+- Windows x86 is unsupported. Windows 11 on Arm may run the x64 build through
+  emulation; native ARM64 is a later target.
+- MSIX is deferred until clean-machine tests prove loopback access to an
+  unpackaged Tokdash service and packaged startup behavior without developer
+  exemptions.
 
-## Local release builds
+## Non-negotiable signing policy
 
-Run from the repository root.
+Unsigned native binaries must not be published, even as a prerelease.
 
-Windows:
+- macOS requires Developer ID Application signing, Hardened Runtime,
+  notarization, ticket stapling, and Gatekeeper verification.
+- Windows requires an Authenticode signature and RFC 3161 timestamp on
+  `TokdashCompanion.exe` before the executable is compressed.
+- GitHub attestations and SHA-256 checksums supplement platform signatures;
+  they do not replace them.
+
+The active `companion-release.yml` is therefore a read-only guard that rejects
+release tags while signing is unconfigured. Replace the guard only after the
+Windows signing provider, Apple credentials, and protected environments have
+been reviewed.
+
+## Unsigned CI builds
+
+Unsigned builds are permitted only inside local development or secret-free CI.
+They are never uploaded:
 
 ```powershell
 powershell -NoProfile -File companion/scripts/build_windows_release.ps1
 ```
 
-macOS:
-
 ```bash
 bash companion/scripts/build_macos_release.sh
 ```
 
-Both scripts read `companion/VERSION`, produce SHA-256 checksums, and label
-unsigned output explicitly. Windows produces both the portable ZIP and MSIX.
-macOS verifies that the app binary contains both `arm64` and `x86_64`.
+The scripts build in Release mode, keep WPF trimming disabled, use the
+committed build number, and put `unsigned` in diagnostic filenames. Companion
+CI uploads no Actions artifacts. Repository artifact and log retention is set
+to one day for any other workflow that needs temporary storage.
 
-## Install, update, and uninstall
+## Install, update, and remove
 
-### macOS DMG
+### macOS
 
-1. Open the DMG and drag TokdashCompanion to Applications.
-2. Start Tokdash first, then open TokdashCompanion.
-3. For an update, quit the companion and replace the existing application.
-4. To uninstall, turn off **Launch at Login**, quit, and remove the app.
-5. Optional settings cleanup: remove
-   `Library/Application Support/TokdashCompanion` from your user folder in
-   Finder.
-
-### Windows MSIX
-
-1. Install the signed MSIX and start TokdashCompanion from Start.
-2. A later package with the same identity and higher version updates in place.
-3. Uninstall from **Settings > Apps > Installed apps**.
-4. Optional settings cleanup:
-   remove `%LOCALAPPDATA%\TokdashCompanion`.
-
-The MSIX manifest declares a disabled-by-default startup task. The Settings
-toggle uses `Windows.ApplicationModel.StartupTask` for an installed MSIX.
+1. Open the notarized DMG and drag TokdashCompanion to Applications.
+2. Start Tokdash, then open TokdashCompanion.
+3. To update, quit the companion and replace the application.
+4. To remove it, disable **Launch at Login**, quit, and delete the application.
+5. Optional settings cleanup: delete
+   `~/Library/Application Support/TokdashCompanion`.
 
 ### Windows portable ZIP
 
 1. Extract the complete ZIP to a stable directory.
-2. Run `TokdashCompanion.exe`; do not move the executable away from `Assets`.
-3. For an update, turn off **Launch at Login**, quit, replace the extracted
-   directory, restart, and re-enable the setting.
-4. To uninstall, turn off **Launch at Login**, quit, and delete the directory.
-5. Optional settings cleanup:
-   remove `%LOCALAPPDATA%\TokdashCompanion`.
+2. Verify the executable signature, then run `TokdashCompanion.exe`.
+3. Launch at login is opt-in. It uses only the named
+   `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` value, quotes the
+   absolute executable path, and passes `--startup`.
+4. Moving the extracted directory invalidates and removes the stale startup
+   entry. Re-enable the setting from the new location.
+5. To update, disable launch at login, quit, replace the extracted directory,
+   restart, and re-enable it.
+6. To remove it, disable launch at login, quit, and delete the directory.
+7. Optional settings cleanup: delete `%LOCALAPPDATA%\TokdashCompanion`.
 
-Portable launch-at-login uses
-`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`.
+Because the Windows build is self-contained, relevant .NET servicing updates
+require a new companion build.
 
-## Signing policy
-
-A clean production release remains blocked on platform signing:
-
-- macOS: Developer ID Application signing, Hardened Runtime, notarization, and
-  ticket stapling.
-- Windows: Authenticode signing for the executable and trusted signing for the
-  MSIX. The package Publisher must match the signing certificate subject.
-
-An unsigned build may be published only as a GitHub **prerelease** with
-`unsigned` in every artifact name:
-
-- macOS Gatekeeper will not treat an unsigned/unnotarized DMG as a normal
-  trusted download.
-- Windows SmartScreen may warn for the portable executable.
-- An unsigned MSIX is packaging evidence, not a normal end-user installer.
-
-The repository does not tell users to disable operating-system security
-features. Production/latest releases must be signed.
-
-## GitHub Actions
-
-- `companion-ci.yml` tests both native apps and exercises both packagers.
-- `companion-release.yml` responds only to `companion-v*` tags and creates a
-  GitHub prerelease from explicitly unsigned assets.
-- CI does not upload temporary build artifacts.
-- Any workflow artifact upload uses `retention-days: 1`.
-- Final binaries are attached directly to the GitHub Release rather than
-  stored as temporary Actions artifacts.
-
-Configure a protected `companion-release` GitHub Environment before tagging.
-Require reviewer approval and restrict it to protected companion release tags.
-The signing workflow will be finalized after the signing-provider decision.
-
-## Release gate
+## Release controls
 
 Before merging:
 
-- Run the full Python suite and both native test suites.
-- Run `python3 companion/scripts/check_release.py`.
-- Build the Windows ZIP/MSIX and universal macOS DMG.
-- Keep the English implementation docs consistent with the WPF implementation.
+- Preserve the companion commits with a merge commit; do not squash or rebase.
+- Merge current `main` into the branch first.
+- Pass the complete Python suite and Release-mode Windows/macOS suites.
+- Treat Swift and Clang warnings as errors.
+- Pass `python3 companion/scripts/check_release.py`.
+- Keep every external Action pinned to a reviewed 40-character commit SHA.
 
 Before tagging:
 
-- Complete `VISUAL_VERIFICATION_CHECKLIST.md` on physical Windows and macOS
-  systems, including accessibility, multiple displays/DPI, sleep/wake,
-  launch-at-login, and privacy/network checks.
-- Confirm the working trees used for native validation are clean and at the
-  release commit.
-- Decide and configure signing. Otherwise publish only an explicit prerelease.
-- Verify the tag is `companion-v$(cat companion/VERSION)` at current `HEAD`.
-- Verify checksums and install/update/uninstall on clean user accounts.
+- Choose and configure one Windows signing provider.
+- Configure Apple Developer ID and App Store Connect notarization credentials.
+- Protect separate Windows, macOS, and publish environments and restrict them
+  to `companion-v*`.
+- Replace the release guard with a reviewed build → sign → verify → package →
+  checksum → attest → prerelease workflow.
+- Complete `VISUAL_VERIFICATION_CHECKLIST.md` on clean standard-user Windows
+  and macOS systems.
+- Verify the downloaded ZIP and DMG, not runner staging files.
+- Confirm the companion makes network requests only to the explicitly
+  configured Tokdash endpoint and performs no telemetry, credential
+  discovery, or port scanning.
+- Tag the current merged `main` commit only. Never replace assets under an
+  existing tag; release fixes under a new companion version.

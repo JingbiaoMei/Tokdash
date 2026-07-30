@@ -111,6 +111,11 @@ internal static class Program
         // flyout begins shutdown, and the next tray click's new FlyoutWindow() throws
         // "The Application object is being shut down." Program owns the Win32 message
         // loop through app.Run().
+
+        // Resolve the display language early so the initial tray tooltip and context menu
+        // are in the right language. The store re-resolves on a later language change.
+        L10n.Current = L10n.Resolve(CompanionSettings.Load().Language);
+
         var app = new App();
         app.InitializeComponent();
         _app = app;
@@ -138,7 +143,7 @@ internal static class Program
         }
 
         _hIcon = LoadCustomIcon() ?? LoadIconW(IntPtr.Zero, new IntPtr(IDI_APPLICATION));
-        _nid = NotifyIcon.Create(_hwnd, 1, _hIcon, "Tokdash - connecting…");
+        _nid = NotifyIcon.Create(_hwnd, 1, _hIcon, L10n.T("tooltip_connecting"));
         _added = NotifyIcon.Shell_NotifyIconW(NotifyIcon.NIM_ADD, ref _nid);
         if (!_added)
         {
@@ -306,11 +311,11 @@ internal static class Program
     {
         var hMenu = CreatePopupMenu();
         if (hMenu == IntPtr.Zero) return;
-        AppendMenuW(hMenu, MF_STRING, IDM_OPEN, "Open Tokdash");
-        AppendMenuW(hMenu, MF_STRING, IDM_REFRESH, "Refresh");
-        AppendMenuW(hMenu, MF_STRING, IDM_SETTINGS, "Settings");
+        AppendMenuW(hMenu, MF_STRING, IDM_OPEN, L10n.T("open_tokdash"));
+        AppendMenuW(hMenu, MF_STRING, IDM_REFRESH, L10n.T("refresh"));
+        AppendMenuW(hMenu, MF_STRING, IDM_SETTINGS, L10n.T("settings"));
         AppendMenuW(hMenu, MF_SEPARATOR, 0, "sep");
-        AppendMenuW(hMenu, MF_STRING, IDM_EXIT, "Exit");
+        AppendMenuW(hMenu, MF_STRING, IDM_EXIT, L10n.T("exit"));
 
         SetForegroundWindow(_hwnd);
         uint cmd = TrackPopupMenuEx(hMenu, TPM_RIGHTBUTTON | TPM_BOTTOMALIGN | TPM_RETURNCMD, x, y, _hwnd, IntPtr.Zero);
@@ -373,15 +378,15 @@ internal static class Program
         if (!_added || _app is null) return;
         var store = _app.Store;
         string tip = store.Snapshot is { Today.TotalTokens: > 0 } snap
-            ? $"Tokdash - Today {snap.TodayCostText} · {snap.TodayTokensCompact} tokens"
+            ? L10n.T("tooltip_today", snap.TodayCostText, snap.TodayTokensCompact)
             : store.ConnectionState switch
             {
-                ConnectionState.Connecting => "Tokdash - connecting…",
-                ConnectionState.Connected => "Tokdash - No usage yet",
-                ConnectionState.Busy => "Tokdash - Busy",
-                ConnectionState.Offline => "Tokdash - Offline",
-                ConnectionState.WrongService => "Tokdash - Not Tokdash",
-                _ => "Tokdash",
+                ConnectionState.Connecting => L10n.T("tooltip_connecting"),
+                ConnectionState.Connected => L10n.T("tooltip_no_usage"),
+                ConnectionState.Busy => L10n.T("tooltip_busy"),
+                ConnectionState.Offline => L10n.T("tooltip_offline"),
+                ConnectionState.WrongService => L10n.T("tooltip_not_tokdash"),
+                _ => L10n.T("tooltip_default"),
             };
         if (tip.Length > 127) tip = tip[..127];
         _nid.szTip = tip;
@@ -394,12 +399,12 @@ internal static class Program
         if (!_added || rows.Count == 0) return;
         var first = rows[0];
         string body = rows.Count == 1
-            ? $"{first.Provider} {first.BucketLabel} is at {(int)first.Left}% remaining."
-            : $"{rows.Count} subscription windows are low. {first.Provider} {first.BucketLabel} at {(int)first.Left}%.";
+            ? L10n.T("notif_low_single", first.Provider, first.DisplayBucketLabel, (int)first.Left)
+            : L10n.T("notif_low_multi", rows.Count, first.Provider, first.DisplayBucketLabel, (int)first.Left);
         var nid = _nid;
         nid.uFlags = NotifyIcon.NIF_MESSAGE | NotifyIcon.NIF_ICON | NotifyIcon.NIF_TIP | NotifyIcon.NIF_INFO;
         nid.szInfo = body.Length > 200 ? body[..200] : body;
-        nid.szInfoTitle = "Tokdash - low quota";
+        nid.szInfoTitle = L10n.T("notif_low_title");
         nid.dwInfoFlags = 0;
         NotifyIcon.Shell_NotifyIconW(NotifyIcon.NIM_MODIFY, ref nid);
     }

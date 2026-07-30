@@ -73,8 +73,108 @@ public class StoreHelperTests
         Assert.AreEqual("Global 5-hour", QuotaRow.DisplayLabel("Global 5-hour"));
     }
 
+    [TestMethod]
+    public void ResetsTextForRemaining_Is_Relative()
+    {
+        // Pin English: ResetsTextForRemaining routes through L10n, so assertions are locale-stable.
+        var saved = L10n.Current;
+        L10n.Current = AppLanguage.English;
+        try
+        {
+            // Pure form: seconds-remaining -> text, no clock dependency. Pinned to the macOS cases.
+            Assert.AreEqual("resets soon", QuotaRow.ResetsTextForRemaining(TimeSpan.FromSeconds(-10)));  // past/stale
+            Assert.AreEqual("resets soon", QuotaRow.ResetsTextForRemaining(TimeSpan.FromSeconds(0)));
+            Assert.AreEqual("resets soon", QuotaRow.ResetsTextForRemaining(TimeSpan.FromSeconds(59)));   // sub-minute
+            Assert.AreEqual("resets in 1 minute", QuotaRow.ResetsTextForRemaining(TimeSpan.FromSeconds(60)));
+            Assert.AreEqual("resets in 1 minute", QuotaRow.ResetsTextForRemaining(TimeSpan.FromSeconds(119)));
+            Assert.AreEqual("resets in 2 minutes", QuotaRow.ResetsTextForRemaining(TimeSpan.FromSeconds(120)));
+            Assert.AreEqual("resets in 90 minutes", QuotaRow.ResetsTextForRemaining(TimeSpan.FromSeconds(5400)));
+            Assert.AreEqual("resets in 119 minutes", QuotaRow.ResetsTextForRemaining(TimeSpan.FromSeconds(7199)), "max minute value stays under 120");
+            Assert.AreEqual("resets in 2 hours", QuotaRow.ResetsTextForRemaining(TimeSpan.FromSeconds(7200)));
+            Assert.AreEqual("resets in 5 hours", QuotaRow.ResetsTextForRemaining(TimeSpan.FromSeconds(18000)));
+            Assert.AreEqual("resets in 23 hours", QuotaRow.ResetsTextForRemaining(TimeSpan.FromSeconds(86399)));
+            Assert.AreEqual("resets in 24 hours", QuotaRow.ResetsTextForRemaining(TimeSpan.FromSeconds(86400)));
+            Assert.AreEqual("resets in 36 hours", QuotaRow.ResetsTextForRemaining(TimeSpan.FromSeconds(129600)));
+            Assert.AreEqual("resets in 72 hours", QuotaRow.ResetsTextForRemaining(TimeSpan.FromSeconds(259200)));
+        }
+        finally { L10n.Current = saved; }
+
+        // A nil resets_at renders nothing (bucket without a reset time).
+        Assert.AreEqual("", Row("5h", "5-hour", 10).ResetsText);
+    }
+
+    [TestMethod]
+    public void L10n_Chinese_Translations_And_Parity()
+    {
+        var saved = L10n.Current;
+        L10n.Current = AppLanguage.ZhHans;
+        try
+        {
+            Assert.AreEqual("订阅跟踪已关闭", L10n.T("tracking_off"));
+            Assert.AreEqual("剩余 14%", L10n.T("percent_left", 14));
+            Assert.AreEqual("wsl · 已连接", L10n.T("server_connected", "wsl"));
+            Assert.AreEqual("本地", CompanionStore.ServerLabel("http://127.0.0.1:55423"));
+            Assert.AreEqual("低于昨日 12%", L10n.T("comparison_below", 12));
+            Assert.AreEqual("5 小时后重置", L10n.T("resets_in_hours", 5, ""));
+            Assert.AreEqual("5 小时", ClaudeRow("session", "Session", 14).DisplayBucketLabel);
+            Assert.AreEqual("每周", ClaudeRow("weekly_all", "Weekly All", 8).DisplayBucketLabel);
+            Assert.AreEqual("Fable", ClaudeRow("weekly_scoped_fable", "Fable", 8).DisplayBucketLabel);
+
+            L10n.Current = AppLanguage.English;
+            Assert.AreEqual("14% left", L10n.T("percent_left", 14));
+        }
+        finally { L10n.Current = saved; }
+
+        // Every English key has a Chinese translation (no silent fallback to English).
+        var enKeys = L10n.KeysFor(AppLanguage.English);
+        var zhKeys = L10n.KeysFor(AppLanguage.ZhHans);
+        CollectionAssert.AreEquivalent(enKeys, zhKeys, "zh-Hans is missing keys present in English");
+    }
+
     private static QuotaRow Row(string bucket, string label, double left) =>
         new("Antigravity", bucket, label, left, null, false, "default", true);
+
+    private static QuotaRow ClaudeRow(string bucket, string label, double left) =>
+        new("Claude", bucket, label, left, null, false, "default", true);
+
+    [TestMethod]
+    public void CanonicalBucket_Maps_Claude_Session_And_Weekly_To_Threshold_Windows()
+    {
+        var saved = L10n.Current;
+        L10n.Current = AppLanguage.English;
+        try
+        {
+            var t = QuotaThresholds.Defaults;  // 5h=20, weekly=10, other=15
+
+            // Claude's real bucket ids share Codex's thresholds instead of the 15% "other" bucket.
+            // Generic windows use the standard names; model-scoped weekly windows keep the model.
+            var session = ClaudeRow("session", "Session", 14);
+            Assert.AreEqual("5h", session.CanonicalBucket);
+            Assert.AreEqual("5-hour", session.DisplayBucketLabel);
+            Assert.IsTrue(session.IsLow(t), "session -> 5h (20%); 14% is low");
+            Assert.IsFalse(ClaudeRow("session", "Session", 25).IsLow(t));
+
+            var weeklyScoped = ClaudeRow("weekly_scoped_opus", "Opus", 8);
+            Assert.AreEqual("weekly", weeklyScoped.CanonicalBucket);
+            Assert.AreEqual("Opus", weeklyScoped.DisplayBucketLabel);
+            Assert.IsTrue(weeklyScoped.IsLow(t), "weekly_scoped -> weekly (10%); 8% is low");
+            Assert.AreEqual("Fable", ClaudeRow("weekly_scoped_fable", "Fable", 8).DisplayBucketLabel);
+            Assert.AreEqual("Weekly", ClaudeRow("weekly_all", "Weekly All", 8).DisplayBucketLabel);
+
+            // Legacy fallback bucket ids from the older API shape.
+            Assert.AreEqual("5h", ClaudeRow("five_hour", "5-hour", 10).CanonicalBucket);
+            Assert.AreEqual("weekly", ClaudeRow("seven_day", "7-day", 10).CanonicalBucket);
+
+            // An unrecognised Claude bucket falls through to "other" - we don't guess its window.
+            var unknown = ClaudeRow("usage_claude_sonnet_4", "Claude Sonnet 4", 10);
+            Assert.AreEqual("usage_claude_sonnet_4", unknown.CanonicalBucket);
+            Assert.IsTrue(unknown.IsLow(t), "unknown -> other (15%); 10% is low");
+
+            // Non-Claude providers are untouched: a "session" bucket on another provider stays itself.
+            Assert.AreEqual("session", Row("session", "Session", 10).CanonicalBucket);
+        }
+        finally { L10n.Current = saved; }
+    }
 
     [TestMethod]
     public void AntigravityPools_Collapse_To_Two_Worst_Rows()
@@ -110,18 +210,24 @@ public class StoreHelperTests
     [TestMethod]
     public void ServerLabel_Names_The_Configured_Host()
     {
-        // Loopback stays "Local"; a remote host uses its first DNS label so a Tailscale
-        // URL doesn't claim to be local. Pinned to the macOS serverLabel cases.
-        Assert.AreEqual("Local", CompanionStore.ServerLabel("http://127.0.0.1:55423"));
-        Assert.AreEqual("Local", CompanionStore.ServerLabel("http://localhost:55423"));
-        Assert.AreEqual("wsl", CompanionStore.ServerLabel("https://wsl.tail76535.ts.net/tokdash"));
-        Assert.AreEqual("wsl", CompanionStore.ServerLabel("  https://WSL.tail76535.ts.net/tokdash  "), "trimmed and lowercased");
-        Assert.AreEqual("homelab", CompanionStore.ServerLabel("http://homelab:8080"));
-        // A bare IP has no name to shorten - showing "192" would be nonsense.
-        Assert.AreEqual("192.168.1.50", CompanionStore.ServerLabel("http://192.168.1.50:55423"));
-        // Unparseable input must not throw; fall back to the default label.
-        Assert.AreEqual("Local", CompanionStore.ServerLabel(null));
-        Assert.AreEqual("Local", CompanionStore.ServerLabel("not a url"));
+        var saved = L10n.Current;
+        L10n.Current = AppLanguage.English;
+        try
+        {
+            // Loopback stays "Local"; a remote host uses its first DNS label so a Tailscale
+            // URL doesn't claim to be local. Pinned to the macOS serverLabel cases.
+            Assert.AreEqual("Local", CompanionStore.ServerLabel("http://127.0.0.1:55423"));
+            Assert.AreEqual("Local", CompanionStore.ServerLabel("http://localhost:55423"));
+            Assert.AreEqual("wsl", CompanionStore.ServerLabel("https://wsl.tail76535.ts.net/tokdash"));
+            Assert.AreEqual("wsl", CompanionStore.ServerLabel("  https://WSL.tail76535.ts.net/tokdash  "), "trimmed and lowercased");
+            Assert.AreEqual("homelab", CompanionStore.ServerLabel("http://homelab:8080"));
+            // A bare IP has no name to shorten - showing "192" would be nonsense.
+            Assert.AreEqual("192.168.1.50", CompanionStore.ServerLabel("http://192.168.1.50:55423"));
+            // Unparseable input must not throw; fall back to the default label.
+            Assert.AreEqual("Local", CompanionStore.ServerLabel(null));
+            Assert.AreEqual("Local", CompanionStore.ServerLabel("not a url"));
+        }
+        finally { L10n.Current = saved; }
     }
 
     [TestMethod]

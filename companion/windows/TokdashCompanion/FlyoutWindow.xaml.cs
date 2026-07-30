@@ -413,6 +413,7 @@ public partial class FlyoutWindow : Window
     private void UpdateView()
     {
         if (Store == null) return;
+        ApplyStrings();
 
         ConnDot.Fill = new SolidColorBrush((Color)ColorConverter.ConvertFromString(Store.DotColor));
         ConnText.Text = Store.ConnectionLabel;
@@ -442,16 +443,16 @@ public partial class FlyoutWindow : Window
 
         if (snap.Today.TotalTokens == 0)
         {
-            TodayCost.Text = snap.TodayFailed ? "Today's data unavailable" : "No usage recorded today";
+            TodayCost.Text = L10n.T(snap.TodayFailed ? "today_unavailable" : "no_usage_today");
             TodayCost.FontSize = FontRes("FontHeroEmpty");
-            TodaySub.Text = snap.TodayFailed ? "Will retry shortly." : "Tokdash is running.";
+            TodaySub.Text = L10n.T(snap.TodayFailed ? "will_retry_shortly" : "tokdash_running");
             TodayCmp.Text = "";
         }
         else
         {
             TodayCost.Text = snap.TodayCostText;
             TodayCost.FontSize = FontRes("FontHero");
-            TodaySub.Text = $"{snap.TodayTokensCompact} tokens · {snap.Today.TotalMessages} messages" + (snap.TodayFailed ? " · retrying" : "");
+            TodaySub.Text = snap.TodaySubLine;
             TodayCmp.Text = snap.ComparisonText ?? "";
             TodayCmp.Foreground = ComparisonBrush(snap.Today.Comparison?.CostPct);
         }
@@ -461,17 +462,17 @@ public partial class FlyoutWindow : Window
         {
             // Keep last-good month visible with a retrying note (don't hide it as "-").
             MonthCost.Text = snap.MonthCostText;
-            MonthTokens.Text = $"{snap.MonthTokensCompact} tokens · retrying";
+            MonthTokens.Text = snap.MonthTokensRetrying;
         }
         else if (snap.MonthFailed)
         {
             MonthCost.Text = "–";
-            MonthTokens.Text = "retrying";
+            MonthTokens.Text = L10n.T("retrying");
         }
         else
         {
             MonthCost.Text = snap.MonthCostText;
-            MonthTokens.Text = $"{snap.MonthTokensCompact} tokens";
+            MonthTokens.Text = snap.MonthTokensLine;
         }
 
         RenderQuota(snap);
@@ -489,6 +490,23 @@ public partial class FlyoutWindow : Window
         QuotaPanel.Opacity = opacity;
     }
 
+    /// <summary>Apply localized text to the static XAML literals. Called from UpdateView so a
+    /// language change (which raises a store property change) re-renders them live, without
+    /// reopening the flyout. DataTemplate literals (Estimated / Couldn't refresh) are localized
+    /// via the QuotaRowVM / QuotaGroupVM they're bound to, rebuilt in RenderQuota.</summary>
+    private void ApplyStrings()
+    {
+        TodayHeader.Text = L10n.T("today");
+        LowBtn.Content = L10n.T("low");
+        AllBtn.Content = L10n.T("all");
+        OpenDashboardBtn.Content = L10n.T("open_dashboard");
+        TrayHint.Text = L10n.T("tray_hint");
+        BannerRetry.Content = L10n.T("retry");
+        BannerSettings.Content = L10n.T("settings");
+        RefreshBtn.ToolTip = L10n.T("refresh");
+        GearBtn.ToolTip = L10n.T("settings");
+    }
+
     private void RenderQuota(Snapshot snap)
     {
         QuotaRows.Items.Clear();
@@ -496,7 +514,7 @@ public partial class FlyoutWindow : Window
 
         if (snap.QuotaFailed)
         {
-            QuotaHeader.Text = "SUBSCRIPTION";
+            QuotaHeader.Text = L10n.T("subscription");
             var warn = new StackPanel { Orientation = Orientation.Horizontal };
             warn.Children.Add(new TextBlock
             {
@@ -508,12 +526,12 @@ public partial class FlyoutWindow : Window
             });
             warn.Children.Add(new TextBlock
             {
-                Text = "Quota data unavailable - will retry shortly.",
+                Text = L10n.T("quota_unavailable"),
                 FontSize = FontRes("FontSecondary"),
                 Foreground = (Brush)FindResource("MutedBrush"),
                 VerticalAlignment = VerticalAlignment.Center,
             });
-            var retryBtn = new Button { Content = "Retry now", Margin = new Thickness(8, 0, 0, 0), Style = (Style)FindResource("WinBtn") };
+            var retryBtn = new Button { Content = L10n.T("retry_now"), Margin = new Thickness(8, 0, 0, 0), Style = (Style)FindResource("WinBtn") };
             retryBtn.Click += (s, e) => _ = Store.RefreshAsync();
             var row = new StackPanel { Orientation = Orientation.Horizontal };
             row.Children.Add(warn);
@@ -528,18 +546,18 @@ public partial class FlyoutWindow : Window
         {
             QuotaRows.Items.Add(new TextBlock
             {
-                Text = "Subscription tracking is off",
+                Text = L10n.T("tracking_off"),
                 FontSize = FontRes("FontSecondary"),
                 Foreground = (Brush)FindResource("MutedBrush"),
             });
-            var openBtn = new Button { Content = "Open Dashboard", Margin = new Thickness(0, 4, 0, 0), Style = (Style)FindResource("WinBtn") };
+            var openBtn = new Button { Content = L10n.T("open_dashboard"), Margin = new Thickness(0, 4, 0, 0), Style = (Style)FindResource("WinBtn") };
             openBtn.Click += (s, e) => OpenDashboard_Click(s, e);
             QuotaRows.Items.Add(openBtn);
-            QuotaHeader.Text = "SUBSCRIPTION";
+            QuotaHeader.Text = L10n.T("subscription");
             return;
         }
 
-        QuotaHeader.Text = Store.QuotaView == QuotaView.Low ? "SUBSCRIPTION" : "ALL SUBSCRIPTIONS";
+        QuotaHeader.Text = L10n.T(Store.QuotaView == QuotaView.Low ? "subscription" : "all_subscriptions");
 
         if (Store.QuotaView == QuotaView.Low)
         {
@@ -548,7 +566,7 @@ public partial class FlyoutWindow : Window
             {
                 QuotaRows.Items.Add(new TextBlock
                 {
-                    Text = "No subscription window is below its alert threshold.",
+                    Text = L10n.T("no_low_windows"),
                     FontSize = FontRes("FontSecondary"),
                     Foreground = (Brush)FindResource("MutedBrush"),
                 });
@@ -584,9 +602,10 @@ public partial class FlyoutWindow : Window
         double pct = Math.Clamp(row.Left, 0, 100);
         return new QuotaRowVM
         {
-            Label = prefix + (showProvider ? $"{row.Provider} · {row.BucketLabel}" : row.BucketLabel),
-            PercentText = row.HasPercent ? $"{(int)row.Left}% left" : "",
+            Label = prefix + (showProvider ? $"{row.Provider} · {row.DisplayBucketLabel}" : row.DisplayBucketLabel),
+            PercentText = row.HasPercent ? L10n.T("percent_left", (int)row.Left) : "",
             ResetsText = row.ResetsText,
+            EstimatedText = L10n.T("estimated"),
             EstimatedVisibility = row.Estimated ? Visibility.Visible : Visibility.Collapsed,
             BarVisibility = row.HasPercent ? Visibility.Visible : Visibility.Collapsed,
             BarBrush = row.HasPercent ? new SolidColorBrush(QuotaBarColor(row.Left)) : Brushes.Transparent,
@@ -599,6 +618,7 @@ public partial class FlyoutWindow : Window
     private QuotaGroupVM MakeQuotaGroupVM(QuotaGroup group) => new()
     {
         Provider = group.Provider,
+        WarningText = L10n.T("couldnt_refresh"),
         // GROUP failure drives the provider-header warning (spec §7); rendered inline by
         // QuotaGroupTemplate rather than a separate MakeProviderWarning() element.
         WarningVisibility = group.Failed ? Visibility.Visible : Visibility.Collapsed,
@@ -656,6 +676,7 @@ internal sealed class QuotaRowVM
     public string Label { get; init; } = "";
     public string PercentText { get; init; } = "";   // "" when !HasPercent
     public string ResetsText { get; init; } = "";
+    public string EstimatedText { get; init; } = "";
     public Visibility EstimatedVisibility { get; init; }
     public Visibility BarVisibility { get; init; }
     public Brush BarBrush { get; init; } = Brushes.Transparent;
@@ -666,6 +687,7 @@ internal sealed class QuotaRowVM
 internal sealed class QuotaGroupVM
 {
     public string Provider { get; init; } = "";
+    public string WarningText { get; init; } = "";
     public Visibility WarningVisibility { get; init; }
     public List<QuotaRowVM> Rows { get; init; } = new();
 }

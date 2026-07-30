@@ -31,6 +31,131 @@ final class SnapshotTests: XCTestCase {
         XCTAssertFalse(okWeekly.isLow(thresholds: t))
     }
 
+    func testClaudeBucketNormalizationForThreshold() {
+        let saved = L10n.current
+        L10n.current = .english
+        defer { L10n.current = saved }
+
+        let t = QuotaThresholds.defaults  // 5h=20, weekly=10, other=15
+
+        // Claude's real bucket ids map to the canonical windows so they share Codex's thresholds
+        // instead of falling into the 15% "other" bucket. Generic windows use the standard
+        // companion names, while model-scoped weekly windows keep their model label.
+        let session = makeClaudeRow(bucket: "session", label: "Session", left: 14)
+        XCTAssertEqual(session.canonicalBucket, "5h")
+        XCTAssertEqual(session.displayBucketLabel, "5-hour")
+        XCTAssertTrue(session.isLow(thresholds: t), "session -> 5h threshold (20%); 14% is low")
+        XCTAssertFalse(makeClaudeRow(bucket: "session", label: "Session", left: 25).isLow(thresholds: t))
+
+        let weeklyScoped = makeClaudeRow(bucket: "weekly_scoped_opus", label: "Opus", left: 8)
+        XCTAssertEqual(weeklyScoped.canonicalBucket, "weekly")
+        XCTAssertEqual(weeklyScoped.displayBucketLabel, "Opus")
+        XCTAssertTrue(weeklyScoped.isLow(thresholds: t), "weekly_scoped -> weekly threshold (10%); 8% is low")
+        XCTAssertEqual(makeClaudeRow(bucket: "weekly_scoped_fable", label: "Fable", left: 8).displayBucketLabel, "Fable")
+        XCTAssertEqual(makeClaudeRow(bucket: "weekly_all", label: "Weekly All", left: 8).displayBucketLabel, "Weekly")
+
+        // Legacy fallback bucket ids from the older API shape.
+        XCTAssertEqual(makeClaudeRow(bucket: "five_hour", label: "5-hour", left: 10).canonicalBucket, "5h")
+        XCTAssertEqual(makeClaudeRow(bucket: "seven_day", label: "7-day", left: 10).canonicalBucket, "weekly")
+
+        // An unrecognised Claude bucket falls through to "other" - we don't guess its window.
+        let unknown = makeClaudeRow(bucket: "usage_claude_sonnet_4", label: "Claude Sonnet 4", left: 10)
+        XCTAssertEqual(unknown.canonicalBucket, "usage_claude_sonnet_4")
+        XCTAssertTrue(unknown.isLow(thresholds: t), "unknown -> other (15%); 10% is low")
+
+        // Non-Claude providers are untouched: a "session" bucket on another provider stays itself.
+        XCTAssertEqual(makeRow(bucket: "session", left: 10).canonicalBucket, "session")
+    }
+
+    func testResetsTextIsRelative() {
+        // Pin English: resetsText now routes through L10n, so the assertions are locale-stable.
+        let saved = L10n.current
+        L10n.current = .english
+        defer { L10n.current = saved }
+
+        // Pure form: seconds-remaining -> text, no clock dependency.
+        XCTAssertEqual(QuotaRow.resetsText(forRemaining: -10), "resets soon")   // past/stale
+        XCTAssertEqual(QuotaRow.resetsText(forRemaining: 0), "resets soon")
+        XCTAssertEqual(QuotaRow.resetsText(forRemaining: 59), "resets soon")     // sub-minute
+        XCTAssertEqual(QuotaRow.resetsText(forRemaining: 60), "resets in 1 minute")
+        XCTAssertEqual(QuotaRow.resetsText(forRemaining: 119), "resets in 1 minute")
+        XCTAssertEqual(QuotaRow.resetsText(forRemaining: 120), "resets in 2 minutes")
+        XCTAssertEqual(QuotaRow.resetsText(forRemaining: 5400), "resets in 90 minutes")
+        XCTAssertEqual(QuotaRow.resetsText(forRemaining: 7199), "resets in 119 minutes", "max minute value stays under 120")
+        XCTAssertEqual(QuotaRow.resetsText(forRemaining: 7200), "resets in 2 hours")
+        XCTAssertEqual(QuotaRow.resetsText(forRemaining: 18000), "resets in 5 hours")
+        XCTAssertEqual(QuotaRow.resetsText(forRemaining: 86399), "resets in 23 hours")
+        XCTAssertEqual(QuotaRow.resetsText(forRemaining: 86400), "resets in 24 hours")
+        XCTAssertEqual(QuotaRow.resetsText(forRemaining: 129600), "resets in 36 hours")
+        XCTAssertEqual(QuotaRow.resetsText(forRemaining: 259200), "resets in 72 hours")
+
+        // A nil resets_at renders nothing (bucket without a reset time).
+        XCTAssertEqual(makeRow(bucket: "5h", left: 10).resetsText, "")
+    }
+
+    func testL10nChineseTranslationsAndParity() {
+        let saved = L10n.current
+        L10n.current = .zhHans
+        defer { L10n.current = saved }
+
+        // A few representative values, including format strings with arguments. Note %% in the
+        // template collapses to a single % after String(format:).
+        XCTAssertEqual(L10n.t("today"), "今日")
+        XCTAssertEqual(L10n.t("tracking_off"), "订阅跟踪已关闭")
+        XCTAssertEqual(L10n.t("percent_left", 14), "剩余 14%")
+        XCTAssertEqual(L10n.t("server_connected", "wsl"), "wsl · 已连接")
+        XCTAssertEqual(CompanionStore.serverLabel(for: "http://127.0.0.1:55423"), "本地")
+        XCTAssertEqual(L10n.t("comparison_below", 12), "低于昨日 12%")
+        XCTAssertEqual(L10n.t("resets_in_hours", 5, ""), "5 小时后重置")
+        XCTAssertEqual(makeClaudeRow(bucket: "session", label: "Session", left: 14).displayBucketLabel, "5 小时")
+        XCTAssertEqual(makeClaudeRow(bucket: "weekly_all", label: "Weekly All", left: 8).displayBucketLabel, "每周")
+        XCTAssertEqual(makeClaudeRow(bucket: "weekly_scoped_fable", label: "Fable", left: 8).displayBucketLabel, "Fable")
+
+        // English still resolves with an explicit choice.
+        L10n.current = .english
+        XCTAssertEqual(L10n.t("today"), "TODAY")
+        XCTAssertEqual(L10n.t("percent_left", 14), "14% left")
+
+        // Every English key has a Chinese translation (no silent fallback to English).
+        let enKeys = Set(L10n.keys(for: .english))
+        let zhKeys = Set(L10n.keys(for: .zhHans))
+        XCTAssertEqual(enKeys.subtracting(zhKeys), [], "zh-Hans is missing keys: \(enKeys.subtracting(zhKeys).sorted())")
+    }
+
+    func testSystemLanguageUsesPrimaryPreferenceOnly() {
+        XCTAssertEqual(L10n.resolve(.system, preferredLanguages: ["en-GB", "zh-Hans"]), .english)
+        XCTAssertEqual(L10n.resolve(.system, preferredLanguages: ["zh-Hans", "en-GB"]), .zhHans)
+        XCTAssertEqual(L10n.resolve(.system, preferredLanguages: []), .english)
+        XCTAssertEqual(L10n.resolve(.zhHans, preferredLanguages: ["en-GB"]), .zhHans)
+    }
+
+    func testLegacySettingsDecodePreservesPreferencesAndDefaultsLanguage() throws {
+        let data = Data("""
+        {
+          "baseURL": "https://wsl.example.test/tokdash",
+          "launchAtLogin": true,
+          "lowQuotaNotifications": true,
+          "thresholds": {
+            "fiveHour": 27,
+            "weekly": 13,
+            "other": 19
+          }
+        }
+        """.utf8)
+
+        let settings = try JSONDecoder().decode(CompanionSettings.self, from: data)
+        XCTAssertEqual(settings.baseURL, "https://wsl.example.test/tokdash")
+        XCTAssertTrue(settings.launchAtLogin)
+        XCTAssertTrue(settings.lowQuotaNotifications)
+        XCTAssertEqual(settings.thresholds, QuotaThresholds(fiveHour: 27, weekly: 13, other: 19))
+        XCTAssertEqual(settings.language, .system)
+
+        let migratedData = try JSONEncoder().encode(settings)
+        let migrated = try JSONDecoder().decode(CompanionSettings.self, from: migratedData)
+        XCTAssertEqual(migrated.baseURL, settings.baseURL)
+        XCTAssertEqual(migrated.language, .system)
+    }
+
     // MARK: - Refresh scheduler timing
 
     func testComputeDelay() {
@@ -97,6 +222,16 @@ final class SnapshotTests: XCTestCase {
         QuotaRow(provider: "test", bucket: BucketQuota(
             bucket: bucket,
             bucketLabel: bucket,
+            remainingPercent: left,
+            resetsAt: nil,
+            account: "default"
+        ))
+    }
+
+    private func makeClaudeRow(bucket: String, label: String, left: Double) -> QuotaRow {
+        QuotaRow(provider: "Claude", bucket: BucketQuota(
+            bucket: bucket,
+            bucketLabel: label,
             remainingPercent: left,
             resetsAt: nil,
             account: "default"
@@ -343,6 +478,10 @@ final class SnapshotTests: XCTestCase {
     }
 
     func testServerLabelNamesTheConfiguredHost() {
+        let saved = L10n.current
+        L10n.current = .english
+        defer { L10n.current = saved }
+
         // Loopback stays "Local"; a remote host uses its first DNS label so a Tailscale
         // URL doesn't claim to be local. Pinned to the Windows ServerLabel cases.
         XCTAssertEqual(CompanionStore.serverLabel(for: "http://127.0.0.1:55423"), "Local")

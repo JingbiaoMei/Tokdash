@@ -40,7 +40,39 @@ public partial class SettingsWindow : Window
         FiveHourSlider.Value = s.Thresholds.FiveHour;
         WeeklySlider.Value = s.Thresholds.Weekly;
         OtherSlider.Value = s.Thresholds.Other;
+        PopulateLanguageCombo();
+        ApplySettingsStrings();
+    }
+
+    /// <summary>Localize the static XAML literals. The window closes on Save, so a language
+    /// change takes effect here on the next open; the flyout updates live via the store.</summary>
+    private void ApplySettingsStrings()
+    {
+        Title = L10n.T("settings_window_title");
+        ServerLabel.Text = L10n.T("section_server");
+        TestButton.Content = L10n.T("test");
+        ServerHint.Text = L10n.T("server_hint");
+        StartupLabel.Text = L10n.T("section_startup");
+        LaunchBox.Content = L10n.T("launch_at_login");
+        NotificationsLabel.Text = L10n.T("section_notifications");
+        NotifyBox.Content = L10n.T("low_quota_notifications");
+        NotifyHint.Text = L10n.T("low_quota_hint");
+        ThresholdsLabel.Text = L10n.T("section_thresholds");
+        LanguageLabel.Text = L10n.T("section_language");
+        LanguageHint.Text = L10n.T("language_hint");
+        CancelBtn.Content = L10n.T("cancel");
+        SaveBtn.Content = L10n.T("save");
         UpdateSliderLabels();
+    }
+
+    /// <summary>Fill the language combo in the current language and select the saved setting.
+    /// Index order matches the AppLanguage enum (System=0, English=1, ZhHans=2).</summary>
+    private void PopulateLanguageCombo()
+    {
+        var langs = new[] { AppLanguage.System, AppLanguage.English, AppLanguage.ZhHans };
+        LanguageCombo.Items.Clear();
+        foreach (var lang in langs) LanguageCombo.Items.Add(lang.DisplayName());
+        LanguageCombo.SelectedIndex = (int)Store.Settings.Language;
     }
 
     private void Slider_Changed(object sender, RoutedPropertyChangedEventArgs<double> e) => UpdateSliderLabels();
@@ -53,9 +85,9 @@ public partial class SettingsWindow : Window
         // kills the whole app, so bail until the fields are assigned - SettingsWindow_Loaded
         // calls this again once everything is constructed.
         if (FiveHourLabel is null || WeeklyLabel is null || OtherLabel is null) return;
-        FiveHourLabel.Text = $"5-hour: {(int)FiveHourSlider.Value}%";
-        WeeklyLabel.Text = $"Weekly: {(int)WeeklySlider.Value}%";
-        OtherLabel.Text = $"Default: {(int)OtherSlider.Value}%";
+        FiveHourLabel.Text = L10n.T("threshold_5h", (int)FiveHourSlider.Value);
+        WeeklyLabel.Text = L10n.T("threshold_weekly", (int)WeeklySlider.Value);
+        OtherLabel.Text = L10n.T("threshold_other", (int)OtherSlider.Value);
     }
 
     /// <summary>
@@ -69,12 +101,12 @@ public partial class SettingsWindow : Window
         TestResult.Visibility = Visibility.Visible;
         if (!CompanionStore.IsValidBaseURL(candidate))
         {
-            ShowTestResult("Enter an absolute http:// or https:// URL.", ok: false);
+            ShowTestResult(L10n.T("test_bad_url"), ok: false);
             return;
         }
 
         TestButton.IsEnabled = false;
-        ShowTestResult("Testing…", ok: null);
+        ShowTestResult(L10n.T("testing"), ok: null);
         try
         {
             using var probe = new TokdashClient(candidate);
@@ -82,13 +114,13 @@ public partial class SettingsWindow : Window
             // A reachable server that isn't Tokdash is a failure, not a success -
             // otherwise a proxy or a wrong port would test green.
             if (health.Service == "tokdash")
-                ShowTestResult($"Connected to {CompanionStore.ServerLabel(candidate)} · Tokdash {health.Version}", ok: true);
+                ShowTestResult(L10n.T("test_ok", CompanionStore.ServerLabel(candidate), health.Version), ok: true);
             else
-                ShowTestResult("Reachable, but not a Tokdash server.", ok: false);
+                ShowTestResult(L10n.T("test_not_tokdash"), ok: false);
         }
         catch (Exception ex)
         {
-            ShowTestResult($"Couldn't reach it: {(ex as TokdashException)?.Error.ToString() ?? ex.Message}", ok: false);
+            ShowTestResult(L10n.T("test_reachable_error", (ex as TokdashException)?.Error.ToString() ?? ex.Message), ok: false);
         }
         finally
         {
@@ -184,7 +216,7 @@ public partial class SettingsWindow : Window
         var url = BaseUrlBox.Text.Trim();
         if (!CompanionStore.IsValidBaseURL(url))
         {
-            MessageBox.Show("Enter a valid http:// or https:// URL.", "Tokdash", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(L10n.T("valid_url"), "Tokdash", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
@@ -199,6 +231,9 @@ public partial class SettingsWindow : Window
             (int)FiveHourSlider.Value,
             (int)WeeklySlider.Value,
             (int)OtherSlider.Value);
+        var newLang = (AppLanguage)Math.Clamp(LanguageCombo.SelectedIndex, 0, 2);
+        bool langChanged = newLang != s.Language;
+        if (langChanged) Store.ApplyLanguage(newLang);  // sets s.Language, persists, re-renders flyout
         if (launchChanged)
         {
             bool actualLaunch = await LaunchAtLogin.SetEnabledAsync(requestedLaunch);
@@ -206,7 +241,7 @@ public partial class SettingsWindow : Window
             if (requestedLaunch && !actualLaunch)
             {
                 MessageBox.Show(
-                    "Windows did not enable launch at login. Check Settings > Apps > Startup.",
+                    L10n.T("launch_failed"),
                     "Tokdash",
                     MessageBoxButton.OK,
                     MessageBoxImage.Information);

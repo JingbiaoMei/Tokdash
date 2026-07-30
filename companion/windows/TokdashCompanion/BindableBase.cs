@@ -28,6 +28,7 @@ public sealed class CompanionSettings
     public bool LaunchAtLogin { get; set; } = false;
     public bool LowQuotaNotifications { get; set; } = false;
     public QuotaThresholds Thresholds { get; set; } = QuotaThresholds.Defaults;
+    public AppLanguage Language { get; set; } = AppLanguage.System;
 
     private static string SettingsPath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),

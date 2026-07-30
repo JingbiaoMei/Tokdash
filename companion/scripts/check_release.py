@@ -36,8 +36,8 @@ def main() -> None:
         fail("macOS project.yml MARKETING_VERSION does not match companion/VERSION")
     if "ENABLE_HARDENED_RUNTIME: YES" not in project_yml:
         fail("macOS project.yml must enable Hardened Runtime")
-    if 'CURRENT_PROJECT_VERSION: "1"' not in project_yml:
-        fail("macOS CURRENT_PROJECT_VERSION must be the committed build number 1")
+    if 'CURRENT_PROJECT_VERSION: "2"' not in project_yml:
+        fail("macOS CURRENT_PROJECT_VERSION must be the committed build number 2")
     if 'xcodeVersion: "15.4"' not in project_yml:
         fail("macOS project.yml must remain compatible with the macOS 14 CI toolchain")
     if 'SWIFT_VERSION: "5.0"' not in project_yml:
@@ -74,9 +74,9 @@ def main() -> None:
     current_versions = set(
         re.findall(r"CURRENT_PROJECT_VERSION = ([^;]+);", pbxproj)
     )
-    if current_versions != {"1"}:
+    if current_versions != {"2"}:
         fail(
-            "tracked Xcode project CURRENT_PROJECT_VERSION values must be 1: "
+            "tracked Xcode project CURRENT_PROJECT_VERSION values must be 2: "
             f"{sorted(current_versions)}"
         )
 
@@ -105,8 +105,8 @@ def main() -> None:
     ).read_text(encoding="utf-8")
     if r"..\VERSION" not in props or "<Version>$(CompanionVersion)</Version>" not in props:
         fail("Windows Directory.Build.props must derive Version from companion/VERSION")
-    if "<CompanionBuildNumber>1</CompanionBuildNumber>" not in props:
-        fail("Windows build number must match macOS CURRENT_PROJECT_VERSION 1")
+    if "<CompanionBuildNumber>2</CompanionBuildNumber>" not in props:
+        fail("Windows build number must match macOS CURRENT_PROJECT_VERSION 2")
     for lockfile in (
         COMPANION_ROOT / "windows" / "TokdashCompanion" / "packages.lock.json",
         COMPANION_ROOT / "windows" / "TokdashCompanion.Tests" / "packages.lock.json",
@@ -118,7 +118,7 @@ def main() -> None:
         COMPANION_ROOT / "scripts" / "build_windows_release.ps1"
     ).read_text(encoding="utf-8")
     if "makeappx.exe" in windows_builder or "unsigned.msix" in windows_builder:
-        fail("v0.1.0 Windows builder must not produce deferred MSIX assets")
+        fail("Windows builder must not produce deferred MSIX assets")
     for required in (
         "-p:PublishSingleFile=true",
         "-p:PublishTrimmed=false",

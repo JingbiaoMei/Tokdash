@@ -34,12 +34,12 @@ def test_companion_version_is_single_authority() -> None:
     )
     assert r"..\VERSION" in props
     assert "<Version>$(CompanionVersion)</Version>" in props
-    assert "<CompanionBuildNumber>1</CompanionBuildNumber>" in props
+    assert "<CompanionBuildNumber>2</CompanionBuildNumber>" in props
     assert "<FileVersion>$(CompanionVersion).$(CompanionBuildNumber)</FileVersion>" in props
 
     project_yml = (COMPANION / "macos/project.yml").read_text(encoding="utf-8")
     assert f'MARKETING_VERSION: "{version}"' in project_yml
-    assert 'CURRENT_PROJECT_VERSION: "1"' in project_yml
+    assert 'CURRENT_PROJECT_VERSION: "2"' in project_yml
     assert 'xcodeVersion: "15.4"' in project_yml
     assert 'SWIFT_VERSION: "5.0"' in project_yml
 
@@ -107,7 +107,7 @@ def test_windows_release_is_x64_portable_and_msix_is_deferred() -> None:
     assert "makeappx.exe" not in script
 
     # Preserve the experimental manifest for later loopback/startup validation,
-    # but it is not part of the v0.1.0 builder or release workflow.
+    # but it is not part of the portable ZIP builder or release workflow.
     manifest = (
         COMPANION / "windows/packaging/AppxManifest.xml.in"
     ).read_text(encoding="utf-8")

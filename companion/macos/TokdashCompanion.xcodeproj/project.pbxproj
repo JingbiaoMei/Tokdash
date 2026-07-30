@@ -12,6 +12,7 @@
 		3F2AAB1A93347A45FB7926D0 /* CompanionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB9529A73E929B5D04FE441F /* CompanionStore.swift */; };
 		86E121C2C3D0F20FDE0ABC4C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 18A6EFC9283A634EF2082E8E /* Assets.xcassets */; };
 		9120FD65B0A0AD500A35D1D7 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4408084C8B68D15BC7FF7BC2 /* ContentView.swift */; };
+		5C7E9A1B3D4F5C7E9A1B3D4F /* L10n.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D8F0B2C4E5A6D8F0B2C4E5A /* L10n.swift */; };
 		E3E4D84C81DA48972E6DE040 /* TokdashClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F94CD97755C9DD5305ACCF73 /* TokdashClient.swift */; };
 		F2B24F35662EC29981D5D34A /* SnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 533FED02CC525FDD803E98DF /* SnapshotTests.swift */; };
 		F799280B7097DD043FEFF80A /* TokdashClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E09EB8A40E58229B8C602AD0 /* TokdashClientTests.swift */; };
@@ -31,6 +32,7 @@
 		18A6EFC9283A634EF2082E8E /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		1C9FEBA36C9D0B9AD24F15E6 /* TokdashCompanionApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokdashCompanionApp.swift; sourceTree = "<group>"; };
 		4408084C8B68D15BC7FF7BC2 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		6D8F0B2C4E5A6D8F0B2C4E5A /* L10n.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = L10n.swift; sourceTree = "<group>"; };
 		533FED02CC525FDD803E98DF /* SnapshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnapshotTests.swift; sourceTree = "<group>"; };
 		BB9529A73E929B5D04FE441F /* CompanionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionStore.swift; sourceTree = "<group>"; };
 		BBF76AFDEACC02BD66048046 /* TokdashCompanion.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TokdashCompanion.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -47,6 +49,7 @@
 				18A6EFC9283A634EF2082E8E /* Assets.xcassets */,
 				BB9529A73E929B5D04FE441F /* CompanionStore.swift */,
 				4408084C8B68D15BC7FF7BC2 /* ContentView.swift */,
+				6D8F0B2C4E5A6D8F0B2C4E5A /* L10n.swift */,
 				F0279861DC509F4ADF3BA67C /* SettingsView.swift */,
 				F94CD97755C9DD5305ACCF73 /* TokdashClient.swift */,
 				1C9FEBA36C9D0B9AD24F15E6 /* TokdashCompanionApp.swift */,
@@ -168,6 +171,7 @@
 			files = (
 				3F2AAB1A93347A45FB7926D0 /* CompanionStore.swift in Sources */,
 				9120FD65B0A0AD500A35D1D7 /* ContentView.swift in Sources */,
+				5C7E9A1B3D4F5C7E9A1B3D4F /* L10n.swift in Sources */,
 				2A3B118D7C238854FB9E8B87 /* SettingsView.swift in Sources */,
 				E3E4D84C81DA48972E6DE040 /* TokdashClient.swift in Sources */,
 				21E3F0CB974C6C204723044C /* TokdashCompanionApp.swift in Sources */,
@@ -243,7 +247,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_NS_ASSERTIONS = NO;
@@ -259,7 +263,7 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TokdashCompanion/Info.plist;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.1.1;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = com.tokdash.companion;
@@ -336,7 +340,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -358,7 +362,7 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TokdashCompanion/Info.plist;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.1.1;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;

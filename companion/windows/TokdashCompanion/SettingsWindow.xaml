@@ -65,7 +65,7 @@
             </Style>
         </StackPanel.Resources>
 
-        <TextBlock Text="Server" FontWeight="SemiBold" FontSize="{StaticResource FontBody}" Margin="0,0,0,8"/>
+        <TextBlock x:Name="ServerLabel" Text="Server" FontWeight="SemiBold" FontSize="{StaticResource FontBody}" Margin="0,0,0,8"/>
         <DockPanel Margin="0,0,0,4">
             <Button x:Name="TestButton" DockPanel.Dock="Right" Content="Test" Click="Test_Click"
                     Padding="14,3" Margin="8,0,0,0"/>
@@ -74,18 +74,18 @@
         <!-- Test result: green when the URL answers as a Tokdash server, red otherwise. -->
         <TextBlock x:Name="TestResult" Text="" FontSize="{StaticResource FontCaption}" TextWrapping="Wrap"
                    Visibility="Collapsed" Margin="0,0,0,4"/>
-        <TextBlock Text="Default: http://127.0.0.1:55423. Tailscale HTTPS URLs are supported."
+        <TextBlock x:Name="ServerHint" Text="Default: http://127.0.0.1:55423. Tailscale HTTPS URLs are supported."
                    FontSize="{StaticResource FontCaption}" Foreground="{DynamicResource SettingsMuted}" Margin="0,0,0,16"/>
 
-        <TextBlock Text="Startup" FontWeight="SemiBold" FontSize="{StaticResource FontBody}" Margin="0,0,0,8"/>
+        <TextBlock x:Name="StartupLabel" Text="Startup" FontWeight="SemiBold" FontSize="{StaticResource FontBody}" Margin="0,0,0,8"/>
         <CheckBox x:Name="LaunchBox" Content="Launch at login" Margin="0,0,0,16"/>
 
-        <TextBlock Text="Notifications" FontWeight="SemiBold" FontSize="{StaticResource FontBody}" Margin="0,0,0,8"/>
+        <TextBlock x:Name="NotificationsLabel" Text="Notifications" FontWeight="SemiBold" FontSize="{StaticResource FontBody}" Margin="0,0,0,8"/>
         <CheckBox x:Name="NotifyBox" Content="Low-quota notifications" Margin="0,0,0,4"/>
-        <TextBlock Text="Notifies when a subscription window crosses its threshold. Opt-in."
+        <TextBlock x:Name="NotifyHint" Text="Notifies when a subscription window crosses its threshold. Opt-in."
                    FontSize="{StaticResource FontCaption}" Foreground="{DynamicResource SettingsMuted}" Margin="0,0,0,16"/>
 
-        <TextBlock Text="Quota alert thresholds (% remaining)" FontWeight="SemiBold" FontSize="{StaticResource FontBody}" Margin="0,0,0,8"/>
+        <TextBlock x:Name="ThresholdsLabel" Text="Quota alert thresholds (% remaining)" FontWeight="SemiBold" FontSize="{StaticResource FontBody}" Margin="0,0,0,8"/>
         <StackPanel Margin="0,0,0,16">
             <DockPanel Margin="0,0,0,8">
                 <TextBlock x:Name="FiveHourLabel" DockPanel.Dock="Left" Text="5-hour: 20%" VerticalAlignment="Center" Width="110"/>
@@ -101,9 +101,16 @@
             </DockPanel>
         </StackPanel>
 
+        <TextBlock x:Name="LanguageLabel" Text="Language" FontWeight="SemiBold" FontSize="{StaticResource FontBody}" Margin="0,0,0,8"/>
+        <StackPanel Margin="0,0,0,4">
+            <ComboBox x:Name="LanguageCombo" SelectedIndex="0" Margin="0,0,0,4"/>
+            <TextBlock x:Name="LanguageHint" Text="Follows the system language by default."
+                       FontSize="{StaticResource FontCaption}" Foreground="{DynamicResource SettingsMuted}" Margin="0,0,0,16"/>
+        </StackPanel>
+
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-            <Button Content="Cancel" Click="Cancel_Click" Margin="0,0,8,0" Padding="16,5"/>
-            <Button Content="Save" Click="Save_Click" Padding="16,5" FontWeight="SemiBold"/>
+            <Button x:Name="CancelBtn" Content="Cancel" Click="Cancel_Click" Margin="0,0,8,0" Padding="16,5"/>
+            <Button x:Name="SaveBtn" Content="Save" Click="Save_Click" Padding="16,5" FontWeight="SemiBold"/>
         </StackPanel>
     </StackPanel>
 </Window>

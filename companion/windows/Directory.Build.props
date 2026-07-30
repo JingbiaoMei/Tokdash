@@ -1,7 +1,7 @@
 <Project>
   <PropertyGroup>
     <CompanionVersion>$([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)..\VERSION').Trim())</CompanionVersion>
-    <CompanionBuildNumber>1</CompanionBuildNumber>
+    <CompanionBuildNumber>2</CompanionBuildNumber>
     <Version>$(CompanionVersion)</Version>
     <AssemblyVersion>$(CompanionVersion).0</AssemblyVersion>
     <FileVersion>$(CompanionVersion).$(CompanionBuildNumber)</FileVersion>

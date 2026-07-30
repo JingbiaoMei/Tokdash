@@ -46,9 +46,20 @@ final class CompanionStore: NSObject, ObservableObject {
             loaded.save()
         }
         let url = URL(string: loaded.baseURL) ?? URL(string: CompanionSettings.defaultBaseURL)!
+        // Resolve the display language before the first view render so the launch state is in
+        // the right language (the store owns this so a later change can republish and re-render).
+        L10n.current = L10n.resolve(loaded.language)
         self.settings = loaded
         self.client = TokdashClient(baseURL: url)
         super.init()
+    }
+
+    /// Apply a new language setting: update the global ``L10n.current``, persist, and republish
+    /// so every view reading a localized string re-renders live (no restart).
+    func applyLanguage(_ setting: AppLanguage) {
+        L10n.current = L10n.resolve(setting)
+        settings.language = setting  // @Published -> objectWillChange, re-renders views
+        settings.save()
     }
 
     /// Short name for the configured server, shown beside the connection state.
@@ -57,8 +68,8 @@ final class CompanionStore: NSObject, ObservableObject {
     /// claiming to be local. Bare IPs are shown as-is (no meaningful label to extract).
     nonisolated static func serverLabel(for urlString: String) -> String {
         let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let host = URL(string: trimmed)?.host?.lowercased(), !host.isEmpty else { return "Local" }
-        if host == "localhost" || host == "127.0.0.1" || host == "::1" { return "Local" }
+        guard let host = URL(string: trimmed)?.host?.lowercased(), !host.isEmpty else { return L10n.t("local") }
+        if host == "localhost" || host == "127.0.0.1" || host == "::1" { return L10n.t("local") }
         // An IPv4/IPv6 literal has no name to shorten; splitting it would be misleading.
         if host.allSatisfy({ $0.isNumber || $0 == "." }) || host.contains(":") { return host }
         let first = host.split(separator: ".").first.map(String.init) ?? host
@@ -70,7 +81,7 @@ final class CompanionStore: NSObject, ObservableObject {
     /// Connection state for display. Only the connected state is prefixed with the
     /// server label; the failure states are about reachability, not which host.
     var connectionLabel: String {
-        connectionState == .connected ? "\(serverLabel) · Connected" : connectionState.label
+        connectionState == .connected ? L10n.t("server_connected", serverLabel) : connectionState.label
     }
 
     /// True when a base URL is usable: an absolute http/https URL with a host. Every
@@ -326,7 +337,7 @@ final class CompanionStore: NSObject, ObservableObject {
             let epoch = Int(resets.timeIntervalSince1970)
             let stateKey = "\(r.provider)|\(r.account)|\(r.bucket)|\(epoch)"
             current.insert(stateKey)
-            let threshold = settings.thresholds.threshold(for: r.bucket)
+            let threshold = settings.thresholds.threshold(for: r.canonicalBucket)
             let isLow = r.left <= threshold
             if isLow, let prev = prevQuotaLeft[stateKey], prev > threshold {
                 let notifyKey = "\(stateKey)|\(threshold)"
@@ -344,11 +355,11 @@ final class CompanionStore: NSObject, ObservableObject {
         center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
             guard granted else { return }
             let content = UNMutableNotificationContent()
-            content.title = "Tokdash - low quota"
+            content.title = L10n.t("notif_low_title")
             if rows.count == 1, let r = rows.first {
-                content.body = "\(r.provider) \(r.bucketLabel) is at \(Int(r.left))% remaining."
+                content.body = L10n.t("notif_low_single", r.provider, r.displayBucketLabel, Int(r.left))
             } else if let r = rows.first {
-                content.body = "\(rows.count) subscription windows are low. \(r.provider) \(r.bucketLabel) at \(Int(r.left))%."
+                content.body = L10n.t("notif_low_multi", rows.count, r.provider, r.displayBucketLabel, Int(r.left))
             }
             content.userInfo = ["openQuota": true]
             let id = "tokdash-low-quota-\(Date().timeIntervalSince1970)"
@@ -374,32 +385,32 @@ final class CompanionStore: NSObject, ObservableObject {
 
     var freshnessText: String {
         guard let last = lastDataTime ?? lastFetchAt else {
-            return connectionState == .connecting ? "" : "No data yet"
+            return connectionState == .connecting ? "" : L10n.t("no_data_yet")
         }
         let age = Date().timeIntervalSince(last)
         var text: String
-        if age < 60 { text = "Updated just now" }
-        else if age < 3600 { text = "Updated \(Int(age / 60)) min ago" }
-        else if age < 86400 { text = "Updated \(Int(age / 3600)) h ago" }
-        else { text = "Updated \(Int(age / 86400)) d ago" }
+        if age < 60 { text = L10n.t("updated_just_now") }
+        else if age < 3600 { text = L10n.t("updated_min_ago", Int(age / 60)) }
+        else if age < 86400 { text = L10n.t("updated_h_ago", Int(age / 3600)) }
+        else { text = L10n.t("updated_d_ago", Int(age / 86400)) }
         // Append "· stale" only when last-good data is older than the refresh window
         // (60s while open, 600s while closed) and the last fetch failed (offline/busy).
         let window: TimeInterval = isOpen ? 60 : 600
-        if (connectionState == .offline || connectionState == .busy) && age > window { text += " · stale" }
+        if (connectionState == .offline || connectionState == .busy) && age > window { text += L10n.t("stale_suffix") }
         return text
     }
 
     /// Live label for the menu-bar item: reflects connection state and usage.
     var tooltipText: String {
         if let snap = snapshot, snap.today.totalTokens > 0 {
-            return "Tokdash - Today \(snap.todayCostText) · \(snap.todayTokensCompact) tokens"
+            return L10n.t("tooltip_today", snap.todayCostText, snap.todayTokensCompact)
         }
         switch connectionState {
-        case .connecting: return "Tokdash - connecting…"
-        case .connected: return "Tokdash - No usage yet"
-        case .busy: return "Tokdash - Busy"
-        case .offline: return "Tokdash - Offline"
-        case .wrongService: return "Tokdash - Not Tokdash"
+        case .connecting: return L10n.t("tooltip_connecting")
+        case .connected: return L10n.t("tooltip_no_usage")
+        case .busy: return L10n.t("tooltip_busy")
+        case .offline: return L10n.t("tooltip_offline")
+        case .wrongService: return L10n.t("tooltip_not_tokdash")
         }
     }
 }
@@ -413,13 +424,13 @@ enum ConnectionState {
 
     var label: String {
         switch self {
-        case .connecting: return "Connecting…"
+        case .connecting: return L10n.t("connecting")
         // The server label prefix is added by CompanionStore.connectionLabel, which is
         // the only thing that knows the configured base URL.
-        case .connected: return "Connected"
-        case .busy: return "Busy"
-        case .offline: return "Offline"
-        case .wrongService: return "Not Tokdash"
+        case .connected: return L10n.t("connected")
+        case .busy: return L10n.t("busy")
+        case .offline: return L10n.t("offline")
+        case .wrongService: return L10n.t("not_tokdash")
         }
     }
 
@@ -453,6 +464,12 @@ struct Snapshot {
     var todayTokensCompact: String { Self.compactTokens(today.totalTokens) }
     var monthTokensCompact: String { Self.compactTokens(month.totalTokens) }
 
+    /// Today secondary line: "18.7M tokens · 248 messages" (+ " · retrying" on partial failure).
+    var todaySubLine: String {
+        let suffix = todayFailed ? L10n.t("today_retrying_suffix") : ""
+        return L10n.t("today_tokens_messages", todayTokensCompact, today.totalMessages, suffix)
+    }
+
     static func compactTokens(_ value: Int) -> String {
         if value >= 1_000_000 {
             return String(format: "%.1fM", Double(value) / 1_000_000)
@@ -466,8 +483,7 @@ struct Snapshot {
     var comparisonText: String? {
         guard let pct = today.comparison?.costPct else { return nil }
         let abs = abs(pct)
-        let dir = pct <= 0 ? "below" : "above"
-        return String(format: "%d%% %@ yesterday", Int(abs), dir)
+        return pct <= 0 ? L10n.t("comparison_below", Int(abs)) : L10n.t("comparison_above", Int(abs))
     }
 
     var activityText: String? {
@@ -476,7 +492,7 @@ struct Snapshot {
             .max(by: { $0.cost < $1.cost })
         guard let tool = leadTool, let model = leadModel else { return nil }
         let modelName = model.name.split(separator: "/").last.map(String.init) ?? model.name
-        return "Most used today  \(tool) · \(modelName)"
+        return L10n.t("most_used_today", tool, modelName)
     }
 
     /// Windows below their low-quota threshold, sorted by remaining ascending.
@@ -613,23 +629,65 @@ struct QuotaRow: Identifiable {
     }
 
     func isLow(thresholds: QuotaThresholds) -> Bool {
-        hasPercent && left <= thresholds.threshold(for: bucket)
+        hasPercent && left <= thresholds.threshold(for: canonicalBucket)
+    }
+
+    /// Canonical bucket id used for threshold lookup and Claude's normalized display label.
+    /// Claude's usage API emits ids like
+    /// ``session`` (the 5-hour window) and ``weekly_scoped`` / ``weekly_scoped_<model>``
+    /// (weekly), plus legacy ``five_hour`` / ``seven_day``. None match the threshold patterns,
+    /// so Claude would otherwise land in the 15% "other" bucket instead of 20% / 10% like
+    /// Codex. The notification dedup key keeps the original bucket id. Scoped to the claude
+    /// provider so Codex/MiniMax/Kimi/Antigravity classification is untouched.
+    var canonicalBucket: String {
+        Self.normalizeBucketForThreshold(provider: provider, bucket: bucket, label: bucketLabel)
+    }
+
+    static func normalizeBucketForThreshold(provider: String, bucket: String, label: String) -> String {
+        guard provider.lowercased() == "claude" else { return bucket }
+        let combined = "\(bucket) \(label)".lowercased()
+        if combined.contains("session") || combined.contains("five_hour") || combined.contains("five hour")
+            || combined.contains("5h") || combined.contains("5-hour") {
+            return "5h"
+        }
+        if combined.contains("week") || combined.contains("seven_day") || combined.contains("seven day")
+            || combined.contains("7-day") || combined.contains("7d") {
+            return "weekly"
+        }
+        return bucket
+    }
+
+    /// User-facing quota-window label. Claude's API calls its five-hour window "Session" and
+    /// its general weekly window "Weekly All"; normalize those to the standard 5-hour / Weekly
+    /// labels. Model-scoped weekly windows keep their descriptive label (for example, Fable).
+    /// Resolve this at render time so a language change is live.
+    var displayBucketLabel: String {
+        guard provider.lowercased() == "claude" else { return bucketLabel }
+        if bucket.lowercased().hasPrefix("weekly_scoped") { return bucketLabel }
+        switch canonicalBucket {
+        case "5h": return L10n.t("window_5h")
+        case "weekly": return L10n.t("window_weekly")
+        default: return bucketLabel
+        }
     }
 
     var resetsText: String {
         guard let resetsAt else { return "" }
-        let fmt = DateFormatter()
-        let cal = Calendar.current
-        if cal.isDateInToday(resetsAt) {
-            fmt.dateFormat = "HH:mm"
-            return "resets \(fmt.string(from: resetsAt))"
+        return Self.resetsText(forRemaining: resetsAt.timeIntervalSinceNow)
+    }
+
+    /// Relative reset text from seconds-remaining, rounded down to the whole unit (matches
+    /// the freshness footer's truncation). <2h -> minutes (<120); all longer windows -> hours.
+    /// A past/stale ``resetsAt`` (window already rolled over) degrades to "resets soon" until
+    /// the next refresh re-arms it. Pure so it is unit-testable without a clock.
+    static func resetsText(forRemaining remaining: TimeInterval) -> String {
+        if remaining < 60 { return L10n.t("resets_soon") }
+        if remaining < 7200 {
+            let mins = Int(remaining / 60)
+            return L10n.t("resets_in_minutes", mins, mins == 1 ? "" : L10n.pluralS)
         }
-        if cal.isDateInTomorrow(resetsAt) {
-            return "resets tomorrow"
-        }
-        let inWeek = cal.dateInterval(of: .weekOfYear, for: Date())?.contains(resetsAt) ?? false
-        fmt.dateFormat = inWeek ? "EEE" : "MMM d"
-        return "resets \(fmt.string(from: resetsAt))"
+        let hours = Int(remaining / 3600)
+        return L10n.t("resets_in_hours", hours, hours == 1 ? "" : L10n.pluralS)
     }
 }
 
@@ -642,6 +700,49 @@ struct CompanionSettings: Codable {
     var launchAtLogin: Bool = false
     var lowQuotaNotifications: Bool = false
     var thresholds: QuotaThresholds = .defaults
+    var language: AppLanguage = .system
+
+    private enum CodingKeys: String, CodingKey {
+        case baseURL
+        case launchAtLogin
+        case lowQuotaNotifications
+        case thresholds
+        case language
+    }
+
+    init(
+        baseURL: String = CompanionSettings.defaultBaseURL,
+        launchAtLogin: Bool = false,
+        lowQuotaNotifications: Bool = false,
+        thresholds: QuotaThresholds = .defaults,
+        language: AppLanguage = .system
+    ) {
+        self.baseURL = baseURL
+        self.launchAtLogin = launchAtLogin
+        self.lowQuotaNotifications = lowQuotaNotifications
+        self.thresholds = thresholds
+        self.language = language
+    }
+
+    /// v0.1.0 settings predate the language field. Decode every existing preference and
+    /// default only the absent field so upgrading never resets the server URL or opt-ins.
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        baseURL = try values.decodeIfPresent(String.self, forKey: .baseURL) ?? Self.defaultBaseURL
+        launchAtLogin = try values.decodeIfPresent(Bool.self, forKey: .launchAtLogin) ?? false
+        lowQuotaNotifications = try values.decodeIfPresent(Bool.self, forKey: .lowQuotaNotifications) ?? false
+        thresholds = try values.decodeIfPresent(QuotaThresholds.self, forKey: .thresholds) ?? .defaults
+        language = try values.decodeIfPresent(AppLanguage.self, forKey: .language) ?? .system
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(baseURL, forKey: .baseURL)
+        try values.encode(launchAtLogin, forKey: .launchAtLogin)
+        try values.encode(lowQuotaNotifications, forKey: .lowQuotaNotifications)
+        try values.encode(thresholds, forKey: .thresholds)
+        try values.encode(language, forKey: .language)
+    }
 
     static let defaultsURL: URL = {
         let fm = FileManager.default

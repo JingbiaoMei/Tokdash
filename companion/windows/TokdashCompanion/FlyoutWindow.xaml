@@ -176,7 +176,7 @@
                     <Border Grid.Column="1" Visibility="{Binding EstimatedVisibility}"
                             BorderBrush="{DynamicResource MutedBrush}" BorderThickness="0.5" CornerRadius="4"
                             Padding="4,0,4,0" Margin="6,0,0,0" VerticalAlignment="Center">
-                        <TextBlock Text="Estimated" FontSize="{StaticResource FontMicro}" Foreground="{DynamicResource MutedBrush}"/>
+                        <TextBlock Text="{Binding EstimatedText}" FontSize="{StaticResource FontMicro}" Foreground="{DynamicResource MutedBrush}"/>
                     </Border>
                 </Grid>
 
@@ -212,7 +212,7 @@
                 <StackPanel Orientation="Horizontal" Visibility="{Binding WarningVisibility}" Margin="0,0,0,4">
                     <TextBlock Text="⚠" FontSize="{StaticResource FontSecondary}" Foreground="#FF9F0A"
                                Margin="0,0,6,0" VerticalAlignment="Center"/>
-                    <TextBlock Text="Couldn't refresh - showing last known" FontSize="{StaticResource FontCaption}"
+                    <TextBlock Text="{Binding WarningText}" FontSize="{StaticResource FontCaption}"
                                Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center"/>
                 </StackPanel>
                 <ItemsControl ItemsSource="{Binding Rows}" ItemTemplate="{StaticResource QuotaRowTemplate}"/>
@@ -286,7 +286,7 @@
 
             <!-- Today hero -->
             <StackPanel Margin="{StaticResource SectionPad}" x:Name="HeroPanel">
-                <TextBlock Text="TODAY" FontSize="{StaticResource FontCaption}" FontWeight="SemiBold" Style="{StaticResource BodyText}" Foreground="{DynamicResource MutedBrush}"/>
+                <TextBlock Text="TODAY" x:Name="TodayHeader" FontSize="{StaticResource FontCaption}" FontWeight="SemiBold" Style="{StaticResource BodyText}" Foreground="{DynamicResource MutedBrush}"/>
                 <TextBlock x:Name="TodayCost" Text="…" FontSize="{StaticResource FontHero}" FontWeight="SemiBold" Style="{StaticResource BodyText}"/>
                 <!-- TextWrapping: the empty-state sub-line is long enough to ellipsize at
                      flyout width, which reads as broken. Wrap it instead. -->
@@ -332,7 +332,7 @@
 
             <!-- Action row -->
             <StackPanel Margin="{StaticResource BandPad}" Orientation="Horizontal">
-                <Button Click="OpenDashboard_Click" Content="Open Dashboard" Padding="14,5,14,6" Style="{StaticResource PrimaryBtn}"/>
+                <Button Click="OpenDashboard_Click" x:Name="OpenDashboardBtn" Content="Open Dashboard" Padding="14,5,14,6" Style="{StaticResource PrimaryBtn}"/>
             </StackPanel>
 
             <!-- Footer band -->
@@ -343,7 +343,7 @@
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
                     <TextBlock Grid.Column="0" x:Name="FreshnessText" FontSize="{StaticResource FontCaption}" Style="{StaticResource BodyText}" Foreground="{DynamicResource FaintBrush}"/>
-                    <TextBlock Grid.Column="1" Text="Right-click tray icon for more" FontSize="{StaticResource FontCaption}" Style="{StaticResource BodyText}" Foreground="{DynamicResource FaintBrush}"/>
+                    <TextBlock Grid.Column="1" x:Name="TrayHint" Text="Right-click tray icon for more" FontSize="{StaticResource FontCaption}" Style="{StaticResource BodyText}" Foreground="{DynamicResource FaintBrush}"/>
                 </Grid>
             </Border>
         </StackPanel>

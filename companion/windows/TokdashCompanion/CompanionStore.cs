@@ -120,9 +120,24 @@ public sealed class CompanionStore : BindableBase
     {
         _client = client;
         Settings = CompanionSettings.Load();
+        // Resolve the display language before the first view render so launch state is in the
+        // right language. ApplyLanguage re-resolves and re-renders on a later change.
+        L10n.Current = L10n.Resolve(Settings.Language);
     }
 
     public CompanionSettings Settings { get; }
+
+    /// <summary>Apply a new language setting: update the global <see cref="L10n.Current"/>,
+    /// persist, and raise a property change so the flyout re-renders its localized strings.</summary>
+    public void ApplyLanguage(AppLanguage setting)
+    {
+        L10n.Current = L10n.Resolve(setting);
+        Settings.Language = setting;
+        Settings.Save();
+        // Any localized property change is enough: Store_PropertyChanged re-renders the flyout.
+        OnPropertyChanged(nameof(ConnectionLabel));
+        OnPropertyChanged(nameof(FreshnessText));
+    }
 
     /// <summary>Rebuild the HTTP client with a new base URL. Returns false (and keeps the
     /// previous client) if the URL is not an absolute http/https URL. Cancels any
@@ -160,9 +175,9 @@ public sealed class CompanionStore : BindableBase
     /// </summary>
     public static string ServerLabel(string? url)
     {
-        if (!Uri.TryCreate(url?.Trim(), UriKind.Absolute, out var uri)) return "Local";
+        if (!Uri.TryCreate(url?.Trim(), UriKind.Absolute, out var uri)) return L10n.T("local");
         string host = uri.Host.ToLowerInvariant();
-        if (host.Length == 0 || host == "localhost" || host == "127.0.0.1" || host == "::1") return "Local";
+        if (host.Length == 0 || host == "localhost" || host == "127.0.0.1" || host == "::1") return L10n.T("local");
         // An IPv4/IPv6 literal has no name to shorten; splitting it would be misleading.
         if (host.Contains(':') || host.All(c => char.IsDigit(c) || c == '.')) return host;
         string first = host.Split('.')[0];
@@ -175,11 +190,11 @@ public sealed class CompanionStore : BindableBase
     // about reachability, not which host.
     public string ConnectionLabel => ConnectionState switch
     {
-        ConnectionState.Connecting => "Connecting…",
-        ConnectionState.Connected => $"{ServerName} · Connected",
-        ConnectionState.Busy => "Busy",
-        ConnectionState.Offline => "Offline",
-        ConnectionState.WrongService => "Not Tokdash",
+        ConnectionState.Connecting => L10n.T("connecting"),
+        ConnectionState.Connected => L10n.T("server_connected", ServerName),
+        ConnectionState.Busy => L10n.T("busy"),
+        ConnectionState.Offline => L10n.T("offline"),
+        ConnectionState.WrongService => L10n.T("not_tokdash"),
         _ => "",
     };
 
@@ -229,7 +244,7 @@ public sealed class CompanionStore : BindableBase
             string stateKey = $"{r.Provider}|{r.Account}|{r.Bucket}|{epoch}";
             currentKeys.Add(stateKey);
 
-            double threshold = Settings.Thresholds.ThresholdFor(r.Bucket);
+            double threshold = Settings.Thresholds.ThresholdFor(r.CanonicalBucket);
             bool isLow = r.Left <= threshold;
             if (isLow && _prevQuotaLeft.TryGetValue(stateKey, out double prev) && prev > threshold)
             {
@@ -263,16 +278,16 @@ public sealed class CompanionStore : BindableBase
         get
         {
             var baseTime = _lastDataTime ?? _lastFetchAt;
-            if (baseTime is null) return ConnectionState == ConnectionState.Connecting ? "" : "No data yet";
+            if (baseTime is null) return ConnectionState == ConnectionState.Connecting ? "" : L10n.T("no_data_yet");
             var age = DateTimeOffset.Now - baseTime.Value;
-            string text = age.TotalSeconds < 60 ? "Updated just now"
-                : age.TotalMinutes < 60 ? $"Updated {(int)age.TotalMinutes} min ago"
-                : age.TotalHours < 24 ? $"Updated {(int)age.TotalHours} h ago"
-                : $"Updated {(int)age.TotalDays} d ago";
+            string text = age.TotalSeconds < 60 ? L10n.T("updated_just_now")
+                : age.TotalMinutes < 60 ? L10n.T("updated_min_ago", (int)age.TotalMinutes)
+                : age.TotalHours < 24 ? L10n.T("updated_h_ago", (int)age.TotalHours)
+                : L10n.T("updated_d_ago", (int)age.TotalDays);
             // Append "· stale" only when last-good data is older than the refresh window
             // (60s while open, 600s while closed) and the last fetch failed (offline/busy).
             double window = _open ? 60 : 600;
-            if ((ConnectionState is ConnectionState.Offline or ConnectionState.Busy) && age.TotalSeconds > window) text += " · stale";
+            if ((ConnectionState is ConnectionState.Offline or ConnectionState.Busy) && age.TotalSeconds > window) text += L10n.T("stale_suffix");
             return text;
         }
     }
@@ -280,16 +295,16 @@ public sealed class CompanionStore : BindableBase
     public bool ShowsBanner => ConnectionState is ConnectionState.Offline or ConnectionState.Busy or ConnectionState.WrongService;
     public string BannerTitle => ConnectionState switch
     {
-        ConnectionState.Offline => "Tokdash is not reachable",
-        ConnectionState.Busy => "Tokdash is busy - retrying",
-        ConnectionState.WrongService => "This address is not a Tokdash service",
+        ConnectionState.Offline => L10n.T("banner_offline_title"),
+        ConnectionState.Busy => L10n.T("banner_busy_title"),
+        ConnectionState.WrongService => L10n.T("banner_wrong_title"),
         _ => "",
     };
     public string BannerBody => ConnectionState switch
     {
-        ConnectionState.Offline => "Start Tokdash, or check the server address in Settings.",
-        ConnectionState.Busy => "Last data shown below. Backing off automatically.",
-        ConnectionState.WrongService => "Check that the server address in Settings points at a Tokdash instance.",
+        ConnectionState.Offline => L10n.T("banner_offline_body"),
+        ConnectionState.Busy => L10n.T("banner_busy_body"),
+        ConnectionState.WrongService => L10n.T("banner_wrong_body"),
         _ => "",
     };
 
@@ -416,7 +431,22 @@ public sealed class Snapshot
     public string MonthCostText => Formatter.FormatCost(Month.TotalCost);
     public string TodayTokensCompact => Formatter.CompactTokens(Today.TotalTokens);
     public string MonthTokensCompact => Formatter.CompactTokens(Month.TotalTokens);
-    public string MonthLabel => DateTimeOffset.Now.ToString("MMMM").ToUpperInvariant();
+    public string MonthLabel
+    {
+        get
+        {
+            // Match the app language rather than the raw system locale, so a zh-Hans override on
+            // an English system still reads "七月". Invariant culture yields English month names.
+            var culture = L10n.Current == AppLanguage.ZhHans ? new CultureInfo("zh-Hans") : CultureInfo.InvariantCulture;
+            return DateTimeOffset.Now.ToString("MMMM", culture).ToUpperInvariant();
+        }
+    }
+
+    /// <summary>Today secondary line: "18.7M tokens · 248 messages" (+ " · retrying" on partial failure).</summary>
+    public string TodaySubLine => L10n.T("today_tokens_messages", TodayTokensCompact, Today.TotalMessages, TodayFailed ? L10n.T("today_retrying_suffix") : "");
+    /// <summary>Month tokens line, with/without a retrying suffix for partial-failure rendering.</summary>
+    public string MonthTokensLine => L10n.T("month_tokens", MonthTokensCompact);
+    public string MonthTokensRetrying => L10n.T("month_tokens_retrying", MonthTokensCompact);
 
     public string? ComparisonText
     {
@@ -437,7 +467,7 @@ public sealed class Snapshot
                 .OrderByDescending(m => m.Cost).FirstOrDefault();
             if (leadTool is null || leadModel is null) return null;
             string modelName = leadModel.Name.Split('/').LastOrDefault() ?? leadModel.Name;
-            return $"Most used today  {leadTool.Value.Key} · {modelName}";
+            return L10n.T("most_used_today", leadTool.Value.Key, modelName);
         }
     }
 

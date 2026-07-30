@@ -7,7 +7,7 @@ if [[ ! -f "$repo_root/companion/VERSION" ]]; then
   exit 1
 fi
 version="$(tr -d '[:space:]' < "$repo_root/companion/VERSION")"
-build_number="1"
+build_number="2"
 output_dir="${COMPANION_OUTPUT_DIR:-$repo_root/dist/companion/$version/macos}"
 signing_identity="${MACOS_SIGNING_IDENTITY:-}"
 notary_profile="${MACOS_NOTARY_KEYCHAIN_PROFILE:-}"

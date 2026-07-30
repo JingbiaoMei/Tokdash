@@ -73,7 +73,7 @@ private struct HeaderSection: View {
                     .font(.system(size: 13))
             }
             .buttonStyle(.plain)
-            .help("Settings")
+            .help(L10n.t("settings"))
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -98,11 +98,11 @@ private struct BannerSection: View {
                 if store.connectionState == .offline || store.connectionState == .wrongService {
                     HStack(spacing: 8) {
                         if store.connectionState == .offline {
-                            Button("Retry") { store.refresh() }
+                            Button(L10n.t("retry")) { store.refresh() }
                                 .font(.system(size: 12))
                         }
                         SettingsLink {
-                            Text("Settings")
+                            Text(L10n.t("settings"))
                         }
                         .font(.system(size: 12))
                     }
@@ -114,18 +114,18 @@ private struct BannerSection: View {
 
     private var bannerTitle: String {
         switch store.connectionState {
-        case .offline: return "Tokdash is not reachable"
-        case .busy: return "Tokdash is busy - retrying"
-        case .wrongService: return "This address is not a Tokdash service"
+        case .offline: return L10n.t("banner_offline_title")
+        case .busy: return L10n.t("banner_busy_title")
+        case .wrongService: return L10n.t("banner_wrong_title")
         default: return ""
         }
     }
 
     private var bannerBody: String {
         switch store.connectionState {
-        case .offline: return "Start Tokdash, or check the server address in Settings."
-        case .busy: return "Last data shown below. Backing off automatically."
-        case .wrongService: return "Check that the server address in Settings points at a Tokdash instance."
+        case .offline: return L10n.t("banner_offline_body")
+        case .busy: return L10n.t("banner_busy_body")
+        case .wrongService: return L10n.t("banner_wrong_body")
         default: return ""
         }
     }
@@ -136,7 +136,7 @@ private struct TodayHeroSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text("TODAY")
+            Text(L10n.t("today"))
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.secondary)
                 .tracking(0.5)
@@ -145,12 +145,12 @@ private struct TodayHeroSection: View {
                     .font(.system(size: 30, weight: .semibold))
                     .foregroundStyle(.tertiary)
             } else if let snap = store.snapshot, snap.today.totalTokens == 0 {
-                Text(snap.todayFailed ? "Today's data unavailable" : "No usage recorded today")
+                Text(snap.todayFailed ? L10n.t("today_unavailable") : L10n.t("no_usage_today"))
                     .font(.system(size: 14, weight: .medium))
                 // Kept short deliberately: the longer form truncated to "…" at popover
                 // width and the trailing clause added nothing. fixedSize keeps it wrapping
                 // rather than ellipsizing if the text ever grows again.
-                Text(snap.todayFailed ? "Will retry shortly." : "Tokdash is running.")
+                Text(snap.todayFailed ? L10n.t("will_retry_shortly") : L10n.t("tokdash_running"))
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -158,7 +158,7 @@ private struct TodayHeroSection: View {
                 Text(snap.todayCostText)
                     .font(.system(size: 30, weight: .semibold))
                     .monospacedDigit()
-                Text("\(snap.todayTokensCompact) tokens · \(snap.today.totalMessages) messages\(snap.todayFailed ? " · retrying" : "")")
+                Text(snap.todaySubLine)
                     .font(.system(size: 12.5))
                     .foregroundStyle(.secondary)
                 if let cmp = snap.comparisonText {
@@ -187,19 +187,19 @@ private struct MonthContextSection: View {
                     // Keep last-good month visible with a retrying note (don't hide it as "-").
                     Text(snap.monthCostText)
                         .font(.system(size: 12.5, weight: .semibold))
-                    Text("\(snap.monthTokensCompact) tokens · retrying")
+                    Text(L10n.t("month_tokens_retrying", snap.monthTokensCompact))
                         .font(.system(size: 12.5))
                         .foregroundStyle(.secondary)
                 } else if snap.monthFailed {
                     Text("-")
                         .font(.system(size: 12.5, weight: .semibold))
-                    Text("retrying")
+                    Text(L10n.t("retrying"))
                         .font(.system(size: 12.5))
                         .foregroundStyle(.secondary)
                 } else {
                     Text(snap.monthCostText)
                         .font(.system(size: 12.5, weight: .semibold))
-                    Text("\(snap.monthTokensCompact) tokens")
+                    Text(L10n.t("month_tokens", snap.monthTokensCompact))
                         .font(.system(size: 12.5))
                         .foregroundStyle(.secondary)
                 }
@@ -215,6 +215,9 @@ private struct MonthContextSection: View {
     private var monthLabel: String {
         let fmt = DateFormatter()
         fmt.dateFormat = "MMMM"
+        // Match the app language rather than the raw system locale, so a zh-Hans override on
+        // an English system still reads "七月".
+        fmt.locale = L10n.current == .zhHans ? Locale(identifier: "zh_Hans") : Locale(identifier: "en")
         return fmt.string(from: Date()).uppercased()
     }
 }
@@ -225,14 +228,14 @@ private struct QuotaSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text(store.quotaView == .low ? "SUBSCRIPTION" : "ALL SUBSCRIPTIONS")
+                Text(store.quotaView == .low ? L10n.t("subscription") : L10n.t("all_subscriptions"))
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
                     .tracking(0.5)
                 Spacer()
                 Picker("", selection: $store.quotaView) {
-                    Text("Low").tag(QuotaView.low)
-                    Text("All").tag(QuotaView.all)
+                    Text(L10n.t("low")).tag(QuotaView.low)
+                    Text(L10n.t("all")).tag(QuotaView.all)
                 }
                 .pickerStyle(.segmented)
                 .frame(width: 92)
@@ -244,11 +247,11 @@ private struct QuotaSection: View {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .foregroundStyle(.orange)
                             .font(.system(size: 12))
-                        Text("Quota data unavailable - will retry shortly.")
+                        Text(L10n.t("quota_unavailable"))
                             .font(.system(size: 12))
                             .foregroundStyle(.secondary)
                         Spacer()
-                        Button("Retry now") { store.refresh() }
+                        Button(L10n.t("retry_now")) { store.refresh() }
                             .font(.system(size: 12))
                     }
                     // Last-good quota remains visible (dimmed) below the warning.
@@ -258,10 +261,10 @@ private struct QuotaSection: View {
                     }
                 } else if !snap.quota.enabled {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Subscription tracking is off")
+                        Text(L10n.t("tracking_off"))
                             .font(.system(size: 12.5))
                             .foregroundStyle(.secondary)
-                        Button("Open Dashboard") { openDashboard(baseURL: store.settings.baseURL) }
+                        Button(L10n.t("open_dashboard")) { openDashboard(baseURL: store.settings.baseURL) }
                             .font(.system(size: 12))
                     }
                 } else {
@@ -280,7 +283,7 @@ private struct QuotaSection: View {
     private func quotaBody(for snap: Snapshot) -> some View {
         if store.quotaView == .low {
             if snap.lowQuotaRows.isEmpty {
-                Text("No subscription window is below its alert threshold.")
+                Text(L10n.t("no_low_windows"))
                     .font(.system(size: 12.5))
                     .foregroundStyle(.secondary)
             } else {
@@ -302,7 +305,7 @@ private struct QuotaSection: View {
                                 Image(systemName: "exclamationmark.triangle.fill")
                                     .foregroundStyle(.orange)
                                     .font(.system(size: 10))
-                                Text("Couldn't refresh - showing last known")
+                                Text(L10n.t("couldnt_refresh"))
                                     .font(.system(size: 11))
                                     .foregroundStyle(.secondary)
                             }
@@ -328,7 +331,7 @@ private struct QuotaRowView: View {
                 Text(label)
                     .font(.system(size: 12.5, weight: .medium))
                 if row.estimated {
-                    Text("Estimated")
+                    Text(L10n.t("estimated"))
                         .font(.system(size: 10.5))
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 4)
@@ -336,7 +339,7 @@ private struct QuotaRowView: View {
                 }
                 Spacer()
                 if row.hasPercent {
-                    Text("\(Int(row.left))% left")
+                    Text(L10n.t("percent_left", Int(row.left)))
                         .font(.system(size: 12.5, weight: .semibold))
                         .monospacedDigit()
                 }
@@ -361,7 +364,8 @@ private struct QuotaRowView: View {
     }
 
     private var label: String {
-        let base = showProvider ? "\(row.provider) · \(row.bucketLabel)" : row.bucketLabel
+        let bucketLabel = row.displayBucketLabel
+        let base = showProvider ? "\(row.provider) · \(bucketLabel)" : bucketLabel
         // A failed provider's rows get a ⚠ prefix so the Low view (no group header)
         // still signals the warning inline.
         return row.failed ? "⚠ \(base)" : base
@@ -392,7 +396,7 @@ private struct ActionBarSection: View {
             Button {
                 openDashboard(baseURL: store.settings.baseURL)
             } label: {
-                Label("Open Dashboard", systemImage: "arrow.up.right.square")
+                Label(L10n.t("open_dashboard"), systemImage: "arrow.up.right.square")
             }
             .buttonStyle(.borderedProminent)
             Spacer()
@@ -402,7 +406,7 @@ private struct ActionBarSection: View {
                 Image(systemName: "arrow.clockwise")
             }
             .buttonStyle(.bordered)
-            .help("Refresh")
+            .help(L10n.t("refresh"))
         }
     }
 }
@@ -416,7 +420,7 @@ private struct FreshnessFooter: View {
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
             Spacer()
-            Button("Quit") {
+            Button(L10n.t("quit")) {
                 NSApplication.shared.terminate(nil)
             }
             .buttonStyle(.plain)

@@ -8,6 +8,7 @@ struct SettingsView: View {
     @State private var fiveHourThreshold: Double = 20
     @State private var weeklyThreshold: Double = 10
     @State private var otherThreshold: Double = 15
+    @State private var language: AppLanguage = .system
     @State private var urlDebounce: Task<Void, Never>?
     @State private var testResult: ConnectionTest = .idle
     @State private var testTask: Task<Void, Never>?
@@ -23,37 +24,47 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
-            Section("Server") {
+            Section(L10n.t("section_server")) {
                 HStack(spacing: 8) {
-                    TextField("Base URL", text: $baseURL)
+                    TextField(L10n.t("base_url"), text: $baseURL)
                         .textFieldStyle(.roundedBorder)
-                    Button("Test") { runConnectionTest() }
+                    Button(L10n.t("test")) { runConnectionTest() }
                         .disabled(!CompanionStore.isValidBaseURL(baseURL) || testResult == .testing)
                 }
                 testResultView
-                Text("Default: http://127.0.0.1:55423. Tailscale HTTPS URLs are supported.")
+                Text(L10n.t("server_hint"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Section("Startup") {
-                Toggle("Launch at Login", isOn: $launchAtLogin)
+            Section(L10n.t("section_startup")) {
+                Toggle(L10n.t("launch_at_login"), isOn: $launchAtLogin)
             }
-            Section("Notifications") {
-                Toggle("Low-quota notifications", isOn: $lowQuotaNotifications)
-                Text("Notifies when a subscription window crosses its threshold. Opt-in.")
+            Section(L10n.t("section_notifications")) {
+                Toggle(L10n.t("low_quota_notifications"), isOn: $lowQuotaNotifications)
+                Text(L10n.t("low_quota_hint"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Section("Quota Alert Thresholds (% remaining)") {
+            Section(L10n.t("section_thresholds")) {
                 Slider(value: $fiveHourThreshold, in: 5...50, step: 1) {
-                    Text("5-hour: \(Int(fiveHourThreshold))%")
+                    Text(L10n.t("threshold_5h", Int(fiveHourThreshold)))
                 }
                 Slider(value: $weeklyThreshold, in: 5...50, step: 1) {
-                    Text("Weekly: \(Int(weeklyThreshold))%")
+                    Text(L10n.t("threshold_weekly", Int(weeklyThreshold)))
                 }
                 Slider(value: $otherThreshold, in: 5...50, step: 1) {
-                    Text("Default: \(Int(otherThreshold))%")
+                    Text(L10n.t("threshold_other", Int(otherThreshold)))
                 }
+            }
+            Section(L10n.t("section_language")) {
+                Picker(L10n.t("section_language"), selection: $language) {
+                    ForEach(AppLanguage.allCases, id: \.self) { lang in
+                        Text(lang.displayName).tag(lang)
+                    }
+                }
+                Text(L10n.t("language_hint"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
@@ -73,6 +84,7 @@ struct SettingsView: View {
         .onChange(of: fiveHourThreshold) { _, _ in saveSettings() }
         .onChange(of: weeklyThreshold) { _, _ in saveSettings() }
         .onChange(of: otherThreshold) { _, _ in saveSettings() }
+        .onChange(of: language) { _, _ in saveSettings() }
     }
 
     @ViewBuilder private var testResultView: some View {
@@ -82,7 +94,7 @@ struct SettingsView: View {
         case .testing:
             HStack(spacing: 6) {
                 ProgressView().controlSize(.small)
-                Text("Testing…").font(.caption).foregroundStyle(.secondary)
+                Text(L10n.t("testing")).font(.caption).foregroundStyle(.secondary)
             }
         case .ok(let detail):
             Label(detail, systemImage: "checkmark.circle.fill")
@@ -101,7 +113,7 @@ struct SettingsView: View {
     private func runConnectionTest() {
         let candidate = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard CompanionStore.isValidBaseURL(candidate), let url = URL(string: candidate) else {
-            testResult = .failed("Enter an absolute http:// or https:// URL.")
+            testResult = .failed(L10n.t("test_bad_url"))
             return
         }
         testTask?.cancel()
@@ -114,11 +126,11 @@ struct SettingsView: View {
                 // A reachable server that isn't Tokdash is a failure, not a success -
                 // otherwise a proxy or a wrong port would test green.
                 testResult = health.service == "tokdash"
-                    ? .ok("Connected to \(CompanionStore.serverLabel(for: candidate)) · Tokdash \(health.version)")
-                    : .failed("Reachable, but not a Tokdash server.")
+                    ? .ok(L10n.t("test_ok", CompanionStore.serverLabel(for: candidate), health.version))
+                    : .failed(L10n.t("test_not_tokdash"))
             } catch {
                 if Task.isCancelled { return }
-                testResult = .failed("Couldn't reach it: \(error.localizedDescription)")
+                testResult = .failed(L10n.t("test_reachable_error", error.localizedDescription))
             }
         }
     }
@@ -130,6 +142,7 @@ struct SettingsView: View {
         fiveHourThreshold = store.settings.thresholds.fiveHour
         weeklyThreshold = store.settings.thresholds.weekly
         otherThreshold = store.settings.thresholds.other
+        language = store.settings.language
     }
 
     private func saveSettings() {
@@ -144,6 +157,7 @@ struct SettingsView: View {
         let thresholds = QuotaThresholds(fiveHour: fiveHourThreshold, weekly: weeklyThreshold, other: otherThreshold)
         let thresholdsChanged = store.settings.thresholds != thresholds
         store.settings.thresholds = thresholds
+        if language != store.settings.language { store.applyLanguage(language) }
         store.settings.save()
         if thresholdsChanged { store.applyThresholds() } // rebuild the Low view immediately
         if launchChanged { store.setLaunchAtLogin(launchAtLogin) }

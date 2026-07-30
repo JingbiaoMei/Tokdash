@@ -37,6 +37,9 @@
   <b>无需安装即可体验 → <a href="https://tokdash.github.io/demo/">tokdash.github.io/demo</a></b>
 </p>
 
+> [!TIP]
+> **Tokdash Companion 状态栏应用的 macOS 与 Windows 无签名预览版现已发布。** 无需一直打开仪表盘，即可查看今日费用与订阅额度。[查看截图、下载并设置 →](#tokdash-companion-状态栏应用)
+
 <p align="center">
   <b>性能：冷启动使用量扫描比 0.6.0 之前快约 30×，在同一台机器的本地基准中比 ccusage 快 15×。</b>
 </p>
@@ -48,6 +51,7 @@
 
 - [功能特性](#功能特性)
 - [已支持客户端](docs/reference/SUPPORTED_CLIENTS.md)
+- [Tokdash Companion 状态栏应用](#tokdash-companion-状态栏应用)
 - [快速开始](#快速开始)
   - [平台支持](#平台支持)
 - [配置](#配置)
@@ -67,6 +71,7 @@
 - **状态栏集成** *[新]*：把实时 Token 使用量挂到 Claude Code（或任何能访问本地 HTTP 端点的 Agent）的状态栏中 — 见[状态栏集成](#状态栏集成statusline-integration)
 - **贡献日历**：2D 热力图 + 3D 等距视图，支持 Tokens / Cost / Messages 切换
 - **会话浏览器**：逐会话下钻
+- **Companion 状态栏应用** *[新]*：在 macOS 菜单栏或 Windows 通知区域查看费用与订阅额度 — [截图与下载](#tokdash-companion-状态栏应用)
 - **主题与应用体验**：10 款样式主题、明暗模式与 PWA 安装支持
 
 <p align="center">
@@ -105,6 +110,60 @@
     <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-quota-codex-cn.png" alt="Tokdash Codex 额度与重置额度 — 点击体验在线 Demo" width="440" />
   </a>
 </p>
+
+## Tokdash Companion 状态栏应用
+
+Tokdash Companion 状态栏应用是一个可选的原生客户端：在 macOS
+菜单栏或 Windows 通知区域中，提供紧凑、只读的 Tokdash 服务视图，
+无需一直打开完整仪表盘。
+
+<p align="center">
+  <a href="docs/assets/companion/demo-mac.png">
+    <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/companion/demo-mac.png" alt="macOS 上的 Tokdash Companion 状态栏应用" width="360" />
+  </a>
+  &nbsp;&nbsp;
+  <a href="docs/assets/companion/demo-win.png">
+    <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/companion/demo-win.png" alt="Windows 上的 Tokdash Companion 状态栏应用" width="360" />
+  </a>
+</p>
+<p align="center">
+  <sub><b>macOS</b> 菜单栏 &nbsp;&nbsp;&nbsp;&nbsp; <b>Windows</b> 通知区域</sub>
+</p>
+
+- 今日费用、Token、消息数和本月累计用量
+- Codex、Claude、Kimi、MiniMax、Antigravity 与 Grok 额度窗口
+- 相对重置时间与可选的低额度通知
+- 可选的登录时启动
+- 跟随系统、English 与简体中文显示语言
+- 无遥测、凭据发现、端口扫描或直接日志解析
+
+### 下载
+
+从 GitHub Releases 下载 **[Tokdash Companion 0.1.1](https://github.com/JingbiaoMei/Tokdash/releases/tag/companion-v0.1.1)**：
+
+| 平台 | 下载 | 要求 |
+|---|---|---|
+| macOS | 通用 DMG（`arm64` + `x86_64`） | macOS 14 或更高版本 |
+| Windows | 自包含便携 ZIP（`x64`） | Windows 11；Windows on Arm 可使用 x64 模拟 |
+
+> [!WARNING]
+> 当前 Companion 二进制文件是**无签名预览版**。macOS Gatekeeper 和
+> Windows SmartScreen 会显示未知发布者警告。请只从本仓库下载，使用随
+> Release 提供的 `SHA256SUMS` 验证文件，并仅在你信任该 Release 时继续。
+> 后续版本计划加入签名与公证。
+
+### 设置
+
+1. 按照[快速开始](#快速开始)安装并启动 **Tokdash 1.5.2 或更高版本**。
+2. 下载对应平台的文件，并使用 `SHA256SUMS` 验证。
+3. 在 macOS 上打开 DMG，将 `TokdashCompanion` 拖入“应用程序”。在
+   Windows 上将 ZIP 解压到固定目录，然后运行 `TokdashCompanion.exe`。
+4. Companion 默认连接 `http://127.0.0.1:55423`。如需使用其他明确指定的
+   Tokdash 端点（例如私有 Tailscale Serve 地址），请在设置中修改。
+
+Companion 只会访问你配置的 Tokdash 端点。低额度通知与登录时启动均为
+可选功能，默认关闭。校验、更新与移除说明见
+[Companion Release 指南](companion/docs/RELEASE.md)。
 
 ## 快速开始
 

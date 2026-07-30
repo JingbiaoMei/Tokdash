@@ -37,6 +37,9 @@
   <b>Try it without installing → <a href="https://tokdash.github.io/demo/">tokdash.github.io/demo</a></b>
 </p>
 
+> [!TIP]
+> **Tokdash Companion Status Bar App for macOS and Windows is now available as an unsigned preview.** See today's spend and subscription quota without keeping the dashboard open. [View screenshots, download, and set it up →](#tokdash-companion-status-bar-app)
+
 <p align="center">
   <b>Performance: about 30× faster than pre-0.6.0 cold usage scans, and 15× faster than ccusage in the same local benchmark.</b>
 </p>
@@ -48,6 +51,7 @@
 
 - [Features](#features)
 - [Supported clients](docs/reference/SUPPORTED_CLIENTS.md)
+- [Tokdash Companion Status Bar App](#tokdash-companion-status-bar-app)
 - [Quick start](#quick-start)
   - [Platform support](#platform-support)
 - [Configuration](#configuration)
@@ -68,6 +72,7 @@
 - **Contribution calendar**: 2D heatmap + 3D isometric view with Tokens/Cost/Messages metrics
 - **Session explorer**: per-session drill-down
 - **Quota tab** *[new]*: subscription window bars with reset countdowns for Codex, Claude Code, and Antigravity. Codex windows work out of the box from local logs; Codex reset credits, metered features, and all Claude/Antigravity quota need opt-in [live polling](#quota-tracking-optional)
+- **Companion Status Bar App** *[new]*: view spend and subscription quota from the macOS menu bar or Windows notification area — [screenshots and downloads](#tokdash-companion-status-bar-app)
 - **Themes and app polish**: 10 style themes, light/dark mode, and PWA install support
 
 <p align="center">
@@ -106,6 +111,64 @@
     <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-quota-codex-en.png" alt="Tokdash Codex quota and reset credits - click for live demo" width="440" />
   </a>
 </p>
+
+## Tokdash Companion Status Bar App
+
+The Tokdash Companion Status Bar App is an optional native menu-bar app for
+macOS and notification-area app for Windows. It provides a compact, read-only
+view of the Tokdash service without keeping the full dashboard open.
+
+<p align="center">
+  <a href="docs/assets/companion/demo-mac.png">
+    <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/companion/demo-mac.png" alt="Tokdash Companion Status Bar App on macOS" width="360" />
+  </a>
+  &nbsp;&nbsp;
+  <a href="docs/assets/companion/demo-win.png">
+    <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/companion/demo-win.png" alt="Tokdash Companion Status Bar App on Windows" width="360" />
+  </a>
+</p>
+<p align="center">
+  <sub><b>macOS</b> menu bar &nbsp;&nbsp;&nbsp;&nbsp; <b>Windows</b> notification area</sub>
+</p>
+
+- Today's cost, tokens, messages, and month-to-date usage
+- Codex, Claude, Kimi, MiniMax, Antigravity, and Grok quota windows
+- Relative reset times and optional low-quota notifications
+- Optional launch at login
+- System, English, and Simplified Chinese display languages
+- No telemetry, credential discovery, port scanning, or direct log parsing
+
+### Download
+
+Download **[Tokdash Companion 0.1.1 from GitHub Releases](https://github.com/JingbiaoMei/Tokdash/releases/tag/companion-v0.1.1)**:
+
+| Platform | Download | Requirements |
+|---|---|---|
+| macOS | Universal DMG (`arm64` + `x86_64`) | macOS 14 or newer |
+| Windows | Self-contained portable ZIP (`x64`) | Windows 11; Windows on Arm can use x64 emulation |
+
+> [!WARNING]
+> The current companion binaries are **unsigned previews**. macOS Gatekeeper
+> and Windows SmartScreen will show an unknown-publisher warning. Download only
+> from this repository, verify the included `SHA256SUMS`, and continue only if
+> you trust the release. Signing and notarization are planned for a later
+> release.
+
+### Set up
+
+1. Install and start **Tokdash 1.5.2 or newer** using the [Quick start](#quick-start).
+2. Download the asset for your platform and verify it against `SHA256SUMS`.
+3. On macOS, open the DMG and drag `TokdashCompanion` to Applications. On
+   Windows, extract the ZIP to a stable directory and run
+   `TokdashCompanion.exe`.
+4. The companion connects to `http://127.0.0.1:55423` by default. Open its
+   settings to use another explicit Tokdash endpoint, such as a private
+   Tailscale Serve URL.
+
+The companion only contacts the Tokdash endpoint you configure. Low-quota
+notifications and launch at login are both opt-in and disabled by default.
+See the [companion release guide](companion/docs/RELEASE.md) for checksum,
+update, and removal instructions.
 
 ## Quick start
 

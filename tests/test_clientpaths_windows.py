@@ -1,6 +1,6 @@
 """Tests for the Hermes Windows-path branch in ``clientpaths.hermes_search_dirs``.
 
-Only Hermes needs a real Windows branch (see ``docs/development/internals/WINDOWS_CLIENT_PATHS.md``); every
+Only Hermes needs a real Windows branch (see ``docs/development/technical-notes/WINDOWS_CLIENT_PATHS.md``); every
 other client is already correct on Windows via ``Path.home()`` and is untouched by this
 chunk. Branching is done on ``tokdash.osinfo.is_windows()`` (not ``os.name``) so the
 Windows path can be exercised on this Linux host without monkeypatching ``os.name``,

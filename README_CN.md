@@ -473,7 +473,7 @@ Tokdash 通过读取各客户端的**本地**会话日志来统计用量，同�
 
 - **[guides/](docs/guides/)** —— 面向任务的配置：onboarding、远程访问、状态栏、后台服务。
 - **[reference/](docs/reference/)** —— 查阅资料：API 参考、支持的客户端、历史数据保留。
-- **[development/](docs/development/)** —— 更新日志、发布流程、路线图，以及 `internals/` 设计笔记。
+- **[development/](docs/development/)** —— 更新日志、发布流程、路线图，以及公开的 `technical-notes/` 技术笔记。
 
 ## 项目结构
 
@@ -502,7 +502,7 @@ tokdash/
 └── docs/                   # 文档 —— 索引见 docs/README.md
     ├── guides/             # Onboarding、远程访问、状态栏、后台服务
     ├── reference/          # API 参考、支持的客户端、历史数据保留
-    └── development/        # 更新日志、发布流程、路线图、internals/ 设计笔记
+    └── development/        # 更新日志、发布流程、路线图、technical-notes/ 技术笔记
 ```
 
 ## License

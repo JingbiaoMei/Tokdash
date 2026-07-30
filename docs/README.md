@@ -24,8 +24,8 @@
 - [Releasing](development/RELEASING.md) — checklist for manual PyPI/Git tag/GitHub Releases publishing.
 - [Roadmap](development/ROADMAP.md) — notes on planned and deferred work.
 
-### development/internals/ — design notes and research
+### development/technical-notes/ — public technical notes and research
 
-- [Codex usage counting](development/internals/CODEX_USAGE_COUNTING.md) — how Tokdash avoids double-counting Codex usage from MultiAgent V2 subagent replay.
-- [Windows support plan](development/internals/WINDOWS_SUPPORT_PLAN.md) — status and design of native Windows support.
-- [Windows client data paths](development/internals/WINDOWS_CLIENT_PATHS.md) — research backing the Windows-support pass, per-client path survey.
+- [Codex usage counting](development/technical-notes/CODEX_USAGE_COUNTING.md) — how Tokdash avoids double-counting Codex usage from MultiAgent V2 subagent replay.
+- [Windows support plan](development/technical-notes/WINDOWS_SUPPORT_PLAN.md) — status and design of native Windows support.
+- [Windows client data paths](development/technical-notes/WINDOWS_CLIENT_PATHS.md) — research backing the Windows-support pass, per-client path survey.

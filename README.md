@@ -484,7 +484,7 @@ Full documentation lives in **[`docs/`](docs/README.md)** (start at the index), 
 
 - **[guides/](docs/guides/)** — task-oriented setup: onboarding, remote access, statusline, background service.
 - **[reference/](docs/reference/)** — lookup material: API reference, supported clients, history retention.
-- **[development/](docs/development/)** — changelog, releasing, roadmap, and `internals/` design notes.
+- **[development/](docs/development/)** — changelog, releasing, roadmap, and public `technical-notes/`.
 
 ## Project structure
 
@@ -513,7 +513,7 @@ tokdash/
 └── docs/                   # Documentation — see docs/README.md for the index
     ├── guides/             # Onboarding, remote access, statusline, background service
     ├── reference/          # API reference, supported clients, history retention
-    └── development/        # Changelog, releasing, roadmap, internals/ design notes
+    └── development/        # Changelog, releasing, roadmap, technical-notes/
 ```
 
 ## License

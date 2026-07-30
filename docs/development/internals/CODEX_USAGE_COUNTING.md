@@ -1,102 +1,109 @@
-# Codex usage counting: subagent replay de-duplication
+# Codex usage counting: replay de-duplication
 
-How Tokdash avoids double-counting Codex usage when Codex MultiAgent V2 spawns subagents.
-Observed against **Codex CLI 0.144.1**.
+How Tokdash avoids double-counting Codex usage when rollout files copy an existing
+thread's history. Observed against Codex CLI **0.144.1** (subagent replay) and
+**0.146.0** (ordinary resumed-thread replay).
 
 ## The problem
 
-Codex writes one JSONL rollout file per thread under `~/.codex/sessions/YYYY/MM/DD/`. When a
-session spawns a subagent (MultiAgent V2 `thread_spawn`, e.g. via `spawn_agent`), the subagent
-gets its own rollout file that **replays the parent thread's history** so the subagent has the
-parent's context available. Concretely, a subagent file:
+Codex writes JSONL rollout files under `~/.codex/sessions/YYYY/MM/DD/`. A later
+rollout can replay token events already present in an older file:
 
-1. Opens with its **own** `session_meta` — carrying `source.subagent.thread_spawn`
-   (`parent_thread_id`, `depth`, `agent_path`, …) and the subagent's own `id`.
-2. Then re-emits the **parent's** `session_meta` (with the parent's `id`) and replays the
-   parent's `turn_context` and `token_count` events — all attributed to the **parent's**
-   session id, not the subagent's.
+- A MultiAgent V2 `thread_spawn` file replays its parent thread before recording
+  the subagent's own work.
+- An ordinary VS Code/CLI resume can open with a new file id, switch to the older
+  logical session id, and replay the full history before recording new work.
 
-Those replayed `token_count` events are **log artifacts**, not new API calls — the parent
-thread already billed them. A naive parser that counts every `token_count` line double-counts:
+The copied events are log artifacts, not new API calls. Their timestamps may be
+restamped to the new file's creation time, so timestamp/file/line identity both
+double-counts the usage and moves old usage into the current day.
 
-- **Overview tab** — each replayed event becomes a separate usage entry (entry ids are
-  per-file, so cross-file replays are not de-duplicated). With several subagents replaying the
-  same parent, a model's reported usage can inflate several-fold.
-- **Sessions tab** — because a subagent file's turns resolve to the *parent's* session id, and
-  the Codex session loader keys sessions by id, a subagent file's replay can **overwrite** the
-  parent session's real turns with a partial replayed subset.
+This affects both views:
 
-This mirrors a known issue in the sibling project ccusage
-([#950](https://github.com/ryoppippi/ccusage/issues/950),
-[#1218](https://github.com/ccusage/ccusage/pull/1218)).
+- **Overview**: every copied `token_count` becomes another usage entry.
+- **Sessions**: allowing the later file to replace the original session either
+  shows the replay as today's work or loses genuine turns from another file.
 
-Note there are two *distinct* subagent file shapes in the wild:
+## Stable event identity
 
-- **own-usage** files — the subagent did its own model/tool work, logged under its **own**
-  session id. This is real usage and must be **kept**.
-- **replay-only** files — the subagent's file contains only the replayed parent history. This
-  must be **skipped**.
+Codex replay preserves three useful pieces of state:
 
-Tokdash distinguishes them by session-id ownership (below), so it keeps real subagent work and
-drops only the replays.
+1. The logical session id active at the `token_count` event.
+2. `total_token_usage`, the cumulative session snapshot.
+3. `last_token_usage`, the per-call snapshot.
 
-## How Tokdash handles it
+Tokdash hashes that state into a `codex-token-v1:*` event key. Known numeric token
+fields are normalized so a missing field and an explicit zero compare equally;
+Codex 0.146 can add zero-valued fields while copying snapshots written by an older
+CLI.
 
-Both the Overview parser (`src/tokdash/sources/coding_tools.py`, `CodexParser._parse_all`) and
-the Sessions parser (`src/tokdash/sessions.py`, `_parse_codex_session_file`) apply the same rule
-while streaming each rollout file:
+The logical session id scopes the key. Identical counters in two independent
+sessions, or on opposite sides of a real session-id/compaction change, remain
+distinct.
 
-1. Record the file's **own** session id = the `id` of the **first** `session_meta` line.
-2. Detect the **thread_spawn gate**: if that first `session_meta` carries
-   `source.subagent.thread_spawn`, the file is a subagent rollout; capture its declared
-   `parent_thread_id`.
-3. Track the **current** session id (updated on every subsequent `session_meta`).
-4. **Skip a `token_count` event only when** the file is a thread_spawn subagent **and** the
-   current session id equals the declared `parent_thread_id` (falling back to "current id ≠ own
-   id" if `parent_thread_id` is absent).
+If either usage snapshot is absent, Tokdash deliberately falls back to the
+file/line identity. That can visibly over-count an old or unrecognized replay,
+but it cannot silently merge two genuine calls that happened to use the same
+number of tokens.
 
-Consequences:
+## Parser and store behavior
 
-- Ordinary primary sessions and guardian (`codex-auto-review`, `source.subagent.other ==
-  "guardian"`) sessions are **never gated**, so their events are always counted — even if a
-  primary session legitimately changes session id mid-file (e.g. compaction).
-- A subagent's own real events (current id == own id) are **kept**; only events attributed to
-  the declared parent are dropped.
-- On any **unrecognized** future format change (renamed fields, re-attributed replays), the gate
-  fails closed to *False* → nothing is skipped → the parser degrades to **over-counting (loud,
-  user-visible)** rather than silently dropping real usage. Tokdash counts the skipped events
-  (`CodexParser.replay_events_skipped`) so a regression is observable.
+Both Codex parsers use the same key:
 
-## Known limitation: nested subagents
+- `CodexParser._parse_all` keeps the earliest timestamp for each event key,
+  independent of rollout discovery order. The Overview parser therefore retains
+  the original timestamp and ignores restamped copies.
+- `_parse_codex_session_file` stores the key on each internal turn. Codex session
+  records with the same logical id are merged, and duplicate turns are removed by
+  event key instead of allowing the later file to overwrite the earlier one.
+- The API removes the internal key before returning public turn data.
 
-The skip matches the **direct** `parent_thread_id`. For a **nested** subagent (depth > 1, which
-requires a non-default `agents.max_depth`), the file also replays its *grandparent's* history
-under the grandparent's id — which differs from the direct parent — so those grandparent replays
-are **not** skipped and may still be over-counted (and could overwrite the root session on the
-Sessions tab).
+The existing `thread_spawn` parent-id gate remains as an additional fallback for
+subagent files whose older token events lack cumulative snapshots.
 
-This is a **known, accepted limitation**, not a regression:
+The persistent usage store has a unique `(source, entry_key)` index. Codex file
+sync resolves a duplicate in favor of the earliest timestamp, regardless of file
+discovery order, so a later replay cannot move the canonical row. Normal
+append-only changes still reparse only the changed file. If a full file
+replacement removes a key that file previously owned, or non-durable cleanup
+removes a canonical Codex file, remaining Codex files are reparsed once so a
+surviving occurrence can take ownership instead of losing the usage. Rewrites
+that retain all owned keys stay file-local.
 
-- It only occurs with nested subagents; `agents.max_depth` defaults to `1`.
-- It errs toward over-counting — the loud, user-visible direction — never silent data loss.
-- A corpus scan of local `thread_spawn` files found **no** nested (third-id) cases in practice.
+## Expected consequences
 
-If nested subagents become common, the fix is to skip events whose current id is any **ancestor**
-id rather than only the direct parent.
+- Historical Codex totals can decrease after upgrade because copied events and
+  repeated unchanged snapshots are removed.
+- Usage returns to the original event date instead of the resume date.
+- A resumed multi-file thread appears as one logical session. Period filters keep
+  only genuine turns whose original timestamps fall inside the requested window.
+- Genuine resumed work is retained even when Codex continues writing it under
+  the older logical session id.
 
-## Operational note: the store rebuilds itself on upgrade
+## Guardrails and tests
 
-The Overview tab is backed by a persistent usage store, which is a *parse cache* — not a source
-of truth. Each cached file's key includes a signature of the parser module itself (its path,
-size, and mtime; see `parser_code_signature` in `src/tokdash/usage_store.py`, folded into every
-file's stored signature by `sync_files`). So when Tokdash is upgraded — or the parser is edited
-locally — that signature changes, every Codex rollout file is detected as *changed* on the next
-sync, and its rows are deleted and reparsed with the corrected parser. **Previously counted
-replays are therefore purged automatically; no manual step is required.** `tokdash db resync`
-forces a full rebuild but is not needed for this fix to take effect.
+Regression coverage must keep these cases distinct:
+
+- ordinary resumed-thread history with restamped timestamps;
+- genuine new work following the replay;
+- `thread_spawn` parent history and real subagent work;
+- primary session-id changes/compaction;
+- identical token amounts in different logical sessions;
+- persistent-store append/resync, in-place canonical rewrites, and file removal;
+- partial logs without `total_token_usage` (loud over-count fallback).
+
+`CodexParser.replay_events_skipped` counts both source-gated replay events and
+stable-key duplicates so format changes remain observable.
+
+## Operational note
+
+The usage database is a parse cache, not a source of truth. Parser module content
+is part of each stored signature, so upgrading to a parser with this logic
+reparses Codex rollout files and removes previously cached copies automatically.
+`tokdash db resync` remains available as a manual full rebuild but is not required.
 
 ## References
 
 - ccusage [#950](https://github.com/ryoppippi/ccusage/issues/950) /
-  [#1218](https://github.com/ccusage/ccusage/pull/1218) — the analogous fix in the sibling project.
+  [#1218](https://github.com/ccusage/ccusage/pull/1218)
 - Codex subagents: <https://developers.openai.com/codex/concepts/subagents>

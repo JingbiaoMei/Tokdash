@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+## 1.5.4 - 2026-07-30
+
+### Fixed
+
+- Deduplicate Codex history copied into ordinary resumed rollout files, preserve the original event dates and explicit thread names, and merge genuine turns across files belonging to the same logical session. Persistent indexing promotes a surviving replay occurrence when a canonical file is rewritten or removed.
+
 ## 1.5.3 - 2026-07-29
 
 ### Added

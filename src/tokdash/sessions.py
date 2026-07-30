@@ -12,6 +12,7 @@ from . import clientpaths
 from .compute import cache_hit_rate, period_to_days
 from .dateutil import parse_date_range
 from .pricing import PricingDatabase
+from .sources.coding_tools import codex_token_event_key
 from .usage_store import UsageEntryStore, parser_code_signature, persistent_usage_db_enabled
 
 
@@ -225,6 +226,23 @@ def _build_turn(
     }
 
 
+def _turn_identity_key(turn: Dict[str, Any]) -> tuple[Any, ...]:
+    event_key = str(turn.get("_event_key") or "").strip()
+    if event_key:
+        return ("event", event_key)
+    return (
+        "fields",
+        int(turn.get("timestamp_ms", 0) or 0),
+        str(turn.get("model") or "unknown"),
+        int(turn.get("tokens_in", 0) or 0),
+        int(turn.get("tokens_cache", 0) or 0),
+        int(turn.get("tokens_out", 0) or 0),
+        int(turn.get("tokens_reasoning", 0) or 0),
+        int(turn.get("tokens", 0) or 0),
+        round(float(turn.get("cost", 0.0) or 0.0), 8),
+    )
+
+
 def _summarize_session(
     raw: Dict[str, Any],
     since_ms: Optional[int] = None,
@@ -288,38 +306,56 @@ def _public_turns(turns: Iterable[Dict[str, Any]]) -> list[Dict[str, Any]]:
     result = []
     for turn in turns:
         row = dict(turn)
+        row.pop("_event_key", None)
         row["timestamp"] = _ms_to_iso(int(row.pop("timestamp_ms", 0) or 0))
         result.append(row)
     return result
 
 
+def _has_explicit_display_name(raw: Dict[str, Any]) -> bool:
+    marker = raw.get("_display_name_explicit")
+    if marker is not None:
+        return bool(marker)
+    display_name = _clean_display_name(raw.get("display_name"))
+    fallback = _fallback_display_name(raw.get("session_id"), raw.get("project"))
+    return bool(display_name and display_name != fallback)
+
+
 def _merge_raw_session(existing: Dict[str, Any], new: Dict[str, Any]) -> Dict[str, Any]:
+    existing_name = _clean_display_name(existing.get("display_name"))
+    new_name = _clean_display_name(new.get("display_name"))
+    existing_name_is_explicit = _has_explicit_display_name(existing)
+    new_name_is_explicit = _has_explicit_display_name(new)
+    if new_name_is_explicit:
+        display_name = new_name
+    elif existing_name_is_explicit:
+        display_name = existing_name
+    else:
+        display_name = existing_name or new_name
+
     merged = {
         "tool": existing.get("tool") or new.get("tool") or "unknown",
         "session_id": existing.get("session_id") or new.get("session_id") or "unknown",
         "project": existing.get("project") if existing.get("project") != "unknown" else new.get("project", "unknown"),
-        "display_name": existing.get("display_name") or new.get("display_name") or "",
+        "display_name": display_name,
         "is_review_session": bool(existing.get("is_review_session") or new.get("is_review_session")),
         "turns": [],
     }
+    if (
+        merged["tool"] == "codex"
+        or "_display_name_explicit" in existing
+        or "_display_name_explicit" in new
+    ):
+        merged["_display_name_explicit"] = existing_name_is_explicit or new_name_is_explicit
 
-    seen = set()
-    merged_turns = []
+    merged_by_key: dict[tuple[Any, ...], Dict[str, Any]] = {}
     for turn in list(existing.get("turns", [])) + list(new.get("turns", [])):
-        key = (
-            int(turn.get("timestamp_ms", 0) or 0),
-            str(turn.get("model") or "unknown"),
-            int(turn.get("tokens_in", 0) or 0),
-            int(turn.get("tokens_cache", 0) or 0),
-            int(turn.get("tokens_out", 0) or 0),
-            int(turn.get("tokens_reasoning", 0) or 0),
-            round(float(turn.get("cost", 0.0) or 0.0), 8),
-        )
-        if key in seen:
-            continue
-        seen.add(key)
-        merged_turns.append(dict(turn))
+        key = _turn_identity_key(turn)
+        prior = merged_by_key.get(key)
+        if prior is None or int(turn.get("timestamp_ms", 0) or 0) < int(prior.get("timestamp_ms", 0) or 0):
+            merged_by_key[key] = dict(turn)
 
+    merged_turns = list(merged_by_key.values())
     merged_turns.sort(key=lambda item: (int(item.get("timestamp_ms", 0) or 0), int(item.get("turn_index", 0) or 0)))
     for index, turn in enumerate(merged_turns, start=1):
         turn["turn_index"] = index
@@ -449,6 +485,7 @@ def _parse_codex_session_file(path_str: str, _mtime_ns: int, _size: int, _pricin
     is_review_session = False
     turns = []
     turn_index = 0
+    seen_event_keys: set[str] = set()
 
     with session_path.open("r", encoding="utf-8") as handle:
         for line in handle:
@@ -495,8 +532,8 @@ def _parse_codex_session_file(path_str: str, _mtime_ns: int, _size: int, _pricin
             if obj_type != "event_msg" or payload.get("type") != "token_count":
                 continue
 
-            # Skip replayed parent token_count events only in thread_spawn subagent files, matched
-            # to the declared parent (see ROBUSTNESS.md / coding_tools.py for the rationale).
+            # Source-shape fallback for thread_spawn replays whose older events lack
+            # cumulative state. Stable identity below handles ordinary resume copies.
             if is_subagent_file and own_session_id is not None:
                 is_replay = (
                     session_id == subagent_parent_id
@@ -515,6 +552,12 @@ def _parse_codex_session_file(path_str: str, _mtime_ns: int, _size: int, _pricin
             if not usage:
                 continue
 
+            event_key = codex_token_event_key(session_id, info)
+            if event_key and event_key in seen_event_keys:
+                continue
+            if event_key:
+                seen_event_keys.add(event_key)
+
             input_total = int(usage.get("input_tokens", 0) or 0)
             cache_read = int(usage.get("cached_input_tokens", 0) or 0)
             output_tokens = int(usage.get("output_tokens", 0) or 0)
@@ -526,18 +569,19 @@ def _parse_codex_session_file(path_str: str, _mtime_ns: int, _size: int, _pricin
 
             full_model_name = f"{current_provider}/{current_model}" if current_provider else current_model
             turn_index += 1
-            turns.append(
-                _build_turn(
-                    turn_index=turn_index,
-                    timestamp_ms=timestamp_ms,
-                    model=current_model,
-                    tokens_in=input_tokens,
-                    tokens_cache=cache_read,
-                    tokens_out=output_tokens,
-                    tokens_reasoning=reasoning_tokens,
-                    cost=_PRICING_DB.get_cost(full_model_name, input_tokens, output_tokens, cache_read, 0),
-                )
+            turn = _build_turn(
+                turn_index=turn_index,
+                timestamp_ms=timestamp_ms,
+                model=current_model,
+                tokens_in=input_tokens,
+                tokens_cache=cache_read,
+                tokens_out=output_tokens,
+                tokens_reasoning=reasoning_tokens,
+                cost=_PRICING_DB.get_cost(full_model_name, input_tokens, output_tokens, cache_read, 0),
             )
+            if event_key:
+                turn["_event_key"] = event_key
+            turns.append(turn)
 
     if not turns:
         return None
@@ -547,6 +591,7 @@ def _parse_codex_session_file(path_str: str, _mtime_ns: int, _size: int, _pricin
         "tool": "codex",
         "session_id": session_id,
         "display_name": thread_name or _fallback_display_name(session_id, project),
+        "_display_name_explicit": bool(thread_name),
         "project": project,
         "is_review_session": is_review_session,
         "turns": turns,
@@ -559,7 +604,11 @@ def _load_codex_sessions(signature: tuple[tuple[str, int, int], ...], pricing_si
     for path_str, mtime_ns, size in signature:
         raw = _parse_codex_session_file(path_str, mtime_ns, size, pricing_sig)
         if raw:
-            sessions[str(raw["session_id"])] = raw
+            session_id = str(raw["session_id"])
+            if session_id in sessions:
+                sessions[session_id] = _merge_raw_session(sessions[session_id], raw)
+            else:
+                sessions[session_id] = raw
     return sessions
 
 
@@ -1440,29 +1489,18 @@ def _raw_sessions_for_tool(
     raise ValueError(f"Unsupported session tool: {tool}")
 
 
-def _turn_identity_key(turn: Dict[str, Any]) -> tuple[int, str, int, int, int, int, float]:
-    return (
-        int(turn.get("timestamp_ms", 0) or 0),
-        str(turn.get("model") or "unknown"),
-        int(turn.get("tokens_in", 0) or 0),
-        int(turn.get("tokens_cache", 0) or 0),
-        int(turn.get("tokens_out", 0) or 0),
-        int(turn.get("tokens_reasoning", 0) or 0),
-        round(float(turn.get("cost", 0.0) or 0.0), 8),
-    )
-
-
 def _session_records_to_raw_sessions(tool: str, records: Iterable[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
     sessions: Dict[str, Dict[str, Any]] = {}
-    seen_turns: dict[str, set[tuple[int, str, int, int, int, int, float]]] = {}
+    seen_turns: dict[str, set[tuple[Any, ...]]] = {}
     for raw in records:
         session_id = str(raw.get("session_id") or "")
         if not session_id:
             continue
         if tool == "codex":
-            # Match the live Codex loader: sorted files with the same session_id
-            # are not merged; the later record wins.
-            sessions[session_id] = raw
+            if session_id in sessions:
+                sessions[session_id] = _merge_raw_session(sessions[session_id], raw)
+            else:
+                sessions[session_id] = raw
             continue
 
         session = sessions.get(session_id)
@@ -1500,7 +1538,11 @@ def _stored_sessions_for_tool(tool: str) -> Dict[str, Dict[str, Any]]:
     if tool == "codex":
         root = clientpaths.codex_sessions_dir()
         signatures = _iter_file_signatures(root)
-        parser_sig = {"parser": parser_code_signature(_parse_codex_session_file), "pricing": _pricing_signature()}
+        parser_sig = {
+            "parser": parser_code_signature(_parse_codex_session_file),
+            "event_key": parser_code_signature(codex_token_event_key),
+            "pricing": _pricing_signature(),
+        }
         pricing_sig = _pricing_signature()
         store.sync_session_files(
             "codex",

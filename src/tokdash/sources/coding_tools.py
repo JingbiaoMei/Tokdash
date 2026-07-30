@@ -90,6 +90,64 @@ def _glob_sigs(pattern: str) -> tuple:
     return tuple(sorted(items))
 
 
+def codex_token_event_key(session_id: Any, info: Any) -> Optional[str]:
+    """Return a stable identity for a Codex token-count event.
+
+    Codex can copy a session's history into a later rollout file when the user
+    resumes a thread. Those copies keep the logical session id and the complete
+    cumulative/per-call usage snapshots, but restamp every event with the resume
+    time. Hashing the stable usage state lets both live parsing and the persistent
+    store reject the copy without relying on timestamps, file paths, token sizes,
+    or a particular resume/subagent source shape.
+
+    Older/partial logs that omit ``total_token_usage`` deliberately return None.
+    Falling back to the file/line identity may over-count a replay, but it cannot
+    silently merge two genuine calls that merely used the same number of tokens.
+    """
+    sid = str(session_id or "").strip()
+    if not sid or not isinstance(info, dict):
+        return None
+    total = info.get("total_token_usage")
+    last = info.get("last_token_usage")
+    if not isinstance(total, dict) or not total or not isinstance(last, dict) or not last:
+        return None
+
+    fields = (
+        "input_tokens",
+        "cached_input_tokens",
+        "cache_write_input_tokens",
+        "output_tokens",
+        "reasoning_output_tokens",
+    )
+
+    def normalized(snapshot: dict[str, Any]) -> dict[str, int]:
+        values: dict[str, int] = {}
+        for field in fields:
+            value = snapshot.get(field, 0)
+            if isinstance(value, bool):
+                raise ValueError("boolean token count")
+            values[field] = int(value or 0)
+        return values
+
+    try:
+        canonical = json.dumps(
+            {
+                "version": 1,
+                "session_id": sid,
+                # Codex 0.146 can add explicit zero-valued fields while replaying
+                # snapshots written by an older CLI. Missing and zero are the same
+                # usage state, so normalize the fields the parser actually counts.
+                "total_token_usage": normalized(total),
+                "last_token_usage": normalized(last),
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return f"codex-token-v1:{hashlib.sha256(canonical.encode('utf-8')).hexdigest()}"
+
+
 def _sqlite_table_exists(conn: sqlite3.Connection, table: str) -> bool:
     try:
         cur = conn.cursor()
@@ -408,7 +466,10 @@ class CodexParser(BaseParser):
     sync_capability = SourceSyncCapability(
         mode="file_replace",
         session_store=True,
-        reason="Codex JSONL session files can be indexed independently; tail append needs stronger line-offset IDs first.",
+        reason=(
+            "Codex JSONL files are reparsed independently; stable usage-state keys "
+            "deduplicate resumed-history copies across files."
+        ),
     )
 
     def __init__(self, pricing_db: PricingDatabase):
@@ -433,6 +494,7 @@ class CodexParser(BaseParser):
     def _parse_all(self) -> List[Dict[str, Any]]:
         out: List[Dict[str, Any]] = []
         self.replay_events_skipped = 0
+        event_index_by_key: dict[str, int] = {}
 
         for path_str, _, _ in self._file_signatures():
             session_file = Path(path_str)
@@ -476,15 +538,12 @@ class CodexParser(BaseParser):
                     if msg.get("type") != "event_msg" or p.get("type") != "token_count":
                         continue
 
-                    # Skip replayed parent token_count events, but ONLY in confirmed thread_spawn subagent
-                    # rollout files (the gate), and only for events attributed to the declared parent thread
-                    # (fallback: any non-own session id if parent_thread_id is absent). Ordinary primary/
-                    # guardian sessions are never gated, so a primary session that switches session ids
-                    # (e.g. compaction) is never under-counted. On an unrecognised format change the gate
-                    # fails to False -> nothing skipped -> loud over-count, not silent data loss.
-                    # Observed against Codex CLI 0.144.1; nested subagents (depth>1) may over-count
-                    # grandparent replays (the safe/loud direction). See
-                    # docs/development/internals/CODEX_USAGE_COUNTING.md.
+                    # Keep the Codex 0.144 thread_spawn source-shape gate as a fallback
+                    # for old/partial rows that lack the cumulative state needed by the
+                    # stable key below. Ordinary primary/guardian files are never source-
+                    # gated; their exact copies are handled by stable identity instead.
+                    # Any unrecognized partial format therefore degrades toward visible
+                    # over-counting, not silent loss. See CODEX_USAGE_COUNTING.md.
                     if is_subagent_file and own_session_id is not None and current_session_id is not None:
                         is_replay = (
                             current_session_id == subagent_parent_id
@@ -510,6 +569,8 @@ class CodexParser(BaseParser):
                     if not usage:
                         continue
 
+                    event_key = codex_token_event_key(current_session_id, info)
+
                     # In Codex: input_tokens INCLUDES cached tokens
                     # So fresh_input = input_tokens - cached_input_tokens
                     total_input = self._i(usage.get("input_tokens"))
@@ -521,21 +582,28 @@ class CodexParser(BaseParser):
                     if input_t == 0 and output_t == 0 and cache_read == 0 and reasoning == 0:
                         continue
 
-                    out.append(
-                        {
-                            "source": self.source_name,
-                            "model": model,
-                            "provider": provider,
-                            "input": input_t,
-                            "output": output_t,
-                            "cacheRead": cache_read,
-                            "cacheWrite": 0,
-                            "reasoning": reasoning,
-                            "cost": self.pricing_db.get_cost(model, input_t, output_t, cache_read, 0),
-                            "timestamp": int(ts.timestamp() * 1000),
-                            "entry_id": f"{session_file}:{line_no}",
-                        }
-                    )
+                    entry = {
+                        "source": self.source_name,
+                        "model": model,
+                        "provider": provider,
+                        "input": input_t,
+                        "output": output_t,
+                        "cacheRead": cache_read,
+                        "cacheWrite": 0,
+                        "reasoning": reasoning,
+                        "cost": self.pricing_db.get_cost(model, input_t, output_t, cache_read, 0),
+                        "timestamp": int(ts.timestamp() * 1000),
+                        "entry_id": event_key or f"{session_file}:{line_no}",
+                    }
+                    if event_key and event_key in event_index_by_key:
+                        self.replay_events_skipped += 1
+                        existing_index = event_index_by_key[event_key]
+                        if entry["timestamp"] < out[existing_index]["timestamp"]:
+                            out[existing_index] = entry
+                        continue
+                    if event_key:
+                        event_index_by_key[event_key] = len(out)
+                    out.append(entry)
             except Exception:
                 continue
 

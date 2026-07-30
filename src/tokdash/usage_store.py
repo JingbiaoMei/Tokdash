@@ -813,6 +813,12 @@ class UsageEntryStore:
             if stored.get(file_sig[0], {}).get("signature") != file_sig_by_path[file_sig[0]]
             or int(stored.get(file_sig[0], {}).get("missing") or 0)
         ]
+        if source == "codex" and removed_paths and not keep_missing:
+            # Codex resumed rollouts can contain stable-key copies owned canonically by
+            # an older file. If that older file is deliberately removed, reparse the
+            # remaining files so one surviving occurrence can take ownership after the
+            # canonical rows are deleted. Normal append-only updates remain file-local.
+            changed_files = list(files)
 
         if not removed_paths and not changed_files:
             return False
@@ -843,6 +849,56 @@ class UsageEntryStore:
                 rows = [_entry_for_storage(e) for e in parse_file_entries(file_sig)]
                 parsed.append((file_sig, [e for e in rows if e is not None], int(size), False))
 
+        if source == "codex":
+            # A full replacement can remove a stable key currently owned by this
+            # file while an unchanged resumed file still contains a later copy.
+            # Reparse survivors only in that uncommon case so the copy can be
+            # promoted after the old canonical row is deleted.
+            full_replaced_paths = [
+                file_sig[0]
+                for file_sig, _entries, _safe_offset, appended in parsed
+                if not appended and file_sig[0] in stored
+            ]
+            owned_keys: dict[str, set[str]] = {}
+            if full_replaced_paths:
+                with closing(self._connect()) as conn:
+                    for start in range(0, len(full_replaced_paths), 500):
+                        path_batch = full_replaced_paths[start : start + 500]
+                        placeholders = ",".join("?" for _ in path_batch)
+                        rows = conn.execute(
+                            f"""
+                            SELECT file_path, entry_key
+                            FROM usage_entries
+                            WHERE source = ?
+                              AND entry_key != ''
+                              AND file_path IN ({placeholders})
+                            """,
+                            [source, *path_batch],
+                        ).fetchall()
+                        for row in rows:
+                            owned_keys.setdefault(str(row["file_path"]), set()).add(str(row["entry_key"]))
+
+            replacement_lost_owned_keys = any(
+                owned_keys.get(file_sig[0], set())
+                - {str(entry.get("entry_key") or "") for entry in entries if entry.get("entry_key")}
+                for file_sig, entries, _safe_offset, appended in parsed
+                if not appended
+            )
+            if replacement_lost_owned_keys:
+                parsed_paths = {file_sig[0] for file_sig, _entries, _safe_offset, _appended in parsed}
+                for file_sig in files:
+                    if file_sig[0] in parsed_paths:
+                        continue
+                    rows = [_entry_for_storage(e) for e in parse_file_entries(file_sig)]
+                    parsed.append(
+                        (
+                            file_sig,
+                            [e for e in rows if e is not None],
+                            int(file_sig[2]),
+                            False,
+                        )
+                    )
+
         with usage_db_process_lock(self.path):
             with closing(self._connect()) as conn:
                 conn.execute("BEGIN IMMEDIATE")
@@ -863,6 +919,37 @@ class UsageEntryStore:
                         )
 
                 total_changed_entries = 0
+                if source == "codex":
+                    insert_sql = """
+                        INSERT INTO usage_entries (
+                            source, file_path, entry_key, model, provider, timestamp,
+                            input, output, cache_read, cache_write, reasoning,
+                            cost, message_count, raw_json
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(source, entry_key) WHERE entry_key != ''
+                        DO UPDATE SET
+                            file_path = excluded.file_path,
+                            model = excluded.model,
+                            provider = excluded.provider,
+                            timestamp = excluded.timestamp,
+                            input = excluded.input,
+                            output = excluded.output,
+                            cache_read = excluded.cache_read,
+                            cache_write = excluded.cache_write,
+                            reasoning = excluded.reasoning,
+                            cost = excluded.cost,
+                            message_count = excluded.message_count,
+                            raw_json = excluded.raw_json
+                        WHERE excluded.timestamp < usage_entries.timestamp
+                    """
+                else:
+                    insert_sql = """
+                        INSERT OR REPLACE INTO usage_entries (
+                            source, file_path, entry_key, model, provider, timestamp,
+                            input, output, cache_read, cache_write, reasoning,
+                            cost, message_count, raw_json
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """
                 for (path, mtime_ns, size), entries, safe_offset, appended in parsed:
                     total_changed_entries += len(entries)
                     if not appended:
@@ -871,13 +958,7 @@ class UsageEntryStore:
                             (source, path),
                         )
                     conn.executemany(
-                        """
-                        INSERT OR REPLACE INTO usage_entries (
-                            source, file_path, entry_key, model, provider, timestamp,
-                            input, output, cache_read, cache_write, reasoning,
-                            cost, message_count, raw_json
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
+                        insert_sql,
                         [
                             (
                                 e["source"],

@@ -324,6 +324,117 @@ def test_usage_store_sync_files_replaces_only_changed_files(tmp_path):
     assert data["total_messages"] == 2
 
 
+def test_usage_store_codex_duplicate_key_preserves_earliest_and_promotes_survivor(tmp_path):
+    store = UsageEntryStore(tmp_path / "usage.sqlite3")
+    # Deliberately make the replay sort first to prove timestamp ownership does not
+    # depend on file discovery/path order.
+    resumed_path = str(tmp_path / "a-resumed.jsonl")
+    original_path = str(tmp_path / "z-original.jsonl")
+    calls: list[str] = []
+
+    def entry(timestamp: int, entry_id: str, input_tokens: int) -> dict:
+        return {
+            "source": "codex",
+            "model": "gpt-5.3-codex",
+            "provider": "openai",
+            "timestamp": timestamp,
+            "input": input_tokens,
+            "output": 1,
+            "entry_id": entry_id,
+        }
+
+    def parse_file(file_sig):
+        path = file_sig[0]
+        calls.append(path)
+        if path == original_path:
+            return [entry(1_700_000_000_000, "codex-token-v1:shared", 10)]
+        return [
+            # Restamped replay: the original row and timestamp must remain canonical.
+            entry(1_700_000_100_000, "codex-token-v1:shared", 10),
+            entry(1_700_000_200_000, "codex-token-v1:new", 20),
+        ]
+
+    files = ((original_path, 1, 100), (resumed_path, 1, 100))
+    assert store.sync_files("codex", files, parser={"v": 1}, parse_file_entries=parse_file) is True
+    rows = store.query_entries(sources=["codex"])
+    assert [(row["entry_id"], row["timestamp"]) for row in rows] == [
+        ("codex-token-v1:shared", 1_700_000_000_000),
+        ("codex-token-v1:new", 1_700_000_200_000),
+    ]
+
+    # A normal append/change reparses only the active resumed file and still cannot
+    # replace the original occurrence with its restamped copy.
+    calls.clear()
+    changed = ((original_path, 1, 100), (resumed_path, 2, 200))
+    assert store.sync_files("codex", changed, parser={"v": 1}, parse_file_entries=parse_file) is True
+    assert calls == [resumed_path]
+    rows = store.query_entries(sources=["codex"])
+    assert [(row["entry_id"], row["timestamp"]) for row in rows] == [
+        ("codex-token-v1:shared", 1_700_000_000_000),
+        ("codex-token-v1:new", 1_700_000_200_000),
+    ]
+
+    # If non-durable cleanup removes the canonical file, reparse surviving Codex
+    # files so a duplicate occurrence is promoted instead of losing the usage.
+    calls.clear()
+    remaining = ((resumed_path, 2, 200),)
+    assert store.sync_files(
+        "codex",
+        remaining,
+        parser={"v": 1},
+        parse_file_entries=parse_file,
+        durable=False,
+    ) is True
+    assert calls == [resumed_path]
+    rows = store.query_entries(sources=["codex"])
+    assert [(row["entry_id"], row["timestamp"]) for row in rows] == [
+        ("codex-token-v1:shared", 1_700_000_100_000),
+        ("codex-token-v1:new", 1_700_000_200_000),
+    ]
+
+
+def test_usage_store_codex_rewrite_promotes_duplicate_from_unchanged_file(tmp_path):
+    store = UsageEntryStore(tmp_path / "usage.sqlite3")
+    original_path = str(tmp_path / "original.jsonl")
+    resumed_path = str(tmp_path / "resumed.jsonl")
+    original_has_shared_event = True
+    calls: list[str] = []
+
+    def entry(timestamp: int, entry_id: str) -> dict:
+        return {
+            "source": "codex",
+            "model": "gpt-5.3-codex",
+            "provider": "openai",
+            "timestamp": timestamp,
+            "input": 10,
+            "output": 1,
+            "entry_id": entry_id,
+        }
+
+    def parse_file(file_sig):
+        path = file_sig[0]
+        calls.append(path)
+        if path == original_path:
+            return [entry(1_700_000_000_000, "codex-token-v1:shared")] if original_has_shared_event else []
+        return [entry(1_700_000_100_000, "codex-token-v1:shared")]
+
+    files = ((original_path, 1, 100), (resumed_path, 1, 100))
+    assert store.sync_files("codex", files, parser={"v": 1}, parse_file_entries=parse_file) is True
+    assert store.query_entries(sources=["codex"])[0]["timestamp"] == 1_700_000_000_000
+
+    # Rewriting the canonical file without this event must reconsider the
+    # unchanged resumed file, which still contains a later occurrence.
+    calls.clear()
+    original_has_shared_event = False
+    changed = ((original_path, 2, 90), (resumed_path, 1, 100))
+    assert store.sync_files("codex", changed, parser={"v": 1}, parse_file_entries=parse_file) is True
+    assert calls == [original_path, resumed_path]
+    rows = store.query_entries(sources=["codex"])
+    assert [(row["entry_id"], row["timestamp"]) for row in rows] == [
+        ("codex-token-v1:shared", 1_700_000_100_000),
+    ]
+
+
 def test_usage_store_sync_files_appends_from_safe_offset(tmp_path):
     store = UsageEntryStore(tmp_path / "usage.sqlite3")
     path = str(tmp_path / "a.jsonl")
@@ -677,6 +788,43 @@ def _codex_token_count_row(ts: str, tokens_in: int, tokens_cache: int, tokens_ou
     }
 
 
+def _codex_token_count_row_with_total(
+    ts: str,
+    *,
+    last_input: int,
+    last_cache: int,
+    last_output: int,
+    last_reasoning: int,
+    total_input: int,
+    total_cache: int,
+    total_output: int,
+    total_reasoning: int,
+) -> dict:
+    return {
+        "timestamp": ts,
+        "type": "event_msg",
+        "payload": {
+            "type": "token_count",
+            "info": {
+                "total_token_usage": {
+                    "input_tokens": total_input,
+                    "cached_input_tokens": total_cache,
+                    "output_tokens": total_output,
+                    "reasoning_output_tokens": total_reasoning,
+                    "total_tokens": total_input + total_output,
+                },
+                "last_token_usage": {
+                    "input_tokens": last_input,
+                    "cached_input_tokens": last_cache,
+                    "output_tokens": last_output,
+                    "reasoning_output_tokens": last_reasoning,
+                    "total_tokens": last_input + last_output,
+                },
+            },
+        },
+    }
+
+
 def test_codex_subagent_thread_spawn_replay_is_skipped(monkeypatch, tmp_path):
     """Codex MultiAgent V2 `thread_spawn` subagent rollout files replay the parent
     thread's entire `session_meta` + `token_count` history under the parent's session
@@ -828,13 +976,240 @@ def test_codex_subagent_thread_spawn_replay_is_skipped(monkeypatch, tmp_path):
     assert len(same_id_raw["turns"]) == 2
 
 
+def test_codex_primary_resume_replay_is_deduplicated_across_files(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    _clear_parser_caches()
+
+    logical_id = "019f6a43-3863-7892-b67b-c8b45093b547"
+    resume_file_id = "019fb22c-5baa-7052-a593-feec9cf2d74d"
+    codex_dir = tmp_path / ".codex" / "sessions" / "2026" / "07" / "30"
+
+    usage_1 = dict(
+        last_input=100,
+        last_cache=10,
+        last_output=20,
+        last_reasoning=5,
+        total_input=100,
+        total_cache=10,
+        total_output=20,
+        total_reasoning=5,
+    )
+    usage_2 = dict(
+        last_input=110,
+        last_cache=11,
+        last_output=21,
+        last_reasoning=6,
+        total_input=210,
+        total_cache=21,
+        total_output=41,
+        total_reasoning=11,
+    )
+    usage_3 = dict(
+        last_input=120,
+        last_cache=12,
+        last_output=22,
+        last_reasoning=7,
+        total_input=330,
+        total_cache=33,
+        total_output=63,
+        total_reasoning=18,
+    )
+
+    parent_rows = [
+        {
+            "timestamp": "2026-07-16T09:32:00.000Z",
+            "type": "session_meta",
+            "payload": {
+                "id": logical_id,
+                "cwd": "/work/PersonalMemoryQA",
+                "source": "vscode",
+                "model_provider": "openai",
+            },
+        },
+        {
+            "timestamp": "2026-07-16T09:32:01.000Z",
+            "type": "turn_context",
+            "payload": {"model": "gpt-5.3-codex", "cwd": "/work/PersonalMemoryQA"},
+        },
+        _codex_token_count_row_with_total("2026-07-16T09:32:10.000Z", **usage_1),
+        _codex_token_count_row_with_total("2026-07-16T09:33:10.000Z", **usage_2),
+    ]
+    replayed_usage_1 = _codex_token_count_row_with_total("2026-07-30T08:38:00.000Z", **usage_1)
+    replayed_usage_2 = _codex_token_count_row_with_total("2026-07-30T08:38:00.001Z", **usage_2)
+    for replayed in (replayed_usage_1, replayed_usage_2):
+        # Codex 0.146 adds this explicit zero while replaying snapshots written by
+        # older versions that omitted the field.
+        replayed["payload"]["info"]["total_token_usage"]["cache_write_input_tokens"] = 0
+        replayed["payload"]["info"]["last_token_usage"]["cache_write_input_tokens"] = 0
+    resumed_rows = [
+        {
+            "timestamp": "2026-07-30T08:37:59.000Z",
+            "type": "session_meta",
+            "payload": {
+                "id": resume_file_id,
+                "cwd": "/work/PersonalMemoryQA",
+                "source": "vscode",
+                "model_provider": "openai",
+            },
+        },
+        {
+            "timestamp": "2026-07-30T08:37:59.001Z",
+            "type": "session_meta",
+            "payload": {
+                "id": logical_id,
+                "cwd": "/work/PersonalMemoryQA",
+                "source": "vscode",
+                "model_provider": "openai",
+            },
+        },
+        {
+            "timestamp": "2026-07-30T08:37:59.002Z",
+            "type": "turn_context",
+            "payload": {"model": "gpt-5.3-codex", "cwd": "/work/PersonalMemoryQA"},
+        },
+        {
+            "timestamp": "2026-07-30T08:37:59.003Z",
+            "type": "event_msg",
+            "payload": {
+                "type": "thread_name_updated",
+                "thread_id": logical_id,
+                "thread_name": "Investigate PersonalMemory token usage",
+            },
+        },
+        # Restamped copies of the original usage snapshots.
+        replayed_usage_1,
+        replayed_usage_2,
+        # Genuine resumed work remains under the old logical session id.
+        _codex_token_count_row_with_total("2026-07-30T08:38:11.000Z", **usage_3),
+    ]
+
+    # Replay sorts first to ensure both live parsing and session merging choose
+    # the earliest occurrence by timestamp, not discovery order.
+    resumed_path = codex_dir / "rollout-1-resumed.jsonl"
+    parent_path = codex_dir / "rollout-2-parent.jsonl"
+    _write_jsonl(parent_path, parent_rows)
+    _write_jsonl(resumed_path, resumed_rows)
+
+    parser = CodexParser(PricingDatabase())
+    entries = parser._parse_all()
+    assert len(entries) == 3
+    assert parser.replay_events_skipped == 2
+    expected_timestamps = [
+        sessions_module._parse_iso_to_ms("2026-07-16T09:32:10.000Z"),
+        sessions_module._parse_iso_to_ms("2026-07-16T09:33:10.000Z"),
+        sessions_module._parse_iso_to_ms("2026-07-30T08:38:11.000Z"),
+    ]
+    assert [entry["timestamp"] for entry in entries] == expected_timestamps
+    assert all(entry["entry_id"].startswith("codex-token-v1:") for entry in entries)
+
+    signatures = tuple(
+        (str(path), path.stat().st_mtime_ns, path.stat().st_size)
+        for path in (resumed_path, parent_path)
+    )
+    sessions = sessions_module._load_codex_sessions(signatures, ())
+    assert set(sessions) == {logical_id}
+    assert sessions[logical_id]["display_name"] == "Investigate PersonalMemory token usage"
+    assert sessions[logical_id]["_display_name_explicit"] is True
+    assert len(sessions[logical_id]["turns"]) == 3
+    assert [turn["timestamp_ms"] for turn in sessions[logical_id]["turns"]] == expected_timestamps
+
+    parent_raw = sessions_module._parse_codex_session_file(
+        str(parent_path), parent_path.stat().st_mtime_ns, parent_path.stat().st_size, ()
+    )
+    resumed_raw = sessions_module._parse_codex_session_file(
+        str(resumed_path), resumed_path.stat().st_mtime_ns, resumed_path.stat().st_size, ()
+    )
+    assert parent_raw["_display_name_explicit"] is False
+    assert resumed_raw["_display_name_explicit"] is True
+    stored = sessions_module._session_records_to_raw_sessions("codex", [resumed_raw, parent_raw])
+    assert stored[logical_id]["display_name"] == "Investigate PersonalMemory token usage"
+    assert len(stored[logical_id]["turns"]) == 3
+
+
+def test_codex_event_identity_is_scoped_to_current_session_id(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    _clear_parser_caches()
+
+    codex_dir = tmp_path / ".codex" / "sessions" / "2026" / "07" / "30"
+    shared_usage = dict(
+        last_input=100,
+        last_cache=10,
+        last_output=20,
+        last_reasoning=5,
+        total_input=100,
+        total_cache=10,
+        total_output=20,
+        total_reasoning=5,
+    )
+    rows = [
+        {
+            "timestamp": "2026-07-30T09:00:00.000Z",
+            "type": "session_meta",
+            "payload": {"id": "before-compaction", "source": "vscode", "model_provider": "openai"},
+        },
+        _codex_token_count_row_with_total("2026-07-30T09:00:01.000Z", **shared_usage),
+        {
+            "timestamp": "2026-07-30T09:01:00.000Z",
+            "type": "session_meta",
+            "payload": {"id": "after-compaction", "source": "vscode", "model_provider": "openai"},
+        },
+        # Identical counters under a different logical id are not a replay collision.
+        _codex_token_count_row_with_total("2026-07-30T09:01:01.000Z", **shared_usage),
+    ]
+    _write_jsonl(codex_dir / "rollout-compaction.jsonl", rows)
+
+    parser = CodexParser(PricingDatabase())
+    entries = parser._parse_all()
+    assert len(entries) == 2
+    assert entries[0]["entry_id"] != entries[1]["entry_id"]
+    assert parser.replay_events_skipped == 0
+
+    path = codex_dir / "rollout-compaction.jsonl"
+    raw = sessions_module._parse_codex_session_file(str(path), path.stat().st_mtime_ns, path.stat().st_size, ())
+    assert raw is not None
+    assert len(raw["turns"]) == 2
+
+
+def test_codex_partial_usage_snapshots_fall_back_without_deduplicating(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    _clear_parser_caches()
+
+    codex_dir = tmp_path / ".codex" / "sessions" / "2026" / "07" / "30"
+    rows = [
+        {
+            "timestamp": "2026-07-30T10:00:00.000Z",
+            "type": "session_meta",
+            "payload": {"id": "partial-session", "source": "cli", "model_provider": "openai"},
+        },
+        # Without cumulative state, identical per-call amounts are ambiguous. Keep
+        # both rather than risk silently dropping a genuine call.
+        _codex_token_count_row("2026-07-30T10:00:01.000Z", 100, 10, 20, 5),
+        _codex_token_count_row("2026-07-30T10:00:02.000Z", 100, 10, 20, 5),
+    ]
+    _write_jsonl(codex_dir / "rollout-partial.jsonl", rows)
+
+    parser = CodexParser(PricingDatabase())
+    entries = parser._parse_all()
+    assert len(entries) == 2
+    assert parser.replay_events_skipped == 0
+    assert entries[0]["entry_id"] != entries[1]["entry_id"]
+
+    path = codex_dir / "rollout-partial.jsonl"
+    raw = sessions_module._parse_codex_session_file(str(path), path.stat().st_mtime_ns, path.stat().st_size, ())
+    assert raw is not None
+    assert len(raw["turns"]) == 2
+
+
 def test_codex_primary_session_id_change_is_not_skipped(monkeypatch, tmp_path):
-    """The hardened skip is gated on positive `thread_spawn` subagent detection (see
-    docs/development/internals/CODEX_USAGE_COUNTING.md). A PRIMARY file (no
-    thread_spawn marker) whose `session_meta.id` changes mid-file - e.g. a compaction or
-    fork that mints a new session id - must never have its real events skipped just
-    because `current_session_id != own_session_id`. This is the guardrail against the
-    dangerous silent-under-count direction."""
+    """The source-shape fallback is gated on positive `thread_spawn` detection.
+    A primary file whose id changes mid-file must keep real events; stable identity
+    also scopes full snapshots by current logical id (covered above)."""
     primary_home = tmp_path / "primary-home"
     primary_dir = primary_home / ".codex" / "sessions" / "2026" / "07" / "13"
 
@@ -1055,16 +1430,33 @@ def test_pi_agent_sessions_data_and_detail(monkeypatch, tmp_path):
     assert detail["turns"][0]["tokens"] == 16
 
 
-def test_codex_stored_session_duplicate_policy_matches_live_loader():
+def test_codex_stored_session_records_merge_instead_of_overwriting():
     records = [
-        {"tool": "codex", "session_id": "dup", "project": "old", "turns": [{"tokens": 10}]},
-        {"tool": "codex", "session_id": "dup", "project": "new", "turns": [{"tokens": 20}]},
+        {
+            "tool": "codex",
+            "session_id": "dup",
+            "project": "old",
+            "display_name": "old",
+            "_display_name_explicit": False,
+            "turns": [{"tokens": 10}],
+        },
+        {
+            "tool": "codex",
+            "session_id": "dup",
+            "project": "new",
+            "display_name": "Investigate replay counting",
+            "_display_name_explicit": True,
+            "turns": [{"tokens": 20}],
+        },
     ]
 
     result = sessions_module._session_records_to_raw_sessions("codex", records)
 
-    assert result["dup"]["project"] == "new"
-    assert result["dup"]["turns"] == [{"tokens": 20}]
+    assert result["dup"]["project"] == "old"
+    assert result["dup"]["display_name"] == "Investigate replay counting"
+    assert result["dup"]["_display_name_explicit"] is True
+    assert [turn["tokens"] for turn in result["dup"]["turns"]] == [10, 20]
+    assert [turn["turn_index"] for turn in result["dup"]["turns"]] == [1, 2]
 
 
 def test_claude_stored_session_records_merge_in_one_pass_matches_legacy_semantics():

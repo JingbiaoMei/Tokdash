@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+## 1.5.5 - 2026-07-31
+
+### Added
+
+- Added official pricing for DeepSeek V4 Flash 0731, including cache-hit, cache-miss, and output rates.
+
+### Changed
+
+- Updated GPT-5.6 Terra and Luna pricing, including their `-pro` mirrors, to the current official OpenAI standard rates.
+
 ## 1.5.4 - 2026-07-30
 
 ### Fixed

@@ -42,8 +42,10 @@ def test_gpt_5_6_family_pricing():
 
     expected = {
         "gpt-5.6-sol": (5.0, 30.0, 0.5, 6.25),
-        "gpt-5.6-terra": (2.5, 15.0, 0.25, 3.125),
-        "gpt-5.6-luna": (1.0, 6.0, 0.10, 1.25),
+        "gpt-5.6-terra": (2.0, 12.0, 0.20, 2.50),
+        "gpt-5.6-terra-pro": (2.0, 12.0, 0.20, 2.50),
+        "gpt-5.6-luna": (0.20, 1.20, 0.02, 0.25),
+        "gpt-5.6-luna-pro": (0.20, 1.20, 0.02, 0.25),
     }
     for model, (input_price, output_price, cache_read_price, cache_write_price) in expected.items():
         cost = db.get_cost(model, 1000, 2000, 3000, 4000)
@@ -54,6 +56,20 @@ def test_gpt_5_6_family_pricing():
             + 4000 * cache_write_price
         ) / 1_000_000
         assert abs(cost - expected_cost) < 1e-12, f"{model!r} pricing should match official table"
+
+
+def test_deepseek_v4_flash_0731_pricing():
+    """DeepSeek V4 Flash 0731 must match the official cache-hit/miss/output rates."""
+    db = PricingDatabase()
+
+    expected_cost = (
+        1000 * 0.14 + 2000 * 0.28 + 3000 * 0.0028 + 4000 * 0.14
+    ) / 1_000_000
+    for model in ["deepseek-v4-flash-0731", "deepseek/deepseek-v4-flash-0731"]:
+        cost = db.get_cost(model, 1000, 2000, 3000, 4000)
+        assert abs(cost - expected_cost) < 1e-12, (
+            f"{model!r} should resolve to DeepSeek V4 Flash 0731 pricing"
+        )
 
 
 def test_alias_entries_resolve():

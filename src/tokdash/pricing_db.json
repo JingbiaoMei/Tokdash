@@ -1,6 +1,6 @@
 {
-  "version": "2.0.10",
-  "lastUpdated": "2026-07-25T07:40:42Z",
+  "version": "2.0.11",
+  "lastUpdated": "2026-07-31T00:00:00Z",
   "note": "Comprehensive pricing database with all Moonshot, MiniMax, GLM, and OpenAI models from OpenRouter. Cache pricing estimated at 10% of input for cache_read, 100% of input for cache_write.",
   "aliases": {
     "claude-sonnet-5-20260630": "claude-sonnet-5",
@@ -787,41 +787,43 @@
     },
     "gpt-5.6-terra": {
       "provider": "openai",
-      "input": 2.5,
-      "output": 15.0,
-      "cache_read": 0.25,
-      "cache_write": 3.125,
+      "input": 2.0,
+      "output": 12.0,
+      "cache_read": 0.2,
+      "cache_write": 2.5,
       "unit": "per_million_tokens",
       "source": "developers.openai.com/api/docs/pricing",
-      "note": "Official OpenAI standard short-context pricing, verified 2026-07-10"
+      "note": "Official OpenAI standard short-context pricing, verified 2026-07-31"
     },
     "gpt-5.6-terra-pro": {
       "provider": "openai",
-      "input": 2.5,
-      "output": 15.0,
-      "cache_read": 0.25,
-      "cache_write": 3.125,
+      "input": 2.0,
+      "output": 12.0,
+      "cache_read": 0.2,
+      "cache_write": 2.5,
       "unit": "per_million_tokens",
-      "source": "openrouter.ai/openai/gpt-5.6-terra-pro"
+      "source": "openrouter.ai/openai/gpt-5.6-terra-pro",
+      "note": "Mirrors official gpt-5.6-terra pricing"
     },
     "gpt-5.6-luna": {
       "provider": "openai",
-      "input": 1.0,
-      "output": 6.0,
-      "cache_read": 0.1,
-      "cache_write": 1.25,
+      "input": 0.2,
+      "output": 1.2,
+      "cache_read": 0.02,
+      "cache_write": 0.25,
       "unit": "per_million_tokens",
       "source": "developers.openai.com/api/docs/pricing",
-      "note": "Official OpenAI standard short-context pricing, verified 2026-07-10"
+      "note": "Official OpenAI standard short-context pricing, verified 2026-07-31"
     },
     "gpt-5.6-luna-pro": {
       "provider": "openai",
-      "input": 1.0,
-      "output": 6.0,
-      "cache_read": 0.1,
-      "cache_write": 1.25,
+      "input": 0.2,
+      "output": 1.2,
+      "cache_read": 0.02,
+      "cache_write": 0.25,
       "unit": "per_million_tokens",
-      "source": "openrouter.ai/openai/gpt-5.6-luna-pro"
+      "source": "openrouter.ai/openai/gpt-5.6-luna-pro",
+      "note": "Mirrors official gpt-5.6-luna pricing"
     },
     "gpt-audio": {
       "provider": "openai",
@@ -1311,6 +1313,16 @@
       "unit": "per_million_tokens",
       "source": "openrouter.ai/deepseek/deepseek-v4-flash",
       "note": "OpenRouter price verified 2026-04-24"
+    },
+    "deepseek-v4-flash-0731": {
+      "provider": "deepseek",
+      "input": 0.14,
+      "output": 0.28,
+      "cache_read": 0.0028,
+      "cache_write": 0.14,
+      "unit": "per_million_tokens",
+      "source": "api-docs.deepseek.com/quick_start/pricing",
+      "note": "Official DeepSeek price; api model id is deepseek-v4-flash, updated to DeepSeek-V4-Flash-0731"
     },
     "deepseek-v4-pro": {
       "provider": "deepseek",

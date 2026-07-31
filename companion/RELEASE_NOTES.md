@@ -1,19 +1,16 @@
-# Tokdash Companion 0.1.1
+# Tokdash Companion 0.1.2
 
-This companion preview adds Simplified Chinese and improves subscription quota
-labels and reset-time presentation on macOS and Windows.
+This preview refreshes the macOS app icon with a crisper rendering of the
+Tokdash logo. No functional changes.
 
 ## Changes
 
-- Added System, English, and Simplified Chinese language choices. Changes apply
-  immediately and preserve existing settings when upgrading from 0.1.0.
-- Normalized Claude's general Session and Weekly All windows to 5-hour and
-  Weekly labels and thresholds.
-- Preserved model-specific Claude weekly labels such as Fable and Opus while
-  applying the weekly alert threshold.
-- Changed reset times to relative text: minutes below two hours, then hours.
-- Localized companion settings, connection states, notifications, quota
-  details, and usage summaries.
+- Re-rendered the macOS app icon (Dock, Finder, About panel, DMG) from
+  vector artwork at every size, replacing the softer 0.1.1 raster.
+- The source SVG now lives at `companion/assets/tokdash_logo_icon.svg` so the
+  icon set is reproducible.
+- No functional changes; the Windows build matches 0.1.1 apart from the
+  version number.
 
 ## Important: unsigned preview
 
@@ -30,9 +27,9 @@ operating-system-trusted publisher.
 
 ## Assets
 
-- `Tokdash-Companion-0.1.1-macos-universal-unsigned.dmg`
+- `Tokdash-Companion-0.1.2-macos-universal-unsigned.dmg`
   supports Apple Silicon and Intel Macs on macOS 14 or newer.
-- `Tokdash-Companion-0.1.1-windows-x64-unsigned.zip`
+- `Tokdash-Companion-0.1.2-windows-x64-unsigned.zip`
   is a self-contained Windows 11 x64 portable build. Windows 11 on Arm may run
   it through x64 emulation.
 - `SHA256SUMS` covers both downloadable binaries.

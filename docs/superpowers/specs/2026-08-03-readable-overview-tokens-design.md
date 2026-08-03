@@ -1,7 +1,7 @@
 # Readable Overview Token Display
 
-**Date:** 2026-08-03  
-**Status:** Approved design  
+**Date:** 2026-08-03
+**Status:** Approved design
 **Scope:** Overview Total Tokens KPI only
 
 ## Summary

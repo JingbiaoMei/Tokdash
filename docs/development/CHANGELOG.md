@@ -6,11 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+## 1.5.6 - 2026-08-03
+
 ### Added
 
 - Added local Codex Activity Insights to Profile and Overview, including recorded chats, reasoning-effort distribution, structured tool usage, ranked tools, and explicit coverage indicators.
 - Activity counts use primary local sessions and exact stable session identifiers; subagents, inferred skills/plugins, and unavailable legacy files are excluded and reflected in coverage.
-- Added a persisted `Readable tokens` switch to Overview. Filtered totals use adaptive M/B units by default, while hover or keyboard focus reveals the exact localized count; disabling the switch restores the previous exact-number display.
+- Added a persisted `Readable tokens` setting across the dashboard. Token quantities use adaptive K/M/B/T units by default; disabling the setting restores exact localized counts.
+
+### Changed
+
+- Grouped language, light/dark mode, visual theme, readable-token display, and app installation under one accessible Settings panel.
+
+### Fixed
+
+- Excluded Codex guardian and automatic-review sessions from primary activity insights so reasoning-effort summaries reflect user sessions.
+- Rejected malformed activity fields and refreshed activity insights with manual dashboard updates.
+- Kept the Overview range controls stable after adding readable-token display controls.
 
 ## 1.5.5 - 2026-07-31
 

@@ -2223,6 +2223,8 @@
     let lastCombinedModels = [];
     let lastAppsBreakdown = null;
     let lastByTool = {};
+    let activeSessionDetail = null;
+    let activeDayDetail = null;
     let pricingDbLoaded = false;
     let quotaLoaded = false;
     let lastQuotaPayload = null;
@@ -2879,27 +2881,54 @@
       return (num ?? 0).toLocaleString(currentLang === 'zh' ? 'zh-CN' : 'en-US');
     }
 
+    // Keep the original key so existing users retain their preference. The setting
+    // now applies to every token quantity in the dashboard, not only Overview.
     const OVERVIEW_READABLE_TOKENS_STORAGE_KEY = 'tokdash-overview-readable-tokens';
 
-    function normalizeOverviewTokenCount(value) {
+    function normalizeTokenCount(value) {
       const number = Number(value);
       return Number.isFinite(number) && number > 0 ? Math.round(number) : 0;
     }
 
-    function formatReadableTokenCount(value) {
-      const tokens = normalizeOverviewTokenCount(value);
-      if (tokens < 1_000_000) return `${formatNumber(tokens)} ${t('tokensUnit')}`;
+    function normalizeOverviewTokenCount(value) {
+      return normalizeTokenCount(value);
+    }
 
-      const useBillions = tokens >= 1_000_000_000;
-      const divisor = useBillions ? 1_000_000_000 : 1_000_000;
-      const suffix = useBillions ? 'B' : 'M';
-      const rounded = Math.round((tokens / divisor) * 10) / 10;
+    function formatCompactTokenCount(value) {
+      const tokens = normalizeTokenCount(value);
+      if (tokens < 1_000) return formatNumber(tokens);
+
+      const scales = [
+        { divisor: 1_000_000_000_000, suffix: 'T' },
+        { divisor: 1_000_000_000, suffix: 'B' },
+        { divisor: 1_000_000, suffix: 'M' },
+        { divisor: 1_000, suffix: 'K' },
+      ];
+      let scale = scales.find((candidate) => tokens >= candidate.divisor) || scales[scales.length - 1];
+      let rounded = Math.round((tokens / scale.divisor) * 10) / 10;
+      const scaleIndex = scales.indexOf(scale);
+      if (rounded >= 1_000 && scaleIndex > 0) {
+        scale = scales[scaleIndex - 1];
+        rounded = Math.round((tokens / scale.divisor) * 10) / 10;
+      }
       const locale = currentLang === 'zh' ? 'zh-CN' : 'en-US';
       const compact = rounded.toLocaleString(locale, {
         minimumFractionDigits: 0,
         maximumFractionDigits: 1,
       });
-      return `${compact}${suffix} ${t('tokensUnit')}`;
+      return `${compact}${scale.suffix}`;
+    }
+
+    function formatReadableTokenCount(value) {
+      return `${formatCompactTokenCount(value)} ${t('tokensUnit')}`;
+    }
+
+    function formatTokenCount(value, includeUnit = false) {
+      const tokens = normalizeTokenCount(value);
+      const formatted = overviewReadableTokens
+        ? formatCompactTokenCount(tokens)
+        : formatNumber(tokens);
+      return includeUnit ? `${formatted} ${t('tokensUnit')}` : formatted;
     }
 
     function loadOverviewReadableTokensPreference(storage = null) {
@@ -2988,7 +3017,7 @@
       overviewReadableTokens = Boolean(enabled);
       saveOverviewReadableTokensPreference(overviewReadableTokens);
       syncOverviewReadableTokensToggle();
-      renderOverviewTokenTotal();
+      rerenderTokenPresentation();
     }
 
     function setSettingsPanelOpen(open, returnFocus = false) {
@@ -3244,7 +3273,7 @@
       if (metric === 'energy') {
         return { key: 'energy', label: t('metricEnergy'), format: formatEnergy };
       }
-      return { key: 'tokens', label: t('metricTokens'), format: formatNumber };
+      return { key: 'tokens', label: t('metricTokens'), format: formatTokenCount };
     }
 
     function getMetricValue(day, metric = 'tokens') {
@@ -3498,7 +3527,7 @@
       syncCodexReviewToggle();
       syncOverviewReadableTokensToggle();
       syncThemeModeControl();
-      renderOverviewTokenTotal();
+      rerenderTokenPresentation();
       updateTimestamp();
       updateMetricControls();
       syncDatePickerFooter();
@@ -3536,6 +3565,48 @@
           render3DCalendar(getVisibleCalendarData('3d'));
           updateTopStatsForAllTime();
         }
+      }
+    }
+
+    function rerenderTokenPresentation() {
+      if (toolChart) {
+        toolChart.destroy();
+        toolChart = null;
+      }
+      if (lastUsageResponse && isOverviewActive()) renderOverviewTab(lastUsageResponse);
+      if (isSessionsActive()) renderSessionsTab();
+
+      const statsContent = document.getElementById('stats-content');
+      if (statsContent?.classList.contains('active') && statsLoaded) {
+        if (calendarState.view === 'profile') renderProfileView();
+        else if (calendarState.view === 'month') renderMonthHeatmap();
+        else if (calendarState.view === 'year') {
+          renderYearHeatmap();
+          updateTopStatsForYear();
+        } else if (calendarState.view === '3d') {
+          render3DCalendar(getVisibleCalendarData('3d'));
+          updateTopStatsForAllTime();
+        }
+      }
+
+      const modal = document.getElementById('sessionModal');
+      if (activeSessionDetail && modal && !modal.classList.contains('hidden')) {
+        const { session = {}, turns = [] } = activeSessionDetail.data || {};
+        const total = Number(session.tokens || 0);
+        document.getElementById('sessionModalInput').textContent = formatTokenCount(session.tokens_in || 0);
+        document.getElementById('sessionModalCache').textContent = formatTokenCount(session.tokens_cache || 0);
+        document.getElementById('sessionModalOutput').textContent = formatTokenCount(session.tokens_out || 0);
+        document.getElementById('sessionModalTotal').textContent = formatTokenCount(total);
+        setShareBar('sessionShareInput', session.tokens_in || 0, total);
+        setShareBar('sessionShareCache', session.tokens_cache || 0, total);
+        setShareBar('sessionShareOutput', session.tokens_out || 0, total);
+        setShareBar('sessionShareReasoning', session.tokens_reasoning || 0, total);
+        renderSessionCharts(turns);
+      }
+
+      const dayDetails = document.getElementById('dayDetails');
+      if (activeDayDetail && dayDetails && !dayDetails.classList.contains('hidden') && dayDetails.style.display !== 'none') {
+        showDayDetails(activeDayDetail, { scroll: false });
       }
     }
 
@@ -3892,7 +3963,7 @@
       if (data.top_models && data.top_models.length > 0) {
         const top = data.top_models[0];
         document.getElementById('topModel').textContent = top.name;
-        document.getElementById('topModelMeta').textContent = `${formatCurrency(top.cost)} · ${formatNumber(top.tokens)} ${t('tokensUnit')}`;
+        document.getElementById('topModelMeta').textContent = `${formatCurrency(top.cost)} · ${formatTokenCount(top.tokens, true)}`;
       } else {
         document.getElementById('topModel').textContent = '—';
         document.getElementById('topModelMeta').textContent = '—';
@@ -4325,11 +4396,11 @@
           latestMeta.textContent = parts.join(" · ");
         }
       }
-      if (latestInput) latestInput.textContent = formatNumber(latest?.tokens_in || 0);
-      if (latestCache) latestCache.textContent = formatNumber(latest?.tokens_cache || 0);
+      if (latestInput) latestInput.textContent = formatTokenCount(latest?.tokens_in || 0);
+      if (latestCache) latestCache.textContent = formatTokenCount(latest?.tokens_cache || 0);
       if (latestCachePct) latestCachePct.textContent = latest ? `${formatHitRate(latest.cache_hit_rate)} ${t("hit")}` : "—";
-      if (latestOutput) latestOutput.textContent = formatNumber(latest?.tokens_out || 0);
-      if (latestTotal) latestTotal.textContent = formatNumber(latest?.tokens || 0);
+      if (latestOutput) latestOutput.textContent = formatTokenCount(latest?.tokens_out || 0);
+      if (latestTotal) latestTotal.textContent = formatTokenCount(latest?.tokens || 0);
       if (latestEvents) latestEvents.textContent = formatNumber(latest?.token_events || 0);
       if (latestSeen) latestSeen.textContent = formatSessionDateTime(latest?.last_seen_at);
 
@@ -4395,7 +4466,7 @@
         summaryRow.appendChild(createTableCell("td", "py-3 px-4", ""));
 
         // Total tokens
-        summaryRow.appendChild(createTableCell("td", "py-3 px-4 text-right font-semibold text-slate-800", formatNumber(group.tokens)));
+        summaryRow.appendChild(createTableCell("td", "py-3 px-4 text-right font-semibold text-slate-800", formatTokenCount(group.tokens)));
         // Cost
         summaryRow.appendChild(createTableCell("td", "py-3 px-4 text-right font-bold", formatCurrency(group.cost), "color: var(--color-cost);"));
         // Last updated + arrow
@@ -4434,11 +4505,11 @@
           row.appendChild(nameCell);
           if (showTool) row.appendChild(createTableCell("td", "py-3 px-4 text-slate-700", formatToolName(session.tool)));
           row.appendChild(createTableCell("td", "py-3 px-4 text-slate-700 mono", session.model || "—"));
-          row.appendChild(createTableCell("td", "py-3 px-4 text-right text-slate-700", formatNumber(session.tokens_in || 0)));
-          row.appendChild(createTableCell("td", "py-3 px-4 text-right text-slate-700", formatNumber(session.tokens_cache || 0)));
+          row.appendChild(createTableCell("td", "py-3 px-4 text-right text-slate-700", formatTokenCount(session.tokens_in || 0)));
+          row.appendChild(createTableCell("td", "py-3 px-4 text-right text-slate-700", formatTokenCount(session.tokens_cache || 0)));
           row.appendChild(createTableCell("td", "py-3 px-4 text-right text-slate-700", formatHitRate(session.cache_hit_rate)));
-          row.appendChild(createTableCell("td", "py-3 px-4 text-right text-slate-700", formatNumber(session.tokens_out || 0)));
-          row.appendChild(createTableCell("td", "py-3 px-4 text-right font-semibold text-slate-800", formatNumber(session.tokens || 0)));
+          row.appendChild(createTableCell("td", "py-3 px-4 text-right text-slate-700", formatTokenCount(session.tokens_out || 0)));
+          row.appendChild(createTableCell("td", "py-3 px-4 text-right font-semibold text-slate-800", formatTokenCount(session.tokens || 0)));
           row.appendChild(createTableCell("td", "py-3 px-4 text-right font-bold", formatCurrency(session.cost || 0), "color: var(--color-cost);"));
           row.appendChild(createTableCell("td", "py-3 px-4 text-right text-slate-500", formatSessionTime(session.last_seen_at)));
           row.addEventListener("click", () => openSessionModal(session.tool || prefix, session.session_id));
@@ -4485,7 +4556,7 @@
 
     function setShareBar(prefix, value, total) {
       const pct = total > 0 ? (Number(value || 0) / total) * 100 : 0;
-      const label = `${formatPercent(pct / 100)} · ${formatNumber(value || 0)}`;
+      const label = `${formatPercent(pct / 100)} · ${formatTokenCount(value || 0)}`;
       const labelEl = document.getElementById(`${prefix}Label`);
       const barEl = document.getElementById(`${prefix}Bar`);
       if (labelEl) labelEl.textContent = label;
@@ -4495,6 +4566,7 @@
 
     function closeSessionModal() {
       document.getElementById("sessionModal").classList.add("hidden");
+      activeSessionDetail = null;
     }
 
     function buildTurnSeries(turns) {
@@ -4629,13 +4701,13 @@
           },
           y: {
             beginAtZero: true,
-            ticks: { color: "#475569", callback: (value) => formatNumber(value) },
+            ticks: { color: "#475569", callback: (value) => formatTokenCount(value) },
             grid: { color: "rgba(226,232,240,0.55)" },
           },
         },
         plugins: {
           legend: { position: "bottom" },
-          tooltip: { callbacks: { label: (context) => `${context.dataset.label}: ${formatNumber(context.raw || 0)}` } },
+          tooltip: { callbacks: { label: (context) => `${context.dataset.label}: ${formatTokenCount(context.raw || 0)}` } },
         },
       };
     }
@@ -4686,14 +4758,15 @@
       try {
         const response = await fetch(`${appPath('/api/session')}?tool=${encodeURIComponent(tool)}&session_id=${encodeURIComponent(sessionId)}`);
         const data = await response.json();
+        activeSessionDetail = { tool, data };
         const session = data.session || {};
         const turns = data.turns || [];
         document.getElementById("sessionModalTitle").textContent = sessionDisplayName(session);
         document.getElementById("sessionModalMeta").textContent = `${formatToolName(tool)} · ${session.project || "—"} · ${session.model || "—"} · ${formatNumber(session.token_events || 0)} ${t("events")}`;
-        document.getElementById("sessionModalInput").textContent = formatNumber(session.tokens_in || 0);
-        document.getElementById("sessionModalCache").textContent = formatNumber(session.tokens_cache || 0);
-        document.getElementById("sessionModalOutput").textContent = formatNumber(session.tokens_out || 0);
-        document.getElementById("sessionModalTotal").textContent = formatNumber(session.tokens || 0);
+        document.getElementById("sessionModalInput").textContent = formatTokenCount(session.tokens_in || 0);
+        document.getElementById("sessionModalCache").textContent = formatTokenCount(session.tokens_cache || 0);
+        document.getElementById("sessionModalOutput").textContent = formatTokenCount(session.tokens_out || 0);
+        document.getElementById("sessionModalTotal").textContent = formatTokenCount(session.tokens || 0);
         const total = Number(session.tokens || 0);
         const inputPct = total > 0 ? Number(session.tokens_in || 0) / total : 0;
         const cachePct = total > 0 ? Number(session.tokens_cache || 0) / total : 0;
@@ -4748,7 +4821,7 @@
                 callbacks: {
                   label: (context) => {
                     const value = context.raw ?? 0;
-                    return `${context.label}: ${formatNumber(value)} ${t('tokensUnit')}`;
+                    return `${context.label}: ${formatTokenCount(value, true)}`;
                   },
                 },
               },
@@ -4918,7 +4991,7 @@
         tr.style.borderColor = 'rgba(226,232,240,0.9)';
         tr.innerHTML = `
           <td class="py-3 px-4 font-semibold text-slate-800">${formatToolName(row.tool)}</td>
-          <td class="py-3 px-4 text-right text-slate-700">${formatNumber(row.tokens)}</td>
+          <td class="py-3 px-4 text-right text-slate-700">${formatTokenCount(row.tokens)}</td>
           <td class="py-3 px-4 text-right text-slate-700">${formatHitRate(row.cache_hit_rate)}</td>
           <td class="py-3 px-4 text-right font-bold" style="color:var(--color-cost)">${formatCurrency(row.cost)}</td>
         `;
@@ -4992,7 +5065,7 @@
         header.className = 'flex flex-wrap items-baseline gap-x-4 gap-y-1 mb-3';
         header.innerHTML = `
           <h4 class="text-sm font-extrabold mono tracking-wide" style="color: var(--color-primary);">${formatToolName(appName)}</h4>
-          <span class="text-xs text-slate-600">${formatNumber(appTokens)} ${t('tokensUnit')} · ${formatCurrency(appCost)} · ${formatNumber(appMessages)} ${t('msgs')} · ${t('cacheHitRate')} ${formatHitRate(appHit)}</span>
+          <span class="text-xs text-slate-600">${formatTokenCount(appTokens, true)} · ${formatCurrency(appCost)} · ${formatNumber(appMessages)} ${t('msgs')} · ${t('cacheHitRate')} ${formatHitRate(appHit)}</span>
         `;
         appDiv.appendChild(header);
 
@@ -5023,10 +5096,10 @@
           row.className = 'border-b hover:bg-slate-50 transition';
           row.innerHTML = `
             <td class="py-2 px-3 text-slate-800" title="${model.name}">${model.name}</td>
-            <td class="py-2 px-3 text-right text-slate-700">${formatNumber(model.tokens_in)}</td>
-            <td class="py-2 px-3 text-right text-slate-700">${formatNumber(model.tokens_out)}</td>
-            <td class="py-2 px-3 text-right text-slate-700">${formatNumber(model.tokens_cache)}</td>
-            <td class="py-2 px-3 text-right font-semibold text-slate-800">${formatNumber(model.tokens)}</td>
+            <td class="py-2 px-3 text-right text-slate-700">${formatTokenCount(model.tokens_in)}</td>
+            <td class="py-2 px-3 text-right text-slate-700">${formatTokenCount(model.tokens_out)}</td>
+            <td class="py-2 px-3 text-right text-slate-700">${formatTokenCount(model.tokens_cache)}</td>
+            <td class="py-2 px-3 text-right font-semibold text-slate-800">${formatTokenCount(model.tokens)}</td>
             <td class="py-2 px-3 text-right text-slate-700">${formatHitRate(model.cache_hit_rate)}</td>
             <td class="py-2 px-3 text-right font-bold" style="color:var(--color-cost)">${formatCurrency(model.cost)}</td>
             <td class="py-2 px-3 text-right text-slate-500">${formatNumber(model.messages || 0)}</td>
@@ -5098,10 +5171,10 @@
         row.className = 'border-b hover:bg-slate-50 transition';
         row.innerHTML = `
           <td class="py-2 px-3 text-slate-800">${model.name}</td>
-          <td class="py-2 px-3 text-right text-slate-700">${formatNumber(model.tokens_in)}</td>
-          <td class="py-2 px-3 text-right text-slate-700">${formatNumber(model.tokens_out)}</td>
-          <td class="py-2 px-3 text-right text-slate-700">${formatNumber(model.tokens_cache)}</td>
-          <td class="py-2 px-3 text-right font-semibold text-slate-800">${formatNumber(model.tokens)}</td>
+          <td class="py-2 px-3 text-right text-slate-700">${formatTokenCount(model.tokens_in)}</td>
+          <td class="py-2 px-3 text-right text-slate-700">${formatTokenCount(model.tokens_out)}</td>
+          <td class="py-2 px-3 text-right text-slate-700">${formatTokenCount(model.tokens_cache)}</td>
+          <td class="py-2 px-3 text-right font-semibold text-slate-800">${formatTokenCount(model.tokens)}</td>
           <td class="py-2 px-3 text-right text-slate-700">${formatHitRate(model.cache_hit_rate)}</td>
           <td class="py-2 px-3 text-right font-bold" style="color:var(--color-cost)">${formatCurrency(model.cost)}</td>
           <td class="py-2 px-3 text-right text-slate-500">${formatNumber(model.messages || 0)}</td>
@@ -6660,10 +6733,7 @@
     }
 
     function formatProfileMetricNumber(value) {
-      return new Intl.NumberFormat(currentLang === 'zh' ? 'zh-CN' : 'en-US', {
-        notation: 'compact',
-        maximumFractionDigits: 1,
-      }).format(safeProfileNumber(value));
+      return formatTokenCount(safeProfileNumber(value));
     }
 
     function formatProfileAggregateTooltip(aggregate, cumulative = false, milestonesEnabled = false) {
@@ -6681,18 +6751,18 @@
         {
           key: 'total',
           label: t('total'),
-          value: `${formatNumber(tokenTotal)} ${t('tokensUnit')}`,
+          value: formatTokenCount(tokenTotal, true),
           tone: milestone?.tone || 'primary',
           prominent: true,
         },
-        { key: 'input', label: t('input'), value: formatNumber(safeProfileNumber(breakdown.input)), tone: 'primary', prominent: false },
-        { key: 'output', label: t('output'), value: formatNumber(safeProfileNumber(breakdown.output)), tone: 'secondary', prominent: false },
-        { key: 'cacheRead', label: t('cacheRead'), value: formatNumber(safeProfileNumber(breakdown.cacheRead)), tone: 'cost', prominent: false },
-        { key: 'cacheWrite', label: t('cacheWrite'), value: formatNumber(safeProfileNumber(breakdown.cacheWrite)), tone: 'cta', prominent: false },
+        { key: 'input', label: t('input'), value: formatTokenCount(safeProfileNumber(breakdown.input)), tone: 'primary', prominent: false },
+        { key: 'output', label: t('output'), value: formatTokenCount(safeProfileNumber(breakdown.output)), tone: 'secondary', prominent: false },
+        { key: 'cacheRead', label: t('cacheRead'), value: formatTokenCount(safeProfileNumber(breakdown.cacheRead)), tone: 'cost', prominent: false },
+        { key: 'cacheWrite', label: t('cacheWrite'), value: formatTokenCount(safeProfileNumber(breakdown.cacheWrite)), tone: 'cta', prominent: false },
         {
           key: 'reasoning',
           label: t('reasoning'),
-          value: formatNumber(safeProfileNumber(breakdown.reasoning)),
+          value: formatTokenCount(safeProfileNumber(breakdown.reasoning)),
           tone: 'reasoning',
           prominent: false,
           include: safeProfileNumber(breakdown.reasoning) > 0,
@@ -7421,7 +7491,7 @@
 
         const stats = data.stats || {};
         document.getElementById('statFavoriteModel').textContent = stats.favorite_model || '—';
-        document.getElementById('statTotalTokens').textContent = formatNumber(stats.total_tokens || 0);
+        document.getElementById('statTotalTokens').textContent = formatTokenCount(stats.total_tokens || 0);
         document.getElementById('statSessions').textContent = formatNumber(stats.sessions || 0);
         document.getElementById('statCurrentStreak').textContent = pluralDays(stats.current_streak || 0);
         document.getElementById('statLongestStreak').textContent = pluralDays(stats.longest_streak || 0);
@@ -7774,7 +7844,7 @@
         const cell = document.createElement('div');
         cell.className = 'heatmap-cell';
         cell.style.backgroundColor = heatColor(lvl);
-        cell.title = `${day.date}: ${formatNumber(day.totals.tokens || 0)} ${t('tokensUnit')} · ${formatCurrency(day.totals.cost || 0)} · ${formatNumber(day.totals.messages || 0)} ${t('msgs')}`;
+        cell.title = `${day.date}: ${formatTokenCount(day.totals.tokens || 0, true)} · ${formatCurrency(day.totals.cost || 0)} · ${formatNumber(day.totals.messages || 0)} ${t('msgs')}`;
         cell.addEventListener('click', () => showDayDetails(day));
         gridEl.appendChild(cell);
       });
@@ -7869,7 +7939,7 @@
 
       // Update UI - Month sidebar stats
       document.getElementById('monthFavoriteModel').textContent = topModel;
-      document.getElementById('monthTotalTokens').textContent = formatNumber(totalTokens);
+      document.getElementById('monthTotalTokens').textContent = formatTokenCount(totalTokens);
       document.getElementById('monthTotalCost').textContent = formatCurrency(totalCost);
       document.getElementById('monthTotalEnergy').textContent = formatEnergyKwh(totalEnergyJ);
       document.getElementById('monthTotalSessions').textContent = formatNumber(totalMessages);
@@ -7879,7 +7949,7 @@
 
       // Update top stats section for month view
       document.getElementById('statFavoriteModel').textContent = topModel;
-      document.getElementById('statTotalTokens').textContent = formatNumber(totalTokens);
+      document.getElementById('statTotalTokens').textContent = formatTokenCount(totalTokens);
       document.getElementById('statSessions').textContent = formatNumber(totalMessages);
       document.getElementById('statCurrentStreak').textContent = pluralDays(monthStreak);
       document.getElementById('statLongestStreak').textContent = pluralDays(longestEverStreak);
@@ -7961,7 +8031,7 @@
 
       // Update top stats section
       document.getElementById('statFavoriteModel').textContent = topModel;
-      document.getElementById('statTotalTokens').textContent = formatNumber(totalTokens);
+      document.getElementById('statTotalTokens').textContent = formatTokenCount(totalTokens);
       document.getElementById('statSessions').textContent = formatNumber(totalMessages);
       document.getElementById('statCurrentStreak').textContent = pluralDays(yearStreak);
       document.getElementById('statLongestStreak').textContent = pluralDays(longestEverStreak);
@@ -8045,7 +8115,7 @@
 
       // Update top stats section
       document.getElementById('statFavoriteModel').textContent = topModel;
-      document.getElementById('statTotalTokens').textContent = formatNumber(totalTokens);
+      document.getElementById('statTotalTokens').textContent = formatTokenCount(totalTokens);
       document.getElementById('statSessions').textContent = formatNumber(totalMessages);
       document.getElementById('statCurrentStreak').textContent = pluralDays(currentStreak);
       document.getElementById('statLongestStreak').textContent = pluralDays(longestEverStreak);
@@ -8134,7 +8204,7 @@
 
         const lvl = quantileLevel(getMetricValue(day, calendarState.metric), thresholds);
         cell.style.backgroundColor = heatColor(lvl);
-        cell.title = `${day.date}: ${formatNumber(day.totals.tokens || 0)} ${t('tokensUnit')} · ${formatCurrency(day.totals.cost || 0)} · ${formatNumber(day.totals.messages || 0)} ${t('msgs')}`;
+        cell.title = `${day.date}: ${formatTokenCount(day.totals.tokens || 0, true)} · ${formatCurrency(day.totals.cost || 0)} · ${formatNumber(day.totals.messages || 0)} ${t('msgs')}`;
         cell.addEventListener('click', () => showDayDetails(day));
 
         gridEl.appendChild(cell);
@@ -8176,7 +8246,7 @@
         tr.title = `${monthNames[m]} ${year}`;
         tr.innerHTML = `
           <td class="py-2 px-3 font-semibold mono">${monthNames[m]}</td>
-          <td class="py-2 px-3 text-right">${formatNumber(b.tokens)}</td>
+          <td class="py-2 px-3 text-right">${formatTokenCount(b.tokens)}</td>
           <td class="py-2 px-3 text-right font-semibold" style="color:var(--color-cost)">${formatCurrency(b.cost)}</td>
           <td class="py-2 px-3 text-right">${formatEnergy(b.energyJ)}</td>
         `;
@@ -8210,7 +8280,8 @@
     // ===== End Heatmap Calendar =====
 
 
-    function showDayDetails(day) {
+    function showDayDetails(day, options = {}) {
+      activeDayDetail = day;
       const details = document.getElementById('dayDetails');
       const content = document.getElementById('dayDetailsContent');
 
@@ -8218,17 +8289,17 @@
         <div class="grid grid-cols-2 gap-4 mb-4 text-sm">
           <div><span class="text-slate-500">${t('date')}</span><div class="font-semibold">${day.date}</div></div>
           <div><span class="text-slate-500">${t('cost')}</span><div class="font-semibold" style="color:var(--color-cost)">${formatCurrency(day.totals.cost)}</div></div>
-          <div><span class="text-slate-500">${t('tokens')}</span><div class="font-semibold">${formatNumber(day.totals.tokens)}</div></div>
+          <div><span class="text-slate-500">${t('tokens')}</span><div class="font-semibold">${formatTokenCount(day.totals.tokens)}</div></div>
           <div><span class="text-slate-500">${t('messages')}</span><div class="font-semibold">${formatNumber(day.totals.messages)}</div></div>
           <div><span class="text-slate-500">${t('energy')}</span><div class="font-semibold">${formatEnergy(dayEnergyJ(day))}</div></div>
           <div><span class="text-slate-500">${t('cacheHitRate')}</span><div class="font-semibold" style="color:var(--color-primary)">${formatHitRate(hitRateFrom(day.tokenBreakdown.input, day.tokenBreakdown.cacheRead))}</div></div>
         </div>
         <div class="mb-2 text-sm font-semibold mono">${t('tokenBreakdown')}</div>
         <div class="grid grid-cols-2 gap-2 text-sm mb-4">
-          <div><span class="text-slate-500">${t('input')}</span>: ${formatNumber(day.tokenBreakdown.input)}</div>
-          <div><span class="text-slate-500">${t('output')}</span>: ${formatNumber(day.tokenBreakdown.output)}</div>
-          <div><span class="text-slate-500">${t('cacheRead')}</span>: ${formatNumber(day.tokenBreakdown.cacheRead)}</div>
-          <div><span class="text-slate-500">${t('reasoning')}</span>: ${formatNumber(day.tokenBreakdown.reasoning)}</div>
+          <div><span class="text-slate-500">${t('input')}</span>: ${formatTokenCount(day.tokenBreakdown.input)}</div>
+          <div><span class="text-slate-500">${t('output')}</span>: ${formatTokenCount(day.tokenBreakdown.output)}</div>
+          <div><span class="text-slate-500">${t('cacheRead')}</span>: ${formatTokenCount(day.tokenBreakdown.cacheRead)}</div>
+          <div><span class="text-slate-500">${t('reasoning')}</span>: ${formatTokenCount(day.tokenBreakdown.reasoning)}</div>
         </div>
       `;
 
@@ -8288,7 +8359,7 @@
             <tr class="border-b">
               <td class="py-2 text-slate-700">${formatToolName(src.source)}</td>
               <td class="py-2 text-slate-800">${src.modelId}</td>
-              <td class="py-2 text-right text-slate-700">${formatNumber(totalTokens)}</td>
+              <td class="py-2 text-right text-slate-700">${formatTokenCount(totalTokens)}</td>
               <td class="py-2 text-right text-slate-700">${formatEnergy(energyJ)}</td>
               <td class="py-2 text-right font-semibold" style="color:var(--color-cost)">${formatCurrency(src.cost)}</td>
               <td class="py-2 text-right text-slate-500">${formatNumber(src.messages)}</td>
@@ -8305,11 +8376,14 @@
 
       content.innerHTML = html;
       details.classList.remove('hidden');
-      try { details.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) {}
+      if (options.scroll !== false) {
+        try { details.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) {}
+      }
     }
 
     document.getElementById('closeDayDetails').addEventListener('click', () => {
       document.getElementById('dayDetails').classList.add('hidden');
+      activeDayDetail = null;
     });
 
     // 3D calendar with Three.js (WebGL)
@@ -8338,7 +8412,7 @@
       if (days.length === 0) {
         container.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:750px;color:var(--color-muted);font-size:16px;">${t('noActivityData')}</div>`;
         document.getElementById('stats3DTotalCost').textContent = formatCurrency(0);
-        document.getElementById('stats3DTotalTokens').textContent = formatNumber(0);
+        document.getElementById('stats3DTotalTokens').textContent = formatTokenCount(0);
         document.getElementById('stats3DActiveDate').textContent = '—';
         document.getElementById('stats3DActiveTokens').textContent = '—';
         document.getElementById('stats3DActiveCost').textContent = '—';
@@ -8599,7 +8673,7 @@
       const totalCost = sorted.reduce((sum, d) => sum + (Number(d?.totals?.cost ?? 0) || 0), 0);
       const totalTokens = sorted.reduce((sum, d) => sum + (Number(d?.totals?.tokens ?? 0) || 0), 0);
       document.getElementById('stats3DTotalCost').textContent = formatCurrency(totalCost);
-      document.getElementById('stats3DTotalTokens').textContent = formatNumber(totalTokens);
+      document.getElementById('stats3DTotalTokens').textContent = formatTokenCount(totalTokens);
       
       // Find most active day under the selected metric
       const activeMetricDays = sorted.filter((day) => getMetricValue(day, metric) > 0);
@@ -8612,7 +8686,7 @@
       if (mostActiveDay) {
         const dayDate = parseDateKey(mostActiveDay.date);
         const dayName = dayDate.toLocaleDateString(currentLang === 'zh' ? 'zh-CN' : 'en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-        const dayTokens = formatNumber(mostActiveDay.totals.tokens || 0);
+        const dayTokens = formatTokenCount(mostActiveDay.totals.tokens || 0);
         const dayCost = formatCurrency(mostActiveDay.totals.cost || 0);
         document.getElementById('stats3DActiveDate').textContent = dayName;
         document.getElementById('stats3DActiveTokens').textContent = dayTokens;

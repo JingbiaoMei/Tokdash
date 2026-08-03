@@ -38,8 +38,11 @@ def _run_readable_token_js(
     functions = "\n".join(
         _extract_js_function(source, signature)
         for signature in (
+            "function normalizeTokenCount(value) {",
             "function normalizeOverviewTokenCount(value) {",
+            "function formatCompactTokenCount(value) {",
             "function formatReadableTokenCount(value) {",
+            "function formatTokenCount(value, includeUnit = false) {",
             "function loadOverviewReadableTokensPreference(storage = null) {",
             "function saveOverviewReadableTokensPreference(enabled, storage = null) {",
         )
@@ -55,6 +58,7 @@ def _run_readable_token_js(
         "const LABELS = { tokensUnit: 'tokens' };\n"
         "function t(key) { return LABELS[key] || key; }\n"
         "function formatNumber(value) { return Number(value || 0).toLocaleString('en-US'); }\n"
+        "let overviewReadableTokens = true;\n"
         + key_match
         + "\n"
         + functions
@@ -77,15 +81,18 @@ def test_readable_token_formatter_boundaries(tmp_path: Path) -> None:
     cases = {
         0: "0 tokens",
         -1: "0 tokens",
-        842_315: "842,315 tokens",
-        999_999: "999,999 tokens",
+        999: "999 tokens",
+        1_000: "1K tokens",
+        842_315: "842.3K tokens",
+        999_999: "1M tokens",
         1_000_000: "1M tokens",
         1_049_999: "1M tokens",
         1_050_000: "1.1M tokens",
         482_563_219: "482.6M tokens",
-        999_999_999: "1,000M tokens",
+        999_999_999: "1B tokens",
         1_000_000_000: "1B tokens",
         1_249_000_000: "1.2B tokens",
+        1_000_000_000_000: "1T tokens",
     }
     result = _run_readable_token_js(
         tmp_path,
@@ -94,6 +101,28 @@ def test_readable_token_formatter_boundaries(tmp_path: Path) -> None:
         list(cases),
     )
     assert result == {str(key): value for key, value in cases.items()}
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_global_token_formatter_respects_readable_preference(tmp_path: Path) -> None:
+    expression = """
+(() => {
+  overviewReadableTokens = true;
+  const readable = [
+    formatTokenCount(12_450),
+    formatTokenCount(12_450_000),
+    formatTokenCount(12_450_000_000),
+    formatTokenCount(12_450_000, true),
+  ];
+  overviewReadableTokens = false;
+  const exact = [formatTokenCount(12_450), formatTokenCount(12_450_000, true)];
+  return { readable, exact };
+})()
+"""
+    assert _run_readable_token_js(tmp_path, expression, None) == {
+        "readable": ["12.5K", "12.5M", "12.5B", "12.5M tokens"],
+        "exact": ["12,450", "12,450,000 tokens"],
+    }
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
@@ -171,27 +200,62 @@ def test_readable_token_render_and_toggle_do_not_refetch() -> None:
     assert "totalTokensExact" in renderer
     assert "aria-describedby" in renderer
     assert "saveOverviewReadableTokensPreference" in setter
-    assert "renderOverviewTokenTotal();" in setter
+    assert "rerenderTokenPresentation();" in setter
     assert "fetch(" not in setter
     assert "updateDashboard" not in setter
+    assert "loadStats" not in setter
     assert "renderOverviewTokenTotal(data.total_tokens);" in overview
-    assert "renderOverviewTokenTotal();" in i18n
+    assert "rerenderTokenPresentation();" in i18n
 
 
-def test_readable_token_scope_preserves_other_token_views() -> None:
+def test_readable_token_scope_covers_all_token_views() -> None:
     source = INDEX_HTML.read_text(encoding="utf-8")
     assert source.count("formatReadableTokenCount(") == 2
+    assert source.count("formatTokenCount(") >= 50
     assert (
         "document.getElementById('totalTokens').textContent = "
         "formatNumber(data.total_tokens);"
     ) not in source
-    for existing in (
-        "document.getElementById('statTotalTokens').textContent = formatNumber",
-        "document.getElementById('monthTotalTokens').textContent = formatNumber",
-        'document.getElementById("sessionModalTotal").textContent = formatNumber',
-        "formatProfileMetricNumber(summary.recordedTokens",
+    for token_view in (
+        "document.getElementById('statTotalTokens').textContent = formatTokenCount",
+        "document.getElementById('monthTotalTokens').textContent = formatTokenCount",
+        'document.getElementById("sessionModalTotal").textContent = formatTokenCount',
+        "formatTokenCount(model.tokens_in)",
+        "formatTokenCount(day.tokenBreakdown.reasoning)",
+        "formatTokenCount(totalTokens)",
     ):
-        assert existing in source
+        assert token_view in source
+
+    # Non-token quantities must remain exact when readable tokens are enabled.
+    for exact_count in (
+        "formatNumber(data.total_messages || 0)",
+        "formatNumber(session.token_events || 0)",
+        "formatNumber(model.messages || 0)",
+        "formatNumber(summary.activeDays || 0)",
+    ):
+        assert exact_count in source
+
+
+def test_global_token_toggle_rerenders_cached_views_without_fetching() -> None:
+    source = INDEX_HTML.read_text(encoding="utf-8")
+    renderer = _extract_js_function(
+        source,
+        "function rerenderTokenPresentation() {",
+    )
+
+    for expected in (
+        "renderOverviewTab(lastUsageResponse)",
+        "renderSessionsTab()",
+        "renderMonthHeatmap()",
+        "renderYearHeatmap()",
+        "render3DCalendar(getVisibleCalendarData('3d'))",
+        "activeSessionDetail",
+        "showDayDetails(activeDayDetail, { scroll: false })",
+    ):
+        assert expected in renderer
+    assert "fetch(" not in renderer
+    assert "loadStats" not in renderer
+    assert "updateDashboard" not in renderer
 
 
 def test_settings_panel_groups_display_and_install_controls() -> None:

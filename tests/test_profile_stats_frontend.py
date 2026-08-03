@@ -97,6 +97,8 @@ function t(key) { return LABELS[key] || key; }
 function formatNumber(value) { return new Intl.NumberFormat('en-US').format(Number(value) || 0); }
 function formatCurrency(value) { return `$${(Number(value) || 0).toFixed(2)}`; }
 function formatShortDate(value) { return value || '—'; }
+let currentLang = 'en';
+let overviewReadableTokens = true;
 """
 
 
@@ -104,6 +106,12 @@ def _run_profile_tooltip_js(tmp_path: Path, expression: str, payload: dict) -> o
     source = INDEX_HTML.read_text(encoding="utf-8")
     functions = "\n".join(
         [
+            _extract_js_function(source, "function normalizeTokenCount(value) {"),
+            _extract_js_function(source, "function formatCompactTokenCount(value) {"),
+            _extract_js_function(
+                source,
+                "function formatTokenCount(value, includeUnit = false) {",
+            ),
             _extract_js_function(source, "function safeProfileNumber(value) {"),
             _extract_js_function(source, "function getProfileMilestoneTier(value) {"),
             _extract_js_function(
@@ -459,12 +467,12 @@ def test_profile_tooltip_model_has_semantic_rows_and_accessible_text(tmp_path: P
     assert result["rows"][0] == {
         "key": "total",
         "label": "Total",
-        "value": "1,234 tokens",
+        "value": "1.2K tokens",
         "tone": "primary",
         "prominent": True,
     }
     assert result["accessibleText"] == (
-        "2026-07-20 → 2026-07-26. Total: 1,234 tokens. Input: 500. "
+        "2026-07-20 → 2026-07-26. Total: 1.2K tokens. Input: 500. "
         "Output: 300. Cache read: 250. Cache write: 100. Reasoning: 84. "
         "Estimated cost: $1.25"
     )

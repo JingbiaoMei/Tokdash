@@ -279,20 +279,26 @@
       justify-content: flex-start;
     }
 
-    .view-toggle-cluster {
-      display: inline-flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      align-items: center;
-    }
-
     .compact-control {
       min-height: 36px;
       padding: 6px 10px;
     }
 
-    .overview-readable-tokens-toggle { display: inline-flex; align-items: center; gap: 6px; width: max-content; max-width: 100%; min-height: 28px; margin-top: 10px; padding: 4px 8px; border-radius: 8px; cursor: pointer; font-size: 10px; font-weight: 750; }
-    .overview-readable-tokens-toggle[hidden] { display: none; }
+    .settings-menu { position: relative; }
+    .settings-trigger { gap: 7px; }
+    .settings-trigger svg { flex: 0 0 auto; }
+    .settings-panel { position: absolute; z-index: 110; top: calc(100% + 9px); right: 0; width: min(320px, calc(100vw - 32px)); padding: 14px; border: 1px solid color-mix(in srgb,var(--color-primary) 18%,var(--color-border)); border-radius: 14px; background: color-mix(in srgb,var(--color-surface-glass) 96%,var(--color-bg)); box-shadow: var(--shadow-md),0 16px 42px color-mix(in srgb,var(--color-text) 16%,transparent); backdrop-filter: blur(18px); }
+    .settings-panel[hidden] { display: none; }
+    .settings-panel-head { display: flex; align-items: center; gap: 9px; padding: 1px 2px 11px; border-bottom: 1px solid var(--color-border); }
+    .settings-panel-head svg { color: var(--color-primary); }
+    .settings-panel-head h2 { margin: 0; font-size: 13px; font-weight: 850; }
+    .settings-panel-body { display: grid; gap: 8px; padding-top: 10px; }
+    .settings-row { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 12px; align-items: center; min-height: 38px; }
+    .settings-label { color: var(--color-muted); font-size: 11px; font-weight: 700; }
+    .settings-control-button { min-width: 72px; min-height: 32px; padding: 5px 9px; gap: 6px; border-radius: 8px; font-size: 11px; }
+    .settings-select { min-width: 142px; min-height: 34px; padding-block: 5px; }
+    .settings-install { display: flex; width: 100%; min-height: 36px; margin-top: 2px; padding: 7px 10px; gap: 7px; font-size: 11px; }
+    .overview-readable-tokens-toggle { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 5px 8px; border-radius: 8px; cursor: pointer; font-size: 10px; font-weight: 750; }
     .overview-readable-tokens-track { position: relative; flex: 0 0 auto; width: 28px; height: 16px; border-radius: 999px; background: var(--color-border); transition: background var(--t-fast) ease; }
     .overview-readable-tokens-track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--color-bg); box-shadow: 0 1px 4px rgba(15, 23, 42, .22); transition: transform var(--t-fast) ease; }
     .overview-readable-tokens-toggle[aria-checked="true"] .overview-readable-tokens-track { background: var(--color-primary); }
@@ -304,7 +310,8 @@
     #totalTokens:focus-visible + .overview-token-exact-tooltip { opacity: 1; visibility: visible; transform: translateY(0); }
 
     @media (max-width: 640px) {
-      .overview-readable-tokens-toggle { max-width: 100%; }
+      .settings-trigger>span { display: none; }
+      .settings-trigger { width: 44px; padding-inline: 10px; }
       .overview-token-exact-tooltip { max-width: min(260px, calc(100vw - 40px)); overflow: hidden; text-overflow: ellipsis; }
     }
 
@@ -1063,36 +1070,59 @@
               <span data-i18n="refresh">Refresh</span>
             </button>
 
-            <div class="view-toggle-cluster">
-              <button id="installBtn" class="btn btn-ghost compact-control" style="display:none; gap:6px;" data-i18n-title="installApp" aria-label="Install app">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <path d="M12 3v12m0 0l-4-4m4 4l4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                  <path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            <div id="settingsMenu" class="settings-menu">
+              <button id="settingsToggle" class="btn btn-ghost compact-control settings-trigger" type="button" aria-expanded="false" aria-controls="settingsPanel">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" stroke="currentColor" stroke-width="1.8"/>
+                  <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.86 2.86-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21H9.55v-.1a1.7 1.7 0 0 0-1.08-1.56 1.7 1.7 0 0 0-1.88.34l-.06.06-2.86-2.86.06-.06A1.7 1.7 0 0 0 4.07 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H2.3V9.55h.1a1.7 1.7 0 0 0 1.56-1.08 1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.86-2.86.06.06A1.7 1.7 0 0 0 8.36 4.07a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V2.3h4.05v.1a1.7 1.7 0 0 0 1.08 1.56 1.7 1.7 0 0 0 1.88-.34l.06-.06 2.86 2.86-.06.06a1.7 1.7 0 0 0-.34 1.88 1.7 1.7 0 0 0 .6 1 1.7 1.7 0 0 0 1.1.4h.1v4.05h-.1a1.7 1.7 0 0 0-1.59 1.19Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
-                <span data-i18n="install">Install</span>
+                <span data-i18n="settings">Settings</span>
               </button>
-              <button id="langToggle" class="btn btn-ghost compact-control" style="font-size:12px; font-weight:700;" aria-label="Toggle language">中</button>
-              <button id="themeToggle" class="btn btn-ghost compact-control" aria-label="Toggle theme">
-                <svg id="themeIconMoon" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-                <svg id="themeIconSun" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="display:none;">
-                  <circle cx="12" cy="12" r="5" stroke="currentColor" stroke-width="2"/>
-                  <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                </svg>
-              </button>
-              <select id="styleThemeSelect" class="ui-input compact-control style-select" aria-label="Style theme">
-                <option value="classic" data-i18n="styleClassic">Classic</option>
-                <option value="elevated" data-i18n="styleElevated">Elevated</option>
-                <option value="paper" data-i18n="stylePaper">Paper</option>
-                <option value="liquid" data-i18n="styleLiquid">Liquid</option>
-                <option value="vibrant" data-i18n="styleVibrant">Vibrant</option>
-                <option value="midnight" data-i18n="styleMidnight">Midnight</option>
-                <option value="terminal" data-i18n="styleTerminal">Terminal</option>
-                <option value="brutalist" data-i18n="styleBrutalist">Brutalist</option>
-                <option value="arcade" data-i18n="styleArcade">Arcade</option>
-                <option value="studio" data-i18n="styleStudio">Studio</option>
-              </select>
+              <section id="settingsPanel" class="settings-panel" aria-labelledby="settingsPanelTitle" hidden>
+                <div class="settings-panel-head">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l-2.86 2.86A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1.4 1.6H9.55a1.7 1.7 0 0 0-1.08-1.66 1.7 1.7 0 0 0-1.88.34l-2.86-2.86A1.7 1.7 0 0 0 4.07 15a1.7 1.7 0 0 0-1.77-1.4V9.55a1.7 1.7 0 0 0 1.66-1.08 1.7 1.7 0 0 0-.34-1.88l2.86-2.86A1.7 1.7 0 0 0 8.36 4.07 1.7 1.7 0 0 0 9.76 2.3h4.05a1.7 1.7 0 0 0 1.08 1.66 1.7 1.7 0 0 0 1.88-.34l2.86 2.86a1.7 1.7 0 0 0-.34 1.88 1.7 1.7 0 0 0 1.77 1.4v4.05A1.7 1.7 0 0 0 19.4 15Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                  <h2 id="settingsPanelTitle" data-i18n="settings">Settings</h2>
+                </div>
+                <div class="settings-panel-body">
+                  <div class="settings-row">
+                    <span class="settings-label" data-i18n="language">Language</span>
+                    <button id="langToggle" class="btn btn-ghost settings-control-button" type="button" aria-label="Toggle language">中</button>
+                  </div>
+                  <div class="settings-row">
+                    <span class="settings-label" data-i18n="colorMode">Light / dark</span>
+                    <button id="themeToggle" class="btn btn-ghost settings-control-button" type="button" aria-label="Toggle theme">
+                      <svg id="themeIconMoon" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                      <svg id="themeIconSun" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="display:none;"><circle cx="12" cy="12" r="5" stroke="currentColor" stroke-width="2"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                      <span id="themeModeLabel">Light</span>
+                    </button>
+                  </div>
+                  <label class="settings-row" for="styleThemeSelect">
+                    <span class="settings-label" data-i18n="styleTheme">Style</span>
+                    <select id="styleThemeSelect" class="ui-input style-select settings-select" aria-label="Style theme">
+                      <option value="classic" data-i18n="styleClassic">Classic</option>
+                      <option value="elevated" data-i18n="styleElevated">Elevated</option>
+                      <option value="paper" data-i18n="stylePaper">Paper</option>
+                      <option value="liquid" data-i18n="styleLiquid">Liquid</option>
+                      <option value="vibrant" data-i18n="styleVibrant">Vibrant</option>
+                      <option value="midnight" data-i18n="styleMidnight">Midnight</option>
+                      <option value="terminal" data-i18n="styleTerminal">Terminal</option>
+                      <option value="brutalist" data-i18n="styleBrutalist">Brutalist</option>
+                      <option value="arcade" data-i18n="styleArcade">Arcade</option>
+                      <option value="studio" data-i18n="styleStudio">Studio</option>
+                    </select>
+                  </label>
+                  <div class="settings-row">
+                    <span class="settings-label" data-i18n="readableTokens">Readable tokens</span>
+                    <button id="readableTokensToggle" class="btn btn-ghost overview-readable-tokens-toggle" type="button" role="switch" aria-checked="true" aria-label="Readable tokens">
+                      <span class="overview-readable-tokens-track" aria-hidden="true"></span>
+                    </button>
+                  </div>
+                  <button id="installBtn" class="btn btn-ghost settings-install" type="button" style="display:none;" data-i18n-title="installApp" aria-label="Install app">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    <span data-i18n="install">Install</span>
+                  </button>
+                </div>
+              </section>
             </div>
           </div>
         </div>
@@ -1120,10 +1150,6 @@
             <div id="totalTokensExact" class="overview-token-exact-tooltip" role="tooltip">-</div>
           </div>
           <div id="tokensDelta" class="text-xs font-semibold mt-1" style="color: var(--color-muted);"></div>
-          <button id="readableTokensToggle" class="btn btn-ghost overview-readable-tokens-toggle" type="button" role="switch" aria-checked="true" aria-label="Readable tokens">
-            <span data-i18n="readableTokens">Readable tokens</span>
-            <span class="overview-readable-tokens-track" aria-hidden="true"></span>
-          </button>
         </div>
         <div class="surface p-5">
           <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="totalCost">Total Cost</div>
@@ -2277,6 +2303,11 @@
         refreshBusy: 'Busy',
         refreshFailed: 'Failed — retry',
         refreshCooldown: 'Wait {n}s',
+        settings: 'Settings',
+        language: 'Language',
+        colorMode: 'Light / dark',
+        themeLight: 'Light',
+        themeDark: 'Dark',
         install: 'Install',
         installApp: 'Install Tokdash as an app',
         styleTheme: 'Style',
@@ -2554,6 +2585,11 @@
         refreshBusy: '繁忙',
         refreshFailed: '失败，请重试',
         refreshCooldown: '{n} 秒后重试',
+        settings: '设置',
+        language: '语言',
+        colorMode: '明暗模式',
+        themeLight: '浅色',
+        themeDark: '深色',
         install: '安装',
         installApp: '将 Tokdash 安装为应用',
         styleTheme: '样式',
@@ -2955,6 +2991,35 @@
       renderOverviewTokenTotal();
     }
 
+    function setSettingsPanelOpen(open, returnFocus = false) {
+      const trigger = document.getElementById('settingsToggle');
+      const panel = document.getElementById('settingsPanel');
+      if (!trigger || !panel) return;
+      const expanded = Boolean(open);
+      trigger.setAttribute('aria-expanded', String(expanded));
+      panel.hidden = !expanded;
+      panel.style.removeProperty('transform');
+      if (expanded) {
+        const gutter = 16;
+        const bounds = panel.getBoundingClientRect();
+        let shiftX = 0;
+        if (bounds.left < gutter) shiftX = gutter - bounds.left;
+        else if (bounds.right > window.innerWidth - gutter) {
+          shiftX = window.innerWidth - gutter - bounds.right;
+        }
+        if (shiftX) panel.style.transform = `translateX(${shiftX}px)`;
+      }
+      if (!expanded && returnFocus) trigger.focus();
+    }
+
+    function syncThemeModeControl() {
+      const label = document.getElementById('themeModeLabel');
+      const toggle = document.getElementById('themeToggle');
+      const labelKey = isDark() ? 'themeDark' : 'themeLight';
+      if (label) label.textContent = t(labelKey);
+      if (toggle) toggle.setAttribute('aria-label', `${t('colorMode')}: ${t(labelKey)}`);
+    }
+
     function fitOverviewKpis() {
       ['totalTokens', 'totalCost', 'totalMessages'].forEach((id) => fitKpiValue(document.getElementById(id)));
     }
@@ -3245,6 +3310,7 @@
       const sun = document.getElementById('themeIconSun');
       if (moon) moon.style.display = dark ? 'none' : '';
       if (sun) sun.style.display = dark ? '' : 'none';
+      syncThemeModeControl();
     }
 
     function renderRefreshButton() {
@@ -3431,6 +3497,7 @@
       renderRefreshButton();
       syncCodexReviewToggle();
       syncOverviewReadableTokensToggle();
+      syncThemeModeControl();
       renderOverviewTokenTotal();
       updateTimestamp();
       updateMetricControls();
@@ -6183,9 +6250,6 @@
       document.querySelectorAll('.tab-content').forEach((item) => item.classList.remove('active'));
       content.classList.add('active');
 
-      const toggle = document.getElementById('readableTokensToggle');
-      if (toggle) toggle.hidden = tab !== 'overview';
-
       if (tab !== 'overview') {
         const tooltip = document.getElementById('overviewProfileTooltip');
         if (tooltip) tooltip.hidden = true;
@@ -8649,6 +8713,23 @@
 
     document.getElementById('readableTokensToggle')?.addEventListener('click', () => {
       setOverviewReadableTokens(!overviewReadableTokens);
+    });
+
+    const settingsMenu = document.getElementById('settingsMenu');
+    const settingsToggle = document.getElementById('settingsToggle');
+    const settingsPanel = document.getElementById('settingsPanel');
+    settingsToggle?.addEventListener('click', () => {
+      setSettingsPanelOpen(settingsPanel?.hidden !== false);
+    });
+    document.addEventListener('click', (event) => {
+      if (!settingsPanel?.hidden && settingsMenu && !settingsMenu.contains(event.target)) {
+        setSettingsPanelOpen(false);
+      }
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && !settingsPanel?.hidden) {
+        setSettingsPanelOpen(false, true);
+      }
     });
 
     document.getElementById('codexReviewToggle')?.addEventListener('change', (event) => {

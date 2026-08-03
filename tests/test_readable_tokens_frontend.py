@@ -144,13 +144,9 @@ def test_readable_token_switch_markup_and_tooltip_contract() -> None:
     assert 'id="totalTokensWrap"' in source
     assert 'id="totalTokensExact"' in source
     assert 'role="tooltip"' in source
-    assert source.index('id="totalTokensWrap"') < source.index(
+    assert source.index('id="settingsPanel"') < source.index(
         'id="readableTokensToggle"'
-    ) < source.index('id="totalCost"')
-    assert source.index('id="overview-content"') < source.index(
-        'id="readableTokensToggle"'
-    )
-    assert ".overview-readable-tokens-toggle[hidden]{display:none;}" in compact
+    ) < source.index('id="overview-content"')
     assert "#totalTokens:hover+.overview-token-exact-tooltip" in compact
     assert "#totalTokens:focus-visible+.overview-token-exact-tooltip" in compact
     assert source.count("readableTokens: '") == 2
@@ -166,10 +162,6 @@ def test_readable_token_render_and_toggle_do_not_refetch() -> None:
         source,
         "function setOverviewReadableTokens(enabled) {",
     )
-    tab_activation = _extract_js_function(
-        source,
-        "function activateDashboardTab(tab) {",
-    )
     overview = _extract_js_function(source, "function renderOverviewTab(data) {")
     i18n = _extract_js_function(source, "function applyI18n() {")
 
@@ -182,7 +174,6 @@ def test_readable_token_render_and_toggle_do_not_refetch() -> None:
     assert "renderOverviewTokenTotal();" in setter
     assert "fetch(" not in setter
     assert "updateDashboard" not in setter
-    assert "toggle.hidden = tab !== 'overview';" in tab_activation
     assert "renderOverviewTokenTotal(data.total_tokens);" in overview
     assert "renderOverviewTokenTotal();" in i18n
 
@@ -201,3 +192,30 @@ def test_readable_token_scope_preserves_other_token_views() -> None:
         "formatProfileMetricNumber(summary.recordedTokens",
     ):
         assert existing in source
+
+
+def test_settings_panel_groups_display_and_install_controls() -> None:
+    source = INDEX_HTML.read_text(encoding="utf-8")
+    panel_start = source.index('id="settingsPanel"')
+    overview_start = source.index('id="overview-content"')
+
+    assert source.index('id="settingsToggle"') < panel_start
+    assert 'aria-expanded="false"' in source
+    assert 'aria-controls="settingsPanel"' in source
+    assert 'aria-labelledby="settingsPanelTitle"' in source
+    for control_id in (
+        "langToggle",
+        "themeToggle",
+        "styleThemeSelect",
+        "readableTokensToggle",
+        "installBtn",
+    ):
+        assert panel_start < source.index(f'id="{control_id}"') < overview_start
+
+    assert "function setSettingsPanelOpen(open, returnFocus = false)" in source
+    assert "panel.getBoundingClientRect()" in source
+    assert "window.innerWidth - gutter" in source
+    assert "event.key === 'Escape'" in source
+    assert "!settingsMenu.contains(event.target)" in source
+    assert source.count("settings: '") == 2
+    assert source.count("colorMode: '") == 2

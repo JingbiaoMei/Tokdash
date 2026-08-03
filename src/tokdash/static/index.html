@@ -291,9 +291,9 @@
       padding: 6px 10px;
     }
 
-    .overview-readable-tokens-toggle { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; }
+    .overview-readable-tokens-toggle { display: inline-flex; align-items: center; gap: 6px; width: max-content; max-width: 100%; min-height: 28px; margin-top: 10px; padding: 4px 8px; border-radius: 8px; cursor: pointer; font-size: 10px; font-weight: 750; }
     .overview-readable-tokens-toggle[hidden] { display: none; }
-    .overview-readable-tokens-track { position: relative; width: 28px; height: 16px; border-radius: 999px; background: var(--color-border); transition: background var(--t-fast) ease; }
+    .overview-readable-tokens-track { position: relative; flex: 0 0 auto; width: 28px; height: 16px; border-radius: 999px; background: var(--color-border); transition: background var(--t-fast) ease; }
     .overview-readable-tokens-track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--color-bg); box-shadow: 0 1px 4px rgba(15, 23, 42, .22); transition: transform var(--t-fast) ease; }
     .overview-readable-tokens-toggle[aria-checked="true"] .overview-readable-tokens-track { background: var(--color-primary); }
     .overview-readable-tokens-toggle[aria-checked="true"] .overview-readable-tokens-track::after { transform: translateX(12px); }
@@ -1055,10 +1055,6 @@
           </div>
 
           <div class="topbar-actions">
-            <button id="readableTokensToggle" class="btn btn-ghost compact-control overview-readable-tokens-toggle" type="button" role="switch" aria-checked="true" aria-label="Readable tokens">
-              <span data-i18n="readableTokens">Readable tokens</span>
-              <span class="overview-readable-tokens-track" aria-hidden="true"></span>
-            </button>
             <button id="refreshBtn" class="btn btn-primary" aria-label="Refresh dashboard">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                 <path d="M20 12a8 8 0 1 1-2.343-5.657" stroke="white" stroke-width="2" stroke-linecap="round"/>
@@ -1124,6 +1120,10 @@
             <div id="totalTokensExact" class="overview-token-exact-tooltip" role="tooltip">-</div>
           </div>
           <div id="tokensDelta" class="text-xs font-semibold mt-1" style="color: var(--color-muted);"></div>
+          <button id="readableTokensToggle" class="btn btn-ghost overview-readable-tokens-toggle" type="button" role="switch" aria-checked="true" aria-label="Readable tokens">
+            <span data-i18n="readableTokens">Readable tokens</span>
+            <span class="overview-readable-tokens-track" aria-hidden="true"></span>
+          </button>
         </div>
         <div class="surface p-5">
           <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="totalCost">Total Cost</div>

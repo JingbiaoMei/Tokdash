@@ -144,6 +144,12 @@ def test_readable_token_switch_markup_and_tooltip_contract() -> None:
     assert 'id="totalTokensWrap"' in source
     assert 'id="totalTokensExact"' in source
     assert 'role="tooltip"' in source
+    assert source.index('id="totalTokensWrap"') < source.index(
+        'id="readableTokensToggle"'
+    ) < source.index('id="totalCost"')
+    assert source.index('id="overview-content"') < source.index(
+        'id="readableTokensToggle"'
+    )
     assert ".overview-readable-tokens-toggle[hidden]{display:none;}" in compact
     assert "#totalTokens:hover+.overview-token-exact-tooltip" in compact
     assert "#totalTokens:focus-visible+.overview-token-exact-tooltip" in compact

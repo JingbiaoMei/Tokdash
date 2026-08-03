@@ -30,7 +30,12 @@ def _extract_js_function(source: str, signature: str) -> str:
     start = source.find(signature)
     assert start != -1, f"{signature} not found in index.html"
     depth = 0
-    for index in range(source.find("{", start), len(source)):
+    body_start = (
+        start + len(signature) - 1
+        if signature.endswith("{")
+        else source.find("{", start)
+    )
+    for index in range(body_start, len(source)):
         if source[index] == "{":
             depth += 1
         elif source[index] == "}":
@@ -1273,6 +1278,166 @@ def test_overview_profile_resize_rearms_initial_scroll_contract():
         "window.addEventListener('resize', ensureOverviewProfileInitialScroll, "
         "{ passive: true });"
     ) in source
+
+
+def test_activity_insights_profile_and_overview_markup_contract():
+    source = INDEX_HTML.read_text(encoding="utf-8")
+    for element_id in (
+        "profileActivityInsights",
+        "profileActivityInsightsKpis",
+        "profileActivityCoverage",
+        "profileActivityToolRanking",
+        "overviewActivityInsights",
+        "overviewActivityInsightsValues",
+        "overviewActivityInsightsState",
+    ):
+        assert f'id="{element_id}"' in source
+    assert source.index('id="profileActivityLegend"') < source.index(
+        'id="profileActivityInsights"'
+    )
+    assert source.index('id="overviewProfileLegend"') < source.index(
+        'id="overviewActivityInsights"'
+    )
+
+
+def test_activity_insights_use_one_shared_fetch_and_limit_profile_to_five_tools():
+    source = INDEX_HTML.read_text(encoding="utf-8")
+    loader = _extract_js_function(
+        source, "async function loadActivityInsights(options = {}) {"
+    )
+    profile = _extract_js_function(
+        source, "function renderProfileActivityInsights() {"
+    )
+    overview = _extract_js_function(
+        source, "function renderOverviewActivityInsights() {"
+    )
+
+    assert source.count("fetchJsonWithRetry(appPath('/api/activity-insights')") == 1
+    assert "activityInsightsState.promise" in loader
+    assert ".slice(0, 5)" in profile
+    assert "fetch(" not in profile
+    assert "fetch(" not in overview
+    assert "innerHTML" not in profile
+    assert "innerHTML" not in overview
+    assert "textContent" in profile
+    assert "textContent" in overview
+
+
+def test_activity_insights_localization_states_and_responsive_contract():
+    source = INDEX_HTML.read_text(encoding="utf-8")
+    compact = re.sub(r"\s+", "", source)
+    for key in (
+        "activityInsightsTitle",
+        "activityRecordedChats",
+        "activityReasoning",
+        "activityToolCalls",
+        "activityTopTool",
+        "activityCoverage",
+        "activityNoData",
+        "activityUnavailable",
+        "activityLocalScope",
+        "effortXhigh",
+    ):
+        assert source.count(f"{key}: '") == 2
+    assert "@media(max-width:768px)" in compact
+    assert (
+        ".profile-activity-insights-kpis{display:grid;"
+        "grid-template-columns:repeat(4,minmax(0,1fr))" in compact
+    )
+    assert (
+        ".profile-activity-insights-kpis,.overview-activity-insights-values"
+        "{grid-template-columns:repeat(2,minmax(0,1fr))" in compact
+    )
+    assert ".overview-activity-insights{background:transparent" in compact
+    assert ".overview-profile-grid-wrap{position:relative;min-width:595px;" in compact
+
+
+def _run_activity_insights_js(
+    tmp_path: Path, expression: str, payload: dict, labels: dict | None = None
+) -> object:
+    source = INDEX_HTML.read_text(encoding="utf-8")
+    functions = "\n".join(
+        _extract_js_function(source, signature)
+        for signature in (
+            "function safeActivityNumber(value) {",
+            "function formatActivityShare(value) {",
+            "function formatActivityEffort(effort) {",
+            "function buildActivityInsightValues(data) {",
+        )
+    )
+    harness = tmp_path / "activity-insights.js"
+    harness.write_text(
+        "const LABELS = JSON.parse(process.argv[3]);\n"
+        "function t(key) { return LABELS[key] || key; }\n"
+        "function formatNumber(value) { return new Intl.NumberFormat('en-US').format(Number(value) || 0); }\n"
+        + functions
+        + "\nconst payload = JSON.parse(process.argv[2]);\n"
+        + f"const result = {expression};\n"
+        + "process.stdout.write(JSON.stringify(result));\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [
+            "node",
+            str(harness),
+            json.dumps(payload),
+            json.dumps(
+                labels
+                or {
+                    "effortXhigh": "Extra High",
+                    "effortHigh": "High",
+                    "effortMedium": "Medium",
+                    "effortLow": "Low",
+                }
+            ),
+        ],
+        check=True,
+        capture_output=True,
+        encoding="utf-8",
+    )
+    return json.loads(result.stdout)
+
+
+def test_activity_insights_display_values_cover_full_partial_and_unknown_effort(
+    tmp_path: Path,
+):
+    full = {
+        "recorded_chats": {"value": 12},
+        "reasoning": {
+            "most_used": {"effort": "xhigh", "count": 48, "share": 0.48}
+        },
+        "tools": {
+            "total_calls": 892,
+            "most_used": {"name": "exec", "count": 330, "share": 0.37},
+        },
+    }
+    result = _run_activity_insights_js(
+        tmp_path, "buildActivityInsightValues(payload)", full
+    )
+    assert result == {
+        "empty": False,
+        "chats": "12",
+        "reasoning": "Extra High · 48%",
+        "toolCalls": "892",
+        "topTool": "exec · 37%",
+    }
+
+    partial = {
+        "recorded_chats": {"value": 1},
+        "reasoning": {"most_used": {"effort": "turbo", "share": 0.5}},
+        "tools": {"total_calls": 0, "most_used": None},
+    }
+    result = _run_activity_insights_js(
+        tmp_path, "buildActivityInsightValues(payload)", partial
+    )
+    assert result["empty"] is False
+    assert result["reasoning"] == "turbo · 50%"
+    assert result["topTool"] == "—"
+
+    empty = _run_activity_insights_js(
+        tmp_path, "buildActivityInsightValues(payload)", {}
+    )
+    assert empty["empty"] is True
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not available")

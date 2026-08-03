@@ -376,6 +376,65 @@ def test_codex_parser_marks_empty_subagent_from_first_session_meta(tmp_path):
     assert _parse(path) is None
 
 
+def test_codex_parser_excludes_guardian_activity_from_primary_metrics(tmp_path):
+    path = tmp_path / "guardian.jsonl"
+    _write_jsonl(
+        path,
+        [
+            {
+                "timestamp": "2026-08-03T10:00:00Z",
+                "type": "session_meta",
+                "payload": {
+                    "id": "guardian-1",
+                    "source": {"subagent": {"other": "guardian"}},
+                },
+            },
+            {
+                "timestamp": "2026-08-03T10:00:01Z",
+                "type": "turn_context",
+                "payload": {
+                    "turn_id": "turn-1",
+                    "effort": "low",
+                    "model": "codex-auto-review",
+                },
+            },
+            {
+                "timestamp": "2026-08-03T10:00:02Z",
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call",
+                    "call_id": "call-1",
+                    "name": "exec_command",
+                },
+            },
+            {
+                "timestamp": "2026-08-03T10:00:03Z",
+                "type": "event_msg",
+                "payload": {
+                    "type": "token_count",
+                    "info": {
+                        "last_token_usage": {
+                            "input_tokens": 11,
+                            "cached_input_tokens": 2,
+                            "output_tokens": 5,
+                            "reasoning_output_tokens": 3,
+                        }
+                    },
+                },
+            },
+        ],
+    )
+
+    raw = _parse(path)
+    result = build_activity_insights([_wrapped("guardian-1", raw["_activity"])])
+
+    assert raw["is_review_session"] is True
+    assert raw["_activity"]["is_primary"] is False
+    assert result["recorded_chats"]["value"] == 0
+    assert result["reasoning"]["distribution"] == []
+    assert result["tools"]["total_calls"] == 0
+
+
 def test_empty_primary_activity_record_stays_out_of_session_loaders(tmp_path):
     raw = {
         "tool": "codex",

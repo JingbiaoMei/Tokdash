@@ -514,6 +514,10 @@ def _parse_codex_session_file(path_str: str, _mtime_ns: int, _size: int, _pricin
                 explicit_meta_id = meta_id.strip() if isinstance(meta_id, str) else ""
                 if explicit_meta_id:
                     activity["has_explicit_session_id"] = True
+                is_guardian_meta = _is_codex_guardian_session(payload)
+                if is_guardian_meta:
+                    is_review_session = True
+                    activity["is_primary"] = False
                 if not saw_session_meta:
                     saw_session_meta = True
                     source = payload.get("source")
@@ -524,14 +528,13 @@ def _parse_codex_session_file(path_str: str, _mtime_ns: int, _size: int, _pricin
                         is_subagent_file = True
                         pid = (subagent.get("thread_spawn") or {}).get("parent_thread_id")
                         subagent_parent_id = str(pid) if pid else None
-                    activity["is_primary"] = not is_subagent_file
+                    activity["is_primary"] = not is_subagent_file and not is_guardian_meta
                 if explicit_meta_id:
                     session_id = explicit_meta_id      # current (last-seen) session id
                     if own_session_id is None:
                         own_session_id = session_id
                 cwd = str(payload.get("cwd") or cwd)
                 repo_url = str(((payload.get("git") or {}).get("repository_url")) or repo_url)
-                is_review_session = is_review_session or _is_codex_guardian_session(payload)
                 if payload.get("model_provider"):
                     current_provider = str(payload.get("model_provider"))
                 continue

@@ -2811,6 +2811,47 @@
       return (num ?? 0).toLocaleString(currentLang === 'zh' ? 'zh-CN' : 'en-US');
     }
 
+    const OVERVIEW_READABLE_TOKENS_STORAGE_KEY = 'tokdash-overview-readable-tokens';
+
+    function normalizeOverviewTokenCount(value) {
+      const number = Number(value);
+      return Number.isFinite(number) && number > 0 ? Math.round(number) : 0;
+    }
+
+    function formatReadableTokenCount(value) {
+      const tokens = normalizeOverviewTokenCount(value);
+      if (tokens < 1_000_000) return `${formatNumber(tokens)} ${t('tokensUnit')}`;
+
+      const useBillions = tokens >= 1_000_000_000;
+      const divisor = useBillions ? 1_000_000_000 : 1_000_000;
+      const suffix = useBillions ? 'B' : 'M';
+      const rounded = Math.round((tokens / divisor) * 10) / 10;
+      const locale = currentLang === 'zh' ? 'zh-CN' : 'en-US';
+      const compact = rounded.toLocaleString(locale, {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 1,
+      });
+      return `${compact}${suffix} ${t('tokensUnit')}`;
+    }
+
+    function loadOverviewReadableTokensPreference(storage = null) {
+      try {
+        const target = storage || window.localStorage;
+        return target.getItem(OVERVIEW_READABLE_TOKENS_STORAGE_KEY) !== '0';
+      } catch (_error) {
+        return true;
+      }
+    }
+
+    function saveOverviewReadableTokensPreference(enabled, storage = null) {
+      try {
+        const target = storage || window.localStorage;
+        target.setItem(OVERVIEW_READABLE_TOKENS_STORAGE_KEY, enabled ? '1' : '0');
+      } catch (_error) {
+        // The preference is optional when storage is unavailable.
+      }
+    }
+
     // Shrink a KPI value's font-size only when its (unbreakable) number would
     // overflow its narrow card — e.g. hundred-million+ totals under the "This
     // Year" range. The size is reset first, so short/normal values keep their CSS

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-import tokdash
+import tokdash  # type: ignore[import-untyped]
 
 INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
 
@@ -133,3 +133,65 @@ def test_readable_token_preference_defaults_and_fails_soft(tmp_path: Path) -> No
             ["tokdash-overview-readable-tokens", "1"],
         ],
     }
+
+
+def test_readable_token_switch_markup_and_tooltip_contract() -> None:
+    source = INDEX_HTML.read_text(encoding="utf-8")
+    compact = "".join(source.split())
+    assert 'id="readableTokensToggle"' in source
+    assert 'role="switch"' in source
+    assert 'aria-checked="true"' in source
+    assert 'id="totalTokensWrap"' in source
+    assert 'id="totalTokensExact"' in source
+    assert 'role="tooltip"' in source
+    assert ".overview-readable-tokens-toggle[hidden]{display:none;}" in compact
+    assert "#totalTokens:hover+.overview-token-exact-tooltip" in compact
+    assert "#totalTokens:focus-visible+.overview-token-exact-tooltip" in compact
+    assert source.count("readableTokens: '") == 2
+
+
+def test_readable_token_render_and_toggle_do_not_refetch() -> None:
+    source = INDEX_HTML.read_text(encoding="utf-8")
+    renderer = _extract_js_function(
+        source,
+        "function renderOverviewTokenTotal(value = overviewTotalTokensRaw) {",
+    )
+    setter = _extract_js_function(
+        source,
+        "function setOverviewReadableTokens(enabled) {",
+    )
+    tab_activation = _extract_js_function(
+        source,
+        "function activateDashboardTab(tab) {",
+    )
+    overview = _extract_js_function(source, "function renderOverviewTab(data) {")
+    i18n = _extract_js_function(source, "function applyI18n() {")
+
+    assert "overviewTotalTokensRaw = normalizeOverviewTokenCount(value);" in renderer
+    assert "formatReadableTokenCount(overviewTotalTokensRaw)" in renderer
+    assert "formatNumber(overviewTotalTokensRaw)" in renderer
+    assert "totalTokensExact" in renderer
+    assert "aria-describedby" in renderer
+    assert "saveOverviewReadableTokensPreference" in setter
+    assert "renderOverviewTokenTotal();" in setter
+    assert "fetch(" not in setter
+    assert "updateDashboard" not in setter
+    assert "toggle.hidden = tab !== 'overview';" in tab_activation
+    assert "renderOverviewTokenTotal(data.total_tokens);" in overview
+    assert "renderOverviewTokenTotal();" in i18n
+
+
+def test_readable_token_scope_preserves_other_token_views() -> None:
+    source = INDEX_HTML.read_text(encoding="utf-8")
+    assert source.count("formatReadableTokenCount(") == 2
+    assert (
+        "document.getElementById('totalTokens').textContent = "
+        "formatNumber(data.total_tokens);"
+    ) not in source
+    for existing in (
+        "document.getElementById('statTotalTokens').textContent = formatNumber",
+        "document.getElementById('monthTotalTokens').textContent = formatNumber",
+        'document.getElementById("sessionModalTotal").textContent = formatNumber',
+        "formatProfileMetricNumber(summary.recordedTokens",
+    ):
+        assert existing in source

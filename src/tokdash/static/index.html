@@ -291,6 +291,29 @@
       padding: 6px 10px;
     }
 
+    .overview-readable-tokens-toggle { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; }
+    .overview-readable-tokens-toggle[hidden] { display: none; }
+    .overview-readable-tokens-track { position: relative; width: 28px; height: 16px; border-radius: 999px; background: var(--color-border); transition: background var(--t-fast) ease; }
+    .overview-readable-tokens-track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--color-bg); box-shadow: 0 1px 4px rgba(15, 23, 42, .22); transition: transform var(--t-fast) ease; }
+    .overview-readable-tokens-toggle[aria-checked="true"] .overview-readable-tokens-track { background: var(--color-primary); }
+    .overview-readable-tokens-toggle[aria-checked="true"] .overview-readable-tokens-track::after { transform: translateX(12px); }
+    .overview-token-value-wrap { position: relative; width: max-content; max-width: 100%; }
+    .overview-token-exact-tooltip { position: absolute; z-index: 70; left: 0; bottom: calc(100% + 8px); padding: 6px 8px; border-radius: 7px; background: var(--color-text); color: var(--color-bg); font-size: 10px; font-weight: 750; line-height: 1.2; white-space: nowrap; opacity: 0; visibility: hidden; pointer-events: none; transform: translateY(3px); transition: opacity var(--t-fast) ease, transform var(--t-fast) ease, visibility var(--t-fast) ease; box-shadow: 0 8px 22px rgba(15, 23, 42, .22); }
+    .overview-token-exact-tooltip::after { content: ""; position: absolute; left: 18px; top: 100%; border: 4px solid transparent; border-top-color: var(--color-text); }
+    #totalTokens:hover + .overview-token-exact-tooltip,
+    #totalTokens:focus-visible + .overview-token-exact-tooltip { opacity: 1; visibility: visible; transform: translateY(0); }
+
+    @media (max-width: 640px) {
+      .overview-readable-tokens-toggle { max-width: 100%; }
+      .overview-token-exact-tooltip { max-width: min(260px, calc(100vw - 40px)); overflow: hidden; text-overflow: ellipsis; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .overview-readable-tokens-track,
+      .overview-readable-tokens-track::after,
+      .overview-token-exact-tooltip { transition: none; }
+    }
+
     /* Provider-visibility dropdown on the Quota tab (show/hide Codex/Claude/Antigravity). */
     .quota-visibility-wrap {
       position: relative;
@@ -1032,6 +1055,10 @@
           </div>
 
           <div class="topbar-actions">
+            <button id="readableTokensToggle" class="btn btn-ghost compact-control overview-readable-tokens-toggle" type="button" role="switch" aria-checked="true" aria-label="Readable tokens">
+              <span data-i18n="readableTokens">Readable tokens</span>
+              <span class="overview-readable-tokens-track" aria-hidden="true"></span>
+            </button>
             <button id="refreshBtn" class="btn btn-primary" aria-label="Refresh dashboard">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                 <path d="M20 12a8 8 0 1 1-2.343-5.657" stroke="white" stroke-width="2" stroke-linecap="round"/>
@@ -1092,7 +1119,10 @@
       <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
         <div class="surface p-5">
           <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="totalTokens">Total Tokens</div>
-          <div id="totalTokens" class="text-3xl sm:text-4xl font-extrabold mt-2" style="color: var(--color-primary);">-</div>
+          <div id="totalTokensWrap" class="overview-token-value-wrap" data-readable="true">
+            <div id="totalTokens" class="text-3xl sm:text-4xl font-extrabold mt-2" style="color: var(--color-primary);" tabindex="0" aria-describedby="totalTokensExact">-</div>
+            <div id="totalTokensExact" class="overview-token-exact-tooltip" role="tooltip">-</div>
+          </div>
           <div id="tokensDelta" class="text-xs font-semibold mt-1" style="color: var(--color-muted);"></div>
         </div>
         <div class="surface p-5">
@@ -2341,6 +2371,7 @@
         pricingSourceOverride: 'Local override active (fully replaces bundled rates)',
         pricingForkedFrom: 'bundled baseline is now v{v}; delete the override to resume updates',
         totalTokens: 'Total Tokens',
+        readableTokens: 'Readable tokens',
         totalCost: 'Total Cost',
         totalMessages: 'Total Messages',
         topModel: 'Top Model',
@@ -2617,6 +2648,7 @@
         pricingSourceOverride: '本地覆盖已生效（完全替换内置费率）',
         pricingForkedFrom: '内置基线现为 v{v}；删除覆盖文件可恢复自动更新',
         totalTokens: '总 Token 数',
+        readableTokens: '易读 Token',
         totalCost: '总费用',
         totalMessages: '总消息数',
         topModel: '最常用模型',
@@ -2852,6 +2884,9 @@
       }
     }
 
+    let overviewReadableTokens = loadOverviewReadableTokensPreference();
+    let overviewTotalTokensRaw = null;
+
     // Shrink a KPI value's font-size only when its (unbreakable) number would
     // overflow its narrow card — e.g. hundred-million+ totals under the "This
     // Year" range. The size is reset first, so short/normal values keep their CSS
@@ -2869,6 +2904,55 @@
         el.style.fontSize = size + 'px';
         guard += 1;
       }
+    }
+
+    function renderOverviewTokenTotal(value = overviewTotalTokensRaw) {
+      const valueElement = document.getElementById('totalTokens');
+      const wrapper = document.getElementById('totalTokensWrap');
+      const tooltip = document.getElementById('totalTokensExact');
+      if (!valueElement || !wrapper || !tooltip) return;
+      if (value === null) {
+        valueElement.textContent = '-';
+        valueElement.removeAttribute('tabindex');
+        valueElement.removeAttribute('aria-describedby');
+        valueElement.removeAttribute('aria-label');
+        tooltip.textContent = '-';
+        tooltip.hidden = true;
+        return;
+      }
+
+      overviewTotalTokensRaw = normalizeOverviewTokenCount(value);
+      const exact = `${formatNumber(overviewTotalTokensRaw)} ${t('tokensUnit')}`;
+      valueElement.textContent = overviewReadableTokens
+        ? formatReadableTokenCount(overviewTotalTokensRaw)
+        : formatNumber(overviewTotalTokensRaw);
+      wrapper.dataset.readable = String(overviewReadableTokens);
+      tooltip.textContent = exact;
+      tooltip.hidden = !overviewReadableTokens;
+      if (overviewReadableTokens) {
+        valueElement.tabIndex = 0;
+        valueElement.setAttribute('aria-describedby', 'totalTokensExact');
+        valueElement.setAttribute('aria-label', exact);
+      } else {
+        valueElement.removeAttribute('tabindex');
+        valueElement.removeAttribute('aria-describedby');
+        valueElement.removeAttribute('aria-label');
+      }
+      fitKpiValue(valueElement);
+    }
+
+    function syncOverviewReadableTokensToggle() {
+      const toggle = document.getElementById('readableTokensToggle');
+      if (!toggle) return;
+      toggle.setAttribute('aria-checked', String(overviewReadableTokens));
+      toggle.setAttribute('aria-label', t('readableTokens'));
+    }
+
+    function setOverviewReadableTokens(enabled) {
+      overviewReadableTokens = Boolean(enabled);
+      saveOverviewReadableTokensPreference(overviewReadableTokens);
+      syncOverviewReadableTokensToggle();
+      renderOverviewTokenTotal();
     }
 
     function fitOverviewKpis() {
@@ -3346,6 +3430,8 @@
       }
       renderRefreshButton();
       syncCodexReviewToggle();
+      syncOverviewReadableTokensToggle();
+      renderOverviewTokenTotal();
       updateTimestamp();
       updateMetricControls();
       syncDatePickerFooter();
@@ -3726,7 +3812,7 @@
 
     function renderOverviewTab(data) {
       if (!data) return;
-      document.getElementById('totalTokens').textContent = formatNumber(data.total_tokens);
+      renderOverviewTokenTotal(data.total_tokens);
       document.getElementById('totalCost').textContent = formatCurrency(data.total_cost);
       document.getElementById('totalMessages').textContent = formatNumber(data.total_messages || 0);
       fitOverviewKpis();
@@ -6096,6 +6182,9 @@
       button.setAttribute('aria-selected', 'true');
       document.querySelectorAll('.tab-content').forEach((item) => item.classList.remove('active'));
       content.classList.add('active');
+
+      const toggle = document.getElementById('readableTokensToggle');
+      if (toggle) toggle.hidden = tab !== 'overview';
 
       if (tab !== 'overview') {
         const tooltip = document.getElementById('overviewProfileTooltip');
@@ -8555,6 +8644,10 @@
         const today = new Date();
         updateDashboardByDateRange(today, today, { forceRefresh: true });
       }
+    });
+
+    document.getElementById('readableTokensToggle')?.addEventListener('click', () => {
+      setOverviewReadableTokens(!overviewReadableTokens);
     });
 
     document.getElementById('codexReviewToggle')?.addEventListener('change', (event) => {

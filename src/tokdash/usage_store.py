@@ -17,7 +17,7 @@ from .filelock import process_lock
 from .pricing import PricingDatabase
 
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 SIGNATURE_VERSION = 3
 
 # quota_history consumption: reset times within this many seconds are treated as the same
@@ -582,6 +582,7 @@ class UsageEntryStore:
                 signature TEXT NOT NULL,
                 updated_at_ms INTEGER NOT NULL,
                 raw_json TEXT NOT NULL,
+                activity_json TEXT,
                 PRIMARY KEY (tool, file_path, session_id)
             );
             CREATE TABLE IF NOT EXISTS quota_snapshots (
@@ -640,6 +641,8 @@ class UsageEntryStore:
             conn.execute("ALTER TABLE session_records ADD COLUMN safe_offset INTEGER NOT NULL DEFAULT 0")
         if "missing" not in session_columns:
             conn.execute("ALTER TABLE session_records ADD COLUMN missing INTEGER NOT NULL DEFAULT 0")
+        if "activity_json" not in session_columns:
+            conn.execute("ALTER TABLE session_records ADD COLUMN activity_json TEXT")
         row = conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
         current = int(row["value"]) if row else 0
         if current > SCHEMA_VERSION:
@@ -1406,13 +1409,15 @@ class UsageEntryStore:
                     )
                     for raw in records:
                         session_id = str(raw.get("session_id") or Path(path).stem)
+                        activity = raw.get("_activity") if isinstance(raw.get("_activity"), dict) else None
+                        session_raw = {key: value for key, value in raw.items() if key != "_activity"}
                         conn.execute(
                             """
                             INSERT INTO session_records(
                                 tool, session_id, file_path, mtime_ns, size, safe_offset,
-                                missing, signature, updated_at_ms, raw_json
+                                missing, signature, updated_at_ms, raw_json, activity_json
                             )
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                             """,
                             (
                                 tool,
@@ -1424,7 +1429,8 @@ class UsageEntryStore:
                                 0,
                                 sig_by_path[path],
                                 now_ms,
-                                stable_json(raw),
+                                stable_json(session_raw),
+                                stable_json(activity) if activity is not None else None,
                             ),
                         )
                 conn.commit()
@@ -1449,6 +1455,37 @@ class UsageEntryStore:
                 continue
             if isinstance(obj, dict):
                 out.append(obj)
+        return out
+
+    def query_session_activity_records(self, tool: str) -> list[dict[str, Any]]:
+        with closing(self._connect()) as conn:
+            rows = conn.execute(
+                """
+                SELECT session_id, file_path, missing, activity_json
+                FROM session_records
+                WHERE tool = ?
+                ORDER BY file_path ASC, session_id ASC
+                """,
+                (tool,),
+            ).fetchall()
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            activity = None
+            if row["activity_json"]:
+                try:
+                    parsed = json.loads(row["activity_json"])
+                except (json.JSONDecodeError, TypeError, UnicodeDecodeError):
+                    parsed = None
+                if isinstance(parsed, dict):
+                    activity = parsed
+            out.append(
+                {
+                    "session_id": str(row["session_id"]),
+                    "file_path": str(row["file_path"]),
+                    "missing": bool(row["missing"]),
+                    "activity": activity,
+                }
+            )
         return out
 
     def quota_meta_get(self, key: str) -> Optional[str]:

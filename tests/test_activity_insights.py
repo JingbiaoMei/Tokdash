@@ -368,3 +368,87 @@ def test_codex_parser_deduplicates_attempts_and_reports_missing_ids(tmp_path):
         "web_search",
     ]
     assert result["reasoning"]["coverage"]["excluded_records"] == 2
+
+
+def _clear_codex_activity_caches():
+    sessions_module._parse_codex_session_file.cache_clear()
+    sessions_module._load_codex_sessions.cache_clear()
+    loader = getattr(sessions_module, "_load_codex_activity_records", None)
+    if loader is not None:
+        loader.cache_clear()
+
+
+def _install_counting_codex_parser(monkeypatch):
+    original = sessions_module._parse_codex_session_file
+    calls = {"count": 0}
+
+    def counting_parser(*args, **kwargs):
+        calls["count"] += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(
+        sessions_module, "_parse_codex_session_file", counting_parser
+    )
+    return calls
+
+
+def test_codex_activity_warm_persistent_load_does_not_reparse(
+    monkeypatch, tmp_path
+):
+    session_root = tmp_path / "sessions"
+    _write_jsonl(
+        session_root / "chat.jsonl",
+        [
+            {"type": "session_meta", "payload": {"id": "chat-1"}},
+            {
+                "type": "turn_context",
+                "payload": {"turn_id": "turn-1", "effort": "high"},
+            },
+        ],
+    )
+    db_path = tmp_path / "tokdash" / "usage.sqlite3"
+    monkeypatch.setenv("TOKDASH_USAGE_DB", "1")
+    monkeypatch.setenv("TOKDASH_USAGE_DB_PATH", str(db_path))
+    monkeypatch.setattr(
+        sessions_module.clientpaths, "codex_sessions_dir", lambda: session_root
+    )
+    _clear_codex_activity_caches()
+    calls = _install_counting_codex_parser(monkeypatch)
+
+    first = sessions_module.get_codex_activity_insights()
+    first_count = calls["count"]
+    second = sessions_module.get_codex_activity_insights()
+
+    assert first["recorded_chats"]["value"] == 1
+    assert second["reasoning"]["most_used"]["effort"] == "high"
+    assert first_count == 1
+    assert calls["count"] == first_count
+    assert db_path.exists()
+
+
+def test_codex_activity_warm_store_disabled_load_does_not_reparse(
+    monkeypatch, tmp_path
+):
+    session_root = tmp_path / "sessions"
+    _write_jsonl(
+        session_root / "chat.jsonl",
+        [{"type": "session_meta", "payload": {"id": "chat-1"}}],
+    )
+    db_path = tmp_path / "tokdash" / "usage.sqlite3"
+    monkeypatch.setenv("TOKDASH_USAGE_DB", "0")
+    monkeypatch.setenv("TOKDASH_USAGE_DB_PATH", str(db_path))
+    monkeypatch.setattr(
+        sessions_module.clientpaths, "codex_sessions_dir", lambda: session_root
+    )
+    _clear_codex_activity_caches()
+    calls = _install_counting_codex_parser(monkeypatch)
+
+    first = sessions_module.get_codex_activity_insights()
+    first_count = calls["count"]
+    second = sessions_module.get_codex_activity_insights()
+
+    assert first["recorded_chats"]["value"] == 1
+    assert second["recorded_chats"]["value"] == 1
+    assert first_count == 1
+    assert calls["count"] == first_count
+    assert not db_path.exists()

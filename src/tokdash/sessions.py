@@ -10,6 +10,8 @@ from typing import Any, Dict, Iterable, Optional
 
 from . import clientpaths
 from .activity_insights import (
+    ACTIVITY_SCHEMA_VERSION,
+    build_activity_insights,
     canonical_mcp_tool_name,
     new_activity_record,
     record_reasoning_turn,
@@ -56,6 +58,7 @@ def reload_pricing_db() -> None:
         _pricing_last_loaded_sig = ()
     _parse_codex_session_file.cache_clear()
     _load_codex_sessions.cache_clear()
+    _load_codex_activity_records.cache_clear()
     _load_codex_title_map.cache_clear()
     _parse_claude_session_file.cache_clear()
     _load_claude_sessions.cache_clear()
@@ -658,6 +661,56 @@ def _load_codex_sessions(signature: tuple[tuple[str, int, int], ...], pricing_si
 def _codex_sessions() -> Dict[str, Dict[str, Any]]:
     root = clientpaths.codex_sessions_dir()
     return _apply_codex_title_map(_load_codex_sessions(_iter_file_signatures(root), _pricing_signature()))
+
+
+@lru_cache(maxsize=8)
+def _load_codex_activity_records(
+    signature: tuple[tuple[str, int, int], ...], pricing_sig: tuple = ()
+) -> tuple[dict[str, Any], ...]:
+    records: list[dict[str, Any]] = []
+    for path_str, mtime_ns, size in signature:
+        raw = _parse_codex_session_file(path_str, mtime_ns, size, pricing_sig)
+        if not raw:
+            continue
+        records.append(
+            {
+                "session_id": str(raw.get("session_id") or Path(path_str).stem),
+                "file_path": path_str,
+                "missing": False,
+                "activity": raw.get("_activity"),
+            }
+        )
+    return tuple(records)
+
+
+def _codex_session_parser_signature(pricing_sig: tuple) -> dict[str, Any]:
+    return {
+        "parser": parser_code_signature(_parse_codex_session_file),
+        "event_key": parser_code_signature(codex_token_event_key),
+        "activity": parser_code_signature(build_activity_insights),
+        "activity_schema": ACTIVITY_SCHEMA_VERSION,
+        "pricing": pricing_sig,
+    }
+
+
+def get_codex_activity_insights() -> dict[str, Any]:
+    signatures = _iter_file_signatures(clientpaths.codex_sessions_dir())
+    pricing_sig = _pricing_signature()
+    if not persistent_usage_db_enabled():
+        return build_activity_insights(
+            _load_codex_activity_records(signatures, pricing_sig)
+        )
+
+    store = UsageEntryStore()
+    store.sync_session_files(
+        "codex",
+        signatures,
+        parser=_codex_session_parser_signature(pricing_sig),
+        parse_file_session=lambda file_sig: _parse_codex_session_file(
+            *file_sig, pricing_sig
+        ),
+    )
+    return build_activity_insights(store.query_session_activity_records("codex"))
 
 
 @lru_cache(maxsize=512)
@@ -1584,12 +1637,8 @@ def _stored_sessions_for_tool(tool: str) -> Dict[str, Dict[str, Any]]:
     if tool == "codex":
         root = clientpaths.codex_sessions_dir()
         signatures = _iter_file_signatures(root)
-        parser_sig = {
-            "parser": parser_code_signature(_parse_codex_session_file),
-            "event_key": parser_code_signature(codex_token_event_key),
-            "pricing": _pricing_signature(),
-        }
         pricing_sig = _pricing_signature()
+        parser_sig = _codex_session_parser_signature(pricing_sig)
         store.sync_session_files(
             "codex",
             signatures,

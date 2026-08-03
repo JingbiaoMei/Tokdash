@@ -9,6 +9,11 @@ from functools import lru_cache
 from pathlib import Path
 
 import tokdash.sessions as sessions_module
+import tokdash.usage_store as usage_store_module
+from tokdash.activity_insights import (
+    new_activity_record,
+    record_structured_tool_call,
+)
 from tokdash.pricing import PricingDatabase
 from tokdash.sources.coding_tools import BaseParser, CodexParser, CodingToolsUsageTracker, _sig_cache
 from tokdash.usage_store import UsageEntryStore, build_source_signature, parser_code_signature
@@ -24,6 +29,9 @@ def _clear_parser_caches() -> None:
     BaseParser._entry_cache.clear()
     sessions_module._parse_codex_session_file.cache_clear()
     sessions_module._load_codex_sessions.cache_clear()
+    activity_loader = getattr(sessions_module, "_load_codex_activity_records", None)
+    if activity_loader is not None:
+        activity_loader.cache_clear()
     sessions_module._load_codex_title_map.cache_clear()
     sessions_module._parse_claude_session_file.cache_clear()
     sessions_module._load_claude_sessions.cache_clear()
@@ -565,6 +573,161 @@ def test_usage_store_session_records_are_synced_and_retained(tmp_path):
 
     assert store.sync_session_files("codex", (), parser={"v": 1}, parse_file_session=lambda _file_sig: None, durable=True) is True
     assert store.query_session_records("codex")[0]["session_id"] == "s1"
+
+
+def test_session_activity_is_stored_separately_from_session_raw_json(tmp_path):
+    store = UsageEntryStore(tmp_path / "usage.sqlite3")
+    path = str(tmp_path / "session.jsonl")
+    activity = new_activity_record(is_primary=True, has_explicit_session_id=True)
+    record_structured_tool_call(
+        activity, call_id="opaque", name="exec", specificity="top_level"
+    )
+
+    assert store.sync_session_files(
+        "codex",
+        ((path, 1, 100),),
+        parser={"v": 2},
+        parse_file_session=lambda _sig: {
+            "tool": "codex",
+            "session_id": "chat-1",
+            "display_name": "RAW_SENTINEL",
+            "turns": [],
+            "_activity": activity,
+        },
+    )
+
+    with sqlite3.connect(store.path) as conn:
+        raw_json, activity_json = conn.execute(
+            "SELECT raw_json, activity_json FROM session_records"
+        ).fetchone()
+    assert "_activity" not in raw_json
+    assert "RAW_SENTINEL" in raw_json
+    assert json.loads(activity_json)["tool_by_call_id"]["opaque"]["name"] == "exec"
+    assert store.query_session_activity_records("codex") == [
+        {
+            "session_id": "chat-1",
+            "file_path": path,
+            "missing": False,
+            "activity": activity,
+        }
+    ]
+
+
+def test_session_activity_query_never_deserializes_raw_json(monkeypatch, tmp_path):
+    store = UsageEntryStore(tmp_path / "usage.sqlite3")
+    path = str(tmp_path / "session.jsonl")
+    activity = new_activity_record(is_primary=True, has_explicit_session_id=True)
+    store.sync_session_files(
+        "codex",
+        ((path, 1, 100),),
+        parser={"v": 2},
+        parse_file_session=lambda _sig: {
+            "tool": "codex",
+            "session_id": "chat-1",
+            "display_name": "RAW_SENTINEL",
+            "turns": [],
+            "_activity": activity,
+        },
+    )
+    original_loads = usage_store_module.json.loads
+
+    def guarded_loads(value):
+        assert "RAW_SENTINEL" not in value
+        return original_loads(value)
+
+    monkeypatch.setattr(usage_store_module.json, "loads", guarded_loads)
+
+    assert store.query_session_activity_records("codex")[0]["activity"] == activity
+
+
+def test_schema_five_migrates_activity_column_without_losing_session_rows(tmp_path):
+    db_path = tmp_path / "usage.sqlite3"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+        conn.execute("INSERT INTO meta(key, value) VALUES('schema_version', '5')")
+        conn.execute(
+            """
+            CREATE TABLE session_records (
+                tool TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                mtime_ns INTEGER NOT NULL,
+                size INTEGER NOT NULL,
+                safe_offset INTEGER NOT NULL DEFAULT 0,
+                missing INTEGER NOT NULL DEFAULT 0,
+                signature TEXT NOT NULL,
+                updated_at_ms INTEGER NOT NULL,
+                raw_json TEXT NOT NULL,
+                PRIMARY KEY (tool, file_path, session_id)
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO session_records(
+                tool, session_id, file_path, mtime_ns, size, safe_offset,
+                missing, signature, updated_at_ms, raw_json
+            ) VALUES ('codex', 'legacy', '/missing.jsonl', 1, 2, 2, 1, 'old', 3, ?)
+            """,
+            (json.dumps({"session_id": "legacy", "turns": [{"tokens": 7}]}),),
+        )
+        conn.commit()
+
+    store = UsageEntryStore(db_path)
+
+    assert store.query_session_records("codex")[0]["session_id"] == "legacy"
+    assert store.query_session_activity_records("codex") == [
+        {
+            "session_id": "legacy",
+            "file_path": "/missing.jsonl",
+            "missing": True,
+            "activity": None,
+        }
+    ]
+    with sqlite3.connect(db_path) as conn:
+        columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(session_records)").fetchall()
+        }
+        schema_version = conn.execute(
+            "SELECT value FROM meta WHERE key = 'schema_version'"
+        ).fetchone()[0]
+        raw_json = conn.execute(
+            "SELECT raw_json FROM session_records WHERE session_id = 'legacy'"
+        ).fetchone()[0]
+    assert "activity_json" in columns
+    assert schema_version == "6"
+    assert json.loads(raw_json)["turns"][0]["tokens"] == 7
+
+
+def test_session_activity_sync_parses_only_changed_files(tmp_path):
+    store = UsageEntryStore(tmp_path / "usage.sqlite3")
+    path = str(tmp_path / "session.jsonl")
+    calls = {"count": 0}
+
+    def parse(_sig):
+        calls["count"] += 1
+        return {
+            "tool": "codex",
+            "session_id": "chat-1",
+            "turns": [],
+            "_activity": new_activity_record(
+                is_primary=True, has_explicit_session_id=True
+            ),
+        }
+
+    files = ((path, 1, 100),)
+    assert store.sync_session_files(
+        "codex", files, parser={"v": 2}, parse_file_session=parse
+    )
+    assert not store.sync_session_files(
+        "codex", files, parser={"v": 2}, parse_file_session=parse
+    )
+    assert calls["count"] == 1
+
+    assert store.sync_session_files(
+        "codex", ((path, 2, 101),), parser={"v": 2}, parse_file_session=parse
+    )
+    assert calls["count"] == 2
 
 
 def test_usage_store_session_file_can_emit_multiple_records(tmp_path):

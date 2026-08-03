@@ -9,6 +9,14 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
 
 from . import clientpaths
+from .activity_insights import (
+    ACTIVITY_SCHEMA_VERSION,
+    build_activity_insights,
+    canonical_mcp_tool_name,
+    new_activity_record,
+    record_reasoning_turn,
+    record_structured_tool_call,
+)
 from .compute import cache_hit_rate, period_to_days
 from .dateutil import parse_date_range
 from .pricing import PricingDatabase
@@ -50,6 +58,7 @@ def reload_pricing_db() -> None:
         _pricing_last_loaded_sig = ()
     _parse_codex_session_file.cache_clear()
     _load_codex_sessions.cache_clear()
+    _load_codex_activity_records.cache_clear()
     _load_codex_title_map.cache_clear()
     _parse_claude_session_file.cache_clear()
     _load_claude_sessions.cache_clear()
@@ -486,6 +495,8 @@ def _parse_codex_session_file(path_str: str, _mtime_ns: int, _size: int, _pricin
     turns = []
     turn_index = 0
     seen_event_keys: set[str] = set()
+    saw_session_meta = False
+    activity = new_activity_record(is_primary=True, has_explicit_session_id=False)
 
     with session_path.open("r", encoding="utf-8") as handle:
         for line in handle:
@@ -496,25 +507,34 @@ def _parse_codex_session_file(path_str: str, _mtime_ns: int, _size: int, _pricin
 
             payload = obj.get("payload") if isinstance(obj.get("payload"), dict) else {}
             obj_type = obj.get("type")
+            payload_type = payload.get("type")
 
             if obj_type == "session_meta":
                 meta_id = payload.get("id")
-                if meta_id:
-                    session_id = str(meta_id)      # current (last-seen) session id
+                explicit_meta_id = meta_id.strip() if isinstance(meta_id, str) else ""
+                if explicit_meta_id:
+                    activity["has_explicit_session_id"] = True
+                is_guardian_meta = _is_codex_guardian_session(payload)
+                if is_guardian_meta:
+                    is_review_session = True
+                    activity["is_primary"] = False
+                if not saw_session_meta:
+                    saw_session_meta = True
+                    source = payload.get("source")
+                    subagent = source.get("subagent") if isinstance(source, dict) else None
+                    if isinstance(subagent, dict) and isinstance(
+                        subagent.get("thread_spawn"), dict
+                    ):
+                        is_subagent_file = True
+                        pid = (subagent.get("thread_spawn") or {}).get("parent_thread_id")
+                        subagent_parent_id = str(pid) if pid else None
+                    activity["is_primary"] = not is_subagent_file and not is_guardian_meta
+                if explicit_meta_id:
+                    session_id = explicit_meta_id      # current (last-seen) session id
                     if own_session_id is None:
                         own_session_id = session_id
-                        # First session_meta identifies the file. A thread_spawn subagent file
-                        # replays ancestor history; capture the declared parent so we skip only
-                        # those replays (never the subagent's own or a stray id).
-                        source = payload.get("source")
-                        subagent = source.get("subagent") if isinstance(source, dict) else None
-                        if isinstance(subagent, dict) and isinstance(subagent.get("thread_spawn"), dict):
-                            is_subagent_file = True
-                            pid = (subagent.get("thread_spawn") or {}).get("parent_thread_id")
-                            subagent_parent_id = str(pid) if pid else None
                 cwd = str(payload.get("cwd") or cwd)
                 repo_url = str(((payload.get("git") or {}).get("repository_url")) or repo_url)
-                is_review_session = is_review_session or _is_codex_guardian_session(payload)
                 if payload.get("model_provider"):
                     current_provider = str(payload.get("model_provider"))
                 continue
@@ -522,12 +542,40 @@ def _parse_codex_session_file(path_str: str, _mtime_ns: int, _size: int, _pricin
             if obj_type == "turn_context":
                 current_model = str(payload.get("model") or current_model)
                 cwd = str(payload.get("cwd") or cwd)
+                record_reasoning_turn(
+                    activity,
+                    turn_id=payload.get("turn_id"),
+                    effort=payload.get("effort"),
+                )
                 continue
 
-            payload_type = payload.get("type")
             if payload_type == "thread_name_updated":
                 thread_name = _clean_display_name(payload.get("thread_name")) or thread_name
                 continue
+
+            if obj_type == "response_item" and payload_type in {
+                "function_call",
+                "custom_tool_call",
+                "tool_search_call",
+                "web_search_call",
+            }:
+                fixed_name = {
+                    "tool_search_call": "tool_search",
+                    "web_search_call": "web_search",
+                }.get(str(payload_type))
+                record_structured_tool_call(
+                    activity,
+                    call_id=payload.get("call_id") or payload.get("id"),
+                    name=fixed_name or payload.get("name"),
+                    specificity="top_level",
+                )
+            elif obj_type == "event_msg" and payload_type == "mcp_tool_call_end":
+                record_structured_tool_call(
+                    activity,
+                    call_id=payload.get("call_id") or payload.get("id"),
+                    name=canonical_mcp_tool_name(payload.get("invocation")),
+                    specificity="mcp",
+                )
 
             if obj_type != "event_msg" or payload.get("type") != "token_count":
                 continue
@@ -583,7 +631,7 @@ def _parse_codex_session_file(path_str: str, _mtime_ns: int, _size: int, _pricin
                 turn["_event_key"] = event_key
             turns.append(turn)
 
-    if not turns:
+    if not turns and not activity["is_primary"]:
         return None
 
     project = _project_from_repo_or_path(repo_url or None, cwd or None)
@@ -595,6 +643,7 @@ def _parse_codex_session_file(path_str: str, _mtime_ns: int, _size: int, _pricin
         "project": project,
         "is_review_session": is_review_session,
         "turns": turns,
+        "_activity": activity,
     }
 
 
@@ -603,7 +652,8 @@ def _load_codex_sessions(signature: tuple[tuple[str, int, int], ...], pricing_si
     sessions: Dict[str, Dict[str, Any]] = {}
     for path_str, mtime_ns, size in signature:
         raw = _parse_codex_session_file(path_str, mtime_ns, size, pricing_sig)
-        if raw:
+        if raw and raw.get("turns"):
+            raw = {key: value for key, value in raw.items() if key != "_activity"}
             session_id = str(raw["session_id"])
             if session_id in sessions:
                 sessions[session_id] = _merge_raw_session(sessions[session_id], raw)
@@ -615,6 +665,56 @@ def _load_codex_sessions(signature: tuple[tuple[str, int, int], ...], pricing_si
 def _codex_sessions() -> Dict[str, Dict[str, Any]]:
     root = clientpaths.codex_sessions_dir()
     return _apply_codex_title_map(_load_codex_sessions(_iter_file_signatures(root), _pricing_signature()))
+
+
+@lru_cache(maxsize=8)
+def _load_codex_activity_records(
+    signature: tuple[tuple[str, int, int], ...], pricing_sig: tuple = ()
+) -> tuple[dict[str, Any], ...]:
+    records: list[dict[str, Any]] = []
+    for path_str, mtime_ns, size in signature:
+        raw = _parse_codex_session_file(path_str, mtime_ns, size, pricing_sig)
+        if not raw:
+            continue
+        records.append(
+            {
+                "session_id": str(raw.get("session_id") or Path(path_str).stem),
+                "file_path": path_str,
+                "missing": False,
+                "activity": raw.get("_activity"),
+            }
+        )
+    return tuple(records)
+
+
+def _codex_session_parser_signature(pricing_sig: tuple) -> dict[str, Any]:
+    return {
+        "parser": parser_code_signature(_parse_codex_session_file),
+        "event_key": parser_code_signature(codex_token_event_key),
+        "activity": parser_code_signature(build_activity_insights),
+        "activity_schema": ACTIVITY_SCHEMA_VERSION,
+        "pricing": pricing_sig,
+    }
+
+
+def get_codex_activity_insights() -> dict[str, Any]:
+    signatures = _iter_file_signatures(clientpaths.codex_sessions_dir())
+    pricing_sig = _pricing_signature()
+    if not persistent_usage_db_enabled():
+        return build_activity_insights(
+            _load_codex_activity_records(signatures, pricing_sig)
+        )
+
+    store = UsageEntryStore()
+    store.sync_session_files(
+        "codex",
+        signatures,
+        parser=_codex_session_parser_signature(pricing_sig),
+        parse_file_session=lambda file_sig: _parse_codex_session_file(
+            *file_sig, pricing_sig
+        ),
+    )
+    return build_activity_insights(store.query_session_activity_records("codex"))
 
 
 @lru_cache(maxsize=512)
@@ -1497,6 +1597,9 @@ def _session_records_to_raw_sessions(tool: str, records: Iterable[Dict[str, Any]
         if not session_id:
             continue
         if tool == "codex":
+            if not raw.get("turns"):
+                continue
+            raw = {key: value for key, value in raw.items() if key != "_activity"}
             if session_id in sessions:
                 sessions[session_id] = _merge_raw_session(sessions[session_id], raw)
             else:
@@ -1538,12 +1641,8 @@ def _stored_sessions_for_tool(tool: str) -> Dict[str, Dict[str, Any]]:
     if tool == "codex":
         root = clientpaths.codex_sessions_dir()
         signatures = _iter_file_signatures(root)
-        parser_sig = {
-            "parser": parser_code_signature(_parse_codex_session_file),
-            "event_key": parser_code_signature(codex_token_event_key),
-            "pricing": _pricing_signature(),
-        }
         pricing_sig = _pricing_signature()
+        parser_sig = _codex_session_parser_signature(pricing_sig)
         store.sync_session_files(
             "codex",
             signatures,

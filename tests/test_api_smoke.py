@@ -103,6 +103,45 @@ def synthetic_api_data(monkeypatch):
     def fake_codex_session_detail(session_id):
         return {"session": {"tool": "codex", "session_id": session_id}, "turns": []}
 
+    def fake_activity_insights():
+        return {
+            "scope": {"tool": "codex", "local": True, "primary_only": True},
+            "recorded_chats": {
+                "value": 3,
+                "coverage": {
+                    "primary_files": 3,
+                    "files_with_session_id": 3,
+                    "legacy_unavailable_records": 0,
+                },
+            },
+            "reasoning": {
+                "most_used": {"effort": "xhigh", "count": 2, "share": 1.0},
+                "distribution": [
+                    {"effort": "xhigh", "count": 2, "share": 1.0}
+                ],
+                "coverage": {
+                    "identified_turns": 2,
+                    "known_effort_turns": 2,
+                    "ambiguous_turns": 0,
+                    "excluded_records": 0,
+                },
+            },
+            "tools": {
+                "total_calls": 8,
+                "most_used": {"name": "exec", "count": 5, "share": 0.625},
+                "distribution": [
+                    {"name": "exec", "count": 5, "share": 0.625},
+                    {"name": "apply_patch", "count": 3, "share": 0.375},
+                ],
+                "coverage": {
+                    "named_calls": 8,
+                    "ambiguous_name_calls": 0,
+                    "excluded_records": 0,
+                },
+            },
+            "timestamp": "2026-08-03T12:00:00+00:00",
+        }
+
     monkeypatch.setattr(api, "compute_usage_with_comparison", fake_usage)
     monkeypatch.setattr(api, "get_tools_data", fake_tools)
     monkeypatch.setattr(api, "get_openclaw_data", fake_openclaw)
@@ -111,6 +150,7 @@ def synthetic_api_data(monkeypatch):
     monkeypatch.setattr(api, "get_session_detail", fake_session_detail)
     monkeypatch.setattr(api, "get_codex_sessions_data", fake_codex_sessions)
     monkeypatch.setattr(api, "get_codex_session_detail", fake_codex_session_detail)
+    monkeypatch.setattr(api, "get_codex_activity_insights", fake_activity_insights)
 
 
 def test_api_endpoints_and_dashboard_smoke(synthetic_api_data):
@@ -165,6 +205,10 @@ def test_api_endpoints_and_dashboard_smoke(synthetic_api_data):
     stats_year = api.get_stats(year=2025)
     assert "contributions" in stats_year
     assert "stats" in stats_year
+
+    activity = api.get_activity_insights()
+    assert activity["scope"]["primary_only"] is True
+    assert activity["recorded_chats"]["value"] == 3
 
     manifest = (api.STATIC_DIR / "manifest.webmanifest").read_text(encoding="utf-8")
     assert "Tokdash" in manifest
@@ -270,6 +314,87 @@ def test_usage_refresh_param_forces_recompute_and_reports_cache_metadata(monkeyp
     assert refreshed["response_cache"]["status"] == "recomputed"
     assert refreshed["response_cache"]["served_from_cache"] is False
     assert calls == [("today", None, None), ("today", None, None)]
+
+
+def test_activity_insights_endpoint_shape(synthetic_api_data):
+    result = api.get_activity_insights()
+
+    assert result["scope"] == {
+        "tool": "codex",
+        "local": True,
+        "primary_only": True,
+    }
+    assert result["recorded_chats"]["value"] == 3
+    assert result["reasoning"]["most_used"]["effort"] == "xhigh"
+    assert result["tools"]["total_calls"] == 8
+    assert result["tools"]["distribution"][0]["name"] == "exec"
+
+
+def test_activity_insights_uses_own_versioned_cache_key(monkeypatch):
+    captured = {}
+    expected = {"scope": {"tool": "codex"}}
+
+    def fake_cached_route(route_name, cache_key, fetch_fn, **kwargs):
+        captured["route_name"] = route_name
+        captured["cache_key"] = cache_key
+        captured["fetch_fn"] = fetch_fn
+        captured.update(kwargs)
+        return expected
+
+    def fake_activity():
+        return expected
+
+    monkeypatch.setattr(api, "_cached_route", fake_cached_route)
+    monkeypatch.setattr(api, "get_codex_activity_insights", fake_activity)
+
+    assert api.get_activity_insights() is expected
+    assert captured == {
+        "route_name": "/api/activity-insights",
+        "cache_key": "activity_insights_v1",
+        "fetch_fn": fake_activity,
+        "force_refresh": False,
+    }
+
+
+def test_activity_insights_refresh_forces_recompute(monkeypatch):
+    captured = {}
+    expected = {"scope": {"tool": "codex"}}
+
+    def fake_cached_route(route_name, cache_key, fetch_fn, **kwargs):
+        captured["route_name"] = route_name
+        captured["cache_key"] = cache_key
+        captured["fetch_fn"] = fetch_fn
+        captured.update(kwargs)
+        return expected
+
+    def fake_activity():
+        return expected
+
+    monkeypatch.setattr(api, "_cached_route", fake_cached_route)
+    monkeypatch.setattr(api, "get_codex_activity_insights", fake_activity)
+
+    assert api.get_activity_insights(refresh=True) is expected
+    assert captured == {
+        "route_name": "/api/activity-insights",
+        "cache_key": "activity_insights_v1",
+        "fetch_fn": fake_activity,
+        "force_refresh": True,
+    }
+
+
+def test_activity_insights_failure_does_not_change_stats(monkeypatch):
+    expected = {"stats": {"total_tokens": 10}, "contributions": []}
+    monkeypatch.setattr(api, "compute_stats", lambda _year=None: expected)
+    monkeypatch.setattr(
+        api,
+        "get_codex_activity_insights",
+        lambda: (_ for _ in ()).throw(RuntimeError("activity unavailable")),
+    )
+
+    with pytest.raises(api.HTTPException) as exc:
+        api.get_activity_insights()
+    assert exc.value.status_code == 500
+    assert api.get_stats() == expected
 
 
 @pytest.mark.skipif(

@@ -32,6 +32,7 @@ from .compute import compute_stats, compute_usage_with_comparison, get_openclaw_
 from .dateutil import parse_date_range
 from .sessions import (
     SESSION_TOOLS,
+    get_codex_activity_insights,
     get_codex_session_detail,
     get_codex_sessions_data,
     get_session_detail,
@@ -1112,6 +1113,21 @@ def get_stats(year: Optional[int] = None) -> Dict[str, Any]:
     except CacheBackpressureError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/activity-insights")
+def get_activity_insights(refresh: bool = False) -> dict[str, Any]:
+    try:
+        return _cached_route(
+            "/api/activity-insights",
+            "activity_insights_v1",
+            get_codex_activity_insights,
+            force_refresh=refresh,
+        )
+    except CacheBackpressureError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:  # noqa: BLE001 - isolate parser/index failures from other routes
         raise HTTPException(status_code=500, detail=str(e))
 
 

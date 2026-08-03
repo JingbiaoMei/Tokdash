@@ -279,16 +279,46 @@
       justify-content: flex-start;
     }
 
-    .view-toggle-cluster {
-      display: inline-flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      align-items: center;
-    }
-
     .compact-control {
       min-height: 36px;
       padding: 6px 10px;
+    }
+
+    .settings-menu { position: relative; }
+    .settings-trigger { gap: 7px; }
+    .settings-trigger svg { flex: 0 0 auto; }
+    .settings-panel { position: absolute; z-index: 110; top: calc(100% + 9px); right: 0; width: min(320px, calc(100vw - 32px)); padding: 14px; border: 1px solid color-mix(in srgb,var(--color-primary) 18%,var(--color-border)); border-radius: 14px; background: color-mix(in srgb,var(--color-surface-glass) 96%,var(--color-bg)); box-shadow: var(--shadow-md),0 16px 42px color-mix(in srgb,var(--color-text) 16%,transparent); backdrop-filter: blur(18px); }
+    .settings-panel[hidden] { display: none; }
+    .settings-panel-head { display: flex; align-items: center; gap: 9px; padding: 1px 2px 11px; border-bottom: 1px solid var(--color-border); }
+    .settings-panel-head svg { color: var(--color-primary); }
+    .settings-panel-head h2 { margin: 0; font-size: 13px; font-weight: 850; }
+    .settings-panel-body { display: grid; gap: 8px; padding-top: 10px; }
+    .settings-row { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 12px; align-items: center; min-height: 38px; }
+    .settings-label { color: var(--color-muted); font-size: 11px; font-weight: 700; }
+    .settings-control-button { min-width: 72px; min-height: 32px; padding: 5px 9px; gap: 6px; border-radius: 8px; font-size: 11px; }
+    .settings-select { min-width: 142px; min-height: 34px; padding-block: 5px; }
+    .settings-install { display: flex; width: 100%; min-height: 36px; margin-top: 2px; padding: 7px 10px; gap: 7px; font-size: 11px; }
+    .overview-readable-tokens-toggle { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 5px 8px; border-radius: 8px; cursor: pointer; font-size: 10px; font-weight: 750; }
+    .overview-readable-tokens-track { position: relative; flex: 0 0 auto; width: 28px; height: 16px; border-radius: 999px; background: var(--color-border); transition: background var(--t-fast) ease; }
+    .overview-readable-tokens-track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--color-bg); box-shadow: 0 1px 4px rgba(15, 23, 42, .22); transition: transform var(--t-fast) ease; }
+    .overview-readable-tokens-toggle[aria-checked="true"] .overview-readable-tokens-track { background: var(--color-primary); }
+    .overview-readable-tokens-toggle[aria-checked="true"] .overview-readable-tokens-track::after { transform: translateX(12px); }
+    .overview-token-value-wrap { position: relative; width: max-content; max-width: 100%; }
+    .overview-token-exact-tooltip { position: absolute; z-index: 70; left: 0; bottom: calc(100% + 8px); padding: 6px 8px; border-radius: 7px; background: var(--color-text); color: var(--color-bg); font-size: 10px; font-weight: 750; line-height: 1.2; white-space: nowrap; opacity: 0; visibility: hidden; pointer-events: none; transform: translateY(3px); transition: opacity var(--t-fast) ease, transform var(--t-fast) ease, visibility var(--t-fast) ease; box-shadow: 0 8px 22px rgba(15, 23, 42, .22); }
+    .overview-token-exact-tooltip::after { content: ""; position: absolute; left: 18px; top: 100%; border: 4px solid transparent; border-top-color: var(--color-text); }
+    #totalTokens:hover + .overview-token-exact-tooltip,
+    #totalTokens:focus-visible + .overview-token-exact-tooltip { opacity: 1; visibility: visible; transform: translateY(0); }
+
+    @media (max-width: 640px) {
+      .settings-trigger>span { display: none; }
+      .settings-trigger { width: 44px; padding-inline: 10px; }
+      .overview-token-exact-tooltip { max-width: min(260px, calc(100vw - 40px)); overflow: hidden; text-overflow: ellipsis; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .overview-readable-tokens-track,
+      .overview-readable-tokens-track::after,
+      .overview-token-exact-tooltip { transition: none; }
     }
 
     /* Provider-visibility dropdown on the Quota tab (show/hide Codex/Claude/Antigravity). */
@@ -534,6 +564,22 @@
     .profile-milestone-toggle[aria-pressed="true"] .profile-milestone-toggle-track::after{transform:translateX(10px);background:var(--color-bg);}
     @media(max-width:640px){.profile-activity-head{gap:6px;flex-wrap:wrap;font-size:13px;}.profile-activity-head h3{flex:1 0 100%;margin-bottom:2px;}.profile-activity-mode{padding:5px 8px;}.profile-activity-shell{max-width:100%;}}
 
+    .profile-activity-insights{min-height:184px;margin-top:24px;padding-top:20px;border-top:1px solid color-mix(in srgb,var(--color-primary) 18%,var(--color-border));}
+    .profile-activity-insights>h3{display:flex;align-items:center;gap:8px;margin:0 0 12px;font-size:15px;font-weight:850;}
+    .profile-activity-insights>h3::before{content:"";width:4px;height:15px;border-radius:999px;background:var(--color-secondary);box-shadow:0 0 12px color-mix(in srgb,var(--color-secondary) 32%,transparent);}
+    .profile-activity-insights-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));margin:0;border:1px solid color-mix(in srgb,var(--color-primary) 16%,var(--color-border));border-radius:13px;overflow:hidden;background:color-mix(in srgb,var(--color-surface-glass) 86%,transparent);}
+    .profile-activity-insight-kpi{--activity-insight-tone:var(--color-primary);position:relative;min-width:0;padding:12px 10px;}
+    .profile-activity-insight-kpi[data-tone="secondary"]{--activity-insight-tone:var(--color-secondary);}.profile-activity-insight-kpi[data-tone="cost"]{--activity-insight-tone:var(--color-cost);}.profile-activity-insight-kpi[data-tone="cta"]{--activity-insight-tone:var(--color-cta);}
+    .profile-activity-insight-kpi+.profile-activity-insight-kpi::before{content:"";position:absolute;inset-block:12px;left:0;width:1px;background:var(--color-border);}
+    .profile-activity-insight-kpi dd{margin:0;overflow:hidden;color:var(--activity-insight-tone);font-size:14px;font-weight:850;text-overflow:ellipsis;white-space:nowrap;}.profile-activity-insight-kpi dt{margin-top:3px;color:var(--color-muted);font-size:10px;line-height:1.25;}
+    .profile-activity-insights-detail{display:grid;grid-template-columns:minmax(220px,.8fr) minmax(320px,1.2fr);gap:12px;margin-top:12px;}
+    .profile-activity-insights-coverage{min-height:76px;margin:0;padding:11px 12px;border:1px solid color-mix(in srgb,var(--color-secondary) 17%,var(--color-border));border-radius:11px;background:color-mix(in srgb,var(--color-secondary) 5%,transparent);color:var(--color-muted);font-size:10px;line-height:1.65;white-space:pre-line;}
+    .profile-activity-tool-ranking{display:grid;gap:6px;min-height:76px;margin:0;padding:10px 12px;list-style:none;border:1px solid color-mix(in srgb,var(--color-primary) 14%,var(--color-border));border-radius:11px;background:color-mix(in srgb,var(--color-primary) 4%,transparent);}
+    .profile-activity-tool-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px 9px;align-items:center;font-size:10px;}.profile-activity-tool-name{overflow:hidden;color:var(--color-text);font-weight:750;text-overflow:ellipsis;white-space:nowrap;}.profile-activity-tool-value{color:var(--color-primary);font-variant-numeric:tabular-nums;font-weight:800;white-space:nowrap;}
+    .profile-activity-tool-track{grid-column:1/-1;height:3px;overflow:hidden;border-radius:999px;background:color-mix(in srgb,var(--color-border) 70%,transparent);}.profile-activity-tool-bar{display:block;width:var(--activity-share,0%);height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--color-secondary),var(--color-primary));box-shadow:0 0 8px color-mix(in srgb,var(--color-primary) 25%,transparent);}
+    .activity-insights-message{grid-column:1/-1;align-self:center;margin:0;padding:15px;color:var(--color-muted);font-size:11px;text-align:center;}
+    .activity-insights-skeleton{display:block;width:68%;height:14px;border-radius:5px;background:linear-gradient(90deg,color-mix(in srgb,var(--color-border) 62%,transparent),color-mix(in srgb,var(--color-primary) 11%,var(--color-border)),color-mix(in srgb,var(--color-border) 62%,transparent));background-size:200% 100%;animation:overview-profile-pulse 1.4s ease-in-out infinite;}
+
     .overview-profile-band{display:grid;grid-template-columns:minmax(180px,220px) minmax(0,1fr);gap:20px;align-items:stretch;min-height:128px;padding:16px 18px;border-color:color-mix(in srgb,var(--color-primary) 18%,var(--color-border));background:linear-gradient(105deg,var(--color-surface-glass),color-mix(in srgb,var(--color-primary) 7%,var(--color-surface-glass)));box-shadow:0 10px 28px color-mix(in srgb,var(--color-primary) 6%,transparent);}
     .overview-profile-copy{display:flex;flex-direction:column;justify-content:center;padding-right:18px;border-right:1px solid color-mix(in srgb,var(--color-primary) 16%,var(--color-border));}
     .overview-profile-eyebrow{color:var(--color-primary);font-size:10px;font-weight:850;letter-spacing:.08em;text-transform:uppercase;}
@@ -568,8 +614,15 @@
     .overview-profile-legend .profile-activity-legend-bar:nth-child(5){height:10px;}
     .overview-profile-legend .profile-activity-legend-badge{padding:2px 4px;font-size:7px;}
     .overview-profile-legend .profile-milestone-toggle{gap:4px;padding-left:5px;font-size:8px;}
+    .overview-activity-insights{background:transparent;min-height:42px;margin-top:8px;color:var(--color-text);}
+    .overview-activity-insights-values{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));margin:0;border-top:1px solid color-mix(in srgb,var(--color-primary) 15%,var(--color-border));}
+    .overview-activity-insight-kpi{position:relative;min-width:0;padding:7px 8px 1px;}.overview-activity-insight-kpi+.overview-activity-insight-kpi::before{content:"";position:absolute;left:0;top:8px;bottom:1px;width:1px;background:var(--color-border);}
+    .overview-activity-insight-kpi dd{margin:0;overflow:hidden;color:var(--color-primary);font-size:11px;font-weight:850;text-overflow:ellipsis;white-space:nowrap;}.overview-activity-insight-kpi dt{margin-top:1px;color:var(--color-muted);font-size:8px;line-height:1.2;}
+    .overview-activity-insights-state{margin:0;padding:9px 8px 0;border-top:1px solid color-mix(in srgb,var(--color-primary) 15%,var(--color-border));color:var(--color-muted);font-size:9px;line-height:1.35;}
+    .overview-activity-insights[data-state="ready"] .overview-activity-insights-state{padding-top:3px;border-top:0;}.overview-activity-insights[data-state="ready"] .overview-activity-insights-values{display:grid;}.overview-activity-insights:not([data-state="ready"]) .overview-activity-insights-values{display:none;}
     @media(max-width:800px){.overview-profile-band{grid-template-columns:1fr;gap:14px;}.overview-profile-copy{padding:0 0 12px;border-right:0;border-bottom:1px solid color-mix(in srgb,var(--color-primary) 16%,var(--color-border));}.overview-profile-metrics{flex-wrap:wrap;}.overview-profile-heat-head{align-items:flex-start;flex-wrap:wrap;}.overview-profile-modes{margin-left:auto;}}
-    @media(prefers-reduced-motion:reduce){.overview-profile-skeleton-grid{animation:none;}.overview-profile-cell{transform:none!important;}}
+    @media(max-width:768px){.profile-activity-insights-kpis,.overview-activity-insights-values{grid-template-columns:repeat(2,minmax(0,1fr));}.profile-activity-insight-kpi:nth-child(3)::before,.overview-activity-insight-kpi:nth-child(3)::before{display:none;}.profile-activity-insights-detail{grid-template-columns:minmax(0,1fr);}}
+    @media(prefers-reduced-motion:reduce){.overview-profile-skeleton-grid,.activity-insights-skeleton{animation:none;}.overview-profile-cell{transform:none!important;}}
 
     .pricing-editor {
       width: 100%;
@@ -1017,36 +1070,59 @@
               <span data-i18n="refresh">Refresh</span>
             </button>
 
-            <div class="view-toggle-cluster">
-              <button id="installBtn" class="btn btn-ghost compact-control" style="display:none; gap:6px;" data-i18n-title="installApp" aria-label="Install app">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <path d="M12 3v12m0 0l-4-4m4 4l4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                  <path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            <div id="settingsMenu" class="settings-menu">
+              <button id="settingsToggle" class="btn btn-ghost compact-control settings-trigger" type="button" aria-expanded="false" aria-controls="settingsPanel">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" stroke="currentColor" stroke-width="1.8"/>
+                  <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.86 2.86-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21H9.55v-.1a1.7 1.7 0 0 0-1.08-1.56 1.7 1.7 0 0 0-1.88.34l-.06.06-2.86-2.86.06-.06A1.7 1.7 0 0 0 4.07 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H2.3V9.55h.1a1.7 1.7 0 0 0 1.56-1.08 1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.86-2.86.06.06A1.7 1.7 0 0 0 8.36 4.07a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V2.3h4.05v.1a1.7 1.7 0 0 0 1.08 1.56 1.7 1.7 0 0 0 1.88-.34l.06-.06 2.86 2.86-.06.06a1.7 1.7 0 0 0-.34 1.88 1.7 1.7 0 0 0 .6 1 1.7 1.7 0 0 0 1.1.4h.1v4.05h-.1a1.7 1.7 0 0 0-1.59 1.19Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
-                <span data-i18n="install">Install</span>
+                <span data-i18n="settings">Settings</span>
               </button>
-              <button id="langToggle" class="btn btn-ghost compact-control" style="font-size:12px; font-weight:700;" aria-label="Toggle language">中</button>
-              <button id="themeToggle" class="btn btn-ghost compact-control" aria-label="Toggle theme">
-                <svg id="themeIconMoon" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-                <svg id="themeIconSun" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="display:none;">
-                  <circle cx="12" cy="12" r="5" stroke="currentColor" stroke-width="2"/>
-                  <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                </svg>
-              </button>
-              <select id="styleThemeSelect" class="ui-input compact-control style-select" aria-label="Style theme">
-                <option value="classic" data-i18n="styleClassic">Classic</option>
-                <option value="elevated" data-i18n="styleElevated">Elevated</option>
-                <option value="paper" data-i18n="stylePaper">Paper</option>
-                <option value="liquid" data-i18n="styleLiquid">Liquid</option>
-                <option value="vibrant" data-i18n="styleVibrant">Vibrant</option>
-                <option value="midnight" data-i18n="styleMidnight">Midnight</option>
-                <option value="terminal" data-i18n="styleTerminal">Terminal</option>
-                <option value="brutalist" data-i18n="styleBrutalist">Brutalist</option>
-                <option value="arcade" data-i18n="styleArcade">Arcade</option>
-                <option value="studio" data-i18n="styleStudio">Studio</option>
-              </select>
+              <section id="settingsPanel" class="settings-panel" aria-labelledby="settingsPanelTitle" hidden>
+                <div class="settings-panel-head">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l-2.86 2.86A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1.4 1.6H9.55a1.7 1.7 0 0 0-1.08-1.66 1.7 1.7 0 0 0-1.88.34l-2.86-2.86A1.7 1.7 0 0 0 4.07 15a1.7 1.7 0 0 0-1.77-1.4V9.55a1.7 1.7 0 0 0 1.66-1.08 1.7 1.7 0 0 0-.34-1.88l2.86-2.86A1.7 1.7 0 0 0 8.36 4.07 1.7 1.7 0 0 0 9.76 2.3h4.05a1.7 1.7 0 0 0 1.08 1.66 1.7 1.7 0 0 0 1.88-.34l2.86 2.86a1.7 1.7 0 0 0-.34 1.88 1.7 1.7 0 0 0 1.77 1.4v4.05A1.7 1.7 0 0 0 19.4 15Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                  <h2 id="settingsPanelTitle" data-i18n="settings">Settings</h2>
+                </div>
+                <div class="settings-panel-body">
+                  <div class="settings-row">
+                    <span class="settings-label" data-i18n="language">Language</span>
+                    <button id="langToggle" class="btn btn-ghost settings-control-button" type="button" aria-label="Toggle language">中</button>
+                  </div>
+                  <div class="settings-row">
+                    <span class="settings-label" data-i18n="colorMode">Light / dark</span>
+                    <button id="themeToggle" class="btn btn-ghost settings-control-button" type="button" aria-label="Toggle theme">
+                      <svg id="themeIconMoon" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                      <svg id="themeIconSun" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="display:none;"><circle cx="12" cy="12" r="5" stroke="currentColor" stroke-width="2"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                      <span id="themeModeLabel">Light</span>
+                    </button>
+                  </div>
+                  <label class="settings-row" for="styleThemeSelect">
+                    <span class="settings-label" data-i18n="styleTheme">Style</span>
+                    <select id="styleThemeSelect" class="ui-input style-select settings-select" aria-label="Style theme">
+                      <option value="classic" data-i18n="styleClassic">Classic</option>
+                      <option value="elevated" data-i18n="styleElevated">Elevated</option>
+                      <option value="paper" data-i18n="stylePaper">Paper</option>
+                      <option value="liquid" data-i18n="styleLiquid">Liquid</option>
+                      <option value="vibrant" data-i18n="styleVibrant">Vibrant</option>
+                      <option value="midnight" data-i18n="styleMidnight">Midnight</option>
+                      <option value="terminal" data-i18n="styleTerminal">Terminal</option>
+                      <option value="brutalist" data-i18n="styleBrutalist">Brutalist</option>
+                      <option value="arcade" data-i18n="styleArcade">Arcade</option>
+                      <option value="studio" data-i18n="styleStudio">Studio</option>
+                    </select>
+                  </label>
+                  <div class="settings-row">
+                    <span class="settings-label" data-i18n="readableTokens">Readable tokens</span>
+                    <button id="readableTokensToggle" class="btn btn-ghost overview-readable-tokens-toggle" type="button" role="switch" aria-checked="true" aria-label="Readable tokens">
+                      <span class="overview-readable-tokens-track" aria-hidden="true"></span>
+                    </button>
+                  </div>
+                  <button id="installBtn" class="btn btn-ghost settings-install" type="button" style="display:none;" data-i18n-title="installApp" aria-label="Install app">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    <span data-i18n="install">Install</span>
+                  </button>
+                </div>
+              </section>
             </div>
           </div>
         </div>
@@ -1069,7 +1145,10 @@
       <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
         <div class="surface p-5">
           <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="totalTokens">Total Tokens</div>
-          <div id="totalTokens" class="text-3xl sm:text-4xl font-extrabold mt-2" style="color: var(--color-primary);">-</div>
+          <div id="totalTokensWrap" class="overview-token-value-wrap" data-readable="true">
+            <div id="totalTokens" class="text-3xl sm:text-4xl font-extrabold mt-2" style="color: var(--color-primary);" tabindex="0" aria-describedby="totalTokensExact">-</div>
+            <div id="totalTokensExact" class="overview-token-exact-tooltip" role="tooltip">-</div>
+          </div>
           <div id="tokensDelta" class="text-xs font-semibold mt-1" style="color: var(--color-muted);"></div>
         </div>
         <div class="surface p-5">
@@ -1158,6 +1237,10 @@
               </div>
               <div id="overviewProfileLegend" class="profile-activity-legend overview-profile-legend"></div>
             </div>
+            <section id="overviewActivityInsights" class="overview-activity-insights" data-state="loading" aria-busy="true" aria-label="Activity insights">
+              <dl id="overviewActivityInsightsValues" class="overview-activity-insights-values"></dl>
+              <p id="overviewActivityInsightsState" class="overview-activity-insights-state" aria-live="polite" data-i18n="loading">Loading…</p>
+            </section>
           </div>
         </div>
       </section>
@@ -1692,6 +1775,14 @@
               <div id="profileActivityMonths" class="profile-activity-months" aria-hidden="true"></div>
               <div id="profileActivityLegend" class="profile-activity-legend"></div>
             </div>
+            <section id="profileActivityInsights" class="profile-activity-insights" data-state="loading" aria-busy="true" aria-labelledby="profileActivityInsightsTitle">
+              <h3 id="profileActivityInsightsTitle" data-i18n="activityInsightsTitle">Activity insights</h3>
+              <dl id="profileActivityInsightsKpis" class="profile-activity-insights-kpis"></dl>
+              <div class="profile-activity-insights-detail">
+                <p id="profileActivityCoverage" class="profile-activity-insights-coverage" aria-live="polite"></p>
+                <ol id="profileActivityToolRanking" class="profile-activity-tool-ranking" aria-label="Most-used structured tools"></ol>
+              </div>
+            </section>
           </div>
         </div>
 
@@ -2132,6 +2223,8 @@
     let lastCombinedModels = [];
     let lastAppsBreakdown = null;
     let lastByTool = {};
+    let activeSessionDetail = null;
+    let activeDayDetail = null;
     let pricingDbLoaded = false;
     let quotaLoaded = false;
     let lastQuotaPayload = null;
@@ -2212,6 +2305,11 @@
         refreshBusy: 'Busy',
         refreshFailed: 'Failed — retry',
         refreshCooldown: 'Wait {n}s',
+        settings: 'Settings',
+        language: 'Language',
+        colorMode: 'Light / dark',
+        themeLight: 'Light',
+        themeDark: 'Dark',
         install: 'Install',
         installApp: 'Install Tokdash as an app',
         styleTheme: 'Style',
@@ -2306,6 +2404,7 @@
         pricingSourceOverride: 'Local override active (fully replaces bundled rates)',
         pricingForkedFrom: 'bundled baseline is now v{v}; delete the override to resume updates',
         totalTokens: 'Total Tokens',
+        readableTokens: 'Readable tokens',
         totalCost: 'Total Cost',
         totalMessages: 'Total Messages',
         topModel: 'Top Model',
@@ -2361,6 +2460,24 @@
         viewFullProfile: 'View full profile',
         overviewProfileUnavailable: 'Profile activity is temporarily unavailable.',
         profileView: 'Profile',
+        activityInsightsTitle: 'Activity insights',
+        activityRecordedChats: 'Recorded chats',
+        activityReasoning: 'Most-used reasoning',
+        activityToolCalls: 'Structured tool calls',
+        activityTopTool: 'Most-used tool',
+        activityTopTools: 'Most-used structured tools',
+        activityCoverage: 'Coverage',
+        activityNoData: 'No local Codex activity yet.',
+        activityUnavailable: 'Activity insights are temporarily unavailable.',
+        activityLocalScope: 'Local primary Codex history',
+        activityFilesIdentified: 'files identified',
+        activityReasoningClassified: 'reasoning turns classified',
+        activityToolsNamed: 'tool calls named',
+        activityLegacyUnavailable: 'legacy records unavailable',
+        effortXhigh: 'Extra High',
+        effortHigh: 'High',
+        effortMedium: 'Medium',
+        effortLow: 'Low',
         recordedTokens: 'Recorded tokens',
         profilePeakTokens: 'Peak tokens',
         tokenActivity: 'Token activity',
@@ -2470,6 +2587,11 @@
         refreshBusy: '繁忙',
         refreshFailed: '失败，请重试',
         refreshCooldown: '{n} 秒后重试',
+        settings: '设置',
+        language: '语言',
+        colorMode: '明暗模式',
+        themeLight: '浅色',
+        themeDark: '深色',
         install: '安装',
         installApp: '将 Tokdash 安装为应用',
         styleTheme: '样式',
@@ -2564,6 +2686,7 @@
         pricingSourceOverride: '本地覆盖已生效（完全替换内置费率）',
         pricingForkedFrom: '内置基线现为 v{v}；删除覆盖文件可恢复自动更新',
         totalTokens: '总 Token 数',
+        readableTokens: '易读 Token',
         totalCost: '总费用',
         totalMessages: '总消息数',
         topModel: '最常用模型',
@@ -2619,6 +2742,24 @@
         viewFullProfile: '查看完整 Profile',
         overviewProfileUnavailable: 'Profile 活动暂时不可用。',
         profileView: '活动概览',
+        activityInsightsTitle: '活动洞察',
+        activityRecordedChats: '已记录会话',
+        activityReasoning: '最常用推理强度',
+        activityToolCalls: '结构化工具调用',
+        activityTopTool: '最常用工具',
+        activityTopTools: '最常用结构化工具',
+        activityCoverage: '覆盖范围',
+        activityNoData: '尚无本地 Codex 活动记录。',
+        activityUnavailable: '活动洞察暂时不可用。',
+        activityLocalScope: '本地主会话 Codex 历史',
+        activityFilesIdentified: '个文件已识别',
+        activityReasoningClassified: '个推理轮次已分类',
+        activityToolsNamed: '次工具调用已命名',
+        activityLegacyUnavailable: '条旧记录不可用',
+        effortXhigh: '超高',
+        effortHigh: '高',
+        effortMedium: '中',
+        effortLow: '低',
         recordedTokens: '已记录 Token',
         profilePeakTokens: '峰值 Token',
         tokenActivity: 'Token 活跃度',
@@ -2740,6 +2881,77 @@
       return (num ?? 0).toLocaleString(currentLang === 'zh' ? 'zh-CN' : 'en-US');
     }
 
+    // Keep the original key so existing users retain their preference. The setting
+    // now applies to every token quantity in the dashboard, not only Overview.
+    const OVERVIEW_READABLE_TOKENS_STORAGE_KEY = 'tokdash-overview-readable-tokens';
+
+    function normalizeTokenCount(value) {
+      const number = Number(value);
+      return Number.isFinite(number) && number > 0 ? Math.round(number) : 0;
+    }
+
+    function normalizeOverviewTokenCount(value) {
+      return normalizeTokenCount(value);
+    }
+
+    function formatCompactTokenCount(value) {
+      const tokens = normalizeTokenCount(value);
+      if (tokens < 1_000) return formatNumber(tokens);
+
+      const scales = [
+        { divisor: 1_000_000_000_000, suffix: 'T' },
+        { divisor: 1_000_000_000, suffix: 'B' },
+        { divisor: 1_000_000, suffix: 'M' },
+        { divisor: 1_000, suffix: 'K' },
+      ];
+      let scale = scales.find((candidate) => tokens >= candidate.divisor) || scales[scales.length - 1];
+      let rounded = Math.round((tokens / scale.divisor) * 10) / 10;
+      const scaleIndex = scales.indexOf(scale);
+      if (rounded >= 1_000 && scaleIndex > 0) {
+        scale = scales[scaleIndex - 1];
+        rounded = Math.round((tokens / scale.divisor) * 10) / 10;
+      }
+      const locale = currentLang === 'zh' ? 'zh-CN' : 'en-US';
+      const compact = rounded.toLocaleString(locale, {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 1,
+      });
+      return `${compact}${scale.suffix}`;
+    }
+
+    function formatReadableTokenCount(value) {
+      return `${formatCompactTokenCount(value)} ${t('tokensUnit')}`;
+    }
+
+    function formatTokenCount(value, includeUnit = false) {
+      const tokens = normalizeTokenCount(value);
+      const formatted = overviewReadableTokens
+        ? formatCompactTokenCount(tokens)
+        : formatNumber(tokens);
+      return includeUnit ? `${formatted} ${t('tokensUnit')}` : formatted;
+    }
+
+    function loadOverviewReadableTokensPreference(storage = null) {
+      try {
+        const target = storage || window.localStorage;
+        return target.getItem(OVERVIEW_READABLE_TOKENS_STORAGE_KEY) !== '0';
+      } catch (_error) {
+        return true;
+      }
+    }
+
+    function saveOverviewReadableTokensPreference(enabled, storage = null) {
+      try {
+        const target = storage || window.localStorage;
+        target.setItem(OVERVIEW_READABLE_TOKENS_STORAGE_KEY, enabled ? '1' : '0');
+      } catch (_error) {
+        // The preference is optional when storage is unavailable.
+      }
+    }
+
+    let overviewReadableTokens = loadOverviewReadableTokensPreference();
+    let overviewTotalTokensRaw = null;
+
     // Shrink a KPI value's font-size only when its (unbreakable) number would
     // overflow its narrow card — e.g. hundred-million+ totals under the "This
     // Year" range. The size is reset first, so short/normal values keep their CSS
@@ -2757,6 +2969,84 @@
         el.style.fontSize = size + 'px';
         guard += 1;
       }
+    }
+
+    function renderOverviewTokenTotal(value = overviewTotalTokensRaw) {
+      const valueElement = document.getElementById('totalTokens');
+      const wrapper = document.getElementById('totalTokensWrap');
+      const tooltip = document.getElementById('totalTokensExact');
+      if (!valueElement || !wrapper || !tooltip) return;
+      if (value === null) {
+        valueElement.textContent = '-';
+        valueElement.removeAttribute('tabindex');
+        valueElement.removeAttribute('aria-describedby');
+        valueElement.removeAttribute('aria-label');
+        tooltip.textContent = '-';
+        tooltip.hidden = true;
+        return;
+      }
+
+      overviewTotalTokensRaw = normalizeOverviewTokenCount(value);
+      const exact = `${formatNumber(overviewTotalTokensRaw)} ${t('tokensUnit')}`;
+      valueElement.textContent = overviewReadableTokens
+        ? formatReadableTokenCount(overviewTotalTokensRaw)
+        : formatNumber(overviewTotalTokensRaw);
+      wrapper.dataset.readable = String(overviewReadableTokens);
+      tooltip.textContent = exact;
+      tooltip.hidden = !overviewReadableTokens;
+      if (overviewReadableTokens) {
+        valueElement.tabIndex = 0;
+        valueElement.setAttribute('aria-describedby', 'totalTokensExact');
+        valueElement.setAttribute('aria-label', exact);
+      } else {
+        valueElement.removeAttribute('tabindex');
+        valueElement.removeAttribute('aria-describedby');
+        valueElement.removeAttribute('aria-label');
+      }
+      fitKpiValue(valueElement);
+    }
+
+    function syncOverviewReadableTokensToggle() {
+      const toggle = document.getElementById('readableTokensToggle');
+      if (!toggle) return;
+      toggle.setAttribute('aria-checked', String(overviewReadableTokens));
+      toggle.setAttribute('aria-label', t('readableTokens'));
+    }
+
+    function setOverviewReadableTokens(enabled) {
+      overviewReadableTokens = Boolean(enabled);
+      saveOverviewReadableTokensPreference(overviewReadableTokens);
+      syncOverviewReadableTokensToggle();
+      rerenderTokenPresentation();
+    }
+
+    function setSettingsPanelOpen(open, returnFocus = false) {
+      const trigger = document.getElementById('settingsToggle');
+      const panel = document.getElementById('settingsPanel');
+      if (!trigger || !panel) return;
+      const expanded = Boolean(open);
+      trigger.setAttribute('aria-expanded', String(expanded));
+      panel.hidden = !expanded;
+      panel.style.removeProperty('transform');
+      if (expanded) {
+        const gutter = 16;
+        const bounds = panel.getBoundingClientRect();
+        let shiftX = 0;
+        if (bounds.left < gutter) shiftX = gutter - bounds.left;
+        else if (bounds.right > window.innerWidth - gutter) {
+          shiftX = window.innerWidth - gutter - bounds.right;
+        }
+        if (shiftX) panel.style.transform = `translateX(${shiftX}px)`;
+      }
+      if (!expanded && returnFocus) trigger.focus();
+    }
+
+    function syncThemeModeControl() {
+      const label = document.getElementById('themeModeLabel');
+      const toggle = document.getElementById('themeToggle');
+      const labelKey = isDark() ? 'themeDark' : 'themeLight';
+      if (label) label.textContent = t(labelKey);
+      if (toggle) toggle.setAttribute('aria-label', `${t('colorMode')}: ${t(labelKey)}`);
     }
 
     function fitOverviewKpis() {
@@ -2983,7 +3273,7 @@
       if (metric === 'energy') {
         return { key: 'energy', label: t('metricEnergy'), format: formatEnergy };
       }
-      return { key: 'tokens', label: t('metricTokens'), format: formatNumber };
+      return { key: 'tokens', label: t('metricTokens'), format: formatTokenCount };
     }
 
     function getMetricValue(day, metric = 'tokens') {
@@ -3049,6 +3339,7 @@
       const sun = document.getElementById('themeIconSun');
       if (moon) moon.style.display = dark ? 'none' : '';
       if (sun) sun.style.display = dark ? '' : 'none';
+      syncThemeModeControl();
     }
 
     function renderRefreshButton() {
@@ -3234,6 +3525,9 @@
       }
       renderRefreshButton();
       syncCodexReviewToggle();
+      syncOverviewReadableTokensToggle();
+      syncThemeModeControl();
+      rerenderTokenPresentation();
       updateTimestamp();
       updateMetricControls();
       syncDatePickerFooter();
@@ -3241,6 +3535,7 @@
         renderProfileActivityLegend('profileActivityLegend', profileActivityMode);
         renderProfileActivityLegend('overviewProfileLegend', profileActivityMode);
       }
+      renderActivityInsights();
     }
 
     function rerenderPresentation() {
@@ -3270,6 +3565,48 @@
           render3DCalendar(getVisibleCalendarData('3d'));
           updateTopStatsForAllTime();
         }
+      }
+    }
+
+    function rerenderTokenPresentation() {
+      if (toolChart) {
+        toolChart.destroy();
+        toolChart = null;
+      }
+      if (lastUsageResponse && isOverviewActive()) renderOverviewTab(lastUsageResponse);
+      if (isSessionsActive()) renderSessionsTab();
+
+      const statsContent = document.getElementById('stats-content');
+      if (statsContent?.classList.contains('active') && statsLoaded) {
+        if (calendarState.view === 'profile') renderProfileView();
+        else if (calendarState.view === 'month') renderMonthHeatmap();
+        else if (calendarState.view === 'year') {
+          renderYearHeatmap();
+          updateTopStatsForYear();
+        } else if (calendarState.view === '3d') {
+          render3DCalendar(getVisibleCalendarData('3d'));
+          updateTopStatsForAllTime();
+        }
+      }
+
+      const modal = document.getElementById('sessionModal');
+      if (activeSessionDetail && modal && !modal.classList.contains('hidden')) {
+        const { session = {}, turns = [] } = activeSessionDetail.data || {};
+        const total = Number(session.tokens || 0);
+        document.getElementById('sessionModalInput').textContent = formatTokenCount(session.tokens_in || 0);
+        document.getElementById('sessionModalCache').textContent = formatTokenCount(session.tokens_cache || 0);
+        document.getElementById('sessionModalOutput').textContent = formatTokenCount(session.tokens_out || 0);
+        document.getElementById('sessionModalTotal').textContent = formatTokenCount(total);
+        setShareBar('sessionShareInput', session.tokens_in || 0, total);
+        setShareBar('sessionShareCache', session.tokens_cache || 0, total);
+        setShareBar('sessionShareOutput', session.tokens_out || 0, total);
+        setShareBar('sessionShareReasoning', session.tokens_reasoning || 0, total);
+        renderSessionCharts(turns);
+      }
+
+      const dayDetails = document.getElementById('dayDetails');
+      if (activeDayDetail && dayDetails && !dayDetails.classList.contains('hidden') && dayDetails.style.display !== 'none') {
+        showDayDetails(activeDayDetail, { scroll: false });
       }
     }
 
@@ -3613,7 +3950,7 @@
 
     function renderOverviewTab(data) {
       if (!data) return;
-      document.getElementById('totalTokens').textContent = formatNumber(data.total_tokens);
+      renderOverviewTokenTotal(data.total_tokens);
       document.getElementById('totalCost').textContent = formatCurrency(data.total_cost);
       document.getElementById('totalMessages').textContent = formatNumber(data.total_messages || 0);
       fitOverviewKpis();
@@ -3626,7 +3963,7 @@
       if (data.top_models && data.top_models.length > 0) {
         const top = data.top_models[0];
         document.getElementById('topModel').textContent = top.name;
-        document.getElementById('topModelMeta').textContent = `${formatCurrency(top.cost)} · ${formatNumber(top.tokens)} ${t('tokensUnit')}`;
+        document.getElementById('topModelMeta').textContent = `${formatCurrency(top.cost)} · ${formatTokenCount(top.tokens, true)}`;
       } else {
         document.getElementById('topModel').textContent = '—';
         document.getElementById('topModelMeta').textContent = '—';
@@ -3788,6 +4125,7 @@
         updateIsManualRefresh = false;
         renderRefreshButton();
         scheduleStatsWarm(forceRefresh);
+        loadActivityInsights({ force: forceRefresh }).catch(() => {});
       }
     }
 
@@ -4058,11 +4396,11 @@
           latestMeta.textContent = parts.join(" · ");
         }
       }
-      if (latestInput) latestInput.textContent = formatNumber(latest?.tokens_in || 0);
-      if (latestCache) latestCache.textContent = formatNumber(latest?.tokens_cache || 0);
+      if (latestInput) latestInput.textContent = formatTokenCount(latest?.tokens_in || 0);
+      if (latestCache) latestCache.textContent = formatTokenCount(latest?.tokens_cache || 0);
       if (latestCachePct) latestCachePct.textContent = latest ? `${formatHitRate(latest.cache_hit_rate)} ${t("hit")}` : "—";
-      if (latestOutput) latestOutput.textContent = formatNumber(latest?.tokens_out || 0);
-      if (latestTotal) latestTotal.textContent = formatNumber(latest?.tokens || 0);
+      if (latestOutput) latestOutput.textContent = formatTokenCount(latest?.tokens_out || 0);
+      if (latestTotal) latestTotal.textContent = formatTokenCount(latest?.tokens || 0);
       if (latestEvents) latestEvents.textContent = formatNumber(latest?.token_events || 0);
       if (latestSeen) latestSeen.textContent = formatSessionDateTime(latest?.last_seen_at);
 
@@ -4128,7 +4466,7 @@
         summaryRow.appendChild(createTableCell("td", "py-3 px-4", ""));
 
         // Total tokens
-        summaryRow.appendChild(createTableCell("td", "py-3 px-4 text-right font-semibold text-slate-800", formatNumber(group.tokens)));
+        summaryRow.appendChild(createTableCell("td", "py-3 px-4 text-right font-semibold text-slate-800", formatTokenCount(group.tokens)));
         // Cost
         summaryRow.appendChild(createTableCell("td", "py-3 px-4 text-right font-bold", formatCurrency(group.cost), "color: var(--color-cost);"));
         // Last updated + arrow
@@ -4167,11 +4505,11 @@
           row.appendChild(nameCell);
           if (showTool) row.appendChild(createTableCell("td", "py-3 px-4 text-slate-700", formatToolName(session.tool)));
           row.appendChild(createTableCell("td", "py-3 px-4 text-slate-700 mono", session.model || "—"));
-          row.appendChild(createTableCell("td", "py-3 px-4 text-right text-slate-700", formatNumber(session.tokens_in || 0)));
-          row.appendChild(createTableCell("td", "py-3 px-4 text-right text-slate-700", formatNumber(session.tokens_cache || 0)));
+          row.appendChild(createTableCell("td", "py-3 px-4 text-right text-slate-700", formatTokenCount(session.tokens_in || 0)));
+          row.appendChild(createTableCell("td", "py-3 px-4 text-right text-slate-700", formatTokenCount(session.tokens_cache || 0)));
           row.appendChild(createTableCell("td", "py-3 px-4 text-right text-slate-700", formatHitRate(session.cache_hit_rate)));
-          row.appendChild(createTableCell("td", "py-3 px-4 text-right text-slate-700", formatNumber(session.tokens_out || 0)));
-          row.appendChild(createTableCell("td", "py-3 px-4 text-right font-semibold text-slate-800", formatNumber(session.tokens || 0)));
+          row.appendChild(createTableCell("td", "py-3 px-4 text-right text-slate-700", formatTokenCount(session.tokens_out || 0)));
+          row.appendChild(createTableCell("td", "py-3 px-4 text-right font-semibold text-slate-800", formatTokenCount(session.tokens || 0)));
           row.appendChild(createTableCell("td", "py-3 px-4 text-right font-bold", formatCurrency(session.cost || 0), "color: var(--color-cost);"));
           row.appendChild(createTableCell("td", "py-3 px-4 text-right text-slate-500", formatSessionTime(session.last_seen_at)));
           row.addEventListener("click", () => openSessionModal(session.tool || prefix, session.session_id));
@@ -4218,7 +4556,7 @@
 
     function setShareBar(prefix, value, total) {
       const pct = total > 0 ? (Number(value || 0) / total) * 100 : 0;
-      const label = `${formatPercent(pct / 100)} · ${formatNumber(value || 0)}`;
+      const label = `${formatPercent(pct / 100)} · ${formatTokenCount(value || 0)}`;
       const labelEl = document.getElementById(`${prefix}Label`);
       const barEl = document.getElementById(`${prefix}Bar`);
       if (labelEl) labelEl.textContent = label;
@@ -4228,6 +4566,7 @@
 
     function closeSessionModal() {
       document.getElementById("sessionModal").classList.add("hidden");
+      activeSessionDetail = null;
     }
 
     function buildTurnSeries(turns) {
@@ -4362,13 +4701,13 @@
           },
           y: {
             beginAtZero: true,
-            ticks: { color: "#475569", callback: (value) => formatNumber(value) },
+            ticks: { color: "#475569", callback: (value) => formatTokenCount(value) },
             grid: { color: "rgba(226,232,240,0.55)" },
           },
         },
         plugins: {
           legend: { position: "bottom" },
-          tooltip: { callbacks: { label: (context) => `${context.dataset.label}: ${formatNumber(context.raw || 0)}` } },
+          tooltip: { callbacks: { label: (context) => `${context.dataset.label}: ${formatTokenCount(context.raw || 0)}` } },
         },
       };
     }
@@ -4419,14 +4758,15 @@
       try {
         const response = await fetch(`${appPath('/api/session')}?tool=${encodeURIComponent(tool)}&session_id=${encodeURIComponent(sessionId)}`);
         const data = await response.json();
+        activeSessionDetail = { tool, data };
         const session = data.session || {};
         const turns = data.turns || [];
         document.getElementById("sessionModalTitle").textContent = sessionDisplayName(session);
         document.getElementById("sessionModalMeta").textContent = `${formatToolName(tool)} · ${session.project || "—"} · ${session.model || "—"} · ${formatNumber(session.token_events || 0)} ${t("events")}`;
-        document.getElementById("sessionModalInput").textContent = formatNumber(session.tokens_in || 0);
-        document.getElementById("sessionModalCache").textContent = formatNumber(session.tokens_cache || 0);
-        document.getElementById("sessionModalOutput").textContent = formatNumber(session.tokens_out || 0);
-        document.getElementById("sessionModalTotal").textContent = formatNumber(session.tokens || 0);
+        document.getElementById("sessionModalInput").textContent = formatTokenCount(session.tokens_in || 0);
+        document.getElementById("sessionModalCache").textContent = formatTokenCount(session.tokens_cache || 0);
+        document.getElementById("sessionModalOutput").textContent = formatTokenCount(session.tokens_out || 0);
+        document.getElementById("sessionModalTotal").textContent = formatTokenCount(session.tokens || 0);
         const total = Number(session.tokens || 0);
         const inputPct = total > 0 ? Number(session.tokens_in || 0) / total : 0;
         const cachePct = total > 0 ? Number(session.tokens_cache || 0) / total : 0;
@@ -4481,7 +4821,7 @@
                 callbacks: {
                   label: (context) => {
                     const value = context.raw ?? 0;
-                    return `${context.label}: ${formatNumber(value)} ${t('tokensUnit')}`;
+                    return `${context.label}: ${formatTokenCount(value, true)}`;
                   },
                 },
               },
@@ -4651,7 +4991,7 @@
         tr.style.borderColor = 'rgba(226,232,240,0.9)';
         tr.innerHTML = `
           <td class="py-3 px-4 font-semibold text-slate-800">${formatToolName(row.tool)}</td>
-          <td class="py-3 px-4 text-right text-slate-700">${formatNumber(row.tokens)}</td>
+          <td class="py-3 px-4 text-right text-slate-700">${formatTokenCount(row.tokens)}</td>
           <td class="py-3 px-4 text-right text-slate-700">${formatHitRate(row.cache_hit_rate)}</td>
           <td class="py-3 px-4 text-right font-bold" style="color:var(--color-cost)">${formatCurrency(row.cost)}</td>
         `;
@@ -4725,7 +5065,7 @@
         header.className = 'flex flex-wrap items-baseline gap-x-4 gap-y-1 mb-3';
         header.innerHTML = `
           <h4 class="text-sm font-extrabold mono tracking-wide" style="color: var(--color-primary);">${formatToolName(appName)}</h4>
-          <span class="text-xs text-slate-600">${formatNumber(appTokens)} ${t('tokensUnit')} · ${formatCurrency(appCost)} · ${formatNumber(appMessages)} ${t('msgs')} · ${t('cacheHitRate')} ${formatHitRate(appHit)}</span>
+          <span class="text-xs text-slate-600">${formatTokenCount(appTokens, true)} · ${formatCurrency(appCost)} · ${formatNumber(appMessages)} ${t('msgs')} · ${t('cacheHitRate')} ${formatHitRate(appHit)}</span>
         `;
         appDiv.appendChild(header);
 
@@ -4756,10 +5096,10 @@
           row.className = 'border-b hover:bg-slate-50 transition';
           row.innerHTML = `
             <td class="py-2 px-3 text-slate-800" title="${model.name}">${model.name}</td>
-            <td class="py-2 px-3 text-right text-slate-700">${formatNumber(model.tokens_in)}</td>
-            <td class="py-2 px-3 text-right text-slate-700">${formatNumber(model.tokens_out)}</td>
-            <td class="py-2 px-3 text-right text-slate-700">${formatNumber(model.tokens_cache)}</td>
-            <td class="py-2 px-3 text-right font-semibold text-slate-800">${formatNumber(model.tokens)}</td>
+            <td class="py-2 px-3 text-right text-slate-700">${formatTokenCount(model.tokens_in)}</td>
+            <td class="py-2 px-3 text-right text-slate-700">${formatTokenCount(model.tokens_out)}</td>
+            <td class="py-2 px-3 text-right text-slate-700">${formatTokenCount(model.tokens_cache)}</td>
+            <td class="py-2 px-3 text-right font-semibold text-slate-800">${formatTokenCount(model.tokens)}</td>
             <td class="py-2 px-3 text-right text-slate-700">${formatHitRate(model.cache_hit_rate)}</td>
             <td class="py-2 px-3 text-right font-bold" style="color:var(--color-cost)">${formatCurrency(model.cost)}</td>
             <td class="py-2 px-3 text-right text-slate-500">${formatNumber(model.messages || 0)}</td>
@@ -4831,10 +5171,10 @@
         row.className = 'border-b hover:bg-slate-50 transition';
         row.innerHTML = `
           <td class="py-2 px-3 text-slate-800">${model.name}</td>
-          <td class="py-2 px-3 text-right text-slate-700">${formatNumber(model.tokens_in)}</td>
-          <td class="py-2 px-3 text-right text-slate-700">${formatNumber(model.tokens_out)}</td>
-          <td class="py-2 px-3 text-right text-slate-700">${formatNumber(model.tokens_cache)}</td>
-          <td class="py-2 px-3 text-right font-semibold text-slate-800">${formatNumber(model.tokens)}</td>
+          <td class="py-2 px-3 text-right text-slate-700">${formatTokenCount(model.tokens_in)}</td>
+          <td class="py-2 px-3 text-right text-slate-700">${formatTokenCount(model.tokens_out)}</td>
+          <td class="py-2 px-3 text-right text-slate-700">${formatTokenCount(model.tokens_cache)}</td>
+          <td class="py-2 px-3 text-right font-semibold text-slate-800">${formatTokenCount(model.tokens)}</td>
           <td class="py-2 px-3 text-right text-slate-700">${formatHitRate(model.cache_hit_rate)}</td>
           <td class="py-2 px-3 text-right font-bold" style="color:var(--color-cost)">${formatCurrency(model.cost)}</td>
           <td class="py-2 px-3 text-right text-slate-500">${formatNumber(model.messages || 0)}</td>
@@ -6032,6 +6372,11 @@
       years: new Map(),
       pendingYears: new Map(),
     };
+    const activityInsightsState = {
+      status: 'idle',
+      data: null,
+      promise: null,
+    };
 
     let statsLoaded = false;   // true once the first /api/stats load has rendered
     let statsLoadSeq = 0;      // guards against stale/overlapping concurrent loads
@@ -6388,10 +6733,7 @@
     }
 
     function formatProfileMetricNumber(value) {
-      return new Intl.NumberFormat(currentLang === 'zh' ? 'zh-CN' : 'en-US', {
-        notation: 'compact',
-        maximumFractionDigits: 1,
-      }).format(safeProfileNumber(value));
+      return formatTokenCount(safeProfileNumber(value));
     }
 
     function formatProfileAggregateTooltip(aggregate, cumulative = false, milestonesEnabled = false) {
@@ -6409,18 +6751,18 @@
         {
           key: 'total',
           label: t('total'),
-          value: `${formatNumber(tokenTotal)} ${t('tokensUnit')}`,
+          value: formatTokenCount(tokenTotal, true),
           tone: milestone?.tone || 'primary',
           prominent: true,
         },
-        { key: 'input', label: t('input'), value: formatNumber(safeProfileNumber(breakdown.input)), tone: 'primary', prominent: false },
-        { key: 'output', label: t('output'), value: formatNumber(safeProfileNumber(breakdown.output)), tone: 'secondary', prominent: false },
-        { key: 'cacheRead', label: t('cacheRead'), value: formatNumber(safeProfileNumber(breakdown.cacheRead)), tone: 'cost', prominent: false },
-        { key: 'cacheWrite', label: t('cacheWrite'), value: formatNumber(safeProfileNumber(breakdown.cacheWrite)), tone: 'cta', prominent: false },
+        { key: 'input', label: t('input'), value: formatTokenCount(safeProfileNumber(breakdown.input)), tone: 'primary', prominent: false },
+        { key: 'output', label: t('output'), value: formatTokenCount(safeProfileNumber(breakdown.output)), tone: 'secondary', prominent: false },
+        { key: 'cacheRead', label: t('cacheRead'), value: formatTokenCount(safeProfileNumber(breakdown.cacheRead)), tone: 'cost', prominent: false },
+        { key: 'cacheWrite', label: t('cacheWrite'), value: formatTokenCount(safeProfileNumber(breakdown.cacheWrite)), tone: 'cta', prominent: false },
         {
           key: 'reasoning',
           label: t('reasoning'),
-          value: formatNumber(safeProfileNumber(breakdown.reasoning)),
+          value: formatTokenCount(safeProfileNumber(breakdown.reasoning)),
           tone: 'reasoning',
           prominent: false,
           include: safeProfileNumber(breakdown.reasoning) > 0,
@@ -6646,6 +6988,249 @@
       { passive: true },
     );
 
+    function safeActivityNumber(value) {
+      const number = Number(value);
+      return Number.isFinite(number) && number > 0 ? number : 0;
+    }
+
+    function formatActivityShare(value) {
+      if (value === null || value === undefined || !Number.isFinite(Number(value))) return '—';
+      const percent = Math.max(0, Number(value) * 100);
+      const rounded = Math.round(percent * 10) / 10;
+      return `${Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(1)}%`;
+    }
+
+    function formatActivityEffort(effort) {
+      const raw = String(effort || '').trim();
+      const key = {
+        xhigh: 'effortXhigh',
+        high: 'effortHigh',
+        medium: 'effortMedium',
+        low: 'effortLow',
+      }[raw.toLowerCase()];
+      return key ? t(key) : (raw || '—');
+    }
+
+    function buildActivityInsightValues(data) {
+      const chats = safeActivityNumber(data?.recorded_chats?.value);
+      const toolCalls = safeActivityNumber(data?.tools?.total_calls);
+      const reasoning = data?.reasoning?.most_used || null;
+      const topTool = data?.tools?.most_used || null;
+      const reasoningLabel = reasoning?.effort ? formatActivityEffort(reasoning.effort) : '—';
+      const reasoningShare = reasoning?.effort ? formatActivityShare(reasoning.share) : '—';
+      const toolName = String(topTool?.name || '').trim();
+      const toolShare = toolName ? formatActivityShare(topTool.share) : '—';
+      return {
+        empty: chats === 0 && toolCalls === 0 && !reasoning?.effort && !toolName,
+        chats: formatNumber(chats),
+        reasoning: reasoningLabel === '—'
+          ? '—'
+          : `${reasoningLabel}${reasoningShare === '—' ? '' : ` · ${reasoningShare}`}`,
+        toolCalls: formatNumber(toolCalls),
+        topTool: toolName
+          ? `${toolName}${toolShare === '—' ? '' : ` · ${toolShare}`}`
+          : '—',
+      };
+    }
+
+    function createActivityInsightKpi(label, value, tone, compact = false) {
+      const wrapper = document.createElement('div');
+      wrapper.className = compact
+        ? 'overview-activity-insight-kpi'
+        : 'profile-activity-insight-kpi';
+      wrapper.dataset.tone = tone;
+      const term = document.createElement('dt');
+      term.textContent = label;
+      const description = document.createElement('dd');
+      description.textContent = value;
+      description.title = value;
+      wrapper.append(description, term);
+      return wrapper;
+    }
+
+    function formatActivityCoverage(data) {
+      const chatCoverage = data?.recorded_chats?.coverage || {};
+      const reasoningCoverage = data?.reasoning?.coverage || {};
+      const toolCoverage = data?.tools?.coverage || {};
+      const primaryFiles = safeActivityNumber(chatCoverage.primary_files);
+      const identifiedFiles = safeActivityNumber(chatCoverage.files_with_session_id);
+      const identifiedTurns = safeActivityNumber(reasoningCoverage.identified_turns);
+      const knownTurns = safeActivityNumber(reasoningCoverage.known_effort_turns);
+      const totalCalls = safeActivityNumber(data?.tools?.total_calls);
+      const namedCalls = safeActivityNumber(toolCoverage.named_calls);
+      const lines = [
+        `${t('activityCoverage')} · ${t('activityLocalScope')}`,
+        `${formatNumber(identifiedFiles)}/${formatNumber(primaryFiles)} ${t('activityFilesIdentified')}`,
+        `${formatNumber(knownTurns)}/${formatNumber(identifiedTurns)} ${t('activityReasoningClassified')}`,
+        `${formatNumber(namedCalls)}/${formatNumber(totalCalls)} ${t('activityToolsNamed')}`,
+      ];
+      const legacyUnavailable = safeActivityNumber(chatCoverage.legacy_unavailable_records);
+      if (legacyUnavailable) {
+        lines.push(`${formatNumber(legacyUnavailable)} ${t('activityLegacyUnavailable')}`);
+      }
+      return lines.join('\n');
+    }
+
+    function renderProfileActivityInsights() {
+      const shell = document.getElementById('profileActivityInsights');
+      const kpis = document.getElementById('profileActivityInsightsKpis');
+      const coverage = document.getElementById('profileActivityCoverage');
+      const ranking = document.getElementById('profileActivityToolRanking');
+      if (!shell || !kpis || !coverage || !ranking) return;
+      const status = activityInsightsState.status;
+      shell.dataset.state = status;
+      shell.setAttribute('aria-busy', String(status === 'idle' || status === 'loading'));
+      ranking.setAttribute('aria-label', t('activityTopTools'));
+      kpis.replaceChildren();
+      ranking.replaceChildren();
+
+      if (status === 'idle' || status === 'loading') {
+        ['primary', 'secondary', 'cost', 'cta'].forEach((tone) => {
+          const item = createActivityInsightKpi('', '', tone);
+          const skeleton = document.createElement('span');
+          skeleton.className = 'activity-insights-skeleton';
+          item.querySelector('dd')?.replaceChildren(skeleton);
+          kpis.appendChild(item);
+        });
+        coverage.textContent = t('loading');
+        return;
+      }
+      if (status === 'error') {
+        const message = document.createElement('p');
+        message.className = 'activity-insights-message';
+        message.textContent = t('activityUnavailable');
+        kpis.appendChild(message);
+        coverage.textContent = t('activityUnavailable');
+        return;
+      }
+
+      const data = activityInsightsState.data || {};
+      const values = buildActivityInsightValues(data);
+      if (values.empty) {
+        const message = document.createElement('p');
+        message.className = 'activity-insights-message';
+        message.textContent = t('activityNoData');
+        kpis.appendChild(message);
+        coverage.textContent = t('activityLocalScope');
+        return;
+      }
+
+      [
+        [t('activityRecordedChats'), values.chats, 'primary'],
+        [t('activityReasoning'), values.reasoning, 'secondary'],
+        [t('activityToolCalls'), values.toolCalls, 'cost'],
+        [t('activityTopTool'), values.topTool, 'cta'],
+      ].forEach(([label, value, tone]) => {
+        kpis.appendChild(createActivityInsightKpi(label, value, tone));
+      });
+      coverage.textContent = formatActivityCoverage(data);
+
+      const tools = Array.isArray(data?.tools?.distribution)
+        ? data.tools.distribution.slice(0, 5)
+        : [];
+      if (!tools.length) {
+        const item = document.createElement('li');
+        item.className = 'activity-insights-message';
+        item.textContent = '—';
+        ranking.appendChild(item);
+        return;
+      }
+      tools.forEach((tool) => {
+        const name = String(tool?.name || '').trim() || '—';
+        const count = safeActivityNumber(tool?.count);
+        const share = Math.max(0, Math.min(1, Number(tool?.share) || 0));
+        const item = document.createElement('li');
+        item.className = 'profile-activity-tool-row';
+        const nameElement = document.createElement('span');
+        nameElement.className = 'profile-activity-tool-name';
+        nameElement.textContent = name;
+        nameElement.title = name;
+        const valueElement = document.createElement('span');
+        valueElement.className = 'profile-activity-tool-value';
+        valueElement.textContent = `${formatNumber(count)} · ${formatActivityShare(share)}`;
+        const track = document.createElement('span');
+        track.className = 'profile-activity-tool-track';
+        const bar = document.createElement('span');
+        bar.className = 'profile-activity-tool-bar';
+        bar.style.setProperty('--activity-share', `${share * 100}%`);
+        track.appendChild(bar);
+        item.append(nameElement, valueElement, track);
+        ranking.appendChild(item);
+      });
+    }
+
+    function renderOverviewActivityInsights() {
+      const shell = document.getElementById('overviewActivityInsights');
+      const valuesElement = document.getElementById('overviewActivityInsightsValues');
+      const stateElement = document.getElementById('overviewActivityInsightsState');
+      if (!shell || !valuesElement || !stateElement) return;
+      const status = activityInsightsState.status;
+      shell.dataset.state = status;
+      shell.setAttribute('aria-busy', String(status === 'idle' || status === 'loading'));
+      shell.setAttribute('aria-label', t('activityInsightsTitle'));
+      valuesElement.replaceChildren();
+
+      if (status === 'idle' || status === 'loading') {
+        stateElement.textContent = t('loading');
+        return;
+      }
+      if (status === 'error') {
+        stateElement.textContent = t('activityUnavailable');
+        return;
+      }
+      const values = buildActivityInsightValues(activityInsightsState.data || {});
+      if (values.empty) {
+        shell.dataset.state = 'empty';
+        stateElement.textContent = t('activityNoData');
+        return;
+      }
+      shell.dataset.state = 'ready';
+      [
+        [t('activityRecordedChats'), values.chats, 'primary'],
+        [t('activityReasoning'), values.reasoning, 'secondary'],
+        [t('activityToolCalls'), values.toolCalls, 'cost'],
+        [t('activityTopTool'), values.topTool, 'cta'],
+      ].forEach(([label, value, tone]) => {
+        valuesElement.appendChild(createActivityInsightKpi(label, value, tone, true));
+      });
+      stateElement.textContent = t('activityLocalScope');
+    }
+
+    function renderActivityInsights() {
+      renderProfileActivityInsights();
+      renderOverviewActivityInsights();
+    }
+
+    async function loadActivityInsights(options = {}) {
+      const force = Boolean(options.force);
+      if (!force && activityInsightsState.data) {
+        renderActivityInsights();
+        return activityInsightsState.data;
+      }
+      if (!force && activityInsightsState.promise) return activityInsightsState.promise;
+
+      activityInsightsState.status = 'loading';
+      renderActivityInsights();
+      const url = `${appPath('/api/activity-insights')}${force ? '?refresh=1' : ''}`;
+      const request = fetchJsonWithRetry(url)
+        .then((data) => {
+          activityInsightsState.data = data;
+          activityInsightsState.status = buildActivityInsightValues(data).empty ? 'empty' : 'ready';
+          renderActivityInsights();
+          return data;
+        })
+        .catch((error) => {
+          activityInsightsState.status = activityInsightsState.data ? 'ready' : 'error';
+          renderActivityInsights();
+          throw error;
+        })
+        .finally(() => {
+          if (activityInsightsState.promise === request) activityInsightsState.promise = null;
+        });
+      activityInsightsState.promise = request;
+      return request;
+    }
+
     function renderProfileSummary(summary) {
       document.getElementById('profileStatRecordedTokens').textContent = formatProfileMetricNumber(summary.recordedTokens || 0);
       const peakValue = summary.peakDay ? profileDayTokens(summary.peakDay) : 0;
@@ -6752,6 +7337,7 @@
       }
 
       syncProfileActivityModeControls();
+      renderProfileActivityInsights();
 
       requestAnimationFrame(ensureProfileActivityInitialScroll);
     }
@@ -6870,6 +7456,7 @@
       syncProfileActivityModeControls();
       renderProfileActivityLegend('overviewProfileLegend', profileActivityMode);
       setOverviewProfileState('ready');
+      renderOverviewActivityInsights();
       requestAnimationFrame(ensureOverviewProfileInitialScroll);
     }
 
@@ -6895,6 +7482,7 @@
 
     async function loadStats(options = {}) {
       const preserveNavigation = !!options.preserveNavigation;
+      loadActivityInsights().catch(() => {});
       const seq = ++statsLoadSeq;
       if (!statsLoaded) setStatsStatus('loading');
       try {
@@ -6903,7 +7491,7 @@
 
         const stats = data.stats || {};
         document.getElementById('statFavoriteModel').textContent = stats.favorite_model || '—';
-        document.getElementById('statTotalTokens').textContent = formatNumber(stats.total_tokens || 0);
+        document.getElementById('statTotalTokens').textContent = formatTokenCount(stats.total_tokens || 0);
         document.getElementById('statSessions').textContent = formatNumber(stats.sessions || 0);
         document.getElementById('statCurrentStreak').textContent = pluralDays(stats.current_streak || 0);
         document.getElementById('statLongestStreak').textContent = pluralDays(stats.longest_streak || 0);
@@ -7168,6 +7756,7 @@
       document.getElementById('statsInsightCards').style.display = view === 'profile' ? 'none' : '';
       document.getElementById('dayDetails').style.display = view === 'profile' ? 'none' : '';
       updateMetricControls();
+      if (view === 'profile') loadActivityInsights().catch(() => {});
 
       // Before the first successful stats load, keep the loading/error banner up
       // (setStatsStatus has hidden the view containers) rather than rendering an
@@ -7255,7 +7844,7 @@
         const cell = document.createElement('div');
         cell.className = 'heatmap-cell';
         cell.style.backgroundColor = heatColor(lvl);
-        cell.title = `${day.date}: ${formatNumber(day.totals.tokens || 0)} ${t('tokensUnit')} · ${formatCurrency(day.totals.cost || 0)} · ${formatNumber(day.totals.messages || 0)} ${t('msgs')}`;
+        cell.title = `${day.date}: ${formatTokenCount(day.totals.tokens || 0, true)} · ${formatCurrency(day.totals.cost || 0)} · ${formatNumber(day.totals.messages || 0)} ${t('msgs')}`;
         cell.addEventListener('click', () => showDayDetails(day));
         gridEl.appendChild(cell);
       });
@@ -7350,7 +7939,7 @@
 
       // Update UI - Month sidebar stats
       document.getElementById('monthFavoriteModel').textContent = topModel;
-      document.getElementById('monthTotalTokens').textContent = formatNumber(totalTokens);
+      document.getElementById('monthTotalTokens').textContent = formatTokenCount(totalTokens);
       document.getElementById('monthTotalCost').textContent = formatCurrency(totalCost);
       document.getElementById('monthTotalEnergy').textContent = formatEnergyKwh(totalEnergyJ);
       document.getElementById('monthTotalSessions').textContent = formatNumber(totalMessages);
@@ -7360,7 +7949,7 @@
 
       // Update top stats section for month view
       document.getElementById('statFavoriteModel').textContent = topModel;
-      document.getElementById('statTotalTokens').textContent = formatNumber(totalTokens);
+      document.getElementById('statTotalTokens').textContent = formatTokenCount(totalTokens);
       document.getElementById('statSessions').textContent = formatNumber(totalMessages);
       document.getElementById('statCurrentStreak').textContent = pluralDays(monthStreak);
       document.getElementById('statLongestStreak').textContent = pluralDays(longestEverStreak);
@@ -7442,7 +8031,7 @@
 
       // Update top stats section
       document.getElementById('statFavoriteModel').textContent = topModel;
-      document.getElementById('statTotalTokens').textContent = formatNumber(totalTokens);
+      document.getElementById('statTotalTokens').textContent = formatTokenCount(totalTokens);
       document.getElementById('statSessions').textContent = formatNumber(totalMessages);
       document.getElementById('statCurrentStreak').textContent = pluralDays(yearStreak);
       document.getElementById('statLongestStreak').textContent = pluralDays(longestEverStreak);
@@ -7526,7 +8115,7 @@
 
       // Update top stats section
       document.getElementById('statFavoriteModel').textContent = topModel;
-      document.getElementById('statTotalTokens').textContent = formatNumber(totalTokens);
+      document.getElementById('statTotalTokens').textContent = formatTokenCount(totalTokens);
       document.getElementById('statSessions').textContent = formatNumber(totalMessages);
       document.getElementById('statCurrentStreak').textContent = pluralDays(currentStreak);
       document.getElementById('statLongestStreak').textContent = pluralDays(longestEverStreak);
@@ -7615,7 +8204,7 @@
 
         const lvl = quantileLevel(getMetricValue(day, calendarState.metric), thresholds);
         cell.style.backgroundColor = heatColor(lvl);
-        cell.title = `${day.date}: ${formatNumber(day.totals.tokens || 0)} ${t('tokensUnit')} · ${formatCurrency(day.totals.cost || 0)} · ${formatNumber(day.totals.messages || 0)} ${t('msgs')}`;
+        cell.title = `${day.date}: ${formatTokenCount(day.totals.tokens || 0, true)} · ${formatCurrency(day.totals.cost || 0)} · ${formatNumber(day.totals.messages || 0)} ${t('msgs')}`;
         cell.addEventListener('click', () => showDayDetails(day));
 
         gridEl.appendChild(cell);
@@ -7657,7 +8246,7 @@
         tr.title = `${monthNames[m]} ${year}`;
         tr.innerHTML = `
           <td class="py-2 px-3 font-semibold mono">${monthNames[m]}</td>
-          <td class="py-2 px-3 text-right">${formatNumber(b.tokens)}</td>
+          <td class="py-2 px-3 text-right">${formatTokenCount(b.tokens)}</td>
           <td class="py-2 px-3 text-right font-semibold" style="color:var(--color-cost)">${formatCurrency(b.cost)}</td>
           <td class="py-2 px-3 text-right">${formatEnergy(b.energyJ)}</td>
         `;
@@ -7691,7 +8280,8 @@
     // ===== End Heatmap Calendar =====
 
 
-    function showDayDetails(day) {
+    function showDayDetails(day, options = {}) {
+      activeDayDetail = day;
       const details = document.getElementById('dayDetails');
       const content = document.getElementById('dayDetailsContent');
 
@@ -7699,17 +8289,17 @@
         <div class="grid grid-cols-2 gap-4 mb-4 text-sm">
           <div><span class="text-slate-500">${t('date')}</span><div class="font-semibold">${day.date}</div></div>
           <div><span class="text-slate-500">${t('cost')}</span><div class="font-semibold" style="color:var(--color-cost)">${formatCurrency(day.totals.cost)}</div></div>
-          <div><span class="text-slate-500">${t('tokens')}</span><div class="font-semibold">${formatNumber(day.totals.tokens)}</div></div>
+          <div><span class="text-slate-500">${t('tokens')}</span><div class="font-semibold">${formatTokenCount(day.totals.tokens)}</div></div>
           <div><span class="text-slate-500">${t('messages')}</span><div class="font-semibold">${formatNumber(day.totals.messages)}</div></div>
           <div><span class="text-slate-500">${t('energy')}</span><div class="font-semibold">${formatEnergy(dayEnergyJ(day))}</div></div>
           <div><span class="text-slate-500">${t('cacheHitRate')}</span><div class="font-semibold" style="color:var(--color-primary)">${formatHitRate(hitRateFrom(day.tokenBreakdown.input, day.tokenBreakdown.cacheRead))}</div></div>
         </div>
         <div class="mb-2 text-sm font-semibold mono">${t('tokenBreakdown')}</div>
         <div class="grid grid-cols-2 gap-2 text-sm mb-4">
-          <div><span class="text-slate-500">${t('input')}</span>: ${formatNumber(day.tokenBreakdown.input)}</div>
-          <div><span class="text-slate-500">${t('output')}</span>: ${formatNumber(day.tokenBreakdown.output)}</div>
-          <div><span class="text-slate-500">${t('cacheRead')}</span>: ${formatNumber(day.tokenBreakdown.cacheRead)}</div>
-          <div><span class="text-slate-500">${t('reasoning')}</span>: ${formatNumber(day.tokenBreakdown.reasoning)}</div>
+          <div><span class="text-slate-500">${t('input')}</span>: ${formatTokenCount(day.tokenBreakdown.input)}</div>
+          <div><span class="text-slate-500">${t('output')}</span>: ${formatTokenCount(day.tokenBreakdown.output)}</div>
+          <div><span class="text-slate-500">${t('cacheRead')}</span>: ${formatTokenCount(day.tokenBreakdown.cacheRead)}</div>
+          <div><span class="text-slate-500">${t('reasoning')}</span>: ${formatTokenCount(day.tokenBreakdown.reasoning)}</div>
         </div>
       `;
 
@@ -7769,7 +8359,7 @@
             <tr class="border-b">
               <td class="py-2 text-slate-700">${formatToolName(src.source)}</td>
               <td class="py-2 text-slate-800">${src.modelId}</td>
-              <td class="py-2 text-right text-slate-700">${formatNumber(totalTokens)}</td>
+              <td class="py-2 text-right text-slate-700">${formatTokenCount(totalTokens)}</td>
               <td class="py-2 text-right text-slate-700">${formatEnergy(energyJ)}</td>
               <td class="py-2 text-right font-semibold" style="color:var(--color-cost)">${formatCurrency(src.cost)}</td>
               <td class="py-2 text-right text-slate-500">${formatNumber(src.messages)}</td>
@@ -7786,11 +8376,14 @@
 
       content.innerHTML = html;
       details.classList.remove('hidden');
-      try { details.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) {}
+      if (options.scroll !== false) {
+        try { details.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) {}
+      }
     }
 
     document.getElementById('closeDayDetails').addEventListener('click', () => {
       document.getElementById('dayDetails').classList.add('hidden');
+      activeDayDetail = null;
     });
 
     // 3D calendar with Three.js (WebGL)
@@ -7819,7 +8412,7 @@
       if (days.length === 0) {
         container.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:750px;color:var(--color-muted);font-size:16px;">${t('noActivityData')}</div>`;
         document.getElementById('stats3DTotalCost').textContent = formatCurrency(0);
-        document.getElementById('stats3DTotalTokens').textContent = formatNumber(0);
+        document.getElementById('stats3DTotalTokens').textContent = formatTokenCount(0);
         document.getElementById('stats3DActiveDate').textContent = '—';
         document.getElementById('stats3DActiveTokens').textContent = '—';
         document.getElementById('stats3DActiveCost').textContent = '—';
@@ -8080,7 +8673,7 @@
       const totalCost = sorted.reduce((sum, d) => sum + (Number(d?.totals?.cost ?? 0) || 0), 0);
       const totalTokens = sorted.reduce((sum, d) => sum + (Number(d?.totals?.tokens ?? 0) || 0), 0);
       document.getElementById('stats3DTotalCost').textContent = formatCurrency(totalCost);
-      document.getElementById('stats3DTotalTokens').textContent = formatNumber(totalTokens);
+      document.getElementById('stats3DTotalTokens').textContent = formatTokenCount(totalTokens);
       
       // Find most active day under the selected metric
       const activeMetricDays = sorted.filter((day) => getMetricValue(day, metric) > 0);
@@ -8093,7 +8686,7 @@
       if (mostActiveDay) {
         const dayDate = parseDateKey(mostActiveDay.date);
         const dayName = dayDate.toLocaleDateString(currentLang === 'zh' ? 'zh-CN' : 'en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-        const dayTokens = formatNumber(mostActiveDay.totals.tokens || 0);
+        const dayTokens = formatTokenCount(mostActiveDay.totals.tokens || 0);
         const dayCost = formatCurrency(mostActiveDay.totals.cost || 0);
         document.getElementById('stats3DActiveDate').textContent = dayName;
         document.getElementById('stats3DActiveTokens').textContent = dayTokens;
@@ -8189,6 +8782,27 @@
       } else {
         const today = new Date();
         updateDashboardByDateRange(today, today, { forceRefresh: true });
+      }
+    });
+
+    document.getElementById('readableTokensToggle')?.addEventListener('click', () => {
+      setOverviewReadableTokens(!overviewReadableTokens);
+    });
+
+    const settingsMenu = document.getElementById('settingsMenu');
+    const settingsToggle = document.getElementById('settingsToggle');
+    const settingsPanel = document.getElementById('settingsPanel');
+    settingsToggle?.addEventListener('click', () => {
+      setSettingsPanelOpen(settingsPanel?.hidden !== false);
+    });
+    document.addEventListener('click', (event) => {
+      if (!settingsPanel?.hidden && settingsMenu && !settingsMenu.contains(event.target)) {
+        setSettingsPanelOpen(false);
+      }
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && !settingsPanel?.hidden) {
+        setSettingsPanelOpen(false, true);
       }
     });
 

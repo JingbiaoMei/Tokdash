@@ -10,7 +10,9 @@ _SPECIFICITY_RANK = {"top_level": 1, "mcp": 2}
 
 
 def _nonempty(value: Any) -> str | None:
-    text = str(value).strip() if value is not None else ""
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
     return text or None
 
 
@@ -57,7 +59,11 @@ def record_structured_tool_call(
 ) -> None:
     stable_id = _nonempty(call_id)
     canonical_name = _nonempty(name)
-    normalized_specificity = specificity if specificity in _SPECIFICITY_RANK else "top_level"
+    normalized_specificity = (
+        specificity
+        if isinstance(specificity, str) and specificity in _SPECIFICITY_RANK
+        else "top_level"
+    )
     rank = _SPECIFICITY_RANK[normalized_specificity]
     if stable_id is None:
         _increment(record, "tool_records_missing_id")
@@ -128,7 +134,12 @@ def _merge_tool_entry(target: dict[str, Any], call_id: Any, value: Any) -> None:
     stable_id = _nonempty(call_id)
     if stable_id is None or not isinstance(value, Mapping):
         return
-    specificity = str(value.get("specificity") or "top_level")
+    raw_specificity = value.get("specificity")
+    specificity = (
+        raw_specificity
+        if isinstance(raw_specificity, str) and raw_specificity in _SPECIFICITY_RANK
+        else "top_level"
+    )
     calls = target["tool_by_call_id"]
     if bool(value.get("ambiguous")):
         incoming_rank = _SPECIFICITY_RANK.get(specificity, 0)

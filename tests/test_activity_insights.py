@@ -185,6 +185,106 @@ def test_tool_record_prefers_available_name_and_canonicalizes_mcp():
     assert canonical_mcp_tool_name({"server": "browser"}) is None
 
 
+def test_activity_fields_reject_container_values_without_retaining_content(tmp_path):
+    sentinel = "SHOULD_NOT_SURVIVE"
+    path = tmp_path / "privacy.jsonl"
+    _write_jsonl(
+        path,
+        [
+            {
+                "type": "session_meta",
+                "payload": {"id": {"credential": sentinel}},
+            },
+            {
+                "type": "turn_context",
+                "payload": {
+                    "turn_id": {"credential": sentinel},
+                    "effort": "high",
+                },
+            },
+            {
+                "type": "turn_context",
+                "payload": {
+                    "turn_id": "turn-1",
+                    "effort": {"credential": sentinel},
+                },
+            },
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call",
+                    "call_id": {"credential": sentinel},
+                    "name": "exec",
+                },
+            },
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call",
+                    "call_id": "call-1",
+                    "name": {"credential": sentinel},
+                },
+            },
+            {
+                "type": "event_msg",
+                "payload": {
+                    "type": "mcp_tool_call_end",
+                    "call_id": "call-2",
+                    "invocation": {
+                        "server": {"credential": sentinel},
+                        "tool": "click",
+                    },
+                },
+            },
+            {
+                "type": "event_msg",
+                "payload": {
+                    "type": "mcp_tool_call_end",
+                    "call_id": "call-3",
+                    "invocation": {
+                        "server": "browser",
+                        "tool": [sentinel],
+                    },
+                },
+            },
+        ],
+    )
+
+    raw = _parse(path)
+    result = build_activity_insights([_wrapped(raw["session_id"], raw["_activity"])])
+
+    assert raw["session_id"] == "privacy"
+    assert raw["_activity"]["has_explicit_session_id"] is False
+    assert raw["_activity"]["turn_records_missing_id"] == 1
+    assert raw["_activity"]["turn_records_missing_effort"] == 1
+    assert raw["_activity"]["tool_records_missing_id"] == 1
+    assert raw["_activity"]["tool_by_call_id"]["call-1"]["name"] is None
+    assert raw["_activity"]["tool_by_call_id"]["call-2"]["name"] == "click"
+    assert raw["_activity"]["tool_by_call_id"]["call-3"]["name"] is None
+    assert result["recorded_chats"]["value"] == 0
+    assert result["reasoning"]["distribution"] == []
+    assert result["tools"]["total_calls"] == 3
+    assert sentinel not in json.dumps(raw["_activity"])
+    assert sentinel not in json.dumps(result)
+
+
+def test_activity_merge_rejects_invalid_cached_specificity_without_stringifying_it():
+    sentinel = "SHOULD_NOT_SURVIVE"
+    activity = new_activity_record(is_primary=True, has_explicit_session_id=True)
+    activity["tool_by_call_id"]["call-1"] = {
+        "name": "exec",
+        "specificity": {"credential": sentinel},
+        "ambiguous": False,
+    }
+
+    result = build_activity_insights([_wrapped("chat-1", activity)])
+
+    assert result["tools"]["distribution"] == [
+        {"name": "exec", "count": 1, "share": 1.0}
+    ]
+    assert sentinel not in json.dumps(result)
+
+
 def test_activity_insights_ignore_unknown_schema_and_missing_session_identity():
     unsupported = new_activity_record(is_primary=True, has_explicit_session_id=True)
     unsupported["version"] = 999

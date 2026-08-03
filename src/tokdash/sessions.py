@@ -511,7 +511,8 @@ def _parse_codex_session_file(path_str: str, _mtime_ns: int, _size: int, _pricin
 
             if obj_type == "session_meta":
                 meta_id = payload.get("id")
-                if meta_id is not None and str(meta_id).strip():
+                explicit_meta_id = meta_id.strip() if isinstance(meta_id, str) else ""
+                if explicit_meta_id:
                     activity["has_explicit_session_id"] = True
                 if not saw_session_meta:
                     saw_session_meta = True
@@ -524,8 +525,8 @@ def _parse_codex_session_file(path_str: str, _mtime_ns: int, _size: int, _pricin
                         pid = (subagent.get("thread_spawn") or {}).get("parent_thread_id")
                         subagent_parent_id = str(pid) if pid else None
                     activity["is_primary"] = not is_subagent_file
-                if meta_id:
-                    session_id = str(meta_id)      # current (last-seen) session id
+                if explicit_meta_id:
+                    session_id = explicit_meta_id      # current (last-seen) session id
                     if own_session_id is None:
                         own_session_id = session_id
                 cwd = str(payload.get("cwd") or cwd)

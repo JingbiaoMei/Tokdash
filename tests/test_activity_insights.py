@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+
+from tokdash import sessions as sessions_module
 from tokdash.activity_insights import (
     build_activity_insights,
     canonical_mcp_tool_name,
@@ -16,6 +19,18 @@ def _wrapped(session_id, activity, *, missing=False, file_path=None):
         "missing": missing,
         "activity": activity,
     }
+
+
+def _write_jsonl(path, rows):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+
+
+def _parse(path):
+    stat = path.stat()
+    return sessions_module._parse_codex_session_file(
+        str(path), stat.st_mtime_ns, stat.st_size, ()
+    )
 
 
 def test_activity_insights_merge_resumes_and_resolve_specificity():
@@ -188,3 +203,168 @@ def test_activity_insights_ignore_unknown_schema_and_missing_session_identity():
         "files_with_session_id": 0,
         "legacy_unavailable_records": 0,
     }
+
+
+def test_codex_parser_collects_activity_without_private_payload_content(tmp_path):
+    path = tmp_path / "root.jsonl"
+    _write_jsonl(
+        path,
+        [
+            {"type": "session_meta", "payload": {"id": "chat-1"}},
+            {
+                "type": "turn_context",
+                "payload": {
+                    "turn_id": "turn-1",
+                    "effort": "xhigh",
+                    "model": "gpt-5.3-codex",
+                },
+            },
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call",
+                    "call_id": "call-1",
+                    "name": "exec",
+                    "arguments": "SECRET-ARGUMENT",
+                },
+            },
+            {
+                "type": "event_msg",
+                "payload": {
+                    "type": "mcp_tool_call_end",
+                    "call_id": "call-1",
+                    "invocation": {"server": "browser", "tool": "click"},
+                    "result": "SECRET-RESULT",
+                },
+            },
+        ],
+    )
+
+    raw = _parse(path)
+
+    assert raw["session_id"] == "chat-1"
+    assert raw["turns"] == []
+    assert raw["_activity"]["is_primary"] is True
+    assert raw["_activity"]["reasoning_by_turn_id"]["turn-1"] == "xhigh"
+    assert raw["_activity"]["tool_by_call_id"]["call-1"]["name"] == "browser/click"
+    assert "SECRET" not in json.dumps(raw["_activity"])
+
+
+def test_codex_parser_marks_empty_subagent_from_first_session_meta(tmp_path):
+    path = tmp_path / "subagent.jsonl"
+    _write_jsonl(
+        path,
+        [
+            {
+                "type": "session_meta",
+                "payload": {
+                    "id": "sub-1",
+                    "source": {
+                        "subagent": {
+                            "thread_spawn": {"parent_thread_id": "root-1"}
+                        }
+                    },
+                },
+            },
+            {
+                "type": "turn_context",
+                "payload": {"turn_id": "turn-1", "effort": "high"},
+            },
+        ],
+    )
+
+    assert _parse(path) is None
+
+
+def test_empty_primary_activity_record_stays_out_of_session_loaders(tmp_path):
+    raw = {
+        "tool": "codex",
+        "session_id": "empty",
+        "project": "unknown",
+        "turns": [],
+        "_activity": new_activity_record(
+            is_primary=True, has_explicit_session_id=True
+        ),
+    }
+
+    assert sessions_module._session_records_to_raw_sessions("codex", [raw]) == {}
+
+    path = tmp_path / "empty.jsonl"
+    _write_jsonl(path, [{"type": "session_meta", "payload": {"id": "empty"}}])
+    stat = path.stat()
+    assert sessions_module._load_codex_sessions(
+        ((str(path), stat.st_mtime_ns, stat.st_size),), ()
+    ) == {}
+
+
+def test_codex_parser_deduplicates_attempts_and_reports_missing_ids(tmp_path):
+    path = tmp_path / "calls.jsonl"
+    rows = [{"type": "session_meta", "payload": {"id": "chat-1"}}]
+    rows.extend(
+        [
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call",
+                    "call_id": "call-1",
+                    "name": "exec",
+                    "status": status,
+                },
+            }
+            for status in ("in_progress", "completed")
+        ]
+    )
+    rows.extend(
+        [
+            {
+                "type": "event_msg",
+                "payload": {
+                    "type": "mcp_tool_call_end",
+                    "call_id": "call-1",
+                    "invocation": {"server": "browser", "tool": "click"},
+                    "status": "failed",
+                },
+            },
+            {
+                "type": "response_item",
+                "payload": {"type": "tool_search_call", "id": "call-2"},
+            },
+            {
+                "type": "response_item",
+                "payload": {"type": "web_search_call", "call_id": "call-3"},
+            },
+            {
+                "type": "response_item",
+                "payload": {"type": "custom_tool_call", "id": "call-4"},
+            },
+            {
+                "type": "response_item",
+                "payload": {"type": "function_call", "name": "missing-id"},
+            },
+            {
+                "type": "turn_context",
+                "payload": {"effort": "high"},
+            },
+            {
+                "type": "turn_context",
+                "payload": {"turn_id": "turn-without-effort"},
+            },
+        ]
+    )
+    _write_jsonl(path, rows)
+
+    raw = _parse(path)
+    result = build_activity_insights([_wrapped("chat-1", raw["_activity"])])
+
+    assert result["tools"]["total_calls"] == 4
+    assert result["tools"]["coverage"] == {
+        "named_calls": 3,
+        "ambiguous_name_calls": 1,
+        "excluded_records": 1,
+    }
+    assert [row["name"] for row in result["tools"]["distribution"]] == [
+        "browser/click",
+        "tool_search",
+        "web_search",
+    ]
+    assert result["reasoning"]["coverage"]["excluded_records"] == 2

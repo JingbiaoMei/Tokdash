@@ -7077,7 +7077,8 @@
 
       activityInsightsState.status = 'loading';
       renderActivityInsights();
-      const request = fetchJsonWithRetry(appPath('/api/activity-insights'))
+      const url = `${appPath('/api/activity-insights')}${force ? '?refresh=1' : ''}`;
+      const request = fetchJsonWithRetry(url)
         .then((data) => {
           activityInsightsState.data = data;
           activityInsightsState.status = buildActivityInsightValues(data).empty ? 'empty' : 'ready';

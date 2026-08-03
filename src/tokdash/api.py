@@ -1117,12 +1117,13 @@ def get_stats(year: Optional[int] = None) -> Dict[str, Any]:
 
 
 @app.get("/api/activity-insights")
-def get_activity_insights() -> dict[str, Any]:
+def get_activity_insights(refresh: bool = False) -> dict[str, Any]:
     try:
         return _cached_route(
             "/api/activity-insights",
             "activity_insights_v1",
             get_codex_activity_insights,
+            force_refresh=refresh,
         )
     except CacheBackpressureError as e:
         raise HTTPException(status_code=503, detail=str(e))

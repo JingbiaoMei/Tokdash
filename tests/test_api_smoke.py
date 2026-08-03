@@ -334,10 +334,11 @@ def test_activity_insights_uses_own_versioned_cache_key(monkeypatch):
     captured = {}
     expected = {"scope": {"tool": "codex"}}
 
-    def fake_cached_route(route_name, cache_key, fetch_fn, **_kwargs):
+    def fake_cached_route(route_name, cache_key, fetch_fn, **kwargs):
         captured["route_name"] = route_name
         captured["cache_key"] = cache_key
         captured["fetch_fn"] = fetch_fn
+        captured.update(kwargs)
         return expected
 
     def fake_activity():
@@ -351,6 +352,33 @@ def test_activity_insights_uses_own_versioned_cache_key(monkeypatch):
         "route_name": "/api/activity-insights",
         "cache_key": "activity_insights_v1",
         "fetch_fn": fake_activity,
+        "force_refresh": False,
+    }
+
+
+def test_activity_insights_refresh_forces_recompute(monkeypatch):
+    captured = {}
+    expected = {"scope": {"tool": "codex"}}
+
+    def fake_cached_route(route_name, cache_key, fetch_fn, **kwargs):
+        captured["route_name"] = route_name
+        captured["cache_key"] = cache_key
+        captured["fetch_fn"] = fetch_fn
+        captured.update(kwargs)
+        return expected
+
+    def fake_activity():
+        return expected
+
+    monkeypatch.setattr(api, "_cached_route", fake_cached_route)
+    monkeypatch.setattr(api, "get_codex_activity_insights", fake_activity)
+
+    assert api.get_activity_insights(refresh=True) is expected
+    assert captured == {
+        "route_name": "/api/activity-insights",
+        "cache_key": "activity_insights_v1",
+        "fetch_fn": fake_activity,
+        "force_refresh": True,
     }
 
 

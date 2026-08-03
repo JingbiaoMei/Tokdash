@@ -1312,7 +1312,9 @@ def test_activity_insights_use_one_shared_fetch_and_limit_profile_to_five_tools(
         source, "function renderOverviewActivityInsights() {"
     )
 
-    assert source.count("fetchJsonWithRetry(appPath('/api/activity-insights')") == 1
+    assert source.count("appPath('/api/activity-insights')") == 1
+    assert "force ? '?refresh=1' : ''" in loader
+    assert "fetchJsonWithRetry(url)" in loader
     assert "activityInsightsState.promise" in loader
     assert ".slice(0, 5)" in profile
     assert "fetch(" not in profile

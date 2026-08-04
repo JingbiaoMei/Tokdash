@@ -284,3 +284,55 @@ def test_core_provider_models_resolve():
     for provider, model in representative.items():
         cost = db.get_cost(model, 1000, 2000, 0, 0)
         assert cost > 0.0, f"{model} ({provider}) should resolve with cost > 0"
+
+
+def test_qwen3_8_max_pricing_and_aliases():
+    """Qwen3.8-Max must resolve at OpenRouter pricing across spellings."""
+    db = PricingDatabase()
+
+    expected_cost = (1000 * 2.0 + 2000 * 6.0 + 3000 * 0.25 + 4000 * 2.5) / 1_000_000
+    for model in ["qwen3.8-max", "qwen/qwen3.8-max", "qwen3.8max"]:
+        cost = db.get_cost(model, 1000, 2000, 3000, 4000)
+        assert abs(cost - expected_cost) < 1e-12, (
+            f"{model!r} should resolve to Qwen3.8-Max pricing"
+        )
+
+
+def test_qwen3_7_flash_pricing():
+    """Qwen3.7-Flash must resolve at OpenRouter pricing across spellings."""
+    db = PricingDatabase()
+
+    expected_cost = (1000 * 0.03 + 2000 * 0.13 + 3000 * 0.006 + 4000 * 0.038) / 1_000_000
+    for model in ["qwen3.7-flash", "qwen/qwen3.7-flash"]:
+        cost = db.get_cost(model, 1000, 2000, 3000, 4000)
+        assert abs(cost - expected_cost) < 1e-12, (
+            f"{model!r} should resolve to Qwen3.7-Flash pricing"
+        )
+
+
+def test_longcat_2_0_pricing_and_aliases():
+    """Meituan LongCat 2.0 must resolve at OpenRouter pricing across spellings."""
+    db = PricingDatabase()
+
+    expected_cost = (1000 * 0.3 + 2000 * 1.2 + 3000 * 0.006 + 4000 * 0.3) / 1_000_000
+    for model in ["longcat-2.0", "meituan/longcat-2.0", "longcat2.0", "longcat-2-0"]:
+        cost = db.get_cost(model, 1000, 2000, 3000, 4000)
+        assert abs(cost - expected_cost) < 1e-12, (
+            f"{model!r} should resolve to LongCat 2.0 pricing"
+        )
+
+
+def test_seed_2_1_turbo_pricing_and_aliases():
+    """Doubao Seed 2.1 Turbo must resolve at Volcengine-derived pricing.
+
+    Official Volcengine CNY price (3.0/15.0/0.6 in/out/cache_read, tier [0,256])
+    converted at 0.137 USD/CNY; cache_write=input (no separate Volcengine fee).
+    """
+    db = PricingDatabase()
+
+    expected_cost = (1000 * 0.411 + 2000 * 2.055 + 3000 * 0.0822 + 4000 * 0.411) / 1_000_000
+    for model in ["seed-2.1-turbo", "doubao-seed-2.1-turbo"]:
+        cost = db.get_cost(model, 1000, 2000, 3000, 4000)
+        assert abs(cost - expected_cost) < 1e-12, (
+            f"{model!r} should resolve to Doubao Seed 2.1 Turbo pricing"
+        )

@@ -315,6 +315,15 @@
       "thinkingBudget": 1024,
       "tokenizerType": "<redacted>"
     },
+    "gemini-2.5-pro-weekly-exhausted": {
+      "apiProvider": "API_PROVIDER_GOOGLE_GEMINI",
+      "displayName": "Gemini 2.5 Pro",
+      "model": "MODEL_PLACEHOLDER_G25P_WEEKLY",
+      "quotaInfo": {
+        "remainingFraction": null,
+        "resetTime": "2026-08-09T07:00:00Z"
+      }
+    },
     "gemini-3-flash": {
       "apiProvider": "API_PROVIDER_GOOGLE_GEMINI",
       "displayName": "Gemini 3 Flash",

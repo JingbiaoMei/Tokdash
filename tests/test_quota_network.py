@@ -915,6 +915,36 @@ def test_antigravity_api_null_remaining_without_reset_is_skipped(monkeypatch, tm
     assert snapshots[0].raw.get("error") == "no_models"
 
 
+def test_antigravity_api_non_dict_quota_info_does_not_crash(monkeypatch, tmp_path):
+    # Schema drift: if quota_info is present but not a dict (and quotaInfo is absent), the
+    # collector must skip the model without raising AttributeError. The reset-time lookup is
+    # hoisted outside the try, so a non-dict fallback would 500 the whole refresh otherwise.
+    ag_dir = tmp_path / ".gemini" / "antigravity-cli"
+    ag_dir.mkdir(parents=True)
+    (ag_dir / "antigravity-oauth-token").write_text(
+        json.dumps({"access_token": "ya29.token"}), encoding="utf-8"
+    )
+    monkeypatch.setattr(antigravity.clientpaths, "antigravity_cli_dir", lambda: ag_dir)
+
+    def opener(req, timeout=15):
+        if req.full_url.endswith(":loadCodeAssist"):
+            return FakeResponse({"projectId": "project-1"})
+        return FakeResponse(
+            {
+                "models": {
+                    "drift": {"name": "models/drift", "quota_info": "not-a-dict"},
+                    "ok": {"name": "models/ok", "quotaInfo": {"remainingFraction": 0.5}},
+                }
+            }
+        )
+
+    snapshots = antigravity.collect_antigravity_api_snapshots(opener=opener, now=1_782_907_200)
+    # The malformed model is skipped; the well-formed one still parses.
+    buckets = {s.bucket for s in snapshots if s.status == "ok"}
+    assert "models/ok" in buckets
+    assert "models/drift" not in buckets
+
+
 def test_antigravity_nested_expired_token_still_attempts_call_and_401_is_stale_without_secret_raw(monkeypatch, tmp_path):
     ag_dir = tmp_path / ".gemini" / "antigravity-cli"
     ag_dir.mkdir(parents=True)
@@ -1269,6 +1299,14 @@ def test_antigravity_models_frozen_fixture_parses(monkeypatch, tmp_path):
 
     assert snapshots
     assert all(s.status != "fetch_error" for s in snapshots)
+    # The recorded exhausted-weekly entry (remainingFraction: null + resetTime) must be
+    # captured as 100% used with its weekly reset, not skipped - pinning the inference to
+    # the frozen fixture, not just the hand-written mock in test_antigravity_api_null_*.
+    exhausted = next(
+        s for s in snapshots if s.bucket == "gemini-2.5-pro-weekly-exhausted"
+    )
+    assert exhausted.used_percent == 100.0
+    assert exhausted.resets_at == 1_786_258_800  # 2026-08-09T07:00:00Z
 
 
 def test_claude_plan_label_normalized(monkeypatch, tmp_path):

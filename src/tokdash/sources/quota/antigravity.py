@@ -125,7 +125,12 @@ def collect_antigravity_api_snapshots(
     for item in items:
         if not isinstance(item, dict):
             continue
-        quota = item.get("quotaInfo") if isinstance(item.get("quotaInfo"), dict) else item.get("quota_info", {})
+        quota = item.get("quotaInfo") if isinstance(item.get("quotaInfo"), dict) else item.get("quota_info")
+        # Guard the snake_case fallback too: if quota_info is present but not a dict (schema
+        # drift), fall back to {} so the .get calls below don't raise AttributeError. This
+        # used to be swallowed by a broad `except Exception` before the reset-time hoist.
+        if not isinstance(quota, dict):
+            quota = {}
         reset = _parse_time(quota.get("resetTime") or quota.get("reset_time"))
         try:
             remaining = float(quota.get("remainingFraction"))

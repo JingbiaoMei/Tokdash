@@ -1,16 +1,19 @@
-# Tokdash Companion 0.1.2
+# Tokdash Companion 0.1.3
 
-This preview refreshes the macOS app icon with a crisper rendering of the
-Tokdash logo. No functional changes.
+This preview fixes the Antigravity quota card so it shows the correct
+window label ("5-hour" vs "Weekly") instead of always assuming 5-hour.
 
 ## Changes
 
-- Re-rendered the macOS app icon (Dock, Finder, About panel, DMG) from
-  vector artwork at every size, replacing the softer 0.1.1 raster.
-- The source SVG now lives at `companion/assets/tokdash_logo_icon.svg` so the
-  icon set is reproducible.
-- No functional changes; the Windows build matches 0.1.1 apart from the
-  version number.
+- Antigravity's quota window is now auto-determined from its reset time
+  across the macOS and Windows flyouts. A weekly limit (e.g. resetting in
+  3 days) now reads "Weekly" instead of the stale "5-hour" label, matching
+  the web dashboard.
+- Antigravity pool labels shortened to "Gemini" / "Claude/GPT" so the
+  window fits the narrow flyout alongside the pool name (e.g.
+  "Gemini · Weekly").
+- No other functional changes; quota data comes from the connected Tokdash
+  server unchanged.
 
 ## Important: unsigned preview
 
@@ -27,9 +30,9 @@ operating-system-trusted publisher.
 
 ## Assets
 
-- `Tokdash-Companion-0.1.2-macos-universal-unsigned.dmg`
+- `Tokdash-Companion-0.1.3-macos-universal-unsigned.dmg`
   supports Apple Silicon and Intel Macs on macOS 14 or newer.
-- `Tokdash-Companion-0.1.2-windows-x64-unsigned.zip`
+- `Tokdash-Companion-0.1.3-windows-x64-unsigned.zip`
   is a self-contained Windows 11 x64 portable build. Windows 11 on Arm may run
   it through x64 emulation.
 - `SHA256SUMS` covers both downloadable binaries.

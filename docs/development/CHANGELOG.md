@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+## 1.5.7 - 2026-08-05
+
 ### Changed
 
 - Quota bars now show a relative "resets in 3 days" / "resets in 4 hours" / "resets in 43 minutes" countdown (single unit, matching the companion app's rule) plus the absolute reset timestamp, replacing the per-bar captured-at time.

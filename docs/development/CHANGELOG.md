@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+## 1.5.8 - 2026-08-05
+
+### Fixed
+
+- Antigravity quota refresh no longer fails for every provider when one model's `quota_info` payload is malformed (non-dict). The defensive guard lost when the reset-time lookup was hoisted out of the broad `try`/`except` is restored.
+
 ## 1.5.7 - 2026-08-05
 
 ### Changed

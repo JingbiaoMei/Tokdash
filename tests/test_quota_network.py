@@ -849,6 +849,72 @@ def test_antigravity_api_normalizes_model_quota(monkeypatch, tmp_path):
     assert "ya29.token" not in json.dumps(snapshots[0].raw)
 
 
+def test_antigravity_api_null_remaining_with_reset_is_exhausted_window(monkeypatch, tmp_path):
+    # When the weekly limit is hit, fetchAvailableModels returns remainingFraction: null
+    # alongside a weekly resetTime. The collector must NOT skip these (else the stored
+    # snapshot goes stale and the dashboard keeps showing the old 5-hour window) - it
+    # treats null remaining as 0% remaining (100% used) so the binding weekly window is
+    # still surfaced. Observed live 2026-08-05: gemini-* models return this shape.
+    ag_dir = tmp_path / ".gemini" / "antigravity-cli"
+    ag_dir.mkdir(parents=True)
+    (ag_dir / "antigravity-oauth-token").write_text(
+        json.dumps({"access_token": "ya29.token", "email": "h@example.com"}), encoding="utf-8"
+    )
+    monkeypatch.setattr(antigravity.clientpaths, "antigravity_cli_dir", lambda: ag_dir)
+
+    def opener(req, timeout=15):
+        if req.full_url.endswith(":loadCodeAssist"):
+            return FakeResponse({"projectId": "project-1"})
+        return FakeResponse(
+            {
+                "models": {
+                    "gemini-3-pro": {
+                        "name": "models/gemini-3-pro",
+                        "displayName": "Gemini 3 Pro",
+                        "quotaInfo": {"remainingFraction": None, "resetTime": "2026-08-09T07:00:00Z"},
+                    },
+                    "chat-internal": {
+                        "name": "models/chat-internal",
+                        "displayName": "Chat Internal",
+                        "quotaInfo": {"remainingFraction": 1},
+                    },
+                }
+            }
+        )
+
+    snapshots = antigravity.collect_antigravity_api_snapshots(opener=opener, now=1_782_907_200)
+
+    by_bucket = {s.bucket: s for s in snapshots}
+    # Exhausted weekly window: null remaining + reset -> 100% used, weekly reset preserved.
+    gemini = by_bucket["models/gemini-3-pro"]
+    assert gemini.used_percent == 100.0
+    assert gemini.resets_at == 1_786_258_800  # 2026-08-09T07:00:00Z
+    # Idle model (remainingFraction=1, no reset) is still captured at 0% used.
+    assert by_bucket["models/chat-internal"].used_percent == 0.0
+
+
+def test_antigravity_api_null_remaining_without_reset_is_skipped(monkeypatch, tmp_path):
+    # null remainingFraction AND no resetTime carries no quota signal (truly idle/untracked);
+    # skip it rather than fabricating 100% used.
+    ag_dir = tmp_path / ".gemini" / "antigravity-cli"
+    ag_dir.mkdir(parents=True)
+    (ag_dir / "antigravity-oauth-token").write_text(
+        json.dumps({"access_token": "ya29.token"}), encoding="utf-8"
+    )
+    monkeypatch.setattr(antigravity.clientpaths, "antigravity_cli_dir", lambda: ag_dir)
+
+    def opener(req, timeout=15):
+        if req.full_url.endswith(":loadCodeAssist"):
+            return FakeResponse({"projectId": "project-1"})
+        return FakeResponse(
+            {"models": {"mystery": {"name": "models/mystery", "quotaInfo": {"remainingFraction": None}}}}
+        )
+
+    snapshots = antigravity.collect_antigravity_api_snapshots(opener=opener, now=1_782_907_200)
+    assert snapshots[0].status == "unavailable"
+    assert snapshots[0].raw.get("error") == "no_models"
+
+
 def test_antigravity_nested_expired_token_still_attempts_call_and_401_is_stale_without_secret_raw(monkeypatch, tmp_path):
     ag_dir = tmp_path / ".gemini" / "antigravity-cli"
     ag_dir.mkdir(parents=True)

@@ -236,6 +236,107 @@ def test_kimi_legacy_plan_bucket_is_labeled_weekly(tmp_path):
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_antigravity_window_label_auto_determined_from_reset_time(tmp_path):
+    """Antigravity's fetchAvailableModels returns a single quotaInfo per model - whichever
+    window (5-hour OR weekly) currently binds the shared pool. The card label must reflect
+    the actual window, not assume 5-hour. The window is inferred from how far out the reset
+    falls: a 5-hour window can't reset more than 5h out, so a reset beyond the threshold is
+    weekly. Reproduces the 3d22h weekly case that previously rendered a stale "5-hour" label.
+    """
+    src = INDEX_HTML.read_text(encoding="utf-8")
+    window_fn = _extract_js_function(src, "function quotaWindowLabel(provider, bucket) {")
+    ag_fn = _extract_js_function(src, "function antigravityWindowLabel(bucket) {")
+    harness = tmp_path / "antigravity-window-label.js"
+    harness.write_text(
+        "function t(key) { return key; }\n"
+        + ag_fn
+        + "\n"
+        + window_fn
+        + "\nconst cases = JSON.parse(process.argv[2]);\n"
+        + "process.stdout.write(JSON.stringify(cases.map((b) => quotaWindowLabel('antigravity', b))));\n",
+        encoding="utf-8",
+    )
+    captured = 1_782_907_200  # fixed reference; resets_at is absolute epoch seconds
+    cases = [
+        # 5-hour window: reset 3h out -> 5-hour
+        {"bucket": "pool:gemini", "bucket_label": "Gemini Models",
+         "captured_at": captured, "resets_at": captured + 3 * 3600},
+        # weekly window: reset 3d22h out (the reported scenario) -> Weekly
+        {"bucket": "pool:gemini", "bucket_label": "Gemini Models",
+         "captured_at": captured, "resets_at": captured + (3 * 24 + 22) * 3600},
+        # full 7-day weekly window -> Weekly
+        {"bucket": "pool:claude", "bucket_label": "Claude and GPT Models",
+         "captured_at": captured, "resets_at": captured + 7 * 24 * 3600},
+        # idle model: no reset time -> 5-hour (no regression vs. the old hardcoded label)
+        {"bucket": "pool:gemini", "bucket_label": "Gemini Models",
+         "captured_at": captured, "resets_at": None},
+    ]
+    result = subprocess.run(
+        ["node", str(harness), json.dumps(cases)],
+        capture_output=True,
+        encoding="utf-8",
+        check=True,
+    )
+
+    assert json.loads(result.stdout) == [
+        "windowFiveHour",
+        "windowWeekly",
+        "windowWeekly",
+        "windowFiveHour",
+    ]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_quota_reset_countdown_uses_companion_single_unit_rule(tmp_path):
+    """The quota bar sub-line shows a relative countdown using the companion app's rule:
+    a single unit only (no combined "3d 22h 43m" noise). >= 1 day -> days, >= 2 hours ->
+    hours, else minutes; sub-minute / past -> "resets soon"; non-finite -> null."""
+    src = INDEX_HTML.read_text(encoding="utf-8")
+    fn = _extract_js_function(src, "function formatResetCountdownFromSeconds(remaining) {")
+    harness = tmp_path / "reset-countdown.js"
+    harness.write_text(
+        "function t(key) {\n"
+        "  const m = { resetsInDays: 'resets in {n} day{s}',\n"
+        "              resetsInHours: 'resets in {n} hour{s}',\n"
+        "              resetsInMinutes: 'resets in {n} minute{s}',\n"
+        "              resetsSoon: 'resets soon' };\n"
+        "  return m[key] !== undefined ? m[key] : key;\n"
+        "}\n"
+        + fn
+        + "\nconst cases = JSON.parse(process.argv[2]);\n"
+        + "process.stdout.write(JSON.stringify(cases.map(formatResetCountdownFromSeconds)));\n",
+        encoding="utf-8",
+    )
+    cases = [
+        3 * 86400 + 22 * 3600,  # 3.9 days -> "3 days"
+        4 * 3600 + 32 * 60,     # 4.5 hours -> "4 hours"
+        43 * 60,                # 43 min -> "43 minutes"
+        60,                     # exactly 1 min -> "1 minute" (singular)
+        86400,                  # exactly 1 day -> "1 day" (singular)
+        30,                     # <1 min -> resets soon
+        -100,                   # past -> resets soon
+        None,                   # non-finite (null) -> no countdown
+    ]
+    result = subprocess.run(
+        ["node", str(harness), json.dumps(cases)],
+        capture_output=True,
+        encoding="utf-8",
+        check=True,
+    )
+
+    assert json.loads(result.stdout) == [
+        "resets in 3 days",
+        "resets in 4 hours",
+        "resets in 43 minutes",
+        "resets in 1 minute",
+        "resets in 1 day",
+        "resets soon",
+        "resets soon",
+        None,
+    ]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
 def test_unlimited_quota_bucket_remains_visible_without_numeric_percent(tmp_path):
     src = INDEX_HTML.read_text(encoding="utf-8")
     usage_fn = _extract_js_function(

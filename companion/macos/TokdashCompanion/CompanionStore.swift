@@ -546,12 +546,14 @@ struct Snapshot {
     // un-suppressing. Spec §7.
     /// Antigravity reports one bucket per model, which floods the list. The web dashboard
     /// collapses them into two pools and shows the worst remaining in each; the companion
-    /// matches so the two surfaces agree. Falls back to the raw rows if nothing matches,
-    /// so an unrecognised model can never silently vanish.
+    /// matches. Pool labels use the short forms ("Gemini" / "Claude/GPT") so the narrow
+    /// flyout can also show the auto-determined window ("Gemini · Weekly"); the web dashboard
+    /// keeps the long forms under its own subtitle. Falls back to the raw rows if nothing
+    /// matches, so an unrecognised model can never silently vanish.
     static func antigravityPools(_ rows: [QuotaRow]) -> [QuotaRow] {
         let pools: [(key: String, label: String, test: (String) -> Bool)] = [
-            ("gemini", "Gemini Models", { $0.contains("gemini") }),
-            ("claude", "Claude and GPT Models", { $0.contains("claude") || $0.contains("gpt") || $0.contains("oss") }),
+            ("gemini", "Gemini", { $0.contains("gemini") }),
+            ("claude", "Claude/GPT", { $0.contains("claude") || $0.contains("gpt") || $0.contains("oss") }),
         ]
         var out: [QuotaRow] = []
         for pool in pools {
@@ -576,6 +578,7 @@ struct QuotaRow: Identifiable {
     let bucketLabel: String
     let left: Double
     let resetsAt: Date?
+    let capturedAt: Date?
     let estimated: Bool
     let account: String
     let hasPercent: Bool
@@ -610,6 +613,7 @@ struct QuotaRow: Identifiable {
         self.bucketLabel = bucketLabel
         self.left = other.left
         self.resetsAt = other.resetsAt
+        self.capturedAt = other.capturedAt
         self.estimated = other.estimated
         self.account = other.account
         self.hasPercent = other.hasPercent
@@ -622,6 +626,7 @@ struct QuotaRow: Identifiable {
         self.bucketLabel = Self.displayLabel(bucket.bucketLabel ?? bucket.bucket)
         self.left = bucket.remainingPercent ?? 100
         self.resetsAt = bucket.resetsAt.map { Date(timeIntervalSince1970: TimeInterval($0)) }
+        self.capturedAt = bucket.capturedAt.map { Date(timeIntervalSince1970: TimeInterval($0)) }
         self.estimated = estimated
         self.account = bucket.account ?? ""
         self.hasPercent = bucket.remainingPercent != nil
@@ -662,13 +667,45 @@ struct QuotaRow: Identifiable {
     /// labels. Model-scoped weekly windows keep their descriptive label (for example, Fable).
     /// Resolve this at render time so a language change is live.
     var displayBucketLabel: String {
-        guard provider.lowercased() == "claude" else { return bucketLabel }
+        let p = provider.lowercased()
+        if p == "antigravity" {
+            // Pooled rows carry the (short) pool name as bucketLabel; append the
+            // auto-determined window so the bar reads "Gemini · Weekly". Mirrors the web
+            // dashboard's pool subtitle + window label in one narrow-flyout label.
+            return "\(bucketLabel) · \(antigravityWindowLabel)"
+        }
+        guard p == "claude" else { return bucketLabel }
         if bucket.lowercased().hasPrefix("weekly_scoped") { return bucketLabel }
         switch canonicalBucket {
         case "5h": return L10n.t("window_5h")
         case "weekly": return L10n.t("window_weekly")
         default: return bucketLabel
         }
+    }
+
+    /// Antigravity's API returns a single window per model - whichever (5-hour or weekly)
+    /// currently binds the pool - with no explicit duration field, so the window is inferred
+    /// from the reset time. A 5-hour window can never reset more than 5h out, so a reset
+    /// beyond the threshold is weekly. The reverse is imperfect: a weekly window in its final
+    /// <8h also reads as "5-hour" (self-correcting after the reset; the API exposes no
+    /// duration field to disambiguate it). Measured from `capturedAt` (stable; matches the web
+    /// dashboard) with a `now` fallback for older servers. Mirrors antigravityWindowLabel
+    /// in the web dashboard.
+    var antigravityWindowLabel: String {
+        guard let resetsAt else { return L10n.t("window_5h") }
+        let remaining: TimeInterval
+        if let capturedAt {
+            remaining = resetsAt.timeIntervalSince(capturedAt)
+        } else {
+            remaining = resetsAt.timeIntervalSinceNow
+        }
+        return Self.antigravityWindowLabel(forSecondsUntilReset: remaining)
+    }
+
+    static func antigravityWindowLabel(forSecondsUntilReset remaining: TimeInterval) -> String {
+        // 8h gives skew/rounding margin above the 5h window max before treating a reset as
+        // weekly; a weekly window in its final <8h is mislabeled "5-hour" (self-correcting).
+        remaining > 8 * 3600 ? L10n.t("window_weekly") : L10n.t("window_5h")
     }
 
     var resetsText: String {

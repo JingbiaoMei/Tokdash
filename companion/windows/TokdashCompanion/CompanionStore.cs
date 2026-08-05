@@ -509,7 +509,8 @@ public sealed class Snapshot
                         kv.Value.Estimated ?? false,
                         b.Account ?? "",
                         b.RemainingPercent is not null,
-                        IsRowFailed(b.CapturedAt, kv.Value.StatusAt, failed))).ToList();
+                        IsRowFailed(b.CapturedAt, kv.Value.StatusAt, failed),
+                        b.CapturedAt is null ? null : DateTimeOffset.FromUnixTimeSeconds(b.CapturedAt.Value))).ToList();
                     if (kv.Key.Equals("antigravity", StringComparison.OrdinalIgnoreCase))
                         rows = AntigravityPools(rows);
                     return new QuotaGroup(Capitalize(kv.Key), rows, failed);
@@ -526,15 +527,17 @@ public sealed class Snapshot
     /// <summary>
     /// Antigravity reports one bucket per model, which floods the list. The web dashboard
     /// collapses them into two pools and shows the worst remaining in each; the companion
-    /// matches so the two surfaces agree. Falls back to the raw rows if nothing matches,
-    /// so an unrecognised model can never silently vanish. Mirrors macOS antigravityPools.
+    /// matches. Pool labels use the short forms ("Gemini" / "Claude/GPT") so the narrow
+    /// flyout can also show the auto-determined window ("Gemini · Weekly"); the web dashboard
+    /// keeps the long forms under its own subtitle. Falls back to the raw rows if nothing
+    /// matches, so an unrecognised model can never silently vanish. Mirrors macOS antigravityPools.
     /// </summary>
     public static List<QuotaRow> AntigravityPools(List<QuotaRow> rows)
     {
         (string Key, string Label, Func<string, bool> Test)[] pools =
         [
-            ("gemini", "Gemini Models", n => n.Contains("gemini")),
-            ("claude", "Claude and GPT Models", n => n.Contains("claude") || n.Contains("gpt") || n.Contains("oss")),
+            ("gemini", "Gemini", n => n.Contains("gemini")),
+            ("claude", "Claude/GPT", n => n.Contains("claude") || n.Contains("gpt") || n.Contains("oss")),
         ];
         var pooled = new List<QuotaRow>();
         foreach (var pool in pools)

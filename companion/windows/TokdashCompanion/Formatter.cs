@@ -52,7 +52,8 @@ public sealed record QuotaRow(
     bool Estimated,
     string Account,
     bool HasPercent,
-    bool Failed = false)
+    bool Failed = false,
+    DateTimeOffset? CapturedAt = null)
 {
     /// <summary>
     /// Drop a trailing "window" from a server bucket label: the flyout is narrow and the
@@ -116,6 +117,13 @@ public sealed record QuotaRow(
     {
         get
         {
+            if (string.Equals(Provider, "antigravity", StringComparison.OrdinalIgnoreCase))
+            {
+                // Pooled rows carry the (short) pool name as BucketLabel; append the
+                // auto-determined window so the bar reads "Gemini · Weekly". Mirrors the web
+                // dashboard's pool subtitle + window label in one narrow-flyout label.
+                return $"{BucketLabel} · {AntigravityWindowLabel}";
+            }
             if (!string.Equals(Provider, "claude", StringComparison.OrdinalIgnoreCase)) return BucketLabel;
             if (Bucket.StartsWith("weekly_scoped", StringComparison.OrdinalIgnoreCase)) return BucketLabel;
             return CanonicalBucket switch
@@ -126,6 +134,33 @@ public sealed record QuotaRow(
             };
         }
     }
+
+    /// <summary>
+    /// Antigravity's API returns a single window per model - whichever (5-hour or weekly)
+    /// currently binds the pool - with no explicit duration field, so the window is inferred
+    /// from the reset time. A 5-hour window can never reset more than 5h out, so a reset
+    /// beyond the threshold is weekly. The reverse is imperfect: a weekly window in its final
+    /// &lt;8h also reads as "5-hour" (self-correcting after the reset; the API exposes no
+    /// duration field to disambiguate it). Measured from <see cref="CapturedAt"/> (stable;
+    /// matches the web dashboard) with a <c>DateTimeOffset.UtcNow</c> fallback for older
+    /// servers. Mirrors antigravityWindowLabel in the web dashboard.
+    /// </summary>
+    public string AntigravityWindowLabel
+    {
+        get
+        {
+            if (ResetsAt is null) return L10n.T("window_5h");
+            double remaining = CapturedAt is not null
+                ? (ResetsAt.Value - CapturedAt.Value).TotalSeconds
+                : (ResetsAt.Value - DateTimeOffset.UtcNow).TotalSeconds;
+            return AntigravityWindowLabelForRemaining(remaining);
+        }
+    }
+
+    // 8h gives skew/rounding margin above the 5h window max before treating a reset as weekly;
+    // a weekly window in its final <8h is mislabeled "5-hour" (self-correcting after the reset).
+    public static string AntigravityWindowLabelForRemaining(double secondsRemaining) =>
+        secondsRemaining > 8 * 3600 ? L10n.T("window_weekly") : L10n.T("window_5h");
 
     public string ResetsText
     {

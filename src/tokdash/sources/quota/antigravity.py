@@ -126,10 +126,19 @@ def collect_antigravity_api_snapshots(
         if not isinstance(item, dict):
             continue
         quota = item.get("quotaInfo") if isinstance(item.get("quotaInfo"), dict) else item.get("quota_info", {})
+        reset = _parse_time(quota.get("resetTime") or quota.get("reset_time"))
         try:
             remaining = float(quota.get("remainingFraction"))
-        except Exception:
-            continue
+        except (TypeError, ValueError):
+            remaining = None
+        if remaining is None:
+            # remainingFraction is null/absent. With a resetTime this is an exhausted
+            # window (e.g. the weekly limit is hit, resetting at `reset`) - treat it as
+            # 0% remaining so the pool still surfaces the binding window instead of going
+            # stale. Without a resetTime the model carries no quota signal, so skip it.
+            if reset is None:
+                continue
+            remaining = 0.0
         out.append(
             QuotaSnapshot(
                 "antigravity",
@@ -137,7 +146,7 @@ def collect_antigravity_api_snapshots(
                 str(item.get("name") or item.get("model") or "model"),
                 str(item.get("displayName") or item.get("display_name") or item.get("name") or "Model"),
                 round((1.0 - remaining) * 100.0, 4),
-                _parse_time(quota.get("resetTime") or quota.get("reset_time")),
+                reset,
                 None,
                 captured_at,
                 "antigravity_api",

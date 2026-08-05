@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Changed
+
+- Quota bars now show a relative "resets in 3 days" / "resets in 4 hours" / "resets in 43 minutes" countdown (single unit, matching the companion app's rule) plus the absolute reset timestamp, replacing the per-bar captured-at time.
+
+### Fixed
+
+- Antigravity quota now shows the correct window label ("5-hour" vs "Weekly") on the dashboard and companion apps. The single quota window returned by the API is auto-determined from its reset time instead of always assuming 5-hour, so a weekly limit (e.g. resetting in 3 days) no longer renders as "5-hour".
+- Antigravity models with an exhausted weekly window (`remainingFraction: null`) are now captured instead of skipped, so the dashboard no longer falls back to stale 5-hour data when the weekly limit is hit.
+
 ## 1.5.6 - 2026-08-03
 
 ### Added

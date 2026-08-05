@@ -446,18 +446,65 @@ final class SnapshotTests: XCTestCase {
         ])
 
         XCTAssertEqual(pooled.count, 2, "exactly two pooled rows")
-        XCTAssertEqual(pooled[0].bucketLabel, "Gemini Models")
+        XCTAssertEqual(pooled[0].bucketLabel, "Gemini")
         XCTAssertEqual(pooled[0].left, 41, accuracy: 0.001, "pool shows the worst remaining")
         XCTAssertEqual(pooled[0].bucket, "pool:gemini")
-        XCTAssertEqual(pooled[1].bucketLabel, "Claude and GPT Models")
+        XCTAssertEqual(pooled[1].bucketLabel, "Claude/GPT")
         XCTAssertEqual(pooled[1].left, 12, accuracy: 0.001)
     }
 
     func testAntigravityPoolsKeepUnmatchedRows() {
-        // A model matching neither pool must not silently vanish.
+        let saved = L10n.current
+        L10n.current = .english
+        defer { L10n.current = saved }
+        // A model matching neither pool must not silently vanish; it still gets a window
+        // suffix (defaulting to 5-hour when it has no reset time).
         let pooled = Snapshot.antigravityPools([antigravityRow("mystery_model", "Mystery Model", 30)])
         XCTAssertEqual(pooled.count, 1)
         XCTAssertEqual(pooled[0].bucketLabel, "Mystery Model", "falls back to the raw rows")
+        XCTAssertEqual(pooled[0].displayBucketLabel, "Mystery Model · 5-hour")
+    }
+
+    // MARK: - Antigravity window auto-detection
+
+    func testAntigravityWindowLabelClassifiesByResetTime() {
+        let saved = L10n.current
+        L10n.current = .english
+        defer { L10n.current = saved }
+
+        // A 5-hour window can never reset more than 5h out; 8h absorbs skew before weekly.
+        XCTAssertEqual(QuotaRow.antigravityWindowLabel(forSecondsUntilReset: 3 * 3600), "5-hour")
+        XCTAssertEqual(QuotaRow.antigravityWindowLabel(forSecondsUntilReset: 5 * 3600), "5-hour")
+        XCTAssertEqual(QuotaRow.antigravityWindowLabel(forSecondsUntilReset: (3 * 24 + 22) * 3600), "Weekly")
+        XCTAssertEqual(QuotaRow.antigravityWindowLabel(forSecondsUntilReset: 7 * 24 * 3600), "Weekly")
+    }
+
+    func testAntigravityDisplayBucketLabelAppendsAutoDeterminedWindow() {
+        let saved = L10n.current
+        L10n.current = .english
+        defer { L10n.current = saved }
+
+        let captured = 1_782_907_200
+        // Weekly reset (3d22h out from capture) -> "Gemini · Weekly".
+        let pooled = Snapshot.antigravityPools([
+            QuotaRow(provider: "Antigravity", bucket: BucketQuota(
+                bucket: "gemini_3_pro", bucketLabel: "Gemini 3 Pro", remainingPercent: 8,
+                resetsAt: captured + (3 * 24 + 22) * 3600, account: "default", capturedAt: captured)),
+        ])
+        XCTAssertEqual(pooled[0].bucketLabel, "Gemini")
+        XCTAssertEqual(pooled[0].displayBucketLabel, "Gemini · Weekly")
+
+        // 5-hour reset -> "Gemini · 5-hour".
+        let pooled5h = Snapshot.antigravityPools([
+            QuotaRow(provider: "Antigravity", bucket: BucketQuota(
+                bucket: "gemini_3_pro", bucketLabel: "Gemini 3 Pro", remainingPercent: 8,
+                resetsAt: captured + 3 * 3600, account: "default", capturedAt: captured)),
+        ])
+        XCTAssertEqual(pooled5h[0].displayBucketLabel, "Gemini · 5-hour")
+
+        // No reset time (idle model) -> defaults to 5-hour, never "Weekly".
+        let pooledIdle = Snapshot.antigravityPools([antigravityRow("gemini_3_pro", "Gemini 3 Pro", 8)])
+        XCTAssertEqual(pooledIdle[0].displayBucketLabel, "Gemini · 5-hour")
     }
 
     func testDisplayLabelShortensWindowsAndMeteredFeatures() {

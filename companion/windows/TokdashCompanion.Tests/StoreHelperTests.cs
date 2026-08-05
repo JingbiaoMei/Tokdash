@@ -190,21 +190,63 @@ public class StoreHelperTests
         ]);
 
         Assert.AreEqual(2, pooled.Count, "exactly two pooled rows");
-        Assert.AreEqual("Gemini Models", pooled[0].BucketLabel);
+        Assert.AreEqual("Gemini", pooled[0].BucketLabel);
         Assert.AreEqual(41, pooled[0].Left, 0.001, "pool shows the worst remaining");
         Assert.AreEqual("pool:gemini", pooled[0].Bucket);
-        Assert.AreEqual("Claude and GPT Models", pooled[1].BucketLabel);
+        Assert.AreEqual("Claude/GPT", pooled[1].BucketLabel);
         Assert.AreEqual(12, pooled[1].Left, 0.001);
     }
 
     [TestMethod]
     public void AntigravityPools_Keep_Unmatched_Rows_Rather_Than_Hiding_Them()
     {
-        // A model matching neither pool must not silently vanish.
-        var rows = new List<QuotaRow> { Row("mystery_model", "Mystery Model", 30) };
-        var pooled = Snapshot.AntigravityPools(rows);
-        Assert.AreEqual(1, pooled.Count);
-        Assert.AreEqual("Mystery Model", pooled[0].BucketLabel, "falls back to the raw rows");
+        var saved = L10n.Current;
+        L10n.Current = AppLanguage.English;
+        try
+        {
+            // A model matching neither pool must not silently vanish; it still gets a window
+            // suffix (defaulting to 5-hour when it has no reset time).
+            var rows = new List<QuotaRow> { Row("mystery_model", "Mystery Model", 30) };
+            var pooled = Snapshot.AntigravityPools(rows);
+            Assert.AreEqual(1, pooled.Count);
+            Assert.AreEqual("Mystery Model", pooled[0].BucketLabel, "falls back to the raw rows");
+            Assert.AreEqual("Mystery Model · 5-hour", pooled[0].DisplayBucketLabel);
+        }
+        finally { L10n.Current = saved; }
+    }
+
+    [TestMethod]
+    public void AntigravityWindowLabel_Auto_Determined_From_Reset_Time()
+    {
+        var saved = L10n.Current;
+        L10n.Current = AppLanguage.English;
+        try
+        {
+            // A 5-hour window can never reset more than 5h out; 8h absorbs skew before weekly.
+            Assert.AreEqual("5-hour", QuotaRow.AntigravityWindowLabelForRemaining(3 * 3600));
+            Assert.AreEqual("5-hour", QuotaRow.AntigravityWindowLabelForRemaining(5 * 3600));
+            Assert.AreEqual("Weekly", QuotaRow.AntigravityWindowLabelForRemaining((3 * 24 + 22) * 3600));
+            Assert.AreEqual("Weekly", QuotaRow.AntigravityWindowLabelForRemaining(7 * 24 * 3600));
+
+            // Pooled row appends the auto-determined window. Weekly reset (3d22h out from
+            // capture) -> "Gemini · Weekly"; 5-hour reset -> "Gemini · 5-hour".
+            long captured = 1_782_907_200L;
+            var weekly = new QuotaRow("Antigravity", "gemini_3_pro", "Gemini 3 Pro", 8,
+                DateTimeOffset.FromUnixTimeSeconds(captured + (3 * 24 + 22) * 3600L),
+                false, "default", true, false,
+                DateTimeOffset.FromUnixTimeSeconds(captured));
+            Assert.AreEqual("Gemini · Weekly", Snapshot.AntigravityPools(new List<QuotaRow> { weekly })[0].DisplayBucketLabel);
+
+            var fiveHour = new QuotaRow("Antigravity", "gemini_3_pro", "Gemini 3 Pro", 8,
+                DateTimeOffset.FromUnixTimeSeconds(captured + 3 * 3600L),
+                false, "default", true, false,
+                DateTimeOffset.FromUnixTimeSeconds(captured));
+            Assert.AreEqual("Gemini · 5-hour", Snapshot.AntigravityPools(new List<QuotaRow> { fiveHour })[0].DisplayBucketLabel);
+
+            // No reset time (idle model) -> defaults to 5-hour, never "Weekly".
+            Assert.AreEqual("Gemini · 5-hour", Snapshot.AntigravityPools(new List<QuotaRow> { Row("gemini_3_pro", "Gemini 3 Pro", 8) })[0].DisplayBucketLabel);
+        }
+        finally { L10n.Current = saved; }
     }
 
     [TestMethod]

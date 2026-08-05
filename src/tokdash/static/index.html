@@ -2390,6 +2390,10 @@
         hourAgo: '{n} hr ago',
         dayAgo: '{n} d ago',
         justNow: 'just now',
+        resetsInDays: 'resets in {n} day{s}',
+        resetsInHours: 'resets in {n} hour{s}',
+        resetsInMinutes: 'resets in {n} minute{s}',
+        resetsSoon: 'resets soon',
         reload: 'Reload',
         save: 'Save',
         formatJson: 'Format JSON',
@@ -2672,6 +2676,10 @@
         hourAgo: '{n} 小时前',
         dayAgo: '{n} 天前',
         justNow: '刚刚',
+        resetsInDays: '{n} 天后重置',
+        resetsInHours: '{n} 小时后重置',
+        resetsInMinutes: '{n} 分钟后重置',
+        resetsSoon: '即将重置',
         reload: '重新加载',
         save: '保存',
         formatJson: '格式化 JSON',
@@ -5229,6 +5237,33 @@
       return t('dayAgo').replace('{n}', days);
     }
 
+    // Relative reset countdown for a quota bar, mirroring the companion app's rule:
+    // >= 1 day -> "resets in 3 days", >= 2 hours -> "resets in 4 hours", else minutes,
+    // so a single unit is shown (no "3d 22h 43m" noise). Sub-minute / past -> "resets soon".
+    // Pure core (takes seconds-remaining) so it is unit-testable without a clock; the
+    // wrapper below computes remaining from the absolute reset epoch vs now.
+    function formatResetCountdownFromSeconds(remaining) {
+      if (!Number.isFinite(remaining)) return null;
+      if (remaining < 60) return t('resetsSoon');
+      const s = (n) => n === 1 ? '' : 's';
+      if (remaining >= 86400) {
+        const days = Math.floor(remaining / 86400);
+        return t('resetsInDays').replace('{n}', days).replace('{s}', s(days));
+      }
+      if (remaining >= 7200) {
+        const hours = Math.floor(remaining / 3600);
+        return t('resetsInHours').replace('{n}', hours).replace('{s}', s(hours));
+      }
+      const mins = Math.floor(remaining / 60);
+      return t('resetsInMinutes').replace('{n}', mins).replace('{s}', s(mins));
+    }
+
+    function formatResetCountdown(resetsAt) {
+      const resetsAtNum = Number(resetsAt);
+      if (!resetsAt || !Number.isFinite(resetsAtNum)) return null;
+      return formatResetCountdownFromSeconds(Math.floor(resetsAtNum - Date.now() / 1000));
+    }
+
     function quotaProviderLabel(provider) {
       if (provider === 'codex') return 'Codex';
       if (provider === 'claude') return 'Claude Code';
@@ -5335,6 +5370,27 @@
         || (bucket.used_percent !== null && bucket.used_percent !== undefined);
     }
 
+    // Antigravity's fetchAvailableModels returns a single quotaInfo per model - whichever
+    // window (5-hour or weekly) currently binds the shared pool. Unlike Codex/Claude there
+    // is no explicit window-duration field, so the window type is inferred from the reset
+    // time: a 5-hour window can never reset more than 5 hours out, so a reset further than
+    // that is the weekly window. A margin above 5h absorbs clock skew / provider rounding so
+    // a just-started 5-hour window isn't mislabeled. The reverse is imperfect: a weekly
+    // window in its final <8h also reads as "5-hour" (self-correcting after the reset; the
+    // API exposes no duration field to disambiguate it). Falls back to "5-hour" when no reset
+    // time is present (idle models with full quota).
+    function antigravityWindowLabel(bucket) {
+      const raw = bucket && bucket.resets_at;
+      const resetsAt = Number(raw);
+      // Number(null) === 0 (finite), so null must be checked explicitly - otherwise an idle
+      // model (no resetTime) falls through to 0 - captured_at and returns "5-hour" by accident.
+      if (raw == null || !Number.isFinite(resetsAt)) return t('windowFiveHour');
+      const capturedAt = Number(bucket && bucket.captured_at);
+      const base = Number.isFinite(capturedAt) ? capturedAt : Math.floor(Date.now() / 1000);
+      const secondsUntilReset = resetsAt - base;
+      return secondsUntilReset > 8 * 60 * 60 ? t('windowWeekly') : t('windowFiveHour');
+    }
+
     // Normalized window label shown on the card bars: every tool shows "5-hour" and
     // "Weekly" instead of tool-specific names (codex "5-hour window"/"7-day window",
     // claude "Session"/"Weekly All"). Claude's scoped Fable bucket and any unmapped
@@ -5360,6 +5416,8 @@
         // in the card title (or group heading when both regions are configured).
         return String(bucket.bucket_label || key || '—')
           .replace(/\s*\((?:Mainland China|Global)\)\s*$/, '');
+      } else if (provider === 'antigravity') {
+        return antigravityWindowLabel(bucket);
       }
       return bucket.bucket_label || key || '—';
     }
@@ -5459,7 +5517,12 @@
       const sub = document.createElement('div');
       sub.className = 'text-xs mt-1';
       sub.style.color = 'var(--color-muted)';
-      sub.textContent = `${formatEpochSeconds(bucket.captured_at)} · reset ${formatEpochSeconds(bucket.resets_at)}`;
+      // Relative countdown ("resets in 3d 22h 43m") + the absolute reset timestamp. The
+      // captured-at time was dropped here as noise - the per-provider freshness footer
+      // already covers "last updated".
+      const resetAbs = formatEpochSeconds(bucket.resets_at);
+      const countdown = formatResetCountdown(bucket.resets_at);
+      sub.textContent = countdown ? `${countdown} · ${resetAbs}` : `reset ${resetAbs}`;
 
       row.appendChild(top);
       row.appendChild(bar);
@@ -5525,8 +5588,10 @@
     // Antigravity quota is pooled per model family: every Gemini model shares one pool and
     // every Claude/GPT model the other, so the card shows two groups. Each group gets a
     // subtitle (the CLI's own group names) and one bar taking the MINIMUM remaining among
-    // matching models — the direct API (fetchAvailableModels) exposes only a single
-    // five-hour window per model, so that is the one bar shown (no weekly is returned).
+    // matching models. fetchAvailableModels exposes a single quotaInfo per model, the one
+    // window currently binding the shared pool, which may be the 5-hour OR the weekly
+    // window, so the bar label is auto-determined from the reset time
+    // (antigravityWindowLabel) instead of assumed to be 5-hour.
     const ANTIGRAVITY_POOLS = [
       { key: 'gemini', label: 'Gemini Models', test: (n) => n.includes('gemini') },
       { key: 'claude', label: 'Claude and GPT Models', test: (n) => n.includes('claude') || n.includes('gpt') || n.includes('oss') },
@@ -5556,7 +5621,7 @@
         const bucket = antigravityPoolBucket(buckets, pool);
         if (bucket) {
           card.appendChild(quotaSubtitleEl(pool.label, rendered === 0));
-          card.appendChild(renderQuotaBucketRow(bucket, 'antigravity', t('windowFiveHour')));
+          card.appendChild(renderQuotaBucketRow(bucket, 'antigravity'));
           rendered += 1;
         }
       });

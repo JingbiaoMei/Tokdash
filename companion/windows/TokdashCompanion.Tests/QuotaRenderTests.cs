@@ -23,7 +23,7 @@ public class QuotaRenderTests
 {
     // Exercises: a normal percent bucket, a no-percent bucket (failed provider, last-known),
     // and Antigravity pooling - which produces the widest realistic row label the 340px
-    // flyout has to fit ("Antigravity · Claude and GPT Models").
+    // flyout has to fit ("Antigravity · Claude/GPT · Weekly").
     private static QuotaResponse WideQuota() => new()
     {
         Enabled = true,
@@ -51,7 +51,7 @@ public class QuotaRenderTests
             {
                 Buckets = new List<BucketQuota>
                 {
-                    new() { Bucket = "claude-model", BucketLabel = "Claude", RemainingPercent = 4 },
+                    new() { Bucket = "claude-model", BucketLabel = "Claude", RemainingPercent = 4, ResetsAt = 1783245600, CapturedAt = 1782907200 },
                     new() { Bucket = "gpt-model", BucketLabel = "GPT", RemainingPercent = 19 },
                     new() { Bucket = "gemini-model", BucketLabel = "Gemini", RemainingPercent = 40 },
                 },
@@ -165,7 +165,7 @@ public class QuotaRenderTests
                     .ToList();
 
                 var longestLabel = Descendants<TextBlock>(flyout.QuotaRows)
-                    .Single(tb => tb.Text == "Antigravity · Claude and GPT Models");
+                    .Single(tb => tb.Text == "Antigravity · Claude/GPT · Weekly");
                 longestLabelActualWidth = longestLabel.ActualWidth;
                 // Re-measure without a width constraint to recover the text's natural width.
                 // DesiredSize from the normal layout is already capped by the Grid and cannot

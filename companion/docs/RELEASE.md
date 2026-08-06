@@ -2,16 +2,16 @@
 
 Tokdash Companion is versioned independently from the Python package.
 `companion/VERSION` is the authority and release tags use
-`companion-vX.Y.Z`. The current release is `0.1.4` and requires Tokdash `1.5.2`
+`companion-vX.Y.Z`. The current release is `0.1.5` and requires Tokdash `1.5.2`
 or newer.
 
-## v0.1.4 assets
+## v0.1.5 assets
 
 Publish one GitHub **prerelease** with exactly these assets:
 
 ```text
-Tokdash-Companion-0.1.4-macos-universal-unsigned.dmg
-Tokdash-Companion-0.1.4-windows-x64-unsigned.zip
+Tokdash-Companion-0.1.5-macos-universal-unsigned.dmg
+Tokdash-Companion-0.1.5-windows-x64-unsigned.zip
 SHA256SUMS
 ```
 
@@ -24,7 +24,7 @@ SHA256SUMS
   unpackaged Tokdash service and packaged startup behavior without developer
   exemptions.
 
-## v0.1.4 unsigned-preview policy
+## v0.1.5 unsigned-preview policy
 
 The maintainer explicitly accepted unsigned distribution for this GitHub
 prerelease. Every user-facing surface must say that the binaries are unsigned:
@@ -118,7 +118,8 @@ Before tagging:
   and macOS systems.
 - Verify the downloaded ZIP and DMG, not runner staging files.
 - Confirm the companion makes network requests only to the explicitly
-  configured Tokdash endpoint and performs no telemetry, credential
+  configured Tokdash endpoint and, when the user requests or enables update
+  checks, GitHub's public releases API. It performs no telemetry, credential
   discovery, or port scanning.
 - Tag the current merged `main` commit only. Never replace assets under an
   existing tag; release fixes under a new companion version.

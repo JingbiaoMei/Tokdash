@@ -40,8 +40,85 @@ public partial class SettingsWindow : Window
         FiveHourSlider.Value = s.Thresholds.FiveHour;
         WeeklySlider.Value = s.Thresholds.Weekly;
         OtherSlider.Value = s.Thresholds.Other;
+        AutoUpdateBox.IsChecked = s.AutomaticUpdateChecks;
         PopulateLanguageCombo();
         ApplySettingsStrings();
+        // Keep the Updates section live while the window is open, so "Check now" reports its
+        // own result without a reopen.
+        Store.PropertyChanged += Store_PropertyChanged;
+        Closed += (_, _) => Store.PropertyChanged -= Store_PropertyChanged;
+        RenderUpdateSection();
+    }
+
+    private void Store_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(CompanionStore.UpdateStatus) or nameof(CompanionStore.ShowsUpdateBadge))
+            Dispatcher.BeginInvoke(RenderUpdateSection);
+    }
+
+    /// <summary>
+    /// Render the Updates status line and its actions. An available version outranks a
+    /// Failed/Idle status: a manual check that later fails must not hide an update we
+    /// already know about.
+    /// </summary>
+    private void RenderUpdateSection()
+    {
+        if (UpdateStatusText is null) return;   // not constructed yet
+        string? available = Store.UpdateAvailableVersion;
+        var status = Store.UpdateStatus;
+
+        CheckUpdateBtn.IsEnabled = status.Kind != UpdateStatusKind.Checking;
+        ViewUpdateBtn.Visibility = available is null ? Visibility.Collapsed : Visibility.Visible;
+        SkipUpdateBtn.Visibility = available is null ? Visibility.Collapsed : Visibility.Visible;
+        LastCheckedText.Text = Store.LastUpdateCheckText;
+
+        if (status.Kind == UpdateStatusKind.Checking)
+        {
+            SetUpdateStatus(L10n.T("update_checking"), "SettingsMuted");
+        }
+        else if (available is not null)
+        {
+            SetUpdateStatus(L10n.T("update_available", available), "SettingsText");
+        }
+        else if (Store.Settings.SkippedUpdateVersion is { Length: > 0 } skipped
+                 && skipped == Store.Settings.AvailableUpdateVersion)
+        {
+            SetUpdateStatus(L10n.T("update_skipped"), "SettingsMuted");
+        }
+        else if (status.Kind == UpdateStatusKind.Failed)
+        {
+            SetUpdateStatus(status.Message ?? L10n.T("update_failed_generic"), "SettingsError");
+        }
+        else if (status.Kind == UpdateStatusKind.UpToDate)
+        {
+            SetUpdateStatus(L10n.T("update_up_to_date"), "SettingsSuccess");
+        }
+        else
+        {
+            SetUpdateStatus(L10n.T("update_manual_hint"), "SettingsMuted");
+        }
+    }
+
+    private void SetUpdateStatus(string text, string brushKey)
+    {
+        UpdateStatusText.Text = text;
+        UpdateStatusText.Foreground = (Brush)FindResource(brushKey);
+    }
+
+    private async void CheckUpdate_Click(object sender, RoutedEventArgs e)
+    {
+        // Persist the opt-in first so a "Check now" from a freshly-ticked box doesn't get
+        // undone by Cancel, then check regardless of the 24h throttle.
+        Store.SetAutomaticUpdateChecks(AutoUpdateBox.IsChecked == true);
+        await Store.CheckForUpdatesAsync(manual: true);
+    }
+
+    private void ViewUpdate_Click(object sender, RoutedEventArgs e) => Store.OpenUpdatePage();
+
+    private void SkipUpdate_Click(object sender, RoutedEventArgs e)
+    {
+        if (Store.UpdateAvailableVersion is { } version) Store.SkipUpdate(version);
+        RenderUpdateSection();
     }
 
     /// <summary>Localize the static XAML literals. The window closes on Save, so a language
@@ -58,6 +135,13 @@ public partial class SettingsWindow : Window
         NotifyBox.Content = L10n.T("low_quota_notifications");
         NotifyHint.Text = L10n.T("low_quota_hint");
         ThresholdsLabel.Text = L10n.T("section_thresholds");
+        UpdatesLabel.Text = L10n.T("section_updates");
+        CurrentVersionText.Text = L10n.T("update_current_version", UpdateChecker.CurrentVersion);
+        AutoUpdateBox.Content = L10n.T("update_auto_check");
+        AutoUpdateHint.Text = L10n.T("update_auto_check_hint");
+        CheckUpdateBtn.Content = L10n.T("update_check_now");
+        ViewUpdateBtn.Content = L10n.T("update_view");
+        SkipUpdateBtn.Content = L10n.T("update_skip");
         LanguageLabel.Text = L10n.T("section_language");
         LanguageHint.Text = L10n.T("language_hint");
         CancelBtn.Content = L10n.T("cancel");
@@ -231,6 +315,9 @@ public partial class SettingsWindow : Window
             (int)FiveHourSlider.Value,
             (int)WeeklySlider.Value,
             (int)OtherSlider.Value);
+        // Persists and kicks the first check when turned on, so it runs before the blanket
+        // save below rather than through it.
+        Store.SetAutomaticUpdateChecks(AutoUpdateBox.IsChecked == true);
         var newLang = (AppLanguage)Math.Clamp(LanguageCombo.SelectedIndex, 0, 2);
         bool langChanged = newLang != s.Language;
         if (langChanged) Store.ApplyLanguage(newLang);  // sets s.Language, persists, re-renders flyout

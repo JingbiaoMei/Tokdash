@@ -30,7 +30,31 @@ public sealed class CompanionSettings
     public QuotaThresholds Thresholds { get; set; } = QuotaThresholds.Defaults;
     public AppLanguage Language { get; set; } = AppLanguage.System;
 
-    private static string SettingsPath => Path.Combine(
+    // Update checking. Every field is optional in the JSON, so a settings file written by
+    // v0.1.4 (which predates all of this) decodes with the feature off and every existing
+    // preference intact.
+
+    /// <summary>Update checking is opt-in: the companion contacts no third party until asked.</summary>
+    public bool AutomaticUpdateChecks { get; set; } = false;
+    /// <summary>Last check ATTEMPT (success or failure) - the 24h throttle reads this.</summary>
+    public DateTimeOffset? LastUpdateCheckAt { get; set; }
+    /// <summary>Last version found newer than this build, and its validated release page.
+    /// Persisted so the gear badge survives a relaunch between daily checks.</summary>
+    public string? AvailableUpdateVersion { get; set; }
+    public string? AvailableUpdateUrl { get; set; }
+    /// <summary>A version the user explicitly skipped; suppresses the badge for it only.</summary>
+    public string? SkippedUpdateVersion { get; set; }
+
+    /// <summary>
+    /// Test seam: when set, settings are read and written here instead of the user's real
+    /// file. Null in production. The test assembly installs a temp path in
+    /// [AssemblyInitialize], before any store is constructed, so a test can neither read
+    /// the developer's own settings (which would make assertions depend on their machine)
+    /// nor write to them.
+    /// </summary>
+    internal static string? PathOverride { get; set; }
+
+    private static string SettingsPath => PathOverride ?? Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "TokdashCompanion", "settings.json");
 

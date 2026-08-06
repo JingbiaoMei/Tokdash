@@ -54,6 +54,11 @@ public sealed class CompanionStore : BindableBase
     {
         _timer!.Stop();
         await RefreshAsync();
+        // Ride the existing refresh cadence instead of adding a second timer. This ticks far
+        // more often than daily, but ShouldAutoCheck's 24h throttle is what actually
+        // rate-limits the request, and it returns immediately when not due. Deliberately not
+        // awaited: a slow GitHub must never delay the next Tokdash refresh.
+        _ = CheckForUpdatesAsync(manual: false);
         Reschedule();
     }
 
@@ -92,6 +97,180 @@ public sealed class CompanionStore : BindableBase
 
     public CompanionStore() : this(CreateDefaultClient()) { }
 
+    // Update checking. UpdateStatus drives only the Settings status line; the gear badge
+    // reads UpdateAvailableVersion (persisted) so it survives a relaunch and can't be
+    // cleared by a later Checking/Failed state.
+    private IUpdateClient? _updateClient;
+    private CancellationTokenSource? _updateCts;
+    private bool _updateCheckInFlight;
+    // Supersedes an older in-flight check rather than letting both write state back.
+    private int _updateCheckGeneration;
+
+    private IUpdateClient UpdateClient => _updateClient ??= new GitHubReleasesClient();
+
+    /// <summary>Test seam: inject a fake releases client (mirrors the ITokdashClient seam).</summary>
+    internal void SetUpdateClient(IUpdateClient client) => _updateClient = client;
+
+    private UpdateStatus _updateStatus = UpdateStatus.Idle;
+    public UpdateStatus UpdateStatus
+    {
+        get => _updateStatus;
+        private set
+        {
+            if (!SetProperty(ref _updateStatus, value)) return;
+            OnPropertyChanged(nameof(ShowsUpdateBadge));
+            OnPropertyChanged(nameof(SettingsAccessibilityName));
+        }
+    }
+
+    /// <summary>
+    /// The version the badge is for, or null when there's nothing to show. Derived (not
+    /// stored) so the three ways it can go away - installing the update, skipping the
+    /// version, a check finding us current - all fall out of one rule. Opening Settings is
+    /// deliberately NOT one of them.
+    /// </summary>
+    public string? UpdateAvailableVersion
+    {
+        get
+        {
+            string? available = Settings.AvailableUpdateVersion;
+            if (string.IsNullOrEmpty(available)) return null;
+            if (available == Settings.SkippedUpdateVersion) return null;
+            int[]? candidate = UpdateChecker.ParseVersion(available);
+            int[]? current = UpdateChecker.ParseVersion(UpdateChecker.CurrentVersion);
+            if (candidate is null || current is null) return null;
+            return UpdateChecker.IsNewer(candidate, current) ? available : null;
+        }
+    }
+
+    /// <summary>Whether to draw the red dot on the Settings gear. Never true for checking,
+    /// offline, malformed-response, or rate-limited states: those aren't news the user can
+    /// act on.</summary>
+    public bool ShowsUpdateBadge => UpdateAvailableVersion is not null;
+
+    /// <summary>Accessible name for the gear, which changes when an update is pending (the
+    /// dot alone carries no meaning to a screen reader).</summary>
+    public string SettingsAccessibilityName =>
+        ShowsUpdateBadge ? L10n.T("settings_update_available") : L10n.T("settings");
+
+    public string LastUpdateCheckText => UpdateChecker.LastCheckedText(Settings.LastUpdateCheckAt, DateTimeOffset.Now);
+
+    /// <summary>
+    /// Run an update check.
+    ///
+    /// <paramref name="manual"/> (the Settings "Check now" button) bypasses the 24h
+    /// throttle, shows a checking state, and reports failures. A scheduled check is
+    /// throttled, silent on failure, and - because it runs on its own task off the refresh
+    /// path with its own CancellationTokenSource - can never change <see cref="ConnectionState"/>.
+    /// </summary>
+    public async Task CheckForUpdatesAsync(bool manual)
+    {
+        if (!manual)
+        {
+            if (_updateCheckInFlight) return;
+            if (!UpdateChecker.ShouldAutoCheck(Settings.AutomaticUpdateChecks, Settings.LastUpdateCheckAt, DateTimeOffset.Now))
+                return;
+        }
+        _updateCts?.Cancel();
+        _updateCts = new CancellationTokenSource();
+        var ct = _updateCts.Token;
+        int generation = ++_updateCheckGeneration;
+        _updateCheckInFlight = true;
+        if (manual) UpdateStatus = UpdateStatus.Checking;
+
+        List<GitHubRelease>? releases = null;
+        Exception? failure = null;
+        try { releases = await UpdateClient.FetchReleasesAsync(ct); }
+        catch (Exception ex) { failure = ex; }
+
+        // A superseded check must not write state back over its replacement's.
+        if (ct.IsCancellationRequested || generation != _updateCheckGeneration) return;
+        _updateCheckInFlight = false;
+        if (failure is null) ApplyReleases(releases!, manual);
+        else ApplyUpdateFailure(failure, manual);
+    }
+
+    internal void ApplyReleases(List<GitHubRelease> releases, bool manual)
+    {
+        Settings.LastUpdateCheckAt = DateTimeOffset.Now;
+        var newest = UpdateChecker.NewestCompanionRelease(releases);
+        int[]? current = UpdateChecker.ParseVersion(UpdateChecker.CurrentVersion);
+        // A build version that doesn't parse fails CLOSED (no badge): claiming an update we
+        // can't compare against would be worse than staying quiet.
+        if (newest is null || current is null || !UpdateChecker.IsNewer(newest.Value.Version, current))
+        {
+            Settings.AvailableUpdateVersion = null;
+            Settings.AvailableUpdateUrl = null;
+            UpdateStatus = UpdateStatus.UpToDate;
+            OnPropertyChanged(nameof(ShowsUpdateBadge));
+            Settings.Save();
+            return;
+        }
+        string version = UpdateChecker.VersionString(newest.Value.Version);
+        string url = UpdateChecker.ReleaseUrl(newest.Value.Release, newest.Value.Version);
+        Settings.AvailableUpdateVersion = version;
+        Settings.AvailableUpdateUrl = url;
+        UpdateStatus = UpdateStatus.Available(version, url);
+        OnPropertyChanged(nameof(ShowsUpdateBadge));
+        Settings.Save();
+    }
+
+    internal void ApplyUpdateFailure(Exception error, bool manual)
+    {
+        // Stamp the timestamp on failure too, so "at most once every 24 hours" holds while
+        // offline: without it the scheduler would retry GitHub every refresh tick and walk
+        // straight into the rate limit.
+        Settings.LastUpdateCheckAt = DateTimeOffset.Now;
+        Settings.Save();
+        // A failed check never clears a known-available update, and a scheduled failure
+        // leaves the status line exactly as it was.
+        if (!manual) return;
+        var kind = (error as UpdateCheckException)?.Error ?? UpdateCheckError.Other;
+        UpdateStatus = UpdateStatus.Failed(UpdateChecker.FailureText(kind));
+    }
+
+    /// <summary>Persist the automatic-check opt-in. Turning it on checks immediately rather
+    /// than waiting up to a day for the first tick.</summary>
+    public void SetAutomaticUpdateChecks(bool enabled)
+    {
+        if (Settings.AutomaticUpdateChecks == enabled) return;
+        Settings.AutomaticUpdateChecks = enabled;
+        Settings.Save();
+        if (enabled) _ = CheckForUpdatesAsync(manual: false);
+    }
+
+    /// <summary>Dismiss the badge for this version only. A later release re-arms it.</summary>
+    public void SkipUpdate(string version)
+    {
+        Settings.SkippedUpdateVersion = version;
+        Settings.Save();
+        OnPropertyChanged(nameof(ShowsUpdateBadge));
+        OnPropertyChanged(nameof(SettingsAccessibilityName));
+    }
+
+    /// <summary>Open the release page in the default browser. Re-validated at the point of
+    /// use so a persisted URL from an older build still can't send the browser elsewhere.</summary>
+    public void OpenUpdatePage()
+    {
+        string? raw = Settings.AvailableUpdateUrl;
+        if (!UpdateChecker.IsValidReleaseUrl(raw)) return;
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = raw,
+            UseShellExecute = true,
+        });
+    }
+
+    /// <summary>Re-publish a previously-found update at launch. The 24h throttle means the
+    /// next check can be most of a day away, and the spec requires the badge to persist
+    /// until the app is updated or the version is skipped - so it has to come back from
+    /// disk, not from the next network round-trip.</summary>
+    private void RestorePendingUpdate()
+    {
+        if (UpdateAvailableVersion is { } version && Settings.AvailableUpdateUrl is { } url)
+            UpdateStatus = UpdateStatus.Available(version, url);
+    }
+
     /// <summary>
     /// True when a base URL is usable: an absolute http/https URL with a host. Every
     /// write path (settings window, UpdateBaseURL) validates with this, so the startup
@@ -123,6 +302,7 @@ public sealed class CompanionStore : BindableBase
         // Resolve the display language before the first view render so launch state is in the
         // right language. ApplyLanguage re-resolves and re-renders on a later change.
         L10n.Current = L10n.Resolve(Settings.Language);
+        RestorePendingUpdate();
     }
 
     public CompanionSettings Settings { get; }

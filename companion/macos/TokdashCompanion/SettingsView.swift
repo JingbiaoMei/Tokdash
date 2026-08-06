@@ -9,6 +9,7 @@ struct SettingsView: View {
     @State private var weeklyThreshold: Double = 10
     @State private var otherThreshold: Double = 15
     @State private var language: AppLanguage = .system
+    @State private var automaticUpdateChecks: Bool = false
     @State private var urlDebounce: Task<Void, Never>?
     @State private var testResult: ConnectionTest = .idle
     @State private var testTask: Task<Void, Never>?
@@ -56,6 +57,27 @@ struct SettingsView: View {
                     Text(L10n.t("threshold_other", Int(otherThreshold)))
                 }
             }
+            Section(L10n.t("section_updates")) {
+                Text(L10n.t("update_current_version", CompanionStore.currentVersion))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Toggle(L10n.t("update_auto_check"), isOn: $automaticUpdateChecks)
+                Text(L10n.t("update_auto_check_hint"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                updateStatusView
+                HStack(spacing: 8) {
+                    Button(L10n.t("update_check_now")) { store.checkForUpdates(manual: true) }
+                        .disabled(store.updateStatus == .checking)
+                    if let version = store.updateAvailableVersion {
+                        Button(L10n.t("update_view")) { store.openUpdatePage() }
+                        Button(L10n.t("update_skip")) { store.skipUpdate(version: version) }
+                    }
+                }
+                Text(store.lastUpdateCheckText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             Section(L10n.t("section_language")) {
                 Picker(L10n.t("section_language"), selection: $language) {
                     ForEach(AppLanguage.allCases, id: \.self) { lang in
@@ -85,6 +107,42 @@ struct SettingsView: View {
         .onChange(of: weeklyThreshold) { _, _ in saveSettings() }
         .onChange(of: otherThreshold) { _, _ in saveSettings() }
         .onChange(of: language) { _, _ in saveSettings() }
+        .onChange(of: automaticUpdateChecks) { _, _ in saveSettings() }
+    }
+
+    /// Update status line. An available version outranks a `failed`/`idle` status: a
+    /// manual check that later fails must not hide an update we already know about.
+    @ViewBuilder private var updateStatusView: some View {
+        if store.updateStatus == .checking {
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text(L10n.t("update_checking")).font(.caption).foregroundStyle(.secondary)
+            }
+        } else if let version = store.updateAvailableVersion {
+            Label(L10n.t("update_available", version), systemImage: "arrow.down.circle.fill")
+                .font(.caption)
+                .foregroundStyle(.orange)
+        } else if let skipped = store.settings.skippedUpdateVersion,
+                  skipped == store.settings.availableUpdateVersion {
+            Text(L10n.t("update_skipped"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        } else if case .failed(let reason) = store.updateStatus {
+            Label(reason, systemImage: "exclamationmark.circle.fill")
+                .font(.caption)
+                .foregroundStyle(.red)
+                .fixedSize(horizontal: false, vertical: true)
+        } else if store.updateStatus == .upToDate {
+            Label(L10n.t("update_up_to_date"), systemImage: "checkmark.circle.fill")
+                .font(.caption)
+                .foregroundStyle(.green)
+        } else {
+            Text(L10n.t("update_manual_hint"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     @ViewBuilder private var testResultView: some View {
@@ -143,6 +201,7 @@ struct SettingsView: View {
         weeklyThreshold = store.settings.thresholds.weekly
         otherThreshold = store.settings.thresholds.other
         language = store.settings.language
+        automaticUpdateChecks = store.settings.automaticUpdateChecks
     }
 
     private func saveSettings() {
@@ -158,6 +217,9 @@ struct SettingsView: View {
         let thresholdsChanged = store.settings.thresholds != thresholds
         store.settings.thresholds = thresholds
         if language != store.settings.language { store.applyLanguage(language) }
+        // setAutomaticUpdateChecks persists and kicks the first check when turned on, so
+        // it must run before the blanket save below rather than through it.
+        store.setAutomaticUpdateChecks(automaticUpdateChecks)
         store.settings.save()
         if thresholdsChanged { store.applyThresholds() } // rebuild the Low view immediately
         if launchChanged { store.setLaunchAtLogin(launchAtLogin) }

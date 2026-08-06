@@ -71,9 +71,22 @@ private struct HeaderSection: View {
             SettingsLink {
                 Image(systemName: "gearshape")
                     .font(.system(size: 13))
+                    // Static dot, deliberately not animated: this is an ambient "there's
+                    // something in Settings" marker, not an alert. Drawn as an overlay so
+                    // it can't shift the header's layout when it appears.
+                    .overlay(alignment: .topTrailing) {
+                        if store.showsUpdateBadge {
+                            Circle()
+                                .fill(Color.red)
+                                .frame(width: 6, height: 6)
+                                .offset(x: 3, y: -2)
+                        }
+                    }
             }
             .buttonStyle(.plain)
-            .help(L10n.t("settings"))
+            .help(store.settingsAccessibilityLabel)
+            // The dot means nothing to VoiceOver, so the label carries it instead.
+            .accessibilityLabel(store.settingsAccessibilityLabel)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)

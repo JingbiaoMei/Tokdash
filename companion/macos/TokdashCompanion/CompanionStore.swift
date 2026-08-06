@@ -37,6 +37,16 @@ final class CompanionStore: NSObject, ObservableObject {
     private var notifiedKeys = Set<String>()
     private var prevQuotaLeft: [String: Double] = [:]
 
+    // Update checking. `updateStatus` drives only the Settings status line; the gear badge
+    // reads `updateAvailableVersion` (persisted) so it survives a relaunch and can't be
+    // cleared by a later checking/failed state.
+    @Published private(set) var updateStatus: UpdateStatus = .idle
+    private let releases = GitHubReleasesClient()
+    private var updateTask: Task<Void, Never>?
+    private var updateCheckInFlight = false
+    // Supersedes an older in-flight check rather than letting both write state back.
+    private var updateCheckGeneration = 0
+
     override init() {
         var loaded = CompanionSettings.load()
         // Repair a blank/malformed base URL saved by an earlier build so the client can't
@@ -52,6 +62,16 @@ final class CompanionStore: NSObject, ObservableObject {
         self.settings = loaded
         self.client = TokdashClient(baseURL: url)
         super.init()
+        restorePendingUpdate()
+    }
+
+    /// Re-publish a previously-found update at launch. The 24h throttle means the next
+    /// check can be most of a day away, and the spec requires the badge to persist until
+    /// the app is updated or the version is skipped - so it has to come back from disk,
+    /// not from the next network round-trip.
+    private func restorePendingUpdate() {
+        guard let version = updateAvailableVersion, let url = settings.availableUpdateURL else { return }
+        updateStatus = .available(version: version, url: url)
     }
 
     /// Apply a new language setting: update the global ``L10n.current``, persist, and republish
@@ -262,6 +282,10 @@ final class CompanionStore: NSObject, ObservableObject {
 
     private func reschedule() {
         scheduler?.invalidate()
+        // Ride the existing refresh cadence instead of adding a second timer. This is
+        // called far more often than daily, but shouldAutoCheck's 24h throttle is what
+        // actually rate-limits the request, and it returns immediately when not due.
+        checkForUpdates(manual: false)
         let delay = Self.computeDelay(open: isOpen, failures: failures, partial: partial, lastFetch: lastFetchAt, now: Date())
         guard delay > 0 else { refresh(); return }
         scheduler = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
@@ -367,6 +391,144 @@ final class CompanionStore: NSObject, ObservableObject {
                                             trigger: UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false))
             center.add(req)
         }
+    }
+
+    // MARK: - Update checking
+
+    /// The running app's marketing version ("0.1.4"), read from the bundle so it can never
+    /// drift from what was shipped.
+    nonisolated static var currentVersion: String {
+        (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "0.0.0"
+    }
+
+    /// The version the badge is for, or nil when there's nothing to show. Derived (not
+    /// stored) so the three ways it can go away - installing the update, skipping the
+    /// version, a check finding us current - all fall out of one rule. Opening Settings is
+    /// deliberately NOT one of them.
+    var updateAvailableVersion: String? {
+        guard let available = settings.availableUpdateVersion,
+              available != settings.skippedUpdateVersion,
+              let candidate = UpdateChecker.parseVersion(available),
+              let current = UpdateChecker.parseVersion(Self.currentVersion),
+              UpdateChecker.isNewer(candidate, than: current) else { return nil }
+        return available
+    }
+
+    /// Whether to draw the red dot on the Settings gear. Never true for checking, offline,
+    /// malformed-response, or rate-limited states: those aren't news the user can act on.
+    var showsUpdateBadge: Bool { updateAvailableVersion != nil }
+
+    /// Accessibility label + tooltip for the gear, which changes when an update is pending
+    /// (the dot alone carries no meaning to VoiceOver).
+    var settingsAccessibilityLabel: String {
+        showsUpdateBadge ? L10n.t("settings_update_available") : L10n.t("settings")
+    }
+
+    var lastUpdateCheckText: String { UpdateChecker.lastCheckedText(settings.lastUpdateCheckAt) }
+
+    /// Run an update check.
+    ///
+    /// `manual` (the Settings "Check now" button) bypasses the 24h throttle, shows a
+    /// checking state, and reports failures. A scheduled check is throttled, silent on
+    /// failure, and - because it runs in its own task off the refresh path - can never
+    /// change ``connectionState``.
+    func checkForUpdates(manual: Bool) {
+        if !manual {
+            guard !updateCheckInFlight else { return }
+            guard UpdateChecker.shouldAutoCheck(enabled: settings.automaticUpdateChecks,
+                                                lastCheck: settings.lastUpdateCheckAt,
+                                                now: Date()) else { return }
+        }
+        updateTask?.cancel()
+        updateCheckGeneration += 1
+        let generation = updateCheckGeneration
+        updateCheckInFlight = true
+        if manual { updateStatus = .checking }
+        updateTask = Task { [weak self] in
+            guard let self else { return }
+            let result: Result<[GitHubRelease], Error>
+            do { result = .success(try await self.releases.fetchReleases()) }
+            catch { result = .failure(error) }
+            // A superseded check must not write state back over its replacement's.
+            guard !Task.isCancelled, generation == self.updateCheckGeneration else { return }
+            self.updateCheckInFlight = false
+            switch result {
+            case .success(let releases): self.applyReleases(releases, manual: manual)
+            case .failure(let error): self.applyUpdateFailure(error, manual: manual)
+            }
+        }
+    }
+
+    private func applyReleases(_ releases: [GitHubRelease], manual: Bool) {
+        settings.lastUpdateCheckAt = Date()
+        guard let newest = UpdateChecker.newestCompanionRelease(in: releases),
+              // A bundle version that doesn't parse fails CLOSED (no badge): claiming an
+              // update we can't compare against would be worse than staying quiet.
+              let current = UpdateChecker.parseVersion(Self.currentVersion),
+              UpdateChecker.isNewer(newest.version, than: current) else {
+            settings.availableUpdateVersion = nil
+            settings.availableUpdateURL = nil
+            updateStatus = .upToDate
+            settings.save()
+            return
+        }
+        let version = UpdateChecker.versionString(newest.version)
+        let url = UpdateChecker.releaseURL(for: newest.release, version: newest.version)
+        settings.availableUpdateVersion = version
+        settings.availableUpdateURL = url
+        updateStatus = .available(version: version, url: url)
+        settings.save()
+    }
+
+    private func applyUpdateFailure(_ error: Error, manual: Bool) {
+        // Stamp the timestamp on failure too, so "at most once every 24 hours" holds while
+        // offline: without it the scheduler would retry GitHub every refresh tick and walk
+        // straight into the rate limit.
+        settings.lastUpdateCheckAt = Date()
+        settings.save()
+        // A failed check never clears a known-available update, and a scheduled failure
+        // leaves the status line exactly as it was.
+        guard manual else { return }
+        updateStatus = .failed(UpdateChecker.failureText((error as? UpdateCheckError) ?? .other))
+    }
+
+    /// Persist the automatic-check opt-in. Turning it on checks immediately rather than
+    /// waiting up to a day for the first tick.
+    func setAutomaticUpdateChecks(_ enabled: Bool) {
+        guard settings.automaticUpdateChecks != enabled else { return }
+        settings.automaticUpdateChecks = enabled
+        settings.save()
+        if enabled { checkForUpdates(manual: false) }
+    }
+
+    /// Dismiss the badge for this version only. A later release re-arms it. `settings` is
+    /// @Published and `showsUpdateBadge` derives from it, so this assignment re-renders the
+    /// gear and the Settings section on its own.
+    func skipUpdate(version: String) {
+        settings.skippedUpdateVersion = version
+        settings.save()
+    }
+
+    // Test hooks: drive the two state-application paths without a network round-trip.
+    internal func applyReleasesForTesting(_ releases: [GitHubRelease], manual: Bool) {
+        applyReleases(releases, manual: manual)
+    }
+
+    internal func applyUpdateFailureForTesting(_ error: Error, manual: Bool) {
+        applyUpdateFailure(error, manual: manual)
+    }
+
+    internal func setUpdateStatusForTesting(_ status: UpdateStatus) {
+        updateStatus = status
+    }
+
+    /// Open the release page. Re-validated at the point of use so a persisted URL from an
+    /// older build still can't send the browser somewhere else.
+    func openUpdatePage() {
+        guard let raw = settings.availableUpdateURL,
+              UpdateChecker.isValidReleaseURL(raw),
+              let url = URL(string: raw) else { return }
+        NSWorkspace.shared.open(url)
     }
 
     // MARK: - Launch at login
@@ -746,6 +908,16 @@ struct CompanionSettings: Codable {
     var lowQuotaNotifications: Bool = false
     var thresholds: QuotaThresholds = .defaults
     var language: AppLanguage = .system
+    /// Update checking is opt-in: the companion contacts no third party until asked.
+    var automaticUpdateChecks: Bool = false
+    /// Last check ATTEMPT (success or failure) - the 24h throttle reads this.
+    var lastUpdateCheckAt: Date? = nil
+    /// Last version found newer than this build, and its validated release page. Persisted
+    /// so the gear badge survives a relaunch between daily checks.
+    var availableUpdateVersion: String? = nil
+    var availableUpdateURL: String? = nil
+    /// A version the user explicitly skipped; suppresses the badge for that version only.
+    var skippedUpdateVersion: String? = nil
 
     private enum CodingKeys: String, CodingKey {
         case baseURL
@@ -753,6 +925,11 @@ struct CompanionSettings: Codable {
         case lowQuotaNotifications
         case thresholds
         case language
+        case automaticUpdateChecks
+        case lastUpdateCheckAt
+        case availableUpdateVersion
+        case availableUpdateURL
+        case skippedUpdateVersion
     }
 
     init(
@@ -760,17 +937,28 @@ struct CompanionSettings: Codable {
         launchAtLogin: Bool = false,
         lowQuotaNotifications: Bool = false,
         thresholds: QuotaThresholds = .defaults,
-        language: AppLanguage = .system
+        language: AppLanguage = .system,
+        automaticUpdateChecks: Bool = false,
+        lastUpdateCheckAt: Date? = nil,
+        availableUpdateVersion: String? = nil,
+        availableUpdateURL: String? = nil,
+        skippedUpdateVersion: String? = nil
     ) {
         self.baseURL = baseURL
         self.launchAtLogin = launchAtLogin
         self.lowQuotaNotifications = lowQuotaNotifications
         self.thresholds = thresholds
         self.language = language
+        self.automaticUpdateChecks = automaticUpdateChecks
+        self.lastUpdateCheckAt = lastUpdateCheckAt
+        self.availableUpdateVersion = availableUpdateVersion
+        self.availableUpdateURL = availableUpdateURL
+        self.skippedUpdateVersion = skippedUpdateVersion
     }
 
-    /// v0.1.0 settings predate the language field. Decode every existing preference and
-    /// default only the absent field so upgrading never resets the server URL or opt-ins.
+    /// v0.1.0 settings predate the language field, and v0.1.4 predates the update fields.
+    /// Decode every existing preference and default only the absent ones so upgrading
+    /// never resets the server URL or opt-ins.
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         baseURL = try values.decodeIfPresent(String.self, forKey: .baseURL) ?? Self.defaultBaseURL
@@ -778,6 +966,11 @@ struct CompanionSettings: Codable {
         lowQuotaNotifications = try values.decodeIfPresent(Bool.self, forKey: .lowQuotaNotifications) ?? false
         thresholds = try values.decodeIfPresent(QuotaThresholds.self, forKey: .thresholds) ?? .defaults
         language = try values.decodeIfPresent(AppLanguage.self, forKey: .language) ?? .system
+        automaticUpdateChecks = try values.decodeIfPresent(Bool.self, forKey: .automaticUpdateChecks) ?? false
+        lastUpdateCheckAt = try values.decodeIfPresent(Date.self, forKey: .lastUpdateCheckAt)
+        availableUpdateVersion = try values.decodeIfPresent(String.self, forKey: .availableUpdateVersion)
+        availableUpdateURL = try values.decodeIfPresent(String.self, forKey: .availableUpdateURL)
+        skippedUpdateVersion = try values.decodeIfPresent(String.self, forKey: .skippedUpdateVersion)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -787,9 +980,22 @@ struct CompanionSettings: Codable {
         try values.encode(lowQuotaNotifications, forKey: .lowQuotaNotifications)
         try values.encode(thresholds, forKey: .thresholds)
         try values.encode(language, forKey: .language)
+        try values.encode(automaticUpdateChecks, forKey: .automaticUpdateChecks)
+        try values.encodeIfPresent(lastUpdateCheckAt, forKey: .lastUpdateCheckAt)
+        try values.encodeIfPresent(availableUpdateVersion, forKey: .availableUpdateVersion)
+        try values.encodeIfPresent(availableUpdateURL, forKey: .availableUpdateURL)
+        try values.encodeIfPresent(skippedUpdateVersion, forKey: .skippedUpdateVersion)
     }
 
-    static let defaultsURL: URL = {
+    /// Test seam: when set, settings are read and written here instead of the user's real
+    /// file. Nil in production. The test bundle installs a temp path before any store is
+    /// constructed, so a test can neither read the developer's own settings (which would
+    /// make assertions depend on their machine) nor write to them.
+    nonisolated(unsafe) static var pathOverride: URL?
+
+    static var defaultsURL: URL { pathOverride ?? productionURL }
+
+    private static let productionURL: URL = {
         let fm = FileManager.default
         let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSTemporaryDirectory())

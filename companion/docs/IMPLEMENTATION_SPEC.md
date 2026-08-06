@@ -314,3 +314,79 @@ Git sync carries edits to each native host.
 The development stop condition was met. Release preparation now follows
 `companion/docs/RELEASE.md`; the physical visual/accessibility/privacy
 checklist and signing decision remain release gates.
+
+## 12. Update checking (added after MVP)
+
+Both companions check whether a newer companion build has been published, and
+say so. They never download or install one: releases are unsigned, so the only
+action offered is opening the release page in the browser. This is distinct from
+§8's "automatic Tokdash installation, startup, upgrade, or repair", which is
+about the Tokdash *server* and remains out of scope.
+
+### Source
+
+`GET https://api.github.com/repos/JingbiaoMei/Tokdash/releases?per_page=100`,
+unauthenticated, no credentials sent.
+
+`/releases/latest` is **not** usable here: the companion shares the repository
+with the Python package, so `latest` resolves to the newest Python release, and
+companion builds are published as prereleases, which `latest` skips outright.
+
+Selection rules:
+
+- Drop `draft` releases; **keep** prereleases (every companion build is one).
+- Accept only tags matching `companion-vX.Y.Z` exactly - three numeric parts, no
+  suffix. Python tags (`v1.5.8`) and malformed tags are skipped, not guessed at.
+- Compare **numerically**, component by component, so `0.1.10 > 0.1.9`.
+
+### Cadence
+
+Opt-in (`Check for updates automatically`, default off), at most one automatic
+check per 24 hours, plus a manual `Check now`. The check rides each app's
+existing refresh scheduler rather than adding a second timer; the 24h throttle
+is what actually rate-limits it. The attempt timestamp is stamped on failure as
+well as success, so an offline machine retries tomorrow rather than on every
+refresh tick.
+
+A scheduled failure is silent, never clears a known-available update, and never
+touches `ConnectionState` - the check runs on its own task, off the refresh path.
+
+### Badge
+
+A static red dot on the Settings gear (macOS flyout header; Windows flyout
+header - the native tray context menu has text, not a gear, and is left alone).
+Never animated. Accessibility label / tooltip becomes `Settings, update
+available`, since the dot alone carries no meaning to a screen reader.
+
+The dot is derived from the *persisted* available version, not from the check
+status, so it survives a relaunch between daily checks and cannot be cleared by
+a later checking/failed state. It disappears only when the app is updated, the
+version is explicitly skipped, or a check finds the build current. Opening
+Settings does **not** clear it. Checking, offline, malformed-response, and
+rate-limit (403/429) states never show it.
+
+### Link safety
+
+`View update` opens the release page only after validating it as an HTTPS URL
+whose host is exactly `github.com` and whose path is under
+`/JingbiaoMei/Tokdash/releases/` (owner/repo compared case-insensitively). A
+missing or non-conforming `html_url` falls back to a tag URL built entirely from
+the parsed numeric version, so no server-supplied text ever reaches the browser.
+
+### Persisted settings
+
+`automaticUpdateChecks`, `lastUpdateCheckAt`, `availableUpdateVersion`,
+`availableUpdateURL`, `skippedUpdateVersion`. All optional in the settings file,
+so a pre-0.1.5 settings file decodes with the feature off and every existing
+preference intact.
+
+### Files
+
+| Platform | Implementation | Tests |
+|---|---|---|
+| macOS | `UpdateChecker.swift` (URLSession) + `CompanionStore` state | `UpdateCheckerTests.swift` |
+| Windows | `UpdateChecker.cs` (HttpClient) + `CompanionStore` state | `UpdateCheckerTests.cs` |
+
+The pure helpers (tag parsing, numeric comparison, release selection, URL
+validation, throttle) are pinned to the same cases in both suites so the two
+platforms cannot drift on which release they would offer.

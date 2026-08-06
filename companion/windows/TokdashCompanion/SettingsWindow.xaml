@@ -101,6 +101,23 @@
             </DockPanel>
         </StackPanel>
 
+        <TextBlock x:Name="UpdatesLabel" Text="Updates" FontWeight="SemiBold" FontSize="{StaticResource FontBody}" Margin="0,0,0,8"/>
+        <TextBlock x:Name="CurrentVersionText" Text="Current version: 0.0.0"
+                   FontSize="{StaticResource FontCaption}" Foreground="{DynamicResource SettingsMuted}" Margin="0,0,0,6"/>
+        <CheckBox x:Name="AutoUpdateBox" Content="Check for updates automatically" Margin="0,0,0,4"/>
+        <TextBlock x:Name="AutoUpdateHint" Text="Checks the public GitHub releases page at most once a day. Opt-in."
+                   FontSize="{StaticResource FontCaption}" Foreground="{DynamicResource SettingsMuted}" TextWrapping="Wrap" Margin="0,0,0,6"/>
+        <!-- Status line: available update, up to date, checking, or (manual checks only) a
+             failure reason. -->
+        <TextBlock x:Name="UpdateStatusText" Text="" FontSize="{StaticResource FontCaption}" TextWrapping="Wrap" Margin="0,0,0,6"/>
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+            <Button x:Name="CheckUpdateBtn" Content="Check now" Click="CheckUpdate_Click" Padding="14,3" Margin="0,0,8,0"/>
+            <Button x:Name="ViewUpdateBtn" Content="View update" Click="ViewUpdate_Click" Padding="14,3" Margin="0,0,8,0" Visibility="Collapsed"/>
+            <Button x:Name="SkipUpdateBtn" Content="Skip this version" Click="SkipUpdate_Click" Padding="14,3" Visibility="Collapsed"/>
+        </StackPanel>
+        <TextBlock x:Name="LastCheckedText" Text="" FontSize="{StaticResource FontCaption}"
+                   Foreground="{DynamicResource SettingsMuted}" Margin="0,0,0,16"/>
+
         <TextBlock x:Name="LanguageLabel" Text="Language" FontWeight="SemiBold" FontSize="{StaticResource FontBody}" Margin="0,0,0,8"/>
         <StackPanel Margin="0,0,0,4">
             <ComboBox x:Name="LanguageCombo" SelectedIndex="0" Margin="0,0,0,4"/>

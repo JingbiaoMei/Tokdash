@@ -259,8 +259,17 @@
                 <TextBlock Grid.Column="3" x:Name="ConnText" Text="Connecting…" FontSize="{StaticResource FontSecondary}" VerticalAlignment="Center" Style="{StaticResource BodyText}" Foreground="{DynamicResource MutedBrush}"/>
                 <Button Grid.Column="4" x:Name="RefreshBtn" Click="Refresh_Click" Style="{StaticResource IconBtn}"
                         ToolTip="Refresh" AutomationProperties.Name="Refresh" Content="&#xE72C;" Margin="4,0,0,0"/>
-                <Button Grid.Column="5" x:Name="GearBtn" Click="Gear_Click" Style="{StaticResource IconBtn}"
-                        ToolTip="Settings" AutomationProperties.Name="Settings" Content="&#xE713;" Margin="2,0,0,0"/>
+                <!-- Gear + update badge. The dot is an overlay inside this Grid rather than
+                     another header column, so it can appear and disappear without shifting
+                     the gear or anything left of it. Static by design: it marks "there's
+                     something in Settings", it isn't an alert, so it never animates. -->
+                <Grid Grid.Column="5" Margin="2,0,0,0">
+                    <Button x:Name="GearBtn" Click="Gear_Click" Style="{StaticResource IconBtn}"
+                            ToolTip="Settings" AutomationProperties.Name="Settings" Content="&#xE713;"/>
+                    <Ellipse x:Name="UpdateBadge" Width="6" Height="6" Fill="#FF453A"
+                             HorizontalAlignment="Right" VerticalAlignment="Top"
+                             Margin="0,5,4,0" Visibility="Collapsed" IsHitTestVisible="False"/>
+                </Grid>
             </Grid>
             <Border x:Name="Sep1" Height="1" Background="{DynamicResource DividerBrush}"/>
 

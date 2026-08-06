@@ -3,6 +3,13 @@ import XCTest
 
 final class SnapshotTests: XCTestCase {
 
+    /// Redirect settings persistence to a temp file before any store is built: constructing
+    /// a CompanionStore loads the settings file, and its invalid-base-URL repair writes one.
+    override class func setUp() {
+        super.setUp()
+        TestSettings.install()
+    }
+
     func testCompactTokens() {
         XCTAssertEqual(Snapshot.compactTokens(0), "0")
         XCTAssertEqual(Snapshot.compactTokens(999), "999")

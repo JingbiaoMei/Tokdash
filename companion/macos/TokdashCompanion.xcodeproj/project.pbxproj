@@ -16,6 +16,9 @@
 		E3E4D84C81DA48972E6DE040 /* TokdashClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F94CD97755C9DD5305ACCF73 /* TokdashClient.swift */; };
 		F2B24F35662EC29981D5D34A /* SnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 533FED02CC525FDD803E98DF /* SnapshotTests.swift */; };
 		F799280B7097DD043FEFF80A /* TokdashClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E09EB8A40E58229B8C602AD0 /* TokdashClientTests.swift */; };
+		7A1D4E90C2B85F3106DA47B1 /* UpdateChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C4A93E7158B62D0AF37E4C9 /* UpdateChecker.swift */; };
+		9E5B72C4D8A031F76B24E0A5 /* UpdateCheckerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B86F1D0A47C29E5D0B31F6E /* UpdateCheckerTests.swift */; };
+		4D7C08B3E619A2F5C84B70D2 /* TestSettingsIsolation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B25E6C41F70D83A9E5169C08 /* TestSettingsIsolation.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -40,6 +43,9 @@
 		E09EB8A40E58229B8C602AD0 /* TokdashClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokdashClientTests.swift; sourceTree = "<group>"; };
 		F0279861DC509F4ADF3BA67C /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		F94CD97755C9DD5305ACCF73 /* TokdashClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokdashClient.swift; sourceTree = "<group>"; };
+		0C4A93E7158B62D0AF37E4C9 /* UpdateChecker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateChecker.swift; sourceTree = "<group>"; };
+		3B86F1D0A47C29E5D0B31F6E /* UpdateCheckerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateCheckerTests.swift; sourceTree = "<group>"; };
+		B25E6C41F70D83A9E5169C08 /* TestSettingsIsolation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestSettingsIsolation.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -53,6 +59,7 @@
 				F0279861DC509F4ADF3BA67C /* SettingsView.swift */,
 				F94CD97755C9DD5305ACCF73 /* TokdashClient.swift */,
 				1C9FEBA36C9D0B9AD24F15E6 /* TokdashCompanionApp.swift */,
+				0C4A93E7158B62D0AF37E4C9 /* UpdateChecker.swift */,
 			);
 			path = TokdashCompanion;
 			sourceTree = "<group>";
@@ -80,6 +87,8 @@
 			children = (
 				533FED02CC525FDD803E98DF /* SnapshotTests.swift */,
 				E09EB8A40E58229B8C602AD0 /* TokdashClientTests.swift */,
+				3B86F1D0A47C29E5D0B31F6E /* UpdateCheckerTests.swift */,
+				B25E6C41F70D83A9E5169C08 /* TestSettingsIsolation.swift */,
 			);
 			path = TokdashCompanionTests;
 			sourceTree = "<group>";
@@ -175,6 +184,7 @@
 				2A3B118D7C238854FB9E8B87 /* SettingsView.swift in Sources */,
 				E3E4D84C81DA48972E6DE040 /* TokdashClient.swift in Sources */,
 				21E3F0CB974C6C204723044C /* TokdashCompanionApp.swift in Sources */,
+				7A1D4E90C2B85F3106DA47B1 /* UpdateChecker.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -184,6 +194,8 @@
 			files = (
 				F2B24F35662EC29981D5D34A /* SnapshotTests.swift in Sources */,
 				F799280B7097DD043FEFF80A /* TokdashClientTests.swift in Sources */,
+				9E5B72C4D8A031F76B24E0A5 /* UpdateCheckerTests.swift in Sources */,
+				4D7C08B3E619A2F5C84B70D2 /* TestSettingsIsolation.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -263,7 +275,7 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TokdashCompanion/Info.plist;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.1.4;
+				MARKETING_VERSION = 0.1.5;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = com.tokdash.companion;
@@ -362,7 +374,7 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TokdashCompanion/Info.plist;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.1.4;
+				MARKETING_VERSION = 0.1.5;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;

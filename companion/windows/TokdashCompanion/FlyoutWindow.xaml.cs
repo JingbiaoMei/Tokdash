@@ -504,7 +504,11 @@ public partial class FlyoutWindow : Window
         BannerRetry.Content = L10n.T("retry");
         BannerSettings.Content = L10n.T("settings");
         RefreshBtn.ToolTip = L10n.T("refresh");
-        GearBtn.ToolTip = L10n.T("settings");
+        // The dot means nothing to a screen reader, so the gear's name and tooltip carry
+        // the update state instead.
+        UpdateBadge.Visibility = Store.ShowsUpdateBadge ? Visibility.Visible : Visibility.Collapsed;
+        GearBtn.ToolTip = Store.SettingsAccessibilityName;
+        System.Windows.Automation.AutomationProperties.SetName(GearBtn, Store.SettingsAccessibilityName);
     }
 
     private void RenderQuota(Snapshot snap)

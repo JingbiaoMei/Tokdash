@@ -1,19 +1,17 @@
-# Tokdash Companion 0.1.3
+# Tokdash Companion 0.1.4
 
-This preview fixes the Antigravity quota card so it shows the correct
-window label ("5-hour" vs "Weekly") instead of always assuming 5-hour.
+This preview makes multi-day quota reset countdowns easier to read in the
+macOS and Windows companion flyouts.
 
 ## Changes
 
-- Antigravity's quota window is now auto-determined from its reset time
-  across the macOS and Windows flyouts. A weekly limit (e.g. resetting in
-  3 days) now reads "Weekly" instead of the stale "5-hour" label, matching
-  the web dashboard.
-- Antigravity pool labels shortened to "Gemini" / "Claude/GPT" so the
-  window fits the narrow flyout alongside the pool name (e.g.
-  "Gemini · Weekly").
-- No other functional changes; quota data comes from the connected Tokdash
-  server unchanged.
+- Multi-day resets now use days instead of large hour counts. For example,
+  a weekly window with 3 days and 22 hours remaining reads "resets in 3 days"
+  instead of "resets in 94 hours".
+- The macOS and Windows flyouts now match the dashboard's minute, hour, and
+  day boundaries.
+- Added English and Simplified Chinese day-count translations and boundary
+  tests on both platforms.
 
 ## Important: unsigned preview
 
@@ -30,9 +28,9 @@ operating-system-trusted publisher.
 
 ## Assets
 
-- `Tokdash-Companion-0.1.3-macos-universal-unsigned.dmg`
+- `Tokdash-Companion-0.1.4-macos-universal-unsigned.dmg`
   supports Apple Silicon and Intel Macs on macOS 14 or newer.
-- `Tokdash-Companion-0.1.3-windows-x64-unsigned.zip`
+- `Tokdash-Companion-0.1.4-windows-x64-unsigned.zip`
   is a self-contained Windows 11 x64 portable build. Windows 11 on Arm may run
   it through x64 emulation.
 - `SHA256SUMS` covers both downloadable binaries.

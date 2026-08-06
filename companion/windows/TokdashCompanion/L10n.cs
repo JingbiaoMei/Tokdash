@@ -168,6 +168,7 @@ public static class L10n
         ["resets_soon"] = "resets soon",
         ["resets_in_minutes"] = "resets in {0} minute{1}",
         ["resets_in_hours"] = "resets in {0} hour{1}",
+        ["resets_in_days"] = "resets in {0} day{1}",
         ["plural_s"] = "s",
     };
 
@@ -277,6 +278,7 @@ public static class L10n
         ["resets_soon"] = "即将重置",
         ["resets_in_minutes"] = "{0} 分钟后重置{1}",
         ["resets_in_hours"] = "{0} 小时后重置{1}",
+        ["resets_in_days"] = "{0} 天后重置{1}",
         ["plural_s"] = "",
     };
 

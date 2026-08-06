@@ -92,10 +92,14 @@ public class StoreHelperTests
             Assert.AreEqual("resets in 119 minutes", QuotaRow.ResetsTextForRemaining(TimeSpan.FromSeconds(7199)), "max minute value stays under 120");
             Assert.AreEqual("resets in 2 hours", QuotaRow.ResetsTextForRemaining(TimeSpan.FromSeconds(7200)));
             Assert.AreEqual("resets in 5 hours", QuotaRow.ResetsTextForRemaining(TimeSpan.FromSeconds(18000)));
-            Assert.AreEqual("resets in 23 hours", QuotaRow.ResetsTextForRemaining(TimeSpan.FromSeconds(86399)));
-            Assert.AreEqual("resets in 24 hours", QuotaRow.ResetsTextForRemaining(TimeSpan.FromSeconds(86400)));
-            Assert.AreEqual("resets in 36 hours", QuotaRow.ResetsTextForRemaining(TimeSpan.FromSeconds(129600)));
-            Assert.AreEqual("resets in 72 hours", QuotaRow.ResetsTextForRemaining(TimeSpan.FromSeconds(259200)));
+            Assert.AreEqual("resets in 23 hours", QuotaRow.ResetsTextForRemaining(TimeSpan.FromSeconds(86399)), "max hour value stays under 24");
+            Assert.AreEqual("resets in 1 day", QuotaRow.ResetsTextForRemaining(TimeSpan.FromSeconds(86400)));
+            Assert.AreEqual("resets in 1 day", QuotaRow.ResetsTextForRemaining(TimeSpan.FromSeconds(129600)), "1.5d floors to the whole unit");
+            Assert.AreEqual("resets in 3 days", QuotaRow.ResetsTextForRemaining(TimeSpan.FromSeconds(259200)));
+            // The antigravity weekly case that motivated the days tier: 3d22h reads as days here
+            // and as "resets in 3 days" on the web dashboard, not "resets in 94 hours".
+            Assert.AreEqual("resets in 3 days", QuotaRow.ResetsTextForRemaining(TimeSpan.FromSeconds((3 * 24 + 22) * 3600)));
+            Assert.AreEqual("resets in 7 days", QuotaRow.ResetsTextForRemaining(TimeSpan.FromSeconds(7 * 24 * 3600)));
         }
         finally { L10n.Current = saved; }
 
@@ -116,6 +120,7 @@ public class StoreHelperTests
             Assert.AreEqual("本地", CompanionStore.ServerLabel("http://127.0.0.1:55423"));
             Assert.AreEqual("低于昨日 12%", L10n.T("comparison_below", 12));
             Assert.AreEqual("5 小时后重置", L10n.T("resets_in_hours", 5, ""));
+            Assert.AreEqual("3 天后重置", L10n.T("resets_in_days", 3, ""));
             Assert.AreEqual("5 小时", ClaudeRow("session", "Session", 14).DisplayBucketLabel);
             Assert.AreEqual("每周", ClaudeRow("weekly_all", "Weekly All", 8).DisplayBucketLabel);
             Assert.AreEqual("Fable", ClaudeRow("weekly_scoped_fable", "Fable", 8).DisplayBucketLabel);

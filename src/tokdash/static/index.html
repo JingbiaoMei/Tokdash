@@ -5242,6 +5242,10 @@
     // so a single unit is shown (no "3d 22h 43m" noise). Sub-minute / past -> "resets soon".
     // Pure core (takes seconds-remaining) so it is unit-testable without a clock; the
     // wrapper below computes remaining from the absolute reset epoch vs now.
+    // The tier boundaries are a cross-surface contract: macOS resetsText(forRemaining:) and
+    // Windows ResetsTextForRemaining implement the same four tiers, and all three are pinned
+    // to the same boundary values in their test suites. Changing one alone makes the same
+    // window read differently on the dashboard and in the companion flyout.
     function formatResetCountdownFromSeconds(remaining) {
       if (!Number.isFinite(remaining)) return null;
       if (remaining < 60) return t('resetsSoon');

@@ -173,9 +173,13 @@ public sealed record QuotaRow(
 
     /// <summary>
     /// Relative reset text from remaining time, rounded down to the whole unit (matches the
-    /// freshness footer's truncation). &lt;2h -> minutes (&lt;120); all longer windows -> hours.
-    /// A past/stale ResetsAt (window already rolled over) degrades to "resets soon". Pure so
-    /// it is unit-testable without a clock. Mirrors macOS resetsText(forRemaining:).
+    /// freshness footer's truncation). &lt;2h -> minutes (&lt;120); &lt;1d -> hours; longer ->
+    /// days, so a weekly window reads "resets in 3 days" rather than "resets in 94 hours".
+    /// A single unit throughout (no "3d 22h" combinations). A past/stale ResetsAt (window
+    /// already rolled over) degrades to "resets soon". Pure so it is unit-testable without a
+    /// clock. Mirrors macOS resetsText(forRemaining:) and formatResetCountdownFromSeconds in
+    /// the web dashboard — the tier boundaries must stay in lockstep across all three or the
+    /// same window reads differently on each surface.
     /// </summary>
     public static string ResetsTextForRemaining(TimeSpan remaining)
     {
@@ -186,7 +190,12 @@ public sealed record QuotaRow(
             int mins = (int)(seconds / 60);
             return L10n.T("resets_in_minutes", mins, mins == 1 ? "" : L10n.PluralS);
         }
-        int hours = (int)(seconds / 3600);
-        return L10n.T("resets_in_hours", hours, hours == 1 ? "" : L10n.PluralS);
+        if (seconds < 86400)
+        {
+            int hours = (int)(seconds / 3600);
+            return L10n.T("resets_in_hours", hours, hours == 1 ? "" : L10n.PluralS);
+        }
+        int days = (int)(seconds / 86400);
+        return L10n.T("resets_in_days", days, days == 1 ? "" : L10n.PluralS);
     }
 }

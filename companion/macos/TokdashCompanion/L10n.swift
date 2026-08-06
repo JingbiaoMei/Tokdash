@@ -151,6 +151,7 @@ enum L10n {
         "resets_soon": "resets soon",
         "resets_in_minutes": "resets in %d minute%@",
         "resets_in_hours": "resets in %d hour%@",
+        "resets_in_days": "resets in %d day%@",
         "plural_s": "s",
     ]
 
@@ -254,6 +255,7 @@ enum L10n {
         "resets_soon": "即将重置",
         "resets_in_minutes": "%d 分钟后重置%@",
         "resets_in_hours": "%d 小时后重置%@",
+        "resets_in_days": "%d 天后重置%@",
         "plural_s": "",
     ]
 

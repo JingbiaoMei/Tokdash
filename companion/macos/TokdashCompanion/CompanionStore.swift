@@ -714,17 +714,25 @@ struct QuotaRow: Identifiable {
     }
 
     /// Relative reset text from seconds-remaining, rounded down to the whole unit (matches
-    /// the freshness footer's truncation). <2h -> minutes (<120); all longer windows -> hours.
-    /// A past/stale ``resetsAt`` (window already rolled over) degrades to "resets soon" until
-    /// the next refresh re-arms it. Pure so it is unit-testable without a clock.
+    /// the freshness footer's truncation). <2h -> minutes (<120); <1d -> hours; longer -> days,
+    /// so a weekly window reads "resets in 3 days" rather than "resets in 94 hours". A single
+    /// unit throughout (no "3d 22h" combinations). A past/stale ``resetsAt`` (window already
+    /// rolled over) degrades to "resets soon" until the next refresh re-arms it. Pure so it is
+    /// unit-testable without a clock. Mirrors formatResetCountdownFromSeconds in the web
+    /// dashboard — the tier boundaries must stay in lockstep or the same window reads
+    /// differently on the two surfaces.
     static func resetsText(forRemaining remaining: TimeInterval) -> String {
         if remaining < 60 { return L10n.t("resets_soon") }
         if remaining < 7200 {
             let mins = Int(remaining / 60)
             return L10n.t("resets_in_minutes", mins, mins == 1 ? "" : L10n.pluralS)
         }
-        let hours = Int(remaining / 3600)
-        return L10n.t("resets_in_hours", hours, hours == 1 ? "" : L10n.pluralS)
+        if remaining < 86400 {
+            let hours = Int(remaining / 3600)
+            return L10n.t("resets_in_hours", hours, hours == 1 ? "" : L10n.pluralS)
+        }
+        let days = Int(remaining / 86400)
+        return L10n.t("resets_in_days", days, days == 1 ? "" : L10n.pluralS)
     }
 }
 

@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Fixed
+
+- Companion apps (macOS/Windows) now show multi-day reset countdowns in days, matching the dashboard. A weekly window read "resets in 3 days" on the dashboard but "resets in 94 hours" in the companion flyout, because the days tier added to the dashboard in 1.5.7 was never added to the companions. The tier boundaries are now pinned to the same values in all three test suites.
+
 ## 1.5.8 - 2026-08-05
 
 ### Fixed

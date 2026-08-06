@@ -290,7 +290,14 @@ def test_antigravity_window_label_auto_determined_from_reset_time(tmp_path):
 def test_quota_reset_countdown_uses_companion_single_unit_rule(tmp_path):
     """The quota bar sub-line shows a relative countdown using the companion app's rule:
     a single unit only (no combined "3d 22h 43m" noise). >= 1 day -> days, >= 2 hours ->
-    hours, else minutes; sub-minute / past -> "resets soon"; non-finite -> null."""
+    hours, else minutes; sub-minute / past -> "resets soon"; non-finite -> null.
+
+    The tier boundaries below are pinned to the same values asserted by the companion
+    suites (macOS testResetsTextIsRelative, Windows ResetsTextForRemaining_Is_Relative).
+    All three must agree or the same window reads differently on each surface — which is
+    exactly what happened when the web gained a days tier the companions lacked and a
+    weekly window read "resets in 3 days" here but "resets in 94 hours" in the flyout.
+    """
     src = INDEX_HTML.read_text(encoding="utf-8")
     fn = _extract_js_function(src, "function formatResetCountdownFromSeconds(remaining) {")
     harness = tmp_path / "reset-countdown.js"
@@ -316,6 +323,12 @@ def test_quota_reset_countdown_uses_companion_single_unit_rule(tmp_path):
         30,                     # <1 min -> resets soon
         -100,                   # past -> resets soon
         None,                   # non-finite (null) -> no countdown
+        # Tier boundaries, mirrored by both companion suites.
+        7199,                   # max minute value stays under 120
+        7200,                   # minute -> hour boundary
+        86399,                  # max hour value stays under 24
+        129600,                 # 1.5d floors to the whole unit
+        7 * 86400,              # full weekly window
     ]
     result = subprocess.run(
         ["node", str(harness), json.dumps(cases)],
@@ -333,6 +346,11 @@ def test_quota_reset_countdown_uses_companion_single_unit_rule(tmp_path):
         "resets soon",
         "resets soon",
         None,
+        "resets in 119 minutes",
+        "resets in 2 hours",
+        "resets in 23 hours",
+        "resets in 1 day",
+        "resets in 7 days",
     ]
 
 

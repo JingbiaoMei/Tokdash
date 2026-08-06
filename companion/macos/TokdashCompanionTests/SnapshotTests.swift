@@ -84,10 +84,14 @@ final class SnapshotTests: XCTestCase {
         XCTAssertEqual(QuotaRow.resetsText(forRemaining: 7199), "resets in 119 minutes", "max minute value stays under 120")
         XCTAssertEqual(QuotaRow.resetsText(forRemaining: 7200), "resets in 2 hours")
         XCTAssertEqual(QuotaRow.resetsText(forRemaining: 18000), "resets in 5 hours")
-        XCTAssertEqual(QuotaRow.resetsText(forRemaining: 86399), "resets in 23 hours")
-        XCTAssertEqual(QuotaRow.resetsText(forRemaining: 86400), "resets in 24 hours")
-        XCTAssertEqual(QuotaRow.resetsText(forRemaining: 129600), "resets in 36 hours")
-        XCTAssertEqual(QuotaRow.resetsText(forRemaining: 259200), "resets in 72 hours")
+        XCTAssertEqual(QuotaRow.resetsText(forRemaining: 86399), "resets in 23 hours", "max hour value stays under 24")
+        XCTAssertEqual(QuotaRow.resetsText(forRemaining: 86400), "resets in 1 day")
+        XCTAssertEqual(QuotaRow.resetsText(forRemaining: 129600), "resets in 1 day", "1.5d floors to the whole unit")
+        XCTAssertEqual(QuotaRow.resetsText(forRemaining: 259200), "resets in 3 days")
+        // The antigravity weekly case that motivated the days tier: 3d22h reads as days here
+        // and as "resets in 3 days" on the web dashboard, not "resets in 94 hours".
+        XCTAssertEqual(QuotaRow.resetsText(forRemaining: (3 * 24 + 22) * 3600), "resets in 3 days")
+        XCTAssertEqual(QuotaRow.resetsText(forRemaining: 7 * 24 * 3600), "resets in 7 days")
 
         // A nil resets_at renders nothing (bucket without a reset time).
         XCTAssertEqual(makeRow(bucket: "5h", left: 10).resetsText, "")
@@ -107,6 +111,7 @@ final class SnapshotTests: XCTestCase {
         XCTAssertEqual(CompanionStore.serverLabel(for: "http://127.0.0.1:55423"), "本地")
         XCTAssertEqual(L10n.t("comparison_below", 12), "低于昨日 12%")
         XCTAssertEqual(L10n.t("resets_in_hours", 5, ""), "5 小时后重置")
+        XCTAssertEqual(L10n.t("resets_in_days", 3, ""), "3 天后重置")
         XCTAssertEqual(makeClaudeRow(bucket: "session", label: "Session", left: 14).displayBucketLabel, "5 小时")
         XCTAssertEqual(makeClaudeRow(bucket: "weekly_all", label: "Weekly All", left: 8).displayBucketLabel, "每周")
         XCTAssertEqual(makeClaudeRow(bucket: "weekly_scoped_fable", label: "Fable", left: 8).displayBucketLabel, "Fable")

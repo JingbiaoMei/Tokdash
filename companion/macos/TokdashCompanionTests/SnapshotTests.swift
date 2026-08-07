@@ -10,6 +10,13 @@ final class SnapshotTests: XCTestCase {
         TestSettings.install()
     }
 
+    @MainActor
+    func testMenuBarIconHasExplicitStatusItemSizeAndTemplateRendering() {
+        XCTAssertEqual(CompanionMenuBarIcon.artworkSize, NSSize(width: 15, height: 16))
+        XCTAssertEqual(CompanionMenuBarIcon.image.size, NSSize(width: 15, height: 20))
+        XCTAssertTrue(CompanionMenuBarIcon.image.isTemplate)
+    }
+
     func testCompactTokens() {
         XCTAssertEqual(Snapshot.compactTokens(0), "0")
         XCTAssertEqual(Snapshot.compactTokens(999), "999")

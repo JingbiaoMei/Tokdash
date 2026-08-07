@@ -1,4 +1,4 @@
-# Tokdash Companion 0.1.6
+# Tokdash Companion 0.1.7
 
 This preview polishes the macOS companion interface and replaces its generic
 menu-bar symbol with the Tokdash mark.
@@ -7,6 +7,8 @@ menu-bar symbol with the Tokdash mark.
 
 - Added a monochrome Tokdash menu-bar icon based on the approved companion
   mockup. It adapts automatically to light, dark, and selected menu-bar states.
+- Fixed the menu-bar icon's intrinsic size and optical alignment so the vector
+  artwork remains proportionate and centered across display scale factors.
 - Reused the same Tokdash mark in the popover header while retaining the
   full-color application icon in Finder and Applications.
 - Made the freshness timestamp and **Quit** action slightly darker so they are
@@ -33,9 +35,9 @@ operating-system-trusted publisher.
 
 ## Assets
 
-- `Tokdash-Companion-0.1.6-macos-universal-unsigned.dmg`
+- `Tokdash-Companion-0.1.7-macos-universal-unsigned.dmg`
   supports Apple Silicon and Intel Macs on macOS 14 or newer.
-- `Tokdash-Companion-0.1.6-windows-x64-unsigned.zip`
+- `Tokdash-Companion-0.1.7-windows-x64-unsigned.zip`
   is a self-contained Windows 11 x64 portable build. Windows 11 on Arm may run
   it through x64 emulation.
 - `SHA256SUMS` covers both downloadable binaries.

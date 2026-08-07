@@ -12,6 +12,33 @@ enum CompanionLayout {
     static let quotaMaxHeight: CGFloat = 260
 }
 
+/// `MenuBarExtra` reads an AppKit image's intrinsic canvas when it creates the status
+/// item and ignores SwiftUI offsets on the extracted label. Render the artwork into the
+/// bottom of a fixed canvas instead: the transparent space above it provides a real
+/// two-point downward optical adjustment.
+@MainActor
+enum CompanionMenuBarIcon {
+    static let artworkSize = NSSize(width: 15, height: 16)
+    static let canvasSize = NSSize(width: 15, height: 20)
+
+    static let image: NSImage = {
+        let source = NSImage(named: "MenuBarIcon")
+            ?? NSImage(systemSymbolName: "chart.bar.fill", accessibilityDescription: "Tokdash")
+            ?? NSImage(size: artworkSize)
+        let canvas = NSImage(size: canvasSize, flipped: false) { _ in
+            source.draw(
+                in: NSRect(origin: .zero, size: artworkSize),
+                from: NSRect(origin: .zero, size: source.size),
+                operation: .sourceOver,
+                fraction: 1
+            )
+            return true
+        }
+        canvas.isTemplate = true
+        return canvas
+    }()
+}
+
 @main
 struct TokdashCompanionApp: App {
     @StateObject private var store: CompanionStore
@@ -35,11 +62,7 @@ struct TokdashCompanionApp: App {
                 .onAppear { store.setOpen(true) }
                 .onDisappear { store.setOpen(false) }
         } label: {
-            Image("MenuBarIcon")
-                .resizable()
-                .renderingMode(.template)
-                .scaledToFit()
-                .frame(width: 16, height: 17)
+            Image(nsImage: CompanionMenuBarIcon.image)
                 .accessibilityLabel(store.tooltipText)
                 .help(store.tooltipText)
                 .onAppear { store.startScheduler() }

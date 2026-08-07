@@ -55,8 +55,11 @@ private struct HeaderSection: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: "chart.bar.fill")
-                .font(.system(size: 13, weight: .semibold))
+            Image("MenuBarIcon")
+                .resizable()
+                .renderingMode(.template)
+                .scaledToFit()
+                .frame(width: 14, height: 15)
             Text("Tokdash")
                 .font(.system(size: 13, weight: .semibold))
             HStack(spacing: 5) {
@@ -431,14 +434,14 @@ private struct FreshnessFooter: View {
         HStack {
             Text(store.freshnessText)
                 .font(.system(size: 11))
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.secondary)
             Spacer()
             Button(L10n.t("quit")) {
                 NSApplication.shared.terminate(nil)
             }
             .buttonStyle(.plain)
             .font(.system(size: 11))
-            .foregroundStyle(.tertiary)
+            .foregroundStyle(.secondary)
         }
     }
 }

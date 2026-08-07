@@ -35,7 +35,11 @@ struct TokdashCompanionApp: App {
                 .onAppear { store.setOpen(true) }
                 .onDisappear { store.setOpen(false) }
         } label: {
-            Image(systemName: "chart.bar.fill")
+            Image("MenuBarIcon")
+                .resizable()
+                .renderingMode(.template)
+                .scaledToFit()
+                .frame(width: 16, height: 17)
                 .accessibilityLabel(store.tooltipText)
                 .help(store.tooltipText)
                 .onAppear { store.startScheduler() }

@@ -90,8 +90,12 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
         .padding(20)
         .frame(width: 380)
+        // Match the clean white content surface used by standard settings windows in
+        // light mode while retaining a readable system-managed surface in dark mode.
+        .background(Color(nsColor: .textBackgroundColor).ignoresSafeArea())
         .onAppear { loadSettings() }
         .onChange(of: baseURL) { _, _ in
             // Debounce the URL: don't reconnect on every keystroke.

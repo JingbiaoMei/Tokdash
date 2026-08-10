@@ -23,10 +23,8 @@ def _write_override() -> None:
 
 def test_pricing_content_signature_ignores_reinstall_metadata(tmp_path):
     baseline = tmp_path / "pricing_db.json"
-    baseline.write_text(
-        json.dumps({"models": {"foo": {"input": 1, "output": 2}}}),
-        encoding="utf-8",
-    )
+    baseline_lf = '{\n  "models": {"foo": {"input": 1, "output": 2}}\n}\n'
+    baseline.write_text(baseline_lf, encoding="utf-8")
     pricing = PricingDatabase(
         db_path=baseline,
         override_path=tmp_path / "missing-override.json",
@@ -35,6 +33,9 @@ def test_pricing_content_signature_ignores_reinstall_metadata(tmp_path):
 
     stat = baseline.stat()
     os.utime(baseline, ns=(stat.st_atime_ns, stat.st_mtime_ns + 5_000_000_000))
+    assert pricing.content_signature() == before
+
+    baseline.write_bytes(baseline_lf.replace("\n", "\r\n").encode("utf-8"))
     assert pricing.content_signature() == before
 
     # Same-length content changes still invalidate the identity.

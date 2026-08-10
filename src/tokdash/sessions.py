@@ -51,9 +51,10 @@ _SESSION_FILE_PARSER_V1_COMPAT_TOKEN = "422eaad7926b4c5362a3c6d7cbcad86dc8244cb8
 _V159_BASELINE_PRICING_CONTENT_SIGNATURE = (
     "pricing-content-v1",
     "baseline",
-    84983,
-    "f9975b02ce603515a1c21d72d2e56788",
+    63321,
+    "be7be7ec40f29e7e264f3ab572f24446",
 )
+_V159_BASELINE_PRICING_RAW_SIZE = 84983
 
 
 def _session_file_parser_signature(name: str) -> dict[str, Any]:
@@ -85,8 +86,7 @@ def _legacy_pricing_signature_matches_content(legacy: Any, content: Any) -> bool
         if content == list(_V159_BASELINE_PRICING_CONTENT_SIGNATURE):
             return (
                 Path(str(baseline[0])).name == "pricing_db.json"
-                and int(baseline[2] or 0)
-                == _V159_BASELINE_PRICING_CONTENT_SIGNATURE[2]
+                and int(baseline[2] or 0) == _V159_BASELINE_PRICING_RAW_SIZE
                 and int(override[1] or 0) == 0
                 and str(override[2] or "") == ""
             )

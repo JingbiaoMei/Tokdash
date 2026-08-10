@@ -95,11 +95,22 @@ class PricingDatabase:
                 continue
             if not isinstance(data, dict) or not isinstance(data.get("models"), dict):
                 continue
+            identity = raw
+            if source == "baseline":
+                # Git may check this JSON out with CRLF on Windows while wheels
+                # contain LF. Canonical JSON identifies the same packaged pricing
+                # data consistently across operating systems and reinstall paths.
+                identity = json.dumps(
+                    data,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                ).encode("utf-8")
             return (
                 "pricing-content-v1",
                 source,
-                len(raw),
-                hashlib.blake2b(raw, digest_size=16).hexdigest(),
+                len(identity),
+                hashlib.blake2b(identity, digest_size=16).hexdigest(),
             )
         return ("pricing-content-v1", "missing", 0, "")
 

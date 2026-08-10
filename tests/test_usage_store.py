@@ -915,7 +915,11 @@ def test_v159_session_signature_upgrade_resigns_without_reparse(tmp_path):
     # This is the v1.5.9 shape. A wheel reinstall changes its packaged path or
     # mtime even when the pricing bytes and parsed session output are identical.
     legacy_pricing = (
-        ("/old/site-packages/tokdash/pricing_db.json", 111, content_pricing[2]),
+        (
+            "/old/site-packages/tokdash/pricing_db.json",
+            111,
+            sessions_module._V159_BASELINE_PRICING_RAW_SIZE,
+        ),
         (str(tmp_path / "pricing_db.json"), 0, ""),
     )
     legacy_parser = sessions_module._codex_session_parser_signature(legacy_pricing)

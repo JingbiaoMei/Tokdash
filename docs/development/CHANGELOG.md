@@ -4,16 +4,23 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## Unreleased
+## 1.6.0 - 2026-08-10
 
 ### Added
 
 - Added multi-server selection to the web dashboard and macOS/Windows companion settings. Reachable server usage is combined for Overview, Sessions, Stats, and companion totals; quota remains grouped by server.
-- Added browser-side Tokdash fingerprint testing, explicit offline add override, per-server reachability state, and automatic recovery on a later refresh.
+- Added optional browser-side `/health` testing, syntax-only server adding for offline machines, per-server reachability state, and automatic recovery on a later refresh.
 
 ### Changed
 
 - Companion settings now persist schema v2 server entries and migrate the prior single `BaseURL`/`baseURL` without resetting other preferences.
+- Default Sessions requests now run with two-tool concurrency instead of letting a cold Claude scan block every later tool.
+
+### Fixed
+
+- Startup warming now populates the dashboard's explicit-today Sessions keys and Activity Insights instead of warming unused period-only keys.
+- Expired API responses now return stale data immediately while one background refresh recomputes the key; response values and idle per-key locks are bounded, and failed-fill lock cleanup remains atomic with the single-flight registry.
+- Persistent Codex and Claude session records now carry indexed time bounds, so narrow date ranges discard historical sessions before Python deserializes their JSON. Explicit parser versions and content-based pricing identities preserve compatible v1.5.9 rows across code changes and wheel restamps; persistent-cache failures are logged before the source-file fallback.
 
 ## 1.5.9 - 2026-08-10
 

@@ -133,6 +133,7 @@ view of the Tokdash service without keeping the full dashboard open.
 </p>
 
 - Today's cost, tokens, messages, and month-to-date usage
+- Combined totals and server-grouped quota from multiple Tokdash endpoints
 - Codex, Claude, Kimi, MiniMax, Antigravity, and Grok quota windows
 - Relative reset times and optional low-quota notifications
 - Optional launch at login
@@ -141,7 +142,7 @@ view of the Tokdash service without keeping the full dashboard open.
 
 ### Download
 
-Download **[Tokdash Companion 0.1.1 from GitHub Releases](https://github.com/JingbiaoMei/Tokdash/releases/tag/companion-v0.1.1)**:
+Download **[Tokdash Companion 0.2.0 from GitHub Releases](https://github.com/JingbiaoMei/Tokdash/releases/tag/companion-v0.2.0)**:
 
 | Platform | Download | Requirements |
 |---|---|---|
@@ -163,10 +164,10 @@ Download **[Tokdash Companion 0.1.1 from GitHub Releases](https://github.com/Jin
    Windows, extract the ZIP to a stable directory and run
    `TokdashCompanion.exe`.
 4. The companion connects to `http://127.0.0.1:55423` by default. Open its
-   settings to use another explicit Tokdash endpoint, such as a private
-   Tailscale Serve URL.
+   settings to add, test, name, enable, or remove explicit Tokdash endpoints,
+   including private Tailscale Serve URLs.
 
-The companion only contacts the Tokdash endpoint you configure. Low-quota
+The companion only contacts the Tokdash endpoints you configure. Low-quota
 notifications and launch at login are both opt-in and disabled by default.
 See the [companion release guide](companion/docs/RELEASE.md) for checksum,
 update, and removal instructions.
@@ -362,6 +363,7 @@ Tokdash is **localhost-only by default**.
 - `TOKDASH_HOST` (default: `127.0.0.1`)
 - `TOKDASH_PORT` (default: `55423`)
 - `TOKDASH_CACHE_TTL` (default: `600` seconds)
+- `TOKDASH_CACHE_MAX_ENTRIES` (default: `256`) — bound cached API responses and their idle per-key locks
 - `TOKDASH_COMPUTE_CONCURRENCY` (default: `2`) — cap on simultaneous heavy history reparses; excess cold requests return a fast `503` instead of saturating the server under load
 - `TOKDASH_LIMIT_CONCURRENCY` (default: `64`) — uvicorn connection cap (backpressure)
 - `TOKDASH_KEEPALIVE` (default: `5` seconds) — uvicorn keep-alive timeout

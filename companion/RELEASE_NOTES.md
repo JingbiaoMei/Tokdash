@@ -1,24 +1,29 @@
-# Tokdash Companion 0.1.7
+# Tokdash Companion 0.2.0
 
-This preview polishes the macOS companion interface and replaces its generic
-menu-bar symbol with the Tokdash mark.
+This preview adds multi-server monitoring on macOS and Windows while preserving
+the direct single-server path for existing installations.
 
 ## Changes
 
-- Added a monochrome Tokdash menu-bar icon based on the approved companion
-  mockup. It adapts automatically to light, dark, and selected menu-bar states.
-- Fixed the menu-bar icon's intrinsic size and optical alignment so the vector
-  artwork remains proportionate and centered across display scale factors.
-- Reused the same Tokdash mark in the popover header while retaining the
-  full-color application icon in Finder and Applications.
-- Made the freshness timestamp and **Quit** action slightly darker so they are
-  easier to find without competing with primary content.
-- Changed the macOS Settings content surface from grey to white in light mode,
-  with the corresponding system-managed dark appearance in dark mode.
+- Added schema-v2 server settings with automatic migration from the previous
+  single Base URL preference.
+- Added parallel refresh across enabled servers, per-server health tracking,
+  partial-failure handling, cancellation, and escalating retry backoff.
+- Combined reachable-server usage into one summary and grouped quota rows as
+  `server · provider`, including canonical provider handling and Low-view
+  subscription deduplication.
+- Added native settings controls for adding, testing, enabling, naming, and
+  removing servers. Connection tests use the lightweight `/health` endpoint.
+- Redesigned the macOS server editor as aligned per-server cards with visible
+  toggle tint, inline status feedback, and long-URL handling.
+- Embedded the Tokdash tray icon in the Windows executable so installed and
+  copied builds do not fall back to the generic application icon.
+- Retained the Tokdash macOS menu-bar mark and the corrected **Open dashboard**
+  and **Quit** action colors from the latest companion build.
 
-The update-checking feature introduced in 0.1.5 remains available on both
-macOS and Windows. Update checks never download or install software; **View
-update** opens the validated Tokdash GitHub release page in the default browser.
+Update checks remain optional. They never download or install software;
+**View update** opens the validated Tokdash GitHub release page in the default
+browser.
 
 ## Important: unsigned preview
 
@@ -35,17 +40,15 @@ operating-system-trusted publisher.
 
 ## Assets
 
-- `Tokdash-Companion-0.1.7-macos-universal-unsigned.dmg`
-  supports Apple Silicon and Intel Macs on macOS 14 or newer.
-- `Tokdash-Companion-0.1.7-windows-x64-unsigned.zip`
-  is a self-contained Windows 11 x64 portable build. Windows 11 on Arm may run
-  it through x64 emulation.
+- `Tokdash-Companion-0.2.0-macos-universal-unsigned.dmg` supports Apple Silicon
+  and Intel Macs on macOS 14 or newer.
+- `Tokdash-Companion-0.2.0-windows-x64-unsigned.zip` is a self-contained Windows
+  11 x64 portable build. Windows 11 on Arm may run it through x64 emulation.
 - `SHA256SUMS` covers both downloadable binaries.
 
 To update on macOS, quit Tokdash Companion, open the DMG, drag the app to
-Applications, and choose **Replace**. Existing settings remain in Application
-Support.
+Applications, and choose **Replace**. Existing settings migrate automatically.
 
 The companion has no telemetry, credential discovery, or port scanning. It
-connects to the Tokdash endpoint configured by the user and, only for manual or
+connects only to Tokdash endpoints configured by the user and, for manual or
 opted-in update checks, GitHub's public releases API.

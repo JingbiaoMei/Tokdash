@@ -131,6 +131,7 @@ Tokdash Companion 状态栏应用是一个可选的原生客户端：在 macOS
 </p>
 
 - 今日费用、Token、消息数和本月累计用量
+- 汇总多个 Tokdash 端点的总计，并按服务器分组显示额度
 - Codex、Claude、Kimi、MiniMax、Antigravity 与 Grok 额度窗口
 - 相对重置时间与可选的低额度通知
 - 可选的登录时启动
@@ -139,7 +140,7 @@ Tokdash Companion 状态栏应用是一个可选的原生客户端：在 macOS
 
 ### 下载
 
-从 GitHub Releases 下载 **[Tokdash Companion 0.1.1](https://github.com/JingbiaoMei/Tokdash/releases/tag/companion-v0.1.1)**：
+从 GitHub Releases 下载 **[Tokdash Companion 0.2.0](https://github.com/JingbiaoMei/Tokdash/releases/tag/companion-v0.2.0)**：
 
 | 平台 | 下载 | 要求 |
 |---|---|---|
@@ -158,8 +159,8 @@ Tokdash Companion 状态栏应用是一个可选的原生客户端：在 macOS
 2. 下载对应平台的文件，并使用 `SHA256SUMS` 验证。
 3. 在 macOS 上打开 DMG，将 `TokdashCompanion` 拖入“应用程序”。在
    Windows 上将 ZIP 解压到固定目录，然后运行 `TokdashCompanion.exe`。
-4. Companion 默认连接 `http://127.0.0.1:55423`。如需使用其他明确指定的
-   Tokdash 端点（例如私有 Tailscale Serve 地址），请在设置中修改。
+4. Companion 默认连接 `http://127.0.0.1:55423`。你可以在设置中添加、测试、
+   命名、启用或移除明确指定的 Tokdash 端点，包括私有 Tailscale Serve 地址。
 
 Companion 只会访问你配置的 Tokdash 端点。低额度通知与登录时启动均为
 可选功能，默认关闭。校验、更新与移除说明见
@@ -349,6 +350,7 @@ Tokdash 默认**只监听 localhost**。
 - `TOKDASH_HOST`（默认：`127.0.0.1`）
 - `TOKDASH_PORT`（默认：`55423`）
 - `TOKDASH_CACHE_TTL`（默认：`600` 秒）
+- `TOKDASH_CACHE_MAX_ENTRIES`（默认：`256`）——限制 API 响应缓存及其空闲键锁的数量
 - `TOKDASH_COMPUTE_CONCURRENCY`（默认：`2`）——同时进行的重型历史重解析数量上限；超出的冷请求会立即返回 `503`，而不是在高负载下耗尽服务线程
 - `TOKDASH_LIMIT_CONCURRENCY`（默认：`64`）——uvicorn 接受的最大并发连接数（背压）
 - `TOKDASH_KEEPALIVE`（默认：`5` 秒）——uvicorn keep-alive 超时

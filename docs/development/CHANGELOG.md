@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Added
+
+- Added multi-server selection to the web dashboard and macOS/Windows companion settings. Reachable server usage is combined for Overview, Sessions, Stats, and companion totals; quota remains grouped by server.
+- Added browser-side Tokdash fingerprint testing, explicit offline add override, per-server reachability state, and automatic recovery on a later refresh.
+
+### Changed
+
+- Companion settings now persist schema v2 server entries and migrate the prior single `BaseURL`/`baseURL` without resetting other preferences.
+
 ## 1.5.9 - 2026-08-10
 
 ### Added

@@ -113,13 +113,13 @@ enum TokdashError: Error, Equatable {
 
 // MARK: - DTOs (additive decoding; unknown fields ignored)
 
-struct HealthResponse: Decodable, Equatable {
+struct HealthResponse: Decodable, Equatable, Sendable {
     let status: String
     let service: String
     let version: String
 }
 
-struct UsageResponse: Decodable {
+struct UsageResponse: Decodable, Sendable {
     let period: String
     let totalTokens: Int
     let totalCost: Double
@@ -143,45 +143,73 @@ struct UsageResponse: Decodable {
         case timestamp
         case responseCache = "response_cache"
     }
+
+    init(period: String = "", totalTokens: Int = 0, totalCost: Double = 0,
+         totalMessages: Int = 0, byTool: [String: ToolAgg]? = nil,
+         topModels: [ModelAgg]? = nil, combinedModels: [ModelAgg]? = nil,
+         comparison: Comparison? = nil, timestamp: String? = nil,
+         responseCache: CacheInfo? = nil) {
+        self.period = period; self.totalTokens = totalTokens; self.totalCost = totalCost
+        self.totalMessages = totalMessages; self.byTool = byTool; self.topModels = topModels
+        self.combinedModels = combinedModels; self.comparison = comparison
+        self.timestamp = timestamp; self.responseCache = responseCache
+    }
 }
 
-struct ToolAgg: Decodable {
+struct ToolAgg: Decodable, Sendable {
     let tokens: Int
     let cost: Double
 }
 
-struct ModelAgg: Decodable {
+struct ModelAgg: Decodable, Sendable {
     let name: String
     let tokens: Int
     let cost: Double
 }
 
-struct Comparison: Decodable {
+struct Comparison: Decodable, Sendable {
     let tokensPct: Double?
     let costPct: Double?
     let messagesPct: Double?
+    let costPrev: Double?
 
     enum CodingKeys: String, CodingKey {
         case tokensPct = "tokens_pct"
         case costPct = "cost_pct"
         case messagesPct = "messages_pct"
+        case costPrev = "cost_prev"
+    }
+
+    init(tokensPct: Double? = nil, costPct: Double? = nil, messagesPct: Double? = nil, costPrev: Double? = nil) {
+        self.tokensPct = tokensPct
+        self.costPct = costPct
+        self.messagesPct = messagesPct
+        self.costPrev = costPrev
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        tokensPct = try values.decodeIfPresent(Double.self, forKey: .tokensPct)
+        costPct = try values.decodeIfPresent(Double.self, forKey: .costPct)
+        messagesPct = try values.decodeIfPresent(Double.self, forKey: .messagesPct)
+        costPrev = try values.decodeIfPresent(Double.self, forKey: .costPrev)
     }
 }
 
-struct CacheInfo: Decodable {
+struct CacheInfo: Decodable, Sendable {
     // The server emits age_seconds as a float (e.g. 454.18947); decoding as Int
     // throws and fails the whole usage response on cached requests.
     let ageSeconds: Double?
     enum CodingKeys: String, CodingKey { case ageSeconds = "age_seconds" }
 }
 
-struct QuotaResponse: Decodable {
+struct QuotaResponse: Decodable, Sendable {
     let enabled: Bool
     let providers: [String: ProviderQuota]?
     let timestamp: Int?
 }
 
-struct ProviderQuota: Decodable {
+struct ProviderQuota: Decodable, Sendable {
     let estimated: Bool?
     let buckets: [BucketQuota]?
     // "ok" (or absent) is healthy; anything else means the provider's quota couldn't
@@ -210,7 +238,7 @@ struct ProviderQuota: Decodable {
     }
 }
 
-struct BucketQuota: Decodable {
+struct BucketQuota: Decodable, Sendable {
     let bucket: String
     let bucketLabel: String?
     let remainingPercent: Double?

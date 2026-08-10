@@ -138,6 +138,11 @@ public static class L10n
 
         ["settings_window_title"] = "Tokdash Settings",
         ["section_server"] = "Server",
+        ["section_servers"] = "Servers",
+        ["server_label"] = "Label",
+        ["add_server"] = "Add server",
+        ["servers_count"] = "{0} servers",
+        ["servers_unavailable"] = "Unavailable: {0}",
         ["base_url"] = "Base URL",
         ["test"] = "Test",
         ["server_hint"] = "Default: http://127.0.0.1:55423. Tailscale HTTPS URLs are supported.",
@@ -270,6 +275,11 @@ public static class L10n
 
         ["settings_window_title"] = "Tokdash 设置",
         ["section_server"] = "服务器",
+        ["section_servers"] = "服务器",
+        ["server_label"] = "名称",
+        ["add_server"] = "添加服务器",
+        ["servers_count"] = "{0} 台服务器",
+        ["servers_unavailable"] = "不可用：{0}",
         ["base_url"] = "基础地址",
         ["test"] = "测试",
         ["server_hint"] = "默认：http://127.0.0.1:55423。支持 Tailscale HTTPS 地址。",

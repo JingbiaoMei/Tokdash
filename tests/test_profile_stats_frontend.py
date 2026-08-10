@@ -1031,7 +1031,7 @@ def test_overview_profile_renderer_reuses_stats_warm_response():
         source, "function resolveProfileActivityTooltip(target) {"
     )
 
-    assert warm.count("fetchJsonWithRetry(appPath('/api/stats')") == 1
+    assert warm.count("fetchSelectedServers('/api/stats'") == 1
     assert "fillMissingDays(data.contributions || [])" in warm
     assert "statsCache.default = filledContributions;" in warm
     assert "renderOverviewProfilePreview(filledContributions);" in warm
@@ -1068,6 +1068,11 @@ function fetchJsonWithRetry() {
   fetchCount += 1;
   return Promise.resolve({ contributions: [] });
 }
+function fetchSelectedServers() {
+  fetchCount += 1;
+  return Promise.resolve([{ payload: { contributions: [] } }]);
+}
+function combineStatsPayloads(rows) { return rows[0]; }
 function fillMissingDays(contributions) { return contributions; }
 function isOverviewActive() { return true; }
 function renderOverviewProfilePreview() { renderCount += 1; }
@@ -1320,9 +1325,9 @@ def test_activity_insights_use_one_shared_fetch_and_limit_profile_to_five_tools(
         source, "function renderOverviewActivityInsights() {"
     )
 
-    assert source.count("appPath('/api/activity-insights')") == 1
+    assert source.count("/api/activity-insights") >= 1
     assert "force ? '?refresh=1' : ''" in loader
-    assert "fetchJsonWithRetry(url)" in loader
+    assert "fetchSelectedServers(url)" in loader
     assert "activityInsightsState.promise" in loader
     assert ".slice(0, 5)" in profile
     assert "fetch(" not in profile

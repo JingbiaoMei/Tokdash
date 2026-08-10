@@ -1,0 +1,20 @@
+{
+  "case": "multi-server",
+  "servers": [
+    { "id": "local", "label": "Local", "usage_today": "usage-today.json", "usage_month": "usage-month.json", "quota": "quota.json" },
+    { "id": "second", "label": "Second", "usage_today": "usage-today.json", "usage_month": "usage-month.json", "quota": "quota.json" }
+  ],
+  "expected": {
+    "connection": "2 servers",
+    "today": { "cost": "$6.84", "tokens_exact": "37400000", "messages": "496", "comparison": "12% below yesterday" },
+    "month": { "cost": "$97.80", "tokens_exact": "562000000" },
+    "quota_all_server_order": ["Local", "Second"],
+    "quota_low": {
+      "visible_count_max": 2,
+      "dedupe_identical_subscriptions": true,
+      "deduped_labels_omit_server": true
+    },
+    "delay_rule": "minimum per-server delay",
+    "partial_failure": "reachable servers remain rendered and failed labels appear in the footer"
+  }
+}

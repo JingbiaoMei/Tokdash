@@ -1,6 +1,7 @@
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Microsoft.Win32;
@@ -16,6 +17,15 @@ public partial class SettingsWindow : Window
 {
     private bool _dark;
     private bool _highContrast;
+    private readonly List<ServerRow> _serverRows = new();
+
+    private sealed record ServerRow(
+        CompanionServerSettings Model,
+        CheckBox Enabled,
+        TextBox Label,
+        TextBox Url,
+        TextBlock Result,
+        StackPanel Container);
 
     public CompanionStore Store { get; set; } = null!;
 
@@ -35,6 +45,7 @@ public partial class SettingsWindow : Window
         // Run entry if the extracted directory was moved.
         s.LaunchAtLogin = await LaunchAtLogin.GetEnabledAsync();
         BaseUrlBox.Text = s.BaseURL;
+        RenderServerRows(s.Servers);
         LaunchBox.IsChecked = s.LaunchAtLogin;
         NotifyBox.IsChecked = s.LowQuotaNotifications;
         FiveHourSlider.Value = s.Thresholds.FiveHour;
@@ -126,7 +137,8 @@ public partial class SettingsWindow : Window
     private void ApplySettingsStrings()
     {
         Title = L10n.T("settings_window_title");
-        ServerLabel.Text = L10n.T("section_server");
+        ServerLabel.Text = L10n.T("section_servers");
+        AddServerButton.Content = L10n.T("add_server");
         TestButton.Content = L10n.T("test");
         ServerHint.Text = L10n.T("server_hint");
         StartupLabel.Text = L10n.T("section_startup");
@@ -219,6 +231,56 @@ public partial class SettingsWindow : Window
             ok is null ? "SettingsMuted" : ok.Value ? "SettingsSuccess" : "SettingsError");
     }
 
+    private void RenderServerRows(IEnumerable<CompanionServerSettings> servers)
+    {
+        _serverRows.Clear();
+        ServersPanel.Children.Clear();
+        foreach (var server in servers) AddServerRow(server);
+        if (_serverRows.Count == 0) AddServerRow(CompanionServerSettings.Create(CompanionSettings.DefaultBaseURL));
+    }
+
+    private void AddServerRow(CompanionServerSettings server)
+    {
+        var enabled = new CheckBox { IsChecked = server.Enabled, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) };
+        var label = new TextBox { Text = server.Label, Width = 72, Margin = new Thickness(0, 0, 6, 0) };
+        var url = new TextBox { Text = server.BaseUrl, MinWidth = 190 };
+        var test = new Button { Content = L10n.T("test"), Padding = new Thickness(9, 2, 9, 2), Margin = new Thickness(6, 0, 0, 0) };
+        var remove = new Button { Content = "−", Padding = new Thickness(8, 2, 8, 2), Margin = new Thickness(4, 0, 0, 0) };
+        var line = new StackPanel { Orientation = Orientation.Horizontal };
+        line.Children.Add(enabled); line.Children.Add(label); line.Children.Add(url); line.Children.Add(test); line.Children.Add(remove);
+        var result = new TextBlock { FontSize = 10, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(22, 3, 0, 0), Visibility = Visibility.Collapsed };
+        var container = new StackPanel { Margin = new Thickness(0, 0, 0, 7) };
+        container.Children.Add(line); container.Children.Add(result);
+        var row = new ServerRow(server, enabled, label, url, result, container);
+        _serverRows.Add(row); ServersPanel.Children.Add(container);
+        test.Click += async (_, _) => await TestServerRowAsync(row, test);
+        remove.Click += (_, _) => {
+            if (_serverRows.Count <= 1) return;
+            _serverRows.Remove(row); ServersPanel.Children.Remove(container);
+        };
+    }
+
+    private async Task TestServerRowAsync(ServerRow row, Button button)
+    {
+        string candidate = row.Url.Text.Trim();
+        row.Result.Visibility = Visibility.Visible;
+        if (!CompanionStore.IsValidBaseURL(candidate)) { row.Result.Text = L10n.T("test_bad_url"); row.Result.Foreground = (Brush)FindResource("SettingsError"); return; }
+        button.IsEnabled = false;
+        try
+        {
+            using var probe = new TokdashClient(candidate);
+            var health = await probe.HealthAsync();
+            bool ok = health.Service == "tokdash";
+            row.Result.Text = ok ? L10n.T("test_ok", CompanionStore.ServerLabel(candidate), health.Version) : L10n.T("test_not_tokdash");
+            row.Result.Foreground = (Brush)FindResource(ok ? "SettingsSuccess" : "SettingsError");
+        }
+        catch (Exception ex) { row.Result.Text = L10n.T("test_reachable_error", ex.Message); row.Result.Foreground = (Brush)FindResource("SettingsError"); }
+        finally { button.IsEnabled = true; }
+    }
+
+    private void AddServer_Click(object sender, RoutedEventArgs e) =>
+        AddServerRow(CompanionServerSettings.Create(CompanionSettings.DefaultBaseURL));
+
     private void ApplyTheme()
     {
         _highContrast = SystemParameters.HighContrast;
@@ -297,19 +359,25 @@ public partial class SettingsWindow : Window
 
     private async void Save_Click(object sender, RoutedEventArgs e)
     {
-        var url = BaseUrlBox.Text.Trim();
-        if (!CompanionStore.IsValidBaseURL(url))
+        var entries = _serverRows.Select(row => new CompanionServerSettings
+        {
+            Id = row.Model.Id,
+            Label = string.IsNullOrWhiteSpace(row.Label.Text) ? CompanionStore.ServerLabel(row.Url.Text) : row.Label.Text.Trim(),
+            BaseUrl = row.Url.Text.Trim(),
+            Enabled = row.Enabled.IsChecked == true,
+        }).ToList();
+        if (entries.Any(entry => !CompanionStore.IsValidBaseURL(entry.BaseUrl)) || !entries.Any(entry => entry.Enabled))
         {
             MessageBox.Show(L10n.T("valid_url"), "Tokdash", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
         var s = Store.Settings;
-        bool urlChanged = s.BaseURL != url;
+        bool serversChanged = !ServerRegistriesEqual(s.Servers, entries);
         bool requestedLaunch = LaunchBox.IsChecked == true;
         bool launchChanged = s.LaunchAtLogin != requestedLaunch;
 
-        s.BaseURL = url;
+        s.Servers = entries;
         s.LowQuotaNotifications = NotifyBox.IsChecked == true;
         s.Thresholds = new QuotaThresholds(
             (int)FiveHourSlider.Value,
@@ -335,7 +403,7 @@ public partial class SettingsWindow : Window
             }
         }
         s.Save();
-        if (urlChanged)
+        if (serversChanged)
         {
             Store.UpdateBaseURL(s.BaseURL);
             _ = Store.RefreshAsync();
@@ -347,6 +415,14 @@ public partial class SettingsWindow : Window
         }
         Close();
     }
+
+    private static string ServerSignature(CompanionServerSettings server) =>
+        $"{server.Id}\u001f{server.Label}\u001f{server.BaseUrl.Trim()}\u001f{server.Enabled}";
+
+    internal static bool ServerRegistriesEqual(
+        IEnumerable<CompanionServerSettings> left,
+        IEnumerable<CompanionServerSettings> right) =>
+        left.Select(ServerSignature).SequenceEqual(right.Select(ServerSignature));
 
     private void Cancel_Click(object sender, RoutedEventArgs e) => Close();
 }

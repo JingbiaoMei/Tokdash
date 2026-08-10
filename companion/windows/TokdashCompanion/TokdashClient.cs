@@ -121,6 +121,7 @@ public sealed class Comparison
     [JsonPropertyName("tokens_pct")] public double? TokensPct { get; set; }
     [JsonPropertyName("cost_pct")] public double? CostPct { get; set; }
     [JsonPropertyName("messages_pct")] public double? MessagesPct { get; set; }
+    [JsonPropertyName("cost_prev")] public double? CostPrev { get; set; }
 }
 public sealed class CacheInfo { [JsonPropertyName("age_seconds")] public double? AgeSeconds { get; set; } }
 

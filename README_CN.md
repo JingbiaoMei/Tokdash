@@ -1,7 +1,6 @@
 <p align="center">
   <a href="README.md">English</a> &nbsp;|&nbsp; <a href="README_CN.md">中文</a>
 </p>
-
 <p align="center">
   <a href="https://tokdash.github.io/"><img src="https://raw.githubusercontent.com/JingbiaoMei/tokdash/main/docs/assets/tokdash_logo_full.png" alt="Tokdash" width="420" /></a>
 </p>
@@ -72,6 +71,7 @@
 - **贡献日历**：2D 热力图 + 3D 等距视图，支持 Tokens / Cost / Messages 切换
 - **会话浏览器**：逐会话下钻
 - **Companion 状态栏应用** *[新]*：在 macOS 菜单栏或 Windows 通知区域查看费用与订阅额度 — [截图与下载](#tokdash-companion-状态栏应用)
+- **多服务器视图**：在设置中添加 WSL、macOS 或其他 Tokdash 服务器；可合并任意选择的用量，并按机器分组显示额度。参见[远程访问](docs/guides/REMOTE_ACCESS.md)。
 - **主题与应用体验**：10 款样式主题、明暗模式与 PWA 安装支持
 
 <p align="center">

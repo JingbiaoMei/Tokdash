@@ -4,6 +4,11 @@ import SwiftUI
 import ServiceManagement
 @preconcurrency import UserNotifications
 
+private enum MultiServerAttempt: Sendable {
+    case success(CompanionServerSettings, UsageResponse, UsageResponse, QuotaResponse)
+    case failure(CompanionServerSettings, busy: Bool, wrongService: Bool)
+}
+
 /// Companion store: holds connection state, the decoded snapshot, the refresh
 /// scheduler, and settings. All mutations happen on the main actor.
 @MainActor
@@ -19,6 +24,9 @@ final class CompanionStore: NSObject, ObservableObject {
     private var lastFetchAt: Date?
     // Data generation time from the API (Today.timestamp), used for freshness.
     private var lastDataTime: Date?
+    private var failedServerLabels: [String] = []
+    private var failedServerIDs = Set<String>()
+    private var serverFailureCounts: [String: Int] = [:]
 
     // Last-good per section, retained across refreshes for partial-state rendering.
     private var lastToday: UsageResponse?
@@ -96,7 +104,10 @@ final class CompanionStore: NSObject, ObservableObject {
         return first.isEmpty ? host : first
     }
 
-    var serverLabel: String { Self.serverLabel(for: settings.baseURL) }
+    var serverLabel: String {
+        let count = settings.servers.filter(\.enabled).count
+        return count > 1 ? L10n.t("servers_count", count) : Self.serverLabel(for: settings.baseURL)
+    }
 
     /// Connection state for display. Only the connected state is prefixed with the
     /// server label; the failure states are about reachability, not which host.
@@ -152,6 +163,14 @@ final class CompanionStore: NSObject, ObservableObject {
     }
 
     private func runRefresh() async {
+        let enabledServers = settings.servers.filter(\.enabled)
+        if enabledServers.count > 1 {
+            await runMultiServerRefresh(enabledServers)
+            return
+        }
+        failedServerLabels = []
+        failedServerIDs = []
+        serverFailureCounts = [:]
         do {
             let health = try await client.health()
             guard health.service == "tokdash" else {
@@ -224,6 +243,100 @@ final class CompanionStore: NSObject, ObservableObject {
         }
     }
 
+    private func runMultiServerRefresh(_ servers: [CompanionServerSettings]) async {
+        typealias ServerResult = (server: CompanionServerSettings, today: UsageResponse, month: UsageResponse, quota: QuotaResponse)
+        let attempts: [MultiServerAttempt] = await withTaskGroup(of: MultiServerAttempt.self) { group in
+            for server in servers {
+                group.addTask {
+                    guard let url = URL(string: server.baseURL) else { return .failure(server, busy: false, wrongService: false) }
+                    let client = TokdashClient(baseURL: url)
+                    do {
+                        let health = try await client.health()
+                        guard health.service == "tokdash" else { return .failure(server, busy: false, wrongService: true) }
+                        async let today = client.usage(period: "today")
+                        async let month = client.usage(period: "month")
+                        async let quota = client.quota()
+                        let values = try await (today, month, quota)
+                        return .success(server, values.0, values.1, values.2)
+                    } catch let error as TokdashError {
+                        if case .busy = error { return .failure(server, busy: true, wrongService: false) }
+                        return .failure(server, busy: false, wrongService: false)
+                    } catch {
+                        return .failure(server, busy: false, wrongService: false)
+                    }
+                }
+            }
+            var values: [MultiServerAttempt] = []
+            for await value in group { values.append(value) }
+            return values
+        }
+        if Task.isCancelled { return }
+        let results: [ServerResult] = attempts.compactMap { attempt in
+            guard case let .success(server, today, month, quota) = attempt else { return nil }
+            return (server, today, month, quota)
+        }
+        failedServerIDs = Set(attempts.compactMap { attempt in
+            guard case let .failure(server, _, _) = attempt else { return nil }
+            return server.id
+        })
+        failedServerLabels = servers.filter { failedServerIDs.contains($0.id) }.map(\.label)
+        for server in servers {
+            if failedServerIDs.contains(server.id) { serverFailureCounts[server.id, default: 0] += 1 }
+            else { serverFailureCounts.removeValue(forKey: server.id) }
+        }
+        serverFailureCounts = serverFailureCounts.filter { key, _ in servers.contains(where: { $0.id == key }) }
+        guard !results.isEmpty else {
+            failures += 1
+            partial = false
+            if attempts.allSatisfy({ if case .failure(_, busy: true, wrongService: false) = $0 { return true }; return false }) {
+                connectionState = .busy
+                lastError = "Tokdash is busy"
+            } else if attempts.allSatisfy({ if case .failure(_, busy: false, wrongService: true) = $0 { return true }; return false }) {
+                connectionState = .wrongService
+            } else {
+                connectionState = .offline
+            }
+            return
+        }
+        let today = Self.combineUsage(results.map(\.today))
+        let month = Self.combineUsage(results.map(\.month))
+        var providers: [String: ProviderQuota] = [:]
+        for result in results {
+            for (provider, value) in result.quota.providers ?? [:] {
+                providers["\(result.server.label) · \(provider)"] = value
+            }
+        }
+        let quota = QuotaResponse(enabled: results.contains(where: { $0.quota.enabled }), providers: providers, timestamp: nil)
+        lastToday = today; lastMonth = month; lastQuota = quota
+        var snap = Snapshot(today: today, month: month, quota: quota, thresholds: settings.thresholds)
+        snap.todayFailed = false; snap.monthFailed = false; snap.quotaFailed = false
+        snapshot = snap; connectionState = .connected; lastFetchAt = Date()
+        lastDataTime = results.compactMap { result in
+            result.today.timestamp.flatMap(Self.parseTimestamp)
+        }.min() ?? lastFetchAt
+        failures = 0; partial = results.count != servers.count
+        let fresh = evaluateLowQuotaNotifications(snap)
+        if !fresh.isEmpty { postLowQuotaNotification(fresh) }
+    }
+
+    nonisolated static func combineUsage(_ rows: [UsageResponse]) -> UsageResponse {
+        var tools: [String: (tokens: Int, cost: Double)] = [:]
+        var models: [String: (tokens: Int, cost: Double)] = [:]
+        for row in rows {
+            for (name, item) in row.byTool ?? [:] { let old = tools[name] ?? (0, 0); tools[name] = (old.tokens + item.tokens, old.cost + item.cost) }
+            for item in row.combinedModels ?? row.topModels ?? [] { let old = models[item.name] ?? (0, 0); models[item.name] = (old.tokens + item.tokens, old.cost + item.cost) }
+        }
+        let totalCost = rows.reduce(0) { $0 + $1.totalCost }
+        let previousValues = rows.compactMap { $0.comparison?.costPrev }
+        let previous = previousValues.count == rows.count ? previousValues.reduce(0, +) : nil
+        let pct = previous.flatMap { $0 > 0 ? (totalCost - $0) / $0 * 100 : nil }
+        let modelRows = models.map { ModelAgg(name: $0.key, tokens: $0.value.tokens, cost: $0.value.cost) }.sorted { $0.cost > $1.cost }
+        return UsageResponse(period: rows.first?.period ?? "", totalTokens: rows.reduce(0) { $0 + $1.totalTokens }, totalCost: totalCost,
+            totalMessages: rows.reduce(0) { $0 + $1.totalMessages }, byTool: tools.mapValues { ToolAgg(tokens: $0.tokens, cost: $0.cost) },
+            topModels: modelRows, combinedModels: modelRows, comparison: Comparison(costPct: pct, costPrev: previous),
+            timestamp: rows.compactMap(\.timestamp).min())
+    }
+
     private func applyError(_ error: TokdashError) {
         switch error {
         case .busy:
@@ -286,7 +399,11 @@ final class CompanionStore: NSObject, ObservableObject {
         // called far more often than daily, but shouldAutoCheck's 24h throttle is what
         // actually rate-limits the request, and it returns immediately when not due.
         checkForUpdates(manual: false)
-        let delay = Self.computeDelay(open: isOpen, failures: failures, partial: partial, lastFetch: lastFetchAt, now: Date())
+        let now = Date()
+        let enabled = settings.servers.filter(\.enabled)
+        let delay = enabled.count > 1
+            ? Self.minimumDelay(enabled.map { server in Self.computeDelay(open: isOpen, failures: serverFailureCounts[server.id, default: 0], partial: false, lastFetch: lastFetchAt, now: now) })
+            : Self.computeDelay(open: isOpen, failures: failures, partial: partial, lastFetch: lastFetchAt, now: now)
         guard delay > 0 else { refresh(); return }
         scheduler = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
             guard let self else { return }
@@ -310,6 +427,8 @@ final class CompanionStore: NSObject, ObservableObject {
         }
         return 600
     }
+
+    nonisolated static func minimumDelay(_ delays: [TimeInterval]) -> TimeInterval { delays.min() ?? 600 }
 
     /// Parse the API `timestamp`, which may be a full ISO 8601 string with offset/Z or
     /// a naive UTC datetime with fractional seconds and no timezone (e.g.
@@ -359,7 +478,8 @@ final class CompanionStore: NSObject, ObservableObject {
             guard let resets = r.resetsAt else { continue } // suppress buckets without a reset time
             if r.failed { continue } // suppress rows whose own bucket failed (last-known, unreliable for alerts)
             let epoch = Int(resets.timeIntervalSince1970)
-            let stateKey = "\(r.provider)|\(r.account)|\(r.bucket)|\(epoch)"
+            let canonicalProvider = r.provider.components(separatedBy: " · ").last ?? r.provider
+            let stateKey = "\(canonicalProvider)|\(r.account)|\(r.bucket)|\(epoch)"
             current.insert(stateKey)
             let threshold = settings.thresholds.threshold(for: r.canonicalBucket)
             let isLow = r.left <= threshold
@@ -559,6 +679,7 @@ final class CompanionStore: NSObject, ObservableObject {
         // (60s while open, 600s while closed) and the last fetch failed (offline/busy).
         let window: TimeInterval = isOpen ? 60 : 600
         if (connectionState == .offline || connectionState == .busy) && age > window { text += L10n.t("stale_suffix") }
+        if !failedServerLabels.isEmpty { text += " · " + L10n.t("servers_unavailable", failedServerLabels.joined(separator: ", ")) }
         return text
     }
 
@@ -662,11 +783,18 @@ struct Snapshot {
         guard quota.enabled else { return [] }
         // Flatten allQuotaGroups so each row keeps its provider name and the
         // provider-level Estimated flag. The old allQuotaRows helper dropped both.
-        return allQuotaGroups.flatMap { $0.rows }
+        let rows = allQuotaGroups.flatMap { $0.rows }
             .filter { $0.isLow(thresholds: thresholds) }
             .sorted(by: { $0.left < $1.left })
-            .prefix(2)
-            .map { $0 }
+        let grouped = Dictionary(grouping: rows) { row in
+            let provider = row.provider.components(separatedBy: " · ").last ?? row.provider
+            return "\(provider)|\(row.account)|\(row.bucket)|\(row.left)|\(row.resetsAt?.timeIntervalSince1970 ?? -1)"
+        }
+        return grouped.values.map { group in
+            guard group.count > 1, let first = group.first else { return group[0] }
+            let provider = first.provider.components(separatedBy: " · ").last ?? first.provider
+            return QuotaRow(copying: first, provider: provider)
+        }.sorted(by: { $0.left < $1.left }).prefix(2).map { $0 }
     }
 
     /// All windows grouped by provider (provider order as detected). A failed provider
@@ -678,14 +806,18 @@ struct Snapshot {
         guard quota.enabled else { return [] }
         let providers = quota.providers ?? [:]
         return providers.compactMap { (name, prov) -> (provider: String, rows: [QuotaRow], failed: Bool)? in
-            let display = name.capitalized
+            let nameParts = name.components(separatedBy: " · ")
+            let canonicalProvider = nameParts.last ?? name
+            let display = nameParts.count == 1
+                ? canonicalProvider.capitalized
+                : nameParts.dropLast().joined(separator: " · ") + " · " + canonicalProvider.capitalized
             let estimated = prov.estimated ?? false
             let failed = !Self.isProviderOk(prov.status) || !(prov.statusDetail?.isEmpty ?? true)
             var rows = (prov.buckets ?? []).compactMap {
                 QuotaRow(provider: display, bucket: $0, estimated: estimated,
                          failed: Self.isRowFailed(capturedAt: $0.capturedAt, statusAt: prov.statusAt, groupFailed: failed))
             }
-            if name.lowercased() == "antigravity" { rows = Self.antigravityPools(rows) }
+            if canonicalProvider.lowercased() == "antigravity" { rows = Self.antigravityPools(rows) }
             guard !rows.isEmpty else { return nil }
             return (display, rows, failed)
         }
@@ -782,6 +914,13 @@ struct QuotaRow: Identifiable {
         self.failed = other.failed
     }
 
+    init(copying other: QuotaRow, provider: String) {
+        self.provider = provider; self.bucket = other.bucket; self.bucketLabel = other.bucketLabel
+        self.left = other.left; self.resetsAt = other.resetsAt; self.capturedAt = other.capturedAt
+        self.estimated = other.estimated; self.account = other.account; self.hasPercent = other.hasPercent
+        self.failed = other.failed
+    }
+
     init(provider: String, bucket: BucketQuota, estimated: Bool = false, failed: Bool = false) {
         self.provider = provider
         self.bucket = bucket.bucket
@@ -811,7 +950,8 @@ struct QuotaRow: Identifiable {
     }
 
     static func normalizeBucketForThreshold(provider: String, bucket: String, label: String) -> String {
-        guard provider.lowercased() == "claude" else { return bucket }
+        let canonicalProvider = provider.components(separatedBy: " · ").last ?? provider
+        guard canonicalProvider.lowercased() == "claude" else { return bucket }
         let combined = "\(bucket) \(label)".lowercased()
         if combined.contains("session") || combined.contains("five_hour") || combined.contains("five hour")
             || combined.contains("5h") || combined.contains("5-hour") {
@@ -903,7 +1043,15 @@ struct QuotaRow: Identifiable {
 struct CompanionSettings: Codable {
     static let defaultBaseURL = "http://127.0.0.1:55423"
 
-    var baseURL: String = CompanionSettings.defaultBaseURL
+    var version: Int = 2
+    var servers: [CompanionServerSettings] = [.make(baseURL: CompanionSettings.defaultBaseURL)]
+    var baseURL: String {
+        get { servers.first(where: { $0.enabled })?.baseURL ?? servers.first?.baseURL ?? Self.defaultBaseURL }
+        set {
+            if servers.isEmpty { servers = [.make(baseURL: newValue)] }
+            else { servers[0].baseURL = newValue }
+        }
+    }
     var launchAtLogin: Bool = false
     var lowQuotaNotifications: Bool = false
     var thresholds: QuotaThresholds = .defaults
@@ -920,6 +1068,8 @@ struct CompanionSettings: Codable {
     var skippedUpdateVersion: String? = nil
 
     private enum CodingKeys: String, CodingKey {
+        case version
+        case servers
         case baseURL
         case launchAtLogin
         case lowQuotaNotifications
@@ -944,7 +1094,8 @@ struct CompanionSettings: Codable {
         availableUpdateURL: String? = nil,
         skippedUpdateVersion: String? = nil
     ) {
-        self.baseURL = baseURL
+        self.version = 2
+        self.servers = [.make(baseURL: baseURL)]
         self.launchAtLogin = launchAtLogin
         self.lowQuotaNotifications = lowQuotaNotifications
         self.thresholds = thresholds
@@ -961,7 +1112,13 @@ struct CompanionSettings: Codable {
     /// never resets the server URL or opt-ins.
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
-        baseURL = try values.decodeIfPresent(String.self, forKey: .baseURL) ?? Self.defaultBaseURL
+        version = 2
+        if let decoded = try values.decodeIfPresent([CompanionServerSettings].self, forKey: .servers), !decoded.isEmpty {
+            servers = decoded
+        } else {
+            let legacy = try values.decodeIfPresent(String.self, forKey: .baseURL) ?? Self.defaultBaseURL
+            servers = [.make(baseURL: legacy)]
+        }
         launchAtLogin = try values.decodeIfPresent(Bool.self, forKey: .launchAtLogin) ?? false
         lowQuotaNotifications = try values.decodeIfPresent(Bool.self, forKey: .lowQuotaNotifications) ?? false
         thresholds = try values.decodeIfPresent(QuotaThresholds.self, forKey: .thresholds) ?? .defaults
@@ -975,7 +1132,8 @@ struct CompanionSettings: Codable {
 
     func encode(to encoder: Encoder) throws {
         var values = encoder.container(keyedBy: CodingKeys.self)
-        try values.encode(baseURL, forKey: .baseURL)
+        try values.encode(2, forKey: .version)
+        try values.encode(servers, forKey: .servers)
         try values.encode(launchAtLogin, forKey: .launchAtLogin)
         try values.encode(lowQuotaNotifications, forKey: .lowQuotaNotifications)
         try values.encode(thresholds, forKey: .thresholds)
@@ -1018,6 +1176,29 @@ struct CompanionSettings: Codable {
         if let data = try? JSONEncoder().encode(self) {
             try? data.write(to: Self.defaultsURL)
         }
+    }
+}
+
+struct CompanionServerSettings: Codable, Identifiable, Equatable, Sendable {
+    var id: String
+    var label: String
+    var baseURL: String
+    var enabled: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case label
+        case baseURL = "baseUrl"
+        case enabled
+    }
+
+    static func make(baseURL: String) -> CompanionServerSettings {
+        CompanionServerSettings(
+            id: UUID().uuidString,
+            label: CompanionStore.serverLabel(for: baseURL),
+            baseURL: baseURL,
+            enabled: true
+        )
     }
 }
 

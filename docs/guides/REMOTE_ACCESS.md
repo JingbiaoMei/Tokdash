@@ -4,6 +4,25 @@ Tokdash binds to `127.0.0.1:55423` by default. This local-only default protects 
 does not authenticate read requests. Choose a remote-access method according to whether you
 need read-only or write access.
 
+## Combine several Tokdash servers
+
+The dashboard and companion apps can read several Tokdash instances at once. In
+dashboard Settings, add each server URL and choose All or a custom subset. Overview,
+Sessions, and Stats combine reachable servers; Quota stays grouped by server. An
+unreachable server drops out until a later refresh succeeds. Adding the same instance
+under two URLs double-counts usage.
+
+The browser's Add/Test request also checks deployment compatibility. A dashboard opened
+on loopback can normally read remote servers with Tokdash's default CORS allowlist. If the
+dashboard itself is served from a remote origin, configure every added server with
+`TOKDASH_ALLOW_ORIGINS=https://<dashboard-host>`. An HTTPS page cannot fetch a plain-HTTP
+server; use loopback HTTP for the page or HTTPS URLs for every server. Native companions
+do not send an `Origin` header and are unaffected by CORS and browser mixed-content rules.
+
+Reads follow the exposure model below. Per-server writes still pass through the existing
+loopback write gate: SSH-forwarded loopback URLs can write, while Tailscale Serve and
+wildcard-bound servers remain read-only.
+
 ## Choose an access method
 
 | Method | Exposure | Write access | Recommended use |

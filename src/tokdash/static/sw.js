@@ -44,6 +44,9 @@ self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
 
   const url = new URL(event.request.url);
+  // Added Tokdash servers are fetched directly by the page. Never intercept,
+  // cache, or rewrite a cross-origin request from the multi-server client.
+  if (url.origin !== self.location.origin) return;
   const path = localPath(url.pathname);
 
   // Avoid caching API requests.

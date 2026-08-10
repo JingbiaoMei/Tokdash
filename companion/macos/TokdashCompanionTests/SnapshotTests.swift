@@ -237,6 +237,54 @@ final class SnapshotTests: XCTestCase {
         XCTAssertEqual(low[1].left, 5)
     }
 
+    func testSharedMultiServerFixturePinsCombineLowDedupAndMinimumDelay() throws {
+        let expectedData = try Data(contentsOf: contractURL("expected/multi-server.json"))
+        let document = try XCTUnwrap(JSONSerialization.jsonObject(with: expectedData) as? [String: Any])
+        let expected = try XCTUnwrap(document["expected"] as? [String: Any])
+        let expectedToday = try XCTUnwrap(expected["today"] as? [String: Any])
+        let usageData = try Data(contentsOf: contractURL("fixtures/usage-today.json"))
+        let today = try JSONDecoder().decode(UsageResponse.self, from: usageData)
+        let combined = CompanionStore.combineUsage([today, today])
+
+        XCTAssertEqual(String(combined.totalTokens), expectedToday["tokens_exact"] as? String)
+        XCTAssertEqual(String(combined.totalMessages), expectedToday["messages"] as? String)
+        XCTAssertEqual(Snapshot(today: combined, month: .empty, quota: .empty, thresholds: .defaults).todayCostText,
+                       expectedToday["cost"] as? String)
+        XCTAssertEqual(Int((combined.comparison?.costPct ?? 0).rounded()), -12)
+
+        let quotaData = try Data(contentsOf: contractURL("fixtures/quota.json"))
+        let quota = try JSONDecoder().decode(QuotaResponse.self, from: quotaData)
+        var providers: [String: ProviderQuota] = [:]
+        for label in ["Local", "Second"] {
+            for (provider, value) in quota.providers ?? [:] { providers["\(label) · \(provider)"] = value }
+        }
+        let snap = Snapshot(today: combined, month: .empty,
+                            quota: QuotaResponse(enabled: true, providers: providers, timestamp: nil), thresholds: .defaults)
+        let expectedLow = try XCTUnwrap(expected["quota_low"] as? [String: Any])
+        XCTAssertEqual(expectedLow["dedupe_identical_subscriptions"] as? Bool, true)
+        XCTAssertLessThanOrEqual(snap.lowQuotaRows.count, try XCTUnwrap(expectedLow["visible_count_max"] as? Int))
+        XCTAssertTrue(snap.lowQuotaRows.allSatisfy { !$0.provider.contains(" · ") })
+        let lowerCaseLabelSnap = Snapshot(today: .empty, month: .empty,
+            quota: QuotaResponse(enabled: true, providers: ["wsl · codex": try XCTUnwrap(quota.providers?["codex"])], timestamp: nil),
+            thresholds: .defaults)
+        XCTAssertEqual(lowerCaseLabelSnap.allQuotaGroups.first?.provider, "wsl · Codex")
+
+        XCTAssertEqual(expected["delay_rule"] as? String, "minimum per-server delay")
+        XCTAssertEqual(CompanionStore.minimumDelay([
+            CompanionStore.computeDelay(open: true, failures: 2, partial: false, lastFetch: nil, now: Date()),
+            CompanionStore.computeDelay(open: true, failures: 3, partial: false, lastFetch: nil, now: Date()),
+        ]), 30)
+    }
+
+    private func contractURL(_ relativePath: String) -> URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("contract")
+            .appendingPathComponent(relativePath)
+    }
+
     private func makeRow(bucket: String, left: Double) -> QuotaRow {
         QuotaRow(provider: "test", bucket: BucketQuota(
             bucket: bucket,

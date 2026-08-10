@@ -369,17 +369,51 @@
     .settings-menu { position: relative; }
     .settings-trigger { gap: 7px; }
     .settings-trigger svg { flex: 0 0 auto; }
-    .settings-panel { position: absolute; z-index: 110; top: calc(100% + 9px); right: 0; width: min(320px, calc(100vw - 32px)); padding: 14px; border: 1px solid color-mix(in srgb,var(--color-primary) 18%,var(--color-border)); border-radius: 14px; background: color-mix(in srgb,var(--color-surface-glass) 96%,var(--color-bg)); box-shadow: var(--shadow-md),0 16px 42px color-mix(in srgb,var(--color-text) 16%,transparent); backdrop-filter: blur(18px); }
+    .settings-panel { position: absolute; z-index: 110; top: calc(100% + 9px); right: 0; width: min(364px, calc(100vw - 24px)); max-height: min(78vh, 760px); overflow-y: auto; padding: 16px; border: 1px solid color-mix(in srgb,var(--color-primary) 18%,var(--color-border)); border-radius: 16px; background: color-mix(in srgb,var(--color-surface-glass) 96%,var(--color-bg)); box-shadow: var(--shadow-md),0 16px 42px color-mix(in srgb,var(--color-text) 16%,transparent); backdrop-filter: blur(18px); scrollbar-width: thin; }
     .settings-panel[hidden] { display: none; }
-    .settings-panel-head { display: flex; align-items: center; gap: 9px; padding: 1px 2px 11px; border-bottom: 1px solid var(--color-border); }
+    .settings-panel-head { position: sticky; z-index: 2; top: -16px; display: flex; align-items: center; gap: 9px; margin: -1px -2px 0; padding: 1px 2px 13px; border-bottom: 1px solid var(--color-border); background: color-mix(in srgb,var(--color-surface-glass) 97%,var(--color-bg)); }
     .settings-panel-head svg { color: var(--color-primary); }
     .settings-panel-head h2 { margin: 0; font-size: 13px; font-weight: 850; }
-    .settings-panel-body { display: grid; gap: 8px; padding-top: 10px; }
-    .settings-row { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 12px; align-items: center; min-height: 38px; }
+    .settings-panel-body { display: grid; gap: 0; padding-top: 12px; }
+    .settings-row { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 12px; align-items: center; min-height: 44px; border-bottom: 1px solid color-mix(in srgb,var(--color-border) 68%,transparent); }
     .settings-label { color: var(--color-muted); font-size: 11px; font-weight: 700; }
     .settings-control-button { min-width: 72px; min-height: 32px; padding: 5px 9px; gap: 6px; border-radius: 8px; font-size: 11px; }
     .settings-select { min-width: 142px; min-height: 34px; padding-block: 5px; }
     .settings-install { display: flex; width: 100%; min-height: 36px; margin-top: 2px; padding: 7px 10px; gap: 7px; font-size: 11px; }
+    .servers-settings { padding-bottom: 16px; border-bottom: 1px solid var(--color-border); }
+    .servers-settings-head { display: flex; align-items: center; justify-content: space-between; min-height: 44px; gap: 12px; }
+    .servers-master-toggle { display: inline-flex; align-items: center; gap: 7px; min-height: 36px; color: var(--color-text); font-size: 11px; font-weight: 700; cursor: pointer; }
+    .servers-master-toggle input,
+    .server-select { width: 17px; height: 17px; margin: 0; accent-color: var(--color-primary); cursor: pointer; }
+    .server-settings-list { overflow: hidden; border: 1px solid color-mix(in srgb,var(--color-primary) 14%,var(--color-border)); border-radius: 11px; background: color-mix(in srgb,var(--color-surface-glass) 82%,transparent); box-shadow: inset 0 1px 0 color-mix(in srgb,#fff 56%,transparent); }
+    .server-setting-row { display: grid; grid-template-columns: 10px minmax(0,1fr) 18px 34px; align-items: center; gap: 9px; min-height: 44px; padding: 0 8px 0 11px; }
+    .server-setting-row + .server-setting-row { border-top: 1px solid color-mix(in srgb,var(--color-border) 70%,transparent); }
+    .server-health-dot { width: 10px; height: 10px; border: 1.5px solid color-mix(in srgb,var(--color-muted) 42%,transparent); border-radius: 50%; background: transparent; box-sizing: border-box; }
+    .server-health-dot[data-state="ok"] { border-color: #2F9E5B; background: #2F9E5B; box-shadow: 0 0 0 3px color-mix(in srgb,#2F9E5B 13%,transparent); }
+    .server-health-dot[data-state="error"] { border-color: #D94848; background: #D94848; box-shadow: 0 0 0 3px color-mix(in srgb,#D94848 11%,transparent); }
+    .server-health-dot[data-state="testing"] { border-color: #C27C2C; background: #C27C2C; animation: server-health-pulse 1.4s ease-in-out infinite; }
+    @keyframes server-health-pulse { 50% { opacity: .45; box-shadow: 0 0 0 4px color-mix(in srgb,#C27C2C 12%,transparent); } }
+    .server-row-copy { display: flex; align-items: baseline; min-width: 0; gap: 5px; line-height: 1.2; }
+    .server-row-name { flex: 0 0 auto; max-width: 42%; overflow: hidden; color: var(--color-text); font-size: 12px; font-weight: 750; text-overflow: ellipsis; white-space: nowrap; }
+    .server-row-separator { flex: 0 0 auto; color: var(--color-muted); font-size: 10px; }
+    .server-row-host { min-width: 0; overflow: hidden; color: var(--color-muted); font-family: "Fira Code",ui-monospace,monospace; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+    .server-remove,
+    .server-remove-placeholder { width: 34px; height: 34px; }
+    .server-remove { display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 1px solid transparent; border-radius: 8px; color: var(--color-muted); background: transparent; cursor: pointer; transition: color var(--t-fast) ease,background var(--t-fast) ease,border-color var(--t-fast) ease; }
+    .server-remove:is(:hover,:focus-visible) { outline: none; border-color: color-mix(in srgb,#D94848 25%,var(--color-border)); background: color-mix(in srgb,#D94848 8%,transparent); color: #C93636; }
+    .server-add-form { display: grid; gap: 7px; margin-top: 16px; }
+    .server-add-title { margin: 0 0 1px; color: var(--color-muted); font-size: 11px; font-weight: 750; }
+    .server-add-form .ui-input { min-height: 40px; padding: 8px 11px; border-width: 1px; font-size: 12px; }
+    .server-add-form .ui-input[data-invalid="true"] { border-color: #D94848; box-shadow: 0 0 0 3px color-mix(in srgb,#D94848 10%,transparent); }
+    .server-form-actions { display: grid; grid-template-columns: minmax(82px,.7fr) minmax(132px,1.3fr); gap: 8px; }
+    .server-form-actions .btn { min-height: 40px; padding: 8px 11px; font-size: 12px; }
+    .server-form-status { display: flex; align-items: flex-start; min-height: 34px; margin: 0; padding-top: 2px; color: var(--color-muted); font-size: 10px; font-weight: 650; line-height: 1.45; }
+    .server-form-status[data-state="success"] { color: #267C4A; }
+    .server-form-status[data-state="error"] { color: #D12F2F; }
+    .server-form-status[data-state="testing"] { color: #A86720; }
+    .settings-preferences { margin-top: 8px; }
+    .settings-preferences .settings-row:last-child { border-bottom: 0; }
+    .settings-panel .settings-install { margin-top: 10px; min-height: 40px; border-top: 1px solid var(--color-border); }
     .overview-readable-tokens-toggle { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 5px 8px; border-radius: 8px; cursor: pointer; font-size: 10px; font-weight: 750; }
     .overview-readable-tokens-track { position: relative; flex: 0 0 auto; width: 28px; height: 16px; border-radius: 999px; background: var(--color-border); transition: background var(--t-fast) ease; }
     .overview-readable-tokens-track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--color-bg); box-shadow: 0 1px 4px rgba(15, 23, 42, .22); transition: transform var(--t-fast) ease; }
@@ -404,6 +438,7 @@
       .overview-readable-tokens-track,
       .overview-readable-tokens-track::after,
       .overview-token-exact-tooltip { transition: none; }
+      .server-health-dot[data-state="testing"] { animation: none; }
     }
 
     /* Provider-visibility dropdown on the Quota tab (show/hide Codex/Claude/Antigravity). */
@@ -1169,6 +1204,7 @@
               </svg>
               <span data-i18n="refresh">Refresh</span>
             </button>
+            <span id="serverCountChip" class="text-xs font-semibold" style="display:none;padding:5px 9px;border:1px solid var(--color-border);border-radius:999px;color:var(--color-muted);"></span>
 
             <div id="settingsMenu" class="settings-menu">
               <button id="settingsToggle" class="btn btn-ghost compact-control settings-trigger" type="button" aria-expanded="false" aria-controls="settingsPanel">
@@ -1184,38 +1220,57 @@
                   <h2 id="settingsPanelTitle" data-i18n="settings">Settings</h2>
                 </div>
                 <div class="settings-panel-body">
-                  <div class="settings-row">
-                    <span class="settings-label" data-i18n="language">Language</span>
-                    <button id="langToggle" class="btn btn-ghost settings-control-button" type="button" aria-label="Toggle language">中</button>
-                  </div>
-                  <div class="settings-row">
-                    <span class="settings-label" data-i18n="colorMode">Light / dark</span>
-                    <button id="themeToggle" class="btn btn-ghost settings-control-button" type="button" aria-label="Toggle theme">
-                      <svg id="themeIconMoon" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                      <svg id="themeIconSun" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="display:none;"><circle cx="12" cy="12" r="5" stroke="currentColor" stroke-width="2"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-                      <span id="themeModeLabel">Light</span>
-                    </button>
-                  </div>
-                  <label class="settings-row" for="styleThemeSelect">
-                    <span class="settings-label" data-i18n="styleTheme">Style</span>
-                    <select id="styleThemeSelect" class="ui-input style-select settings-select" aria-label="Style theme">
-                      <option value="classic" data-i18n="styleClassic">Classic</option>
-                      <option value="elevated" data-i18n="styleElevated">Elevated</option>
-                      <option value="paper" data-i18n="stylePaper">Paper</option>
-                      <option value="liquid" data-i18n="styleLiquid">Liquid</option>
-                      <option value="vibrant" data-i18n="styleVibrant">Vibrant</option>
-                      <option value="midnight" data-i18n="styleMidnight">Midnight</option>
-                      <option value="terminal" data-i18n="styleTerminal">Terminal</option>
-                      <option value="brutalist" data-i18n="styleBrutalist">Brutalist</option>
-                      <option value="arcade" data-i18n="styleArcade">Arcade</option>
-                      <option value="studio" data-i18n="styleStudio">Studio</option>
-                    </select>
-                  </label>
-                  <div class="settings-row">
-                    <span class="settings-label" data-i18n="readableTokens">Readable tokens</span>
-                    <button id="readableTokensToggle" class="btn btn-ghost overview-readable-tokens-toggle" type="button" role="switch" aria-checked="true" aria-label="Readable tokens">
-                      <span class="overview-readable-tokens-track" aria-hidden="true"></span>
-                    </button>
+                  <section id="serversSettings" class="servers-settings">
+                    <div class="servers-settings-head">
+                      <strong class="settings-label" data-i18n="servers">Servers</strong>
+                      <label class="servers-master-toggle"><input id="allServersToggle" type="checkbox"> <span data-i18n="allServers">Use all</span></label>
+                    </div>
+                    <div id="serverSettingsList" class="server-settings-list"></div>
+                    <div class="server-add-form">
+                      <p class="server-add-title" data-i18n="addAServer">Add a server</p>
+                      <input id="serverUrlInput" class="ui-input" type="url" data-i18n-placeholder="serverUrl" placeholder="https://host:55423/tokdash" aria-describedby="serverFormStatus">
+                      <input id="serverLabelInput" class="ui-input" type="text" data-i18n-placeholder="serverLabelOptional" placeholder="Name (optional)">
+                      <div class="server-form-actions">
+                        <button id="testServerBtn" class="btn btn-ghost" type="button" data-i18n="testServer">Test</button>
+                        <button id="addServerBtn" class="btn btn-primary" type="button" data-i18n="addServer">Add server</button>
+                      </div>
+                      <p id="serverFormStatus" class="server-form-status" data-state="neutral" aria-live="polite" data-i18n="serverHint">Check the URL, then test or add.</p>
+                    </div>
+                  </section>
+                  <div class="settings-preferences">
+                    <div class="settings-row">
+                      <span class="settings-label" data-i18n="language">Language</span>
+                      <button id="langToggle" class="btn btn-ghost settings-control-button" type="button" aria-label="Toggle language">中</button>
+                    </div>
+                    <div class="settings-row">
+                      <span class="settings-label" data-i18n="colorMode">Light / dark</span>
+                      <button id="themeToggle" class="btn btn-ghost settings-control-button" type="button" aria-label="Toggle theme">
+                        <svg id="themeIconMoon" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        <svg id="themeIconSun" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="display:none;"><circle cx="12" cy="12" r="5" stroke="currentColor" stroke-width="2"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                        <span id="themeModeLabel">Light</span>
+                      </button>
+                    </div>
+                    <label class="settings-row" for="styleThemeSelect">
+                      <span class="settings-label" data-i18n="styleTheme">Style</span>
+                      <select id="styleThemeSelect" class="ui-input style-select settings-select" aria-label="Style theme">
+                        <option value="classic" data-i18n="styleClassic">Classic</option>
+                        <option value="elevated" data-i18n="styleElevated">Elevated</option>
+                        <option value="paper" data-i18n="stylePaper">Paper</option>
+                        <option value="liquid" data-i18n="styleLiquid">Liquid</option>
+                        <option value="vibrant" data-i18n="styleVibrant">Vibrant</option>
+                        <option value="midnight" data-i18n="styleMidnight">Midnight</option>
+                        <option value="terminal" data-i18n="styleTerminal">Terminal</option>
+                        <option value="brutalist" data-i18n="styleBrutalist">Brutalist</option>
+                        <option value="arcade" data-i18n="styleArcade">Arcade</option>
+                        <option value="studio" data-i18n="styleStudio">Studio</option>
+                      </select>
+                    </label>
+                    <div class="settings-row">
+                      <span class="settings-label" data-i18n="readableTokens">Readable tokens</span>
+                      <button id="readableTokensToggle" class="btn btn-ghost overview-readable-tokens-toggle" type="button" role="switch" aria-checked="true" aria-label="Readable tokens">
+                        <span class="overview-readable-tokens-track" aria-hidden="true"></span>
+                      </button>
+                    </div>
                   </div>
                   <button id="installBtn" class="btn btn-ghost settings-install" type="button" style="display:none;" data-i18n-title="installApp" aria-label="Install app">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -2069,6 +2124,28 @@
 
     <!-- Quota Tab -->
     <div id="quota-content" class="tab-content">
+      <div id="quotaGlobalControls" class="flex flex-wrap items-center justify-end gap-2 mb-4">
+        <select id="quotaRangeSelect" class="ui-input compact-control" aria-label="Quota history range">
+          <option value="24h" data-i18n="quotaRange24h">Last 24 Hours</option>
+          <option value="7d" data-i18n="quotaRange7d">Last 7 Days</option>
+          <option value="30d" data-i18n="quotaRange30d">Last 30 Days</option>
+          <option value="all" data-i18n="quotaRangeAll">All Time</option>
+        </select>
+        <div id="quotaVisibilityWrap" class="quota-visibility-wrap">
+          <button type="button" id="quotaVisibilityBtn" class="ui-input compact-control quota-visibility-btn" aria-haspopup="true" aria-expanded="false">
+            <span id="quotaVisibilityLabel" data-i18n="quotaVisibilityAll">Show: All</span><span aria-hidden="true" class="quota-visibility-caret">▾</span>
+          </button>
+          <div id="quotaVisibilityPanel" class="quota-visibility-panel hidden" role="menu" aria-label="Show providers">
+            <label class="quota-visibility-item"><input type="checkbox" data-quota-provider="codex" checked><span>Codex</span></label>
+            <label class="quota-visibility-item"><input type="checkbox" data-quota-provider="claude" checked><span>Claude Code</span></label>
+            <label class="quota-visibility-item"><input type="checkbox" data-quota-provider="antigravity" checked><span>Antigravity</span></label>
+            <label class="quota-visibility-item"><input type="checkbox" data-quota-provider="minimax" checked><span>MiniMax</span></label>
+            <label class="quota-visibility-item"><input type="checkbox" data-quota-provider="kimi" checked><span>Kimi Code</span></label>
+            <label class="quota-visibility-item"><input type="checkbox" data-quota-provider="grok" checked><span>Grok Build</span></label>
+          </div>
+        </div>
+        <span id="quotaGlobalStatusLine" class="text-xs" style="color:var(--color-muted)"></span>
+      </div>
       <section class="surface p-5 mb-6">
         <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-5">
           <div>
@@ -2093,26 +2170,7 @@
               </select>
             </label>
             <span id="quotaIntervalSource" class="text-xs" style="color: var(--color-muted);"></span>
-            <select id="quotaRangeSelect" class="ui-input compact-control" aria-label="Quota history range">
-              <option value="24h" data-i18n="quotaRange24h">Last 24 Hours</option>
-              <option value="7d" data-i18n="quotaRange7d">Last 7 Days</option>
-              <option value="30d" data-i18n="quotaRange30d">Last 30 Days</option>
-              <option value="all" data-i18n="quotaRangeAll">All Time</option>
-            </select>
-            <div id="quotaVisibilityWrap" class="quota-visibility-wrap">
-              <button type="button" id="quotaVisibilityBtn" class="ui-input compact-control quota-visibility-btn" aria-haspopup="true" aria-expanded="false">
-                <span id="quotaVisibilityLabel" data-i18n="quotaVisibilityAll">Show: All</span>
-                <span aria-hidden="true" class="quota-visibility-caret">▾</span>
-              </button>
-              <div id="quotaVisibilityPanel" class="quota-visibility-panel hidden" role="menu" aria-label="Show providers">
-                <label class="quota-visibility-item"><input type="checkbox" data-quota-provider="codex" checked><span>Codex</span></label>
-                <label class="quota-visibility-item"><input type="checkbox" data-quota-provider="claude" checked><span>Claude Code</span></label>
-                <label class="quota-visibility-item"><input type="checkbox" data-quota-provider="antigravity" checked><span>Antigravity</span></label>
-                <label class="quota-visibility-item"><input type="checkbox" data-quota-provider="minimax" checked><span>MiniMax</span></label>
-                <label class="quota-visibility-item"><input type="checkbox" data-quota-provider="kimi" checked><span>Kimi Code</span></label>
-                <label class="quota-visibility-item"><input type="checkbox" data-quota-provider="grok" checked><span>Grok Build</span></label>
-              </div>
-            </div>
+            <span id="quotaGlobalControlsSingleSlot" style="display:contents"></span>
             <!-- TASK 2: no dedicated quota refresh button anymore — the global #refreshBtn
                  refreshes quota when this tab is active. This line keeps the poll.last_run
                  freshness readout visible, and doubles as the transient status surface for
@@ -2307,6 +2365,247 @@
     let sessionTimeCumulativeChart = null;
     let quotaUtilizationChart = null;
     let quotaConsumptionChart = null;
+    const quotaUtilizationCharts = new Map();
+    const quotaConsumptionCharts = new Map();
+
+    const SERVERS_STORAGE_KEY = 'tokdash-servers';
+    const SERVER_SELECTION_STORAGE_KEY = 'tokdash-server-selection';
+    const LOCAL_SERVER = Object.freeze({ id: 'local', label: 'Local', baseUrl: '' });
+    const serverRuntimeStatus = new Map();
+    const csrfTokensByServer = new Map();
+
+    function normalizeServerBaseUrl(value) {
+      const raw = String(value || '').trim().replace(/\/+$/, '');
+      try {
+        const url = new URL(raw);
+        return (url.protocol === 'http:' || url.protocol === 'https:') && url.host ? raw : '';
+      } catch (_error) { return ''; }
+    }
+
+    function defaultServerLabel(value) {
+      try {
+        const host = new URL(value).hostname.toLowerCase();
+        if (!host || ['localhost', '127.0.0.1', '::1'].includes(host)) return 'Local';
+        if (host.includes(':') || /^[0-9.]+$/.test(host)) return host;
+        return host.split('.')[0] || host;
+      } catch (_error) { return 'Server'; }
+    }
+
+    function loadServerRegistry(storage = localStorage) {
+      try {
+        const parsed = JSON.parse(storage.getItem(SERVERS_STORAGE_KEY) || '[]');
+        if (!Array.isArray(parsed)) return [];
+        const ids = new Set(['local']);
+        return parsed.filter((item) => {
+          if (!item || typeof item.id !== 'string' || ids.has(item.id)) return false;
+          const baseUrl = normalizeServerBaseUrl(item.baseUrl);
+          if (!baseUrl) return false;
+          item.baseUrl = baseUrl;
+          item.label = String(item.label || defaultServerLabel(baseUrl)).trim();
+          ids.add(item.id);
+          return true;
+        });
+      } catch (_error) { return []; }
+    }
+
+    function loadServerSelection(storage = localStorage) {
+      try {
+        const value = JSON.parse(storage.getItem(SERVER_SELECTION_STORAGE_KEY) || '{"mode":"all","custom":[]}');
+        if (value?.mode === 'custom' && Array.isArray(value.custom)) return { mode: 'custom', custom: [...new Set(value.custom.map(String))] };
+      } catch (_error) { /* use all */ }
+      return { mode: 'all', custom: [] };
+    }
+
+    let addedServers = loadServerRegistry();
+    let serverSelection = loadServerSelection();
+
+    function allServers() { return [LOCAL_SERVER, ...addedServers]; }
+    function selectedServers() {
+      const list = allServers();
+      if (serverSelection.mode === 'all') return list;
+      const selected = new Set(serverSelection.custom);
+      const result = list.filter((server) => selected.has(server.id));
+      return result.length ? result : [LOCAL_SERVER];
+    }
+    function saveServerRegistry() { localStorage.setItem(SERVERS_STORAGE_KEY, JSON.stringify(addedServers)); }
+    function saveServerSelection() { localStorage.setItem(SERVER_SELECTION_STORAGE_KEY, JSON.stringify(serverSelection)); }
+
+    function serverPath(server, path) {
+      if (!server || server.id === 'local' || !server.baseUrl) return appPath(path);
+      return `${String(server.baseUrl).replace(/\/+$/, '')}/${String(path || '').replace(/^\/+/, '')}`;
+    }
+
+    function combineUsagePayloads(list) {
+      const rows = (Array.isArray(list) ? list : []).filter(Boolean);
+      if (!rows.length) return null;
+      if (rows.length === 1) return JSON.parse(JSON.stringify(rows[0]));
+      const out = JSON.parse(JSON.stringify(rows[0]));
+      const number = (value) => Number(value) || 0;
+      const sumFields = (target, source, fields) => fields.forEach((field) => {
+        if (target[field] !== undefined || source[field] !== undefined) target[field] = number(target[field]) + number(source[field]);
+      });
+      const mergeObject = (key) => {
+        const merged = {};
+        rows.forEach((row) => Object.entries(row[key] || {}).forEach(([name, value]) => {
+          if (value && typeof value === 'object') {
+            if (!merged[name]) merged[name] = JSON.parse(JSON.stringify(value));
+            else {
+              sumFields(merged[name], value, ['tokens','total_tokens','tokens_in','tokens_out','tokens_cache','tokens_cache_write','tokens_reasoning','cost','total_cost','messages','total_messages']);
+              if (Array.isArray(value.models)) {
+                const models = new Map((merged[name].models || []).map((item) => [String(item?.name ?? item?.model ?? ''), { ...item }]));
+                value.models.forEach((item) => {
+                  const modelName = String(item?.name ?? item?.model ?? '');
+                  if (!modelName) return;
+                  if (!models.has(modelName)) models.set(modelName, { ...item });
+                  else sumFields(models.get(modelName), item, ['tokens','total_tokens','tokens_in','tokens_out','tokens_cache','tokens_cache_write','tokens_reasoning','cost','total_cost','messages','total_messages']);
+                });
+                merged[name].models = [...models.values()].sort((a, b) => number(b.cost ?? b.tokens) - number(a.cost ?? a.tokens));
+              }
+            }
+          } else merged[name] = number(merged[name]) + number(value);
+        }));
+        out[key] = merged;
+      };
+      const mergeArray = (key) => {
+        const merged = new Map();
+        rows.forEach((row) => (row[key] || []).forEach((item) => {
+          const name = String(item?.name ?? item?.model ?? item?.tool ?? '');
+          if (!name) return;
+          if (!merged.has(name)) merged.set(name, { ...item });
+          else sumFields(merged.get(name), item, ['tokens','total_tokens','tokens_in','tokens_out','tokens_cache','tokens_cache_write','tokens_reasoning','cost','total_cost','messages','total_messages']);
+        }));
+        out[key] = [...merged.values()].sort((a, b) => number(b.cost ?? b.total_cost ?? b.tokens) - number(a.cost ?? a.total_cost ?? a.tokens));
+      };
+      ['total_tokens','total_cost','total_messages'].forEach((field) => { out[field] = rows.reduce((sum, row) => sum + number(row[field]), 0); });
+      ['by_tool','apps','coding_apps'].forEach(mergeObject);
+      ['coding_models','top_models','openclaw_models','combined_models'].forEach(mergeArray);
+      out.timestamp = rows.map((row) => row.timestamp).filter(Boolean).sort()[0] || null;
+      out.comparison = { ...(out.comparison || {}) };
+      [['cost','total_cost'],['tokens','total_tokens'],['messages','total_messages']].forEach(([prefix, totalField]) => {
+        const prevField = `${prefix}_prev`;
+        const pctField = `${prefix}_pct`;
+        const allHavePrevious = rows.every((row) => row.comparison && row.comparison[prevField] !== null && row.comparison[prevField] !== undefined);
+        const previous = allHavePrevious ? rows.reduce((sum, row) => sum + number(row.comparison[prevField]), 0) : null;
+        out.comparison[prevField] = previous;
+        out.comparison[pctField] = previous === null ? null : (previous === 0 ? (number(out[totalField]) === 0 ? 0 : null) : ((number(out[totalField]) - previous) / previous) * 100);
+      });
+      const prompt = rows.reduce((sum, row) => sum + number(row.tokens_in), 0);
+      const cache = rows.reduce((sum, row) => sum + number(row.tokens_cache), 0);
+      if (rows.some((row) => row.tokens_in !== undefined)) { out.tokens_in = prompt; out.tokens_cache = cache; out.cache_hit_rate = prompt + cache > 0 ? cache / (prompt + cache) : null; }
+      return out;
+    }
+
+    function mergeSessionLists(list) {
+      const rows = (Array.isArray(list) ? list : []).filter(Boolean);
+      if (!rows.length) return { sessions: [], summary: { session_count: 0, tokens: 0, cost: 0 } };
+      if (rows.length === 1 && !rows[0].server) return JSON.parse(JSON.stringify(rows[0]));
+      const sessions = [];
+      rows.forEach((entry) => (entry.payload?.sessions || entry.sessions || []).forEach((session) => sessions.push({ ...session, _server: entry.server || session._server || null })));
+      sessions.sort((a, b) => String(b.last_seen_at || '').localeCompare(String(a.last_seen_at || '')));
+      const out = { ...(rows[0].payload || rows[0]), sessions };
+      out.latest_session = sessions[0] || null;
+      out.summary = {
+        session_count: sessions.length,
+        tokens: sessions.reduce((sum, row) => sum + (Number(row.tokens) || 0), 0),
+        cost: sessions.reduce((sum, row) => sum + (Number(row.cost) || 0), 0),
+      };
+      return out;
+    }
+
+    function combineStatsPayloads(list) {
+      const rows = (Array.isArray(list) ? list : []).filter(Boolean);
+      if (!rows.length) return null;
+      if (rows.length === 1) return JSON.parse(JSON.stringify(rows[0]));
+      const number = (value) => Number(value) || 0;
+      const days = new Map();
+      rows.forEach((row) => (row.contributions || []).forEach((day) => {
+        const target = days.get(day.date) || { date: day.date, totals: {}, tokenBreakdown: {}, sources: [] };
+        Object.entries(day.totals || {}).forEach(([key, value]) => { target.totals[key] = number(target.totals[key]) + number(value); });
+        Object.entries(day.tokenBreakdown || {}).forEach(([key, value]) => { target.tokenBreakdown[key] = number(target.tokenBreakdown[key]) + number(value); });
+        target.sources.push(...(day.sources || []));
+        days.set(day.date, target);
+      }));
+      const contributions = [...days.values()].sort((a, b) => String(a.date).localeCompare(String(b.date)));
+      const active = contributions.filter((day) => number(day.totals?.tokens) > 0);
+      let trailing = 0, longest = 0;
+      active.forEach((day, index) => {
+        const previous = index ? new Date(`${active[index - 1].date}T00:00:00`) : null;
+        const now = new Date(`${day.date}T00:00:00`);
+        trailing = previous && (now - previous) === 86400000 ? trailing + 1 : 1;
+        longest = Math.max(longest, trailing);
+      });
+      const today = new Date();
+      const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+      const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
+      const yesterdayKey = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, '0')}-${String(yesterday.getDate()).padStart(2, '0')}`;
+      const lastActiveKey = active.at(-1)?.date || '';
+      const current = lastActiveKey === todayKey || lastActiveKey === yesterdayKey ? trailing : 0;
+      const modelTotals = new Map();
+      contributions.forEach((day) => (day.sources || []).forEach((source) => {
+        const name = String(source.modelId || source.model || '').trim();
+        const tokens = source.tokens && typeof source.tokens === 'object'
+          ? number(source.tokens.total) || ['input','output','cacheRead','cacheWrite','reasoning'].reduce((sum, key) => sum + number(source.tokens[key]), 0)
+          : number(source.tokens);
+        if (name) modelTotals.set(name, number(modelTotals.get(name)) + (tokens || number(source.cost)));
+      }));
+      const favoriteModel = [...modelTotals.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] || null;
+      const out = JSON.parse(JSON.stringify(rows[0]));
+      out.contributions = contributions;
+      out.summary = { ...(out.summary || {}), totalCost: rows.reduce((sum, row) => sum + number(row.summary?.totalCost), 0) };
+      out.stats = { ...(out.stats || {}), favorite_model: favoriteModel, total_tokens: active.reduce((sum, day) => sum + number(day.totals?.tokens), 0), sessions: active.reduce((sum, day) => sum + number(day.totals?.messages), 0), active_days: active.length, total_days: contributions.length, longest_streak: longest, current_streak: current };
+      return out;
+    }
+
+    function combineInsightsPayloads(list) {
+      const rows = (Array.isArray(list) ? list : []).filter(Boolean);
+      if (!rows.length) return null;
+      if (rows.length === 1) return JSON.parse(JSON.stringify(rows[0]));
+      const number = (value) => Number(value) || 0;
+      const mergeSeries = (values) => {
+        const map = new Map();
+        values.forEach((series) => (series || []).forEach((item) => {
+          const keyName = item.date !== undefined ? 'date' : item.hour !== undefined ? 'hour' : item.name !== undefined ? 'name' : 'key';
+          const key = item[keyName];
+          const target = map.get(key) || { ...item };
+          Object.entries(item).forEach(([field, value]) => { if (field !== keyName && typeof value === 'number') target[field] = number(target[field]) + value; });
+          map.set(key, target);
+        }));
+        return [...map.values()].sort((a, b) => String(a.date ?? a.hour ?? a.name ?? a.key).localeCompare(String(b.date ?? b.hour ?? b.name ?? b.key)));
+      };
+      const out = JSON.parse(JSON.stringify(rows[0]));
+      const mergeCoverage = (section) => {
+        const coverage = {};
+        rows.forEach((row) => Object.entries(row?.[section]?.coverage || {}).forEach(([key, value]) => { coverage[key] = number(coverage[key]) + number(value); }));
+        return coverage;
+      };
+      out.recorded_chats = {
+        ...(out.recorded_chats || {}),
+        value: rows.reduce((sum, row) => sum + number(row.recorded_chats?.value), 0),
+        coverage: mergeCoverage('recorded_chats'),
+      };
+      ['reasoning', 'tools'].forEach((section) => {
+        const nameKey = section === 'reasoning' ? 'effort' : 'name';
+        const counts = new Map();
+        rows.forEach((row) => (row?.[section]?.distribution || []).forEach((item) => counts.set(item[nameKey], number(counts.get(item[nameKey])) + number(item.count))));
+        const total = [...counts.values()].reduce((sum, value) => sum + value, 0);
+        const distribution = [...counts.entries()].map(([name, count]) => ({ [nameKey]: name, count, share: total ? count / total : 0 })).sort((a, b) => b.count - a.count || String(a[nameKey]).localeCompare(String(b[nameKey])));
+        const uniqueLeader = distribution.length && (distribution.length === 1 || distribution[0].count > distribution[1].count) ? distribution[0] : null;
+        out[section] = {
+          ...(out[section] || {}),
+          distribution,
+          most_used: uniqueLeader ? { [nameKey]: uniqueLeader[nameKey], count: uniqueLeader.count, share: uniqueLeader.share } : null,
+          coverage: mergeCoverage(section),
+        };
+        if (section === 'tools') out[section].total_calls = total;
+      });
+      const keys = new Set(rows.flatMap((row) => Object.keys(row)));
+      keys.forEach((key) => {
+        if (['recorded_chats', 'reasoning', 'tools'].includes(key)) return;
+        if (rows.some((row) => Array.isArray(row[key]))) out[key] = mergeSeries(rows.map((row) => row[key]));
+        else if (rows.every((row) => typeof row[key] === 'number' || row[key] === undefined)) out[key] = rows.reduce((sum, row) => sum + number(row[key]), 0);
+      });
+      return out;
+    }
 
     // Render perf controls
     let updateInFlight = false;
@@ -2329,6 +2628,7 @@
     let quotaLoaded = false;
     let lastQuotaPayload = null;
     let lastQuotaHistory = null;
+    let lastQuotaServerRows = [];
     let pricingDbDirty = false;
     let pricingDbLastText = '';
     let pricingDbLastPayload = null;  // last GET/PUT payload, so the source line can re-localize
@@ -2408,6 +2708,27 @@
         refreshFailed: 'Failed — retry',
         refreshCooldown: 'Wait {n}s',
         settings: 'Settings',
+        servers: 'Servers',
+        allServers: 'Use all',
+        addAServer: 'Add a server',
+        serverUrl: 'https://host:55423/tokdash',
+        serverLabelOptional: 'Name (optional)',
+        testServer: 'Test',
+        testingServer: 'Testing…',
+        addServer: 'Add server',
+        serverHint: 'Check the URL, then test or add.',
+        serverTestTesting: 'Checking /health…',
+        serverTestOk: 'Reachable — /health OK ({ms} ms)',
+        serverTestNetworkError: 'Unreachable — check the URL, CORS, and mixed content.',
+        serverTestFingerprintError: 'This address is reachable, but it is not a Tokdash server.',
+        serverInvalidUrl: 'Enter a full http(s) URL, e.g. https://host:55423',
+        serverAdded: 'Added {name}.',
+        serverStatusIdle: 'Not checked',
+        serverStatusOk: 'Reachable',
+        serverStatusError: 'Unavailable',
+        serverRemove: 'Remove',
+        serverCount: '{n} servers',
+        unreachableServers: 'Unavailable: {names}',
         language: 'Language',
         colorMode: 'Light / dark',
         themeLight: 'Light',
@@ -2457,7 +2778,9 @@
         available: 'available',
         expires: 'expires',
         quotaTracking: 'Quota tracking',
+        quotaReadOnlyRemote: 'Read-only over remote access.',
         pollInterval: 'Poll every',
+        minuteShort: 'min',
         quotaDisabledTitle: 'Quota tracking is off',
         quotaDisabledDesc: 'Enable quota tracking to record subscription windows, poll consented provider APIs, and chart history.',
         enableQuotaTracking: 'Enable quota tracking',
@@ -2696,6 +3019,27 @@
         refreshFailed: '失败，请重试',
         refreshCooldown: '{n} 秒后重试',
         settings: '设置',
+        servers: '服务器',
+        allServers: '全部启用',
+        addAServer: '添加服务器',
+        serverUrl: 'https://主机:55423/tokdash',
+        serverLabelOptional: '名称（可选）',
+        testServer: '测试',
+        testingServer: '测试中…',
+        addServer: '添加服务器',
+        serverHint: '检查地址后，可测试或直接添加。',
+        serverTestTesting: '正在检查 /health…',
+        serverTestOk: '/health 可访问（{ms} 毫秒）',
+        serverTestNetworkError: '无法访问——请检查地址、CORS 和混合内容。',
+        serverTestFingerprintError: '此地址可以访问，但不是 Tokdash 服务器。',
+        serverInvalidUrl: '请输入完整的 http(s) 地址，例如 https://主机:55423',
+        serverAdded: '已添加 {name}。',
+        serverStatusIdle: '尚未检查',
+        serverStatusOk: '可访问',
+        serverStatusError: '不可用',
+        serverRemove: '移除',
+        serverCount: '{n} 台服务器',
+        unreachableServers: '不可用：{names}',
         language: '语言',
         colorMode: '明暗模式',
         themeLight: '浅色',
@@ -2745,7 +3089,9 @@
         available: '可用',
         expires: '到期',
         quotaTracking: '额度跟踪',
+        quotaReadOnlyRemote: '远程访问为只读模式。',
         pollInterval: '轮询间隔',
+        minuteShort: '分钟',
         quotaDisabledTitle: '额度跟踪已关闭',
         quotaDisabledDesc: '启用额度跟踪后可记录订阅窗口、轮询已授权的服务商 API 并绘制历史曲线。',
         enableQuotaTracking: '启用额度跟踪',
@@ -3533,10 +3879,14 @@
       if (!lastUsageResponse?.timestamp) return;
       const cacheMeta = lastUsageResponse.response_cache || null;
       const cachedSuffix = cacheMeta?.served_from_cache ? ` (${t('cached')})` : '';
-      document.getElementById('lastUpdate').textContent = `${t('lastUpdated')}: ${formatMonthDayTime(lastUsageResponse.timestamp)}${cachedSuffix}`;
+      const stalest = selectedServers().length > 1 && lastUsageResponse._stalest_server ? ` · ${lastUsageResponse._stalest_server.label}` : '';
+      document.getElementById('lastUpdate').textContent = `${t('lastUpdated')}: ${formatMonthDayTime(lastUsageResponse.timestamp)}${cachedSuffix}${stalest}`;
     }
 
-    async function fetchJson(url, options = {}) {
+    async function fetchJson(serverOrUrl, urlOrOptions = {}, maybeOptions = {}) {
+      const server = typeof serverOrUrl === 'object' && serverOrUrl?.id ? serverOrUrl : null;
+      const url = server ? serverPath(server, urlOrOptions) : serverOrUrl;
+      const options = server ? maybeOptions : urlOrOptions;
       const response = await fetch(url, options);
       let payload = null;
       try {
@@ -3557,13 +3907,17 @@
       return new Promise((resolve) => setTimeout(resolve, ms));
     }
 
-    async function fetchJsonWithRetry(url, options = {}, retryOptions = {}) {
+    async function fetchJsonWithRetry(serverOrUrl, urlOrOptions = {}, optionsOrRetry = {}, maybeRetryOptions = {}) {
+      const server = typeof serverOrUrl === 'object' && serverOrUrl?.id ? serverOrUrl : null;
+      const url = server ? urlOrOptions : serverOrUrl;
+      const options = server ? optionsOrRetry : urlOrOptions;
+      const retryOptions = server ? maybeRetryOptions : optionsOrRetry;
       const attempts = Number(retryOptions.attempts || 3);
       const baseDelayMs = Number(retryOptions.baseDelayMs || 450);
       let lastError = null;
       for (let attempt = 0; attempt < attempts; attempt += 1) {
         try {
-          return await fetchJson(url, options);
+          return server ? await fetchJson(server, url, options) : await fetchJson(url, options);
         } catch (error) {
           lastError = error;
           if (error?.status !== 503 || attempt === attempts - 1) throw error;
@@ -3574,15 +3928,209 @@
       throw lastError;
     }
 
-    async function postJsonWithCsrf(url, body = {}) {
-      const tokenResp = await fetch(appPath('/api/csrf-token'));
-      const tokenPayload = await tokenResp.json();
-      if (!tokenResp.ok) throw new Error(tokenPayload.detail || tokenResp.statusText);
-      return fetchJson(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Tokdash-Token': tokenPayload.token || '' },
-        body: JSON.stringify(body),
+    async function postJsonWithCsrf(serverOrUrl, urlOrBody = {}, maybeBody = {}) {
+      const server = typeof serverOrUrl === 'object' && serverOrUrl?.id ? serverOrUrl : LOCAL_SERVER;
+      const url = server === serverOrUrl ? urlOrBody : serverOrUrl;
+      const body = server === serverOrUrl ? maybeBody : urlOrBody;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        let token = csrfTokensByServer.get(server.id) || '';
+        if (!token) {
+          const tokenPayload = await fetchJson(server, '/api/csrf-token');
+          token = tokenPayload?.token || '';
+          csrfTokensByServer.set(server.id, token);
+        }
+        try {
+          return await fetchJson(server, url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Tokdash-Token': token },
+            body: JSON.stringify(body),
+          });
+        } catch (error) {
+          if (error?.status !== 403 || attempt === 1) throw error;
+          csrfTokensByServer.delete(server.id);
+        }
+      }
+    }
+
+    async function fetchSelectedServers(path, options = {}, retryOptions = {}) {
+      const servers = selectedServers();
+      const settled = await Promise.allSettled(servers.map((server) => fetchJsonWithRetry(server, path, options, retryOptions)));
+      const successes = [];
+      settled.forEach((result, index) => {
+        const server = servers[index];
+        const ok = result.status === 'fulfilled';
+        serverRuntimeStatus.set(server.id, { ok, error: ok ? null : result.reason, checkedAt: Date.now() });
+        if (ok) successes.push({ server, payload: result.value });
       });
+      renderServerSettings();
+      updateServerIndicator();
+      return successes;
+    }
+
+    function updateServerIndicator() {
+      const chip = document.getElementById('serverCountChip');
+      if (!chip) return;
+      const selected = selectedServers();
+      const failed = selected.filter((server) => serverRuntimeStatus.get(server.id)?.ok === false);
+      chip.style.display = selected.length > 1 || failed.length ? '' : 'none';
+      chip.style.color = failed.length ? '#DC2626' : 'var(--color-muted)';
+      chip.textContent = failed.length
+        ? t('unreachableServers').replace('{names}', failed.map((server) => server.label).join(', '))
+        : t('serverCount').replace('{n}', String(selected.length));
+    }
+
+    async function probeServer(baseUrl) {
+      const candidate = { id: 'candidate', baseUrl: normalizeServerBaseUrl(baseUrl) };
+      if (!candidate.baseUrl) throw Object.assign(new Error(t('serverTestNetworkError')), { kind: 'network' });
+      let health;
+      try { health = await fetchJson(candidate, '/health', { cache: 'no-store' }); }
+      catch (error) { throw Object.assign(error, { kind: 'network' }); }
+      if (health?.service !== 'tokdash') throw Object.assign(new Error(t('serverTestFingerprintError')), { kind: 'fingerprint' });
+      return health;
+    }
+
+    function renderServerSettings() {
+      const list = document.getElementById('serverSettingsList');
+      if (!list) return;
+      const selectedIds = new Set(selectedServers().map((server) => server.id));
+      const allToggle = document.getElementById('allServersToggle');
+      if (allToggle) allToggle.checked = serverSelection.mode === 'all';
+      list.replaceChildren(...allServers().map((server) => {
+        const row = document.createElement('div');
+        row.className = 'server-setting-row';
+        const status = document.createElement('span');
+        const state = serverRuntimeStatus.get(server.id);
+        status.className = 'server-health-dot';
+        status.dataset.state = state ? (state.ok ? 'ok' : 'error') : 'idle';
+        status.title = state ? t(state.ok ? 'serverStatusOk' : 'serverStatusError') : t('serverStatusIdle');
+        status.setAttribute('aria-label', status.title);
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox'; checkbox.className = 'server-select'; checkbox.checked = selectedIds.has(server.id);
+        checkbox.setAttribute('aria-label', `${t('servers')}: ${server.label}`);
+        checkbox.addEventListener('change', () => {
+          const ids = new Set(selectedServers().map((item) => item.id));
+          checkbox.checked ? ids.add(server.id) : ids.delete(server.id);
+          if (!ids.size) { checkbox.checked = true; return; }
+          serverSelection = { mode: 'custom', custom: [...ids] };
+          saveServerSelection(); renderServerSettings(); refreshCurrentView();
+        });
+        const text = document.createElement('span'); text.className = 'server-row-copy';
+        const name = document.createElement('span'); name.className = 'server-row-name'; name.textContent = server.label;
+        const separator = document.createElement('span'); separator.className = 'server-row-separator'; separator.textContent = '·';
+        const hostText = document.createElement('span'); hostText.className = 'server-row-host';
+        const host = server.id === 'local' ? location.host : (() => { try { return new URL(server.baseUrl).host; } catch (_) { return server.baseUrl; } })();
+        hostText.textContent = host; hostText.title = host;
+        text.append(name, separator, hostText);
+        row.append(status, text, checkbox);
+        if (server.id !== 'local') {
+          const remove = document.createElement('button');
+          remove.type = 'button'; remove.className = 'server-remove';
+          remove.title = `${t('serverRemove')} ${server.label}`;
+          remove.setAttribute('aria-label', remove.title);
+          remove.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+          remove.addEventListener('click', () => {
+            addedServers = addedServers.filter((item) => item.id !== server.id);
+            serverRuntimeStatus.delete(server.id); saveServerRegistry();
+            if (serverSelection.mode === 'custom') { serverSelection.custom = serverSelection.custom.filter((id) => id !== server.id); if (!serverSelection.custom.length) serverSelection.custom = ['local']; saveServerSelection(); }
+            renderServerSettings(); refreshCurrentView();
+          });
+          row.appendChild(remove);
+        } else { const placeholder = document.createElement('span'); placeholder.className = 'server-remove-placeholder'; placeholder.setAttribute('aria-hidden', 'true'); row.appendChild(placeholder); }
+        return row;
+      }));
+      updateServerIndicator();
+    }
+
+    function refreshCurrentView() {
+      sessionsLoadedKey = null; quotaLoaded = false; statsLoaded = false; activityInsightsState.data = null;
+      if (isQuotaActive()) loadQuota({ force: true });
+      else if (document.querySelector('.tab-btn[data-tab="stats"]')?.getAttribute('aria-selected') === 'true') loadStats();
+      else updateDashboardByDateRange(currentStartDate || new Date(), currentEndDate || new Date(), { forceRefresh: true });
+    }
+
+    let serverFormStatusTimer = null;
+    function renderServerFormStatus() {
+      const status = document.getElementById('serverFormStatus');
+      if (!status) return;
+      let message = t(status.dataset.statusKey || 'serverHint');
+      try {
+        const values = JSON.parse(status.dataset.statusValues || '{}');
+        Object.entries(values).forEach(([key, value]) => { message = message.replaceAll(`{${key}}`, String(value)); });
+      } catch (_error) { /* use untranslated placeholders */ }
+      status.textContent = message;
+    }
+    function setServerFormStatus(key, state = 'neutral', values = {}) {
+      const status = document.getElementById('serverFormStatus');
+      if (!status) return;
+      status.removeAttribute('data-i18n');
+      status.dataset.statusKey = key;
+      status.dataset.statusValues = JSON.stringify(values);
+      status.dataset.state = state;
+      renderServerFormStatus();
+    }
+    function setServerUrlInvalid(invalid) {
+      const input = document.getElementById('serverUrlInput');
+      if (!input) return;
+      input.dataset.invalid = invalid ? 'true' : 'false';
+      input.setAttribute('aria-invalid', String(!!invalid));
+    }
+    async function testServerForm() {
+      const input = document.getElementById('serverUrlInput');
+      const baseUrl = normalizeServerBaseUrl(input?.value);
+      if (!baseUrl) { setServerUrlInvalid(true); setServerFormStatus('serverInvalidUrl', 'error'); return false; }
+      setServerUrlInvalid(false);
+      const button = document.getElementById('testServerBtn');
+      const startedAt = performance.now();
+      if (button) { button.disabled = true; button.setAttribute('aria-busy', 'true'); button.removeAttribute('data-i18n'); button.textContent = t('testingServer'); }
+      setServerFormStatus('serverTestTesting', 'testing');
+      try {
+        await probeServer(baseUrl);
+        if (normalizeServerBaseUrl(input?.value) !== baseUrl) return false;
+        setServerFormStatus('serverTestOk', 'success', { ms: Math.max(1, Math.round(performance.now() - startedAt)) });
+        return true;
+      } catch (error) {
+        if (normalizeServerBaseUrl(input?.value) !== baseUrl) return false;
+        setServerFormStatus(error.kind === 'fingerprint' ? 'serverTestFingerprintError' : 'serverTestNetworkError', 'error');
+        return false;
+      } finally {
+        if (button) { button.disabled = false; button.removeAttribute('aria-busy'); button.setAttribute('data-i18n', 'testServer'); button.textContent = t('testServer'); }
+      }
+    }
+    function storeServerFromForm() {
+      const urlInput = document.getElementById('serverUrlInput');
+      const labelInput = document.getElementById('serverLabelInput');
+      const baseUrl = normalizeServerBaseUrl(urlInput?.value);
+      if (!baseUrl) { setServerUrlInvalid(true); setServerFormStatus('serverInvalidUrl', 'error'); return false; }
+      setServerUrlInvalid(false);
+      const id = globalThis.crypto?.randomUUID?.() || `server-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      const label = String(labelInput?.value || defaultServerLabel(baseUrl)).trim();
+      addedServers.push({ id, label, baseUrl });
+      saveServerRegistry();
+      if (serverSelection.mode === 'custom') { serverSelection.custom.push(id); saveServerSelection(); }
+      urlInput.value = ''; labelInput.value = '';
+      setServerFormStatus('serverAdded', 'success', { name: label });
+      clearTimeout(serverFormStatusTimer);
+      serverFormStatusTimer = setTimeout(() => {
+        if (document.getElementById('serverFormStatus')?.dataset.statusKey === 'serverAdded') setServerFormStatus('serverHint');
+      }, 3000);
+      renderServerSettings(); refreshCurrentView();
+      return true;
+    }
+
+    function initServerSettings() {
+      renderServerSettings();
+      positionQuotaGlobalControls(selectedServers().length > 1);
+      document.getElementById('allServersToggle')?.addEventListener('change', (event) => {
+        serverSelection = event.target.checked ? { mode: 'all', custom: [] } : { mode: 'custom', custom: selectedServers().map((server) => server.id) };
+        saveServerSelection(); renderServerSettings(); refreshCurrentView();
+      });
+      document.getElementById('serverUrlInput')?.addEventListener('input', () => {
+        clearTimeout(serverFormStatusTimer);
+        setServerUrlInvalid(false);
+        setServerFormStatus('serverHint');
+      });
+      document.getElementById('testServerBtn')?.addEventListener('click', testServerForm);
+      document.getElementById('addServerBtn')?.addEventListener('click', storeServerFromForm);
     }
 
     function setDashboardFetchStatus(error) {
@@ -3626,9 +4174,16 @@
       // The pricing source line is set imperatively (no data-i18n), so re-derive it from the
       // last payload on a language switch — otherwise it stays frozen in the prior language.
       if (pricingDbLastPayload) setPricingDbSource(pricingDbLastPayload);
-      if (lastQuotaPayload) renderQuotaProviderCards(lastQuotaPayload);
-      if (lastQuotaHistory) renderQuotaCharts(lastQuotaHistory);
-      if (lastQuotaPayload) renderQuotaSettings(lastQuotaPayload);
+      if (selectedServers().length > 1 && lastQuotaServerRows.length) {
+        document.getElementById('quotaServerBlocks')?.replaceChildren();
+        lastQuotaServerRows.forEach((row) => renderQuotaServerBlock(row.server, row.payload, row.history));
+      } else {
+        if (lastQuotaPayload) renderQuotaProviderCards(lastQuotaPayload);
+        if (lastQuotaHistory) renderQuotaCharts(lastQuotaHistory);
+        if (lastQuotaPayload) renderQuotaSettings(lastQuotaPayload);
+      }
+      renderServerSettings();
+      renderServerFormStatus();
       updateQuotaVisibilityLabel();  // imperative label (data-i18n removed), re-derive on switch
       const quotaUnitEl = document.getElementById('quotaConsumptionUnit');
       if (quotaUnitEl && !quotaUnitEl.hasAttribute('data-i18n')) {
@@ -4183,7 +4738,7 @@
       const reviewParam = (tool === 'codex' && includeCodexReviewSessions !== null)
         ? `&include_review_sessions=${includeCodexReviewSessions ? 'true' : 'false'}`
         : '';
-      return `${appPath('/api/sessions')}?tool=${encodeURIComponent(tool)}&${params}${reviewParam}`;
+      return `/api/sessions?tool=${encodeURIComponent(tool)}&${params}${reviewParam}`;
     }
 
     async function fetchSessionsResponses(customDays, dateFrom, dateTo) {
@@ -4192,8 +4747,10 @@
       for (const tool of SESSION_TOOL_KEYS) {
         const requestKey = sessionRequestKeyFor(tool, customDays, dateFrom, dateTo);
         try {
+          const serverRows = await fetchSelectedServers(sessionUrlForTool(tool, customDays, dateFrom, dateTo));
+          if (!serverRows.length) throw new Error(t('loadFailed'));
           responses[tool] = {
-            ...(await fetchJsonWithRetry(sessionUrlForTool(tool, customDays, dateFrom, dateTo))),
+            ...mergeSessionLists(serverRows),
             _request_key: requestKey,
           };
         } catch (error) {
@@ -4230,11 +4787,11 @@
       let usageApiUrl;
       if (dateFrom && dateTo) {
         // Use specific date range
-        usageApiUrl = `${appPath('/api/usage')}?date_from=${encodeURIComponent(dateFrom)}&date_to=${encodeURIComponent(dateTo)}`;
+        usageApiUrl = `/api/usage?date_from=${encodeURIComponent(dateFrom)}&date_to=${encodeURIComponent(dateTo)}`;
       } else {
         // Use period-based query
         let periodValue = customDays ? String(customDays) : 'today';
-        usageApiUrl = `${appPath('/api/usage')}?period=${encodeURIComponent(periodValue)}`;
+        usageApiUrl = `/api/usage?period=${encodeURIComponent(periodValue)}`;
       }
       if (forceRefresh) {
         usageApiUrl += '&refresh=1';
@@ -4255,7 +4812,13 @@
       renderRefreshButton();
 
       try {
-        const usagePromise = fetchJsonWithRetry(usageApiUrl);
+        const usagePromise = fetchSelectedServers(usageApiUrl).then((rows) => {
+          if (!rows.length) throw new Error(t('loadFailed'));
+          const combined = combineUsagePayloads(rows.map((row) => row.payload));
+          combined._server_rows = rows;
+          combined._stalest_server = rows.slice().sort((a, b) => String(a.payload.timestamp || '').localeCompare(String(b.payload.timestamp || '')))[0]?.server || null;
+          return combined;
+        });
         if (wantSessions) {
           const [usageData, sessions] = await Promise.all([
             usagePromise,
@@ -4686,7 +5249,13 @@
           row.appendChild(createTableCell("td", "py-3 px-4 text-right font-semibold text-slate-800", formatTokenCount(session.tokens || 0)));
           row.appendChild(createTableCell("td", "py-3 px-4 text-right font-bold", formatCurrency(session.cost || 0), "color: var(--color-cost);"));
           row.appendChild(createTableCell("td", "py-3 px-4 text-right text-slate-500", formatSessionTime(session.last_seen_at)));
-          row.addEventListener("click", () => openSessionModal(session.tool || prefix, session.session_id));
+          if (selectedServers().length > 1 && session._server) {
+            const badge = document.createElement('span');
+            badge.textContent = session._server.label;
+            badge.style.cssText = 'margin-left:6px;padding:2px 6px;border:1px solid var(--color-border);border-radius:999px;font-size:10px;color:var(--color-muted)';
+            row.firstElementChild?.appendChild(badge);
+          }
+          row.addEventListener("click", () => openSessionModal(session.tool || prefix, session.session_id, session._server));
           innerBody.appendChild(row);
         });
 
@@ -4915,7 +5484,7 @@
       });
     }
 
-    async function openSessionModal(tool, sessionId) {
+    async function openSessionModal(tool, sessionId, ownerServer = null) {
       const modal = document.getElementById("sessionModal");
       modal.classList.remove("hidden");
       document.getElementById("sessionModalTitle").textContent = sessionShortId(sessionId);
@@ -4930,7 +5499,8 @@
       document.getElementById("sessionModalReasoningPct").textContent = "-";
 
       try {
-        const response = await fetch(`${appPath('/api/session')}?tool=${encodeURIComponent(tool)}&session_id=${encodeURIComponent(sessionId)}`);
+        const server = ownerServer || LOCAL_SERVER;
+        const response = await fetch(serverPath(server, `/api/session?tool=${encodeURIComponent(tool)}&session_id=${encodeURIComponent(sessionId)}`));
         const data = await response.json();
         activeSessionDetail = { tool, data };
         const session = data.session || {};
@@ -5491,7 +6061,9 @@
     let quotaActionStatusResetTimer = null;
 
     function setQuotaActionStatus(state) {
-      const el = document.getElementById('quotaStatusLine');
+      const el = selectedServers().length > 1
+        ? document.getElementById('quotaGlobalStatusLine')
+        : document.getElementById('quotaStatusLine');
       if (!el) return;
       if (quotaActionStatusResetTimer) {
         clearTimeout(quotaActionStatusResetTimer);
@@ -5502,14 +6074,14 @@
         el.textContent = t('quotaActionSaving');
         return;
       }
-      if (state === 'saved' || state === 'error') {
-        el.style.color = state === 'error' ? '#DC2626' : 'var(--color-muted)';
-        el.textContent = t(state === 'error' ? 'quotaActionFailed' : 'quotaActionSaved');
+      if (state === 'saved' || state === 'error' || state === 'readonly') {
+        el.style.color = state === 'error' || state === 'readonly' ? '#DC2626' : 'var(--color-muted)';
+        el.textContent = t(state === 'readonly' ? 'quotaReadOnlyRemote' : state === 'error' ? 'quotaActionFailed' : 'quotaActionSaved');
         quotaActionStatusResetTimer = setTimeout(() => {
           el.style.color = 'var(--color-muted)';
           el.textContent = '';
           quotaActionStatusResetTimer = null;
-        }, state === 'error' ? 2600 : 1800);
+        }, state === 'error' || state === 'readonly' ? 4200 : 1800);
         return;
       }
       el.style.color = 'var(--color-muted)';
@@ -5828,7 +6400,7 @@
       // untouched and clear nothing here.
     }
 
-    function renderQuotaDisabledCard(container) {
+    function renderQuotaDisabledCard(container, ownerServer = LOCAL_SERVER) {
       const card = document.createElement('div');
       card.className = 'surface p-8 text-center lg:col-span-3';
       const title = document.createElement('h3');
@@ -5842,7 +6414,7 @@
       button.className = 'btn btn-primary';
       button.type = 'button';
       button.textContent = t('enableQuotaTracking');
-      button.addEventListener('click', () => setQuotaEnabled(true));
+      button.addEventListener('click', () => setQuotaEnabled(true, ownerServer));
       card.appendChild(title);
       card.appendChild(desc);
       card.appendChild(button);
@@ -5868,12 +6440,12 @@
       card.appendChild(box);
     }
 
-    function renderQuotaProviderCards(payload) {
-      const container = document.getElementById('quotaProviderCards');
+    function renderQuotaProviderCards(payload, containerOverride = null, ownerServer = LOCAL_SERVER) {
+      const container = containerOverride || document.getElementById('quotaProviderCards');
       if (!container) return;
       updateQuotaProviderPresence(payload);
       if (payload?.enabled === false) {
-        renderQuotaDisabledCard(container);
+        renderQuotaDisabledCard(container, ownerServer);
         return;
       }
       const providers = payload?.providers || {};
@@ -6011,8 +6583,8 @@
           button.type = 'button';
           button.textContent = t(consent.credential_scan ? 'enableQuotaApi' : 'enableQuotaCredentialScan');
           button.addEventListener('click', () => {
-            if (consent.credential_scan) enableQuotaProvider(consentMeta.key);
-            else setQuotaCredentialScan(true);
+            if (consent.credential_scan) enableQuotaProvider(consentMeta.key, ownerServer);
+            else setQuotaCredentialScan(true, ownerServer);
           });
           consentBox.appendChild(desc);
           consentBox.appendChild(button);
@@ -6145,8 +6717,11 @@
           persistQuotaVisibility();
           updateQuotaVisibilityLabel();
           // Re-render from the cached payloads — a visibility change never needs a refetch.
-          if (lastQuotaPayload) renderQuotaProviderCards(lastQuotaPayload);
-          if (lastQuotaHistory) renderQuotaCharts(lastQuotaHistory);
+          if (lastQuotaServerRows.length > 1) lastQuotaServerRows.forEach((row) => renderQuotaServerBlock(row.server, row.payload, row.history));
+          else {
+            if (lastQuotaPayload) renderQuotaProviderCards(lastQuotaPayload);
+            if (lastQuotaHistory) renderQuotaCharts(lastQuotaHistory);
+          }
         });
       });
       btn.addEventListener('click', (event) => {
@@ -6164,20 +6739,21 @@
       updateQuotaVisibilityLabel();
     }
 
-    function renderQuotaCharts(history) {
+    function renderQuotaCharts(history, targets = {}) {
       // Provider-visibility filter (dropdown next to the interval selector): drop whole
       // provider series the user has hidden before any dataset is built.
       const series = collapseAntigravitySeriesForCharts(history?.series || [])
         .filter((item) => quotaProviderVisible(item.provider));
       const granularity = history?.granularity || 'hour';
       const palette = getChartPalette();
-      const utilizationCanvas = document.getElementById('quotaUtilizationChart');
-      const consumptionCanvas = document.getElementById('quotaConsumptionChart');
+      const utilizationCanvas = targets.utilizationCanvas || document.getElementById('quotaUtilizationChart');
+      const consumptionCanvas = targets.consumptionCanvas || document.getElementById('quotaConsumptionChart');
+      const chartKey = targets.serverId || 'local';
 
       // Estimation banner: session-source Codex data (API polling off) is an approximation
       // of live usage (see quota_history's `estimated` flag) — warn near the consumption
       // chart rather than silently charting numbers that can be materially wrong.
-      const estimatedBanner = document.getElementById('quotaConsumptionEstimatedBanner');
+      const estimatedBanner = targets.estimatedBanner || document.getElementById('quotaConsumptionEstimatedBanner');
       if (estimatedBanner) {
         const isEstimated = series.some((item) => item.estimated) || !!history?.any_estimated;
         estimatedBanner.classList.toggle('hidden', !isEstimated);
@@ -6241,8 +6817,8 @@
       const linearTooltipTitle = (items) => (items[0] ? formatQuotaAxisLabel(Number(items[0].parsed.x) / 1000, granularity) : '');
 
       if (utilizationCanvas) {
-        if (quotaUtilizationChart) quotaUtilizationChart.destroy();
-        quotaUtilizationChart = new Chart(utilizationCanvas.getContext('2d'), {
+        quotaUtilizationCharts.get(chartKey)?.destroy();
+        const chart = new Chart(utilizationCanvas.getContext('2d'), {
           type: 'line',
           data: { datasets: utilizationDatasets },
           options: {
@@ -6254,10 +6830,12 @@
             plugins: { legend: { position: 'bottom' }, tooltip: { callbacks: { title: linearTooltipTitle } } },
           },
         });
+        quotaUtilizationCharts.set(chartKey, chart);
+        if (chartKey === 'local') quotaUtilizationChart = chart;
       }
       if (consumptionCanvas) {
-        if (quotaConsumptionChart) quotaConsumptionChart.destroy();
-        quotaConsumptionChart = new Chart(consumptionCanvas.getContext('2d'), {
+        quotaConsumptionCharts.get(chartKey)?.destroy();
+        const chart = new Chart(consumptionCanvas.getContext('2d'), {
           type: 'bar',
           data: { labels: consumptionLabels, datasets: consumptionDatasets },
           options: {
@@ -6272,6 +6850,8 @@
             plugins: { legend: { position: 'bottom' } },
           },
         });
+        quotaConsumptionCharts.set(chartKey, chart);
+        if (chartKey === 'local') quotaConsumptionChart = chart;
       }
     }
 
@@ -6292,6 +6872,61 @@
       select.value = localStorage.getItem('tokdash-quota-range') || '7d';
     }
 
+    function ensureQuotaServerBlocks() {
+      let container = document.getElementById('quotaServerBlocks');
+      if (!container) {
+        container = document.createElement('div');
+        container.id = 'quotaServerBlocks';
+        container.style.display = 'grid';
+        container.style.gap = '18px';
+        document.getElementById('quota-content')?.appendChild(container);
+      }
+      return container;
+    }
+
+    function positionQuotaGlobalControls(multi) {
+      const controls = document.getElementById('quotaGlobalControls');
+      const quotaContent = document.getElementById('quota-content');
+      const singleSlot = document.getElementById('quotaGlobalControlsSingleSlot');
+      if (!controls || !quotaContent || !singleSlot) return;
+      if (multi) {
+        controls.style.display = 'flex';
+        controls.className = 'flex flex-wrap items-center justify-end gap-2 mb-4';
+        quotaContent.insertBefore(controls, quotaContent.firstElementChild);
+      } else {
+        controls.style.display = 'contents';
+        controls.className = '';
+        singleSlot.appendChild(controls);
+      }
+    }
+
+    function createQuotaServerBlock(server) {
+      const block = document.createElement('section');
+      block.className = 'surface p-5';
+      block.dataset.serverId = server.id;
+      const minute = t('minuteShort');
+      block.innerHTML = `<div class="flex flex-wrap items-center justify-between gap-3 mb-4"><h2 class="text-base font-extrabold mono"></h2><div class="flex flex-wrap items-center gap-2"><label class="text-sm"><input data-control="enabled" type="checkbox"> <span data-i18n="quotaTracking">${t('quotaTracking')}</span></label><label class="text-sm"><input data-control="credentials" type="checkbox"> <span data-i18n="quotaCredentialScan">${t('quotaCredentialScan')}</span></label><select data-control="interval" class="ui-input compact-control"><option value="15">15 ${minute}</option><option value="30">30 ${minute}</option><option value="60">60 ${minute}</option><option value="120">120 ${minute}</option></select><span data-role="status" class="text-xs" style="color:var(--color-muted)"></span></div></div><div data-role="cards" class="grid grid-cols-1 lg:grid-cols-3 gap-4"></div><div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4"><div class="surface p-5"><h3 class="text-base font-extrabold mono mb-3" data-i18n="utilizationHistory">${t('utilizationHistory')}</h3><div class="h-[280px]"><canvas data-role="utilization"></canvas></div></div><div class="surface p-5"><h3 class="text-base font-extrabold mono mb-3" data-i18n="consumptionHistory">${t('consumptionHistory')}</h3><div data-role="estimated" class="text-xs mb-2 hidden" style="color:var(--color-muted)" data-i18n="quotaConsumptionEstimated">${t('quotaConsumptionEstimated')}</div><div class="h-[280px]"><canvas data-role="consumption"></canvas></div></div></div>`;
+      block.querySelector('h2').textContent = server.label;
+      return block;
+    }
+
+    function renderQuotaServerBlock(server, payload, history) {
+      const blocks = ensureQuotaServerBlocks();
+      let block = blocks.querySelector(`[data-server-id="${CSS.escape(server.id)}"]`);
+      if (!block) { block = createQuotaServerBlock(server); blocks.appendChild(block); }
+      const enabled = block.querySelector('[data-control="enabled"]');
+      const credentials = block.querySelector('[data-control="credentials"]');
+      const interval = block.querySelector('[data-control="interval"]');
+      enabled.checked = payload?.enabled !== false;
+      credentials.checked = !!payload?.consent?.credential_scan;
+      interval.value = String(payload?.poll?.interval_minutes || 60);
+      enabled.onchange = () => setQuotaEnabled(enabled.checked, server).catch(() => { enabled.checked = !enabled.checked; });
+      credentials.onchange = () => setQuotaCredentialScan(credentials.checked, server).catch(() => { credentials.checked = !credentials.checked; });
+      interval.onchange = () => setQuotaInterval(interval.value, server);
+      renderQuotaProviderCards(payload, block.querySelector('[data-role="cards"]'), server);
+      renderQuotaCharts(history, { serverId: server.id, utilizationCanvas: block.querySelector('[data-role="utilization"]'), consumptionCanvas: block.querySelector('[data-role="consumption"]'), estimatedBanner: block.querySelector('[data-role="estimated"]') });
+    }
+
     async function loadQuota(options = {}) {
       try {
         const range = currentQuotaRange();
@@ -6303,64 +6938,83 @@
           unitEl.removeAttribute('data-i18n');
           unitEl.textContent = granularity === 'hour' ? t('consumptionUnitHour') : t('consumptionUnitDay');
         }
-        const payload = await fetchJsonWithRetry(appPath('/api/quota'));
-        const historyUrl = appPath(`/api/quota/history?granularity=${encodeURIComponent(granularity)}${start ? `&start=${start}` : ''}`);
-        const history = await fetchJsonWithRetry(historyUrl);
+        const historyPath = `/api/quota/history?granularity=${encodeURIComponent(granularity)}${start ? `&start=${start}` : ''}`;
+        const servers = selectedServers();
+        const settled = await Promise.allSettled(servers.map(async (server) => ({ server, payload: await fetchJsonWithRetry(server, '/api/quota'), history: await fetchJsonWithRetry(server, historyPath) })));
+        const rows = settled.filter((result) => result.status === 'fulfilled').map((result) => result.value);
+        settled.forEach((result, index) => serverRuntimeStatus.set(servers[index].id, { ok: result.status === 'fulfilled', error: result.status === 'rejected' ? result.reason : null, checkedAt: Date.now() }));
+        if (!rows.length) throw new Error(t('loadFailed'));
+        const multi = servers.length > 1;
+        positionQuotaGlobalControls(multi);
+        document.querySelector('#quota-content > section.surface')?.toggleAttribute('hidden', multi);
+        document.querySelector('#quota-content > section.grid')?.toggleAttribute('hidden', multi);
+        const blocks = ensureQuotaServerBlocks();
+        blocks.style.display = multi ? 'grid' : 'none';
+        if (multi) {
+          [...blocks.children].forEach((node) => { if (!rows.some((row) => row.server.id === node.dataset.serverId)) { quotaUtilizationCharts.get(node.dataset.serverId)?.destroy(); quotaConsumptionCharts.get(node.dataset.serverId)?.destroy(); node.remove(); } });
+          rows.forEach((row) => renderQuotaServerBlock(row.server, row.payload, row.history));
+        }
+        lastQuotaServerRows = rows;
+        const { payload, history } = rows[0];
         lastQuotaPayload = payload;
         lastQuotaHistory = history;
         quotaLoaded = true;
-        renderQuotaSettings(payload);
-        renderQuotaProviderCards(payload);
-        renderQuotaCharts(history);
+        if (!multi) {
+          renderQuotaSettings(payload);
+          renderQuotaProviderCards(payload);
+          renderQuotaCharts(history);
+        }
       } catch (error) {
         console.error('Error loading quota:', error);
-        if (lastQuotaPayload) renderQuotaSettings(lastQuotaPayload);
-        if (lastQuotaPayload) renderQuotaProviderCards(lastQuotaPayload);
-        if (lastQuotaHistory) renderQuotaCharts(lastQuotaHistory);
+        if (lastQuotaServerRows.length <= 1) {
+          if (lastQuotaPayload) renderQuotaSettings(lastQuotaPayload);
+          if (lastQuotaPayload) renderQuotaProviderCards(lastQuotaPayload);
+          if (lastQuotaHistory) renderQuotaCharts(lastQuotaHistory);
+        }
       }
     }
 
-    async function enableQuotaProvider(key) {
+    async function enableQuotaProvider(key, server = LOCAL_SERVER) {
       setQuotaActionStatus('saving');
       try {
-        await postJsonWithCsrf(appPath('/api/quota/consent'), { [key]: true });
+        await postJsonWithCsrf(server, '/api/quota/consent', { [key]: true });
         await loadQuota({ force: true });
         setQuotaActionStatus('saved');
       } catch (error) {
-        setQuotaActionStatus('error');
+        setQuotaActionStatus(error?.status === 403 ? 'readonly' : 'error');
       }
     }
 
-    async function setQuotaCredentialScan(enabled) {
+    async function setQuotaCredentialScan(enabled, server = LOCAL_SERVER) {
       setQuotaActionStatus('saving');
       try {
-        await postJsonWithCsrf(appPath('/api/quota/consent'), { credential_scan: !!enabled });
+        await postJsonWithCsrf(server, '/api/quota/consent', { credential_scan: !!enabled });
         await loadQuota({ force: true });
         setQuotaActionStatus('saved');
       } catch (error) {
-        setQuotaActionStatus('error');
+        setQuotaActionStatus(error?.status === 403 ? 'readonly' : 'error');
       }
     }
 
-    async function setQuotaEnabled(enabled) {
+    async function setQuotaEnabled(enabled, server = LOCAL_SERVER) {
       setQuotaActionStatus('saving');
       try {
-        await postJsonWithCsrf(appPath('/api/quota/settings'), { enabled: !!enabled });
+        await postJsonWithCsrf(server, '/api/quota/settings', { enabled: !!enabled });
         await loadQuota({ force: true });
         setQuotaActionStatus('saved');
       } catch (error) {
-        setQuotaActionStatus('error');
+        setQuotaActionStatus(error?.status === 403 ? 'readonly' : 'error');
       }
     }
 
-    async function setQuotaInterval(minutes) {
+    async function setQuotaInterval(minutes, server = LOCAL_SERVER) {
       setQuotaActionStatus('saving');
       try {
-        await postJsonWithCsrf(appPath('/api/quota/settings'), { poll_interval_minutes: Number(minutes) });
+        await postJsonWithCsrf(server, '/api/quota/settings', { poll_interval_minutes: Number(minutes) });
         await loadQuota({ force: true });
         setQuotaActionStatus('saved');
       } catch (error) {
-        setQuotaActionStatus('error');
+        setQuotaActionStatus(error?.status === 403 ? 'readonly' : 'error');
       }
     }
 
@@ -6378,7 +7032,9 @@
       if (updateInFlight || refreshUiState === 'refreshing' || refreshUiState === 'cooldown') return;
       setRefreshUiState('refreshing');
       try {
-        await fetchJsonWithRetry(appPath('/api/quota/refresh'), { cache: 'no-store' });
+        const settled = await Promise.allSettled(selectedServers().map((server) => fetchJsonWithRetry(server, '/api/quota/refresh', { cache: 'no-store' })));
+        const rejected = settled.find((result) => result.status === 'rejected');
+        if (rejected && settled.every((result) => result.status === 'rejected')) throw rejected.reason;
         await loadQuota({ force: true });
         setRefreshUiState('updated', { resetAfterMs: 1800 });
       } catch (error) {
@@ -7446,9 +8102,11 @@
 
       activityInsightsState.status = 'loading';
       renderActivityInsights();
-      const url = `${appPath('/api/activity-insights')}${force ? '?refresh=1' : ''}`;
-      const request = fetchJsonWithRetry(url)
-        .then((data) => {
+      const url = `/api/activity-insights${force ? '?refresh=1' : ''}`;
+      const request = fetchSelectedServers(url)
+        .then((rows) => {
+          if (!rows.length) throw new Error(t('loadFailed'));
+          const data = combineInsightsPayloads(rows.map((row) => row.payload));
           activityInsightsState.data = data;
           activityInsightsState.status = buildActivityInsightValues(data).empty ? 'empty' : 'ready';
           renderActivityInsights();
@@ -7721,7 +8379,9 @@
       const seq = ++statsLoadSeq;
       if (!statsLoaded) setStatsStatus('loading');
       try {
-        const data = await fetchJsonWithRetry(appPath('/api/stats'));
+        const rows = await fetchSelectedServers('/api/stats');
+        if (!rows.length) throw new Error(t('statsLoadFailed'));
+        const data = combineStatsPayloads(rows.map((row) => row.payload));
         if (seq !== statsLoadSeq) return; // a newer load superseded this one
 
         const stats = data.stats || {};
@@ -7760,8 +8420,10 @@
       statsWarmScheduled = true;
       setTimeout(() => {
         scheduleIdle(() => {
-          fetchJsonWithRetry(appPath('/api/stats'), {}, { attempts: 2, baseDelayMs: 600 })
-            .then((data) => {
+          fetchSelectedServers('/api/stats', {}, { attempts: 2, baseDelayMs: 600 })
+            .then((rows) => {
+              if (!rows.length) throw new Error(t('statsLoadFailed'));
+              const data = combineStatsPayloads(rows.map((row) => row.payload));
               const filledContributions = fillMissingDays(data.contributions || []);
               statsCache.default = filledContributions;
               if (isOverviewActive()) renderOverviewProfilePreview(filledContributions);
@@ -7781,7 +8443,9 @@
       if (statsCache.pendingYears.has(year)) return statsCache.pendingYears.get(year);
 
       const promise = (async () => {
-        const data = await fetchJsonWithRetry(`${appPath('/api/stats')}?year=${year}`);
+        const rows = await fetchSelectedServers(`/api/stats?year=${year}`);
+        if (!rows.length) throw new Error(t('statsLoadFailed'));
+        const data = combineStatsPayloads(rows.map((row) => row.payload));
         const filled = fillYearDays(data.contributions || [], year);
         statsCache.years.set(year, filled);
         return filled;
@@ -9199,6 +9863,7 @@
     applyStyleTheme(getDefaultStyleTheme());
     applyTheme(getDefaultTheme());
     applyI18n();
+    initServerSettings();
     initQuotaRangeSelect();
     initQuotaVisibilityControls();
     initUpdateNotice();

@@ -98,6 +98,7 @@ public sealed record QuotaRow(
 
     public static string NormalizeBucketForThreshold(string provider, string bucket, string label)
     {
+        provider = provider.Split(" · ").Last();
         if (!string.Equals(provider, "claude", StringComparison.OrdinalIgnoreCase)) return bucket;
         string combined = $"{bucket} {label}".ToLowerInvariant();
         if (combined.Contains("session") || combined.Contains("five_hour") || combined.Contains("five hour")

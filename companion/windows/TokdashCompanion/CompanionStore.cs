@@ -26,6 +26,7 @@ public sealed class CompanionStore : BindableBase
     // Refresh scheduler: 60s while open, 10min while closed, backoff on failure,
     // 15s short retry while a section is in partial failure.
     private int _failures;
+    private readonly Dictionary<string, int> _serverFailureCounts = [];
     private bool _partial;
     private bool _open;
     private DispatcherTimer? _timer;
@@ -65,7 +66,13 @@ public sealed class CompanionStore : BindableBase
     private void Reschedule()
     {
         if (_timer is null) return;
-        _timer.Interval = ComputeDelay(_open, _failures, _partial, _lastFetchAt, DateTimeOffset.Now);
+        var now = DateTimeOffset.Now;
+        if (_client is MultiServerTokdashClient multi)
+        {
+            _timer.Interval = MinimumDelay(Settings.Servers.Where(s => s.Enabled)
+                .Select(s => ComputeDelay(_open, _serverFailureCounts.GetValueOrDefault(s.Id), false, _lastFetchAt, now)));
+        }
+        else _timer.Interval = ComputeDelay(_open, _failures, _partial, _lastFetchAt, now);
         _timer.Start();
     }
 
@@ -94,6 +101,9 @@ public sealed class CompanionStore : BindableBase
         }
         return TimeSpan.FromMinutes(10);
     }
+
+    internal static TimeSpan MinimumDelay(IEnumerable<TimeSpan> delays) =>
+        delays.DefaultIfEmpty(TimeSpan.FromMinutes(10)).Min();
 
     public CompanionStore() : this(CreateDefaultClient()) { }
 
@@ -292,7 +302,9 @@ public sealed class CompanionStore : BindableBase
             settings.BaseURL = CompanionSettings.DefaultBaseURL;
             settings.Save();
         }
-        return new TokdashClient(settings.BaseURL);
+        return settings.Servers.Count(s => s.Enabled) > 1
+            ? new MultiServerTokdashClient(settings.Servers)
+            : new TokdashClient(settings.BaseURL);
     }
 
     public CompanionStore(ITokdashClient client)
@@ -327,7 +339,10 @@ public sealed class CompanionStore : BindableBase
         if (!IsValidBaseURL(url)) return false;
         _cts?.Cancel();
         var old = _client;
-        _client = new TokdashClient(url.Trim());
+        _serverFailureCounts.Clear();
+        _client = Settings.Servers.Count(s => s.Enabled) > 1
+            ? new MultiServerTokdashClient(Settings.Servers)
+            : new TokdashClient(url.Trim());
         old.Dispose();
         // ConnectionLabel embeds the server name, so it has to re-render on a URL change.
         OnPropertyChanged(nameof(ServerName));
@@ -364,7 +379,9 @@ public sealed class CompanionStore : BindableBase
         return first.Length == 0 ? host : first;
     }
 
-    public string ServerName => ServerLabel(Settings.BaseURL);
+    public string ServerName => Settings.Servers.Count(s => s.Enabled) > 1
+        ? L10n.T("servers_count", Settings.Servers.Count(s => s.Enabled))
+        : ServerLabel(Settings.BaseURL);
 
     // Only the connected state is prefixed with the server label; the failure states are
     // about reachability, not which host.
@@ -421,7 +438,8 @@ public sealed class CompanionStore : BindableBase
             if (r.ResetsAt is null) continue; // suppress buckets without a reset time
             if (r.Failed) continue; // suppress rows whose own bucket failed (last-known, unreliable for alerts)
             long epoch = r.ResetsAt.Value.ToUnixTimeSeconds();
-            string stateKey = $"{r.Provider}|{r.Account}|{r.Bucket}|{epoch}";
+            string canonicalProvider = r.Provider.Split(" · ").Last();
+            string stateKey = $"{canonicalProvider}|{r.Account}|{r.Bucket}|{epoch}";
             currentKeys.Add(stateKey);
 
             double threshold = Settings.Thresholds.ThresholdFor(r.CanonicalBucket);
@@ -468,6 +486,8 @@ public sealed class CompanionStore : BindableBase
             // (60s while open, 600s while closed) and the last fetch failed (offline/busy).
             double window = _open ? 60 : 600;
             if ((ConnectionState is ConnectionState.Offline or ConnectionState.Busy) && age.TotalSeconds > window) text += L10n.T("stale_suffix");
+            if (_client is MultiServerTokdashClient multi && multi.FailedServerLabels.Count > 0)
+                text += " · " + L10n.T("servers_unavailable", string.Join(", ", multi.FailedServerLabels));
             return text;
         }
     }
@@ -559,9 +579,11 @@ public sealed class CompanionStore : BindableBase
                 else
                     _lastDataTime = _lastFetchAt;
                 _failures = 0;
-                _partial = todayFailed || monthFailed || quotaFailed; // partial -> 15s short retry
+                _partial = todayFailed || monthFailed || quotaFailed
+                    || (_client is MultiServerTokdashClient multi && multi.FailedServerLabels.Count > 0); // partial -> 15s short retry
                 EvaluateLowQuotaNotifications(Snapshot);
             }
+            UpdateServerFailureCounts();
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -571,6 +593,7 @@ public sealed class CompanionStore : BindableBase
         }
         catch (TokdashException ex)
         {
+            UpdateServerFailureCounts();
             _failures++;
             _partial = false;
             ConnectionState = ex.Error switch
@@ -588,6 +611,21 @@ public sealed class CompanionStore : BindableBase
         }
         OnPropertyChanged(nameof(FreshnessText));
         OnPropertyChanged(nameof(ShowsBanner));
+    }
+
+    private void UpdateServerFailureCounts()
+    {
+        if (_client is not MultiServerTokdashClient multi) return;
+        var failedIds = multi.FailedServerIds.ToHashSet();
+        foreach (var server in Settings.Servers.Where(s => s.Enabled))
+        {
+            if (failedIds.Contains(server.Id))
+                _serverFailureCounts[server.Id] = _serverFailureCounts.GetValueOrDefault(server.Id) + 1;
+            else
+                _serverFailureCounts.Remove(server.Id);
+        }
+        foreach (var id in _serverFailureCounts.Keys.Except(Settings.Servers.Select(s => s.Id)).ToList())
+            _serverFailureCounts.Remove(id);
     }
 }
 
@@ -659,12 +697,14 @@ public sealed class Snapshot
             // Derive from AllQuotaGroups so each row keeps its provider name and the
             // provider-level Estimated flag. The old AllQuotaRows helper built rows
             // with an empty provider and Estimated=false, losing both in the Low view.
-            return AllQuotaGroups
+            var low = AllQuotaGroups
                 .SelectMany(g => g.Rows)
                 .Where(r => r.IsLow(Thresholds))
                 .OrderBy(r => r.Left)
-                .Take(2)
                 .ToList();
+            return low.GroupBy(r => new { Provider = r.Provider.Split(" · ").Last(), r.Account, r.Bucket, r.Left, r.ResetsAt })
+                .Select(group => group.Count() > 1 ? group.First() with { Provider = group.Key.Provider } : group.First())
+                .OrderBy(r => r.Left).Take(2).ToList();
         }
     }
 
@@ -677,6 +717,7 @@ public sealed class Snapshot
                 .Where(kv => kv.Value.Buckets is { Count: > 0 })
                 .Select(kv =>
                 {
+                    string canonicalProvider = kv.Key.Split(" · ").Last();
                     // GROUP failure drives the provider-header warning: status != "ok" OR a
                     // non-empty status_detail (e.g. stale_token, even when status is "ok").
                     // A provider with several credentials reports the detail for the whole
@@ -691,7 +732,7 @@ public sealed class Snapshot
                         b.RemainingPercent is not null,
                         IsRowFailed(b.CapturedAt, kv.Value.StatusAt, failed),
                         b.CapturedAt is null ? null : DateTimeOffset.FromUnixTimeSeconds(b.CapturedAt.Value))).ToList();
-                    if (kv.Key.Equals("antigravity", StringComparison.OrdinalIgnoreCase))
+                    if (canonicalProvider.Equals("antigravity", StringComparison.OrdinalIgnoreCase))
                         rows = AntigravityPools(rows);
                     return new QuotaGroup(Capitalize(kv.Key), rows, failed);
                 })
@@ -699,8 +740,13 @@ public sealed class Snapshot
         }
     }
 
-    private static string Capitalize(string s) =>
-        string.IsNullOrEmpty(s) ? s : char.ToUpperInvariant(s[0]) + s[1..];
+    private static string Capitalize(string s)
+    {
+        var parts = s.Split(" · ");
+        string provider = parts[^1];
+        string displayProvider = string.IsNullOrEmpty(provider) ? provider : char.ToUpperInvariant(provider[0]) + provider[1..];
+        return parts.Length == 1 ? displayProvider : string.Join(" · ", parts[..^1]) + " · " + displayProvider;
+    }
 
     // "ok" or absent (older servers) is healthy; any other value means that quota
     // couldn't be refreshed this cycle. Spec §7.

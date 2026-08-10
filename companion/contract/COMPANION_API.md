@@ -9,6 +9,10 @@ Fixtures live in `contract/fixtures/`. Expected outcomes live in
 `contract/expected/`. Both native test suites consume the same fixtures so the
 behavior contract is shared even though the UI code is not.
 
+`expected/multi-server.json` reuses the shared endpoint fixtures for two named
+servers and pins combined hero math, server ordering, Low-view deduplication,
+partial failure, and the minimum-delay rule.
+
 ## Endpoints used
 
 | Method | Path | Purpose | When |
@@ -66,6 +70,7 @@ Fields used by the companion:
 | `total_tokens` | int | Today hero secondary line (compact notation) |
 | `total_messages` | int | Today hero secondary line |
 | `comparison.cost_pct` | float \| null | "12% below yesterday" / "8% above yesterday". Omit when `null`. |
+| `comparison.cost_prev` | float \| null | Previous-period cost used to recompute a combined percentage across reachable servers. Hide the comparison when any contributing server omits it. |
 | `by_tool` | object | Leading tool by cost (activity line) |
 | `combined_models` / `top_models` | array | Leading model by cost (activity line) |
 | `timestamp` | string (ISO 8601) | Freshness calculation |
@@ -105,6 +110,12 @@ Buckets with `remaining_percent == null` are rendered without a percentage and
 without a bar fill; they are not candidates for the Low view.
 
 ## Client behavior rules
+
+Companion settings schema v2 stores a `servers` array (`id`, `label`, `baseUrl`,
+`enabled`). A v1 `BaseURL`/`baseURL` value migrates to the first entry. Refreshes
+fan out across enabled servers; failed servers are excluded from combined figures
+until they recover. Native clients do not require a passing Test before saving a
+valid URL.
 
 1. **Health gate.** Call `/health` first. Require `service == "tokdash"`. On
    mismatch or non-2xx, enter wrong-service / offline state. Do not call usage

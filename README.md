@@ -73,6 +73,7 @@
 - **Session explorer**: per-session drill-down
 - **Quota tab** *[new]*: subscription window bars with reset countdowns for Codex, Claude Code, and Antigravity. Codex windows work out of the box from local logs; Codex reset credits, metered features, and all Claude/Antigravity quota need opt-in [live polling](#quota-tracking-optional)
 - **Companion Status Bar App** *[new]*: view spend and subscription quota from the macOS menu bar or Windows notification area — [screenshots and downloads](#tokdash-companion-status-bar-app)
+- **Multi-server views**: add WSL, macOS, and other Tokdash servers in Settings; combine usage across any selection while keeping quota grouped by machine. See [remote access](docs/guides/REMOTE_ACCESS.md).
 - **Themes and app polish**: 10 style themes, light/dark mode, and PWA install support
 
 <p align="center">

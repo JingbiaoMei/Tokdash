@@ -1,6 +1,6 @@
 # Tokdash Roadmap / Notes
 
-_Last updated: 2026-07-29_
+_Last updated: 2026-08-10_
 
 ## History retention / durable usage store
 Tokdash now keeps a local SQLite usage index at `~/.tokdash/usage.sqlite3` by default. Durable
@@ -19,6 +19,9 @@ future need such as non-disable-able client cleanup or multi-machine history syn
 - **Safe defaults**: bind to localhost by default; no surprise LAN exposure.
 
 ## Current state (today)
+- ✅ Dashboard and native companions support a persisted multi-server registry. Usage,
+  sessions, stats, and companion hero totals combine reachable selections; quota remains
+  grouped by server. The HTTP API remains one-server-per-machine.
 - FastAPI backend in:
   - `src/tokdash/api.py` (routes/app; serves `src/tokdash/static/index.html` + `/api/*`)
   - `src/tokdash/compute.py` (aggregation/merging logic)

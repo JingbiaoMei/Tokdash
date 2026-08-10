@@ -65,8 +65,12 @@
             </Style>
         </StackPanel.Resources>
 
-        <TextBlock x:Name="ServerLabel" Text="Server" FontWeight="SemiBold" FontSize="{StaticResource FontBody}" Margin="0,0,0,8"/>
-        <DockPanel Margin="0,0,0,4">
+        <TextBlock x:Name="ServerLabel" Text="Servers" FontWeight="SemiBold" FontSize="{StaticResource FontBody}" Margin="0,0,0,8"/>
+        <StackPanel x:Name="ServersPanel" Margin="0,0,0,6"/>
+        <Button x:Name="AddServerButton" Content="Add server" Click="AddServer_Click" HorizontalAlignment="Left" Padding="12,3" Margin="0,0,0,6"/>
+        <!-- Retained as hidden compatibility controls for the v1 test handler. New rows
+             above have their own optional Test action and URL-only save validation. -->
+        <DockPanel Visibility="Collapsed">
             <Button x:Name="TestButton" DockPanel.Dock="Right" Content="Test" Click="Test_Click"
                     Padding="14,3" Margin="8,0,0,0"/>
             <TextBox x:Name="BaseUrlBox"/>

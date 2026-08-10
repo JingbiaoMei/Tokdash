@@ -53,8 +53,10 @@ INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
 def _extract_js_function(source: str, signature: str) -> str:
     start = source.find(signature)
     assert start != -1, f"{signature} not found in index.html"
+    body_start = start + len(signature) - 1
+    assert source[body_start] == "{", f"{signature} must end at the function body"
     depth = 0
-    for index in range(source.find("{", start), len(source)):
+    for index in range(body_start, len(source)):
         if source[index] == "{":
             depth += 1
         elif source[index] == "}":

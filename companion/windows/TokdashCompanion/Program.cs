@@ -31,6 +31,9 @@ internal static class Program
     [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     private static extern IntPtr LoadImageW(IntPtr hInst, string lpszName, uint uType, int cxDesired, int cyDesired, uint fuLoad);
 
+    [DllImport("user32.dll", EntryPoint = "LoadImageW", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern IntPtr LoadImageResourceW(IntPtr hInst, IntPtr lpszName, uint uType, int cxDesired, int cyDesired, uint fuLoad);
+
     private const uint IMAGE_ICON = 1;
     private const uint LR_LOADFROMFILE = 0x00000010;
 
@@ -193,19 +196,34 @@ internal static class Program
         DestroyWindow(_hwnd);
     }
 
-    /// <summary>Load the Tokdash tray icon from the deployed Assets/tray.ico; fall back to null (caller uses the system icon).</summary>
+    /// <summary>
+    /// Load the Tokdash tray icon embedded by ApplicationIcon. The loose ICO remains a
+    /// compatibility fallback for development builds, but the released executable must
+    /// not lose its identity when it is launched without the rest of the ZIP.
+    /// </summary>
     private static IntPtr? LoadCustomIcon()
     {
-        string path = Path.Combine(AppContext.BaseDirectory, "Assets", "tray.ico");
-        if (!File.Exists(path)) return null;
         // Ask for the shell's small-icon size explicitly. Passing 0,0 means LR_DEFAULTSIZE,
         // which for IMAGE_ICON picks SM_CXICON (32px) and leaves the shell to downsample it
         // into a ~16px tray slot - visibly blurry. tray.ico ships 16/32/48/64/256, so
         // requesting the exact metric selects a crisp frame instead of resampling one.
         int cx = GetSystemMetrics(SM_CXSMICON);
         int cy = GetSystemMetrics(SM_CYSMICON);
-        IntPtr h = LoadImageW(IntPtr.Zero, path, IMAGE_ICON, cx, cy, LR_LOADFROMFILE);
-        if (h == IntPtr.Zero) h = LoadImageW(IntPtr.Zero, path, IMAGE_ICON, 0, 0, LR_LOADFROMFILE);
+
+        // The .NET SDK stores <ApplicationIcon> as resource ID 32512 in the native app
+        // host. Loading it from this process module makes the tray icon self-contained.
+        IntPtr hInstance = GetModuleHandleW(null);
+        IntPtr h = LoadImageResourceW(hInstance, new IntPtr(IDI_APPLICATION), IMAGE_ICON, cx, cy, 0);
+        if (h == IntPtr.Zero)
+        {
+            string path = Path.Combine(AppContext.BaseDirectory, "Assets", "tray.ico");
+            if (File.Exists(path))
+            {
+                h = LoadImageW(IntPtr.Zero, path, IMAGE_ICON, cx, cy, LR_LOADFROMFILE);
+                if (h == IntPtr.Zero)
+                    h = LoadImageW(IntPtr.Zero, path, IMAGE_ICON, 0, 0, LR_LOADFROMFILE);
+            }
+        }
         return h == IntPtr.Zero ? null : h;
     }
 

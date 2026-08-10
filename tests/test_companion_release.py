@@ -106,6 +106,17 @@ def test_windows_release_is_x64_portable_and_msix_is_deferred() -> None:
     assert "windows-x64-unsigned.msix" not in script
     assert "makeappx.exe" not in script
 
+    # The notification-area logo must come from the executable's native icon
+    # resource. A loose Assets/tray.ico may be missing when a user moves or
+    # launches the EXE by itself, and must only be a compatibility fallback.
+    program = (
+        COMPANION / "windows/TokdashCompanion/Program.cs"
+    ).read_text(encoding="utf-8")
+    embedded_load = program.index("IntPtr h = LoadImageResourceW(")
+    sidecar_load = program.index("Path.Combine(AppContext.BaseDirectory")
+    assert embedded_load < sidecar_load
+    assert "new IntPtr(IDI_APPLICATION)" in program
+
     # Preserve the experimental manifest for later loopback/startup validation,
     # but it is not part of the portable ZIP builder or release workflow.
     manifest = (

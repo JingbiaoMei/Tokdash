@@ -261,6 +261,88 @@
       min-width: 0;
     }
 
+    .date-range-control {
+      position: relative;
+      min-width: min(240px, 100%);
+    }
+
+    .date-range-native-input {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .date-range-trigger {
+      width: 100%;
+      min-height: 48px;
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 7px 10px;
+      border: 1px solid var(--color-border);
+      border-radius: 10px;
+      background: var(--color-surface-glass);
+      color: var(--color-text);
+      cursor: pointer;
+      text-align: left;
+      transition: border-color var(--t-fast) ease, box-shadow var(--t-fast) ease, background var(--t-fast) ease;
+    }
+
+    .date-range-trigger:hover {
+      border-color: var(--color-primary);
+      background: color-mix(in srgb, var(--color-primary) 5%, var(--color-surface-glass));
+    }
+
+    .date-range-trigger:focus-visible {
+      outline: none;
+      border-color: var(--color-primary);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 20%, transparent);
+    }
+
+    .date-range-calendar-icon {
+      flex: 0 0 auto;
+      color: var(--color-primary);
+    }
+
+    .date-range-trigger-copy {
+      flex: 1;
+      min-width: 0;
+      display: grid;
+      gap: 2px;
+    }
+
+    .date-range-trigger-copy strong {
+      font-size: 12px;
+      line-height: 1.2;
+    }
+
+    .date-range-trigger-copy span {
+      overflow: hidden;
+      color: var(--color-muted);
+      font-size: 11px;
+      line-height: 1.2;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .date-range-chevron {
+      flex: 0 0 auto;
+      color: var(--color-muted);
+      transition: transform var(--t-fast) ease;
+    }
+
+    .date-range-trigger[aria-expanded="true"] .date-range-chevron {
+      transform: rotate(180deg);
+    }
+
+    .quick-range-btn[aria-pressed="true"] {
+      border-color: color-mix(in srgb, var(--color-primary) 58%, var(--color-border));
+      background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+      color: var(--color-primary);
+    }
+
     .quick-range-panel {
       grid-area: quick;
       display: flex;
@@ -310,12 +392,15 @@
     #totalTokens:focus-visible + .overview-token-exact-tooltip { opacity: 1; visibility: visible; transform: translateY(0); }
 
     @media (max-width: 640px) {
+      .date-range-control { width: 100%; min-width: 0; }
       .settings-trigger>span { display: none; }
       .settings-trigger { width: 44px; padding-inline: 10px; }
       .overview-token-exact-tooltip { max-width: min(260px, calc(100vw - 40px)); overflow: hidden; text-overflow: ellipsis; }
     }
 
     @media (prefers-reduced-motion: reduce) {
+      .date-range-trigger,
+      .date-range-chevron,
       .overview-readable-tokens-track,
       .overview-readable-tokens-track::after,
       .overview-token-exact-tooltip { transition: none; }
@@ -1031,8 +1116,23 @@
         <div class="topbar-control-rail">
           <!-- Date Range Picker -->
           <div class="range-picker-group">
-            <label for="dateRangePicker" class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="range">Range</label>
-            <input type="text" id="dateRangePicker" class="ui-input" placeholder="Select date range" readonly style="min-width: 240px; cursor: pointer;" />
+            <label for="dateRangeTrigger" id="dateRangeControlLabel" class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="range">Range</label>
+            <div class="date-range-control">
+              <input type="text" id="dateRangePicker" class="date-range-native-input" readonly tabindex="-1" aria-hidden="true" />
+              <button id="dateRangeTrigger" class="date-range-trigger" type="button" aria-haspopup="dialog" aria-expanded="false" aria-labelledby="dateRangeControlLabel dateRangePresetLabel dateRangeExactLabel">
+                <svg class="date-range-calendar-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <rect x="3" y="5" width="18" height="16" rx="2" stroke="currentColor" stroke-width="1.8"/>
+                  <path d="M8 3v4M16 3v4M3 10h18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                </svg>
+                <span class="date-range-trigger-copy">
+                  <strong id="dateRangePresetLabel">Today</strong>
+                  <span id="dateRangeExactLabel"></span>
+                </span>
+                <svg class="date-range-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="m7 10 5 5 5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </button>
+            </div>
             <div id="updateNotice" class="update-notice" hidden>
               <button id="updateBadge" class="update-badge" hidden aria-haspopup="true" aria-expanded="false"></button>
               <button id="updateEnableLink" class="update-enable-link" hidden data-i18n="updateEnable">Enable update notices</button>
@@ -1049,16 +1149,16 @@
 
           <!-- Quick Range Buttons -->
           <div class="quick-range-panel">
-            <button class="btn btn-ghost quick-range-btn" data-range="today" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="today">Today</button>
-            <button class="btn btn-ghost quick-range-btn" data-range="yesterday" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="yesterday">Yesterday</button>
-            <button class="btn btn-ghost quick-range-btn" data-range="last7days" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="last7days">Last 7 Days</button>
-            <button class="btn btn-ghost quick-range-btn" data-range="lastWeek" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="lastWeek">Last Week</button>
-            <button class="btn btn-ghost quick-range-btn" data-range="last14days" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="last14days">Last 14 Days</button>
-            <button class="btn btn-ghost quick-range-btn" data-range="last4weeks" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="last4weeks">Last 4 Weeks</button>
-            <button class="btn btn-ghost quick-range-btn" data-range="thisMonth" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="thisMonth">This Month</button>
-            <button class="btn btn-ghost quick-range-btn" data-range="lastMonth" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="lastMonth">Last Month</button>
-            <button class="btn btn-ghost quick-range-btn" data-range="thisYear" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="thisYear">This Year</button>
-            <button class="btn btn-ghost quick-range-btn" data-range="lastYear" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="lastYear">Last Year</button>
+            <button type="button" class="btn btn-ghost quick-range-btn" data-range="today" aria-pressed="true" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="today">Today</button>
+            <button type="button" class="btn btn-ghost quick-range-btn" data-range="yesterday" aria-pressed="false" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="yesterday">Yesterday</button>
+            <button type="button" class="btn btn-ghost quick-range-btn" data-range="last7days" aria-pressed="false" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="last7days">Last 7 Days</button>
+            <button type="button" class="btn btn-ghost quick-range-btn" data-range="lastWeek" aria-pressed="false" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="lastWeek">Last Week</button>
+            <button type="button" class="btn btn-ghost quick-range-btn" data-range="last14days" aria-pressed="false" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="last14days">Last 14 Days</button>
+            <button type="button" class="btn btn-ghost quick-range-btn" data-range="last4weeks" aria-pressed="false" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="last4weeks">Last 4 Weeks</button>
+            <button type="button" class="btn btn-ghost quick-range-btn" data-range="thisMonth" aria-pressed="false" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="thisMonth">This Month</button>
+            <button type="button" class="btn btn-ghost quick-range-btn" data-range="lastMonth" aria-pressed="false" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="lastMonth">Last Month</button>
+            <button type="button" class="btn btn-ghost quick-range-btn" data-range="thisYear" aria-pressed="false" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="thisYear">This Year</button>
+            <button type="button" class="btn btn-ghost quick-range-btn" data-range="lastYear" aria-pressed="false" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="lastYear">Last Year</button>
           </div>
 
           <div class="topbar-actions">
@@ -2283,6 +2383,8 @@
         updateSkip: 'Skip this version',
         updateEnable: 'Enable update notices',
         range: 'Range',
+        selectRange: 'Select range',
+        customRange: 'Custom range',
         today: 'Today',
         yesterday: 'Yesterday',
         last3days: 'Last 3 Days',
@@ -2569,6 +2671,8 @@
         updateSkip: '跳过此版本',
         updateEnable: '开启更新提醒',
         range: '范围',
+        selectRange: '选择日期范围',
+        customRange: '自定义范围',
         today: '今天',
         yesterday: '昨天',
         last3days: '最近 3 天',
@@ -3539,6 +3643,7 @@
       updateTimestamp();
       updateMetricControls();
       syncDatePickerFooter();
+      syncDateRangeControl();
       if (typeof profileActivityMode !== 'undefined') {
         renderProfileActivityLegend('profileActivityLegend', profileActivityMode);
         renderProfileActivityLegend('overviewProfileLegend', profileActivityMode);
@@ -3723,6 +3828,7 @@
     let currentEndDate = null;
     let pendingStartDate = null;
     let pendingEndDate = null;
+    let activeQuickRange = 'today';
     let isDatePickerInitializing = true;
     let isSyncingDatePicker = false;
     let isCommittingDatePicker = false;
@@ -3775,6 +3881,22 @@
       return `${startText} – ${formatDateRangeDate(end, lang)}`;
     }
 
+    function syncDateRangeControl() {
+      const trigger = document.getElementById('dateRangeTrigger');
+      const preset = document.getElementById('dateRangePresetLabel');
+      const exact = document.getElementById('dateRangeExactLabel');
+      if (!trigger || !preset || !exact) return;
+
+      const presetKey = activeQuickRange || 'customRange';
+      preset.textContent = t(presetKey);
+      exact.textContent = formatDateRangeTriggerText(currentStartDate, currentEndDate);
+      trigger.setAttribute('title', t('selectRange'));
+      document.querySelectorAll('.quick-range-btn').forEach((button) => {
+        const isActive = button.dataset.range === activeQuickRange;
+        button.setAttribute('aria-pressed', String(isActive));
+      });
+    }
+
     function syncDatePickerFooter() {
       if (!flatpickrInstance?.calendarContainer) return;
       const summary = flatpickrInstance.calendarContainer.querySelector('.flatpickr-footer-summary');
@@ -3812,13 +3934,19 @@
     }
 
     function commitDateSelection(startDate, endDate, options = {}) {
-      const { closePicker = false, triggerUpdate = true, triggerPickerSync = true } = options;
+      const {
+        closePicker = false,
+        triggerUpdate = true,
+        triggerPickerSync = true,
+        rangeKey = null,
+      } = options;
       if (!startDate || !endDate) return;
 
       currentStartDate = cloneDate(startDate);
       currentEndDate = cloneDate(endDate);
       pendingStartDate = cloneDate(startDate);
       pendingEndDate = cloneDate(endDate);
+      activeQuickRange = rangeKey;
 
       if (flatpickrInstance && triggerPickerSync) {
         isSyncingDatePicker = true;
@@ -3827,6 +3955,7 @@
       }
 
       syncDatePickerFooter();
+      syncDateRangeControl();
 
       if (triggerUpdate) {
         updateDashboardByDateRange(currentStartDate, currentEndDate);
@@ -3847,13 +3976,17 @@
 
     function initDateRangePicker() {
       const dateInput = document.getElementById('dateRangePicker');
-      if (!dateInput) return;
+      const dateTrigger = document.getElementById('dateRangeTrigger');
+      if (!dateInput || !dateTrigger) return;
+      dateTrigger.addEventListener('click', () => flatpickrInstance?.open());
 
       flatpickrInstance = flatpickr(dateInput, {
         mode: 'range',
         dateFormat: 'Y-m-d',
         maxDate: 'today',
         closeOnSelect: false,
+        clickOpens: false,
+        positionElement: dateTrigger,
         onChange: function(selectedDates) {
           // Skip update during initialization
           if (isDatePickerInitializing || isSyncingDatePicker) return;
@@ -3873,16 +4006,19 @@
           instance.setDate([today, today], false);
           isSyncingDatePicker = false;
           syncDatePickerFooter();
+          syncDateRangeControl();
           // Allow onChange to work after initialization
           setTimeout(() => { isDatePickerInitializing = false; }, 100);
         },
         onOpen: function(selectedDates) {
+          dateTrigger.setAttribute('aria-expanded', 'true');
           [pendingStartDate, pendingEndDate] = selectedDates.length
             ? getPendingRangeFromSelection(selectedDates)
             : [cloneDate(currentStartDate), cloneDate(currentEndDate)];
           syncDatePickerFooter();
         },
         onClose: function() {
+          dateTrigger.setAttribute('aria-expanded', 'false');
           if (isCommittingDatePicker) {
             isCommittingDatePicker = false;
             return;
@@ -3959,7 +4095,12 @@
         const { startDate, endDate } = getQuickRangeDates(range);
 
         if (flatpickrInstance) {
-          commitDateSelection(startDate, endDate, { closePicker: true, triggerUpdate: true, triggerPickerSync: true });
+          commitDateSelection(startDate, endDate, {
+            closePicker: true,
+            triggerUpdate: true,
+            triggerPickerSync: true,
+            rangeKey: range,
+          });
         }
       });
     });

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sqlite3
 from datetime import datetime, timedelta, timezone
@@ -25,6 +26,7 @@ from .usage_store import UsageEntryStore, parser_code_signature, persistent_usag
 
 
 SESSION_TOOLS = ("codex", "claude", "opencode", "pi_agent", "mimo")
+logger = logging.getLogger(__name__)
 TOOL_LABELS = {
     "codex": "Codex",
     "claude": "Claude Code",
@@ -35,6 +37,94 @@ TOOL_LABELS = {
 
 _PRICING_DB = PricingDatabase()
 DISPLAY_NAME_MAX_CHARS = 96
+
+# Explicit versions for the two persistent session-file parsers. Version 1 is
+# serialized as the exact parser token used by v1.5.9 so upgrading can reuse
+# those valid rows without a full-corpus reparse. Unlike parser_code_signature,
+# these tokens do not change when unrelated helpers in sessions.py are edited.
+# Bump only the affected version when that parser's stored output changes.
+_SESSION_FILE_PARSER_VERSIONS = {
+    "_parse_codex_session_file": 1,
+    "_parse_claude_session_file": 1,
+}
+_SESSION_FILE_PARSER_V1_COMPAT_TOKEN = "422eaad7926b4c5362a3c6d7cbcad86dc8244cb8"
+_V159_BASELINE_PRICING_CONTENT_SIGNATURE = (
+    "pricing-content-v1",
+    "baseline",
+    84983,
+    "f9975b02ce603515a1c21d72d2e56788",
+)
+
+
+def _session_file_parser_signature(name: str) -> dict[str, Any]:
+    version = _SESSION_FILE_PARSER_VERSIONS[name]
+    if version == 1:
+        # Compatibility shape: parser_code_signature() in v1.5.9 produced this
+        # object from the then-current sessions.py module. Freezing it makes it
+        # an explicit version token while retaining existing row signatures.
+        return {
+            "object": f"{__name__}.{name}",
+            "content_sha1": _SESSION_FILE_PARSER_V1_COMPAT_TOKEN,
+        }
+    return {"object": f"{__name__}.{name}", "version": version}
+
+
+def _legacy_pricing_signature_matches_content(legacy: Any, content: Any) -> bool:
+    """Accept only v1.5.9 pricing stats proven equivalent to new content IDs."""
+    if not isinstance(legacy, list) or len(legacy) != 2:
+        return False
+    if not isinstance(content, list) or len(content) != 4:
+        return False
+    baseline, override = legacy
+    if not isinstance(baseline, list) or len(baseline) != 3:
+        return False
+    if not isinstance(override, list) or len(override) != 3:
+        return False
+
+    try:
+        if content == list(_V159_BASELINE_PRICING_CONTENT_SIGNATURE):
+            return (
+                Path(str(baseline[0])).name == "pricing_db.json"
+                and int(baseline[2] or 0)
+                == _V159_BASELINE_PRICING_CONTENT_SIGNATURE[2]
+                and int(override[1] or 0) == 0
+                and str(override[2] or "") == ""
+            )
+
+        if content[:2] == ["pricing-content-v1", "override"]:
+            return (
+                int(override[1] or 0) == int(content[2] or 0)
+                and str(override[2] or "") == str(content[3] or "")
+            )
+    except (TypeError, ValueError):
+        return False
+    return False
+
+
+def _session_signature_compatible(old_signature: str, new_signature: str) -> bool:
+    """Recognize a v1.5.9 stat-pricing signature with identical effective content."""
+    try:
+        old = json.loads(old_signature)
+        new = json.loads(new_signature)
+    except (TypeError, ValueError):
+        return False
+    if not isinstance(old, dict) or not isinstance(new, dict):
+        return False
+    if {key: value for key, value in old.items() if key != "parser"} != {
+        key: value for key, value in new.items() if key != "parser"
+    }:
+        return False
+    old_parser = old.get("parser")
+    new_parser = new.get("parser")
+    if not isinstance(old_parser, dict) or not isinstance(new_parser, dict):
+        return False
+    if {key: value for key, value in old_parser.items() if key != "pricing"} != {
+        key: value for key, value in new_parser.items() if key != "pricing"
+    }:
+        return False
+    return _legacy_pricing_signature_matches_content(
+        old_parser.get("pricing"), new_parser.get("pricing")
+    )
 
 # Signature of the pricing files the singleton was last loaded from. Sessions cost is computed
 # via the long-lived _PRICING_DB singleton, whose in-memory rates are refreshed only by
@@ -413,6 +503,14 @@ def _pricing_signature() -> tuple:
     return sig
 
 
+def _session_pricing_content_signature() -> tuple:
+    """Content identity used only by persistent Codex/Claude session rows."""
+    try:
+        return _PRICING_DB.content_signature()
+    except (OSError, AttributeError, ValueError, TypeError):
+        return ("pricing-content-v1", "missing", 0, "")
+
+
 def _codex_state_db_path() -> Path:
     return clientpaths.codex_state_db_path()
 
@@ -689,7 +787,7 @@ def _load_codex_activity_records(
 
 def _codex_session_parser_signature(pricing_sig: tuple) -> dict[str, Any]:
     return {
-        "parser": parser_code_signature(_parse_codex_session_file),
+        "parser": _session_file_parser_signature("_parse_codex_session_file"),
         "event_key": parser_code_signature(codex_token_event_key),
         "activity": parser_code_signature(build_activity_insights),
         "activity_schema": ACTIVITY_SCHEMA_VERSION,
@@ -709,10 +807,11 @@ def get_codex_activity_insights() -> dict[str, Any]:
     store.sync_session_files(
         "codex",
         signatures,
-        parser=_codex_session_parser_signature(pricing_sig),
+        parser=_codex_session_parser_signature(_session_pricing_content_signature()),
         parse_file_session=lambda file_sig: _parse_codex_session_file(
             *file_sig, pricing_sig
         ),
+        signature_compatible=_session_signature_compatible,
     )
     return build_activity_insights(store.query_session_activity_records("codex"))
 
@@ -1573,9 +1672,13 @@ def _raw_sessions_for_tool(
     key = str(tool or "").strip().lower()
     if key in {"codex", "claude"} and persistent_usage_db_enabled():
         try:
-            return _stored_sessions_for_tool(key)
+            return _stored_sessions_for_tool(key, since_ms=since_ms, until_ms=until_ms)
         except Exception:
-            pass
+            logger.warning(
+                "tokdash persistent session cache failed tool=%s; falling back to source files",
+                key,
+                exc_info=True,
+            )
     if key == "codex":
         return _codex_sessions()
     if key == "claude":
@@ -1636,36 +1739,54 @@ def _session_records_to_raw_sessions(tool: str, records: Iterable[Dict[str, Any]
     return sessions
 
 
-def _stored_sessions_for_tool(tool: str) -> Dict[str, Dict[str, Any]]:
+def _stored_sessions_for_tool(
+    tool: str,
+    *,
+    since_ms: Optional[int] = None,
+    until_ms: Optional[int] = None,
+) -> Dict[str, Dict[str, Any]]:
     store = UsageEntryStore()
     if tool == "codex":
         root = clientpaths.codex_sessions_dir()
         signatures = _iter_file_signatures(root)
         pricing_sig = _pricing_signature()
-        parser_sig = _codex_session_parser_signature(pricing_sig)
         store.sync_session_files(
             "codex",
             signatures,
-            parser=parser_sig,
-            parse_file_session=lambda file_sig: _parse_codex_session_file(*file_sig, pricing_sig),
+            parser=_codex_session_parser_signature(
+                _session_pricing_content_signature()
+            ),
+            parse_file_session=lambda file_sig: _parse_codex_session_file(
+                *file_sig, pricing_sig
+            ),
+            signature_compatible=_session_signature_compatible,
         )
     elif tool == "claude":
         all_sigs: list[tuple[str, int, int]] = []
         for projects_dir in clientpaths.claude_project_dirs():
             all_sigs.extend(_iter_file_signatures(projects_dir))
         all_sigs.sort(key=lambda item: item[0])
-        parser_sig = {"parser": parser_code_signature(_parse_claude_session_file), "pricing": _pricing_signature()}
         pricing_sig = _pricing_signature()
+        parser_sig = {
+            "parser": _session_file_parser_signature("_parse_claude_session_file"),
+            "pricing": _session_pricing_content_signature(),
+        }
         store.sync_session_files(
             "claude",
             tuple(all_sigs),
             parser=parser_sig,
-            parse_file_session=lambda file_sig: _parse_claude_session_file(*file_sig, pricing_sig),
+            parse_file_session=lambda file_sig: _parse_claude_session_file(
+                *file_sig, pricing_sig
+            ),
+            signature_compatible=_session_signature_compatible,
         )
     else:
         raise ValueError(f"Unsupported stored session tool: {tool}")
 
-    sessions = _session_records_to_raw_sessions(tool, store.query_session_records(tool))
+    sessions = _session_records_to_raw_sessions(
+        tool,
+        store.query_session_records(tool, since_ms=since_ms, until_ms=until_ms),
+    )
     if tool == "codex":
         return _apply_codex_title_map(sessions)
     return sessions
@@ -1692,10 +1813,8 @@ def get_sessions_data(
         since_ms, until_ms = _period_range(period)
 
     sessions = []
-    window_since_ms = since_ms if key in {"opencode", "mimo"} else None
-    window_until_ms = until_ms if key in {"opencode", "mimo"} else None
     include_codex_review = _include_codex_review_sessions(include_review_sessions)
-    for raw in _raw_sessions_for_tool(key, since_ms=window_since_ms, until_ms=window_until_ms).values():
+    for raw in _raw_sessions_for_tool(key, since_ms=since_ms, until_ms=until_ms).values():
         if key == "codex" and raw.get("is_review_session") and not include_codex_review:
             continue
         summary = _summarize_session(raw, since_ms=since_ms, until_ms=until_ms)

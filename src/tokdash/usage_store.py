@@ -17,7 +17,7 @@ from .filelock import process_lock
 from .pricing import PricingDatabase
 
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 SIGNATURE_VERSION = 3
 
 # quota_history consumption: reset times within this many seconds are treated as the same
@@ -490,6 +490,22 @@ def _session_record_list(raw: Any) -> list[dict[str, Any]]:
     return out
 
 
+def _session_time_bounds(raw: dict[str, Any]) -> tuple[Optional[int], Optional[int]]:
+    timestamps: list[int] = []
+    for turn in raw.get("turns", []):
+        if not isinstance(turn, dict):
+            continue
+        try:
+            timestamp_ms = int(turn.get("timestamp_ms", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if timestamp_ms > 0:
+            timestamps.append(timestamp_ms)
+    if not timestamps:
+        return None, None
+    return min(timestamps), max(timestamps)
+
+
 class UsageEntryStore:
     """SQLite-backed persistent cache for normalized token usage rows."""
 
@@ -581,6 +597,8 @@ class UsageEntryStore:
                 missing INTEGER NOT NULL DEFAULT 0,
                 signature TEXT NOT NULL,
                 updated_at_ms INTEGER NOT NULL,
+                started_at_ms INTEGER,
+                last_seen_at_ms INTEGER,
                 raw_json TEXT NOT NULL,
                 activity_json TEXT,
                 PRIMARY KEY (tool, file_path, session_id)
@@ -643,10 +661,47 @@ class UsageEntryStore:
             conn.execute("ALTER TABLE session_records ADD COLUMN missing INTEGER NOT NULL DEFAULT 0")
         if "activity_json" not in session_columns:
             conn.execute("ALTER TABLE session_records ADD COLUMN activity_json TEXT")
+        if "started_at_ms" not in session_columns:
+            conn.execute("ALTER TABLE session_records ADD COLUMN started_at_ms INTEGER")
+        if "last_seen_at_ms" not in session_columns:
+            conn.execute("ALTER TABLE session_records ADD COLUMN last_seen_at_ms INTEGER")
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_session_records_tool_window
+            ON session_records(tool, last_seen_at_ms, started_at_ms)
+            """
+        )
         row = conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
         current = int(row["value"]) if row else 0
         if current > SCHEMA_VERSION:
             raise RuntimeError(f"unsupported usage DB schema {current}; expected <= {SCHEMA_VERSION}")
+        if current < 7:
+            rows = conn.execute(
+                """
+                SELECT rowid, raw_json
+                FROM session_records
+                WHERE started_at_ms IS NULL OR last_seen_at_ms IS NULL
+                """
+            ).fetchall()
+            updates: list[tuple[Optional[int], Optional[int], int]] = []
+            for session_row in rows:
+                try:
+                    raw = json.loads(session_row["raw_json"])
+                except Exception:
+                    continue
+                if not isinstance(raw, dict):
+                    continue
+                started_at_ms, last_seen_at_ms = _session_time_bounds(raw)
+                updates.append((started_at_ms, last_seen_at_ms, int(session_row["rowid"])))
+            if updates:
+                conn.executemany(
+                    """
+                    UPDATE session_records
+                    SET started_at_ms = ?, last_seen_at_ms = ?
+                    WHERE rowid = ?
+                    """,
+                    updates,
+                )
         conn.execute(
             "INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', ?)",
             (str(SCHEMA_VERSION),),
@@ -1340,6 +1395,7 @@ class UsageEntryStore:
         *,
         parser: Any = None,
         parse_file_session: Callable[[tuple[str, int, int]], Any],
+        signature_compatible: Optional[Callable[[str, str], bool]] = None,
         durable: Optional[bool] = None,
     ) -> bool:
         files = _normalize_file_signatures(file_signatures)
@@ -1372,14 +1428,26 @@ class UsageEntryStore:
             for path, state in stored.items()
             if path not in current_paths and (not keep_missing or not int(state.get("missing") or 0))
         )
-        changed_files = [
-            file_sig
-            for file_sig in files
-            if stored.get(file_sig[0], {}).get("signature") != sig_by_path[file_sig[0]]
-            or int(stored.get(file_sig[0], {}).get("missing") or 0)
-        ]
+        changed_files: list[tuple[str, int, int]] = []
+        resign_files: list[tuple[str, int, int]] = []
+        for file_sig in files:
+            path = file_sig[0]
+            state = stored.get(path, {})
+            old_signature = state.get("signature")
+            new_signature = sig_by_path[path]
+            if old_signature == new_signature and not int(state.get("missing") or 0):
+                continue
+            if (
+                old_signature
+                and not int(state.get("missing") or 0)
+                and signature_compatible is not None
+                and signature_compatible(str(old_signature), new_signature)
+            ):
+                resign_files.append(file_sig)
+            else:
+                changed_files.append(file_sig)
 
-        if not removed_paths and not changed_files:
+        if not removed_paths and not changed_files and not resign_files:
             return False
 
         parsed: list[tuple[tuple[str, int, int], list[dict[str, Any]]]] = []
@@ -1402,6 +1470,28 @@ class UsageEntryStore:
                             (tool, path),
                         )
 
+                # A cache-signature format upgrade can preserve rows whose parser,
+                # source file, and effective pricing content are proven equivalent.
+                # Update only their metadata; do not deserialize or reparse the log.
+                for path, mtime_ns, size in resign_files:
+                    conn.execute(
+                        """
+                        UPDATE session_records
+                        SET mtime_ns = ?, size = ?, safe_offset = ?, missing = 0,
+                            signature = ?, updated_at_ms = ?
+                        WHERE tool = ? AND file_path = ?
+                        """,
+                        (
+                            mtime_ns,
+                            size,
+                            size,
+                            sig_by_path[path],
+                            now_ms,
+                            tool,
+                            path,
+                        ),
+                    )
+
                 for (path, mtime_ns, size), records in parsed:
                     conn.execute(
                         "DELETE FROM session_records WHERE tool = ? AND file_path = ?",
@@ -1411,13 +1501,15 @@ class UsageEntryStore:
                         session_id = str(raw.get("session_id") or Path(path).stem)
                         activity = raw.get("_activity") if isinstance(raw.get("_activity"), dict) else None
                         session_raw = {key: value for key, value in raw.items() if key != "_activity"}
+                        started_at_ms, last_seen_at_ms = _session_time_bounds(session_raw)
                         conn.execute(
                             """
                             INSERT INTO session_records(
                                 tool, session_id, file_path, mtime_ns, size, safe_offset,
-                                missing, signature, updated_at_ms, raw_json, activity_json
+                                missing, signature, updated_at_ms, started_at_ms,
+                                last_seen_at_ms, raw_json, activity_json
                             )
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                             """,
                             (
                                 tool,
@@ -1429,6 +1521,8 @@ class UsageEntryStore:
                                 0,
                                 sig_by_path[path],
                                 now_ms,
+                                started_at_ms,
+                                last_seen_at_ms,
                                 stable_json(session_raw),
                                 stable_json(activity) if activity is not None else None,
                             ),
@@ -1436,16 +1530,30 @@ class UsageEntryStore:
                 conn.commit()
                 return True
 
-    def query_session_records(self, tool: str) -> list[dict[str, Any]]:
+    def query_session_records(
+        self,
+        tool: str,
+        *,
+        since_ms: Optional[int] = None,
+        until_ms: Optional[int] = None,
+    ) -> list[dict[str, Any]]:
+        where = ["tool = ?"]
+        args: list[Any] = [tool]
+        if since_ms is not None:
+            where.append("last_seen_at_ms >= ?")
+            args.append(int(since_ms))
+        if until_ms is not None:
+            where.append("started_at_ms < ?")
+            args.append(int(until_ms))
         with closing(self._connect()) as conn:
             rows = conn.execute(
-                """
+                f"""
                 SELECT raw_json
                 FROM session_records
-                WHERE tool = ?
+                WHERE {' AND '.join(where)}
                 ORDER BY file_path ASC, session_id ASC
                 """,
-                (tool,),
+                args,
             ).fetchall()
         out: list[dict[str, Any]] = []
         for row in rows:

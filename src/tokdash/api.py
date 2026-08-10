@@ -8,6 +8,7 @@ import os
 import secrets
 import threading
 import time
+from collections import OrderedDict
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
@@ -45,6 +46,7 @@ PRICING_DB_PATH = Path(__file__).parent / "pricing_db.json"
 logger = logging.getLogger(__name__)
 BASE_PATH_PLACEHOLDER = "__TOKDASH_BASE_PATH__"
 SUPPORTED_BASE_PATHS = ("/tokdash",)
+ACTIVITY_INSIGHTS_CACHE_KEY = "activity_insights_v1"
 
 
 def _normalize_public_base_path(value: str | None) -> str:
@@ -140,6 +142,18 @@ class BasePathMiddleware:
         await self.app(scope, receive, send)
 
 
+def _session_response_cache_key(
+    tool: str,
+    period: str,
+    date_from: Optional[str],
+    date_to: Optional[str],
+    include_review_sessions: Optional[bool],
+) -> str:
+    return _pricing_cache_key(
+        f"sessions_{tool.strip().lower()}_{period}_{date_from}_{date_to}_{include_review_sessions}"
+    )
+
+
 def _warm_caches() -> None:
     """Best-effort background warm so the first user request hits hot caches.
 
@@ -161,15 +175,19 @@ def _warm_caches() -> None:
         ),
         (_pricing_cache_key("stats_None"), lambda: compute_stats(None)),
     ]
-    # Mirror the dashboard's default Sessions-tab request: period=today, no date
-    # range, server-default review-session toggle (None).
+    # Mirror the dashboard exactly: its default date picker sends an explicit
+    # date_from/date_to pair, not period=today. Keeping this key construction shared
+    # with the route prevents the warmer and browser from drifting apart again.
     for tool in SESSION_TOOLS:
         warmers.append(
             (
-                _pricing_cache_key(f"sessions_{tool}_today_None_None_None"),
-                lambda tool=tool: get_sessions_data(tool, "today", None, None, include_review_sessions=None),
+                _session_response_cache_key(tool, "today", today, today, None),
+                lambda tool=tool: get_sessions_data(
+                    tool, "today", today, today, include_review_sessions=None
+                ),
             )
         )
+    warmers.append((ACTIVITY_INSIGHTS_CACHE_KEY, get_codex_activity_insights))
     for key, fetch in warmers:
         try:
             get_cached_or_fetch(key, fetch)
@@ -347,9 +365,9 @@ async def _write_guard(request: Request, call_next):
     return await call_next(request)
 
 
-_cache: Dict[str, tuple[float, Any]] = {}
+_cache: OrderedDict[str, tuple[float, Any]] = OrderedDict()
 _cache_guard = threading.Lock()  # protects _cache, _key_locks, and _cache_epoch
-_key_locks: Dict[str, threading.Lock] = {}
+_key_locks: OrderedDict[str, threading.Lock] = OrderedDict()
 _cache_epoch = 0
 _pricing_sig_guard = threading.Lock()
 _pricing_baseline_sig_cache: Optional[tuple[str, tuple[str, int, int]]] = None
@@ -376,6 +394,7 @@ def _positive_int_env(name: str, default: int) -> int:
 # scheduled refresh does not always land on an expired key and compete for a cold
 # parse slot. Operators can still lower it with TOKDASH_CACHE_TTL.
 CACHE_TTL = _positive_int_env("TOKDASH_CACHE_TTL", 600)  # seconds
+CACHE_MAX_ENTRIES = _positive_int_env("TOKDASH_CACHE_MAX_ENTRIES", 256)
 
 
 class CacheBackpressureError(RuntimeError):
@@ -455,18 +474,50 @@ def _cached_route(
         )
 
 
-def _key_lock(key: str) -> threading.Lock:
+def _try_key_lock(key: str) -> tuple[threading.Lock, bool]:
+    """Return the key lock and acquire it atomically with registry lookup."""
     with _cache_guard:
         lock = _key_locks.get(key)
         if lock is None:
             lock = threading.Lock()
             _key_locks[key] = lock
-        return lock
+        _key_locks.move_to_end(key)
+        acquired = lock.acquire(blocking=False)
+        _prune_key_locks_locked(exclude=key)
+        return lock, acquired
+
+
+def _prune_key_locks_locked(*, exclude: Optional[str] = None) -> None:
+    """Bound idle per-key locks while preserving every in-flight single flight."""
+    if len(_key_locks) <= CACHE_MAX_ENTRIES:
+        return
+    for candidate, candidate_lock in list(_key_locks.items()):
+        if len(_key_locks) <= CACHE_MAX_ENTRIES:
+            break
+        if candidate == exclude or candidate_lock.locked():
+            continue
+        _key_locks.pop(candidate, None)
+
+
+def _release_key_lock(key: str, lock: threading.Lock) -> None:
+    with _cache_guard:
+        # Keep unlock and registry cleanup atomic with _try_key_lock(). If the
+        # mutex were released first, another caller could acquire this lock
+        # before we remove it, letting a later caller create a second lock for
+        # the same key and run a duplicate fill.
+        lock.release()
+        # Failed/invalidated fills have no cached value and should leave no lock behind.
+        if _key_locks.get(key) is lock and key not in _cache:
+            _key_locks.pop(key, None)
+        _prune_key_locks_locked()
 
 
 def _cache_get(key: str) -> Optional[tuple[float, Any]]:
     with _cache_guard:
-        return _cache.get(key)
+        hit = _cache.get(key)
+        if hit is not None:
+            _cache.move_to_end(key)
+        return hit
 
 
 def _cache_epoch_value() -> int:
@@ -479,20 +530,51 @@ def _cache_set_if_epoch(key: str, value: Any, epoch: int) -> bool:
         if epoch != _cache_epoch:
             return False
         _cache[key] = (datetime.now().timestamp(), value)
+        _cache.move_to_end(key)
+        while len(_cache) > CACHE_MAX_ENTRIES:
+            _cache.popitem(last=False)
+        _prune_key_locks_locked()
         return True
 
 
 def _clear_cache() -> None:
     """Drop all cached responses (e.g. after the pricing DB is edited).
 
-    Only cached values are cleared; per-key locks are left intact. The generation
-    counter prevents an in-flight compute that started before this clear from
-    repopulating stale values after it finishes.
+    Idle locks are cleared with their values. In-flight locks remain until their
+    holder exits, and the generation counter prevents those older computes from
+    repopulating stale values after this clear.
     """
     global _cache_epoch
     with _cache_guard:
         _cache_epoch += 1
         _cache.clear()
+        for key, lock in list(_key_locks.items()):
+            if not lock.locked():
+                _key_locks.pop(key, None)
+
+
+def _refresh_stale_in_background(
+    key: str,
+    fetch_fn,
+    lock: threading.Lock,
+    epoch: int,
+) -> None:
+    acquired_compute = False
+    try:
+        acquired_compute = _compute_semaphore.acquire(blocking=False)
+        if not acquired_compute:
+            logger.debug("tokdash stale refresh deferred key=%s reason=compute_cap", key)
+            return
+        try:
+            fresh = fetch_fn()
+        except Exception:
+            logger.warning("tokdash stale refresh failed key=%s", key, exc_info=True)
+            return
+        _cache_set_if_epoch(key, fresh, epoch)
+    finally:
+        if acquired_compute:
+            _compute_semaphore.release()
+        _release_key_lock(key, lock)
 
 
 def get_cached_or_fetch(
@@ -506,8 +588,8 @@ def get_cached_or_fetch(
 
     - Fresh hit (age < TTL): returned immediately with no locking or worker contention.
       ``force_refresh=True`` skips this fast path so manual refreshes recompute.
-    - Stale hit: at most one request refreshes the key; concurrent callers keep
-      getting the stale value instead of stampeding the parser.
+    - Stale hit: returned immediately. At most one daemon refreshes the key in the
+      background, so no caller pays the recompute latency and parsers do not stampede.
     - Cold miss: if this key or the global heavy-compute pool is already busy, fail
       fast with ``CacheBackpressureError`` so request workers do not pile up while
       blocked. A later request can retry once the in-flight fill finishes.
@@ -522,8 +604,31 @@ def get_cached_or_fetch(
     if hit is not None and now - hit[0] < CACHE_TTL and not force_refresh:
         return result(hit[1], "hit", now - hit[0])
 
-    lock = _key_lock(key)
-    if not lock.acquire(blocking=False):
+    if hit is not None and not force_refresh:
+        lock, acquired = _try_key_lock(key)
+        if acquired:
+            # A prior background holder may have refreshed between our first read and
+            # acquiring the single-flight lock.
+            latest = _cache_get(key)
+            locked_now = datetime.now().timestamp()
+            if latest is not None and locked_now - latest[0] < CACHE_TTL:
+                _release_key_lock(key, lock)
+                return result(latest[1], "hit", locked_now - latest[0])
+            epoch = _cache_epoch_value()
+            try:
+                threading.Thread(
+                    target=_refresh_stale_in_background,
+                    args=(key, fetch_fn, lock, epoch),
+                    name="tokdash-cache-refresh",
+                    daemon=True,
+                ).start()
+            except Exception:
+                _release_key_lock(key, lock)
+                logger.warning("tokdash failed to start stale refresh key=%s", key, exc_info=True)
+        return result(hit[1], "stale", now - hit[0])
+
+    lock, acquired = _try_key_lock(key)
+    if not acquired:
         # Another thread is already computing this key.
         if hit is not None:
             return result(hit[1], "stale", now - hit[0])  # serve cached rather than stampede the parser
@@ -556,7 +661,7 @@ def get_cached_or_fetch(
         _cache_set_if_epoch(key, fresh, epoch)
         return result(fresh, "recomputed", 0.0)
     finally:
-        lock.release()
+        _release_key_lock(key, lock)
 
 
 def _format_pricing_db(data: Dict[str, Any]) -> str:
@@ -1005,8 +1110,12 @@ def get_sessions(
 ) -> Dict[str, Any]:
     _validate_date_params(date_from, date_to)
     try:
-        cache_key = _pricing_cache_key(
-            f"sessions_{tool.strip().lower()}_{period}_{date_from}_{date_to}_{include_review_sessions}"
+        cache_key = _session_response_cache_key(
+            tool,
+            period,
+            date_from,
+            date_to,
+            include_review_sessions,
         )
         return _cached_route(
             "/api/sessions",
@@ -1121,7 +1230,7 @@ def get_activity_insights(refresh: bool = False) -> dict[str, Any]:
     try:
         return _cached_route(
             "/api/activity-insights",
-            "activity_insights_v1",
+            ACTIVITY_INSIGHTS_CACHE_KEY,
             get_codex_activity_insights,
             force_refresh=refresh,
         )

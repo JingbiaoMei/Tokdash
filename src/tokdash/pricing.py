@@ -78,6 +78,31 @@ class PricingDatabase:
             sig.append((str(ov), 0, ""))
         return tuple(sig)
 
+    def content_signature(self) -> tuple[str, str, int, str]:
+        """Identify the effective pricing file by content, independent of install metadata.
+
+        Persistent parse caches use this instead of ``signature()`` so reinstalling an
+        unchanged wheel does not invalidate every stored session merely because the
+        packaged file received a new path or mtime. The source marker preserves the
+        authoritative-override contract, and invalid overrides fall back exactly as
+        ``load()`` does.
+        """
+        for source, path in (("override", self.override_path()), ("baseline", self.db_path)):
+            try:
+                raw = path.read_bytes()
+                data = json.loads(raw)
+            except (OSError, ValueError, TypeError):
+                continue
+            if not isinstance(data, dict) or not isinstance(data.get("models"), dict):
+                continue
+            return (
+                "pricing-content-v1",
+                source,
+                len(raw),
+                hashlib.blake2b(raw, digest_size=16).hexdigest(),
+            )
+        return ("pricing-content-v1", "missing", 0, "")
+
     def _load_file(self, path: Path):
         """Parse one pricing file. Returns (models, aliases), or None if absent/invalid.
 

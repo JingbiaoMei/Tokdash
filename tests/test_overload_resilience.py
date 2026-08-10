@@ -134,7 +134,7 @@ def test_cold_same_key_waiters_fail_fast_instead_of_blocking_workers():
 
 
 def test_stale_value_served_while_refresh_in_flight():
-    """A stale entry is returned immediately to readers while one thread refreshes."""
+    """The first stale reader returns immediately while one daemon refreshes."""
     api._cache["k2"] = (datetime.now().timestamp() - (api.CACHE_TTL + 10), "stale")
     calls = []
     started = threading.Event()
@@ -146,24 +146,37 @@ def test_stale_value_served_while_refresh_in_flight():
         release.wait(timeout=5)
         return "fresh"
 
-    refreshed: dict[str, str] = {}
-
-    def refresher():
-        refreshed["v"] = api.get_cached_or_fetch("k2", slow_fetch)
-
-    rt = threading.Thread(target=refresher)
-    rt.start()
+    started_at = time.monotonic()
+    assert api.get_cached_or_fetch("k2", slow_fetch) == "stale"
+    assert time.monotonic() - started_at < 0.2
     assert started.wait(timeout=5)
 
-    # While the refresh is in flight, a reader gets the stale value without blocking
-    # and without triggering a second compute.
+    # Readers keep getting stale without blocking or triggering another compute.
     assert api.get_cached_or_fetch("k2", slow_fetch) == "stale"
 
     release.set()
-    rt.join(timeout=5)
-    assert refreshed["v"] == "fresh"
+    deadline = time.monotonic() + 5
+    while api._cache["k2"][1] != "fresh" and time.monotonic() < deadline:
+        time.sleep(0.01)
     assert len(calls) == 1
     assert api._cache["k2"][1] == "fresh"
+
+
+def test_response_cache_and_idle_key_locks_are_bounded(monkeypatch):
+    monkeypatch.setattr(api, "CACHE_MAX_ENTRIES", 2)
+
+    assert api.get_cached_or_fetch("first", lambda: 1) == 1
+    assert api.get_cached_or_fetch("second", lambda: 2) == 2
+    # Touch first so second is the LRU entry.
+    assert api.get_cached_or_fetch("first", lambda: 99) == 1
+    assert api.get_cached_or_fetch("third", lambda: 3) == 3
+
+    assert list(api._cache) == ["first", "third"]
+    assert len(api._key_locks) <= 2
+
+    api._clear_cache()
+    assert not api._cache
+    assert not api._key_locks
 
 
 def test_failed_compute_propagates_and_does_not_poison_cache():
@@ -180,6 +193,60 @@ def test_failed_compute_propagates_and_does_not_poison_cache():
 
     state["fail"] = False
     assert api.get_cached_or_fetch("k3", fetch) == "ok"  # retry recomputes cleanly
+
+
+def test_failed_fill_unlock_and_registry_cleanup_are_atomic():
+    """A released failed-fill lock cannot be acquired while still registered."""
+    released = threading.Event()
+    finish_release = threading.Event()
+    contender_done = threading.Event()
+
+    class PausingReleaseLock:
+        def __init__(self):
+            self._lock = threading.Lock()
+            self._lock.acquire()
+
+        def acquire(self, blocking=True):
+            return self._lock.acquire(blocking=blocking)
+
+        def release(self):
+            self._lock.release()
+            released.set()
+            assert finish_release.wait(timeout=5)
+
+        def locked(self):
+            return self._lock.locked()
+
+    key = "failed-fill-release-race"
+    lock = PausingReleaseLock()
+    with api._cache_guard:
+        api._key_locks[key] = lock
+
+    releaser = threading.Thread(target=api._release_key_lock, args=(key, lock))
+    contender_result = {}
+
+    def contend():
+        contender_result["lock"], contender_result["acquired"] = api._try_key_lock(key)
+        contender_done.set()
+
+    contender = threading.Thread(target=contend)
+    releaser.start()
+    assert released.wait(timeout=5)
+    contender.start()
+    try:
+        # _release_key_lock still owns _cache_guard, so lookup cannot observe
+        # the just-unlocked mutex before its failed-fill entry is removed.
+        assert not contender_done.wait(timeout=0.2)
+    finally:
+        finish_release.set()
+
+    releaser.join(timeout=5)
+    contender.join(timeout=5)
+    assert not releaser.is_alive()
+    assert not contender.is_alive()
+    assert contender_result["acquired"] is True
+    assert contender_result["lock"] is not lock
+    api._release_key_lock(key, contender_result["lock"])
 
 
 def test_inflight_compute_after_cache_clear_does_not_repopulate_stale_value():

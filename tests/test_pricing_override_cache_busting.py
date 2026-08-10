@@ -21,6 +21,30 @@ def _write_override() -> None:
     ov.write_text(json.dumps({"models": {"foo": {"input": 999.0, "output": 999.0}}}), encoding="utf-8")
 
 
+def test_pricing_content_signature_ignores_reinstall_metadata(tmp_path):
+    baseline = tmp_path / "pricing_db.json"
+    baseline.write_text(
+        json.dumps({"models": {"foo": {"input": 1, "output": 2}}}),
+        encoding="utf-8",
+    )
+    pricing = PricingDatabase(
+        db_path=baseline,
+        override_path=tmp_path / "missing-override.json",
+    )
+    before = pricing.content_signature()
+
+    stat = baseline.stat()
+    os.utime(baseline, ns=(stat.st_atime_ns, stat.st_mtime_ns + 5_000_000_000))
+    assert pricing.content_signature() == before
+
+    # Same-length content changes still invalidate the identity.
+    baseline.write_text(
+        json.dumps({"models": {"foo": {"input": 9, "output": 2}}}),
+        encoding="utf-8",
+    )
+    assert pricing.content_signature() != before
+
+
 def test_coding_tools_pricing_signature_busts_on_override():
     pdb = PricingDatabase()
     parser = ClaudeParser(pdb)

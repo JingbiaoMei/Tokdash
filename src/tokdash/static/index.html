@@ -4744,7 +4744,7 @@
     async function fetchSessionsResponses(customDays, dateFrom, dateTo) {
       const responses = {};
       const errors = {};
-      for (const tool of SESSION_TOOL_KEYS) {
+      const fetchTool = async (tool) => {
         const requestKey = sessionRequestKeyFor(tool, customDays, dateFrom, dateTo);
         try {
           const serverRows = await fetchSelectedServers(sessionUrlForTool(tool, customDays, dateFrom, dateTo));
@@ -4774,7 +4774,14 @@
             };
           }
         }
-      }
+      };
+      // Match the API's default heavy-compute capacity: overlap the slow tools without
+      // firing enough distinct cold keys to trigger cache backpressure on startup.
+      const queue = [...SESSION_TOOL_KEYS];
+      const worker = async () => {
+        while (queue.length) await fetchTool(queue.shift());
+      };
+      await Promise.all(Array.from({ length: Math.min(2, queue.length) }, worker));
       responses.combined = buildCombinedSessionsData(responses);
       responses._errors = errors;
       return responses;

@@ -130,6 +130,10 @@ def test_multi_server_contract_is_client_only_and_service_worker_is_same_origin(
     assert "tokdash-servers" in source
     assert "tokdash-server-selection" in source
     assert "Promise.allSettled" in source
+    assert "Math.min(2, queue.length)" in source
+    assert "await Promise.all(Array.from" in source
+    assert "currentStartDate = today;" in source
+    assert "date_from=${encodeURIComponent(dateFrom)}&date_to=${encodeURIComponent(dateTo)}" in source
     assert "Add anyway" not in source and "仍然添加" not in source
     assert "await probeServer(baseUrl)" in source
     assert "fetchJson(candidate, '/health'" in source

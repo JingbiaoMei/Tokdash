@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sqlite3
 
@@ -575,6 +576,65 @@ def test_usage_store_session_records_are_synced_and_retained(tmp_path):
     assert store.query_session_records("codex")[0]["session_id"] == "s1"
 
 
+def test_session_record_date_window_filters_before_json_deserialization(monkeypatch, tmp_path):
+    store = UsageEntryStore(tmp_path / "usage.sqlite3")
+    files = tuple((str(tmp_path / f"{name}.jsonl"), index, 100) for index, name in enumerate(("old", "current", "future"), start=1))
+    records = {
+        files[0][0]: {
+            "tool": "claude",
+            "session_id": "old",
+            "display_name": "OLD_SENTINEL",
+            "turns": [{"timestamp_ms": 100, "tokens": 1}],
+        },
+        files[1][0]: {
+            "tool": "claude",
+            "session_id": "current",
+            "display_name": "CURRENT_SENTINEL",
+            "turns": [{"timestamp_ms": 250, "tokens": 2}],
+        },
+        files[2][0]: {
+            "tool": "claude",
+            "session_id": "future",
+            "display_name": "FUTURE_SENTINEL",
+            "turns": [{"timestamp_ms": 400, "tokens": 3}],
+        },
+    }
+    assert store.sync_session_files(
+        "claude",
+        files,
+        parser={"v": 1},
+        parse_file_session=lambda file_sig: records[file_sig[0]],
+    )
+
+    original_loads = usage_store_module.json.loads
+
+    def guarded_loads(value):
+        assert "OLD_SENTINEL" not in value
+        assert "FUTURE_SENTINEL" not in value
+        return original_loads(value)
+
+    monkeypatch.setattr(usage_store_module.json, "loads", guarded_loads)
+    window = store.query_session_records("claude", since_ms=200, until_ms=300)
+    assert [record["session_id"] for record in window] == ["current"]
+
+
+def test_persistent_session_failure_is_logged_before_source_fallback(monkeypatch, caplog):
+    monkeypatch.setattr(sessions_module, "persistent_usage_db_enabled", lambda: True)
+    monkeypatch.setattr(
+        sessions_module,
+        "_stored_sessions_for_tool",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("broken cache")),
+    )
+    monkeypatch.setattr(sessions_module, "_claude_sessions", lambda: {"fallback": {}})
+
+    with caplog.at_level(logging.WARNING, logger="tokdash.sessions"):
+        result = sessions_module._raw_sessions_for_tool("claude", since_ms=100, until_ms=200)
+
+    assert result == {"fallback": {}}
+    assert "persistent session cache failed tool=claude" in caplog.text
+    assert "broken cache" in caplog.text
+
+
 def test_session_activity_is_stored_separately_from_session_raw_json(tmp_path):
     store = UsageEntryStore(tmp_path / "usage.sqlite3")
     path = str(tmp_path / "session.jsonl")
@@ -669,7 +729,7 @@ def test_schema_five_migrates_activity_column_without_losing_session_rows(tmp_pa
                 missing, signature, updated_at_ms, raw_json
             ) VALUES ('codex', 'legacy', '/missing.jsonl', 1, 2, 2, 1, 'old', 3, ?)
             """,
-            (json.dumps({"session_id": "legacy", "turns": [{"tokens": 7}]}),),
+            (json.dumps({"session_id": "legacy", "turns": [{"timestamp_ms": 123, "tokens": 7}]}),),
         )
         conn.commit()
 
@@ -694,9 +754,14 @@ def test_schema_five_migrates_activity_column_without_losing_session_rows(tmp_pa
         raw_json = conn.execute(
             "SELECT raw_json FROM session_records WHERE session_id = 'legacy'"
         ).fetchone()[0]
-    assert "activity_json" in columns
-    assert schema_version == "6"
+    assert {"activity_json", "started_at_ms", "last_seen_at_ms"}.issubset(columns)
+    assert schema_version == "7"
     assert json.loads(raw_json)["turns"][0]["tokens"] == 7
+    with sqlite3.connect(db_path) as conn:
+        bounds = conn.execute(
+            "SELECT started_at_ms, last_seen_at_ms FROM session_records WHERE session_id = 'legacy'"
+        ).fetchone()
+    assert bounds == (123, 123)
 
 
 def test_session_activity_sync_parses_only_changed_files(tmp_path):
@@ -803,6 +868,101 @@ def test_parser_code_signature_unwraps_lru_cache_functions():
     signature = parser_code_signature(parser_fn)
 
     assert signature["object"].endswith(".parser_fn")
+
+
+def test_session_file_parser_signatures_are_explicit_and_v159_compatible(monkeypatch):
+    expected_token = "422eaad7926b4c5362a3c6d7cbcad86dc8244cb8"
+
+    codex = sessions_module._session_file_parser_signature(
+        "_parse_codex_session_file"
+    )
+    claude = sessions_module._session_file_parser_signature(
+        "_parse_claude_session_file"
+    )
+
+    assert codex == {
+        "object": "tokdash.sessions._parse_codex_session_file",
+        "content_sha1": expected_token,
+    }
+    assert claude == {
+        "object": "tokdash.sessions._parse_claude_session_file",
+        "content_sha1": expected_token,
+    }
+
+    # Unrelated sessions.py changes used to alter both signatures because the
+    # entire module was hashed. The persistent parser token no longer consults
+    # that module hash.
+    monkeypatch.setattr(
+        sessions_module,
+        "parser_code_signature",
+        lambda _obj: {"object": "changed", "content_sha1": "changed"},
+    )
+    assert sessions_module._session_file_parser_signature(
+        "_parse_codex_session_file"
+    ) == codex
+    assert sessions_module._session_file_parser_signature(
+        "_parse_claude_session_file"
+    ) == claude
+
+
+def test_v159_session_signature_upgrade_resigns_without_reparse(tmp_path):
+    store = UsageEntryStore(tmp_path / "usage.sqlite3")
+    session_path = str(tmp_path / "session.jsonl")
+    files = ((session_path, 123, 456),)
+    content_pricing = sessions_module._session_pricing_content_signature()
+    assert content_pricing == sessions_module._V159_BASELINE_PRICING_CONTENT_SIGNATURE
+
+    # This is the v1.5.9 shape. A wheel reinstall changes its packaged path or
+    # mtime even when the pricing bytes and parsed session output are identical.
+    legacy_pricing = (
+        ("/old/site-packages/tokdash/pricing_db.json", 111, content_pricing[2]),
+        (str(tmp_path / "pricing_db.json"), 0, ""),
+    )
+    legacy_parser = sessions_module._codex_session_parser_signature(legacy_pricing)
+    content_parser = sessions_module._codex_session_parser_signature(content_pricing)
+    calls = 0
+
+    def parse(_file_sig):
+        nonlocal calls
+        calls += 1
+        return {
+            "session_id": "session-1",
+            "turns": [{"timestamp_ms": 123, "tokens": 1}],
+        }
+
+    assert store.sync_session_files(
+        "codex", files, parser=legacy_parser, parse_file_session=parse
+    )
+    assert calls == 1
+
+    # The format migration updates the stored signature but reuses raw_json.
+    assert store.sync_session_files(
+        "codex",
+        files,
+        parser=content_parser,
+        parse_file_session=parse,
+        signature_compatible=sessions_module._session_signature_compatible,
+    )
+    assert calls == 1
+    assert not store.sync_session_files(
+        "codex",
+        files,
+        parser=content_parser,
+        parse_file_session=parse,
+        signature_compatible=sessions_module._session_signature_compatible,
+    )
+    assert calls == 1
+
+    # A real pricing-content change remains an invalidation and must reparse.
+    changed_pricing = (*content_pricing[:3], "different-content")
+    assert store.sync_session_files(
+        "codex",
+        files,
+        parser=sessions_module._codex_session_parser_signature(changed_pricing),
+        parse_file_session=parse,
+        signature_compatible=sessions_module._session_signature_compatible,
+    )
+    assert calls == 2
 
 
 def _load_fn_from_module_file(path: Path, module_name: str):

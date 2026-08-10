@@ -493,7 +493,7 @@ def test_quota_schema_migrates_v4_database(tmp_path):
 
     status = UsageEntryStore(db_path).status()
 
-    assert status["meta"]["schema_version"] == "6"
+    assert status["meta"]["schema_version"] == "7"
     assert status["quota_snapshots"] == 0
     with sqlite3.connect(db_path) as conn:
         assert conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='quota_snapshots'").fetchone()

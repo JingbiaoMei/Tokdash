@@ -3750,6 +3750,31 @@
       return `${formatCalendarFooterDate(start)}-${formatCalendarFooterDate(end)}`;
     }
 
+    function sameLocalDate(left, right) {
+      if (!left || !right) return false;
+      return left.getFullYear() === right.getFullYear()
+        && left.getMonth() === right.getMonth()
+        && left.getDate() === right.getDate();
+    }
+
+    function formatDateRangeDate(date, lang = currentLang) {
+      if (!date) return '';
+      if (lang === 'zh') {
+        return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
+      }
+      const month = new Intl.DateTimeFormat('en-US', { month: 'short' }).format(date);
+      return `${month} ${date.getDate()}, ${date.getFullYear()}`;
+    }
+
+    function formatDateRangeTriggerText(startDate, endDate, lang = currentLang) {
+      const start = startDate || endDate;
+      const end = endDate || startDate;
+      if (!start || !end) return '';
+      const startText = formatDateRangeDate(start, lang);
+      if (sameLocalDate(start, end)) return startText;
+      return `${startText} – ${formatDateRangeDate(end, lang)}`;
+    }
+
     function syncDatePickerFooter() {
       if (!flatpickrInstance?.calendarContainer) return;
       const summary = flatpickrInstance.calendarContainer.querySelector('.flatpickr-footer-summary');

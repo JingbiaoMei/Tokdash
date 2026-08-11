@@ -366,6 +366,13 @@
       padding: 6px 10px;
     }
 
+    /* Most themes give .surface a backdrop-filter, which makes every card its own
+       stacking context. The topbar's popovers are then trapped inside the topbar card
+       and paint under the cards that follow it, whatever z-index they carry. Only the
+       themes that drop the blur (paper, brutalist) escaped this. Lift the topbar card
+       itself so its popovers clear the content below. */
+    header.surface { position: relative; z-index: 40; }
+
     .settings-menu { position: relative; }
     .settings-trigger { gap: 7px; }
     .settings-trigger svg { flex: 0 0 auto; }

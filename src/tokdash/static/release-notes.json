@@ -1,6 +1,19 @@
 {
-  "current": "1.6.2",
+  "current": "1.6.3",
   "releases": [
+    {
+      "version": "1.6.3",
+      "date": "2026-08-12",
+      "sections": [
+        {
+          "type": "fixed",
+          "items": [
+            "Preserved persistent usage caches across unchanged package upgrades while retaining invalidation for pricing data and calculation changes.",
+            "Removed duplicate empty quota history panels from multi-server dashboard views."
+          ]
+        }
+      ]
+    },
     {
       "version": "1.6.2",
       "date": "2026-08-12",

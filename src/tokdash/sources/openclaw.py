@@ -13,6 +13,7 @@ try:
         UsageEntryStore,
         build_source_signature,
         parser_code_signature,
+        persistent_pricing_signature,
         persistent_usage_db_enabled,
     )
 except ImportError:  # pragma: no cover
@@ -21,6 +22,7 @@ except ImportError:  # pragma: no cover
     UsageEntryStore = None  # type: ignore
     build_source_signature = None  # type: ignore
     parser_code_signature = None  # type: ignore
+    persistent_pricing_signature = None  # type: ignore
 
     def persistent_usage_db_enabled() -> bool:  # type: ignore
         return False
@@ -243,9 +245,7 @@ def _collect_entries(session_dirs: list[str]) -> List[Dict[str, Any]]:
 def _pricing_signature(pricing_db: PricingDatabase) -> tuple:
     # Cover BOTH the packaged baseline AND the data-dir override (PricingDatabase.signature()
     # stats both and is OSError-safe). A dashboard pricing edit writes only the override, so
-    # statting the baseline alone would never bust this cache — and because this same
-    # signature gates the persistent SQLite usage store, the stale costs would survive a
-    # process restart until a source log file changed on disk.
+    # statting the baseline alone would never notice the edit.
     try:
         return tuple(pricing_db.signature())
     except (OSError, AttributeError):
@@ -309,7 +309,7 @@ def _sync_openclaw_store(session_dirs: list[str], pricing_db: PricingDatabase) -
     store = UsageEntryStore()
     signature = build_source_signature(  # type: ignore[misc]
         files=sig,
-        pricing=_pricing_signature(pricing_db),
+        pricing=persistent_pricing_signature(pricing_db),
         parser=parser_code_signature(_collect_normalized_entries),  # type: ignore[misc]
     )
     store.sync_source(

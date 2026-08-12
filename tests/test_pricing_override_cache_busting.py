@@ -1,14 +1,17 @@
-"""Regression: a dashboard pricing edit writes ONLY the data-dir override, so the
-coding-tools and OpenClaw cache-busting signatures must cover the override too.
+"""Regression coverage for runtime and persistent pricing cache identities.
 
-Before the fix these signatures stat'd only the packaged baseline (``pricing_db.db_path``),
-so an edit never changed them — the in-memory entry caches AND the persistent usage store
-(which key on the same signature) kept serving costs computed at the OLD prices.
+Runtime caches use file metadata plus override content so out-of-band edits are noticed
+immediately. Persistent stores use effective pricing content plus the pricing implementation
+so unchanged reinstalls remain fast while real data or cost-calculation changes rebuild rows.
 """
 import json
 import os
+from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import tokdash.api as api
+import tokdash.compute as compute_module
+import tokdash.usage_store as usage_store_module
 from tokdash.onboard import paths
 from tokdash.pricing import PricingDatabase
 from tokdash.sources import openclaw
@@ -19,6 +22,31 @@ def _write_override() -> None:
     ov = paths.pricing_db_override_path()
     ov.parent.mkdir(parents=True, exist_ok=True)
     ov.write_text(json.dumps({"models": {"foo": {"input": 999.0, "output": 999.0}}}), encoding="utf-8")
+
+
+def _installed_pricing_db(root, input_rate: float, mtime: float) -> PricingDatabase:
+    root.mkdir(parents=True, exist_ok=True)
+    baseline = root / "pricing_db.json"
+    baseline.write_text(
+        json.dumps(
+            {
+                "models": {
+                    "foo": {
+                        "input": input_rate,
+                        "output": 2.0,
+                        "unit": "per_million_tokens",
+                    }
+                }
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    os.utime(baseline, (mtime, mtime))
+    return PricingDatabase(
+        db_path=baseline,
+        override_path=root / "missing-override.json",
+    )
 
 
 def test_pricing_content_signature_ignores_reinstall_metadata(tmp_path):
@@ -64,6 +92,165 @@ def test_openclaw_pricing_signature_busts_on_override():
     after = openclaw._pricing_signature(pdb)
     assert before != after
     assert after == tuple(pdb.signature())
+
+
+def test_coding_tools_persistent_store_survives_identical_reinstall(monkeypatch, tmp_path):
+    first_db = _installed_pricing_db(tmp_path / "install-v1", 1.0, 1_700_000_000)
+    reinstalled_db = _installed_pricing_db(tmp_path / "install-v2", 1.0, 1_800_000_000)
+    changed_db = _installed_pricing_db(tmp_path / "install-v3", 9.0, 1_900_000_000)
+
+    file_sig = ((str(tmp_path / "usage.jsonl"), 123, 456),)
+    parse_calls: list[str] = []
+
+    def tracker_for(pricing_db: PricingDatabase):
+        parser = ClaudeParser(pricing_db)
+        parser._file_signatures = lambda: file_sig
+
+        def parse_all():
+            parse_calls.append(str(pricing_db.db_path))
+            return [
+                {
+                    "source": "claude",
+                    "model": "foo",
+                    "provider": "anthropic",
+                    "timestamp": 1_700_000_000_000,
+                    "input": 10,
+                    "output": 5,
+                    "cost": 0.0,
+                }
+            ]
+
+        parser._parse_all = parse_all
+        tracker = type("Tracker", (), {})()
+        tracker.pricing_db = pricing_db
+        tracker.parsers = {"claude": parser}
+        return tracker, parser
+
+    first_tracker, first_parser = tracker_for(first_db)
+    reinstalled_tracker, reinstalled_parser = tracker_for(reinstalled_db)
+    changed_tracker, changed_parser = tracker_for(changed_db)
+
+    assert first_parser._pricing_signature() != reinstalled_parser._pricing_signature()
+    assert usage_store_module.persistent_pricing_signature(
+        first_db
+    ) == usage_store_module.persistent_pricing_signature(reinstalled_db)
+    assert usage_store_module.persistent_pricing_signature(
+        first_db
+    ) != usage_store_module.persistent_pricing_signature(changed_db)
+
+    compute_module._sync_usage_store(first_tracker)
+    compute_module._sync_usage_store(reinstalled_tracker)
+    assert len(parse_calls) == 1
+
+    original_code_signature = usage_store_module.parser_code_signature
+
+    def changed_pricing_implementation(obj):
+        signature = original_code_signature(obj)
+        if obj is PricingDatabase:
+            return {**signature, "content_sha1": "changed-pricing-implementation"}
+        return signature
+
+    monkeypatch.setattr(
+        usage_store_module,
+        "parser_code_signature",
+        changed_pricing_implementation,
+    )
+    compute_module._sync_usage_store(reinstalled_tracker)
+    assert len(parse_calls) == 2
+
+    compute_module._sync_usage_store(changed_tracker)
+    assert len(parse_calls) == 3
+
+
+def test_coding_tools_computes_persistent_pricing_signature_once_per_tracker(monkeypatch):
+    sync_calls: list[str] = []
+    pricing_calls: list[object] = []
+
+    class FakeStore:
+        def sync_files(self, source, _files, **_kwargs):
+            sync_calls.append(source)
+
+    pricing_db = object()
+    capability = SimpleNamespace(mode="file_replace", append_jsonl=False)
+    parsers = {
+        name: SimpleNamespace(
+            sync_capability=capability,
+            _file_signatures=lambda: (),
+        )
+        for name in ("claude", "codex", "gemini_cli")
+    }
+    tracker = SimpleNamespace(pricing_db=pricing_db, parsers=parsers)
+
+    monkeypatch.setattr(compute_module, "UsageEntryStore", FakeStore)
+    monkeypatch.setattr(
+        compute_module,
+        "persistent_pricing_signature",
+        lambda value: pricing_calls.append(value) or {"pricing": "signature"},
+    )
+
+    compute_module._sync_usage_store(tracker)
+
+    assert pricing_calls == [pricing_db]
+    assert sync_calls == ["claude", "codex", "gemini_cli"]
+
+
+def test_openclaw_persistent_store_survives_identical_reinstall(monkeypatch, tmp_path):
+    first_db = _installed_pricing_db(tmp_path / "openclaw-v1", 1.0, 1_700_000_000)
+    reinstalled_db = _installed_pricing_db(tmp_path / "openclaw-v2", 1.0, 1_800_000_000)
+    changed_db = _installed_pricing_db(tmp_path / "openclaw-v3", 9.0, 1_900_000_000)
+
+    sessions_dir = tmp_path / "sessions"
+    sessions_dir.mkdir()
+    (sessions_dir / "session.jsonl").write_text("{}\n", encoding="utf-8")
+    parse_calls: list[str] = []
+
+    def collect_entries(_session_dirs):
+        parse_calls.append("parsed")
+        return [
+            {
+                "msg_dt": datetime(2026, 8, 12, tzinfo=timezone.utc),
+                "model": "foo",
+                "input_raw": 10,
+                "cache_write": 0,
+                "output": 5,
+                "cache_read": 0,
+                "payload_cost": 0.0,
+                "entry_id": "openclaw:test-entry",
+            }
+        ]
+
+    monkeypatch.setattr(openclaw, "_collect_entries", collect_entries)
+
+    assert openclaw._pricing_signature(first_db) != openclaw._pricing_signature(reinstalled_db)
+    assert usage_store_module.persistent_pricing_signature(
+        first_db
+    ) == usage_store_module.persistent_pricing_signature(reinstalled_db)
+    assert usage_store_module.persistent_pricing_signature(
+        first_db
+    ) != usage_store_module.persistent_pricing_signature(changed_db)
+
+    openclaw._sync_openclaw_store([str(sessions_dir)], first_db)
+    openclaw._sync_openclaw_store([str(sessions_dir)], reinstalled_db)
+    assert len(parse_calls) == 1
+
+    original_code_signature = usage_store_module.parser_code_signature
+
+    def changed_pricing_implementation(obj):
+        signature = original_code_signature(obj)
+        if obj is PricingDatabase:
+            return {**signature, "content_sha1": "changed-pricing-implementation"}
+        return signature
+
+    monkeypatch.setattr(
+        usage_store_module,
+        "parser_code_signature",
+        changed_pricing_implementation,
+    )
+    openclaw._sync_openclaw_store([str(sessions_dir)], reinstalled_db)
+    assert len(parse_calls) == 2
+
+    openclaw._sync_openclaw_store([str(sessions_dir)], changed_db)
+    assert len(parse_calls) == 3
 
 
 def test_sessions_singleton_reloads_when_override_changes_out_of_band():

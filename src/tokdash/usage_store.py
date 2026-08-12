@@ -382,6 +382,23 @@ def parser_code_signature(obj: Any) -> dict[str, Any]:
         return {"object": obj.__class__.__name__}
 
 
+def persistent_pricing_signature(pricing_db: PricingDatabase) -> dict[str, Any]:
+    """Identify effective pricing data and the code that interprets it.
+
+    Persistent rows contain computed costs, so they must be invalidated when either the
+    pricing content or ``PricingDatabase`` implementation changes. Both components are
+    content-based so reinstall paths and mtimes do not affect the identity.
+    """
+    try:
+        content = tuple(pricing_db.content_signature())
+    except (OSError, AttributeError, ValueError, TypeError):
+        content = ("pricing-content-v1", "missing", 0, "")
+    return {
+        "content": content,
+        "implementation": parser_code_signature(PricingDatabase),
+    }
+
+
 def build_source_signature(*, files: Any, pricing: Any = None, parser: Any = None, extra: Any = None) -> str:
     return stable_json(
         {

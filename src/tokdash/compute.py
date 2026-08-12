@@ -20,6 +20,7 @@ from .usage_store import (
     UsageEntryStore,
     build_source_signature,
     parser_code_signature,
+    persistent_pricing_signature,
     persistent_usage_db_enabled,
 )
 
@@ -137,11 +138,11 @@ def _collect_parser_tail(parser: Any, file_sig: tuple[str, int, int], start_offs
 def _sync_usage_store(tracker: CodingToolsUsageTracker) -> tuple[UsageEntryStore, list[str]]:
     store = UsageEntryStore()
     selected = _usage_store_sources(tracker)
+    pricing = persistent_pricing_signature(tracker.pricing_db)
     for name in selected:
         parser = tracker.parsers[name]
         capability = getattr(parser, "sync_capability")
         files = parser._file_signatures()
-        pricing = parser._pricing_signature()
         parser_sig = parser_code_signature(parser)
         if capability.mode == "file_replace":
             store.sync_files(

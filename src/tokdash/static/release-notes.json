@@ -1,6 +1,18 @@
 {
-  "current": "1.6.3",
+  "current": "1.6.4",
   "releases": [
+    {
+      "version": "1.6.4",
+      "date": "2026-08-12",
+      "sections": [
+        {
+          "type": "fixed",
+          "items": [
+            "Replaced the quick-range horizontal scrollbar with a responsive More ranges disclosure that keeps the selected preset visible."
+          ]
+        }
+      ]
+    },
     {
       "version": "1.6.3",
       "date": "2026-08-12",

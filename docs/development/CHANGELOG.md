@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+## 1.6.4 - 2026-08-12
+
+### Fixed
+
+- Replaced the quick-range horizontal scrollbar with a responsive, keyboard-accessible disclosure that keeps the active preset visible.
+
 ## 1.6.3 - 2026-08-12
 
 ### Fixed

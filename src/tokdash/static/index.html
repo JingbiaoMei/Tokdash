@@ -4684,6 +4684,25 @@
       hermes: { icon: '/static/icons/agents/hermes.png', color: '#111111', fallback: 'H', darkInvert: true },
       mimo: { icon: '/static/icons/agents/mimo.svg', color: '#FF6900', fallback: 'M', logoKind: 'wordmark' },
     });
+    const toolBrandIconPromises = new Map();
+
+    function loadToolBrandIcon(iconPath) {
+      const iconUrl = appAssetWithBase(iconPath);
+      if (!toolBrandIconPromises.has(iconUrl)) {
+        const request = fetch(iconUrl)
+          .then((response) => {
+            if (!response.ok) throw new Error(`Tool icon request failed: ${response.status}`);
+            return response.blob();
+          })
+          .then((blob) => URL.createObjectURL(blob))
+          .catch((error) => {
+            toolBrandIconPromises.delete(iconUrl);
+            throw error;
+          });
+        toolBrandIconPromises.set(iconUrl, request);
+      }
+      return toolBrandIconPromises.get(iconUrl);
+    }
 
     function normalizeToolBrandKey(tool) {
       const key = String(tool || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
@@ -4724,16 +4743,18 @@
       fallback.className = 'tool-brand-fallback';
       fallback.textContent = meta.fallback;
 
+      icon.appendChild(fallback);
       if (meta.icon) {
-        const image = document.createElement('img');
-        image.src = appAssetWithBase(meta.icon);
-        image.alt = '';
-        image.loading = 'lazy';
-        image.decoding = 'async';
-        image.addEventListener('error', () => icon.replaceChildren(fallback), { once: true });
-        icon.appendChild(image);
-      } else {
-        icon.appendChild(fallback);
+        loadToolBrandIcon(meta.icon).then((iconUrl) => {
+          if (!icon.isConnected) return;
+          const image = document.createElement('img');
+          image.src = iconUrl;
+          image.alt = '';
+          image.loading = 'lazy';
+          image.decoding = 'async';
+          image.addEventListener('error', () => icon.replaceChildren(fallback), { once: true });
+          icon.replaceChildren(image);
+        }).catch(() => {});
       }
 
       const label = document.createElement('span');

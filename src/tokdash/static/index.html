@@ -377,7 +377,6 @@
       display: grid;
       grid-template-areas:
         "picker"
-        "quick"
         "actions";
       gap: 14px 18px;
       align-items: start;
@@ -476,12 +475,22 @@
     }
 
     .quick-range-panel {
-      grid-area: quick;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      align-items: flex-start;
+      display: grid;
+      grid-template-columns: repeat(10, minmax(0, 1fr));
+      gap: 8px;
+      align-items: stretch;
+      width: 100%;
+      margin-top: 16px;
       min-width: 0;
+    }
+
+    .quick-range-btn {
+      width: 100%;
+      min-width: 0;
+      min-height: 32px;
+      padding: 4px 6px;
+      font-size: 12px;
+      white-space: nowrap;
     }
 
     .topbar-actions {
@@ -571,6 +580,16 @@
       .overview-token-exact-tooltip { max-width: min(260px, calc(100vw - 40px)); overflow: hidden; text-overflow: ellipsis; }
     }
 
+    @media (max-width: 1023px) {
+      .quick-range-panel {
+        grid-template-columns: repeat(10, minmax(88px, 1fr));
+        overflow-x: auto;
+        overscroll-behavior-inline: contain;
+        padding-bottom: 4px;
+        scrollbar-width: thin;
+      }
+    }
+
     @media (prefers-reduced-motion: reduce) {
       .date-range-trigger,
       .date-range-chevron,
@@ -655,9 +674,7 @@
     @media (min-width: 1024px) {
       .topbar-control-rail {
         grid-template-columns: minmax(0, 1fr) auto;
-        grid-template-areas:
-          "picker actions"
-          "quick actions";
+        grid-template-areas: "picker actions";
       }
 
       .topbar-actions {
@@ -1506,20 +1523,6 @@
             </div>
           </div>
 
-          <!-- Quick Range Buttons -->
-          <div class="quick-range-panel">
-            <button type="button" class="btn btn-ghost quick-range-btn" data-range="today" aria-pressed="true" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="today">Today</button>
-            <button type="button" class="btn btn-ghost quick-range-btn" data-range="yesterday" aria-pressed="false" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="yesterday">Yesterday</button>
-            <button type="button" class="btn btn-ghost quick-range-btn" data-range="last7days" aria-pressed="false" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="last7days">Last 7 Days</button>
-            <button type="button" class="btn btn-ghost quick-range-btn" data-range="lastWeek" aria-pressed="false" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="lastWeek">Last Week</button>
-            <button type="button" class="btn btn-ghost quick-range-btn" data-range="last14days" aria-pressed="false" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="last14days">Last 14 Days</button>
-            <button type="button" class="btn btn-ghost quick-range-btn" data-range="last4weeks" aria-pressed="false" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="last4weeks">Last 4 Weeks</button>
-            <button type="button" class="btn btn-ghost quick-range-btn" data-range="thisMonth" aria-pressed="false" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="thisMonth">This Month</button>
-            <button type="button" class="btn btn-ghost quick-range-btn" data-range="lastMonth" aria-pressed="false" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="lastMonth">Last Month</button>
-            <button type="button" class="btn btn-ghost quick-range-btn" data-range="thisYear" aria-pressed="false" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="thisYear">This Year</button>
-            <button type="button" class="btn btn-ghost quick-range-btn" data-range="lastYear" aria-pressed="false" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="lastYear">Last Year</button>
-          </div>
-
           <div class="topbar-actions">
             <button id="refreshBtn" class="btn btn-primary" aria-label="Refresh dashboard">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -1613,6 +1616,20 @@
             </div>
           </div>
         </div>
+      </div>
+
+      <!-- Quick Range Buttons -->
+      <div class="quick-range-panel">
+        <button type="button" class="btn btn-ghost quick-range-btn" data-range="today" aria-pressed="true" data-i18n="today">Today</button>
+        <button type="button" class="btn btn-ghost quick-range-btn" data-range="yesterday" aria-pressed="false" data-i18n="yesterday">Yesterday</button>
+        <button type="button" class="btn btn-ghost quick-range-btn" data-range="last7days" aria-pressed="false" data-i18n="last7days">Last 7 Days</button>
+        <button type="button" class="btn btn-ghost quick-range-btn" data-range="lastWeek" aria-pressed="false" data-i18n="lastWeek">Last Week</button>
+        <button type="button" class="btn btn-ghost quick-range-btn" data-range="last14days" aria-pressed="false" data-i18n="last14days">Last 14 Days</button>
+        <button type="button" class="btn btn-ghost quick-range-btn" data-range="last4weeks" aria-pressed="false" data-i18n="last4weeks">Last 4 Weeks</button>
+        <button type="button" class="btn btn-ghost quick-range-btn" data-range="thisMonth" aria-pressed="false" data-i18n="thisMonth">This Month</button>
+        <button type="button" class="btn btn-ghost quick-range-btn" data-range="lastMonth" aria-pressed="false" data-i18n="lastMonth">Last Month</button>
+        <button type="button" class="btn btn-ghost quick-range-btn" data-range="thisYear" aria-pressed="false" data-i18n="thisYear">This Year</button>
+        <button type="button" class="btn btn-ghost quick-range-btn" data-range="lastYear" aria-pressed="false" data-i18n="lastYear">Last Year</button>
       </div>
 
       <!-- Tabs -->

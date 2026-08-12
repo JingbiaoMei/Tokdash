@@ -82,6 +82,21 @@ def test_date_range_trigger_markup_and_localization_contract() -> None:
     assert source.count("selectRange: '") == 2
 
 
+def test_quick_ranges_use_one_full_width_row() -> None:
+    source = INDEX_HTML.read_text(encoding="utf-8")
+    rail_start = source.index('<div class="topbar-control-rail">')
+    quick_start = source.index("<!-- Quick Range Buttons -->")
+    tabs_start = source.index("<!-- Tabs -->")
+
+    assert quick_start > rail_start
+    assert 'class="quick-range-panel"' not in source[rail_start:quick_start]
+    assert source[quick_start:tabs_start].count('class="btn btn-ghost quick-range-btn"') == 10
+    assert "grid-template-columns: repeat(10, minmax(0, 1fr));" in source
+    assert "grid-template-columns: repeat(10, minmax(88px, 1fr));" in source
+    assert "overflow-x: auto;" in source
+    assert "white-space: nowrap;" in source
+
+
 def test_date_range_state_sync_does_not_fetch() -> None:
     source = INDEX_HTML.read_text(encoding="utf-8")
     sync = _extract_js_function(source, "function syncDateRangeControl() {")

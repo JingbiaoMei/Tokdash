@@ -100,15 +100,18 @@
       color: var(--color-text);
     }
 
-    .tokdash-loading-placeholder {
+    .tokdash-loading-placeholder:has(> .tokdash-loading-label) {
       position: relative;
       min-height: 1.25em;
-      color: transparent !important;
       cursor: wait;
       overflow: hidden;
     }
 
-    .tokdash-loading-placeholder::after {
+    .tokdash-loading-placeholder > .tokdash-loading-label {
+      color: transparent !important;
+    }
+
+    .tokdash-loading-placeholder:has(> .tokdash-loading-label)::after {
       content: '';
       position: absolute;
       top: 50%;
@@ -780,7 +783,7 @@
     .overview-activity-insights[data-state="ready"] .overview-activity-insights-state{padding-top:3px;border-top:0;}.overview-activity-insights[data-state="ready"] .overview-activity-insights-values{display:grid;}.overview-activity-insights:not([data-state="ready"]) .overview-activity-insights-values{display:none;}
     @media(max-width:800px){.overview-profile-band{grid-template-columns:1fr;gap:14px;}.overview-profile-copy{padding:0 0 12px;border-right:0;border-bottom:1px solid color-mix(in srgb,var(--color-primary) 16%,var(--color-border));}.overview-profile-metrics{flex-wrap:wrap;}.overview-profile-heat-head{align-items:flex-start;flex-wrap:wrap;}.overview-profile-modes{margin-left:auto;}}
     @media(max-width:768px){.profile-activity-insights-kpis,.overview-activity-insights-values{grid-template-columns:repeat(2,minmax(0,1fr));}.profile-activity-insight-kpi:nth-child(3)::before,.overview-activity-insight-kpi:nth-child(3)::before{display:none;}.profile-activity-insights-detail{grid-template-columns:minmax(0,1fr);}}
-    @media(prefers-reduced-motion:reduce){.tokdash-loading-placeholder::after,.overview-profile-skeleton-metrics i,.overview-profile-skeleton-grid,.activity-insights-skeleton{animation:none;}.overview-profile-cell{transform:none!important;}}
+    @media(prefers-reduced-motion:reduce){.tokdash-loading-placeholder:has(> .tokdash-loading-label)::after,.overview-profile-skeleton-metrics i,.overview-profile-skeleton-grid,.activity-insights-skeleton{animation:none;}.overview-profile-cell{transform:none!important;}}
 
     .pricing-editor {
       width: 100%;
@@ -1379,7 +1382,7 @@
                 <path d="M2.5 6h7m-2.4-2.4L9.5 6 7.1 8.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
               </svg>
             </button>
-            <p id="lastUpdate" class="text-xs mt-2" style="color: var(--color-label);">Loading...</p>
+            <p id="lastUpdate" class="tokdash-loading-placeholder text-xs mt-2" style="color: var(--color-label);"><span class="tokdash-loading-label">Loading...</span></p>
           </div>
         </div>
 
@@ -1629,7 +1632,7 @@
             </div>
             <section id="overviewActivityInsights" class="overview-activity-insights" data-state="loading" aria-busy="true" aria-label="Activity insights">
               <dl id="overviewActivityInsightsValues" class="overview-activity-insights-values"></dl>
-              <p id="overviewActivityInsightsState" class="overview-activity-insights-state" aria-live="polite" data-i18n="loading">Loading…</p>
+              <p id="overviewActivityInsightsState" class="tokdash-loading-placeholder overview-activity-insights-state" aria-live="polite"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></p>
             </section>
           </div>
         </div>
@@ -1649,7 +1652,7 @@
               </tr>
             </thead>
             <tbody id="toolsTable">
-              <tr><td colspan="4" class="text-center py-10" style="color: var(--color-muted);" data-i18n="loading">Loading…</td></tr>
+              <tr><td colspan="4" class="tokdash-loading-placeholder text-center py-10" style="color: var(--color-muted);"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></td></tr>
             </tbody>
           </table>
         </div>
@@ -1658,7 +1661,7 @@
       <section class="surface p-5 mb-6">
         <h2 class="text-base font-extrabold mono mb-4" data-i18n="appsModelsBreakdown">Apps & Models Breakdown</h2>
         <div id="appsBreakdown">
-          <p class="text-center py-10" style="color: var(--color-muted);" data-i18n="loading">Loading…</p>
+          <p class="tokdash-loading-placeholder text-center py-10" style="color: var(--color-muted);"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></p>
         </div>
       </section>
 
@@ -1684,7 +1687,7 @@
               </tr>
             </thead>
             <tbody id="allModelsTable">
-              <tr><td colspan="8" class="text-center py-10" style="color: var(--color-muted);" data-i18n="loading">Loading…</td></tr>
+              <tr><td colspan="8" class="tokdash-loading-placeholder text-center py-10" style="color: var(--color-muted);"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></td></tr>
             </tbody>
           </table>
         </div>
@@ -1707,7 +1710,7 @@
         <div id="codexLatestSession" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4 mb-5">
           <div class="surface p-4">
             <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="latestSession">Latest Session</div>
-            <div id="codexLatestProject" class="mt-2 font-extrabold mono">Loading…</div>
+            <div id="codexLatestProject" class="tokdash-loading-placeholder mt-2 font-extrabold mono"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
             <div id="codexLatestMeta" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
           </div>
           <div class="surface p-4">
@@ -1750,7 +1753,7 @@
               </tr>
             </thead>
             <tbody id="codexSessionsTable">
-              <tr><td colspan="9" class="text-center py-10" style="color: var(--color-muted);" data-i18n="loading">Loading…</td></tr>
+              <tr><td colspan="9" class="tokdash-loading-placeholder text-center py-10" style="color: var(--color-muted);"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></td></tr>
             </tbody>
           </table>
         </div>
@@ -1766,7 +1769,7 @@
         <div id="claudeLatestSession" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4 mb-5">
           <div class="surface p-4">
             <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="latestSession">Latest Session</div>
-            <div id="claudeLatestProject" class="mt-2 font-extrabold mono">Loading…</div>
+            <div id="claudeLatestProject" class="tokdash-loading-placeholder mt-2 font-extrabold mono"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
             <div id="claudeLatestMeta" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
           </div>
           <div class="surface p-4">
@@ -1809,7 +1812,7 @@
               </tr>
             </thead>
             <tbody id="claudeSessionsTable">
-              <tr><td colspan="9" class="text-center py-10" style="color: var(--color-muted);" data-i18n="loading">Loading…</td></tr>
+              <tr><td colspan="9" class="tokdash-loading-placeholder text-center py-10" style="color: var(--color-muted);"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></td></tr>
             </tbody>
           </table>
         </div>
@@ -1825,7 +1828,7 @@
         <div id="opencodeLatestSession" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4 mb-5">
           <div class="surface p-4">
             <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="latestSession">Latest Session</div>
-            <div id="opencodeLatestProject" class="mt-2 font-extrabold mono">Loading…</div>
+            <div id="opencodeLatestProject" class="tokdash-loading-placeholder mt-2 font-extrabold mono"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
             <div id="opencodeLatestMeta" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
           </div>
           <div class="surface p-4">
@@ -1868,7 +1871,7 @@
               </tr>
             </thead>
             <tbody id="opencodeSessionsTable">
-              <tr><td colspan="9" class="text-center py-10" style="color: var(--color-muted);" data-i18n="loading">Loading…</td></tr>
+              <tr><td colspan="9" class="tokdash-loading-placeholder text-center py-10" style="color: var(--color-muted);"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></td></tr>
             </tbody>
           </table>
         </div>
@@ -1884,7 +1887,7 @@
         <div id="pi_agentLatestSession" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4 mb-5">
           <div class="surface p-4">
             <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="latestSession">Latest Session</div>
-            <div id="pi_agentLatestProject" class="mt-2 font-extrabold mono">Loading…</div>
+            <div id="pi_agentLatestProject" class="tokdash-loading-placeholder mt-2 font-extrabold mono"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
             <div id="pi_agentLatestMeta" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
           </div>
           <div class="surface p-4">
@@ -1927,7 +1930,7 @@
               </tr>
             </thead>
             <tbody id="pi_agentSessionsTable">
-              <tr><td colspan="9" class="text-center py-10" style="color: var(--color-muted);" data-i18n="loading">Loading…</td></tr>
+              <tr><td colspan="9" class="tokdash-loading-placeholder text-center py-10" style="color: var(--color-muted);"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></td></tr>
             </tbody>
           </table>
         </div>
@@ -1943,7 +1946,7 @@
         <div id="mimoLatestSession" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4 mb-5">
           <div class="surface p-4">
             <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="latestSession">Latest Session</div>
-            <div id="mimoLatestProject" class="mt-2 font-extrabold mono">Loading…</div>
+            <div id="mimoLatestProject" class="tokdash-loading-placeholder mt-2 font-extrabold mono"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
             <div id="mimoLatestMeta" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
           </div>
           <div class="surface p-4">
@@ -1986,7 +1989,7 @@
               </tr>
             </thead>
             <tbody id="mimoSessionsTable">
-              <tr><td colspan="9" class="text-center py-10" style="color: var(--color-muted);" data-i18n="loading">Loading…</td></tr>
+              <tr><td colspan="9" class="tokdash-loading-placeholder text-center py-10" style="color: var(--color-muted);"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></td></tr>
             </tbody>
           </table>
         </div>
@@ -2002,7 +2005,7 @@
         <div id="combinedLatestSession" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4 mb-5">
           <div class="surface p-4">
             <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="latestSession">Latest Session</div>
-            <div id="combinedLatestProject" class="mt-2 font-extrabold mono">Loading…</div>
+            <div id="combinedLatestProject" class="tokdash-loading-placeholder mt-2 font-extrabold mono"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
             <div id="combinedLatestMeta" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
           </div>
           <div class="surface p-4">
@@ -2046,7 +2049,7 @@
               </tr>
             </thead>
             <tbody id="combinedSessionsTable">
-              <tr><td colspan="10" class="text-center py-10" style="color: var(--color-muted);" data-i18n="loading">Loading…</td></tr>
+              <tr><td colspan="10" class="tokdash-loading-placeholder text-center py-10" style="color: var(--color-muted);"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></td></tr>
             </tbody>
           </table>
         </div>
@@ -2058,35 +2061,35 @@
       <section id="statsSummaryCards" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <div class="surface p-4">
           <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="topModelCost">Top Model (Cost)</div>
-          <div id="statFavoriteModel" class="mt-2 font-extrabold mono">Loading…</div>
+          <div id="statFavoriteModel" class="tokdash-loading-placeholder mt-2 font-extrabold mono"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
         </div>
         <div class="surface p-4">
           <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="totalTokens">Total Tokens</div>
-          <div id="statTotalTokens" class="mt-2 font-extrabold">Loading…</div>
+          <div id="statTotalTokens" class="tokdash-loading-placeholder mt-2 font-extrabold"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
         </div>
         <div class="surface p-4">
           <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="sessions">Sessions</div>
-          <div id="statSessions" class="mt-2 font-extrabold">Loading…</div>
+          <div id="statSessions" class="tokdash-loading-placeholder mt-2 font-extrabold"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
         </div>
         <div class="surface p-4">
           <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="streak">Streak</div>
-          <div id="statCurrentStreak" class="mt-2 font-extrabold">Loading…</div>
+          <div id="statCurrentStreak" class="tokdash-loading-placeholder mt-2 font-extrabold"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
         </div>
         <div class="surface p-4">
           <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="longestStreak">Longest Streak</div>
-          <div id="statLongestStreak" class="mt-2 font-extrabold">Loading…</div>
+          <div id="statLongestStreak" class="tokdash-loading-placeholder mt-2 font-extrabold"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
         </div>
         <div class="surface p-4">
           <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="activeDays">Active Days</div>
-          <div id="statActiveDays" class="mt-2 font-extrabold">Loading…</div>
+          <div id="statActiveDays" class="tokdash-loading-placeholder mt-2 font-extrabold"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
         </div>
         <div class="surface p-4">
           <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="totalDays">Total Days</div>
-          <div id="statTotalDays" class="mt-2 font-extrabold">Loading…</div>
+          <div id="statTotalDays" class="tokdash-loading-placeholder mt-2 font-extrabold"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
         </div>
         <div class="surface p-4">
           <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="totalCost">Total Cost</div>
-          <div id="statTotalCost" class="mt-2 font-extrabold">Loading…</div>
+          <div id="statTotalCost" class="tokdash-loading-placeholder mt-2 font-extrabold"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
         </div>
       </section>
 
@@ -2135,7 +2138,7 @@
 
         <!-- Loading / error state for the stats calendar (shown until the first /api/stats load succeeds) -->
         <div id="statsStatus" class="text-center py-10" style="display:none; color: var(--color-muted);">
-          <div id="statsStatusMsg" class="font-semibold">Loading…</div>
+          <div id="statsStatusMsg" class="tokdash-loading-placeholder font-semibold"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
           <button id="statsRetryBtn" class="btn btn-primary mt-3" type="button" style="display:none;" data-i18n="retry">Retry</button>
         </div>
 
@@ -2197,7 +2200,7 @@
               <div id="monthDayLabels" class="heatmap-day-labels"></div>
 
               <div id="calendarContainer" class="overflow-x-auto">
-                <div id="monthGrid" class="inline-block">Loading…</div>
+                <div id="monthGrid" class="tokdash-loading-placeholder inline-block"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
               </div>
             </div>
 
@@ -2277,7 +2280,7 @@
             <div id="yearDayLabels" class="heatmap-year-ylabels"></div>
             <div class="heatmap-year-main">
               <div id="yearMonthLabels" class="heatmap-year-months"></div>
-              <div id="yearGrid" class="heatmap-year-grid">Loading…</div>
+              <div id="yearGrid" class="tokdash-loading-placeholder heatmap-year-grid"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
             </div>
           </div>
 
@@ -2294,7 +2297,7 @@
                   </tr>
                 </thead>
                 <tbody id="yearMonthlyTotalsTable">
-                  <tr><td colspan="4" class="text-center py-6" style="color: var(--color-muted);" data-i18n="loading">Loading…</td></tr>
+                  <tr><td colspan="4" class="tokdash-loading-placeholder text-center py-6" style="color: var(--color-muted);"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></td></tr>
                 </tbody>
               </table>
             </div>
@@ -2414,7 +2417,7 @@
           </div>
         </div>
         <div id="quotaProviderCards" class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div class="text-center py-10" style="color: var(--color-muted);" data-i18n="loading">Loading…</div>
+          <div class="tokdash-loading-placeholder text-center py-10" style="color: var(--color-muted);"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
         </div>
       </section>
 
@@ -2451,7 +2454,7 @@
             <div id="pricingDbSource" class="text-xs mono mt-1 break-all" style="color: var(--color-muted);"></div>
           </div>
           <div class="flex flex-wrap items-center gap-2">
-            <div id="pricingDbStatus" class="text-sm font-semibold mr-1" style="color: var(--color-muted);" data-i18n="loading">Loading…</div>
+            <div id="pricingDbStatus" class="tokdash-loading-placeholder text-sm font-semibold mr-1" style="color: var(--color-muted);"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
             <button id="pricingDbReload" class="btn btn-ghost" type="button" data-i18n="reload">Reload</button>
             <button id="pricingDbFormat" class="btn btn-ghost" type="button" data-i18n="formatJson">Format JSON</button>
             <button id="pricingDbSave" class="btn btn-primary" type="button" data-i18n="save">Save</button>
@@ -2468,7 +2471,7 @@
           </div>
           <div class="rounded-lg border p-4" style="border-color: var(--color-border); background: color-mix(in srgb, var(--color-text) 3%, transparent);">
             <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="jsonState">JSON</div>
-            <div id="pricingDbJsonState" class="mt-2 font-extrabold" style="color: var(--color-muted);" data-i18n="loading">Loading…</div>
+            <div id="pricingDbJsonState" class="tokdash-loading-placeholder mt-2 font-extrabold" style="color: var(--color-muted);"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
           </div>
         </div>
         <textarea id="pricingDbEditor" class="pricing-editor mono" spellcheck="false" aria-label="pricing_db.json editor"></textarea>
@@ -2591,7 +2594,7 @@
           </svg>
         </button>
       </header>
-      <div id="releaseNotesList" class="release-notes-list" aria-live="polite" data-i18n="loading">Loading…</div>
+      <div id="releaseNotesList" class="release-notes-list tokdash-loading-placeholder" aria-live="polite"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
       <footer class="release-notes-footer">
         <a href="https://github.com/JingbiaoMei/Tokdash/blob/main/docs/development/CHANGELOG.md" target="_blank" rel="noreferrer">
           <span data-i18n="viewFullChangelog">View full changelog</span>
@@ -3986,45 +3989,14 @@
       return (I18N[currentLang] || I18N.en)[key] || I18N.en[key] || key;
     }
 
-    const TOKDASH_LOADING_LABELS = new Set(['Loading...', 'Loading…', '加载中…']);
-
-    function syncLoadingPlaceholder(element) {
-      if (!(element instanceof HTMLElement)) return;
-      if (element.matches('.sr-only, script, style, [aria-hidden="true"]')) return;
-      const isLoading = element.childElementCount === 0
-        && TOKDASH_LOADING_LABELS.has(String(element.textContent || '').trim());
-      element.classList.toggle('tokdash-loading-placeholder', isLoading);
-      if (isLoading && !element.hasAttribute('aria-busy')) {
-        element.setAttribute('aria-busy', 'true');
-        element.dataset.tokdashLoadingAriaBusy = 'true';
-      } else if (!isLoading && element.dataset.tokdashLoadingAriaBusy === 'true') {
-        element.removeAttribute('aria-busy');
-        delete element.dataset.tokdashLoadingAriaBusy;
-      }
-    }
-
-    function syncLoadingPlaceholderTree(root) {
-      if (root instanceof HTMLElement) syncLoadingPlaceholder(root);
-      if (root instanceof Element) root.querySelectorAll('*').forEach(syncLoadingPlaceholder);
-    }
-
-    const loadingPlaceholderObserver = new MutationObserver((mutations) => {
-      mutations.forEach((mutation) => {
-        const target = mutation.target.nodeType === Node.TEXT_NODE
-          ? mutation.target.parentElement
-          : mutation.target;
-        syncLoadingPlaceholder(target);
-        mutation.addedNodes.forEach((node) => syncLoadingPlaceholderTree(node));
-      });
-    });
-
-    function initLoadingPlaceholders() {
-      syncLoadingPlaceholderTree(document.body);
-      loadingPlaceholderObserver.observe(document.body, {
-        subtree: true,
-        childList: true,
-        characterData: true,
-      });
+    function renderLoadingPlaceholder(element, label = t('loading')) {
+      if (!element) return;
+      element.classList.add('tokdash-loading-placeholder');
+      const loadingLabel = document.createElement('span');
+      loadingLabel.className = 'tokdash-loading-label';
+      loadingLabel.dataset.i18n = 'loading';
+      loadingLabel.textContent = label;
+      element.replaceChildren(loadingLabel);
     }
 
     function getDayLabels() {
@@ -5816,7 +5788,7 @@
       const modal = document.getElementById("sessionModal");
       modal.classList.remove("hidden");
       document.getElementById("sessionModalTitle").textContent = sessionShortId(sessionId);
-      document.getElementById("sessionModalMeta").textContent = t("loading");
+      renderLoadingPlaceholder(document.getElementById("sessionModalMeta"));
       document.getElementById("sessionModalInput").textContent = "-";
       document.getElementById("sessionModalInputPct").textContent = "-";
       document.getElementById("sessionModalCache").textContent = "-";
@@ -7379,7 +7351,8 @@
       const el = document.getElementById('pricingDbStatus');
       if (!el) return;
       el.removeAttribute('data-i18n');
-      el.textContent = text;
+      if (text === t('loading')) renderLoadingPlaceholder(el);
+      else el.textContent = text;
       el.style.color = color;
     }
 
@@ -7617,7 +7590,10 @@
         if (el) el.style.display = 'none';
       });
       const msg = document.getElementById('statsStatusMsg');
-      if (msg) msg.textContent = t(state === 'error' ? 'statsLoadFailed' : 'loading');
+      if (msg) {
+        if (state === 'error') msg.textContent = t('statsLoadFailed');
+        else renderLoadingPlaceholder(msg);
+      }
       const retry = document.getElementById('statsRetryBtn');
       if (retry) retry.style.display = state === 'error' ? '' : 'none';
     }
@@ -8311,7 +8287,7 @@
           item.querySelector('dd')?.replaceChildren(skeleton);
           kpis.appendChild(item);
         });
-        coverage.textContent = t('loading');
+        renderLoadingPlaceholder(coverage);
         return;
       }
       if (status === 'error') {
@@ -8390,7 +8366,7 @@
       valuesElement.replaceChildren();
 
       if (status === 'idle' || status === 'loading') {
-        stateElement.textContent = t('loading');
+        renderLoadingPlaceholder(stateElement);
         return;
       }
       if (status === 'error') {
@@ -10198,10 +10174,7 @@
       }
       if (releaseNotesPromise) return releaseNotesPromise;
       const list = document.getElementById('releaseNotesList');
-      if (list) {
-        list.dataset.i18n = 'loading';
-        list.textContent = t('loading');
-      }
+      if (list) renderLoadingPlaceholder(list);
       releaseNotesPromise = fetch(window.tokdashPath('/static/release-notes.json'), { cache: 'no-store' })
         .then((response) => {
           if (!response.ok) throw new Error(String(response.status));
@@ -10334,7 +10307,6 @@
     applyStyleTheme(getDefaultStyleTheme());
     applyTheme(getDefaultTheme());
     applyI18n();
-    initLoadingPlaceholders();
     initServerSettings();
     initQuotaRangeSelect();
     initQuotaVisibilityControls();

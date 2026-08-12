@@ -85,6 +85,33 @@ def test_usage_merger_identity_sum_and_missing_previous(tmp_path):
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_overview_deltas_use_one_decimal_place(tmp_path):
+    source = INDEX_HTML.read_text(encoding="utf-8")
+    function = _extract_js_function(source, "function renderDelta(elementId, pctChange) {")
+    harness = [
+        "const element = { textContent: '', style: {} };",
+        "const document = { getElementById: () => element };",
+        "function t() { return 'vs prev period'; }",
+        function,
+    ]
+
+    assert _run(
+        tmp_path,
+        "delta_down",
+        harness,
+        "(renderDelta('delta', input), element.textContent)",
+        -37.7355087610252,
+    ) == "↓ 37.7% vs prev period"
+    assert _run(
+        tmp_path,
+        "delta_up",
+        harness,
+        "(renderDelta('delta', input), element.textContent)",
+        12,
+    ) == "↑ 12.0% vs prev period"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
 def test_stats_and_session_mergers(tmp_path):
     source = INDEX_HTML.read_text(encoding="utf-8")
     stats_fn = _extract_js_function(source, "function combineStatsPayloads(list) {")

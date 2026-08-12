@@ -4153,7 +4153,7 @@
       }
 
       const arrow = pctChange > 0 ? '↑' : pctChange < 0 ? '↓' : '→';
-      const abs = Math.abs(pctChange);
+      const abs = Math.abs(pctChange).toFixed(1);
       el.textContent = `${arrow} ${abs}% ${t('vsPrevPeriod')}`;
       el.style.color = pctChange > 0 ? '#DC2626' : pctChange < 0 ? '#16A34A' : 'var(--color-muted)';
     }

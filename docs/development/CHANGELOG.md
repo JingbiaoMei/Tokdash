@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Unreleased
+
+### Added
+
+- Added an in-app **What's new** drawer beside the Tokdash title, backed by release notes that ship with the package and a release checklist guard to keep them current.
+
+### Changed
+
+- Unified dashboard loading placeholders with the Profile Activity shimmer while preserving localized status text for assistive technology.
+
+### Fixed
+
+- Extended the themed document background across the full page so long dashboard views no longer reveal a mismatched background seam.
+
 ## 1.6.1 - 2026-08-11
 
 ### Fixed

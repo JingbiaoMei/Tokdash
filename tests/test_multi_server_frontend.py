@@ -151,6 +151,31 @@ def test_multi_server_contract_is_client_only_and_service_worker_is_same_origin(
     assert "selectedServers().length > 1 && lastQuotaServerRows.length" in source
 
 
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_multi_server_quota_hides_single_server_sections(tmp_path):
+    source = INDEX_HTML.read_text(encoding="utf-8")
+    quota_start = source.index('id="quota-content"')
+    quota_end = source.index('id="pricing-content"')
+    assert quota_start < source.index('id="quotaSingleServerPanel"') < quota_end
+    assert quota_start < source.index('id="quotaSingleServerCharts"') < quota_end
+    function = _extract_js_function(source, "function setQuotaSingleServerLayout(multi) {")
+    expression = """(() => {
+      const sections = {
+        quotaSingleServerPanel: { hidden: false, style: { display: '' } },
+        quotaSingleServerCharts: { hidden: false, style: { display: '' } },
+      };
+      global.document = { getElementById: (id) => sections[id] };
+      setQuotaSingleServerLayout(input);
+      return sections;
+    })()"""
+
+    hidden = _run(tmp_path, "quota-multi", [function], expression, True)
+    assert all(section == {"hidden": True, "style": {"display": "none"}} for section in hidden.values())
+
+    shown = _run(tmp_path, "quota-single", [function], expression, False)
+    assert all(section == {"hidden": False, "style": {"display": ""}} for section in shown.values())
+
+
 def test_companion_v2_schema_and_loose_test_rule_are_present():
     root = INDEX_HTML.parents[3]
     windows = (root / "companion/windows/TokdashCompanion/BindableBase.cs").read_text(encoding="utf-8")

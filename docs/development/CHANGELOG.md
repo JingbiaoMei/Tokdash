@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 
 - Preserved the persistent usage cache across package upgrades when parser and pricing contents are unchanged, while still invalidating cached costs when pricing data or calculation code changes.
+- Hid the unused single-server quota history shells in multi-server mode, removing the duplicate empty charts above per-server quota sections.
 
 ## 1.6.2 - 2026-08-12
 

@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 
 - Unified dashboard loading placeholders with the Profile Activity shimmer while preserving localized status text for assistive technology.
+- Strengthened the Overview Profile preview's typography, supporting controls, and insight color hierarchy while keeping its heatmap geometry unchanged.
 
 ### Fixed
 

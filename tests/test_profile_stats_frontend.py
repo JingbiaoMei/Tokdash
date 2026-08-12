@@ -1159,7 +1159,16 @@ def test_overview_profile_summary_markup_and_style_contract():
         assert source.count(f"{key}: '") == 2
 
     assert ".overview-profile-band{" in compact
-    assert "grid-template-columns:minmax(180px,220px)minmax(0,1fr)" in compact
+    assert "grid-template-columns:minmax(220px,260px)minmax(0,1fr)" in compact
+    assert ".overview-profile-copy{" in compact
+    assert "border-radius:14px" in compact
+    assert ".overview-profile-copyh2{margin-top:8px;font-size:21px" in compact
+    assert ".overview-profile-open{" in compact
+    assert "padding:8px9px8px11px" in compact
+    assert ".overview-profile-metricsdd{margin:0;color:var(--overview-profile-tone);font-size:19px" in compact
+    assert ".overview-profile-mode{padding:6px10px;font-size:12px;" in compact
+    assert ".overview-activity-insight-kpi[data-tone=\"secondary\"]" in compact
+    assert ".overview-activity-insight-kpidd{margin:0;overflow:hidden;color:var(--overview-insight-tone);font-size:15px" in compact
     assert (
         ".overview-profile-grid-wrap{position:relative;min-width:595px;}"
         in compact

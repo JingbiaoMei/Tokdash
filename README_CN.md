@@ -355,7 +355,7 @@ Tokdash 默认**只监听 localhost**。
 - `TOKDASH_LIMIT_CONCURRENCY`（默认：`64`）——uvicorn 接受的最大并发连接数（背压）
 - `TOKDASH_KEEPALIVE`（默认：`5` 秒）——uvicorn keep-alive 超时
 - `TOKDASH_ALLOW_ORIGINS`（逗号分隔，默认：空）
-- `TOKDASH_ALLOW_ORIGIN_REGEX`（默认仅允许 localhost/127.0.0.1）
+- `TOKDASH_ALLOW_ORIGIN_REGEX`（默认 CORS 策略允许 localhost/127.0.0.1，以及同一 tailnet 内的 Tailscale Serve 读取；设置任一 CORS 选项会替换该默认策略）
 - `TOKDASH_NO_RETENTION_NOTICE`（设为 `1` 可静默 `tokdash serve` 启动时打印的历史保留提醒）
 
 持久化使用量数据库（默认开启）：

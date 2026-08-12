@@ -60,10 +60,12 @@ proxies loopback traffic, even though those paths reject genuine writes. The con
 endpoints (`PUT /api/pricing-db`, `POST /api/quota/consent`, `POST /api/quota/settings`,
 `POST /api/update-check/consent`) are unaffected and remain loopback-only as described above.
 
-`TOKDASH_ALLOW_ORIGINS` / `TOKDASH_ALLOW_ORIGIN_REGEX` only widen the CORS allowlist (which
-browser-page origins may issue cross-origin `fetch` calls); they are unrelated to the write
-gate and never grant write access to a non-loopback bind — loopback bind + Host/Origin + token
-are still required for every mutating request.
+The default CORS policy permits loopback origins and HTTPS reads between Tailscale Serve hosts
+with the same `<tailnet-name>.ts.net` suffix. Other browser-page origins require
+`TOKDASH_ALLOW_ORIGINS` / `TOKDASH_ALLOW_ORIGIN_REGEX`; setting either option replaces the default
+origin policy, so list every required origin. CORS is unrelated to the write gate and never grants
+write access to a non-loopback bind — loopback bind + Host/Origin + token are still required for
+every mutating request.
 
 On WSL2, bind to `127.0.0.1` (the default), not `0.0.0.0`. Windows' localhost forwarding into
 WSL preserves a loopback `Host` header, so the guarded writes above keep working from Windows;

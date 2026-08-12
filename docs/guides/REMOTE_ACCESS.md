@@ -12,12 +12,13 @@ Sessions, and Stats combine reachable servers; Quota stays grouped by server. An
 unreachable server drops out until a later refresh succeeds. Adding the same instance
 under two URLs double-counts usage.
 
-The browser's Add/Test request also checks deployment compatibility. A dashboard opened
-on loopback can normally read remote servers with Tokdash's default CORS allowlist. If the
-dashboard itself is served from a remote origin, configure every added server with
-`TOKDASH_ALLOW_ORIGINS=https://<dashboard-host>`. An HTTPS page cannot fetch a plain-HTTP
-server; use loopback HTTP for the page or HTTPS URLs for every server. Native companions
-do not send an `Origin` header and are unaffected by CORS and browser mixed-content rules.
+The browser's Add/Test request also checks deployment compatibility. By default, a dashboard
+opened on loopback can read remote servers, and Tailscale Serve dashboards can read Tokdash
+servers under the same `<tailnet-name>.ts.net` suffix. Other remote origins must be added to
+every server with `TOKDASH_ALLOW_ORIGINS=https://<dashboard-host>`. Explicit CORS settings replace
+the default origin policy, so include every browser origin that must connect. An HTTPS page cannot
+fetch a plain-HTTP server; use HTTPS Tailscale Serve URLs for every server. Native companions do
+not send an `Origin` header and are unaffected by CORS and browser mixed-content rules.
 
 Reads follow the exposure model below. Per-server writes still pass through the existing
 loopback write gate: SSH-forwarded loopback URLs can write, while Tailscale Serve and

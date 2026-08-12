@@ -368,7 +368,7 @@ Tokdash is **localhost-only by default**.
 - `TOKDASH_LIMIT_CONCURRENCY` (default: `64`) — uvicorn connection cap (backpressure)
 - `TOKDASH_KEEPALIVE` (default: `5` seconds) — uvicorn keep-alive timeout
 - `TOKDASH_ALLOW_ORIGINS` (comma-separated, default: empty)
-- `TOKDASH_ALLOW_ORIGIN_REGEX` (default allows only localhost/127.0.0.1)
+- `TOKDASH_ALLOW_ORIGIN_REGEX` (default CORS policy allows localhost/127.0.0.1 and same-tailnet Tailscale Serve reads; setting either CORS option replaces that default policy)
 - `TOKDASH_NO_RETENTION_NOTICE` (set to `1` to silence the history-retention reminder printed on `tokdash serve`)
 
 Persistent usage DB (default on):

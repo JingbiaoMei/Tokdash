@@ -195,6 +195,135 @@ def _asgi_status(method: str, path: str, headers: dict) -> int:
     return next(m["status"] for m in sent if m["type"] == "http.response.start")
 
 
+async def _asgi_response_headers_async(
+    method: str, path: str, headers: dict
+) -> dict[str, str]:
+    sent = []
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": method,
+        "path": path,
+        "raw_path": path.encode(),
+        "query_string": b"",
+        "headers": [(k.lower().encode(), v.encode()) for k, v in headers.items()],
+        "client": ("127.0.0.1", 12345),
+        "server": ("127.0.0.1", 55423),
+        "scheme": "https",
+    }
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message):
+        sent.append(message)
+
+    await api.app(scope, receive, send)
+    start = next(m for m in sent if m["type"] == "http.response.start")
+    return {key.decode().lower(): value.decode() for key, value in start["headers"]}
+
+
+def _asgi_response_headers(method: str, path: str, headers: dict) -> dict[str, str]:
+    return asyncio.run(_asgi_response_headers_async(method, path, headers))
+
+
+def test_default_cors_allows_https_reads_between_servers_on_same_tailnet():
+    origin = "https://wsl.tail76535.ts.net"
+    headers = _asgi_response_headers(
+        "GET",
+        "/health",
+        {"host": "macbook.tail76535.ts.net", "origin": origin},
+    )
+    assert headers["access-control-allow-origin"] == origin
+    assert "Origin" in headers["vary"]
+
+
+def test_default_cors_rejects_other_tailnets_and_non_https_origins():
+    request_host = "macbook.tail76535.ts.net"
+    for origin in (
+        "https://wsl.tail99999.ts.net",
+        "http://wsl.tail76535.ts.net",
+        "https://tail76535.ts.net.evil.example",
+    ):
+        headers = _asgi_response_headers(
+            "GET", "/health", {"host": request_host, "origin": origin}
+        )
+        assert "access-control-allow-origin" not in headers
+
+
+def test_default_cors_rejects_malformed_or_non_machine_tailnet_hosts():
+    for request_host, origin in (
+        ("tail76535.ts.net", "https://wsl.tail76535.ts.net"),
+        ("macbook.tail76535.ts.net", "https://tail76535.ts.net"),
+        ("macbook.tail76535.ts.net", "https://user@wsl.tail76535.ts.net"),
+        ("macbook.tail76535.ts.net", "https://wsl.tail76535.ts.net:99999"),
+        ("macbook.tail76535.ts.net", "https://wsl.tail76535.ts.net/path"),
+    ):
+        headers = _asgi_response_headers(
+            "GET", "/health", {"host": request_host, "origin": origin}
+        )
+        assert "access-control-allow-origin" not in headers
+
+
+def test_same_tailnet_cors_host_context_is_request_local():
+    async def run_requests():
+        allowed_origin = "https://dashboard.alpha-tail.ts.net"
+        return await asyncio.gather(
+            *(
+                _asgi_response_headers_async(
+                    "GET",
+                    "/health",
+                    {
+                        "host": (
+                            "server.alpha-tail.ts.net"
+                            if index % 2 == 0
+                            else "server.beta-tail.ts.net"
+                        ),
+                        "origin": allowed_origin,
+                    },
+                )
+                for index in range(40)
+            )
+        )
+
+    responses = asyncio.run(run_requests())
+    for index, headers in enumerate(responses):
+        if index % 2 == 0:
+            assert headers["access-control-allow-origin"] == (
+                "https://dashboard.alpha-tail.ts.net"
+            )
+        else:
+            assert "access-control-allow-origin" not in headers
+
+
+def test_default_cors_same_tailnet_preflight():
+    origin = "https://wsl.tail76535.ts.net"
+    headers = _asgi_response_headers(
+        "OPTIONS",
+        "/health",
+        {
+            "host": "macbook.tail76535.ts.net",
+            "origin": origin,
+            "access-control-request-method": "GET",
+        },
+    )
+    assert headers["access-control-allow-origin"] == origin
+
+
+def test_same_tailnet_cors_does_not_open_remote_writes():
+    assert _asgi_status(
+        "POST",
+        "/api/quota/consent",
+        {
+            "host": "macbook.tail76535.ts.net",
+            "origin": "https://wsl.tail76535.ts.net",
+            "content-type": "application/json",
+            "x-tokdash-token": api._CSRF_TOKEN,
+        },
+    ) == 403
+
+
 def test_write_guard_registered_and_blocks_through_asgi(monkeypatch):
     monkeypatch.setenv("TOKDASH_WARM_ON_START", "0")
     # bind/port already set by the autouse fixture.

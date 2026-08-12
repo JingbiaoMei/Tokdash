@@ -10,16 +10,19 @@ import threading
 import time
 from collections import OrderedDict
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime
 from json import JSONDecodeError
 from pathlib import Path
 from typing import Any, Dict, Optional
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from . import __version__
@@ -142,6 +145,76 @@ class BasePathMiddleware:
         await self.app(scope, receive, send)
 
 
+def _tailnet_dns_suffix(hostname: str | None) -> str | None:
+    """Return ``<tailnet>.ts.net`` for a Tailscale MagicDNS hostname."""
+    labels = (hostname or "").strip().lower().rstrip(".").split(".")
+    if len(labels) < 4 or labels[-2:] != ["ts", "net"] or not all(labels):
+        return None
+    return ".".join(labels[-3:])
+
+
+def _same_tailnet_https_origin(origin: str, request_host: str) -> bool:
+    """Whether an HTTPS browser origin and request Host belong to one tailnet.
+
+    Tailscale Serve preserves the public MagicDNS name in ``Host``. Matching the
+    complete tailnet suffix permits cross-machine dashboard reads without opening
+    CORS to another ``*.ts.net`` tailnet.
+    """
+    try:
+        origin_url = urlsplit(origin)
+        request_url = urlsplit(f"//{request_host}")
+        if (
+            origin_url.scheme.lower() != "https"
+            or not origin_url.hostname
+            or origin_url.username is not None
+            or origin_url.password is not None
+            or request_url.username is not None
+            or request_url.password is not None
+            or origin_url.path not in ("", "/")
+            or origin_url.query
+            or origin_url.fragment
+        ):
+            return False
+        # Accessing .port validates malformed and out-of-range port strings.
+        origin_url.port
+        request_url.port
+        origin_suffix = _tailnet_dns_suffix(origin_url.hostname)
+        request_suffix = _tailnet_dns_suffix(request_url.hostname)
+    except ValueError:
+        return False
+    return origin_suffix is not None and origin_suffix == request_suffix
+
+
+class TailnetCORSMiddleware(CORSMiddleware):
+    """Add same-tailnet HTTPS origins to the default CORS policy.
+
+    ``CORSMiddleware.is_allowed_origin`` does not receive the request scope. A
+    context variable carries the current request Host safely across concurrent
+    async requests so the decision can compare both MagicDNS suffixes.
+    """
+
+    def __init__(self, app: ASGIApp, *, allow_same_tailnet: bool = False, **kwargs) -> None:
+        super().__init__(app, **kwargs)
+        self.allow_same_tailnet = allow_same_tailnet
+        self._request_host: ContextVar[str] = ContextVar("tokdash_cors_request_host", default="")
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or not self.allow_same_tailnet:
+            await super().__call__(scope, receive, send)
+            return
+        token = self._request_host.set(Headers(scope=scope).get("host", ""))
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            self._request_host.reset(token)
+
+    def is_allowed_origin(self, origin: str) -> bool:
+        return super().is_allowed_origin(origin) or (
+            self.allow_same_tailnet
+            and _same_tailnet_https_origin(origin, self._request_host.get())
+        )
+
+
 def _session_response_cache_key(
     tool: str,
     period: str,
@@ -209,13 +282,15 @@ app.add_middleware(NoCacheMiddleware)
 
 cors_allow_origins = [o.strip() for o in os.environ.get("TOKDASH_ALLOW_ORIGINS", "").split(",") if o.strip()]
 cors_allow_origin_regex = os.environ.get("TOKDASH_ALLOW_ORIGIN_REGEX", "").strip() or None
-if not cors_allow_origins and cors_allow_origin_regex is None:
+cors_allow_same_tailnet = not cors_allow_origins and cors_allow_origin_regex is None
+if cors_allow_same_tailnet:
     cors_allow_origin_regex = r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
 
 app.add_middleware(
-    CORSMiddleware,
+    TailnetCORSMiddleware,
     allow_origins=cors_allow_origins,
     allow_origin_regex=cors_allow_origin_regex,
+    allow_same_tailnet=cors_allow_same_tailnet,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],

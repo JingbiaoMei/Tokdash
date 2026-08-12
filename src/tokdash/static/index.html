@@ -86,14 +86,46 @@
       --datepickr-range-join-size: 5px;
     }
 
-    html, body { height: 100%; }
+    html {
+      min-height: 100%;
+      background: var(--color-bg);
+    }
 
     body {
+      min-height: 100%;
       font-family: "Fira Sans", ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
       background: radial-gradient(1200px 600px at 20% -10%, rgba(59,130,246,0.16), transparent 65%),
                   radial-gradient(900px 600px at 90% 10%, rgba(245,158,11,0.12), transparent 55%),
                   var(--color-bg);
       color: var(--color-text);
+    }
+
+    .tokdash-loading-placeholder {
+      position: relative;
+      min-height: 1.25em;
+      color: transparent !important;
+      cursor: wait;
+      overflow: hidden;
+    }
+
+    .tokdash-loading-placeholder::after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: min(68%, 10rem);
+      min-width: 2.5rem;
+      height: 0.875rem;
+      border-radius: 5px;
+      background: linear-gradient(90deg, color-mix(in srgb, var(--color-border) 62%, transparent), color-mix(in srgb, var(--color-primary) 11%, var(--color-border)), color-mix(in srgb, var(--color-border) 62%, transparent));
+      background-size: 200% 100%;
+      animation: tokdash-loading-sweep 1.4s ease-in-out infinite;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+    }
+
+    @keyframes tokdash-loading-sweep {
+      50% { background-position: 100% 0; }
     }
 
     .mono { font-family: "Fira Code", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
@@ -705,7 +737,7 @@
     .profile-activity-tool-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px 9px;align-items:center;font-size:10px;}.profile-activity-tool-name{overflow:hidden;color:var(--color-text);font-weight:750;text-overflow:ellipsis;white-space:nowrap;}.profile-activity-tool-value{color:var(--color-primary);font-variant-numeric:tabular-nums;font-weight:800;white-space:nowrap;}
     .profile-activity-tool-track{grid-column:1/-1;height:3px;overflow:hidden;border-radius:999px;background:color-mix(in srgb,var(--color-border) 70%,transparent);}.profile-activity-tool-bar{display:block;width:var(--activity-share,0%);height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--color-secondary),var(--color-primary));box-shadow:0 0 8px color-mix(in srgb,var(--color-primary) 25%,transparent);}
     .activity-insights-message{grid-column:1/-1;align-self:center;margin:0;padding:15px;color:var(--color-muted);font-size:11px;text-align:center;}
-    .activity-insights-skeleton{display:block;width:68%;height:14px;border-radius:5px;background:linear-gradient(90deg,color-mix(in srgb,var(--color-border) 62%,transparent),color-mix(in srgb,var(--color-primary) 11%,var(--color-border)),color-mix(in srgb,var(--color-border) 62%,transparent));background-size:200% 100%;animation:overview-profile-pulse 1.4s ease-in-out infinite;}
+    .activity-insights-skeleton{display:block;width:68%;height:14px;border-radius:5px;background:linear-gradient(90deg,color-mix(in srgb,var(--color-border) 62%,transparent),color-mix(in srgb,var(--color-primary) 11%,var(--color-border)),color-mix(in srgb,var(--color-border) 62%,transparent));background-size:200% 100%;animation:tokdash-loading-sweep 1.4s ease-in-out infinite;}
 
     .overview-profile-band{display:grid;grid-template-columns:minmax(180px,220px) minmax(0,1fr);gap:20px;align-items:stretch;min-height:128px;padding:16px 18px;border-color:color-mix(in srgb,var(--color-primary) 18%,var(--color-border));background:linear-gradient(105deg,var(--color-surface-glass),color-mix(in srgb,var(--color-primary) 7%,var(--color-surface-glass)));box-shadow:0 10px 28px color-mix(in srgb,var(--color-primary) 6%,transparent);}
     .overview-profile-copy{display:flex;flex-direction:column;justify-content:center;padding-right:18px;border-right:1px solid color-mix(in srgb,var(--color-primary) 16%,var(--color-border));}
@@ -718,9 +750,8 @@
     .overview-profile-main{display:flex;min-width:0;align-items:center;}
     .overview-profile-state,.overview-profile-ready{width:100%;}
     .overview-profile-band:not([data-state="loading"]) .overview-profile-loading,.overview-profile-band:not([data-state="error"]) .overview-profile-unavailable,.overview-profile-band:not([data-state="ready"]) .overview-profile-ready{display:none;}
-    .overview-profile-skeleton-metrics{display:flex;gap:18px;margin-bottom:12px;}.overview-profile-skeleton-metrics i{display:block;width:82px;height:20px;border-radius:6px;background:color-mix(in srgb,var(--color-border) 72%,transparent);}
-    .overview-profile-skeleton-grid{height:57px;border-radius:4px;background:linear-gradient(90deg,color-mix(in srgb,var(--color-border) 58%,transparent),color-mix(in srgb,var(--color-primary) 10%,var(--color-border)),color-mix(in srgb,var(--color-border) 58%,transparent));background-size:200% 100%;animation:overview-profile-pulse 1.4s ease-in-out infinite;}
-    @keyframes overview-profile-pulse{50%{background-position:100% 0;}}
+    .overview-profile-skeleton-metrics{display:flex;gap:18px;margin-bottom:12px;}.overview-profile-skeleton-metrics i{display:block;width:82px;height:20px;border-radius:6px;background:linear-gradient(90deg,color-mix(in srgb,var(--color-border) 62%,transparent),color-mix(in srgb,var(--color-primary) 11%,var(--color-border)),color-mix(in srgb,var(--color-border) 62%,transparent));background-size:200% 100%;animation:tokdash-loading-sweep 1.4s ease-in-out infinite;}
+    .overview-profile-skeleton-grid{height:57px;border-radius:4px;background:linear-gradient(90deg,color-mix(in srgb,var(--color-border) 58%,transparent),color-mix(in srgb,var(--color-primary) 10%,var(--color-border)),color-mix(in srgb,var(--color-border) 58%,transparent));background-size:200% 100%;animation:tokdash-loading-sweep 1.4s ease-in-out infinite;}
     .overview-profile-unavailable{color:var(--color-muted);font-size:12px;}
     .overview-profile-metrics{display:flex;align-items:baseline;gap:18px;margin-bottom:10px;}
     .overview-profile-metrics>div{--overview-profile-tone:var(--color-primary);display:flex;align-items:baseline;gap:5px;}.overview-profile-metrics>div[data-tone="cost"]{--overview-profile-tone:var(--color-cost);}.overview-profile-metrics>div[data-tone="cta"]{--overview-profile-tone:var(--color-cta);}
@@ -749,7 +780,7 @@
     .overview-activity-insights[data-state="ready"] .overview-activity-insights-state{padding-top:3px;border-top:0;}.overview-activity-insights[data-state="ready"] .overview-activity-insights-values{display:grid;}.overview-activity-insights:not([data-state="ready"]) .overview-activity-insights-values{display:none;}
     @media(max-width:800px){.overview-profile-band{grid-template-columns:1fr;gap:14px;}.overview-profile-copy{padding:0 0 12px;border-right:0;border-bottom:1px solid color-mix(in srgb,var(--color-primary) 16%,var(--color-border));}.overview-profile-metrics{flex-wrap:wrap;}.overview-profile-heat-head{align-items:flex-start;flex-wrap:wrap;}.overview-profile-modes{margin-left:auto;}}
     @media(max-width:768px){.profile-activity-insights-kpis,.overview-activity-insights-values{grid-template-columns:repeat(2,minmax(0,1fr));}.profile-activity-insight-kpi:nth-child(3)::before,.overview-activity-insight-kpi:nth-child(3)::before{display:none;}.profile-activity-insights-detail{grid-template-columns:minmax(0,1fr);}}
-    @media(prefers-reduced-motion:reduce){.overview-profile-skeleton-grid,.activity-insights-skeleton{animation:none;}.overview-profile-cell{transform:none!important;}}
+    @media(prefers-reduced-motion:reduce){.tokdash-loading-placeholder::after,.overview-profile-skeleton-metrics i,.overview-profile-skeleton-grid,.activity-insights-skeleton{animation:none;}.overview-profile-cell{transform:none!important;}}
 
     .pricing-editor {
       width: 100%;
@@ -1128,11 +1159,201 @@
       padding: 0; color: var(--color-label); text-decoration: underline dotted;
     }
 
+    /* Release notes: a quiet title-level entry backed by an on-demand side sheet. */
+    .release-notes-trigger {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 4px;
+      padding: 2px 0;
+      border: 0;
+      background: transparent;
+      color: var(--color-muted);
+      cursor: pointer;
+      font-size: 12px;
+      line-height: 1.4;
+      text-align: left;
+    }
+    .release-notes-trigger:hover { color: var(--color-primary); }
+    .release-notes-trigger:focus-visible {
+      border-radius: 4px;
+      outline: 2px solid color-mix(in srgb, var(--color-primary) 62%, transparent);
+      outline-offset: 3px;
+    }
+    .release-notes-version {
+      color: var(--color-text);
+      font-size: 11px;
+      font-weight: 750;
+    }
+    .release-notes-arrow {
+      transition: transform 180ms ease;
+    }
+    .release-notes-trigger:hover .release-notes-arrow,
+    .release-notes-trigger[aria-expanded="true"] .release-notes-arrow {
+      transform: translateX(2px);
+    }
+
+    .release-notes-dialog {
+      width: min(430px, 100%);
+      max-width: none;
+      height: 100dvh;
+      max-height: none;
+      margin: 0 0 0 auto;
+      padding: 0;
+      overflow: hidden;
+      border: 0;
+      border-left: 1px solid var(--color-border);
+      background: var(--color-bg);
+      color: var(--color-text);
+      box-shadow: -18px 0 54px color-mix(in srgb, var(--color-text) 16%, transparent);
+    }
+    .release-notes-dialog::backdrop {
+      background: color-mix(in srgb, var(--color-text) 30%, transparent);
+      backdrop-filter: blur(3px);
+    }
+    .release-notes-dialog[open] { animation: release-notes-enter 240ms ease-out; }
+    @keyframes release-notes-enter {
+      from { opacity: 0; transform: translateX(22px); }
+      to { opacity: 1; transform: translateX(0); }
+    }
+    .release-notes-shell {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+    }
+    .release-notes-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 20px;
+      padding: 24px 24px 18px;
+      border-bottom: 1px solid var(--color-border);
+      background: linear-gradient(135deg, color-mix(in srgb, var(--color-primary) 9%, var(--color-bg)), var(--color-bg) 66%);
+    }
+    .release-notes-eyebrow {
+      margin: 0 0 5px;
+      color: var(--color-primary);
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+    .release-notes-title {
+      margin: 0;
+      font-size: 24px;
+      font-weight: 850;
+      letter-spacing: -0.025em;
+    }
+    .release-notes-intro {
+      margin: 7px 0 0;
+      color: var(--color-muted);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+    .release-notes-close {
+      display: grid;
+      flex: 0 0 auto;
+      width: 34px;
+      height: 34px;
+      place-items: center;
+      border: 1px solid var(--color-border);
+      border-radius: 9px;
+      background: color-mix(in srgb, var(--color-bg) 86%, transparent);
+      color: var(--color-muted);
+      cursor: pointer;
+    }
+    .release-notes-close:hover { border-color: var(--color-primary); color: var(--color-primary); }
+    .release-notes-close:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+    .release-notes-list {
+      flex: 1;
+      padding: 10px 24px 32px;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+    }
+    .release-notes-list.tokdash-loading-placeholder { min-height: 128px; }
+    .release-notes-entry {
+      position: relative;
+      display: grid;
+      grid-template-columns: 14px minmax(0, 1fr);
+      gap: 12px;
+      padding-top: 22px;
+    }
+    .release-notes-rail { position: relative; }
+    .release-notes-rail::before {
+      content: '';
+      position: absolute;
+      top: 8px;
+      bottom: -30px;
+      left: 6px;
+      width: 1px;
+      background: color-mix(in srgb, var(--color-primary) 24%, var(--color-border));
+    }
+    .release-notes-entry:last-child .release-notes-rail::before { display: none; }
+    .release-notes-dot {
+      position: relative;
+      z-index: 1;
+      display: block;
+      width: 13px;
+      height: 13px;
+      margin-top: 3px;
+      border: 3px solid var(--color-bg);
+      border-radius: 50%;
+      background: var(--color-primary);
+      box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-primary) 52%, var(--color-border));
+    }
+    .release-notes-meta { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+    .release-notes-number { font-size: 15px; font-weight: 800; }
+    .release-notes-date { color: var(--color-label); font-size: 10px; white-space: nowrap; }
+    .release-notes-section { margin-top: 14px; }
+    .release-notes-section-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 5px;
+      color: var(--color-primary);
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.09em;
+      text-transform: uppercase;
+    }
+    .release-notes-section-label::before {
+      content: '';
+      width: 12px;
+      height: 2px;
+      border-radius: 999px;
+      background: currentColor;
+    }
+    .release-notes-items { margin: 0; padding-left: 18px; color: var(--color-muted); }
+    .release-notes-items li { margin-top: 6px; padding-left: 2px; font-size: 12px; line-height: 1.55; }
+    .release-notes-items li::marker { color: var(--color-primary); }
+    .release-notes-footer {
+      padding: 14px 24px;
+      border-top: 1px solid var(--color-border);
+      background: color-mix(in srgb, var(--color-bg) 92%, var(--color-primary));
+    }
+    .release-notes-footer a {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--color-primary);
+      font-size: 11px;
+      font-weight: 750;
+      text-decoration: none;
+    }
+    .release-notes-footer a:hover { text-decoration: underline; text-underline-offset: 3px; }
+    @media (max-width: 520px) {
+      .release-notes-dialog { width: 100%; border-left: 0; }
+      .release-notes-head { padding: 20px 18px 16px; }
+      .release-notes-list { padding: 8px 18px 28px; }
+      .release-notes-footer { padding: 13px 18px; }
+    }
+
     /* Reduce motion */
     @media (prefers-reduced-motion: reduce) {
       * { transition: none !important; scroll-behavior: auto !important; }
       .profile-activity-cell{transform:none!important;}
       button.profile-activity-cell[data-milestone]:not(:disabled):is(:hover,:focus-visible){transform:none;transition:none;}
+      .release-notes-dialog[open] { animation: none; }
     }
   </style>
   <script>document.write(`<link rel="stylesheet" href="${window.tokdashPath('/static/themes.css')}" />`);</script>
@@ -1150,7 +1371,14 @@
           </div>
           <div>
             <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight mono">Tokdash</h1>
-            <p class="text-sm sm:text-base" style="color: var(--color-muted);"></p>
+            <button id="releaseNotesToggle" class="release-notes-trigger" type="button" aria-controls="releaseNotesDialog" aria-expanded="false">
+              <span id="releaseNotesVersion" class="release-notes-version mono">v—</span>
+              <span aria-hidden="true">·</span>
+              <span data-i18n="whatsNew">What's new</span>
+              <svg class="release-notes-arrow" width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                <path d="M2.5 6h7m-2.4-2.4L9.5 6 7.1 8.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
             <p id="lastUpdate" class="text-xs mt-2" style="color: var(--color-label);">Loading...</p>
           </div>
         </div>
@@ -2349,6 +2577,30 @@
     </div>
   </div>
 
+  <dialog id="releaseNotesDialog" class="release-notes-dialog" aria-labelledby="releaseNotesTitle">
+    <div class="release-notes-shell">
+      <header class="release-notes-head">
+        <div>
+          <p class="release-notes-eyebrow mono" data-i18n="releaseNotes">Release notes</p>
+          <h2 id="releaseNotesTitle" class="release-notes-title" data-i18n="whatsNew">What's new</h2>
+          <p class="release-notes-intro" data-i18n="releaseNotesIntro">A concise record of what changed in each Tokdash release.</p>
+        </div>
+        <button id="releaseNotesClose" class="release-notes-close" type="button" aria-label="Close release notes">
+          <svg width="17" height="17" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+            <path d="m4.5 4.5 9 9m0-9-9 9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </header>
+      <div id="releaseNotesList" class="release-notes-list" aria-live="polite" data-i18n="loading">Loading…</div>
+      <footer class="release-notes-footer">
+        <a href="https://github.com/JingbiaoMei/Tokdash/blob/main/docs/development/CHANGELOG.md" target="_blank" rel="noreferrer">
+          <span data-i18n="viewFullChangelog">View full changelog</span>
+          <span aria-hidden="true">↗</span>
+        </a>
+      </footer>
+    </div>
+  </dialog>
+
   <!-- Viewport-level tooltips must stay outside filtered/transformed cards. -->
   <div id="overviewProfileTooltip" class="profile-activity-tooltip overview-profile-tooltip" role="tooltip" hidden></div>
   <div id="profileActivityTooltip" class="profile-activity-tooltip" role="tooltip" hidden></div>
@@ -2754,6 +3006,15 @@
         styleArcade: 'Arcade',
         styleStudio: 'Studio',
         loading: 'Loading…',
+        whatsNew: 'What\'s new',
+        releaseNotes: 'Release notes',
+        releaseNotesIntro: 'A concise record of what changed in each Tokdash release.',
+        releaseNotesUnavailable: 'Release notes are unavailable right now.',
+        closeReleaseNotes: 'Close release notes',
+        viewFullChangelog: 'View full changelog',
+        added: 'Added',
+        changed: 'Changed',
+        fixed: 'Fixed',
         cached: 'cached',
         temporaryOverload: 'Temporarily busy. Try Refresh again.',
         loadFailed: 'Failed to load data.',
@@ -3065,6 +3326,15 @@
         styleArcade: '街机',
         styleStudio: '工作室',
         loading: '加载中…',
+        whatsNew: '更新动态',
+        releaseNotes: '更新日志',
+        releaseNotesIntro: '简要记录每个 Tokdash 版本带来的变化。',
+        releaseNotesUnavailable: '暂时无法加载更新日志。',
+        closeReleaseNotes: '关闭更新日志',
+        viewFullChangelog: '查看完整更新日志',
+        added: '新增',
+        changed: '调整',
+        fixed: '修复',
         cached: '缓存',
         temporaryOverload: '暂时繁忙，请稍后刷新重试。',
         loadFailed: '数据加载失败。',
@@ -3716,6 +3986,47 @@
       return (I18N[currentLang] || I18N.en)[key] || I18N.en[key] || key;
     }
 
+    const TOKDASH_LOADING_LABELS = new Set(['Loading...', 'Loading…', '加载中…']);
+
+    function syncLoadingPlaceholder(element) {
+      if (!(element instanceof HTMLElement)) return;
+      if (element.matches('.sr-only, script, style, [aria-hidden="true"]')) return;
+      const isLoading = element.childElementCount === 0
+        && TOKDASH_LOADING_LABELS.has(String(element.textContent || '').trim());
+      element.classList.toggle('tokdash-loading-placeholder', isLoading);
+      if (isLoading && !element.hasAttribute('aria-busy')) {
+        element.setAttribute('aria-busy', 'true');
+        element.dataset.tokdashLoadingAriaBusy = 'true';
+      } else if (!isLoading && element.dataset.tokdashLoadingAriaBusy === 'true') {
+        element.removeAttribute('aria-busy');
+        delete element.dataset.tokdashLoadingAriaBusy;
+      }
+    }
+
+    function syncLoadingPlaceholderTree(root) {
+      if (root instanceof HTMLElement) syncLoadingPlaceholder(root);
+      if (root instanceof Element) root.querySelectorAll('*').forEach(syncLoadingPlaceholder);
+    }
+
+    const loadingPlaceholderObserver = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        const target = mutation.target.nodeType === Node.TEXT_NODE
+          ? mutation.target.parentElement
+          : mutation.target;
+        syncLoadingPlaceholder(target);
+        mutation.addedNodes.forEach((node) => syncLoadingPlaceholderTree(node));
+      });
+    });
+
+    function initLoadingPlaceholders() {
+      syncLoadingPlaceholderTree(document.body);
+      loadingPlaceholderObserver.observe(document.body, {
+        subtree: true,
+        childList: true,
+        characterData: true,
+      });
+    }
+
     function getDayLabels() {
       return [t('mon'), t('tue'), t('wed'), t('thu'), t('fri'), t('sat'), t('sun')];
     }
@@ -4178,6 +4489,9 @@
       }
       const langBtn = document.getElementById('langToggle');
       if (langBtn) langBtn.textContent = currentLang === 'zh' ? 'EN' : '中';
+      const releaseNotesClose = document.getElementById('releaseNotesClose');
+      if (releaseNotesClose) releaseNotesClose.setAttribute('aria-label', t('closeReleaseNotes'));
+      if (typeof releaseNotesPayload !== 'undefined' && releaseNotesPayload) renderReleaseNotes(releaseNotesPayload);
       // The pricing source line is set imperatively (no data-i18n), so re-derive it from the
       // last payload on a language switch — otherwise it stays frozen in the prior language.
       if (pricingDbLastPayload) setPricingDbSource(pricingDbLastPayload);
@@ -9804,6 +10118,151 @@
     // *reports* availability — upgrading stays a terminal action
     // (`tokdash update`, which detects pip/pipx); the web UI never runs it (§15).
     const UPDATE_SKIP_KEY = 'tokdash-update-skipped';
+    let runtimeVersionPromise = null;
+    let releaseNotesPayload = null;
+    let releaseNotesPromise = null;
+
+    function getRuntimeVersion() {
+      if (!runtimeVersionPromise) {
+        runtimeVersionPromise = fetch(appPath('/api/version')).then((response) => {
+          if (!response.ok) throw new Error(String(response.status));
+          return response.json();
+        });
+      }
+      return runtimeVersionPromise;
+    }
+
+    function renderReleaseNotes(payload) {
+      const list = document.getElementById('releaseNotesList');
+      if (!list || !payload || !Array.isArray(payload.releases)) return;
+      const fragment = document.createDocumentFragment();
+      payload.releases.forEach((release) => {
+        const entry = document.createElement('article');
+        entry.className = 'release-notes-entry';
+
+        const rail = document.createElement('div');
+        rail.className = 'release-notes-rail';
+        rail.setAttribute('aria-hidden', 'true');
+        const dot = document.createElement('span');
+        dot.className = 'release-notes-dot';
+        rail.appendChild(dot);
+
+        const content = document.createElement('div');
+        const meta = document.createElement('div');
+        meta.className = 'release-notes-meta';
+        const version = document.createElement('h3');
+        version.className = 'release-notes-number mono';
+        version.textContent = `v${release.version || '—'}`;
+        const date = document.createElement('time');
+        date.className = 'release-notes-date mono';
+        date.dateTime = release.date || '';
+        const releaseDate = new Date(`${release.date || ''}T12:00:00`);
+        date.textContent = Number.isNaN(releaseDate.getTime())
+          ? String(release.date || '')
+          : releaseDate.toLocaleDateString(currentLang === 'zh' ? 'zh-CN' : 'en-US', {
+              year: 'numeric', month: 'short', day: 'numeric',
+            });
+        meta.append(version, date);
+        content.appendChild(meta);
+
+        (release.sections || []).forEach((section) => {
+          const sectionElement = document.createElement('section');
+          sectionElement.className = 'release-notes-section';
+          const label = document.createElement('h4');
+          label.className = 'release-notes-section-label mono';
+          label.textContent = t(section.type);
+          const items = document.createElement('ul');
+          items.className = 'release-notes-items';
+          (section.items || []).forEach((item) => {
+            const itemElement = document.createElement('li');
+            itemElement.textContent = item;
+            items.appendChild(itemElement);
+          });
+          sectionElement.append(label, items);
+          content.appendChild(sectionElement);
+        });
+
+        entry.append(rail, content);
+        fragment.appendChild(entry);
+      });
+      list.removeAttribute('data-i18n');
+      list.replaceChildren(fragment);
+      const current = document.getElementById('releaseNotesVersion');
+      if (current && payload.current) current.textContent = `v${payload.current}`;
+    }
+
+    async function loadReleaseNotes() {
+      if (releaseNotesPayload) {
+        renderReleaseNotes(releaseNotesPayload);
+        return releaseNotesPayload;
+      }
+      if (releaseNotesPromise) return releaseNotesPromise;
+      const list = document.getElementById('releaseNotesList');
+      if (list) {
+        list.dataset.i18n = 'loading';
+        list.textContent = t('loading');
+      }
+      releaseNotesPromise = fetch(window.tokdashPath('/static/release-notes.json'), { cache: 'no-store' })
+        .then((response) => {
+          if (!response.ok) throw new Error(String(response.status));
+          return response.json();
+        })
+        .then((payload) => {
+          releaseNotesPayload = payload;
+          renderReleaseNotes(payload);
+          return payload;
+        })
+        .catch(() => {
+          if (list) {
+            list.removeAttribute('data-i18n');
+            list.textContent = t('releaseNotesUnavailable');
+          }
+          releaseNotesPromise = null;
+          return null;
+        });
+      return releaseNotesPromise;
+    }
+
+    async function openReleaseNotes() {
+      const dialog = document.getElementById('releaseNotesDialog');
+      const toggle = document.getElementById('releaseNotesToggle');
+      if (!dialog || !toggle) return;
+      toggle.setAttribute('aria-expanded', 'true');
+      if (!dialog.open) dialog.showModal();
+      await loadReleaseNotes();
+    }
+
+    function closeReleaseNotes() {
+      const dialog = document.getElementById('releaseNotesDialog');
+      if (dialog?.open) dialog.close();
+    }
+
+    function initReleaseNotes() {
+      const dialog = document.getElementById('releaseNotesDialog');
+      const toggle = document.getElementById('releaseNotesToggle');
+      const close = document.getElementById('releaseNotesClose');
+      if (!dialog || !toggle || !close) return;
+      toggle.addEventListener('click', openReleaseNotes);
+      close.addEventListener('click', closeReleaseNotes);
+      dialog.addEventListener('close', () => {
+        toggle.setAttribute('aria-expanded', 'false');
+        toggle.focus();
+      });
+      dialog.addEventListener('click', (event) => {
+        if (event.target === dialog) closeReleaseNotes();
+      });
+      dialog.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          closeReleaseNotes();
+        }
+      });
+      getRuntimeVersion().then((version) => {
+        const label = document.getElementById('releaseNotesVersion');
+        const current = version?.runtime_version || version?.current;
+        if (label && current) label.textContent = `v${current}`;
+      }).catch(() => {});
+    }
 
     async function postUpdateEndpoint(path) {
       // Same-origin write: fetch the per-session token and echo it back
@@ -9852,9 +10311,7 @@
 
     async function initUpdateNotice() {
       try {
-        const resp = await fetch(appPath('/api/version'));
-        if (!resp.ok) return;
-        const version = await resp.json();
+        const version = await getRuntimeVersion();
         const notice = document.getElementById('updateNotice');
         const enableLink = document.getElementById('updateEnableLink');
         if (!version.update_check_enabled) {
@@ -9877,9 +10334,11 @@
     applyStyleTheme(getDefaultStyleTheme());
     applyTheme(getDefaultTheme());
     applyI18n();
+    initLoadingPlaceholders();
     initServerSettings();
     initQuotaRangeSelect();
     initQuotaVisibilityControls();
+    initReleaseNotes();
     initUpdateNotice();
 
     document.getElementById('styleThemeSelect').addEventListener('change', (event) => {

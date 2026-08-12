@@ -6,9 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+## 1.6.2 - 2026-08-12
+
 ### Added
 
-- Added an in-app **What's new** drawer beside the Tokdash title, backed by release notes that ship with the package and a release checklist guard to keep them current.
+- Added an in-app **What's new** drawer, backed by release notes that ship with the package and a release checklist guard to keep them current.
 - Added compact local brand marks for supported coding tools in the Usage by Tool chart, usage tables, app/model, and combined-session breakdowns.
 
 ### Changed
@@ -16,11 +18,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Unified dashboard loading placeholders with the Profile Activity shimmer while preserving localized status text for assistive technology.
 - Refined the Overview Profile preview's typography and insight hierarchy without a nested card surface, while keeping its heatmap geometry unchanged.
 - Moved the What's new entry from the Tokdash brand lockup into the dashboard action rail and normalized Codex/Grok marks onto transparent backgrounds.
+- Kept quick date ranges compact and on one row, extending from the existing Range control toward the right without stretching individual buttons.
 
 ### Fixed
 
 - Prevented gradient theme backgrounds from tiling on long dashboard views, removing the mismatched horizontal seam while preserving the Brutalist theme's intentional grid pattern.
 - Kept the current-day Profile Activity cell synchronized with the already-loaded Today Overview totals, avoiding drift between independently aged response caches without adding another API request.
+- Shared each local tool icon request across repeated dashboard identities, avoiding duplicate transfers under the no-store static asset policy.
+- Allowed dashboards opened through Tailscale Serve to combine Tokdash servers on the same tailnet without per-server CORS configuration; cross-tailnet origins and remote writes remain blocked.
 
 ## 1.6.1 - 2026-08-11
 

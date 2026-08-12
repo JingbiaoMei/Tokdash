@@ -1,6 +1,31 @@
 {
-  "current": "1.6.1",
+  "current": "1.6.2",
   "releases": [
+    {
+      "version": "1.6.2",
+      "date": "2026-08-12",
+      "sections": [
+        {
+          "type": "added",
+          "items": [
+            "Added a localized in-app What's new drawer and local brand marks throughout tool breakdowns."
+          ]
+        },
+        {
+          "type": "changed",
+          "items": [
+            "Unified loading states, refined the Overview profile hierarchy, and kept quick date ranges compact on one row."
+          ]
+        },
+        {
+          "type": "fixed",
+          "items": [
+            "Enabled same-tailnet Tailscale Serve dashboards to combine Tokdash servers without manual CORS setup while keeping remote writes blocked.",
+            "Synchronized today's Profile Activity totals, removed duplicate tool-icon transfers, and kept long themed pages visually continuous."
+          ]
+        }
+      ]
+    },
     {
       "version": "1.6.1",
       "date": "2026-08-11",

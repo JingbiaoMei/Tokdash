@@ -272,12 +272,12 @@ class BaseParser(ABC):
         return ()
 
     def _pricing_signature(self) -> tuple:
-        """Signature of the EFFECTIVE pricing DB (packaged baseline + data-dir override).
+        """Runtime signature of the effective pricing DB.
 
         Must cover BOTH files: a dashboard pricing edit writes ONLY the override under
         ``TOKDASH_DATA_DIR`` and never touches the packaged baseline, so statting the
-        baseline alone would never bust ``_entry_cache`` (nor the persistent usage store,
-        which keys on this same signature) and edited rates would silently not apply.
+        baseline alone would never bust ``_entry_cache`` and edited rates would silently
+        not apply.
         ``PricingDatabase.signature()`` stats both files and is itself OSError-safe.
         """
         try:

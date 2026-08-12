@@ -97,7 +97,100 @@
       background: radial-gradient(1200px 600px at 20% -10%, rgba(59,130,246,0.16), transparent 65%),
                   radial-gradient(900px 600px at 90% 10%, rgba(245,158,11,0.12), transparent 55%),
                   var(--color-bg);
+      background-repeat: no-repeat;
+      background-size: 100% 100%;
       color: var(--color-text);
+    }
+
+    .tool-identity {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      max-width: 100%;
+      vertical-align: middle;
+    }
+
+    .tool-brand-icon {
+      position: relative;
+      display: inline-grid;
+      place-items: center;
+      flex: 0 0 auto;
+      width: 28px;
+      height: 28px;
+      overflow: hidden;
+      border: 1px solid color-mix(in srgb, var(--tool-brand) 28%, var(--color-border));
+      border-radius: 9px;
+      background: color-mix(in srgb, var(--tool-brand) 9%, #FFFFFF);
+      box-shadow:
+        0 5px 14px color-mix(in srgb, var(--tool-brand) 12%, transparent),
+        inset 0 1px 0 rgba(255, 255, 255, 0.72);
+      transition: transform var(--t-fast) ease, box-shadow var(--t-fast) ease;
+    }
+
+    .tool-brand-icon img {
+      display: block;
+      width: 19px;
+      height: 19px;
+      object-fit: contain;
+    }
+
+    .tool-brand-fallback {
+      display: grid;
+      place-items: center;
+      width: 100%;
+      height: 100%;
+      color: var(--tool-brand);
+      font: 800 12px/1 "Fira Code", ui-monospace, monospace;
+      text-transform: uppercase;
+    }
+
+    .tool-brand-label {
+      min-width: 0;
+      overflow: hidden;
+      color: color-mix(in srgb, var(--tool-brand) 48%, var(--color-text));
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    html.dark .tool-brand-label {
+      color: color-mix(in srgb, var(--tool-brand) 18%, var(--color-text));
+    }
+
+    .tool-identity[data-compact="true"] {
+      gap: 7px;
+    }
+
+    .tool-identity[data-compact="true"] .tool-brand-icon {
+      width: 24px;
+      height: 24px;
+      border-radius: 8px;
+    }
+
+    .tool-identity[data-compact="true"] .tool-brand-icon img {
+      width: 16px;
+      height: 16px;
+    }
+
+    .tool-identity[data-logo-kind="wordmark"] .tool-brand-icon {
+      width: 44px;
+    }
+
+    .tool-identity[data-logo-kind="wordmark"] .tool-brand-icon img {
+      width: 34px;
+      height: 15px;
+    }
+
+    .tool-identity[data-compact="true"][data-logo-kind="wordmark"] .tool-brand-icon {
+      width: 40px;
+    }
+
+    tr:hover .tool-brand-icon,
+    .tool-identity:hover .tool-brand-icon {
+      transform: translateY(-1px);
+      box-shadow:
+        0 7px 18px color-mix(in srgb, var(--tool-brand) 18%, transparent),
+        inset 0 1px 0 rgba(255, 255, 255, 0.76);
     }
 
     .tokdash-loading-placeholder:has(> .tokdash-loading-label) {
@@ -4571,6 +4664,79 @@
       }
     }
 
+    const TOOL_BRAND_META = Object.freeze({
+      opencode: { icon: '/static/icons/agents/opencode.png', color: '#111111', fallback: 'O' },
+      codex: { icon: '/static/icons/agents/codex.png', color: '#111827', fallback: 'C' },
+      claude: { icon: '/static/icons/agents/claude.svg', color: '#D97757', fallback: 'C' },
+      gemini_cli: { icon: '/static/icons/agents/gemini.svg', color: '#4285F4', fallback: 'G' },
+      antigravity_cli: { icon: '/static/icons/agents/antigravity.png', color: '#4285F4', fallback: 'A' },
+      cursor: { icon: '/static/icons/agents/cursor.svg', color: '#26251E', fallback: 'C' },
+      amp: { icon: '/static/icons/agents/amp.svg', color: '#F34E3F', fallback: 'A' },
+      openclaw: { icon: '/static/icons/agents/openclaw.png', color: '#EF3E45', fallback: 'O' },
+      kimi: { icon: '/static/icons/agents/kimi.png', color: '#1688F8', fallback: 'K' },
+      grok: { icon: '/static/icons/agents/grok.png', color: '#111111', fallback: 'G' },
+      pi_agent: { icon: '/static/icons/agents/pi.png', color: '#111111', fallback: 'P' },
+      copilot_cli: { icon: '/static/icons/agents/copilot.svg', color: '#6E40C9', fallback: 'C' },
+      hermes: { icon: '/static/icons/agents/hermes.png', color: '#111111', fallback: 'H' },
+      mimo: { icon: '/static/icons/agents/mimo.svg', color: '#FF6900', fallback: 'M', logoKind: 'wordmark' },
+    });
+
+    function normalizeToolBrandKey(tool) {
+      const key = String(tool || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+      const aliases = {
+        claude_code: 'claude',
+        github_copilot_cli: 'copilot_cli',
+        copilot: 'copilot_cli',
+        gemini: 'gemini_cli',
+        antigravity: 'antigravity_cli',
+        pi: 'pi_agent',
+      };
+      return aliases[key] || key;
+    }
+
+    function toolBrandMeta(tool) {
+      const key = normalizeToolBrandKey(tool);
+      const known = TOOL_BRAND_META[key];
+      if (known) return known;
+      const label = formatToolName(tool);
+      return { icon: null, color: '#64748B', fallback: label.charAt(0) || '?' };
+    }
+
+    function createToolIdentity(tool, options = {}) {
+      const meta = toolBrandMeta(tool);
+      const identity = document.createElement('span');
+      identity.className = 'tool-identity';
+      identity.dataset.compact = String(Boolean(options.compact));
+      identity.dataset.logoKind = meta.logoKind || 'mark';
+      identity.style.setProperty('--tool-brand', meta.color);
+
+      const icon = document.createElement('span');
+      icon.className = 'tool-brand-icon';
+      icon.setAttribute('aria-hidden', 'true');
+
+      const fallback = document.createElement('span');
+      fallback.className = 'tool-brand-fallback';
+      fallback.textContent = meta.fallback;
+
+      if (meta.icon) {
+        const image = document.createElement('img');
+        image.src = appAssetWithBase(meta.icon);
+        image.alt = '';
+        image.loading = 'lazy';
+        image.decoding = 'async';
+        image.addEventListener('error', () => icon.replaceChildren(fallback), { once: true });
+        icon.appendChild(image);
+      } else {
+        icon.appendChild(fallback);
+      }
+
+      const label = document.createElement('span');
+      label.className = 'tool-brand-label';
+      label.textContent = formatToolName(tool);
+      identity.append(icon, label);
+      return identity;
+    }
+
     // Human-friendly source/tool labels
     function formatToolName(tool) {
       const key = String(tool || '').trim().toLowerCase();
@@ -4588,6 +4754,7 @@
         copilot_cli: 'GitHub Copilot CLI',
         hermes: 'Hermes',
         mimo: 'Mimo',
+        cursor: 'Cursor',
       };
       if (mapping[key]) return mapping[key];
 
@@ -5540,7 +5707,11 @@
           const nameCell = createTableCell("td", "py-3 px-4 text-slate-800", sessionDisplayName(session));
           nameCell.title = session.session_id ? `${sessionDisplayName(session)} · ${session.session_id}` : sessionDisplayName(session);
           row.appendChild(nameCell);
-          if (showTool) row.appendChild(createTableCell("td", "py-3 px-4 text-slate-700", formatToolName(session.tool)));
+          if (showTool) {
+            const toolCell = createTableCell("td", "py-3 px-4 text-slate-700", "");
+            toolCell.appendChild(createToolIdentity(session.tool, { compact: true }));
+            row.appendChild(toolCell);
+          }
           row.appendChild(createTableCell("td", "py-3 px-4 text-slate-700 mono", session.model || "—"));
           row.appendChild(createTableCell("td", "py-3 px-4 text-right text-slate-700", formatTokenCount(session.tokens_in || 0)));
           row.appendChild(createTableCell("td", "py-3 px-4 text-right text-slate-700", formatTokenCount(session.tokens_cache || 0)));
@@ -6033,12 +6204,15 @@
         const tr = document.createElement('tr');
         tr.className = 'border-b hover:bg-slate-50 transition';
         tr.style.borderColor = 'rgba(226,232,240,0.9)';
-        tr.innerHTML = `
-          <td class="py-3 px-4 font-semibold text-slate-800">${formatToolName(row.tool)}</td>
+        const toolCell = document.createElement('td');
+        toolCell.className = 'py-3 px-4 font-semibold text-slate-800';
+        toolCell.appendChild(createToolIdentity(row.tool));
+        tr.appendChild(toolCell);
+        tr.insertAdjacentHTML('beforeend', `
           <td class="py-3 px-4 text-right text-slate-700">${formatTokenCount(row.tokens)}</td>
           <td class="py-3 px-4 text-right text-slate-700">${formatHitRate(row.cache_hit_rate)}</td>
           <td class="py-3 px-4 text-right font-bold" style="color:var(--color-cost)">${formatCurrency(row.cost)}</td>
-        `;
+        `);
         frag.appendChild(tr);
       });
 
@@ -6106,11 +6280,14 @@
         const appHit = hitRateFrom(appIn, appCache);
 
         const header = document.createElement('div');
-        header.className = 'flex flex-wrap items-baseline gap-x-4 gap-y-1 mb-3';
-        header.innerHTML = `
-          <h4 class="text-sm font-extrabold mono tracking-wide" style="color: var(--color-primary);">${formatToolName(appName)}</h4>
-          <span class="text-xs text-slate-600">${formatTokenCount(appTokens, true)} · ${formatCurrency(appCost)} · ${formatNumber(appMessages)} ${t('msgs')} · ${t('cacheHitRate')} ${formatHitRate(appHit)}</span>
-        `;
+        header.className = 'flex flex-wrap items-center gap-x-4 gap-y-1 mb-3';
+        const title = document.createElement('h4');
+        title.className = 'text-sm font-extrabold mono tracking-wide';
+        title.appendChild(createToolIdentity(appName, { compact: true }));
+        const appSummary = document.createElement('span');
+        appSummary.className = 'text-xs text-slate-600';
+        appSummary.textContent = `${formatTokenCount(appTokens, true)} · ${formatCurrency(appCost)} · ${formatNumber(appMessages)} ${t('msgs')} · ${t('cacheHitRate')} ${formatHitRate(appHit)}`;
+        header.append(title, appSummary);
         appDiv.appendChild(header);
 
         const table = document.createElement('table');

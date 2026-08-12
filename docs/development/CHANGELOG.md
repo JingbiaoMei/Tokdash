@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - Added an in-app **What's new** drawer beside the Tokdash title, backed by release notes that ship with the package and a release checklist guard to keep them current.
+- Added compact local brand marks and restrained brand-color accents for supported coding tools in usage, app/model, and combined-session breakdowns.
 
 ### Changed
 
@@ -16,7 +17,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
-- Extended the themed document background across the full page so long dashboard views no longer reveal a mismatched background seam.
+- Prevented gradient theme backgrounds from tiling on long dashboard views, removing the mismatched horizontal seam while preserving the Brutalist theme's intentional grid pattern.
 
 ## 1.6.1 - 2026-08-11
 

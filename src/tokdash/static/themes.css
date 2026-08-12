@@ -1610,3 +1610,11 @@ html.dark[data-ui-theme="studio"] .style-select option {
   background: #15171B;
   color: #F8FAFC;
 }
+
+/* Gradient themes should paint one continuous canvas across the full document.
+   The brutalist theme is excluded because its 32px grid is intentionally tiled. */
+html[data-ui-theme]:not([data-ui-theme="brutalist"]) body {
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  background-color: var(--color-bg);
+}

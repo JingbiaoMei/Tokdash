@@ -9,6 +9,7 @@ import tokdash  # type: ignore[import-untyped]
 STATIC_DIR = Path(tokdash.__file__).parent / "static"
 INDEX_HTML = STATIC_DIR / "index.html"
 RELEASE_NOTES = STATIC_DIR / "release-notes.json"
+THEMES_CSS = STATIC_DIR / "themes.css"
 
 
 def _extract_js_function(source: str, signature: str) -> str:
@@ -29,9 +30,20 @@ def _extract_js_function(source: str, signature: str) -> str:
 
 def test_document_background_covers_the_full_page() -> None:
     source = INDEX_HTML.read_text(encoding="utf-8")
+    themes = THEMES_CSS.read_text(encoding="utf-8")
     assert "html, body { height: 100%; }" not in source
     assert re.search(r"html\s*\{[^}]*min-height:\s*100%", source, re.DOTALL)
     assert re.search(r"body\s*\{[^}]*min-height:\s*100%", source, re.DOTALL)
+    themed_body = re.search(
+        r"html\[data-ui-theme\]:not\(\[data-ui-theme=\"brutalist\"\]\)\s+body\s*\{(?P<body>[^}]*)\}",
+        themes,
+        re.DOTALL,
+    )
+    assert themed_body, "themes.css must define one shared full-page background rule"
+    body = themed_body.group("body")
+    assert "background-repeat: no-repeat" in body
+    assert "background-size: 100% 100%" in body
+    assert "background-color: var(--color-bg)" in body
 
 
 def test_loading_placeholders_share_the_profile_activity_shimmer() -> None:

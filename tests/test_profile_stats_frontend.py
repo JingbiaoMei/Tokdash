@@ -51,6 +51,8 @@ PROFILE_FUNCTIONS = [
     "function startOfWeekMonday(date) {",
     "function createEmptyContribution(key) {",
     "function safeProfileNumber(value) {",
+    "function buildUsageProfileContribution(dateKey, usageData) {",
+    "function reconcileTodayProfileContribution(contributions, usageData, startDate, endDate, today = new Date()) {",
     "function getProfileActivityWindow(contributions, today, weekCount = 52) {",
     "function profileDayTokens(day) {",
     "function summarizeProfileActivity(days) {",
@@ -1059,6 +1061,9 @@ def test_overview_profile_warm_cache_refreshes_only_when_forced(tmp_path: Path):
 let statsWarmScheduled = false;
 let statsLoaded = false;
 const statsCache = { default: null };
+const lastUsageResponse = null;
+const currentStartDate = null;
+const currentEndDate = null;
 let fetchCount = 0;
 let renderCount = 0;
 function setTimeout(callback) { callback(); }
@@ -1074,6 +1079,7 @@ function fetchSelectedServers() {
 }
 function combineStatsPayloads(rows) { return rows[0]; }
 function fillMissingDays(contributions) { return contributions; }
+function reconcileTodayProfileContribution(contributions) { return contributions; }
 function isOverviewActive() { return true; }
 function renderOverviewProfilePreview() { renderCount += 1; }
 function setOverviewProfileState() {}
@@ -1120,6 +1126,73 @@ async function flushPromises() {
     assert "scheduleStatsWarm(forceRefresh);" in source
 
 
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_today_usage_reconciles_the_profile_day_without_mutating_history(tmp_path: Path):
+    payload = {
+        "contributions": [
+            {
+                "date": "2026-08-11",
+                "totals": {"tokens": 80, "cost": 0.8, "messages": 1},
+                "tokenBreakdown": {"input": 20, "output": 10, "cacheRead": 50, "cacheWrite": 0, "reasoning": 0},
+                "sources": [],
+            },
+            {
+                "date": "2026-08-12",
+                "totals": {"tokens": 10, "cost": 0.1, "messages": 1},
+                "tokenBreakdown": {"input": 2, "output": 1, "cacheRead": 7, "cacheWrite": 0, "reasoning": 0},
+                "sources": [],
+            },
+        ],
+        "usage": {
+            "total_tokens": 300,
+            "total_cost": 2.5,
+            "total_messages": 4,
+            "coding_models": [
+                {
+                    "source": "codex",
+                    "name": "gpt-test",
+                    "tokens": 300,
+                    "tokens_in": 40,
+                    "tokens_out": 20,
+                    "tokens_cache": 100,
+                    "cost": 2.5,
+                    "messages": 4,
+                }
+            ],
+            "openclaw_models": [],
+        },
+        "startDate": "2026-08-12",
+        "endDate": "2026-08-12",
+        "today": "2026-08-12",
+    }
+    result = _run_profile_js(
+        tmp_path,
+        "reconcileTodayProfileContribution(payload.contributions, payload.usage, parseDateKey(payload.startDate), parseDateKey(payload.endDate), parseDateKey(payload.today))",
+        payload,
+    )
+
+    assert result[0]["date"] == "2026-08-11"
+    assert result[0]["totals"]["tokens"] == 80
+    assert result[1]["totals"] == {"tokens": 300, "cost": 2.5, "messages": 4}
+    assert result[1]["tokenBreakdown"] == {
+        "input": 40,
+        "output": 20,
+        "cacheRead": 100,
+        "cacheWrite": 0,
+        "reasoning": 140,
+    }
+    assert result[1]["sources"][0]["source"] == "codex"
+    assert result[1]["sources"][0]["modelId"] == "gpt-test"
+
+    source = INDEX_HTML.read_text(encoding="utf-8")
+    renderer = _extract_js_function(source, "function renderOverviewTab(data) {")
+    loader = _extract_js_function(source, "async function loadStats(options = {}) {")
+    warmer = _extract_js_function(source, "function scheduleStatsWarm(force = false) {")
+    assert "reconcileTodayProfileContribution(" in renderer
+    assert "reconcileTodayProfileContribution(" in loader
+    assert "reconcileTodayProfileContribution(" in warmer
+
+
 def test_overview_profile_summary_markup_and_style_contract():
     source = INDEX_HTML.read_text(encoding="utf-8")
     compact = re.sub(r"\s+", "", source)
@@ -1161,10 +1234,11 @@ def test_overview_profile_summary_markup_and_style_contract():
     assert ".overview-profile-band{" in compact
     assert "grid-template-columns:minmax(220px,260px)minmax(0,1fr)" in compact
     assert ".overview-profile-copy{" in compact
-    assert "border-radius:14px" in compact
-    assert ".overview-profile-copyh2{margin-top:8px;font-size:21px" in compact
+    assert "border-radius:0;background:none;box-shadow:none" in compact
+    assert ".overview-profile-copyh2{margin-top:7px;font-size:19px" in compact
     assert ".overview-profile-open{" in compact
-    assert "padding:8px9px8px11px" in compact
+    assert "padding:7px0" in compact
+    assert "border:0;background:transparent;box-shadow:none" in compact
     assert ".overview-profile-metricsdd{margin:0;color:var(--overview-profile-tone);font-size:19px" in compact
     assert ".overview-profile-mode{padding:6px10px;font-size:12px;" in compact
     assert ".overview-activity-insight-kpi[data-tone=\"secondary\"]" in compact

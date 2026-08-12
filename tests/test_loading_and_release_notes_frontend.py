@@ -89,6 +89,11 @@ def test_release_notes_accessible_drawer_contract() -> None:
     assert "version?.runtime_version || version?.current" in source
     assert source.count("whatsNew: '") == 2
     assert source.count("releaseNotesIntro: '") == 2
+    assert 'class="btn btn-ghost compact-control release-notes-trigger"' in source
+    assert source.index('id="refreshBtn"') < source.index('id="releaseNotesToggle"')
+    assert source.index('id="releaseNotesToggle"') < source.index('id="settingsMenu"')
+    brand_block = source[source.index('alt="Tokdash logo"') : source.index('class="topbar-control-rail"')]
+    assert 'id="releaseNotesToggle"' not in brand_block
 
 
 def test_release_notes_render_with_text_content_and_lazy_local_fetch() -> None:

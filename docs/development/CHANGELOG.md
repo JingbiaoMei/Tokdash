@@ -9,16 +9,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - Added an in-app **What's new** drawer beside the Tokdash title, backed by release notes that ship with the package and a release checklist guard to keep them current.
-- Added compact local brand marks and restrained brand-color accents for supported coding tools in usage, app/model, and combined-session breakdowns.
+- Added compact local brand marks for supported coding tools in the Usage by Tool chart, usage tables, app/model, and combined-session breakdowns.
 
 ### Changed
 
 - Unified dashboard loading placeholders with the Profile Activity shimmer while preserving localized status text for assistive technology.
-- Strengthened the Overview Profile preview's typography, supporting controls, and insight color hierarchy while keeping its heatmap geometry unchanged.
+- Refined the Overview Profile preview's typography and insight hierarchy without a nested card surface, while keeping its heatmap geometry unchanged.
+- Moved the What's new entry from the Tokdash brand lockup into the dashboard action rail and normalized Codex/Grok marks onto transparent backgrounds.
 
 ### Fixed
 
 - Prevented gradient theme backgrounds from tiling on long dashboard views, removing the mismatched horizontal seam while preserving the Brutalist theme's intentional grid pattern.
+- Kept the current-day Profile Activity cell synchronized with the already-loaded Today Overview totals, avoiding drift between independently aged response caches without adding another API request.
 
 ## 1.6.1 - 2026-08-11
 

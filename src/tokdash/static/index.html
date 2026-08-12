@@ -116,30 +116,27 @@
       display: inline-grid;
       place-items: center;
       flex: 0 0 auto;
-      width: 28px;
-      height: 28px;
-      overflow: hidden;
-      border: 1px solid color-mix(in srgb, var(--tool-brand) 28%, var(--color-border));
-      border-radius: 9px;
-      background: color-mix(in srgb, var(--tool-brand) 9%, #FFFFFF);
-      box-shadow:
-        0 5px 14px color-mix(in srgb, var(--tool-brand) 12%, transparent),
-        inset 0 1px 0 rgba(255, 255, 255, 0.72);
-      transition: transform var(--t-fast) ease, box-shadow var(--t-fast) ease;
+      width: 24px;
+      height: 24px;
+      overflow: visible;
+      border: 0;
+      background: transparent;
+      box-shadow: none;
+      transition: opacity var(--t-fast) ease, transform var(--t-fast) ease;
     }
 
     .tool-brand-icon img {
       display: block;
-      width: 19px;
-      height: 19px;
+      width: 20px;
+      height: 20px;
       object-fit: contain;
     }
 
     .tool-brand-fallback {
       display: grid;
       place-items: center;
-      width: 100%;
-      height: 100%;
+      width: 20px;
+      height: 20px;
       color: var(--tool-brand);
       font: 800 12px/1 "Fira Code", ui-monospace, monospace;
       text-transform: uppercase;
@@ -148,13 +145,13 @@
     .tool-brand-label {
       min-width: 0;
       overflow: hidden;
-      color: color-mix(in srgb, var(--tool-brand) 48%, var(--color-text));
+      color: var(--color-text);
       text-overflow: ellipsis;
       white-space: nowrap;
     }
 
-    html.dark .tool-brand-label {
-      color: color-mix(in srgb, var(--tool-brand) 18%, var(--color-text));
+    html.dark .tool-identity[data-dark-invert="true"] .tool-brand-icon img {
+      filter: invert(.88);
     }
 
     .tool-identity[data-compact="true"] {
@@ -162,14 +159,13 @@
     }
 
     .tool-identity[data-compact="true"] .tool-brand-icon {
-      width: 24px;
-      height: 24px;
-      border-radius: 8px;
+      width: 20px;
+      height: 20px;
     }
 
     .tool-identity[data-compact="true"] .tool-brand-icon img {
-      width: 16px;
-      height: 16px;
+      width: 17px;
+      height: 17px;
     }
 
     .tool-identity[data-logo-kind="wordmark"] .tool-brand-icon {
@@ -188,10 +184,18 @@
     tr:hover .tool-brand-icon,
     .tool-identity:hover .tool-brand-icon {
       transform: translateY(-1px);
-      box-shadow:
-        0 7px 18px color-mix(in srgb, var(--tool-brand) 18%, transparent),
-        inset 0 1px 0 rgba(255, 255, 255, 0.76);
+      opacity: .82;
+      box-shadow: none;
     }
+
+    .tool-chart-shell{display:grid;height:280px;grid-template-rows:minmax(0,1fr) auto;gap:8px;}
+    .tool-chart-canvas{position:relative;min-height:0;}
+    .tool-chart-legend{display:flex;min-height:22px;flex-wrap:wrap;align-items:center;justify-content:center;gap:7px 16px;}
+    .tool-chart-legend-item{display:inline-flex;align-items:center;gap:7px;min-width:0;color:var(--color-muted);font-size:12px;}
+    .tool-chart-legend-swatch{width:15px;height:3px;flex:0 0 auto;border-radius:999px;}
+    .tool-chart-legend .tool-identity{gap:6px;}.tool-chart-legend .tool-identity[data-compact="true"] .tool-brand-icon{width:22px;height:22px;}.tool-chart-legend .tool-identity[data-compact="true"] .tool-brand-icon img{width:20px;height:20px;}.tool-chart-legend .tool-brand-label{color:var(--color-muted);font-size:12px;font-weight:650;}
+    .tool-chart-legend .tool-identity[data-logo-kind="wordmark"] .tool-brand-label{display:none;}
+    .tool-chart-legend-more{display:inline-flex;align-items:center;min-height:22px;padding-left:2px;color:var(--color-label);font-size:11px;font-weight:700;white-space:nowrap;}
 
     .tokdash-loading-placeholder:has(> .tokdash-loading-label) {
       position: relative;
@@ -836,14 +840,14 @@
     .activity-insights-skeleton{display:block;width:68%;height:14px;border-radius:5px;background:linear-gradient(90deg,color-mix(in srgb,var(--color-border) 62%,transparent),color-mix(in srgb,var(--color-primary) 11%,var(--color-border)),color-mix(in srgb,var(--color-border) 62%,transparent));background-size:200% 100%;animation:tokdash-loading-sweep 1.4s ease-in-out infinite;}
 
     .overview-profile-band{display:grid;grid-template-columns:minmax(220px,260px) minmax(0,1fr);gap:24px;align-items:stretch;min-height:182px;padding:20px 22px 22px;border-color:color-mix(in srgb,var(--color-primary) 18%,var(--color-border));background:linear-gradient(105deg,var(--color-surface-glass),color-mix(in srgb,var(--color-primary) 7%,var(--color-surface-glass)));box-shadow:0 10px 28px color-mix(in srgb,var(--color-primary) 6%,transparent);}
-    .overview-profile-copy{position:relative;isolation:isolate;display:flex;overflow:hidden;flex-direction:column;align-items:flex-start;justify-content:center;padding:18px 20px 20px;border:1px solid color-mix(in srgb,var(--color-secondary) 24%,var(--color-border));border-radius:14px;background:radial-gradient(circle at 90% 12%,color-mix(in srgb,var(--color-secondary) 16%,transparent),transparent 42%),linear-gradient(145deg,color-mix(in srgb,var(--color-secondary) 7%,var(--color-surface-glass)),color-mix(in srgb,var(--color-primary) 4%,var(--color-surface-glass)));box-shadow:inset 3px 0 0 color-mix(in srgb,var(--color-secondary) 58%,transparent),inset 0 1px 0 rgba(255,255,255,.32);}
-    .overview-profile-eyebrow{display:flex;align-items:center;gap:7px;color:var(--color-secondary);font-size:12px;font-weight:850;letter-spacing:.09em;text-transform:uppercase;}.overview-profile-eyebrow::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--color-secondary);box-shadow:0 0 10px color-mix(in srgb,var(--color-secondary) 58%,transparent);}
-    .overview-profile-copy h2{margin-top:8px;font-size:21px;font-weight:850;letter-spacing:-.025em;line-height:1.12;text-wrap:balance;}
-    .overview-profile-copy p{margin-top:5px;color:var(--color-muted);font-size:13px;line-height:1.4;}
-    .overview-profile-open{display:inline-flex;align-items:center;gap:8px;width:max-content;margin-top:16px;padding:8px 9px 8px 11px;border:1px solid color-mix(in srgb,var(--color-primary) 25%,var(--color-border));border-radius:999px;background:color-mix(in srgb,var(--color-primary) 8%,var(--color-surface-glass));box-shadow:0 4px 12px color-mix(in srgb,var(--color-primary) 7%,transparent);color:var(--color-primary);font:inherit;font-size:13px;font-weight:800;cursor:pointer;transition:border-color .16s ease,background-color .16s ease,box-shadow .16s ease,transform .16s ease;}
-    .overview-profile-open span:last-child{display:grid;width:20px;height:20px;place-items:center;border-radius:50%;background:var(--color-primary);color:var(--color-bg);font-size:13px;line-height:1;transition:transform .16s ease;}
-    .overview-profile-open:is(:hover,:focus-visible){border-color:color-mix(in srgb,var(--color-primary) 48%,var(--color-border));background:color-mix(in srgb,var(--color-primary) 13%,var(--color-surface-glass));box-shadow:0 7px 18px color-mix(in srgb,var(--color-primary) 13%,transparent);transform:translateY(-1px);}.overview-profile-open:is(:hover,:focus-visible) span:last-child{transform:translateX(2px);}
-    .overview-profile-open:active{transform:translateY(0);}.overview-profile-open:focus-visible{outline:2px solid color-mix(in srgb,var(--color-primary) 52%,transparent);outline-offset:3px;}
+    .overview-profile-copy{display:flex;flex-direction:column;align-items:flex-start;justify-content:center;padding:12px 22px 14px 2px;border:0;border-right:1px solid color-mix(in srgb,var(--color-primary) 16%,var(--color-border));border-radius:0;background:none;box-shadow:none;}
+    .overview-profile-eyebrow{display:flex;align-items:center;gap:7px;color:var(--color-secondary);font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;}.overview-profile-eyebrow::before{content:"";width:3px;height:14px;border-radius:999px;background:color-mix(in srgb,var(--color-secondary) 72%,var(--color-border));}
+    .overview-profile-copy h2{margin-top:7px;font-size:19px;font-weight:850;letter-spacing:-.025em;line-height:1.15;text-wrap:balance;}
+    .overview-profile-copy p{margin-top:4px;color:var(--color-muted);font-size:12px;line-height:1.4;}
+    .overview-profile-open{display:inline-flex;align-items:center;gap:7px;width:max-content;margin-top:12px;padding:7px 0;border:0;background:transparent;box-shadow:none;color:var(--color-primary);font:inherit;font-size:12px;font-weight:800;cursor:pointer;transition:color .16s ease,transform .16s ease;}
+    .overview-profile-open span:last-child{font-size:16px;line-height:1;transition:transform .16s ease;}
+    .overview-profile-open:is(:hover,:focus-visible){color:color-mix(in srgb,var(--color-primary) 76%,var(--color-secondary));transform:translateX(1px);}.overview-profile-open:is(:hover,:focus-visible) span:last-child{transform:translateX(3px);}
+    .overview-profile-open:active{transform:translateX(0);}.overview-profile-open:focus-visible{outline:2px solid color-mix(in srgb,var(--color-primary) 46%,transparent);outline-offset:3px;border-radius:4px;}
     .overview-profile-main{display:flex;min-width:0;align-items:center;padding-block:2px;}
     .overview-profile-state,.overview-profile-ready{width:100%;}
     .overview-profile-band:not([data-state="loading"]) .overview-profile-loading,.overview-profile-band:not([data-state="error"]) .overview-profile-unavailable,.overview-profile-band:not([data-state="ready"]) .overview-profile-ready{display:none;}
@@ -875,7 +879,7 @@
     .overview-activity-insight-kpi dd{margin:0;overflow:hidden;color:var(--overview-insight-tone);font-size:15px;font-weight:850;text-overflow:ellipsis;white-space:nowrap;}.overview-activity-insight-kpi dt{margin-top:2px;color:var(--color-muted);font-size:10px;line-height:1.25;}
     .overview-activity-insights-state{margin:0;padding:10px 10px 0;border-top:1px solid color-mix(in srgb,var(--color-primary) 15%,var(--color-border));color:var(--color-muted);font-size:10px;line-height:1.4;}
     .overview-activity-insights[data-state="ready"] .overview-activity-insights-state{padding-top:3px;border-top:0;}.overview-activity-insights[data-state="ready"] .overview-activity-insights-values{display:grid;}.overview-activity-insights:not([data-state="ready"]) .overview-activity-insights-values{display:none;}
-    @media(max-width:800px){.overview-profile-band{grid-template-columns:1fr;gap:16px;}.overview-profile-copy{min-height:160px;padding:16px 18px 18px;}.overview-profile-metrics{flex-wrap:wrap;}.overview-profile-heat-head{align-items:flex-start;flex-wrap:wrap;}.overview-profile-modes{margin-left:auto;}}
+    @media(max-width:800px){.overview-profile-band{grid-template-columns:1fr;gap:16px;}.overview-profile-copy{min-height:0;padding:2px 0 14px;border-right:0;border-bottom:1px solid color-mix(in srgb,var(--color-primary) 16%,var(--color-border));}.overview-profile-metrics{flex-wrap:wrap;}.overview-profile-heat-head{align-items:flex-start;flex-wrap:wrap;}.overview-profile-modes{margin-left:auto;}}
     @media(max-width:768px){.profile-activity-insights-kpis,.overview-activity-insights-values{grid-template-columns:repeat(2,minmax(0,1fr));}.profile-activity-insight-kpi:nth-child(3)::before,.overview-activity-insight-kpi:nth-child(3)::before{display:none;}.profile-activity-insights-detail{grid-template-columns:minmax(0,1fr);}}
     @media(max-width:520px){.overview-profile-band{padding:14px;}.overview-profile-copy h2{font-size:20px;}.overview-profile-metrics{gap:14px 20px;}}
     @media(prefers-reduced-motion:reduce){.tokdash-loading-placeholder:has(> .tokdash-loading-label)::after,.overview-profile-skeleton-metrics i,.overview-profile-skeleton-grid,.activity-insights-skeleton{animation:none;}.overview-profile-cell{transform:none!important;}.overview-profile-open,.overview-profile-open span:last-child{transition:none;}}
@@ -1257,39 +1261,34 @@
       padding: 0; color: var(--color-label); text-decoration: underline dotted;
     }
 
-    /* Release notes: a quiet title-level entry backed by an on-demand side sheet. */
+    /* Release notes live with dashboard actions, leaving the brand lockup uncluttered. */
     .release-notes-trigger {
       display: inline-flex;
       align-items: center;
-      gap: 6px;
-      margin-top: 4px;
-      padding: 2px 0;
-      border: 0;
-      background: transparent;
-      color: var(--color-muted);
+      gap: 7px;
+      min-height: 36px;
+      padding: 6px 10px;
+      color: var(--color-text);
       cursor: pointer;
       font-size: 12px;
-      line-height: 1.4;
-      text-align: left;
+      font-weight: 700;
+      line-height: 1;
+      white-space: nowrap;
     }
-    .release-notes-trigger:hover { color: var(--color-primary); }
+    .release-notes-trigger:hover,
+    .release-notes-trigger[aria-expanded="true"] { color: var(--color-primary); }
     .release-notes-trigger:focus-visible {
-      border-radius: 4px;
       outline: 2px solid color-mix(in srgb, var(--color-primary) 62%, transparent);
-      outline-offset: 3px;
+      outline-offset: 2px;
     }
     .release-notes-version {
-      color: var(--color-text);
-      font-size: 11px;
-      font-weight: 750;
+      color: var(--color-muted);
+      font-size: 10px;
+      font-weight: 650;
+      letter-spacing: -.02em;
     }
-    .release-notes-arrow {
-      transition: transform 180ms ease;
-    }
-    .release-notes-trigger:hover .release-notes-arrow,
-    .release-notes-trigger[aria-expanded="true"] .release-notes-arrow {
-      transform: translateX(2px);
-    }
+    .release-notes-icon { flex: 0 0 auto; color: var(--color-muted); }
+    .release-notes-trigger:is(:hover,[aria-expanded="true"]) .release-notes-icon { color: currentColor; }
 
     .release-notes-dialog {
       width: min(430px, 100%);
@@ -1469,14 +1468,6 @@
           </div>
           <div>
             <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight mono">Tokdash</h1>
-            <button id="releaseNotesToggle" class="release-notes-trigger" type="button" aria-controls="releaseNotesDialog" aria-expanded="false">
-              <span id="releaseNotesVersion" class="release-notes-version mono">v—</span>
-              <span aria-hidden="true">·</span>
-              <span data-i18n="whatsNew">What's new</span>
-              <svg class="release-notes-arrow" width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                <path d="M2.5 6h7m-2.4-2.4L9.5 6 7.1 8.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-            </button>
             <p id="lastUpdate" class="tokdash-loading-placeholder text-xs mt-2" style="color: var(--color-label);"><span class="tokdash-loading-label">Loading...</span></p>
           </div>
         </div>
@@ -1536,6 +1527,14 @@
               <path d="M20 4v6h-6" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
               </svg>
               <span data-i18n="refresh">Refresh</span>
+            </button>
+            <button id="releaseNotesToggle" class="btn btn-ghost compact-control release-notes-trigger" type="button" aria-controls="releaseNotesDialog" aria-expanded="false">
+              <svg class="release-notes-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M6.5 4.5h11a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.7"/>
+                <path d="M8 9h8M8 12h8M8 15h5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+              </svg>
+              <span data-i18n="whatsNew">What's new</span>
+              <span id="releaseNotesVersion" class="release-notes-version mono">v—</span>
             </button>
             <span id="serverCountChip" class="text-xs font-semibold" style="display:none;padding:5px 9px;border:1px solid var(--color-border);border-radius:999px;color:var(--color-muted);"></span>
 
@@ -1671,8 +1670,11 @@
             <h2 class="text-base font-extrabold mono" data-i18n="usageByTool">Usage by Tool</h2>
             <div class="text-xs" style="color: var(--color-muted);" data-i18n="tokens">Tokens</div>
           </div>
-          <div class="h-[280px]">
-            <canvas id="toolChart" aria-label="Usage by tool chart" role="img"></canvas>
+          <div class="tool-chart-shell">
+            <div class="tool-chart-canvas">
+              <canvas id="toolChart" aria-label="Usage by tool chart" role="img"></canvas>
+            </div>
+            <div id="toolChartLegend" class="tool-chart-legend" role="list" aria-label="Tool chart legend"></div>
           </div>
         </div>
 
@@ -4668,18 +4670,18 @@
 
     const TOOL_BRAND_META = Object.freeze({
       opencode: { icon: '/static/icons/agents/opencode.png', color: '#111111', fallback: 'O' },
-      codex: { icon: '/static/icons/agents/codex.png', color: '#111827', fallback: 'C' },
+      codex: { icon: '/static/icons/agents/codex-transparent.png', color: '#111827', fallback: 'C', darkInvert: true },
       claude: { icon: '/static/icons/agents/claude.svg', color: '#D97757', fallback: 'C' },
       gemini_cli: { icon: '/static/icons/agents/gemini.svg', color: '#4285F4', fallback: 'G' },
       antigravity_cli: { icon: '/static/icons/agents/antigravity.png', color: '#4285F4', fallback: 'A' },
-      cursor: { icon: '/static/icons/agents/cursor.svg', color: '#26251E', fallback: 'C' },
+      cursor: { icon: '/static/icons/agents/cursor.svg', color: '#26251E', fallback: 'C', darkInvert: true },
       amp: { icon: '/static/icons/agents/amp.svg', color: '#F34E3F', fallback: 'A' },
       openclaw: { icon: '/static/icons/agents/openclaw.png', color: '#EF3E45', fallback: 'O' },
       kimi: { icon: '/static/icons/agents/kimi.png', color: '#1688F8', fallback: 'K' },
-      grok: { icon: '/static/icons/agents/grok.png', color: '#111111', fallback: 'G' },
+      grok: { icon: '/static/icons/agents/grok-transparent.png', color: '#111111', fallback: 'G', darkInvert: true },
       pi_agent: { icon: '/static/icons/agents/pi.png', color: '#111111', fallback: 'P' },
       copilot_cli: { icon: '/static/icons/agents/copilot.svg', color: '#6E40C9', fallback: 'C' },
-      hermes: { icon: '/static/icons/agents/hermes.png', color: '#111111', fallback: 'H' },
+      hermes: { icon: '/static/icons/agents/hermes.png', color: '#111111', fallback: 'H', darkInvert: true },
       mimo: { icon: '/static/icons/agents/mimo.svg', color: '#FF6900', fallback: 'M', logoKind: 'wordmark' },
     });
 
@@ -4710,7 +4712,9 @@
       identity.className = 'tool-identity';
       identity.dataset.compact = String(Boolean(options.compact));
       identity.dataset.logoKind = meta.logoKind || 'mark';
+      identity.dataset.darkInvert = String(Boolean(meta.darkInvert));
       identity.style.setProperty('--tool-brand', meta.color);
+      identity.setAttribute('aria-label', formatToolName(tool));
 
       const icon = document.createElement('span');
       icon.className = 'tool-brand-icon';
@@ -4737,6 +4741,37 @@
       label.textContent = formatToolName(tool);
       identity.append(icon, label);
       return identity;
+    }
+
+    function renderToolChartLegend(entries, colors) {
+      const legend = document.getElementById('toolChartLegend');
+      if (!legend) return;
+      const fragment = document.createDocumentFragment();
+      const visibleEntries = entries.slice(0, 6);
+      visibleEntries.forEach(([tool], index) => {
+        const item = document.createElement('span');
+        item.className = 'tool-chart-legend-item';
+        item.setAttribute('role', 'listitem');
+
+        const swatch = document.createElement('span');
+        swatch.className = 'tool-chart-legend-swatch';
+        swatch.style.backgroundColor = colors[index];
+        swatch.setAttribute('aria-hidden', 'true');
+
+        item.append(swatch, createToolIdentity(tool, { compact: true }));
+        fragment.appendChild(item);
+      });
+      const hiddenCount = entries.length - visibleEntries.length;
+      if (hiddenCount > 0) {
+        const more = document.createElement('span');
+        more.className = 'tool-chart-legend-more';
+        more.setAttribute('role', 'listitem');
+        more.textContent = currentLang === 'zh'
+          ? `另有 ${hiddenCount} 个工具`
+          : `+${hiddenCount} more tools`;
+        fragment.appendChild(more);
+      }
+      legend.replaceChildren(fragment);
     }
 
     // Human-friendly source/tool labels
@@ -5173,6 +5208,14 @@
         }
       });
       scheduleIdle(() => updateCombinedModelsTable(lastCombinedModels));
+      if (Array.isArray(statsCache.default)) {
+        statsCache.default = reconcileTodayProfileContribution(
+          statsCache.default,
+          data,
+          currentStartDate,
+          currentEndDate,
+        );
+      }
       renderOverviewProfilePreview();
     }
 
@@ -6016,6 +6059,7 @@
       const values = entries.map(([, v]) => Number(v?.tokens || 0));
       const palette = getChartPalette();
       const colors = values.map((_, i) => palette[i % palette.length]);
+      renderToolChartLegend(entries, colors);
 
       if (!toolChart) {
         toolChart = new Chart(ctx, {
@@ -6033,7 +6077,7 @@
             maintainAspectRatio: false,
             animation: false,
             plugins: {
-              legend: { position: 'bottom' },
+              legend: { display: false },
               tooltip: {
                 callbacks: {
                   label: (context) => {
@@ -7813,6 +7857,65 @@
       return Number.isFinite(number) ? Math.max(0, number) : 0;
     }
 
+    function buildUsageProfileContribution(dateKey, usageData) {
+      const codingModels = Array.isArray(usageData?.coding_models) ? usageData.coding_models : [];
+      const openclawModels = Array.isArray(usageData?.openclaw_models) ? usageData.openclaw_models : [];
+      const models = [
+        ...codingModels.map((model) => ({ ...model, source: model.source || 'coding' })),
+        ...openclawModels.map((model) => ({ ...model, source: model.source || 'openclaw' })),
+      ];
+      const tokenBreakdown = {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        reasoning: 0,
+      };
+      const sources = models.map((model) => {
+        const input = safeProfileNumber(model.tokens_in);
+        const output = safeProfileNumber(model.tokens_out);
+        const cacheRead = safeProfileNumber(model.tokens_cache);
+        const total = safeProfileNumber(model.tokens ?? model.total_tokens);
+        const reasoning = Math.max(0, total - input - output - cacheRead);
+        tokenBreakdown.input += input;
+        tokenBreakdown.output += output;
+        tokenBreakdown.cacheRead += cacheRead;
+        tokenBreakdown.reasoning += reasoning;
+        return {
+          source: model.source || 'unknown',
+          modelId: model.name || model.model || 'unknown',
+          providerId: model.provider || 'unknown',
+          tokens: { input, output, cacheRead, cacheWrite: 0, reasoning },
+          cost: safeProfileNumber(model.cost ?? model.total_cost),
+          messages: safeProfileNumber(model.messages ?? model.total_messages),
+        };
+      });
+      const totalTokens = safeProfileNumber(usageData?.total_tokens);
+      const attributedTokens = Object.values(tokenBreakdown).reduce((sum, value) => sum + value, 0);
+      if (attributedTokens < totalTokens) tokenBreakdown.reasoning += totalTokens - attributedTokens;
+      return {
+        date: dateKey,
+        totals: {
+          tokens: totalTokens,
+          cost: safeProfileNumber(usageData?.total_cost),
+          messages: safeProfileNumber(usageData?.total_messages),
+        },
+        intensity: totalTokens > 0 ? 1 : 0,
+        tokenBreakdown,
+        sources,
+      };
+    }
+
+    function reconcileTodayProfileContribution(contributions, usageData, startDate, endDate, today = new Date()) {
+      const rows = Array.isArray(contributions) ? contributions : [];
+      if (!usageData || !(startDate instanceof Date) || !(endDate instanceof Date)) return rows;
+      const todayKey = formatDateKey(today);
+      if (formatDateKey(startDate) !== todayKey || formatDateKey(endDate) !== todayKey) return rows;
+      const reconciled = rows.filter((day) => day?.date !== todayKey);
+      reconciled.push(buildUsageProfileContribution(todayKey, usageData));
+      return reconciled.sort((left, right) => String(left?.date || '').localeCompare(String(right?.date || '')));
+    }
+
     function getProfileActivityWindow(contributions, today, weekCount = 52) {
       const safeToday = today instanceof Date && !isNaN(today.getTime()) ? today : new Date();
       const todayKey = formatDateKey(safeToday);
@@ -8877,7 +8980,12 @@
         document.getElementById('statTotalDays').textContent = formatNumber(stats.total_days || 0);
         document.getElementById('statTotalCost').textContent = formatCurrency((data.summary || {}).totalCost || 0);
 
-        const filledContributions = fillMissingDays(data.contributions);
+        const filledContributions = reconcileTodayProfileContribution(
+          fillMissingDays(data.contributions),
+          lastUsageResponse,
+          currentStartDate,
+          currentEndDate,
+        );
         statsCache.default = filledContributions;
         const currentYear = new Date().getFullYear();
         const currentYearRows = filledContributions.filter((day) => Number(String(day.date).slice(0, 4)) === currentYear);
@@ -8907,7 +9015,12 @@
             .then((rows) => {
               if (!rows.length) throw new Error(t('statsLoadFailed'));
               const data = combineStatsPayloads(rows.map((row) => row.payload));
-              const filledContributions = fillMissingDays(data.contributions || []);
+              const filledContributions = reconcileTodayProfileContribution(
+                fillMissingDays(data.contributions || []),
+                lastUsageResponse,
+                currentStartDate,
+                currentEndDate,
+              );
               statsCache.default = filledContributions;
               if (isOverviewActive()) renderOverviewProfilePreview(filledContributions);
             })

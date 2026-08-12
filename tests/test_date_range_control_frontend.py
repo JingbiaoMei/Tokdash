@@ -101,11 +101,15 @@ def test_quick_ranges_use_progressive_disclosure_without_horizontal_scroll() -> 
     assert 'data-i18n="moreRanges"' in quick_markup
     assert '"quick quick"' in source
     assert "display: flex;" in source
-    assert "flex-wrap: wrap;" in quick_css
+    assert "flex-wrap: nowrap;" in quick_css
     assert "flex: 0 0 auto;" in source
     assert "overflow: visible;" in quick_css
     assert "overflow-x: auto;" not in quick_css
     assert "white-space: nowrap;" in source
+    assert quick_markup.count("data-quick-primary") == 6
+    assert "function syncQuickRangeLayout()" in source
+    assert "quickRangeMoreMenu.prepend(quickRangePrimaryButtons[index]);" in source
+    assert "new ResizeObserver(scheduleQuickRangeLayout).observe(quickRangePanel);" in source
 
 
 def test_date_range_state_sync_does_not_fetch() -> None:

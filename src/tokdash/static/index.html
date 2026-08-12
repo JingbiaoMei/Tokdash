@@ -478,7 +478,7 @@
     .quick-range-panel {
       grid-area: quick;
       display: flex;
-      flex-wrap: wrap;
+      flex-wrap: nowrap;
       gap: 8px;
       align-items: center;
       width: 100%;
@@ -1583,12 +1583,12 @@
 
           <!-- Quick Range Buttons -->
           <div class="quick-range-panel" role="toolbar" aria-labelledby="dateRangeControlLabel">
-            <button type="button" class="btn btn-ghost quick-range-btn" data-range="today" aria-pressed="true" data-i18n="today">Today</button>
-            <button type="button" class="btn btn-ghost quick-range-btn" data-range="yesterday" aria-pressed="false" data-i18n="yesterday">Yesterday</button>
-            <button type="button" class="btn btn-ghost quick-range-btn" data-range="last7days" aria-pressed="false" data-i18n="last7days">Last 7 Days</button>
-            <button type="button" class="btn btn-ghost quick-range-btn" data-range="lastWeek" aria-pressed="false" data-i18n="lastWeek">Last Week</button>
-            <button type="button" class="btn btn-ghost quick-range-btn" data-range="thisMonth" aria-pressed="false" data-i18n="thisMonth">This Month</button>
-            <button type="button" class="btn btn-ghost quick-range-btn" data-range="lastMonth" aria-pressed="false" data-i18n="lastMonth">Last Month</button>
+            <button type="button" class="btn btn-ghost quick-range-btn" data-range="today" data-quick-primary aria-pressed="true" data-i18n="today">Today</button>
+            <button type="button" class="btn btn-ghost quick-range-btn" data-range="yesterday" data-quick-primary aria-pressed="false" data-i18n="yesterday">Yesterday</button>
+            <button type="button" class="btn btn-ghost quick-range-btn" data-range="last7days" data-quick-primary aria-pressed="false" data-i18n="last7days">Last 7 Days</button>
+            <button type="button" class="btn btn-ghost quick-range-btn" data-range="lastWeek" data-quick-primary aria-pressed="false" data-i18n="lastWeek">Last Week</button>
+            <button type="button" class="btn btn-ghost quick-range-btn" data-range="thisMonth" data-quick-primary aria-pressed="false" data-i18n="thisMonth">This Month</button>
+            <button type="button" class="btn btn-ghost quick-range-btn" data-range="lastMonth" data-quick-primary aria-pressed="false" data-i18n="lastMonth">Last Month</button>
             <div class="quick-range-more">
               <button id="quickRangeMoreToggle" type="button" class="btn btn-ghost quick-range-more-trigger" aria-expanded="false" aria-controls="quickRangeMoreMenu" aria-pressed="false">
                 <span id="quickRangeMoreLabel" data-i18n="moreRanges">More ranges</span>
@@ -4676,6 +4676,7 @@
       updateMetricControls();
       syncDatePickerFooter();
       syncDateRangeControl();
+      scheduleQuickRangeLayout();
       if (typeof profileActivityMode !== 'undefined') {
         renderProfileActivityLegend('profileActivityLegend', profileActivityMode);
         renderProfileActivityLegend('overviewProfileLegend', profileActivityMode);
@@ -5268,6 +5269,52 @@
     const quickRangeMore = document.querySelector('.quick-range-more');
     const quickRangeMoreToggle = document.getElementById('quickRangeMoreToggle');
     const quickRangeMoreMenu = document.getElementById('quickRangeMoreMenu');
+    const quickRangePanel = document.querySelector('.quick-range-panel');
+    const quickRangePrimaryButtons = Array.from(document.querySelectorAll('[data-quick-primary]'));
+    let quickRangeLayoutFrame = null;
+
+    function quickRangeRequiredWidth() {
+      if (!quickRangePanel) return 0;
+      const children = Array.from(quickRangePanel.children);
+      const styles = window.getComputedStyle(quickRangePanel);
+      const gap = Number.parseFloat(styles.columnGap || styles.gap) || 0;
+      return children.reduce((total, child) => total + child.offsetWidth, 0)
+        + Math.max(0, children.length - 1) * gap;
+    }
+
+    function syncQuickRangeLayout() {
+      if (!quickRangePanel || !quickRangeMore || !quickRangeMoreMenu) return;
+
+      // Start from the preferred desktop set, then progressively move the least
+      // important visible presets into the existing disclosure until one row fits.
+      quickRangePrimaryButtons.forEach((button) => {
+        quickRangePanel.insertBefore(button, quickRangeMore);
+      });
+      syncDateRangeControl();
+
+      for (let index = quickRangePrimaryButtons.length - 1;
+        index > 0 && quickRangeRequiredWidth() > quickRangePanel.clientWidth;
+        index -= 1) {
+        quickRangeMoreMenu.prepend(quickRangePrimaryButtons[index]);
+        syncDateRangeControl();
+      }
+    }
+
+    function scheduleQuickRangeLayout() {
+      if (quickRangeLayoutFrame !== null) cancelAnimationFrame(quickRangeLayoutFrame);
+      quickRangeLayoutFrame = requestAnimationFrame(() => {
+        quickRangeLayoutFrame = null;
+        syncQuickRangeLayout();
+      });
+    }
+
+    if (quickRangePanel && typeof ResizeObserver === 'function') {
+      new ResizeObserver(scheduleQuickRangeLayout).observe(quickRangePanel);
+    } else {
+      window.addEventListener('resize', scheduleQuickRangeLayout, { passive: true });
+    }
+    document.fonts?.ready.then(scheduleQuickRangeLayout);
+
     quickRangeMoreToggle?.addEventListener('click', () => {
       setQuickRangeMoreOpen(Boolean(quickRangeMoreMenu?.hidden));
     });

@@ -241,15 +241,20 @@ def _collect_entries(session_dirs: list[str]) -> List[Dict[str, Any]]:
 
 
 def _pricing_signature(pricing_db: PricingDatabase) -> tuple:
-    # Cover BOTH the packaged baseline AND the data-dir override (PricingDatabase.signature()
-    # stats both and is OSError-safe). A dashboard pricing edit writes only the override, so
-    # statting the baseline alone would never bust this cache — and because this same
-    # signature gates the persistent SQLite usage store, the stale costs would survive a
-    # process restart until a source log file changed on disk.
+    # Cover BOTH the packaged baseline AND the data-dir override. This metadata identity
+    # keeps the in-process cache responsive to out-of-band edits; the persistent store uses
+    # the content identity below so reinstall path/mtime changes do not trigger a rebuild.
     try:
         return tuple(pricing_db.signature())
     except (OSError, AttributeError):
         return ()
+
+
+def _persistent_pricing_signature(pricing_db: PricingDatabase) -> tuple:
+    try:
+        return tuple(pricing_db.content_signature())
+    except (OSError, AttributeError, TypeError, ValueError):
+        return _pricing_signature(pricing_db)
 
 
 def _normalized_entry(entry: Dict[str, Any], pricing_db: PricingDatabase) -> Dict[str, Any]:
@@ -309,7 +314,7 @@ def _sync_openclaw_store(session_dirs: list[str], pricing_db: PricingDatabase) -
     store = UsageEntryStore()
     signature = build_source_signature(  # type: ignore[misc]
         files=sig,
-        pricing=_pricing_signature(pricing_db),
+        pricing=_persistent_pricing_signature(pricing_db),
         parser=parser_code_signature(_collect_normalized_entries),  # type: ignore[misc]
     )
     store.sync_source(

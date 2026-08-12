@@ -141,7 +141,10 @@ def _sync_usage_store(tracker: CodingToolsUsageTracker) -> tuple[UsageEntryStore
         parser = tracker.parsers[name]
         capability = getattr(parser, "sync_capability")
         files = parser._file_signatures()
-        pricing = parser._pricing_signature()
+        # Persistent cache keys must survive package reinstalls. The runtime pricing
+        # signature includes site-packages path/mtime for cheap in-process invalidation;
+        # using it here made every historical source file look stale after an upgrade.
+        pricing = parser._persistent_pricing_signature()
         parser_sig = parser_code_signature(parser)
         if capability.mode == "file_replace":
             store.sync_files(

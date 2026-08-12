@@ -272,18 +272,27 @@ class BaseParser(ABC):
         return ()
 
     def _pricing_signature(self) -> tuple:
-        """Signature of the EFFECTIVE pricing DB (packaged baseline + data-dir override).
+        """Runtime signature of the effective pricing DB.
 
         Must cover BOTH files: a dashboard pricing edit writes ONLY the override under
-        ``TOKDASH_DATA_DIR`` and never touches the packaged baseline, so statting the
-        baseline alone would never bust ``_entry_cache`` (nor the persistent usage store,
-        which keys on this same signature) and edited rates would silently not apply.
-        ``PricingDatabase.signature()`` stats both files and is itself OSError-safe.
+        ``TOKDASH_DATA_DIR`` and never touches the packaged baseline. This metadata-based
+        signature keeps the in-process entry cache cheap and responsive to out-of-band
+        edits. Persistent caches use ``_persistent_pricing_signature()`` instead so a
+        reinstall cannot invalidate historical rows merely by changing path or mtime.
         """
         try:
             return tuple(self.pricing_db.signature())
         except (OSError, AttributeError):
             return ()
+
+    def _persistent_pricing_signature(self) -> tuple:
+        """Content identity used by the persistent usage cache across installs."""
+        try:
+            return tuple(self.pricing_db.content_signature())
+        except (OSError, AttributeError, TypeError, ValueError):
+            # Custom/older PricingDatabase implementations may not expose a content
+            # identity. Preserve their previous behavior rather than disabling caching.
+            return self._pricing_signature()
 
     @abstractmethod
     def _parse_all(self) -> List[Dict[str, Any]]:

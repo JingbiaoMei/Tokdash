@@ -1,18 +1,18 @@
-"""Regression: a dashboard pricing edit writes ONLY the data-dir override, so the
-coding-tools and OpenClaw cache-busting signatures must cover the override too.
+"""Regressions for runtime and persistent pricing cache identities.
 
-Before the fix these signatures stat'd only the packaged baseline (``pricing_db.db_path``),
-so an edit never changed them — the in-memory entry caches AND the persistent usage store
-(which key on the same signature) kept serving costs computed at the OLD prices.
+Both identities must cover the data-dir override. Runtime identities may use filesystem
+metadata, while persistent identities must survive reinstall path and mtime changes.
 """
 import json
 import os
 
 import tokdash.api as api
+import tokdash.compute as compute
 from tokdash.onboard import paths
 from tokdash.pricing import PricingDatabase
 from tokdash.sources import openclaw
 from tokdash.sources.coding_tools import ClaudeParser
+from tokdash.usage_store import UsageEntryStore
 
 
 def _write_override() -> None:
@@ -50,20 +50,118 @@ def test_coding_tools_pricing_signature_busts_on_override():
     pdb = PricingDatabase()
     parser = ClaudeParser(pdb)
     before = parser._pricing_signature()
+    persistent_before = parser._persistent_pricing_signature()
     _write_override()
     after = parser._pricing_signature()
+    persistent_after = parser._persistent_pricing_signature()
     assert before != after  # the override write must change the cache-busting signature
+    assert persistent_before != persistent_after
     # ...and it must track exactly the files PricingDatabase.load() reads (baseline + override)
     assert after == tuple(pdb.signature())
+    assert persistent_after == tuple(pdb.content_signature())
 
 
 def test_openclaw_pricing_signature_busts_on_override():
     pdb = PricingDatabase()
     before = openclaw._pricing_signature(pdb)
+    persistent_before = openclaw._persistent_pricing_signature(pdb)
     _write_override()
     after = openclaw._pricing_signature(pdb)
+    persistent_after = openclaw._persistent_pricing_signature(pdb)
     assert before != after
+    assert persistent_before != persistent_after
     assert after == tuple(pdb.signature())
+    assert persistent_after == tuple(pdb.content_signature())
+
+
+def test_persistent_pricing_signatures_survive_reinstall_metadata(tmp_path):
+    payload = '{\n  "models": {"foo": {"input": 1, "output": 2}}\n}\n'
+    first_path = tmp_path / "first-install" / "pricing_db.json"
+    second_path = tmp_path / "second-install" / "pricing_db.json"
+    first_path.parent.mkdir()
+    second_path.parent.mkdir()
+    first_path.write_text(payload, encoding="utf-8")
+    second_path.write_text(payload, encoding="utf-8")
+    os.utime(second_path, ns=(1_800_000_000_000_000_000, 1_800_000_000_000_000_000))
+
+    first = PricingDatabase(db_path=first_path, override_path=tmp_path / "missing-first.json")
+    second = PricingDatabase(db_path=second_path, override_path=tmp_path / "missing-second.json")
+
+    # Runtime identities intentionally include install metadata.
+    assert first.signature() != second.signature()
+    # Persistent identities depend only on effective pricing content.
+    assert (
+        ClaudeParser(first)._persistent_pricing_signature()
+        == ClaudeParser(second)._persistent_pricing_signature()
+    )
+    assert openclaw._persistent_pricing_signature(first) == openclaw._persistent_pricing_signature(second)
+
+    store = UsageEntryStore(tmp_path / "usage.sqlite3")
+    files = ((str(tmp_path / "session.jsonl"), 1, 100),)
+    parse_calls = []
+
+    def parse_file(file_signature):
+        parse_calls.append(file_signature)
+        return []
+
+    assert store.sync_files(
+        "claude",
+        files,
+        pricing=ClaudeParser(first)._persistent_pricing_signature(),
+        parse_file_entries=parse_file,
+    )
+    assert not store.sync_files(
+        "claude",
+        files,
+        pricing=ClaudeParser(second)._persistent_pricing_signature(),
+        parse_file_entries=parse_file,
+    )
+    assert parse_calls == [files[0]]
+
+
+def test_usage_store_sync_uses_persistent_pricing_identity(monkeypatch):
+    tracker = compute.CodingToolsUsageTracker()
+    parser = tracker.parsers["claude"]
+    captured = {}
+
+    class FakeStore:
+        def sync_files(self, source, files, **kwargs):
+            captured["source"] = source
+            captured["pricing"] = kwargs["pricing"]
+            return False
+
+    monkeypatch.setattr(compute, "UsageEntryStore", FakeStore)
+    monkeypatch.setattr(compute, "_usage_store_sources", lambda _tracker: ["claude"])
+    monkeypatch.setattr(parser, "_file_signatures", lambda: ())
+    monkeypatch.setattr(parser, "_pricing_signature", lambda: ("runtime-metadata",))
+    monkeypatch.setattr(parser, "_persistent_pricing_signature", lambda: ("content",))
+
+    compute._sync_usage_store(tracker)
+
+    assert captured == {"source": "claude", "pricing": ("content",)}
+
+
+def test_openclaw_store_sync_uses_persistent_pricing_identity(monkeypatch, tmp_path):
+    captured = {}
+
+    class FakeStore:
+        def sync_source(self, source, signature, collect):
+            captured["source"] = source
+            captured["signature"] = json.loads(signature)
+            return False
+
+    pricing = PricingDatabase(
+        db_path=tmp_path / "missing-baseline.json",
+        override_path=tmp_path / "missing-override.json",
+    )
+    monkeypatch.setattr(openclaw, "UsageEntryStore", FakeStore)
+    monkeypatch.setattr(openclaw, "_session_files", lambda _session_dirs: [])
+    monkeypatch.setattr(openclaw, "_persistent_pricing_signature", lambda _pricing: ("content",))
+
+    openclaw._sync_openclaw_store([], pricing)
+
+    assert captured["source"] == "openclaw"
+    assert captured["signature"]["pricing"] == ["content"]
 
 
 def test_sessions_singleton_reloads_when_override_changes_out_of_band():

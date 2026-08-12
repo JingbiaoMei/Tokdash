@@ -86,14 +86,146 @@
       --datepickr-range-join-size: 5px;
     }
 
-    html, body { height: 100%; }
+    html {
+      min-height: 100%;
+      background: var(--color-bg);
+    }
 
     body {
+      min-height: 100%;
       font-family: "Fira Sans", ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
       background: radial-gradient(1200px 600px at 20% -10%, rgba(59,130,246,0.16), transparent 65%),
                   radial-gradient(900px 600px at 90% 10%, rgba(245,158,11,0.12), transparent 55%),
                   var(--color-bg);
+      background-repeat: no-repeat;
+      background-size: 100% 100%;
       color: var(--color-text);
+    }
+
+    .tool-identity {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      max-width: 100%;
+      vertical-align: middle;
+    }
+
+    .tool-brand-icon {
+      position: relative;
+      display: inline-grid;
+      place-items: center;
+      flex: 0 0 auto;
+      width: 24px;
+      height: 24px;
+      overflow: visible;
+      border: 0;
+      background: transparent;
+      box-shadow: none;
+      transition: opacity var(--t-fast) ease, transform var(--t-fast) ease;
+    }
+
+    .tool-brand-icon img {
+      display: block;
+      width: 20px;
+      height: 20px;
+      object-fit: contain;
+    }
+
+    .tool-brand-fallback {
+      display: grid;
+      place-items: center;
+      width: 20px;
+      height: 20px;
+      color: var(--tool-brand);
+      font: 800 12px/1 "Fira Code", ui-monospace, monospace;
+      text-transform: uppercase;
+    }
+
+    .tool-brand-label {
+      min-width: 0;
+      overflow: hidden;
+      color: var(--color-text);
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    html.dark .tool-identity[data-dark-invert="true"] .tool-brand-icon img {
+      filter: invert(.88);
+    }
+
+    .tool-identity[data-compact="true"] {
+      gap: 7px;
+    }
+
+    .tool-identity[data-compact="true"] .tool-brand-icon {
+      width: 20px;
+      height: 20px;
+    }
+
+    .tool-identity[data-compact="true"] .tool-brand-icon img {
+      width: 17px;
+      height: 17px;
+    }
+
+    .tool-identity[data-logo-kind="wordmark"] .tool-brand-icon {
+      width: 44px;
+    }
+
+    .tool-identity[data-logo-kind="wordmark"] .tool-brand-icon img {
+      width: 34px;
+      height: 15px;
+    }
+
+    .tool-identity[data-compact="true"][data-logo-kind="wordmark"] .tool-brand-icon {
+      width: 40px;
+    }
+
+    tr:hover .tool-brand-icon,
+    .tool-identity:hover .tool-brand-icon {
+      transform: translateY(-1px);
+      opacity: .82;
+      box-shadow: none;
+    }
+
+    .tool-chart-shell{display:grid;height:280px;grid-template-rows:minmax(0,1fr) auto;gap:8px;}
+    .tool-chart-canvas{position:relative;min-height:0;}
+    .tool-chart-legend{display:flex;min-height:22px;flex-wrap:wrap;align-items:center;justify-content:center;gap:7px 16px;}
+    .tool-chart-legend-item{display:inline-flex;align-items:center;gap:7px;min-width:0;color:var(--color-muted);font-size:12px;}
+    .tool-chart-legend-swatch{width:15px;height:3px;flex:0 0 auto;border-radius:999px;}
+    .tool-chart-legend .tool-identity{gap:6px;}.tool-chart-legend .tool-identity[data-compact="true"] .tool-brand-icon{width:22px;height:22px;}.tool-chart-legend .tool-identity[data-compact="true"] .tool-brand-icon img{width:20px;height:20px;}.tool-chart-legend .tool-brand-label{color:var(--color-muted);font-size:12px;font-weight:650;}
+    .tool-chart-legend .tool-identity[data-logo-kind="wordmark"] .tool-brand-label{display:none;}
+    .tool-chart-legend-more{display:inline-flex;align-items:center;min-height:22px;padding-left:2px;color:var(--color-label);font-size:11px;font-weight:700;white-space:nowrap;}
+
+    .tokdash-loading-placeholder:has(> .tokdash-loading-label) {
+      position: relative;
+      min-height: 1.25em;
+      cursor: wait;
+      overflow: hidden;
+    }
+
+    .tokdash-loading-placeholder > .tokdash-loading-label {
+      color: transparent !important;
+    }
+
+    .tokdash-loading-placeholder:has(> .tokdash-loading-label)::after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: min(68%, 10rem);
+      min-width: 2.5rem;
+      height: 0.875rem;
+      border-radius: 5px;
+      background: linear-gradient(90deg, color-mix(in srgb, var(--color-border) 62%, transparent), color-mix(in srgb, var(--color-primary) 11%, var(--color-border)), color-mix(in srgb, var(--color-border) 62%, transparent));
+      background-size: 200% 100%;
+      animation: tokdash-loading-sweep 1.4s ease-in-out infinite;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+    }
+
+    @keyframes tokdash-loading-sweep {
+      50% { background-position: 100% 0; }
     }
 
     .mono { font-family: "Fira Code", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
@@ -346,10 +478,23 @@
     .quick-range-panel {
       grid-area: quick;
       display: flex;
-      flex-wrap: wrap;
+      flex-wrap: nowrap;
       gap: 10px;
       align-items: flex-start;
+      width: 100%;
       min-width: 0;
+      overflow-x: auto;
+      overscroll-behavior-inline: contain;
+      padding-bottom: 4px;
+      scrollbar-width: thin;
+    }
+
+    .quick-range-btn {
+      flex: 0 0 auto;
+      min-height: 32px;
+      padding: 4px 10px;
+      font-size: 12px;
+      white-space: nowrap;
     }
 
     .topbar-actions {
@@ -525,7 +670,7 @@
         grid-template-columns: minmax(0, 1fr) auto;
         grid-template-areas:
           "picker actions"
-          "quick actions";
+          "quick quick";
       }
 
       .topbar-actions {
@@ -705,51 +850,52 @@
     .profile-activity-tool-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px 9px;align-items:center;font-size:10px;}.profile-activity-tool-name{overflow:hidden;color:var(--color-text);font-weight:750;text-overflow:ellipsis;white-space:nowrap;}.profile-activity-tool-value{color:var(--color-primary);font-variant-numeric:tabular-nums;font-weight:800;white-space:nowrap;}
     .profile-activity-tool-track{grid-column:1/-1;height:3px;overflow:hidden;border-radius:999px;background:color-mix(in srgb,var(--color-border) 70%,transparent);}.profile-activity-tool-bar{display:block;width:var(--activity-share,0%);height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--color-secondary),var(--color-primary));box-shadow:0 0 8px color-mix(in srgb,var(--color-primary) 25%,transparent);}
     .activity-insights-message{grid-column:1/-1;align-self:center;margin:0;padding:15px;color:var(--color-muted);font-size:11px;text-align:center;}
-    .activity-insights-skeleton{display:block;width:68%;height:14px;border-radius:5px;background:linear-gradient(90deg,color-mix(in srgb,var(--color-border) 62%,transparent),color-mix(in srgb,var(--color-primary) 11%,var(--color-border)),color-mix(in srgb,var(--color-border) 62%,transparent));background-size:200% 100%;animation:overview-profile-pulse 1.4s ease-in-out infinite;}
+    .activity-insights-skeleton{display:block;width:68%;height:14px;border-radius:5px;background:linear-gradient(90deg,color-mix(in srgb,var(--color-border) 62%,transparent),color-mix(in srgb,var(--color-primary) 11%,var(--color-border)),color-mix(in srgb,var(--color-border) 62%,transparent));background-size:200% 100%;animation:tokdash-loading-sweep 1.4s ease-in-out infinite;}
 
-    .overview-profile-band{display:grid;grid-template-columns:minmax(180px,220px) minmax(0,1fr);gap:20px;align-items:stretch;min-height:128px;padding:16px 18px;border-color:color-mix(in srgb,var(--color-primary) 18%,var(--color-border));background:linear-gradient(105deg,var(--color-surface-glass),color-mix(in srgb,var(--color-primary) 7%,var(--color-surface-glass)));box-shadow:0 10px 28px color-mix(in srgb,var(--color-primary) 6%,transparent);}
-    .overview-profile-copy{display:flex;flex-direction:column;justify-content:center;padding-right:18px;border-right:1px solid color-mix(in srgb,var(--color-primary) 16%,var(--color-border));}
-    .overview-profile-eyebrow{color:var(--color-primary);font-size:10px;font-weight:850;letter-spacing:.08em;text-transform:uppercase;}
-    .overview-profile-copy h2{margin-top:5px;font-size:15px;font-weight:850;}
-    .overview-profile-copy p{margin-top:2px;color:var(--color-muted);font-size:11px;}
-    .overview-profile-open{display:inline-flex;align-items:center;gap:5px;width:max-content;margin-top:11px;border:0;background:transparent;color:var(--color-primary);font:inherit;font-size:11px;font-weight:800;cursor:pointer;}
-    .overview-profile-open:is(:hover,:focus-visible){text-decoration:underline;text-underline-offset:3px;}
-    .overview-profile-open:focus-visible{outline:2px solid color-mix(in srgb,var(--color-primary) 52%,transparent);outline-offset:3px;border-radius:4px;}
-    .overview-profile-main{display:flex;min-width:0;align-items:center;}
+    .overview-profile-band{display:grid;grid-template-columns:minmax(220px,260px) minmax(0,1fr);gap:24px;align-items:stretch;min-height:182px;padding:20px 22px 22px;border-color:color-mix(in srgb,var(--color-primary) 18%,var(--color-border));background:linear-gradient(105deg,var(--color-surface-glass),color-mix(in srgb,var(--color-primary) 7%,var(--color-surface-glass)));box-shadow:0 10px 28px color-mix(in srgb,var(--color-primary) 6%,transparent);}
+    .overview-profile-copy{display:flex;flex-direction:column;align-items:flex-start;justify-content:center;padding:12px 22px 14px 2px;border:0;border-right:1px solid color-mix(in srgb,var(--color-primary) 16%,var(--color-border));border-radius:0;background:none;box-shadow:none;}
+    .overview-profile-eyebrow{display:flex;align-items:center;gap:7px;color:var(--color-secondary);font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;}.overview-profile-eyebrow::before{content:"";width:3px;height:14px;border-radius:999px;background:color-mix(in srgb,var(--color-secondary) 72%,var(--color-border));}
+    .overview-profile-copy h2{margin-top:7px;font-size:19px;font-weight:850;letter-spacing:-.025em;line-height:1.15;text-wrap:balance;}
+    .overview-profile-copy p{margin-top:4px;color:var(--color-muted);font-size:12px;line-height:1.4;}
+    .overview-profile-open{display:inline-flex;align-items:center;gap:7px;width:max-content;margin-top:12px;padding:7px 0;border:0;background:transparent;box-shadow:none;color:var(--color-primary);font:inherit;font-size:12px;font-weight:800;cursor:pointer;transition:color .16s ease,transform .16s ease;}
+    .overview-profile-open span:last-child{font-size:16px;line-height:1;transition:transform .16s ease;}
+    .overview-profile-open:is(:hover,:focus-visible){color:color-mix(in srgb,var(--color-primary) 76%,var(--color-secondary));transform:translateX(1px);}.overview-profile-open:is(:hover,:focus-visible) span:last-child{transform:translateX(3px);}
+    .overview-profile-open:active{transform:translateX(0);}.overview-profile-open:focus-visible{outline:2px solid color-mix(in srgb,var(--color-primary) 46%,transparent);outline-offset:3px;border-radius:4px;}
+    .overview-profile-main{display:flex;min-width:0;align-items:center;padding-block:2px;}
     .overview-profile-state,.overview-profile-ready{width:100%;}
     .overview-profile-band:not([data-state="loading"]) .overview-profile-loading,.overview-profile-band:not([data-state="error"]) .overview-profile-unavailable,.overview-profile-band:not([data-state="ready"]) .overview-profile-ready{display:none;}
-    .overview-profile-skeleton-metrics{display:flex;gap:18px;margin-bottom:12px;}.overview-profile-skeleton-metrics i{display:block;width:82px;height:20px;border-radius:6px;background:color-mix(in srgb,var(--color-border) 72%,transparent);}
-    .overview-profile-skeleton-grid{height:57px;border-radius:4px;background:linear-gradient(90deg,color-mix(in srgb,var(--color-border) 58%,transparent),color-mix(in srgb,var(--color-primary) 10%,var(--color-border)),color-mix(in srgb,var(--color-border) 58%,transparent));background-size:200% 100%;animation:overview-profile-pulse 1.4s ease-in-out infinite;}
-    @keyframes overview-profile-pulse{50%{background-position:100% 0;}}
+    .overview-profile-skeleton-metrics{display:flex;gap:24px;margin-bottom:14px;}.overview-profile-skeleton-metrics i{display:block;width:92px;height:24px;border-radius:6px;background:linear-gradient(90deg,color-mix(in srgb,var(--color-border) 62%,transparent),color-mix(in srgb,var(--color-primary) 11%,var(--color-border)),color-mix(in srgb,var(--color-border) 62%,transparent));background-size:200% 100%;animation:tokdash-loading-sweep 1.4s ease-in-out infinite;}
+    .overview-profile-skeleton-grid{height:57px;border-radius:4px;background:linear-gradient(90deg,color-mix(in srgb,var(--color-border) 58%,transparent),color-mix(in srgb,var(--color-primary) 10%,var(--color-border)),color-mix(in srgb,var(--color-border) 58%,transparent));background-size:200% 100%;animation:tokdash-loading-sweep 1.4s ease-in-out infinite;}
     .overview-profile-unavailable{color:var(--color-muted);font-size:12px;}
-    .overview-profile-metrics{display:flex;align-items:baseline;gap:18px;margin-bottom:10px;}
-    .overview-profile-metrics>div{--overview-profile-tone:var(--color-primary);display:flex;align-items:baseline;gap:5px;}.overview-profile-metrics>div[data-tone="cost"]{--overview-profile-tone:var(--color-cost);}.overview-profile-metrics>div[data-tone="cta"]{--overview-profile-tone:var(--color-cta);}
-    .overview-profile-metrics dd{margin:0;color:var(--overview-profile-tone);font-size:15px;font-weight:850;font-variant-numeric:tabular-nums;}.overview-profile-metrics dt{color:var(--color-muted);font-size:10px;white-space:nowrap;}
-    .overview-profile-heat-head{display:flex;align-items:center;gap:10px;margin-bottom:6px;color:var(--color-muted);font-size:10px;}
-    .overview-profile-heat-head>span{margin-right:auto;}
-    .overview-profile-modes{display:flex;align-items:center;gap:2px;}
-    .overview-profile-mode{padding:4px 7px;font-size:10px;}
+    .overview-profile-metrics{display:flex;align-items:baseline;gap:26px;margin-bottom:14px;}
+    .overview-profile-metrics>div{--overview-profile-tone:var(--color-primary);display:flex;align-items:baseline;gap:7px;}.overview-profile-metrics>div[data-tone="cost"]{--overview-profile-tone:var(--color-cost);}.overview-profile-metrics>div[data-tone="cta"]{--overview-profile-tone:var(--color-cta);}
+    .overview-profile-metrics dd{margin:0;color:var(--overview-profile-tone);font-size:19px;font-weight:850;font-variant-numeric:tabular-nums;letter-spacing:-.02em;}.overview-profile-metrics dt{color:var(--color-muted);font-size:12px;font-weight:650;white-space:nowrap;}
+    .overview-profile-heat-head{display:flex;align-items:center;gap:12px;margin-bottom:8px;color:var(--color-muted);font-size:12px;}
+    .overview-profile-heat-head>span{margin-right:auto;color:var(--color-text);font-weight:750;}
+    .overview-profile-modes{display:flex;align-items:center;gap:4px;}
+    .overview-profile-mode{padding:6px 10px;font-size:12px;font-weight:750;}
     .overview-profile-scroll{--overview-profile-interactive-aura-reserve:16px;--profile-edge-safety-gutter:8px;overflow-x:auto;padding-block:2px 4px;padding-inline:0 calc(var(--overview-profile-interactive-aura-reserve) + var(--profile-edge-safety-gutter));}
     .overview-profile-grid-wrap{position:relative;min-width:595px;}
     .overview-profile-grid{display:grid;grid-auto-flow:column;grid-template-columns:repeat(52,minmax(8px,1fr));grid-template-rows:repeat(7,minmax(8px,1fr));gap:3.5px;width:100%;}
     .overview-profile-week-hits{grid-template-columns:repeat(52,minmax(8px,1fr));gap:3.5px;}
     .overview-profile-cell{border-radius:2px;}
-    .overview-profile-legend{margin-top:7px;gap:6px;font-size:9px;}
-    .overview-profile-legend .profile-activity-legend-scale,.overview-profile-legend .profile-activity-legend-milestones{gap:4px;}
-    .overview-profile-legend .profile-activity-legend-swatch{width:8px;height:8px;}
-    .overview-profile-legend .profile-activity-legend-glyph{height:10px;}
-    .overview-profile-legend .profile-activity-legend-bar:nth-child(5){height:10px;}
-    .overview-profile-legend .profile-activity-legend-badge{padding:2px 4px;font-size:7px;}
-    .overview-profile-legend .profile-milestone-toggle{gap:4px;padding-left:5px;font-size:8px;}
-    .overview-activity-insights{background:transparent;min-height:42px;margin-top:8px;color:var(--color-text);}
+    .overview-profile-legend{margin-top:9px;gap:8px;font-size:10px;}
+    .overview-profile-legend .profile-activity-legend-scale,.overview-profile-legend .profile-activity-legend-milestones{gap:5px;}
+    .overview-profile-legend .profile-activity-legend-swatch{width:9px;height:9px;}
+    .overview-profile-legend .profile-activity-legend-glyph{height:11px;}
+    .overview-profile-legend .profile-activity-legend-bar:nth-child(5){height:11px;}
+    .overview-profile-legend .profile-activity-legend-badge{padding:3px 6px;font-size:8px;}
+    .overview-profile-legend .profile-milestone-toggle{gap:5px;padding-left:6px;font-size:9px;}
+    .overview-activity-insights{background:transparent;min-height:56px;margin-top:12px;color:var(--color-text);}
     .overview-activity-insights-values{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));margin:0;border-top:1px solid color-mix(in srgb,var(--color-primary) 15%,var(--color-border));}
-    .overview-activity-insight-kpi{position:relative;min-width:0;padding:7px 8px 1px;}.overview-activity-insight-kpi+.overview-activity-insight-kpi::before{content:"";position:absolute;left:0;top:8px;bottom:1px;width:1px;background:var(--color-border);}
-    .overview-activity-insight-kpi dd{margin:0;overflow:hidden;color:var(--color-primary);font-size:11px;font-weight:850;text-overflow:ellipsis;white-space:nowrap;}.overview-activity-insight-kpi dt{margin-top:1px;color:var(--color-muted);font-size:8px;line-height:1.2;}
-    .overview-activity-insights-state{margin:0;padding:9px 8px 0;border-top:1px solid color-mix(in srgb,var(--color-primary) 15%,var(--color-border));color:var(--color-muted);font-size:9px;line-height:1.35;}
+    .overview-activity-insight-kpi{--overview-insight-tone:var(--color-primary);position:relative;min-width:0;padding:10px 10px 2px;}.overview-activity-insight-kpi[data-tone="secondary"]{--overview-insight-tone:var(--color-secondary);}.overview-activity-insight-kpi[data-tone="cost"]{--overview-insight-tone:var(--color-cost);}.overview-activity-insight-kpi[data-tone="cta"]{--overview-insight-tone:var(--color-cta);}.overview-activity-insight-kpi+.overview-activity-insight-kpi::before{content:"";position:absolute;left:0;top:10px;bottom:2px;width:1px;background:var(--color-border);}
+    .overview-activity-insight-kpi dd{margin:0;overflow:hidden;color:var(--overview-insight-tone);font-size:15px;font-weight:850;text-overflow:ellipsis;white-space:nowrap;}.overview-activity-insight-kpi dt{margin-top:2px;color:var(--color-muted);font-size:10px;line-height:1.25;}
+    .overview-activity-insights-state{margin:0;padding:10px 10px 0;border-top:1px solid color-mix(in srgb,var(--color-primary) 15%,var(--color-border));color:var(--color-muted);font-size:10px;line-height:1.4;}
     .overview-activity-insights[data-state="ready"] .overview-activity-insights-state{padding-top:3px;border-top:0;}.overview-activity-insights[data-state="ready"] .overview-activity-insights-values{display:grid;}.overview-activity-insights:not([data-state="ready"]) .overview-activity-insights-values{display:none;}
-    @media(max-width:800px){.overview-profile-band{grid-template-columns:1fr;gap:14px;}.overview-profile-copy{padding:0 0 12px;border-right:0;border-bottom:1px solid color-mix(in srgb,var(--color-primary) 16%,var(--color-border));}.overview-profile-metrics{flex-wrap:wrap;}.overview-profile-heat-head{align-items:flex-start;flex-wrap:wrap;}.overview-profile-modes{margin-left:auto;}}
+    @media(max-width:800px){.overview-profile-band{grid-template-columns:1fr;gap:16px;}.overview-profile-copy{min-height:0;padding:2px 0 14px;border-right:0;border-bottom:1px solid color-mix(in srgb,var(--color-primary) 16%,var(--color-border));}.overview-profile-metrics{flex-wrap:wrap;}.overview-profile-heat-head{align-items:flex-start;flex-wrap:wrap;}.overview-profile-modes{margin-left:auto;}}
     @media(max-width:768px){.profile-activity-insights-kpis,.overview-activity-insights-values{grid-template-columns:repeat(2,minmax(0,1fr));}.profile-activity-insight-kpi:nth-child(3)::before,.overview-activity-insight-kpi:nth-child(3)::before{display:none;}.profile-activity-insights-detail{grid-template-columns:minmax(0,1fr);}}
-    @media(prefers-reduced-motion:reduce){.overview-profile-skeleton-grid,.activity-insights-skeleton{animation:none;}.overview-profile-cell{transform:none!important;}}
+    @media(max-width:520px){.overview-profile-band{padding:14px;}.overview-profile-copy h2{font-size:20px;}.overview-profile-metrics{gap:14px 20px;}}
+    @media(prefers-reduced-motion:reduce){.tokdash-loading-placeholder:has(> .tokdash-loading-label)::after,.overview-profile-skeleton-metrics i,.overview-profile-skeleton-grid,.activity-insights-skeleton{animation:none;}.overview-profile-cell{transform:none!important;}.overview-profile-open,.overview-profile-open span:last-child{transition:none;}}
 
     .pricing-editor {
       width: 100%;
@@ -1128,11 +1274,196 @@
       padding: 0; color: var(--color-label); text-decoration: underline dotted;
     }
 
+    /* Release notes live with dashboard actions, leaving the brand lockup uncluttered. */
+    .release-notes-trigger {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      min-height: 36px;
+      padding: 6px 10px;
+      color: var(--color-text);
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1;
+      white-space: nowrap;
+    }
+    .release-notes-trigger:hover,
+    .release-notes-trigger[aria-expanded="true"] { color: var(--color-primary); }
+    .release-notes-trigger:focus-visible {
+      outline: 2px solid color-mix(in srgb, var(--color-primary) 62%, transparent);
+      outline-offset: 2px;
+    }
+    .release-notes-version {
+      color: var(--color-muted);
+      font-size: 10px;
+      font-weight: 650;
+      letter-spacing: -.02em;
+    }
+    .release-notes-icon { flex: 0 0 auto; color: var(--color-muted); }
+    .release-notes-trigger:is(:hover,[aria-expanded="true"]) .release-notes-icon { color: currentColor; }
+
+    .release-notes-dialog {
+      width: min(430px, 100%);
+      max-width: none;
+      height: 100dvh;
+      max-height: none;
+      margin: 0 0 0 auto;
+      padding: 0;
+      overflow: hidden;
+      border: 0;
+      border-left: 1px solid var(--color-border);
+      background: var(--color-bg);
+      color: var(--color-text);
+      box-shadow: -18px 0 54px color-mix(in srgb, var(--color-text) 16%, transparent);
+    }
+    .release-notes-dialog::backdrop {
+      background: color-mix(in srgb, var(--color-text) 30%, transparent);
+      backdrop-filter: blur(3px);
+    }
+    .release-notes-dialog[open] { animation: release-notes-enter 240ms ease-out; }
+    @keyframes release-notes-enter {
+      from { opacity: 0; transform: translateX(22px); }
+      to { opacity: 1; transform: translateX(0); }
+    }
+    .release-notes-shell {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+    }
+    .release-notes-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 20px;
+      padding: 24px 24px 18px;
+      border-bottom: 1px solid var(--color-border);
+      background: linear-gradient(135deg, color-mix(in srgb, var(--color-primary) 9%, var(--color-bg)), var(--color-bg) 66%);
+    }
+    .release-notes-eyebrow {
+      margin: 0 0 5px;
+      color: var(--color-primary);
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+    .release-notes-title {
+      margin: 0;
+      font-size: 24px;
+      font-weight: 850;
+      letter-spacing: -0.025em;
+    }
+    .release-notes-intro {
+      margin: 7px 0 0;
+      color: var(--color-muted);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+    .release-notes-close {
+      display: grid;
+      flex: 0 0 auto;
+      width: 34px;
+      height: 34px;
+      place-items: center;
+      border: 1px solid var(--color-border);
+      border-radius: 9px;
+      background: color-mix(in srgb, var(--color-bg) 86%, transparent);
+      color: var(--color-muted);
+      cursor: pointer;
+    }
+    .release-notes-close:hover { border-color: var(--color-primary); color: var(--color-primary); }
+    .release-notes-close:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+    .release-notes-list {
+      flex: 1;
+      padding: 10px 24px 32px;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+    }
+    .release-notes-list.tokdash-loading-placeholder { min-height: 128px; }
+    .release-notes-entry {
+      position: relative;
+      display: grid;
+      grid-template-columns: 14px minmax(0, 1fr);
+      gap: 12px;
+      padding-top: 22px;
+    }
+    .release-notes-rail { position: relative; }
+    .release-notes-rail::before {
+      content: '';
+      position: absolute;
+      top: 8px;
+      bottom: -30px;
+      left: 6px;
+      width: 1px;
+      background: color-mix(in srgb, var(--color-primary) 24%, var(--color-border));
+    }
+    .release-notes-entry:last-child .release-notes-rail::before { display: none; }
+    .release-notes-dot {
+      position: relative;
+      z-index: 1;
+      display: block;
+      width: 13px;
+      height: 13px;
+      margin-top: 3px;
+      border: 3px solid var(--color-bg);
+      border-radius: 50%;
+      background: var(--color-primary);
+      box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-primary) 52%, var(--color-border));
+    }
+    .release-notes-meta { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+    .release-notes-number { font-size: 15px; font-weight: 800; }
+    .release-notes-date { color: var(--color-label); font-size: 10px; white-space: nowrap; }
+    .release-notes-section { margin-top: 14px; }
+    .release-notes-section-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 5px;
+      color: var(--color-primary);
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.09em;
+      text-transform: uppercase;
+    }
+    .release-notes-section-label::before {
+      content: '';
+      width: 12px;
+      height: 2px;
+      border-radius: 999px;
+      background: currentColor;
+    }
+    .release-notes-items { margin: 0; padding-left: 18px; color: var(--color-muted); }
+    .release-notes-items li { margin-top: 6px; padding-left: 2px; font-size: 12px; line-height: 1.55; }
+    .release-notes-items li::marker { color: var(--color-primary); }
+    .release-notes-footer {
+      padding: 14px 24px;
+      border-top: 1px solid var(--color-border);
+      background: color-mix(in srgb, var(--color-bg) 92%, var(--color-primary));
+    }
+    .release-notes-footer a {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--color-primary);
+      font-size: 11px;
+      font-weight: 750;
+      text-decoration: none;
+    }
+    .release-notes-footer a:hover { text-decoration: underline; text-underline-offset: 3px; }
+    @media (max-width: 520px) {
+      .release-notes-dialog { width: 100%; border-left: 0; }
+      .release-notes-head { padding: 20px 18px 16px; }
+      .release-notes-list { padding: 8px 18px 28px; }
+      .release-notes-footer { padding: 13px 18px; }
+    }
+
     /* Reduce motion */
     @media (prefers-reduced-motion: reduce) {
       * { transition: none !important; scroll-behavior: auto !important; }
       .profile-activity-cell{transform:none!important;}
       button.profile-activity-cell[data-milestone]:not(:disabled):is(:hover,:focus-visible){transform:none;transition:none;}
+      .release-notes-dialog[open] { animation: none; }
     }
   </style>
   <script>document.write(`<link rel="stylesheet" href="${window.tokdashPath('/static/themes.css')}" />`);</script>
@@ -1150,8 +1481,7 @@
           </div>
           <div>
             <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight mono">Tokdash</h1>
-            <p class="text-sm sm:text-base" style="color: var(--color-muted);"></p>
-            <p id="lastUpdate" class="text-xs mt-2" style="color: var(--color-label);">Loading...</p>
+            <p id="lastUpdate" class="tokdash-loading-placeholder text-xs mt-2" style="color: var(--color-label);"><span class="tokdash-loading-label">Loading...</span></p>
           </div>
         </div>
 
@@ -1191,16 +1521,16 @@
 
           <!-- Quick Range Buttons -->
           <div class="quick-range-panel">
-            <button type="button" class="btn btn-ghost quick-range-btn" data-range="today" aria-pressed="true" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="today">Today</button>
-            <button type="button" class="btn btn-ghost quick-range-btn" data-range="yesterday" aria-pressed="false" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="yesterday">Yesterday</button>
-            <button type="button" class="btn btn-ghost quick-range-btn" data-range="last7days" aria-pressed="false" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="last7days">Last 7 Days</button>
-            <button type="button" class="btn btn-ghost quick-range-btn" data-range="lastWeek" aria-pressed="false" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="lastWeek">Last Week</button>
-            <button type="button" class="btn btn-ghost quick-range-btn" data-range="last14days" aria-pressed="false" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="last14days">Last 14 Days</button>
-            <button type="button" class="btn btn-ghost quick-range-btn" data-range="last4weeks" aria-pressed="false" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="last4weeks">Last 4 Weeks</button>
-            <button type="button" class="btn btn-ghost quick-range-btn" data-range="thisMonth" aria-pressed="false" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="thisMonth">This Month</button>
-            <button type="button" class="btn btn-ghost quick-range-btn" data-range="lastMonth" aria-pressed="false" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="lastMonth">Last Month</button>
-            <button type="button" class="btn btn-ghost quick-range-btn" data-range="thisYear" aria-pressed="false" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="thisYear">This Year</button>
-            <button type="button" class="btn btn-ghost quick-range-btn" data-range="lastYear" aria-pressed="false" style="min-height:32px; padding:4px 10px; font-size:12px;" data-i18n="lastYear">Last Year</button>
+            <button type="button" class="btn btn-ghost quick-range-btn" data-range="today" aria-pressed="true" data-i18n="today">Today</button>
+            <button type="button" class="btn btn-ghost quick-range-btn" data-range="yesterday" aria-pressed="false" data-i18n="yesterday">Yesterday</button>
+            <button type="button" class="btn btn-ghost quick-range-btn" data-range="last7days" aria-pressed="false" data-i18n="last7days">Last 7 Days</button>
+            <button type="button" class="btn btn-ghost quick-range-btn" data-range="lastWeek" aria-pressed="false" data-i18n="lastWeek">Last Week</button>
+            <button type="button" class="btn btn-ghost quick-range-btn" data-range="last14days" aria-pressed="false" data-i18n="last14days">Last 14 Days</button>
+            <button type="button" class="btn btn-ghost quick-range-btn" data-range="last4weeks" aria-pressed="false" data-i18n="last4weeks">Last 4 Weeks</button>
+            <button type="button" class="btn btn-ghost quick-range-btn" data-range="thisMonth" aria-pressed="false" data-i18n="thisMonth">This Month</button>
+            <button type="button" class="btn btn-ghost quick-range-btn" data-range="lastMonth" aria-pressed="false" data-i18n="lastMonth">Last Month</button>
+            <button type="button" class="btn btn-ghost quick-range-btn" data-range="thisYear" aria-pressed="false" data-i18n="thisYear">This Year</button>
+            <button type="button" class="btn btn-ghost quick-range-btn" data-range="lastYear" aria-pressed="false" data-i18n="lastYear">Last Year</button>
           </div>
 
           <div class="topbar-actions">
@@ -1210,6 +1540,14 @@
               <path d="M20 4v6h-6" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
               </svg>
               <span data-i18n="refresh">Refresh</span>
+            </button>
+            <button id="releaseNotesToggle" class="btn btn-ghost compact-control release-notes-trigger" type="button" aria-controls="releaseNotesDialog" aria-expanded="false">
+              <svg class="release-notes-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M6.5 4.5h11a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.7"/>
+                <path d="M8 9h8M8 12h8M8 15h5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+              </svg>
+              <span data-i18n="whatsNew">What's new</span>
+              <span id="releaseNotesVersion" class="release-notes-version mono">v—</span>
             </button>
             <span id="serverCountChip" class="text-xs font-semibold" style="display:none;padding:5px 9px;border:1px solid var(--color-border);border-radius:999px;color:var(--color-muted);"></span>
 
@@ -1345,8 +1683,11 @@
             <h2 class="text-base font-extrabold mono" data-i18n="usageByTool">Usage by Tool</h2>
             <div class="text-xs" style="color: var(--color-muted);" data-i18n="tokens">Tokens</div>
           </div>
-          <div class="h-[280px]">
-            <canvas id="toolChart" aria-label="Usage by tool chart" role="img"></canvas>
+          <div class="tool-chart-shell">
+            <div class="tool-chart-canvas">
+              <canvas id="toolChart" aria-label="Usage by tool chart" role="img"></canvas>
+            </div>
+            <div id="toolChartLegend" class="tool-chart-legend" role="list" aria-label="Tool chart legend"></div>
           </div>
         </div>
 
@@ -1401,7 +1742,7 @@
             </div>
             <section id="overviewActivityInsights" class="overview-activity-insights" data-state="loading" aria-busy="true" aria-label="Activity insights">
               <dl id="overviewActivityInsightsValues" class="overview-activity-insights-values"></dl>
-              <p id="overviewActivityInsightsState" class="overview-activity-insights-state" aria-live="polite" data-i18n="loading">Loading…</p>
+              <p id="overviewActivityInsightsState" class="tokdash-loading-placeholder overview-activity-insights-state" aria-live="polite"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></p>
             </section>
           </div>
         </div>
@@ -1421,7 +1762,7 @@
               </tr>
             </thead>
             <tbody id="toolsTable">
-              <tr><td colspan="4" class="text-center py-10" style="color: var(--color-muted);" data-i18n="loading">Loading…</td></tr>
+              <tr><td colspan="4" class="tokdash-loading-placeholder text-center py-10" style="color: var(--color-muted);"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></td></tr>
             </tbody>
           </table>
         </div>
@@ -1430,7 +1771,7 @@
       <section class="surface p-5 mb-6">
         <h2 class="text-base font-extrabold mono mb-4" data-i18n="appsModelsBreakdown">Apps & Models Breakdown</h2>
         <div id="appsBreakdown">
-          <p class="text-center py-10" style="color: var(--color-muted);" data-i18n="loading">Loading…</p>
+          <p class="tokdash-loading-placeholder text-center py-10" style="color: var(--color-muted);"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></p>
         </div>
       </section>
 
@@ -1456,7 +1797,7 @@
               </tr>
             </thead>
             <tbody id="allModelsTable">
-              <tr><td colspan="8" class="text-center py-10" style="color: var(--color-muted);" data-i18n="loading">Loading…</td></tr>
+              <tr><td colspan="8" class="tokdash-loading-placeholder text-center py-10" style="color: var(--color-muted);"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></td></tr>
             </tbody>
           </table>
         </div>
@@ -1479,7 +1820,7 @@
         <div id="codexLatestSession" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4 mb-5">
           <div class="surface p-4">
             <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="latestSession">Latest Session</div>
-            <div id="codexLatestProject" class="mt-2 font-extrabold mono">Loading…</div>
+            <div id="codexLatestProject" class="tokdash-loading-placeholder mt-2 font-extrabold mono"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
             <div id="codexLatestMeta" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
           </div>
           <div class="surface p-4">
@@ -1522,7 +1863,7 @@
               </tr>
             </thead>
             <tbody id="codexSessionsTable">
-              <tr><td colspan="9" class="text-center py-10" style="color: var(--color-muted);" data-i18n="loading">Loading…</td></tr>
+              <tr><td colspan="9" class="tokdash-loading-placeholder text-center py-10" style="color: var(--color-muted);"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></td></tr>
             </tbody>
           </table>
         </div>
@@ -1538,7 +1879,7 @@
         <div id="claudeLatestSession" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4 mb-5">
           <div class="surface p-4">
             <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="latestSession">Latest Session</div>
-            <div id="claudeLatestProject" class="mt-2 font-extrabold mono">Loading…</div>
+            <div id="claudeLatestProject" class="tokdash-loading-placeholder mt-2 font-extrabold mono"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
             <div id="claudeLatestMeta" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
           </div>
           <div class="surface p-4">
@@ -1581,7 +1922,7 @@
               </tr>
             </thead>
             <tbody id="claudeSessionsTable">
-              <tr><td colspan="9" class="text-center py-10" style="color: var(--color-muted);" data-i18n="loading">Loading…</td></tr>
+              <tr><td colspan="9" class="tokdash-loading-placeholder text-center py-10" style="color: var(--color-muted);"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></td></tr>
             </tbody>
           </table>
         </div>
@@ -1597,7 +1938,7 @@
         <div id="opencodeLatestSession" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4 mb-5">
           <div class="surface p-4">
             <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="latestSession">Latest Session</div>
-            <div id="opencodeLatestProject" class="mt-2 font-extrabold mono">Loading…</div>
+            <div id="opencodeLatestProject" class="tokdash-loading-placeholder mt-2 font-extrabold mono"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
             <div id="opencodeLatestMeta" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
           </div>
           <div class="surface p-4">
@@ -1640,7 +1981,7 @@
               </tr>
             </thead>
             <tbody id="opencodeSessionsTable">
-              <tr><td colspan="9" class="text-center py-10" style="color: var(--color-muted);" data-i18n="loading">Loading…</td></tr>
+              <tr><td colspan="9" class="tokdash-loading-placeholder text-center py-10" style="color: var(--color-muted);"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></td></tr>
             </tbody>
           </table>
         </div>
@@ -1656,7 +1997,7 @@
         <div id="pi_agentLatestSession" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4 mb-5">
           <div class="surface p-4">
             <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="latestSession">Latest Session</div>
-            <div id="pi_agentLatestProject" class="mt-2 font-extrabold mono">Loading…</div>
+            <div id="pi_agentLatestProject" class="tokdash-loading-placeholder mt-2 font-extrabold mono"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
             <div id="pi_agentLatestMeta" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
           </div>
           <div class="surface p-4">
@@ -1699,7 +2040,7 @@
               </tr>
             </thead>
             <tbody id="pi_agentSessionsTable">
-              <tr><td colspan="9" class="text-center py-10" style="color: var(--color-muted);" data-i18n="loading">Loading…</td></tr>
+              <tr><td colspan="9" class="tokdash-loading-placeholder text-center py-10" style="color: var(--color-muted);"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></td></tr>
             </tbody>
           </table>
         </div>
@@ -1715,7 +2056,7 @@
         <div id="mimoLatestSession" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4 mb-5">
           <div class="surface p-4">
             <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="latestSession">Latest Session</div>
-            <div id="mimoLatestProject" class="mt-2 font-extrabold mono">Loading…</div>
+            <div id="mimoLatestProject" class="tokdash-loading-placeholder mt-2 font-extrabold mono"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
             <div id="mimoLatestMeta" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
           </div>
           <div class="surface p-4">
@@ -1758,7 +2099,7 @@
               </tr>
             </thead>
             <tbody id="mimoSessionsTable">
-              <tr><td colspan="9" class="text-center py-10" style="color: var(--color-muted);" data-i18n="loading">Loading…</td></tr>
+              <tr><td colspan="9" class="tokdash-loading-placeholder text-center py-10" style="color: var(--color-muted);"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></td></tr>
             </tbody>
           </table>
         </div>
@@ -1774,7 +2115,7 @@
         <div id="combinedLatestSession" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4 mb-5">
           <div class="surface p-4">
             <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="latestSession">Latest Session</div>
-            <div id="combinedLatestProject" class="mt-2 font-extrabold mono">Loading…</div>
+            <div id="combinedLatestProject" class="tokdash-loading-placeholder mt-2 font-extrabold mono"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
             <div id="combinedLatestMeta" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
           </div>
           <div class="surface p-4">
@@ -1818,7 +2159,7 @@
               </tr>
             </thead>
             <tbody id="combinedSessionsTable">
-              <tr><td colspan="10" class="text-center py-10" style="color: var(--color-muted);" data-i18n="loading">Loading…</td></tr>
+              <tr><td colspan="10" class="tokdash-loading-placeholder text-center py-10" style="color: var(--color-muted);"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></td></tr>
             </tbody>
           </table>
         </div>
@@ -1830,35 +2171,35 @@
       <section id="statsSummaryCards" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <div class="surface p-4">
           <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="topModelCost">Top Model (Cost)</div>
-          <div id="statFavoriteModel" class="mt-2 font-extrabold mono">Loading…</div>
+          <div id="statFavoriteModel" class="tokdash-loading-placeholder mt-2 font-extrabold mono"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
         </div>
         <div class="surface p-4">
           <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="totalTokens">Total Tokens</div>
-          <div id="statTotalTokens" class="mt-2 font-extrabold">Loading…</div>
+          <div id="statTotalTokens" class="tokdash-loading-placeholder mt-2 font-extrabold"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
         </div>
         <div class="surface p-4">
           <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="sessions">Sessions</div>
-          <div id="statSessions" class="mt-2 font-extrabold">Loading…</div>
+          <div id="statSessions" class="tokdash-loading-placeholder mt-2 font-extrabold"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
         </div>
         <div class="surface p-4">
           <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="streak">Streak</div>
-          <div id="statCurrentStreak" class="mt-2 font-extrabold">Loading…</div>
+          <div id="statCurrentStreak" class="tokdash-loading-placeholder mt-2 font-extrabold"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
         </div>
         <div class="surface p-4">
           <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="longestStreak">Longest Streak</div>
-          <div id="statLongestStreak" class="mt-2 font-extrabold">Loading…</div>
+          <div id="statLongestStreak" class="tokdash-loading-placeholder mt-2 font-extrabold"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
         </div>
         <div class="surface p-4">
           <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="activeDays">Active Days</div>
-          <div id="statActiveDays" class="mt-2 font-extrabold">Loading…</div>
+          <div id="statActiveDays" class="tokdash-loading-placeholder mt-2 font-extrabold"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
         </div>
         <div class="surface p-4">
           <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="totalDays">Total Days</div>
-          <div id="statTotalDays" class="mt-2 font-extrabold">Loading…</div>
+          <div id="statTotalDays" class="tokdash-loading-placeholder mt-2 font-extrabold"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
         </div>
         <div class="surface p-4">
           <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="totalCost">Total Cost</div>
-          <div id="statTotalCost" class="mt-2 font-extrabold">Loading…</div>
+          <div id="statTotalCost" class="tokdash-loading-placeholder mt-2 font-extrabold"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
         </div>
       </section>
 
@@ -1907,7 +2248,7 @@
 
         <!-- Loading / error state for the stats calendar (shown until the first /api/stats load succeeds) -->
         <div id="statsStatus" class="text-center py-10" style="display:none; color: var(--color-muted);">
-          <div id="statsStatusMsg" class="font-semibold">Loading…</div>
+          <div id="statsStatusMsg" class="tokdash-loading-placeholder font-semibold"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
           <button id="statsRetryBtn" class="btn btn-primary mt-3" type="button" style="display:none;" data-i18n="retry">Retry</button>
         </div>
 
@@ -1969,7 +2310,7 @@
               <div id="monthDayLabels" class="heatmap-day-labels"></div>
 
               <div id="calendarContainer" class="overflow-x-auto">
-                <div id="monthGrid" class="inline-block">Loading…</div>
+                <div id="monthGrid" class="tokdash-loading-placeholder inline-block"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
               </div>
             </div>
 
@@ -2049,7 +2390,7 @@
             <div id="yearDayLabels" class="heatmap-year-ylabels"></div>
             <div class="heatmap-year-main">
               <div id="yearMonthLabels" class="heatmap-year-months"></div>
-              <div id="yearGrid" class="heatmap-year-grid">Loading…</div>
+              <div id="yearGrid" class="tokdash-loading-placeholder heatmap-year-grid"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
             </div>
           </div>
 
@@ -2066,7 +2407,7 @@
                   </tr>
                 </thead>
                 <tbody id="yearMonthlyTotalsTable">
-                  <tr><td colspan="4" class="text-center py-6" style="color: var(--color-muted);" data-i18n="loading">Loading…</td></tr>
+                  <tr><td colspan="4" class="tokdash-loading-placeholder text-center py-6" style="color: var(--color-muted);"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></td></tr>
                 </tbody>
               </table>
             </div>
@@ -2186,7 +2527,7 @@
           </div>
         </div>
         <div id="quotaProviderCards" class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div class="text-center py-10" style="color: var(--color-muted);" data-i18n="loading">Loading…</div>
+          <div class="tokdash-loading-placeholder text-center py-10" style="color: var(--color-muted);"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
         </div>
       </section>
 
@@ -2223,7 +2564,7 @@
             <div id="pricingDbSource" class="text-xs mono mt-1 break-all" style="color: var(--color-muted);"></div>
           </div>
           <div class="flex flex-wrap items-center gap-2">
-            <div id="pricingDbStatus" class="text-sm font-semibold mr-1" style="color: var(--color-muted);" data-i18n="loading">Loading…</div>
+            <div id="pricingDbStatus" class="tokdash-loading-placeholder text-sm font-semibold mr-1" style="color: var(--color-muted);"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
             <button id="pricingDbReload" class="btn btn-ghost" type="button" data-i18n="reload">Reload</button>
             <button id="pricingDbFormat" class="btn btn-ghost" type="button" data-i18n="formatJson">Format JSON</button>
             <button id="pricingDbSave" class="btn btn-primary" type="button" data-i18n="save">Save</button>
@@ -2240,7 +2581,7 @@
           </div>
           <div class="rounded-lg border p-4" style="border-color: var(--color-border); background: color-mix(in srgb, var(--color-text) 3%, transparent);">
             <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="jsonState">JSON</div>
-            <div id="pricingDbJsonState" class="mt-2 font-extrabold" style="color: var(--color-muted);" data-i18n="loading">Loading…</div>
+            <div id="pricingDbJsonState" class="tokdash-loading-placeholder mt-2 font-extrabold" style="color: var(--color-muted);"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
           </div>
         </div>
         <textarea id="pricingDbEditor" class="pricing-editor mono" spellcheck="false" aria-label="pricing_db.json editor"></textarea>
@@ -2348,6 +2689,30 @@
       </div>
     </div>
   </div>
+
+  <dialog id="releaseNotesDialog" class="release-notes-dialog" aria-labelledby="releaseNotesTitle">
+    <div class="release-notes-shell">
+      <header class="release-notes-head">
+        <div>
+          <p class="release-notes-eyebrow mono" data-i18n="releaseNotes">Release notes</p>
+          <h2 id="releaseNotesTitle" class="release-notes-title" data-i18n="whatsNew">What's new</h2>
+          <p class="release-notes-intro" data-i18n="releaseNotesIntro">A concise record of what changed in each Tokdash release.</p>
+        </div>
+        <button id="releaseNotesClose" class="release-notes-close" type="button" aria-label="Close release notes">
+          <svg width="17" height="17" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+            <path d="m4.5 4.5 9 9m0-9-9 9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </header>
+      <div id="releaseNotesList" class="release-notes-list tokdash-loading-placeholder" aria-live="polite"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
+      <footer class="release-notes-footer">
+        <a href="https://github.com/JingbiaoMei/Tokdash/blob/main/docs/development/CHANGELOG.md" target="_blank" rel="noreferrer">
+          <span data-i18n="viewFullChangelog">View full changelog</span>
+          <span aria-hidden="true">↗</span>
+        </a>
+      </footer>
+    </div>
+  </dialog>
 
   <!-- Viewport-level tooltips must stay outside filtered/transformed cards. -->
   <div id="overviewProfileTooltip" class="profile-activity-tooltip overview-profile-tooltip" role="tooltip" hidden></div>
@@ -2754,6 +3119,15 @@
         styleArcade: 'Arcade',
         styleStudio: 'Studio',
         loading: 'Loading…',
+        whatsNew: 'What\'s new',
+        releaseNotes: 'Release notes',
+        releaseNotesIntro: 'A concise record of what changed in each Tokdash release.',
+        releaseNotesUnavailable: 'Release notes are unavailable right now.',
+        closeReleaseNotes: 'Close release notes',
+        viewFullChangelog: 'View full changelog',
+        added: 'Added',
+        changed: 'Changed',
+        fixed: 'Fixed',
         cached: 'cached',
         temporaryOverload: 'Temporarily busy. Try Refresh again.',
         loadFailed: 'Failed to load data.',
@@ -3065,6 +3439,15 @@
         styleArcade: '街机',
         styleStudio: '工作室',
         loading: '加载中…',
+        whatsNew: '更新动态',
+        releaseNotes: '更新日志',
+        releaseNotesIntro: '简要记录每个 Tokdash 版本带来的变化。',
+        releaseNotesUnavailable: '暂时无法加载更新日志。',
+        closeReleaseNotes: '关闭更新日志',
+        viewFullChangelog: '查看完整更新日志',
+        added: '新增',
+        changed: '调整',
+        fixed: '修复',
         cached: '缓存',
         temporaryOverload: '暂时繁忙，请稍后刷新重试。',
         loadFailed: '数据加载失败。',
@@ -3716,6 +4099,16 @@
       return (I18N[currentLang] || I18N.en)[key] || I18N.en[key] || key;
     }
 
+    function renderLoadingPlaceholder(element, label = t('loading')) {
+      if (!element) return;
+      element.classList.add('tokdash-loading-placeholder');
+      const loadingLabel = document.createElement('span');
+      loadingLabel.className = 'tokdash-loading-label';
+      loadingLabel.dataset.i18n = 'loading';
+      loadingLabel.textContent = label;
+      element.replaceChildren(loadingLabel);
+    }
+
     function getDayLabels() {
       return [t('mon'), t('tue'), t('wed'), t('thu'), t('fri'), t('sat'), t('sun')];
     }
@@ -4178,6 +4571,9 @@
       }
       const langBtn = document.getElementById('langToggle');
       if (langBtn) langBtn.textContent = currentLang === 'zh' ? 'EN' : '中';
+      const releaseNotesClose = document.getElementById('releaseNotesClose');
+      if (releaseNotesClose) releaseNotesClose.setAttribute('aria-label', t('closeReleaseNotes'));
+      if (typeof releaseNotesPayload !== 'undefined' && releaseNotesPayload) renderReleaseNotes(releaseNotesPayload);
       // The pricing source line is set imperatively (no data-i18n), so re-derive it from the
       // last payload on a language switch — otherwise it stays frozen in the prior language.
       if (pricingDbLastPayload) setPricingDbSource(pricingDbLastPayload);
@@ -4285,6 +4681,133 @@
       }
     }
 
+    const TOOL_BRAND_META = Object.freeze({
+      opencode: { icon: '/static/icons/agents/opencode.png', color: '#111111', fallback: 'O' },
+      codex: { icon: '/static/icons/agents/codex-transparent.png', color: '#111827', fallback: 'C', darkInvert: true },
+      claude: { icon: '/static/icons/agents/claude.svg', color: '#D97757', fallback: 'C' },
+      gemini_cli: { icon: '/static/icons/agents/gemini.svg', color: '#4285F4', fallback: 'G' },
+      antigravity_cli: { icon: '/static/icons/agents/antigravity.png', color: '#4285F4', fallback: 'A' },
+      cursor: { icon: '/static/icons/agents/cursor.svg', color: '#26251E', fallback: 'C', darkInvert: true },
+      amp: { icon: '/static/icons/agents/amp.svg', color: '#F34E3F', fallback: 'A' },
+      openclaw: { icon: '/static/icons/agents/openclaw.png', color: '#EF3E45', fallback: 'O' },
+      kimi: { icon: '/static/icons/agents/kimi.png', color: '#1688F8', fallback: 'K' },
+      grok: { icon: '/static/icons/agents/grok-transparent.png', color: '#111111', fallback: 'G', darkInvert: true },
+      pi_agent: { icon: '/static/icons/agents/pi.png', color: '#111111', fallback: 'P' },
+      copilot_cli: { icon: '/static/icons/agents/copilot.svg', color: '#6E40C9', fallback: 'C' },
+      hermes: { icon: '/static/icons/agents/hermes.png', color: '#111111', fallback: 'H', darkInvert: true },
+      mimo: { icon: '/static/icons/agents/mimo.svg', color: '#FF6900', fallback: 'M', logoKind: 'wordmark' },
+    });
+    const toolBrandIconPromises = new Map();
+
+    function loadToolBrandIcon(iconPath) {
+      const iconUrl = appAssetWithBase(iconPath);
+      if (!toolBrandIconPromises.has(iconUrl)) {
+        const request = fetch(iconUrl)
+          .then((response) => {
+            if (!response.ok) throw new Error(`Tool icon request failed: ${response.status}`);
+            return response.blob();
+          })
+          .then((blob) => URL.createObjectURL(blob))
+          .catch((error) => {
+            toolBrandIconPromises.delete(iconUrl);
+            throw error;
+          });
+        toolBrandIconPromises.set(iconUrl, request);
+      }
+      return toolBrandIconPromises.get(iconUrl);
+    }
+
+    function normalizeToolBrandKey(tool) {
+      const key = String(tool || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+      const aliases = {
+        claude_code: 'claude',
+        github_copilot_cli: 'copilot_cli',
+        copilot: 'copilot_cli',
+        gemini: 'gemini_cli',
+        antigravity: 'antigravity_cli',
+        pi: 'pi_agent',
+      };
+      return aliases[key] || key;
+    }
+
+    function toolBrandMeta(tool) {
+      const key = normalizeToolBrandKey(tool);
+      const known = TOOL_BRAND_META[key];
+      if (known) return known;
+      const label = formatToolName(tool);
+      return { icon: null, color: '#64748B', fallback: label.charAt(0) || '?' };
+    }
+
+    function createToolIdentity(tool, options = {}) {
+      const meta = toolBrandMeta(tool);
+      const identity = document.createElement('span');
+      identity.className = 'tool-identity';
+      identity.dataset.compact = String(Boolean(options.compact));
+      identity.dataset.logoKind = meta.logoKind || 'mark';
+      identity.dataset.darkInvert = String(Boolean(meta.darkInvert));
+      identity.style.setProperty('--tool-brand', meta.color);
+      identity.setAttribute('aria-label', formatToolName(tool));
+
+      const icon = document.createElement('span');
+      icon.className = 'tool-brand-icon';
+      icon.setAttribute('aria-hidden', 'true');
+
+      const fallback = document.createElement('span');
+      fallback.className = 'tool-brand-fallback';
+      fallback.textContent = meta.fallback;
+
+      icon.appendChild(fallback);
+      if (meta.icon) {
+        loadToolBrandIcon(meta.icon).then((iconUrl) => {
+          if (!icon.isConnected) return;
+          const image = document.createElement('img');
+          image.src = iconUrl;
+          image.alt = '';
+          image.loading = 'lazy';
+          image.decoding = 'async';
+          image.addEventListener('error', () => icon.replaceChildren(fallback), { once: true });
+          icon.replaceChildren(image);
+        }).catch(() => {});
+      }
+
+      const label = document.createElement('span');
+      label.className = 'tool-brand-label';
+      label.textContent = formatToolName(tool);
+      identity.append(icon, label);
+      return identity;
+    }
+
+    function renderToolChartLegend(entries, colors) {
+      const legend = document.getElementById('toolChartLegend');
+      if (!legend) return;
+      const fragment = document.createDocumentFragment();
+      const visibleEntries = entries.slice(0, 6);
+      visibleEntries.forEach(([tool], index) => {
+        const item = document.createElement('span');
+        item.className = 'tool-chart-legend-item';
+        item.setAttribute('role', 'listitem');
+
+        const swatch = document.createElement('span');
+        swatch.className = 'tool-chart-legend-swatch';
+        swatch.style.backgroundColor = colors[index];
+        swatch.setAttribute('aria-hidden', 'true');
+
+        item.append(swatch, createToolIdentity(tool, { compact: true }));
+        fragment.appendChild(item);
+      });
+      const hiddenCount = entries.length - visibleEntries.length;
+      if (hiddenCount > 0) {
+        const more = document.createElement('span');
+        more.className = 'tool-chart-legend-more';
+        more.setAttribute('role', 'listitem');
+        more.textContent = currentLang === 'zh'
+          ? `另有 ${hiddenCount} 个工具`
+          : `+${hiddenCount} more tools`;
+        fragment.appendChild(more);
+      }
+      legend.replaceChildren(fragment);
+    }
+
     // Human-friendly source/tool labels
     function formatToolName(tool) {
       const key = String(tool || '').trim().toLowerCase();
@@ -4302,6 +4825,7 @@
         copilot_cli: 'GitHub Copilot CLI',
         hermes: 'Hermes',
         mimo: 'Mimo',
+        cursor: 'Cursor',
       };
       if (mapping[key]) return mapping[key];
 
@@ -4718,6 +5242,14 @@
         }
       });
       scheduleIdle(() => updateCombinedModelsTable(lastCombinedModels));
+      if (Array.isArray(statsCache.default)) {
+        statsCache.default = reconcileTodayProfileContribution(
+          statsCache.default,
+          data,
+          currentStartDate,
+          currentEndDate,
+        );
+      }
       renderOverviewProfilePreview();
     }
 
@@ -5254,7 +5786,11 @@
           const nameCell = createTableCell("td", "py-3 px-4 text-slate-800", sessionDisplayName(session));
           nameCell.title = session.session_id ? `${sessionDisplayName(session)} · ${session.session_id}` : sessionDisplayName(session);
           row.appendChild(nameCell);
-          if (showTool) row.appendChild(createTableCell("td", "py-3 px-4 text-slate-700", formatToolName(session.tool)));
+          if (showTool) {
+            const toolCell = createTableCell("td", "py-3 px-4 text-slate-700", "");
+            toolCell.appendChild(createToolIdentity(session.tool, { compact: true }));
+            row.appendChild(toolCell);
+          }
           row.appendChild(createTableCell("td", "py-3 px-4 text-slate-700 mono", session.model || "—"));
           row.appendChild(createTableCell("td", "py-3 px-4 text-right text-slate-700", formatTokenCount(session.tokens_in || 0)));
           row.appendChild(createTableCell("td", "py-3 px-4 text-right text-slate-700", formatTokenCount(session.tokens_cache || 0)));
@@ -5502,7 +6038,7 @@
       const modal = document.getElementById("sessionModal");
       modal.classList.remove("hidden");
       document.getElementById("sessionModalTitle").textContent = sessionShortId(sessionId);
-      document.getElementById("sessionModalMeta").textContent = t("loading");
+      renderLoadingPlaceholder(document.getElementById("sessionModalMeta"));
       document.getElementById("sessionModalInput").textContent = "-";
       document.getElementById("sessionModalInputPct").textContent = "-";
       document.getElementById("sessionModalCache").textContent = "-";
@@ -5557,6 +6093,7 @@
       const values = entries.map(([, v]) => Number(v?.tokens || 0));
       const palette = getChartPalette();
       const colors = values.map((_, i) => palette[i % palette.length]);
+      renderToolChartLegend(entries, colors);
 
       if (!toolChart) {
         toolChart = new Chart(ctx, {
@@ -5574,7 +6111,7 @@
             maintainAspectRatio: false,
             animation: false,
             plugins: {
-              legend: { position: 'bottom' },
+              legend: { display: false },
               tooltip: {
                 callbacks: {
                   label: (context) => {
@@ -5747,12 +6284,15 @@
         const tr = document.createElement('tr');
         tr.className = 'border-b hover:bg-slate-50 transition';
         tr.style.borderColor = 'rgba(226,232,240,0.9)';
-        tr.innerHTML = `
-          <td class="py-3 px-4 font-semibold text-slate-800">${formatToolName(row.tool)}</td>
+        const toolCell = document.createElement('td');
+        toolCell.className = 'py-3 px-4 font-semibold text-slate-800';
+        toolCell.appendChild(createToolIdentity(row.tool));
+        tr.appendChild(toolCell);
+        tr.insertAdjacentHTML('beforeend', `
           <td class="py-3 px-4 text-right text-slate-700">${formatTokenCount(row.tokens)}</td>
           <td class="py-3 px-4 text-right text-slate-700">${formatHitRate(row.cache_hit_rate)}</td>
           <td class="py-3 px-4 text-right font-bold" style="color:var(--color-cost)">${formatCurrency(row.cost)}</td>
-        `;
+        `);
         frag.appendChild(tr);
       });
 
@@ -5820,11 +6360,14 @@
         const appHit = hitRateFrom(appIn, appCache);
 
         const header = document.createElement('div');
-        header.className = 'flex flex-wrap items-baseline gap-x-4 gap-y-1 mb-3';
-        header.innerHTML = `
-          <h4 class="text-sm font-extrabold mono tracking-wide" style="color: var(--color-primary);">${formatToolName(appName)}</h4>
-          <span class="text-xs text-slate-600">${formatTokenCount(appTokens, true)} · ${formatCurrency(appCost)} · ${formatNumber(appMessages)} ${t('msgs')} · ${t('cacheHitRate')} ${formatHitRate(appHit)}</span>
-        `;
+        header.className = 'flex flex-wrap items-center gap-x-4 gap-y-1 mb-3';
+        const title = document.createElement('h4');
+        title.className = 'text-sm font-extrabold mono tracking-wide';
+        title.appendChild(createToolIdentity(appName, { compact: true }));
+        const appSummary = document.createElement('span');
+        appSummary.className = 'text-xs text-slate-600';
+        appSummary.textContent = `${formatTokenCount(appTokens, true)} · ${formatCurrency(appCost)} · ${formatNumber(appMessages)} ${t('msgs')} · ${t('cacheHitRate')} ${formatHitRate(appHit)}`;
+        header.append(title, appSummary);
         appDiv.appendChild(header);
 
         const table = document.createElement('table');
@@ -7065,7 +7608,8 @@
       const el = document.getElementById('pricingDbStatus');
       if (!el) return;
       el.removeAttribute('data-i18n');
-      el.textContent = text;
+      if (text === t('loading')) renderLoadingPlaceholder(el);
+      else el.textContent = text;
       el.style.color = color;
     }
 
@@ -7303,7 +7847,10 @@
         if (el) el.style.display = 'none';
       });
       const msg = document.getElementById('statsStatusMsg');
-      if (msg) msg.textContent = t(state === 'error' ? 'statsLoadFailed' : 'loading');
+      if (msg) {
+        if (state === 'error') msg.textContent = t('statsLoadFailed');
+        else renderLoadingPlaceholder(msg);
+      }
       const retry = document.getElementById('statsRetryBtn');
       if (retry) retry.style.display = state === 'error' ? '' : 'none';
     }
@@ -7342,6 +7889,65 @@
     function safeProfileNumber(value) {
       const number = Number(value ?? 0);
       return Number.isFinite(number) ? Math.max(0, number) : 0;
+    }
+
+    function buildUsageProfileContribution(dateKey, usageData) {
+      const codingModels = Array.isArray(usageData?.coding_models) ? usageData.coding_models : [];
+      const openclawModels = Array.isArray(usageData?.openclaw_models) ? usageData.openclaw_models : [];
+      const models = [
+        ...codingModels.map((model) => ({ ...model, source: model.source || 'coding' })),
+        ...openclawModels.map((model) => ({ ...model, source: model.source || 'openclaw' })),
+      ];
+      const tokenBreakdown = {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        reasoning: 0,
+      };
+      const sources = models.map((model) => {
+        const input = safeProfileNumber(model.tokens_in);
+        const output = safeProfileNumber(model.tokens_out);
+        const cacheRead = safeProfileNumber(model.tokens_cache);
+        const total = safeProfileNumber(model.tokens ?? model.total_tokens);
+        const reasoning = Math.max(0, total - input - output - cacheRead);
+        tokenBreakdown.input += input;
+        tokenBreakdown.output += output;
+        tokenBreakdown.cacheRead += cacheRead;
+        tokenBreakdown.reasoning += reasoning;
+        return {
+          source: model.source || 'unknown',
+          modelId: model.name || model.model || 'unknown',
+          providerId: model.provider || 'unknown',
+          tokens: { input, output, cacheRead, cacheWrite: 0, reasoning },
+          cost: safeProfileNumber(model.cost ?? model.total_cost),
+          messages: safeProfileNumber(model.messages ?? model.total_messages),
+        };
+      });
+      const totalTokens = safeProfileNumber(usageData?.total_tokens);
+      const attributedTokens = Object.values(tokenBreakdown).reduce((sum, value) => sum + value, 0);
+      if (attributedTokens < totalTokens) tokenBreakdown.reasoning += totalTokens - attributedTokens;
+      return {
+        date: dateKey,
+        totals: {
+          tokens: totalTokens,
+          cost: safeProfileNumber(usageData?.total_cost),
+          messages: safeProfileNumber(usageData?.total_messages),
+        },
+        intensity: totalTokens > 0 ? 1 : 0,
+        tokenBreakdown,
+        sources,
+      };
+    }
+
+    function reconcileTodayProfileContribution(contributions, usageData, startDate, endDate, today = new Date()) {
+      const rows = Array.isArray(contributions) ? contributions : [];
+      if (!usageData || !(startDate instanceof Date) || !(endDate instanceof Date)) return rows;
+      const todayKey = formatDateKey(today);
+      if (formatDateKey(startDate) !== todayKey || formatDateKey(endDate) !== todayKey) return rows;
+      const reconciled = rows.filter((day) => day?.date !== todayKey);
+      reconciled.push(buildUsageProfileContribution(todayKey, usageData));
+      return reconciled.sort((left, right) => String(left?.date || '').localeCompare(String(right?.date || '')));
     }
 
     function getProfileActivityWindow(contributions, today, weekCount = 52) {
@@ -7997,7 +8603,7 @@
           item.querySelector('dd')?.replaceChildren(skeleton);
           kpis.appendChild(item);
         });
-        coverage.textContent = t('loading');
+        renderLoadingPlaceholder(coverage);
         return;
       }
       if (status === 'error') {
@@ -8076,7 +8682,7 @@
       valuesElement.replaceChildren();
 
       if (status === 'idle' || status === 'loading') {
-        stateElement.textContent = t('loading');
+        renderLoadingPlaceholder(stateElement);
         return;
       }
       if (status === 'error') {
@@ -8408,7 +9014,12 @@
         document.getElementById('statTotalDays').textContent = formatNumber(stats.total_days || 0);
         document.getElementById('statTotalCost').textContent = formatCurrency((data.summary || {}).totalCost || 0);
 
-        const filledContributions = fillMissingDays(data.contributions);
+        const filledContributions = reconcileTodayProfileContribution(
+          fillMissingDays(data.contributions),
+          lastUsageResponse,
+          currentStartDate,
+          currentEndDate,
+        );
         statsCache.default = filledContributions;
         const currentYear = new Date().getFullYear();
         const currentYearRows = filledContributions.filter((day) => Number(String(day.date).slice(0, 4)) === currentYear);
@@ -8438,7 +9049,12 @@
             .then((rows) => {
               if (!rows.length) throw new Error(t('statsLoadFailed'));
               const data = combineStatsPayloads(rows.map((row) => row.payload));
-              const filledContributions = fillMissingDays(data.contributions || []);
+              const filledContributions = reconcileTodayProfileContribution(
+                fillMissingDays(data.contributions || []),
+                lastUsageResponse,
+                currentStartDate,
+                currentEndDate,
+              );
               statsCache.default = filledContributions;
               if (isOverviewActive()) renderOverviewProfilePreview(filledContributions);
             })
@@ -9804,6 +10420,148 @@
     // *reports* availability — upgrading stays a terminal action
     // (`tokdash update`, which detects pip/pipx); the web UI never runs it (§15).
     const UPDATE_SKIP_KEY = 'tokdash-update-skipped';
+    let runtimeVersionPromise = null;
+    let releaseNotesPayload = null;
+    let releaseNotesPromise = null;
+
+    function getRuntimeVersion() {
+      if (!runtimeVersionPromise) {
+        runtimeVersionPromise = fetch(appPath('/api/version')).then((response) => {
+          if (!response.ok) throw new Error(String(response.status));
+          return response.json();
+        });
+      }
+      return runtimeVersionPromise;
+    }
+
+    function renderReleaseNotes(payload) {
+      const list = document.getElementById('releaseNotesList');
+      if (!list || !payload || !Array.isArray(payload.releases)) return;
+      const fragment = document.createDocumentFragment();
+      payload.releases.forEach((release) => {
+        const entry = document.createElement('article');
+        entry.className = 'release-notes-entry';
+
+        const rail = document.createElement('div');
+        rail.className = 'release-notes-rail';
+        rail.setAttribute('aria-hidden', 'true');
+        const dot = document.createElement('span');
+        dot.className = 'release-notes-dot';
+        rail.appendChild(dot);
+
+        const content = document.createElement('div');
+        const meta = document.createElement('div');
+        meta.className = 'release-notes-meta';
+        const version = document.createElement('h3');
+        version.className = 'release-notes-number mono';
+        version.textContent = `v${release.version || '—'}`;
+        const date = document.createElement('time');
+        date.className = 'release-notes-date mono';
+        date.dateTime = release.date || '';
+        const releaseDate = new Date(`${release.date || ''}T12:00:00`);
+        date.textContent = Number.isNaN(releaseDate.getTime())
+          ? String(release.date || '')
+          : releaseDate.toLocaleDateString(currentLang === 'zh' ? 'zh-CN' : 'en-US', {
+              year: 'numeric', month: 'short', day: 'numeric',
+            });
+        meta.append(version, date);
+        content.appendChild(meta);
+
+        (release.sections || []).forEach((section) => {
+          const sectionElement = document.createElement('section');
+          sectionElement.className = 'release-notes-section';
+          const label = document.createElement('h4');
+          label.className = 'release-notes-section-label mono';
+          label.textContent = t(section.type);
+          const items = document.createElement('ul');
+          items.className = 'release-notes-items';
+          (section.items || []).forEach((item) => {
+            const itemElement = document.createElement('li');
+            itemElement.textContent = item;
+            items.appendChild(itemElement);
+          });
+          sectionElement.append(label, items);
+          content.appendChild(sectionElement);
+        });
+
+        entry.append(rail, content);
+        fragment.appendChild(entry);
+      });
+      list.removeAttribute('data-i18n');
+      list.replaceChildren(fragment);
+      const current = document.getElementById('releaseNotesVersion');
+      if (current && payload.current) current.textContent = `v${payload.current}`;
+    }
+
+    async function loadReleaseNotes() {
+      if (releaseNotesPayload) {
+        renderReleaseNotes(releaseNotesPayload);
+        return releaseNotesPayload;
+      }
+      if (releaseNotesPromise) return releaseNotesPromise;
+      const list = document.getElementById('releaseNotesList');
+      if (list) renderLoadingPlaceholder(list);
+      releaseNotesPromise = fetch(window.tokdashPath('/static/release-notes.json'), { cache: 'no-store' })
+        .then((response) => {
+          if (!response.ok) throw new Error(String(response.status));
+          return response.json();
+        })
+        .then((payload) => {
+          releaseNotesPayload = payload;
+          renderReleaseNotes(payload);
+          return payload;
+        })
+        .catch(() => {
+          if (list) {
+            list.removeAttribute('data-i18n');
+            list.textContent = t('releaseNotesUnavailable');
+          }
+          releaseNotesPromise = null;
+          return null;
+        });
+      return releaseNotesPromise;
+    }
+
+    async function openReleaseNotes() {
+      const dialog = document.getElementById('releaseNotesDialog');
+      const toggle = document.getElementById('releaseNotesToggle');
+      if (!dialog || !toggle) return;
+      toggle.setAttribute('aria-expanded', 'true');
+      if (!dialog.open) dialog.showModal();
+      await loadReleaseNotes();
+    }
+
+    function closeReleaseNotes() {
+      const dialog = document.getElementById('releaseNotesDialog');
+      if (dialog?.open) dialog.close();
+    }
+
+    function initReleaseNotes() {
+      const dialog = document.getElementById('releaseNotesDialog');
+      const toggle = document.getElementById('releaseNotesToggle');
+      const close = document.getElementById('releaseNotesClose');
+      if (!dialog || !toggle || !close) return;
+      toggle.addEventListener('click', openReleaseNotes);
+      close.addEventListener('click', closeReleaseNotes);
+      dialog.addEventListener('close', () => {
+        toggle.setAttribute('aria-expanded', 'false');
+        toggle.focus();
+      });
+      dialog.addEventListener('click', (event) => {
+        if (event.target === dialog) closeReleaseNotes();
+      });
+      dialog.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          closeReleaseNotes();
+        }
+      });
+      getRuntimeVersion().then((version) => {
+        const label = document.getElementById('releaseNotesVersion');
+        const current = version?.runtime_version || version?.current;
+        if (label && current) label.textContent = `v${current}`;
+      }).catch(() => {});
+    }
 
     async function postUpdateEndpoint(path) {
       // Same-origin write: fetch the per-session token and echo it back
@@ -9852,9 +10610,7 @@
 
     async function initUpdateNotice() {
       try {
-        const resp = await fetch(appPath('/api/version'));
-        if (!resp.ok) return;
-        const version = await resp.json();
+        const version = await getRuntimeVersion();
         const notice = document.getElementById('updateNotice');
         const enableLink = document.getElementById('updateEnableLink');
         if (!version.update_check_enabled) {
@@ -9880,6 +10636,7 @@
     initServerSettings();
     initQuotaRangeSelect();
     initQuotaVisibilityControls();
+    initReleaseNotes();
     initUpdateNotice();
 
     document.getElementById('styleThemeSelect').addEventListener('change', (event) => {

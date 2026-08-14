@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+## 1.7.0 - 2026-08-14
+
+### Added
+
+- Added an estimated agent time card to the Overview, after Total Messages, with a change against the previous period. It is backed by a new `/api/active-time` endpoint that merges every session tool into one figure and reports each tool separately.
+- Added estimated active and agent runtime to sessions and per-tool panels. Active time counts each gap between a stream's token events up to an idle cap (`TOKDASH_ACTIVE_GAP_CAP_SECONDS`, default 300s), so a session left open overnight no longer reads as an all-night session; agent time adds concurrent agents up instead of counting the overlap once.
+- Added Kimi to the session explorer, including its persistent cache and per-agent stream timing.
+- Added Gemini 3.7 Flash pricing at list price rather than the current launch discount.
+
+### Changed
+
+- Cached session rows are now price-neutral: they hold each turn's billing inputs and are priced when read. Editing a rate reprices Codex, Claude and Kimi immediately instead of marking every unchanged log as changed — on a corpus of 5301 session files, a pricing edit now reparses none of them and rewrites no rows. Two Tokdash builds sharing one database no longer overwrite each other's costs.
+- Codex rows written before this are rebuilt once. Codex bills under `provider/model` but stores the bare model name, so a row holding only totals cannot prove which pricing entry applied to it.
+- The Overview's total token value drops its unit to save width; the exact count remains in its tooltip and its accessible label.
+
+### Fixed
+
+- Kept the provider's own reported cost for OpenCode and Mimo turns instead of replacing it with Tokdash's estimate.
+- Fixed Mimo's fallback loader for SQLite builds without JSON1, which still required a JSON function to exclude imported messages.
+- Stopped a dashboard load that was superseded mid-flight from committing its results or reporting its errors under the newly selected range, and made a return to a range whose load was already discarded re-request it.
+- Timed Claude subagents as their own streams, so two agents reporting identical usage in the same second are no longer merged into one.
+- Stopped an unwindowed loader from treating a user message just outside a window as the nearest token event when JSON1 is unavailable.
+
 ## 1.6.4 - 2026-08-12
 
 ### Fixed

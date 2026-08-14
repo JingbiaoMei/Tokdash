@@ -143,13 +143,63 @@ def test_stats_and_session_mergers(tmp_path):
         [sessions_fn],
         "mergeSessionLists(input)",
         [
-            {"server": {"id": "a", "label": "A"}, "payload": {"sessions": [{"session_id": "1", "last_seen_at": "2026-08-10T10:00:00Z", "tokens": 2, "cost": 1}]}},
-            {"server": {"id": "b", "label": "B"}, "payload": {"sessions": [{"session_id": "2", "last_seen_at": "2026-08-10T11:00:00Z", "tokens": 3, "cost": 2}]}},
+            {
+                "server": {"id": "a", "label": "A"},
+                "payload": {
+                    # Concurrent agents: agent time exceeds this session's clock time.
+                    "sessions": [{"session_id": "1", "last_seen_at": "2026-08-10T10:00:00Z", "tokens": 2, "cost": 1, "active_ms": 60000, "active_ms_sum": 100000, "span_ms": 600000}],
+                    "summary": {"active_ms": 60000, "active_ms_sum": 100000, "active_gap_cap_ms": 300000, "active_time_estimated": True, "active_time_method": "capped-inter-event-gap"},
+                },
+            },
+            {
+                "server": {"id": "b", "label": "B"},
+                "payload": {
+                    "sessions": [{"session_id": "2", "last_seen_at": "2026-08-10T11:00:00Z", "tokens": 3, "cost": 2, "active_ms": 120000, "active_ms_sum": 150000, "span_ms": 900000}],
+                    "summary": {"active_ms": 120000, "active_ms_sum": 150000, "active_gap_cap_ms": 300000, "active_time_estimated": True, "active_time_method": "capped-inter-event-gap"},
+                },
+            },
         ],
     )
     assert [row["session_id"] for row in sessions["sessions"]] == ["2", "1"]
     assert sessions["sessions"][0]["_server"]["label"] == "B"
-    assert sessions["summary"] == {"session_count": 2, "tokens": 5, "cost": 3}
+    # Servers are separate machines: their deduplicated active times add up. Agent
+    # time must come from each server's own total — re-summing per-session
+    # active_ms here would silently drop every session's concurrent agents.
+    assert sessions["summary"] == {
+        "session_count": 2,
+        "tokens": 5,
+        "cost": 3,
+        "active_ms": 180000,
+        "active_ms_sum": 250000,
+        "span_ms": 1500000,
+        "active_gap_cap_ms": 300000,
+        "active_time_estimated": True,
+        "active_time_method": "capped-inter-event-gap",
+    }
+
+    legacy = _run(
+        tmp_path,
+        "sessions-legacy",
+        [sessions_fn],
+        "mergeSessionLists(input)",
+        [
+            {
+                "server": {"id": "a", "label": "A"},
+                # A server predating the active-time fields: recover what we can
+                # from its session rows instead of reporting nothing.
+                "payload": {"sessions": [{"session_id": "1", "last_seen_at": "2026-08-10T10:00:00Z", "tokens": 2, "cost": 1}], "summary": {}},
+            },
+            {
+                "server": {"id": "b", "label": "B"},
+                "payload": {
+                    "sessions": [{"session_id": "2", "last_seen_at": "2026-08-10T11:00:00Z", "tokens": 3, "cost": 2, "active_ms": 120000, "active_ms_sum": 150000}],
+                    "summary": {},
+                },
+            },
+        ],
+    )
+    assert legacy["summary"]["active_ms"] == 120000
+    assert legacy["summary"]["active_ms_sum"] == 150000
 
 
 def test_multi_server_contract_is_client_only_and_service_worker_is_same_origin():

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import math
 import os
+import re
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
@@ -21,11 +24,11 @@ from .activity_insights import (
 from .compute import cache_hit_rate, period_to_days
 from .dateutil import parse_date_range
 from .pricing import PricingDatabase
-from .sources.coding_tools import codex_token_event_key
+from .sources.coding_tools import KimiParser, codex_token_event_key
 from .usage_store import UsageEntryStore, parser_code_signature, persistent_usage_db_enabled
 
 
-SESSION_TOOLS = ("codex", "claude", "opencode", "pi_agent", "mimo")
+SESSION_TOOLS = ("codex", "claude", "opencode", "pi_agent", "mimo", "kimi")
 logger = logging.getLogger(__name__)
 TOOL_LABELS = {
     "codex": "Codex",
@@ -33,20 +36,27 @@ TOOL_LABELS = {
     "opencode": "OpenCode",
     "pi_agent": "Pi",
     "mimo": "Mimo",
+    "kimi": "Kimi",
 }
 
 _PRICING_DB = PricingDatabase()
 DISPLAY_NAME_MAX_CHARS = 96
 
-# Explicit versions for the two persistent session-file parsers. Version 1 is
-# serialized as the exact parser token used by v1.5.9 so upgrading can reuse
-# those valid rows without a full-corpus reparse. Unlike parser_code_signature,
-# these tokens do not change when unrelated helpers in sessions.py are edited.
-# Bump only the affected version when that parser's stored output changes.
+# Explicit versions for the persistent session-file parsers. Unlike
+# parser_code_signature, these tokens do not change when unrelated helpers in
+# sessions.py are edited. Bump only the affected version when that parser's
+# stored output changes.
 _SESSION_FILE_PARSER_VERSIONS = {
     "_parse_codex_session_file": 1,
-    "_parse_claude_session_file": 1,
+    # 2: turns carry _stream_id so subagents are timed separately from the main agent.
+    "_parse_claude_session_file": 2,
+    # 2: turns carry _stream_id so concurrent agents are timed separately.
+    "_parse_kimi_session_file": 2,
 }
+# Version 1 of the two original parsers is serialized as the exact parser token
+# v1.5.9 produced, so upgrading reuses those valid rows without a full-corpus
+# reparse. Parsers added later have no such history and use the plain shape.
+_V159_COMPAT_PARSERS = frozenset({"_parse_codex_session_file", "_parse_claude_session_file"})
 _SESSION_FILE_PARSER_V1_COMPAT_TOKEN = "422eaad7926b4c5362a3c6d7cbcad86dc8244cb8"
 _V159_BASELINE_PRICING_CONTENT_SIGNATURE = (
     "pricing-content-v1",
@@ -59,7 +69,7 @@ _V159_BASELINE_PRICING_RAW_SIZE = 84983
 
 def _session_file_parser_signature(name: str) -> dict[str, Any]:
     version = _SESSION_FILE_PARSER_VERSIONS[name]
-    if version == 1:
+    if version == 1 and name in _V159_COMPAT_PARSERS:
         # Compatibility shape: parser_code_signature() in v1.5.9 produced this
         # object from the then-current sessions.py module. Freezing it makes it
         # an explicit version token while retaining existing row signatures.
@@ -155,6 +165,8 @@ def reload_pricing_db() -> None:
     _load_opencode_sessions.cache_clear()
     _parse_pi_session_file.cache_clear()
     _load_pi_sessions.cache_clear()
+    _parse_kimi_session_file.cache_clear()
+    _load_kimi_sessions.cache_clear()
     _load_mimo_sessions.cache_clear()
 
 
@@ -300,6 +312,118 @@ def _project_from_repo_or_path(repo_url: Optional[str], path: Optional[str]) -> 
     return "unknown"
 
 
+# Active time is the wall-clock span minus idle. On every supported tool a token
+# event is emitted per assistant request, so events during real work land seconds
+# apart (p50 7-15s, p90 21-107s across codex/claude/opencode/pi/mimo) while breaks
+# jump to tens of minutes (p99 16-60min). A gap longer than the cap therefore
+# contributes only the cap and the remainder is treated as idle.
+ACTIVE_GAP_CAP_MS_DEFAULT = 5 * 60 * 1000
+_ACTIVE_GAP_CAP_MS_MIN = 1_000
+_ACTIVE_GAP_CAP_MS_MAX = 6 * 60 * 60 * 1000
+
+
+def active_gap_cap_ms() -> int:
+    """Idle threshold in ms; override with ``TOKDASH_ACTIVE_GAP_CAP_SECONDS``."""
+    raw = os.environ.get("TOKDASH_ACTIVE_GAP_CAP_SECONDS", "").strip()
+    if not raw:
+        return ACTIVE_GAP_CAP_MS_DEFAULT
+    try:
+        seconds = float(raw)
+    except ValueError:
+        return ACTIVE_GAP_CAP_MS_DEFAULT
+    # nan/inf parse as floats but blow up on int(); nan also defeats the <= 0 test.
+    if not math.isfinite(seconds) or seconds <= 0:
+        return ACTIVE_GAP_CAP_MS_DEFAULT
+    return max(_ACTIVE_GAP_CAP_MS_MIN, min(_ACTIVE_GAP_CAP_MS_MAX, int(seconds * 1000)))
+
+
+def _active_intervals(timestamps_ms: Iterable[int], cap_ms: int) -> list[tuple[int, int]]:
+    """Working interval ending at each event: the capped gap since the previous one.
+
+    An event's own generation time is part of the gap that ends at it, so the only
+    unmeasurable slice is a session's first event — nothing precedes it. Sessions
+    with a single event therefore have no measurable active time.
+    """
+    ordered = sorted(int(value or 0) for value in timestamps_ms)
+    intervals: list[tuple[int, int]] = []
+    for previous, current in zip(ordered, ordered[1:]):
+        gap = current - previous
+        if gap <= 0:
+            continue
+        intervals.append((current - min(gap, cap_ms), current))
+    return intervals
+
+
+def _clip_intervals(
+    intervals: Iterable[tuple[int, int]],
+    since_ms: Optional[int],
+    until_ms: Optional[int],
+) -> list[tuple[int, int]]:
+    """Trim intervals to the window, dropping the ones left empty."""
+    clipped: list[tuple[int, int]] = []
+    for start, end in intervals:
+        if since_ms is not None:
+            start = max(start, int(since_ms))
+        if until_ms is not None:
+            end = min(end, int(until_ms))
+        if end > start:
+            clipped.append((start, end))
+    return clipped
+
+
+def _session_active_intervals(
+    raw: Dict[str, Any],
+    cap_ms: int,
+    since_ms: Optional[int] = None,
+    until_ms: Optional[int] = None,
+) -> list[tuple[int, int]]:
+    """Working intervals for a session, per concurrent stream, clipped to the window.
+
+    Two rules matter here. Events are grouped by ``_stream_id`` first, because a
+    session can run several agents at once and interleaving them into a single
+    timeline would read one agent's event as the end of another's work. And
+    intervals are built from the session's whole history *before* clipping: the
+    work leading into the first in-window event started before the window opened,
+    so filtering events first would silently drop it (a 23:59-00:01 stretch would
+    report nothing for the new day).
+    """
+    streams: Dict[Any, list[int]] = {}
+    for turn in raw.get("turns", []):
+        streams.setdefault(turn.get("_stream_id"), []).append(int(turn.get("timestamp_ms", 0) or 0))
+
+    # Loaders that window at the source (the SQLite-backed ones) pass the events
+    # they held back on either edge, so a session continuing across a boundary
+    # keeps the stretch that spans it.
+    prior_event_ms = raw.get("_prior_event_ms")
+    next_event_ms = raw.get("_next_event_ms")
+    intervals: list[tuple[int, int]] = []
+    for stamps in streams.values():
+        if prior_event_ms is not None:
+            stamps = [int(prior_event_ms), *stamps]
+        if next_event_ms is not None:
+            stamps = [*stamps, int(next_event_ms)]
+        intervals.extend(_active_intervals(stamps, cap_ms))
+    return _clip_intervals(intervals, since_ms, until_ms)
+
+
+def _merged_interval_ms(intervals: Iterable[tuple[int, int]]) -> int:
+    """Wall-clock covered by the intervals, counting overlap once."""
+    total = 0
+    start: Optional[int] = None
+    end = 0
+    for interval_start, interval_end in sorted(intervals):
+        if start is None:
+            start, end = interval_start, interval_end
+        elif interval_start > end:
+            total += end - start
+            start, end = interval_start, interval_end
+        elif interval_end > end:
+            end = interval_end
+    if start is not None:
+        total += end - start
+    return total
+
+
 def _build_turn(
     turn_index: int,
     timestamp_ms: int,
@@ -329,8 +453,13 @@ def _turn_identity_key(turn: Dict[str, Any]) -> tuple[Any, ...]:
     event_key = str(turn.get("_event_key") or "").strip()
     if event_key:
         return ("event", event_key)
+    # Claude has no per-event id, so identity falls back to the fields. The
+    # stream belongs in that identity: two agents working the same second can
+    # report the same usage, and without it the merge would drop one of them and
+    # with it that stream's activity.
     return (
         "fields",
+        str(turn.get("_stream_id") or ""),
         int(turn.get("timestamp_ms", 0) or 0),
         str(turn.get("model") or "unknown"),
         int(turn.get("tokens_in", 0) or 0),
@@ -375,6 +504,7 @@ def _summarize_session(
 
     started_at_ms = int(turns[0].get("timestamp_ms", 0) or 0)
     last_seen_at_ms = int(turns[-1].get("timestamp_ms", 0) or 0)
+    intervals = _session_active_intervals(raw, active_gap_cap_ms(), since_ms, until_ms)
 
     return {
         "tool": raw.get("tool", "unknown"),
@@ -398,6 +528,14 @@ def _summarize_session(
         "cost": total_cost,
         "started_at": _ms_to_iso(started_at_ms),
         "last_seen_at": _ms_to_iso(last_seen_at_ms),
+        # span_ms is first-to-last event wall-clock (idle included); active_ms
+        # subtracts the idle. Both are clipped to the requested window. Where a
+        # session runs concurrent agents, active_ms counts the overlap once
+        # (clock time) and active_ms_sum adds the agents up (agent time).
+        "span_ms": max(0, last_seen_at_ms - started_at_ms),
+        "active_ms": _merged_interval_ms(intervals),
+        "active_ms_sum": sum(end - start for start, end in intervals),
+        "_active_intervals": intervals,
     }
 
 
@@ -406,6 +544,7 @@ def _public_turns(turns: Iterable[Dict[str, Any]]) -> list[Dict[str, Any]]:
     for turn in turns:
         row = dict(turn)
         row.pop("_event_key", None)
+        row.pop("_stream_id", None)
         row["timestamp"] = _ms_to_iso(int(row.pop("timestamp_ms", 0) or 0))
         result.append(row)
     return result
@@ -893,6 +1032,11 @@ def _parse_claude_session_file(path_str: str, _mtime_ns: int, _size: int, _prici
                 tokens_reasoning=0,
                 cost=_PRICING_DB.get_cost(model, input_tokens, output_tokens, cache_read, 0),
             )
+            # Subagents log to subagents/agent-*.jsonl under the parent session id,
+            # each row tagged with its agentId. They run concurrently with the main
+            # agent, so each is timed as its own stream rather than interleaved
+            # into one timeline. Top-level rows carry no agentId.
+            turn["_stream_id"] = str(obj.get("agentId") or "").strip() or "main"
             if not message_id:
                 turns.append(turn)
                 continue
@@ -994,6 +1138,127 @@ def _opencode_window_clause(since_ms: Optional[int], until_ms: Optional[int]) ->
         where.append("m.time_created < ?")
         args.append(int(until_ms))
     return (" WHERE " + " AND ".join(where)) if where else "", args
+
+
+def _boundary_edge_clauses(before: bool, extra_clause: str) -> list[str]:
+    """Rows on the far side of a window edge, before any role filtering."""
+    clauses = [f"m.time_created {'<' if before else '>='} ?"]
+    if extra_clause:
+        clauses.append(extra_clause)
+    return clauses
+
+
+def _sql_boundary_event_ms(
+    conn: sqlite3.Connection,
+    bound_ms: Optional[int],
+    *,
+    before: bool,
+    extra_clause: str = "",
+) -> Dict[str, int]:
+    """Nearest assistant event per session on the far side of a window edge.
+
+    These loaders window in SQL, so a session that continues across an edge would
+    otherwise lose the stretch spanning it: the first in-window event looks like
+    the start of its stream, and the last one like the end. Only the nearest
+    event outside matters — anything further away yields the same capped
+    interval, whose clipped part is identical either way.
+    """
+    if bound_ms is None:
+        return {}
+    clauses = _boundary_edge_clauses(before, extra_clause)
+    clauses.append("json_valid(m.data) AND json_extract(m.data, '$.role') = 'assistant'")
+    try:
+        rows = conn.execute(
+            f"""
+            SELECT m.session_id, {'MAX' if before else 'MIN'}(m.time_created)
+            FROM message m
+            WHERE {' AND '.join(clauses)}
+            GROUP BY m.session_id
+            """,
+            [int(bound_ms)],
+        ).fetchall()
+    except sqlite3.Error:
+        return {}
+    return {str(row[0]): int(row[1]) for row in rows if row[0] is not None and row[1] is not None}
+
+
+def _raw_boundary_event_ms(
+    conn: sqlite3.Connection,
+    bound_ms: Optional[int],
+    session_ids: Iterable[str],
+    *,
+    before: bool,
+    extra_clause: str = "",
+) -> Dict[str, int]:
+    """The same lookup for loaders that cannot filter roles in SQL.
+
+    Without JSON1 the role is only readable after parsing, so walk outwards from
+    the edge and stop at each session's first assistant row. Taking the nearest
+    row of any role would turn a user message just outside the window into a
+    token event that never happened, inventing activity the scalar loader
+    correctly reports as none.
+    """
+    pending = {str(session_id) for session_id in session_ids}
+    if bound_ms is None or not pending:
+        return {}
+    clauses = _boundary_edge_clauses(before, extra_clause)
+    try:
+        cursor = conn.execute(
+            f"""
+            SELECT m.session_id, m.time_created, m.data
+            FROM message m
+            WHERE {' AND '.join(clauses)}
+            ORDER BY m.time_created {'DESC' if before else 'ASC'}
+            """,
+            [int(bound_ms)],
+        )
+    except sqlite3.Error:
+        return {}
+    found: Dict[str, int] = {}
+    try:
+        for session_id, created_ms, data_json in cursor:
+            key = str(session_id)
+            if key not in pending or created_ms is None:
+                continue
+            try:
+                data = json.loads(data_json)
+            except Exception:
+                continue
+            if not isinstance(data, dict) or data.get("role") != "assistant":
+                continue
+            found[key] = int(created_ms)
+            pending.discard(key)
+            if not pending:
+                break
+    except sqlite3.Error:
+        return found
+    return found
+
+
+def _attach_window_context(
+    conn: sqlite3.Connection,
+    sessions: Dict[str, Dict[str, Any]],
+    since_ms: Optional[int],
+    until_ms: Optional[int],
+    *,
+    role_filtered: bool,
+    extra_clause: str = "",
+) -> None:
+    """Hand the summarizer the events just outside the window it asked for."""
+    for key, bound_ms, before in (
+        ("_prior_event_ms", since_ms, True),
+        ("_next_event_ms", until_ms, False),
+    ):
+        if role_filtered:
+            boundary = _sql_boundary_event_ms(conn, bound_ms, before=before, extra_clause=extra_clause)
+        else:
+            boundary = _raw_boundary_event_ms(
+                conn, bound_ms, sessions.keys(), before=before, extra_clause=extra_clause
+            )
+        for session_id, session in sessions.items():
+            event_ms = boundary.get(str(session_id))
+            if event_ms is not None:
+                session[key] = event_ms
 
 
 def _opencode_project_path(directory: Any, worktree: Any, cwd: Any = "", root: Any = "") -> str:
@@ -1199,6 +1464,7 @@ def _load_opencode_sessions_scalar(
                 title=title,
                 slug=slug,
             )
+        _attach_window_context(conn, sessions, since_ms, until_ms, role_filtered=True)
     finally:
         conn.close()
 
@@ -1273,6 +1539,7 @@ def _load_opencode_sessions_raw_json(
                 title=title,
                 slug=slug,
             )
+        _attach_window_context(conn, sessions, since_ms, until_ms, role_filtered=False)
     finally:
         conn.close()
 
@@ -1444,6 +1711,294 @@ def _pi_sessions() -> Dict[str, Dict[str, Any]]:
     return _load_pi_sessions(_pi_session_signatures(), _pricing_signature())
 
 
+# Kimi Code names each workspace dir ``wd_<slug>_<12 hex>``; the slug is a
+# lowercased/sanitized basename, not an encoded cwd, so it is only a fallback
+# for sessions whose wire file never recorded a real cwd.
+_KIMI_WORKSPACE_DIR_RE = re.compile(r"^wd_(?P<slug>.+)_[0-9a-f]{12}$")
+
+
+def _kimi_session_signatures() -> tuple[tuple[str, int, int], ...]:
+    signatures: list[tuple[str, int, int]] = []
+    for root in clientpaths.kimi_roots():
+        sessions_dir = root / "sessions"
+        if not sessions_dir.is_dir():
+            continue
+        # Legacy Kimi CLI (<0.26) and Kimi Code (>=0.26) layouts, respectively.
+        for pattern in ("*/*/wire.jsonl", "*/*/agents/*/wire.jsonl"):
+            for path in sessions_dir.glob(pattern):
+                try:
+                    signatures.append(_file_signature(path))
+                except OSError:
+                    continue
+    return tuple(sorted(set(signatures)))
+
+
+def _kimi_session_id_from_path(path: Path) -> str:
+    # Kimi Code: sessions/<workspace>/<sessionId>/agents/<agent>/wire.jsonl.
+    if path.parent.parent.name == "agents":
+        return path.parents[2].name
+    # Legacy: sessions/<userId>/<sessionId>/wire.jsonl.
+    return path.parent.name
+
+
+def _kimi_stream_id_from_path(path: Path) -> str:
+    """Name the concurrent event stream a wire file represents.
+
+    Kimi Code runs several agents at once inside one session, one file each; the
+    legacy layout has a single file per session, hence a single stream. Only
+    within-session uniqueness matters — intervals are computed per session.
+    """
+    return path.parent.name if path.parent.parent.name == "agents" else "main"
+
+
+def _kimi_workspace_project(path: Path) -> str:
+    if path.parent.parent.name != "agents":
+        return "unknown"
+    match = _KIMI_WORKSPACE_DIR_RE.match(path.parents[3].name)
+    return match.group("slug") if match else "unknown"
+
+
+def _kimi_workspaces_signature() -> tuple[tuple[str, int, int], ...]:
+    parts: list[tuple[str, int, int]] = []
+    for root in clientpaths.kimi_roots():
+        path = root / "workspaces.json"
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        parts.append((str(path), int(stat.st_mtime_ns), int(stat.st_size)))
+    return tuple(parts)
+
+
+@lru_cache(maxsize=8)
+def _load_kimi_workspace_projects(signature: tuple[tuple[str, int, int], ...]) -> Dict[str, str]:
+    """Map each ``wd_<slug>_<hash>`` dir to the project name of its real root.
+
+    Most wire files never record a cwd, so without this two sessions in the same
+    workspace can land under different project names — the true basename for the
+    few that do, the lowercased dir slug for the rest. workspaces.json is
+    authoritative and carries its own signature, so it is read outside the
+    per-file parse cache, which is keyed on the wire file's mtime/size alone.
+    """
+    projects: Dict[str, str] = {}
+    for path_str, _mtime_ns, _size in signature:
+        try:
+            payload = json.loads(Path(path_str).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        workspaces = payload.get("workspaces")
+        if not isinstance(workspaces, dict):
+            continue
+        for workspace_id, meta in workspaces.items():
+            if not isinstance(meta, dict):
+                continue
+            project = _project_from_repo_or_path(None, str(meta.get("root") or "") or None)
+            if project == "unknown":
+                project = _clean_display_name(meta.get("name"))
+            if project and project != "unknown":
+                projects[str(workspace_id)] = project
+    return projects
+
+
+def _apply_kimi_workspace_projects(
+    sessions: Dict[str, Dict[str, Any]],
+    signature: tuple[tuple[str, int, int], ...],
+) -> Dict[str, Dict[str, Any]]:
+    projects = _load_kimi_workspace_projects(_kimi_workspaces_signature())
+    if not projects:
+        return sessions
+
+    workspace_by_session: Dict[str, str] = {}
+    for path_str, _mtime_ns, _size in signature:
+        path = Path(path_str)
+        if path.parent.parent.name != "agents":
+            continue
+        workspace_by_session[_kimi_session_id_from_path(path)] = path.parents[3].name
+
+    copied = {session_id: dict(session) for session_id, session in sessions.items()}
+    for session_id, session in sessions.items():
+        project = projects.get(workspace_by_session.get(session_id, ""))
+        if not project or project == session.get("project"):
+            continue
+        copied[session_id]["project"] = project
+        # A name that was only a stand-in for the old project has to follow it.
+        if session.get("display_name") == _fallback_display_name(session_id, session.get("project")):
+            copied[session_id]["display_name"] = _fallback_display_name(session_id, project)
+    return copied
+
+
+def _kimi_usage_record_key(path_str: str, ts_ms: int, model: str, usage: Dict[str, Any]) -> str:
+    # Must stay identical to KimiParser._entry_from_usage_record's dedup hash:
+    # usage.record rows carry no message id, and including the path keeps
+    # identical rows from sibling agent files countable after the merge.
+    return hashlib.sha1(
+        json.dumps(
+            [
+                path_str,
+                ts_ms,
+                model,
+                usage.get("inputOther"),
+                usage.get("output"),
+                usage.get("inputCacheRead"),
+                usage.get("inputCacheCreation"),
+            ],
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+@lru_cache(maxsize=512)
+def _parse_kimi_session_file(path_str: str, _mtime_ns: int, _size: int, _pricing_sig: tuple = ()) -> Optional[Dict[str, Any]]:
+    session_path = Path(path_str)
+    if not session_path.exists():
+        return None
+
+    session_id = _kimi_session_id_from_path(session_path)
+    stream_id = _kimi_stream_id_from_path(session_path)
+    cwd = ""
+    first_user_preview = ""
+    turns: list[Dict[str, Any]] = []
+    seen_keys: set[str] = set()
+    turn_index = 0
+
+    with session_path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(obj, dict):
+                continue
+
+            # Kimi Code records the workspace cwd on config.update rows only.
+            if not cwd and obj.get("cwd"):
+                cwd = str(obj.get("cwd"))
+
+            obj_type = obj.get("type")
+            if obj_type == "turn.prompt":
+                if not first_user_preview:
+                    first_user_preview = _message_text_preview({"content": obj.get("input")})
+                continue
+
+            if obj_type == "usage.record":
+                usage = obj.get("usage")
+                if not isinstance(usage, dict):
+                    continue
+                # No usageScope filter: "session"-scoped rows (compaction) are real usage.
+                timestamp_ms = _to_int(obj.get("time"))
+                if timestamp_ms <= 0:
+                    continue
+                model = KimiParser._model_for_wire_name(obj.get("model"))
+                event_key = _kimi_usage_record_key(path_str, timestamp_ms, model, usage)
+                if event_key in seen_keys:
+                    continue
+                seen_keys.add(event_key)
+                fresh_input = _to_int(usage.get("inputOther"))
+                output_tokens = _to_int(usage.get("output"))
+                cache_read = _to_int(usage.get("inputCacheRead"))
+                cache_write = _to_int(usage.get("inputCacheCreation"))
+            else:
+                message = obj.get("message") if isinstance(obj.get("message"), dict) else {}
+                message_type = message.get("type")
+                if message_type == "TurnBegin":
+                    if not first_user_preview:
+                        payload = message.get("payload") if isinstance(message.get("payload"), dict) else {}
+                        first_user_preview = _message_text_preview({"content": payload.get("user_input")})
+                    continue
+                if message_type != "StatusUpdate":
+                    continue
+                payload = message.get("payload") if isinstance(message.get("payload"), dict) else {}
+                usage = payload.get("token_usage")
+                if not isinstance(usage, dict):
+                    continue
+                event_key = str(payload.get("message_id") or "")
+                if not event_key or event_key in seen_keys:
+                    continue
+                seen_keys.add(event_key)
+                try:
+                    timestamp = datetime.fromtimestamp(float(obj.get("timestamp")), timezone.utc)
+                except (TypeError, ValueError, OSError):
+                    continue
+                timestamp_ms = _dt_to_ms(timestamp)
+                # The legacy schema never records the resolved model.
+                model = KimiParser._default_model_for_timestamp(timestamp)
+                fresh_input = _to_int(usage.get("input_other"))
+                output_tokens = _to_int(usage.get("output"))
+                cache_read = _to_int(usage.get("input_cache_read"))
+                cache_write = _to_int(usage.get("input_cache_creation"))
+
+            if fresh_input == 0 and output_tokens == 0 and cache_read == 0 and cache_write == 0:
+                continue
+
+            tokens_in = fresh_input + cache_write
+            turn_index += 1
+            turn = _build_turn(
+                turn_index=turn_index,
+                timestamp_ms=timestamp_ms,
+                model=model,
+                tokens_in=tokens_in,
+                tokens_cache=cache_read,
+                tokens_out=output_tokens,
+                tokens_reasoning=0,
+                cost=_PRICING_DB.get_cost(model, tokens_in, output_tokens, cache_read, 0),
+            )
+            turn["_event_key"] = event_key
+            # Agents inside one session run concurrently, so their events are
+            # separate streams: merging them into one timeline would read a
+            # subagent's event as the end of the main agent's work.
+            turn["_stream_id"] = stream_id
+            turns.append(turn)
+
+    if not turns:
+        return None
+
+    project = _project_from_repo_or_path(None, cwd or None)
+    if project == "unknown":
+        project = _kimi_workspace_project(session_path)
+    return {
+        "tool": "kimi",
+        "session_id": session_id,
+        "display_name": first_user_preview or _fallback_display_name(session_id, project),
+        "project": project,
+        "turns": turns,
+    }
+
+
+@lru_cache(maxsize=8)
+def _load_kimi_sessions(signature: tuple[tuple[str, int, int], ...], pricing_sig: tuple = ()) -> Dict[str, Dict[str, Any]]:
+    sessions: Dict[str, Dict[str, Any]] = {}
+    for path_str, mtime_ns, size in signature:
+        raw = _parse_kimi_session_file(path_str, mtime_ns, size, pricing_sig)
+        if not raw:
+            continue
+        session_id = str(raw["session_id"])
+        if session_id in sessions:
+            sessions[session_id] = _merge_raw_session(sessions[session_id], raw)
+        else:
+            sessions[session_id] = raw
+    return sessions
+
+
+def _kimi_session_parser_signature(pricing_sig: tuple) -> dict[str, Any]:
+    return {
+        "parser": _session_file_parser_signature("_parse_kimi_session_file"),
+        # KimiParser carries the wire-model map that decides each turn's model
+        # and cost; its module hash busts cached rows when that map changes.
+        "model_map": parser_code_signature(KimiParser),
+        "pricing": pricing_sig,
+    }
+
+
+def _kimi_sessions() -> Dict[str, Dict[str, Any]]:
+    signature = _kimi_session_signatures()
+    return _apply_kimi_workspace_projects(
+        _load_kimi_sessions(signature, _pricing_signature()), signature
+    )
+
+
 def _mimo_db_signature() -> tuple[tuple[str, int, int], ...]:
     db_path = clientpaths.mimocode_db_path()
     if not db_path.exists():
@@ -1567,6 +2122,7 @@ def _load_mimo_sessions_scalar(
                 slug=slug,
                 recorded_cost=recorded_cost,
             )
+        _attach_window_context(conn, sessions, since_ms, until_ms, role_filtered=True, extra_clause=import_clause)
     finally:
         conn.close()
 
@@ -1651,6 +2207,7 @@ def _load_mimo_sessions_raw_json(
                 slug=slug,
                 recorded_cost=data.get("cost"),
             )
+        _attach_window_context(conn, sessions, since_ms, until_ms, role_filtered=False, extra_clause=import_clause)
     finally:
         conn.close()
 
@@ -1670,7 +2227,7 @@ def _raw_sessions_for_tool(
     until_ms: Optional[int] = None,
 ) -> Dict[str, Dict[str, Any]]:
     key = str(tool or "").strip().lower()
-    if key in {"codex", "claude"} and persistent_usage_db_enabled():
+    if key in {"codex", "claude", "kimi"} and persistent_usage_db_enabled():
         try:
             return _stored_sessions_for_tool(key, since_ms=since_ms, until_ms=until_ms)
         except Exception:
@@ -1689,53 +2246,39 @@ def _raw_sessions_for_tool(
         return _pi_sessions()
     if key == "mimo":
         return _mimo_sessions(since_ms=since_ms, until_ms=until_ms)
+    if key == "kimi":
+        return _kimi_sessions()
     raise ValueError(f"Unsupported session tool: {tool}")
 
 
 def _session_records_to_raw_sessions(tool: str, records: Iterable[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """Rebuild raw sessions from the per-file rows held in the persistent store.
+
+    Every live loader that can see one session in several files (codex, claude,
+    pi_agent, kimi) merges with _merge_raw_session, so the cached path uses it
+    too. It is what prefers an explicit title over a fallback and dedups turns by
+    event identity; rebuilding the merge differently here is exactly how a cached
+    read starts disagreeing with a live one.
+    """
     sessions: Dict[str, Dict[str, Any]] = {}
-    seen_turns: dict[str, set[tuple[Any, ...]]] = {}
-    for raw in records:
-        session_id = str(raw.get("session_id") or "")
-        if not session_id:
+    for record in records:
+        session_id = str(record.get("session_id") or "")
+        if not session_id or not record.get("turns"):
             continue
-        if tool == "codex":
-            if not raw.get("turns"):
-                continue
-            raw = {key: value for key, value in raw.items() if key != "_activity"}
-            if session_id in sessions:
-                sessions[session_id] = _merge_raw_session(sessions[session_id], raw)
-            else:
-                sessions[session_id] = raw
-            continue
-
-        session = sessions.get(session_id)
-        if session is None:
-            session = dict(raw)
-            session["tool"] = session.get("tool") or tool
-            session["session_id"] = session_id
-            session["project"] = session.get("project") or "unknown"
-            session["turns"] = []
-            sessions[session_id] = session
-            seen_turns[session_id] = set()
-        elif session.get("project") == "unknown" and raw.get("project"):
-            session["project"] = raw.get("project")
-
-        seen = seen_turns[session_id]
-        for turn in raw.get("turns", []):
-            key = _turn_identity_key(turn)
-            if key in seen:
-                continue
-            seen.add(key)
-            session["turns"].append(dict(turn))
+        raw = {key: value for key, value in record.items() if key != "_activity"}
+        raw["tool"] = raw.get("tool") or tool
+        raw["session_id"] = session_id
+        # Rows written by older versions may carry a falsy project; _merge_raw_session
+        # only defers to a sibling row's project when this one reads "unknown".
+        raw["project"] = raw.get("project") or "unknown"
+        if session_id in sessions:
+            sessions[session_id] = _merge_raw_session(sessions[session_id], raw)
+        else:
+            sessions[session_id] = raw
 
     for session in sessions.values():
         session.setdefault("display_name", _fallback_display_name(session.get("session_id"), session.get("project")))
         session["is_review_session"] = bool(session.get("is_review_session", False))
-        if tool != "codex":
-            session["turns"].sort(key=lambda item: (int(item.get("timestamp_ms", 0) or 0), int(item.get("turn_index", 0) or 0)))
-            for turn_index, turn in enumerate(session["turns"], start=1):
-                turn["turn_index"] = turn_index
     return sessions
 
 
@@ -1780,15 +2323,32 @@ def _stored_sessions_for_tool(
             ),
             signature_compatible=_session_signature_compatible,
         )
+    elif tool == "kimi":
+        signatures = _kimi_session_signatures()
+        pricing_sig = _pricing_signature()
+        store.sync_session_files(
+            "kimi",
+            signatures,
+            parser=_kimi_session_parser_signature(_session_pricing_content_signature()),
+            parse_file_session=lambda file_sig: _parse_kimi_session_file(
+                *file_sig, pricing_sig
+            ),
+        )
     else:
         raise ValueError(f"Unsupported stored session tool: {tool}")
 
     sessions = _session_records_to_raw_sessions(
         tool,
-        store.query_session_records(tool, since_ms=since_ms, until_ms=until_ms),
+        store.query_session_records(
+            tool, since_ms=since_ms, until_ms=until_ms, whole_sessions=True
+        ),
     )
     if tool == "codex":
         return _apply_codex_title_map(sessions)
+    if tool == "kimi":
+        # Applied on read, not baked into the rows: workspaces.json changes
+        # independently of the wire files the cached rows are signed against.
+        return _apply_kimi_workspace_projects(sessions, signatures)
     return sessions
 
 
@@ -1813,12 +2373,14 @@ def get_sessions_data(
         since_ms, until_ms = _period_range(period)
 
     sessions = []
+    active_intervals: list[tuple[int, int]] = []
     include_codex_review = _include_codex_review_sessions(include_review_sessions)
     for raw in _raw_sessions_for_tool(key, since_ms=since_ms, until_ms=until_ms).values():
         if key == "codex" and raw.get("is_review_session") and not include_codex_review:
             continue
         summary = _summarize_session(raw, since_ms=since_ms, until_ms=until_ms)
         if summary:
+            active_intervals.extend(summary.pop("_active_intervals", []))
             sessions.append(summary)
 
     sessions.sort(key=lambda row: (row.get("last_seen_at") or "", row.get("tokens") or 0), reverse=True)
@@ -1835,6 +2397,17 @@ def get_sessions_data(
             "session_count": len(sessions),
             "tokens": sum(int(row.get("tokens", 0) or 0) for row in sessions),
             "cost": sum(float(row.get("cost", 0.0) or 0.0) for row in sessions),
+            # active_ms is deduplicated wall-clock: sessions running in parallel
+            # (the common case here) overlap and are counted once. active_ms_sum
+            # adds them up instead, i.e. agent-hours rather than clock time.
+            "active_ms": _merged_interval_ms(active_intervals),
+            "active_ms_sum": sum(int(row.get("active_ms_sum", 0) or 0) for row in sessions),
+            "span_ms": sum(int(row.get("span_ms", 0) or 0) for row in sessions),
+            "active_gap_cap_ms": active_gap_cap_ms(),
+            # Inter-event gaps cannot separate a short pause from work, long single
+            # operations are truncated at the cap, and a lone event measures nothing.
+            "active_time_estimated": True,
+            "active_time_method": "capped-inter-event-gap",
         },
         # Echo the effective review-session default (param, else TOKDASH_INCLUDE_CODEX_GUARDIAN)
         # so the dashboard toggle can reflect the server default before the user opts in.
@@ -1855,6 +2428,7 @@ def get_session_detail(tool: str, session_id: str) -> Dict[str, Any]:
     session = _summarize_session(raw)
     if session is None:
         raise FileNotFoundError(f"{TOOL_LABELS.get(key, key.title())} session not found: {session_id}")
+    session.pop("_active_intervals", None)
 
     return {
         "session": session,

@@ -1553,15 +1553,37 @@ class UsageEntryStore:
         *,
         since_ms: Optional[int] = None,
         until_ms: Optional[int] = None,
+        whole_sessions: bool = False,
     ) -> list[dict[str, Any]]:
+        """Return stored session records, optionally limited to a window.
+
+        Rows are per source file, and one session can span several of them (Kimi
+        writes one per agent; Codex and Claude write one per resumed log). Pass
+        ``whole_sessions`` to return every row of any session that touches the
+        window: windowing rows directly can drop the file carrying the session's
+        name or cwd, which callers cannot reconstruct. Callers then window the
+        turns themselves, as they must anyway to clip partially covered sessions.
+        """
         where = ["tool = ?"]
         args: list[Any] = [tool]
+        window: list[str] = []
+        window_args: list[Any] = []
         if since_ms is not None:
-            where.append("last_seen_at_ms >= ?")
-            args.append(int(since_ms))
+            window.append("last_seen_at_ms >= ?")
+            window_args.append(int(since_ms))
         if until_ms is not None:
-            where.append("started_at_ms < ?")
-            args.append(int(until_ms))
+            window.append("started_at_ms < ?")
+            window_args.append(int(until_ms))
+        if window and whole_sessions:
+            where.append(
+                "session_id IN (SELECT session_id FROM session_records"
+                f" WHERE tool = ? AND {' AND '.join(window)})"
+            )
+            args.append(tool)
+            args.extend(window_args)
+        elif window:
+            where.extend(window)
+            args.extend(window_args)
         with closing(self._connect()) as conn:
             rows = conn.execute(
                 f"""

@@ -1184,6 +1184,9 @@ class KimiParser(BaseParser):
         "kimi-for-coding": "kimi-k2.7-code",
         "kimi-for-coding-highspeed": "kimi-k2.7-code",
         "k3": "kimi-k3",
+        # Same rate as kimi-k3 today, but mapped explicitly so it does not depend
+        # on the pricing DB continuing to resolve the bare wire name.
+        "k3-256k": "kimi-k3-256k",
     }
 
     def __init__(self, pricing_db: PricingDatabase):

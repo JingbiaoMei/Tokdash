@@ -371,9 +371,19 @@ Tokdash is **localhost-only by default**.
 - `TOKDASH_ALLOW_ORIGIN_REGEX` (default CORS policy allows localhost/127.0.0.1 and same-tailnet Tailscale Serve reads; setting either CORS option replaces that default policy)
 - `TOKDASH_NO_RETENTION_NOTICE` (set to `1` to silence the history-retention reminder printed on `tokdash serve`)
 
+Session active time (estimated):
+
+Every session reports `active_ms` alongside `span_ms`. Span is first-to-last event; active time subtracts idle by counting each gap between consecutive token events only up to an idle cap, so a session left open overnight no longer reads as a 14-hour session.
+
+It is an estimate, and the API says so: `summary.active_time_estimated` is `true` and `summary.active_time_method` is `capped-inter-event-gap`. The limits follow from the method — a short pause between events is indistinguishable from work, a single operation longer than the cap is truncated to it, and a session with one token event measures zero because nothing precedes it.
+
+Concurrent work is counted two ways. `active_ms` is clock time, with overlap counted once; `active_ms_sum` adds the overlap up, i.e. agent time. Both appear per session and per tool in `summary`. Kimi agents and Claude subagents run alongside the main agent, and each is timed as its own stream: a subagent working one minute in parallel adds a minute of agent time and none of clock time.
+
+- `TOKDASH_ACTIVE_GAP_CAP_SECONDS` (default: `300`) — idle cap in seconds; gaps longer than this contribute only the cap. Clamped to 1s–6h.
+
 Persistent usage DB (default on):
 
-Tokdash maintains a local SQLite index at `~/.tokdash/usage.sqlite3` by default. It stores parsed token rows and Codex/Claude session summaries so repeated dashboard and API reads can use indexed SQL instead of reparsing every source log. Source logs remain the source of truth; the DB is a local performance index, and Tokdash falls back to live parsing if it is disabled or unavailable.
+Tokdash maintains a local SQLite index at `~/.tokdash/usage.sqlite3` by default. It stores parsed token rows and Codex/Claude/Kimi session summaries so repeated dashboard and API reads can use indexed SQL instead of reparsing every source log. Source logs remain the source of truth; the DB is a local performance index, and Tokdash falls back to live parsing if it is disabled or unavailable.
 
 - `TOKDASH_USAGE_DB` (default: `1`) — set to `0`, `false`, `no`, or `off` to disable the persistent usage DB
 - `TOKDASH_DATA_DIR` (default: `~/.tokdash`) — base directory for Tokdash local state
@@ -442,7 +452,7 @@ Tokdash is a local HTTP server. Common endpoints:
 - `GET /api/usage?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD`
 - `GET /api/tools?period=...` (coding tools only)
 - `GET /api/openclaw?period=...` (OpenClaw only)
-- `GET /api/sessions?tool=codex|claude|opencode|pi_agent|mimo&period=...` (append `&include_review_sessions=true` to include Codex review/permission sessions, hidden by default)
+- `GET /api/sessions?tool=codex|claude|opencode|pi_agent|mimo|kimi&period=...` (append `&include_review_sessions=true` to include Codex review/permission sessions, hidden by default)
 - `GET /api/quota` and `GET /api/quota/history` (subscription quota snapshots; network refresh is write-gated and opt-in)
 - `GET /api/stats` (contribution calendar & statistics)
 

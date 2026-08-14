@@ -880,14 +880,18 @@ def test_session_file_parser_signatures_are_explicit_and_v159_compatible(monkeyp
         "_parse_claude_session_file"
     )
 
+    # Codex still emits the frozen v1.5.9 token, so rows written by that version
+    # remain reusable. Claude left the compat path at version 2, when its turns
+    # started carrying _stream_id — its old rows must be reparsed, not reused.
     assert codex == {
         "object": "tokdash.sessions._parse_codex_session_file",
         "content_sha1": expected_token,
     }
     assert claude == {
         "object": "tokdash.sessions._parse_claude_session_file",
-        "content_sha1": expected_token,
+        "version": sessions_module._SESSION_FILE_PARSER_VERSIONS["_parse_claude_session_file"],
     }
+    assert claude["version"] > 1
 
     # Unrelated sessions.py changes used to alter both signatures because the
     # entire module was hashed. The persistent parser token no longer consults
@@ -2217,3 +2221,54 @@ def test_mimo_parser_collect_excludes_external_import_messages(monkeypatch, tmp_
     assert [entry["entry_id"] for entry in window_entries] == ["mimo:other_inside"]
     assert len(window_entries) == 1
     assert len(all_entries) == 3
+
+
+def test_query_session_records_whole_sessions_keeps_sibling_files(tmp_path):
+    """A session's out-of-window files come back when whole_sessions is set.
+
+    One session spans several rows (Kimi agents, resumed Codex/Claude logs), and
+    the row that carries its name may sit outside the requested window.
+    """
+    store = UsageEntryStore(tmp_path / "usage.sqlite3")
+    files = (
+        ("/logs/main.jsonl", 1, 10),
+        ("/logs/agent-0.jsonl", 1, 10),
+        ("/logs/other.jsonl", 1, 10),
+    )
+    records = {
+        "/logs/main.jsonl": {
+            "tool": "kimi",
+            "session_id": "s1",
+            "display_name": "main prompt",
+            "turns": [{"timestamp_ms": 100, "tokens": 5}],
+        },
+        "/logs/agent-0.jsonl": {
+            "tool": "kimi",
+            "session_id": "s1",
+            "display_name": "subagent preamble",
+            "turns": [{"timestamp_ms": 500, "tokens": 1}],
+        },
+        "/logs/other.jsonl": {
+            "tool": "kimi",
+            "session_id": "s2",
+            "display_name": "unrelated",
+            "turns": [{"timestamp_ms": 900, "tokens": 1}],
+        },
+    }
+    assert store.sync_session_files(
+        "kimi",
+        files,
+        parser={"v": 1},
+        parse_file_session=lambda file_sig: records[file_sig[0]],
+    )
+
+    windowed = store.query_session_records("kimi", since_ms=400, until_ms=600)
+    assert [record["display_name"] for record in windowed] == ["subagent preamble"]
+
+    whole = store.query_session_records("kimi", since_ms=400, until_ms=600, whole_sessions=True)
+    assert sorted(record["display_name"] for record in whole) == ["main prompt", "subagent preamble"]
+    # Sessions that never touch the window stay out.
+    assert all(record["session_id"] == "s1" for record in whole)
+
+    unwindowed = store.query_session_records("kimi", whole_sessions=True)
+    assert len(unwindowed) == 3

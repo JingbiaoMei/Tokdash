@@ -358,9 +358,19 @@ Tokdash 默认**只监听 localhost**。
 - `TOKDASH_ALLOW_ORIGIN_REGEX`（默认 CORS 策略允许 localhost/127.0.0.1，以及同一 tailnet 内的 Tailscale Serve 读取；设置任一 CORS 选项会替换该默认策略）
 - `TOKDASH_NO_RETENTION_NOTICE`（设为 `1` 可静默 `tokdash serve` 启动时打印的历史保留提醒）
 
+会话活跃时长（估算）：
+
+每个会话除 `span_ms` 外还会给出 `active_ms`。span 是首末事件之间的跨度；活跃时长则把相邻 token 事件之间的间隔按空闲上限截断后累加，因此一个开着过夜的会话不再显示成 14 小时。
+
+这是估算值，API 中已明确标注：`summary.active_time_estimated` 为 `true`，`summary.active_time_method` 为 `capped-inter-event-gap`。其局限来自方法本身——事件之间的短暂停顿与真实工作无法区分，单次超过上限的操作会被截断到上限，只有一个 token 事件的会话则记为 0（前面没有可比较的事件）。
+
+并行工作会给出两个口径：`active_ms` 是时钟时长，重叠只计一次；`active_ms_sum` 把重叠也累加，即智能体时长。两者在单个会话和按工具汇总（`summary`）中都会出现。Kimi 的 agent 与 Claude 的子智能体都与主智能体并行运行，各自按独立事件流计时：一个子智能体并行工作一分钟，只增加一分钟智能体时长，不增加时钟时长。
+
+- `TOKDASH_ACTIVE_GAP_CAP_SECONDS`（默认：`300`）——空闲上限（秒）；超过该值的间隔只按上限计入。取值范围限制在 1 秒至 6 小时。
+
 持久化使用量数据库（默认开启）：
 
-Tokdash 默认会在 `~/.tokdash/usage.sqlite3` 维护一个本地 SQLite 索引。它保存解析后的 token 行以及 Codex/Claude 会话摘要，让仪表盘和 API 的重复读取可以走索引 SQL，而不是每次重新解析所有源日志。源日志仍然是事实来源；这个 DB 是本地性能索引，禁用或不可用时 Tokdash 会回退到实时解析。
+Tokdash 默认会在 `~/.tokdash/usage.sqlite3` 维护一个本地 SQLite 索引。它保存解析后的 token 行以及 Codex/Claude/Kimi 会话摘要，让仪表盘和 API 的重复读取可以走索引 SQL，而不是每次重新解析所有源日志。源日志仍然是事实来源；这个 DB 是本地性能索引，禁用或不可用时 Tokdash 会回退到实时解析。
 
 - `TOKDASH_USAGE_DB`（默认：`1`）——设为 `0`、`false`、`no` 或 `off` 可禁用持久化使用量 DB
 - `TOKDASH_DATA_DIR`（默认：`~/.tokdash`）——Tokdash 本地状态目录
@@ -429,7 +439,7 @@ Tokdash 是一个本地 HTTP 服务。常用接口：
 - `GET /api/usage?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD`
 - `GET /api/tools?period=...`（仅编程工具）
 - `GET /api/openclaw?period=...`（仅 OpenClaw）
-- `GET /api/sessions?tool=codex|claude|opencode|pi_agent|mimo&period=...`（追加 `&include_review_sessions=true` 可包含默认隐藏的 Codex 审核/权限会话）
+- `GET /api/sessions?tool=codex|claude|opencode|pi_agent|mimo|kimi&period=...`（追加 `&include_review_sessions=true` 可包含默认隐藏的 Codex 审核/权限会话）
 - `GET /api/quota` 与 `GET /api/quota/history`（订阅额度快照；网络刷新受写入保护且需显式授权）
 - `GET /api/stats`（贡献日历与统计数据）
 

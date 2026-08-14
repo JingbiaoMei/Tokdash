@@ -336,3 +336,25 @@ def test_seed_2_1_turbo_pricing_and_aliases():
         assert abs(cost - expected_cost) < 1e-12, (
             f"{model!r} should resolve to Doubao Seed 2.1 Turbo pricing"
         )
+
+
+def test_gemini_3_7_flash_pricing():
+    """Gemini 3.7 Flash must resolve at list price across spellings.
+
+    OpenRouter currently shows a 50% launch discount (0.375/1.875); the DB tracks
+    the undiscounted rate, as the 3.6-flash entry does.
+    """
+    db = PricingDatabase()
+
+    expected_cost = (1000 * 0.75 + 2000 * 3.75 + 3000 * 0.075 + 4000 * 0.041667) / 1_000_000
+    for model in [
+        "gemini-3.7-flash",
+        "google/gemini-3.7-flash",
+        "models/gemini-3.7-flash",
+        "gemini-3-7-flash",
+        "Gemini 3.7 Flash",
+    ]:
+        cost = db.get_cost(model, 1000, 2000, 3000, 4000)
+        assert abs(cost - expected_cost) < 1e-12, (
+            f"{model!r} should resolve to Gemini 3.7 Flash pricing"
+        )

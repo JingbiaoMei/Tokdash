@@ -1714,7 +1714,7 @@
     <div id="overview-content" class="tab-content active">
 
       <!-- KPI cards -->
-      <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
+      <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4 mb-6">
         <div class="surface p-5">
           <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="totalTokens">Total Tokens</div>
           <div id="totalTokensWrap" class="overview-token-value-wrap" data-readable="true">
@@ -1732,6 +1732,15 @@
           <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="totalMessages">Total Messages</div>
           <div id="totalMessages" class="text-3xl sm:text-4xl font-extrabold mt-2" style="color: var(--color-messages);">-</div>
           <div id="messagesDelta" class="text-xs font-semibold mt-1" style="color: var(--color-muted);"></div>
+        </div>
+        <div class="surface p-5">
+          <div class="text-xs font-semibold uppercase tracking-wider flex items-center gap-1" style="color: var(--color-label);">
+            <span id="overviewActiveLabel" data-i18n="agentTimeCard">Agent time (est.)</span>
+            <span id="overviewActiveHint" class="cursor-help select-none" style="opacity:0.6;" data-i18n-title="agentTimeOverviewHint" title="Estimated agent working time in the selected range, added up across every session tool: agents running at once each count, idle gaps beyond the cap are excluded.">ⓘ</span>
+          </div>
+          <div id="overviewActiveTime" class="text-3xl sm:text-4xl font-extrabold mt-2" style="color: var(--color-secondary);">-</div>
+          <div id="overviewActiveDelta" class="text-xs font-semibold mt-1" style="color: var(--color-muted);"></div>
+          <div id="overviewActiveMeta" class="text-xs font-semibold mt-1" style="color: var(--color-muted);"></div>
         </div>
         <div class="surface p-5">
           <div class="text-xs font-semibold uppercase tracking-wider flex items-center gap-1" style="color: var(--color-label);">
@@ -3174,6 +3183,15 @@
 
     // Render perf controls
     let updateInFlight = false;
+    // One dashboard load runs at a time. A request arriving mid-load is held here
+    // (newest wins) and run when the current one finishes, so a range change is
+    // never silently dropped while its label is already on screen.
+    let inFlightDashboardKey = null;
+    let pendingDashboardRequest = null;
+    // Set once the running load has been superseded and thrown its result away.
+    // From then on it has nothing left to commit, so returning to its range has
+    // to fetch again rather than wait for it.
+    let inFlightResultDiscarded = false;
     let updateIsManualRefresh = false;
     let refreshUiState = 'idle';
     let refreshUiResetTimer = null;
@@ -3431,6 +3449,7 @@
         activeTime: 'Estimated active',
         activeTimeColumn: 'Active (est.)',
         agentTime: 'Estimated agent time',
+        agentTimeCard: 'Agent time (est.)',
         idleCap: 'Idle cap',
         span: 'Span',
         activeTimeHint: 'Estimate from the gaps between token events: each gap counts up to the idle cap (5 min by default). A short pause reads the same as work, one long operation is truncated at the cap, and a session with a single event measures zero.',
@@ -3439,6 +3458,8 @@
         activeTimeCombined: 'Estimated active (sum)',
         activeTimeCombinedHint: 'Each tool’s estimated active time added up. Overlap is deduplicated within a tool but not across tools, so two tools used at once count twice — an upper bound on clock time.',
         activeTimeMultiServerHint: 'Estimates added up across the selected servers. Overlap is deduplicated only within one tool on one server, so concurrent work counts more than once — an upper bound on clock time.',
+        agentTimeOverviewHint: 'Estimated agent working time in the selected range, added up across every session tool: agents running at once each count, idle gaps beyond the cap are excluded.',
+        activeTimeToolsUnavailable: 'No data read for: {tools}',
         combinedSessionsDesc: 'Cross-tool session view grouped by project for the selected range.',
         sessionsRangeDesc: 'Latest session plus sessions for the selected range.',
         showReviewSessions: 'Show review sessions',
@@ -3764,6 +3785,7 @@
         activeTime: '预计活跃时长',
         activeTimeColumn: '活跃时长（估算）',
         agentTime: '预计智能体时长',
+        agentTimeCard: '智能体时长（估算）',
         idleCap: '空闲上限',
         span: '跨度',
         activeTimeHint: '基于 token 事件之间间隔的估算：每段间隔最多按空闲上限（默认 5 分钟）计入。短暂停顿与工作无法区分，单次长耗时操作会被截断到上限，只有一个事件的会话则记为 0。',
@@ -3772,6 +3794,8 @@
         activeTimeCombined: '预计活跃时长（合计）',
         activeTimeCombinedHint: '各工具预计活跃时长之和。同一工具内的重叠只计一次，但跨工具不去重，因此同时使用两个工具会被计两次——这是时钟时长的上界。',
         activeTimeMultiServerHint: '所选各服务器的预计活跃时长之和。只有同一服务器上的同一工具内部才去重，因此并行工作会被重复计入——这是时钟时长的上界。',
+        agentTimeOverviewHint: '所选范围内智能体工作时长的预计值，按全部会话工具相加：同时运行的多个智能体分别计入，超过上限的空闲间隔不计入。',
+        activeTimeToolsUnavailable: '未能读取：{tools}',
         combinedSessionsDesc: '按项目汇总所选时间范围内的跨工具会话视图。',
         sessionsRangeDesc: '显示最近一条会话摘要，以及所选时间范围内的会话列表。',
         showReviewSessions: '显示审核会话',
@@ -3986,10 +4010,6 @@
       return `${compact}${scale.suffix}`;
     }
 
-    function formatReadableTokenCount(value) {
-      return `${formatCompactTokenCount(value)} ${t('tokensUnit')}`;
-    }
-
     function formatTokenCount(value, includeUnit = false) {
       const tokens = normalizeTokenCount(value);
       const formatted = overviewReadableTokens
@@ -4055,8 +4075,11 @@
 
       overviewTotalTokensRaw = normalizeOverviewTokenCount(value);
       const exact = `${formatNumber(overviewTotalTokensRaw)} ${t('tokensUnit')}`;
+      // The card is already labelled "Total Tokens", so the value carries no unit
+      // — it would only cost width the KPI row no longer has. The exact count in
+      // the tooltip and the aria-label keep it.
       valueElement.textContent = overviewReadableTokens
-        ? formatReadableTokenCount(overviewTotalTokensRaw)
+        ? formatCompactTokenCount(overviewTotalTokensRaw)
         : formatNumber(overviewTotalTokensRaw);
       wrapper.dataset.readable = String(overviewReadableTokens);
       tooltip.textContent = exact;
@@ -4117,7 +4140,7 @@
     }
 
     function fitOverviewKpis() {
-      ['totalTokens', 'totalCost', 'totalMessages'].forEach((id) => fitKpiValue(document.getElementById(id)));
+      ['totalTokens', 'totalCost', 'totalMessages', 'overviewActiveTime'].forEach((id) => fitKpiValue(document.getElementById(id)));
     }
 
     // Format currency
@@ -4827,6 +4850,7 @@
         renderProfileActivityLegend('overviewProfileLegend', profileActivityMode);
       }
       renderActivityInsights();
+      renderOverviewActiveTime();
     }
 
     function rerenderPresentation() {
@@ -5519,6 +5543,7 @@
       if (hitEl) hitEl.textContent = formatHitRate(data.cache_hit_rate);
       const hitMeta = document.getElementById('avgCacheHitMeta');
       if (hitMeta) hitMeta.textContent = (data.cache_hit_rate === null || data.cache_hit_rate === undefined) ? '' : t('cacheHitRate');
+      renderOverviewActiveTime();
       updateComparisonDeltas(data);
 
       if (data.top_models && data.top_models.length > 0) {
@@ -5628,8 +5653,28 @@
     }
 
     async function updateDashboard(customDays = null, dateFrom = null, dateTo = null, options = {}) {
-      if (updateInFlight) return;
       const forceRefresh = !!options.forceRefresh;
+      const windowKey = windowKeyFor(customDays, dateFrom, dateTo);
+
+      if (updateInFlight) {
+        // The date picker has already moved its label, so dropping this would
+        // leave the previous range's numbers under the new heading until the
+        // 5-minute auto-refresh. Queue the newest request instead.
+        if (windowKey === inFlightDashboardKey && !forceRefresh && !inFlightResultDiscarded) {
+          // Back on the range already loading: nothing new to fetch, but any
+          // request queued in between is now stale and must not run after it —
+          // it would land another range's data under this one's label.
+          pendingDashboardRequest = null;
+          invalidateOverviewActiveTime(customDays, dateFrom, dateTo);
+          return;
+        }
+        // Otherwise queue it, including a return to a range whose own load
+        // already discarded its result: that load will commit nothing, so
+        // without a fresh request this range would never be fetched at all.
+        pendingDashboardRequest = { customDays, dateFrom, dateTo, options };
+        invalidateOverviewActiveTime(customDays, dateFrom, dateTo);
+        return;
+      }
 
       let usageApiUrl;
       if (dateFrom && dateTo) {
@@ -5644,13 +5689,17 @@
         usageApiUrl += '&refresh=1';
       }
 
-      const windowKey = windowKeyFor(customDays, dateFrom, dateTo);
       // 3A: the Overview tab only needs /api/usage. Fetch the 3 heavy /api/sessions
       // streams only when the Sessions tab is actually open; otherwise defer them
       // to ensureSessionsLoaded() so a cold page load no longer fans out 4 parses.
       const wantSessions = isSessionsActive();
 
+      // The card's own fetch waits in the finally below, so clear a figure from
+      // another range here, while the new one is still loading.
+      invalidateOverviewActiveTime(customDays, dateFrom, dateTo);
+      inFlightDashboardKey = windowKey;
       updateInFlight = true;
+      inFlightResultDiscarded = false;
       updateIsManualRefresh = forceRefresh;
       const refreshStartedAt = Date.now();
       if (forceRefresh) {
@@ -5666,16 +5715,29 @@
           combined._stalest_server = rows.slice().sort((a, b) => String(a.payload.timestamp || '').localeCompare(String(b.payload.timestamp || '')))[0]?.server || null;
           return combined;
         });
+        // Held locally until this load is known to still be the current one.
+        let usageData;
+        let sessionResponses = null;
         if (wantSessions) {
-          const [usageData, sessions] = await Promise.all([
+          [usageData, sessionResponses] = await Promise.all([
             usagePromise,
             fetchSessionsResponses(customDays, dateFrom, dateTo),
           ]);
-          lastUsageResponse = usageData;
-          lastSessionsResponses = sessions;
-          sessionsLoadedKey = windowKey;
         } else {
-          lastUsageResponse = await usagePromise;
+          usageData = await usagePromise;
+        }
+        // A newer range was picked while this ran. Its request is dispatched from
+        // the finally below, so commit nothing here: these numbers belong to a
+        // range the label no longer names. (finally still runs on return.)
+        if (pendingDashboardRequest) {
+          inFlightResultDiscarded = true;
+          return;
+        }
+
+        lastUsageResponse = usageData;
+        if (sessionResponses) {
+          lastSessionsResponses = sessionResponses;
+          sessionsLoadedKey = windowKey;
         }
         lastWindowKey = windowKey;
 
@@ -5691,6 +5753,12 @@
         if (isSessionsActive()) renderSessionsTab();
       } catch (error) {
         console.error('Error fetching data:', error);
+        // Superseded: the user is waiting on another range, so this failure is
+        // not theirs to see. The queued request reports its own outcome.
+        if (pendingDashboardRequest) {
+          inFlightResultDiscarded = true;
+          return;
+        }
         setDashboardFetchStatus(error);
         if (forceRefresh) {
           setRefreshUiState(error?.status === 503 ? 'busy' : 'failed', { resetAfterMs: 2600 });
@@ -5707,9 +5775,20 @@
         }
         updateInFlight = false;
         updateIsManualRefresh = false;
+        inFlightDashboardKey = null;
+        inFlightResultDiscarded = false;
         renderRefreshButton();
-        scheduleStatsWarm(forceRefresh);
-        loadActivityInsights({ force: forceRefresh }).catch(() => {});
+        const queued = pendingDashboardRequest;
+        pendingDashboardRequest = null;
+        if (queued) {
+          // Run the range the user is actually looking at, and skip this one's
+          // deferred work — it would fetch for the range just superseded.
+          updateDashboard(queued.customDays, queued.dateFrom, queued.dateTo, queued.options);
+        } else {
+          scheduleStatsWarm(forceRefresh);
+          loadActivityInsights({ force: forceRefresh }).catch(() => {});
+          loadOverviewActiveTime(customDays, dateFrom, dateTo, { force: forceRefresh }).catch(() => {});
+        }
       }
     }
 
@@ -5777,6 +5856,147 @@
       if (hours) return `${hours}h ${String(minutes).padStart(2, "0")}m`;
       if (minutes) return `${minutes}m`;
       return `${seconds}s`;
+    }
+
+    // Overview KPI: active time across every session tool. It rides its own
+    // endpoint rather than /api/usage so the first paint still costs one request
+    // — the card fills in when this lands. The union across tools is the server's
+    // job: adding each tool's active_ms here would count minutes when two tools
+    // ran at once twice over.
+    const overviewActiveTimeState = { status: 'idle', data: null, key: null, requestId: 0 };
+
+    function activeTimeRequestKey(customDays, dateFrom, dateTo) {
+      const reviewState = includeCodexReviewSessions === null ? 'server' : String(includeCodexReviewSessions);
+      // Identify the servers, not just how many: two selections of the same size
+      // return different numbers and must not share a key.
+      const servers = selectedServers().map((server) => String(server.id ?? server.url ?? '')).sort().join(',');
+      return `${windowKeyFor(customDays, dateFrom, dateTo)}:review=${reviewState}:servers=${servers}`;
+    }
+
+    // Matches the server's pct_change: no previous figure means no percentage,
+    // not an infinite jump from zero.
+    function pctChange(current, previous) {
+      if (!previous) return null;
+      return Math.round(((current - previous) / previous) * 1000) / 10;
+    }
+
+    function combineActiveTimePayloads(payloads) {
+      const combined = {
+        active_ms: 0,
+        active_ms_sum: 0,
+        active_gap_cap_ms: 0,
+        unavailable_tools: [],
+        active_time_estimated: true,
+        active_time_method: 'capped-inter-event-gap',
+        _server_count: payloads.length,
+      };
+      let prevActiveMs = 0;
+      let prevAgentMs = 0;
+      let comparable = false;
+      payloads.forEach((payload) => {
+        if (!payload) return;
+        combined.active_ms += Number(payload.active_ms) || 0;
+        combined.active_ms_sum += Number(payload.active_ms_sum) || 0;
+        combined.active_gap_cap_ms = Math.max(combined.active_gap_cap_ms, Number(payload.active_gap_cap_ms) || 0);
+        (payload.unavailable_tools || []).forEach((tool) => {
+          if (!combined.unavailable_tools.includes(tool)) combined.unavailable_tools.push(tool);
+        });
+        // The percentages cannot be averaged — add the previous windows up the
+        // same way and take the change of the totals.
+        if (payload.comparison) {
+          comparable = true;
+          prevActiveMs += Number(payload.comparison.active_ms_prev) || 0;
+          prevAgentMs += Number(payload.comparison.active_ms_sum_prev) || 0;
+        }
+      });
+      combined.comparison = comparable
+        ? {
+            active_ms_prev: prevActiveMs,
+            active_ms_sum_prev: prevAgentMs,
+            active_ms_pct: pctChange(combined.active_ms, prevActiveMs),
+            active_ms_sum_pct: pctChange(combined.active_ms_sum, prevAgentMs),
+          }
+        : null;
+      return combined;
+    }
+
+    // The card shows agent time — the additive one. It needs no multi-server
+    // caveat for that reason: summing agent time across servers is the same
+    // quantity, where summing their deduplicated clocks would not have been.
+    function renderOverviewActiveTime() {
+      const valueElement = document.getElementById('overviewActiveTime');
+      const metaElement = document.getElementById('overviewActiveMeta');
+      if (!valueElement || !metaElement) return;
+      const data = overviewActiveTimeState.data;
+      if (!data) {
+        valueElement.textContent = '—';
+        valueElement.title = '';
+        renderDelta('overviewActiveDelta', null);
+        metaElement.textContent = overviewActiveTimeState.status === 'error' ? t('loadFailed') : '';
+        return;
+      }
+      valueElement.textContent = formatDuration(data.active_ms_sum);
+      valueElement.title = data.active_gap_cap_ms ? `${t('idleCap')}: ${formatDuration(data.active_gap_cap_ms)}` : '';
+      renderDelta('overviewActiveDelta', data.comparison?.active_ms_sum_pct ?? null);
+      metaElement.textContent = data.unavailable_tools.length
+        ? t('activeTimeToolsUnavailable').replace('{tools}', data.unavailable_tools.map(formatToolName).join(', '))
+        : '';
+      fitKpiValue(valueElement);
+    }
+
+    // Blank a figure that belongs to a range the user has left. Called the moment
+    // the range changes, not when its fetch starts: the fetch waits behind
+    // /api/usage, and until it lands the old runtime would sit under the new date.
+    function invalidateOverviewActiveTime(customDays, dateFrom, dateTo) {
+      const requestKey = activeTimeRequestKey(customDays, dateFrom, dateTo);
+      if (overviewActiveTimeState.key === requestKey && overviewActiveTimeState.data) return false;
+      // Bumping the request id also discards a load already in flight for the old
+      // range, which would otherwise land its result under the new one.
+      overviewActiveTimeState.requestId += 1;
+      overviewActiveTimeState.data = null;
+      overviewActiveTimeState.key = null;
+      // The previous range's failure is not this one's: clear the status too, or
+      // the new range opens on "Load failed" before it has asked for anything.
+      overviewActiveTimeState.status = 'loading';
+      renderOverviewActiveTime();
+      return true;
+    }
+
+    async function loadOverviewActiveTime(customDays, dateFrom, dateTo, options = {}) {
+      // Every call refetches, including the 5-minute auto-refresh on an unchanged
+      // range: skipping the request there would freeze this card while the rest of
+      // the row moved on. Repeats are cheap — the server caches the response.
+      const requestKey = activeTimeRequestKey(customDays, dateFrom, dateTo);
+      const force = Boolean(options.force);
+      invalidateOverviewActiveTime(customDays, dateFrom, dateTo);
+      const params = (dateFrom && dateTo)
+        ? `date_from=${encodeURIComponent(dateFrom)}&date_to=${encodeURIComponent(dateTo)}`
+        : `period=${encodeURIComponent(customDays ? String(customDays) : 'today')}`;
+      const reviewParam = includeCodexReviewSessions === null
+        ? ''
+        : `&include_review_sessions=${includeCodexReviewSessions ? 'true' : 'false'}`;
+      const requestId = ++overviewActiveTimeState.requestId;
+      overviewActiveTimeState.status = 'loading';
+      try {
+        // Refresh must reach the server's response cache too, or the button
+        // redraws the same stale figure for up to its full TTL.
+        const refreshParam = force ? '&refresh=1' : '';
+        const rows = await fetchSelectedServers(`/api/active-time?${params}${reviewParam}${refreshParam}`);
+        // A slower reply for a range the user has already left must not overwrite
+        // the one now on screen.
+        if (requestId !== overviewActiveTimeState.requestId) return;
+        if (!rows.length) throw new Error(t('loadFailed'));
+        overviewActiveTimeState.data = combineActiveTimePayloads(rows.map((row) => row.payload));
+        overviewActiveTimeState.key = requestKey;
+        overviewActiveTimeState.status = 'ready';
+      } catch (error) {
+        if (requestId !== overviewActiveTimeState.requestId) return;
+        console.error('Error fetching active time:', error);
+        // A failed refresh keeps the figure this range already had; anything
+        // belonging to another range was cleared before the request went out.
+        overviewActiveTimeState.status = overviewActiveTimeState.data ? 'ready' : 'error';
+      }
+      renderOverviewActiveTime();
     }
 
     function buildCombinedSessionsData(responses) {
@@ -10718,6 +10938,13 @@
       localStorage.setItem('tokdash-show-codex-review-sessions', includeCodexReviewSessions ? '1' : '0');
       sessionsLoadedKey = null;
       if (isSessionsActive()) ensureSessionsLoaded();
+      // Codex review sessions count towards active time too, so the Overview KPI
+      // has to follow the toggle rather than keep the previous split.
+      loadOverviewActiveTime(
+        null,
+        currentStartDate ? formatLocalDateYmd(currentStartDate) : null,
+        currentEndDate ? formatLocalDateYmd(currentEndDate) : null,
+      ).catch(() => {});
     });
 
     const combinedModelsToggle = document.getElementById('combinedModelsToggle');

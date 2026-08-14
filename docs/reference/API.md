@@ -31,6 +31,7 @@ per-session token); see [`docs/SECURITY.md`](../SECURITY.md) and `PUT /api/prici
 | `GET` | `/api/quota/refresh` | Run an immediate consented quota API poll (read-only, cooldown) |
 | `GET` | `/api/sessions` | List sessions for a given tool |
 | `GET` | `/api/session` | Detailed turns for a single session |
+| `GET` | `/api/active-time` | Estimated active time across every session tool |
 | `GET` | `/api/codex/sessions` | Convenience wrapper: Codex sessions |
 | `GET` | `/api/codex/session` | Convenience wrapper: single Codex session |
 | `GET` | `/api/openclaw` | OpenClaw model breakdown |
@@ -321,7 +322,7 @@ List of sessions for a specific tool.
 
 | Name | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `tool` | string | **yes** | – | Tool name: `codex`, `claude`, `opencode`, `pi_agent`, or `mimo` (the session explorer set; OpenClaw is served only via `/api/openclaw`) |
+| `tool` | string | **yes** | – | Tool name: `codex`, `claude`, `opencode`, `pi_agent`, `mimo`, or `kimi` (the session explorer set; OpenClaw is served only via `/api/openclaw`) |
 | `period` | string | no | `"today"` | See [Period parameter](#period-parameter) |
 | `date_from` | string | no | – | Start date (`YYYY-MM-DD`) |
 | `date_to` | string | no | – | End date (`YYYY-MM-DD`) |
@@ -336,6 +337,42 @@ List of sessions for a specific tool.
 | `period` | string | Period queried |
 | `latest_session` | object | Most recent session (same shape as items in `sessions[]`) |
 | `sessions` | array | All sessions in the period, sorted by `last_seen_at` desc |
+
+**Costs**
+
+`cost` is calculated when the response is built, from the billing inputs stored
+per turn (model, fresh input, cache reads, cache writes, output) and the pricing
+database this process has loaded. Two Tokdash builds sharing one usage database
+each report under their own pricing.
+
+Editing a rate reprices `codex`, `claude` and `kimi` without rereading any
+source log: those are the tools whose parsed sessions are cached in the usage
+database, and pricing is no longer part of the signature that invalidates a
+cached row. `opencode`, `pi_agent` and `mimo` are read live from their own
+databases and logs on each cold request, keyed on the pricing signature among
+others, so a rate edit does make them reread.
+
+Non-zero provider-reported costs from OpenCode, Pi and Mimo are kept verbatim —
+Pi from `usage.cost.total`, the other two from the message's `cost`. They are the
+provider's own figures, so no rate edit moves them. Zero means the provider
+reported nothing (plan and subscription accounts), and those turns are estimated
+from rates like any other.
+
+Rows written before turns carried billing inputs — including rows kept by
+`TOKDASH_USAGE_DB_DURABLE` after their source log disappeared — are priced from
+their stored totals instead. That reproduces the same number under any rates,
+because every cached source billed a turn as
+`get_cost(model, tokens_in, tokens_out, tokens_cache, 0)`, but it cannot separate
+a Claude or Kimi cache write from fresh input again. If a provider ever prices
+those apart, only reparsing those logs restores the distinction; a durable row
+whose log is gone keeps the combined figure.
+
+Codex is the exception: it bills under `provider/model` and stores the bare
+name, and the pricing file keys some aliases by provider, so its rows from
+before that change are reparsed once rather than reused. A durable Codex row
+whose log is already gone cannot be, and prices under the bare model name — if
+that name later gets a provider-specific rate, that row keeps the unqualified
+one.
 
 **Session object shape**
 
@@ -391,6 +428,75 @@ Detailed view of a single session including per-turn breakdown.
   "tokens": 23479,
   "cost": 0.0718,
   "timestamp": "2026-05-20T16:02:07.514000+00:00"
+}
+```
+
+---
+
+## `GET /api/active-time`
+
+Estimated active time across every session tool, for the Overview KPI. Kept
+separate from `/api/usage` because it reads all six session sources.
+
+**Query parameters**
+
+| Name | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `period` | string | no | `"today"` | See [Period parameter](#period-parameter) |
+| `date_from` | string | no | – | Start date (`YYYY-MM-DD`) |
+| `date_to` | string | no | – | End date (`YYYY-MM-DD`) |
+| `include_review_sessions` | boolean | no | `false` | Include Codex review / auto-permission sessions |
+| `refresh` | boolean | no | `false` | Bypass the response cache and recompute, as on `/api/usage`. The dashboard's Refresh button sends this |
+
+**Response fields**
+
+| Field | Type | Description |
+|---|---|---|
+| `period` | string | Echo of the period param |
+| `active_ms` | int | Clock time any agent was working: overlapping sessions *and tools* count once |
+| `active_ms_sum` | int | Agent time: per-stream intervals added up, so concurrent agents count separately |
+| `comparison` | object\|null | The same two figures for the previous window and the percentage change: `{active_ms_prev, active_ms_sum_prev, active_ms_pct, active_ms_sum_pct}`. A percentage is `null` when the previous window is empty, and the whole object is `null` if that window could not be read |
+| `by_tool` | object | Per-tool `{tool_label, session_count, active_ms, active_ms_sum}` |
+| `unavailable_tools` | array | Tools that could not be read or summarized for this window (excluded from the totals, so the rest still answer) |
+| `active_gap_cap_ms` | int | Idle cap in effect (`TOKDASH_ACTIVE_GAP_CAP_SECONDS`) |
+| `active_time_estimated` | bool | Always `true` — see the method below |
+| `active_time_method` | string | `"capped-inter-event-gap"` |
+| `include_review_sessions` | bool | The effective setting applied, param or server default |
+| `timestamp` | string | ISO 8601 time the payload was computed |
+
+Both figures are estimates: each gap between a stream's token events counts up to
+the idle cap, so a short pause reads the same as work, one long operation is
+truncated at the cap, and a session with a single event measures zero. The same
+fields appear per tool in `/api/sessions` under `summary`, and per session in
+`sessions[]`, where the union is over that session's agent streams only.
+
+`comparison` covers the window immediately before this one — the previous day,
+month or N days, or for an explicit `date_from`/`date_to` the range of equal
+length ending where it begins. That is the same window `/api/usage` compares
+against, so the runtime delta on the Overview means what the token, cost and
+message deltas beside it mean. Computing it aggregates a second window; the
+response cache makes that a per-window cost rather than a per-request one.
+
+```jsonc
+{
+  "period": "week",
+  "active_ms": 331980000,       // 92h 13m of clock time
+  "active_ms_sum": 494880000,   // 137h 28m of agent time
+  "comparison": {               // the week before, on the same terms
+    "active_ms_prev": 298620000,
+    "active_ms_sum_prev": 421200000,
+    "active_ms_pct": 11.2,
+    "active_ms_sum_pct": 17.5
+  },
+  "by_tool": {
+    "codex": {"tool_label": "Codex", "session_count": 38, "active_ms": 273780000, "active_ms_sum": 332820000}
+  },
+  "unavailable_tools": [],
+  "active_gap_cap_ms": 300000,
+  "active_time_estimated": true,
+  "active_time_method": "capped-inter-event-gap",
+  "include_review_sessions": false,
+  "timestamp": "2026-08-14T14:31:05.412000"
 }
 ```
 

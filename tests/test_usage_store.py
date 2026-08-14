@@ -909,12 +909,27 @@ def test_session_file_parser_signatures_are_explicit_and_v159_compatible(monkeyp
     ) == claude
 
 
+def _priced_codex_signature(pricing):
+    """The signature shape builds wrote while cost was baked into a row.
+
+    Derived from the current one so the parser-identity keys stay in step; only
+    the pricing/cost-basis half is historical.
+    """
+    signature = sessions_module._codex_session_parser_signature()
+    signature.pop("cost_basis", None)
+    signature["pricing"] = pricing
+    return signature
+
+
 def test_v159_session_signature_upgrade_resigns_without_reparse(tmp_path):
     store = UsageEntryStore(tmp_path / "usage.sqlite3")
     session_path = str(tmp_path / "session.jsonl")
     files = ((session_path, 123, 456),)
-    content_pricing = sessions_module._session_pricing_content_signature()
-    assert content_pricing == sessions_module._V159_BASELINE_PRICING_CONTENT_SIGNATURE
+    # The fast path applies only while the packaged pricing still holds v1.5.9's
+    # content, so drive that condition rather than assert it against whatever is
+    # shipped today. The constant is frozen at those bytes on purpose: see
+    # test_v159_rows_are_not_reused_once_the_packaged_pricing_changes.
+    content_pricing = sessions_module._V159_BASELINE_PRICING_CONTENT_SIGNATURE
 
     # This is the v1.5.9 shape. A wheel reinstall changes its packaged path or
     # mtime even when the pricing bytes and parsed session output are identical.
@@ -926,8 +941,8 @@ def test_v159_session_signature_upgrade_resigns_without_reparse(tmp_path):
         ),
         (str(tmp_path / "pricing_db.json"), 0, ""),
     )
-    legacy_parser = sessions_module._codex_session_parser_signature(legacy_pricing)
-    content_parser = sessions_module._codex_session_parser_signature(content_pricing)
+    legacy_parser = _priced_codex_signature(legacy_pricing)
+    content_parser = _priced_codex_signature(content_pricing)
     calls = 0
 
     def parse(_file_sig):
@@ -966,11 +981,221 @@ def test_v159_session_signature_upgrade_resigns_without_reparse(tmp_path):
     assert store.sync_session_files(
         "codex",
         files,
-        parser=sessions_module._codex_session_parser_signature(changed_pricing),
+        parser=_priced_codex_signature(changed_pricing),
         parse_file_session=parse,
         signature_compatible=sessions_module._session_signature_compatible,
     )
     assert calls == 2
+
+
+def test_priced_rows_move_onto_the_price_neutral_shape_without_reparsing(tmp_path):
+    """The migration itself must not reread the corpus.
+
+    Rows written while pricing was part of the signature are resigned in place:
+    their cost is recomputed on read from the billing inputs they carry, or
+    reconstructed from their totals when they predate those, so whichever rates
+    they were written under stop mattering.
+    """
+    store = UsageEntryStore(tmp_path / "usage.sqlite3")
+    session_path = str(tmp_path / "session.jsonl")
+    files = ((session_path, 123, 456),)
+    calls = 0
+
+    def parse(_file_sig):
+        nonlocal calls
+        calls += 1
+        return {"session_id": "session-1", "turns": [{"timestamp_ms": 123, "tokens": 1}]}
+
+    assert store.sync_session_files(
+        "codex",
+        files,
+        parser=_priced_codex_signature(sessions_module._session_pricing_content_signature()),
+        parse_file_session=parse,
+    )
+    assert calls == 1
+
+    assert store.sync_session_files(
+        "codex",
+        files,
+        parser=sessions_module._codex_session_parser_signature(),
+        parse_file_session=parse,
+        signature_compatible=sessions_module._session_signature_compatible,
+    )
+    assert calls == 1, "the move to price-neutral rows must not reparse"
+
+    # Settled: the same shape twice is a no-op.
+    assert not store.sync_session_files(
+        "codex",
+        files,
+        parser=sessions_module._codex_session_parser_signature(),
+        parse_file_session=parse,
+        signature_compatible=sessions_module._session_signature_compatible,
+    )
+    assert calls == 1
+
+    # Pricing is no longer part of the signature at all, so an edit cannot
+    # invalidate the row however it is spelled.
+    assert not store.sync_session_files(
+        "codex",
+        files,
+        parser=sessions_module._codex_session_parser_signature(),
+        parse_file_session=parse,
+        signature_compatible=sessions_module._session_signature_compatible,
+    )
+    assert calls == 1
+
+
+def test_a_priced_row_from_a_different_parser_is_not_resigned(tmp_path, monkeypatch):
+    """Dropping pricing from the signature must not weaken the parser check."""
+    store = UsageEntryStore(tmp_path / "usage.sqlite3")
+    session_path = str(tmp_path / "session.jsonl")
+    files = ((session_path, 123, 456),)
+    calls = 0
+
+    def parse(_file_sig):
+        nonlocal calls
+        calls += 1
+        return {"session_id": "session-1", "turns": [{"timestamp_ms": 123, "tokens": 1}]}
+
+    store.sync_session_files(
+        "codex",
+        files,
+        parser=_priced_codex_signature(sessions_module._session_pricing_content_signature()),
+        parse_file_session=parse,
+    )
+    assert calls == 1
+
+    bumped = dict(sessions_module._SESSION_FILE_PARSER_VERSIONS)
+    bumped["_parse_codex_session_file"] += 1
+    monkeypatch.setattr(sessions_module, "_SESSION_FILE_PARSER_VERSIONS", bumped)
+    assert store.sync_session_files(
+        "codex",
+        files,
+        parser=sessions_module._codex_session_parser_signature(),
+        parse_file_session=parse,
+        signature_compatible=sessions_module._session_signature_compatible,
+    )
+    assert calls == 2, "a different parser must reparse, price-neutral or not"
+
+
+def test_price_neutral_rows_are_rebuilt_for_a_build_that_prices_at_parse_time(tmp_path):
+    """Downgrading to a build with baked-in costs must not reuse these rows."""
+    store = UsageEntryStore(tmp_path / "usage.sqlite3")
+    session_path = str(tmp_path / "session.jsonl")
+    files = ((session_path, 123, 456),)
+    calls = 0
+
+    def parse(_file_sig):
+        nonlocal calls
+        calls += 1
+        return {"session_id": "session-1", "turns": [{"timestamp_ms": 123, "tokens": 1}]}
+
+    store.sync_session_files(
+        "codex",
+        files,
+        parser=sessions_module._codex_session_parser_signature(),
+        parse_file_session=parse,
+    )
+    assert calls == 1
+
+    assert store.sync_session_files(
+        "codex",
+        files,
+        parser=_priced_codex_signature(sessions_module._session_pricing_content_signature()),
+        parse_file_session=parse,
+        signature_compatible=sessions_module._session_signature_compatible,
+    )
+    assert calls == 2
+
+
+def test_a_storage_format_bump_rebuilds_price_neutral_rows(tmp_path, monkeypatch):
+    """_SESSION_COST_BASIS is the versioned migration handle."""
+    store = UsageEntryStore(tmp_path / "usage.sqlite3")
+    session_path = str(tmp_path / "session.jsonl")
+    files = ((session_path, 123, 456),)
+    calls = 0
+
+    def parse(_file_sig):
+        nonlocal calls
+        calls += 1
+        return {"session_id": "session-1", "turns": [{"timestamp_ms": 123, "tokens": 1}]}
+
+    store.sync_session_files(
+        "codex",
+        files,
+        parser=sessions_module._codex_session_parser_signature(),
+        parse_file_session=parse,
+    )
+    assert calls == 1
+
+    monkeypatch.setattr(sessions_module, "_SESSION_COST_BASIS", "priced-on-read-v2")
+    assert store.sync_session_files(
+        "codex",
+        files,
+        parser=sessions_module._codex_session_parser_signature(),
+        parse_file_session=parse,
+        signature_compatible=sessions_module._session_signature_compatible,
+    )
+    assert calls == 2
+
+
+def test_v159_rows_are_not_reused_once_the_packaged_pricing_changes(tmp_path):
+    """A pricing update ends the v1.5.9 fast path, and must.
+
+    The baseline constant is frozen at the pricing content v1.5.9 shipped. Once a
+    model is added or a rate changes, the packaged file no longer matches it and
+    those rows reparse. Re-pointing the constant at the newer file would instead
+    re-sign rows whose costs were computed at the old rates as if they matched
+    the new ones.
+    """
+    store = UsageEntryStore(tmp_path / "usage.sqlite3")
+    session_path = str(tmp_path / "session.jsonl")
+    files = ((session_path, 123, 456),)
+    legacy_pricing = (
+        (
+            "/old/site-packages/tokdash/pricing_db.json",
+            111,
+            sessions_module._V159_BASELINE_PRICING_RAW_SIZE,
+        ),
+        (str(tmp_path / "pricing_db.json"), 0, ""),
+    )
+    baseline = sessions_module._V159_BASELINE_PRICING_CONTENT_SIGNATURE
+    updated = (*baseline[:2], baseline[2] + 190, "a-later-pricing-db")
+
+    # Signatures reach this check as JSON, i.e. lists all the way down.
+    def as_json(value):
+        return json.loads(json.dumps(value))
+
+    assert sessions_module._legacy_pricing_signature_matches_content(
+        as_json(legacy_pricing), as_json(baseline)
+    )
+    assert not sessions_module._legacy_pricing_signature_matches_content(
+        as_json(legacy_pricing), as_json(updated)
+    )
+
+    calls = 0
+
+    def parse(_file_sig):
+        nonlocal calls
+        calls += 1
+        return {"session_id": "session-1", "turns": [{"timestamp_ms": 123, "tokens": 1}]}
+
+    assert store.sync_session_files(
+        "codex",
+        files,
+        parser=_priced_codex_signature(legacy_pricing),
+        parse_file_session=parse,
+    )
+    assert calls == 1
+
+    assert store.sync_session_files(
+        "codex",
+        files,
+        parser=_priced_codex_signature(updated),
+        parse_file_session=parse,
+        signature_compatible=sessions_module._session_signature_compatible,
+    )
+    assert calls == 2, "rows priced at v1.5.9 rates must reparse once pricing changes"
 
 
 def _load_fn_from_module_file(path: Path, module_name: str):
@@ -1812,8 +2037,12 @@ def test_claude_stored_session_records_merge_in_one_pass_matches_legacy_semantic
         },
     ]
 
-    expected = records[0]
-    expected = sessions_module._merge_raw_session(expected, records[1])
+    # Reading prices the rows, so price both sides: what is under test here is
+    # the merge, not the rates.
+    expected = dict(records[0], turns=sessions_module._repriced_turns(records[0]["turns"]))
+    expected = sessions_module._merge_raw_session(
+        expected, dict(records[1], turns=sessions_module._repriced_turns(records[1]["turns"]))
+    )
     result = sessions_module._session_records_to_raw_sessions("claude", records)
 
     assert result["shared"] == expected
@@ -2050,7 +2279,7 @@ def test_get_sessions_data_passes_period_window_to_opencode_loader(monkeypatch):
                         tokens_cache=0,
                         tokens_out=1,
                         tokens_reasoning=0,
-                        cost=0.0,
+                        bill=sessions_module._billing_record("model", "fresh-input"),
                     )
                 ],
             }
@@ -2086,7 +2315,7 @@ def test_get_sessions_data_passes_period_window_to_mimo_loader(monkeypatch):
                         tokens_cache=0,
                         tokens_out=1,
                         tokens_reasoning=0,
-                        cost=0.0,
+                        bill=sessions_module._billing_record("model", "fresh-input"),
                     )
                 ],
             }

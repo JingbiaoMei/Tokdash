@@ -10,7 +10,7 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Callable, Collection, Dict, Iterable, Optional
 
 from . import clientpaths
 from .activity_insights import (
@@ -21,7 +21,7 @@ from .activity_insights import (
     record_reasoning_turn,
     record_structured_tool_call,
 )
-from .compute import cache_hit_rate, period_to_days
+from .compute import cache_hit_rate, pct_change, period_to_days, previous_period_range
 from .dateutil import parse_date_range
 from .pricing import PricingDatabase
 from .sources.coding_tools import KimiParser, codex_token_event_key
@@ -58,6 +58,27 @@ _SESSION_FILE_PARSER_VERSIONS = {
 # reparse. Parsers added later have no such history and use the plain shape.
 _V159_COMPAT_PARSERS = frozenset({"_parse_codex_session_file", "_parse_claude_session_file"})
 _SESSION_FILE_PARSER_V1_COMPAT_TOKEN = "422eaad7926b4c5362a3c6d7cbcad86dc8244cb8"
+# Stored session rows hold each turn's billing inputs and are priced by whoever
+# reads them, so pricing is not part of their source signature. Editing a rate no
+# longer marks unchanged logs as changed, and two servers running different
+# pricing files can share one database instead of rewriting each other's rows.
+# Bump this only if what a row must carry to be priceable changes; that is a
+# storage-format change and rows written under the old value are reparsed.
+_SESSION_COST_BASIS = "priced-on-read-v1"
+
+
+def _codex_cost_basis() -> str:
+    """Codex rows must also carry the provider-qualified model they billed under.
+
+    Its bill names openai/gpt-5.5 while the row stores the bare gpt-5.5, so a row
+    holding only totals cannot say which pricing entry applies (see
+    _codex_session_signature_compatible). Rows written before the billing inputs
+    existed — including any already resigned onto the plain basis without them —
+    fail this comparison and are rebuilt once.
+    """
+    return f"{_SESSION_COST_BASIS}+qualified-model"
+
+
 _V159_BASELINE_PRICING_CONTENT_SIGNATURE = (
     "pricing-content-v1",
     "baseline",
@@ -111,8 +132,27 @@ def _legacy_pricing_signature_matches_content(legacy: Any, content: Any) -> bool
     return False
 
 
-def _session_signature_compatible(old_signature: str, new_signature: str) -> bool:
-    """Recognize a v1.5.9 stat-pricing signature with identical effective content."""
+def _session_signature_compatible(
+    old_signature: str,
+    new_signature: str,
+    *,
+    allow_legacy_migration: bool = True,
+) -> bool:
+    """Whether a stored row can be resigned instead of reparsed.
+
+    Two shapes qualify. A row written when pricing was part of the signature can
+    move to the price-neutral shape: its cost is recomputed on read from the
+    billing inputs it carries (or, for rows predating those, reconstructed from
+    its stored totals — see _legacy_bill), so whichever rates it was written
+    under no longer matter. And a v1.5.9 stat-shaped pricing signature can move
+    to the content-shaped one when the two are proven to describe the same
+    pricing bytes. Everything else — a different parser, file or extraction — is
+    a real change and reparses.
+
+    allow_legacy_migration=False withholds only the first of those, for a source
+    whose stored totals cannot reconstruct what it was billed as. Such rows are
+    reparsed once and carry their billing inputs from then on.
+    """
     try:
         old = json.loads(old_signature)
         new = json.loads(new_signature)
@@ -128,12 +168,43 @@ def _session_signature_compatible(old_signature: str, new_signature: str) -> boo
     new_parser = new.get("parser")
     if not isinstance(old_parser, dict) or not isinstance(new_parser, dict):
         return False
-    if {key: value for key, value in old_parser.items() if key != "pricing"} != {
-        key: value for key, value in new_parser.items() if key != "pricing"
+    ignored = {"pricing", "cost_basis"}
+    if {key: value for key, value in old_parser.items() if key not in ignored} != {
+        key: value for key, value in new_parser.items() if key not in ignored
     }:
+        return False
+
+    old_basis = old_parser.get("cost_basis")
+    new_basis = new_parser.get("cost_basis")
+    if new_basis is not None:
+        if old_basis == new_basis:
+            # Same storage format.
+            return True
+        # The one-way move onto it from a priced row.
+        return allow_legacy_migration and old_basis is None and "pricing" in old_parser
+    if old_basis is not None:
+        # Downgrade to a build that prices at parse time: those rows must be
+        # rebuilt, since this one's costs came from another process's rates.
         return False
     return _legacy_pricing_signature_matches_content(
         old_parser.get("pricing"), new_parser.get("pricing")
+    )
+
+
+def _codex_session_signature_compatible(old_signature: str, new_signature: str) -> bool:
+    """Codex rows do not get the free migration onto priced-on-read.
+
+    Every other cached source bills a turn under the model name it stores, so a
+    row predating _bill reprices to the same number from its totals. Codex bills
+    under provider/model ("openai/gpt-5.5") and stores the bare name, and the
+    pricing file keys 16 aliases by provider — so a legacy row cannot prove which
+    entry priced it, and a later provider-specific rate would silently reprice it
+    at the bare one. Those rows are reparsed once instead, after which they carry
+    the qualified model themselves. A durable row whose log is gone cannot be, and
+    keeps the bare-name limitation (see docs/reference/API.md).
+    """
+    return _session_signature_compatible(
+        old_signature, new_signature, allow_legacy_migration=False
     )
 
 # Signature of the pricing files the singleton was last loaded from. Sessions cost is computed
@@ -424,6 +495,74 @@ def _merged_interval_ms(intervals: Iterable[tuple[int, int]]) -> int:
     return total
 
 
+# How each source's raw token counts map onto PricingDatabase.get_cost. Kept as
+# data on the turn so a stored row can be repriced later without rereading the
+# log: the rule names the mapping, the bill carries the counts it consumes.
+#
+#   fresh-input            cache writes are not billed separately (Codex logs
+#                          none; the field stays 0)
+#   input-plus-cache-write cache writes bill at the input rate, which is how
+#                          Claude, Kimi, OpenCode and Mimo are priced today
+#   split-cache-write      cache writes bill at their own rate (Pi)
+#
+# Changing a rule changes what stored rows cost, deliberately and without a
+# reparse. Changing which counts a parser *extracts* is a parser change and must
+# bump that parser's version in _SESSION_FILE_PARSER_VERSIONS.
+_BILLING_RULES: dict[str, Callable[[Any, Dict[str, Any]], float]] = {
+    "fresh-input": lambda db, bill: db.get_cost(
+        bill["model"], bill["input"], bill["output"], bill["cache_read"], 0
+    ),
+    "input-plus-cache-write": lambda db, bill: db.get_cost(
+        bill["model"], bill["input"] + bill["cache_write"], bill["output"], bill["cache_read"], 0
+    ),
+    "split-cache-write": lambda db, bill: db.get_cost(
+        bill["model"], bill["input"], bill["output"], bill["cache_read"], bill["cache_write"]
+    ),
+}
+
+
+def _billing_record(
+    model: str,
+    rule: str,
+    *,
+    input_tokens: Any = 0,
+    output_tokens: Any = 0,
+    cache_read: Any = 0,
+    cache_write: Any = 0,
+    fixed_cost: Any = None,
+) -> Dict[str, Any]:
+    """The billing inputs for one turn, enough to price it under any rates."""
+    bill = {
+        "model": str(model or "unknown"),
+        "rule": rule,
+        "input": int(input_tokens or 0),
+        "output": int(output_tokens or 0),
+        "cache_read": int(cache_read or 0),
+        "cache_write": int(cache_write or 0),
+    }
+    # A cost the source itself reported (OpenCode, Pi). It is the provider's own
+    # number, not something Tokdash may recompute from rates.
+    if fixed_cost is not None:
+        bill["fixed"] = float(fixed_cost)
+    return bill
+
+
+def _turn_cost(bill: Dict[str, Any], pricing: Any = None) -> float:
+    fixed = bill.get("fixed")
+    if fixed is not None:
+        try:
+            return float(fixed)
+        except (TypeError, ValueError):
+            return 0.0
+    rule = _BILLING_RULES.get(str(bill.get("rule") or ""))
+    if rule is None:
+        return 0.0
+    try:
+        return float(rule(pricing or _PRICING_DB, bill))
+    except (TypeError, ValueError, KeyError):
+        return 0.0
+
+
 def _build_turn(
     turn_index: int,
     timestamp_ms: int,
@@ -432,7 +571,7 @@ def _build_turn(
     tokens_cache: int,
     tokens_out: int,
     tokens_reasoning: int,
-    cost: float,
+    bill: Dict[str, Any],
 ) -> Dict[str, Any]:
     total_tokens = tokens_in + tokens_cache + tokens_out + tokens_reasoning
     return {
@@ -445,8 +584,46 @@ def _build_turn(
         "tokens_reasoning": int(tokens_reasoning),
         "tokens": int(total_tokens),
         "cache_hit_rate": cache_hit_rate(tokens_in, tokens_cache),
-        "cost": float(cost or 0.0),
+        "cost": _turn_cost(bill),
+        # Private: stripped from API output, kept in stored rows so a pricing
+        # edit reprices from here instead of rereading the source log.
+        "_bill": bill,
     }
+
+
+def _legacy_bill(turn: Dict[str, Any]) -> Dict[str, Any]:
+    """Billing inputs for a row written before turns carried them.
+
+    Codex, Claude and Kimi all priced a turn as get_cost(model, tokens_in,
+    tokens_out, tokens_cache, 0) — Claude and Kimi having already folded cache
+    writes into tokens_in, Codex having no cache writes to fold. Those three
+    fields are still on the row, so such a row reprices exactly rather than
+    needing its log reread. What it cannot do is separate a Claude or Kimi cache
+    write from fresh input again, so a future rule that prices them apart would
+    need those files reparsed (see docs/reference/API.md).
+    """
+    return _billing_record(
+        str(turn.get("model") or "unknown"),
+        "fresh-input",
+        input_tokens=turn.get("tokens_in"),
+        output_tokens=turn.get("tokens_out"),
+        cache_read=turn.get("tokens_cache"),
+        fixed_cost=None,
+    )
+
+
+def _repriced_turns(turns: Iterable[Dict[str, Any]], pricing: Any = None) -> list[Dict[str, Any]]:
+    """Copies of the turns, costed with the caller's own rates."""
+    out: list[Dict[str, Any]] = []
+    for turn in turns:
+        row = dict(turn)
+        bill = row.get("_bill")
+        if not isinstance(bill, dict):
+            bill = _legacy_bill(row)
+            row["_bill"] = bill
+        row["cost"] = _turn_cost(bill, pricing)
+        out.append(row)
+    return out
 
 
 def _turn_identity_key(turn: Dict[str, Any]) -> tuple[Any, ...]:
@@ -545,6 +722,7 @@ def _public_turns(turns: Iterable[Dict[str, Any]]) -> list[Dict[str, Any]]:
         row = dict(turn)
         row.pop("_event_key", None)
         row.pop("_stream_id", None)
+        row.pop("_bill", None)
         row["timestamp"] = _ms_to_iso(int(row.pop("timestamp_ms", 0) or 0))
         result.append(row)
     return result
@@ -643,7 +821,13 @@ def _pricing_signature() -> tuple:
 
 
 def _session_pricing_content_signature() -> tuple:
-    """Content identity used only by persistent Codex/Claude session rows."""
+    """Content identity of the effective pricing data.
+
+    Session rows no longer fold this into their signature — they are priced when
+    read. It remains the input to the v1.5.9 equivalence proof in
+    _legacy_pricing_signature_matches_content, which decides whether a row that
+    version wrote describes the same pricing bytes.
+    """
     try:
         return _PRICING_DB.content_signature()
     except (OSError, AttributeError, ValueError, TypeError):
@@ -862,7 +1046,15 @@ def _parse_codex_session_file(path_str: str, _mtime_ns: int, _size: int, _pricin
                 tokens_cache=cache_read,
                 tokens_out=output_tokens,
                 tokens_reasoning=reasoning_tokens,
-                cost=_PRICING_DB.get_cost(full_model_name, input_tokens, output_tokens, cache_read, 0),
+                # Reasoning output is reported separately and is not billed on
+                # top of output_tokens, so it stays out of the bill.
+                bill=_billing_record(
+                    full_model_name,
+                    "fresh-input",
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    cache_read=cache_read,
+                ),
             )
             if event_key:
                 turn["_event_key"] = event_key
@@ -924,13 +1116,14 @@ def _load_codex_activity_records(
     return tuple(records)
 
 
-def _codex_session_parser_signature(pricing_sig: tuple) -> dict[str, Any]:
+def _codex_session_parser_signature() -> dict[str, Any]:
     return {
         "parser": _session_file_parser_signature("_parse_codex_session_file"),
         "event_key": parser_code_signature(codex_token_event_key),
         "activity": parser_code_signature(build_activity_insights),
         "activity_schema": ACTIVITY_SCHEMA_VERSION,
-        "pricing": pricing_sig,
+        # Deliberately no pricing: see _SESSION_COST_BASIS.
+        "cost_basis": _codex_cost_basis(),
     }
 
 
@@ -946,11 +1139,11 @@ def get_codex_activity_insights() -> dict[str, Any]:
     store.sync_session_files(
         "codex",
         signatures,
-        parser=_codex_session_parser_signature(_session_pricing_content_signature()),
+        parser=_codex_session_parser_signature(),
         parse_file_session=lambda file_sig: _parse_codex_session_file(
             *file_sig, pricing_sig
         ),
-        signature_compatible=_session_signature_compatible,
+        signature_compatible=_codex_session_signature_compatible,
     )
     return build_activity_insights(store.query_session_activity_records("codex"))
 
@@ -1030,7 +1223,14 @@ def _parse_claude_session_file(path_str: str, _mtime_ns: int, _size: int, _prici
                 tokens_cache=cache_read,
                 tokens_out=output_tokens,
                 tokens_reasoning=0,
-                cost=_PRICING_DB.get_cost(model, input_tokens, output_tokens, cache_read, 0),
+                bill=_billing_record(
+                    model,
+                    "input-plus-cache-write",
+                    input_tokens=fresh_input,
+                    output_tokens=output_tokens,
+                    cache_read=cache_read,
+                    cache_write=cache_write,
+                ),
             )
             # Subagents log to subagents/agent-*.jsonl under the parent session id,
             # each row tagged with its agentId. They run concurrently with the main
@@ -1189,6 +1389,7 @@ def _raw_boundary_event_ms(
     *,
     before: bool,
     extra_clause: str = "",
+    exclude_ids: Collection[str] = (),
 ) -> Dict[str, int]:
     """The same lookup for loaders that cannot filter roles in SQL.
 
@@ -1196,16 +1397,19 @@ def _raw_boundary_event_ms(
     the edge and stop at each session's first assistant row. Taking the nearest
     row of any role would turn a user message just outside the window into a
     token event that never happened, inventing activity the scalar loader
-    correctly reports as none.
+    correctly reports as none. Rows the caller excludes are skipped the same way,
+    for the same reason: their ids come from a list this path cannot expand in
+    SQL either.
     """
     pending = {str(session_id) for session_id in session_ids}
     if bound_ms is None or not pending:
         return {}
+    excluded = set(exclude_ids)
     clauses = _boundary_edge_clauses(before, extra_clause)
     try:
         cursor = conn.execute(
             f"""
-            SELECT m.session_id, m.time_created, m.data
+            SELECT m.session_id, m.time_created, m.data, m.id
             FROM message m
             WHERE {' AND '.join(clauses)}
             ORDER BY m.time_created {'DESC' if before else 'ASC'}
@@ -1216,9 +1420,11 @@ def _raw_boundary_event_ms(
         return {}
     found: Dict[str, int] = {}
     try:
-        for session_id, created_ms, data_json in cursor:
+        for session_id, created_ms, data_json, message_id in cursor:
             key = str(session_id)
             if key not in pending or created_ms is None:
+                continue
+            if excluded and str(message_id) in excluded:
                 continue
             try:
                 data = json.loads(data_json)
@@ -1243,6 +1449,7 @@ def _attach_window_context(
     *,
     role_filtered: bool,
     extra_clause: str = "",
+    exclude_ids: Collection[str] = (),
 ) -> None:
     """Hand the summarizer the events just outside the window it asked for."""
     for key, bound_ms, before in (
@@ -1253,7 +1460,12 @@ def _attach_window_context(
             boundary = _sql_boundary_event_ms(conn, bound_ms, before=before, extra_clause=extra_clause)
         else:
             boundary = _raw_boundary_event_ms(
-                conn, bound_ms, sessions.keys(), before=before, extra_clause=extra_clause
+                conn,
+                bound_ms,
+                sessions.keys(),
+                before=before,
+                extra_clause=extra_clause,
+                exclude_ids=exclude_ids,
             )
         for session_id, session in sessions.items():
             event_ms = boundary.get(str(session_id))
@@ -1286,6 +1498,33 @@ def _sqlite_table_exists(conn: sqlite3.Connection, table: str) -> bool:
         return cur.fetchone() is not None
     except sqlite3.Error:
         return False
+
+
+def _mimo_imported_message_ids(conn: sqlite3.Connection) -> set[str]:
+    """The same exclusion as the clause below, resolved without JSON1.
+
+    The raw-JSON loaders exist because SQLite may have no JSON functions at all,
+    so the fallback cannot reach for json_each to expand these id lists — it
+    reads them whole and parses them here.
+    """
+    ids: set[str] = set()
+    for table in ("external_import", "claude_import"):
+        if not _sqlite_table_exists(conn, table):
+            continue
+        try:
+            rows = conn.execute(
+                f"SELECT message_ids FROM {table} WHERE message_ids IS NOT NULL"
+            ).fetchall()
+        except sqlite3.Error:
+            continue
+        for (blob,) in rows:
+            try:
+                parsed = json.loads(blob)
+            except (TypeError, ValueError):
+                continue
+            if isinstance(parsed, list):
+                ids.update(str(value) for value in parsed)
+    return ids
 
 
 def _mimo_import_exclusion_clause(conn: sqlite3.Connection) -> str:
@@ -1344,7 +1583,15 @@ def _append_opencode_turn(
         data_cost = float(recorded_cost or 0.0)
     except (TypeError, ValueError):
         data_cost = 0.0
-    cost = data_cost if data_cost > 0 else _PRICING_DB.get_cost(full_model_name, input_tokens, output_tokens, cache_read, 0)
+    bill = _billing_record(
+        full_model_name,
+        "input-plus-cache-write",
+        input_tokens=fresh_input,
+        output_tokens=output_tokens,
+        cache_read=cache_read,
+        cache_write=cache_write,
+        fixed_cost=data_cost if data_cost > 0 else None,
+    )
     project_path = _opencode_project_path(directory, worktree, cwd, root)
     sid = str(session_id)
     project = _project_from_repo_or_path(None, project_path or None)
@@ -1376,7 +1623,7 @@ def _append_opencode_turn(
             tokens_cache=cache_read,
             tokens_out=output_tokens,
             tokens_reasoning=reasoning_tokens,
-            cost=cost,
+            bill=bill,
         )
     )
 
@@ -1418,7 +1665,8 @@ def _load_opencode_sessions_scalar(
               json_extract(m.data, '$.modelID'),
               json_extract(m.data, '$.providerID'),
               json_extract(m.data, '$.path.cwd'),
-              json_extract(m.data, '$.path.root')
+              json_extract(m.data, '$.path.root'),
+              json_extract(m.data, '$.cost')
             FROM message m
             JOIN session s ON m.session_id = s.id
             LEFT JOIN project p ON s.project_id = p.id
@@ -1444,6 +1692,7 @@ def _load_opencode_sessions_scalar(
             provider,
             cwd,
             root,
+            recorded_cost,
         ) in cur.fetchall():
             _append_opencode_turn(
                 sessions,
@@ -1463,6 +1712,7 @@ def _load_opencode_sessions_scalar(
                 root=root,
                 title=title,
                 slug=slug,
+                recorded_cost=recorded_cost,
             )
         _attach_window_context(conn, sessions, since_ms, until_ms, role_filtered=True)
     finally:
@@ -1538,6 +1788,7 @@ def _load_opencode_sessions_raw_json(
                 root=path_info.get("root"),
                 title=title,
                 slug=slug,
+                recorded_cost=data.get("cost"),
             )
         _attach_window_context(conn, sessions, since_ms, until_ms, role_filtered=False)
     finally:
@@ -1660,10 +1911,14 @@ def _parse_pi_session_file(path_str: str, _mtime_ns: int, _size: int, _pricing_s
             except Exception:
                 cost_total = 0.0
             full_model_name = f"{provider}/{model}" if provider else model
-            cost = (
-                cost_total
-                if cost_total > 0
-                else _PRICING_DB.get_cost(full_model_name, fresh_input, output_tokens, cache_read, cache_write)
+            bill = _billing_record(
+                full_model_name,
+                "split-cache-write",
+                input_tokens=fresh_input,
+                output_tokens=output_tokens,
+                cache_read=cache_read,
+                cache_write=cache_write,
+                fixed_cost=cost_total if cost_total > 0 else None,
             )
             turn_index += 1
             turns.append(
@@ -1675,7 +1930,7 @@ def _parse_pi_session_file(path_str: str, _mtime_ns: int, _size: int, _pricing_s
                     tokens_cache=cache_read,
                     tokens_out=output_tokens,
                     tokens_reasoning=0,
-                    cost=cost,
+                    bill=bill,
                 )
             )
 
@@ -1943,7 +2198,14 @@ def _parse_kimi_session_file(path_str: str, _mtime_ns: int, _size: int, _pricing
                 tokens_cache=cache_read,
                 tokens_out=output_tokens,
                 tokens_reasoning=0,
-                cost=_PRICING_DB.get_cost(model, tokens_in, output_tokens, cache_read, 0),
+                bill=_billing_record(
+                    model,
+                    "input-plus-cache-write",
+                    input_tokens=fresh_input,
+                    output_tokens=output_tokens,
+                    cache_read=cache_read,
+                    cache_write=cache_write,
+                ),
             )
             turn["_event_key"] = event_key
             # Agents inside one session run concurrently, so their events are
@@ -1982,13 +2244,20 @@ def _load_kimi_sessions(signature: tuple[tuple[str, int, int], ...], pricing_sig
     return sessions
 
 
-def _kimi_session_parser_signature(pricing_sig: tuple) -> dict[str, Any]:
+def _kimi_session_parser_signature() -> dict[str, Any]:
     return {
         "parser": _session_file_parser_signature("_parse_kimi_session_file"),
-        # KimiParser carries the wire-model map that decides each turn's model
-        # and cost; its module hash busts cached rows when that map changes.
+        # KimiParser carries the wire-model map that decides each turn's model;
+        # its module hash busts cached rows when that map changes.
         "model_map": parser_code_signature(KimiParser),
-        "pricing": pricing_sig,
+        "cost_basis": _SESSION_COST_BASIS,
+    }
+
+
+def _claude_session_parser_signature() -> dict[str, Any]:
+    return {
+        "parser": _session_file_parser_signature("_parse_claude_session_file"),
+        "cost_basis": _SESSION_COST_BASIS,
     }
 
 
@@ -2140,13 +2409,10 @@ def _load_mimo_sessions_raw_json(
     sessions: Dict[str, Dict[str, Any]] = {}
     conn = sqlite3.connect(str(db_path))
     try:
-        import_clause = _mimo_import_exclusion_clause(conn)
-        if window_clause and import_clause:
-            where_clause = f"{window_clause} AND {import_clause}"
-        elif import_clause:
-            where_clause = f" WHERE {import_clause}"
-        else:
-            where_clause = window_clause
+        # This loader runs when SQLite has no JSON functions, so the imported ids
+        # are read whole and matched in Python rather than through json_each.
+        imported_ids = _mimo_imported_message_ids(conn)
+        where_clause = window_clause
 
         session_cols = _sqlite_columns(conn, "session")
         title_expr = "s.title" if "title" in session_cols else "''"
@@ -2161,7 +2427,8 @@ def _load_mimo_sessions_raw_json(
               {slug_expr},
               COALESCE(p.worktree, ''),
               m.time_created,
-              m.data
+              m.data,
+              m.id
             FROM message m
             JOIN session s ON m.session_id = s.id
             LEFT JOIN project p ON s.project_id = p.id
@@ -2171,7 +2438,9 @@ def _load_mimo_sessions_raw_json(
             args,
         )
         turn_index_by_session: Dict[str, int] = {}
-        for session_id, directory, title, slug, worktree, created_ms, data_json in cur.fetchall():
+        for session_id, directory, title, slug, worktree, created_ms, data_json, message_id in cur.fetchall():
+            if imported_ids and str(message_id) in imported_ids:
+                continue
             try:
                 data = json.loads(data_json)
             except Exception:
@@ -2207,7 +2476,9 @@ def _load_mimo_sessions_raw_json(
                 slug=slug,
                 recorded_cost=data.get("cost"),
             )
-        _attach_window_context(conn, sessions, since_ms, until_ms, role_filtered=False, extra_clause=import_clause)
+        _attach_window_context(
+            conn, sessions, since_ms, until_ms, role_filtered=False, exclude_ids=imported_ids
+        )
     finally:
         conn.close()
 
@@ -2266,6 +2537,11 @@ def _session_records_to_raw_sessions(tool: str, records: Iterable[Dict[str, Any]
         if not session_id or not record.get("turns"):
             continue
         raw = {key: value for key, value in record.items() if key != "_activity"}
+        # Stored rows are price-neutral: they carry the billing inputs, not a
+        # cost this process has to agree with. Pricing them here is what lets a
+        # rate change skip the logs, and lets two servers on different pricing
+        # files share one database without rewriting each other's rows.
+        raw["turns"] = _repriced_turns(record.get("turns") or [])
         raw["tool"] = raw.get("tool") or tool
         raw["session_id"] = session_id
         # Rows written by older versions may carry a falsy project; _merge_raw_session
@@ -2296,13 +2572,11 @@ def _stored_sessions_for_tool(
         store.sync_session_files(
             "codex",
             signatures,
-            parser=_codex_session_parser_signature(
-                _session_pricing_content_signature()
-            ),
+            parser=_codex_session_parser_signature(),
             parse_file_session=lambda file_sig: _parse_codex_session_file(
                 *file_sig, pricing_sig
             ),
-            signature_compatible=_session_signature_compatible,
+            signature_compatible=_codex_session_signature_compatible,
         )
     elif tool == "claude":
         all_sigs: list[tuple[str, int, int]] = []
@@ -2310,14 +2584,10 @@ def _stored_sessions_for_tool(
             all_sigs.extend(_iter_file_signatures(projects_dir))
         all_sigs.sort(key=lambda item: item[0])
         pricing_sig = _pricing_signature()
-        parser_sig = {
-            "parser": _session_file_parser_signature("_parse_claude_session_file"),
-            "pricing": _session_pricing_content_signature(),
-        }
         store.sync_session_files(
             "claude",
             tuple(all_sigs),
-            parser=parser_sig,
+            parser=_claude_session_parser_signature(),
             parse_file_session=lambda file_sig: _parse_claude_session_file(
                 *file_sig, pricing_sig
             ),
@@ -2329,10 +2599,11 @@ def _stored_sessions_for_tool(
         store.sync_session_files(
             "kimi",
             signatures,
-            parser=_kimi_session_parser_signature(_session_pricing_content_signature()),
+            parser=_kimi_session_parser_signature(),
             parse_file_session=lambda file_sig: _parse_kimi_session_file(
                 *file_sig, pricing_sig
             ),
+            signature_compatible=_session_signature_compatible,
         )
     else:
         raise ValueError(f"Unsupported stored session tool: {tool}")
@@ -2352,6 +2623,18 @@ def _stored_sessions_for_tool(
     return sessions
 
 
+def _window_bounds(
+    period: str,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+) -> tuple[Optional[int], Optional[int]]:
+    """Epoch-ms window for a request, dates winning over the named period."""
+    if date_from and date_to:
+        since_dt, until_dt = parse_date_range(date_from, date_to)
+        return int(since_dt.timestamp() * 1000), int(until_dt.timestamp() * 1000)
+    return _period_range(period)
+
+
 def get_sessions_data(
     tool: str,
     period: str,
@@ -2364,13 +2647,7 @@ def get_sessions_data(
     if key not in SESSION_TOOLS:
         raise ValueError(f"Unsupported session tool: {tool}")
 
-    # If specific dates are provided, use them instead of period
-    if date_from and date_to:
-        since_dt, until_dt = parse_date_range(date_from, date_to)
-        since_ms = int(since_dt.timestamp() * 1000)
-        until_ms = int(until_dt.timestamp() * 1000)
-    else:
-        since_ms, until_ms = _period_range(period)
+    since_ms, until_ms = _window_bounds(period, date_from, date_to)
 
     sessions = []
     active_intervals: list[tuple[int, int]] = []
@@ -2411,6 +2688,155 @@ def get_sessions_data(
         },
         # Echo the effective review-session default (param, else TOKDASH_INCLUDE_CODEX_GUARDIAN)
         # so the dashboard toggle can reflect the server default before the user opts in.
+        "include_review_sessions": include_codex_review,
+        "timestamp": datetime.now().isoformat(),
+    }
+
+
+def _active_time_window(
+    since_ms: Optional[int],
+    until_ms: Optional[int],
+    *,
+    include_codex_review: bool,
+) -> tuple[Dict[str, Dict[str, Any]], Dict[str, str], list[tuple[int, int]]]:
+    """Per-tool runtime for one window, plus every interval behind it.
+
+    The intervals come back raw because the caller merges them across tools: two
+    tools working the same minute is one minute of clock time, and that can only
+    be seen with the whole set in hand.
+    """
+
+    def tool_active_time(key: str) -> tuple[list[tuple[int, int]], int, int]:
+        intervals: list[tuple[int, int]] = []
+        agent_ms = 0
+        session_count = 0
+        for raw in _raw_sessions_for_tool(key, since_ms=since_ms, until_ms=until_ms).values():
+            if key == "codex" and raw.get("is_review_session") and not include_codex_review:
+                continue
+            summary = _summarize_session(raw, since_ms=since_ms, until_ms=until_ms)
+            if not summary:
+                continue
+            session_count += 1
+            intervals.extend(summary.get("_active_intervals", []))
+            agent_ms += int(summary.get("active_ms_sum", 0) or 0)
+        return intervals, agent_ms, session_count
+
+    by_tool: Dict[str, Dict[str, Any]] = {}
+    unavailable: Dict[str, str] = {}
+    all_intervals: list[tuple[int, int]] = []
+    for key in SESSION_TOOLS:
+        try:
+            intervals, agent_ms, session_count = tool_active_time(key)
+        except Exception as error:  # noqa: BLE001 - one broken source must not blank the rest
+            logger.warning("active time unavailable for %s: %s", key, error, exc_info=True)
+            unavailable[key] = str(error) or error.__class__.__name__
+            continue
+        all_intervals.extend(intervals)
+        by_tool[key] = {
+            "tool_label": TOOL_LABELS.get(key, key.title()),
+            "session_count": session_count,
+            "active_ms": _merged_interval_ms(intervals),
+            "active_ms_sum": agent_ms,
+        }
+    return by_tool, unavailable, all_intervals
+
+
+def _previous_window_bounds(
+    period: str,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+) -> tuple[Optional[int], Optional[int]]:
+    """The window the Overview compares against, matching /api/usage's choice.
+
+    An explicit range is compared with the range of equal length ending where it
+    begins; a named period defers to compute, so the runtime delta and the token,
+    cost and message deltas beside it always mean the same "previous period".
+    """
+    if date_from and date_to:
+        since_dt, until_dt = parse_date_range(date_from, date_to)
+        return _dt_to_ms(since_dt - (until_dt - since_dt)), _dt_to_ms(since_dt)
+    since_dt, until_dt = previous_period_range(period)
+    return _dt_to_ms(since_dt), _dt_to_ms(until_dt)
+
+
+def _active_time_comparison(
+    period: str,
+    date_from: Optional[str],
+    date_to: Optional[str],
+    *,
+    include_codex_review: bool,
+    active_ms: int,
+    active_ms_sum: int,
+) -> Optional[Dict[str, Any]]:
+    """The same figures for the previous window, or None if it cannot be read.
+
+    Aggregating a second window is the cost of the delta; the route caches its
+    response, so it is paid once per window rather than per request. A failure
+    here drops the comparison rather than the runtime the card exists to show.
+    """
+    try:
+        prev_by_tool, _, prev_intervals = _active_time_window(
+            *_previous_window_bounds(period, date_from, date_to),
+            include_codex_review=include_codex_review,
+        )
+    except Exception as error:  # noqa: BLE001 - the current window is what matters
+        logger.warning("active time comparison unavailable: %s", error, exc_info=True)
+        return None
+    prev_active_ms = _merged_interval_ms(prev_intervals)
+    prev_active_ms_sum = sum(int(row["active_ms_sum"]) for row in prev_by_tool.values())
+    return {
+        "active_ms_prev": prev_active_ms,
+        "active_ms_sum_prev": prev_active_ms_sum,
+        "active_ms_pct": pct_change(active_ms, prev_active_ms),
+        "active_ms_sum_pct": pct_change(active_ms_sum, prev_active_ms_sum),
+    }
+
+
+def get_active_time_data(
+    period: str = "today",
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    include_review_sessions: Optional[bool] = None,
+) -> Dict[str, Any]:
+    """Active time across every session tool, merged into one clock.
+
+    The per-tool payloads cannot answer the Overview's question — how long was
+    *any* agent working — because adding their `active_ms` counts the minutes two
+    tools ran at once twice over. Here the whole interval set is in hand, so the
+    union is real: `active_ms` is clock time across all tools, `active_ms_sum`
+    stays the additive agent time.
+
+    One tool failing drops that tool rather than the whole figure, and the payload
+    names the ones it could not read. Reading and summarizing are covered alike: a
+    single unparseable timestamp in one stored session would otherwise take the
+    whole Overview KPI down with it.
+    """
+    include_codex_review = _include_codex_review_sessions(include_review_sessions)
+    cap_ms = active_gap_cap_ms()
+
+    by_tool, unavailable, all_intervals = _active_time_window(
+        *_window_bounds(period, date_from, date_to), include_codex_review=include_codex_review
+    )
+    active_ms = _merged_interval_ms(all_intervals)
+    active_ms_sum = sum(int(row["active_ms_sum"]) for row in by_tool.values())
+
+    return {
+        "period": period,
+        "active_ms": active_ms,
+        "active_ms_sum": active_ms_sum,
+        "comparison": _active_time_comparison(
+            period,
+            date_from,
+            date_to,
+            include_codex_review=include_codex_review,
+            active_ms=active_ms,
+            active_ms_sum=active_ms_sum,
+        ),
+        "by_tool": by_tool,
+        "unavailable_tools": sorted(unavailable),
+        "active_gap_cap_ms": cap_ms,
+        "active_time_estimated": True,
+        "active_time_method": "capped-inter-event-gap",
         "include_review_sessions": include_codex_review,
         "timestamp": datetime.now().isoformat(),
     }

@@ -41,7 +41,6 @@ def _run_readable_token_js(
             "function normalizeTokenCount(value) {",
             "function normalizeOverviewTokenCount(value) {",
             "function formatCompactTokenCount(value) {",
-            "function formatReadableTokenCount(value) {",
             "function formatTokenCount(value, includeUnit = false) {",
             "function loadOverviewReadableTokensPreference(storage = null) {",
             "function saveOverviewReadableTokensPreference(enabled, storage = null) {",
@@ -78,26 +77,28 @@ def _run_readable_token_js(
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
 def test_readable_token_formatter_boundaries(tmp_path: Path) -> None:
+    # The Overview KPI shows the bare number: its card is already labelled
+    # "Total Tokens", and the unit only costs width in a six-card row.
     cases = {
-        0: "0 tokens",
-        -1: "0 tokens",
-        999: "999 tokens",
-        1_000: "1K tokens",
-        842_315: "842.3K tokens",
-        999_999: "1M tokens",
-        1_000_000: "1M tokens",
-        1_049_999: "1M tokens",
-        1_050_000: "1.1M tokens",
-        482_563_219: "482.6M tokens",
-        999_999_999: "1B tokens",
-        1_000_000_000: "1B tokens",
-        1_249_000_000: "1.2B tokens",
-        1_000_000_000_000: "1T tokens",
+        0: "0",
+        -1: "0",
+        999: "999",
+        1_000: "1K",
+        842_315: "842.3K",
+        999_999: "1M",
+        1_000_000: "1M",
+        1_049_999: "1M",
+        1_050_000: "1.1M",
+        482_563_219: "482.6M",
+        999_999_999: "1B",
+        1_000_000_000: "1B",
+        1_249_000_000: "1.2B",
+        1_000_000_000_000: "1T",
     }
     result = _run_readable_token_js(
         tmp_path,
         "Object.fromEntries(payload.map(value => "
-        "[String(value), formatReadableTokenCount(value)]))",
+        "[String(value), formatCompactTokenCount(value)]))",
         list(cases),
     )
     assert result == {str(key): value for key, value in cases.items()}
@@ -195,7 +196,7 @@ def test_readable_token_render_and_toggle_do_not_refetch() -> None:
     i18n = _extract_js_function(source, "function applyI18n() {")
 
     assert "overviewTotalTokensRaw = normalizeOverviewTokenCount(value);" in renderer
-    assert "formatReadableTokenCount(overviewTotalTokensRaw)" in renderer
+    assert "formatCompactTokenCount(overviewTotalTokensRaw)" in renderer
     assert "formatNumber(overviewTotalTokensRaw)" in renderer
     assert "totalTokensExact" in renderer
     assert "aria-describedby" in renderer
@@ -210,7 +211,10 @@ def test_readable_token_render_and_toggle_do_not_refetch() -> None:
 
 def test_readable_token_scope_covers_all_token_views() -> None:
     source = INDEX_HTML.read_text(encoding="utf-8")
-    assert source.count("formatReadableTokenCount(") == 2
+    # The KPI value is unitless; the exact count behind it still reads "N tokens"
+    # for the tooltip and the aria-label.
+    assert "formatReadableTokenCount" not in source
+    assert "const exact = `${formatNumber(overviewTotalTokensRaw)} ${t('tokensUnit')}`;" in source
     assert source.count("formatTokenCount(") >= 50
     assert (
         "document.getElementById('totalTokens').textContent = "

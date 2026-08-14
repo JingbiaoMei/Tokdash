@@ -78,7 +78,7 @@ def test_previous_period_range_today_uses_full_yesterday(monkeypatch):
 
     monkeypatch.setattr(compute, "_current_period_range", lambda period: (current_since, current_until))
 
-    prev_since, prev_until = compute._compute_previous_period_range("today")
+    prev_since, prev_until = compute.previous_period_range("today")
 
     assert prev_since == current_since - timedelta(days=1)
     assert prev_until == current_since
@@ -90,7 +90,7 @@ def test_previous_period_range_three_days_uses_full_previous_three_days(monkeypa
 
     monkeypatch.setattr(compute, "_current_period_range", lambda period: (current_since, current_until))
 
-    prev_since, prev_until = compute._compute_previous_period_range("3days")
+    prev_since, prev_until = compute.previous_period_range("3days")
 
     assert prev_since == datetime(2026, 3, 26, 0, 0, tzinfo=timezone.utc)
     assert prev_until == current_since
@@ -102,7 +102,7 @@ def test_previous_period_range_month_uses_full_previous_calendar_month(monkeypat
 
     monkeypatch.setattr(compute, "_current_period_range", lambda period: (current_since, current_until))
 
-    prev_since, prev_until = compute._compute_previous_period_range("month")
+    prev_since, prev_until = compute.previous_period_range("month")
 
     assert prev_since == datetime(2026, 2, 1, 0, 0, tzinfo=timezone.utc)
     assert prev_until == current_since

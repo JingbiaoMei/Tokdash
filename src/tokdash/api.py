@@ -36,6 +36,7 @@ from .compute import compute_stats, compute_usage_with_comparison, get_openclaw_
 from .dateutil import parse_date_range
 from .sessions import (
     SESSION_TOOLS,
+    get_active_time_data,
     get_codex_activity_insights,
     get_codex_session_detail,
     get_codex_sessions_data,
@@ -227,6 +228,17 @@ def _session_response_cache_key(
     )
 
 
+def _active_time_cache_key(
+    period: str,
+    date_from: Optional[str],
+    date_to: Optional[str],
+    include_review_sessions: Optional[bool],
+) -> str:
+    return _pricing_cache_key(
+        f"active_time_{period}_{date_from}_{date_to}_{include_review_sessions}"
+    )
+
+
 def _warm_caches() -> None:
     """Best-effort background warm so the first user request hits hot caches.
 
@@ -260,6 +272,12 @@ def _warm_caches() -> None:
                 ),
             )
         )
+    warmers.append(
+        (
+            _active_time_cache_key("today", today, today, None),
+            lambda: get_active_time_data("today", today, today, include_review_sessions=None),
+        )
+    )
     warmers.append((ACTIVITY_INSIGHTS_CACHE_KEY, get_codex_activity_insights))
     for key, fetch in warmers:
         try:
@@ -1202,6 +1220,43 @@ def get_sessions(
                 date_to,
                 include_review_sessions=include_review_sessions,
             ),
+        )
+    except CacheBackpressureError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/active-time")
+def get_active_time(
+    period: str = "today",
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    include_review_sessions: Optional[bool] = None,
+    refresh: bool = False,
+) -> Dict[str, Any]:
+    """Cross-tool active time for the Overview KPI.
+
+    Kept off /api/usage so the Overview's first paint still costs one request:
+    this one reads every session tool, so the card fills in when it lands.
+    ``refresh`` bypasses the response cache, as /api/usage does, so the dashboard's
+    Refresh button can clear a stale figure or one missing a tool that failed.
+    """
+    _validate_date_params(date_from, date_to)
+    try:
+        cache_key = _active_time_cache_key(period, date_from, date_to, include_review_sessions)
+        return _cached_route(
+            "/api/active-time",
+            cache_key,
+            lambda: get_active_time_data(
+                period,
+                date_from,
+                date_to,
+                include_review_sessions=include_review_sessions,
+            ),
+            force_refresh=refresh,
         )
     except CacheBackpressureError as e:
         raise HTTPException(status_code=503, detail=str(e))

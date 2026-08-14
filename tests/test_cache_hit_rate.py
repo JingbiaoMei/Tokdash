@@ -6,7 +6,7 @@ Output and reasoning tokens are excluded. None when there is no prompt input.
 """
 import tokdash.compute as C
 from tokdash.compute import cache_hit_rate, parse_entries_json
-from tokdash.sessions import _build_turn, _summarize_session
+from tokdash.sessions import _billing_record, _build_turn, _summarize_session
 
 
 def test_helper_edges_and_math():
@@ -83,8 +83,8 @@ def test_compute_usage_by_tool_combined_and_header(monkeypatch):
 
 
 def test_sessions_turn_and_summary_rate():
-    t1 = _build_turn(0, 1000, "m", tokens_in=200, tokens_cache=300, tokens_out=50, tokens_reasoning=0, cost=0.0)
-    t2 = _build_turn(1, 2000, "m", tokens_in=0, tokens_cache=0, tokens_out=10, tokens_reasoning=0, cost=0.0)
+    t1 = _build_turn(0, 1000, "m", tokens_in=200, tokens_cache=300, tokens_out=50, tokens_reasoning=0, bill=_billing_record("m", "fresh-input"))
+    t2 = _build_turn(1, 2000, "m", tokens_in=0, tokens_cache=0, tokens_out=10, tokens_reasoning=0, bill=_billing_record("m", "fresh-input"))
     assert t1["cache_hit_rate"] == 0.6
     assert t2["cache_hit_rate"] is None  # output-only turn -> n/a
 

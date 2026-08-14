@@ -811,7 +811,7 @@ def _current_period_range(period: str) -> tuple[datetime, datetime]:
     return since_local.astimezone(timezone.utc), now_local.astimezone(timezone.utc)
 
 
-def _compute_previous_period_range(period: str) -> tuple[datetime, datetime]:
+def previous_period_range(period: str) -> tuple[datetime, datetime]:
     current_since, current_until = _current_period_range(period)
     if period == "month":
         prev_until = current_since
@@ -842,7 +842,7 @@ def _compute_previous_usage(period: str, date_from: Optional[str] = None, date_t
         openclaw_data = get_session_usage_range(prev_since, prev_until)
         coding_data = get_tools_data_for_range(prev_since, prev_until)
     else:
-        since, until = _compute_previous_period_range(period)
+        since, until = previous_period_range(period)
         openclaw_data = get_session_usage_range(since, until)
         coding_data = get_tools_data_for_range(since, until)
 
@@ -859,7 +859,7 @@ def _compute_previous_usage(period: str, date_from: Optional[str] = None, date_t
     }
 
 
-def _pct_change(current: float, previous: float) -> Optional[float]:
+def pct_change(current: float, previous: float) -> Optional[float]:
     if previous == 0:
         return None
     return round(((current - previous) / previous) * 100, 1)
@@ -873,9 +873,9 @@ def compute_usage_with_comparison(period: str, date_from: Optional[str] = None, 
         "tokens_prev": previous["total_tokens"],
         "cost_prev": previous["total_cost"],
         "messages_prev": previous["total_messages"],
-        "tokens_pct": _pct_change(current["total_tokens"], previous["total_tokens"]),
-        "cost_pct": _pct_change(current["total_cost"], previous["total_cost"]),
-        "messages_pct": _pct_change(current["total_messages"], previous["total_messages"]),
+        "tokens_pct": pct_change(current["total_tokens"], previous["total_tokens"]),
+        "cost_pct": pct_change(current["total_cost"], previous["total_cost"]),
+        "messages_pct": pct_change(current["total_messages"], previous["total_messages"]),
     }
     return current
 

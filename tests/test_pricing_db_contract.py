@@ -63,12 +63,59 @@ def test_deepseek_v4_flash_0731_pricing():
     db = PricingDatabase()
 
     expected_cost = (
-        1000 * 0.14 + 2000 * 0.28 + 3000 * 0.0028 + 4000 * 0.14
+        1000 * 0.44 + 2000 * 1.32 + 3000 * 0.014 + 4000 * 0.44
     ) / 1_000_000
     for model in ["deepseek-v4-flash-0731", "deepseek/deepseek-v4-flash-0731"]:
         cost = db.get_cost(model, 1000, 2000, 3000, 4000)
         assert abs(cost - expected_cost) < 1e-12, (
             f"{model!r} should resolve to DeepSeek V4 Flash 0731 pricing"
+        )
+
+
+def test_deepseek_v4_pro_0813_pricing():
+    """DeepSeek V4 Pro 0813 must match the official cache-hit/miss/output rates."""
+    db = PricingDatabase()
+
+    expected_cost = (
+        1000 * 1.32 + 2000 * 3.96 + 3000 * 0.044 + 4000 * 1.32
+    ) / 1_000_000
+    for model in ["deepseek-v4-pro-0813", "deepseek/deepseek-v4-pro-0813"]:
+        cost = db.get_cost(model, 1000, 2000, 3000, 4000)
+        assert abs(cost - expected_cost) < 1e-12, (
+            f"{model!r} should resolve to DeepSeek V4 Pro 0813 pricing"
+        )
+
+
+def test_grok_4_6_pricing():
+    """Grok 4.6 must match xAI's standard-tier (sub-200K prompt) rates."""
+    db = PricingDatabase()
+
+    expected_cost = (
+        1000 * 2.0 + 2000 * 6.0 + 3000 * 0.5 + 4000 * 2.0
+    ) / 1_000_000
+    for model in ["grok-4.6", "x-ai/grok-4.6", "xai/grok-4.6"]:
+        cost = db.get_cost(model, 1000, 2000, 3000, 4000)
+        assert abs(cost - expected_cost) < 1e-12, (
+            f"{model!r} should resolve to Grok 4.6 standard-tier pricing"
+        )
+
+
+def test_glm_5_3_resolves():
+    """GLM-5.3 and its aliases must resolve to a non-zero price.
+
+    Rates are provisional (z.ai had not published per-token pricing as of
+    2026-08-14), so this asserts resolution only -- deliberately not exact
+    values, which would pin an unofficial number as if it were confirmed.
+    """
+    db = PricingDatabase()
+
+    base_cost = db.get_cost("glm-5.3", 1000, 2000, 0, 0)
+    assert base_cost > 0.0, "glm-5.3 should resolve"
+
+    for alias in ["glm5.3", "glm-5-3", "z-ai/glm-5.3", "zhipu/glm-5.3"]:
+        alias_cost = db.get_cost(alias, 1000, 2000, 0, 0)
+        assert abs(alias_cost - base_cost) < 1e-12, (
+            f"Alias {alias!r} should resolve to glm-5.3 pricing"
         )
 
 

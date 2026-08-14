@@ -4,7 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## Unreleased
+## 1.8.0 - 2026-08-14
+
+### Added
+
+- Added DeepSeek Harness (`dsh`) as a token, cost and session source. Tokdash reads `$DSH_HOME/sessions/*/*/session.jsonl.zstd` (or an uncompressed `session.jsonl`, defaulting to `~/.dsh`), decodes its concatenated zstd frames, folds each step's early usage chunk into its finalized message instead of double-counting it, skips the parent-owned prefix of forked sessions, and prices DeepSeek models through the existing pricing database. Sessions appear in the Session Explorer with title, project and active time, and sync into the persistent store like the other file-backed clients.
+- Added a DeepSeek Harness brand mark to the dashboard and the README supported-tools strip.
+- Added GLM 5.3, DeepSeek V4 Pro 0813 and Grok 4.6 pricing.
+
+### Changed
+
+- Updated the DeepSeek V4 Flash and V4 Pro rates to the current official prices.
 
 ## 1.7.0 - 2026-08-14
 

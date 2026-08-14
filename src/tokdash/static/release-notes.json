@@ -1,6 +1,26 @@
 {
-  "current": "1.7.0",
+  "current": "1.8.0",
   "releases": [
+    {
+      "version": "1.8.0",
+      "date": "2026-08-14",
+      "sections": [
+        {
+          "type": "added",
+          "items": [
+            "Added DeepSeek Harness (dsh) as a token, cost and session source — each step's early usage chunk folds into its finalized message, and a forked session's inherited prefix is skipped, so nothing is double-counted.",
+            "DeepSeek Harness sessions appear in the Session Explorer with title, project and active time, and sync into the persistent store.",
+            "Added GLM 5.3, DeepSeek V4 Pro and Grok 4.6 pricing, plus a DeepSeek Harness brand mark."
+          ]
+        },
+        {
+          "type": "changed",
+          "items": [
+            "Updated the DeepSeek V4 Flash and V4 Pro rates to the current official prices."
+          ]
+        }
+      ]
+    },
     {
       "version": "1.7.0",
       "date": "2026-08-14",

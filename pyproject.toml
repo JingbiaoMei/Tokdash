@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tokdash"
-version = "1.7.0"
+version = "1.8.0"
 description = "Local token & cost dashboard for AI coding tools"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -32,6 +32,8 @@ dependencies = [
   # PEP 440-correct version comparison for the opt-in update check (updatecheck.py); the
   # hand-rolled fallback is only correct for plain X.Y.Z releases, not pre/post/dev.
   "packaging>=21.0",
+  # DeepSeek Harness session logs are concatenated zstd frames (sources/dsh_log.py).
+  "zstandard>=0.23",
 ]
 
 [project.urls]

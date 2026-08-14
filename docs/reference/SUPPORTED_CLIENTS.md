@@ -31,6 +31,7 @@ Tokdash reads usage **locally** from each tool's own session/log files — nothi
 - **Pi**: `~/.pi/agent/sessions/` (override via `PI_AGENT_DIR` env var, comma-separated list of dirs)
 - **GitHub Copilot CLI**: `~/.copilot/otel/` (full input/cache/cost data — set `COPILOT_OTEL_FILE_EXPORTER_PATH` to enable OTel export) and `~/.copilot/session-state/*/events.jsonl` (output-only fallback when OTel is not enabled)
 - **Hermes**: `~/.hermes/state.db` (override via `HERMES_HOME` env var, comma-separated list of dirs)
+- **DeepSeek Harness**: `$DSH_HOME/sessions/<project-key>/<session-id>/session.jsonl.zstd` (or an uncompressed `session.jsonl`; `DSH_HOME` defaults to `~/.dsh`)
 
 ---
 

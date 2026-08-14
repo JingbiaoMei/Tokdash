@@ -22,6 +22,7 @@
   <a href="https://pi.dev/" title="Pi"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/pi.png" alt="Pi" height="34"></a>
   <a href="https://github.com/features/copilot" title="GitHub Copilot CLI"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/copilot.png" alt="GitHub Copilot CLI" height="34"></a>
   <a href="https://hermes-agent.nousresearch.com/" title="Hermes"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/hermes.png" alt="Hermes" height="34"></a>
+  <a href="https://github.com/deepseek-ai/deepseek-harness" title="DeepSeek Harness"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/dsh.png" alt="DeepSeek Harness" height="34"></a>
 </p>
 
 <p align="center">
@@ -36,15 +37,15 @@
   <b>无需安装即可体验 → <a href="https://tokdash.github.io/demo/">tokdash.github.io/demo</a></b>
 </p>
 
+> [!NOTE]
+> **首日支持 DeepSeek Harness。** 从本地 `~/.dsh` 读取 token、费用与会话，无需任何配置。[支持的客户端 →](docs/reference/SUPPORTED_CLIENTS.md)
+
 > [!TIP]
 > **Tokdash Companion 状态栏应用的 macOS 与 Windows 无签名预览版现已发布。** 无需一直打开仪表盘，即可查看今日费用与订阅额度。[查看截图、下载并设置 →](#tokdash-companion-状态栏应用)
 
 <p align="center">
   <b>性能：冷启动使用量扫描比 0.6.0 之前快约 30×，在同一台机器的本地基准中比 ccusage 快 15×。</b>
 </p>
-
-> [!IMPORTANT]
-> **保留你的历史：** Claude Code 与 Gemini CLI 默认会删除超过约 30 天的本地会话，因此 Tokdash 早期月份的统计可能会悄悄变少——每个客户端改一行配置即可避免（[历史数据保留](#历史数据保留)）。
 
 ## 目录
 
@@ -370,7 +371,7 @@ Tokdash 默认**只监听 localhost**。
 
 持久化使用量数据库（默认开启）：
 
-Tokdash 默认会在 `~/.tokdash/usage.sqlite3` 维护一个本地 SQLite 索引。它保存解析后的 token 行以及 Codex/Claude/Kimi 会话摘要，让仪表盘和 API 的重复读取可以走索引 SQL，而不是每次重新解析所有源日志。源日志仍然是事实来源；这个 DB 是本地性能索引，禁用或不可用时 Tokdash 会回退到实时解析。
+Tokdash 默认会在 `~/.tokdash/usage.sqlite3` 维护一个本地 SQLite 索引。它保存解析后的 token 行以及 Codex/Claude/Kimi/DeepSeek Harness 会话摘要，让仪表盘和 API 的重复读取可以走索引 SQL，而不是每次重新解析所有源日志。源日志仍然是事实来源；这个 DB 是本地性能索引，禁用或不可用时 Tokdash 会回退到实时解析。
 
 缓存的会话行不含价格：它们只保存每轮的计费输入（模型、新增输入、缓存读取与写入、输出），费用在读取时按当前进程加载的价格计算。因此修改价格会立即重算，而不需要重新读取数 GB 日志；共用同一个数据库的两个 Tokdash 版本（例如已安装的服务与源码检出）也不会因价格不同而互相作废对方的行。解析器变更与源文件变更仍会照常触发重新解析。此前写入的行（包括 `TOKDASH_USAGE_DB_DURABLE` 在源日志消失后保留的行）会按存储的合计值重算，结果一致，但无法再区分 Claude/Kimi 的缓存写入与新增输入；只有重新解析这些日志才能恢复该区分。Codex 按 `provider/model` 计费但只存裸模型名，因此它的旧行不会被复用，而是重新解析一次。
 
@@ -429,6 +430,8 @@ tokdash quota show
 
 Tokdash 还会从 `$GROK_HOME/logs/unified.jsonl` 本地统计 Grok Build token。推理记录会提供 prompt、缓存 prompt、completion 与 reasoning token；Tokdash 使用同一 CLI 进程的模型事件完成归属，并通过常规价格数据库计算费用。缺少模型事件的记录会被跳过，不会猜测价格。
 
+DeepSeek Harness（`dsh`）的用量与会话从 `$DSH_HOME/sessions/*/*/session.jsonl.zstd`（或未压缩的 `session.jsonl`）本地读取，`DSH_HOME` 默认为 `~/.dsh`。每个日志由多个独立 zstd 帧拼接而成；Tokdash 会解码全部帧，把每个 step 的早期 usage chunk 折叠进最终消息而不是重复计数，并跳过 fork 会话继承自父会话的前缀，确保父会话与子会话不会对同一批 token 重复计费。
+
 `tokdash setup` 会提供一个可选的额度步骤（按服务商的网络授权，默认为否，以及轮询间隔），`tokdash doctor` 会报告额度状态：总开关、按服务商授权、终止开关、生效间隔及其来源、上次轮询时间，以及已保存的快照数量。
 
 额度快照及其历史保存在本地使用量数据库（`usage.sqlite3`，默认开启），**默认永久保留**——将 `TOKDASH_QUOTA_RETENTION_DAYS` 设为正整数天数可开启对更早快照的清理。如果你用 `TOKDASH_USAGE_DB=0` 关闭本地持久化，「额度」标签页将失去主要数据来源：不再保留快照历史，后台轮询也不运行，标签页只会在当前服务进程存活期间展示手动**刷新**（已授权的网络服务商）得到的内存中结果。日常额度跟踪请保持使用量数据库开启（默认）。
@@ -441,7 +444,7 @@ Tokdash 是一个本地 HTTP 服务。常用接口：
 - `GET /api/usage?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD`
 - `GET /api/tools?period=...`（仅编程工具）
 - `GET /api/openclaw?period=...`（仅 OpenClaw）
-- `GET /api/sessions?tool=codex|claude|opencode|pi_agent|mimo|kimi&period=...`（追加 `&include_review_sessions=true` 可包含默认隐藏的 Codex 审核/权限会话）
+- `GET /api/sessions?tool=codex|claude|opencode|pi_agent|mimo|kimi|dsh&period=...`（追加 `&include_review_sessions=true` 可包含默认隐藏的 Codex 审核/权限会话）
 - `GET /api/active-time?period=...`（跨全部会话工具的活跃时长，并按工具细分）
 - `GET /api/quota` 与 `GET /api/quota/history`（订阅额度快照；网络刷新受写入保护且需显式授权）
 - `GET /api/stats`（贡献日历与统计数据）
@@ -459,6 +462,9 @@ curl 'http://127.0.0.1:55423/api/usage?period=today'
 Token 统计依赖各客户端本地记录的内容。费用默认由内置定价数据库（`src/tokdash/pricing_db.json`）计算；如果存在你在「定价」标签页保存的覆盖文件 `<data_dir>/pricing_db.json`，则改用该覆盖文件（它会完全替换内置费率）。两种情况都可能滞后于真实服务商价格，请将其作为估算值，如金额敏感请以你的账单来源为准。
 
 ## 历史数据保留
+
+> [!IMPORTANT]
+> **保留你的历史。** Claude Code 与 Gemini CLI 默认会删除超过约 30 天的本地会话，因此 Tokdash 早期月份的统计可能会悄悄变少。
 
 Tokdash 通过读取各客户端的**本地**会话日志来统计用量，同时也维护一个本地 SQLite 性能索引。这个索引可以保留 Tokdash 已经见过的行，但无法恢复在索引前就被删除的日志，也不能替代原始客户端历史。如果客户端在 Tokdash 同步前删除了旧日志，过去某个月的统计仍然**可能比你最初记录时更低**。只有两个受支持的客户端会默认这样做，且都只需改一行配置：
 

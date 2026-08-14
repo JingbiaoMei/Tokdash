@@ -25,10 +25,17 @@ from .compute import cache_hit_rate, pct_change, period_to_days, previous_period
 from .dateutil import parse_date_range
 from .pricing import PricingDatabase
 from .sources.coding_tools import KimiParser, codex_token_event_key
+from .sources import dsh_log
+from .sources.dsh_log import (
+    decode_dsh_session_file,
+    dsh_entry_id,
+    dsh_file_signatures,
+    fold_dsh_usage_samples,
+)
 from .usage_store import UsageEntryStore, parser_code_signature, persistent_usage_db_enabled
 
 
-SESSION_TOOLS = ("codex", "claude", "opencode", "pi_agent", "mimo", "kimi")
+SESSION_TOOLS = ("codex", "claude", "opencode", "pi_agent", "mimo", "kimi", "dsh")
 logger = logging.getLogger(__name__)
 TOOL_LABELS = {
     "codex": "Codex",
@@ -37,6 +44,7 @@ TOOL_LABELS = {
     "pi_agent": "Pi",
     "mimo": "Mimo",
     "kimi": "Kimi",
+    "dsh": "DeepSeek Harness",
 }
 
 _PRICING_DB = PricingDatabase()
@@ -52,6 +60,7 @@ _SESSION_FILE_PARSER_VERSIONS = {
     "_parse_claude_session_file": 2,
     # 2: turns carry _stream_id so concurrent agents are timed separately.
     "_parse_kimi_session_file": 2,
+    "_parse_dsh_session_file": 1,
 }
 # Version 1 of the two original parsers is serialized as the exact parser token
 # v1.5.9 produced, so upgrading reuses those valid rows without a full-corpus
@@ -238,6 +247,8 @@ def reload_pricing_db() -> None:
     _load_pi_sessions.cache_clear()
     _parse_kimi_session_file.cache_clear()
     _load_kimi_sessions.cache_clear()
+    _parse_dsh_session_file.cache_clear()
+    _load_dsh_sessions.cache_clear()
     _load_mimo_sessions.cache_clear()
 
 
@@ -2492,13 +2503,126 @@ def _mimo_sessions(since_ms: Optional[int] = None, until_ms: Optional[int] = Non
     return _load_mimo_sessions(signature, _pricing_signature(), since_ms, until_ms)
 
 
+def _dsh_session_signatures() -> tuple[tuple[str, int, int], ...]:
+    return dsh_file_signatures(clientpaths.dsh_sessions_dir())
+
+
+@lru_cache(maxsize=512)
+def _parse_dsh_session_file(path_str: str, _mtime_ns: int, _size: int, _pricing_sig: tuple = ()) -> Optional[Dict[str, Any]]:
+    session_path = Path(path_str)
+    if not session_path.exists():
+        return None
+
+    try:
+        decoded = decode_dsh_session_file(session_path)
+    except Exception:
+        return None
+    if decoded.skip_reason is not None or decoded.header is None:
+        return None
+
+    header = decoded.header
+    # The header id is authoritative; the project directory name is lossy by
+    # design and the session directory name is only a fallback.
+    session_id = str(header.get("id") or session_path.parent.name)
+    cwd = str(header.get("cwd") or "")
+
+    title = ""
+    first_user_preview = ""
+    for event in decoded.events:
+        data = event.get("data") if isinstance(event.get("data"), dict) else {}
+        if event.get("type") == "session/title":
+            title = _clean_display_name(data.get("title")) or title
+        elif event.get("type") == "user/message" and not first_user_preview:
+            first_user_preview = _message_text_preview(data)
+
+    turns: list[Dict[str, Any]] = []
+    turn_index = 0
+    for sample in fold_dsh_usage_samples(header, decoded.events):
+        model = sample["model"]
+        fresh_input = sample["input"]
+        output_tokens = sample["output"]
+        cache_read = sample["cache_read"]
+        cache_write = sample["cache_write"]
+        bill = _billing_record(
+            model,
+            "split-cache-write",
+            input_tokens=fresh_input,
+            output_tokens=output_tokens,
+            cache_read=cache_read,
+            cache_write=cache_write,
+        )
+        turn_index += 1
+        turn = _build_turn(
+            turn_index=turn_index,
+            timestamp_ms=sample["timestamp_ms"],
+            model=model,
+            tokens_in=fresh_input + cache_write,
+            tokens_cache=cache_read,
+            tokens_out=output_tokens,
+            tokens_reasoning=0,
+            bill=bill,
+        )
+        turn["_event_key"] = dsh_entry_id(session_id, sample["turn"], sample["step"])
+        turns.append(turn)
+
+    if not turns:
+        return None
+
+    project = _project_from_repo_or_path(None, cwd or None)
+    return {
+        "tool": "dsh",
+        "session_id": session_id,
+        "display_name": title or first_user_preview or _fallback_display_name(session_id, project),
+        "project": project,
+        "is_review_session": False,
+        "turns": turns,
+    }
+
+
+@lru_cache(maxsize=8)
+def _load_dsh_sessions(signature: tuple[tuple[str, int, int], ...], pricing_sig: tuple = ()) -> Dict[str, Dict[str, Any]]:
+    sessions: Dict[str, Dict[str, Any]] = {}
+    for path_str, mtime_ns, size in signature:
+        raw = _parse_dsh_session_file(path_str, mtime_ns, size, pricing_sig)
+        if not raw:
+            continue
+        session_id = str(raw["session_id"])
+        if session_id in sessions:
+            # Duplicate physical files for one header id merge; the stable
+            # per-(turn, step) event keys dedup the turns.
+            sessions[session_id] = _merge_raw_session(sessions[session_id], raw)
+        else:
+            sessions[session_id] = raw
+    return sessions
+
+
+def _dsh_session_parser_signature() -> dict[str, Any]:
+    return {
+        "parser": _session_file_parser_signature("_parse_dsh_session_file"),
+        # The shared decoder owns framing and the usage-fold semantics, so its
+        # versions bust stored rows when those change even if the parser
+        # version above did not. Read through the module (not a from-imported
+        # binding) so a bump — or a test patching dsh_log — takes effect here.
+        "decoder": {
+            "object": "tokdash.sources.dsh_log",
+            "version": dsh_log.DSH_DECODER_VERSION,
+            "accounting": dsh_log.DSH_ACCOUNTING_VERSION,
+        },
+        "cost_basis": _SESSION_COST_BASIS,
+    }
+
+
+def _dsh_sessions() -> Dict[str, Dict[str, Any]]:
+    return _load_dsh_sessions(_dsh_session_signatures(), _pricing_signature())
+
+
 def _raw_sessions_for_tool(
     tool: str,
     since_ms: Optional[int] = None,
     until_ms: Optional[int] = None,
 ) -> Dict[str, Dict[str, Any]]:
     key = str(tool or "").strip().lower()
-    if key in {"codex", "claude", "kimi"} and persistent_usage_db_enabled():
+    if key in {"codex", "claude", "kimi", "dsh"} and persistent_usage_db_enabled():
         try:
             return _stored_sessions_for_tool(key, since_ms=since_ms, until_ms=until_ms)
         except Exception:
@@ -2519,6 +2643,8 @@ def _raw_sessions_for_tool(
         return _mimo_sessions(since_ms=since_ms, until_ms=until_ms)
     if key == "kimi":
         return _kimi_sessions()
+    if key == "dsh":
+        return _dsh_sessions()
     raise ValueError(f"Unsupported session tool: {tool}")
 
 
@@ -2601,6 +2727,18 @@ def _stored_sessions_for_tool(
             signatures,
             parser=_kimi_session_parser_signature(),
             parse_file_session=lambda file_sig: _parse_kimi_session_file(
+                *file_sig, pricing_sig
+            ),
+            signature_compatible=_session_signature_compatible,
+        )
+    elif tool == "dsh":
+        signatures = _dsh_session_signatures()
+        pricing_sig = _pricing_signature()
+        store.sync_session_files(
+            "dsh",
+            signatures,
+            parser=_dsh_session_parser_signature(),
+            parse_file_session=lambda file_sig: _parse_dsh_session_file(
                 *file_sig, pricing_sig
             ),
             signature_compatible=_session_signature_compatible,

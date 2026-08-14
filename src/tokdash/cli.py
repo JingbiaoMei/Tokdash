@@ -342,6 +342,7 @@ def _sync_usage_database() -> dict:
     get_sessions_data("codex", "all")
     get_sessions_data("claude", "all")
     get_sessions_data("kimi", "all")
+    get_sessions_data("dsh", "all")
     return UsageEntryStore().status()
 
 

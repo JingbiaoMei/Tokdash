@@ -23,6 +23,7 @@
   <a href="https://pi.dev/" title="Pi"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/pi.png" alt="Pi" height="34"></a>
   <a href="https://github.com/features/copilot" title="GitHub Copilot CLI"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/copilot.png" alt="GitHub Copilot CLI" height="34"></a>
   <a href="https://hermes-agent.nousresearch.com/" title="Hermes"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/hermes.png" alt="Hermes" height="34"></a>
+  <a href="https://github.com/deepseek-ai/deepseek-harness" title="DeepSeek Harness"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/dsh.png" alt="DeepSeek Harness" height="34"></a>
 </p>
 
 <p align="center">
@@ -37,15 +38,15 @@
   <b>Try it without installing → <a href="https://tokdash.github.io/demo/">tokdash.github.io/demo</a></b>
 </p>
 
+> [!NOTE]
+> **Day 1 support for DeepSeek Harness.** Tokens, cost and sessions are read locally from `~/.dsh`, with nothing to configure. [Supported clients →](docs/reference/SUPPORTED_CLIENTS.md)
+
 > [!TIP]
 > **Tokdash Companion Status Bar App for macOS and Windows is now available as an unsigned preview.** See today's spend and subscription quota without keeping the dashboard open. [View screenshots, download, and set it up →](#tokdash-companion-status-bar-app)
 
 <p align="center">
   <b>Performance: about 30× faster than pre-0.6.0 cold usage scans, and 15× faster than ccusage in the same local benchmark.</b>
 </p>
-
-> [!IMPORTANT]
-> **Keep your history:** Claude Code and Gemini CLI delete local sessions older than ~30 days by default, so Tokdash's earlier months can silently shrink — a one-line config change per client prevents it ([History retention](#history-retention)).
 
 ## Table of Contents
 
@@ -383,7 +384,7 @@ Concurrent work is counted two ways. `active_ms` is clock time, with overlap cou
 
 Persistent usage DB (default on):
 
-Tokdash maintains a local SQLite index at `~/.tokdash/usage.sqlite3` by default. It stores parsed token rows and Codex/Claude/Kimi session summaries so repeated dashboard and API reads can use indexed SQL instead of reparsing every source log. Source logs remain the source of truth; the DB is a local performance index, and Tokdash falls back to live parsing if it is disabled or unavailable.
+Tokdash maintains a local SQLite index at `~/.tokdash/usage.sqlite3` by default. It stores parsed token rows and Codex/Claude/Kimi/DeepSeek Harness session summaries so repeated dashboard and API reads can use indexed SQL instead of reparsing every source log. Source logs remain the source of truth; the DB is a local performance index, and Tokdash falls back to live parsing if it is disabled or unavailable.
 
 Cached session rows are price-neutral: they hold each turn's billing inputs (model, fresh input, cache reads and writes, output), and cost is calculated when they are read, with whatever pricing that process has loaded. Editing a rate therefore reprices instantly instead of rereading gigabytes of logs, and two Tokdash versions sharing one database — an installed service and a checkout, say — do not invalidate each other's rows over pricing. Parser and source-file changes still reparse normally. Rows written before this (including any kept by `TOKDASH_USAGE_DB_DURABLE` after their log is gone) reprice from their stored totals, which reproduces the same figure but cannot separate a Claude or Kimi cache write from fresh input; only a reparse of those logs can restore that distinction. Codex bills under `provider/model` and stores the bare name, so its older rows are reparsed once instead of reused.
 
@@ -442,6 +443,8 @@ Live polling requires two separate decisions: `quota.credential_scan` permits re
 
 Grok Build token usage is also parsed locally from `$GROK_HOME/logs/unified.jsonl`. Its inference records expose prompt, cached-prompt, completion, and reasoning tokens; Tokdash attributes them using the model events from the same CLI process and calculates cost from the normal pricing database. Records without a model event are skipped rather than assigned a guessed price.
 
+DeepSeek Harness (`dsh`) usage and sessions are read locally from `$DSH_HOME/sessions/*/*/session.jsonl.zstd` (or the uncompressed `session.jsonl`), with `DSH_HOME` defaulting to `~/.dsh`. Each log is a sequence of concatenated zstd frames; Tokdash decodes all frames, folds each step's early usage chunk into its finalized message instead of double-counting it, and skips the inherited prefix of forked sessions so parent and child never bill the same tokens twice.
+
 `tokdash setup` offers an optional quota step (per-provider network consent, default No, plus the poll interval), and `tokdash doctor` reports the quota state: master switch, per-provider consent, kill switch, effective interval and its source, last poll time, and the stored snapshot count.
 
 Quota snapshots and their history live in the local usage database (`usage.sqlite3`, enabled by default) and are **kept indefinitely by default** — set `TOKDASH_QUOTA_RETENTION_DAYS` to a positive number of days to prune older snapshots. If you opt out of local persistence with `TOKDASH_USAGE_DB=0`, the Quota tab loses its main data path: no snapshot history is kept, the background poller does not run, and the tab only shows in-memory results from a manual **Refresh** (network providers with consent) for the lifetime of the current server process. Keep the usage DB enabled (the default) for normal quota tracking.
@@ -454,7 +457,7 @@ Tokdash is a local HTTP server. Common endpoints:
 - `GET /api/usage?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD`
 - `GET /api/tools?period=...` (coding tools only)
 - `GET /api/openclaw?period=...` (OpenClaw only)
-- `GET /api/sessions?tool=codex|claude|opencode|pi_agent|mimo|kimi&period=...` (append `&include_review_sessions=true` to include Codex review/permission sessions, hidden by default)
+- `GET /api/sessions?tool=codex|claude|opencode|pi_agent|mimo|kimi|dsh&period=...` (append `&include_review_sessions=true` to include Codex review/permission sessions, hidden by default)
 - `GET /api/active-time?period=...` (active time across every session tool, plus a per-tool breakdown)
 - `GET /api/quota` and `GET /api/quota/history` (subscription quota snapshots; network refresh is write-gated and opt-in)
 - `GET /api/stats` (contribution calendar & statistics)
@@ -471,6 +474,9 @@ Full API reference: [`docs/reference/API.md`](docs/reference/API.md) — schema,
 Token counts depend on what each client logs locally. Costs are computed from the bundled pricing database (`src/tokdash/pricing_db.json`) by default, or from your saved dashboard pricing override at `<data_dir>/pricing_db.json` when present (the Pricing tab writes there and it fully replaces the bundled rates). Either way they may lag real provider pricing — use as an estimate and verify against your billing source if it matters.
 
 ## History retention
+
+> [!IMPORTANT]
+> **Keep your history.** Claude Code and Gemini CLI delete local sessions older than ~30 days by default, so Tokdash's earlier months can silently shrink.
 
 Tokdash reads each client's **local** session logs and also keeps a local SQLite performance index. The index can keep rows Tokdash has already seen, but it cannot recover logs that were deleted before they were indexed, and it is not a replacement for keeping the original client history. If a client deletes old logs before Tokdash syncs them, a past month can still read **lower than when you first recorded it**. Only two supported clients do this by default, and both are a one-line fix:
 

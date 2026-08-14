@@ -186,6 +186,22 @@ def grok_sessions_dir() -> Path:
     return grok_home() / "sessions"
 
 
+# --- DeepSeek Harness (dsh) ---------------------------------------------------
+
+
+def dsh_home() -> Path:
+    """``$DSH_HOME`` if set, else ``~/.dsh``. Empty/whitespace counts as unset."""
+    explicit = os.environ.get("DSH_HOME", "").strip()
+    if explicit:
+        path = Path(explicit).expanduser()
+        return path if path.is_absolute() else path.resolve()
+    return Path.home() / ".dsh"
+
+
+def dsh_sessions_dir() -> Path:
+    return dsh_home() / "sessions"
+
+
 # --- CC Switch --------------------------------------------------------------
 
 

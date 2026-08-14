@@ -22,10 +22,12 @@ from typing import Any, ClassVar, Dict, List, Optional, Tuple
 try:
     from .. import clientpaths
     from ..pricing import PricingDatabase
+    from .dsh_log import decode_dsh_session_file, dsh_entry_id, dsh_file_signatures, fold_dsh_usage_samples
 except ImportError:  # pragma: no cover
     # Allow running as a script by file path.
     import clientpaths
     from pricing import PricingDatabase
+    from dsh_log import decode_dsh_session_file, dsh_entry_id, dsh_file_signatures, fold_dsh_usage_samples
 
 
 # ---------------------------------------------------------------------------
@@ -2512,6 +2514,79 @@ class MimoParser(BaseParser):
         return list(out)
 
 
+class DSHParser(BaseParser):
+    """Parser for DeepSeek Harness (dsh) session logs.
+
+    Location: ``$DSH_HOME/sessions/<project-key>/<session-id>/session.jsonl.zstd``
+    (or an uncompressed ``session.jsonl``), defaulting to ``~/.dsh``.
+
+    Each file is an append-only logical JSONL event log whose first row is the
+    session header; provider usage arrives as an early ``assistant/chunk``
+    usage sample and/or the finalized ``assistant/message`` usage, folded
+    replace-not-add per ``(turn, step)``. Framing, fork boundaries and the
+    fold itself live in ``sources/dsh_log.py``, shared with the session parser.
+    """
+
+    source_name = "dsh"
+    sync_capability = SourceSyncCapability(
+        mode="file_replace",
+        append_jsonl=False,
+        session_store=True,
+        reason=(
+            "DSH append batches are concatenated zstd frames, and a final usage message replaces an "
+            "earlier same-step chunk; changed files are reparsed whole."
+        ),
+    )
+
+    def __init__(self, pricing_db: PricingDatabase):
+        super().__init__(pricing_db)
+        self.sessions_dir = clientpaths.dsh_sessions_dir()
+
+    def _file_signatures(self) -> tuple:
+        return _timed_sigs(
+            f"dsh:{self.sessions_dir}",
+            lambda: dsh_file_signatures(self.sessions_dir),
+        )
+
+    def _parse_all(self) -> List[Dict[str, Any]]:
+        # Keyed on the stable entry id so duplicate physical files for one
+        # session id (both suffixes present, or one id under two project keys)
+        # never bill twice. Discovery is sorted, so the later file's sample
+        # wins deterministically; the emitted order below stays timestamp-sorted.
+        by_entry_id: Dict[str, Dict[str, Any]] = {}
+        for path_str, _, _ in self._file_signatures():
+            try:
+                decoded = decode_dsh_session_file(Path(path_str))
+                if decoded.skip_reason is not None or decoded.header is None:
+                    continue
+                session_id = str(decoded.header.get("id") or Path(path_str).parent.name)
+                for sample in fold_dsh_usage_samples(decoded.header, decoded.events):
+                    model = sample["model"]
+                    input_t = sample["input"]
+                    output_t = sample["output"]
+                    cache_r = sample["cache_read"]
+                    cache_w = sample["cache_write"]
+                    entry = {
+                        "source": self.source_name,
+                        "model": model,
+                        "provider": sample["provider"],
+                        "input": input_t,
+                        "output": output_t,
+                        "cacheRead": cache_r,
+                        "cacheWrite": cache_w,
+                        "reasoning": 0,
+                        "cost": self.pricing_db.get_cost(model, input_t, output_t, cache_r, cache_w),
+                        "timestamp": int(sample["timestamp_ms"]),
+                        "entry_id": dsh_entry_id(session_id, sample["turn"], sample["step"]),
+                    }
+                    by_entry_id[entry["entry_id"]] = entry
+            except Exception:
+                # One malformed file never blanks the whole DSH source.
+                continue
+        out = sorted(by_entry_id.values(), key=lambda entry: int(entry.get("timestamp", 0) or 0))
+        return out
+
+
 class CodingToolsUsageTracker:
     """Registry-driven tracker for coding clients."""
 
@@ -2535,6 +2610,7 @@ class CodingToolsUsageTracker:
             "copilot_cli": CopilotCLIParser(self.pricing_db),
             "hermes": HermesParser(self.pricing_db),
             "mimo": MimoParser(self.pricing_db),
+            "dsh": DSHParser(self.pricing_db),
         }
 
     def collect(self, since_date: Optional[datetime] = None, until_date: Optional[datetime] = None, sources: Optional[List[str]] = None):
@@ -2564,7 +2640,7 @@ def main():
     parser.add_argument("--since", type=str)
     parser.add_argument("--until", type=str)
     parser.add_argument("--json", action="store_true")
-    parser.add_argument("--sources", type=str, default="opencode,codex,claude,gemini_cli,antigravity_cli,amp,kimi,grok,pi_agent,copilot_cli,hermes,mimo")
+    parser.add_argument("--sources", type=str, default="opencode,codex,claude,gemini_cli,antigravity_cli,amp,kimi,grok,pi_agent,copilot_cli,hermes,mimo,dsh")
     args = parser.parse_args()
 
     since_date, until_date = _date_range(args)

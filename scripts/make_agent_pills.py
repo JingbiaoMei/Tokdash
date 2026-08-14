@@ -45,6 +45,7 @@ TOOLS = [
     ("pi", "Pi", "pi.png"),
     ("copilot", "GitHub Copilot CLI", "copilot.svg"),
     ("hermes", "Hermes", "hermes.png"),
+    ("dsh", "DeepSeek Harness", "dsh.svg"),
 ]
 
 # Rendered at ~2.4x the README display height (40px) for crispness.

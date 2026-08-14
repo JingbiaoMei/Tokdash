@@ -20,11 +20,13 @@ from tokdash.usage_store import UsageEntryStore
 TS = "2026-05-19T12:00:00Z"
 MODEL = "claude-opus-5"
 KIMI_MODEL = "kimi-k3"
+DSH_MODEL = "deepseek-v4-flash"
 
 
 @pytest.fixture(autouse=True)
 def _isolated_home(monkeypatch, tmp_path):
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("DSH_HOME", str(tmp_path / ".dsh"))
     monkeypatch.setenv("TOKDASH_USAGE_DB", "1")
     reload_pricing_db()
     yield tmp_path
@@ -34,11 +36,12 @@ def _isolated_home(monkeypatch, tmp_path):
 @pytest.fixture
 def counting_parsers(monkeypatch):
     """Count how many source files each parser reads."""
-    counts = {"codex": 0, "claude": 0, "kimi": 0}
+    counts = {"codex": 0, "claude": 0, "kimi": 0, "dsh": 0}
     for tool, name in (
         ("codex", "_parse_codex_session_file"),
         ("claude", "_parse_claude_session_file"),
         ("kimi", "_parse_kimi_session_file"),
+        ("dsh", "_parse_dsh_session_file"),
     ):
         original = getattr(sessions, name)
 
@@ -74,7 +77,11 @@ def _rates(input_rate: float = 3.0, output_rate: float = 15.0, cache_read: float
         "cache_write": input_rate,
         "unit": "per_million_tokens",
     }
-    return {MODEL: priced, KIMI_MODEL: dict(priced, provider="moonshotai")}
+    return {
+        MODEL: priced,
+        KIMI_MODEL: dict(priced, provider="moonshotai"),
+        DSH_MODEL: dict(priced, provider="deepseek"),
+    }
 
 
 def _claude_row(session_id: str, message_id: str, timestamp: str = TS, **usage) -> dict:
@@ -156,6 +163,44 @@ def _write_kimi(home: Path, session_id: str, message_id: str) -> Path:
     return path
 
 
+def _write_dsh(home: Path, session_id: str) -> Path:
+    """A minimal dsh log: v0 header plus one usage-bearing assistant/message."""
+    path = home / ".dsh" / "sessions" / "--work-proj--" / session_id / "session.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rows = [
+        {
+            "type": "session",
+            "version": 0,
+            "id": session_id,
+            "createdAt": 1_779_278_400_000,
+            "cwd": "/work/proj",
+        },
+        {
+            "type": "assistant/message",
+            "seq": 1,
+            "time": 1_779_278_400_000,
+            "data": {
+                "turn": 0,
+                "step": 0,
+                "message": {
+                    "id": "a1",
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "done"}],
+                    "source": {"kind": "model", "provider": "deepseek", "model": DSH_MODEL},
+                },
+                "usage": {
+                    "inputTokens": 1_000,
+                    "outputTokens": 100,
+                    "cacheReadTokens": 2_000,
+                    "cacheWriteTokens": 500,
+                },
+            },
+        },
+    ]
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+    return path
+
+
 def _cost(tool: str) -> float:
     return get_sessions_data(tool, "all")["summary"]["cost"]
 
@@ -172,7 +217,7 @@ def test_adding_a_model_does_not_reread_any_source_log(_isolated_home, counting_
 
     for tool in ("claude", "codex", "kimi"):
         get_sessions_data(tool, "all")
-    assert counting_parsers == {"claude": 1, "codex": 1, "kimi": 1}, "first read parses each file once"
+    assert counting_parsers == {"claude": 1, "codex": 1, "kimi": 1, "dsh": 0}, "first read parses each file once"
 
     for tool in counting_parsers:
         counting_parsers[tool] = 0
@@ -180,7 +225,7 @@ def test_adding_a_model_does_not_reread_any_source_log(_isolated_home, counting_
     for tool in ("claude", "codex", "kimi"):
         get_sessions_data(tool, "all")
 
-    assert counting_parsers == {"claude": 0, "codex": 0, "kimi": 0}
+    assert counting_parsers == {"claude": 0, "codex": 0, "kimi": 0, "dsh": 0}
 
 
 # --- 2: rate changes still reach the reported cost --------------------------
@@ -351,6 +396,32 @@ def test_a_parser_version_bump_still_reparses(_isolated_home, counting_parsers, 
     get_sessions_data("claude", "all")
 
     assert counting_parsers["claude"] == 1
+
+
+def test_a_dsh_decoder_version_bump_still_reparses(_isolated_home, counting_parsers, monkeypatch):
+    """The dsh signature folds in the shared decoder's extraction and
+    accounting versions; bumping either must reparse, exactly like a parser
+    version bump. ``_session_signature_compatible`` ignores only ``pricing``
+    and ``cost_basis``, so the ``decoder`` keys are compared."""
+    from tokdash.sources import dsh_log
+
+    home = _isolated_home
+    _write_dsh(home, "dsh-1")
+    _write_pricing(_rates())
+    get_sessions_data("dsh", "all")
+    assert counting_parsers["dsh"] == 1, "cold store parses once"
+
+    counting_parsers["dsh"] = 0
+    get_sessions_data("dsh", "all")
+    assert counting_parsers["dsh"] == 0, "unchanged signature hits the store"
+
+    for attr in ("DSH_DECODER_VERSION", "DSH_ACCOUNTING_VERSION"):
+        monkeypatch.setattr(dsh_log, attr, getattr(dsh_log, attr) + 1)
+        get_sessions_data("dsh", "all")
+        assert counting_parsers["dsh"] == 1, f"{attr} bump must reparse"
+        counting_parsers["dsh"] = 0
+        get_sessions_data("dsh", "all")
+        assert counting_parsers["dsh"] == 0, f"re-reading at the bumped {attr} hits the store"
 
 
 # --- 8: the frozen v1.5.9 constants -----------------------------------------
@@ -534,12 +605,13 @@ def test_only_codex_withholds_the_free_migration():
 # --- 10 & 11: cached and live agree, streams intact -------------------------
 
 
-@pytest.mark.parametrize("tool", ["claude", "codex", "kimi"])
+@pytest.mark.parametrize("tool", ["claude", "codex", "kimi", "dsh"])
 def test_cached_and_live_payloads_are_identical(_isolated_home, monkeypatch, tool):
     home = _isolated_home
     _write_claude(home, "a", [_claude_row("s1", "m1"), _claude_row("s1", "m2", timestamp="2026-05-19T12:02:00Z")])
     _write_codex(home, "c", _codex_rows("codex-1"))
     _write_kimi(home, "k1", "kimi-msg-1")
+    _write_dsh(home, "dsh-1")
     _write_pricing(_rates())
 
     monkeypatch.setenv("TOKDASH_USAGE_DB", "0")

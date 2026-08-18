@@ -143,6 +143,10 @@ public sealed class CompanionStore : BindableBase
     {
         get
         {
+            // A settings file carried over from a portable install can hold a pending
+            // update from before the switch. The Store build has no action to offer for
+            // it, so the badge would be a dead end.
+            if (PackagedApp.IsPackaged) return null;
             string? available = Settings.AvailableUpdateVersion;
             if (string.IsNullOrEmpty(available)) return null;
             if (available == Settings.SkippedUpdateVersion) return null;
@@ -175,6 +179,13 @@ public sealed class CompanionStore : BindableBase
     /// </summary>
     public async Task CheckForUpdatesAsync(bool manual)
     {
+        // Store builds never check. The Store owns update delivery for packaged apps, and
+        // sending a Store user to a GitHub release page to download an unpackaged build
+        // both duplicates that channel and reads as distributing code from outside the
+        // Store. Manual checks are gated too - the button is hidden when packaged, so
+        // reaching here with manual:true would mean the UI and this rule disagreed.
+        if (PackagedApp.IsPackaged) return;
+
         if (!manual)
         {
             if (_updateCheckInFlight) return;

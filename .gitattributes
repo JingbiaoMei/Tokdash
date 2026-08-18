@@ -1,0 +1,4 @@
+# dotnet restore run from Windows against this repo rewrites these files with CRLF,
+# producing a whole-file diff with identical content. Pin them to LF so the Windows and
+# WSL toolchains agree.
+packages.lock.json text eol=lf

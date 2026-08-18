@@ -52,6 +52,11 @@ public partial class SettingsWindow : Window
         WeeklySlider.Value = s.Thresholds.Weekly;
         OtherSlider.Value = s.Thresholds.Other;
         AutoUpdateBox.IsChecked = s.AutomaticUpdateChecks;
+        // Store builds swap the whole Updates section for a read-only version line: the
+        // Store owns update delivery, so every control in that section is redundant there.
+        bool packaged = PackagedApp.IsPackaged;
+        UpdatesSection.Visibility = packaged ? Visibility.Collapsed : Visibility.Visible;
+        PackagedVersionSection.Visibility = packaged ? Visibility.Visible : Visibility.Collapsed;
         PopulateLanguageCombo();
         ApplySettingsStrings();
         // Keep the Updates section live while the window is open, so "Check now" reports its
@@ -154,6 +159,9 @@ public partial class SettingsWindow : Window
         CheckUpdateBtn.Content = L10n.T("update_check_now");
         ViewUpdateBtn.Content = L10n.T("update_view");
         SkipUpdateBtn.Content = L10n.T("update_skip");
+        PackagedVersionLabel.Text = L10n.T("section_version");
+        PackagedVersionText.Text = L10n.T("update_current_version", UpdateChecker.CurrentVersion);
+        PackagedVersionHint.Text = L10n.T("update_managed_by_store");
         LanguageLabel.Text = L10n.T("section_language");
         LanguageHint.Text = L10n.T("language_hint");
         CancelBtn.Content = L10n.T("cancel");

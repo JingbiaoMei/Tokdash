@@ -177,6 +177,10 @@ public static class L10n
         ["plural_s"] = "s",
 
         ["section_updates"] = "Updates",
+        // Store (MSIX) builds only: the Updates section is hidden there, so the version
+        // still needs a home and the user needs to know where updates come from.
+        ["section_version"] = "Version",
+        ["update_managed_by_store"] = "Updates are delivered through the Microsoft Store.",
         ["settings_update_available"] = "Settings, update available",
         ["update_current_version"] = "Current version: {0}",
         ["update_auto_check"] = "Check for updates automatically",
@@ -314,6 +318,8 @@ public static class L10n
         ["plural_s"] = "",
 
         ["section_updates"] = "更新",
+        ["section_version"] = "版本",
+        ["update_managed_by_store"] = "更新通过 Microsoft Store 发布。",
         ["settings_update_available"] = "设置，有可用更新",
         ["update_current_version"] = "当前版本：{0}",
         ["update_auto_check"] = "自动检查更新",

@@ -7,6 +7,7 @@ import argparse
 import json
 import re
 from pathlib import Path
+from xml.etree import ElementTree
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -15,6 +16,147 @@ COMPANION_ROOT = REPO_ROOT / "companion"
 
 def fail(message: str) -> None:
     raise SystemExit(message)
+
+
+def check_msix_packaging(version: str) -> None:
+    """Validate the Microsoft Store (MSIX) track.
+
+    Store rejections happen at upload or in certification, both of which are slow and
+    manual, so the cheap invariants are asserted here instead.
+    """
+    manifest_template_path = (
+        COMPANION_ROOT / "windows" / "packaging" / "AppxManifest.xml.in"
+    )
+    template = manifest_template_path.read_text(encoding="utf-8")
+
+    placeholders = (
+        "@@IDENTITY_NAME@@",
+        "@@PUBLISHER@@",
+        "@@PUBLISHER_DISPLAY_NAME@@",
+        "@@VERSION@@",
+    )
+    for placeholder in placeholders:
+        if placeholder not in template:
+            fail(f"AppxManifest template is missing {placeholder}")
+
+    # Identity must never be hard-coded: Partner Center issues it, and a stale literal
+    # would be rejected at upload rather than caught here.
+    if re.search(r'Name="Tokdash\.Companion"', template):
+        fail("AppxManifest Identity/Name must come from Partner Center, not a literal")
+
+    # Substituting and parsing catches malformed XML in the template itself. An XML
+    # comment cannot contain a double hyphen, which is easy to introduce when documenting
+    # command-line flags.
+    substituted = (
+        template.replace("@@IDENTITY_NAME@@", "12345Example.TokdashCompanion")
+        .replace("@@PUBLISHER@@", "CN=00000000-0000-0000-0000-000000000000")
+        .replace("@@PUBLISHER_DISPLAY_NAME@@", "Example")
+        .replace("@@VERSION@@", f"{version}.0")
+    )
+    try:
+        root = ElementTree.fromstring(substituted)
+    except ElementTree.ParseError as exc:
+        fail(f"AppxManifest template is not well-formed XML once substituted: {exc}")
+
+    ns = {
+        "m": "http://schemas.microsoft.com/appx/manifest/foundation/windows10",
+        "uap10": "http://schemas.microsoft.com/appx/manifest/uap/windows10/10",
+        "rescap": (
+            "http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+            "/restrictedcapabilities"
+        ),
+    }
+
+    identity = root.find("m:Identity", ns)
+    if identity is None:
+        fail("AppxManifest has no Identity element")
+    package_version = identity.get("Version", "")
+    parts = package_version.split(".")
+    if len(parts) != 4:
+        fail(f"MSIX package version must have four parts, got {package_version!r}")
+    if parts[3] != "0":
+        fail(
+            "the Store reserves the MSIX revision field and rejects a non-zero value: "
+            f"{package_version!r}"
+        )
+    # "The other sections must be set to an integer between 0 and 65535 (except for the
+    # first section, which cannot be 0)." A 0.x.y companion version is therefore not
+    # submittable at all, which is why companion/VERSION starts at 1.0.0.
+    # https://learn.microsoft.com/en-us/windows/apps/publish/publish-your-app/msix/app-package-requirements
+    if not parts[0].isdigit() or int(parts[0]) == 0:
+        fail(
+            "the Store rejects a zero major version; companion/VERSION must start at "
+            f"1.0.0 or later, got {package_version!r}"
+        )
+    for index, part in enumerate(parts[:3]):
+        if not part.isdigit() or not 0 <= int(part) <= 65535:
+            fail(
+                f"MSIX version component {index} must be an integer 0-65535, "
+                f"got {package_version!r}"
+            )
+    if ".".join(parts[:3]) != version:
+        fail(
+            f"MSIX package version {package_version!r} does not derive from "
+            f"companion/VERSION {version!r}"
+        )
+
+    application = root.find("m:Applications/m:Application", ns)
+    if application is None:
+        fail("AppxManifest declares no Application")
+    runtime_behavior = application.get(f"{{{ns['uap10']}}}RuntimeBehavior")
+    trust_level = application.get(f"{{{ns['uap10']}}}TrustLevel")
+    # A full-trust packaged desktop app runs outside AppContainer, which is what lets the
+    # companion reach a loopback Tokdash service. appContainer would silently break it.
+    if runtime_behavior != "packagedClassicApp":
+        fail(f"Application RuntimeBehavior must be packagedClassicApp, got {runtime_behavior!r}")
+    if trust_level != "mediumIL":
+        fail(f"Application TrustLevel must be mediumIL, got {trust_level!r}")
+
+    capabilities = [
+        element.get("Name")
+        for element in root.findall("m:Capabilities/*", ns)
+    ]
+    if capabilities != ["runFullTrust"]:
+        fail(
+            "the companion declares exactly one capability, runFullTrust; "
+            f"found {capabilities}"
+        )
+
+    # Every asset the manifest references must exist, or packing fails late.
+    packaging_root = manifest_template_path.parent
+    referenced = set(re.findall(r'"(Assets\\[^"]+)"', substituted))
+    referenced.update(re.findall(r"<Logo>(Assets\\[^<]+)</Logo>", substituted))
+    missing = sorted(
+        asset
+        for asset in referenced
+        if not (packaging_root / asset.replace("\\", "/")).is_file()
+    )
+    if missing:
+        fail(f"AppxManifest references missing packaging assets: {missing}")
+
+    builder = (
+        COMPANION_ROOT / "scripts" / "build_windows_msix.ps1"
+    ).read_text(encoding="utf-8")
+    for required, reason in (
+        (
+            "-p:PublishSingleFile=false",
+            "MSIX is already a container; single-file adds a decompress-to-temp startup cost",
+        ),
+        (
+            '$packageVersion = "$version.0"',
+            "the MSIX revision field must stay pinned to 0 for the Store",
+        ),
+        (
+            "the Store rejects a zero major version",
+            "the builder must refuse a 0.x.y version before packing, not at upload",
+        ),
+        (
+            "SelfSignForTesting cannot be combined with a Store identity",
+            "a Store package must be uploaded unsigned; Microsoft re-signs it",
+        ),
+    ):
+        if required not in builder:
+            fail(f"MSIX builder is missing {required!r} - {reason}")
 
 
 def main() -> None:
@@ -117,8 +259,11 @@ def main() -> None:
     windows_builder = (
         COMPANION_ROOT / "scripts" / "build_windows_release.ps1"
     ).read_text(encoding="utf-8")
-    if "makeappx.exe" in windows_builder or "unsigned.msix" in windows_builder:
-        fail("Windows builder must not produce deferred MSIX assets")
+    # The portable ZIP and the Store MSIX are built by separate scripts on purpose: they
+    # differ in payload layout, signing, and who publishes them. Keep the portable builder
+    # from growing packaging concerns.
+    if "makeappx.exe" in windows_builder or ".msix" in windows_builder:
+        fail("portable builder must not produce MSIX assets; that is build_windows_msix.ps1")
     for required in (
         "-p:PublishSingleFile=true",
         "-p:PublishTrimmed=false",
@@ -127,6 +272,8 @@ def main() -> None:
     ):
         if required not in windows_builder:
             fail(f"Windows portable builder is missing {required}")
+
+    check_msix_packaging(version)
 
     workflows = REPO_ROOT / ".github" / "workflows"
     action_pattern = re.compile(r"^\s*uses:\s+([^@\s]+)@([^\s#]+)", re.MULTILINE)

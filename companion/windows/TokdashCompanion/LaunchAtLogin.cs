@@ -15,7 +15,7 @@ internal static class LaunchAtLogin
 
     public static async Task<bool> GetEnabledAsync()
     {
-        if (IsPackaged())
+        if (PackagedApp.IsPackaged)
         {
             try
             {
@@ -33,7 +33,7 @@ internal static class LaunchAtLogin
 
     public static async Task<bool> SetEnabledAsync(bool enabled)
     {
-        if (IsPackaged())
+        if (PackagedApp.IsPackaged)
         {
             try
             {
@@ -54,19 +54,6 @@ internal static class LaunchAtLogin
         }
 
         return SetPortableEnabled(enabled);
-    }
-
-    private static bool IsPackaged()
-    {
-        try
-        {
-            _ = Package.Current.Id;
-            return true;
-        }
-        catch
-        {
-            return false;
-        }
     }
 
     private static bool SetPortableEnabled(bool enabled)

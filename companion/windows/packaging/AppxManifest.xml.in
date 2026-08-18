@@ -1,4 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Template for the Store (MSIX) build. build_windows_msix.ps1 substitutes each of the
+  four double-at placeholders below and then fails the build if any remain.
+
+  The three identity values are issued by Partner Center once the app name is reserved
+  (Product management > Product identity) and must match it exactly - a mismatch is
+  rejected at upload, not at certification:
+
+    @@IDENTITY_NAME@@          Package/Identity/Name,          e.g. 12345Tokdash.TokdashCompanion
+    @@PUBLISHER@@              Package/Identity/Publisher,     e.g. CN=01234567-89ab-cdef-0123-456789abcdef
+    @@PUBLISHER_DISPLAY_NAME@@ Publisher display name,         e.g. Tokdash
+
+  @@VERSION@@ is FOUR parts: companion/VERSION plus a revision pinned to 0, so 1.0.0
+  becomes 1.0.0.0. The Store reserves the revision field and rejects any package that
+  sets it, and it also rejects a zero major - which is why the companion starts at 1.0.0.
+-->
 <Package
   xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
   xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
@@ -7,26 +23,35 @@
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
   IgnorableNamespaces="uap uap5 uap10 rescap">
   <Identity
-    Name="Tokdash.Companion"
+    Name="@@IDENTITY_NAME@@"
     Publisher="@@PUBLISHER@@"
     Version="@@VERSION@@"
     ProcessorArchitecture="x64" />
   <Properties>
     <DisplayName>Tokdash Companion</DisplayName>
-    <PublisherDisplayName>Tokdash</PublisherDisplayName>
+    <PublisherDisplayName>@@PUBLISHER_DISPLAY_NAME@@</PublisherDisplayName>
     <Description>Native usage and quota companion for the local Tokdash service.</Description>
     <Logo>Assets\StoreLogo.png</Logo>
   </Properties>
   <Resources>
     <Resource Language="en-us" />
+    <Resource Language="zh-hans" />
   </Resources>
   <Dependencies>
+    <!-- MinVersion 22000 is Windows 11 only. The flyout's Acrylic/Mica treatment and the
+         notification-area behavior are tuned for Windows 11; raising Windows 10 support
+         would need its own visual verification pass. -->
     <TargetDeviceFamily
       Name="Windows.Desktop"
       MinVersion="10.0.22000.0"
       MaxVersionTested="10.0.26100.0" />
   </Dependencies>
   <Capabilities>
+    <!-- Full-trust desktop app. This is the only capability declared: the companion talks
+         to a user-configured Tokdash endpoint and to GitHub's public releases API, both of
+         which a full-trust process reaches without a network capability. It reads no
+         credentials and enumerates no ports. Partner Center asks for a justification for
+         runFullTrust at submission. -->
     <rescap:Capability Name="runFullTrust" />
   </Capabilities>
   <Applications>
@@ -44,6 +69,11 @@
         <uap:DefaultTile ShortName="Tokdash" />
       </uap:VisualElements>
       <Extensions>
+        <!-- Launch at login stays opt-in and disabled by default, matching the portable
+             build's Run-key behavior. LaunchAtLogin.cs drives this through StartupTask
+             when packaged. Note that Windows launches a StartupTask with no arguments, so
+             the packaged startup run carries no startup marker argument. That argument is
+             a diagnostic log marker only and changes no behavior, so nothing is lost. -->
         <uap5:Extension
           Category="windows.startupTask"
           Executable="TokdashCompanion.exe"

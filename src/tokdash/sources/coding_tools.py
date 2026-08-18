@@ -2745,6 +2745,222 @@ class DSHParser(BaseParser):
         return out
 
 
+class ReasonixParser(BaseParser):
+    """Parser for Reasonix daily token usage logs.
+
+    Location: ``$REASONIX_HOME/stats/YYYY-MM-DD.jsonl`` (``REASONIX_HOME``
+    defaults to ``~/.reasonix``), one JSON object per provider request appended
+    during the day. Reasonix talks to any provider configured in its
+    ``config.toml``, so ``model`` is ``<provider-label>/<model-id>`` with the
+    provider half a user-chosen config name, not a vendor.
+
+    Observed row::
+
+        {"ts":"2026-08-15T12:24:35.556495944+01:00","model":"minimax-cn/MiniMax-M3",
+         "prompt":8247,"completion":56,"cache_hit":128,"cache_miss":8119,"total":8303}
+
+    ``prompt`` counts cached and uncached input together (``prompt ==
+    cache_hit + cache_miss``), while Tokdash's buckets are disjoint: ``input``
+    is uncached input and ``cacheRead`` is cached input. The mapping therefore
+    splits ``prompt`` rather than copying it, or every aggregate would bill the
+    cached slice twice — once at the input rate and once at the cache rate::
+
+        input      <- cache_miss, else prompt - cache_hit
+        cacheRead  <- cache_hit (absent means zero)
+        cacheWrite <- 0     # the stats log has no cache-write bucket
+        output     <- completion
+        reasoning  <- 0
+
+    ``total``, ``requests`` and Reasonix's own ``cost_*`` / ``display_*`` fields
+    are ignored: the first two are redundant and the rest describe Reasonix's
+    pricing status, while Tokdash prices from its own database.
+    """
+
+    source_name = "reasonix"
+    sync_capability = SourceSyncCapability(
+        mode="file_replace",
+        append_jsonl=False,
+        session_store=True,
+        reason=(
+            "Reasonix stats logs are append-only daily JSONL files; entry ids are content-keyed, "
+            "so a changed day file is reparsed whole without rebilling its earlier rows."
+        ),
+    )
+
+    # Reasonix writes up to 9 fractional-second digits. datetime.fromisoformat
+    # accepts only 3 or 6 before Python 3.11, and Tokdash supports 3.10, where
+    # every row would otherwise be dropped as unparseable.
+    _ISO_SUBSECOND_OVERFLOW = re.compile(r"(\.\d{6})\d+")
+
+    def __init__(self, pricing_db: PricingDatabase):
+        super().__init__(pricing_db)
+        self.stats_dir = clientpaths.reasonix_stats_dir()
+
+    def _file_signatures(self) -> tuple:
+        def scan() -> tuple:
+            if not self.stats_dir.exists():
+                return ()
+            sigs: List[Tuple[str, int, int]] = []
+            for p in self.stats_dir.glob("*.jsonl"):
+                try:
+                    s = p.stat()
+                    sigs.append((str(p), s.st_mtime_ns, s.st_size))
+                except (FileNotFoundError, OSError):
+                    continue
+            return tuple(sorted(sigs))
+
+        return _timed_sigs(f"reasonix:{self.stats_dir}", scan)
+
+    @staticmethod
+    def _split_model(raw_model: str) -> Tuple[str, str]:
+        raw = (raw_model or "").strip()
+        if "/" in raw:
+            parts = raw.split("/", 1)
+            return parts[0].strip(), parts[1].strip()
+        return "", raw
+
+    @staticmethod
+    def _token_int(value: Any) -> Optional[int]:
+        """An explicit non-negative token count, or None when invalid.
+
+        Mirrors dsh_log._to_int: a missing field is the caller's business, an
+        unusable one rejects its row rather than raising into the per-file
+        handler and silently discarding the rest of the day.
+        """
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            return None
+        try:
+            result = int(value)
+        except (TypeError, ValueError):
+            return None
+        return result if result >= 0 else None
+
+    @classmethod
+    def _token_field(cls, entry: Dict[str, Any], key: str) -> Optional[int]:
+        """A row's token count: 0 when absent, None when present but unusable.
+
+        Absent is not malformed. Reasonix omits ``cache_hit`` when nothing was
+        cached, so a missing field is a real zero; a field that is present but
+        cannot be read as a count means the row cannot be trusted and is
+        dropped. Coercing with ``or 0`` would erase that distinction and let
+        ``false``, ``""``, ``[]`` and ``{}`` through as zeroes.
+        """
+        if key not in entry:
+            return 0
+        raw = entry[key]
+        if raw is None:  # explicit JSON null reads the same as absent
+            return 0
+        return cls._token_int(raw)
+
+    @classmethod
+    def _timestamp_ms(cls, raw: Any) -> Optional[int]:
+        if not isinstance(raw, str) or not raw.strip():
+            return None
+        text = cls._ISO_SUBSECOND_OVERFLOW.sub(r"\1", raw.strip().replace("Z", "+00:00"))
+        try:
+            parsed = datetime.fromisoformat(text)
+        except (TypeError, ValueError):
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        try:
+            return int(parsed.timestamp() * 1000)
+        except (OSError, OverflowError):
+            return None
+
+    def _parse_all(self) -> List[Dict[str, Any]]:
+        out: List[Dict[str, Any]] = []
+        # Entry ids are keyed on row content, never on the file path or line
+        # number: a moved REASONIX_HOME or a rewritten day file would otherwise
+        # re-ingest the whole history as new rows. Two byte-identical requests
+        # in one day are indistinguishable by content, so an occurrence counter
+        # keeps them apart; unlike a line number it is stable under appends.
+        seen_digests: Dict[str, int] = {}
+        for path_str, _, _ in self._file_signatures():
+            try:
+                with open(path_str, "r", encoding="utf-8") as f:
+                    lines = list(f)
+            except Exception:
+                # One unreadable day file never blanks the whole source.
+                continue
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(entry, dict):
+                    continue
+
+                ts_str = entry.get("ts")
+                ts_ms = self._timestamp_ms(ts_str)
+                if ts_ms is None:
+                    continue
+
+                raw_model = str(entry.get("model") or "unknown")
+                provider, model = self._split_model(raw_model)
+                if not model:
+                    model = "unknown"
+
+                prompt = self._token_field(entry, "prompt")
+                completion = self._token_field(entry, "completion")
+                # cache_hit is optional; absent means nothing was cached.
+                cache_hit = self._token_field(entry, "cache_hit")
+                if prompt is None or completion is None or cache_hit is None:
+                    continue
+                # cache_miss is optional too, but its absence has to stay
+                # distinguishable from a zero so the split below knows whether
+                # to trust it or fall back to the subtraction.
+                if entry.get("cache_miss") is None:
+                    cache_miss = None
+                else:
+                    cache_miss = self._token_int(entry["cache_miss"])
+                    if cache_miss is None:
+                        continue
+
+                # Split prompt into its disjoint halves. cache_miss is the
+                # source's own uncached count and wins; the subtraction is the
+                # fallback for rows that omit it. A row whose cache_hit exceeds
+                # prompt is self-contradictory, so the floor keeps input sane.
+                uncached = cache_miss if cache_miss is not None else prompt - cache_hit
+                uncached = max(0, uncached)
+                if uncached == 0 and completion == 0 and cache_hit == 0:
+                    continue
+
+                digest = hashlib.sha256(
+                    f"{ts_str}|{raw_model}|{prompt}|{completion}|{cache_hit}|{uncached}".encode("utf-8")
+                ).hexdigest()
+                occurrence = seen_digests.get(digest, 0)
+                seen_digests[digest] = occurrence + 1
+                entry_id = f"reasonix:{digest}" if not occurrence else f"reasonix:{digest}:{occurrence}"
+
+                out.append({
+                    "source": self.source_name,
+                    "model": model,
+                    "provider": provider,
+                    "input": uncached,
+                    "output": completion,
+                    "cacheRead": cache_hit,
+                    "cacheWrite": 0,
+                    "reasoning": 0,
+                    "cost": self.pricing_db.get_cost(
+                        model,
+                        uncached,
+                        completion,
+                        cache_read=cache_hit,
+                        cache_write=0,
+                    ),
+                    "timestamp": ts_ms,
+                    "entry_id": entry_id,
+                })
+        out.sort(key=lambda item: int(item.get("timestamp", 0) or 0))
+        return out
+
+
 class CodingToolsUsageTracker:
     """Registry-driven tracker for coding clients."""
 
@@ -2769,6 +2985,7 @@ class CodingToolsUsageTracker:
             "hermes": HermesParser(self.pricing_db),
             "mimo": MimoParser(self.pricing_db),
             "dsh": DSHParser(self.pricing_db),
+            "reasonix": ReasonixParser(self.pricing_db),
         }
 
     def collect(self, since_date: Optional[datetime] = None, until_date: Optional[datetime] = None, sources: Optional[List[str]] = None):
@@ -2798,7 +3015,7 @@ def main():
     parser.add_argument("--since", type=str)
     parser.add_argument("--until", type=str)
     parser.add_argument("--json", action="store_true")
-    parser.add_argument("--sources", type=str, default="opencode,codex,claude,gemini_cli,antigravity_cli,amp,kimi,grok,pi_agent,copilot_cli,hermes,mimo,dsh")
+    parser.add_argument("--sources", type=str, default="opencode,codex,claude,gemini_cli,antigravity_cli,amp,kimi,grok,pi_agent,copilot_cli,hermes,mimo,dsh,reasonix")
     args = parser.parse_args()
 
     since_date, until_date = _date_range(args)

@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Unreleased
+
+### Added
+
+- Added Reasonix as a token, cost and session source. Tokdash reads `$REASONIX_HOME/stats/YYYY-MM-DD.jsonl` for per-request usage and `$REASONIX_HOME/projects/*/sessions/*.jsonl` for the Session Explorer (`REASONIX_HOME` defaults to `~/.reasonix`), attributing the `provider/model` pair from Reasonix's own config and pricing it through the existing pricing database. Reasonix's `prompt` field counts cached and uncached input together, so it is split into Tokdash's disjoint `input` and `cacheRead` buckets rather than copied into both. Reasonix records usage per request without a session id, so session rows carry turns, project and timing but no token counts; Overview and Stats hold the full totals.
+- Added a Reasonix brand mark to the dashboard and the README supported-tools strip.
+- Active time can now use a duration the source measured itself instead of inferring one from the gap between events. Reasonix logs how long each assistant step took, so its sessions exclude the pause between an answer and the next prompt outright rather than billing it up to the idle cap, and a session's first and last steps are both counted. Tools that log only completion instants are unchanged.
+
+### Fixed
+
+- Restored DeepSeek Harness session loading on the live-parse path. `/api/sessions?tool=dsh` raised `NameError` whenever the persistent store was disabled or its read failed, because the fallback loader had been removed.
 ## 1.8.1 - 2026-08-18
 
 ### Fixed

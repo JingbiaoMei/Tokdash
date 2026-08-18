@@ -24,6 +24,7 @@
   <a href="https://github.com/features/copilot" title="GitHub Copilot CLI"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/copilot.png" alt="GitHub Copilot CLI" height="34"></a>
   <a href="https://hermes-agent.nousresearch.com/" title="Hermes"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/hermes.png" alt="Hermes" height="34"></a>
   <a href="https://github.com/deepseek-ai/deepseek-harness" title="DeepSeek Harness"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/dsh.png" alt="DeepSeek Harness" height="34"></a>
+  <a href="https://github.com/esengine/DeepSeek-Reasonix" title="Reasonix"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/reasonix.png" alt="Reasonix" height="34"></a>
 </p>
 
 <p align="center">
@@ -384,7 +385,7 @@ Concurrent work is counted two ways. `active_ms` is clock time, with overlap cou
 
 Persistent usage DB (default on):
 
-Tokdash maintains a local SQLite index at `~/.tokdash/usage.sqlite3` by default. It stores parsed token rows and Codex/Claude/Kimi/DeepSeek Harness session summaries so repeated dashboard and API reads can use indexed SQL instead of reparsing every source log. Source logs remain the source of truth; the DB is a local performance index, and Tokdash falls back to live parsing if it is disabled or unavailable.
+Tokdash maintains a local SQLite index at `~/.tokdash/usage.sqlite3` by default. It stores parsed token rows and Codex/Claude/Kimi/DeepSeek Harness/Reasonix session summaries so repeated dashboard and API reads can use indexed SQL instead of reparsing every source log. Source logs remain the source of truth; the DB is a local performance index, and Tokdash falls back to live parsing if it is disabled or unavailable.
 
 Cached session rows are price-neutral: they hold each turn's billing inputs (model, fresh input, cache reads and writes, output), and cost is calculated when they are read, with whatever pricing that process has loaded. Editing a rate therefore reprices instantly instead of rereading gigabytes of logs, and two Tokdash versions sharing one database — an installed service and a checkout, say — do not invalidate each other's rows over pricing. Parser and source-file changes still reparse normally. Rows written before this (including any kept by `TOKDASH_USAGE_DB_DURABLE` after their log is gone) reprice from their stored totals, which reproduces the same figure but cannot separate a Claude or Kimi cache write from fresh input; only a reparse of those logs can restore that distinction. Codex bills under `provider/model` and stores the bare name, so its older rows are reparsed once instead of reused.
 
@@ -445,6 +446,8 @@ Grok Build token usage is also parsed locally from `$GROK_HOME/logs/unified.json
 
 DeepSeek Harness (`dsh`) usage and sessions are read locally from `$DSH_HOME/sessions/*/*/session.jsonl.zstd` (or the uncompressed `session.jsonl`), with `DSH_HOME` defaulting to `~/.dsh`. Each log is a sequence of concatenated zstd frames; Tokdash decodes all frames, folds each step's early usage chunk into its finalized message instead of double-counting it, and skips the inherited prefix of forked sessions so parent and child never bill the same tokens twice.
 
+Reasonix usage and sessions are read locally from `$REASONIX_HOME` (default `~/.reasonix`): per-request tokens from the daily `stats/YYYY-MM-DD.jsonl` logs, and session structure from `projects/*/sessions/*.jsonl`. Reasonix talks to whatever providers its `config.toml` names, so the `provider/model` pair in each row is attributed and priced through the normal pricing database; self-hosted models with no published rate count tokens at zero cost. Reasonix records usage per request and never stamps a session id on it, so Session Explorer rows show turns, project and timing without token counts — Overview and Stats carry the full totals.
+
 `tokdash setup` offers an optional quota step (per-provider network consent, default No, plus the poll interval), and `tokdash doctor` reports the quota state: master switch, per-provider consent, kill switch, effective interval and its source, last poll time, and the stored snapshot count.
 
 Quota snapshots and their history live in the local usage database (`usage.sqlite3`, enabled by default) and are **kept indefinitely by default** — set `TOKDASH_QUOTA_RETENTION_DAYS` to a positive number of days to prune older snapshots. If you opt out of local persistence with `TOKDASH_USAGE_DB=0`, the Quota tab loses its main data path: no snapshot history is kept, the background poller does not run, and the tab only shows in-memory results from a manual **Refresh** (network providers with consent) for the lifetime of the current server process. Keep the usage DB enabled (the default) for normal quota tracking.
@@ -457,7 +460,7 @@ Tokdash is a local HTTP server. Common endpoints:
 - `GET /api/usage?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD`
 - `GET /api/tools?period=...` (coding tools only)
 - `GET /api/openclaw?period=...` (OpenClaw only)
-- `GET /api/sessions?tool=codex|claude|opencode|pi_agent|mimo|kimi|dsh&period=...` (append `&include_review_sessions=true` to include Codex review/permission sessions, hidden by default)
+- `GET /api/sessions?tool=codex|claude|opencode|pi_agent|mimo|kimi|dsh|reasonix&period=...` (append `&include_review_sessions=true` to include Codex review/permission sessions, hidden by default)
 - `GET /api/active-time?period=...` (active time across every session tool, plus a per-tool breakdown)
 - `GET /api/quota` and `GET /api/quota/history` (subscription quota snapshots; network refresh is write-gated and opt-in)
 - `GET /api/stats` (contribution calendar & statistics)

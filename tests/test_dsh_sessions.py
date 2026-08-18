@@ -273,14 +273,14 @@ def test_cli_sync_primes_dsh_session_records(_isolated_dsh_home, monkeypatch):
         lambda tool, period: called.append(tool) or {"sessions": []},
     )
     cli._sync_usage_database()
-    assert called == ["codex", "claude", "kimi", "dsh"]
+    assert called == ["codex", "claude", "kimi", "dsh", "reasonix"]
 
 
 def test_frontend_session_registry_includes_dsh():
     index = Path(sessions.__file__).parent / "static" / "index.html"
     source = index.read_text(encoding="utf-8")
-    assert "'codex', 'claude', 'opencode', 'pi_agent', 'mimo', 'kimi', 'dsh'" in source
-    assert "kimi: null, dsh: null, combined: null" in source
+    assert "'codex', 'claude', 'opencode', 'pi_agent', 'mimo', 'kimi', 'dsh', 'reasonix'" in source
+    assert "kimi: null, dsh: null, reasonix: null, combined: null" in source
     assert 'updateSessionPanel("dsh", lastSessionsResponses.dsh);' in source
     assert 'initSortHeaders("dsh", renderSessionsTab);' in source
     assert "dsh: { ...DEFAULT_SORT }," in source

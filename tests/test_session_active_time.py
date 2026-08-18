@@ -7,6 +7,7 @@ from tokdash import sessions
 from tokdash.sessions import (
     ACTIVE_GAP_CAP_MS_DEFAULT,
     _active_intervals,
+    _measured_intervals,
     _merged_interval_ms,
     _summarize_session,
     active_gap_cap_ms,
@@ -59,6 +60,44 @@ def test_active_intervals_ignore_duplicate_and_unordered_stamps():
 
 def test_active_intervals_single_event_has_no_measurable_time():
     assert _active_intervals([BASE_MS], 5 * MINUTE) == []
+
+
+def test_measured_intervals_use_the_recorded_duration_not_the_gap():
+    """A source that timed its own work needs no cap: idle is simply not in it."""
+    cap = 5 * MINUTE
+    # 10s of work, the user thinks for 10 minutes, then 5s of work.
+    events = [(10_000, 10_000), (10 * MINUTE + 15_000, 5_000)]
+
+    intervals = _measured_intervals(events, cap)
+
+    assert intervals == [(0, 10_000), (10 * MINUTE + 10_000, 10 * MINUTE + 15_000)]
+    assert sum(end - start for start, end in intervals) == 15_000
+
+
+def test_measured_intervals_are_not_capped():
+    """The cap strips idle out of an inferred gap; a timed duration has none."""
+    assert _measured_intervals([(3 * HOUR, 3 * HOUR)], 5 * MINUTE) == [(0, 3 * HOUR)]
+
+
+def test_measured_intervals_measure_a_lone_event():
+    """Unlike the gap rule, a single timed event is measurable on its own."""
+    assert _measured_intervals([(BASE_MS, 7_000)], 5 * MINUTE) == [(BASE_MS - 7_000, BASE_MS)]
+
+
+def test_measured_intervals_fall_back_to_the_capped_gap():
+    """Events with no recorded duration keep the heuristic unchanged."""
+    cap = 5 * MINUTE
+    plain = [(0, None), (MINUTE, None), (MINUTE + 3 * HOUR, None)]
+
+    assert _measured_intervals(plain, cap) == _active_intervals([0, MINUTE, MINUTE + 3 * HOUR], cap)
+
+
+def test_measured_and_unmeasured_events_mix_within_one_stream():
+    """A timed event still anchors the gap for an untimed one after it."""
+    cap = 5 * MINUTE
+    events = [(10_000, 10_000), (30_000, None)]
+
+    assert _measured_intervals(events, cap) == [(0, 10_000), (10_000, 30_000)]
 
 
 def test_merged_interval_counts_overlap_once():

@@ -571,6 +571,10 @@ def test_codex_activity_warm_persistent_load_does_not_reparse(
     monkeypatch.setattr(
         sessions_module.clientpaths, "codex_sessions_dir", lambda: session_root
     )
+    monkeypatch.setattr(
+        sessions_module.clientpaths, "codex_archived_sessions_dir",
+        lambda: tmp_path / "archived_sessions",
+    )
     _clear_codex_activity_caches()
     calls = _install_counting_codex_parser(monkeypatch)
 
@@ -598,6 +602,10 @@ def test_codex_activity_warm_store_disabled_load_does_not_reparse(
     monkeypatch.setenv("TOKDASH_USAGE_DB_PATH", str(db_path))
     monkeypatch.setattr(
         sessions_module.clientpaths, "codex_sessions_dir", lambda: session_root
+    )
+    monkeypatch.setattr(
+        sessions_module.clientpaths, "codex_archived_sessions_dir",
+        lambda: tmp_path / "archived_sessions",
     )
     _clear_codex_activity_caches()
     calls = _install_counting_codex_parser(monkeypatch)

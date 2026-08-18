@@ -430,7 +430,7 @@ def test_store_rows_are_rebuilt_when_the_parser_version_changes(monkeypatch, _is
 
 
 def test_kimi_parser_signature_has_no_v159_compat_token():
-    """Only the two original parsers carry the frozen v1.5.9 token."""
+    """Only original parsers still at version 1 carry the frozen v1.5.9 token."""
     signature = sessions._session_file_parser_signature("_parse_kimi_session_file")
     assert signature == {
         "object": f"{sessions.__name__}._parse_kimi_session_file",
@@ -438,10 +438,13 @@ def test_kimi_parser_signature_has_no_v159_compat_token():
         "version": sessions._SESSION_FILE_PARSER_VERSIONS["_parse_kimi_session_file"],
     }
     assert "content_sha1" not in signature
-    assert (
-        sessions._session_file_parser_signature("_parse_codex_session_file")["content_sha1"]
-        == sessions._SESSION_FILE_PARSER_V1_COMPAT_TOKEN
-    )
+    # The frozen v1.5.9 token applies only to original parsers still at version 1.
+    # Codex (v2: thread_spawn replay rekeying) and Claude (v2: _stream_id) have both
+    # left that path, so every current parser emits a plain version token.
+    for name, version in sessions._SESSION_FILE_PARSER_VERSIONS.items():
+        sig = sessions._session_file_parser_signature(name)
+        if version > 1:
+            assert "content_sha1" not in sig
 
 
 def test_workspace_project_correction_survives_a_cached_read(_isolated_kimi_roots):

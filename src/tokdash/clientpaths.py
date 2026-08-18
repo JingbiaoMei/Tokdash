@@ -81,6 +81,15 @@ def codex_sessions_dir() -> Path:
     return codex_home() / "sessions"
 
 
+def codex_archived_sessions_dir() -> Path:
+    """Codex moves completed rollouts here (``codex archive`` / auto-archive).
+
+    Files keep their content, so the stable event key collapses any overlap with
+    ``sessions/`` — scanning both roots cannot double-count.
+    """
+    return codex_home() / "archived_sessions"
+
+
 def codex_state_db_path() -> Path:
     return codex_home() / "state_5.sqlite"
 

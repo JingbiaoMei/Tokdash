@@ -1604,6 +1604,46 @@ class UsageEntryStore:
                 out.append(obj)
         return out
 
+    def query_session_records_by_ids(
+        self,
+        tool: str,
+        session_ids: Iterable[str],
+    ) -> list[dict[str, Any]]:
+        """Return stored session records for specific session ids, unbounded by time.
+
+        Windowed reads (``query_session_records``) only return sessions touching
+        the window; cross-session checks like the Codex thread_spawn replay dedup
+        need the parent session even when every one of its files is older than the
+        requested window.
+        """
+        ids = sorted({str(session_id) for session_id in session_ids if session_id})
+        if not ids:
+            return []
+        out: list[dict[str, Any]] = []
+        with closing(self._connect()) as conn:
+            for start in range(0, len(ids), 500):
+                batch = ids[start : start + 500]
+                placeholders = ",".join("?" for _ in batch)
+                # No missing filter: durable rows kept after their file disappeared
+                # still prove the session was indexed, and their event keys remain
+                # valid for cross-session replay dedup.
+                rows = conn.execute(
+                    f"""
+                    SELECT raw_json FROM session_records
+                    WHERE tool = ? AND session_id IN ({placeholders})
+                    ORDER BY file_path ASC, session_id ASC
+                    """,
+                    [tool, *batch],
+                ).fetchall()
+                for row in rows:
+                    try:
+                        obj = json.loads(row["raw_json"])
+                    except Exception:
+                        continue
+                    if isinstance(obj, dict):
+                        out.append(obj)
+        return out
+
     def query_session_activity_records(self, tool: str) -> list[dict[str, Any]]:
         with closing(self._connect()) as conn:
             rows = conn.execute(

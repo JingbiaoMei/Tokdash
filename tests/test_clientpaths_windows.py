@@ -54,6 +54,7 @@ def test_quota_client_roots_honor_environment_overrides(monkeypatch):
 
     assert clientpaths.codex_home() == Path("/tmp/codex-home")
     assert clientpaths.codex_sessions_dir() == Path("/tmp/codex-home") / "sessions"
+    assert clientpaths.codex_archived_sessions_dir() == Path("/tmp/codex-home") / "archived_sessions"
     assert clientpaths.claude_config_dir() == Path("/tmp/claude-config")
     assert clientpaths.antigravity_cli_dir() == Path.home() / ".gemini" / "antigravity-cli"
     assert clientpaths.antigravity_conversations_dir() == Path.home() / ".gemini" / "antigravity-cli" / "conversations"

@@ -150,6 +150,83 @@ def codex_token_event_key(session_id: Any, info: Any) -> Optional[str]:
     return f"codex-token-v1:{hashlib.sha256(canonical.encode('utf-8')).hexdigest()}"
 
 
+# Placeholder resolved for rows written before a file's first model signal (a
+# fork's replayed parent prefix, or old formats without turn_context). Rows
+# carry a ``_model_placeholder`` marker until then so backfill can tell "no
+# signal yet" apart from an explicit user selection of this same model — the
+# name is real, so the value alone must never be the sentinel.
+CODEX_DEFAULT_MODEL = "gpt-5.3-codex"
+
+
+def codex_replay_key_session_id(
+    is_fork_file: bool,
+    own_session_id: Any,
+    current_session_id: Any,
+    subagent_parent_id: Any,
+    saw_turn_context: bool,
+) -> Tuple[Any, bool]:
+    """Return ``(key scope, replay_fallback)`` for a Codex token_count event.
+
+    Fork files (``thread_spawn`` subagents, user ``/fork``, exec forks — any file
+    whose first ``session_meta`` declares an ancestor) replay the parent thread's
+    history before their own work. Keying the replay to the parent session
+    collapses it against the parent file via the stable event key:
+
+    - Codex 0.144 shape: the file replays the parent's ``session_meta``, so the
+      current session id IS the parent's and the key is already parent-scoped.
+    - Codex 0.146+ single-meta fork shape (``forked_from_id``): one session_meta
+      carrying the child's own id; the replayed parent prefix precedes the
+      child's first ``turn_context``.
+
+    ``replay_fallback`` marks rows that may be source-gated, but only when they
+    lack the cumulative state a stable key needs (old/partial logs); anything
+    unrecognized degrades toward visible over-counting, not silent loss.
+    Shared by both Codex parsers so Overview and Sessions cannot drift apart.
+    See CODEX_USAGE_COUNTING.md.
+    """
+    if not is_fork_file or own_session_id is None or current_session_id is None:
+        return current_session_id, False
+    if subagent_parent_id is not None:
+        if current_session_id == subagent_parent_id:
+            return current_session_id, True
+        if current_session_id == own_session_id and not saw_turn_context:
+            return subagent_parent_id, False
+    elif current_session_id != own_session_id:
+        return current_session_id, True
+    return current_session_id, False
+
+
+def codex_fork_ancestry(payload: Any) -> Tuple[bool, Optional[str]]:
+    """Return ``(is_thread_spawn, declared_parent_id)`` from a session_meta payload.
+
+    Codex has declared fork ancestry three ways: ``source.subagent.thread_spawn
+    .parent_thread_id`` (MultiAgent V2) and the top-level ``forked_from_id`` /
+    ``parent_thread_id`` fields (user ``/fork``, exec forks, and single-meta
+    spawn files). Any of them marks the file as a history-replaying fork;
+    ``thread_spawn`` additionally distinguishes subagent sessions for activity
+    classification. A self-reference is not ancestry. The bare ``session_id``
+    top-level field is deliberately NOT accepted: it has never carried ancestry
+    in any observed log (0/1009 files) and its generic name risks treating
+    ordinary sessions as forks, which would rekey real rows into a shared scope.
+    """
+    p = payload if isinstance(payload, dict) else {}
+    own_id = str(p.get("id") or "")
+    source = p.get("source") if isinstance(p.get("source"), dict) else {}
+    subagent = source.get("subagent") if isinstance(source.get("subagent"), dict) else None
+    thread_spawn = subagent.get("thread_spawn") if isinstance(subagent, dict) else None
+    is_thread_spawn = isinstance(thread_spawn, dict)
+    pid = None
+    if is_thread_spawn:
+        pid = (thread_spawn or {}).get("parent_thread_id")
+    if not pid:
+        for field in ("forked_from_id", "parent_thread_id"):
+            candidate = p.get(field)
+            if candidate and str(candidate) != own_id:
+                pid = candidate
+                break
+    return is_thread_spawn, (str(pid) if pid else None)
+
+
 def _sqlite_table_exists(conn: sqlite3.Connection, table: str) -> bool:
     try:
         cur = conn.cursor()
@@ -477,6 +554,7 @@ class CodexParser(BaseParser):
     def __init__(self, pricing_db: PricingDatabase):
         super().__init__(pricing_db)
         self.sessions_dir = clientpaths.codex_sessions_dir()
+        self.archived_sessions_dir = clientpaths.codex_archived_sessions_dir()
         self.replay_events_skipped = 0
 
     @staticmethod
@@ -491,7 +569,14 @@ class CodexParser(BaseParser):
         return fallback
 
     def _file_signatures(self) -> tuple:
-        return _timed_sigs(f"codex:{self.sessions_dir}", lambda: _rglob_sigs(self.sessions_dir))
+        # Both roots: archived rollouts keep their content, so stable event keys
+        # collapse any overlap with sessions/ instead of double-counting.
+        def _scan() -> tuple:
+            sigs = list(_rglob_sigs(self.sessions_dir)) + list(_rglob_sigs(self.archived_sessions_dir))
+            sigs.sort()
+            return tuple(sigs)
+
+        return _timed_sigs(f"codex:{self.sessions_dir}:{self.archived_sessions_dir}", _scan)
 
     def _parse_all(self) -> List[Dict[str, Any]]:
         out: List[Dict[str, Any]] = []
@@ -501,12 +586,21 @@ class CodexParser(BaseParser):
         for path_str, _, _ in self._file_signatures():
             session_file = Path(path_str)
             try:
-                model = "gpt-5.3-codex"
+                model: Optional[str] = None
                 provider = "openai"
                 own_session_id = None
                 current_session_id = None
                 subagent_parent_id = None
-                is_subagent_file = False
+                is_fork_file = False
+                saw_turn_context = False
+                first_model_seen: Optional[str] = None
+                first_provider_seen: Optional[str] = None
+                # Indices this file inserted OR replaced. A duplicate with an
+                # earlier timestamp can replace an entry owned by a previously
+                # parsed file (index < len(out) at file start), so a slice from
+                # the file's first append would miss it — its placeholder marker
+                # must still be resolved by THIS file's model signal.
+                file_entry_indices: set[int] = set()
 
                 for line_no, line in enumerate(session_file.read_text(encoding="utf-8").splitlines(), start=1):
                     try:
@@ -515,46 +609,64 @@ class CodexParser(BaseParser):
                         continue
 
                     p = msg.get("payload") or {}
-                    if msg.get("type") == "turn_context" and p.get("model"):
-                        model = str(p.get("model"))
-                        provider = self._infer_provider(model, provider)
+                    if msg.get("type") == "turn_context":
+                        saw_turn_context = True
+                        if p.get("model"):
+                            model = str(p.get("model"))
+                            provider = self._infer_provider(model, provider)
+                            if first_model_seen is None:
+                                first_model_seen = model
+                                first_provider_seen = provider
+                    elif (
+                        not saw_turn_context
+                        and msg.get("type") == "event_msg"
+                        and p.get("type") == "thread_settings_applied"
+                    ):
+                        # Newer Codex applies the thread settings before the first
+                        # turn_context; an authoritative early model source. Once a
+                        # turn_context exists it owns per-turn attribution.
+                        settings = p.get("thread_settings") if isinstance(p.get("thread_settings"), dict) else {}
+                        if settings.get("model"):
+                            model = str(settings.get("model"))
+                            provider = self._infer_provider(model, provider)
+                            if settings.get("model_provider_id"):
+                                provider = str(settings.get("model_provider_id"))
+                            if first_model_seen is None:
+                                first_model_seen = model
+                                first_provider_seen = provider
                     elif msg.get("type") == "session_meta":
                         sid = p.get("id")
                         if sid:
                             sid = str(sid)
                             if own_session_id is None:
                                 own_session_id = sid
-                                # First session_meta identifies the file. A thread_spawn subagent file
-                                # replays ancestor history; capture the declared parent so we skip only
-                                # those replays (never the subagent's own or a stray id).
-                                source = p.get("source")
-                                subagent = source.get("subagent") if isinstance(source, dict) else None
-                                if isinstance(subagent, dict) and isinstance(subagent.get("thread_spawn"), dict):
-                                    is_subagent_file = True
-                                    pid = (subagent.get("thread_spawn") or {}).get("parent_thread_id")
-                                    subagent_parent_id = str(pid) if pid else None
+                                # First session_meta identifies the file. A fork file
+                                # (thread_spawn subagent, user /fork, exec fork)
+                                # replays ancestor history; capture the declared parent
+                                # from any ancestry field so we skip only those replays
+                                # (never the fork's own or a stray id).
+                                _is_thread_spawn, subagent_parent_id = codex_fork_ancestry(p)
+                                is_fork_file = _is_thread_spawn or subagent_parent_id is not None
                             current_session_id = sid
                         if p.get("model_provider"):
                             provider = str(p.get("model_provider"))
+                        if not saw_turn_context:
+                            # Issue #23 reported the selected model nested under
+                            # base_instructions.provenance. Unconfirmed: no real
+                            # log through Codex 0.147.0 carries that key, but the
+                            # lookup is harmless and keeps the reporter's case
+                            # covered if a future build adds it.
+                            base = p.get("base_instructions") if isinstance(p.get("base_instructions"), dict) else {}
+                            provenance = base.get("provenance") if isinstance(base.get("provenance"), dict) else {}
+                            if provenance.get("model"):
+                                model = str(provenance.get("model"))
+                                provider = self._infer_provider(model, provider)
+                                if first_model_seen is None:
+                                    first_model_seen = model
+                                    first_provider_seen = provider
 
                     if msg.get("type") != "event_msg" or p.get("type") != "token_count":
                         continue
-
-                    # Keep the Codex 0.144 thread_spawn source-shape gate as a fallback
-                    # for old/partial rows that lack the cumulative state needed by the
-                    # stable key below. Ordinary primary/guardian files are never source-
-                    # gated; their exact copies are handled by stable identity instead.
-                    # Any unrecognized partial format therefore degrades toward visible
-                    # over-counting, not silent loss. See CODEX_USAGE_COUNTING.md.
-                    if is_subagent_file and own_session_id is not None and current_session_id is not None:
-                        is_replay = (
-                            current_session_id == subagent_parent_id
-                            if subagent_parent_id is not None
-                            else current_session_id != own_session_id
-                        )
-                        if is_replay:
-                            self.replay_events_skipped += 1
-                            continue
 
                     ts_raw = msg.get("timestamp")
                     if not ts_raw:
@@ -571,7 +683,18 @@ class CodexParser(BaseParser):
                     if not usage:
                         continue
 
-                    event_key = codex_token_event_key(current_session_id, info)
+                    key_session_id, replay_fallback = codex_replay_key_session_id(
+                        is_fork_file,
+                        own_session_id,
+                        current_session_id,
+                        subagent_parent_id,
+                        saw_turn_context,
+                    )
+
+                    event_key = codex_token_event_key(key_session_id, info)
+                    if replay_fallback and event_key is None:
+                        self.replay_events_skipped += 1
+                        continue
 
                     # In Codex: input_tokens INCLUDES cached tokens
                     # So fresh_input = input_tokens - cached_input_tokens
@@ -584,28 +707,63 @@ class CodexParser(BaseParser):
                     if input_t == 0 and output_t == 0 and cache_read == 0 and reasoning == 0:
                         continue
 
+                    entry_model = model or CODEX_DEFAULT_MODEL
                     entry = {
                         "source": self.source_name,
-                        "model": model,
+                        "model": entry_model,
                         "provider": provider,
                         "input": input_t,
                         "output": output_t,
                         "cacheRead": cache_read,
                         "cacheWrite": 0,
                         "reasoning": reasoning,
-                        "cost": self.pricing_db.get_cost(model, input_t, output_t, cache_read, 0),
+                        "cost": self.pricing_db.get_cost(entry_model, input_t, output_t, cache_read, 0),
                         "timestamp": int(ts.timestamp() * 1000),
                         "entry_id": event_key or f"{session_file}:{line_no}",
                     }
+                    if model is None:
+                        entry["_model_placeholder"] = True
                     if event_key and event_key in event_index_by_key:
                         self.replay_events_skipped += 1
                         existing_index = event_index_by_key[event_key]
                         if entry["timestamp"] < out[existing_index]["timestamp"]:
                             out[existing_index] = entry
+                            # The replacement may sit before this file's first
+                            # append; the file now owns that slot's marker too.
+                            file_entry_indices.add(existing_index)
                         continue
                     if event_key:
                         event_index_by_key[event_key] = len(out)
+                    file_entry_indices.add(len(out))
                     out.append(entry)
+
+                if first_model_seen:
+                    # Rows written before the file's first model signal (a fork's
+                    # replayed parent prefix that outlives an unindexed parent, or
+                    # old formats) would otherwise bill under the placeholder
+                    # default. The file's own first model is the closest truthful
+                    # attribution. Only placeholder rows move: an explicit
+                    # selection of CODEX_DEFAULT_MODEL is real data, not a signal
+                    # gap, and must survive even when the model changes mid-file.
+                    for index in file_entry_indices:
+                        entry = out[index]
+                        if not entry.pop("_model_placeholder", False):
+                            continue
+                        entry["model"] = first_model_seen
+                        entry["provider"] = first_provider_seen or entry["provider"]
+                        entry["cost"] = self.pricing_db.get_cost(
+                            first_model_seen, entry["input"], entry["output"], entry["cacheRead"], 0
+                        )
+                else:
+                    # No model signal anywhere in the file: label the rows
+                    # explicitly unknown (issue #23) instead of billing them
+                    # under a default model that never ran. Unknown models carry
+                    # token counts but price to $0.
+                    for index in file_entry_indices:
+                        entry = out[index]
+                        if entry.pop("_model_placeholder", False):
+                            entry["model"] = "unknown"
+                            entry["cost"] = 0.0
             except Exception:
                 continue
 

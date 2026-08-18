@@ -24,7 +24,13 @@ from .activity_insights import (
 from .compute import cache_hit_rate, pct_change, period_to_days, previous_period_range
 from .dateutil import parse_date_range
 from .pricing import PricingDatabase
-from .sources.coding_tools import KimiParser, codex_token_event_key
+from .sources.coding_tools import (
+    CODEX_DEFAULT_MODEL,
+    KimiParser,
+    codex_fork_ancestry,
+    codex_replay_key_session_id,
+    codex_token_event_key,
+)
 from .sources import dsh_log
 from .sources.dsh_log import (
     decode_dsh_session_file,
@@ -55,7 +61,10 @@ DISPLAY_NAME_MAX_CHARS = 96
 # sessions.py are edited. Bump only the affected version when that parser's
 # stored output changes.
 _SESSION_FILE_PARSER_VERSIONS = {
-    "_parse_codex_session_file": 1,
+    # 2: thread_spawn replay turns are keyed to the parent session (incl. the 0.146+
+    #    single-meta fork shape) and raws carry _subagent_parent_id for cross-session
+    #    replay dedup; stored v1 keys/rows predate both.
+    "_parse_codex_session_file": 2,
     # 2: turns carry _stream_id so subagents are timed separately from the main agent.
     "_parse_claude_session_file": 2,
     # 2: turns carry _stream_id so concurrent agents are timed separately.
@@ -774,6 +783,9 @@ def _merge_raw_session(existing: Dict[str, Any], new: Dict[str, Any]) -> Dict[st
         or "_display_name_explicit" in new
     ):
         merged["_display_name_explicit"] = existing_name_is_explicit or new_name_is_explicit
+    subagent_parent = existing.get("_subagent_parent_id") or new.get("_subagent_parent_id")
+    if subagent_parent:
+        merged["_subagent_parent_id"] = subagent_parent
 
     merged_by_key: dict[tuple[Any, ...], Dict[str, Any]] = {}
     for turn in list(existing.get("turns", [])) + list(new.get("turns", [])):
@@ -793,6 +805,124 @@ def _merge_raw_session(existing: Dict[str, Any], new: Dict[str, Any]) -> Dict[st
     return merged
 
 
+def _drop_codex_subagent_replay_turns(
+    sessions: Dict[str, Dict[str, Any]],
+    external_parent_keys: Optional[Dict[str, set]] = None,
+) -> Dict[str, Dict[str, Any]]:
+    """Remove replayed parent-prefix turns from thread_spawn child sessions.
+
+    A single-meta fork file (Codex 0.146+, ``forked_from_id``) keeps its own session
+    id, so it never merges with the parent's session, and its replayed prefix turns
+    — keyed to the parent session id by ``_parse_codex_session_file`` — would count
+    twice across sessions. Drop the child turns whose event key the parent session
+    already owns, and drop the child session entirely if nothing else remains. When
+    the parent was never indexed (archived or deleted), the child keeps the prefix
+    so the usage is counted once instead of lost. Only Codex raws carry the marker.
+
+    ``external_parent_keys`` supplies event keys for parent sessions absent from
+    ``sessions`` — a windowed stored read can exclude every parent file while the
+    child's restamped replay turns fall inside the window (see
+    ``_stored_sessions_for_tool``).
+
+    When the parent is not indexed anywhere, sibling forks of the same parent
+    would each retain an identical parent-scoped copy of the replay prefix. The
+    earliest sibling (by first turn timestamp, then session id) keeps it; later
+    siblings drop turns whose event key an earlier sibling already retained —
+    the same single-survivor rule Overview's global event-key index applies.
+    """
+    keys_by_session = {
+        session_id: {
+            str(turn.get("_event_key"))
+            for turn in session.get("turns", [])
+            if turn.get("_event_key")
+        }
+        for session_id, session in sessions.items()
+    }
+    orphan_children: list[tuple[int, str, Dict[str, Any]]] = []
+    for session_id, session in list(sessions.items()):
+        parent_id = str(session.get("_subagent_parent_id") or "")
+        if not parent_id or parent_id == session_id:
+            continue
+        parent_keys = keys_by_session.get(parent_id)
+        if parent_keys is None and external_parent_keys:
+            parent_keys = external_parent_keys.get(parent_id)
+        if not parent_keys:
+            orphan_children.append((parent_id, session_id, session))
+            continue
+        kept = [
+            turn
+            for turn in session.get("turns", [])
+            if not turn.get("_event_key") or str(turn.get("_event_key")) not in parent_keys
+        ]
+        if kept:
+            session["turns"] = kept
+            keys_by_session[session_id] = {
+                str(turn.get("_event_key")) for turn in kept if turn.get("_event_key")
+            }
+        else:
+            del sessions[session_id]
+            keys_by_session.pop(session_id, None)
+
+    orphans_by_parent: Dict[str, list] = {}
+    for parent_id, session_id, session in orphan_children:
+        orphans_by_parent.setdefault(parent_id, []).append((session_id, session))
+    for siblings in orphans_by_parent.values():
+        if len(siblings) < 2:
+            continue
+        siblings.sort(
+            key=lambda item: (
+                min((int(t.get("timestamp_ms", 0) or 0) for t in item[1].get("turns", [])), default=0),
+                item[0],
+            )
+        )
+        retained_keys: set = set()
+        for session_id, session in siblings:
+            kept = []
+            for turn in session.get("turns", []):
+                event_key = str(turn.get("_event_key") or "")
+                if event_key and event_key in retained_keys:
+                    continue
+                kept.append(turn)
+                if event_key:
+                    retained_keys.add(event_key)
+            if kept:
+                session["turns"] = kept
+            else:
+                del sessions[session_id]
+                keys_by_session.pop(session_id, None)
+    return sessions
+
+
+def _codex_unwindowed_parent_keys(
+    store: "UsageEntryStore", sessions: Dict[str, Dict[str, Any]]
+) -> Dict[str, set]:
+    """Event keys of fork-parent sessions that a windowed read excluded.
+
+    ``query_session_records(whole_sessions=True)`` only loads sessions touching the
+    window. A forked subagent file keeps its own session id while its replayed
+    prefix turns are restamped into the window, so the parent session can be absent
+    from the result while present in the store. Fetch those parents unbounded by
+    time so the replay dedup is window-independent. A parent with no stored rows
+    yields no keys and the child keeps the prefix (counted once, never dropped).
+    """
+    missing = {
+        str(session["_subagent_parent_id"])
+        for session in sessions.values()
+        if session.get("_subagent_parent_id")
+    } - set(sessions)
+    if not missing:
+        return {}
+    parent_keys: Dict[str, set] = {}
+    for record in store.query_session_records_by_ids("codex", missing):
+        session_id = str(record.get("session_id") or "")
+        keys = parent_keys.setdefault(session_id, set())
+        for turn in record.get("turns") or []:
+            event_key = turn.get("_event_key")
+            if event_key:
+                keys.add(str(event_key))
+    return parent_keys
+
+
 def _file_signature(path: Path) -> tuple[str, int, int]:
     stat = path.stat()
     return str(path), int(stat.st_mtime_ns), int(stat.st_size)
@@ -807,6 +937,16 @@ def _iter_file_signatures(root: Path) -> tuple[tuple[str, int, int], ...]:
             items.append(_file_signature(path))
         except FileNotFoundError:
             continue
+    items.sort(key=lambda item: item[0])
+    return tuple(items)
+
+
+def _codex_file_signatures() -> tuple[tuple[str, int, int], ...]:
+    """Signatures from both Codex rollout roots (``sessions/`` and
+    ``archived_sessions/``). Archived files keep their content, so the stable
+    event key collapses any overlap instead of double-counting."""
+    items = list(_iter_file_signatures(clientpaths.codex_sessions_dir()))
+    items.extend(_iter_file_signatures(clientpaths.codex_archived_sessions_dir()))
     items.sort(key=lambda item: item[0])
     return tuple(items)
 
@@ -918,8 +1058,10 @@ def _parse_codex_session_file(path_str: str, _mtime_ns: int, _size: int, _pricin
     own_session_id = None
     subagent_parent_id = None
     is_subagent_file = False
-    current_model = "gpt-5.3-codex"
+    current_model: Optional[str] = None
     current_provider = "openai"
+    first_model_seen: Optional[str] = None
+    first_provider_seen: Optional[str] = None
     cwd = ""
     repo_url = ""
     thread_name = ""
@@ -928,6 +1070,7 @@ def _parse_codex_session_file(path_str: str, _mtime_ns: int, _size: int, _pricin
     turn_index = 0
     seen_event_keys: set[str] = set()
     saw_session_meta = False
+    saw_turn_context = False
     activity = new_activity_record(is_primary=True, has_explicit_session_id=False)
 
     with session_path.open("r", encoding="utf-8") as handle:
@@ -952,14 +1095,11 @@ def _parse_codex_session_file(path_str: str, _mtime_ns: int, _size: int, _pricin
                     activity["is_primary"] = False
                 if not saw_session_meta:
                     saw_session_meta = True
-                    source = payload.get("source")
-                    subagent = source.get("subagent") if isinstance(source, dict) else None
-                    if isinstance(subagent, dict) and isinstance(
-                        subagent.get("thread_spawn"), dict
-                    ):
-                        is_subagent_file = True
-                        pid = (subagent.get("thread_spawn") or {}).get("parent_thread_id")
-                        subagent_parent_id = str(pid) if pid else None
+                    # thread_spawn drives activity classification; any declared
+                    # ancestry (thread_spawn parent, forked_from_id, top-level
+                    # parent_thread_id) drives replay keying.
+                    is_thread_spawn, subagent_parent_id = codex_fork_ancestry(payload)
+                    is_subagent_file = is_thread_spawn
                     activity["is_primary"] = not is_subagent_file and not is_guardian_meta
                 if explicit_meta_id:
                     session_id = explicit_meta_id      # current (last-seen) session id
@@ -969,16 +1109,51 @@ def _parse_codex_session_file(path_str: str, _mtime_ns: int, _size: int, _pricin
                 repo_url = str(((payload.get("git") or {}).get("repository_url")) or repo_url)
                 if payload.get("model_provider"):
                     current_provider = str(payload.get("model_provider"))
+                if not saw_turn_context:
+                    # Issue #23 reported the selected model nested under
+                    # base_instructions.provenance. Unconfirmed: no real log
+                    # through Codex 0.147.0 carries that key, but the lookup is
+                    # harmless and keeps the reporter's case covered.
+                    base = payload.get("base_instructions") if isinstance(payload.get("base_instructions"), dict) else {}
+                    provenance = base.get("provenance") if isinstance(base.get("provenance"), dict) else {}
+                    if provenance.get("model"):
+                        current_model = str(provenance.get("model"))
+                        if first_model_seen is None:
+                            first_model_seen = current_model
+                            first_provider_seen = current_provider
                 continue
 
             if obj_type == "turn_context":
-                current_model = str(payload.get("model") or current_model)
+                saw_turn_context = True
+                if payload.get("model"):
+                    current_model = str(payload.get("model"))
+                    if first_model_seen is None:
+                        first_model_seen = current_model
+                        first_provider_seen = current_provider
                 cwd = str(payload.get("cwd") or cwd)
                 record_reasoning_turn(
                     activity,
                     turn_id=payload.get("turn_id"),
                     effort=payload.get("effort"),
                 )
+                continue
+
+            if (
+                not saw_turn_context
+                and obj_type == "event_msg"
+                and payload_type == "thread_settings_applied"
+            ):
+                # Newer Codex applies the thread settings before the first
+                # turn_context; an authoritative early model source. Once a
+                # turn_context exists it owns per-turn attribution.
+                settings = payload.get("thread_settings") if isinstance(payload.get("thread_settings"), dict) else {}
+                if settings.get("model"):
+                    current_model = str(settings.get("model"))
+                    if settings.get("model_provider_id"):
+                        current_provider = str(settings.get("model_provider_id"))
+                    if first_model_seen is None:
+                        first_model_seen = current_model
+                        first_provider_seen = current_provider
                 continue
 
             if payload_type == "thread_name_updated":
@@ -1012,17 +1187,6 @@ def _parse_codex_session_file(path_str: str, _mtime_ns: int, _size: int, _pricin
             if obj_type != "event_msg" or payload.get("type") != "token_count":
                 continue
 
-            # Source-shape fallback for thread_spawn replays whose older events lack
-            # cumulative state. Stable identity below handles ordinary resume copies.
-            if is_subagent_file and own_session_id is not None:
-                is_replay = (
-                    session_id == subagent_parent_id
-                    if subagent_parent_id is not None
-                    else session_id != own_session_id
-                )
-                if is_replay:
-                    continue
-
             timestamp_ms = _parse_iso_to_ms(obj.get("timestamp"))
             if timestamp_ms is None:
                 continue
@@ -1032,7 +1196,21 @@ def _parse_codex_session_file(path_str: str, _mtime_ns: int, _size: int, _pricin
             if not usage:
                 continue
 
-            event_key = codex_token_event_key(session_id, info)
+            # Key fork replay segments to the parent session so the stable
+            # event key collapses them against the parent file (shared with
+            # CodexParser._parse_all; see CODEX_USAGE_COUNTING.md). The source-shape
+            # skip fires only for rows without the cumulative state a key needs.
+            key_session_id, replay_fallback = codex_replay_key_session_id(
+                is_subagent_file or subagent_parent_id is not None,
+                own_session_id,
+                session_id,
+                subagent_parent_id,
+                saw_turn_context,
+            )
+
+            event_key = codex_token_event_key(key_session_id, info)
+            if replay_fallback and event_key is None:
+                continue
             if event_key and event_key in seen_event_keys:
                 continue
             if event_key:
@@ -1047,12 +1225,13 @@ def _parse_codex_session_file(path_str: str, _mtime_ns: int, _size: int, _pricin
             if total_tokens == 0:
                 continue
 
-            full_model_name = f"{current_provider}/{current_model}" if current_provider else current_model
+            turn_model = current_model or CODEX_DEFAULT_MODEL
+            full_model_name = f"{current_provider}/{turn_model}" if current_provider else turn_model
             turn_index += 1
             turn = _build_turn(
                 turn_index=turn_index,
                 timestamp_ms=timestamp_ms,
-                model=current_model,
+                model=turn_model,
                 tokens_in=input_tokens,
                 tokens_cache=cache_read,
                 tokens_out=output_tokens,
@@ -1067,6 +1246,10 @@ def _parse_codex_session_file(path_str: str, _mtime_ns: int, _size: int, _pricin
                     cache_read=cache_read,
                 ),
             )
+            if current_model is None:
+                # Placeholder, not an explicit gpt-5.3-codex selection — only
+                # these rows may be backfilled to the file's first real model.
+                turn["_model_placeholder"] = True
             if event_key:
                 turn["_event_key"] = event_key
             turns.append(turn)
@@ -1074,8 +1257,38 @@ def _parse_codex_session_file(path_str: str, _mtime_ns: int, _size: int, _pricin
     if not turns and not activity["is_primary"]:
         return None
 
+    if first_model_seen:
+        # Turns written before the file's first model signal (a fork's replayed
+        # parent prefix that outlives an unindexed parent, or old formats) would
+        # otherwise bill under the placeholder default. Only flagged placeholder
+        # turns move: an explicit CODEX_DEFAULT_MODEL selection is real data and
+        # must survive even when the file switches models mid-stream.
+        qualified = (
+            f"{first_provider_seen}/{first_model_seen}" if first_provider_seen else first_model_seen
+        )
+        for turn in turns:
+            if not turn.pop("_model_placeholder", False):
+                continue
+            turn["model"] = first_model_seen
+            bill = turn.get("_bill")
+            if isinstance(bill, dict):
+                bill["model"] = qualified
+                turn["cost"] = _turn_cost(bill)
+    else:
+        # No model signal anywhere in the file: label the turns explicitly
+        # unknown (issue #23) instead of billing them under a default model that
+        # never ran. Unknown models keep token counts but price to $0.
+        for turn in turns:
+            if not turn.pop("_model_placeholder", False):
+                continue
+            turn["model"] = "unknown"
+            bill = turn.get("_bill")
+            if isinstance(bill, dict):
+                bill["model"] = "unknown"
+                turn["cost"] = _turn_cost(bill)
+
     project = _project_from_repo_or_path(repo_url or None, cwd or None)
-    return {
+    raw = {
         "tool": "codex",
         "session_id": session_id,
         "display_name": thread_name or _fallback_display_name(session_id, project),
@@ -1085,6 +1298,13 @@ def _parse_codex_session_file(path_str: str, _mtime_ns: int, _size: int, _pricin
         "turns": turns,
         "_activity": activity,
     }
+    if subagent_parent_id:
+        # Lets the cross-session merge drop this file's replayed parent-prefix
+        # turns when the parent session is present (fork files never merge with
+        # the parent on their own). Set for any declared ancestry, not only
+        # thread_spawn.
+        raw["_subagent_parent_id"] = subagent_parent_id
+    return raw
 
 
 @lru_cache(maxsize=8)
@@ -1099,12 +1319,11 @@ def _load_codex_sessions(signature: tuple[tuple[str, int, int], ...], pricing_si
                 sessions[session_id] = _merge_raw_session(sessions[session_id], raw)
             else:
                 sessions[session_id] = raw
-    return sessions
+    return _drop_codex_subagent_replay_turns(sessions)
 
 
 def _codex_sessions() -> Dict[str, Dict[str, Any]]:
-    root = clientpaths.codex_sessions_dir()
-    return _apply_codex_title_map(_load_codex_sessions(_iter_file_signatures(root), _pricing_signature()))
+    return _apply_codex_title_map(_load_codex_sessions(_codex_file_signatures(), _pricing_signature()))
 
 
 @lru_cache(maxsize=8)
@@ -1139,7 +1358,7 @@ def _codex_session_parser_signature() -> dict[str, Any]:
 
 
 def get_codex_activity_insights() -> dict[str, Any]:
-    signatures = _iter_file_signatures(clientpaths.codex_sessions_dir())
+    signatures = _codex_file_signatures()
     pricing_sig = _pricing_signature()
     if not persistent_usage_db_enabled():
         return build_activity_insights(
@@ -2678,6 +2897,9 @@ def _session_records_to_raw_sessions(tool: str, records: Iterable[Dict[str, Any]
         else:
             sessions[session_id] = raw
 
+    if tool == "codex":
+        # Codex-only pass; skip the keys_by_session build for every other tool.
+        sessions = _drop_codex_subagent_replay_turns(sessions)
     for session in sessions.values():
         session.setdefault("display_name", _fallback_display_name(session.get("session_id"), session.get("project")))
         session["is_review_session"] = bool(session.get("is_review_session", False))
@@ -2692,8 +2914,7 @@ def _stored_sessions_for_tool(
 ) -> Dict[str, Dict[str, Any]]:
     store = UsageEntryStore()
     if tool == "codex":
-        root = clientpaths.codex_sessions_dir()
-        signatures = _iter_file_signatures(root)
+        signatures = _codex_file_signatures()
         pricing_sig = _pricing_signature()
         store.sync_session_files(
             "codex",
@@ -2753,6 +2974,10 @@ def _stored_sessions_for_tool(
         ),
     )
     if tool == "codex":
+        sessions = _drop_codex_subagent_replay_turns(
+            sessions,
+            external_parent_keys=_codex_unwindowed_parent_keys(store, sessions),
+        )
         return _apply_codex_title_map(sessions)
     if tool == "kimi":
         # Applied on read, not baked into the rows: workspaces.json changes

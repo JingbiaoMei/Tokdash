@@ -921,6 +921,76 @@ def _codex_unwindowed_parent_keys(
             if event_key:
                 keys.add(str(event_key))
     return parent_keys
+def _merge_raw_session_sequence(raws: list[Dict[str, Any]]) -> Dict[str, Any]:
+    """Left-fold ``raws`` exactly as repeated :func:`_merge_raw_session` would.
+
+    The pairwise fold rebuilds the whole accumulated session on every record: it
+    recomputes an identity key and takes a fresh copy for every turn already
+    merged. A session split across K files therefore costs O(K^2), and Claude
+    splits one session across every subagent transcript it spawned — hundreds of
+    files for a single session id, which is what made a cold Overview read spend
+    minutes re-keying the same turns.
+
+    This keeps that to one key and one copy per turn while reproducing the fold's
+    output verbatim, including the per-record sort: each pairwise merge renumbered
+    ``turn_index`` before the next one ran, and the next sort tie-breaks on that
+    renumbering, so the sort stays inside the loop.
+    """
+    if len(raws) == 1:
+        return raws[0]
+
+    # Metadata never reads turns, so fold it with the pairwise merge itself. That
+    # keeps title/project/review precedence — and the keys the merge drops —
+    # identical to the original without touching a single turn.
+    meta = {key: value for key, value in raws[0].items() if key != "turns"}
+    meta["turns"] = []
+    for raw in raws[1:]:
+        stub = {key: value for key, value in raw.items() if key != "turns"}
+        stub["turns"] = []
+        meta = _merge_raw_session(meta, stub)
+
+    ordered: list[Dict[str, Any]] = []
+    keys: list[tuple[Any, ...]] = []
+    # The sort inputs are carried alongside the turns rather than read back out of
+    # them per comparison: sorting tuples costs no Python-level key callback, and
+    # that callback was most of what remained after the re-keying went away.
+    stamps: list[int] = []
+    indices: list[int] = []
+    position: dict[tuple[Any, ...], int] = {}
+    for record_index, raw in enumerate(raws):
+        for turn in raw.get("turns", []):
+            key = _turn_identity_key(turn)
+            stamp = int(turn.get("timestamp_ms", 0) or 0)
+            at = position.get(key)
+            if at is None:
+                position[key] = len(ordered)
+                ordered.append(dict(turn))
+                keys.append(key)
+                stamps.append(stamp)
+                indices.append(int(turn.get("turn_index", 0) or 0))
+            elif stamp < stamps[at]:
+                # A later file carrying an earlier stamp for the same event wins,
+                # and keeps the position the first sighting claimed.
+                ordered[at] = dict(turn)
+                stamps[at] = stamp
+                indices[at] = int(turn.get("turn_index", 0) or 0)
+        if not record_index:
+            # The first record is the accumulator the fold starts from; it is not
+            # merged with itself, so it is neither sorted nor renumbered yet.
+            continue
+        order = sorted(zip(stamps, indices, range(len(ordered))))
+        ordered = [ordered[at] for _stamp, _index, at in order]
+        keys = [keys[at] for _stamp, _index, at in order]
+        stamps = [stamp for stamp, _index, _at in order]
+        indices = list(range(1, len(ordered) + 1))
+        for index, turn in enumerate(ordered, start=1):
+            turn["turn_index"] = index
+        position = {key: index for index, key in enumerate(keys)}
+
+    meta["turns"] = ordered
+    if not meta["display_name"]:
+        meta["display_name"] = _fallback_display_name(meta["session_id"], meta["project"])
+    return meta
 
 
 def _file_signature(path: Path) -> tuple[str, int, int]:
@@ -2871,12 +2941,13 @@ def _session_records_to_raw_sessions(tool: str, records: Iterable[Dict[str, Any]
     """Rebuild raw sessions from the per-file rows held in the persistent store.
 
     Every live loader that can see one session in several files (codex, claude,
-    pi_agent, kimi) merges with _merge_raw_session, so the cached path uses it
-    too. It is what prefers an explicit title over a fallback and dedups turns by
-    event identity; rebuilding the merge differently here is exactly how a cached
-    read starts disagreeing with a live one.
+    pi_agent, kimi) merges with _merge_raw_session, so the cached path merges the
+    same way — _merge_raw_session_sequence is that fold in one pass, not a second
+    set of rules. It is what prefers an explicit title over a fallback and dedups
+    turns by event identity; rebuilding the merge differently here is exactly how
+    a cached read starts disagreeing with a live one.
     """
-    sessions: Dict[str, Dict[str, Any]] = {}
+    grouped: Dict[str, list[Dict[str, Any]]] = {}
     for record in records:
         session_id = str(record.get("session_id") or "")
         if not session_id or not record.get("turns"):
@@ -2892,10 +2963,14 @@ def _session_records_to_raw_sessions(tool: str, records: Iterable[Dict[str, Any]
         # Rows written by older versions may carry a falsy project; _merge_raw_session
         # only defers to a sibling row's project when this one reads "unknown".
         raw["project"] = raw.get("project") or "unknown"
-        if session_id in sessions:
-            sessions[session_id] = _merge_raw_session(sessions[session_id], raw)
-        else:
-            sessions[session_id] = raw
+        grouped.setdefault(session_id, []).append(raw)
+
+    # Merge each session's rows in one pass. Folding them pairwise re-keyed and
+    # re-copied every turn already merged, which is quadratic in the number of
+    # files a session spans — see _merge_raw_session_sequence.
+    sessions: Dict[str, Dict[str, Any]] = {
+        session_id: _merge_raw_session_sequence(raws) for session_id, raws in grouped.items()
+    }
 
     if tool == "codex":
         # Codex-only pass; skip the keys_by_session build for every other tool.

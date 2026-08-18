@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 1.8.1 - 2026-08-18
+
+### Fixed
+
+- Codex subagent and fork rollouts no longer double-count the parent thread they replay. Codex 0.146+ writes fork files with a single `session_meta` carrying the child's own id and declares ancestry through `forked_from_id` or a top-level `parent_thread_id`, so the previous gate never fired and every replayed event was counted twice. Replay segments are now keyed to the declared parent session so they collapse against the parent's own rows. When the parent is not indexed anywhere the rows survive and are counted once, and sibling forks of the same parent keep exactly one copy between them.
+- Codex usage is no longer attributed to `gpt-5.3-codex` when a rollout records no model. That name is a real, selectable model, so it can no longer stand in for "not known yet": rows written before a file's first model signal take the file's own first model, and files with no model signal at all are labelled `unknown` and priced at zero. `thread_settings_applied` now counts as a model source alongside `turn_context`.
+- A windowed session read no longer keeps a fork's replayed prefix when the window excluded every one of the parent's files.
+
+### Added
+
+- Codex rollouts moved to `~/.codex/archived_sessions` are now read alongside `sessions/`. Identical copies across the two roots collapse by event key rather than counting twice.
+
+### Changed
+
+- Stored session rows belonging to one session now merge in a single pass rather than pairwise. Folding them one at a time re-keyed and re-copied every turn already merged, which is quadratic in the number of files a session spans — and Claude splits one session across every subagent transcript it spawned, several hundred files for a single session id. Output is unchanged.
+
 ## 1.8.0 - 2026-08-14
 
 ### Added

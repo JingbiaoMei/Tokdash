@@ -1,6 +1,32 @@
 {
-  "current": "1.8.0",
+  "current": "1.8.1",
   "releases": [
+    {
+      "version": "1.8.1",
+      "date": "2026-08-18",
+      "sections": [
+        {
+          "type": "fixed",
+          "items": [
+            "Codex subagent and fork sessions no longer double-count the parent thread they replay — newer Codex writes forks in a shape the old check could not see.",
+            "Codex usage is no longer attributed to gpt-5.3-codex when a rollout records no model; those rows now take the file's own model, or read as unknown at zero cost.",
+            "Picking a date range no longer keeps a fork's replayed rows when the range excluded the parent session."
+          ]
+        },
+        {
+          "type": "added",
+          "items": [
+            "Codex rollouts moved to ~/.codex/archived_sessions are now read alongside the active ones, without counting anything twice."
+          ]
+        },
+        {
+          "type": "changed",
+          "items": [
+            "Sessions spanning many files now load much faster. Claude splits one session across every subagent it spawns, and merging those rows was quadratic in the file count."
+          ]
+        }
+      ]
+    },
     {
       "version": "1.8.0",
       "date": "2026-08-14",

@@ -4,7 +4,8 @@ import Foundation
 ///
 /// The companion ships its own version line (`companion/VERSION`) and shares the Tokdash
 /// repository with the Python package, so `/releases/latest` is useless here: it resolves
-/// to the newest *Python* release, and companion builds are published as prereleases,
+/// to the newest *Python* release, and companion releases are published with
+/// `--latest=false` so they never take that pointer,
 /// which `latest` skips outright. The check therefore lists releases and filters by tag.
 ///
 /// No credentials are sent (public endpoint, unauthenticated 60 req/hour/IP), and the
@@ -31,7 +32,9 @@ enum UpdateChecker {
     /// Newest published companion release, or nil when the list holds none.
     ///
     /// Drafts are dropped (unpublished, their tag may not exist yet); prereleases are
-    /// deliberately KEPT, because every companion build is one. Tags that don't parse -
+    /// deliberately KEPT. Companion builds are no longer published as prereleases, but the
+    /// flag must not be filtered on: releases up to 0.2.0 were prereleases, and excluding
+    /// them would hide an upgrade path for anyone still on an older build. Tags that don't parse -
     /// Python releases (`v1.5.8`), partial versions (`companion-v0.1`), suffixed versions
     /// (`companion-v0.1.4-rc1`) - are skipped rather than guessed at.
     static func newestCompanionRelease(in releases: [GitHubRelease]) -> (version: [Int], release: GitHubRelease)? {

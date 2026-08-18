@@ -287,14 +287,18 @@ def main() -> None:
         workflows / "companion-release.yml"
     ).read_text(encoding="utf-8")
     for required in (
-        "name: Companion unsigned prerelease",
+        "name: Companion unsigned release",
         "gh release create",
         "gh release upload",
         "gh release download",
         "gh release edit",
         "GH_REPO: ${{ github.repository }}",
         "--draft",
-        "--prerelease",
+        # Companion releases are ordinary releases, not prereleases, but they must never
+        # take the repository's "Latest" pointer: this repo also publishes the Python
+        # package, and a companion tag newer than the newest vX.Y.Z would otherwise become
+        # what /releases/latest resolves to for everyone installing Tokdash itself.
+        "--latest=false",
         "environment: companion-release-publish",
         "macos-universal-unsigned.dmg",
         "windows-x64-unsigned.zip",
@@ -307,6 +311,9 @@ def main() -> None:
         "actions/download-artifact",
         "--clobber",
         "id-token: write",
+        # A bare --latest (or --prerelease) would undo the rule above.
+        "--prerelease",
+        "--latest ",
     ):
         if forbidden in release_workflow:
             fail(f"unsigned companion release workflow must not contain {forbidden!r}")

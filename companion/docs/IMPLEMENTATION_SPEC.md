@@ -329,12 +329,15 @@ about the Tokdash *server* and remains out of scope.
 unauthenticated, no credentials sent.
 
 `/releases/latest` is **not** usable here: the companion shares the repository
-with the Python package, so `latest` resolves to the newest Python release, and
-companion builds are published as prereleases, which `latest` skips outright.
+with the Python package, so `latest` resolves to the newest Python release.
+Companion releases are published with `--latest=false` precisely so they never
+take that pointer, which means `latest` can never resolve to a companion build.
 
 Selection rules:
 
-- Drop `draft` releases; **keep** prereleases (every companion build is one).
+- Drop `draft` releases; **keep** prereleases. Companion builds are no longer
+  published as prereleases, but the checker must not depend on that: older
+  companion releases were prereleases, and filtering on the flag would hide them.
 - Accept only tags matching `companion-vX.Y.Z` exactly - three numeric parts, no
   suffix. Python tags (`v1.5.8`) and malformed tags are skipped, not guessed at.
 - Compare **numerically**, component by component, so `0.1.10 > 0.1.9`.

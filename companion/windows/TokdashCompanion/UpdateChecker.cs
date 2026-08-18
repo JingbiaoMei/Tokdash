@@ -10,9 +10,9 @@ namespace TokdashCompanion;
 ///
 /// The companion ships its own version line (<c>companion/VERSION</c>) and shares the
 /// Tokdash repository with the Python package, so <c>/releases/latest</c> is useless here:
-/// it resolves to the newest <em>Python</em> release, and companion builds are published as
-/// prereleases, which <c>latest</c> skips outright. The check therefore lists releases and
-/// filters by tag.
+/// it resolves to the newest <em>Python</em> release, and companion releases are published
+/// with <c>--latest=false</c> so they never take that pointer. The check therefore lists
+/// releases and filters by tag.
 ///
 /// No credentials are sent (public endpoint, unauthenticated 60 req/hour/IP), and the check
 /// never downloads or installs anything - releases are unsigned, so the only action offered
@@ -41,7 +41,9 @@ public static class UpdateChecker
     /// Newest published companion release, or null when the list holds none.
     ///
     /// Drafts are dropped (unpublished, their tag may not exist yet); prereleases are
-    /// deliberately KEPT, because every companion build is one. Tags that don't parse -
+    /// deliberately KEPT. Companion builds are no longer published as prereleases, but the
+    /// flag must not be filtered on: releases up to 0.2.0 were prereleases, and excluding
+    /// them would hide an upgrade path for anyone still on an older build. Tags that don't parse -
     /// Python releases ("v1.5.8"), partial versions ("companion-v0.1"), suffixed versions
     /// ("companion-v0.1.4-rc1") - are skipped rather than guessed at.
     /// </summary>

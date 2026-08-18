@@ -94,7 +94,7 @@ try {
     Write-Host "Windows companion unsigned release artifact:"
     Write-Host "  $zipPath"
     Write-Host "  $checksumPath"
-    Write-Warning "Artifact is unsigned. Windows will report an unknown publisher; publish only as an explicitly labelled unsigned preview."
+    Write-Warning "Artifact is unsigned. Windows will report an unknown publisher; publish only as an explicitly labelled unsigned build."
 }
 finally {
     if (Test-Path $workRoot) {

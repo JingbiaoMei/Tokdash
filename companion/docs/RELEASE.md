@@ -2,16 +2,16 @@
 
 Tokdash Companion is versioned independently from the Python package.
 `companion/VERSION` is the authority and release tags use
-`companion-vX.Y.Z`. The current release is `0.2.0` and requires Tokdash `1.5.2`
+`companion-vX.Y.Z`. The current release is `1.0.0` and requires Tokdash `1.5.2`
 or newer.
 
-## v0.2.0 assets
+## v1.0.0 assets
 
-Publish one GitHub **prerelease** with exactly these assets:
+Publish one GitHub **release** with exactly these assets:
 
 ```text
-Tokdash-Companion-0.2.0-macos-universal-unsigned.dmg
-Tokdash-Companion-0.2.0-windows-x64-unsigned.zip
+Tokdash-Companion-1.0.0-macos-universal-unsigned.dmg
+Tokdash-Companion-1.0.0-windows-x64-unsigned.zip
 SHA256SUMS
 ```
 
@@ -20,20 +20,25 @@ SHA256SUMS
   the icon, Tokdash license, .NET third-party notices, and this guide.
 - Windows x86 is unsupported. Windows 11 on Arm may run the x64 build through
   emulation; native ARM64 is a later target.
-- MSIX is deferred until clean-machine tests prove loopback access to an
-  unpackaged Tokdash service and packaged startup behavior without developer
-  exemptions.
+- MSIX is built by `companion/scripts/build_windows_msix.ps1` and published
+  through the Microsoft Store, not as a GitHub release asset. The Store signs
+  that package during certification, so this unsigned-binary policy covers only
+  the GitHub ZIP and DMG.
 
-## v0.2.0 unsigned-preview policy
+## v1.0.0 unsigned-binary policy
 
 The maintainer explicitly accepted unsigned distribution for this GitHub
-prerelease. Every user-facing surface must say that the binaries are unsigned:
+release. Every user-facing surface must say that the binaries are unsigned:
 
 - Both binary filenames end in `-unsigned`.
-- The release title includes `unsigned preview`.
+- The release title includes `unsigned build`.
 - Release notes explain the Gatekeeper and SmartScreen warnings.
 - `SHA256SUMS` covers the final GitHub Release assets.
-- The GitHub Release remains marked as a prerelease.
+- The GitHub Release is published with `--latest=false`. It is an ordinary
+  release, not a prerelease, but it must never take the repository's "Latest"
+  pointer: this repo also publishes the Python package, and a companion tag
+  newer than the newest `vX.Y.Z` would otherwise become what `/releases/latest`
+  resolves to for everyone installing Tokdash itself.
 
 Checksums detect file changes but do not establish a trusted publisher.
 Developer ID/notarization and Windows Authenticode remain goals for a later
@@ -57,7 +62,7 @@ committed build number, and put `unsigned` in the filenames. The tag workflow:
 
 1. verifies `companion-vX.Y.Z` against `companion/VERSION` and checks that the
    tagged commit is on `main`;
-2. creates a draft GitHub prerelease;
+2. creates a draft GitHub release;
 3. builds and tests Windows x64 and the macOS universal application;
 4. uploads both binaries directly to the draft release;
 5. downloads those final assets, generates `SHA256SUMS`, and publishes.
@@ -71,7 +76,7 @@ set to one day for any other workflow that needs temporary storage.
 
 1. Verify the DMG against `SHA256SUMS`.
 2. Open the DMG and drag TokdashCompanion to Applications.
-3. Because this preview is unsigned, Control-click the app, choose **Open**,
+3. Because this build is unsigned, Control-click the app, choose **Open**,
    then confirm **Open** if you trust this repository and checksum.
 4. Start Tokdash, then open TokdashCompanion.
 5. To update, quit the companion and replace the application.
@@ -111,11 +116,11 @@ Before merging:
 
 Before tagging:
 
-- Record the maintainer's explicit acceptance of unsigned preview distribution.
+- Record the maintainer's explicit acceptance of unsigned distribution.
 - Protect the publish environment and restrict it to `companion-v*`.
 - Confirm both filenames and the release title clearly say `unsigned`.
-- Complete `VISUAL_VERIFICATION_CHECKLIST.md` on clean standard-user Windows
-  and macOS systems.
+- Complete the maintainer's visual verification pass on clean standard-user
+  Windows and macOS systems.
 - Verify the downloaded ZIP and DMG, not runner staging files.
 - Confirm the companion makes network requests only to the explicitly
   configured Tokdash endpoint and, when the user requests or enables update

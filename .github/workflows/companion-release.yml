@@ -1,4 +1,4 @@
-name: Companion unsigned prerelease
+name: Companion unsigned release
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -55,7 +55,7 @@ jobs:
           }
 
   prepare:
-    name: Prepare draft prerelease
+    name: Prepare draft release
     needs: preflight
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -67,7 +67,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Create an empty draft prerelease
+      - name: Create an empty draft release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -80,8 +80,8 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             --verify-tag \
             --draft \
-            --prerelease \
-            --title "Tokdash Companion ${{ needs.preflight.outputs.version }} (unsigned preview)" \
+            --latest=false \
+            --title "Tokdash Companion ${{ needs.preflight.outputs.version }} (unsigned build)" \
             --notes-file companion/RELEASE_NOTES.md
 
   windows:
@@ -118,7 +118,7 @@ jobs:
           companion/scripts/build_windows_release.ps1
           -OutputDirectory "${{ runner.temp }}/tokdash-companion-windows"
 
-      - name: Upload unsigned ZIP to draft prerelease
+      - name: Upload unsigned ZIP to draft release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -156,7 +156,7 @@ jobs:
           COMPANION_OUTPUT_DIR: ${{ runner.temp }}/tokdash-companion-macos
         run: bash companion/scripts/build_macos_release.sh
 
-      - name: Upload unsigned DMG to draft prerelease
+      - name: Upload unsigned DMG to draft release
         env:
           GH_TOKEN: ${{ github.token }}
           COMPANION_VERSION: ${{ needs.preflight.outputs.version }}
@@ -166,7 +166,7 @@ jobs:
             "$RUNNER_TEMP/tokdash-companion-macos/Tokdash-Companion-$COMPANION_VERSION-macos-universal-unsigned.dmg"
 
   publish:
-    name: Publish checksummed prerelease
+    name: Publish checksummed release
     needs: [preflight, windows, macos]
     if: ${{ !cancelled() && needs.windows.result == 'success' && needs.macos.result == 'success' }}
     runs-on: ubuntu-24.04
@@ -201,15 +201,15 @@ jobs:
             > SHA256SUMS
           gh release upload "$GITHUB_REF_NAME" SHA256SUMS
 
-      - name: Publish GitHub prerelease
+      - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           gh release edit "$GITHUB_REF_NAME" \
             --draft=false \
-            --prerelease \
-            --title "Tokdash Companion ${{ needs.preflight.outputs.version }} (unsigned preview)"
+            --latest=false \
+            --title "Tokdash Companion ${{ needs.preflight.outputs.version }} (unsigned build)"
 
 # Release assets move directly through a draft GitHub Release. No Actions
 # artifacts are uploaded, so this workflow consumes no artifact-storage quota.

@@ -107,5 +107,5 @@ printf '%s *%s\n' "$checksum" "$(basename "$dmg_path")" > "$checksum_path"
 echo "macOS companion artifact: $dmg_path"
 echo "Architectures: $architectures"
 if [[ -z "$signing_identity" ]]; then
-  echo "WARNING: artifact is unsigned. Gatekeeper will warn users; publish only as an explicitly labelled unsigned preview." >&2
+  echo "WARNING: artifact is unsigned. Gatekeeper will warn users; publish only as an explicitly labelled unsigned build." >&2
 fi

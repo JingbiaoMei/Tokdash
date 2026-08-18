@@ -138,7 +138,12 @@ def test_companion_workflows_avoid_temporary_artifact_storage() -> None:
     assert "actions/upload-artifact" not in companion_release
     assert "actions/download-artifact" not in companion_release
     assert 'tags:\n      - "companion-v*"' in companion_release
-    assert "name: Companion unsigned prerelease" in companion_release
+    assert "name: Companion unsigned release" in companion_release
+    # Companion releases are ordinary releases, but must never take the repository's
+    # "Latest" pointer: this repo also publishes the Python package, and a companion tag
+    # newer than the newest vX.Y.Z would become what /releases/latest resolves to.
+    assert "--latest=false" in companion_release
+    assert "--prerelease" not in companion_release
     assert "contents: write" in companion_release
     assert "gh release create" in companion_release
     assert "gh release upload" in companion_release
@@ -191,7 +196,9 @@ def test_companion_docs_do_not_misidentify_windows_ui() -> None:
     assert "explicitly accepted unsigned distribution" in release
     assert "macos-universal-unsigned.dmg" in release
     assert "windows-x64-unsigned.zip" in release
-    assert "MSIX is deferred" in release
+    # MSIX is no longer deferred; it ships through the Microsoft Store, which signs it.
+    assert "MSIX is deferred" not in release
+    assert "build_windows_msix.ps1" in release
 
 
 def test_companion_privacy_surface_remains_read_only_and_explicit() -> None:

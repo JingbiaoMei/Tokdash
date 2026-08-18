@@ -1,6 +1,6 @@
-# Tokdash Companion 0.2.0
+# Tokdash Companion 1.0.0
 
-This preview adds multi-server monitoring on macOS and Windows while preserving
+This release adds multi-server monitoring on macOS and Windows while preserving
 the direct single-server path for existing installations.
 
 ## Changes
@@ -25,7 +25,7 @@ Update checks remain optional. They never download or install software;
 **View update** opens the validated Tokdash GitHub release page in the default
 browser.
 
-## Important: unsigned preview
+## Important: unsigned binaries
 
 These binaries are **not code signed**. GitHub hosting and `SHA256SUMS` verify
 the downloaded files against this release, but they do not establish an
@@ -40,9 +40,9 @@ operating-system-trusted publisher.
 
 ## Assets
 
-- `Tokdash-Companion-0.2.0-macos-universal-unsigned.dmg` supports Apple Silicon
+- `Tokdash-Companion-1.0.0-macos-universal-unsigned.dmg` supports Apple Silicon
   and Intel Macs on macOS 14 or newer.
-- `Tokdash-Companion-0.2.0-windows-x64-unsigned.zip` is a self-contained Windows
+- `Tokdash-Companion-1.0.0-windows-x64-unsigned.zip` is a self-contained Windows
   11 x64 portable build. Windows 11 on Arm may run it through x64 emulation.
 - `SHA256SUMS` covers both downloadable binaries.
 

@@ -871,8 +871,6 @@ def test_parser_code_signature_unwraps_lru_cache_functions():
 
 
 def test_session_file_parser_signatures_are_explicit_and_v159_compatible(monkeypatch):
-    expected_token = "422eaad7926b4c5362a3c6d7cbcad86dc8244cb8"
-
     codex = sessions_module._session_file_parser_signature(
         "_parse_codex_session_file"
     )
@@ -880,13 +878,15 @@ def test_session_file_parser_signatures_are_explicit_and_v159_compatible(monkeyp
         "_parse_claude_session_file"
     )
 
-    # Codex still emits the frozen v1.5.9 token, so rows written by that version
-    # remain reusable. Claude left the compat path at version 2, when its turns
-    # started carrying _stream_id — its old rows must be reparsed, not reused.
+    # Both original parsers have left the frozen v1.5.9 compat token behind:
+    # Claude at version 2 (turns carry _stream_id), Codex at version 2 (thread_spawn
+    # replay turns are keyed to the parent session and raws carry
+    # _subagent_parent_id). Their old rows must be reparsed, not reused.
     assert codex == {
         "object": "tokdash.sessions._parse_codex_session_file",
-        "content_sha1": expected_token,
+        "version": sessions_module._SESSION_FILE_PARSER_VERSIONS["_parse_codex_session_file"],
     }
+    assert codex["version"] > 1
     assert claude == {
         "object": "tokdash.sessions._parse_claude_session_file",
         "version": sessions_module._SESSION_FILE_PARSER_VERSIONS["_parse_claude_session_file"],
@@ -1530,6 +1530,820 @@ def test_codex_subagent_thread_spawn_replay_is_skipped(monkeypatch, tmp_path):
     )
     assert same_id_raw is not None
     assert len(same_id_raw["turns"]) == 2
+
+
+def _codex_fork_usage_rows():
+    """Cumulative usage snapshots for a parent thread and a forked subagent that
+    continues the same counters after the fork point."""
+    usage_1 = dict(last_input=100, last_cache=10, last_output=20, last_reasoning=5,
+                   total_input=100, total_cache=10, total_output=20, total_reasoning=5)
+    usage_2 = dict(last_input=110, last_cache=11, last_output=21, last_reasoning=6,
+                   total_input=210, total_cache=21, total_output=41, total_reasoning=11)
+    usage_3 = dict(last_input=120, last_cache=12, last_output=22, last_reasoning=7,
+                   total_input=330, total_cache=33, total_output=63, total_reasoning=18)
+    own_1 = dict(last_input=130, last_cache=13, last_output=23, last_reasoning=8,
+                 total_input=460, total_cache=46, total_output=86, total_reasoning=26)
+    own_2 = dict(last_input=140, last_cache=14, last_output=24, last_reasoning=9,
+                 total_input=600, total_cache=60, total_output=110, total_reasoning=35)
+    return usage_1, usage_2, usage_3, own_1, own_2
+
+
+def test_codex_subagent_single_meta_fork_replay_is_deduplicated(monkeypatch, tmp_path):
+    """Codex 0.146+ writes thread_spawn fork files with ONE session_meta (the child's
+    own id, parent declared via thread_spawn/forked_from_id) and replays the parent's
+    token_count prefix BEFORE the child's first turn_context. The parent-id gate never
+    fires (current id never flips) and the session-scoped stable key hashes the copies
+    under the child id, so both dedup mechanisms miss them. The replayed prefix must be
+    keyed to the parent session so it collapses against the parent file."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    _clear_parser_caches()
+
+    parent_id = "019f8024-8014-7202-aa03-9f039f67a648"
+    child_id = "019f80ad-f48c-7361-a358-532ff84dcba9"
+    codex_dir = tmp_path / ".codex" / "sessions" / "2026" / "07" / "20"
+    usage_1, usage_2, usage_3, own_1, own_2 = _codex_fork_usage_rows()
+
+    parent_rows = [
+        {
+            "timestamp": "2026-07-20T16:28:24.000Z",
+            "type": "session_meta",
+            "payload": {"id": parent_id, "cwd": "/work/tokdash", "source": "vscode", "model_provider": "openai"},
+        },
+        {
+            "timestamp": "2026-07-20T16:28:25.000Z",
+            "type": "turn_context",
+            "payload": {"model": "gpt-5.6-sol", "cwd": "/work/tokdash"},
+        },
+        _codex_token_count_row_with_total("2026-07-20T16:30:10.000Z", **usage_1),
+        _codex_token_count_row_with_total("2026-07-20T16:31:10.000Z", **usage_2),
+        _codex_token_count_row_with_total("2026-07-20T16:32:10.000Z", **usage_3),
+    ]
+    child_rows = [
+        {
+            "timestamp": "2026-07-20T18:58:31.000Z",
+            "type": "session_meta",
+            "payload": {
+                "id": child_id,
+                "cwd": "/work/tokdash",
+                "forked_from_id": parent_id,
+                "source": {
+                    "subagent": {
+                        "thread_spawn": {
+                            "parent_thread_id": parent_id,
+                            "depth": 1,
+                            "agent_path": "/root/fix-bug",
+                            "agent_nickname": "worker",
+                            "agent_role": None,
+                        }
+                    }
+                },
+                "model_provider": "openai",
+            },
+        },
+        # Replayed parent prefix: restamped copies under the child's own session id,
+        # before any turn_context.
+        _codex_token_count_row_with_total("2026-07-20T18:58:32.000Z", **usage_1),
+        _codex_token_count_row_with_total("2026-07-20T18:58:32.001Z", **usage_2),
+        _codex_token_count_row_with_total("2026-07-20T18:58:32.002Z", **usage_3),
+        # The child's first turn_context ends the replay prefix.
+        {
+            "timestamp": "2026-07-20T18:58:33.000Z",
+            "type": "turn_context",
+            "payload": {"model": "gpt-5.6-sol", "cwd": "/work/tokdash"},
+        },
+        _codex_token_count_row_with_total("2026-07-20T19:00:10.000Z", **own_1),
+        _codex_token_count_row_with_total("2026-07-20T19:01:10.000Z", **own_2),
+    ]
+
+    # Child sorts first: the parent file must still win each shared key on timestamp.
+    child_path = codex_dir / "rollout-1-child.jsonl"
+    parent_path = codex_dir / "rollout-2-parent.jsonl"
+    _write_jsonl(child_path, child_rows)
+    _write_jsonl(parent_path, parent_rows)
+
+    parser = CodexParser(PricingDatabase())
+    entries = parser._parse_all()
+    assert len(entries) == 5
+    assert parser.replay_events_skipped == 3
+    expected_timestamps = [
+        sessions_module._parse_iso_to_ms("2026-07-20T16:30:10.000Z"),
+        sessions_module._parse_iso_to_ms("2026-07-20T16:31:10.000Z"),
+        sessions_module._parse_iso_to_ms("2026-07-20T16:32:10.000Z"),
+        sessions_module._parse_iso_to_ms("2026-07-20T19:00:10.000Z"),
+        sessions_module._parse_iso_to_ms("2026-07-20T19:01:10.000Z"),
+    ]
+    assert [entry["timestamp"] for entry in entries] == expected_timestamps
+    assert all(entry["entry_id"].startswith("codex-token-v1:") for entry in entries)
+    # The parent's turn_context model wins; no phantom default model from the replay.
+    assert all(entry["model"] == "gpt-5.6-sol" for entry in entries)
+
+    signatures = tuple(
+        (str(path), path.stat().st_mtime_ns, path.stat().st_size)
+        for path in (child_path, parent_path)
+    )
+    sessions = sessions_module._load_codex_sessions(signatures, ())
+    assert set(sessions) == {parent_id, child_id}
+    assert len(sessions[parent_id]["turns"]) == 3
+    # Cross-session dedup: the child session keeps only its own two turns.
+    assert sessions[child_id]["_subagent_parent_id"] == parent_id
+    assert [turn["timestamp_ms"] for turn in sessions[child_id]["turns"]] == expected_timestamps[3:]
+
+    child_raw = sessions_module._parse_codex_session_file(
+        str(child_path), child_path.stat().st_mtime_ns, child_path.stat().st_size, ()
+    )
+    parent_raw = sessions_module._parse_codex_session_file(
+        str(parent_path), parent_path.stat().st_mtime_ns, parent_path.stat().st_size, ()
+    )
+    assert child_raw is not None and len(child_raw["turns"]) == 5
+    stored = sessions_module._session_records_to_raw_sessions("codex", [child_raw, parent_raw])
+    assert len(stored[parent_id]["turns"]) == 3
+    assert len(stored[child_id]["turns"]) == 2
+
+
+def test_codex_subagent_single_meta_fork_replay_survives_without_parent(monkeypatch, tmp_path):
+    """If the parent file was never indexed (archived/deleted), the replayed prefix
+    must survive under the child file — counted once, never silently dropped."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    _clear_parser_caches()
+
+    parent_id = "019f8024-8014-7202-aa03-9f039f67a648"
+    child_id = "019f80ad-f48c-7361-a358-532ff84dcba9"
+    codex_dir = tmp_path / ".codex" / "sessions" / "2026" / "07" / "20"
+    usage_1, usage_2, usage_3, own_1, own_2 = _codex_fork_usage_rows()
+
+    child_rows = [
+        {
+            "timestamp": "2026-07-20T18:58:31.000Z",
+            "type": "session_meta",
+            "payload": {
+                "id": child_id,
+                "cwd": "/work/tokdash",
+                "forked_from_id": parent_id,
+                "source": {"subagent": {"thread_spawn": {"parent_thread_id": parent_id, "depth": 1}}},
+                "model_provider": "openai",
+            },
+        },
+        _codex_token_count_row_with_total("2026-07-20T18:58:32.000Z", **usage_1),
+        _codex_token_count_row_with_total("2026-07-20T18:58:32.001Z", **usage_2),
+        _codex_token_count_row_with_total("2026-07-20T18:58:32.002Z", **usage_3),
+        {
+            "timestamp": "2026-07-20T18:58:33.000Z",
+            "type": "turn_context",
+            "payload": {"model": "gpt-5.6-sol", "cwd": "/work/tokdash"},
+        },
+        _codex_token_count_row_with_total("2026-07-20T19:00:10.000Z", **own_1),
+        _codex_token_count_row_with_total("2026-07-20T19:01:10.000Z", **own_2),
+    ]
+    child_path = codex_dir / "rollout-child.jsonl"
+    _write_jsonl(child_path, child_rows)
+
+    parser = CodexParser(PricingDatabase())
+    entries = parser._parse_all()
+    assert len(entries) == 5
+    assert parser.replay_events_skipped == 0
+    # Orphaned replay rows predate the file's first model signal; they must be
+    # backfilled with the file's own model, not the placeholder default.
+    assert all(entry["model"] == "gpt-5.6-sol" for entry in entries)
+
+    signatures = ((str(child_path), child_path.stat().st_mtime_ns, child_path.stat().st_size),)
+    sessions = sessions_module._load_codex_sessions(signatures, ())
+    assert set(sessions) == {child_id}
+    assert len(sessions[child_id]["turns"]) == 5
+    assert all(turn["model"] == "gpt-5.6-sol" for turn in sessions[child_id]["turns"])
+
+
+def test_codex_explicit_default_model_selection_survives_backfill(monkeypatch, tmp_path):
+    """CODEX_DEFAULT_MODEL is a real, selectable model. A file that starts on
+    another model and later switches to an explicit gpt-5.3-codex turn_context
+    must keep those rows attributed to gpt-5.3-codex — only rows written before
+    ANY model signal (the placeholder flag) may be backfilled to the file's
+    first observed model. Observed on real logs: 5 files switch into
+    gpt-5.3-codex mid-file; a name-equality backfill relabeled 2,999 of their
+    explicit rows to the earlier model."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    _clear_parser_caches()
+
+    session_id = "019c3028-f83c-7842-86ab-4c02428a841f"
+    codex_dir = tmp_path / ".codex" / "sessions" / "2026" / "02" / "05"
+    rows = [
+        {
+            "timestamp": "2026-02-05T23:35:17.000Z",
+            "type": "session_meta",
+            "payload": {"id": session_id, "cwd": "/work/tokdash", "model_provider": "openai"},
+        },
+        # No model signal yet: placeholder rows.
+        _codex_token_count_row_with_total(
+            "2026-02-05T23:35:18.000Z",
+            last_input=100, last_cache=10, last_output=20, last_reasoning=5,
+            total_input=100, total_cache=10, total_output=20, total_reasoning=5,
+        ),
+        {
+            "timestamp": "2026-02-05T23:36:00.000Z",
+            "type": "turn_context",
+            "payload": {"model": "gpt-5.2-codex", "cwd": "/work/tokdash"},
+        },
+        _codex_token_count_row_with_total(
+            "2026-02-05T23:36:10.000Z",
+            last_input=110, last_cache=11, last_output=21, last_reasoning=6,
+            total_input=210, total_cache=21, total_output=41, total_reasoning=11,
+        ),
+        # Explicit switch into the placeholder's own name.
+        {
+            "timestamp": "2026-02-05T23:40:00.000Z",
+            "type": "turn_context",
+            "payload": {"model": "gpt-5.3-codex", "cwd": "/work/tokdash"},
+        },
+        _codex_token_count_row_with_total(
+            "2026-02-05T23:40:10.000Z",
+            last_input=120, last_cache=12, last_output=22, last_reasoning=7,
+            total_input=330, total_cache=33, total_output=63, total_reasoning=18,
+        ),
+    ]
+    path = codex_dir / "rollout-switch.jsonl"
+    _write_jsonl(path, rows)
+
+    entries = CodexParser(PricingDatabase())._parse_all()
+    assert [entry["model"] for entry in entries] == ["gpt-5.2-codex", "gpt-5.2-codex", "gpt-5.3-codex"]
+
+    signatures = ((str(path), path.stat().st_mtime_ns, path.stat().st_size),)
+    sessions = sessions_module._load_codex_sessions(signatures, ())
+    turn_models = [turn["model"] for turn in sessions[session_id]["turns"]]
+    assert turn_models == ["gpt-5.2-codex", "gpt-5.2-codex", "gpt-5.3-codex"]
+    assert all("_model_placeholder" not in turn for turn in sessions[session_id]["turns"])
+    bill_models = [turn["_bill"]["model"] for turn in sessions[session_id]["turns"]]
+    assert bill_models == ["openai/gpt-5.2-codex", "openai/gpt-5.2-codex", "openai/gpt-5.3-codex"]
+
+
+def test_codex_cross_file_replacement_still_backfills(monkeypatch, tmp_path):
+    """A duplicate with an earlier timestamp replaces the slot owned by a
+    previously parsed file (index before the current file's first append). The
+    replacement's placeholder marker must still be resolved by the current
+    file's own model signal — not left as the default model with a leaked flag."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    _clear_parser_caches()
+
+    codex_dir = tmp_path / ".codex" / "sessions" / "2026" / "01" / "02"
+    usage = dict(last_input=100, last_cache=10, last_output=20, last_reasoning=5,
+                 total_input=100, total_cache=10, total_output=20, total_reasoning=5)
+
+    # File 1 (sorts first): owns the event-key slot with a LATER timestamp.
+    _write_jsonl(codex_dir / "rollout-1-first.jsonl", [
+        {
+            "timestamp": "2026-01-02T00:00:00.000Z",
+            "type": "session_meta",
+            "payload": {"id": "s1", "cwd": "/work/tokdash", "model_provider": "openai"},
+        },
+        {
+            "timestamp": "2026-01-02T00:00:01.000Z",
+            "type": "turn_context",
+            "payload": {"model": "gpt-5.5", "cwd": "/work/tokdash"},
+        },
+        _codex_token_count_row_with_total("2026-01-02T00:00:10.000Z", **usage),
+    ])
+    # File 2: same session scope and same usage snapshot with an EARLIER
+    # timestamp, written before its own first model signal. It replaces file 1's
+    # slot while still carrying the placeholder marker.
+    _write_jsonl(codex_dir / "rollout-2-second.jsonl", [
+        {
+            "timestamp": "2026-01-01T00:00:00.000Z",
+            "type": "session_meta",
+            "payload": {"id": "s1", "cwd": "/work/tokdash", "model_provider": "openai"},
+        },
+        _codex_token_count_row_with_total("2026-01-01T00:00:05.000Z", **usage),
+        {
+            "timestamp": "2026-01-01T00:01:00.000Z",
+            "type": "turn_context",
+            "payload": {"model": "gpt-5.6-sol", "cwd": "/work/tokdash"},
+        },
+    ])
+
+    entries = CodexParser(PricingDatabase())._parse_all()
+    assert len(entries) == 1
+    assert entries[0]["model"] == "gpt-5.6-sol"
+    assert "_model_placeholder" not in entries[0]
+
+
+def test_codex_file_without_any_model_signal_is_unknown(monkeypatch, tmp_path):
+    """A file with no turn_context, no thread_settings_applied, and no provenance
+    model must label its rows explicitly unknown (issue #23) — token counts kept,
+    cost $0 — rather than fabricating usage under the default model."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    _clear_parser_caches()
+
+    codex_dir = tmp_path / ".codex" / "sessions" / "2026" / "01" / "03"
+    usage = dict(last_input=100, last_cache=10, last_output=20, last_reasoning=5,
+                 total_input=100, total_cache=10, total_output=20, total_reasoning=5)
+    _write_jsonl(codex_dir / "rollout-nosignal.jsonl", [
+        {
+            "timestamp": "2026-01-03T00:00:00.000Z",
+            "type": "session_meta",
+            "payload": {"id": "nosignal-1", "cwd": "/work/tokdash", "model_provider": "openai"},
+        },
+        _codex_token_count_row_with_total("2026-01-03T00:00:05.000Z", **usage),
+    ])
+
+    entries = CodexParser(PricingDatabase())._parse_all()
+    assert len(entries) == 1
+    assert entries[0]["model"] == "unknown"
+    assert entries[0]["cost"] == 0.0
+    assert "_model_placeholder" not in entries[0]
+
+    path = codex_dir / "rollout-nosignal.jsonl"
+    raw = sessions_module._parse_codex_session_file(
+        str(path), path.stat().st_mtime_ns, path.stat().st_size, ()
+    )
+    assert raw is not None
+    assert [turn["model"] for turn in raw["turns"]] == ["unknown"]
+    assert raw["turns"][0]["_bill"]["model"] == "unknown"
+    assert raw["turns"][0]["cost"] == 0.0
+    assert all("_model_placeholder" not in turn for turn in raw["turns"])
+
+
+def test_codex_orphan_sibling_forks_keep_one_replay_copy(monkeypatch, tmp_path):
+    """Two sibling forks of a parent that was never indexed would each retain an
+    identical parent-scoped copy of the replay prefix. Overview's global event-key
+    index keeps one; Sessions must do the same — the earliest sibling keeps the
+    prefix, later siblings drop it."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    _clear_parser_caches()
+
+    parent_id = "019f8024-8014-7202-aa03-9f039f67a648"
+    child_a = "019f80ad-f48c-7361-a358-532ff84dcba9"
+    child_b = "019f80ae-1c1c-7dd3-86e5-a40140bdcb41"
+    codex_dir = tmp_path / ".codex" / "sessions" / "2026" / "07" / "20"
+    usage_1, usage_2, usage_3, own_1, own_2 = _codex_fork_usage_rows()
+
+    def fork_rows(child_id, fork_ts, own_ts):
+        return [
+            {
+                "timestamp": f"{fork_ts}.000Z",
+                "type": "session_meta",
+                "payload": {
+                    "id": child_id,
+                    "cwd": "/work/tokdash",
+                    "forked_from_id": parent_id,
+                    "source": {"subagent": {"thread_spawn": {"parent_thread_id": parent_id, "depth": 1}}},
+                    "model_provider": "openai",
+                },
+            },
+            _codex_token_count_row_with_total(f"{fork_ts}.001Z", **usage_1),
+            _codex_token_count_row_with_total(f"{fork_ts}.002Z", **usage_2),
+            _codex_token_count_row_with_total(f"{fork_ts}.003Z", **usage_3),
+            {
+                "timestamp": f"{fork_ts}.004Z",
+                "type": "turn_context",
+                "payload": {"model": "gpt-5.6-sol", "cwd": "/work/tokdash"},
+            },
+            _codex_token_count_row_with_total(f"{own_ts}.000Z", **own_1),
+            _codex_token_count_row_with_total(f"{own_ts}.001Z", **own_2),
+        ]
+
+    # child_b forked earlier, so its restamped replay copy is the survivor.
+    _write_jsonl(codex_dir / "rollout-1-a.jsonl", fork_rows(child_a, "2026-07-20T18:58:31", "2026-07-20T19:00:10"))
+    _write_jsonl(codex_dir / "rollout-2-b.jsonl", fork_rows(child_b, "2026-07-20T18:00:00", "2026-07-20T18:30:10"))
+
+    signatures = tuple(
+        (str(path), path.stat().st_mtime_ns, path.stat().st_size)
+        for path in sorted(codex_dir.glob("*.jsonl"))
+    )
+    sessions = sessions_module._load_codex_sessions(signatures, ())
+    assert set(sessions) == {child_a, child_b}
+    assert len(sessions[child_b]["turns"]) == 5   # earliest sibling keeps the prefix
+    assert [
+        turn["timestamp_ms"] for turn in sessions[child_a]["turns"]
+    ] == [
+        sessions_module._parse_iso_to_ms("2026-07-20T19:00:10.000Z"),
+        sessions_module._parse_iso_to_ms("2026-07-20T19:00:10.001Z"),
+    ]
+
+
+def test_codex_archived_sessions_root_is_scanned(monkeypatch, tmp_path):
+    """Issue #23: Codex archives rollouts to ~/.codex/archived_sessions. Both the
+    Overview parser and the Sessions signature scan must include that root, and a
+    file present in BOTH roots (archived copy not yet removed) must collapse via
+    the stable event key rather than double-count."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    _clear_parser_caches()
+
+    usage = dict(last_input=100, last_cache=10, last_output=20, last_reasoning=5,
+                 total_input=100, total_cache=10, total_output=20, total_reasoning=5)
+    live_dir = tmp_path / ".codex" / "sessions" / "2026" / "08" / "01"
+    archived_dir = tmp_path / ".codex" / "archived_sessions" / "2026" / "07" / "01"
+
+    archived_only_rows = [
+        {
+            "timestamp": "2026-07-01T08:00:00.000Z",
+            "type": "session_meta",
+            "payload": {"id": "archived-only", "cwd": "/work/tokdash", "model_provider": "openai"},
+        },
+        {
+            "timestamp": "2026-07-01T08:00:01.000Z",
+            "type": "turn_context",
+            "payload": {"model": "gpt-5.6-sol", "cwd": "/work/tokdash"},
+        },
+        _codex_token_count_row_with_total("2026-07-01T08:00:10.000Z", **usage),
+    ]
+    _write_jsonl(archived_dir / "rollout-archived.jsonl", archived_only_rows)
+    # Same content also still present under sessions/ (copy not yet cleaned up).
+    _write_jsonl(live_dir / "rollout-live-copy.jsonl", archived_only_rows)
+
+    entries = CodexParser(PricingDatabase())._parse_all()
+    assert len(entries) == 1  # identical snapshots in both roots collapse by key
+    assert entries[0]["model"] == "gpt-5.6-sol"
+
+    signatures = sessions_module._codex_file_signatures()
+    assert len(signatures) == 2  # both roots are scanned
+    sessions = sessions_module._load_codex_sessions(signatures, ())
+    assert set(sessions) == {"archived-only"}
+    assert len(sessions["archived-only"]["turns"]) == 1  # merged, deduped by key
+
+
+def test_codex_missing_parent_records_still_dedupe_replay(monkeypatch, tmp_path):
+    """A durable store keeps a session's rows (missing=1) after its file is deleted.
+    Those rows still prove the parent was indexed: the unbounded parent lookup must
+    include them or a deleted parent resurrects the child's replay prefix."""
+    store = UsageEntryStore(tmp_path / "usage.sqlite3")
+    parent_path = tmp_path / "rollout-parent.jsonl"
+    parent_raw = {
+        "tool": "codex",
+        "session_id": "parent-1",
+        "turns": [{"turn_index": 1, "timestamp_ms": 100, "_event_key": "k1"}],
+    }
+    assert store.sync_session_files(
+        "codex",
+        ((str(parent_path), 1, 100),),
+        parser={"v": 2},
+        parse_file_session=lambda _sig: parent_raw,
+        durable=True,
+    )
+    # Parent file deleted: durable sync marks the record missing instead of deleting.
+    assert store.sync_session_files(
+        "codex",
+        (),
+        parser={"v": 2},
+        parse_file_session=lambda _sig: None,
+        durable=True,
+    )
+    records = store.query_session_records_by_ids("codex", {"parent-1"})
+    assert len(records) == 1
+    assert records[0]["turns"][0]["_event_key"] == "k1"
+
+
+def test_codex_session_meta_provenance_model_is_an_early_model_source(monkeypatch, tmp_path):
+    """Issue #23 reported the selected model nested under session_meta
+    .base_instructions.provenance.model. No real log through Codex 0.147.0 carries
+    that key (unconfirmed shape), but the lookup stays so rows never bill under
+    the placeholder default if a future build adds it."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    _clear_parser_caches()
+
+    codex_dir = tmp_path / ".codex" / "sessions" / "2026" / "08" / "18"
+    usage_1 = dict(last_input=100, last_cache=10, last_output=20, last_reasoning=5,
+                   total_input=100, total_cache=10, total_output=20, total_reasoning=5)
+    rows = [
+        {
+            "timestamp": "2026-08-18T10:00:00.000Z",
+            "type": "session_meta",
+            "payload": {
+                "id": "provenance-session",
+                "cwd": "/work/tokdash",
+                "source": "cli",
+                "model_provider": "openai",
+                "base_instructions": {"text": "...", "provenance": {"model": "gpt-5.6-terra"}},
+            },
+        },
+        # No turn_context or thread_settings_applied: provenance is the only signal.
+        _codex_token_count_row_with_total("2026-08-18T10:01:10.000Z", **usage_1),
+    ]
+    _write_jsonl(codex_dir / "rollout-provenance.jsonl", rows)
+
+    parser = CodexParser(PricingDatabase())
+    entries = parser._parse_all()
+    assert len(entries) == 1
+    assert entries[0]["model"] == "gpt-5.6-terra"
+
+    path = codex_dir / "rollout-provenance.jsonl"
+    raw = sessions_module._parse_codex_session_file(
+        str(path), path.stat().st_mtime_ns, path.stat().st_size, ()
+    )
+    assert raw is not None
+    assert [turn["model"] for turn in raw["turns"]] == ["gpt-5.6-terra"]
+
+
+def test_codex_forked_from_id_only_file_gets_replay_dedup(monkeypatch, tmp_path):
+    """Ancestry declared only via top-level forked_from_id (no thread_spawn marker —
+    user /fork, exec forks) replays the parent prefix the same way and must get the
+    same rekeying. Without the thread_spawn marker the session stays primary."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    _clear_parser_caches()
+
+    parent_id = "019f8024-8014-7202-aa03-9f039f67a648"
+    child_id = "019f90ad-f48c-7361-a358-532ff84dcba9"
+    codex_dir = tmp_path / ".codex" / "sessions" / "2026" / "07" / "21"
+    usage_1, usage_2, usage_3, own_1, own_2 = _codex_fork_usage_rows()
+
+    parent_rows = [
+        {
+            "timestamp": "2026-07-21T08:00:00.000Z",
+            "type": "session_meta",
+            "payload": {"id": parent_id, "cwd": "/work/tokdash", "source": "vscode", "model_provider": "openai"},
+        },
+        {
+            "timestamp": "2026-07-21T08:00:01.000Z",
+            "type": "turn_context",
+            "payload": {"model": "gpt-5.6-sol", "cwd": "/work/tokdash"},
+        },
+        _codex_token_count_row_with_total("2026-07-21T08:01:10.000Z", **usage_1),
+        _codex_token_count_row_with_total("2026-07-21T08:02:10.000Z", **usage_2),
+        _codex_token_count_row_with_total("2026-07-21T08:03:10.000Z", **usage_3),
+    ]
+    child_rows = [
+        {
+            "timestamp": "2026-07-21T12:00:00.000Z",
+            "type": "session_meta",
+            "payload": {
+                "id": child_id,
+                "cwd": "/work/tokdash",
+                "forked_from_id": parent_id,
+                "source": "cli",
+                "model_provider": "openai",
+            },
+        },
+        _codex_token_count_row_with_total("2026-07-21T12:00:01.000Z", **usage_1),
+        _codex_token_count_row_with_total("2026-07-21T12:00:02.000Z", **usage_2),
+        _codex_token_count_row_with_total("2026-07-21T12:00:03.000Z", **usage_3),
+        {
+            "timestamp": "2026-07-21T12:00:04.000Z",
+            "type": "turn_context",
+            "payload": {"model": "gpt-5.6-sol", "cwd": "/work/tokdash"},
+        },
+        _codex_token_count_row_with_total("2026-07-21T12:10:10.000Z", **own_1),
+        _codex_token_count_row_with_total("2026-07-21T12:11:10.000Z", **own_2),
+    ]
+    _write_jsonl(codex_dir / "rollout-1-parent.jsonl", parent_rows)
+    _write_jsonl(codex_dir / "rollout-2-child.jsonl", child_rows)
+
+    parser = CodexParser(PricingDatabase())
+    entries = parser._parse_all()
+    assert len(entries) == 5
+    assert parser.replay_events_skipped == 3
+
+    signatures = tuple(
+        (str(path), path.stat().st_mtime_ns, path.stat().st_size)
+        for path in sorted(codex_dir.glob("*.jsonl"))
+    )
+    sessions = sessions_module._load_codex_sessions(signatures, ())
+    assert set(sessions) == {parent_id, child_id}
+    assert len(sessions[parent_id]["turns"]) == 3
+    assert len(sessions[child_id]["turns"]) == 2
+
+    # No thread_spawn marker: the fork is not a subagent for activity purposes.
+    child_path = codex_dir / "rollout-2-child.jsonl"
+    raw = sessions_module._parse_codex_session_file(
+        str(child_path), child_path.stat().st_mtime_ns, child_path.stat().st_size, ()
+    )
+    assert raw is not None
+    assert raw["_activity"]["is_primary"] is True
+
+
+def test_codex_subagent_replay_gate_keeps_own_turns_with_stable_keys(monkeypatch, tmp_path):
+    """Codex 0.144 shape: the child file replays the parent's session_meta, so the
+    current session id stays the parent's for the rest of the file — including the
+    subagent's OWN turns after the replay. When those events carry cumulative state,
+    the stable key already dedups the replay against the parent file; hard-skipping
+    every parent-attributed event loses the subagent's genuine work. Only rows without
+    a stable key may still hit the source-shape fallback."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    _clear_parser_caches()
+
+    parent_id = "019f8024-8014-7202-aa03-9f039f67a648"
+    child_id = "019f8084-9931-7403-b9ff-6f631cb5703f"
+    codex_dir = tmp_path / ".codex" / "sessions" / "2026" / "07" / "20"
+    usage_1, usage_2, usage_3, own_1, own_2 = _codex_fork_usage_rows()
+
+    parent_rows = [
+        {
+            "timestamp": "2026-07-20T16:28:24.000Z",
+            "type": "session_meta",
+            "payload": {"id": parent_id, "cwd": "/work/tokdash", "source": "vscode", "model_provider": "openai"},
+        },
+        {
+            "timestamp": "2026-07-20T16:28:25.000Z",
+            "type": "turn_context",
+            "payload": {"model": "gpt-5.6-sol", "cwd": "/work/tokdash"},
+        },
+        _codex_token_count_row_with_total("2026-07-20T16:30:10.000Z", **usage_1),
+        _codex_token_count_row_with_total("2026-07-20T16:31:10.000Z", **usage_2),
+        _codex_token_count_row_with_total("2026-07-20T16:32:10.000Z", **usage_3),
+    ]
+    child_rows = [
+        {
+            "timestamp": "2026-07-20T18:13:21.000Z",
+            "type": "session_meta",
+            "payload": {
+                "id": child_id,
+                "cwd": "/work/tokdash",
+                "source": {"subagent": {"thread_spawn": {"parent_thread_id": parent_id, "depth": 1}}},
+                "model_provider": "openai",
+            },
+        },
+        # Replayed parent session_meta flips the current session id to the parent's.
+        {
+            "timestamp": "2026-07-20T18:13:21.001Z",
+            "type": "session_meta",
+            "payload": {"id": parent_id, "cwd": "/work/tokdash", "source": "vscode", "model_provider": "openai"},
+        },
+        {
+            "timestamp": "2026-07-20T18:13:21.002Z",
+            "type": "turn_context",
+            "payload": {"model": "gpt-5.6-sol", "cwd": "/work/tokdash"},
+        },
+        _codex_token_count_row_with_total("2026-07-20T18:13:22.000Z", **usage_1),
+        _codex_token_count_row_with_total("2026-07-20T18:13:22.001Z", **usage_2),
+        _codex_token_count_row_with_total("2026-07-20T18:13:22.002Z", **usage_3),
+        # Genuine subagent work continues under the parent's session id (no second
+        # child session_meta is ever written).
+        _codex_token_count_row_with_total("2026-07-20T18:20:10.000Z", **own_1),
+        _codex_token_count_row_with_total("2026-07-20T18:21:10.000Z", **own_2),
+    ]
+    _write_jsonl(codex_dir / "rollout-1-parent.jsonl", parent_rows)
+    _write_jsonl(codex_dir / "rollout-2-child.jsonl", child_rows)
+
+    parser = CodexParser(PricingDatabase())
+    entries = parser._parse_all()
+    assert len(entries) == 5
+    assert parser.replay_events_skipped == 3
+    expected_timestamps = [
+        sessions_module._parse_iso_to_ms("2026-07-20T16:30:10.000Z"),
+        sessions_module._parse_iso_to_ms("2026-07-20T16:31:10.000Z"),
+        sessions_module._parse_iso_to_ms("2026-07-20T16:32:10.000Z"),
+        sessions_module._parse_iso_to_ms("2026-07-20T18:20:10.000Z"),
+        sessions_module._parse_iso_to_ms("2026-07-20T18:21:10.000Z"),
+    ]
+    assert [entry["timestamp"] for entry in entries] == expected_timestamps
+
+    # Sessions tab: the child file merges into the parent session; the replay turns
+    # dedup by event key and the subagent's own turns survive there.
+    signatures = tuple(
+        (str(path), path.stat().st_mtime_ns, path.stat().st_size)
+        for path in sorted(codex_dir.glob("*.jsonl"))
+    )
+    sessions = sessions_module._load_codex_sessions(signatures, ())
+    assert set(sessions) == {parent_id}
+    assert [turn["timestamp_ms"] for turn in sessions[parent_id]["turns"]] == expected_timestamps
+
+
+def test_codex_windowed_stored_read_dedupes_subagent_replay(monkeypatch, tmp_path):
+    """A windowed stored read only loads sessions touching the window. The forked
+    subagent file keeps its own session id and its replayed prefix is restamped
+    into the window, so the parent session is absent from the result. The replay
+    dedup must still find the parent's keys in the store, unbounded by the window
+    — otherwise Sessions disagrees with Overview exactly when the window hides
+    the parent."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    _clear_parser_caches()
+
+    parent_id = "019f8024-8014-7202-aa03-9f039f67a648"
+    child_id = "019f80ad-f48c-7361-a358-532ff84dcba9"
+    codex_dir = tmp_path / ".codex" / "sessions" / "2026" / "07" / "20"
+    usage_1, usage_2, usage_3, own_1, own_2 = _codex_fork_usage_rows()
+
+    # Parent ran on day 1 only.
+    parent_rows = [
+        {
+            "timestamp": "2026-07-20T16:28:24.000Z",
+            "type": "session_meta",
+            "payload": {"id": parent_id, "cwd": "/work/tokdash", "source": "vscode", "model_provider": "openai"},
+        },
+        {
+            "timestamp": "2026-07-20T16:28:25.000Z",
+            "type": "turn_context",
+            "payload": {"model": "gpt-5.6-sol", "cwd": "/work/tokdash"},
+        },
+        _codex_token_count_row_with_total("2026-07-20T16:30:10.000Z", **usage_1),
+        _codex_token_count_row_with_total("2026-07-20T16:31:10.000Z", **usage_2),
+        _codex_token_count_row_with_total("2026-07-20T16:32:10.000Z", **usage_3),
+    ]
+    # Forked on day 2; the replayed prefix is restamped to day 2, inside the window.
+    child_rows = [
+        {
+            "timestamp": "2026-07-21T09:00:00.000Z",
+            "type": "session_meta",
+            "payload": {
+                "id": child_id,
+                "cwd": "/work/tokdash",
+                "forked_from_id": parent_id,
+                "source": {"subagent": {"thread_spawn": {"parent_thread_id": parent_id, "depth": 1}}},
+                "model_provider": "openai",
+            },
+        },
+        _codex_token_count_row_with_total("2026-07-21T09:00:01.000Z", **usage_1),
+        _codex_token_count_row_with_total("2026-07-21T09:00:02.000Z", **usage_2),
+        _codex_token_count_row_with_total("2026-07-21T09:00:03.000Z", **usage_3),
+        {
+            "timestamp": "2026-07-21T09:00:04.000Z",
+            "type": "turn_context",
+            "payload": {"model": "gpt-5.6-sol", "cwd": "/work/tokdash"},
+        },
+        _codex_token_count_row_with_total("2026-07-21T09:10:10.000Z", **own_1),
+        _codex_token_count_row_with_total("2026-07-21T09:11:10.000Z", **own_2),
+    ]
+    _write_jsonl(codex_dir / "rollout-1-parent.jsonl", parent_rows)
+    _write_jsonl(codex_dir / "rollout-2-child.jsonl", child_rows)
+
+    store = UsageEntryStore(tmp_path / "usage.sqlite3")
+    monkeypatch.setattr(sessions_module, "UsageEntryStore", lambda: store)
+
+    day2_start = sessions_module._parse_iso_to_ms("2026-07-21T00:00:00.000Z")
+    day3_start = sessions_module._parse_iso_to_ms("2026-07-22T00:00:00.000Z")
+
+    windowed = sessions_module._stored_sessions_for_tool(
+        "codex", since_ms=day2_start, until_ms=day3_start
+    )
+    # The parent's files are entirely outside the window, so its session is not
+    # in the result — but the child must still lose the replayed prefix.
+    assert parent_id not in windowed
+    assert set(windowed) == {child_id}
+    assert [
+        turn["timestamp_ms"] for turn in windowed[child_id]["turns"]
+    ] == [
+        sessions_module._parse_iso_to_ms("2026-07-21T09:10:10.000Z"),
+        sessions_module._parse_iso_to_ms("2026-07-21T09:11:10.000Z"),
+    ]
+
+    # Unwindowed reads see the parent and dedup against it directly.
+    unbounded = sessions_module._stored_sessions_for_tool("codex")
+    assert set(unbounded) == {parent_id, child_id}
+    assert len(unbounded[parent_id]["turns"]) == 3
+    assert len(unbounded[child_id]["turns"]) == 2
+
+
+def test_codex_thread_settings_applied_is_an_early_model_source(monkeypatch, tmp_path):
+    """Newer Codex emits thread_settings_applied before the first turn_context.
+    Rows that follow it (and rows before any model signal, via backfill) must use
+    that model instead of the placeholder default."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    _clear_parser_caches()
+
+    codex_dir = tmp_path / ".codex" / "sessions" / "2026" / "08" / "12"
+    usage_1 = dict(last_input=100, last_cache=10, last_output=20, last_reasoning=5,
+                   total_input=100, total_cache=10, total_output=20, total_reasoning=5)
+    rows = [
+        {
+            "timestamp": "2026-08-12T11:25:16.000Z",
+            "type": "session_meta",
+            "payload": {"id": "settings-session", "cwd": "/work/tokdash", "source": "cli", "model_provider": "openai"},
+        },
+        {
+            "timestamp": "2026-08-12T11:25:16.100Z",
+            "type": "event_msg",
+            "payload": {
+                "type": "thread_settings_applied",
+                "thread_settings": {"model": "gpt-5.6-sol", "model_provider_id": "openai"},
+            },
+        },
+        # No turn_context in this file at all: thread_settings_applied is the only
+        # model signal and must win over the placeholder default.
+        _codex_token_count_row_with_total("2026-08-12T11:26:10.000Z", **usage_1),
+    ]
+    _write_jsonl(codex_dir / "rollout-settings.jsonl", rows)
+
+    parser = CodexParser(PricingDatabase())
+    entries = parser._parse_all()
+    assert len(entries) == 1
+    assert entries[0]["model"] == "gpt-5.6-sol"
+    assert entries[0]["provider"] == "openai"
+
+    path = codex_dir / "rollout-settings.jsonl"
+    raw = sessions_module._parse_codex_session_file(
+        str(path), path.stat().st_mtime_ns, path.stat().st_size, ()
+    )
+    assert raw is not None
+    assert [turn["model"] for turn in raw["turns"]] == ["gpt-5.6-sol"]
 
 
 def test_codex_primary_resume_replay_is_deduplicated_across_files(monkeypatch, tmp_path):

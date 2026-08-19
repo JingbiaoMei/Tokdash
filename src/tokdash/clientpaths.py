@@ -264,6 +264,30 @@ def hermes_search_dirs() -> List[Path]:
     return [Path.home() / ".hermes"]
 
 
+# --- Reasonix -----------------------------------------------------------------
+
+
+def reasonix_home() -> Path:
+    """``$REASONIX_HOME`` if set, else ``~/.reasonix``. Empty/whitespace counts as unset.
+
+    This override is Tokdash-side: it points the reader at a Reasonix home,
+    which is not the same as Reasonix itself honoring the variable.
+    """
+    explicit = os.environ.get("REASONIX_HOME", "").strip()
+    if explicit:
+        path = Path(explicit).expanduser()
+        return path if path.is_absolute() else path.resolve()
+    return Path.home() / ".reasonix"
+
+
+def reasonix_stats_dir() -> Path:
+    return reasonix_home() / "stats"
+
+
+def reasonix_projects_dir() -> Path:
+    return reasonix_home() / "projects"
+
+
 # --- Tokdash data dir / usage DB -------------------------------------------------
 #
 # Mirrors onboard/paths.py::data_dir() (kept as a separate, untouched copy there —

@@ -41,7 +41,7 @@ from .sources.dsh_log import (
 from .usage_store import UsageEntryStore, parser_code_signature, persistent_usage_db_enabled
 
 
-SESSION_TOOLS = ("codex", "claude", "opencode", "pi_agent", "mimo", "kimi", "dsh")
+SESSION_TOOLS = ("codex", "claude", "opencode", "pi_agent", "mimo", "kimi", "dsh", "reasonix")
 logger = logging.getLogger(__name__)
 TOOL_LABELS = {
     "codex": "Codex",
@@ -51,6 +51,7 @@ TOOL_LABELS = {
     "mimo": "Mimo",
     "kimi": "Kimi",
     "dsh": "DeepSeek Harness",
+    "reasonix": "Reasonix",
 }
 
 _PRICING_DB = PricingDatabase()
@@ -70,6 +71,10 @@ _SESSION_FILE_PARSER_VERSIONS = {
     # 2: turns carry _stream_id so concurrent agents are timed separately.
     "_parse_kimi_session_file": 2,
     "_parse_dsh_session_file": 1,
+    # 4: turns carry _work_ms, so active time is the measured step duration
+    #    rather than the capped gap to the next turn. 3 moved the timestamp to
+    #    the end of that work; 2 stamped its start. None shipped; rows rebuild.
+    "_parse_reasonix_session_file": 4,
 }
 # Version 1 of the two original parsers is serialized as the exact parser token
 # v1.5.9 produced, so upgrading reuses those valid rows without a full-corpus
@@ -258,6 +263,8 @@ def reload_pricing_db() -> None:
     _load_kimi_sessions.cache_clear()
     _parse_dsh_session_file.cache_clear()
     _load_dsh_sessions.cache_clear()
+    _parse_reasonix_session_file.cache_clear()
+    _load_reasonix_sessions.cache_clear()
     _load_mimo_sessions.cache_clear()
 
 
@@ -445,6 +452,42 @@ def _active_intervals(timestamps_ms: Iterable[int], cap_ms: int) -> list[tuple[i
     return intervals
 
 
+def _measured_intervals(
+    events: Iterable[tuple[int, Optional[int]]],
+    cap_ms: int,
+) -> list[tuple[int, int]]:
+    """Working intervals for events that may carry their own measured duration.
+
+    The capped-gap rule in _active_intervals is a heuristic for sources that log
+    only completion instants: it cannot tell a model thinking for four minutes
+    from a human idling for four minutes, so it treats anything past the cap as
+    idle and accepts the first event as unmeasurable. A source that records how
+    long each step actually took needs none of that — its interval is exactly
+    that long and ends at the event, so idle between steps is excluded rather
+    than capped, and the first step counts like any other.
+
+    Measured durations are deliberately not capped: the cap exists to strip idle
+    out of an inferred gap, and there is no idle inside a duration the source
+    timed itself. Events without one fall back to the gap rule, and a measured
+    event still anchors the gap for whatever follows it, so the two mix safely
+    within one stream.
+    """
+    ordered = sorted(events, key=lambda event: int(event[0] or 0))
+    intervals: list[tuple[int, int]] = []
+    previous: Optional[int] = None
+    for raw_ts, raw_work in ordered:
+        current = int(raw_ts or 0)
+        work_ms = None if raw_work is None else int(raw_work or 0)
+        if work_ms is not None and work_ms > 0:
+            intervals.append((current - work_ms, current))
+        elif previous is not None:
+            gap = current - previous
+            if gap > 0:
+                intervals.append((current - min(gap, cap_ms), current))
+        previous = current
+    return intervals
+
+
 def _clip_intervals(
     intervals: Iterable[tuple[int, int]],
     since_ms: Optional[int],
@@ -478,22 +521,31 @@ def _session_active_intervals(
     so filtering events first would silently drop it (a 23:59-00:01 stretch would
     report nothing for the new day).
     """
-    streams: Dict[Any, list[int]] = {}
+    streams: Dict[Any, list[tuple[int, Optional[int]]]] = {}
     for turn in raw.get("turns", []):
-        streams.setdefault(turn.get("_stream_id"), []).append(int(turn.get("timestamp_ms", 0) or 0))
+        # _work_ms is how long this turn's own work took, when the source
+        # measured it (Reasonix does). Turns without one keep the capped-gap
+        # heuristic, which is all a completion-instant log can support.
+        work_ms = turn.get("_work_ms")
+        streams.setdefault(turn.get("_stream_id"), []).append(
+            (int(turn.get("timestamp_ms", 0) or 0), None if work_ms is None else int(work_ms or 0))
+        )
 
-    # Loaders that window at the source (the SQLite-backed ones) pass the events
-    # they held back on either edge, so a session continuing across a boundary
-    # keeps the stretch that spans it.
+    # Two kinds of loader supply a boundary event. The ones that window at the
+    # source (SQLite-backed) pass the events they held back on either edge, so a
+    # session continuing across a boundary keeps the stretch that spans it. A
+    # parser may also set _prior_event_ms to the instant its first turn's work
+    # began (Reasonix does, from the user message that prompted it), which is
+    # what makes that first turn's duration measurable at all.
     prior_event_ms = raw.get("_prior_event_ms")
     next_event_ms = raw.get("_next_event_ms")
     intervals: list[tuple[int, int]] = []
     for stamps in streams.values():
         if prior_event_ms is not None:
-            stamps = [int(prior_event_ms), *stamps]
+            stamps = [(int(prior_event_ms), None), *stamps]
         if next_event_ms is not None:
-            stamps = [*stamps, int(next_event_ms)]
-        intervals.extend(_active_intervals(stamps, cap_ms))
+            stamps = [*stamps, (int(next_event_ms), None)]
+        intervals.extend(_measured_intervals(stamps, cap_ms))
     return _clip_intervals(intervals, since_ms, until_ms)
 
 
@@ -2905,13 +2957,221 @@ def _dsh_sessions() -> Dict[str, Dict[str, Any]]:
     return _load_dsh_sessions(_dsh_session_signatures(), _pricing_signature())
 
 
+def _reasonix_session_signatures() -> tuple[tuple[str, int, int], ...]:
+    """Signatures for every Reasonix conversation log, sidecar metadata included.
+
+    The parser reads two files per session — ``<id>.jsonl`` and its
+    ``<id>.jsonl.meta`` — so both must drive change detection or a metadata-only
+    edit (preview, model, revision) is never picked up by the caches or the
+    persistent store. The sidecar is folded into the conversation log's slot:
+    mtime takes the later of the two, size their sum. Both values are only ever
+    hashed for change detection, never read back as file stats.
+    """
+    projects_dir = clientpaths.reasonix_projects_dir()
+    if not projects_dir.exists():
+        return ()
+    sigs: list[tuple[str, int, int]] = []
+    for path in projects_dir.glob("*/sessions/*.jsonl"):
+        if path.name.endswith(".events.jsonl"):
+            continue
+        try:
+            st = path.stat()
+        except (FileNotFoundError, OSError):
+            continue
+        mtime_ns, size = st.st_mtime_ns, st.st_size
+        try:
+            meta_st = path.with_name(path.name + ".meta").stat()
+        except (FileNotFoundError, OSError):
+            pass
+        else:
+            mtime_ns = max(mtime_ns, meta_st.st_mtime_ns)
+            size += meta_st.st_size
+        sigs.append((str(path), mtime_ns, size))
+    sigs.sort(key=lambda s: s[0])
+    return tuple(sigs)
+
+
+# Highest ``.meta`` schema Reasonix has written that this parser was read
+# against. A newer file may move or rename the fields below, so it is skipped
+# rather than parsed blind into wrong sessions.
+_REASONIX_META_SCHEMA_MAX = 2
+
+
+@lru_cache(maxsize=512)
+def _parse_reasonix_session_file(path_str: str, _mtime_ns: int, _size: int, _pricing_sig: tuple = ()) -> Optional[Dict[str, Any]]:
+    """One Reasonix session from ``<id>.jsonl`` plus its ``<id>.jsonl.meta``.
+
+    Turns carry **zero tokens by design**. Nothing in the session file cluster
+    records usage — the conversation log, the events log and the indexes were
+    all inspected — and the daily stats log that does carries neither a session
+    nor a turn id, so no non-heuristic join exists. Session Explorer therefore
+    shows Reasonix structure (turns, timing, project, title) while Overview and
+    Stats carry its real token totals from ReasonixParser.
+
+    Turn timing is wall clock, not tokens. A turn's timestamp is the instant its
+    work *finished*, which is what _active_intervals assumes ("an event's own
+    generation time is part of the gap that ends at it"), so the cursor advances
+    by each assistant step's ``workDurationMs`` before the turn is stamped. The
+    user message that prompted the first turn is handed back as
+    ``_prior_event_ms``; without it that first step's duration would fall off
+    the front of the session, exactly as it does for tools that only log
+    completion instants.
+    """
+    session_path = Path(path_str)
+    if not session_path.exists():
+        return None
+
+    meta_path = session_path.with_name(session_path.name + ".meta")
+    meta: Dict[str, Any] = {}
+    if meta_path.exists():
+        try:
+            loaded = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            loaded = None
+        if isinstance(loaded, dict):
+            meta = loaded
+
+    schema_version = meta.get("schema_version")
+    if isinstance(schema_version, bool) or not isinstance(schema_version, (int, float)):
+        schema_version = None
+    if schema_version is not None and int(schema_version) > _REASONIX_META_SCHEMA_MAX:
+        return None
+
+    session_id = str(meta.get("id") or session_path.stem)
+    default_model = str(meta.get("model") or "unknown")
+    if "/" in default_model:
+        _, default_model = default_model.split("/", 1)
+
+    messages = []
+    try:
+        with session_path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    messages.append(json.loads(line))
+                except Exception:
+                    continue
+    except Exception:
+        return None
+
+    cwd = ""
+    first_user_preview = str(meta.get("preview") or "")
+    turns: list[Dict[str, Any]] = []
+    turn_index = 0
+    # Wall-clock cursor: moved forward by each user message, then advanced past
+    # every assistant step's own work so consecutive steps are timed apart by
+    # exactly the work between them.
+    cursor_ms: Optional[int] = None
+    # The instant the first turn's work began, handed to the active-time model
+    # so that turn's duration is not lost to the no-predecessor rule.
+    first_work_start_ms: Optional[int] = None
+
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+        role = msg.get("role")
+        if role == "system":
+            content = str(msg.get("content") or "")
+            match = re.search(r'Current workspace:\s*"([^"]+)"', content)
+            if match:
+                cwd = match.group(1)
+        elif role == "user":
+            if not first_user_preview:
+                first_user_preview = str(msg.get("raw_content") or msg.get("content") or "").strip()
+            created = _to_int(msg.get("createdAt")) or _parse_iso_to_ms(msg.get("createdAt"))
+            # Only ever move the clock forward: a stale or malformed createdAt
+            # must not rewind the session behind work already timed.
+            if created and (cursor_ms is None or int(created) > cursor_ms):
+                cursor_ms = int(created)
+        elif role == "assistant":
+            turn_index += 1
+            if cursor_ms is None:
+                cursor_ms = int(_mtime_ns // 1_000_000)
+            if first_work_start_ms is None:
+                first_work_start_ms = cursor_ms
+            work_ms = _to_int(msg.get("workDurationMs"))
+            if work_ms > 0:
+                cursor_ms += work_ms
+            bill = _billing_record(
+                default_model,
+                "split-cache-write",
+                input_tokens=0,
+                output_tokens=0,
+                cache_read=0,
+                cache_write=0,
+            )
+            turn = _build_turn(
+                turn_index=turn_index,
+                timestamp_ms=cursor_ms,
+                model=default_model,
+                tokens_in=0,
+                tokens_cache=0,
+                tokens_out=0,
+                tokens_reasoning=0,
+                bill=bill,
+            )
+            turn["_event_key"] = f"reasonix:{session_id}:{turn_index}"
+            # Reasonix times each step itself, so active time can use the real
+            # duration instead of inferring one from the gap to the next turn —
+            # which would fold the user's thinking time in with the agent's work.
+            if work_ms > 0:
+                turn["_work_ms"] = work_ms
+            turns.append(turn)
+
+    if not turns:
+        return None
+
+    project = _project_from_repo_or_path(None, cwd or None)
+    raw: Dict[str, Any] = {
+        "tool": "reasonix",
+        "session_id": session_id,
+        "display_name": first_user_preview or _fallback_display_name(session_id, project),
+        "project": project,
+        "is_review_session": False,
+        "turns": turns,
+    }
+    # Only when it precedes the first turn: an equal value would add a zero-length
+    # interval, and a later one would invent work that never happened.
+    if first_work_start_ms is not None and first_work_start_ms < turns[0]["timestamp_ms"]:
+        raw["_prior_event_ms"] = first_work_start_ms
+    return raw
+
+
+@lru_cache(maxsize=8)
+def _load_reasonix_sessions(signature: tuple[tuple[str, int, int], ...], pricing_sig: tuple = ()) -> Dict[str, Dict[str, Any]]:
+    sessions: Dict[str, Dict[str, Any]] = {}
+    for path_str, mtime_ns, size in signature:
+        raw = _parse_reasonix_session_file(path_str, mtime_ns, size, pricing_sig)
+        if not raw:
+            continue
+        session_id = str(raw["session_id"])
+        if session_id in sessions:
+            sessions[session_id] = _merge_raw_session(sessions[session_id], raw)
+        else:
+            sessions[session_id] = raw
+    return sessions
+
+
+def _reasonix_session_parser_signature() -> dict[str, Any]:
+    return {
+        "parser": _session_file_parser_signature("_parse_reasonix_session_file"),
+        "cost_basis": _SESSION_COST_BASIS,
+    }
+
+
+def _reasonix_sessions() -> Dict[str, Dict[str, Any]]:
+    return _load_reasonix_sessions(_reasonix_session_signatures(), _pricing_signature())
+
+
 def _raw_sessions_for_tool(
     tool: str,
     since_ms: Optional[int] = None,
     until_ms: Optional[int] = None,
 ) -> Dict[str, Dict[str, Any]]:
     key = str(tool or "").strip().lower()
-    if key in {"codex", "claude", "kimi", "dsh"} and persistent_usage_db_enabled():
+    if key in {"codex", "claude", "kimi", "dsh", "reasonix"} and persistent_usage_db_enabled():
         try:
             return _stored_sessions_for_tool(key, since_ms=since_ms, until_ms=until_ms)
         except Exception:
@@ -2934,6 +3194,8 @@ def _raw_sessions_for_tool(
         return _kimi_sessions()
     if key == "dsh":
         return _dsh_sessions()
+    if key == "reasonix":
+        return _reasonix_sessions()
     raise ValueError(f"Unsupported session tool: {tool}")
 
 
@@ -3035,6 +3297,18 @@ def _stored_sessions_for_tool(
             signatures,
             parser=_dsh_session_parser_signature(),
             parse_file_session=lambda file_sig: _parse_dsh_session_file(
+                *file_sig, pricing_sig
+            ),
+            signature_compatible=_session_signature_compatible,
+        )
+    elif tool == "reasonix":
+        signatures = _reasonix_session_signatures()
+        pricing_sig = _pricing_signature()
+        store.sync_session_files(
+            "reasonix",
+            signatures,
+            parser=_reasonix_session_parser_signature(),
+            parse_file_session=lambda file_sig: _parse_reasonix_session_file(
                 *file_sig, pricing_sig
             ),
             signature_compatible=_session_signature_compatible,

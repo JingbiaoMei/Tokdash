@@ -15,6 +15,8 @@ Tokdash reads usage **locally** from each tool's own session/log files — nothi
   <a href="https://pi.dev/" title="Pi"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/pi.png" alt="Pi" height="34"></a>
   <a href="https://github.com/features/copilot" title="GitHub Copilot CLI"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/copilot.png" alt="GitHub Copilot CLI" height="34"></a>
   <a href="https://hermes-agent.nousresearch.com/" title="Hermes"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/hermes.png" alt="Hermes" height="34"></a>
+  <a href="https://github.com/deepseek-ai/deepseek-harness" title="DeepSeek Harness"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/dsh.png" alt="DeepSeek Harness" height="34"></a>
+  <a href="https://github.com/esengine/DeepSeek-Reasonix" title="Reasonix"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/reasonix.png" alt="Reasonix" height="34"></a>
 </p>
 
 ## Where each client logs
@@ -32,6 +34,7 @@ Tokdash reads usage **locally** from each tool's own session/log files — nothi
 - **GitHub Copilot CLI**: `~/.copilot/otel/` (full input/cache/cost data — set `COPILOT_OTEL_FILE_EXPORTER_PATH` to enable OTel export) and `~/.copilot/session-state/*/events.jsonl` (output-only fallback when OTel is not enabled)
 - **Hermes**: `~/.hermes/state.db` (override via `HERMES_HOME` env var, comma-separated list of dirs)
 - **DeepSeek Harness**: `$DSH_HOME/sessions/<project-key>/<session-id>/session.jsonl.zstd` (or an uncompressed `session.jsonl`; `DSH_HOME` defaults to `~/.dsh`)
+- **Reasonix**: `$REASONIX_HOME/stats/YYYY-MM-DD.jsonl` for tokens and cost, and `$REASONIX_HOME/projects/*/sessions/*.jsonl` for Session Explorer (`REASONIX_HOME` defaults to `~/.reasonix`). Reasonix records usage per request rather than per session, so session rows carry turns and timing but no token counts; the totals in Overview and Stats are complete.
 
 ---
 

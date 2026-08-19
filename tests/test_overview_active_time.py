@@ -500,6 +500,83 @@ def test_the_card_shows_agent_time_and_its_delta():
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_the_card_says_loading_rather_than_answering_with_a_dash(tmp_path):
+    """The card's own request runs behind /api/usage, so it answers a beat later.
+
+    A dash in that gap reads as "no agent time in this range" — an answer the card
+    has not got yet. It shares the shimmer the rest of the tab's deferred surfaces
+    use, and keeps the dash for the states that really are an answer.
+    """
+    source = INDEX_HTML.read_text(encoding="utf-8")
+    harness = tmp_path / "active-time-render.js"
+    harness.write_text(
+        """
+const nodes = {};
+function node(id) {
+  if (!nodes[id]) nodes[id] = {
+    id, textContent: '', innerHTML: '', title: '', style: {}, classes: new Set(),
+    classList: {
+      add: (c) => nodes[id].classes.add(c),
+      remove: (c) => nodes[id].classes.delete(c),
+      contains: (c) => nodes[id].classes.has(c),
+    },
+  };
+  return nodes[id];
+}
+const document = { getElementById: node };
+const overviewActiveTimeState = { status: 'idle', data: null, key: null, requestId: 0 };
+function t(key) { return key; }
+function renderDelta() {}
+function formatDuration(ms) { return `dur:${ms}`; }
+function formatToolName(name) { return name; }
+function fitKpiValue() {}
+"""
+        + _extract_js_function(source, "function renderOverviewActiveTime() {")
+        + """
+const out = {};
+const snapshot = () => ({
+  text: node('overviewActiveTime').textContent,
+  html: node('overviewActiveTime').innerHTML,
+  shimmer: node('overviewActiveTime').classes.has('tokdash-loading-placeholder'),
+  meta: node('overviewActiveMeta').textContent,
+});
+for (const status of ['loading', 'error', 'idle']) {
+  overviewActiveTimeState.status = status;
+  overviewActiveTimeState.data = null;
+  renderOverviewActiveTime();
+  out[status] = snapshot();
+}
+overviewActiveTimeState.status = 'ready';
+overviewActiveTimeState.data = { active_ms_sum: 42, unavailable_tools: [] };
+renderOverviewActiveTime();
+out.ready = snapshot();
+process.stdout.write(JSON.stringify(out));
+""",
+        encoding="utf-8",
+    )
+    out = json.loads(
+        subprocess.run(
+            ["node", str(harness)], check=True, capture_output=True, encoding="utf-8"
+        ).stdout
+    )
+
+    assert out["loading"]["shimmer"] is True, "a pending request must not read as a dash"
+    assert "tokdash-loading-label" in out["loading"]["html"]
+    assert 'data-i18n="loading"' in out["loading"]["html"], "and must survive a language switch"
+
+    # The states that really are an answer keep the dash.
+    assert out["error"]["shimmer"] is False
+    assert out["error"]["text"] == "\u2014"
+    assert out["error"]["meta"] == "loadFailed"
+    assert out["idle"]["shimmer"] is False
+    assert out["idle"]["text"] == "\u2014"
+
+    # And the shimmer is dropped once the figure lands, not left under the value.
+    assert out["ready"]["shimmer"] is False
+    assert out["ready"]["text"] == "dur:42"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
 def test_equal_sized_server_selections_get_different_keys(tmp_path):
     source = INDEX_HTML.read_text(encoding="utf-8")
     harness = tmp_path / "active-time-key.js"

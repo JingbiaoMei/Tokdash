@@ -17,6 +17,7 @@
 - [API reference](reference/API.md) — the local HTTP API (FastAPI) for token usage, costs, and session data.
 - [Supported clients](reference/SUPPORTED_CLIENTS.md) — which coding tools Tokdash reads usage from and how detection works.
 - [History retention](reference/HISTORY_RETENTION.md) — why Tokdash's past months can shrink, and how to prevent it.
+- [Day boundaries](reference/DAY_BOUNDARIES.md) — Tokdash buckets by your local day; why a provider's own usage page shows a different number.
 
 ## development/ — maintainer workflows, release history, and design notes
 

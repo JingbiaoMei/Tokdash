@@ -6068,8 +6068,19 @@
       const metaElement = document.getElementById('overviewActiveMeta');
       if (!valueElement || !metaElement) return;
       const data = overviewActiveTimeState.data;
+      valueElement.classList.remove('tokdash-loading-placeholder');
       if (!data) {
-        valueElement.textContent = '—';
+        // This card's request runs behind /api/usage, so it is still loading for a
+        // second or two after the rest of the row has answered. A dash there reads
+        // as "no agent time in this range" rather than "not back yet", so show the
+        // same shimmer every other deferred surface on this tab uses, and keep the
+        // dash for the states that really are an answer.
+        if (overviewActiveTimeState.status === 'loading') {
+          valueElement.classList.add('tokdash-loading-placeholder');
+          valueElement.innerHTML = `<span class="tokdash-loading-label" data-i18n="loading">${t('loading')}</span>`;
+        } else {
+          valueElement.textContent = '—';
+        }
         valueElement.title = '';
         renderDelta('overviewActiveDelta', null);
         metaElement.textContent = overviewActiveTimeState.status === 'error' ? t('loadFailed') : '';

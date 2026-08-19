@@ -4,17 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## Unreleased
+## 1.9.0 - 2026-08-19
 
 ### Added
 
 - Added Reasonix as a token, cost and session source. Tokdash reads `$REASONIX_HOME/stats/YYYY-MM-DD.jsonl` for per-request usage and `$REASONIX_HOME/projects/*/sessions/*.jsonl` for the Session Explorer (`REASONIX_HOME` defaults to `~/.reasonix`), attributing the `provider/model` pair from Reasonix's own config and pricing it through the existing pricing database. Reasonix's `prompt` field counts cached and uncached input together, so it is split into Tokdash's disjoint `input` and `cacheRead` buckets rather than copied into both. Reasonix records usage per request without a session id, so session rows carry turns, project and timing but no token counts; Overview and Stats hold the full totals.
 - Added a Reasonix brand mark to the dashboard and the README supported-tools strip.
+- Documented that dashboard days are the host machine's local days, and why a provider's own usage page shows a different number for the same date (`docs/reference/DAY_BOUNDARIES.md`).
 - Active time can now use a duration the source measured itself instead of inferring one from the gap between events. Reasonix logs how long each assistant step took, so its sessions exclude the pause between an answer and the next prompt outright rather than billing it up to the idle cap, and a session's first and last steps are both counted. Tools that log only completion instants are unchanged.
 
 ### Fixed
 
 - Restored DeepSeek Harness session loading on the live-parse path. `/api/sessions?tool=dsh` raised `NameError` whenever the persistent store was disabled or its read failed, because the fallback loader had been removed.
+- The Overview no longer shows one date range's breakdowns under another range's label. The date picker writes its new label before the fetch starts, and the Apps & Models and Combined Models tables were painted from an idle callback, so both could outlive the range they belonged to. They are now cleared the moment the selection moves, and the Overview is visibly marked while it is showing a window other than the one on the label.
+- The Agent Time card now shows a loading state instead of an em dash while its own request is in flight. It is fetched after the rest of the KPI row, so a dash there read as "no agent time in this range" rather than "not back yet".
+
 ## 1.8.1 - 2026-08-18
 
 ### Fixed

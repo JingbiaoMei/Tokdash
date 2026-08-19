@@ -1,6 +1,27 @@
 {
-  "current": "1.8.1",
+  "current": "1.9.0",
   "releases": [
+    {
+      "version": "1.9.0",
+      "date": "2026-08-19",
+      "sections": [
+        {
+          "type": "added",
+          "items": [
+            "Reasonix is now a tracked source. Tokdash reads its per-request stats and session logs from ~/.reasonix (or $REASONIX_HOME), pricing each provider/model pair through the usual pricing database.",
+            "Sessions can now use a step duration the tool measured itself rather than inferring one from the gap between events, so idle time between an answer and your next prompt is excluded outright."
+          ]
+        },
+        {
+          "type": "fixed",
+          "items": [
+            "Changing the date range no longer leaves the previous range's Apps & Models and Combined Models tables under the new range's label.",
+            "The Agent Time card now shows that it is loading instead of a dash, which read as “no agent time” while its request was still in flight.",
+            "Restored DeepSeek Harness session loading when the persistent usage database is disabled or unreadable."
+          ]
+        }
+      ]
+    },
     {
       "version": "1.8.1",
       "date": "2026-08-18",

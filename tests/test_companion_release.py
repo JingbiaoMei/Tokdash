@@ -135,8 +135,12 @@ def test_companion_workflows_avoid_temporary_artifact_storage() -> None:
         encoding="utf-8"
     )
     assert "actions/upload-artifact" not in companion_ci
-    assert "actions/upload-artifact" not in companion_release
     assert "actions/download-artifact" not in companion_release
+    # The release workflow uploads exactly one artifact: the Store MSIX, which has no
+    # public download path because Partner Center signs it. Everything a user downloads
+    # still moves through the draft release.
+    assert companion_release.count("actions/upload-artifact@") == 1
+    assert "tokdash-companion-msix" in companion_release
     assert 'tags:\n      - "companion-v*"' in companion_release
     assert "name: Companion unsigned release" in companion_release
     # Companion releases are ordinary releases, but must never take the repository's

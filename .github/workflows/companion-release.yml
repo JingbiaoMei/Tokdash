@@ -130,6 +130,46 @@ jobs:
               throw "Failed to upload $asset"
           }
 
+      # ---- Microsoft Store track ----
+      # The Store signs the package it ingests, so this build is deliberately unsigned,
+      # and an unsigned MSIX cannot be installed at all. It is therefore never attached
+      # to the GitHub Release: publishing one would only produce failed installs next to
+      # a ZIP that works. It goes to a workflow artifact for upload to Partner Center.
+
+      - name: Require the Partner Center identity
+        shell: pwsh
+        env:
+          IDENTITY_NAME: ${{ vars.MSIX_IDENTITY_NAME }}
+          PUBLISHER: ${{ vars.MSIX_PUBLISHER }}
+          PUBLISHER_DISPLAY_NAME: ${{ vars.MSIX_PUBLISHER_DISPLAY_NAME }}
+        run: |
+          # With no identity supplied the build script falls back to its test identity,
+          # which Partner Center rejects at upload. Fail here, where the cause is obvious,
+          # rather than three manual steps later.
+          foreach ($name in 'IDENTITY_NAME', 'PUBLISHER', 'PUBLISHER_DISPLAY_NAME') {
+              if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
+                  throw "Repository variable MSIX_$name is not set. Add the Partner Center identity triple under Settings > Secrets and variables > Actions > Variables."
+              }
+          }
+
+      - name: Build Store MSIX
+        shell: pwsh
+        env:
+          TOKDASH_MSIX_IDENTITY_NAME: ${{ vars.MSIX_IDENTITY_NAME }}
+          TOKDASH_MSIX_PUBLISHER: ${{ vars.MSIX_PUBLISHER }}
+          TOKDASH_MSIX_PUBLISHER_DISPLAY_NAME: ${{ vars.MSIX_PUBLISHER_DISPLAY_NAME }}
+        run: >
+          companion/scripts/build_windows_msix.ps1
+          -OutputDirectory "${{ runner.temp }}/tokdash-companion-msix"
+
+      - name: Upload Store MSIX for Partner Center
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: tokdash-companion-${{ needs.preflight.outputs.version }}-store-msix
+          path: ${{ runner.temp }}/tokdash-companion-msix/*
+          if-no-files-found: error
+          retention-days: 1
+
   macos:
     name: Build macOS universal
     needs: [preflight, prepare]
@@ -211,5 +251,9 @@ jobs:
             --latest=false \
             --title "Tokdash Companion ${{ needs.preflight.outputs.version }} (unsigned build)"
 
-# Release assets move directly through a draft GitHub Release. No Actions
-# artifacts are uploaded, so this workflow consumes no artifact-storage quota.
+# Release assets move directly through a draft GitHub Release, so the public
+# download path uses no artifact storage. The one artifact is the Store MSIX, which
+# has no public download path by design: it is unsigned until Partner Center signs it,
+# and Windows will not install an unsigned package. It retains for one day, matching
+# the repository-wide rule; if the window is missed, re-run the job to rebuild it from
+# the same tag.

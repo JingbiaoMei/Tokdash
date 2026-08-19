@@ -25,6 +25,37 @@ SHA256SUMS
   that package during certification, so this unsigned-binary policy covers only
   the GitHub ZIP and DMG.
 
+## Microsoft Store package
+
+The release workflow builds the Store MSIX on every `companion-v*` tag, in the
+same Windows job as the ZIP, and attaches it to the run as the
+`tokdash-companion-<version>-store-msix` artifact. Download it from the workflow
+run and upload it to Partner Center; nothing is built by hand.
+
+It is an artifact rather than a release asset on purpose. Partner Center signs
+the package it ingests, so what CI produces is unsigned, and Windows refuses to
+install an unsigned MSIX outright — there is no click-through as there is for
+SmartScreen. Publishing it next to the ZIP would only generate failed installs.
+
+The artifact retains for one day, matching the repository-wide rule. If that
+window is missed, re-run the `windows` job: the build is driven entirely by the
+tag, so it reproduces the same package.
+
+The build needs the Partner Center identity triple in repository variables
+(Settings > Secrets and variables > Actions > Variables):
+
+| Variable | Value |
+|---|---|
+| `MSIX_IDENTITY_NAME` | `Package/Identity/Name` from Partner Center |
+| `MSIX_PUBLISHER` | `Package/Identity/Publisher`, starting `CN=` |
+| `MSIX_PUBLISHER_DISPLAY_NAME` | `Package/Properties/PublisherDisplayName` |
+
+These are not secrets — they are readable in any installed package — but they
+must match Partner Center exactly, since a mismatch is rejected at upload rather
+than in certification. A dedicated step fails the build when any is unset,
+because the build script would otherwise fall back to its test identity and
+produce a package Partner Center rejects.
+
 ## v1.0.0 unsigned-binary policy
 
 The maintainer explicitly accepted unsigned distribution for this GitHub

@@ -303,11 +303,20 @@ def main() -> None:
         "macos-universal-unsigned.dmg",
         "windows-x64-unsigned.zip",
         "SHA256SUMS",
+        # The Store package is built in CI but must never reach the public release: it is
+        # unsigned until Partner Center signs it, and Windows refuses to install an
+        # unsigned MSIX. It leaves through a short-lived artifact instead.
+        "build_windows_msix.ps1",
+        "TOKDASH_MSIX_IDENTITY_NAME",
+        "if-no-files-found: error",
+        "retention-days: 1",
     ):
         if required not in release_workflow:
             fail(f"unsigned companion release workflow is missing {required!r}")
     for forbidden in (
-        "actions/upload-artifact",
+        # actions/upload-artifact is permitted for the Store MSIX only; the required
+        # strings above pin that usage down. Downloading artifacts stays banned: release
+        # assets move through the draft release, which "gh release download" reads.
         "actions/download-artifact",
         "--clobber",
         "id-token: write",
@@ -317,6 +326,12 @@ def main() -> None:
     ):
         if forbidden in release_workflow:
             fail(f"unsigned companion release workflow must not contain {forbidden!r}")
+
+    if re.search(r"gh release upload[^\n]*\.msix", release_workflow):
+        fail(
+            "the Store MSIX must not be attached to the GitHub Release: it is unsigned "
+            "until Partner Center signs it, and Windows cannot install an unsigned MSIX"
+        )
 
     release_notes = (
         COMPANION_ROOT / "RELEASE_NOTES.md"

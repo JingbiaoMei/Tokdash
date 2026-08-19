@@ -42,7 +42,7 @@
 > [!NOTE]
 > **Day 1 support for DeepSeek Harness.** Tokens, cost and sessions are read locally from `~/.dsh`, with nothing to configure. [Supported clients →](docs/reference/SUPPORTED_CLIENTS.md)
 >
-> **Also from the same author: [Cosyncing](https://github.com/cosyncing/cosyncing).** It runs a server on your machine and streams your coding-agent sessions to every device you own — read the transcript, answer a prompt, or take over mid-run from your phone. Tokdash tracks what your agents cost; Cosyncing shows what they are doing right now.
+> **Also from the same author: [Cosyncing](https://github.com/cosyncing/cosyncing).** Synchronize and control your agents — from CLI to GUI, from desktop to phone. Pick up right where you left off, anywhere. Cosyncing keeps your coding agents in sync across your own network.
 
 > [!TIP]
 > **Tokdash Companion is now on the Microsoft Store.** See today's spend and subscription quota from the Windows notification area or the macOS menu bar, without keeping the dashboard open. [Get it from the Microsoft Store](https://apps.microsoft.com/detail/9ppnmpdq8b52) · [screenshots, downloads, and setup →](#tokdash-companion-status-bar-app)

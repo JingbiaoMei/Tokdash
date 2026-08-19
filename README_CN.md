@@ -41,7 +41,7 @@
 > [!NOTE]
 > **首日支持 DeepSeek Harness。** 从本地 `~/.dsh` 读取 token、费用与会话，无需任何配置。[支持的客户端 →](docs/reference/SUPPORTED_CLIENTS.md)
 >
-> **同一作者的另一个项目：[Cosyncing](https://github.com/cosyncing/cosyncing)。** 它在你的机器上运行一个服务端，把编码 agent 的会话同步到你的每一台设备 —— 查看对话记录、回复提示，或直接从手机接管。Tokdash 记录 agent 花了多少钱；Cosyncing 让你看到它们正在做什么。
+> **同一作者的另一个项目：[Cosyncing](https://github.com/cosyncing/cosyncing)。** 同步并操控你的 agent —— 从 CLI 到 GUI，从桌面到手机。随时随地，从上次中断的地方接着继续。Cosyncing 让你的编码 agent 在你自己的网络中保持同步。
 
 > [!TIP]
 > **Tokdash Companion 现已上架 Microsoft Store。** 无需一直打开仪表盘，即可在 Windows 通知区域或 macOS 菜单栏查看今日费用与订阅额度。[从 Microsoft Store 获取](https://apps.microsoft.com/detail/9ppnmpdq8b52) · [查看截图、下载并设置 →](#tokdash-companion-状态栏应用)

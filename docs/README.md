@@ -33,3 +33,4 @@
 - [Windows client data paths](development/technical-notes/WINDOWS_CLIENT_PATHS.md) — research backing the Windows-support pass, per-client path survey.
 - [DeepSeek Harness support design](development/technical-notes/DSH_SUPPORT_DESIGN.md) - implementation plan for durable dsh token usage and Session Explorer tracking.
 - [Reasonix support design](development/technical-notes/REASONIX_SUPPORT_DESIGN.md) - implementation plan for Reasonix token usage, per-request stats mapping, and Session Explorer tracking.
+- [ZCode support design](development/technical-notes/ZCODE_SUPPORT_DESIGN.md) - how Tokdash reads ZCode's local SQLite database for token and cost, and the token-accounting rules it follows.

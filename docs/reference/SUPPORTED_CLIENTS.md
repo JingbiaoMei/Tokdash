@@ -17,6 +17,7 @@ Tokdash reads usage **locally** from each tool's own session/log files — nothi
   <a href="https://hermes-agent.nousresearch.com/" title="Hermes"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/hermes.png" alt="Hermes" height="34"></a>
   <a href="https://github.com/deepseek-ai/deepseek-harness" title="DeepSeek Harness"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/dsh.png" alt="DeepSeek Harness" height="34"></a>
   <a href="https://reasonix.io/" title="Reasonix"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/reasonix.png" alt="Reasonix" height="34"></a>
+  <a href="https://zcode.z.ai" title="ZCode"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/zcode.png" alt="ZCode" height="34"></a>
 </p>
 
 ## Where each client logs
@@ -35,6 +36,7 @@ Tokdash reads usage **locally** from each tool's own session/log files — nothi
 - **Hermes**: `~/.hermes/state.db` (override via `HERMES_HOME` env var, comma-separated list of dirs)
 - **DeepSeek Harness**: `$DSH_HOME/sessions/<project-key>/<session-id>/session.jsonl.zstd` (or an uncompressed `session.jsonl`; `DSH_HOME` defaults to `~/.dsh`)
 - **Reasonix**: `$REASONIX_HOME/stats/YYYY-MM-DD.jsonl` for tokens and cost, and `$REASONIX_HOME/projects/*/sessions/*.jsonl` for Session Explorer (`REASONIX_HOME` defaults to `~/.reasonix`). Reasonix records usage per request rather than per session, so session rows carry turns and timing but no token counts; the totals in Overview and Stats are complete.
+- **ZCode**: `$ZCODE_HOME/cli/db/db.sqlite` (default `~/.zcode/cli/db/db.sqlite`, WAL mode; `ZCODE_HOME` follows ZCode's own setting). One `model_usage` row per model request; the cached share inside `input_tokens` is split out and billed at the cache rate.
 
 ---
 

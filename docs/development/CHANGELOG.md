@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Added
+
+- Added ZCode as a token and cost source. Tokdash reads `model_usage` from `$ZCODE_HOME/cli/db/db.sqlite` (default `~/.zcode/cli/db/db.sqlite`) in read-only mode, one entry per model request, retries included as separate billable rows. ZCode's `input_tokens` counts cached and uncached prompt tokens together, so the cached share is split into its own `cacheRead` bucket, and reasoning tokens are displayed disjoint from output while billing at the output rate. Session Explorer support for ZCode is planned for a later change.
+- Added a ZCode brand mark to the dashboard and the README supported-tools strip.
+
 ### Fixed
 
 - `tokdash setup` on native Windows can now register its Task Scheduler task. The task definition was written as UTF-8, but `schtasks /Create /XML` hands the file to MSXML as a UTF-16 wide string that refuses a declared UTF-8, so registration failed with "unable to switch the encoding" on every native-Windows setup since v1.0.5 — it failed closed, with no half-installed state. The definition is now declared and written as UTF-16 LE with BOM, matching Task Scheduler's own exports, and read back the same way, including the plain-UTF-8 file a previously failed setup left behind, so an upgrade still recognizes it as setup-owned. A `windows-latest` CI step now renders both task variants and registers them with a real `schtasks` — every unit test fakes `schtasks`, which is exactly why this shipped.

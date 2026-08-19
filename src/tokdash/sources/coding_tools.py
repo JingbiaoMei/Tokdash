@@ -2685,6 +2685,177 @@ class MimoParser(BaseParser):
         return list(out)
 
 
+class ZCodeParser(BaseParser):
+    """
+    Parser for ZCode (Z.ai's GLM coding app) token usage.
+
+    =======================================================================
+    ZCODE SQLITE DATABASE SCHEMA
+    =======================================================================
+    Location: $ZCODE_HOME/cli/db/db.sqlite (default ~/.zcode/cli/db/db.sqlite,
+    %USERPROFILE%\\.zcode\\cli\\db\\db.sqlite on Windows). WAL mode, so
+    live rows accumulate in the -wal file between checkpoints.
+
+    Table: model_usage — one row per model request. Retries are distinct
+    rows sharing a logical_request_id with different attempt_index values.
+      - id TEXT PRIMARY KEY
+      - session_id TEXT
+      - model_id TEXT                (e.g. GLM-5-Turbo — the pricing key)
+      - provider_id TEXT             (e.g. builtin:zai-start-plan — label only)
+      - status TEXT                  (running/completed/error/cancelled)
+      - started_at INTEGER           (epoch ms)
+      - input_tokens INTEGER          TOTAL prompt tokens, inclusive of cache
+      - output_tokens INTEGER         already includes reasoning_tokens
+      - reasoning_tokens INTEGER
+      - cache_read_input_tokens INTEGER    subset of input_tokens
+      - cache_creation_input_tokens INTEGER
+
+    Token accounting (see docs/development/technical-notes/ZCODE_SUPPORT_DESIGN.md):
+      - input_tokens is inclusive of the cached slice, so the entry bills
+        max(0, input - cache_read) as fresh input and cache_read separately.
+      - output_tokens already includes reasoning, so the entry carries a
+        disjoint output/reasoning split for the displayed total, but cost is
+        computed from the FULL output_tokens: get_cost never sees the entry's
+        reasoning bucket, and z.ai bills reasoning at the output rate.
+    =======================================================================
+    """
+
+    source_name = "zcode"
+    sync_capability = SourceSyncCapability(
+        mode="source_native_db",
+        session_store=False,
+        reason="ZCode is a WAL-mode SQLite DB and supports SQL date windows.",
+    )
+
+    _query_cache: ClassVar[Dict[tuple, List[Dict[str, Any]]]] = {}
+    _query_cache_sig: ClassVar[tuple] = ()
+
+    def __init__(self, pricing_db: PricingDatabase):
+        super().__init__(pricing_db)
+        self.db_path = clientpaths.zcode_db_path()
+
+    def _file_signatures(self) -> tuple:
+        # Main file plus -wal and -shm: ZCode's live rows sit in the WAL
+        # between checkpoints, so a signature on the main file alone goes
+        # stale while the app is running and cached results silently lag.
+        if not self.db_path.exists():
+            return ()
+        out: list[tuple[str, int, int]] = []
+        for candidate in (
+            self.db_path,
+            Path(str(self.db_path) + "-wal"),
+            Path(str(self.db_path) + "-shm"),
+        ):
+            try:
+                s = candidate.stat()
+                out.append((str(candidate), s.st_mtime_ns, s.st_size))
+            except (FileNotFoundError, OSError):
+                continue
+        return tuple(out)
+
+    def _connect_readonly(self) -> sqlite3.Connection:
+        # Read-only URI so Tokdash never contends with the running ZCode
+        # process (WAL readers are safe). resolve().as_uri() keeps a "#" in
+        # the path from truncating the URI; the plain f"file:{path}?mode=ro"
+        # form drops mode=ro in that case.
+        try:
+            return sqlite3.connect(self.db_path.resolve().as_uri() + "?mode=ro", uri=True)
+        except sqlite3.Error:
+            return sqlite3.connect(str(self.db_path))
+
+    def _build_entry(self, row: sqlite3.Row) -> Optional[Dict[str, Any]]:
+        model = str(row["model_id"] or "").strip()
+        if not model:
+            return None
+
+        input_total = self._i(row["input_tokens"])
+        cache_r = self._i(row["cache_read_input_tokens"])
+        cache_w = self._i(row["cache_creation_input_tokens"])
+        output_total = self._i(row["output_tokens"])
+        reasoning = self._i(row["reasoning_tokens"])
+
+        # Token-presence guard: a cancelled request that already burned
+        # tokens still bills.
+        if input_total == 0 and output_total == 0 and cache_r == 0 and cache_w == 0 and reasoning == 0:
+            return None
+
+        # Fresh input only: ZCode's input_tokens is inclusive of the cached
+        # slice, and get_cost bills the buckets additively.
+        input_t = max(0, input_total - cache_r)
+        # z.ai bills reasoning at the output rate, so cost uses the FULL
+        # output_total; the entry's split output exists only so compute.py's
+        # additive displayed total (input + output + cacheRead + reasoning)
+        # stays correct.
+        cost = self.pricing_db.get_cost(model, input_t, output_total, cache_r, cache_w)
+
+        return {
+            "source": self.source_name,
+            "model": model,
+            "provider": str(row["provider_id"] or ""),
+            "input": input_t,
+            "output": max(0, output_total - reasoning),
+            "cacheRead": cache_r,
+            "cacheWrite": cache_w,
+            "reasoning": reasoning,
+            "cost": cost,
+            "timestamp": int(row["started_at"]),
+            "entry_id": f"zcode:{row['id']}",
+        }
+
+    def _parse_all(self) -> List[Dict[str, Any]]:
+        return []
+
+    def collect(self, since_date: Optional[datetime] = None, until_date: Optional[datetime] = None) -> List[Dict[str, Any]]:
+        sig = (self._file_signatures(), self._pricing_signature())
+        if sig != type(self)._query_cache_sig:
+            type(self)._query_cache.clear()
+            type(self)._query_cache_sig = sig
+
+        s_ms = int(self._to_utc(since_date).timestamp() * 1000) if since_date else 0
+        u_ms = int(self._to_utc(until_date).timestamp() * 1000) if until_date else 9999999999999
+        cache_key = (s_ms, u_ms)
+
+        cached = type(self)._query_cache.get(cache_key)
+        if cached is not None:
+            return list(cached)
+
+        out: List[Dict[str, Any]] = []
+        if self.db_path.exists():
+            try:
+                conn = self._connect_readonly()
+                try:
+                    conn.row_factory = sqlite3.Row
+                    cur = conn.cursor()
+                    if _sqlite_table_exists(conn, "model_usage"):
+                        cur.execute(
+                            """
+                            SELECT id, session_id, model_id, provider_id, started_at,
+                                   input_tokens, output_tokens, reasoning_tokens,
+                                   cache_read_input_tokens, cache_creation_input_tokens
+                            FROM model_usage
+                            WHERE started_at >= ? AND started_at < ?
+                            ORDER BY started_at
+                            """,
+                            (s_ms, u_ms),
+                        )
+                        for row in cur.fetchall():
+                            try:
+                                entry = self._build_entry(row)
+                            except Exception:
+                                continue
+                            if entry is not None:
+                                out.append(entry)
+                finally:
+                    conn.close()
+            except Exception:
+                pass
+
+        if len(type(self)._query_cache) >= _OPENCODE_QUERY_CACHE_MAX:
+            type(self)._query_cache.clear()
+        type(self)._query_cache[cache_key] = out
+        return list(out)
+
+
 class DSHParser(BaseParser):
     """Parser for DeepSeek Harness (dsh) session logs.
 
@@ -2998,6 +3169,7 @@ class CodingToolsUsageTracker:
             "copilot_cli": CopilotCLIParser(self.pricing_db),
             "hermes": HermesParser(self.pricing_db),
             "mimo": MimoParser(self.pricing_db),
+            "zcode": ZCodeParser(self.pricing_db),
             "dsh": DSHParser(self.pricing_db),
             "reasonix": ReasonixParser(self.pricing_db),
         }

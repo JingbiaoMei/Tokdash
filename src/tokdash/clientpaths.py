@@ -327,6 +327,27 @@ def openclaw_agent_sessions_glob() -> str:
     return str(openclaw_home() / "agents" / "*" / "sessions")
 
 
+# --- ZCode --------------------------------------------------------------------
+
+
+def zcode_home() -> Path:
+    """``$ZCODE_HOME`` if set, else ``~/.zcode``. Empty/whitespace counts as unset.
+
+    ZCode itself honors ``ZCODE_HOME`` for its data dir, so the reader follows an
+    overridden home; on Windows the default is ``%USERPROFILE%\\.zcode``.
+    """
+    explicit = os.environ.get("ZCODE_HOME", "").strip()
+    if explicit:
+        path = Path(explicit).expanduser()
+        return path if path.is_absolute() else path.resolve()
+    return Path.home() / ".zcode"
+
+
+def zcode_db_path() -> Path:
+    """ZCode session database (WAL mode; ``-wal``/``-shm`` siblings live beside it)."""
+    return zcode_home() / "cli" / "db" / "db.sqlite"
+
+
 # --- Tokdash data dir / usage DB -------------------------------------------------
 #
 # Mirrors onboard/paths.py::data_dir() (kept as a separate, untouched copy there —

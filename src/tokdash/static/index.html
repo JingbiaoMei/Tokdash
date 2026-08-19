@@ -5089,6 +5089,7 @@
       mimo: { icon: '/static/icons/agents/mimo.svg', color: '#FF6900', fallback: 'M', logoKind: 'wordmark' },
       dsh: { icon: '/static/icons/agents/dsh.svg', color: '#4D6BFE', fallback: 'D' },
       reasonix: { icon: '/static/icons/agents/reasonix.svg', color: '#0153E5', fallback: 'R' },
+      zcode: { icon: '/static/icons/agents/zcode.png', color: '#111213', fallback: 'Z', darkInvert: true },
     });
     const toolBrandIconPromises = new Map();
 
@@ -5220,6 +5221,7 @@
         mimo: 'Mimo',
         dsh: 'DeepSeek Harness',
         reasonix: 'Reasonix',
+        zcode: 'ZCode',
         cursor: 'Cursor',
       };
       if (mapping[key]) return mapping[key];

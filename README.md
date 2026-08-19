@@ -25,6 +25,7 @@
   <a href="https://hermes-agent.nousresearch.com/" title="Hermes"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/hermes.png" alt="Hermes" height="34"></a>
   <a href="https://github.com/deepseek-ai/deepseek-harness" title="DeepSeek Harness"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/dsh.png" alt="DeepSeek Harness" height="34"></a>
   <a href="https://reasonix.io/" title="Reasonix"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/reasonix.png" alt="Reasonix" height="34"></a>
+  <a href="https://zcode.z.ai" title="ZCode"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/zcode.png" alt="ZCode" height="34"></a>
 </p>
 
 <p align="center">
@@ -461,6 +462,7 @@ Grok Build token usage is also parsed locally from `$GROK_HOME/logs/unified.json
 DeepSeek Harness (`dsh`) usage and sessions are read locally from `$DSH_HOME/sessions/*/*/session.jsonl.zstd` (or the uncompressed `session.jsonl`), with `DSH_HOME` defaulting to `~/.dsh`. Each log is a sequence of concatenated zstd frames; Tokdash decodes all frames, folds each step's early usage chunk into its finalized message instead of double-counting it, and skips the inherited prefix of forked sessions so parent and child never bill the same tokens twice.
 
 Reasonix usage and sessions are read locally from `$REASONIX_HOME` (default `~/.reasonix`): per-request tokens from the daily `stats/YYYY-MM-DD.jsonl` logs, and session structure from `projects/*/sessions/*.jsonl`. Reasonix talks to whatever providers its `config.toml` names, so the `provider/model` pair in each row is attributed and priced through the normal pricing database; self-hosted models with no published rate count tokens at zero cost. Reasonix records usage per request and never stamps a session id on it, so Session Explorer rows show turns, project and timing without token counts — Overview and Stats carry the full totals.
+ZCode usage is read locally from `$ZCODE_HOME/cli/db/db.sqlite` (default `~/.zcode/cli/db/db.sqlite`; `ZCODE_HOME` follows ZCode's own setting). Each `model_usage` row is one model request, retries included, and the row's `model_id` is priced through the normal pricing database while `provider_id` (e.g. `builtin:zai-start-plan`) is kept as a label. ZCode's `input_tokens` counts cached and uncached prompt tokens together, so the cached share is split into its own bucket and billed at the cache rate, and reasoning tokens are displayed disjoint from output while still billing at the output rate. ZCode's Coding Plan quota is remote account data and is out of scope for the local parser.
 
 `tokdash setup` offers an optional quota step (per-provider network consent, default No, plus the poll interval), and `tokdash doctor` reports the quota state: master switch, per-provider consent, kill switch, effective interval and its source, last poll time, and the stored snapshot count.
 

@@ -31,3 +31,4 @@
 - [Windows support plan](development/technical-notes/WINDOWS_SUPPORT_PLAN.md) — status and design of native Windows support.
 - [Windows client data paths](development/technical-notes/WINDOWS_CLIENT_PATHS.md) — research backing the Windows-support pass, per-client path survey.
 - [DeepSeek Harness support design](development/technical-notes/DSH_SUPPORT_DESIGN.md) - implementation plan for durable dsh token usage and Session Explorer tracking.
+- [Reasonix support design](development/technical-notes/REASONIX_SUPPORT_DESIGN.md) - implementation plan for Reasonix token usage, per-request stats mapping, and Session Explorer tracking.

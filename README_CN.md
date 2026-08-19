@@ -44,6 +44,9 @@
 > [!TIP]
 > **Tokdash Companion 现已上架 Microsoft Store。** 无需一直打开仪表盘，即可在 Windows 通知区域或 macOS 菜单栏查看今日费用与订阅额度。[从 Microsoft Store 获取](https://apps.microsoft.com/detail/9ppnmpdq8b52) · [查看截图、下载并设置 →](#tokdash-companion-状态栏应用)
 
+> [!NOTE]
+> **同一作者的另一个项目：[Cosyncing](https://github.com/cosyncing/cosyncing)。** 它在你的机器上运行一个服务端，把编码 agent 的会话同步到你的每一台设备 —— 查看对话记录、回复提示，或直接从手机接管。Tokdash 记录 agent 花了多少钱；Cosyncing 让你看到它们正在做什么。
+
 <p align="center">
   <b>性能：冷启动使用量扫描比 0.6.0 之前快约 30×，在同一台机器的本地基准中比 ccusage 快 15×。</b>
 </p>
@@ -374,6 +377,7 @@ Tokdash 默认**只监听 localhost**。
 - `TOKDASH_ALLOW_ORIGINS`（逗号分隔，默认：空）
 - `TOKDASH_ALLOW_ORIGIN_REGEX`（默认 CORS 策略允许 localhost/127.0.0.1，以及同一 tailnet 内的 Tailscale Serve 读取；设置任一 CORS 选项会替换该默认策略）
 - `TOKDASH_NO_RETENTION_NOTICE`（设为 `1` 可静默 `tokdash serve` 启动时打印的历史保留提醒）
+- `TOKDASH_SETUP_NO_OPEN`（设为 `1` 可跳过 `tokdash setup` 结束时可选的浏览器打开）
 
 会话活跃时长（估算）：
 

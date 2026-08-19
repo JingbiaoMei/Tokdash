@@ -45,6 +45,9 @@
 > [!TIP]
 > **Tokdash Companion is now on the Microsoft Store.** See today's spend and subscription quota from the Windows notification area or the macOS menu bar, without keeping the dashboard open. [Get it from the Microsoft Store](https://apps.microsoft.com/detail/9ppnmpdq8b52) · [screenshots, downloads, and setup →](#tokdash-companion-status-bar-app)
 
+> [!NOTE]
+> **Also from the same author: [Cosyncing](https://github.com/cosyncing/cosyncing).** It runs a server on your machine and streams your coding-agent sessions to every device you own — read the transcript, answer a prompt, or take over mid-run from your phone. Tokdash tracks what your agents cost; Cosyncing shows what they are doing right now.
+
 <p align="center">
   <b>Performance: about 30× faster than pre-0.6.0 cold usage scans, and 15× faster than ccusage in the same local benchmark.</b>
 </p>
@@ -387,6 +390,8 @@ Tokdash is **localhost-only by default**.
 - `TOKDASH_ALLOW_ORIGINS` (comma-separated, default: empty)
 - `TOKDASH_ALLOW_ORIGIN_REGEX` (default CORS policy allows localhost/127.0.0.1 and same-tailnet Tailscale Serve reads; setting either CORS option replaces that default policy)
 - `TOKDASH_NO_RETENTION_NOTICE` (set to `1` to silence the history-retention reminder printed on `tokdash serve`)
+- `TOKDASH_SETUP_NO_OPEN` (set to `1` to skip the optional browser open at the end of `tokdash setup`)
+- `TOKDASH_SETUP_NO_OPEN` (set to `1` to skip the optional browser open at the end of `tokdash setup`)
 
 Session active time (estimated):
 

@@ -43,7 +43,7 @@
 > **Day 1 support for DeepSeek Harness.** Tokens, cost and sessions are read locally from `~/.dsh`, with nothing to configure. [Supported clients →](docs/reference/SUPPORTED_CLIENTS.md)
 
 > [!TIP]
-> **Tokdash Companion Status Bar App for macOS and Windows is now available as an unsigned preview.** See today's spend and subscription quota without keeping the dashboard open. [View screenshots, download, and set it up →](#tokdash-companion-status-bar-app)
+> **Tokdash Companion is now on the Microsoft Store.** See today's spend and subscription quota from the Windows notification area or the macOS menu bar, without keeping the dashboard open. [Get it from the Microsoft Store](https://apps.microsoft.com/detail/9ppnmpdq8b52) · [screenshots, downloads, and setup →](#tokdash-companion-status-bar-app)
 
 <p align="center">
   <b>Performance: about 30× faster than pre-0.6.0 cold usage scans, and 15× faster than ccusage in the same local benchmark.</b>
@@ -74,7 +74,7 @@
 - **Contribution calendar**: 2D heatmap + 3D isometric view with Tokens/Cost/Messages metrics
 - **Session explorer**: per-session drill-down
 - **Quota tab** *[new]*: subscription window bars with reset countdowns for Codex, Claude Code, and Antigravity. Codex windows work out of the box from local logs; Codex reset credits, metered features, and all Claude/Antigravity quota need opt-in [live polling](#quota-tracking-optional)
-- **Companion Status Bar App** *[new]*: view spend and subscription quota from the macOS menu bar or Windows notification area — [screenshots and downloads](#tokdash-companion-status-bar-app)
+- **Companion Status Bar App** *[new]*: view spend and subscription quota from the macOS menu bar or Windows notification area — on the [Microsoft Store](https://apps.microsoft.com/detail/9ppnmpdq8b52) for Windows — [screenshots and downloads](#tokdash-companion-status-bar-app)
 - **Multi-server views**: add WSL, macOS, and other Tokdash servers in Settings; combine usage across any selection while keeping quota grouped by machine. See [remote access](docs/guides/REMOTE_ACCESS.md).
 - **Themes and app polish**: 10 style themes, light/dark mode, and PWA install support
 
@@ -144,7 +144,20 @@ view of the Tokdash service without keeping the full dashboard open.
 
 ### Download
 
-Download **[Tokdash Companion 0.2.0 from GitHub Releases](https://github.com/JingbiaoMei/Tokdash/releases/tag/companion-v0.2.0)**:
+**Windows — Microsoft Store** (recommended)
+
+<p>
+  <a href="https://apps.microsoft.com/detail/9ppnmpdq8b52?mode=direct">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://get.microsoft.com/images/en-us%20light.svg" />
+      <img src="https://get.microsoft.com/images/en-us%20dark.svg" alt="Get Tokdash Companion from the Microsoft Store" width="200" />
+    </picture>
+  </a>
+</p>
+
+Signed by Microsoft and updated through the Store. Requires Windows 11.
+
+**Direct download** — **[Tokdash Companion 1.0.0](https://github.com/JingbiaoMei/Tokdash/releases/tag/companion-v1.0.0)**:
 
 | Platform | Download | Requirements |
 |---|---|---|
@@ -152,18 +165,20 @@ Download **[Tokdash Companion 0.2.0 from GitHub Releases](https://github.com/Jin
 | Windows | Self-contained portable ZIP (`x64`) | Windows 11; Windows on Arm can use x64 emulation |
 
 > [!WARNING]
-> The current companion binaries are **unsigned previews**. macOS Gatekeeper
-> and Windows SmartScreen will show an unknown-publisher warning. Download only
-> from this repository, verify the included `SHA256SUMS`, and continue only if
-> you trust the release. Signing and notarization are planned for a later
-> release.
+> The GitHub Releases binaries are **unsigned**. macOS Gatekeeper and Windows
+> SmartScreen will show an unknown-publisher warning. Download only from this
+> repository, verify the included `SHA256SUMS`, and continue only if you trust
+> the release. The Microsoft Store build is signed by Microsoft and is not
+> affected; macOS signing and notarization are planned for a later release.
 
 ### Set up
 
 1. Install and start **Tokdash 1.5.2 or newer** using the [Quick start](#quick-start).
-2. Download the asset for your platform and verify it against `SHA256SUMS`.
-3. On macOS, open the DMG and drag `TokdashCompanion` to Applications. On
-   Windows, extract the ZIP to a stable directory and run
+2. Install the companion. On Windows, use the Microsoft Store link above. For a
+   direct download, get the asset for your platform and verify it against
+   `SHA256SUMS`.
+3. From a direct download: on macOS, open the DMG and drag `TokdashCompanion`
+   to Applications; on Windows, extract the ZIP to a stable directory and run
    `TokdashCompanion.exe`.
 4. The companion connects to `http://127.0.0.1:55423` by default. Open its
    settings to add, test, name, enable, or remove explicit Tokdash endpoints,

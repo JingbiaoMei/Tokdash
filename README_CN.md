@@ -42,7 +42,7 @@
 > **首日支持 DeepSeek Harness。** 从本地 `~/.dsh` 读取 token、费用与会话，无需任何配置。[支持的客户端 →](docs/reference/SUPPORTED_CLIENTS.md)
 
 > [!TIP]
-> **Tokdash Companion 状态栏应用的 macOS 与 Windows 无签名预览版现已发布。** 无需一直打开仪表盘，即可查看今日费用与订阅额度。[查看截图、下载并设置 →](#tokdash-companion-状态栏应用)
+> **Tokdash Companion 现已上架 Microsoft Store。** 无需一直打开仪表盘，即可在 Windows 通知区域或 macOS 菜单栏查看今日费用与订阅额度。[从 Microsoft Store 获取](https://apps.microsoft.com/detail/9ppnmpdq8b52) · [查看截图、下载并设置 →](#tokdash-companion-状态栏应用)
 
 <p align="center">
   <b>性能：冷启动使用量扫描比 0.6.0 之前快约 30×，在同一台机器的本地基准中比 ccusage 快 15×。</b>
@@ -72,7 +72,7 @@
 - **状态栏集成** *[新]*：把实时 Token 使用量挂到 Claude Code（或任何能访问本地 HTTP 端点的 Agent）的状态栏中 — 见[状态栏集成](#状态栏集成statusline-integration)
 - **贡献日历**：2D 热力图 + 3D 等距视图，支持 Tokens / Cost / Messages 切换
 - **会话浏览器**：逐会话下钻
-- **Companion 状态栏应用** *[新]*：在 macOS 菜单栏或 Windows 通知区域查看费用与订阅额度 — [截图与下载](#tokdash-companion-状态栏应用)
+- **Companion 状态栏应用** *[新]*：在 macOS 菜单栏或 Windows 通知区域查看费用与订阅额度，Windows 版已上架 [Microsoft Store](https://apps.microsoft.com/detail/9ppnmpdq8b52) — [截图与下载](#tokdash-companion-状态栏应用)
 - **多服务器视图**：在设置中添加 WSL、macOS 或其他 Tokdash 服务器；可合并任意选择的用量，并按机器分组显示额度。参见[远程访问](docs/guides/REMOTE_ACCESS.md)。
 - **主题与应用体验**：10 款样式主题、明暗模式与 PWA 安装支持
 
@@ -142,7 +142,20 @@ Tokdash Companion 状态栏应用是一个可选的原生客户端：在 macOS
 
 ### 下载
 
-从 GitHub Releases 下载 **[Tokdash Companion 0.2.0](https://github.com/JingbiaoMei/Tokdash/releases/tag/companion-v0.2.0)**：
+**Windows —— Microsoft Store**（推荐）
+
+<p>
+  <a href="https://apps.microsoft.com/detail/9ppnmpdq8b52?mode=direct">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://get.microsoft.com/images/zh-cn%20light.svg" />
+      <img src="https://get.microsoft.com/images/zh-cn%20dark.svg" alt="从 Microsoft Store 获取 Tokdash Companion" width="200" />
+    </picture>
+  </a>
+</p>
+
+由 Microsoft 签名，并通过 Store 更新。需要 Windows 11。
+
+**直接下载** —— **[Tokdash Companion 1.0.0](https://github.com/JingbiaoMei/Tokdash/releases/tag/companion-v1.0.0)**：
 
 | 平台 | 下载 | 要求 |
 |---|---|---|
@@ -150,17 +163,19 @@ Tokdash Companion 状态栏应用是一个可选的原生客户端：在 macOS
 | Windows | 自包含便携 ZIP（`x64`） | Windows 11；Windows on Arm 可使用 x64 模拟 |
 
 > [!WARNING]
-> 当前 Companion 二进制文件是**无签名预览版**。macOS Gatekeeper 和
+> GitHub Releases 提供的二进制文件**未签名**。macOS Gatekeeper 和
 > Windows SmartScreen 会显示未知发布者警告。请只从本仓库下载，使用随
 > Release 提供的 `SHA256SUMS` 验证文件，并仅在你信任该 Release 时继续。
-> 后续版本计划加入签名与公证。
+> Microsoft Store 版本由 Microsoft 签名，不受此影响；macOS 的签名与公证
+> 在后续版本中加入。
 
 ### 设置
 
 1. 按照[快速开始](#快速开始)安装并启动 **Tokdash 1.5.2 或更高版本**。
-2. 下载对应平台的文件，并使用 `SHA256SUMS` 验证。
-3. 在 macOS 上打开 DMG，将 `TokdashCompanion` 拖入“应用程序”。在
-   Windows 上将 ZIP 解压到固定目录，然后运行 `TokdashCompanion.exe`。
+2. 安装 Companion。Windows 用户可直接使用上方的 Microsoft Store 链接；
+   如需直接下载，请获取对应平台的文件并使用 `SHA256SUMS` 验证。
+3. 使用直接下载时：在 macOS 上打开 DMG，将 `TokdashCompanion` 拖入“应用程序”；
+   在 Windows 上将 ZIP 解压到固定目录，然后运行 `TokdashCompanion.exe`。
 4. Companion 默认连接 `http://127.0.0.1:55423`。你可以在设置中添加、测试、
    命名、启用或移除明确指定的 Tokdash 端点，包括私有 Tailscale Serve 地址。
 

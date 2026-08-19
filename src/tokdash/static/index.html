@@ -783,6 +783,12 @@
 
     .tab-content { display: none; }
     .tab-content.active { display: block; }
+    /* A range change moves the date label before the new range's data arrives.
+       Dim the data region so the figures still on screen read as not-yet-this-range
+       rather than as an answer. The date control and refresh button sit outside the
+       tab panes, so they stay at full contrast. */
+    .tab-content.is-stale { opacity: .55; transition: opacity .12s ease; }
+    @media (prefers-reduced-motion: reduce) { .tab-content.is-stale { transition: none; } }
 
     /* Heatmap (GitHub-like) */
     /* Heatmap sizing via CSS variables (responsive) */
@@ -3270,6 +3276,10 @@
     let lastCombinedModels = [];
     let lastAppsBreakdown = null;
     let lastByTool = {};
+    // Which window key's data currently sits in the two deferred breakdowns, and a
+    // token that lets a superseded idle callback recognise itself and paint nothing.
+    let overviewBreakdownWindowKey = null;
+    let overviewRenderToken = 0;
     let activeSessionDetail = null;
     let activeDayDetail = null;
     let pricingDbLoaded = false;
@@ -5602,6 +5612,41 @@
       updateDashboard(null, dateFrom, dateTo, options);
     }
 
+    // Apps & Models and Combined Models are painted from an idle callback, so they
+    // outlive their range twice over: for the whole /api/usage fetch, and again for
+    // up to a frame after the KPI cards update. Reset both to the loading state the
+    // page already ships in its initial markup, so the cleared state is one the
+    // stylesheet and the translator both already handle.
+    function clearOverviewBreakdowns() {
+      const loading = `<span class="tokdash-loading-label" data-i18n="loading">${t('loading')}</span>`;
+      const apps = document.getElementById('appsBreakdown');
+      if (apps) apps.innerHTML = `<p class="tokdash-loading-placeholder text-center py-10" style="color: var(--color-muted);">${loading}</p>`;
+      const models = document.getElementById('allModelsTable');
+      if (models) models.innerHTML = `<tr><td colspan="8" class="tokdash-loading-placeholder text-center py-10" style="color: var(--color-muted);">${loading}</td></tr>`;
+      const info = document.getElementById('combinedModelsInfo');
+      if (info) info.textContent = '';
+      const toggle = document.getElementById('combinedModelsToggle');
+      if (toggle) toggle.style.display = 'none';
+      overviewBreakdownWindowKey = null;
+      // Callbacks queued by the render being cleared are now stale too. Nothing has
+      // rendered for the incoming range yet, so this is the only thing that can
+      // retire them before they repaint what was just cleared.
+      overviewRenderToken += 1;
+    }
+
+    // Two different states, deliberately not one flag. `pending` is a fetch actually
+    // running, which is what aria-busy means: hold off announcing, an update is coming.
+    // `stale` outlives it — a failed range change leaves another range's numbers under
+    // the label, worth dimming, but nothing is being modified and no update is coming,
+    // so asserting aria-busy there would tell assistive tech to wait forever.
+    function setOverviewState({ pending = false, stale = false } = {}) {
+      const region = document.getElementById('overview-content');
+      if (!region) return;
+      region.classList.toggle('is-stale', !!(pending || stale));
+      if (pending) region.setAttribute('aria-busy', 'true');
+      else region.removeAttribute('aria-busy');
+    }
+
     function renderOverviewTab(data) {
       if (!data) return;
       renderOverviewTokenTotal(data.total_tokens);
@@ -5631,12 +5676,22 @@
       lastCombinedModels = data.combined_models || [];
       lastAppsBreakdown = { apps: data.apps || null, openclawModels: data.openclaw_models || null };
 
+      // Every render bumps the token, so a callback queued for a range the user has
+      // already left paints nothing instead of briefly filling the cleared containers
+      // with data the label no longer names. Capture the key this data belongs to:
+      // on the error path below, that is deliberately the previous range's.
+      const breakdownToken = ++overviewRenderToken;
+      const paintedWindowKey = lastWindowKey;
       scheduleIdle(() => {
-        if (lastAppsBreakdown?.apps) {
-          updateAppsBreakdown(lastAppsBreakdown.apps, lastAppsBreakdown.openclawModels);
-        }
+        if (breakdownToken !== overviewRenderToken) return;
+        updateAppsBreakdown(lastAppsBreakdown?.apps || {}, lastAppsBreakdown?.openclawModels);
+        overviewBreakdownWindowKey = paintedWindowKey;
       });
-      scheduleIdle(() => updateCombinedModelsTable(lastCombinedModels));
+      scheduleIdle(() => {
+        if (breakdownToken !== overviewRenderToken) return;
+        updateCombinedModelsTable(lastCombinedModels);
+        overviewBreakdownWindowKey = paintedWindowKey;
+      });
       if (Array.isArray(statsCache.default)) {
         statsCache.default = reconcileTodayProfileContribution(
           statsCache.default,
@@ -5724,6 +5779,15 @@
     async function updateDashboard(customDays = null, dateFrom = null, dateTo = null, options = {}) {
       const forceRefresh = !!options.forceRefresh;
       const windowKey = windowKeyFor(customDays, dateFrom, dateTo);
+
+      // The date picker moved its label before this ran, so whatever is on screen now
+      // sits under a heading that does not name it. Drop the deferred breakdowns and
+      // mark the rest as pending. A same-range refresh is excluded: its content is
+      // still the right range's, and the refresh button reports that load itself.
+      if (windowKey !== overviewBreakdownWindowKey) {
+        clearOverviewBreakdowns();
+        if (lastUsageResponse) setOverviewState({ pending: true });
+      }
 
       if (updateInFlight) {
         // The date picker has already moved its label, so dropping this would
@@ -5846,6 +5910,13 @@
         updateIsManualRefresh = false;
         inFlightDashboardKey = null;
         inFlightResultDiscarded = false;
+        // A load that landed puts lastWindowKey on the range the label names, so the
+        // marking comes off. A failed range change does not: it restores the previous
+        // range's cards and tables rather than leaving a shimmer for a load that is
+        // over, and #lastUpdate turning into "Load failed" is one small line in the
+        // header. Stay marked until something actually lands, so those numbers are
+        // never presented as this range's answer.
+        setOverviewState({ stale: !!lastUsageResponse && lastWindowKey !== windowKey });
         renderRefreshButton();
         const queued = pendingDashboardRequest;
         pendingDashboardRequest = null;

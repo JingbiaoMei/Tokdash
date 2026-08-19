@@ -49,10 +49,11 @@ let lastUsageResponse = null;
 let lastSessionsResponses = null;
 let sessionsLoadedKey = null;
 let lastWindowKey = null;
+let overviewBreakdownWindowKey = null;
 let includeCodexReviewSessions = null;
 const overviewActiveTimeState = { status: 'idle', data: null, key: null, requestId: 0 };
 
-const log = { rendered: [], errors: [], alerts: [], refreshStates: [], activeCards: [], activeLoads: [] };
+const log = { rendered: [], errors: [], alerts: [], refreshStates: [], activeCards: [], activeLoads: [], stale: [] };
 const fetches = [];
 
 function deferred() {
@@ -74,6 +75,8 @@ function isOverviewActive() { return true; }
 function renderOverviewTab(data) { log.rendered.push(data && data.range); }
 function renderSessionsTab() {}
 function renderRefreshButton() {}
+function clearOverviewBreakdowns() { overviewBreakdownWindowKey = null; }
+function setOverviewState(state) { log.stale.push(!!(state && (state.pending || state.stale))); }
 function setRefreshUiState(state) { refreshUiState = state; log.refreshStates.push(state); }
 function setDashboardFetchStatus(error) { log.errors.push(String(error && error.message || error)); }
 function updateTimestamp() {}

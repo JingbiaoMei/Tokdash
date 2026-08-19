@@ -339,6 +339,7 @@ release.
 
 ## References
 
+- Project site: <https://reasonix.io/>
 - Upstream repository: <https://github.com/esengine/DeepSeek-Reasonix>
 - npm package: `reasonix@1.25.2` (`@reasonix/cli-<platform>-<arch>` prebuilt binaries)
 - Local observations: this machine's `~/.reasonix` (WSL2), 2026-08-15

@@ -2716,7 +2716,10 @@ class ZCodeParser(BaseParser):
       - output_tokens already includes reasoning, so the entry carries a
         disjoint output/reasoning split for the displayed total, but cost is
         computed from the FULL output_tokens: get_cost never sees the entry's
-        reasoning bucket, and z.ai bills reasoning at the output rate.
+        reasoning bucket, and z.ai bills reasoning at the output rate. A row
+        that reports reasoning above output is anomalous (the subset
+        assumption is broken); for that row both are billed and displayed as
+        disjoint, so the displayed total and the billed tokens stay equal.
     =======================================================================
     """
 
@@ -2753,15 +2756,17 @@ class ZCodeParser(BaseParser):
                 continue
         return tuple(out)
 
-    def _connect_readonly(self) -> sqlite3.Connection:
+    def _connect_readonly(self) -> Optional[sqlite3.Connection]:
         # Read-only URI so Tokdash never contends with the running ZCode
         # process (WAL readers are safe). resolve().as_uri() keeps a "#" in
         # the path from truncating the URI; the plain f"file:{path}?mode=ro"
-        # form drops mode=ro in that case.
+        # form drops mode=ro in that case. Returns None on failure: falling
+        # back to a read-write connection would let the reader modify or
+        # create WAL/SHM state, which the source must never do.
         try:
             return sqlite3.connect(self.db_path.resolve().as_uri() + "?mode=ro", uri=True)
         except sqlite3.Error:
-            return sqlite3.connect(str(self.db_path))
+            return None
 
     def _build_entry(self, row: sqlite3.Row) -> Optional[Dict[str, Any]]:
         model = str(row["model_id"] or "").strip()
@@ -2782,18 +2787,26 @@ class ZCodeParser(BaseParser):
         # Fresh input only: ZCode's input_tokens is inclusive of the cached
         # slice, and get_cost bills the buckets additively.
         input_t = max(0, input_total - cache_r)
-        # z.ai bills reasoning at the output rate, so cost uses the FULL
-        # output_total; the entry's split output exists only so compute.py's
-        # additive displayed total (input + output + cacheRead + reasoning)
-        # stays correct.
-        cost = self.pricing_db.get_cost(model, input_t, output_total, cache_r, cache_w)
+        # z.ai bills reasoning at the output rate, so cost normally uses the
+        # FULL output_total (reasoning is a subset of it), while the entry's
+        # split output keeps compute.py's additive displayed total correct.
+        # If a row reports more reasoning than output, the subset assumption
+        # is broken for that row: treat the two as disjoint for BOTH display
+        # and billing, so the displayed total and the billed tokens agree.
+        if reasoning > output_total:
+            billed_output = output_total + reasoning
+            display_output = output_total
+        else:
+            billed_output = output_total
+            display_output = output_total - reasoning
+        cost = self.pricing_db.get_cost(model, input_t, billed_output, cache_r, cache_w)
 
         return {
             "source": self.source_name,
             "model": model,
             "provider": str(row["provider_id"] or ""),
             "input": input_t,
-            "output": max(0, output_total - reasoning),
+            "output": display_output,
             "cacheRead": cache_r,
             "cacheWrite": cache_w,
             "reasoning": reasoning,
@@ -2821,8 +2834,15 @@ class ZCodeParser(BaseParser):
 
         out: List[Dict[str, Any]] = []
         if self.db_path.exists():
-            try:
-                conn = self._connect_readonly()
+            conn = self._connect_readonly()
+            if conn is None:
+                # Read-only open failed (e.g. a WAL file is present but the
+                # -shm sidecar is not readable and cannot be created). Skip
+                # the source for this window instead of opening read-write;
+                # the file signature changes as soon as the sidecar appears,
+                # so the next collect retries.
+                pass
+            else:
                 try:
                     conn.row_factory = sqlite3.Row
                     cur = conn.cursor()
@@ -2845,10 +2865,10 @@ class ZCodeParser(BaseParser):
                                 continue
                             if entry is not None:
                                 out.append(entry)
+                except Exception:
+                    pass
                 finally:
                     conn.close()
-            except Exception:
-                pass
 
         if len(type(self)._query_cache) >= _OPENCODE_QUERY_CACHE_MAX:
             type(self)._query_cache.clear()
@@ -3209,14 +3229,19 @@ def main():
     parser.add_argument("--since", type=str)
     parser.add_argument("--until", type=str)
     parser.add_argument("--json", action="store_true")
-    parser.add_argument("--sources", type=str, default="opencode,codex,claude,gemini_cli,antigravity_cli,amp,kimi,grok,pi_agent,copilot_cli,hermes,mimo,dsh,reasonix")
+    parser.add_argument(
+        "--sources",
+        type=str,
+        default=None,
+        help="Comma-separated source names (default: all registered sources)",
+    )
     args = parser.parse_args()
 
     since_date, until_date = _date_range(args)
     sources = [s.strip() for s in (args.sources or "").split(",") if s.strip()]
 
     tracker = CodingToolsUsageTracker()
-    tracker.collect(since_date, until_date, sources)
+    tracker.collect(since_date, until_date, sources or None)
 
     if args.json:
         print(json.dumps(tracker.to_json(), indent=2))

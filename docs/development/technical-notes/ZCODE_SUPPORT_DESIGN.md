@@ -62,12 +62,16 @@ source's own numbers:
    `output = max(0, output_tokens - reasoning_tokens)` and
    `reasoning = reasoning_tokens` for display, but cost is computed from the
    **full** `output_tokens`: `get_cost` never sees the entry's reasoning
-   bucket, and z.ai bills reasoning at the output rate. Passing the split
+   bucket, and z.ai bills reasoning at the output rate. If a row reports
+   more reasoning than output, the subset assumption is broken for that row
+   and both display and billing treat the two as disjoint, so the displayed
+   total and the billed tokens stay equal. Passing the split
    output to the price lookup would under-charge reasoning, which is most of
    a reasoning model's output. (Gemini's parser currently has this exact bug
    for `thoughts`; do not copy it.) The `max(0, ...)` guard covers the case
-   where the inclusion assumption turns out to be wrong: a negative split
-   must never reach totals or cost.
+   where the inclusion assumption turns out to be wrong: such a row is
+   billed and displayed with the two buckets disjoint (see rule 2), so no
+   negative split and no billed/displayed mismatch can reach the totals.
 3. **Cancelled work that burned tokens still bills.** The keep-guard is
    token presence, not status: a row is kept if any of
    `input_tokens`, `output_tokens`, `cache_read_input_tokens`,
@@ -78,8 +82,8 @@ Unverified assumptions, each pinned to a first-row check in
 
 - `reasoning_tokens ⊆ output_tokens` is documented by third-party adapters but
   the evidence row has `reasoning_tokens = 0`. If a row with
-  `reasoning_tokens > output_tokens` ever appears, the guard clamps the split
-  to zero and that row should be logged once.
+  `reasoning_tokens > output_tokens` appears, the row falls back to disjoint
+  accounting for both display and billing (rule 2).
 - `cache_creation_input_tokens` is treated as a separate bucket (as in the
   reference adapter). If a row shows creation is also nested inside
   `input_tokens`, the subtraction becomes
@@ -93,7 +97,9 @@ Unverified assumptions, each pinned to a first-row check in
 - Path resolution: `clientpaths.zcode_db_path()`, honoring `ZCODE_HOME`.
 - Connection: read-only URI `path.resolve().as_uri() + "?mode=ro"` (the
   Antigravity pattern). The plain `f"file:{path}?mode=ro"` form truncates on a
-  `#` in the path and silently drops `mode=ro`.
+  `#` in the path and silently drops `mode=ro`. A failed read-only open skips
+  the source for that window - there is deliberately no read-write fallback,
+  because a reader must never be able to modify WAL/SHM state.
 - Query: half-open window `WHERE started_at >= ? AND started_at < ?`,
   guarded by `_sqlite_table_exists`, one SELECT by column name so a future
   schema change degrades to a skipped source rather than a crash.

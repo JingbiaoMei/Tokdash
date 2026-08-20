@@ -139,9 +139,10 @@ def test_zcode_reasoning_split(monkeypatch, tmp_path):
     assert e["cost"] != pytest.approx(pricing.get_cost("GLM-5-Turbo", 1000, 600, 0, 0))
 
 
-def test_zcode_reasoning_sibling_guard(monkeypatch, tmp_path):
-    """If reasoning is ever a sibling of output (inclusion unverified), the
-    split must not go negative."""
+def test_zcode_reasoning_anomaly_disjoint_fallback(monkeypatch, tmp_path):
+    """If reasoning is ever reported above output (subset assumption broken
+    for that row), both display and billing must treat the two as disjoint:
+    no negative split, no billed/displayed mismatch."""
     home = tmp_path / ".zcode"
     db_path = home / "cli" / "db" / "db.sqlite"
     db_path.parent.mkdir(parents=True)
@@ -153,9 +154,11 @@ def test_zcode_reasoning_sibling_guard(monkeypatch, tmp_path):
     entries = _parser(monkeypatch, tmp_path, db_path).collect(None, None)
     assert len(entries) == 1
     e = entries[0]
-    assert e["output"] == 0
+    pricing = PricingDatabase()
+    assert e["output"] == 100
     assert e["reasoning"] == 400
-    assert e["input"] + e["output"] + e["cacheRead"] + e["reasoning"] >= 0
+    # Billed output is 100 + 400, exactly the displayed output+reasoning sum.
+    assert e["cost"] == pytest.approx(pricing.get_cost("GLM-5-Turbo", 100, 500, 0, 0))
 
 
 def test_zcode_retries_kept_distinct(monkeypatch, tmp_path):
@@ -287,6 +290,32 @@ def test_zcode_wal_freshness(monkeypatch, tmp_path):
         assert len(parser.collect(None, None)) == 2
     finally:
         writer.close()
+
+
+def test_zcode_readonly_open_failure_skips(monkeypatch, tmp_path):
+    """A read-only open failure (stale WAL without a readable -shm sidecar)
+    skips the source instead of falling back to a read-write connection that
+    could modify WAL/SHM state."""
+    import os
+
+    home = tmp_path / ".zcode"
+    db_dir = home / "cli" / "db"
+    db_dir.mkdir(parents=True)
+    db_path = db_dir / "db.sqlite"
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("CREATE TABLE model_usage (id text primary key)")
+    conn.commit()
+    conn.close()
+    # Stale WAL with no -shm sidecar: a read-only open cannot proceed, and a
+    # read-only directory forbids creating one.
+    (db_path.parent / "db.sqlite-wal").write_bytes(b"\x00" * 100)
+    os.chmod(db_dir, 0o555)
+    try:
+        monkeypatch.setenv("ZCODE_HOME", str(home))
+        assert ZCodeParser(PricingDatabase()).collect(None, None) == []
+        assert not (db_dir / "db.sqlite-shm").exists()
+    finally:
+        os.chmod(db_dir, 0o755)
 
 
 def test_zcode_registered_in_tracker():

@@ -186,12 +186,15 @@ In (phase 2, this change's session support):
   row by the selected turns' (session_id, turn_id) rather than by an
   independent date window, so a turn's retries and model calls can never be
   split across a boundary by their own `started_at`. The two boundary
-  lookups stay bounded the same way: the next-boundary query selects the
-  nearest qualifying turn per session in SQL (a correlated MIN; the schema
-  has no `completed_at` index, so one row per session is the only
-  containment), and the prior-boundary query is restricted to the true set-A
-  ids (chunked `IN` list) snapshotted before the next-boundary query adds
-  set-B sessions, so neither request materializes whole histories.
+  lookups each scan once and return exactly one row per session, selected
+  by a `ROW_NUMBER` window: the next-boundary winner is the earliest
+  `completed_at >= until_ms`, the prior-boundary winner is the latest
+  `E < since_ms` (restricted to the true set-A ids via a chunked `IN`
+  list, snapshotted before the next-boundary query adds set-B sessions).
+  Ties at the winning instant resolve to the longest positive
+  `duration_ms` - all tied intervals share the same end, so the longest
+  subsumes its twins and a zero-duration row cannot hide a measured
+  boundary - with `turn_id` as a final determinism key.
 - **Composite billing records** (D7). A turn can span several models, and
   `_build_turn` accepted exactly one `_bill`, so turns carry `_bills`
   (one record per (turn, model) group, `split-cache-write` rule) and the

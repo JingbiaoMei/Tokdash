@@ -499,6 +499,25 @@ def test_quota_schema_migrates_v4_database(tmp_path):
         assert conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='quota_snapshots'").fetchone()
 
 
+def test_schema_is_rebuilt_when_db_file_is_recreated_at_a_cached_path(tmp_path):
+    # _SCHEMA_READY caches by path for the whole process, but the file under a
+    # cached path can be deleted and recreated: pytest 9's
+    # tmp_path_retention_policy = "failed" cleans a passed test's tmp dir
+    # mid-session, and the next test whose node name truncates to the same 30-char
+    # base is re-allocated the same path. The recreated empty file must be
+    # re-ensured instead of being served from the path cache (was:
+    # "no such table: quota_snapshots").
+    db_path = tmp_path / "usage.sqlite3"
+    store = UsageEntryStore(db_path)
+    store.insert_quota_snapshots([_snapshot("5h", 10.0, BASE_TS)])  # warms the path cache
+
+    db_path.unlink()
+
+    store.insert_quota_snapshots([_snapshot("5h", 20.0, BASE_TS + 3600)])
+
+    assert [row["used_percent"] for row in store.latest_quota_snapshots()] == [20.0]
+
+
 def test_quota_history_merges_accounts_into_one_series_per_bucket(tmp_path):
     store = UsageEntryStore(tmp_path / "usage.sqlite3")
     store.insert_quota_snapshots(

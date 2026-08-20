@@ -552,13 +552,29 @@ class UsageEntryStore:
 
     def _ensure_schema_once(self, conn: sqlite3.Connection) -> None:
         key = str(self.path.resolve())
-        if key in _SCHEMA_READY:
+        if key in _SCHEMA_READY and self._schema_is_current(conn):
             return
         with _SCHEMA_LOCK:
-            if key in _SCHEMA_READY:
+            if key in _SCHEMA_READY and self._schema_is_current(conn):
                 return
             self._ensure_schema(conn)
             _SCHEMA_READY.add(key)
+
+    def _schema_is_current(self, conn: sqlite3.Connection) -> bool:
+        """Cache validation: the file under this path still carries the current schema.
+
+        ``_SCHEMA_READY`` lives for the whole process, but the file under a cached
+        path can be deleted and recreated: pytest 9's
+        ``tmp_path_retention_policy = "failed"`` cleans a passed test's tmp dir
+        mid-session, and the next test whose node name truncates to the same base
+        is re-allocated the same path (a user can also delete the live DB file
+        while the server runs). The empty replacement file has no tables, so a
+        cached path must be re-verified before the DDL is skipped.
+        """
+        if conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'meta'").fetchone() is None:
+            return False
+        version = conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
+        return version is not None and int(version["value"]) == SCHEMA_VERSION
 
     def _ensure_schema(self, conn: sqlite3.Connection) -> None:
         conn.execute("PRAGMA journal_mode=WAL")

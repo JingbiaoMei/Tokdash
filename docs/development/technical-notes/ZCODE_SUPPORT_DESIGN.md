@@ -100,6 +100,10 @@ Unverified assumptions, each pinned to a first-row check in
   `#` in the path and silently drops `mode=ro`. A failed read-only open skips
   the source for that window - there is deliberately no read-write fallback,
   because a reader must never be able to modify WAL/SHM state.
+- Failed reads (connect or query errors) are **not** cached: a restored
+  permission or cleared transient SQLite error may not change the file
+  signatures, so caching an empty result would keep it stale until a file
+  happens to change. The next collect retries.
 - Query: half-open window `WHERE started_at >= ? AND started_at < ?`,
   guarded by `_sqlite_table_exists`, one SELECT by column name so a future
   schema change degrades to a skipped source rather than a crash.

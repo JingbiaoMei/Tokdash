@@ -293,29 +293,67 @@ def test_zcode_wal_freshness(monkeypatch, tmp_path):
 
 
 def test_zcode_readonly_open_failure_skips(monkeypatch, tmp_path):
-    """A read-only open failure (stale WAL without a readable -shm sidecar)
-    skips the source instead of falling back to a read-write connection that
-    could modify WAL/SHM state."""
-    import os
+    """A read-only open failure skips the source with no read-write
+    fallback: every connection attempt must use the read-only URI form, and
+    _connect_readonly returns None after exactly one attempt."""
+    import tokdash.sources.coding_tools as ct
 
     home = tmp_path / ".zcode"
-    db_dir = home / "cli" / "db"
-    db_dir.mkdir(parents=True)
-    db_path = db_dir / "db.sqlite"
-    conn = sqlite3.connect(str(db_path))
-    conn.execute("CREATE TABLE model_usage (id text primary key)")
-    conn.commit()
-    conn.close()
-    # Stale WAL with no -shm sidecar: a read-only open cannot proceed, and a
-    # read-only directory forbids creating one.
-    (db_path.parent / "db.sqlite-wal").write_bytes(b"\x00" * 100)
-    os.chmod(db_dir, 0o555)
+    db_path = home / "cli" / "db" / "db.sqlite"
+    db_path.parent.mkdir(parents=True)
+    _create_db(db_path, [_row()])
+    monkeypatch.setenv("ZCODE_HOME", str(home))
+
+    calls = []
+
+    def fake_connect(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise sqlite3.OperationalError("unable to open database file")
+
+    monkeypatch.setattr(ct.sqlite3, "connect", fake_connect)
+    parser = ZCodeParser(PricingDatabase())
+
+    assert parser._connect_readonly() is None
+    assert len(calls) == 1
+    args, kwargs = calls[0]
+    assert kwargs.get("uri") is True
+    assert args[0].endswith("db.sqlite?mode=ro")
+
+    assert parser.collect(None, None) == []
+    # The collect-level attempt is also a single read-only URI open; the
+    # pre-fix implementation would have issued a second plain (read-write)
+    # connection here.
+    assert len(calls) == 2
+    assert calls[1][1].get("uri") is True
+
+
+def test_zcode_failed_read_not_cached(monkeypatch, tmp_path):
+    """A failed read is not cached: the next collect retries and returns the
+    rows once the read recovers, even though the file signatures are
+    unchanged."""
+    import tokdash.sources.coding_tools as ct
+
+    home = tmp_path / ".zcode"
+    db_path = home / "cli" / "db" / "db.sqlite"
+    db_path.parent.mkdir(parents=True)
+    _create_db(db_path, [_row()])
+    monkeypatch.setenv("ZCODE_HOME", str(home))
+
+    real_connect = sqlite3.connect
+
+    def failing_connect(*args, **kwargs):
+        raise sqlite3.OperationalError("simulated transient read failure")
+
+    parser = ZCodeParser(PricingDatabase())
+    ct.sqlite3.connect = failing_connect
     try:
-        monkeypatch.setenv("ZCODE_HOME", str(home))
-        assert ZCodeParser(PricingDatabase()).collect(None, None) == []
-        assert not (db_dir / "db.sqlite-shm").exists()
+        assert parser.collect(None, None) == []
     finally:
-        os.chmod(db_dir, 0o755)
+        ct.sqlite3.connect = real_connect
+
+    # Same files on disk, same signature: the empty result must not have
+    # been cached, so this collect re-reads and succeeds.
+    assert len(parser.collect(None, None)) == 1
 
 
 def test_zcode_registered_in_tracker():

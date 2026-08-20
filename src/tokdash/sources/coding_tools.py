@@ -2833,16 +2833,10 @@ class ZCodeParser(BaseParser):
             return list(cached)
 
         out: List[Dict[str, Any]] = []
+        read_ok = False
         if self.db_path.exists():
             conn = self._connect_readonly()
-            if conn is None:
-                # Read-only open failed (e.g. a WAL file is present but the
-                # -shm sidecar is not readable and cannot be created). Skip
-                # the source for this window instead of opening read-write;
-                # the file signature changes as soon as the sidecar appears,
-                # so the next collect retries.
-                pass
-            else:
+            if conn is not None:
                 try:
                     conn.row_factory = sqlite3.Row
                     cur = conn.cursor()
@@ -2865,14 +2859,20 @@ class ZCodeParser(BaseParser):
                                 continue
                             if entry is not None:
                                 out.append(entry)
+                    read_ok = True
                 except Exception:
-                    pass
+                    # Transient read failure (connect or query): a restored
+                    # permission or cleared SQLite error may not change the
+                    # file signatures, so the empty result must NOT be
+                    # cached - the next collect retries.
+                    read_ok = False
                 finally:
                     conn.close()
 
-        if len(type(self)._query_cache) >= _OPENCODE_QUERY_CACHE_MAX:
-            type(self)._query_cache.clear()
-        type(self)._query_cache[cache_key] = out
+        if read_ok:
+            if len(type(self)._query_cache) >= _OPENCODE_QUERY_CACHE_MAX:
+                type(self)._query_cache.clear()
+            type(self)._query_cache[cache_key] = out
         return list(out)
 
 

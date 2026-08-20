@@ -2694,13 +2694,6 @@ class MimoParser(BaseParser):
 _ZCODE_SNAPSHOT_MAX_ATTEMPTS = 3
 
 
-class _SourceChangedMidCopy(OSError):
-    """Internal: source files changed between the two snapshot copies.
-
-    An OSError so the snapshot's error handling treats it as a failed read;
-    _open_snapshot distinguishes it to retry instead of giving up."""
-
-
 class ZCodeParser(BaseParser):
     """
     Parser for ZCode (Z.ai's GLM coding app) token usage.
@@ -2805,10 +2798,15 @@ class ZCodeParser(BaseParser):
         # deletes the whole dir afterwards.
         #
         # Coherence: the copies are sequential while ZCode may append to
-        # the WAL or checkpoint between them, so the db/-wal signatures
-        # are taken before and after copying; a difference means the pair
-        # may span two generations and the attempt is retried, bounded by
-        # _ZCODE_SNAPSHOT_MAX_ATTEMPTS.
+        # the WAL or checkpoint between them. The db/-wal signatures are
+        # taken before and after copying, and any copy failure is
+        # re-checked against the pre-copy signatures: a difference means
+        # a generation change landed mid-copy (a checkpoint deleting the
+        # -wal between the exists() check and its copy is the normal
+        # one) and the attempt is retried, bounded by
+        # _ZCODE_SNAPSHOT_MAX_ATTEMPTS. A failure with unchanged
+        # signatures is terminal for this collect; failed reads are not
+        # cached, so the next collect retries.
         #
         # Returns (conn, tmpdir); None on a copy/open error or when every
         # attempt raced a source change - no fallback open in another mode.
@@ -2822,13 +2820,15 @@ class ZCodeParser(BaseParser):
                 if wal.exists():
                     shutil.copy2(wal, tmpdir / (self.db_path.name + "-wal"))
                 if self._snapshot_signatures() != before:
-                    raise _SourceChangedMidCopy("source changed mid-copy")
+                    raise OSError("source changed mid-copy")
                 conn = sqlite3.connect(str(tmpdir / self.db_path.name))
-            except (OSError, sqlite3.Error) as e:
+            except (OSError, sqlite3.Error):
                 if tmpdir is not None:
                     shutil.rmtree(tmpdir, ignore_errors=True)
+                # A failure accompanied by a signature change is a
+                # generation change that landed mid-copy - retry it.
                 if (
-                    isinstance(e, _SourceChangedMidCopy)
+                    self._snapshot_signatures() != before
                     and _attempt + 1 < _ZCODE_SNAPSHOT_MAX_ATTEMPTS
                 ):
                     continue
@@ -2946,8 +2946,15 @@ class ZCodeParser(BaseParser):
                     # NOT be cached - the next collect retries.
                     read_ok = False
                 finally:
-                    conn.close()
-                    shutil.rmtree(snap_dir, ignore_errors=True)
+                    # Removal runs even if close() raises; a close error
+                    # degrades this read to a failed (uncached) one
+                    # instead of escaping collect().
+                    try:
+                        conn.close()
+                    except Exception:
+                        read_ok = False
+                    finally:
+                        shutil.rmtree(snap_dir, ignore_errors=True)
 
         if read_ok:
             with type(self)._cache_lock:

@@ -559,3 +559,106 @@ def test_zcode_snapshot_retries_when_source_changes_mid_copy(monkeypatch, tmp_pa
     # complete second generation.
     assert len(entries) == 2
     assert {e["entry_id"] for e in entries} == {"zcode:mu-1", "zcode:mu-2"}
+
+def test_zcode_snapshot_retries_checkpoint_race_on_wal_copy(monkeypatch, tmp_path):
+    """A checkpoint that lands between the -wal exists() check and its
+    copy (rows fold into the db, the -wal is deleted) used to surface as
+    a terminal FileNotFoundError; it is a normal generation change, so
+    the attempt is retried and the next attempt reads the checkpointed
+    db with its rows."""
+    import tokdash.sources.coding_tools as ct
+
+    home = tmp_path / ".zcode"
+    db_path = home / "cli" / "db" / "db.sqlite"
+    db_path.parent.mkdir(parents=True)
+
+    writer = sqlite3.connect(str(db_path))
+    writer.execute("PRAGMA journal_mode=WAL")
+    writer.executescript(MODEL_USAGE_DDL)
+    writer.execute(INSERT, _row())
+    writer.commit()
+    live_dir = tmp_path / "live" / "cli" / "db"
+    live_dir.mkdir(parents=True)
+    shutil.copy2(db_path, live_dir / "db.sqlite")
+    shutil.copy2(db_path.parent / "db.sqlite-wal", live_dir / "db.sqlite-wal")
+    writer.close()  # the live copy stays in crash-recovery state
+
+    monkeypatch.setenv("ZCODE_HOME", str(tmp_path / "live"))
+
+    real_copy2 = ct.shutil.copy2
+    state = {"fired": False}
+
+    def racing_copy2(src, dst, *args, **kwargs):
+        if not state["fired"] and Path(dst).name == "db.sqlite-wal":
+            state["fired"] = True
+            # A real checkpoint lands just before this copy runs: the
+            # WAL rows fold into the db and the -wal file is deleted.
+            # (src is the -wal; open its database, not the wal file.)
+            db = Path(str(src)[: -len("-wal")])
+            c = sqlite3.connect(str(db))
+            c.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            c.close()
+            raise FileNotFoundError(src)
+        return real_copy2(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(ct.shutil, "copy2", racing_copy2)
+    entries = ZCodeParser(PricingDatabase()).collect(None, None)
+    # First attempt races the checkpoint and is dropped (signature
+    # changed); the retry copies the checkpointed db and sees the row.
+    assert len(entries) == 1
+    assert entries[0]["entry_id"] == "zcode:mu-1"
+
+
+class _CloseRaisingConnection:
+    """Forwards everything to the real connection but close() raises: a
+    close error must not leak the snapshot dir or escape collect()."""
+
+    def __init__(self, conn):
+        object.__setattr__(self, "_conn", conn)
+
+    def close(self):
+        raise sqlite3.OperationalError("simulated close failure")
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+    def __setattr__(self, name, value):
+        setattr(self._conn, name, value)
+
+
+def test_zcode_close_failure_cleans_snapshot_and_does_not_cache(monkeypatch, tmp_path):
+    import tokdash.sources.coding_tools as ct
+
+    home = tmp_path / ".zcode"
+    db_path = home / "cli" / "db" / "db.sqlite"
+    db_path.parent.mkdir(parents=True)
+    _create_db(db_path, [_row()])
+    monkeypatch.setenv("ZCODE_HOME", str(home))
+
+    parser = ZCodeParser(PricingDatabase())
+    created = []
+
+    def fake_mkdtemp(suffix=None, prefix=None, dir=None):
+        d = tmp_path / f"zcode-snap-{len(created)}"
+        d.mkdir()
+        created.append(d)
+        return str(d)
+
+    monkeypatch.setattr(ct.tempfile, "mkdtemp", fake_mkdtemp)
+
+    real_open = parser._open_snapshot
+
+    def close_raising_open():
+        conn, tmpdir = real_open()
+        return _CloseRaisingConnection(conn), tmpdir
+
+    monkeypatch.setattr(parser, "_open_snapshot", close_raising_open)
+
+    entries = parser.collect(None, None)
+    # The data is read and returned, but the read counts as failed:
+    # nothing is cached, no error escapes, and the snapshot dir is
+    # removed.
+    assert len(entries) == 1
+    assert ZCodeParser._query_cache == {}
+    assert len(created) == 1
+    assert not created[0].exists()

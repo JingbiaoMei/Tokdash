@@ -105,13 +105,17 @@ Unverified assumptions, each pinned to a first-row check in
   rebuilds the WAL index from the copied `-wal` inside the temp dir. (The
   earlier `resolve().as_uri() + "?mode=ro"` plan is superseded; that URI
   form also truncates on a `#` in the path.)
-- Snapshot coherence: the copies are sequential while ZCode may append to
-  the WAL or checkpoint between them, so the db/-wal signatures - exactly
+- Snapshot coherence: the copies are sequential while ZCode may append
+  to the WAL or checkpoint between them. The db/-wal signatures - exactly
   the copied set; the live `-shm` is excluded because reader traffic in
-  it must not force retries - are taken before and after copying. A
-  difference drops the attempt and retries, bounded by
-  `_ZCODE_SNAPSHOT_MAX_ATTEMPTS`. Copy/open errors and exhausted attempts
-  skip the source - no fallback open in another mode.
+  it must not force retries - are taken before and after copying, and any
+  failure during the copy is re-checked against them: a signature change
+  (a checkpoint deleting the `-wal` between the `exists()` check and its
+  copy is the normal one) drops the attempt and retries, bounded by
+  `_ZCODE_SNAPSHOT_MAX_ATTEMPTS`. A failure with unchanged signatures, or
+  exhausted attempts, skips the source - no fallback open in another
+  mode. A `close()` error degrades the read to failed (uncached) without
+  leaking the temp dir.
 - Failed reads (connect, probe, or query errors) are **not** cached: a restored
   permission or cleared transient SQLite error may not change the file
   signatures, so caching an empty result would keep it stale until a file

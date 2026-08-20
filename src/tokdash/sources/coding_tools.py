@@ -17,10 +17,11 @@ import tempfile
 import threading
 import time as _time
 from abc import ABC, abstractmethod
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, ClassVar, Dict, List, Optional, Tuple
+from typing import Any, ClassVar, Dict, Iterator, List, Optional, Tuple
 
 
 try:
@@ -2694,6 +2695,123 @@ class MimoParser(BaseParser):
 _ZCODE_SNAPSHOT_MAX_ATTEMPTS = 3
 
 
+class ZCodeSnapshotError(RuntimeError):
+    """A transient failure opening a ZCode snapshot (copy or connect).
+
+    There is no fallback open in another mode: the read fails and the
+    caller retries later (failed reads are never cached).
+    """
+
+
+class _ZCodeSnapshot:
+    """A temp-dir copy of a ZCode DB, opened for read-only reporting.
+
+    ``conn`` is a live connection into the copy. On context exit,
+    closing and cleanup always run. A close error sets ``close_failed``
+    and never escapes: the data was already read from the copy, and the
+    caller uses the flag to decide whether to cache the result (shared
+    close-failure contract: the result is returned, never cached).
+    """
+
+    def __init__(self, conn: sqlite3.Connection, tmpdir: Path) -> None:
+        self.conn = conn
+        self.tmpdir = tmpdir
+        self.close_failed = False
+
+
+def zcode_snapshot_signatures(db_path: Path) -> tuple:
+    # (path, mtime_ns, size) of exactly the files the snapshot copies:
+    # the main DB and, while present, the -wal. The live -shm is
+    # excluded on purpose: it is not copied (SQLite rebuilds the WAL
+    # index inside the temp dir), and reader traffic in a live -shm
+    # must not force coherence retries.
+    out = []
+    for p in (db_path, Path(str(db_path) + "-wal")):
+        try:
+            st = p.stat()
+            out.append((str(p), st.st_mtime_ns, st.st_size))
+        except OSError:
+            out.append((str(p), None, None))
+    return tuple(out)
+
+
+def _zcode_open_snapshot(db_path: Path) -> Optional[Tuple[sqlite3.Connection, Path]]:
+    # Open a private temp-dir copy, never the source file. A ?mode=ro
+    # open of a WAL database is still not side-effect free: when the
+    # -shm file is missing, SQLite creates it in the source directory
+    # (it is the WAL coordination file, and the reader needs it whether
+    # it wants it or not). The reader must never write sidecar state
+    # into the source tree, so db + -wal are copied (the live rows sit
+    # in the WAL) and the copy is opened normally. The -shm is NOT
+    # copied: it is live coordination state, and SQLite rebuilds the
+    # WAL index from the copied -wal inside the temp dir. The caller
+    # deletes the whole dir afterwards.
+    #
+    # Coherence: the copies are sequential while ZCode may append to
+    # the WAL or checkpoint between them. The db/-wal signatures are
+    # taken before and after copying, and any copy failure is
+    # re-checked against the pre-copy signatures: a difference means
+    # a generation change landed mid-copy (a checkpoint deleting the
+    # -wal between the exists() check and its copy is the normal
+    # one) and the attempt is retried, bounded by
+    # _ZCODE_SNAPSHOT_MAX_ATTEMPTS. A failure with unchanged
+    # signatures is terminal for this read; failed reads are not
+    # cached, so the next read retries.
+    #
+    # Returns (conn, tmpdir); None on a copy/open error or when every
+    # attempt raced a source change - no fallback open in another mode.
+    for _attempt in range(_ZCODE_SNAPSHOT_MAX_ATTEMPTS):
+        before = zcode_snapshot_signatures(db_path)
+        tmpdir: Optional[Path] = None
+        try:
+            tmpdir = Path(tempfile.mkdtemp(prefix="tokdash-zcode."))
+            shutil.copy2(db_path, tmpdir / db_path.name)
+            wal = Path(str(db_path) + "-wal")
+            if wal.exists():
+                shutil.copy2(wal, tmpdir / (db_path.name + "-wal"))
+            if zcode_snapshot_signatures(db_path) != before:
+                raise OSError("source changed mid-copy")
+            conn = sqlite3.connect(str(tmpdir / db_path.name))
+        except (OSError, sqlite3.Error):
+            if tmpdir is not None:
+                shutil.rmtree(tmpdir, ignore_errors=True)
+            # A failure accompanied by a signature change is a
+            # generation change that landed mid-copy - retry it.
+            if (
+                zcode_snapshot_signatures(db_path) != before
+                and _attempt + 1 < _ZCODE_SNAPSHOT_MAX_ATTEMPTS
+            ):
+                continue
+            return None
+        return conn, tmpdir
+    return None
+
+
+@contextmanager
+def zcode_snapshot(db_path: Path) -> Iterator[_ZCodeSnapshot]:
+    """A coherent, side-effect-free read view of a WAL-mode ZCode DB.
+
+    Wraps _zcode_open_snapshot with the exit lifecycle: close the
+    connection (a close error marks the snapshot close_failed and is
+    logged by the caller, never raised here) and remove the temp dir,
+    always. Raises ZCodeSnapshotError when no snapshot could be opened.
+    """
+    opened = _zcode_open_snapshot(db_path)
+    if opened is None:
+        raise ZCodeSnapshotError(f"could not open a coherent snapshot of {db_path}")
+    conn, tmpdir = opened
+    snap = _ZCodeSnapshot(conn, tmpdir)
+    try:
+        yield snap
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            snap.close_failed = True
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+
 class ZCodeParser(BaseParser):
     """
     Parser for ZCode (Z.ai's GLM coding app) token usage.
@@ -2771,70 +2889,15 @@ class ZCodeParser(BaseParser):
         return tuple(out)
 
     def _snapshot_signatures(self) -> tuple:
-        # (path, mtime_ns, size) of exactly the files the snapshot copies:
-        # the main DB and, while present, the -wal. The live -shm is
-        # excluded on purpose: it is not copied (SQLite rebuilds the WAL
-        # index inside the temp dir), and reader traffic in a live -shm
-        # must not force coherence retries.
-        out = []
-        for p in (self.db_path, Path(str(self.db_path) + "-wal")):
-            try:
-                st = p.stat()
-                out.append((str(p), st.st_mtime_ns, st.st_size))
-            except OSError:
-                out.append((str(p), None, None))
-        return tuple(out)
+        return zcode_snapshot_signatures(self.db_path)
 
     def _open_snapshot(self) -> Optional[Tuple[sqlite3.Connection, Path]]:
-        # Open a private temp-dir copy, never the source file. A ?mode=ro
-        # open of a WAL database is still not side-effect free: when the
-        # -shm file is missing, SQLite creates it in the source directory
-        # (it is the WAL coordination file, and the reader needs it whether
-        # it wants it or not). The reader must never write sidecar state
-        # into the source tree, so db + -wal are copied (the live rows sit
-        # in the WAL) and the copy is opened normally. The -shm is NOT
-        # copied: it is live coordination state, and SQLite rebuilds the
-        # WAL index from the copied -wal inside the temp dir. The caller
-        # deletes the whole dir afterwards.
-        #
-        # Coherence: the copies are sequential while ZCode may append to
-        # the WAL or checkpoint between them. The db/-wal signatures are
-        # taken before and after copying, and any copy failure is
-        # re-checked against the pre-copy signatures: a difference means
-        # a generation change landed mid-copy (a checkpoint deleting the
-        # -wal between the exists() check and its copy is the normal
-        # one) and the attempt is retried, bounded by
-        # _ZCODE_SNAPSHOT_MAX_ATTEMPTS. A failure with unchanged
-        # signatures is terminal for this collect; failed reads are not
-        # cached, so the next collect retries.
-        #
-        # Returns (conn, tmpdir); None on a copy/open error or when every
-        # attempt raced a source change - no fallback open in another mode.
-        for _attempt in range(_ZCODE_SNAPSHOT_MAX_ATTEMPTS):
-            before = self._snapshot_signatures()
-            tmpdir: Optional[Path] = None
-            try:
-                tmpdir = Path(tempfile.mkdtemp(prefix="tokdash-zcode."))
-                shutil.copy2(self.db_path, tmpdir / self.db_path.name)
-                wal = Path(str(self.db_path) + "-wal")
-                if wal.exists():
-                    shutil.copy2(wal, tmpdir / (self.db_path.name + "-wal"))
-                if self._snapshot_signatures() != before:
-                    raise OSError("source changed mid-copy")
-                conn = sqlite3.connect(str(tmpdir / self.db_path.name))
-            except (OSError, sqlite3.Error):
-                if tmpdir is not None:
-                    shutil.rmtree(tmpdir, ignore_errors=True)
-                # A failure accompanied by a signature change is a
-                # generation change that landed mid-copy - retry it.
-                if (
-                    self._snapshot_signatures() != before
-                    and _attempt + 1 < _ZCODE_SNAPSHOT_MAX_ATTEMPTS
-                ):
-                    continue
-                return None
-            return conn, tmpdir
-        return None
+        # Thin wrapper over the shared snapshot helper: sessions.py's
+        # ZCode session loader uses the zcode_snapshot context manager
+        # on top of the same helper, so the coherence rule (signatures
+        # before/after the copy, bounded retry, no -shm copy, temp-dir
+        # cleanup) has exactly one implementation.
+        return _zcode_open_snapshot(self.db_path)
 
     def _build_entry(self, row: sqlite3.Row) -> Optional[Dict[str, Any]]:
         model = str(row["model_id"] or "").strip()

@@ -7,6 +7,7 @@ import math
 import os
 import re
 import sqlite3
+import threading
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache, wraps
 from pathlib import Path
@@ -27,10 +28,12 @@ from .pricing import PricingDatabase
 from .sources.coding_tools import (
     CODEX_DEFAULT_MODEL,
     KimiParser,
+    ZCodeSnapshotError,
     codex_fork_ancestry,
     codex_replay_key_session_id,
     codex_token_event_key,
     connect_sqlite_readonly,
+    zcode_snapshot,
 )
 from .sources import dsh_log
 from .sources.dsh_log import (
@@ -42,7 +45,7 @@ from .sources.dsh_log import (
 from .usage_store import UsageEntryStore, parser_code_signature, persistent_usage_db_enabled
 
 
-SESSION_TOOLS = ("codex", "claude", "opencode", "pi_agent", "mimo", "kimi", "dsh", "reasonix")
+SESSION_TOOLS = ("codex", "claude", "opencode", "pi_agent", "mimo", "kimi", "dsh", "reasonix", "zcode")
 logger = logging.getLogger(__name__)
 TOOL_LABELS = {
     "codex": "Codex",
@@ -53,6 +56,7 @@ TOOL_LABELS = {
     "kimi": "Kimi",
     "dsh": "DeepSeek Harness",
     "reasonix": "Reasonix",
+    "zcode": "ZCode",
 }
 
 _PRICING_DB = PricingDatabase()
@@ -629,11 +633,21 @@ def _session_active_intervals(
     streams: Dict[Any, list[tuple[int, Optional[int]]]] = {}
     for turn in raw.get("turns", []):
         # _work_ms is how long this turn's own work took, when the source
-        # measured it (Reasonix does). Turns without one keep the capped-gap
-        # heuristic, which is all a completion-instant log can support.
+        # measured it (Reasonix and ZCode do). Turns without one keep the
+        # capped-gap heuristic, which is all a completion-instant log can
+        # support.
         work_ms = turn.get("_work_ms")
         streams.setdefault(turn.get("_stream_id"), []).append(
             (int(turn.get("timestamp_ms", 0) or 0), None if work_ms is None else int(work_ms or 0))
+        )
+    # Activity events: turns that produced no billable tokens still did
+    # work (tool-only or error turns). ZCode sets _activity_events as
+    # (timestamp_ms, work_ms or None) pairs; no other tool sets it, so
+    # this is a no-op elsewhere. (The bare name _activity is taken by
+    # Codex for unrelated per-file metadata.)
+    for raw_ts, raw_work in raw.get("_activity_events") or []:
+        streams.setdefault(None, []).append(
+            (int(raw_ts or 0), None if raw_work is None else int(raw_work or 0))
         )
 
     # Two kinds of loader supply a boundary event. The ones that window at the
@@ -641,15 +655,27 @@ def _session_active_intervals(
     # session continuing across a boundary keeps the stretch that spans it. A
     # parser may also set _prior_event_ms to the instant its first turn's work
     # began (Reasonix does, from the user message that prompted it), which is
-    # what makes that first turn's duration measurable at all.
+    # what makes that first turn's duration measurable at all. When the source
+    # measured the boundary turn's own duration (ZCode's _prior_work_ms /
+    # _next_work_ms), it is kept: the next boundary's work interval can overlap
+    # the window even though the event itself is outside it.
     prior_event_ms = raw.get("_prior_event_ms")
     next_event_ms = raw.get("_next_event_ms")
+    prior_work_ms = raw.get("_prior_work_ms")
+    next_work_ms = raw.get("_next_work_ms")
+    if not streams and (prior_event_ms is not None or next_event_ms is not None):
+        # A raw with no turns or activity events but with boundary
+        # events (a ZCode activity-only session) still needs a stream
+        # for the stamps to land in.
+        streams.setdefault(None, [])
     intervals: list[tuple[int, int]] = []
     for stamps in streams.values():
         if prior_event_ms is not None:
-            stamps = [(int(prior_event_ms), None), *stamps]
+            prior_work = None if prior_work_ms is None else int(prior_work_ms)
+            stamps = [(int(prior_event_ms), prior_work), *stamps]
         if next_event_ms is not None:
-            stamps = [*stamps, (int(next_event_ms), None)]
+            next_work = None if next_work_ms is None else int(next_work_ms)
+            stamps = [*stamps, (int(next_event_ms), next_work)]
         intervals.extend(_measured_intervals(stamps, cap_ms))
     return _clip_intervals(intervals, since_ms, until_ms)
 
@@ -748,9 +774,20 @@ def _build_turn(
     tokens_cache: int,
     tokens_out: int,
     tokens_reasoning: int,
-    bill: Dict[str, Any],
+    bill: Optional[Dict[str, Any]] = None,
+    bills: Optional[list] = None,
 ) -> Dict[str, Any]:
     total_tokens = tokens_in + tokens_cache + tokens_out + tokens_reasoning
+    # ZCode passes one billing record per (turn, model) group because a
+    # multi-model turn must not be priced as one model: the cost is the
+    # sum and the repricing input is the list (_bills). Every other tool
+    # passes a single bill and keeps the _bill shape.
+    if bills:
+        cost = sum(_turn_cost(b) for b in bills)
+        private: Dict[str, Any] = {"_bills": bills}
+    else:
+        cost = _turn_cost(bill)
+        private = {"_bill": bill}
     return {
         "turn_index": turn_index,
         "timestamp_ms": int(timestamp_ms),
@@ -761,10 +798,10 @@ def _build_turn(
         "tokens_reasoning": int(tokens_reasoning),
         "tokens": int(total_tokens),
         "cache_hit_rate": cache_hit_rate(tokens_in, tokens_cache),
-        "cost": _turn_cost(bill),
+        "cost": cost,
         # Private: stripped from API output, kept in stored rows so a pricing
         # edit reprices from here instead of rereading the source log.
-        "_bill": bill,
+        **private,
     }
 
 
@@ -794,6 +831,11 @@ def _repriced_turns(turns: Iterable[Dict[str, Any]], pricing: Any = None) -> lis
     out: list[Dict[str, Any]] = []
     for turn in turns:
         row = dict(turn)
+        bills = row.get("_bills")
+        if isinstance(bills, list) and bills:
+            row["cost"] = sum(_turn_cost(b, pricing) for b in bills)
+            out.append(row)
+            continue
         bill = row.get("_bill")
         if not isinstance(bill, dict):
             bill = _legacy_bill(row)
@@ -900,6 +942,7 @@ def _public_turns(turns: Iterable[Dict[str, Any]]) -> list[Dict[str, Any]]:
         row.pop("_event_key", None)
         row.pop("_stream_id", None)
         row.pop("_bill", None)
+        row.pop("_bills", None)
         row["timestamp"] = _ms_to_iso(int(row.pop("timestamp_ms", 0) or 0))
         result.append(row)
     return result
@@ -3357,6 +3400,404 @@ def _reasonix_sessions() -> Dict[str, Dict[str, Any]]:
     return _load_reasonix_sessions(_reasonix_session_signatures(), _pricing_signature())
 
 
+# ======================================================================
+# ZCode sessions (phase 2): the live native-DB group
+#
+# Reads the same WAL-mode SQLite DB as the usage parser, through the
+# shared zcode_snapshot context manager - never the source file.
+# turn_usage rows are the candidate turns; a candidate becomes a token
+# turn only when one of its model_usage rows survives the phase-1
+# token-presence guard, otherwise it is an activity event (measured
+# work without billable tokens). Read failures raise ZCodeReadError
+# instead of returning {}, so no layer (warmer, /api/sessions response
+# cache, /api/session 404s, active time) can cache a broken read as an
+# empty one; a legitimate empty (no DB, or no turn_usage table) IS
+# cached - the file signature changes when the DB appears.
+# ======================================================================
+
+
+class ZCodeReadError(RuntimeError):
+    """A transient failure reading the live ZCode database."""
+
+
+# Max (window) entries kept in the loader result cache, mirroring the
+# phase-1 parser cache cap.
+_ZCODE_SESSIONS_CACHE_MAX = 32
+
+_zcode_sessions_cache: Dict[tuple, Dict[str, Dict[str, Any]]] = {}
+_zcode_sessions_cache_sig: tuple = ()
+_zcode_sessions_cache_lock = threading.Lock()
+
+
+def _zcode_db_signature() -> tuple:
+    # db + -wal + -shm: the invalidation signature must see checkpoints
+    # (they rewrite the -shm) even though the snapshot copies only db +
+    # -wal, mirroring ZCodeParser._file_signatures.
+    db_path = clientpaths.zcode_db_path()
+    if not db_path.exists():
+        return ()
+    out: list[tuple[str, int, int]] = []
+    for candidate in (
+        db_path,
+        Path(str(db_path) + "-wal"),
+        Path(str(db_path) + "-shm"),
+    ):
+        try:
+            st = candidate.stat()
+            out.append((str(candidate), st.st_mtime_ns, st.st_size))
+        except (FileNotFoundError, OSError):
+            continue
+    return tuple(out)
+
+
+def _zcode_turn_event_ms(row: sqlite3.Row) -> int:
+    # The turn's single event timestamp: the completion instant, or the
+    # start for a turn that has not completed. SQL windowing, ordering,
+    # boundary lookups and the emitted timestamp_ms all use it, so the
+    # loader's window and _summarize_session's re-filter agree by
+    # construction.
+    return int(row["completed_at"] if row["completed_at"] is not None else row["started_at"])
+
+
+def _zcode_row_buckets(row: sqlite3.Row) -> Optional[tuple]:
+    # The phase-1 per-row accounting (ZCodeParser._build_entry), shared
+    # so sessions and Overview can never drift: input_tokens is
+    # inclusive of the cached slice (subtract once), and output_tokens
+    # includes reasoning (z.ai bills reasoning at the output rate, so
+    # cost uses the full output while display keeps a disjoint
+    # output/reasoning split). Returns
+    # (model_id, input_t, cache_read, cache_write, billed_output,
+    # display_output, reasoning); None for a row with no billable
+    # tokens or no model, matching the parser's guard.
+    model = str(row["model_id"] or "").strip()
+    if not model:
+        return None
+    input_total = int(row["input_tokens"] or 0)
+    cache_r = int(row["cache_read_input_tokens"] or 0)
+    cache_w = int(row["cache_creation_input_tokens"] or 0)
+    output_total = int(row["output_tokens"] or 0)
+    reasoning = int(row["reasoning_tokens"] or 0)
+    if input_total == 0 and output_total == 0 and cache_r == 0 and cache_w == 0 and reasoning == 0:
+        return None
+    input_t = max(0, input_total - cache_r)
+    if reasoning > output_total:
+        # The subset assumption is broken for this row: treat the two
+        # as disjoint for BOTH display and billing.
+        billed_output = output_total + reasoning
+        display_output = output_total
+    else:
+        billed_output = output_total
+        display_output = output_total - reasoning
+    return (model, input_t, cache_r, cache_w, billed_output, display_output, reasoning)
+
+
+def _zcode_load_sessions(
+    conn: sqlite3.Connection,
+    since_ms: Optional[int],
+    until_ms: Optional[int],
+) -> Dict[str, Dict[str, Any]]:
+    lo = 0 if since_ms is None else int(since_ms)
+    hi = 9999999999999 if until_ms is None else int(until_ms)
+    cur = conn.cursor()
+
+    # Query 1 - every in-window top-level turn row (set A). The token
+    # vs activity split happens in Python once the model rows are in
+    # hand, so zero-token turns are not lost before billing is known.
+    cur.execute(
+        """
+        SELECT s.id AS session_id, s.title, s.directory,
+               t.turn_id, t.status, t.started_at, t.completed_at,
+               t.duration_ms, t.model_request_count, t.model_retry_count,
+               t.tool_call_count, t.error_type, t.error_code
+        FROM turn_usage t
+        JOIN session s ON s.id = t.session_id
+        WHERE s.parent_id IS NULL
+          AND COALESCE(t.completed_at, t.started_at) >= ?
+          AND COALESCE(t.completed_at, t.started_at) < ?
+        ORDER BY COALESCE(t.completed_at, t.started_at), t.started_at
+        """,
+        (lo, hi),
+    )
+    turn_rows = cur.fetchall()
+
+    sessions: Dict[str, Dict[str, Any]] = {}
+
+    def _ensure(session_id: str, title: Any, directory: Any) -> Dict[str, Any]:
+        raw = sessions.get(session_id)
+        if raw is None:
+            raw = {
+                "tool": "zcode",
+                "session_id": session_id,
+                "display_name": _clean_display_name(title),
+                "project": _project_from_repo_or_path(None, directory),
+                "is_review_session": False,
+                "turns": [],
+                "_activity_events": [],
+            }
+            sessions[session_id] = raw
+        return raw
+
+    # Query 2 - the selected turns' model rows, by (session_id,
+    # turn_id) rather than a second date window: a retry belonging to a
+    # selected turn can cross the window edge, and the turn is billed
+    # atomically. Chunked to stay under SQLite's bind-parameter limit.
+    model_by_key: Dict[tuple, list] = {}
+    if turn_rows:
+        pairs = [(str(r["session_id"]), str(r["turn_id"])) for r in turn_rows]
+        for start in range(0, len(pairs), 400):
+            chunk = pairs[start : start + 400]
+            cur.execute(
+                f"""
+                SELECT session_id, turn_id, model_id,
+                       input_tokens, output_tokens, reasoning_tokens,
+                       cache_read_input_tokens, cache_creation_input_tokens
+                FROM model_usage
+                WHERE (session_id, turn_id) IN ({", ".join("(?, ?)" for _ in chunk)})
+                """,
+                [value for pair in chunk for value in pair],
+            )
+            for row in cur.fetchall():
+                model_by_key.setdefault(
+                    (str(row["session_id"]), str(row["turn_id"])), []
+                ).append(row)
+
+    for row in turn_rows:
+        session_id = str(row["session_id"])
+        raw = _ensure(session_id, row["title"], row["directory"])
+        e_ms = _zcode_turn_event_ms(row)
+        duration_ms = row["duration_ms"]
+        buckets = [
+            b
+            for b in (
+                _zcode_row_buckets(m)
+                for m in model_by_key.get((session_id, str(row["turn_id"])), [])
+            )
+            if b is not None
+        ]
+        if not buckets:
+            # No billable model row: an activity event, not a token
+            # event. Its measured work still counts in active time.
+            work = None if duration_ms is None else int(duration_ms or 0)
+            raw["_activity_events"].append((e_ms, work))
+            continue
+
+        groups: Dict[str, list] = {}
+        for b in buckets:
+            groups.setdefault(b[0], []).append(b)
+
+        tokens_in = tokens_cache = tokens_out = tokens_reasoning = 0
+        bills: list = []
+        group_totals: Dict[str, int] = {}
+        for model_id, rows in groups.items():
+            input_t = sum(r[1] for r in rows)
+            cache_r = sum(r[2] for r in rows)
+            cache_w = sum(r[3] for r in rows)
+            billed = sum(r[4] for r in rows)
+            display = sum(r[5] for r in rows)
+            reasoning = sum(r[6] for r in rows)
+            # split-cache-write bills get_cost(model, input, output,
+            # cache_read, cache_write) - phase 1's cost expression,
+            # with reasoning billed inside the full output.
+            bills.append(
+                _billing_record(
+                    model_id,
+                    "split-cache-write",
+                    input_tokens=input_t,
+                    output_tokens=billed,
+                    cache_read=cache_r,
+                    cache_write=cache_w,
+                )
+            )
+            # Displayed input includes the cache write (the Overview
+            # display convention); billing input stays input_t with
+            # cache_write passed separately to the rule.
+            tokens_in += input_t + cache_w
+            tokens_cache += cache_r
+            tokens_out += display
+            tokens_reasoning += reasoning
+            group_totals[model_id] = input_t + cache_w + cache_r + display + reasoning
+
+        turn = _build_turn(
+            turn_index=len(raw["turns"]) + 1,
+            timestamp_ms=e_ms,
+            model=max(group_totals.items(), key=lambda kv: kv[1])[0],
+            tokens_in=tokens_in,
+            tokens_cache=tokens_cache,
+            tokens_out=tokens_out,
+            tokens_reasoning=tokens_reasoning,
+            bills=bills,
+        )
+        turn["_event_key"] = f"zcode:{session_id}:{row['turn_id']}"
+        if duration_ms is not None and int(duration_ms or 0) > 0:
+            turn["_work_ms"] = int(duration_ms)
+        # Turn-level status/counts/error fields, exposed on the API
+        # response; the v1 modal renders the standard token fields only.
+        turn["status"] = str(row["status"] or "")
+        turn["model_request_count"] = int(row["model_request_count"] or 0)
+        turn["model_retry_count"] = int(row["model_retry_count"] or 0)
+        turn["tool_call_count"] = int(row["tool_call_count"] or 0)
+        turn["error_type"] = row["error_type"]
+        turn["error_code"] = row["error_code"]
+        raw["turns"].append(turn)
+
+    # Query 3 - next boundary: the nearest FINALIZED turn per
+    # top-level session at/after until_ms (a still-running turn has no
+    # measurable work yet). For a session with in-window turns this is
+    # the gap anchor (plus its measured work when recorded); for a
+    # session without any, it enters the raw dict (activity-only) iff
+    # its measured work overlaps the window. The nearest next turn is
+    # the only one that can matter: later same-session turns start
+    # after it completes, so their clipped in-window part is empty.
+    if until_ms is not None:
+        cur.execute(
+            """
+            SELECT t.session_id, s.title, s.directory,
+                   t.completed_at, t.duration_ms
+            FROM turn_usage t
+            JOIN session s ON s.id = t.session_id
+            WHERE s.parent_id IS NULL AND t.completed_at >= ?
+            ORDER BY t.session_id, t.completed_at
+            """,
+            (hi,),
+        )
+        seen: set = set()
+        for row in cur.fetchall():
+            session_id = str(row["session_id"])
+            if session_id in seen:
+                continue
+            seen.add(session_id)
+            e_ms = int(row["completed_at"])
+            work = None if row["duration_ms"] is None else int(row["duration_ms"] or 0)
+            raw = sessions.get(session_id)
+            if raw is None:
+                # Set B: no in-window turns. A lone UNMEASURED boundary
+                # event measures no interval (the contract every other
+                # tool has), so only a measured overlap earns a raw
+                # session.
+                if not work or e_ms - work >= hi:
+                    continue
+                raw = _ensure(session_id, row["title"], row["directory"])
+            raw["_next_event_ms"] = e_ms
+            if work:
+                raw["_next_work_ms"] = work
+
+    # Query 4 - prior boundary, set-A sessions only (a set-B session's
+    # prior work ends before the window and clips to empty). started_at
+    # < lo is an index-usable superset of E < lo because
+    # started_at <= E; rows with E in-window are filtered out.
+    if since_ms is not None and sessions:
+        cur.execute(
+            """
+            SELECT t.session_id, t.started_at, t.completed_at, t.duration_ms
+            FROM turn_usage t
+            JOIN session s ON s.id = t.session_id
+            WHERE s.parent_id IS NULL AND t.started_at < ?
+            """,
+            (lo,),
+        )
+        best: Dict[str, tuple] = {}
+        for row in cur.fetchall():
+            e_ms = int(
+                row["completed_at"] if row["completed_at"] is not None else row["started_at"]
+            )
+            if e_ms >= lo:
+                continue
+            session_id = str(row["session_id"])
+            current = best.get(session_id)
+            if current is None or e_ms > current[0]:
+                best[session_id] = (e_ms, row["duration_ms"])
+        for session_id, (e_ms, duration) in best.items():
+            raw = sessions.get(session_id)
+            if raw is None:
+                continue
+            raw["_prior_event_ms"] = e_ms
+            if duration is not None and int(duration or 0) > 0:
+                raw["_prior_work_ms"] = int(duration)
+
+    # Activity-only sessions (no token turns): precompute their
+    # intervals so get_sessions_data and _active_time_window can count
+    # their work even though _summarize_session returns None for them.
+    cap_ms = active_gap_cap_ms()
+    for raw in sessions.values():
+        if not raw["turns"]:
+            raw["_activity_intervals"] = _session_active_intervals(
+                raw, cap_ms, since_ms, until_ms
+            )
+
+    return sessions
+
+
+def _zcode_sessions(
+    since_ms: Optional[int] = None,
+    until_ms: Optional[int] = None,
+) -> Dict[str, Dict[str, Any]]:
+    global _zcode_sessions_cache_sig
+    sig = (_zcode_db_signature(), _pricing_signature())
+    key = (since_ms, until_ms)
+    # Signature validation and the cache lookup are one critical
+    # section (the phase-1 algorithm): a concurrent collector must not
+    # clear and repopulate the cache between them.
+    with _zcode_sessions_cache_lock:
+        if sig != _zcode_sessions_cache_sig:
+            _zcode_sessions_cache.clear()
+            _zcode_sessions_cache_sig = sig
+        cached = _zcode_sessions_cache.get(key)
+    if cached is not None:
+        return cached
+
+    db_path = clientpaths.zcode_db_path()
+    if not db_path.exists():
+        # Legitimate empty: no ZCode DB on this machine. Cached; the
+        # signature changes when the DB appears.
+        return _zcode_store(sig, key, {})
+
+    raw_sessions: Dict[str, Dict[str, Any]]
+    try:
+        with zcode_snapshot(db_path) as snap:
+            conn = snap.conn
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            # Tri-state probe: an absent table is an empty success, a
+            # probe error is a failed read (never an "absent table").
+            cur.execute(
+                "SELECT 1 FROM sqlite_master "
+                "WHERE type='table' AND name='turn_usage'"
+            )
+            if cur.fetchone() is None:
+                raw_sessions = {}
+            else:
+                raw_sessions = _zcode_load_sessions(conn, since_ms, until_ms)
+    except (ZCodeSnapshotError, sqlite3.Error) as error:
+        # A transient failure: a restored permission or cleared SQLite
+        # error may not change the file signatures, so the result must
+        # not be cached - and it must not be mistaken for an empty
+        # result at any layer, so raise.
+        raise ZCodeReadError(f"ZCode session read failed: {error}") from error
+
+    if snap.close_failed:
+        # The read completed but the snapshot could not be closed:
+        # return the data, never cache it (the phase-1 close-failure
+        # contract, shared with the usage parser).
+        return raw_sessions
+    return _zcode_store(sig, key, raw_sessions)
+
+
+def _zcode_store(
+    sig: tuple, key: tuple, raw_sessions: Dict[str, Dict[str, Any]]
+) -> Dict[str, Dict[str, Any]]:
+    global _zcode_sessions_cache, _zcode_sessions_cache_sig
+    # Recheck under the lock: if a concurrent call advanced the
+    # signature while we were reading, this result belongs to the old
+    # signature and must not be stored under the new one (it is still
+    # returned for this request).
+    with _zcode_sessions_cache_lock:
+        if sig == _zcode_sessions_cache_sig:
+            if len(_zcode_sessions_cache) >= _ZCODE_SESSIONS_CACHE_MAX:
+                _zcode_sessions_cache.clear()
+            _zcode_sessions_cache[key] = raw_sessions
+    return raw_sessions
+
+
 def _raw_sessions_for_tool(
     tool: str,
     since_ms: Optional[int] = None,
@@ -3389,6 +3830,8 @@ def _raw_sessions_for_tool(
             return _dsh_sessions()
         if key == "reasonix":
             return _reasonix_sessions()
+        if key == "zcode":
+            return _zcode_sessions(since_ms=since_ms, until_ms=until_ms)
     except (OSError, sqlite3.Error):
         # A live-parse failure (locked dir, unreadable file, corrupt DB) degrades
         # to an empty view instead of erroring the whole tool's session endpoint.
@@ -3565,6 +4008,7 @@ def get_sessions_data(
 
     sessions = []
     active_intervals: list[tuple[int, int]] = []
+    activity_agent_ms = 0
     include_codex_review = _include_codex_review_sessions(include_review_sessions)
     for raw in _raw_sessions_for_tool(key, since_ms=since_ms, until_ms=until_ms).values():
         if key == "codex" and raw.get("is_review_session") and not include_codex_review:
@@ -3573,6 +4017,13 @@ def get_sessions_data(
         if summary:
             active_intervals.extend(summary.pop("_active_intervals", []))
             sessions.append(summary)
+        else:
+            # Activity-only session (ZCode: no token turns in the window,
+            # but measured work from zero-token or boundary turns): nothing
+            # to list, but the work still counts in the tool's active time.
+            act = raw.get("_activity_intervals") or []
+            active_intervals.extend(act)
+            activity_agent_ms += sum(end - start for start, end in act)
 
     sessions.sort(key=lambda row: (row.get("last_seen_at") or "", row.get("tokens") or 0), reverse=True)
     latest_session = sessions[0] if sessions else None
@@ -3592,7 +4043,8 @@ def get_sessions_data(
             # (the common case here) overlap and are counted once. active_ms_sum
             # adds them up instead, i.e. agent-hours rather than clock time.
             "active_ms": _merged_interval_ms(active_intervals),
-            "active_ms_sum": sum(int(row.get("active_ms_sum", 0) or 0) for row in sessions),
+            "active_ms_sum": sum(int(row.get("active_ms_sum", 0) or 0) for row in sessions)
+            + activity_agent_ms,
             "span_ms": sum(int(row.get("span_ms", 0) or 0) for row in sessions),
             "active_gap_cap_ms": active_gap_cap_ms(),
             # Inter-event gaps cannot separate a short pause from work, long single
@@ -3628,11 +4080,16 @@ def _active_time_window(
             if key == "codex" and raw.get("is_review_session") and not include_codex_review:
                 continue
             summary = _summarize_session(raw, since_ms=since_ms, until_ms=until_ms)
-            if not summary:
-                continue
-            session_count += 1
-            intervals.extend(summary.get("_active_intervals", []))
-            agent_ms += int(summary.get("active_ms_sum", 0) or 0)
+            if summary:
+                session_count += 1
+                intervals.extend(summary.get("_active_intervals", []))
+                agent_ms += int(summary.get("active_ms_sum", 0) or 0)
+            else:
+                # Activity-only session (ZCode): no token events to
+                # summarize, but the measured work still counts.
+                act = raw.get("_activity_intervals") or []
+                intervals.extend(act)
+                agent_ms += sum(end - start for start, end in act)
         return intervals, agent_ms, session_count
 
     by_tool: Dict[str, Dict[str, Any]] = {}

@@ -40,7 +40,7 @@
 </p>
 
 > [!NOTE]
-> **首日支持 DeepSeek Harness。** 从本地 `~/.dsh` 读取 token、费用与会话，无需任何配置。[支持的客户端 →](docs/reference/SUPPORTED_CLIENTS.md)
+> **2.0 新增 ZCode 支持。** 从 ZCode 本地 SQLite 数据库读取 token、费用、会话、轮次与实测活跃时间。[支持的客户端 →](docs/reference/SUPPORTED_CLIENTS.md)
 >
 > **同一作者的另一个项目：[Cosyncing](https://github.com/cosyncing/cosyncing)。** 同步并操控你的 agent —— 从 CLI 到 GUI，从桌面到手机。随时随地，从上次中断的地方接着继续。Cosyncing 让你的编码 agent 在你自己的网络中保持同步。
 
@@ -74,6 +74,28 @@
 - **Companion 状态栏应用** *[新]*：在 macOS 菜单栏或 Windows 通知区域查看费用与订阅额度，Windows 版已上架 [Microsoft Store](https://apps.microsoft.com/detail/9ppnmpdq8b52) — [截图与下载](#tokdash-companion-状态栏应用)
 - **多服务器视图**：在设置中添加 WSL、macOS 或其他 Tokdash 服务器；可合并任意选择的用量，并按机器分组显示额度。参见[远程访问](docs/guides/REMOTE_ACCESS.md)。
 - **主题与应用体验**：10 款样式主题、明暗模式与 PWA 安装支持
+
+### 客户端支持矩阵
+
+| 客户端 | 用量与费用 | 会话浏览器 |
+|---|:---:|:---:|
+| OpenCode | ✅ | ✅ |
+| Codex | ✅ | ✅ |
+| Claude Code | ✅ | ✅ |
+| Gemini CLI | ✅ | — |
+| Antigravity CLI | ✅ | — |
+| OpenClaw | ✅ | — |
+| Kimi Code / Kimi CLI | ✅ | ✅ |
+| MiMo Code | ✅ | ✅ |
+| Grok Build | ✅ | — |
+| Pi | ✅ | ✅ |
+| GitHub Copilot CLI | ✅ | — |
+| Hermes | ✅ | — |
+| DeepSeek Harness | ✅ | ✅ |
+| Reasonix | ✅ | ✅ |
+| **ZCode** | ✅ | ✅ |
+
+本地数据路径、覆盖变量与各来源的计费说明见[已支持客户端](docs/reference/SUPPORTED_CLIENTS.md)。
 
 <p align="center">
   <b>总览</b><br />
@@ -463,7 +485,7 @@ Tokdash 是一个本地 HTTP 服务。常用接口：
 - `GET /api/usage?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD`
 - `GET /api/tools?period=...`（仅编程工具）
 - `GET /api/openclaw?period=...`（仅 OpenClaw）
-- `GET /api/sessions?tool=codex|claude|opencode|pi_agent|mimo|kimi|dsh|reasonix&period=...`（追加 `&include_review_sessions=true` 可包含默认隐藏的 Codex 审核/权限会话）
+- `GET /api/sessions?tool=codex|claude|opencode|pi_agent|mimo|kimi|dsh|reasonix|zcode&period=...`（追加 `&include_review_sessions=true` 可包含默认隐藏的 Codex 审核/权限会话）
 - `GET /api/active-time?period=...`（跨全部会话工具的活跃时长，并按工具细分）
 - `GET /api/quota` 与 `GET /api/quota/history`（订阅额度快照；网络刷新受写入保护且需显式授权）
 - `GET /api/stats`（贡献日历与统计数据）

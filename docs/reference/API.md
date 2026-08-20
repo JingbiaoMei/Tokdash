@@ -322,7 +322,7 @@ List of sessions for a specific tool.
 
 | Name | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `tool` | string | **yes** | – | Tool name: `codex`, `claude`, `opencode`, `pi_agent`, `mimo`, or `kimi` (the session explorer set; OpenClaw is served only via `/api/openclaw`) |
+| `tool` | string | **yes** | – | Tool name: `codex`, `claude`, `opencode`, `pi_agent`, `mimo`, `kimi`, `dsh`, `reasonix`, or `zcode` (OpenClaw is served only via `/api/openclaw`) |
 | `period` | string | no | `"today"` | See [Period parameter](#period-parameter) |
 | `date_from` | string | no | – | Start date (`YYYY-MM-DD`) |
 | `date_to` | string | no | – | End date (`YYYY-MM-DD`) |

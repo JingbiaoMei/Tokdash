@@ -4,13 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## Unreleased
+## 2.0.0 - 2026-08-20
 
 ### Added
 
-- Added ZCode as a token and cost source. Tokdash reads `model_usage` from `$ZCODE_HOME/cli/db/db.sqlite` (default `~/.zcode/cli/db/db.sqlite`) in read-only mode, one entry per model request, retries included as separate billable rows. ZCode's `input_tokens` counts cached and uncached prompt tokens together, so the cached share is split into its own `cacheRead` bucket, and reasoning tokens are displayed disjoint from output while billing at the output rate.
+- Added ZCode as a token and cost source. Tokdash copies `$ZCODE_HOME/cli/db/db.sqlite` and its live WAL into a disposable snapshot before reading `model_usage`, so SQLite never creates or changes sidecars beside the source database. Each model request is one entry and retries remain separate billable rows. ZCode's `input_tokens` counts cached and uncached prompt tokens together, so the cached share is split into its own `cacheRead` bucket, and reasoning tokens are displayed disjoint from output while billing at the output rate.
 - Added ZCode to the Session Explorer. Turns are read from the same database through the same coherent snapshot the usage parser uses and billed per (turn, model) with the same token rules, top-level sessions only. A turn with no billable tokens still credits its measured time to active time as an activity event, and a boundary turn whose measured work overlaps the selected window is credited even when its session has no in-window token event. A transient read failure surfaces as an error and retries on the next collection instead of blanking the panel or caching an empty result.
 - Added a ZCode brand mark to the dashboard and the README supported-tools strip.
+- Added Qwen3.8 27B pricing from Alibaba Cloud Model Studio's published rate.
 
 ### Fixed
 

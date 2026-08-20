@@ -1,6 +1,27 @@
 {
-  "current": "1.9.0",
+  "current": "2.0.0",
   "releases": [
+    {
+      "version": "2.0.0",
+      "date": "2026-08-20",
+      "sections": [
+        {
+          "type": "added",
+          "items": [
+            "Added ZCode as a local token and cost source, with cache-aware input accounting and per-model pricing.",
+            "Added ZCode to the Session Explorer with turns, per-model billing, and measured active-time events.",
+            "Added Qwen3.8 27B pricing and ZCode branding across the dashboard and documentation."
+          ]
+        },
+        {
+          "type": "fixed",
+          "items": [
+            "Fixed native-Windows setup, locked-file session reads, and usage-database resync behavior.",
+            "Made ZCode live-database reads coherent and read-only at the source by querying disposable SQLite snapshots, with retry-safe caching."
+          ]
+        }
+      ]
+    },
     {
       "version": "1.9.0",
       "date": "2026-08-19",

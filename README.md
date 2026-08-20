@@ -41,7 +41,7 @@
 </p>
 
 > [!NOTE]
-> **Day 1 support for DeepSeek Harness.** Tokens, cost and sessions are read locally from `~/.dsh`, with nothing to configure. [Supported clients →](docs/reference/SUPPORTED_CLIENTS.md)
+> **New in 2.0: ZCode support.** Tokens, cost, sessions, turns, and measured active time are read locally from ZCode's SQLite database. [Supported clients →](docs/reference/SUPPORTED_CLIENTS.md)
 >
 > **Also from the same author: [Cosyncing](https://github.com/cosyncing/cosyncing).** Synchronize and control your agents — from CLI to GUI, from desktop to phone. Pick up right where you left off, anywhere. Cosyncing keeps your coding agents in sync across your own network.
 
@@ -76,6 +76,28 @@
 - **Companion Status Bar App** *[new]*: view spend and subscription quota from the macOS menu bar or Windows notification area — on the [Microsoft Store](https://apps.microsoft.com/detail/9ppnmpdq8b52) for Windows — [screenshots and downloads](#tokdash-companion-status-bar-app)
 - **Multi-server views**: add WSL, macOS, and other Tokdash servers in Settings; combine usage across any selection while keeping quota grouped by machine. See [remote access](docs/guides/REMOTE_ACCESS.md).
 - **Themes and app polish**: 10 style themes, light/dark mode, and PWA install support
+
+### Client support matrix
+
+| Client | Usage & cost | Session Explorer |
+|---|:---:|:---:|
+| OpenCode | ✅ | ✅ |
+| Codex | ✅ | ✅ |
+| Claude Code | ✅ | ✅ |
+| Gemini CLI | ✅ | — |
+| Antigravity CLI | ✅ | — |
+| OpenClaw | ✅ | — |
+| Kimi Code / Kimi CLI | ✅ | ✅ |
+| MiMo Code | ✅ | ✅ |
+| Grok Build | ✅ | — |
+| Pi | ✅ | ✅ |
+| GitHub Copilot CLI | ✅ | — |
+| Hermes | ✅ | — |
+| DeepSeek Harness | ✅ | ✅ |
+| Reasonix | ✅ | ✅ |
+| **ZCode** | ✅ | ✅ |
+
+See [Supported clients](docs/reference/SUPPORTED_CLIENTS.md) for local data paths, overrides, and source-specific accounting notes.
 
 <p align="center">
   <b>Overview</b><br />
@@ -476,7 +498,7 @@ Tokdash is a local HTTP server. Common endpoints:
 - `GET /api/usage?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD`
 - `GET /api/tools?period=...` (coding tools only)
 - `GET /api/openclaw?period=...` (OpenClaw only)
-- `GET /api/sessions?tool=codex|claude|opencode|pi_agent|mimo|kimi|dsh|reasonix&period=...` (append `&include_review_sessions=true` to include Codex review/permission sessions, hidden by default)
+- `GET /api/sessions?tool=codex|claude|opencode|pi_agent|mimo|kimi|dsh|reasonix|zcode&period=...` (append `&include_review_sessions=true` to include Codex review/permission sessions, hidden by default)
 - `GET /api/active-time?period=...` (active time across every session tool, plus a per-tool breakdown)
 - `GET /api/quota` and `GET /api/quota/history` (subscription quota snapshots; network refresh is write-gated and opt-in)
 - `GET /api/stats` (contribution calendar & statistics)

@@ -11,7 +11,10 @@ import json
 import logging
 import os
 import re
+import shutil
 import sqlite3
+import tempfile
+import threading
 import time as _time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -2732,6 +2735,11 @@ class ZCodeParser(BaseParser):
 
     _query_cache: ClassVar[Dict[tuple, List[Dict[str, Any]]]] = {}
     _query_cache_sig: ClassVar[tuple] = ()
+    # Guards the pair above: the signature check/clear at the top of
+    # collect() and the store-time recheck must run under the same lock,
+    # or a query in flight under an older signature can store its stale
+    # result under a signature a concurrent collect has already advanced.
+    _cache_lock: ClassVar[threading.Lock] = threading.Lock()
 
     def __init__(self, pricing_db: PricingDatabase):
         super().__init__(pricing_db)
@@ -2756,16 +2764,34 @@ class ZCodeParser(BaseParser):
                 continue
         return tuple(out)
 
-    def _connect_readonly(self) -> Optional[sqlite3.Connection]:
-        # Read-only URI so Tokdash never contends with the running ZCode
-        # process (WAL readers are safe). resolve().as_uri() keeps a "#" in
-        # the path from truncating the URI; the plain f"file:{path}?mode=ro"
-        # form drops mode=ro in that case. Returns None on failure: falling
-        # back to a read-write connection would let the reader modify or
-        # create WAL/SHM state, which the source must never do.
+    def _open_snapshot(self) -> Optional[Tuple[sqlite3.Connection, Path]]:
+        # Open a private temp-dir copy, never the source file. A ?mode=ro
+        # open of a WAL database is still not side-effect free: when the
+        # -shm file is missing, SQLite creates it in the source directory
+        # (it is the WAL coordination file, and the reader needs it whether
+        # it wants it or not). The reader must never write sidecar state
+        # into the source tree, so db + -wal + -shm are copied together
+        # (the live rows sit in the WAL) and the copy is opened normally:
+        # SQLite may create or rewrite its own -wal/-shm inside the temp
+        # dir, and the caller deletes the whole dir afterwards. A torn
+        # trailing WAL frame can only lose that one frame, and the
+        # signature change that raced it forces a fresh copy on the next
+        # collect. Returns (conn, tmpdir); None after a single attempt on
+        # any failure (copy or open) - no fallback open in another mode.
         try:
-            return sqlite3.connect(self.db_path.resolve().as_uri() + "?mode=ro", uri=True)
-        except sqlite3.Error:
+            tmpdir = Path(tempfile.mkdtemp(prefix="tokdash-zcode."))
+        except OSError:
+            return None
+        try:
+            shutil.copy2(self.db_path, tmpdir / self.db_path.name)
+            for sidecar in ("-wal", "-shm"):
+                src = Path(str(self.db_path) + sidecar)
+                if src.exists():
+                    shutil.copy2(src, tmpdir / (self.db_path.name + sidecar))
+            conn = sqlite3.connect(str(tmpdir / self.db_path.name))
+            return conn, tmpdir
+        except (OSError, sqlite3.Error):
+            shutil.rmtree(tmpdir, ignore_errors=True)
             return None
 
     def _build_entry(self, row: sqlite3.Row) -> Optional[Dict[str, Any]]:
@@ -2820,9 +2846,10 @@ class ZCodeParser(BaseParser):
 
     def collect(self, since_date: Optional[datetime] = None, until_date: Optional[datetime] = None) -> List[Dict[str, Any]]:
         sig = (self._file_signatures(), self._pricing_signature())
-        if sig != type(self)._query_cache_sig:
-            type(self)._query_cache.clear()
-            type(self)._query_cache_sig = sig
+        with type(self)._cache_lock:
+            if sig != type(self)._query_cache_sig:
+                type(self)._query_cache.clear()
+                type(self)._query_cache_sig = sig
 
         s_ms = int(self._to_utc(since_date).timestamp() * 1000) if since_date else 0
         u_ms = int(self._to_utc(until_date).timestamp() * 1000) if until_date else 9999999999999
@@ -2835,8 +2862,9 @@ class ZCodeParser(BaseParser):
         out: List[Dict[str, Any]] = []
         read_ok = False
         if self.db_path.exists():
-            conn = self._connect_readonly()
-            if conn is not None:
+            snap = self._open_snapshot()
+            if snap is not None:
+                conn, snap_dir = snap
                 try:
                     conn.row_factory = sqlite3.Row
                     cur = conn.cursor()
@@ -2877,11 +2905,18 @@ class ZCodeParser(BaseParser):
                     read_ok = False
                 finally:
                     conn.close()
+                    shutil.rmtree(snap_dir, ignore_errors=True)
 
         if read_ok:
-            if len(type(self)._query_cache) >= _OPENCODE_QUERY_CACHE_MAX:
-                type(self)._query_cache.clear()
-            type(self)._query_cache[cache_key] = out
+            with type(self)._cache_lock:
+                # Recheck under the lock: if a concurrent collect advanced
+                # the signature while we were reading, this result belongs
+                # to the old signature and must not be stored under the new
+                # one (it is still returned for this request).
+                if sig == type(self)._query_cache_sig:
+                    if len(type(self)._query_cache) >= _OPENCODE_QUERY_CACHE_MAX:
+                        type(self)._query_cache.clear()
+                    type(self)._query_cache[cache_key] = out
         return list(out)
 
 

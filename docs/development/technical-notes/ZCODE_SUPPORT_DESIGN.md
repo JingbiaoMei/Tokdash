@@ -95,11 +95,17 @@ Unverified assumptions, each pinned to a first-row check in
 `MimoParser` (SQLite, class-level query cache, `SourceSyncCapability`):
 
 - Path resolution: `clientpaths.zcode_db_path()`, honoring `ZCODE_HOME`.
-- Connection: read-only URI `path.resolve().as_uri() + "?mode=ro"` (the
-  Antigravity pattern). The plain `f"file:{path}?mode=ro"` form truncates on a
-  `#` in the path and silently drops `mode=ro`. A failed read-only open skips
-  the source for that window - there is deliberately no read-write fallback,
-  because a reader must never be able to modify WAL/SHM state.
+- Connection: `_open_snapshot` copies `db.sqlite` + `db.sqlite-wal` +
+  `db.sqlite-shm` together (the live rows sit in the WAL) into a private
+  temp dir, opens the copy normally, and deletes the dir after the query.
+  Reading the source directly is not side-effect free: even a `?mode=ro`
+  open makes SQLite CREATE a missing `db.sqlite-shm` in the source
+  directory (reproduced with a valid DB+WAL), so the reader never opens the
+  source file at all. Any WAL/SHM writes SQLite needs happen inside the
+  disposable copy. (The earlier `resolve().as_uri() + "?mode=ro"` plan is
+  superseded; that URI form also truncates on a `#` in the path.) A copy or
+  open failure skips the source after a single attempt - no fallback open
+  in another mode.
 - Failed reads (connect, probe, or query errors) are **not** cached: a restored
   permission or cleared transient SQLite error may not change the file
   signatures, so caching an empty result would keep it stale until a file
@@ -115,6 +121,12 @@ Unverified assumptions, each pinned to a first-row check in
   **and** `db.sqlite-shm` (Mimo's `_file_signatures` shape). A signature on
   the main file alone goes stale while ZCode is running, because new rows sit
   in the WAL until checkpoint.
+- Cache concurrency: the class-level cache and signature are guarded by a
+  class lock. The signature check/clear at the top of `collect()` and the
+  store-time recheck run under the same lock, so a result fetched under an
+  older signature (its query in flight while a concurrent collect advanced
+  the signature) is returned for that request but never stored under the new
+  signature.
 - Entry ids: `f"zcode:{model_usage.id}"` — flat, stable, retry-distinct.
 - Cost is always emitted by the parser for resolvable models; the
   `cost == 0` fallback in compute.py would re-price from the entry's split
@@ -130,10 +142,12 @@ ZCode; dashboard brand mark; brand-wiring test coverage.
 
 Out, deliberately:
 
-- **Session Explorer.** `session` + `turn_usage` are ready for a phase 2 that
-  adds `sessions.py` support, flips `session_store`, and adds the `cli.py`
-  warm call. Declaring `session_store=True` without that wiring does nothing:
-  no code gates the Sessions tab on the flag.
+- **Session Explorer.** `session` + `turn_usage` are ready for a phase 2
+  that adds the session/turn loader and per-session detail view in
+  `sessions.py`, the frontend session panel, active-time integration, the
+  `cli.py` warm/sync call (`get_sessions_data("zcode", "all")`), and the
+  `session_store=True` declaration. The flag alone does nothing - no code
+  gates the Sessions tab on it - so it must ship with the wiring.
 - **Coding Plan quota.** The 5-hour/weekly/monthly pools are remote data. The
   desktop app polls `https://zcode.z.ai/api/v1/zcode-plan/billing/balance`
   (OAuth token in `~/.zcode/v2/credentials.json`), and the local

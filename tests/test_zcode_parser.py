@@ -1,5 +1,7 @@
-"""Tests for ZCodeParser (read-only SQLite, WAL-mode source DB)."""
+"""Tests for ZCodeParser (temp-dir snapshot reads of a WAL-mode source DB)."""
+import shutil
 import sqlite3
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -292,10 +294,10 @@ def test_zcode_wal_freshness(monkeypatch, tmp_path):
         writer.close()
 
 
-def test_zcode_readonly_open_failure_skips(monkeypatch, tmp_path):
-    """A read-only open failure skips the source with no read-write
-    fallback: every connection attempt must use the read-only URI form, and
-    _connect_readonly returns None after exactly one attempt."""
+def test_zcode_snapshot_open_failure_skips(monkeypatch, tmp_path):
+    """A snapshot open failure skips the source with a single attempt and
+    no fallback: the only connection attempt targets the private temp-dir
+    copy, never the source path, and _open_snapshot returns None."""
     import tokdash.sources.coding_tools as ct
 
     home = tmp_path / ".zcode"
@@ -313,18 +315,17 @@ def test_zcode_readonly_open_failure_skips(monkeypatch, tmp_path):
     monkeypatch.setattr(ct.sqlite3, "connect", fake_connect)
     parser = ZCodeParser(PricingDatabase())
 
-    assert parser._connect_readonly() is None
+    assert parser._open_snapshot() is None
     assert len(calls) == 1
-    args, kwargs = calls[0]
-    assert kwargs.get("uri") is True
-    assert args[0].endswith("db.sqlite?mode=ro")
+    (conn_arg,), _ = calls[0]
+    assert conn_arg != str(db_path)
+    assert Path(conn_arg).name == "db.sqlite"
 
     assert parser.collect(None, None) == []
-    # The collect-level attempt is also a single read-only URI open; the
-    # pre-fix implementation would have issued a second plain (read-write)
-    # connection here.
+    # The collect-level attempt is also a single open of the private copy;
+    # there is no second attempt in another mode against the source.
     assert len(calls) == 2
-    assert calls[1][1].get("uri") is True
+    assert calls[1][0][0] != str(db_path)
 
 
 def test_zcode_failed_read_not_cached(monkeypatch, tmp_path):
@@ -406,14 +407,16 @@ def test_zcode_table_probe_failure_not_cached(monkeypatch, tmp_path):
     monkeypatch.setenv("ZCODE_HOME", str(home))
 
     parser = ZCodeParser(PricingDatabase())
-    real_readonly = parser._connect_readonly
+    real_open = parser._open_snapshot
     # One flaky state shared across collects: the first probe fails, the
     # retry's probe succeeds.
     flaky = {"probe_failed": False}
-    monkeypatch.setattr(
-        parser, "_connect_readonly",
-        lambda: _FlakyConnection(real_readonly(), flaky),
-    )
+
+    def flaky_open():
+        conn, tmpdir = real_open()
+        return _FlakyConnection(conn, flaky), tmpdir
+
+    monkeypatch.setattr(parser, "_open_snapshot", flaky_open)
 
     assert parser.collect(None, None) == []
     # Same files on disk, same signature: the probe failure must not have
@@ -425,3 +428,77 @@ def test_zcode_registered_in_tracker():
     tracker = CodingToolsUsageTracker()
     assert "zcode" in tracker.parsers
     assert isinstance(tracker.parsers["zcode"], ZCodeParser)
+
+
+def test_zcode_no_sidecar_writes_in_source_dir(monkeypatch, tmp_path):
+    """Reading must not create db.sqlite-shm (or anything else) in the
+    source directory: SQLite creates a missing -shm even for a ?mode=ro
+    open of a WAL database, so the parser reads a temp-dir snapshot. The
+    fixture is the crash-recovery state - db + wal, no -shm - with the row
+    living only in the WAL, which also proves the WAL was read."""
+    home = tmp_path / ".zcode"
+    db_path = home / "cli" / "db" / "db.sqlite"
+    db_path.parent.mkdir(parents=True)
+
+    writer = sqlite3.connect(str(db_path))
+    writer.execute("PRAGMA journal_mode=WAL")
+    writer.executescript(MODEL_USAGE_DDL)
+    writer.execute(INSERT, _row())
+    writer.commit()
+    # Crash-recovery state: copy db + wal (NOT -shm) to the live location
+    # while the writer still holds the uncheckpointed WAL, then close it.
+    live_dir = tmp_path / "live" / "cli" / "db"
+    live_dir.mkdir(parents=True)
+    shutil.copy2(db_path, live_dir / "db.sqlite")
+    shutil.copy2(db_path.parent / "db.sqlite-wal", live_dir / "db.sqlite-wal")
+    writer.close()  # checkpoints and deletes the ORIGINAL wal/shm only
+
+    monkeypatch.setenv("ZCODE_HOME", str(tmp_path / "live"))
+    before = sorted(p.name for p in live_dir.iterdir())
+    assert before == ["db.sqlite", "db.sqlite-wal"]
+
+    entries = ZCodeParser(PricingDatabase()).collect(None, None)
+    assert len(entries) == 1  # the WAL-only row was read from the snapshot
+    # No sidecar (or any) file appears in the source directory, and the
+    # temp-dir snapshot is cleaned up afterwards.
+    assert sorted(p.name for p in live_dir.iterdir()) == before
+    td = Path(tempfile.gettempdir())
+    assert not [
+        p.name for p in td.iterdir() if p.name.startswith("tokdash-zcode.")
+    ]
+
+
+def test_zcode_stale_read_not_stored_after_signature_change(monkeypatch, tmp_path):
+    """A result fetched under an older file signature (its query in flight
+    while a concurrent collect advanced the signature) is returned for that
+    request but NOT stored under the new signature - no indefinite stale
+    cache."""
+    home = tmp_path / ".zcode"
+    db_path = home / "cli" / "db" / "db.sqlite"
+    db_path.parent.mkdir(parents=True)
+    _create_db(db_path, [_row()])
+    monkeypatch.setenv("ZCODE_HOME", str(home))
+    parser = ZCodeParser(PricingDatabase())
+
+    real_open = parser._open_snapshot
+    state = {"intercepted": False}
+
+    def interleaved_open():
+        # A's snapshot, taken before the source change below.
+        snap = real_open()
+        if not state["intercepted"]:
+            state["intercepted"] = True
+            # B: the source gains a row (new signature) and a full collect
+            # runs to completion, advancing _query_cache_sig and caching
+            # the fresh data.
+            db_path.unlink()
+            _create_db(db_path, [_row(), _row(row_id="mu-2", logical="lr-2", attempt=1)])
+            assert len(parser.collect(None, None)) == 2
+        return snap
+
+    monkeypatch.setattr(parser, "_open_snapshot", interleaved_open)
+
+    # A finishes its (stale) query and must skip the store.
+    assert len(parser.collect(None, None)) == 1
+    # C: the cache hit must serve B's fresh data, not A's stale store.
+    assert len(parser.collect(None, None)) == 2

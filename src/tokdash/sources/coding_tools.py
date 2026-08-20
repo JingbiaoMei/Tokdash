@@ -8,6 +8,7 @@ import argparse
 import glob
 import hashlib
 import json
+import logging
 import os
 import re
 import sqlite3
@@ -28,6 +29,8 @@ except ImportError:  # pragma: no cover
     import clientpaths
     from pricing import PricingDatabase
     from dsh_log import decode_dsh_session_file, dsh_entry_id, dsh_file_signatures, fold_dsh_usage_samples
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -71,13 +74,34 @@ def _rglob_sigs(root: Path, pattern: str = "*.jsonl") -> tuple:
     if not root.exists():
         return ()
     items: List[Tuple[str, int, int]] = []
-    for p in root.rglob(pattern):
-        try:
-            s = p.stat()
-            items.append((str(p), s.st_mtime_ns, s.st_size))
-        except (FileNotFoundError, OSError):
-            continue
+    try:
+        for p in root.rglob(pattern):
+            try:
+                s = p.stat()
+                items.append((str(p), s.st_mtime_ns, s.st_size))
+            except (FileNotFoundError, OSError):
+                continue
+    except OSError:
+        # pathlib's recursive selector only swallows PermissionError; a different
+        # OSError from a mid-walk is_dir()/scandir (e.g. a cloud-file placeholder on
+        # Windows) would otherwise propagate and blank the whole source. Keep the
+        # partial walk, matching the PermissionError behavior.
+        pass
     return tuple(sorted(items))
+
+
+def connect_sqlite_readonly(path: Path) -> sqlite3.Connection:
+    """Open a live third-party database read-only, with a read-write fallback.
+
+    A plain RW connect takes a write lock that on native Windows can block the
+    owning client's own writes for the duration of our read (and would create the
+    file if it were missing). Shared by the usage parsers in this module and the
+    session loaders in sessions.py.
+    """
+    try:
+        return sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
+    except Exception:
+        return sqlite3.connect(str(path))
 
 
 def _glob_sigs(pattern: str) -> tuple:
@@ -516,7 +540,7 @@ class OpenCodeParser(BaseParser):
 
         if self.db_path.exists():
             try:
-                conn = sqlite3.connect(str(self.db_path))
+                conn = connect_sqlite_readonly(self.db_path)
                 cur = conn.cursor()
                 cur.execute("SELECT data, time_created FROM message WHERE time_created >= ? AND time_created < ? ORDER BY time_created", (s_ms, u_ms))
                 rows = cur.fetchall()
@@ -1148,13 +1172,6 @@ class AntigravityCLIParser(BaseParser):
 
         return _timed_sigs(f"antigravity_cli:{self.conversations_dir}", scan)
 
-    @staticmethod
-    def _connect_readonly(path: Path) -> sqlite3.Connection:
-        try:
-            return sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
-        except Exception:
-            return sqlite3.connect(str(path))
-
     @classmethod
     def _decode_row(cls, data: bytes) -> Optional[Dict[str, Any]]:
         outer = _pb_parse_message(bytes(data))
@@ -1212,30 +1229,25 @@ class AntigravityCLIParser(BaseParser):
         for path_str, _, _ in self._file_signatures():
             db_path = Path(path_str)
             rows = None
-            for use_readonly in (True, False):
+            # The helper already opens RO with an RW fallback, so the plain connect
+            # is only the last resort: sqlite3 opens lazily, so an RO open that needs
+            # recovery (the client crashed mid-write, leaving a WAL) fails on the
+            # first query — and recovery requires a writable connection.
+            for opener in (connect_sqlite_readonly, lambda p: sqlite3.connect(str(p))):
                 try:
-                    conn = self._connect_readonly(db_path) if use_readonly else sqlite3.connect(str(db_path))
+                    conn = opener(db_path)
                 except Exception:
-                    if use_readonly:
-                        continue
-                    break
+                    continue
                 try:
                     rows = conn.execute("SELECT idx, data FROM gen_metadata ORDER BY idx").fetchall()
                     break
                 except Exception:
+                    pass
+                finally:
                     try:
                         conn.close()
                     except Exception:
                         pass
-                    if use_readonly:
-                        continue
-                    break
-                finally:
-                    if rows is not None:
-                        try:
-                            conn.close()
-                        except Exception:
-                            pass
             if rows is None:
                 continue
 
@@ -1703,7 +1715,8 @@ class PiAgentParser(BaseParser):
     PI-AGENT SESSION FILE SCHEMA
     =======================================================================
     Location: ~/.pi/agent/sessions/<encoded-cwd>/<isoTime>_<sessionUUID>.jsonl
-    Override: PI_AGENT_DIR env var — comma-separated list of root dirs.
+    Override: see clientpaths.pi_agent_search_dirs
+              (PI_CODING_AGENT_SESSION_DIR / PI_CODING_AGENT_DIR / legacy PI_AGENT_DIR).
 
     Each JSONL file contains one JSON object per line:
       - type="session"        — first line; ignored for token counting.
@@ -2410,7 +2423,7 @@ class HermesParser(BaseParser):
 
         for db_path in self._db_paths():
             try:
-                conn = sqlite3.connect(str(db_path))
+                conn = connect_sqlite_readonly(db_path)
                 cur = conn.cursor()
                 try:
                     cur.execute(
@@ -2632,7 +2645,7 @@ class MimoParser(BaseParser):
         out: List[Dict[str, Any]] = []
         if self.db_path.exists():
             try:
-                conn = sqlite3.connect(str(self.db_path))
+                conn = connect_sqlite_readonly(self.db_path)
                 try:
                     cur = conn.cursor()
                     imported_ids = _mimo_imported_message_ids(conn)
@@ -2970,6 +2983,7 @@ class CodingToolsUsageTracker:
 
     def __init__(self):
         self.entries: List[Dict[str, Any]] = []
+        self.source_errors: List[Dict[str, str]] = []
         self.pricing_db = PricingDatabase()
         self.parsers = {
             "opencode": OpenCodeParser(self.pricing_db),
@@ -2990,14 +3004,22 @@ class CodingToolsUsageTracker:
 
     def collect(self, since_date: Optional[datetime] = None, until_date: Optional[datetime] = None, sources: Optional[List[str]] = None):
         self.entries = []
+        self.source_errors = []
         selected = sources or list(self.parsers.keys())
         for name in selected:
             parser = self.parsers.get(name)
             if parser:
-                self.entries.extend(parser.collect(since_date, until_date))
+                try:
+                    self.entries.extend(parser.collect(since_date, until_date))
+                except Exception as exc:
+                    # One broken source (locked dir, unreadable file, bad path)
+                    # must not blank the whole usage view — skip it, keep the rest,
+                    # and record it so consumers can show "unavailable" instead of 0.
+                    logger.warning("tokdash usage source %s failed; skipped", name, exc_info=True)
+                    self.source_errors.append({"source": name, "error": str(exc)})
 
     def to_json(self) -> Dict[str, Any]:
-        return {"entries": self.entries, "total": len(self.entries)}
+        return {"entries": self.entries, "total": len(self.entries), "source_errors": self.source_errors}
 
 
 def _date_range(args: argparse.Namespace) -> Tuple[Optional[datetime], Optional[datetime]]:

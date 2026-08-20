@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Unreleased
+
+### Fixed
+
+- `tokdash setup` on native Windows can now register its Task Scheduler task. The task definition was written as UTF-8, but `schtasks /Create /XML` hands the file to MSXML as a UTF-16 wide string that refuses a declared UTF-8, so registration failed with "unable to switch the encoding" on every native-Windows setup since v1.0.5 — it failed closed, with no half-installed state. The definition is now declared and written as UTF-16 LE with BOM, matching Task Scheduler's own exports, and read back the same way, including the plain-UTF-8 file a previously failed setup left behind, so an upgrade still recognizes it as setup-owned. A `windows-latest` CI step now renders both task variants and registers them with a real `schtasks` — every unit test fakes `schtasks`, which is exactly why this shipped.
+- A single locked or unreadable file no longer errors a whole dashboard view on native Windows. Session scanners and parsers now skip a file they cannot stat or open (for example one held without share-read by the agent itself, antivirus, or the search indexer) instead of letting the error propagate. That skip lasts one request: neither the per-file parser nor the per-tool loader caches a view assembled while a file was locked, so the session comes back on the next request. Both caches are keyed on (path, mtime, size), which for a finished session file never changes again — memoizing the miss would have hidden that session until tokdash restarted. The usage tracker skips a source that fails outright rather than blanking `/api/usage`. A session view that cannot be read for I/O or SQLite reasons degrades to an empty view with a logged warning instead of a 500 — a loader bug still raises, rather than masquerading as "no sessions".
+- `tokdash db resync` run while the dashboard is up no longer ends in a raw traceback and an orphaned temp database on Windows: replacing a database another process still holds open is now reported as a clear "stop the running `tokdash serve` and retry" failure, any partially-done rename is undone, and the temp files are removed — and the command exits non-zero for any failed resync, including the existing refusal to replace a populated database with an empty result. The undo runs for any failed rename, not just a held file: a cross-device rename or a volume I/O error reports its own cause instead of blaming the server. If the undo itself cannot finish, the response says so (`rollback_ok: false`) and names the `.bak` left on disk, which is then the only intact copy of the old database. `tokdash uninstall --purge` names the same cause when the file it could not delete is the usage database a running server is holding.
+- Codex session titles are no longer lost when the path to `state_5.sqlite` contains `#` or `%` — on any platform. The read-only SQLite `file:` URI was built by string interpolation, where `#` truncates the path and `%XX` is percent-decoded; it is now built with `Path.as_uri()`, which encodes both.
+
+### Changed
+
+- `/api/usage` now reports the sources that failed to read in a `source_errors` list (the usage tracker's JSON carries it too), so a source that failed mid-collect can be shown as unavailable instead of a zero that reads as "no usage in range".
+- Reads of live third-party SQLite databases (OpenCode, Hermes, Mimo) now open read-only first with a read-write fallback, matching what the Antigravity reader already did. A plain read-write open takes a write lock that on native Windows can block the client's own writes for the duration of the read.
+- OpenClaw's data location now resolves through the same central path seam as every other client and honors an `OPENCLAW_HOME` override. Its native-Windows location is unverified (no Windows host at research time); if OpenClaw stores its data elsewhere there, point `OPENCLAW_HOME` at it.
+- The Pi override now honors the environment variables the Pi coding agent actually reads: `PI_CODING_AGENT_SESSION_DIR` (the session dir) and `PI_CODING_AGENT_DIR` (the agent dir; sessions live under `<dir>/sessions`). The earlier `PI_AGENT_DIR` comma-separated list still works.
+
 ## 1.9.0 - 2026-08-19
 
 ### Added

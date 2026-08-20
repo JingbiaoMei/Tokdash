@@ -8,6 +8,7 @@ Windows execution is deferred to CI.
 """
 from __future__ import annotations
 
+import codecs
 import subprocess
 from pathlib import Path
 
@@ -88,7 +89,9 @@ def test_task_carries_marker_and_uses_pythonw():
         ["C:\\dd\\runtime\\python-venv\\Scripts\\python.exe", "-m", "tokdash"],
         "127.0.0.1", 55423, marker_id="abc123",
     )
-    assert text.startswith('<?xml version="1.0" encoding="UTF-8"?>')
+    # schtasks /Create /XML hands the file to MSXML as UTF-16 and refuses a UTF-8
+    # declaration — the bytes write_task emits must be what this declaration promises.
+    assert text.startswith('<?xml version="1.0" encoding="UTF-16"?>')
     assert "Managed-by: tokdash-setup" in text
     assert "X-Tokdash-Managed id=abc123" in text
     assert "<Command>C:\\dd\\runtime\\python-venv\\Scripts\\pythonw.exe</Command>" in text
@@ -119,14 +122,21 @@ def test_task_env_snippet_when_non_default_data_dir():
 
 
 def test_task_is_managed_detection_via_file(tmp_path):
+    text = winsched.render_task(["py.exe", "-m", "tokdash"], "127.0.0.1", 1, marker_id="deadbeef")
     task_path = tmp_path / "Tokdash.xml"
-    task_path.write_text(
-        winsched.render_task(["py.exe", "-m", "tokdash"], "127.0.0.1", 1, marker_id="deadbeef"),
-        encoding="utf-8",
-    )
+    # The same bytes write_task writes: UTF-16 LE with a BOM.
+    task_path.write_bytes(codecs.BOM_UTF16_LE + text.encode("utf-16-le"))
     assert winsched.task_is_managed(task_path) is True
     assert winsched.task_is_managed(task_path, "deadbeef") is True
     assert winsched.task_is_managed(task_path, "other") is False
+
+    # Files written by pre-UTF-16 tokdash were plain UTF-8 — including failed setups,
+    # which wrote the file before schtasks rejected it. The reader must still recognize
+    # their marker, or uninstall refuses to remove a task setup itself registered.
+    legacy = tmp_path / "legacy.xml"
+    legacy.write_text(text, encoding="utf-8")
+    assert winsched.task_is_managed(legacy) is True
+    assert winsched.task_is_managed(legacy, "deadbeef") is True
 
     unmarked = tmp_path / "manual.xml"
     unmarked.write_text("<Task><Actions/></Task>", encoding="utf-8")
@@ -162,7 +172,12 @@ def test_write_task_writes_to_paths_location(monkeypatch, tmp_path):
     text = winsched.render_task(["py.exe", "-m", "tokdash"], "127.0.0.1", 1, marker_id="x")
     out = winsched.write_task(text)
     assert out == task_path
-    assert task_path.read_text(encoding="utf-8") == text
+    # Read the written file back as BYTES: the declared encoding must match the actual
+    # byte encoding, because MSXML will not switch encodings once it has started.
+    data = task_path.read_bytes()
+    assert data.startswith(codecs.BOM_UTF16_LE)
+    assert data.decode("utf-16") == text
+    assert 'encoding="UTF-16"' in text.splitlines()[0]
 
 
 # --- lifecycle commands -----------------------------------------------------------
@@ -339,7 +354,7 @@ def test_windows_setup_writes_task_and_manifest(windows_env, fake_winsched, caps
     rc, payload = run_json(["setup", "--auto", "--service", "winsched", "--json"], capsys)
     assert rc == 0 and payload["service"]["type"] == "winsched"
     task_path = paths.winsched_task_path()
-    assert task_path.is_file() and "X-Tokdash-Managed" in task_path.read_text(encoding="utf-8")
+    assert task_path.is_file() and "X-Tokdash-Managed" in task_path.read_bytes().decode("utf-16")
     assert manifest.read_manifest()["service"]["type"] == "winsched"
     assert "service:winsched" in payload["changed"]
 
@@ -357,7 +372,7 @@ def test_windows_setup_force_overwrites_unmarked_task(windows_env, fake_winsched
     task_path.parent.mkdir(parents=True, exist_ok=True)
     task_path.write_text("<Task></Task>", encoding="utf-8")
     rc = run(["setup", "--auto", "--service", "winsched", "--force"])
-    assert rc == 0 and "X-Tokdash-Managed" in task_path.read_text(encoding="utf-8")
+    assert rc == 0 and "X-Tokdash-Managed" in task_path.read_bytes().decode("utf-16")
 
 
 def test_windows_uninstall_removes_winsched(windows_env, fake_winsched, capsys):

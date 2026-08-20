@@ -8,7 +8,7 @@ import os
 import re
 import sqlite3
 from datetime import datetime, timedelta, timezone
-from functools import lru_cache
+from functools import lru_cache, wraps
 from pathlib import Path
 from typing import Any, Callable, Collection, Dict, Iterable, Optional
 
@@ -30,6 +30,7 @@ from .sources.coding_tools import (
     codex_fork_ancestry,
     codex_replay_key_session_id,
     codex_token_event_key,
+    connect_sqlite_readonly,
 )
 from .sources import dsh_log
 from .sources.dsh_log import (
@@ -81,6 +82,110 @@ _SESSION_FILE_PARSER_VERSIONS = {
 # reparse. Parsers added later have no such history and use the plain shape.
 _V159_COMPAT_PARSERS = frozenset({"_parse_codex_session_file", "_parse_claude_session_file"})
 _SESSION_FILE_PARSER_V1_COMPAT_TOKEN = "422eaad7926b4c5362a3c6d7cbcad86dc8244cb8"
+
+
+class _SessionFileUnavailable(Exception):
+    """A session file could not be opened on this attempt (lock / AV / indexer).
+
+    Raised rather than returning None so the parser's cache never memoizes a
+    transient failure. ``lru_cache`` stores return values, not exceptions, and
+    the parser key is (path, mtime_ns, size) — which for a finished session file
+    never changes again. A cached None would therefore hide that session for the
+    life of the process, turning a one-request file lock into a permanent gap.
+    """
+
+
+def _cached_session_parser(maxsize: int = 512):
+    """``lru_cache`` for a session-file parser, minus transient-failure caching.
+
+    Identical to ``lru_cache(maxsize)`` except that a :class:`_SessionFileUnavailable`
+    raised by the parser becomes None for the caller *without* being stored, so the
+    next request retries the file. A genuine parse result — including a None for a
+    file that is readable but unusable — caches as before.
+    """
+
+    def decorate(func):
+        cached = lru_cache(maxsize=maxsize)(func)
+
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            try:
+                return cached(*args, **kwargs)
+            except _SessionFileUnavailable:
+                return None
+
+        wrapper.cache_clear = cached.cache_clear
+        wrapper.cache_info = cached.cache_info
+        # The same cached parser, still raising _SessionFileUnavailable instead of
+        # flattening it to None. Aggregate loaders call this so they can tell a
+        # transient miss apart from a file that genuinely parsed to nothing; every
+        # other caller wants the plain None.
+        wrapper.raising = cached
+        return wrapper
+
+    return decorate
+
+
+class _PartialSessionView(Exception):
+    """An aggregate built while at least one file was transiently unreadable.
+
+    Carries the partial result in ``value``: the caller still gets every session
+    that *could* be read, but the aggregate is not memoized against a signature
+    that will not change again.
+    """
+
+    def __init__(self, value):
+        super().__init__("partial session view")
+        self.value = value
+
+
+def _parse_session_file(parser, path_str: str, mtime_ns: int, size: int, pricing_sig: tuple):
+    """Call a session-file parser, preferring the variant that reports a transient miss.
+
+    ``_cached_session_parser`` hangs the raising variant off the wrapper it returns,
+    but the module attribute a loader reaches it through can be replaced: test
+    instrumentation and any other decorator may substitute a plain compatible
+    callable. Requiring ``.raising`` would turn that into an AttributeError and crash
+    the whole view, so a parser without it falls back to the ordinary call — a
+    transient miss then reads as an empty parse, exactly as it did before the retry
+    existed. Degraded, not broken.
+    """
+    raising = getattr(parser, "raising", None)
+    if raising is None:
+        return parser(path_str, mtime_ns, size, pricing_sig)
+    return raising(path_str, mtime_ns, size, pricing_sig)
+
+
+def _cached_session_aggregate(maxsize: int = 8):
+    """``lru_cache`` for a per-tool loader, minus transient-failure caching.
+
+    Fixing only the file parser is not enough: these loaders are themselves keyed
+    on the file signature, so a result assembled while one file was locked would
+    be memoized with that session missing, and the retry inside the parser would
+    never be reached. A loader signals that case by raising
+    :class:`_PartialSessionView`; ``lru_cache`` does not store exceptions, so the
+    partial view reaches the caller and the next request rebuilds it.
+
+    The cache is kept rather than dropped because these loaders do the expensive
+    per-request work (the session merge fold, the codex subagent replay pass);
+    only a genuinely partial result skips it.
+    """
+
+    def decorate(func):
+        cached = lru_cache(maxsize=maxsize)(func)
+
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            try:
+                return cached(*args, **kwargs)
+            except _PartialSessionView as partial:
+                return partial.value
+
+        wrapper.cache_clear = cached.cache_clear
+        wrapper.cache_info = cached.cache_info
+        return wrapper
+
+    return decorate
 # Stored session rows hold each turn's billing inputs and are priced by whoever
 # reads them, so pricing is not part of their source signature. Editing a rate no
 # longer marks unchanged logs as changed, and two servers running different
@@ -1054,11 +1159,18 @@ def _iter_file_signatures(root: Path) -> tuple[tuple[str, int, int], ...]:
     if not root.exists():
         return ()
     items = []
-    for path in root.rglob("*.jsonl"):
-        try:
-            items.append(_file_signature(path))
-        except FileNotFoundError:
-            continue
+    try:
+        for path in root.rglob("*.jsonl"):
+            try:
+                items.append(_file_signature(path))
+            except OSError:
+                continue
+    except OSError:
+        # pathlib's recursive selector only swallows PermissionError; a different
+        # OSError from a mid-walk is_dir()/scandir (e.g. a cloud-file placeholder on
+        # Windows) would otherwise propagate and error the whole source. Keep the
+        # partial walk, matching the PermissionError behavior.
+        pass
     items.sort(key=lambda item: item[0])
     return tuple(items)
 
@@ -1130,8 +1242,10 @@ def _load_codex_title_map(_state_sig: tuple = ()) -> Dict[str, str]:
         return {}
     titles: Dict[str, str] = {}
     try:
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=0.05)
-    except sqlite3.Error:
+        conn = sqlite3.connect(db_path.resolve().as_uri() + "?mode=ro", uri=True, timeout=0.05)
+    except (sqlite3.Error, OSError, ValueError):
+        # OSError from resolve(), ValueError from as_uri() — both raise before the
+        # connection exists, so sqlite3.Error alone would not cover them.
         return {}
     try:
         conn.execute("PRAGMA query_only = ON")
@@ -1170,7 +1284,7 @@ def _apply_codex_title_map(sessions: Dict[str, Dict[str, Any]]) -> Dict[str, Dic
     return copied
 
 
-@lru_cache(maxsize=512)
+@_cached_session_parser()
 def _parse_codex_session_file(path_str: str, _mtime_ns: int, _size: int, _pricing_sig: tuple = ()) -> Optional[Dict[str, Any]]:
     session_path = Path(path_str)
     if not session_path.exists():
@@ -1195,7 +1309,15 @@ def _parse_codex_session_file(path_str: str, _mtime_ns: int, _size: int, _pricin
     saw_turn_context = False
     activity = new_activity_record(is_primary=True, has_explicit_session_id=False)
 
-    with session_path.open("r", encoding="utf-8") as handle:
+    try:
+        handle = session_path.open("r", encoding="utf-8")
+    except OSError as exc:
+        # A file held without share-read (the client itself, AV, a search indexer)
+        # raises PermissionError on Windows; drop this file rather than erroring
+        # the whole tool's session view. Raised, not returned, so the failure is
+        # not cached against a signature that will never change again.
+        raise _SessionFileUnavailable(path_str) from exc
+    with handle:
         for line in handle:
             try:
                 obj = json.loads(line)
@@ -1429,11 +1551,18 @@ def _parse_codex_session_file(path_str: str, _mtime_ns: int, _size: int, _pricin
     return raw
 
 
-@lru_cache(maxsize=8)
+@_cached_session_aggregate()
 def _load_codex_sessions(signature: tuple[tuple[str, int, int], ...], pricing_sig: tuple = ()) -> Dict[str, Dict[str, Any]]:
     sessions: Dict[str, Dict[str, Any]] = {}
+    transient_miss = False
     for path_str, mtime_ns, size in signature:
-        raw = _parse_codex_session_file(path_str, mtime_ns, size, pricing_sig)
+        try:
+            raw = _parse_session_file(
+                _parse_codex_session_file, path_str, mtime_ns, size, pricing_sig
+            )
+        except _SessionFileUnavailable:
+            transient_miss = True
+            continue
         if raw and raw.get("turns"):
             raw = {key: value for key, value in raw.items() if key != "_activity"}
             session_id = str(raw["session_id"])
@@ -1441,20 +1570,30 @@ def _load_codex_sessions(signature: tuple[tuple[str, int, int], ...], pricing_si
                 sessions[session_id] = _merge_raw_session(sessions[session_id], raw)
             else:
                 sessions[session_id] = raw
-    return _drop_codex_subagent_replay_turns(sessions)
+    result = _drop_codex_subagent_replay_turns(sessions)
+    if transient_miss:
+        raise _PartialSessionView(result)
+    return result
 
 
 def _codex_sessions() -> Dict[str, Dict[str, Any]]:
     return _apply_codex_title_map(_load_codex_sessions(_codex_file_signatures(), _pricing_signature()))
 
 
-@lru_cache(maxsize=8)
+@_cached_session_aggregate()
 def _load_codex_activity_records(
     signature: tuple[tuple[str, int, int], ...], pricing_sig: tuple = ()
 ) -> tuple[dict[str, Any], ...]:
     records: list[dict[str, Any]] = []
+    transient_miss = False
     for path_str, mtime_ns, size in signature:
-        raw = _parse_codex_session_file(path_str, mtime_ns, size, pricing_sig)
+        try:
+            raw = _parse_session_file(
+                _parse_codex_session_file, path_str, mtime_ns, size, pricing_sig
+            )
+        except _SessionFileUnavailable:
+            transient_miss = True
+            continue
         if not raw:
             continue
         records.append(
@@ -1465,6 +1604,8 @@ def _load_codex_activity_records(
                 "activity": raw.get("_activity"),
             }
         )
+    if transient_miss:
+        raise _PartialSessionView(tuple(records))
     return tuple(records)
 
 
@@ -1500,7 +1641,7 @@ def get_codex_activity_insights() -> dict[str, Any]:
     return build_activity_insights(store.query_session_activity_records("codex"))
 
 
-@lru_cache(maxsize=512)
+@_cached_session_parser()
 def _parse_claude_session_file(path_str: str, _mtime_ns: int, _size: int, _pricing_sig: tuple = ()) -> Optional[Dict[str, Any]]:
     session_path = Path(path_str)
     if not session_path.exists():
@@ -1515,7 +1656,15 @@ def _parse_claude_session_file(path_str: str, _mtime_ns: int, _size: int, _prici
     seen_message_ids = set()
     snapshot_turns_by_message_id: Dict[str, Dict[str, Any]] = {}
 
-    with session_path.open("r", encoding="utf-8") as handle:
+    try:
+        handle = session_path.open("r", encoding="utf-8")
+    except OSError as exc:
+        # A file held without share-read (the client itself, AV, a search indexer)
+        # raises PermissionError on Windows; drop this file rather than erroring
+        # the whole tool's session view. Raised, not returned, so the failure is
+        # not cached against a signature that will never change again.
+        raise _SessionFileUnavailable(path_str) from exc
+    with handle:
         for line in handle:
             try:
                 obj = json.loads(line)
@@ -1626,17 +1775,26 @@ def _parse_claude_session_file(path_str: str, _mtime_ns: int, _size: int, _prici
     }
 
 
-@lru_cache(maxsize=8)
+@_cached_session_aggregate()
 def _load_claude_sessions(signature: tuple[tuple[str, int, int], ...], pricing_sig: tuple = ()) -> Dict[str, Dict[str, Any]]:
     sessions: Dict[str, Dict[str, Any]] = {}
+    transient_miss = False
     for path_str, mtime_ns, size in signature:
-        raw = _parse_claude_session_file(path_str, mtime_ns, size, pricing_sig)
+        try:
+            raw = _parse_session_file(
+                _parse_claude_session_file, path_str, mtime_ns, size, pricing_sig
+            )
+        except _SessionFileUnavailable:
+            transient_miss = True
+            continue
         if raw:
             session_id = str(raw["session_id"])
             if session_id in sessions:
                 sessions[session_id] = _merge_raw_session(sessions[session_id], raw)
             else:
                 sessions[session_id] = raw
+    if transient_miss:
+        raise _PartialSessionView(sessions)
     return sessions
 
 
@@ -1656,7 +1814,7 @@ def _opencode_db_signature() -> tuple[tuple[str, int, int], ...]:
     for candidate in (db_path, Path(str(db_path) + "-wal"), Path(str(db_path) + "-shm")):
         try:
             signatures.append(_file_signature(candidate))
-        except FileNotFoundError:
+        except OSError:
             continue
     return tuple(signatures)
 
@@ -1994,7 +2152,7 @@ def _load_opencode_sessions_scalar(
         where_clause = f" WHERE {role_clause}"
 
     sessions: Dict[str, Dict[str, Any]] = {}
-    conn = sqlite3.connect(str(db_path))
+    conn = connect_sqlite_readonly(db_path)
     try:
         session_cols = _sqlite_columns(conn, "session")
         title_expr = "s.title" if "title" in session_cols else "''"
@@ -2082,7 +2240,7 @@ def _load_opencode_sessions_raw_json(
     window_clause, args = _opencode_window_clause(since_ms, until_ms)
 
     sessions: Dict[str, Dict[str, Any]] = {}
-    conn = sqlite3.connect(str(db_path))
+    conn = connect_sqlite_readonly(db_path)
     try:
         session_cols = _sqlite_columns(conn, "session")
         title_expr = "s.title" if "title" in session_cols else "''"
@@ -2166,7 +2324,7 @@ def _pi_session_signatures() -> tuple[tuple[str, int, int], ...]:
         if root.is_file() and root.suffix == ".jsonl":
             try:
                 signatures.append(_file_signature(root))
-            except FileNotFoundError:
+            except OSError:
                 continue
         else:
             signatures.extend(_iter_file_signatures(root))
@@ -2183,7 +2341,7 @@ def _pi_session_id_from_path(path: Path) -> str:
     return stem
 
 
-@lru_cache(maxsize=512)
+@_cached_session_parser()
 def _parse_pi_session_file(path_str: str, _mtime_ns: int, _size: int, _pricing_sig: tuple = ()) -> Optional[Dict[str, Any]]:
     session_path = Path(path_str)
     if not session_path.exists():
@@ -2199,7 +2357,15 @@ def _parse_pi_session_file(path_str: str, _mtime_ns: int, _size: int, _pricing_s
     seen_ids: set[str] = set()
     turn_index = 0
 
-    with session_path.open("r", encoding="utf-8") as handle:
+    try:
+        handle = session_path.open("r", encoding="utf-8")
+    except OSError as exc:
+        # A file held without share-read (the client itself, AV, a search indexer)
+        # raises PermissionError on Windows; drop this file rather than erroring
+        # the whole tool's session view. Raised, not returned, so the failure is
+        # not cached against a signature that will never change again.
+        raise _SessionFileUnavailable(path_str) from exc
+    with handle:
         for line in handle:
             line = line.strip()
             if not line:
@@ -2299,11 +2465,18 @@ def _parse_pi_session_file(path_str: str, _mtime_ns: int, _size: int, _pricing_s
     }
 
 
-@lru_cache(maxsize=8)
+@_cached_session_aggregate()
 def _load_pi_sessions(signature: tuple[tuple[str, int, int], ...], pricing_sig: tuple = ()) -> Dict[str, Dict[str, Any]]:
     sessions: Dict[str, Dict[str, Any]] = {}
+    transient_miss = False
     for path_str, mtime_ns, size in signature:
-        raw = _parse_pi_session_file(path_str, mtime_ns, size, pricing_sig)
+        try:
+            raw = _parse_session_file(
+                _parse_pi_session_file, path_str, mtime_ns, size, pricing_sig
+            )
+        except _SessionFileUnavailable:
+            transient_miss = True
+            continue
         if not raw:
             continue
         session_id = str(raw["session_id"])
@@ -2311,6 +2484,8 @@ def _load_pi_sessions(signature: tuple[tuple[str, int, int], ...], pricing_sig: 
             sessions[session_id] = _merge_raw_session(sessions[session_id], raw)
         else:
             sessions[session_id] = raw
+    if transient_miss:
+        raise _PartialSessionView(sessions)
     return sessions
 
 
@@ -2454,7 +2629,7 @@ def _kimi_usage_record_key(path_str: str, ts_ms: int, model: str, usage: Dict[st
     ).hexdigest()
 
 
-@lru_cache(maxsize=512)
+@_cached_session_parser()
 def _parse_kimi_session_file(path_str: str, _mtime_ns: int, _size: int, _pricing_sig: tuple = ()) -> Optional[Dict[str, Any]]:
     session_path = Path(path_str)
     if not session_path.exists():
@@ -2468,7 +2643,15 @@ def _parse_kimi_session_file(path_str: str, _mtime_ns: int, _size: int, _pricing
     seen_keys: set[str] = set()
     turn_index = 0
 
-    with session_path.open("r", encoding="utf-8") as handle:
+    try:
+        handle = session_path.open("r", encoding="utf-8")
+    except OSError as exc:
+        # A file held without share-read (the client itself, AV, a search indexer)
+        # raises PermissionError on Windows; drop this file rather than erroring
+        # the whole tool's session view. Raised, not returned, so the failure is
+        # not cached against a signature that will never change again.
+        raise _SessionFileUnavailable(path_str) from exc
+    with handle:
         for line in handle:
             line = line.strip()
             if not line:
@@ -2581,11 +2764,18 @@ def _parse_kimi_session_file(path_str: str, _mtime_ns: int, _size: int, _pricing
     }
 
 
-@lru_cache(maxsize=8)
+@_cached_session_aggregate()
 def _load_kimi_sessions(signature: tuple[tuple[str, int, int], ...], pricing_sig: tuple = ()) -> Dict[str, Dict[str, Any]]:
     sessions: Dict[str, Dict[str, Any]] = {}
+    transient_miss = False
     for path_str, mtime_ns, size in signature:
-        raw = _parse_kimi_session_file(path_str, mtime_ns, size, pricing_sig)
+        try:
+            raw = _parse_session_file(
+                _parse_kimi_session_file, path_str, mtime_ns, size, pricing_sig
+            )
+        except _SessionFileUnavailable:
+            transient_miss = True
+            continue
         if not raw:
             continue
         session_id = str(raw["session_id"])
@@ -2593,6 +2783,8 @@ def _load_kimi_sessions(signature: tuple[tuple[str, int, int], ...], pricing_sig
             sessions[session_id] = _merge_raw_session(sessions[session_id], raw)
         else:
             sessions[session_id] = raw
+    if transient_miss:
+        raise _PartialSessionView(sessions)
     return sessions
 
 
@@ -2628,7 +2820,7 @@ def _mimo_db_signature() -> tuple[tuple[str, int, int], ...]:
     for candidate in (db_path, Path(str(db_path) + "-wal"), Path(str(db_path) + "-shm")):
         try:
             signatures.append(_file_signature(candidate))
-        except FileNotFoundError:
+        except OSError:
             continue
     return tuple(signatures)
 
@@ -2661,7 +2853,7 @@ def _load_mimo_sessions_scalar(
     window_clause, args = _opencode_window_clause(since_ms, until_ms)
 
     sessions: Dict[str, Dict[str, Any]] = {}
-    conn = sqlite3.connect(str(db_path))
+    conn = connect_sqlite_readonly(db_path)
     try:
         role_clause = "json_valid(m.data) AND json_extract(m.data, '$.role') = 'assistant'"
         import_clause = _mimo_import_exclusion_clause(conn)
@@ -2759,7 +2951,7 @@ def _load_mimo_sessions_raw_json(
     window_clause, args = _opencode_window_clause(since_ms, until_ms)
 
     sessions: Dict[str, Dict[str, Any]] = {}
-    conn = sqlite3.connect(str(db_path))
+    conn = connect_sqlite_readonly(db_path)
     try:
         # This loader runs when SQLite has no JSON functions, so the imported ids
         # are read whole and matched in Python rather than through json_each.
@@ -3180,22 +3372,32 @@ def _raw_sessions_for_tool(
                 key,
                 exc_info=True,
             )
-    if key == "codex":
-        return _codex_sessions()
-    if key == "claude":
-        return _claude_sessions()
-    if key == "opencode":
-        return _opencode_sessions(since_ms=since_ms, until_ms=until_ms)
-    if key == "pi_agent":
-        return _pi_sessions()
-    if key == "mimo":
-        return _mimo_sessions(since_ms=since_ms, until_ms=until_ms)
-    if key == "kimi":
-        return _kimi_sessions()
-    if key == "dsh":
-        return _dsh_sessions()
-    if key == "reasonix":
-        return _reasonix_sessions()
+    try:
+        if key == "codex":
+            return _codex_sessions()
+        if key == "claude":
+            return _claude_sessions()
+        if key == "opencode":
+            return _opencode_sessions(since_ms=since_ms, until_ms=until_ms)
+        if key == "pi_agent":
+            return _pi_sessions()
+        if key == "mimo":
+            return _mimo_sessions(since_ms=since_ms, until_ms=until_ms)
+        if key == "kimi":
+            return _kimi_sessions()
+        if key == "dsh":
+            return _dsh_sessions()
+        if key == "reasonix":
+            return _reasonix_sessions()
+    except (OSError, sqlite3.Error):
+        # A live-parse failure (locked dir, unreadable file, corrupt DB) degrades
+        # to an empty view instead of erroring the whole tool's session endpoint.
+        # Deliberately narrow: a TypeError/KeyError/ValueError here is a bug in the
+        # loader, not file semantics — and an empty view would hide it as "you have
+        # no sessions", which is the silent-empty failure this guard exists to
+        # prevent.
+        logger.warning("tokdash session source failed tool=%s; returning empty view", key, exc_info=True)
+        return {}
     raise ValueError(f"Unsupported session tool: {tool}")
 
 

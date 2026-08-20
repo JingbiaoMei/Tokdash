@@ -368,16 +368,86 @@ def _resync_usage_database() -> dict:
                 os.environ["TOKDASH_USAGE_DB_PATH"] = old_env
 
         backup_paths: list[str] = []
-        for candidate in (path, Path(str(path) + "-wal"), Path(str(path) + "-shm")):
-            if candidate.exists():
-                backup = candidate.with_name(candidate.name + f".bak.{timestamp}")
-                candidate.replace(backup)
-                backup_paths.append(str(backup))
-        tmp_path.replace(path)
-        for suffix in ("-wal", "-shm"):
-            tmp_sidecar = Path(str(tmp_path) + suffix)
-            if tmp_sidecar.exists():
-                tmp_sidecar.replace(Path(str(path) + suffix))
+        backups: list[tuple[Path, Path]] = []
+        candidates = (path, Path(str(path) + "-wal"), Path(str(path) + "-shm"))
+        try:
+            for candidate in candidates:
+                if candidate.exists():
+                    backup = candidate.with_name(candidate.name + f".bak.{timestamp}")
+                    candidate.replace(backup)
+                    backups.append((candidate, backup))
+                    backup_paths.append(str(backup))
+            tmp_path.replace(path)
+            for suffix in ("-wal", "-shm"):
+                tmp_sidecar = Path(str(tmp_path) + suffix)
+                if tmp_sidecar.exists():
+                    tmp_sidecar.replace(Path(str(path) + suffix))
+        except OSError as exc:
+            # On Windows, SQLite opens the database without FILE_SHARE_DELETE, so while
+            # another tokdash process (e.g. a running `tokdash serve`) still holds it,
+            # these renames raise instead of succeeding as they do on POSIX. Every other
+            # OSError — a cross-device rename, an I/O error on the volume — leaves the
+            # tree in the same half-applied state and needs the same undo, so the catch
+            # is broad and only the *reported cause* is narrowed below. Catching just
+            # PermissionError would let those escape with the backups already renamed
+            # away and no rollback attempted at all. Undo in the pairs the renames were
+            # actually made in, not zipped back against the candidate tuple: a missing
+            # sidecar (any candidate that did not exist) would shift every later pair
+            # onto the wrong path.
+            restored_backups: list[str] = []
+            unrestored_backups: list[str] = []
+            for candidate, backup in backups:
+                try:
+                    backup.replace(candidate)
+                    restored_backups.append(str(backup))
+                except OSError:
+                    # Never swallow this one: the .bak left on disk is now the
+                    # only intact copy of the old database, and the live path
+                    # holds either the half-applied resync or nothing at all.
+                    unrestored_backups.append(str(backup))
+            for leftover in (tmp_path, Path(str(tmp_path) + "-wal"), Path(str(tmp_path) + "-shm")):
+                try:
+                    leftover.unlink()
+                except OSError:
+                    pass
+            if isinstance(exc, PermissionError):
+                # The Windows open-handle case. A retry cannot succeed while the
+                # handle stays open, so the remedy is to stop whoever holds it.
+                cause = (
+                    "the usage database is held open by another process (e.g. a running "
+                    "`tokdash serve`)"
+                )
+                remedy = "stop it and retry `tokdash db resync`"
+                recovery = "Stop the server and restore it by hand"
+            else:
+                # Not evidence of a holder. Name the real error instead of sending
+                # the user to stop a server that is not the cause.
+                cause = f"the usage database could not be replaced ({type(exc).__name__}: {exc})"
+                remedy = "resolve that error and retry `tokdash db resync`"
+                recovery = "You must restore it by hand"
+            if unrestored_backups:
+                error = (
+                    cause
+                    + ", and rolling the resync back did not finish: "
+                    + ", ".join(unrestored_backups)
+                    + " could not be moved back and is now the only intact copy of the "
+                    "old database. " + recovery + " — do not retry `tokdash db resync` first."
+                )
+            else:
+                error = f"{cause}; {remedy}"
+            return {
+                "ok": False,
+                "error": error,
+                # False means the tree was left mid-rollback and needs a human.
+                "rollback_ok": not unrestored_backups,
+                # `backups` means the same thing on both paths: .bak files that
+                # exist on disk right now. A clean rollback renames every one of
+                # them back, so the list is empty; anything that could not be
+                # moved back is still there and is listed here.
+                "backups": unrestored_backups,
+                "restored_backups": restored_backups,
+                "resync_mode": "temp-db-atomic-replace",
+            }
 
         status = UsageEntryStore(path).status()
         status["ok"] = True
@@ -764,8 +834,9 @@ def db_command(action: str, pretty: bool, output: str | None, verify_period: str
         _emit_json(_sync_usage_database(), pretty, output)
         return 0
     if action == "resync":
-        _emit_json(_resync_usage_database(), pretty, output)
-        return 0
+        result = _resync_usage_database()
+        _emit_json(result, pretty, output)
+        return 0 if result.get("ok") else 1
     if action == "verify":
         result = _verify_usage_database(verify_period)
         _emit_json(result, pretty, output)

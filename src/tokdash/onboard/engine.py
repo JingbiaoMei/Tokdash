@@ -1163,7 +1163,13 @@ def _purge_data() -> None:
         if path.exists():  # follows symlinks; ENOENT (already gone) is the idempotent success
             failed.append(str(path))
     if failed:
-        raise OSError("could not purge (still present): " + ", ".join(failed))
+        hint = ""
+        db_held = {str(db), str(db) + "-wal", str(db) + "-shm", str(db) + ".lock"}
+        if db_held & set(failed):
+            # On Windows a running dashboard holds the usage DB open without
+            # FILE_SHARE_DELETE, so the unlink above fails for exactly these files.
+            hint = " — a running `tokdash serve` holds the usage database open; stop it and retry"
+        raise OSError("could not purge (still present): " + ", ".join(failed) + hint)
 
 
 # --- output ---------------------------------------------------------------------

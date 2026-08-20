@@ -643,13 +643,20 @@ def get_tools_data_for_range(since: Optional[datetime], until: Optional[datetime
                 store_data = store.aggregate_entries(sources=stored_sources, since=since, until=until)
                 live_entries = _collect_live_coding_entries(tracker, since, until, _usage_store_live_sources(tracker))
                 live_data = parse_entries_json({"entries": live_entries})
-                return _merge_parsed_usage([store_data, live_data])
+                result = _merge_parsed_usage([store_data, live_data])
+                # Only the live (non-stored) sources were just collected, so this
+                # lists the sources that failed to read — the UI/API can then show
+                # "unavailable" instead of a zero that reads as "no usage".
+                result["source_errors"] = [e["source"] for e in tracker.source_errors]
+                return result
             except Exception:
                 # Keep the DB fail-open: serving correctness should not depend on
                 # cache health while this backend is still evolving.
                 pass
         tracker.collect(since, until)
-        return parse_entries_json(tracker.to_json())
+        result = parse_entries_json(tracker.to_json())
+        result["source_errors"] = [e["source"] for e in tracker.source_errors]
+        return result
 
     since_str = since.astimezone().strftime("%Y-%m-%d")
     until_str = (until.astimezone() - timedelta(microseconds=1)).strftime("%Y-%m-%d")
@@ -792,6 +799,10 @@ def compute_usage(period: str, date_from: Optional[str] = None, date_to: Optiona
         "top_models": combined_models[:5],
         "openclaw_models": openclaw_models,
         "combined_models": combined_models,
+        # Sources that failed to read this collection (empty when all succeeded):
+        # lets the UI and API consumers tell a failed source apart from a source
+        # that genuinely had no usage in range.
+        "source_errors": coding_data.get("source_errors", []),
         "timestamp": datetime.now().isoformat(),
     }
 

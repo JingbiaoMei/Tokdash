@@ -245,7 +245,7 @@ def test_zcode_date_window_half_open(monkeypatch, tmp_path):
 def test_zcode_default_home_path(monkeypatch, tmp_path):
     """Without ZCODE_HOME the DB is read from ~/.zcode/cli/db/db.sqlite."""
     monkeypatch.delenv("ZCODE_HOME", raising=False)
-    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
     db_path = tmp_path / ".zcode" / "cli" / "db" / "db.sqlite"
     db_path.parent.mkdir(parents=True)
     _create_db(db_path, [_row()])

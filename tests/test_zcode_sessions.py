@@ -560,3 +560,109 @@ def test_detail_roundtrip(monkeypatch, tmp_path):
     with pytest.raises(FileNotFoundError):
         get_session_detail("zcode", "nope")
 
+def test_missing_model_table_is_cached_empty(monkeypatch, tmp_path):
+    """turn_usage without model_usage (a partially migrated schema) is a
+    legitimate empty success, not a read failure: the read is cached and
+    a later snapshot failure still serves the empty result."""
+    db = _db_path(tmp_path)
+    conn = sqlite3.connect(str(db))
+    conn.executescript(SESSION_DDL + TURN_USAGE_DDL)
+    conn.execute(
+        "INSERT INTO session (id, parent_id, directory, title, time_created, "
+        "time_updated) VALUES (?,?,?,?,?,?)",
+        ("s1", None, "/tmp/proj", "p", BASE, BASE + 1),
+    )
+    conn.execute(
+        "INSERT INTO turn_usage (session_id, turn_id, status, started_at, "
+        "completed_at, duration_ms) VALUES (?,?,?,?,?,?)",
+        ("s1", "t1", "completed", BASE, BASE + 10_000, 10_000),
+    )
+    conn.commit()
+    conn.close()
+    monkeypatch.setenv("ZCODE_HOME", str(db.parent.parent.parent))
+    assert _zcode_sessions() == {}
+    assert sessions._zcode_sessions_cache  # the empty IS cached
+
+
+def test_late_store_under_stale_signature_is_skipped(monkeypatch, tmp_path):
+    """A result computed under an older signature must not be stored after
+    a concurrent load advanced it (the phase-1 interleaved-store failure
+    mode, pinned for the session cache): it is returned for its own
+    request, but the cache keeps the newer data for the same key."""
+    db = _db_path(tmp_path)
+    _write(
+        db,
+        sess=[_sess("s1")],
+        turns=[_turn(sid="s1", tid="t1", started=BASE + 1_000,
+                     completed=BASE + 2_000, duration=1_000)],
+        models=[_mu(mid="m1", sid="s1", tid="t1", started=BASE + 1_100)],
+    )
+    sig_a = (sessions._zcode_db_signature(), sessions._pricing_signature())
+    raw_a = _load(monkeypatch, tmp_path, db)
+    assert set(raw_a) == {"s1"}
+
+    # Collector B rewrites the source (new signature) and completes.
+    _write(
+        db,
+        sess=[_sess("s1"), _sess("s2")],
+        turns=[
+            _turn(sid="s1", tid="t1", started=BASE + 1_000,
+                  completed=BASE + 2_000, duration=1_000),
+            _turn(sid="s2", tid="t2", started=BASE + 3_000,
+                  completed=BASE + 4_000, duration=1_000),
+        ],
+        models=[
+            _mu(mid="m1", sid="s1", tid="t1", started=BASE + 1_100),
+            _mu(mid="m2", sid="s2", tid="t2", started=BASE + 3_100),
+        ],
+    )
+    sig_b = (sessions._zcode_db_signature(), sessions._pricing_signature())
+    assert sig_b != sig_a
+    raw_b = _load(monkeypatch, tmp_path, db)
+    assert set(raw_b) == {"s1", "s2"}
+
+    # A's in-flight result lands late with the old signature: returned
+    # for its own request, but not stored.
+    stale = dict(raw_a)
+    assert sessions._zcode_store(sig_a, (None, None), stale) is stale
+    # The cache still serves B's data for the same key.
+    assert _load(monkeypatch, tmp_path, db) == raw_b
+    # Positive control: storing under the current signature does work.
+    replacement = dict(raw_b)
+    replacement["s9"] = {"tool": "zcode", "session_id": "s9"}
+    assert sessions._zcode_store(sig_b, (None, None), replacement) is replacement
+    assert _load(monkeypatch, tmp_path, db) == replacement
+
+
+def test_prior_boundary_lookup_is_restricted_to_in_window_sessions(monkeypatch, tmp_path):
+    """The prior-boundary lookup is restricted to set-A (in-window)
+    sessions: a session present only via its next boundary (set B) gets no
+    _prior_event_ms, even though it has a prior turn with measured work."""
+    S, U = BASE + 60_000, BASE + 120_000
+    db = _db_path(tmp_path)
+    _write(
+        db,
+        sess=[_sess("s-in"), _sess("s-out")],
+        turns=[
+            # s-in (set A): prior turn + in-window token turn.
+            _turn(sid="s-in", tid="t0", started=S - 15_000,
+                  completed=S - 5_000, duration=10_000),
+            _turn(sid="s-in", tid="t1", started=S + 1_000,
+                  completed=S + 10_000, duration=9_000),
+            # s-out (set B): prior turn + a next-boundary turn whose
+            # measured work overlaps the window.
+            _turn(sid="s-out", tid="t2", started=S - 20_000,
+                  completed=S - 10_000, duration=10_000),
+            _turn(sid="s-out", tid="t3", started=U - 20_000,
+                  completed=U + 10_000, duration=30_000),
+        ],
+        models=[_mu(mid="m1", sid="s-in", tid="t1", started=S + 2_000)],
+    )
+    raw = _load(monkeypatch, tmp_path, db, since_ms=S, until_ms=U)
+    assert "s-in" in raw and raw["s-in"]["turns"]
+    assert raw["s-in"]["_prior_event_ms"] == S - 5_000
+    assert raw["s-in"]["_prior_work_ms"] == 10_000
+    assert "s-out" in raw
+    assert raw["s-out"]["turns"] == []
+    assert raw["s-out"]["_next_event_ms"] == U + 10_000
+    assert "_prior_event_ms" not in raw["s-out"]

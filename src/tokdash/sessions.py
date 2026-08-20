@@ -3640,14 +3640,22 @@ def _zcode_load_sessions(
         turn["error_code"] = row["error_code"]
         raw["turns"].append(turn)
 
-    # Query 3 - next boundary: the nearest FINALIZED turn per
-    # top-level session at/after until_ms (a still-running turn has no
-    # measurable work yet). For a session with in-window turns this is
-    # the gap anchor (plus its measured work when recorded); for a
-    # session without any, it enters the raw dict (activity-only) iff
-    # its measured work overlaps the window. The nearest next turn is
-    # the only one that can matter: later same-session turns start
-    # after it completes, so their clipped in-window part is empty.
+    # True set-A: the sessions Query 1 selected. Snapshot before Query 3
+    # because it adds set-B sessions to the dict.
+    set_a = list(sessions)
+
+    # Query 3 - next boundary: the nearest FINALIZED turn per top-level
+    # session at/after until_ms, selected in SQL (the correlated MIN
+    # keeps one row per session instead of materializing every later
+    # turn into Python; the schema has no completed_at index, so the
+    # restriction to one row per session is the only containment). A
+    # still-running turn has no measurable work yet. For a session with
+    # in-window turns (set A) this is the gap anchor (plus its measured
+    # work when recorded); for a session without any (set B) it enters
+    # the raw dict (activity-only) iff its measured work overlaps the
+    # window. The nearest next turn is the only one that can matter:
+    # later same-session turns start after it completes, so their
+    # clipped in-window part is empty.
     if until_ms is not None:
         cur.execute(
             """
@@ -3655,12 +3663,18 @@ def _zcode_load_sessions(
                    t.completed_at, t.duration_ms
             FROM turn_usage t
             JOIN session s ON s.id = t.session_id
-            WHERE s.parent_id IS NULL AND t.completed_at >= ?
-            ORDER BY t.session_id, t.completed_at
+            WHERE s.parent_id IS NULL
+              AND t.completed_at >= ?
+              AND t.completed_at = (
+                    SELECT MIN(t2.completed_at) FROM turn_usage t2
+                    WHERE t2.session_id = t.session_id
+                      AND t2.completed_at >= ?
+                  )
+            ORDER BY t.session_id
             """,
-            (hi,),
+            (hi, hi),
         )
-        seen: set = set()
+        seen: set = set()  # a tie at the MIN timestamp can yield two rows
         for row in cur.fetchall():
             session_id = str(row["session_id"])
             if session_id in seen:
@@ -3682,34 +3696,39 @@ def _zcode_load_sessions(
                 raw["_next_work_ms"] = work
 
     # Query 4 - prior boundary, set-A sessions only (a set-B session's
-    # prior work ends before the window and clips to empty). started_at
-    # < lo is an index-usable superset of E < lo because
-    # started_at <= E; rows with E in-window are filtered out.
-    if since_ms is not None and sessions:
-        cur.execute(
-            """
-            SELECT t.session_id, t.started_at, t.completed_at, t.duration_ms
-            FROM turn_usage t
-            JOIN session s ON s.id = t.session_id
-            WHERE s.parent_id IS NULL AND t.started_at < ?
-            """,
-            (lo,),
-        )
+    # prior work ends before the window and clips to empty). The IN list
+    # is the point: the unbounded query fetched every turn before
+    # since_ms for every session in the database, so a "today" request
+    # read the whole history. started_at < lo is an index-usable
+    # superset of E < lo because started_at <= E; rows with E in-window
+    # are filtered out. Chunked like Query 2 for the bind limit.
+    if since_ms is not None and set_a:
         best: Dict[str, tuple] = {}
-        for row in cur.fetchall():
-            e_ms = int(
-                row["completed_at"] if row["completed_at"] is not None else row["started_at"]
+        for start in range(0, len(set_a), 400):
+            chunk = set_a[start : start + 400]
+            cur.execute(
+                f"""
+                SELECT t.session_id, t.started_at, t.completed_at, t.duration_ms
+                FROM turn_usage t
+                WHERE t.session_id IN ({", ".join("?" * len(chunk))})
+                  AND t.started_at < ?
+                """,
+                (*chunk, lo),
             )
-            if e_ms >= lo:
-                continue
-            session_id = str(row["session_id"])
-            current = best.get(session_id)
-            if current is None or e_ms > current[0]:
-                best[session_id] = (e_ms, row["duration_ms"])
+            for row in cur.fetchall():
+                e_ms = int(
+                    row["completed_at"]
+                    if row["completed_at"] is not None
+                    else row["started_at"]
+                )
+                if e_ms >= lo:
+                    continue
+                session_id = str(row["session_id"])
+                current = best.get(session_id)
+                if current is None or e_ms > current[0]:
+                    best[session_id] = (e_ms, row["duration_ms"])
         for session_id, (e_ms, duration) in best.items():
-            raw = sessions.get(session_id)
-            if raw is None:
-                continue
+            raw = sessions[session_id]
             raw["_prior_event_ms"] = e_ms
             if duration is not None and int(duration or 0) > 0:
                 raw["_prior_work_ms"] = int(duration)
@@ -3757,13 +3776,15 @@ def _zcode_sessions(
             conn = snap.conn
             conn.row_factory = sqlite3.Row
             cur = conn.cursor()
-            # Tri-state probe: an absent table is an empty success, a
-            # probe error is a failed read (never an "absent table").
+            # Tri-state probe over BOTH required tables: an absent (or
+            # partially migrated) schema is a legitimate empty success,
+            # a probe error is a failed read (never an "absent table").
             cur.execute(
-                "SELECT 1 FROM sqlite_master "
-                "WHERE type='table' AND name='turn_usage'"
+                "SELECT name FROM sqlite_master "
+                "WHERE type='table' AND name IN ('turn_usage', 'model_usage')"
             )
-            if cur.fetchone() is None:
+            tables = {row[0] for row in cur.fetchall()}
+            if tables != {"turn_usage", "model_usage"}:
                 raw_sessions = {}
             else:
                 raw_sessions = _zcode_load_sessions(conn, since_ms, until_ms)

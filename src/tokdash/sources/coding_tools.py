@@ -2892,11 +2892,11 @@ class ZCodeParser(BaseParser):
         return zcode_snapshot_signatures(self.db_path)
 
     def _open_snapshot(self) -> Optional[Tuple[sqlite3.Connection, Path]]:
-        # Thin wrapper over the shared snapshot helper: sessions.py's
-        # ZCode session loader uses the zcode_snapshot context manager
-        # on top of the same helper, so the coherence rule (signatures
-        # before/after the copy, bounded retry, no -shm copy, temp-dir
-        # cleanup) has exactly one implementation.
+        # Direct seam to the shared open helper (collect() goes through
+        # the zcode_snapshot context manager, which owns the close and
+        # cleanup on top of the same helper), so the coherence rule
+        # (signatures before/after the copy, bounded retry, no -shm
+        # copy, temp-dir cleanup) has exactly one implementation.
         return _zcode_open_snapshot(self.db_path)
 
     def _build_entry(self, row: sqlite3.Row) -> Optional[Dict[str, Any]]:
@@ -2969,11 +2969,11 @@ class ZCodeParser(BaseParser):
 
         out: List[Dict[str, Any]] = []
         read_ok = False
+        snap = None
         if self.db_path.exists():
-            snap = self._open_snapshot()
-            if snap is not None:
-                conn, snap_dir = snap
-                try:
+            try:
+                with zcode_snapshot(self.db_path) as snap:
+                    conn = snap.conn
                     conn.row_factory = sqlite3.Row
                     cur = conn.cursor()
                     # Probe sqlite_master inline instead of via
@@ -3005,22 +3005,16 @@ class ZCodeParser(BaseParser):
                             if entry is not None:
                                 out.append(entry)
                     read_ok = True
-                except Exception:
-                    # Transient read failure (snapshot copy, connect, probe, or query): a
-                    # restored permission or cleared SQLite error may not
-                    # change the file signatures, so the empty result must
-                    # NOT be cached - the next collect retries.
-                    read_ok = False
-                finally:
-                    # Removal runs even if close() raises; a close error
-                    # degrades this read to a failed (uncached) one
-                    # instead of escaping collect().
-                    try:
-                        conn.close()
-                    except Exception:
-                        read_ok = False
-                    finally:
-                        shutil.rmtree(snap_dir, ignore_errors=True)
+            except Exception:
+                # Transient read failure (snapshot copy, connect, probe, or
+                # query): a restored permission or cleared SQLite error may
+                # not change the file signatures, so the empty result must
+                # NOT be cached - the next collect retries.
+                read_ok = False
+            if read_ok and snap.close_failed:
+                # The data was read and is returned, but a snapshot that
+                # could not be closed counts as a failed (uncached) read.
+                read_ok = False
 
         if read_ok:
             with type(self)._cache_lock:

@@ -1,6 +1,7 @@
 """Tests for ZCodeParser (temp-dir snapshot reads of a WAL-mode source DB)."""
 import shutil
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -388,6 +389,27 @@ class _FlakyCursor:
         return getattr(self._cur, name)
 
 
+class _ProxySnapshot:
+    """Presents a substituted connection while close_failed/tmpdir stay
+    those of the real snapshot (collect reads both after the with block)."""
+
+    def __init__(self, snap, conn):
+        object.__setattr__(self, "_snap", snap)
+        object.__setattr__(self, "_conn", conn)
+
+    @property
+    def conn(self):
+        return self._conn
+
+    @property
+    def close_failed(self):
+        return self._snap.close_failed
+
+    @property
+    def tmpdir(self):
+        return self._snap.tmpdir
+
+
 class _FlakyConnection:
     """Wraps a real connection; every cursor() fails the first
     sqlite_master query exactly once. Attribute writes (row_factory) and
@@ -412,6 +434,8 @@ def test_zcode_table_probe_failure_not_cached(monkeypatch, tmp_path):
     "absent table": the empty result is not cached, and the next collect
     retries and returns the rows even though the file signatures are
     unchanged."""
+    import tokdash.sources.coding_tools as ct
+
     home = tmp_path / ".zcode"
     db_path = home / "cli" / "db" / "db.sqlite"
     db_path.parent.mkdir(parents=True)
@@ -419,16 +443,17 @@ def test_zcode_table_probe_failure_not_cached(monkeypatch, tmp_path):
     monkeypatch.setenv("ZCODE_HOME", str(home))
 
     parser = ZCodeParser(PricingDatabase())
-    real_open = parser._open_snapshot
+    real_snapshot = ct.zcode_snapshot
     # One flaky state shared across collects: the first probe fails, the
     # retry's probe succeeds.
     flaky = {"probe_failed": False}
 
-    def flaky_open():
-        conn, tmpdir = real_open()
-        return _FlakyConnection(conn, flaky), tmpdir
+    @contextmanager
+    def flaky_snapshot(db_path):
+        with real_snapshot(db_path) as snap:
+            yield _ProxySnapshot(snap, _FlakyConnection(snap.conn, flaky))
 
-    monkeypatch.setattr(parser, "_open_snapshot", flaky_open)
+    monkeypatch.setattr(ct, "zcode_snapshot", flaky_snapshot)
 
     assert parser.collect(None, None) == []
     # Same files on disk, same signature: the probe failure must not have
@@ -495,6 +520,8 @@ def test_zcode_stale_read_not_stored_after_signature_change(monkeypatch, tmp_pat
     while a concurrent collect advanced the signature) is returned for that
     request but NOT stored under the new signature - no indefinite stale
     cache."""
+    import tokdash.sources.coding_tools as ct
+
     home = tmp_path / ".zcode"
     db_path = home / "cli" / "db" / "db.sqlite"
     db_path.parent.mkdir(parents=True)
@@ -502,23 +529,28 @@ def test_zcode_stale_read_not_stored_after_signature_change(monkeypatch, tmp_pat
     monkeypatch.setenv("ZCODE_HOME", str(home))
     parser = ZCodeParser(PricingDatabase())
 
-    real_open = parser._open_snapshot
+    real_snapshot = ct.zcode_snapshot
     state = {"intercepted": False}
 
-    def interleaved_open():
-        # A's snapshot, taken before the source change below.
-        snap = real_open()
-        if not state["intercepted"]:
-            state["intercepted"] = True
-            # B: the source gains a row (new signature) and a full collect
-            # runs to completion, advancing _query_cache_sig and caching
-            # the fresh data.
-            db_path.unlink()
-            _create_db(db_path, [_row(), _row(row_id="mu-2", logical="lr-2", attempt=1)])
-            assert len(parser.collect(None, None)) == 2
-        return snap
+    @contextmanager
+    def interleaved_snapshot(db_path):
+        cm = real_snapshot(db_path)
+        snap = cm.__enter__()
+        try:
+            if not state["intercepted"]:
+                state["intercepted"] = True
+                # B: the source gains a row (new signature) and a full
+                # collect runs to completion, advancing _query_cache_sig
+                # and caching the fresh data, while A's (stale) snapshot
+                # is still open.
+                db_path.unlink()
+                _create_db(db_path, [_row(), _row(row_id="mu-2", logical="lr-2", attempt=1)])
+                assert len(parser.collect(None, None)) == 2
+            yield snap
+        finally:
+            cm.__exit__(None, None, None)
 
-    monkeypatch.setattr(parser, "_open_snapshot", interleaved_open)
+    monkeypatch.setattr(ct, "zcode_snapshot", interleaved_snapshot)
 
     # A finishes its (stale) query and must skip the store.
     assert len(parser.collect(None, None)) == 1
@@ -650,13 +682,16 @@ def test_zcode_close_failure_cleans_snapshot_and_does_not_cache(monkeypatch, tmp
 
     monkeypatch.setattr(ct.tempfile, "mkdtemp", fake_mkdtemp)
 
-    real_open = parser._open_snapshot
+    # The context manager closes the connection IT opened (not the one
+    # handed to collect), so the close failure is injected at the open
+    # helper seam underneath the real manager.
+    real_open = ct._zcode_open_snapshot
 
-    def close_raising_open():
-        conn, tmpdir = real_open()
+    def close_raising_open(db_path):
+        conn, tmpdir = real_open(db_path)
         return _CloseRaisingConnection(conn), tmpdir
 
-    monkeypatch.setattr(parser, "_open_snapshot", close_raising_open)
+    monkeypatch.setattr(ct, "_zcode_open_snapshot", close_raising_open)
 
     entries = parser.collect(None, None)
     # The data is read and returned, but the read counts as failed:

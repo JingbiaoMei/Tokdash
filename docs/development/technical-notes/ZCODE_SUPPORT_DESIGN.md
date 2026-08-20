@@ -100,13 +100,17 @@ Unverified assumptions, each pinned to a first-row check in
   `#` in the path and silently drops `mode=ro`. A failed read-only open skips
   the source for that window - there is deliberately no read-write fallback,
   because a reader must never be able to modify WAL/SHM state.
-- Failed reads (connect or query errors) are **not** cached: a restored
+- Failed reads (connect, probe, or query errors) are **not** cached: a restored
   permission or cleared transient SQLite error may not change the file
   signatures, so caching an empty result would keep it stale until a file
   happens to change. The next collect retries.
-- Query: half-open window `WHERE started_at >= ? AND started_at < ?`,
-  guarded by `_sqlite_table_exists`, one SELECT by column name so a future
-  schema change degrades to a skipped source rather than a crash.
+- Query: half-open window `WHERE started_at >= ? AND started_at < ?`, one
+  SELECT by column name so a future schema change degrades to a skipped
+  source rather than a crash. Presence of `model_usage` is probed against
+  `sqlite_master` inline rather than via `_sqlite_table_exists` (which
+  swallows `sqlite3.Error` and returns False): an absent table is a
+  legitimate empty success, but a probe error must surface as a failed read
+  rather than be mistaken for an absent table and cached as one.
 - Cache freshness: the file signature covers `db.sqlite`, `db.sqlite-wal`
   **and** `db.sqlite-shm` (Mimo's `_file_signatures` shape). A signature on
   the main file alone goes stale while ZCode is running, because new rows sit

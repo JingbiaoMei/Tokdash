@@ -356,6 +356,71 @@ def test_zcode_failed_read_not_cached(monkeypatch, tmp_path):
     assert len(parser.collect(None, None)) == 1
 
 
+class _FlakyCursor:
+    """Wraps a real cursor; fails the first sqlite_master query exactly
+    once. sqlite3.Cursor is an immutable C type, so the wrapper forwards
+    everything else instead of shadowing methods."""
+
+    def __init__(self, cur, flaky):
+        self._cur = cur
+        self._flaky = flaky
+
+    def execute(self, sql, *params, **kw):
+        if not self._flaky["probe_failed"] and "sqlite_master" in sql:
+            self._flaky["probe_failed"] = True
+            raise sqlite3.OperationalError("simulated probe failure")
+        return self._cur.execute(sql, *params, **kw)
+
+    def __getattr__(self, name):
+        return getattr(self._cur, name)
+
+
+class _FlakyConnection:
+    """Wraps a real connection; every cursor() fails the first
+    sqlite_master query exactly once. Attribute writes (row_factory) and
+    reads (close) forward to the wrapped connection."""
+
+    def __init__(self, conn, flaky):
+        object.__setattr__(self, "_conn", conn)
+        object.__setattr__(self, "_flaky", flaky)
+
+    def cursor(self):
+        return _FlakyCursor(self._conn.cursor(), self._flaky)
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+    def __setattr__(self, name, value):
+        setattr(self._conn, name, value)
+
+
+def test_zcode_table_probe_failure_not_cached(monkeypatch, tmp_path):
+    """A transient sqlite_master probe error is a failed read, not an
+    "absent table": the empty result is not cached, and the next collect
+    retries and returns the rows even though the file signatures are
+    unchanged."""
+    home = tmp_path / ".zcode"
+    db_path = home / "cli" / "db" / "db.sqlite"
+    db_path.parent.mkdir(parents=True)
+    _create_db(db_path, [_row()])
+    monkeypatch.setenv("ZCODE_HOME", str(home))
+
+    parser = ZCodeParser(PricingDatabase())
+    real_readonly = parser._connect_readonly
+    # One flaky state shared across collects: the first probe fails, the
+    # retry's probe succeeds.
+    flaky = {"probe_failed": False}
+    monkeypatch.setattr(
+        parser, "_connect_readonly",
+        lambda: _FlakyConnection(real_readonly(), flaky),
+    )
+
+    assert parser.collect(None, None) == []
+    # Same files on disk, same signature: the probe failure must not have
+    # been cached as an "absent table" empty success.
+    assert len(parser.collect(None, None)) == 1
+
+
 def test_zcode_registered_in_tracker():
     tracker = CodingToolsUsageTracker()
     assert "zcode" in tracker.parsers

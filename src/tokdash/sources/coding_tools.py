@@ -2840,7 +2840,16 @@ class ZCodeParser(BaseParser):
                 try:
                     conn.row_factory = sqlite3.Row
                     cur = conn.cursor()
-                    if _sqlite_table_exists(conn, "model_usage"):
+                    # Probe sqlite_master inline instead of via
+                    # _sqlite_table_exists (which swallows sqlite3.Error):
+                    # an absent table is a legitimate empty success, but a
+                    # probe error must surface as a failed read rather than
+                    # be mistaken for an absent table and cached as such.
+                    cur.execute(
+                        "SELECT 1 FROM sqlite_master "
+                        "WHERE type='table' AND name='model_usage'"
+                    )
+                    if cur.fetchone() is not None:
                         cur.execute(
                             """
                             SELECT id, session_id, model_id, provider_id, started_at,
@@ -2861,10 +2870,10 @@ class ZCodeParser(BaseParser):
                                 out.append(entry)
                     read_ok = True
                 except Exception:
-                    # Transient read failure (connect or query): a restored
-                    # permission or cleared SQLite error may not change the
-                    # file signatures, so the empty result must NOT be
-                    # cached - the next collect retries.
+                    # Transient read failure (connect, probe, or query): a
+                    # restored permission or cleared SQLite error may not
+                    # change the file signatures, so the empty result must
+                    # NOT be cached - the next collect retries.
                     read_ok = False
                 finally:
                     conn.close()

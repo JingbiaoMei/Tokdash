@@ -345,6 +345,18 @@ def test_qwen3_8_max_pricing_and_aliases():
         )
 
 
+def test_qwen3_8_27b_pricing_and_aliases():
+    """Qwen3.8-27B must resolve at its official Model Studio pricing."""
+    db = PricingDatabase()
+
+    expected_cost = (1000 * 0.5 + 2000 * 3.0 + 3000 * 0.05 + 4000 * 0.5) / 1_000_000
+    for model in ["qwen3.8-27b", "qwen/qwen3.8-27b", "vllm-hpc/qwen3.8-27B-FP8"]:
+        cost = db.get_cost(model, 1000, 2000, 3000, 4000)
+        assert abs(cost - expected_cost) < 1e-12, (
+            f"{model!r} should resolve to Qwen3.8-27B pricing"
+        )
+
+
 def test_qwen3_7_flash_pricing():
     """Qwen3.7-Flash must resolve at OpenRouter pricing across spellings."""
     db = PricingDatabase()

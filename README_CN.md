@@ -24,6 +24,7 @@
   <a href="https://hermes-agent.nousresearch.com/" title="Hermes"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/hermes.png" alt="Hermes" height="34"></a>
   <a href="https://github.com/deepseek-ai/deepseek-harness" title="DeepSeek Harness"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/dsh.png" alt="DeepSeek Harness" height="34"></a>
   <a href="https://reasonix.io/" title="Reasonix"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/reasonix.png" alt="Reasonix" height="34"></a>
+  <a href="https://zcode.z.ai" title="ZCode"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/zcode.png" alt="ZCode" height="34"></a>
 </p>
 
 <p align="center">
@@ -448,6 +449,7 @@ Tokdash 还会从 `$GROK_HOME/logs/unified.jsonl` 本地统计 Grok Build token�
 DeepSeek Harness（`dsh`）的用量与会话从 `$DSH_HOME/sessions/*/*/session.jsonl.zstd`（或未压缩的 `session.jsonl`）本地读取，`DSH_HOME` 默认为 `~/.dsh`。每个日志由多个独立 zstd 帧拼接而成；Tokdash 会解码全部帧，把每个 step 的早期 usage chunk 折叠进最终消息而不是重复计数，并跳过 fork 会话继承自父会话的前缀，确保父会话与子会话不会对同一批 token 重复计费。
 
 Reasonix 的用量与会话从 `$REASONIX_HOME`（默认 `~/.reasonix`）本地读取：逐次请求的 token 来自每日 `stats/YYYY-MM-DD.jsonl` 日志，会话结构来自 `projects/*/sessions/*.jsonl`。Reasonix 连接的是其 `config.toml` 中配置的任意供应商，因此每行的 `provider/model` 会照常归因并按现有价格库计价；没有公开价格的自建模型只统计 token，费用为 0。Reasonix 按请求记录用量，且不会写入会话 ID，所以会话浏览器中的行只有轮次、项目与时长，没有 token 数 —— 完整总量在概览与统计中。
+ZCode 的用量从 `$ZCODE_HOME/cli/db/db.sqlite`（默认 `~/.zcode/cli/db/db.sqlite`，`ZCODE_HOME` 跟随 ZCode 自身设置）本地读取。`model_usage` 表中每行是一次模型请求（含重试），该行的 `model_id` 照常按现有价格库计价，`provider_id`（如 `builtin:zai-start-plan`）只作标签。ZCode 的 `input_tokens` 把已缓存与未缓存的提示词 token 合在一起计数，因此缓存部分单独分桶、按缓存费率计费；reasoning token 与 output 分开显示，但按 output 费率计费。ZCode 也会出现在 Sessions 标签页：turn 从同一数据库读取，按 (turn, model) 用相同规则计费，只读顶层会话；没有可计费 token 的 turn 仍会将其测量时长计入该工具的活跃时间。ZCode Coding Plan 额度属于远程账户数据，不在本地解析范围内。
 
 `tokdash setup` 会提供一个可选的额度步骤（按服务商的网络授权，默认为否，以及轮询间隔），`tokdash doctor` 会报告额度状态：总开关、按服务商授权、终止开关、生效间隔及其来源、上次轮询时间，以及已保存的快照数量。
 

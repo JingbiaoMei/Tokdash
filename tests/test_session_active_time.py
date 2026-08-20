@@ -9,6 +9,7 @@ from tokdash.sessions import (
     _active_intervals,
     _measured_intervals,
     _merged_interval_ms,
+    _session_active_intervals,
     _summarize_session,
     active_gap_cap_ms,
     get_sessions_data,
@@ -535,3 +536,18 @@ def test_opencode_loader_spanning_both_edges_credits_only_the_window(tmp_path):
     # events truncated to the cap, then 30s carried over the right edge.
     assert summary["active_ms"] == 30_000 + ACTIVE_GAP_CAP_MS_DEFAULT + 30_000
     assert summary["active_ms"] == 360_000
+
+
+def test_zcode_activity_events_and_boundary_work():
+    """ZCode activity events and boundary work stamps feed the interval
+    builder: an activity event credits its work, and a next-boundary event
+    carries the overlapping measured work from outside the window."""
+    raw = {
+        "tool": "zcode", "session_id": "s", "turns": [],
+        "_activity_events": [(BASE_MS + 2 * MINUTE, 60_000)],
+        "_next_event_ms": BASE_MS + 5 * MINUTE,
+        "_next_work_ms": 4 * MINUTE,
+    }
+    intervals = _session_active_intervals(raw, 5 * MINUTE, None, None)
+    assert (BASE_MS + MINUTE, BASE_MS + 2 * MINUTE) in intervals
+    assert (BASE_MS + MINUTE, BASE_MS + 5 * MINUTE) in intervals

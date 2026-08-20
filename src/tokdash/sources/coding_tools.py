@@ -11,13 +11,17 @@ import json
 import logging
 import os
 import re
+import shutil
 import sqlite3
+import tempfile
+import threading
 import time as _time
 from abc import ABC, abstractmethod
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, ClassVar, Dict, List, Optional, Tuple
+from typing import Any, ClassVar, Dict, Iterator, List, Optional, Tuple
 
 
 try:
@@ -2685,6 +2689,346 @@ class MimoParser(BaseParser):
         return list(out)
 
 
+# Snapshot copy attempts within one collect: if ZCode appends to the
+# WAL or checkpoints between the two sequential copies, the db/-wal pair
+# may span two generations; that attempt is dropped and re-copied.
+_ZCODE_SNAPSHOT_MAX_ATTEMPTS = 3
+
+
+class ZCodeSnapshotError(RuntimeError):
+    """A transient failure opening a ZCode snapshot (copy or connect).
+
+    There is no fallback open in another mode: the read fails and the
+    caller retries later (failed reads are never cached).
+    """
+
+
+class _ZCodeSnapshot:
+    """A temp-dir copy of a ZCode DB, opened for read-only reporting.
+
+    ``conn`` is a live connection into the copy. On context exit,
+    closing and cleanup always run. A close error sets ``close_failed``
+    and never escapes: the data was already read from the copy, and the
+    caller uses the flag to decide whether to cache the result (shared
+    close-failure contract: the result is returned, never cached).
+    """
+
+    def __init__(self, conn: sqlite3.Connection, tmpdir: Path) -> None:
+        self.conn = conn
+        self.tmpdir = tmpdir
+        self.close_failed = False
+
+
+def zcode_snapshot_signatures(db_path: Path) -> tuple:
+    # (path, mtime_ns, size) of exactly the files the snapshot copies:
+    # the main DB and, while present, the -wal. The live -shm is
+    # excluded on purpose: it is not copied (SQLite rebuilds the WAL
+    # index inside the temp dir), and reader traffic in a live -shm
+    # must not force coherence retries.
+    out = []
+    for p in (db_path, Path(str(db_path) + "-wal")):
+        try:
+            st = p.stat()
+            out.append((str(p), st.st_mtime_ns, st.st_size))
+        except OSError:
+            out.append((str(p), None, None))
+    return tuple(out)
+
+
+def _zcode_open_snapshot(db_path: Path) -> Optional[Tuple[sqlite3.Connection, Path]]:
+    # Open a private temp-dir copy, never the source file. A ?mode=ro
+    # open of a WAL database is still not side-effect free: when the
+    # -shm file is missing, SQLite creates it in the source directory
+    # (it is the WAL coordination file, and the reader needs it whether
+    # it wants it or not). The reader must never write sidecar state
+    # into the source tree, so db + -wal are copied (the live rows sit
+    # in the WAL) and the copy is opened normally. The -shm is NOT
+    # copied: it is live coordination state, and SQLite rebuilds the
+    # WAL index from the copied -wal inside the temp dir. The caller
+    # deletes the whole dir afterwards.
+    #
+    # Coherence: the copies are sequential while ZCode may append to
+    # the WAL or checkpoint between them. The db/-wal signatures are
+    # taken before and after copying, and any copy failure is
+    # re-checked against the pre-copy signatures: a difference means
+    # a generation change landed mid-copy (a checkpoint deleting the
+    # -wal between the exists() check and its copy is the normal
+    # one) and the attempt is retried, bounded by
+    # _ZCODE_SNAPSHOT_MAX_ATTEMPTS. A failure with unchanged
+    # signatures is terminal for this read; failed reads are not
+    # cached, so the next read retries.
+    #
+    # Returns (conn, tmpdir); None on a copy/open error or when every
+    # attempt raced a source change - no fallback open in another mode.
+    for _attempt in range(_ZCODE_SNAPSHOT_MAX_ATTEMPTS):
+        before = zcode_snapshot_signatures(db_path)
+        tmpdir: Optional[Path] = None
+        try:
+            tmpdir = Path(tempfile.mkdtemp(prefix="tokdash-zcode."))
+            shutil.copy2(db_path, tmpdir / db_path.name)
+            wal = Path(str(db_path) + "-wal")
+            if wal.exists():
+                shutil.copy2(wal, tmpdir / (db_path.name + "-wal"))
+            if zcode_snapshot_signatures(db_path) != before:
+                raise OSError("source changed mid-copy")
+            conn = sqlite3.connect(str(tmpdir / db_path.name))
+        except (OSError, sqlite3.Error):
+            if tmpdir is not None:
+                shutil.rmtree(tmpdir, ignore_errors=True)
+            # A failure accompanied by a signature change is a
+            # generation change that landed mid-copy - retry it.
+            if (
+                zcode_snapshot_signatures(db_path) != before
+                and _attempt + 1 < _ZCODE_SNAPSHOT_MAX_ATTEMPTS
+            ):
+                continue
+            return None
+        return conn, tmpdir
+    return None
+
+
+@contextmanager
+def zcode_snapshot(db_path: Path) -> Iterator[_ZCodeSnapshot]:
+    """A coherent, side-effect-free read view of a WAL-mode ZCode DB.
+
+    Wraps _zcode_open_snapshot with the exit lifecycle: close the
+    connection (a close error marks the snapshot close_failed and is
+    logged by the caller, never raised here) and remove the temp dir,
+    always. Raises ZCodeSnapshotError when no snapshot could be opened.
+    """
+    opened = _zcode_open_snapshot(db_path)
+    if opened is None:
+        raise ZCodeSnapshotError(f"could not open a coherent snapshot of {db_path}")
+    conn, tmpdir = opened
+    snap = _ZCodeSnapshot(conn, tmpdir)
+    try:
+        yield snap
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            snap.close_failed = True
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+class ZCodeParser(BaseParser):
+    """
+    Parser for ZCode (Z.ai's GLM coding app) token usage.
+
+    =======================================================================
+    ZCODE SQLITE DATABASE SCHEMA
+    =======================================================================
+    Location: $ZCODE_HOME/cli/db/db.sqlite (default ~/.zcode/cli/db/db.sqlite,
+    %USERPROFILE%\\.zcode\\cli\\db\\db.sqlite on Windows). WAL mode, so
+    live rows accumulate in the -wal file between checkpoints.
+
+    Table: model_usage — one row per model request. Retries are distinct
+    rows sharing a logical_request_id with different attempt_index values.
+      - id TEXT PRIMARY KEY
+      - session_id TEXT
+      - model_id TEXT                (e.g. GLM-5-Turbo — the pricing key)
+      - provider_id TEXT             (e.g. builtin:zai-start-plan — label only)
+      - status TEXT                  (running/completed/error/cancelled)
+      - started_at INTEGER           (epoch ms)
+      - input_tokens INTEGER          TOTAL prompt tokens, inclusive of cache
+      - output_tokens INTEGER         already includes reasoning_tokens
+      - reasoning_tokens INTEGER
+      - cache_read_input_tokens INTEGER    subset of input_tokens
+      - cache_creation_input_tokens INTEGER
+
+    Token accounting (see docs/development/technical-notes/ZCODE_SUPPORT_DESIGN.md):
+      - input_tokens is inclusive of the cached slice, so the entry bills
+        max(0, input - cache_read) as fresh input and cache_read separately.
+      - output_tokens already includes reasoning, so the entry carries a
+        disjoint output/reasoning split for the displayed total, but cost is
+        computed from the FULL output_tokens: get_cost never sees the entry's
+        reasoning bucket, and z.ai bills reasoning at the output rate. A row
+        that reports reasoning above output is anomalous (the subset
+        assumption is broken); for that row both are billed and displayed as
+        disjoint, so the displayed total and the billed tokens stay equal.
+    =======================================================================
+    """
+
+    source_name = "zcode"
+    sync_capability = SourceSyncCapability(
+        mode="source_native_db",
+        session_store=False,
+        reason="ZCode is a WAL-mode SQLite DB and supports SQL date windows.",
+    )
+
+    _query_cache: ClassVar[Dict[tuple, List[Dict[str, Any]]]] = {}
+    _query_cache_sig: ClassVar[tuple] = ()
+    # Guards the pair above: the signature check/clear at the top of
+    # collect() and the store-time recheck must run under the same lock,
+    # or a query in flight under an older signature can store its stale
+    # result under a signature a concurrent collect has already advanced.
+    _cache_lock: ClassVar[threading.Lock] = threading.Lock()
+
+    def __init__(self, pricing_db: PricingDatabase):
+        super().__init__(pricing_db)
+        self.db_path = clientpaths.zcode_db_path()
+
+    def _file_signatures(self) -> tuple:
+        # Main file plus -wal and -shm: ZCode's live rows sit in the WAL
+        # between checkpoints, so a signature on the main file alone goes
+        # stale while the app is running and cached results silently lag.
+        if not self.db_path.exists():
+            return ()
+        out: list[tuple[str, int, int]] = []
+        for candidate in (
+            self.db_path,
+            Path(str(self.db_path) + "-wal"),
+            Path(str(self.db_path) + "-shm"),
+        ):
+            try:
+                s = candidate.stat()
+                out.append((str(candidate), s.st_mtime_ns, s.st_size))
+            except (FileNotFoundError, OSError):
+                continue
+        return tuple(out)
+
+    def _snapshot_signatures(self) -> tuple:
+        return zcode_snapshot_signatures(self.db_path)
+
+    def _open_snapshot(self) -> Optional[Tuple[sqlite3.Connection, Path]]:
+        # Direct seam to the shared open helper (collect() goes through
+        # the zcode_snapshot context manager, which owns the close and
+        # cleanup on top of the same helper), so the coherence rule
+        # (signatures before/after the copy, bounded retry, no -shm
+        # copy, temp-dir cleanup) has exactly one implementation.
+        return _zcode_open_snapshot(self.db_path)
+
+    def _build_entry(self, row: sqlite3.Row) -> Optional[Dict[str, Any]]:
+        model = str(row["model_id"] or "").strip()
+        if not model:
+            return None
+
+        input_total = self._i(row["input_tokens"])
+        cache_r = self._i(row["cache_read_input_tokens"])
+        cache_w = self._i(row["cache_creation_input_tokens"])
+        output_total = self._i(row["output_tokens"])
+        reasoning = self._i(row["reasoning_tokens"])
+
+        # Token-presence guard: a cancelled request that already burned
+        # tokens still bills.
+        if input_total == 0 and output_total == 0 and cache_r == 0 and cache_w == 0 and reasoning == 0:
+            return None
+
+        # Fresh input only: ZCode's input_tokens is inclusive of the cached
+        # slice, and get_cost bills the buckets additively.
+        input_t = max(0, input_total - cache_r)
+        # z.ai bills reasoning at the output rate, so cost normally uses the
+        # FULL output_total (reasoning is a subset of it), while the entry's
+        # split output keeps compute.py's additive displayed total correct.
+        # If a row reports more reasoning than output, the subset assumption
+        # is broken for that row: treat the two as disjoint for BOTH display
+        # and billing, so the displayed total and the billed tokens agree.
+        if reasoning > output_total:
+            billed_output = output_total + reasoning
+            display_output = output_total
+        else:
+            billed_output = output_total
+            display_output = output_total - reasoning
+        cost = self.pricing_db.get_cost(model, input_t, billed_output, cache_r, cache_w)
+
+        return {
+            "source": self.source_name,
+            "model": model,
+            "provider": str(row["provider_id"] or ""),
+            "input": input_t,
+            "output": display_output,
+            "cacheRead": cache_r,
+            "cacheWrite": cache_w,
+            "reasoning": reasoning,
+            "cost": cost,
+            "timestamp": int(row["started_at"]),
+            "entry_id": f"zcode:{row['id']}",
+        }
+
+    def _parse_all(self) -> List[Dict[str, Any]]:
+        return []
+
+    def collect(self, since_date: Optional[datetime] = None, until_date: Optional[datetime] = None) -> List[Dict[str, Any]]:
+        sig = (self._file_signatures(), self._pricing_signature())
+        s_ms = int(self._to_utc(since_date).timestamp() * 1000) if since_date else 0
+        u_ms = int(self._to_utc(until_date).timestamp() * 1000) if until_date else 9999999999999
+        cache_key = (s_ms, u_ms)
+        # Signature validation and the cache lookup are one critical
+        # section: a concurrent collector must not be able to clear and
+        # repopulate the cache between them, in which case this request
+        # would consume entries parsed or priced under a different
+        # signature than the one it just validated.
+        with type(self)._cache_lock:
+            if sig != type(self)._query_cache_sig:
+                type(self)._query_cache.clear()
+                type(self)._query_cache_sig = sig
+            cached = type(self)._query_cache.get(cache_key)
+        if cached is not None:
+            return list(cached)
+
+        out: List[Dict[str, Any]] = []
+        read_ok = False
+        snap = None
+        if self.db_path.exists():
+            try:
+                with zcode_snapshot(self.db_path) as snap:
+                    conn = snap.conn
+                    conn.row_factory = sqlite3.Row
+                    cur = conn.cursor()
+                    # Probe sqlite_master inline instead of via
+                    # _sqlite_table_exists (which swallows sqlite3.Error):
+                    # an absent table is a legitimate empty success, but a
+                    # probe error must surface as a failed read rather than
+                    # be mistaken for an absent table and cached as such.
+                    cur.execute(
+                        "SELECT 1 FROM sqlite_master "
+                        "WHERE type='table' AND name='model_usage'"
+                    )
+                    if cur.fetchone() is not None:
+                        cur.execute(
+                            """
+                            SELECT id, session_id, model_id, provider_id, started_at,
+                                   input_tokens, output_tokens, reasoning_tokens,
+                                   cache_read_input_tokens, cache_creation_input_tokens
+                            FROM model_usage
+                            WHERE started_at >= ? AND started_at < ?
+                            ORDER BY started_at
+                            """,
+                            (s_ms, u_ms),
+                        )
+                        for row in cur.fetchall():
+                            try:
+                                entry = self._build_entry(row)
+                            except Exception:
+                                continue
+                            if entry is not None:
+                                out.append(entry)
+                    read_ok = True
+            except Exception:
+                # Transient read failure (snapshot copy, connect, probe, or
+                # query): a restored permission or cleared SQLite error may
+                # not change the file signatures, so the empty result must
+                # NOT be cached - the next collect retries.
+                read_ok = False
+            if read_ok and snap.close_failed:
+                # The data was read and is returned, but a snapshot that
+                # could not be closed counts as a failed (uncached) read.
+                read_ok = False
+
+        if read_ok:
+            with type(self)._cache_lock:
+                # Recheck under the lock: if a concurrent collect advanced
+                # the signature while we were reading, this result belongs
+                # to the old signature and must not be stored under the new
+                # one (it is still returned for this request).
+                if sig == type(self)._query_cache_sig:
+                    if len(type(self)._query_cache) >= _OPENCODE_QUERY_CACHE_MAX:
+                        type(self)._query_cache.clear()
+                    type(self)._query_cache[cache_key] = out
+        return list(out)
+
+
 class DSHParser(BaseParser):
     """Parser for DeepSeek Harness (dsh) session logs.
 
@@ -2998,6 +3342,7 @@ class CodingToolsUsageTracker:
             "copilot_cli": CopilotCLIParser(self.pricing_db),
             "hermes": HermesParser(self.pricing_db),
             "mimo": MimoParser(self.pricing_db),
+            "zcode": ZCodeParser(self.pricing_db),
             "dsh": DSHParser(self.pricing_db),
             "reasonix": ReasonixParser(self.pricing_db),
         }
@@ -3037,14 +3382,19 @@ def main():
     parser.add_argument("--since", type=str)
     parser.add_argument("--until", type=str)
     parser.add_argument("--json", action="store_true")
-    parser.add_argument("--sources", type=str, default="opencode,codex,claude,gemini_cli,antigravity_cli,amp,kimi,grok,pi_agent,copilot_cli,hermes,mimo,dsh,reasonix")
+    parser.add_argument(
+        "--sources",
+        type=str,
+        default=None,
+        help="Comma-separated source names (default: all registered sources)",
+    )
     args = parser.parse_args()
 
     since_date, until_date = _date_range(args)
     sources = [s.strip() for s in (args.sources or "").split(",") if s.strip()]
 
     tracker = CodingToolsUsageTracker()
-    tracker.collect(since_date, until_date, sources)
+    tracker.collect(since_date, until_date, sources or None)
 
     if args.json:
         print(json.dumps(tracker.to_json(), indent=2))

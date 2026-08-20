@@ -1,6 +1,6 @@
 {
   "version": "2.0.19",
-  "lastUpdated": "2026-08-14T18:41:00Z",
+  "lastUpdated": "2026-08-20T19:52:35Z",
   "note": "Comprehensive pricing database with all Moonshot, MiniMax, GLM, and OpenAI models from OpenRouter. Cache pricing estimated at 10% of input for cache_read, 100% of input for cache_write.",
   "aliases": {
     "claude-sonnet-5-20260630": "claude-sonnet-5",
@@ -2188,6 +2188,15 @@
       "cache_write": 0.4,
       "unit": "per_million_tokens",
       "source": "openrouter.ai/qwen/qwen3.7-plus"
+    },
+    "qwen3.8-27b": {
+      "provider": "qwen",
+      "input": 0.5,
+      "output": 3.0,
+      "cache_read": 0.05,
+      "cache_write": 0.5,
+      "unit": "per_million_tokens",
+      "source": "alibabacloud.com Model Studio official list price (openrouter.ai/qwen/qwen3.8-27b)"
     },
     "qwen3.8-max": {
       "provider": "qwen",

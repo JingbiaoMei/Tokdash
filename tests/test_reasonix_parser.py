@@ -234,12 +234,18 @@ def test_reasonix_unknown_model_keeps_tokens_and_costs_nothing(_isolated_reasoni
     _write_stats(
         home,
         "2026-08-15.jsonl",
-        _stats_line(model="vllm-hpc/qwen3.8-27B-FP8", prompt=4000, completion=100, cache_hit=0, cache_miss=4000),
+        _stats_line(
+            model="vllm-hpc/unlisted-reasonix-model-FP8",
+            prompt=4000,
+            completion=100,
+            cache_hit=0,
+            cache_miss=4000,
+        ),
     )
 
     entry = _collect(home)[0]
 
-    assert entry["model"] == "qwen3.8-27B-FP8"
+    assert entry["model"] == "unlisted-reasonix-model-FP8"
     assert entry["input"] == 4000
     assert entry["output"] == 100
     assert entry["cost"] == 0

@@ -617,6 +617,10 @@ class _CloseRaisingConnection:
         object.__setattr__(self, "_conn", conn)
 
     def close(self):
+        # Close the real connection first: Windows cannot remove a file
+        # that is still open, and the cleanup assertion must hold on
+        # windows-latest CI.
+        self._conn.close()
         raise sqlite3.OperationalError("simulated close failure")
 
     def __getattr__(self, name):
@@ -662,3 +666,50 @@ def test_zcode_close_failure_cleans_snapshot_and_does_not_cache(monkeypatch, tmp
     assert ZCodeParser._query_cache == {}
     assert len(created) == 1
     assert not created[0].exists()
+
+
+def test_zcode_cache_lookup_under_signature_lock(monkeypatch, tmp_path):
+    """Signature validation and the cache lookup are one critical
+    section: a collect that runs and repopulates the cache between this
+    request's validation and lookup must not have its entries consumed
+    by this request."""
+    home = tmp_path / ".zcode"
+    db_path = home / "cli" / "db" / "db.sqlite"
+    db_path.parent.mkdir(parents=True)
+    _create_db(db_path, [_row()])
+    monkeypatch.setenv("ZCODE_HOME", str(home))
+    parser = ZCodeParser(PricingDatabase())
+
+    real_to_utc = ZCodeParser._to_utc
+    # A real date window so _to_utc is actually invoked: under the
+    # pre-fix layout that call sat between signature validation and the
+    # cache lookup, which is where B runs; under the fixed layout it sits
+    # before the (now atomic) critical section. B must use the same
+    # window so its entries land under A's cache key.
+    from datetime import datetime, timezone
+
+    since = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    until = datetime(2027, 1, 1, tzinfo=timezone.utc)
+    state = {"fired": False, "b_entries": None}
+
+    def nested_to_utc(dt):
+        if not state["fired"]:
+            state["fired"] = True
+            # B: the source gains a row (new signature) and a full
+            # collect runs to completion, repopulating the cache.
+            db_path.unlink()
+            _create_db(db_path, [_row(), _row(row_id="mu-2", logical="lr-2", attempt=1)])
+            state["b_entries"] = parser.collect(since, until)
+            assert len(state["b_entries"]) == 2
+        return real_to_utc(dt)
+
+    monkeypatch.setattr(ZCodeParser, "_to_utc", staticmethod(nested_to_utc))
+
+    a_entries = parser.collect(since, until)
+    assert len(a_entries) == 2
+    # A must have parsed its own snapshot, not consumed B's cached
+    # entries: mutating B's returned dicts is only observable on A's
+    # result if A reused them.
+    for e in state["b_entries"]:
+        e["model"] = "MUTATED-B"
+    assert {e["model"] for e in a_entries} == {"GLM-5-Turbo"}

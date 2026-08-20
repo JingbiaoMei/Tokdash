@@ -132,11 +132,12 @@ Unverified assumptions, each pinned to a first-row check in
   the main file alone goes stale while ZCode is running, because new rows sit
   in the WAL until checkpoint.
 - Cache concurrency: the class-level cache and signature are guarded by a
-  class lock. The signature check/clear at the top of `collect()` and the
-  store-time recheck run under the same lock, so a result fetched under an
-  older signature (its query in flight while a concurrent collect advanced
-  the signature) is returned for that request but never stored under the new
-  signature.
+  class lock. The signature check/clear, the cache lookup, and the
+  store-time recheck all run under the same lock: a concurrent collect
+  cannot clear and repopulate between this request's validation and
+  lookup, and a result fetched under an older signature (its query in
+  flight while a concurrent collect advanced the signature) is returned
+  for that request but never stored under the new signature.
 - Entry ids: `f"zcode:{model_usage.id}"` — flat, stable, retry-distinct.
 - Cost is always emitted by the parser for resolvable models; the
   `cost == 0` fallback in compute.py would re-price from the entry's split

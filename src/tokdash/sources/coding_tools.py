@@ -2888,16 +2888,19 @@ class ZCodeParser(BaseParser):
 
     def collect(self, since_date: Optional[datetime] = None, until_date: Optional[datetime] = None) -> List[Dict[str, Any]]:
         sig = (self._file_signatures(), self._pricing_signature())
+        s_ms = int(self._to_utc(since_date).timestamp() * 1000) if since_date else 0
+        u_ms = int(self._to_utc(until_date).timestamp() * 1000) if until_date else 9999999999999
+        cache_key = (s_ms, u_ms)
+        # Signature validation and the cache lookup are one critical
+        # section: a concurrent collector must not be able to clear and
+        # repopulate the cache between them, in which case this request
+        # would consume entries parsed or priced under a different
+        # signature than the one it just validated.
         with type(self)._cache_lock:
             if sig != type(self)._query_cache_sig:
                 type(self)._query_cache.clear()
                 type(self)._query_cache_sig = sig
-
-        s_ms = int(self._to_utc(since_date).timestamp() * 1000) if since_date else 0
-        u_ms = int(self._to_utc(until_date).timestamp() * 1000) if until_date else 9999999999999
-        cache_key = (s_ms, u_ms)
-
-        cached = type(self)._query_cache.get(cache_key)
+            cached = type(self)._query_cache.get(cache_key)
         if cached is not None:
             return list(cached)
 

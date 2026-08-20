@@ -20,6 +20,7 @@ Windows analogue of how systemd/launchd detach the service from any controlling 
 """
 from __future__ import annotations
 
+import codecs
 import subprocess
 from pathlib import Path, PureWindowsPath
 from typing import Any, Dict, List, Optional, Union
@@ -99,8 +100,12 @@ def render_task(
 
     description = f"{MARKER_COMMENT}&#10;{escape(manifest.marker_token(marker_id))}"
 
+    # schtasks /Create /XML hands the file to MSXML as a UTF-16 wide string and refuses
+    # to switch to a declared UTF-8 ("unable to switch the encoding" at the end of the
+    # declaration); Task Scheduler's own /XML exports declare and are UTF-16.
+    # write_task must keep writing the bytes this declaration promises.
     lines = [
-        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<?xml version="1.0" encoding="UTF-16"?>',
         '<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">',
         "  <RegistrationInfo>",
         f"    <Description>{description}</Description>",
@@ -141,8 +146,20 @@ def render_task(
 def _read_definition_text(path_or_name: Union[Path, str]) -> Optional[str]:
     if isinstance(path_or_name, Path):
         try:
-            return path_or_name.read_text(encoding="utf-8")
+            data = path_or_name.read_bytes()
         except OSError:
+            return None
+        if data.startswith(codecs.BOM_UTF16_LE) or data.startswith(codecs.BOM_UTF16_BE):
+            # The BOM pins the byte order and the codec consumes it.
+            return data.decode("utf-16")
+        # Files written by pre-UTF-16 tokdash — including failed setups, which wrote the
+        # file before schtasks rejected it — were plain UTF-8. Keep recognizing their
+        # marker: task_is_managed feeds plan.py's overwrite guard AND the uninstall
+        # ownership check, and a decode mismatch there turns a loud failure into a
+        # silent "not ours, refuse to remove".
+        try:
+            return data.decode("utf-8")
+        except UnicodeDecodeError:
             return None
     # A bare task name: ask Task Scheduler for the live XML definition it holds today.
     try:
@@ -169,7 +186,10 @@ def task_is_managed(path_or_name: Union[Path, str], marker_id: Optional[str] = N
 def write_task(text: str) -> Path:
     path = paths.winsched_task_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+    # UTF-16 LE with an explicit BOM: the bytes render_task's declaration promises and
+    # schtasks /Create /XML requires. `encoding="utf-16"` would also emit a BOM, but its
+    # byte order follows the platform — pin LE, the order Task Scheduler's exports use.
+    path.write_bytes(codecs.BOM_UTF16_LE + text.encode("utf-16-le"))
     return path
 
 

@@ -543,11 +543,21 @@ class UsageEntryStore:
 
     def _connect(self, *, ensure_schema: bool = True) -> sqlite3.Connection:
         conn = sqlite3.connect(str(self.path), timeout=30)
-        conn.execute("PRAGMA busy_timeout=5000")
-        conn.execute("PRAGMA temp_store=MEMORY")
-        conn.row_factory = sqlite3.Row
-        if ensure_schema:
-            self._ensure_schema_once(conn)
+        try:
+            conn.execute("PRAGMA busy_timeout=5000")
+            conn.execute("PRAGMA temp_store=MEMORY")
+            conn.row_factory = sqlite3.Row
+            if ensure_schema:
+                self._ensure_schema_once(conn)
+        except BaseException:
+            # Schema setup runs before the connection is handed out, so a failure
+            # here escapes past every `with closing(self._connect())` and leaks the
+            # handle. On a corrupt database that is the common path, and on Windows
+            # the leaked handle then blocks renaming the file — which made
+            # `tokdash db resync` fail on exactly the broken database it exists to
+            # repair, and blame a running server for holding it.
+            conn.close()
+            raise
         return conn
 
     def _ensure_schema_once(self, conn: sqlite3.Connection) -> None:

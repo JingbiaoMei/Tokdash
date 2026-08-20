@@ -48,6 +48,48 @@ def test_hermes_search_dirs_env_override_windows(monkeypatch):
     assert clientpaths.hermes_search_dirs() == [Path("/a/b"), Path("/c/d")]
 
 
+def test_pi_agent_search_dirs_default(monkeypatch):
+    monkeypatch.delenv("PI_AGENT_DIR", raising=False)
+    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+    monkeypatch.delenv("PI_CODING_AGENT_SESSION_DIR", raising=False)
+    assert clientpaths.pi_agent_search_dirs() == [Path.home() / ".pi" / "agent" / "sessions"]
+
+
+def test_pi_agent_search_dirs_upstream_env_names(monkeypatch):
+    monkeypatch.delenv("PI_AGENT_DIR", raising=False)
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", "/pi/agent")
+    assert clientpaths.pi_agent_search_dirs() == [Path("/pi/agent/sessions")]
+
+
+def test_pi_agent_search_dirs_session_dir_wins(monkeypatch):
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", "/pi/agent")
+    monkeypatch.setenv("PI_CODING_AGENT_SESSION_DIR", "/pi/sessions")
+    assert clientpaths.pi_agent_search_dirs() == [Path("/pi/sessions")]
+
+
+def test_pi_agent_search_dirs_legacy_comma_list(monkeypatch):
+    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+    monkeypatch.delenv("PI_CODING_AGENT_SESSION_DIR", raising=False)
+    monkeypatch.setenv("PI_AGENT_DIR", "/a/b,/c/d")
+    assert clientpaths.pi_agent_search_dirs() == [Path("/a/b"), Path("/c/d")]
+
+
+def test_openclaw_home_and_sessions_glob(monkeypatch):
+    monkeypatch.delenv("OPENCLAW_HOME", raising=False)
+    assert clientpaths.openclaw_home() == Path.home() / ".openclaw"
+    assert clientpaths.openclaw_agent_sessions_glob() == str(Path.home() / ".openclaw" / "agents" / "*" / "sessions")
+
+
+def test_openclaw_home_env_override(monkeypatch, tmp_path):
+    # tmp_path, not a POSIX-style "/claw": on Windows a rooted path with no drive
+    # is not absolute, so openclaw_home() resolves it against the current drive and
+    # the comparison depends on which drive the tests run from.
+    home = tmp_path / "claw"
+    monkeypatch.setenv("OPENCLAW_HOME", str(home))
+    assert clientpaths.openclaw_home() == home
+    assert clientpaths.openclaw_agent_sessions_glob() == str(home / "agents" / "*" / "sessions")
+
+
 def test_quota_client_roots_honor_environment_overrides(monkeypatch):
     monkeypatch.setenv("CODEX_HOME", "/tmp/codex-home")
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", "/tmp/claude-config")

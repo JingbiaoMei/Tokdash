@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 try:
+    from ..clientpaths import openclaw_agent_sessions_glob
     from ..pricing import PricingDatabase
     from ..usage_store import (
         UsageEntryStore,
@@ -18,6 +19,7 @@ try:
     )
 except ImportError:  # pragma: no cover
     # Allow importing when running this code from the repo by file path.
+    from clientpaths import openclaw_agent_sessions_glob
     from pricing import PricingDatabase
     UsageEntryStore = None  # type: ignore
     build_source_signature = None  # type: ignore
@@ -572,7 +574,7 @@ def get_session_usage(
 
 def get_usage_for_days(days: int) -> Dict[str, Any]:
     """Get usage for the last N *calendar* days (local midnight → now)."""
-    sessions_dir = glob.glob(os.path.expanduser("~/.openclaw/agents/*/sessions"))
+    sessions_dir = glob.glob(openclaw_agent_sessions_glob())
 
     now_local = datetime.now().astimezone()
     today_local_midnight = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -586,7 +588,7 @@ def get_usage_for_days(days: int) -> Dict[str, Any]:
 
 def get_usage_for_month() -> Dict[str, Any]:
     """Get usage for current month (local time)."""
-    sessions_dir = glob.glob(os.path.expanduser("~/.openclaw/agents/*/sessions"))
+    sessions_dir = glob.glob(openclaw_agent_sessions_glob())
 
     now_local = datetime.now().astimezone()
     start_of_month_local = now_local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -598,13 +600,13 @@ def get_usage_for_month() -> Dict[str, Any]:
 
 def get_usage_for_range(since_date: datetime, until_date: datetime) -> Dict[str, Any]:
     """Get usage for an explicit datetime range."""
-    sessions_dir = glob.glob(os.path.expanduser("~/.openclaw/agents/*/sessions"))
+    sessions_dir = glob.glob(openclaw_agent_sessions_glob())
     return get_session_usage(sessions_dir, since_date=since_date, until_date=until_date)
 
 
 def get_usage_for_year(year: int) -> Dict[str, Any]:
     """Get usage for a calendar year (local time)."""
-    sessions_dir = glob.glob(os.path.expanduser("~/.openclaw/agents/*/sessions"))
+    sessions_dir = glob.glob(openclaw_agent_sessions_glob())
 
     local_tz = datetime.now().astimezone().tzinfo or timezone.utc
     start_of_year = datetime(year, 1, 1, tzinfo=local_tz).astimezone(timezone.utc)

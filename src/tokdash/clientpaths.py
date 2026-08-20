@@ -227,7 +227,22 @@ def cc_switch_db_path() -> Path:
 
 
 def pi_agent_search_dirs() -> List[Path]:
-    """``$PI_AGENT_DIR`` (comma-separated) if set, else ``~/.pi/agent/sessions``."""
+    """Pi session-dir candidates, most specific override first.
+
+    Upstream pi coding-agent reads ``PI_CODING_AGENT_SESSION_DIR`` (the session
+    dir, single path) and ``PI_CODING_AGENT_DIR`` (the agent dir; sessions live
+    under ``<dir>/sessions``) — see the Pi row of
+    ``docs/development/technical-notes/WINDOWS_CLIENT_PATHS.md``, which found
+    ``PI_AGENT_DIR`` to be a test constant, not the live var, and no
+    comma-splitting anywhere upstream. The legacy ``PI_AGENT_DIR`` comma-list
+    is still honored for existing overrides, then the portable dotfile default.
+    """
+    session_dir_env = os.environ.get("PI_CODING_AGENT_SESSION_DIR", "").strip()
+    if session_dir_env:
+        return [Path(session_dir_env).expanduser()]
+    agent_dir_env = os.environ.get("PI_CODING_AGENT_DIR", "").strip()
+    if agent_dir_env:
+        return [Path(agent_dir_env).expanduser() / "sessions"]
     pi_dir_env = os.environ.get("PI_AGENT_DIR", "").strip()
     if pi_dir_env:
         return [Path(d.strip()).expanduser() for d in pi_dir_env.split(",") if d.strip()]
@@ -286,6 +301,30 @@ def reasonix_stats_dir() -> Path:
 
 def reasonix_projects_dir() -> Path:
     return reasonix_home() / "projects"
+
+
+# --- OpenClaw -----------------------------------------------------------------
+
+
+def openclaw_home() -> Path:
+    """``$OPENCLAW_HOME`` if set, else ``~/.openclaw``. Empty/whitespace counts as unset.
+
+    This override is Tokdash-side: it points the reader at an OpenClaw home,
+    which is not the same as OpenClaw itself honoring the variable. The
+    native-Windows data dir is unverified (no row in WINDOWS_CLIENT_PATHS.md),
+    so the default is the portable-dotfile assumption shared by every other
+    client here — if it differs on Windows, set ``OPENCLAW_HOME``.
+    """
+    explicit = os.environ.get("OPENCLAW_HOME", "").strip()
+    if explicit:
+        path = Path(explicit).expanduser()
+        return path if path.is_absolute() else path.resolve()
+    return Path.home() / ".openclaw"
+
+
+def openclaw_agent_sessions_glob() -> str:
+    """Session dirs of every OpenClaw agent: ``<home>/agents/*/sessions``."""
+    return str(openclaw_home() / "agents" / "*" / "sessions")
 
 
 # --- Tokdash data dir / usage DB -------------------------------------------------

@@ -43,3 +43,56 @@ jobs:
 
       - name: Test
         run: pytest -q
+
+      # Every winsched unit test fakes `schtasks`; this is the only place the rendered
+      # task XML meets the real Task Scheduler. Added after `tokdash setup` failed on a
+      # native-Windows host: the file was written UTF-8, and `schtasks /Create /XML`
+      # (MSXML) refuses a UTF-8 declaration it is handed as UTF-16 — a green pytest run
+      # could never have caught that. Both rendered variants are registered: the
+      # env_data_dir one carries a -c trampoline whose <Arguments> is list2cmdline
+      # quoting on top of XML escaping — the fragility the plain variant never
+      # exercises. See docs/local/20260819_windows_compat_review/REVIEW.md (P0).
+      - name: schtasks smoke — register the rendered task for real
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $tmp = Join-Path $env:RUNNER_TEMP "tokdash-schtasks-check"
+          $py = @'
+          import pathlib, sys
+          from tokdash.onboard import winsched, paths
+          tmp = pathlib.Path(sys.argv[1])
+          variant = sys.argv[2]
+          tmp.mkdir(parents=True, exist_ok=True)
+          out = tmp / (variant + ".xml")
+          paths.winsched_task_path = lambda: out
+          kwargs = {}
+          if variant == "env":
+              kwargs["env_data_dir"] = str(tmp / "custom-dd")
+          winsched.write_task(winsched.render_task(
+              [sys.executable, "-m", "tokdash"], "127.0.0.1", 55423,
+              marker_id="ci-encoding-check", **kwargs))
+          print(str(out))
+          '@
+          $xml = & python -c $py $tmp default
+          if ($LASTEXITCODE -ne 0) {
+            throw "rendering the default task variant failed with exit $LASTEXITCODE (check the python output above)"
+          }
+          $xmlEnv = & python -c $py $tmp env
+          if ($LASTEXITCODE -ne 0) {
+            throw "rendering the env_data_dir task variant failed with exit $LASTEXITCODE (check the python output above)"
+          }
+          $task = "Tokdash-CI-XML-Check"
+          $taskEnv = "Tokdash-CI-XML-Check-Env"
+          try {
+            schtasks.exe /Create /TN $task /XML $xml /F
+            if ($LASTEXITCODE -ne 0) {
+              throw "schtasks /Create /XML failed with exit ${LASTEXITCODE}: Task Scheduler rejects the rendered definition"
+            }
+            schtasks.exe /Create /TN $taskEnv /XML $xmlEnv /F
+            if ($LASTEXITCODE -ne 0) {
+              throw "schtasks /Create /XML failed with exit ${LASTEXITCODE}: Task Scheduler rejects the env_data_dir variant"
+            }
+          } finally {
+            schtasks.exe /Delete /TN $task /F 2>$null | Out-Null
+            schtasks.exe /Delete /TN $taskEnv /F 2>$null | Out-Null
+          }

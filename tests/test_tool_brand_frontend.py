@@ -150,3 +150,17 @@ def test_tool_icons_are_unboxed_and_usage_chart_has_an_icon_legend() -> None:
     assert "createToolIdentity(tool, { compact: true })" in source
     assert "renderToolChartLegend(entries, colors);" in source
     assert "legend: { display: false }" in source
+
+def test_zcode_session_panel_is_wired_into_the_sessions_tab() -> None:
+    source = INDEX_HTML.read_text(encoding="utf-8")
+    assert re.search(r"const SESSION_TOOL_KEYS = \[[^\]]*'zcode'[^\]]*\];", source)
+    assert "zcode: null" in source
+    assert 'updateSessionPanel("zcode", lastSessionsResponses.zcode);' in source
+    assert 'initSortHeaders("zcode", renderSessionsTab);' in source
+    # One heading key per i18n dictionary (en + zh).
+    assert len(re.findall(r"zcodeSessions:", source)) == 2
+    # The panel follows the shared session-panel element contract.
+    assert 'data-panel="zcode"' in source
+    assert '<tbody id="zcodeSessionsTable">' in source
+    assert 'id="zcodeActiveLabel"' in source
+    assert 'id="zcodeLatestSession"' in source

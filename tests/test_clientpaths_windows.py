@@ -80,10 +80,14 @@ def test_openclaw_home_and_sessions_glob(monkeypatch):
     assert clientpaths.openclaw_agent_sessions_glob() == str(Path.home() / ".openclaw" / "agents" / "*" / "sessions")
 
 
-def test_openclaw_home_env_override(monkeypatch):
-    monkeypatch.setenv("OPENCLAW_HOME", "/claw")
-    assert clientpaths.openclaw_home() == Path("/claw")
-    assert clientpaths.openclaw_agent_sessions_glob() == str(Path("/claw") / "agents" / "*" / "sessions")
+def test_openclaw_home_env_override(monkeypatch, tmp_path):
+    # tmp_path, not a POSIX-style "/claw": on Windows a rooted path with no drive
+    # is not absolute, so openclaw_home() resolves it against the current drive and
+    # the comparison depends on which drive the tests run from.
+    home = tmp_path / "claw"
+    monkeypatch.setenv("OPENCLAW_HOME", str(home))
+    assert clientpaths.openclaw_home() == home
+    assert clientpaths.openclaw_agent_sessions_glob() == str(home / "agents" / "*" / "sessions")
 
 
 def test_quota_client_roots_honor_environment_overrides(monkeypatch):

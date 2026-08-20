@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from tokdash import cli, compute, sessions
+from tokdash import cli, compute, sessions, usage_store
 from tokdash.onboard import engine, paths
 from tokdash.sources import coding_tools
 
@@ -696,3 +696,49 @@ def test_codex_activity_records_tolerate_a_parser_without_the_raising_variant(
     finally:
         sessions._load_codex_activity_records.cache_clear()
         original.cache_clear()
+
+
+# --- a failed connect must not leak the handle it opened ---
+
+
+def test_usage_store_connect_closes_the_handle_when_schema_setup_fails(tmp_path, monkeypatch):
+    # _connect() runs schema setup before handing the connection out, so a failure
+    # there escapes past every `with closing(self._connect())` and leaks the handle.
+    # A corrupt database is the common path into that branch. On Windows the leaked
+    # handle then blocks renaming the file, which made `tokdash db resync` fail on
+    # exactly the broken database it exists to repair — and blame a running server.
+    db = tmp_path / "usage.sqlite3"
+    db.write_bytes(b"not a sqlite database")
+
+    real_connect = sqlite3.connect
+    opened: list[sqlite3.Connection] = []
+
+    def _tracking_connect(*args, **kwargs):
+        conn = real_connect(*args, **kwargs)
+        opened.append(conn)
+        return conn
+
+    monkeypatch.setattr(sqlite3, "connect", _tracking_connect)
+    store = usage_store.UsageEntryStore(db)
+    with pytest.raises(sqlite3.DatabaseError):
+        store._connect()
+
+    assert opened, "no connection was opened, so the test proves nothing"
+    for conn in opened:
+        with pytest.raises(sqlite3.ProgrammingError):
+            conn.execute("SELECT 1")  # a closed connection raises; an open one leaks
+
+
+def test_db_resync_repairs_a_corrupt_database(tmp_path, monkeypatch):
+    # The end-to-end shape: resync is what you run when the usage DB is broken, so
+    # a corrupt DB must not come back as "held open by another process".
+    db = tmp_path / "usage.sqlite3"
+    db.write_bytes(b"not a sqlite database")
+    monkeypatch.setenv("TOKDASH_USAGE_DB_PATH", str(db))
+    monkeypatch.setattr(cli, "_sync_usage_database", lambda: {"usage_entries": 3})
+
+    status = cli._resync_usage_database()
+
+    assert status.get("ok") is True, status.get("error")
+    assert "tokdash serve" not in str(status.get("error", ""))
+    assert len(status["backups"]) == 1  # the corrupt file was kept as a .bak

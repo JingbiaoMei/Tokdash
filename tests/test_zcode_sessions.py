@@ -153,6 +153,62 @@ def _load(monkeypatch, tmp_path, db: Path, since_ms=None, until_ms=None):
     return _zcode_sessions(since_ms=since_ms, until_ms=until_ms)
 
 
+class _RecordingConnection:
+    """Forwards to a real connection; records (sql, row count) per
+    fetchall so a test can assert how much data the loader materialized."""
+
+    def __init__(self, conn):
+        object.__setattr__(self, "_conn", conn)
+        object.__setattr__(self, "statements", [])
+
+    def cursor(self):
+        return _RecordingCursor(self)
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+    def __setattr__(self, name, value):
+        setattr(self._conn, name, value)
+
+
+class _RecordingCursor:
+    def __init__(self, rec):
+        object.__setattr__(self, "_rec", rec)
+        object.__setattr__(self, "_cur", rec._conn.cursor())
+        object.__setattr__(self, "_sql", None)
+
+    def execute(self, sql, *params, **kw):
+        self._cur.execute(sql, *params, **kw)
+        object.__setattr__(self, "_sql", sql)
+
+    def fetchall(self):
+        rows = self._cur.fetchall()
+        if self._sql is not None:
+            self._rec.statements.append((self._sql, len(rows)))
+        return rows
+
+    def __getattr__(self, name):
+        return getattr(self._cur, name)
+
+
+class _RecordingSnapshot:
+    def __init__(self, snap, conn):
+        object.__setattr__(self, "_snap", snap)
+        object.__setattr__(self, "_conn", conn)
+
+    @property
+    def conn(self):
+        return self._conn
+
+    @property
+    def close_failed(self):
+        return self._snap.close_failed
+
+    @property
+    def tmpdir(self):
+        return self._snap.tmpdir
+
+
 def test_zcode_registered():
     assert "zcode" in SESSION_TOOLS
     assert sessions.TOOL_LABELS["zcode"] == "ZCode"
@@ -666,3 +722,95 @@ def test_prior_boundary_lookup_is_restricted_to_in_window_sessions(monkeypatch, 
     assert raw["s-out"]["turns"] == []
     assert raw["s-out"]["_next_event_ms"] == U + 10_000
     assert "_prior_event_ms" not in raw["s-out"]
+
+def test_tied_next_boundary_completions_pick_measured_work(monkeypatch, tmp_path):
+    """Two turns of one session finish at the same instant: the boundary
+    row must be the measured one (its work interval subsumes the
+    zero-duration twin's), so set-B admission and the credited work do
+    not depend on row order."""
+    S, U = BASE + 60_000, BASE + 120_000
+    db = _db_path(tmp_path)
+    _write(
+        db,
+        sess=[_sess("s-tie")],
+        # The zero-duration twin is inserted first: a first-row-wins
+        # selection over the tie would drop the measured work.
+        turns=[
+            _turn(sid="s-tie", tid="t0", started=U + 5_000,
+                  completed=U + 10_000, duration=0),
+            _turn(sid="s-tie", tid="t1", started=U - 20_000,
+                  completed=U + 10_000, duration=30_000),
+        ],
+    )
+    raw = _load(monkeypatch, tmp_path, db, since_ms=S, until_ms=U)
+    assert "s-tie" in raw
+    s = raw["s-tie"]
+    assert s["turns"] == []
+    assert s["_next_event_ms"] == U + 10_000
+    assert s["_next_work_ms"] == 30_000
+    # The credited work is the longer interval, clipped to the window.
+    assert s["_activity_intervals"] == [(U - 20_000, U)]
+
+
+def test_boundary_lookups_materialize_one_row_per_session(monkeypatch, tmp_path):
+    """Both boundary lookups pick their winner in SQL: each session
+    contributes exactly one row to the loader (its nearest next turn /
+    its latest prior turn), not its whole turn list, so a long-lived
+    session does not re-materialize its history on every request."""
+    S, U = BASE + 60_000, BASE + 120_000
+    db = _db_path(tmp_path)
+    _write(
+        db,
+        sess=[_sess("s-in"), _sess("s-out")],
+        turns=[
+            # s-in: 3 history turns, 1 in-window token turn, 1 next turn.
+            _turn(sid="s-in", tid="t0a", started=S - 30_000,
+                  completed=S - 20_000, duration=10_000),
+            _turn(sid="s-in", tid="t0b", started=S - 18_000,
+                  completed=S - 8_000, duration=10_000),
+            _turn(sid="s-in", tid="t0c", started=S - 5_000,
+                  completed=S - 4_000, duration=1_000),
+            _turn(sid="s-in", tid="t1", started=S + 1_000,
+                  completed=S + 10_000, duration=9_000),
+            _turn(sid="s-in", tid="t4", started=U + 1_000,
+                  completed=U + 5_000, duration=4_000),
+            # s-out: 1 history turn, 1 overlapping next-boundary turn.
+            _turn(sid="s-out", tid="t2", started=S - 20_000,
+                  completed=S - 10_000, duration=10_000),
+            _turn(sid="s-out", tid="t3", started=U - 20_000,
+                  completed=U + 10_000, duration=30_000),
+        ],
+        models=[_mu(mid="m1", sid="s-in", tid="t1", started=S + 2_000)],
+    )
+    recs = []
+    real_snapshot = sessions.zcode_snapshot
+
+    @contextmanager
+    def recording_snapshot(db_path):
+        with real_snapshot(db_path) as snap:
+            rec = _RecordingConnection(snap.conn)
+            recs.append(rec)
+            yield _RecordingSnapshot(snap, rec)
+
+    monkeypatch.setattr(sessions, "zcode_snapshot", recording_snapshot)
+    raw = _load(monkeypatch, tmp_path, db, since_ms=S, until_ms=U)
+
+    # Winner semantics: the latest prior turn (t0c) and each session's
+    # single next turn.
+    assert raw["s-in"]["_prior_event_ms"] == S - 4_000
+    assert raw["s-in"]["_prior_work_ms"] == 1_000
+    assert raw["s-in"]["_next_event_ms"] == U + 5_000
+    assert raw["s-out"]["_next_event_ms"] == U + 10_000
+    assert "_prior_event_ms" not in raw["s-out"]
+
+    # Cardinality: the data fetchall statements are Query 1 (1 in-window
+    # turn), Query 2 (1 model row), Query 3 (1 row per session with a
+    # next turn: 2), Query 4 (1 row per set-A session: 1 - not the 3
+    # history rows, and none for set-B's s-out). The sqlite_master probe
+    # is a schema check, not data.
+    total = sum(
+        rows
+        for sql, rows in recs[0].statements
+        if "sqlite_master" not in sql
+    )
+    assert total == 1 + 1 + 2 + 1

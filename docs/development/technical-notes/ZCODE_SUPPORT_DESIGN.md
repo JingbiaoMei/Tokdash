@@ -1,9 +1,11 @@
 # ZCode support design
 
 ZCode (Z.ai's GLM coding app) persists every model request in a local SQLite
-database. Tokdash reads it read-only, one entry per `model_usage` row. This
-note records the storage layout, the token-accounting rules the parser must
-follow, and what is deliberately out of scope for the first change.
+database. Tokdash reads it read-only, one entry per `model_usage` row, and a
+phase 2 extension reads `turn_usage` for the Session Explorer. This note
+records the storage layout, the token-accounting rules the parser must
+follow, the session-support decisions, and what is deliberately out of
+scope.
 
 ## Storage
 
@@ -19,9 +21,11 @@ Key tables:
 | Table | Role |
 | --- | --- |
 | `model_usage` | One row per model request; the cost and token source |
-| `turn_usage` | Per-(session, turn) aggregate; phase 2 |
-| `session` | id, title, directory, parent_id (subagents); phase 2 |
-| `tool_usage` | Per tool call; phase 2 |
+| `turn_usage` | Per-(session, turn) aggregate; read by the session
+  loader (phase 2) for timing, status and turn-level counts |
+| `session` | id, title, directory, parent_id (subagents); read by the
+  session loader (phase 2) |
+| `tool_usage` | Per tool call; not read (turn-level `tool_call_count` covers the display need) |
 | `message` / `part` | Conversation text; not read by Tokdash |
 
 `model_usage` columns the parser uses:
@@ -95,9 +99,12 @@ Unverified assumptions, each pinned to a first-row check in
 `MimoParser` (SQLite, class-level query cache, `SourceSyncCapability`):
 
 - Path resolution: `clientpaths.zcode_db_path()`, honoring `ZCODE_HOME`.
-- Connection: `_open_snapshot` copies `db.sqlite` + `db.sqlite-wal`
-  (the live rows sit in the WAL) into a private temp dir, opens the copy
-  normally, and deletes the dir after the query. Reading the source
+- Connection: the module-level `zcode_snapshot(db_path)` context manager
+  copies `db.sqlite` + `db.sqlite-wal` (the live rows sit in the WAL)
+  into a private temp dir, opens the copy normally, and deletes the dir
+  on exit - close runs even when the body raises, and a close error sets
+  `close_failed` instead of escaping. Both the usage parser and the
+  session loader consume it. Reading the source
   directly is not side-effect free: even a `?mode=ro` open makes SQLite
   CREATE a missing `db.sqlite-shm` in the source directory (reproduced
   with a valid DB+WAL), so the reader never opens the source file at all.
@@ -114,8 +121,9 @@ Unverified assumptions, each pinned to a first-row check in
   copy is the normal one) drops the attempt and retries, bounded by
   `_ZCODE_SNAPSHOT_MAX_ATTEMPTS`. A failure with unchanged signatures, or
   exhausted attempts, skips the source - no fallback open in another
-  mode. A `close()` error degrades the read to failed (uncached) without
-  leaking the temp dir.
+  mode. A `close()` error marks the snapshot `close_failed`; both consumers
+  then return the read result but never cache it, without leaking the
+  temp dir.
 - Failed reads (connect, probe, or query errors) are **not** cached: a restored
   permission or cleared transient SQLite error may not change the file
   signatures, so caching an empty result would keep it stale until a file
@@ -148,17 +156,70 @@ Unverified assumptions, each pinned to a first-row check in
 
 ## Scope
 
-In (this change): Overview/Stats tokens, cost, models, daily activity for
-ZCode; dashboard brand mark; brand-wiring test coverage.
+In (phase 1): Overview/Stats tokens, cost, models, daily activity for ZCode;
+dashboard brand mark; brand-wiring test coverage.
+
+In (phase 2, this change's session support):
+
+- **Session Explorer, live native-DB group.** The loader in `sessions.py`
+  (`_zcode_load_sessions`) reads `turn_usage` + `model_usage` through the same
+  `zcode_snapshot` context manager the parser uses, and `zcode` joins
+  `SESSION_TOOLS` so `/api/sessions`, the startup warmer, and the active-time
+  paths all pick it up. `session_store` stays **False** (D1): ZCode remains a
+  live-queried source like OpenCode and Mimo; the earlier plan to flip the flag
+  is withdrawn - the flag gates persistent-store sync, not the Sessions tab.
+  No `cli.py` change (D2: the warm path is `SESSION_TOOLS`-driven) and no
+  `api.py` change (D3).
+- **Top-level sessions only** (D4). `session.parent_id` set marks a subagent;
+  its model rows are excluded from Sessions entirely, so Sessions totals are a
+  subset of Overview totals whenever subagents ran.
+- **Token turns vs activity events** (D5). One candidate per
+  (session, turn) row. If at least one of its `model_usage` rows survives the
+  token-presence guard, it is a token turn. Otherwise its measured `duration_ms`
+  (when > 0) is kept as an `_activity_events` entry `(E, duration)` so
+  tool-only and error work still credits active time. The field is not named
+  `_activity`: Codex already uses that key on raw sessions for unrelated
+  per-file metadata.
+- **One event timestamp** (D6). `E = COALESCE(completed_at, started_at)` is the
+  single instant used for the half-open query window, ordering, boundary
+  lookups, and the emitted `timestamp_ms`. Query 2 fetches every `model_usage`
+  row by the selected turns' (session_id, turn_id) rather than by an
+  independent date window, so a turn's retries and model calls can never be
+  split across a boundary by their own `started_at`.
+- **Composite billing records** (D7). A turn can span several models, and
+  `_build_turn` accepted exactly one `_bill`, so turns carry `_bills`
+  (one record per (turn, model) group, `split-cache-write` rule) and the
+  displayed `tokens_in` is `Σ(input_t + cache_write)` - cache writes show up in
+  the input column while billing input stays `Σinput_t` with `cache_write`
+  passed to `get_cost` separately. Repricing and private-field stripping handle
+  `_bills` as well as `_bill`.
+- **Tri-state reads** (D8). A missing database and an absent `model_usage`
+  table are legitimate empty successes and are cached (the phase-1 signature
+  cache, success-only). A transient snapshot or query failure raises
+  `ZCodeReadError` and is never cached, so the next collection retries.
+  Verified consumers: the startup warmer swallows the exception;
+  `/api/sessions` returns an error instead of false data; `/api/session`
+  returns 500 rather than a false 404 for an id that exists on disk;
+  `_active_time_window` isolates the failure per tool.
+- **Active time.** Measured work of top-level sessions is credited for its
+  overlap with the window even when the session has no in-window token event:
+  token turns via `_work_ms`, in-window zero-token turns via
+  `_activity_events`, and a boundary-only turn via `_next_event_ms` +
+  `_next_work_ms` on an activity-only session (the set-B rule: a boundary turn
+  earns a raw session iff its measured work overlaps the window). Unmeasured
+  work keeps the existing capped-gap contract: a lone unmeasured boundary event
+  measures nothing. The two consumers that count activity-only sessions are
+  `get_sessions_data`'s summary and `_active_time_window`'s per-tool path,
+  both reading the precomputed `_activity_intervals` because
+  `_summarize_session` returns None for a session without in-window token
+  turns. Caveat: `duration_ms` is turn wall-time, so on an approval-gated
+  setup user pauses inside a turn count as active (see Verification status);
+  and the response's shared `active_time_method` string still says
+  "capped-inter-event-gap" even where ZCode's intervals are fully measured -
+  acceptable for v1.
 
 Out, deliberately:
 
-- **Session Explorer.** `session` + `turn_usage` are ready for a phase 2
-  that adds the session/turn loader and per-session detail view in
-  `sessions.py`, the frontend session panel, active-time integration, the
-  `cli.py` warm/sync call (`get_sessions_data("zcode", "all")`), and the
-  `session_store=True` declaration. The flag alone does nothing - no code
-  gates the Sessions tab on it - so it must ship with the wiring.
 - **Coding Plan quota.** The 5-hour/weekly/monthly pools are remote data. The
   desktop app polls `https://zcode.z.ai/api/v1/zcode-plan/billing/balance`
   (OAuth token in `~/.zcode/v2/credentials.json`), and the local
@@ -166,10 +227,29 @@ Out, deliberately:
   A quota adapter is a separate provider and must not share the local
   parser's data path.
 
+Reconciliation guarantee (phase 2): per-turn parity - every `model_usage` row
+that belongs to a top-level session, has a non-null `turn_id`, and survives the
+token-presence guard is billed exactly once in Sessions and once in Overview,
+at the same cost and the same displayed buckets, for windows that do not cross
+a boundary. Excluded by design (one test each): subagent rows, rows with
+`turn_id IS NULL`, all-zero-token turns (their measured work still counts in
+active time), and period-edge attribution (Sessions treats a turn atomically;
+Overview windows individual requests).
+
 ## Verification status (2026-08-19)
 
 - macOS (ZCode 3.7.7): schema, sample rows, timestamps, and the balance
   endpoint observed directly.
+- Phase 2 (2026-08-20), live macOS database, single turn:
+  `turn_usage.duration_ms == completed_at - started_at` exactly
+  (8213 ms both ways), the model request started 25 ms after the turn
+  start, and the turn's permission mode was `"build"` (autonomous, no
+  mid-turn approval waits). So `duration_ms` is a sound proxy for agent
+  work on this setup; on an approval-gated setup user pauses inside a
+  turn would count as active. Reproducing a multi-tool turn headlessly
+  was not possible: `node .../ZCode.app/Contents/Resources/glm/zcode.cjs
+  -p ...` fails with "Model config is missing" (needs
+  `~/.zcode/cli/config.json`, which was not created for the check).
 - Windows: the current GUI was not installed on the review host; the expected
   layout follows the cross-platform home-dir convention and is unverified.
 - Linux: ZCode ships deb/AppImage builds (officially supported under WSLg),

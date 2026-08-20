@@ -55,3 +55,11 @@ tokdash = [
   "static/*",
   "static/**/*",
 ]
+
+[tool.pytest.ini_options]
+# Keep only failed tests' tmp dirs (dead per-test Chrome profiles used to
+# accumulate gigabytes under /tmp/pytest-of-<user>).
+tmp_path_retention_policy = "failed"
+markers = [
+    "opens_browser: test legitimately exercises a browser-open sink; the no_browser_open backstop is suspended for it",
+]

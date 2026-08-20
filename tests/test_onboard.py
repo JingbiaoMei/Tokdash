@@ -380,6 +380,7 @@ def test_setup_systemd_restart_timeout_fails_closed_when_not_ready(fake_systemd,
     assert paths.manifest_path().exists()
 
 
+@pytest.mark.opens_browser
 def test_setup_open_dashboard_uses_detached_opener(monkeypatch):
     calls = []
 
@@ -437,10 +438,12 @@ def test_setup_opens_dashboard_after_quota_wizard(monkeypatch, fake_systemd):
 
 def test_setup_interactive_never_spawns_browser(monkeypatch, fake_systemd):
     # Regression: `setup` must spawn no browser under test (incident history:
-    # tests/conftest.py::no_setup_browser_open). `_has_display` is pinned True so
-    # the conftest TOKDASH_SETUP_NO_OPEN switch is the ONLY remaining guard —
-    # otherwise the display check short-circuits first in CI/SSH and this test
-    # is vacuous there.
+    # tests/conftest.py::no_browser_open). `_has_display` is pinned True so the
+    # conftest TOKDASH_SETUP_NO_OPEN switch is the guard under test — otherwise
+    # the display check short-circuits first in CI/SSH and this test is vacuous
+    # there. If the switch is removed, the conftest sink backstop fails the
+    # test; if the whole fixture is removed, the Popen spy below catches the
+    # real xdg-open.
     monkeypatch.setattr(engine, "_has_display", lambda: True)
     monkeypatch.setattr(engine, "_print_setup_human_plan", lambda p: None)
     monkeypatch.setattr(engine, "_confirm", lambda prompt, default=True: True)
@@ -459,7 +462,7 @@ def test_setup_interactive_never_spawns_browser(monkeypatch, fake_systemd):
 def test_has_display_false_under_pytest(monkeypatch):
     # A pytest run has a display but no one to show it to; the guard must hold
     # even with a display present (the in-repo no-open switch is separate —
-    # tests/conftest.py::no_setup_browser_open). CI and SSH are cleared so the
+    # tests/conftest.py::no_browser_open). CI and SSH are cleared so the
     # PYTEST_CURRENT_TEST guard specifically is what's pinned. Both call sites
     # (setup's open and serve's auto-open) delegate to the same shared
     # implementation, so asserting both wrappers pins the single source.

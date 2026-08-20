@@ -73,7 +73,7 @@ def has_display() -> bool:
         return False
     # A test run has a display but no one to show it to: a browser opened from
     # pytest is detached from the test process and nothing would ever close it
-    # (incident: tests/conftest.py::no_setup_browser_open). PYTEST_CURRENT_TEST
+    # (incident: tests/conftest.py::no_browser_open). PYTEST_CURRENT_TEST
     # is inherited by subprocesses, so this intentionally also covers a
     # `tokdash serve` or `tokdash setup` shelled out from another project's
     # test suite.

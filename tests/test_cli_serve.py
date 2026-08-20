@@ -1,6 +1,8 @@
 """Tests for `tokdash serve` browser auto-open behavior and the --no-open flag."""
 import sys
 
+import pytest
+
 import tokdash.cli as cli
 from tokdash.onboard import engine
 
@@ -149,6 +151,7 @@ def test_has_display_non_linux_assumes_gui(monkeypatch):
     assert cli._has_display() is True
 
 
+@pytest.mark.opens_browser
 def test_open_browser_swallows_errors(monkeypatch):
     def boom(url):
         raise RuntimeError("no browser available")
@@ -204,7 +207,7 @@ def test_serve_never_arms_browser_timer_under_pytest(monkeypatch):
     # must never arm, even with a display present. CI/SSH are cleared so the
     # PYTEST_CURRENT_TEST guard in osinfo.has_display is the ONLY thing between
     # serve() and a timer — remove it and this test arms one. (Incident
-    # history: tests/conftest.py::no_setup_browser_open.)
+    # history: tests/conftest.py::no_browser_open.)
     started = _patch_serve(monkeypatch, has_display=None)  # the real predicate must decide
     monkeypatch.delenv("CI", raising=False)
     monkeypatch.delenv("SSH_CONNECTION", raising=False)

@@ -21,6 +21,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from .. import osinfo
 from . import detect, launchd, manifest, paths, plan, runtime, systemd, tailscale, updatecheck, winsched
 from .plan import DEFAULT_PORT, Options
 
@@ -130,14 +131,13 @@ def cmd_setup(opts: Options) -> int:
 
 
 def _has_display() -> bool:
-    """Best-effort GUI detection for setup's optional browser open."""
-    if os.environ.get("CI"):
-        return False
-    if os.environ.get("SSH_CONNECTION") or os.environ.get("SSH_TTY"):
-        return False
-    if sys.platform.startswith("linux"):
-        return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
-    return True
+    """Best-effort GUI detection for setup's optional browser open.
+
+    Thin wrapper over the single shared implementation (:func:`osinfo.has_display`,
+    also used by ``tokdash serve``'s auto-open) — keep it delegating so the two
+    call sites can never diverge.
+    """
+    return osinfo.has_display()
 
 
 def _maybe_open_dashboard(result: Dict[str, Any], opts: Options, detection: Dict[str, Any]) -> bool:

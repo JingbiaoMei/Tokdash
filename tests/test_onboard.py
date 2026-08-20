@@ -409,6 +409,10 @@ def test_setup_open_dashboard_uses_detached_opener(monkeypatch):
 
 
 def test_setup_open_dashboard_records_note(monkeypatch):
+    # Deliberately lifts the conftest TOKDASH_SETUP_NO_OPEN switch: this test
+    # exercises the open path itself (the no-open behavior is pinned by
+    # test_setup_interactive_never_spawns_browser).
+    monkeypatch.delenv("TOKDASH_SETUP_NO_OPEN", raising=False)
     monkeypatch.setattr(engine, "_has_display", lambda: True)
     monkeypatch.setattr(engine, "_open_dashboard_url", lambda url: True)
     result = {"ok": True, "url": "http://127.0.0.1:55423"}
@@ -429,6 +433,43 @@ def test_setup_opens_dashboard_after_quota_wizard(monkeypatch, fake_systemd):
 
     assert run(["setup", "--service", "systemd"]) == 0
     assert calls == ["quota", "open"]
+
+
+def test_setup_interactive_never_spawns_browser(monkeypatch, fake_systemd):
+    # Regression: `setup` must spawn no browser under test (incident history:
+    # tests/conftest.py::no_setup_browser_open). `_has_display` is pinned True so
+    # the conftest TOKDASH_SETUP_NO_OPEN switch is the ONLY remaining guard —
+    # otherwise the display check short-circuits first in CI/SSH and this test
+    # is vacuous there.
+    monkeypatch.setattr(engine, "_has_display", lambda: True)
+    monkeypatch.setattr(engine, "_print_setup_human_plan", lambda p: None)
+    monkeypatch.setattr(engine, "_confirm", lambda prompt, default=True: True)
+    monkeypatch.setattr(engine, "_offer_tailscale", lambda result: None)
+    monkeypatch.setattr(engine, "_update_check_setup_step", lambda: None)
+    monkeypatch.setattr(engine, "_quota_setup_wizard", lambda: None)
+    spawned = []
+    # engine.subprocess IS the global subprocess module, so this records every
+    # spawn — including subprocess.run, which builds a Popen internally.
+    monkeypatch.setattr(engine.subprocess, "Popen", lambda *a, **k: spawned.append(a))
+
+    assert run(["setup", "--service", "systemd"]) == 0
+    assert spawned == []
+
+
+def test_has_display_false_under_pytest(monkeypatch):
+    # A pytest run has a display but no one to show it to; the guard must hold
+    # even with a display present (the in-repo no-open switch is separate —
+    # tests/conftest.py::no_setup_browser_open). CI and SSH are cleared so the
+    # PYTEST_CURRENT_TEST guard specifically is what's pinned. Both call sites
+    # (setup's open and serve's auto-open) delegate to the same shared
+    # implementation, so asserting both wrappers pins the single source.
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.delenv("SSH_CONNECTION", raising=False)
+    monkeypatch.delenv("SSH_TTY", raising=False)
+    monkeypatch.setenv("DISPLAY", ":0")
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "tests/x.py::test_y (call)")
+    assert engine._has_display() is False
+    assert cli._has_display() is False
 
 
 # --- update-check setup step -----------------------------------------------------

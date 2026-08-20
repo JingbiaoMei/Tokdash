@@ -4,7 +4,6 @@ import argparse
 import json
 import os
 import random
-import sys
 import time
 import threading
 import webbrowser
@@ -13,7 +12,7 @@ from pathlib import Path
 
 import uvicorn
 
-from . import __version__
+from . import __version__, osinfo
 from .api import app
 from .compute import compute_usage
 from .sources.quota.config import POLL_INTERVAL_FLOOR_SECONDS
@@ -230,25 +229,12 @@ def build_parser(prog: str) -> argparse.ArgumentParser:
 def _has_display() -> bool:
     """Best-effort check for a usable GUI session.
 
-    Returns False in headless contexts (CI, SSH sessions, systemd/launchd
-    services, Linux without an X11/Wayland display) so we don't try to launch
-    a browser where there is none. ``--no-open`` remains the explicit hard
-    override on top of this.
+    Thin wrapper over the single shared implementation (:func:`osinfo.has_display`,
+    also used by ``tokdash setup``'s optional browser open) — keep it delegating
+    so the two call sites can never diverge. ``--no-open`` remains the explicit
+    hard override on top of this.
     """
-    # CI runners are headless regardless of OS. Most providers (GitHub Actions,
-    # GitLab, Travis, CircleCI, ...) set CI=true.
-    ci = os.environ.get("CI", "").strip().lower()
-    if ci and ci not in {"0", "false", "no"}:
-        return False
-    # A remote shell with no local console: opening a browser is wrong here
-    # even on macOS/Windows.
-    if os.environ.get("SSH_CONNECTION") or os.environ.get("SSH_TTY"):
-        return False
-    # On Linux a GUI needs an X11 or Wayland display. macOS and Windows don't
-    # expose these vars but do have a desktop session, so only gate on Linux.
-    if sys.platform.startswith("linux"):
-        return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
-    return True
+    return osinfo.has_display()
 
 
 def _open_browser(url: str) -> None:

@@ -2,6 +2,7 @@
 import sys
 
 import tokdash.cli as cli
+from tokdash.onboard import engine
 
 
 def test_no_open_flag_defaults_false():
@@ -102,14 +103,21 @@ def test_export_include_quota_flag(monkeypatch, capsys):
 def test_has_display_false_in_ci(monkeypatch):
     monkeypatch.delenv("SSH_CONNECTION", raising=False)
     monkeypatch.delenv("SSH_TTY", raising=False)
+    # These tests assert the real-GUI branch, so lift the pytest marker that
+    # has_display() treats as headless.
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
     # CI gating is OS-independent, so even a "GUI" platform stays headless.
     monkeypatch.setattr(sys, "platform", "darwin")
     monkeypatch.setenv("DISPLAY", ":0")
     monkeypatch.setenv("CI", "true")
+    # Both call sites (serve's auto-open and setup's optional open) share one
+    # implementation — pin the unified CI semantics at both wrappers.
     assert cli._has_display() is False
+    assert engine._has_display() is False
     # An explicitly falsy CI value should not gate.
     monkeypatch.setenv("CI", "false")
     assert cli._has_display() is True
+    assert engine._has_display() is True
 
 
 def test_has_display_false_under_ssh(monkeypatch):
@@ -122,6 +130,7 @@ def test_has_display_linux_requires_display(monkeypatch):
     monkeypatch.delenv("CI", raising=False)
     monkeypatch.delenv("SSH_CONNECTION", raising=False)
     monkeypatch.delenv("SSH_TTY", raising=False)
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)  # assert the real-GUI branch
     monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.delenv("DISPLAY", raising=False)
     monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
@@ -134,6 +143,7 @@ def test_has_display_non_linux_assumes_gui(monkeypatch):
     monkeypatch.delenv("CI", raising=False)
     monkeypatch.delenv("SSH_CONNECTION", raising=False)
     monkeypatch.delenv("SSH_TTY", raising=False)
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)  # assert the real-GUI branch
     monkeypatch.setattr(sys, "platform", "darwin")
     monkeypatch.delenv("DISPLAY", raising=False)
     assert cli._has_display() is True
@@ -148,11 +158,16 @@ def test_open_browser_swallows_errors(monkeypatch):
     cli._open_browser("http://localhost:55423")
 
 
-def _patch_serve(monkeypatch, *, has_display):
-    """Stub uvicorn + threading.Timer; return a list that records timer starts."""
+def _patch_serve(monkeypatch, *, has_display=None):
+    """Stub uvicorn + threading.Timer; return a list that records timer starts.
+
+    ``has_display=None`` leaves the REAL predicate in place (the regression
+    test needs that to bite); True/False stub it out.
+    """
     started: list[str] = []
     monkeypatch.setattr(cli.uvicorn, "run", lambda *a, **k: None)
-    monkeypatch.setattr(cli, "_has_display", lambda: has_display)
+    if has_display is not None:
+        monkeypatch.setattr(cli, "_has_display", lambda: has_display)
 
     class FakeTimer:
         def __init__(self, _interval, _func, args=(), **_kwargs):
@@ -180,6 +195,23 @@ def test_serve_skips_browser_when_disabled(monkeypatch):
 
 def test_serve_skips_browser_when_headless(monkeypatch):
     started = _patch_serve(monkeypatch, has_display=False)
+    cli.serve("127.0.0.1", 55423, "info", open_browser=True)
+    assert started == []
+
+
+def test_serve_never_arms_browser_timer_under_pytest(monkeypatch):
+    # Regression (WSLg incident, serve twin): under pytest the browser timer
+    # must never arm, even with a display present. CI/SSH are cleared so the
+    # PYTEST_CURRENT_TEST guard in osinfo.has_display is the ONLY thing between
+    # serve() and a timer — remove it and this test arms one. (Incident
+    # history: tests/conftest.py::no_setup_browser_open.)
+    started = _patch_serve(monkeypatch, has_display=None)  # the real predicate must decide
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.delenv("SSH_CONNECTION", raising=False)
+    monkeypatch.delenv("SSH_TTY", raising=False)
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setenv("DISPLAY", ":0")
+
     cli.serve("127.0.0.1", 55423, "info", open_browser=True)
     assert started == []
 

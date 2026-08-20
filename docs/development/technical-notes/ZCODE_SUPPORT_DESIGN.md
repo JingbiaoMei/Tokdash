@@ -95,17 +95,23 @@ Unverified assumptions, each pinned to a first-row check in
 `MimoParser` (SQLite, class-level query cache, `SourceSyncCapability`):
 
 - Path resolution: `clientpaths.zcode_db_path()`, honoring `ZCODE_HOME`.
-- Connection: `_open_snapshot` copies `db.sqlite` + `db.sqlite-wal` +
-  `db.sqlite-shm` together (the live rows sit in the WAL) into a private
-  temp dir, opens the copy normally, and deletes the dir after the query.
-  Reading the source directly is not side-effect free: even a `?mode=ro`
-  open makes SQLite CREATE a missing `db.sqlite-shm` in the source
-  directory (reproduced with a valid DB+WAL), so the reader never opens the
-  source file at all. Any WAL/SHM writes SQLite needs happen inside the
-  disposable copy. (The earlier `resolve().as_uri() + "?mode=ro"` plan is
-  superseded; that URI form also truncates on a `#` in the path.) A copy or
-  open failure skips the source after a single attempt - no fallback open
-  in another mode.
+- Connection: `_open_snapshot` copies `db.sqlite` + `db.sqlite-wal`
+  (the live rows sit in the WAL) into a private temp dir, opens the copy
+  normally, and deletes the dir after the query. Reading the source
+  directly is not side-effect free: even a `?mode=ro` open makes SQLite
+  CREATE a missing `db.sqlite-shm` in the source directory (reproduced
+  with a valid DB+WAL), so the reader never opens the source file at all.
+  The `-shm` is NOT copied - it is live coordination state, and SQLite
+  rebuilds the WAL index from the copied `-wal` inside the temp dir. (The
+  earlier `resolve().as_uri() + "?mode=ro"` plan is superseded; that URI
+  form also truncates on a `#` in the path.)
+- Snapshot coherence: the copies are sequential while ZCode may append to
+  the WAL or checkpoint between them, so the db/-wal signatures - exactly
+  the copied set; the live `-shm` is excluded because reader traffic in
+  it must not force retries - are taken before and after copying. A
+  difference drops the attempt and retries, bounded by
+  `_ZCODE_SNAPSHOT_MAX_ATTEMPTS`. Copy/open errors and exhausted attempts
+  skip the source - no fallback open in another mode.
 - Failed reads (connect, probe, or query errors) are **not** cached: a restored
   permission or cleared transient SQLite error may not change the file
   signatures, so caching an empty result would keep it stale until a file

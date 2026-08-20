@@ -1,7 +1,6 @@
 """Tests for ZCodeParser (temp-dir snapshot reads of a WAL-mode source DB)."""
 import shutil
 import sqlite3
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -313,6 +312,16 @@ def test_zcode_snapshot_open_failure_skips(monkeypatch, tmp_path):
         raise sqlite3.OperationalError("unable to open database file")
 
     monkeypatch.setattr(ct.sqlite3, "connect", fake_connect)
+
+    created = []
+
+    def fake_mkdtemp(suffix=None, prefix=None, dir=None):
+        d = tmp_path / f"zcode-snap-{len(created)}"
+        d.mkdir()
+        created.append(d)
+        return str(d)
+
+    monkeypatch.setattr(ct.tempfile, "mkdtemp", fake_mkdtemp)
     parser = ZCodeParser(PricingDatabase())
 
     assert parser._open_snapshot() is None
@@ -326,6 +335,9 @@ def test_zcode_snapshot_open_failure_skips(monkeypatch, tmp_path):
     # there is no second attempt in another mode against the source.
     assert len(calls) == 2
     assert calls[1][0][0] != str(db_path)
+    # Both failed attempts' temp dirs are removed, not leaked.
+    assert len(created) == 2
+    assert not any(d.exists() for d in created)
 
 
 def test_zcode_failed_read_not_cached(monkeypatch, tmp_path):
@@ -457,15 +469,25 @@ def test_zcode_no_sidecar_writes_in_source_dir(monkeypatch, tmp_path):
     before = sorted(p.name for p in live_dir.iterdir())
     assert before == ["db.sqlite", "db.sqlite-wal"]
 
+    import tokdash.sources.coding_tools as ct
+
+    created = []
+
+    def fake_mkdtemp(suffix=None, prefix=None, dir=None):
+        d = tmp_path / f"zcode-snap-{len(created)}"
+        d.mkdir()
+        created.append(d)
+        return str(d)
+
+    monkeypatch.setattr(ct.tempfile, "mkdtemp", fake_mkdtemp)
+
     entries = ZCodeParser(PricingDatabase()).collect(None, None)
     assert len(entries) == 1  # the WAL-only row was read from the snapshot
     # No sidecar (or any) file appears in the source directory, and the
-    # temp-dir snapshot is cleaned up afterwards.
+    # exact temp-dir snapshot is removed afterwards.
     assert sorted(p.name for p in live_dir.iterdir()) == before
-    td = Path(tempfile.gettempdir())
-    assert not [
-        p.name for p in td.iterdir() if p.name.startswith("tokdash-zcode.")
-    ]
+    assert len(created) == 1
+    assert not created[0].exists()
 
 
 def test_zcode_stale_read_not_stored_after_signature_change(monkeypatch, tmp_path):
@@ -502,3 +524,38 @@ def test_zcode_stale_read_not_stored_after_signature_change(monkeypatch, tmp_pat
     assert len(parser.collect(None, None)) == 1
     # C: the cache hit must serve B's fresh data, not A's stale store.
     assert len(parser.collect(None, None)) == 2
+
+
+def test_zcode_snapshot_retries_when_source_changes_mid_copy(monkeypatch, tmp_path):
+    """If the source db is replaced between the two copies (ZCode
+    checkpointing or rewriting mid-copy), the attempt would mix two
+    generations, so the db/-wal signatures are re-checked after copying
+    and the attempt is dropped and re-copied: the result is the complete
+    new generation, never a torn mix."""
+    import tokdash.sources.coding_tools as ct
+
+    home = tmp_path / ".zcode"
+    db_path = home / "cli" / "db" / "db.sqlite"
+    db_path.parent.mkdir(parents=True)
+    _create_db(db_path, [_row()])
+    monkeypatch.setenv("ZCODE_HOME", str(home))
+
+    real_copy2 = ct.shutil.copy2
+    state = {"fired": False}
+
+    def sneaky_copy2(src, dst, *args, **kwargs):
+        result = real_copy2(src, dst, *args, **kwargs)
+        if not state["fired"] and Path(dst).name == "db.sqlite":
+            state["fired"] = True
+            # The source is replaced mid-copy: the copied db is an older
+            # generation than the signature taken after the copy.
+            db_path.unlink()
+            _create_db(db_path, [_row(), _row(row_id="mu-2", logical="lr-2", attempt=1)])
+        return result
+
+    monkeypatch.setattr(ct.shutil, "copy2", sneaky_copy2)
+    entries = ZCodeParser(PricingDatabase()).collect(None, None)
+    # First attempt is torn and retried; the stored result is the
+    # complete second generation.
+    assert len(entries) == 2
+    assert {e["entry_id"] for e in entries} == {"zcode:mu-1", "zcode:mu-2"}

@@ -185,7 +185,13 @@ In (phase 2, this change's session support):
   lookups, and the emitted `timestamp_ms`. Query 2 fetches every `model_usage`
   row by the selected turns' (session_id, turn_id) rather than by an
   independent date window, so a turn's retries and model calls can never be
-  split across a boundary by their own `started_at`.
+  split across a boundary by their own `started_at`. The two boundary
+  lookups stay bounded the same way: the next-boundary query selects the
+  nearest qualifying turn per session in SQL (a correlated MIN; the schema
+  has no `completed_at` index, so one row per session is the only
+  containment), and the prior-boundary query is restricted to the true set-A
+  ids (chunked `IN` list) snapshotted before the next-boundary query adds
+  set-B sessions, so neither request materializes whole histories.
 - **Composite billing records** (D7). A turn can span several models, and
   `_build_turn` accepted exactly one `_bill`, so turns carry `_bills`
   (one record per (turn, model) group, `split-cache-write` rule) and the
@@ -193,9 +199,9 @@ In (phase 2, this change's session support):
   the input column while billing input stays `Σinput_t` with `cache_write`
   passed to `get_cost` separately. Repricing and private-field stripping handle
   `_bills` as well as `_bill`.
-- **Tri-state reads** (D8). A missing database and an absent `model_usage`
-  table are legitimate empty successes and are cached (the phase-1 signature
-  cache, success-only). A transient snapshot or query failure raises
+- **Tri-state reads** (D8). A missing database and an absent `turn_usage`
+  or `model_usage` table (a partially migrated schema) are legitimate empty
+  successes and are cached (the phase-1 signature cache, success-only). A transient snapshot or query failure raises
   `ZCodeReadError` and is never cached, so the next collection retries.
   Verified consumers: the startup warmer swallows the exception;
   `/api/sessions` returns an error instead of false data; `/api/session`

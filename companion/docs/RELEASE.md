@@ -41,6 +41,27 @@ The artifact retains for one day, matching the repository-wide rule. If that
 window is missed, re-run the `windows` job: the build is driven entirely by the
 tag, so it reproduces the same package.
 
+### Publishing a Store update
+
+1. Land the change on `main` and bump `companion/VERSION`.
+2. Run `python3 companion/scripts/check_release.py --tag companion-vX.Y.Z`.
+3. Tag that commit `companion-vX.Y.Z` and push. One tag builds all three packages.
+4. Download the `tokdash-companion-<version>-store-msix` artifact from the run.
+5. Partner Center > the product > Packages: upload the `.msix`. Identity is matched
+   here, so a mismatch is rejected at upload rather than in certification.
+6. Update Store listings only if the copy changed. The current en-US and zh-Hans
+   field text is kept out of the public repo, under
+   `docs/local/companion/listing-paste/`.
+7. Submit. Certification re-runs the Windows App Certification Kit tests on
+   Microsoft's side; a local WACK pass is a pre-check, not a substitute.
+8. Publication follows certification automatically.
+
+`runFullTrust` approval is granted per product and carries across submissions. That
+form reappears only if a package declares a restricted capability it did not have
+before, so adding one means re-justifying it.
+
+### Identity
+
 The build needs the Partner Center identity triple in repository variables
 (Settings > Secrets and variables > Actions > Variables):
 
@@ -96,10 +117,13 @@ committed build number, and put `unsigned` in the filenames. The tag workflow:
 2. creates a draft GitHub release;
 3. builds and tests Windows x64 and the macOS universal application;
 4. uploads both binaries directly to the draft release;
-5. downloads those final assets, generates `SHA256SUMS`, and publishes.
+5. builds the Store MSIX and attaches it to the run as an artifact, never to the
+   release;
+6. downloads those final assets, generates `SHA256SUMS`, and publishes.
 
-No Actions artifacts are uploaded. Repository artifact and log retention is
-set to one day for any other workflow that needs temporary storage.
+The public download path uses no Actions artifacts: the ZIP and DMG move through
+the draft release. The single artifact is the Store MSIX, which has no public
+download path by design. Artifact and log retention is one day.
 
 ## Install, update, and remove
 
@@ -159,3 +183,12 @@ Before tagging:
   discovery, or port scanning.
 - Tag the current merged `main` commit only. Never replace assets under an
   existing tag; release fixes under a new companion version.
+
+For the Store track specifically:
+
+- Confirm the three `MSIX_*` repository variables are still set; the build fails
+  fast without them rather than producing a test-identity package.
+- Never attach the `.msix` to the GitHub Release. `check_release.py` enforces this.
+- Confirm `companion/VERSION` has a non-zero major. The Store rejects a zero major,
+  and it reserves the fourth version field, which the builder pins to `0`.
+- A version already accepted by the Store cannot be resubmitted; ship a bump.

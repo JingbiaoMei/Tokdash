@@ -24,6 +24,7 @@
 - [Changelog](development/CHANGELOG.md) — notable changes to the project, release by release.
 - [Releasing](development/RELEASING.md) — checklist for manual PyPI/Git tag/GitHub Releases publishing.
 - [Roadmap](development/ROADMAP.md) — notes on planned and deferred work.
+- [Companion release guide](../companion/docs/RELEASE.md) — tagging the menu-bar/tray app, the unsigned GitHub binaries, and the Microsoft Store (MSIX) track.
 
 ### development/technical-notes/ — public technical notes and research
 

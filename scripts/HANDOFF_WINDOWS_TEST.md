@@ -274,3 +274,51 @@ release-gate ordering.
 - `detect.process_image_path` got the os.name guard its sibling has.
 - Known precision gap (accepted): non-python.exe runtimes (e.g. a pipx
   tokdash.exe) fall back to the name+fingerprint gate.
+
+## Round 8 (fourth live run — re-setup regressed, then fixed)
+
+Live run: ALL CHECKS PASSED except re-setup. Failure:
+
+    service did not start: port 55424 is occupied by a process that is not the
+    previous service (held by pythonw.exe, PID 21372)
+
+Root cause — the dying-instance evidence window. Re-setup /Ends the running
+task and classifies the port while the old pythonw is still dying. In that
+window BOTH positive ownership signals vanish at once: the process has exited
+by the time Get-Process resolves its path (~1-2s PowerShell spawn after
+tasklist), and the 0.5s /health probe races the uvicorn shutdown. The
+classifier demanded name + (path OR fingerprint), got name only, and returned
+'foreign' — hard-failing the re-setup on the port of the very service it had
+just stopped. The same latent evidence requirement existed in the planner:
+`port_is_ours` demanded the live fingerprint, so a wedged/dying previous
+service made the plan silently auto-pick a NEW port (port drift) instead of
+keeping the recorded one.
+
+Fix (one ownership rule: manifest + marker prove ownership; liveness never
+does; kill authority always stays in the wait loop's exact-interpreter gate):
+
+- `_classify_port_holder(port, kill_names)`: on a recorded-own port, a holder
+  with one of our runtime image names is 'ours' even when path and fingerprint
+  are both unavailable (the dying window); an unresolvable holder on a
+  recorded-own port is 'ours' too (wait is safe — the kill gate never kills an
+  unidentifiable holder). 'foreign' is now reserved for holders whose NAME is
+  not ours (wslrelay.exe, other apps) or any occupant of a port we do not
+  record: /End cannot release those, so fail-fast stays. The expected_exe
+  argument was dropped — the classifier no longer resolves paths.
+- Planner `port_is_ours`: manifest port + marked service, no live-fingerprint
+  requirement. Re-setup keeps the recorded port while the previous service is
+  stopping or wedged; the engine's release-wait handles the holder.
+- `_wait_for_port_release(initial_holder=...)`: the handed-in holder now seeds
+  only the identity cache, NOT kill authorization (the old `authorized`
+  shortcut would have taskkill'd a name-matching holder from another venv
+  without the path check once the classifier started passing name-matches
+  through). The kill gate always runs: exact path match -> kill (cached
+  verdict via the killed/no_kill/path_unknown sets, so still one Get-Process
+  spawn per distinct holder), path mismatch -> terminal no-kill, path
+  unknown -> fingerprint.
+
+Tests: classifier (dying own instance -> ours; unresolvable on own port ->
+ours; foreign name -> foreign; no kill_names -> foreign), wait-loop gate on a
+handed-in holder (mismatch -> no kill, match -> kill, no re-lookup), e2e
+re-setup with a dying instance (port frees without any taskkill), planner
+keeps the port when the previous service is not answering.

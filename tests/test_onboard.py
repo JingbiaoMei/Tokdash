@@ -263,6 +263,25 @@ def test_busy_tokdash_port_is_reused_when_ours(monkeypatch, tmp_path):
     assert p["port"] == 55423 and any("already serves Tokdash" in n for n in p["notes"])
 
 
+def test_resetup_keeps_port_when_previous_service_not_answering(monkeypatch, tmp_path):
+    # The previous service is wedged or mid-stop: the port is open but /health is
+    # silent. The plan must still keep the recorded port (manifest + marker are
+    # the ownership proof); a live-fingerprint requirement would silently
+    # auto-pick a new port and strand the install on a different URL.
+    unit = tmp_path / "tokdash.service"
+    unit.write_text("# X-Tokdash-Managed id=abc\n[Service]\n", encoding="utf-8")
+    monkeypatch.setattr(
+        detect, "probe_port",
+        lambda *a, **k: {"port": 55423, "open": True, "is_tokdash": False, "version": None},
+    )
+    d = _detection(
+        existing_service={"systemd_unit": str(unit), "launchd_plist": None, "winsched_task": None},
+        manifest={"port": 55423, "service": {"type": "systemd-user"}},
+    )
+    p = plan.build_setup_plan(plan.Options(auto=True), d)
+    assert p["port"] == 55423
+
+
 def test_resetup_adopts_previous_port(monkeypatch, tmp_path):
     # The regression: after setup auto-picked 55424 (55423 held by the WSL relay's
     # Tokdash), a plain re-setup must keep 55424 — not fall back to the default

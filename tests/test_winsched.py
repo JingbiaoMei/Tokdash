@@ -1139,3 +1139,200 @@ def test_windows_update_fails_fast_on_foreign_holder(windows_env, monkeypatch, c
     assert "wslrelay.exe" in payload["restart_detail"]
     assert "run" not in calls  # no /Run that would die on bind and report success
     assert time.monotonic() - t0 < 5
+
+
+# --- round-7 live failure: dying own instance misclassified as foreign -----------
+#
+# Live-verified: re-setup /Ends the running task and classifies the port while the
+# old pythonw is still dying. In that window Get-Process resolves no path (the
+# process exits between the tasklist and the PowerShell spawn) and the 0.5s
+# /health probe races the uvicorn shutdown — both positive signals are gone at
+# once, the holder was classified "foreign", and the re-setup hard-failed on a
+# port that was about to free up. The image name on the recorded-own port is the
+# only stable evidence and is enough to WAIT; the kill decision stays with the
+# wait loop's exact-interpreter gate.
+
+
+def test_classifier_dying_own_instance_is_ours(monkeypatch):
+    # Port open, holder is our image name, path unresolvable, no /health answer:
+    # "ours" (wait for release), never "foreign".
+    monkeypatch.setattr(
+        detect, "probe_port",
+        lambda port=55423, *a, **k: {"port": port, "open": True, "is_tokdash": False, "version": None},
+    )
+    monkeypatch.setattr(detect, "port_holder", lambda port: (21372, "pythonw.exe"))
+    monkeypatch.setattr(detect, "process_image_path", lambda pid: None)
+    verdict, holder = engine._classify_port_holder(55423, {"python.exe", "pythonw.exe", "pythonw"})
+    assert verdict == "ours"
+    assert holder == (21372, "pythonw.exe")
+
+
+def test_classifier_unresolvable_holder_on_own_port_is_ours(monkeypatch):
+    # Transient netstat/tasklist failure while our dying instance holds the port:
+    # wait (the kill gate never kills an unidentifiable holder), do not fast-fail.
+    monkeypatch.setattr(
+        detect, "probe_port",
+        lambda port=55423, *a, **k: {"port": port, "open": True, "is_tokdash": False, "version": None},
+    )
+    monkeypatch.setattr(detect, "port_holder", lambda port: None)
+    assert engine._classify_port_holder(55423, {"pythonw.exe"}) == ("ours", None)
+
+
+def test_classifier_foreign_name_stays_foreign(monkeypatch):
+    # A non-runtime occupant is foreign even on a recorded-own port: /End cannot
+    # release it, so the caller fails fast with the holder named.
+    monkeypatch.setattr(
+        detect, "probe_port",
+        lambda port=55423, *a, **k: {"port": port, "open": True, "is_tokdash": True, "version": "1.9.0"},
+    )
+    monkeypatch.setattr(detect, "port_holder", lambda port: (777, "wslrelay.exe"))
+    verdict, holder = engine._classify_port_holder(55423, {"pythonw.exe"})
+    assert verdict == "foreign"
+    assert holder == (777, "wslrelay.exe")
+
+
+def test_classifier_no_kill_names_is_foreign(monkeypatch):
+    # A port this install does not record: any occupant is foreign (never waited
+    # on as ours, never killed) — even another Tokdash under the same image name.
+    monkeypatch.setattr(
+        detect, "probe_port",
+        lambda port=55423, *a, **k: {"port": port, "open": True, "is_tokdash": True, "version": "2.0.0"},
+    )
+    monkeypatch.setattr(detect, "port_holder", lambda port: (4242, "pythonw.exe"))
+    assert engine._classify_port_holder(55423, None) == ("foreign", (4242, "pythonw.exe"))
+
+
+def test_port_release_wait_initial_holder_not_auto_authorized(monkeypatch):
+    # The caller hands in a name-matching holder it classified as "ours" (the
+    # dying window, where path + fingerprint are both gone). The wait loop must
+    # still run the kill gate on it: when the path resolves to a DIFFERENT
+    # interpreter, the holder is waited on and reported, never killed.
+    monkeypatch.setattr(
+        detect, "probe_port",
+        lambda port=55423, *a, **k: {"port": port, "open": True, "is_tokdash": False, "version": None},
+    )
+    monkeypatch.setattr(detect, "port_holder", lambda port: (4242, "pythonw.exe"))
+    monkeypatch.setattr(detect, "process_image_path", lambda pid: r"C:\other\venv\Scripts\pythonw.exe")
+
+    def boom(*a, **k):
+        raise AssertionError("taskkill must not run for a different interpreter")
+
+    monkeypatch.setattr(engine.subprocess, "run", boom)
+    err = engine._wait_for_port_release(
+        55423, kill_names={"pythonw.exe"}, expected_exe=r"C:\rt\pythonw.exe",
+        timeout=0.8, initial_holder=(4242, "pythonw.exe"),
+    )
+    assert err is not None and "still busy" in err and "PID 4242" in err
+
+
+def test_port_release_wait_initial_holder_matching_path_kills(monkeypatch):
+    # The handed-in holder passes the gate (exact interpreter) -> kill proceeds
+    # once the gate verifies it; the identity lookup itself is not repeated.
+    state = {"killed": False, "holder_calls": 0}
+
+    def counting_holder(port):
+        state["holder_calls"] += 1
+        return (4242, "pythonw.exe")
+
+    monkeypatch.setattr(
+        detect, "probe_port",
+        lambda port=55423, *a, **k: {"port": port, "open": not state["killed"], "is_tokdash": False, "version": None},
+    )
+    monkeypatch.setattr(detect, "port_holder", counting_holder)
+    monkeypatch.setattr(detect, "process_image_path", lambda pid: r"C:\rt\pythonw.exe")
+    kills = []
+
+    def fake_run(args, *a, **k):
+        if args[:1] == ["taskkill"]:
+            kills.append(args)
+            state["killed"] = True
+        return _ok_proc()
+
+    monkeypatch.setattr(engine.subprocess, "run", fake_run)
+    assert engine._wait_for_port_release(
+        55423, kill_names={"pythonw.exe"}, expected_exe=r"C:\rt\pythonw.exe",
+        timeout=2.0, initial_holder=(4242, "pythonw.exe"),
+    ) is None
+    assert kills == [["taskkill", "/PID", "4242", "/F"]]
+    assert state["holder_calls"] == 0  # initial_holder seeded the cache
+
+
+def test_windows_resetup_waits_for_dying_instance(windows_env, monkeypatch, capsys):
+    # The live-verified round-7 failure, end to end: after /End the old pythonw
+    # still holds the recorded port, but both positive signals are gone in the
+    # shutdown window (no Get-Process path, no /health answer). The re-setup must
+    # wait for the release the dying instance performs on its own — not
+    # fast-fail "not the previous service", and never taskkill it.
+    calls = []
+    state = {"released": False}
+    monkeypatch.setattr(
+        detect, "probe_port",
+        lambda port=55423, *a, **k: {
+            "port": port,
+            "open": not state["released"],
+            "is_tokdash": False,  # uvicorn shutdown: /health no longer answers
+            "version": None,
+        },
+    )
+    monkeypatch.setattr(
+        detect, "port_holder",
+        lambda port: (21372, "pythonw.exe") if not state["released"] else None,
+    )
+
+    def dying_instance_path(pid):
+        # The dying instance frees the port once the wait loop has started its
+        # kill-gate evaluation; no kill is ever needed.
+        state["released"] = True
+        return None
+
+    monkeypatch.setattr(detect, "process_image_path", dying_instance_path)
+
+    def fake_run(args, *a, **k):
+        if args[:1] == ["taskkill"]:
+            raise AssertionError("taskkill must not run: the holder is our dying service")
+        return _ok_proc()
+
+    monkeypatch.setattr(engine.subprocess, "run", fake_run)
+    monkeypatch.setattr(winsched, "create", lambda task_path, name=winsched.TASK_NAME: calls.append("create") or _ok_proc())
+    monkeypatch.setattr(winsched, "delete", lambda name=winsched.TASK_NAME: _ok_proc())
+    monkeypatch.setattr(winsched, "run_now", lambda name=winsched.TASK_NAME: calls.append("run") or _ok_proc())
+    monkeypatch.setattr(winsched, "end_task", lambda name=winsched.TASK_NAME: calls.append("end") or _ok_proc())
+    monkeypatch.setattr(winsched, "is_registered", lambda name=winsched.TASK_NAME: True)
+    monkeypatch.setattr(winsched, "is_registered_strict", lambda name=winsched.TASK_NAME: True)
+    monkeypatch.setattr(winsched, "is_running", lambda name=winsched.TASK_NAME: True)
+    monkeypatch.setattr(
+        engine,
+        "_wait_for_service_ready",
+        lambda bind, port, **k: {"ok": True, "port": {"port": port, "open": True, "is_tokdash": True, "version": "test"}},
+    )
+    monkeypatch.setattr(
+        runtime, "resolve",
+        lambda flag, detection: {
+            "kind": "existing", "install_method": "manual",
+            "command": [r"C:\rt\python.exe", "-m", "tokdash"], "python": r"C:\rt\python.exe",
+            "owned_by_setup": False, "needs_create": False, "error": None,
+        },
+    )
+
+    # A previous install of ours recorded exactly this port and its marked task exists.
+    task_path = paths.winsched_task_path()
+    task_path.parent.mkdir(parents=True, exist_ok=True)
+    task_path.write_bytes(
+        codecs.BOM_UTF16_LE
+        + winsched.render_task([r"C:\rt\python.exe", "-m", "tokdash"], "127.0.0.1", 55423, marker_id="x").encode("utf-16-le")
+    )
+    svc = {"type": "winsched", "unit": str(task_path), "name": winsched.TASK_NAME,
+           "created_by_setup": True, "marker": "X-Tokdash-Managed id=x"}
+    man = manifest.build_manifest(
+        install_method="manual", runtime_kind="existing",
+        runtime_command=[r"C:\rt\python.exe", "-m", "tokdash"],
+        runtime_owned_by_setup=False, python_path=r"C:\rt\python.exe", python_version="3.13.5",
+        service=svc, runtime_marker=None, data_dir=str(paths.data_dir()),
+        bind="127.0.0.1", port=55423,
+    )
+    manifest.write_manifest(man)
+
+    rc, payload = run_json(["setup", "--auto", "--service", "winsched", "--json"], capsys)
+    assert rc == 0
+    assert payload["port"] == 55423
+    assert calls.index("end") < calls.index("create") < calls.index("run")

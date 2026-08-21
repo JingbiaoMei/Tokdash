@@ -141,13 +141,18 @@ def build_setup_plan(opts: Options, detection: Dict[str, Any]) -> Dict[str, Any]
     port_info = detect.probe_port(requested_port)
     # "Ours" = this install's previous service was serving exactly this port (the
     # manifest says so and a marked service of this setup still exists): keep it.
-    # Any other Tokdash on the port is a foreign installation — on WSL-hosted machines
-    # that is often a WSL distro mirroring its own Tokdash onto the host's localhost via
-    # wslrelay.exe — and our service would crash-loop trying to bind it.
-    port_is_ours = bool(
-        port_info.get("open") and port_info.get("is_tokdash")
-        and _port_owned_by_existing_service(service["type"], detection, requested_port)
-    )
+    # The live /health fingerprint is deliberately NOT part of this test: on
+    # re-setup the previous service is being stopped (or is wedged) while it may
+    # still hold the port, and a dead responder would make the plan silently
+    # auto-pick a new port instead of keeping the install's recorded one.
+    # Manifest + marker are the ownership proof; the engine's release-wait deals
+    # with whatever actually holds the port, and its image-name check still
+    # refuses foreign occupants (wslrelay & co.). Any other Tokdash on the port
+    # without a marked service of ours is a foreign installation — on WSL-hosted
+    # machines that is often a WSL distro mirroring its own Tokdash onto the
+    # host's localhost via wslrelay.exe — and our service would crash-loop
+    # trying to bind it.
+    port_is_ours = _port_owned_by_existing_service(service["type"], detection, requested_port)
     busy_reason = None
     if port_info.get("open") and not port_is_ours and not force_replacing_unmarked_systemd:
         if port_info.get("is_tokdash"):

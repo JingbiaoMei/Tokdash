@@ -334,31 +334,40 @@ def _task_interpreter(runtime: Optional[Dict[str, Any]]) -> Optional[str]:
     return str(p.with_name("pythonw.exe"))
 
 
-def _classify_port_holder(
-    port: int, kill_names: Optional[set], expected_exe: Optional[str]
-) -> Tuple[str, Optional[Tuple[int, str]]]:
+def _classify_port_holder(port: int, kill_names: Optional[set]) -> Tuple[str, Optional[Tuple[int, str]]]:
     """Classify the current holder of ``port``: ``'free' | 'ours' | 'foreign'``.
 
-    ``'ours'`` is positive identification of our own service runtime: one of our
-    image names plus, when resolvable, the exact interpreter path the task runs —
-    the path is stronger evidence than a single 0.5s /health probe, so a wedged
-    instance that is not answering yet still counts as ours to stop; when the path
-    cannot be resolved, the Tokdash fingerprint decides. Every other open port is
-    ``'foreign'`` — including holders we cannot identify at all: we never kill
-    those. Returns ``(verdict, holder)`` so callers can pass the resolved holder
+    This decides whether to WAIT for the port to release — never whether to KILL;
+    kill authority stays with :func:`_wait_for_port_release`'s exact-interpreter
+    gate. ``kill_names`` is None for a port this install does not record as its
+    own: any occupant is ``'foreign'`` (fail fast, or skip the wait; never touched).
+
+    For a recorded-own port (``kill_names`` given), a holder carrying one of our
+    runtime image names is ``'ours'`` even when nothing else identifies it
+    positively. Right after ``/End`` of our own task the dying instance loses both
+    positive signals at once: the process has exited by the time ``Get-Process``
+    resolves its path, and the 0.5s ``/health`` probe races the uvicorn shutdown.
+    In that window the image name on our recorded port is the only stable
+    evidence, and it is sufficient to WAIT — the dying instance frees the port on
+    its own within a second, while a ``'foreign'`` verdict hard-fails the re-setup
+    on a port that is about to free up (live-verified round-7 failure). An
+    unresolvable holder on a recorded-own port is likewise ``'ours'``: the wait is
+    safe (the kill gate never kills an unidentifiable holder) and a transient
+    lookup failure must not hard-fail the re-setup. Only a holder whose name is
+    NOT ours (wslrelay.exe, another app) is ``'foreign'``: our ``/End`` cannot
+    release it, so failing fast is correct.
+
+    Returns ``(verdict, holder)`` so callers can pass the resolved holder
     straight into :func:`_wait_for_port_release` instead of re-looking it up.
     """
     info = detect.probe_port(port, timeout=0.5)
     if not info.get("open"):
         return "free", None
     holder = detect.port_holder(port)
-    if holder and holder[1].lower() in {n.lower() for n in (kill_names or set())}:
-        if expected_exe:
-            hpath = detect.process_image_path(str(holder[0]))
-            if hpath:
-                return ("ours" if _same_path(hpath, expected_exe) else "foreign"), holder
-        if info.get("is_tokdash"):
-            return "ours", holder
+    if kill_names is None:
+        return "foreign", holder
+    if holder is None or holder[1].lower() in {n.lower() for n in kill_names}:
+        return "ours", holder
     return "foreign", holder
 
 
@@ -389,9 +398,11 @@ def _wait_for_port_release(
     be resolved falls back to the fingerprint; with neither proof available the
     holder is waited on, not killed.
 
-    ``initial_holder`` is a (pid, name) already resolved AND verified as ours by
-    the caller (e.g. :func:`_classify_port_holder`): it seeds the cache, so the
-    expensive lookups are not repeated.
+    ``initial_holder`` is a (pid, name) the caller already resolved (e.g.
+    :func:`_classify_port_holder`): it seeds the holder-identity cache so the
+    expensive lookups are not repeated. It does NOT seed kill authorization —
+    the kill gate below still runs on it, so a name-matching holder that turns
+    out to be a different interpreter is waited on, never killed.
 
     The holder lookup is cached for the life of the wait: an unresolvable holder
     and a terminal "not ours" verdict cannot change outcome while the same port
@@ -405,11 +416,8 @@ def _wait_for_port_release(
     names = {n.lower() for n in kill_names} if kill_names else set()
     killed: set = set()
     no_kill: set = set()
-    authorized: set = set()   # caller-verified-ours PIDs (skip re-verification)
     path_unknown: set = set()  # PIDs whose executable path already failed to resolve
     holder = initial_holder
-    if holder is not None:
-        authorized.add(holder[0])
     looked_up = holder is not None
     deadline = time.monotonic() + timeout
     while True:
@@ -425,8 +433,8 @@ def _wait_for_port_release(
             and holder[0] not in no_kill
             and holder[1].lower() in names
         ):
-            may_kill = holder[0] in authorized
-            if not may_kill and expected_exe and holder[0] not in path_unknown:
+            may_kill = False
+            if expected_exe and holder[0] not in path_unknown:
                 hpath = detect.process_image_path(str(holder[0]))
                 if hpath:
                     if _same_path(hpath, expected_exe):
@@ -645,7 +653,7 @@ def _apply_setup(p: Dict[str, Any], opts: Options) -> Dict[str, Any]:
         )
         kill_names = _runtime_holder_names(p.get("runtime")) if own_port else None
         expected_exe = _task_interpreter(p.get("runtime")) if own_port else None
-        verdict, holder = _classify_port_holder(p["port"], kill_names, expected_exe)
+        verdict, holder = _classify_port_holder(p["port"], kill_names)
         if verdict == "foreign":
             who = f" (held by {holder[1]}, PID {holder[0]})" if holder else ""
             return {
@@ -1086,7 +1094,7 @@ def cmd_update(opts: Options) -> int:
                     if man_port:
                         kill_names = _runtime_holder_names({"command": runtime_command})
                         expected_exe = _task_interpreter({"command": runtime_command})
-                        verdict, holder = _classify_port_holder(int(man_port), kill_names, expected_exe)
+                        verdict, holder = _classify_port_holder(int(man_port), kill_names)
                         if verdict == "foreign":
                             # A foreign occupant on the recorded port cannot be bound by the
                             # restarted task (it would die on "address in use"): fail the
@@ -1369,7 +1377,7 @@ def _apply_uninstall(p: Dict[str, Any], opts: Options) -> Dict[str, Any]:
                             # the recorded port) is not ours to stop, and failing the
                             # uninstall on it would loop forever on such machines.
                             verdict, holder = _classify_port_holder(
-                                int(_uninstall_port), _uninstall_holder_names, _uninstall_expected_exe
+                                int(_uninstall_port), _uninstall_holder_names
                             )
                             if verdict == "ours":
                                 release_error = _wait_for_port_release(

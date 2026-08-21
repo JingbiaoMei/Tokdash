@@ -15,7 +15,7 @@ import subprocess
 import sys
 import urllib.request
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from .. import osinfo
 from . import manifest, paths
@@ -281,6 +281,127 @@ def probe_port(port: int, host: str = "127.0.0.1", timeout: float = 0.5) -> Dict
     except Exception:
         pass
     return info
+
+
+def _netstat_listener_pids(port: int) -> set:
+    """PIDs listening on ``port`` from ``netstat -ano`` — English-locale fast path.
+
+    The state token ("LISTENING") is localized on non-English Windows, so an empty
+    result is ambiguous (no listener, or localized output); the caller falls back
+    to :func:`_powershell_listener_pids`.
+    """
+    try:
+        out = subprocess.run(["netstat", "-ano"], capture_output=True, text=True, timeout=10).stdout
+    except Exception:
+        return set()
+    pids = set()
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) >= 5 and parts[0].startswith("TCP") and parts[3] == "LISTENING":
+            if parts[1].endswith(f":{port}"):
+                pids.add(parts[4])
+    return pids
+
+
+def _powershell_listener_pids(port: int) -> set:
+    """Locale-independent fallback: PIDs listening on ``port`` (Get-NetTCPConnection).
+
+    The ``-State Listen`` enum value and the emitted PIDs are invariant output (unlike
+    localized ``netstat`` state words), so this works on non-English Windows.
+    """
+    cmd = [
+        "powershell", "-NoProfile", "-NonInteractive", "-Command",
+        f"Get-NetTCPConnection -LocalPort {port} -State Listen -ErrorAction SilentlyContinue | "
+        "Select-Object -ExpandProperty OwningProcess",
+    ]
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=15).stdout
+    except Exception:
+        return set()
+    pids = set()
+    for line in out.splitlines():
+        if line.strip().isdigit():
+            pids.add(line.strip())
+    return pids
+
+
+def _image_name_for_pid(pid: str) -> Optional[str]:
+    """Image name for a PID via ``tasklist``; None when the PID has already exited.
+
+    With ``/FO CSV /NH`` a real row always starts with a quote; the localized
+    "no tasks match" INFO line does not, so anything else is skipped rather than
+    parsed as a name.
+    """
+    try:
+        out = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+            capture_output=True, text=True, timeout=10,
+        ).stdout
+    except Exception:
+        return None
+    first = out.strip().splitlines()[0] if out.strip() else ""
+    if not first.startswith('"'):
+        return None
+    name = first.split(",")[0].strip('"')
+    return name or None
+
+
+def process_image_path(pid: str) -> Optional[str]:
+    """Full executable path for a PID via ``Get-Process`` (Windows only).
+
+    Lets the kill authority compare the *exact* interpreter a stale instance runs
+    (``pythonw.exe`` from a specific venv) instead of the image basename alone, so
+    a manually-started ``tokdash serve`` from a different venv is never force-killed.
+    Locale-independent (bare path on stdout). Fails safe: any error -> None.
+    """
+    if os.name != "nt":
+        return None
+    try:
+        pid_int = int(pid)
+    except (TypeError, ValueError):
+        return None
+    cmd = [
+        "powershell", "-NoProfile", "-NonInteractive", "-Command",
+        f"(Get-Process -Id {pid_int} -ErrorAction SilentlyContinue).Path",
+    ]
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=15).stdout
+    except Exception:
+        return None
+    line = out.strip().splitlines()[0].strip() if out.strip() else ""
+    return line or None
+
+
+def port_holder(port: int) -> Optional[Tuple[int, str]]:
+    """Best-effort ``(pid, image name)`` of the process holding a listening port.
+
+    Windows only. The PID comes from ``netstat -ano`` (English fast path) or, when
+    netstat's localized state words yield nothing, from PowerShell's
+    Get-NetTCPConnection; the image name comes from ``tasklist``. The PID lets the
+    caller identify (and stop) a *specific* stale instance — e.g. a ``pythonw.exe``
+    that outlived ``schtasks /End`` on re-setup — while the name is used for
+    diagnostics (e.g. telling the user a WSL distro mirrors its own Tokdash onto
+    this port via wslrelay.exe). Fails safe: any error -> None.
+    """
+    if os.name != "nt":
+        return None
+    pids = _netstat_listener_pids(port)
+    if not pids:
+        pids = _powershell_listener_pids(port)
+    for pid in sorted(pids):
+        name = _image_name_for_pid(pid)
+        if name:
+            try:
+                return int(pid), name
+            except ValueError:
+                continue
+    return None
+
+
+def port_holder_process(port: int) -> Optional[str]:
+    """Best-effort name of the process holding a listening port (Windows only)."""
+    holder = port_holder(port)
+    return holder[1] if holder else None
 
 
 def find_free_port(start: int, host: str = "127.0.0.1", limit: int = 64) -> Optional[int]:

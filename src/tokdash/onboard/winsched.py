@@ -2,8 +2,15 @@
 
 The Windows analogue of :mod:`.systemd` (Linux/WSL) and :mod:`.launchd` (macOS). A task
 named :data:`TASK_NAME` carries the same ownership marker so ``uninstall`` can prove setup
-wrote it before removing it (mirrors §12.3 for the other two backends). All lifecycle calls
-go through per-user ``schtasks`` only — never an elevated/system task, never ``runas``.
+wrote it before removing it (mirrors §12.3 for the other two backends). The task itself is
+always a LeastPrivilege InteractiveToken task of the invoking user — never a SYSTEM/elevated
+task, never ``runas``.
+
+The trigger is a *per-user* ``LogonTrigger`` (``<UserId>`` = the invoking user): a bare
+LogonTrigger means "any user's logon", a system-wide event Task Scheduler refuses to
+register for a standard user (``schtasks /Create`` -> Access denied). The per-user form is
+registerable from a non-elevated shell. On systems where even that is refused, setup falls
+back to a clear error telling the user to re-run from an elevated shell.
 
 Task Scheduler has no single "unit file" the way systemd/launchd do; ``schtasks`` keeps the
 live registration in its own store. To keep the same on-disk "does this file carry our
@@ -21,6 +28,7 @@ Windows analogue of how systemd/launchd detach the service from any controlling 
 from __future__ import annotations
 
 import codecs
+import os
 import subprocess
 from pathlib import Path, PureWindowsPath
 from typing import Any, Dict, List, Optional, Union
@@ -46,6 +54,24 @@ def _pythonw_for(python_exe: str) -> str:
     if p.name.lower() == "python.exe":
         return str(p.with_name("pythonw.exe"))
     return python_exe
+
+
+def _current_user_name() -> str:
+    """``DOMAIN\\USER`` of the invoking user, for the per-user LogonTrigger.
+
+    Task Scheduler refuses a *bare* ``<LogonTrigger>`` (any user's logon) from a standard
+    user, so the trigger names this user explicitly (the Task Scheduler UI equivalent of
+    "At log on" + "For: specific user"). ``USERDOMAIN`` is the domain on domain-joined
+    machines and the machine name on workgroups — both valid in ``DOMAIN\\USER`` form.
+    Returns "" when the user cannot be determined (e.g. a non-interactive context);
+    :func:`render_task` then emits the bare trigger and registration degrades to the
+    pre-fix behaviour (needs elevation) instead of rendering an invalid definition.
+    """
+    user = os.environ.get("USERNAME", "").strip()
+    if not user:
+        return ""
+    domain = os.environ.get("USERDOMAIN", "").strip()
+    return f"{domain}\\{user}" if domain else user
 
 
 def _module_args(runtime_command: List[str], bind: str, port: int) -> List[str]:
@@ -99,6 +125,7 @@ def render_task(
         arguments = subprocess.list2cmdline(module_args)
 
     description = f"{MARKER_COMMENT}&#10;{escape(manifest.marker_token(marker_id))}"
+    user = _current_user_name()
 
     # schtasks /Create /XML hands the file to MSXML as a UTF-16 wide string and refuses
     # to switch to a declared UTF-8 ("unable to switch the encoding" at the end of the
@@ -113,6 +140,7 @@ def render_task(
         "  <Triggers>",
         "    <LogonTrigger>",
         "      <Enabled>true</Enabled>",
+        f"      <UserId>{escape(user)}</UserId>" if user else "",
         "    </LogonTrigger>",
         "  </Triggers>",
         "  <Principals>",

@@ -18,8 +18,8 @@ import shutil
 import subprocess
 import sys
 import time
-from pathlib import Path
-from typing import Any, Dict, List, Optional
+from pathlib import Path, PureWindowsPath
+from typing import Any, Dict, List, Optional, Tuple
 
 from .. import osinfo
 from . import detect, launchd, manifest, paths, plan, runtime, systemd, tailscale, updatecheck, winsched
@@ -304,17 +304,229 @@ def _probe_host_for_bind(bind: str) -> str:
     return b
 
 
-def _wait_for_service_ready(bind: str, port: int, *, timeout: float = 8.0) -> Dict[str, Any]:
-    """Wait until the configured port answers with Tokdash's /health fingerprint."""
+def _runtime_holder_names(runtime: Optional[Dict[str, Any]]) -> Optional[set]:
+    """Image names the service runtime is expected to run as (winsched readiness/teardown).
+
+    The task always runs the windowless ``pythonw.exe`` twin while the runtime
+    command records ``python.exe``, so both forms are accepted; any other runtime
+    is matched by its exact basename.
+    """
+    command = (runtime or {}).get("command") or []
+    if not command:
+        return None
+    # PureWindowsPath (not os.path.basename): the runtime command is a Windows path even
+    # when the planner runs on the POSIX test host.
+    exe = PureWindowsPath(command[0]).name.lower()
+    names = {exe}
+    if exe in ("python.exe", "python"):
+        names |= {"pythonw.exe", "pythonw"}
+    return names
+
+
+def _task_interpreter(runtime: Optional[Dict[str, Any]]) -> Optional[str]:
+    """The exact ``pythonw.exe`` path the task runs, or None for non-python runtimes."""
+    command = (runtime or {}).get("command") or []
+    if not command:
+        return None
+    p = PureWindowsPath(command[0])
+    if p.name.lower() != "python.exe":
+        return None
+    return str(p.with_name("pythonw.exe"))
+
+
+def _classify_port_holder(port: int, kill_names: Optional[set]) -> Tuple[str, Optional[Tuple[int, str]]]:
+    """Classify the current holder of ``port``: ``'free' | 'ours' | 'foreign'``.
+
+    This decides whether to WAIT for the port to release — never whether to KILL;
+    kill authority stays with :func:`_wait_for_port_release`'s exact-interpreter
+    gate. ``kill_names`` is None for a port this install does not record as its
+    own: any occupant is ``'foreign'`` (fail fast, or skip the wait; never touched).
+
+    For a recorded-own port (``kill_names`` given), a holder carrying one of our
+    runtime image names is ``'ours'`` even when nothing else identifies it
+    positively. Right after ``/End`` of our own task the dying instance loses both
+    positive signals at once: the process has exited by the time ``Get-Process``
+    resolves its path, and the 0.5s ``/health`` probe races the uvicorn shutdown.
+    In that window the image name on our recorded port is the only stable
+    evidence, and it is sufficient to WAIT — the dying instance frees the port on
+    its own within a second, while a ``'foreign'`` verdict hard-fails the re-setup
+    on a port that is about to free up (live-verified round-7 failure). An
+    unresolvable holder on a recorded-own port is likewise ``'ours'``: the wait is
+    safe (the kill gate never kills an unidentifiable holder) and a transient
+    lookup failure must not hard-fail the re-setup. Only a holder whose name is
+    NOT ours (wslrelay.exe, another app) is ``'foreign'``: our ``/End`` cannot
+    release it, so failing fast is correct.
+
+    Returns ``(verdict, holder)`` so callers can pass the resolved holder
+    straight into :func:`_wait_for_port_release` instead of re-looking it up.
+    """
+    info = detect.probe_port(port, timeout=0.5)
+    if not info.get("open"):
+        return "free", None
+    holder = detect.port_holder(port)
+    if kill_names is None:
+        return "foreign", holder
+    if holder is None or holder[1].lower() in {n.lower() for n in kill_names}:
+        return "ours", holder
+    return "foreign", holder
+
+
+def _wait_for_port_release(
+    port: int,
+    kill_names: Optional[set] = None,
+    expected_exe: Optional[str] = None,
+    timeout: float = 15.0,
+    initial_holder: Optional[Tuple[int, str]] = None,
+) -> Optional[str]:
+    """Block until ``port`` stops answering; hard-kill a lingering own-runtime holder.
+
+    ``schtasks /End`` only *asks* the previous task instance to stop. A
+    ``pythonw.exe`` instance (GUI subsystem — no console for the stop to reach) can
+    outlive the re-registration + ``/Run`` that immediately follow it; the fresh
+    instance then fails to bind the still-held port and exits with uvicorn's
+    startup-failure code 3 while the stale one keeps serving — and readiness would
+    pass on the stale responder's fingerprint, reporting a green re-setup whose
+    task is already dead. Making the port release a precondition of the (re)start
+    closes that race at the source.
+
+    Kill authority is deliberately narrow: the holder must carry one of our runtime
+    image names AND either answer with Tokdash's fingerprint OR be the exact
+    interpreter the task runs (``expected_exe``) when its path resolves — the path
+    is positive identification, so a wedged own instance that stopped answering
+    /health is still stoppable. A positive path mismatch (a manual serve from a
+    different venv) is terminal: never killed, never retried. A path that cannot
+    be resolved falls back to the fingerprint; with neither proof available the
+    holder is waited on, not killed.
+
+    ``initial_holder`` is a (pid, name) the caller already resolved (e.g.
+    :func:`_classify_port_holder`): it seeds the holder-identity cache so the
+    expensive lookups are not repeated. It does NOT seed kill authorization —
+    the kill gate below still runs on it, so a name-matching holder that turns
+    out to be a different interpreter is waited on, never killed.
+
+    The holder lookup is cached for the life of the wait: an unresolvable holder
+    and a terminal "not ours" verdict cannot change outcome while the same port
+    stays open, so only a killed PID (which may be gone, with a new holder up)
+    warrants a refresh. On hosts whose localized ``netstat`` forces the
+    PowerShell fallback this keeps the wait at one spawn per distinct holder,
+    not one per polling tick.
+
+    Returns None once the port stops answering, else an error string.
+    """
+    names = {n.lower() for n in kill_names} if kill_names else set()
+    killed: set = set()
+    no_kill: set = set()
+    path_unknown: set = set()  # PIDs whose executable path already failed to resolve
+    holder = initial_holder
+    looked_up = holder is not None
+    deadline = time.monotonic() + timeout
+    while True:
+        info = detect.probe_port(port, timeout=0.5)
+        if not info.get("open"):
+            return None
+        if not looked_up or (holder is not None and holder[0] in killed):
+            holder = detect.port_holder(port)
+            looked_up = True
+        if (
+            holder
+            and holder[0] not in killed
+            and holder[0] not in no_kill
+            and holder[1].lower() in names
+        ):
+            may_kill = False
+            if expected_exe and holder[0] not in path_unknown:
+                hpath = detect.process_image_path(str(holder[0]))
+                if hpath:
+                    if _same_path(hpath, expected_exe):
+                        may_kill = True  # exact interpreter: ours even if wedged
+                    else:
+                        # A different interpreter holds our port (e.g. a manual
+                        # serve from another venv): not ours to stop.
+                        no_kill.add(holder[0])
+                else:
+                    path_unknown.add(holder[0])
+            if not may_kill and holder[0] not in no_kill:
+                may_kill = bool(info.get("is_tokdash"))
+            if may_kill:
+                killed.add(holder[0])
+                try:
+                    subprocess.run(
+                        ["taskkill", "/PID", str(holder[0]), "/F"],
+                        capture_output=True, text=True, timeout=10,
+                    )
+                except Exception:
+                    pass
+                # refresh on the next tick: the killed PID may be gone, new holder up
+        if time.monotonic() >= deadline:
+            who = f" (held by {holder[1]}, PID {holder[0]})" if holder else ""
+            return f"port {port} is still busy after stopping the previous service{who}"
+        time.sleep(0.5)
+
+
+def _wait_for_service_ready(
+    bind: str,
+    port: int,
+    *,
+    timeout: float = 8.0,
+    service_up=None,
+    service_desc: str = "the service",
+    expected_holders=None,
+) -> Dict[str, Any]:
+    """Wait until the configured port answers with Tokdash's /health fingerprint.
+
+    ``service_up`` (optional zero-arg callable) is the owning service's own liveness
+    check. When given, a port that answers must also be backed by the live service —
+    otherwise a *foreign* responder (e.g. a WSL distro mirroring its own Tokdash onto
+    this host's localhost via wslrelay) would make readiness pass while our service is
+    dead on arrival.
+
+    ``expected_holders`` (optional iterable of process names) is the expected owner of
+    the port (the runtime the service runs as). When given, readiness passes if EITHER
+    the owning service reports up OR the port is held by one of those processes: the
+    two signals are independent proof (the task-state check is locale-sensitive, the
+    holder check is not), and a known mismatched holder still fails fast — closing the
+    window where a relayed/foreign Tokdash answers the fingerprint while our own
+    process is dead. An undetermined holder (None) is ignored.
+    """
     host = _probe_host_for_bind(bind)
     deadline = time.monotonic() + timeout
     last: Dict[str, Any] = {"port": port, "open": False, "is_tokdash": False, "version": None}
+    holders = {h.lower() for h in expected_holders} if expected_holders else None
+    holder = None
+    holder_at = 0.0
     while True:
         last = detect.probe_port(port, host=host, timeout=0.5)
         if last.get("is_tokdash"):
-            return {"ok": True, "port": last}
+            up = service_up is None or service_up()
+            holder_ok = None
+            if holders:
+                if holder is None or time.monotonic() - holder_at >= 2.0:
+                    holder = detect.port_holder_process(port)
+                    holder_at = time.monotonic()
+                holder_ok = (holder.lower() in holders) if holder else None
+            # Ownership proof is "the task reports Running" OR "the port is held by our
+            # runtime image". The task-state check is a localized string match on
+            # schtasks output (English "Running") and is useless on non-English
+            # Windows; the holder check is locale-independent (PID -> image name).
+            # Accept either, so a healthy service is not failed by a locale mismatch;
+            # a KNOWN mismatched holder still fails fast below.
+            if holder_ok is False:
+                detail = (
+                    f"port {port} answers with Tokdash's /health fingerprint but is held by "
+                    f"{holder}, not the service runtime ({', '.join(sorted(holders))}) — "
+                    f"{service_desc} is not actually serving it"
+                )
+                return {"ok": False, "port": last, "error": f"service did not become ready: {detail}"}
+            if up or holder_ok is True:
+                return {"ok": True, "port": last}
         if time.monotonic() >= deadline:
-            if last.get("open"):
+            if last.get("open") and last.get("is_tokdash"):
+                detail = (
+                    f"port {port} answers with Tokdash's /health fingerprint, but {service_desc} "
+                    "cannot be confirmed as its owner (task state not readable as Running and "
+                    "the holder is not identifiable) — the port may be held by a foreign/relayed occupant"
+                )
+            elif last.get("open"):
                 detail = f"port {port} is open but does not answer with Tokdash's /health fingerprint"
             else:
                 detail = f"nothing answered on {host}:{port}"
@@ -421,6 +633,50 @@ def _apply_setup(p: Dict[str, Any], opts: Options) -> Dict[str, Any]:
         }
         changed.append("service:launchd")
     elif svc_type == "winsched":
+        # A still-running instance of a previously registered task keeps holding the port,
+        # and MultipleInstancesPolicy=IgnoreNew would swallow the fresh /Run — stop it
+        # first (re-setup/upgrade path). /End on a non-running task is a no-op.
+        try:
+            if winsched.is_registered():
+                winsched.end_task()
+        except Exception:
+            pass
+        # /End is a request, not a guarantee: the stopped pythonw instance can still
+        # be listening when the replacement is registered and /Run fires. Read the
+        # PREVIOUS manifest (the new one is recorded only after the service is up) to
+        # learn whether this exact port was ours — only then may a lingering
+        # own-runtime holder be hard-killed; a foreign occupant is never touched.
+        prev_man = manifest.read_manifest() or {}
+        own_port = (
+            (prev_man.get("service") or {}).get("type") == "winsched"
+            and prev_man.get("port") == p["port"]
+        )
+        kill_names = _runtime_holder_names(p.get("runtime")) if own_port else None
+        expected_exe = _task_interpreter(p.get("runtime")) if own_port else None
+        verdict, holder = _classify_port_holder(p["port"], kill_names)
+        if verdict == "foreign":
+            who = f" (held by {holder[1]}, PID {holder[0]})" if holder else ""
+            return {
+                "ok": False, "action": "setup",
+                "error": (
+                    f"service did not start: port {p['port']} is occupied by a process that is "
+                    f"not the previous service{who}; free the port (stop the holding process) "
+                    "and re-run `tokdash setup`."
+                ),
+            }
+        if verdict == "ours":
+            release_error = _wait_for_port_release(
+                p["port"], kill_names=kill_names, expected_exe=expected_exe, initial_holder=holder,
+            )
+            if release_error:
+                return {
+                    "ok": False, "action": "setup",
+                    "error": (
+                        f"service did not start: {release_error}; the previous task was stopped "
+                        "and the replacement was not registered - free the port (stop the holding "
+                        "process) and re-run `tokdash setup`."
+                    ),
+                }
         task_text = winsched.render_task(
             rt["command"], p["bind"], p["port"], marker_id=marker_id, env_data_dir=p["env_data_dir"]
         )
@@ -431,9 +687,15 @@ def _apply_setup(p: Dict[str, Any], opts: Options) -> Dict[str, Any]:
             # failure here means the task never got registered at all.
             proc = winsched.create(task_path)
             if proc.returncode != 0:
+                detail = _proc_failure_detail(proc, f"exit {proc.returncode}")
+                if "Access is denied" in detail:
+                    detail += (
+                        " — this system refused the logon-trigger task registration for a "
+                        "standard user; re-run `tokdash setup` from an elevated PowerShell"
+                    )
                 return {
                     "ok": False, "action": "setup",
-                    "error": f"schtasks /Create failed: {_proc_failure_detail(proc, f'exit {proc.returncode}')}",
+                    "error": f"schtasks /Create failed: {detail}",
                 }
         except subprocess.TimeoutExpired as exc:
             return {"ok": False, "action": "setup", "error": _timeout_detail("schtasks /Create", exc)}
@@ -503,7 +765,13 @@ def _apply_setup(p: Dict[str, Any], opts: Options) -> Dict[str, Any]:
             })
             return result
     if svc_type in {"systemd-user", "launchd", "winsched"}:
-        readiness = _wait_for_service_ready(p["bind"], p["port"])
+        service_up = winsched.is_running if svc_type == "winsched" else None
+        service_desc = f"the Task Scheduler task {winsched.TASK_NAME}" if svc_type == "winsched" else "the service"
+        expected_holders = _runtime_holder_names(p.get("runtime")) if svc_type == "winsched" else None
+        readiness = _wait_for_service_ready(
+            p["bind"], p["port"], service_up=service_up, service_desc=service_desc,
+            expected_holders=expected_holders,
+        )
         result["readiness"] = readiness
         if not readiness.get("ok"):
             result.update({"ok": False, "error": readiness.get("error")})
@@ -632,9 +900,18 @@ def _append_service_issues(issues: List[str], man: Optional[Dict[str, Any]], ser
     elif stype == "winsched" and not detection.get("winsched"):
         issues.append("Task Scheduler (schtasks) is unavailable, but the manifest records a winsched service.")
         return
-    if "active" in service and not service.get("active"):
-        issues.append(f"{stype} service is not active.")
     port = detection.get("port") or {}
+    if "active" in service and not service.get("active"):
+        detail = f"{stype} service is not active."
+        if stype == "winsched" and port.get("open") and port.get("is_tokdash"):
+            holder = detect.port_holder_process(port.get("port"))
+            if holder:
+                detail += (
+                    f" Port {port.get('port')} is still answered by {holder}, which the task is "
+                    "not running - a stale instance outlived the last `tokdash setup`. Re-run "
+                    "`tokdash setup` to stop the leftover and restart the service."
+                )
+        issues.append(detail)
     if service.get("active") and not port.get("is_tokdash"):
         if port.get("open"):
             issues.append(f"service is active, but port {port.get('port')} is occupied by something other than Tokdash.")
@@ -749,7 +1026,7 @@ def cmd_update(opts: Options) -> int:
                 if service_type == "launchd":
                     print(f"Would restart: launchctl kickstart -k gui/$(id -u)/{service_name}")
                 elif service_type == "winsched":
-                    print(f"Would restart: schtasks /End /TN {service_name} & schtasks /Run /TN {service_name}")
+                    print(f"Would stop the task, wait for the service port to release, and re-run it: schtasks /End /TN {service_name} & schtasks /Run /TN {service_name}")
                 else:
                     print(f"Would restart: systemctl --user restart {service_name}")
         return EXIT_OK
@@ -788,6 +1065,7 @@ def cmd_update(opts: Options) -> int:
     # silently serves the old version and a bundler thinks the update fully applied.
     restarted = False
     restart_failed = False
+    restart_detail: Optional[str] = None
     if restart_managed:
         if service_type == "launchd":
             if detect.launchd_available():
@@ -804,11 +1082,48 @@ def cmd_update(opts: Options) -> int:
         elif service_type == "winsched":
             if detect.winsched_available():
                 # Mirrors the launchd arm: any failure (including a hung/missing schtasks)
-                # is a failed restart, never a raw traceback.
+                # is a failed restart, never a raw traceback. /End is a request, not a
+                # kill (same premise as setup): wait for the port to actually release
+                # before /Run, hard-killing a lingering own-runtime holder, or the fresh
+                # instance dies with uvicorn's startup-failure code 3 on the stale
+                # listener.
                 try:
-                    restarted = winsched.restart(service_name).returncode == 0
+                    winsched.end_task(service_name)
+                    restart_detail = None
+                    man_port = (man or {}).get("port")
+                    if man_port:
+                        kill_names = _runtime_holder_names({"command": runtime_command})
+                        expected_exe = _task_interpreter({"command": runtime_command})
+                        verdict, holder = _classify_port_holder(int(man_port), kill_names)
+                        if verdict == "foreign":
+                            # A foreign occupant on the recorded port cannot be bound by the
+                            # restarted task (it would die on "address in use"): fail the
+                            # restart immediately with the reason instead of paying a
+                            # release-wait timeout for a port we will never take.
+                            who = f" (held by {holder[1]}, PID {holder[0]})" if holder else ""
+                            restart_detail = (
+                                f"port {man_port} is held by a process that is not the tokdash "
+                                f"service{who}; the restarted task cannot bind it - stop the "
+                                "occupant and re-run `tokdash update`"
+                            )
+                            restarted = False
+                        elif verdict == "ours":
+                            release_error = _wait_for_port_release(
+                                int(man_port), kill_names=kill_names, expected_exe=expected_exe,
+                                initial_holder=holder,
+                            )
+                            if release_error:
+                                restart_detail = release_error
+                                restarted = False
+                            else:
+                                restarted = winsched.run_now(service_name).returncode == 0
+                        else:
+                            restarted = winsched.run_now(service_name).returncode == 0
+                    else:
+                        restarted = winsched.run_now(service_name).returncode == 0
                 except Exception:
                     restarted = False
+                    restart_detail = None
                 restart_failed = not restarted
             else:
                 restart_failed = True  # managed task exists but schtasks is unreachable
@@ -836,6 +1151,7 @@ def cmd_update(opts: Options) -> int:
             "service_name": service_name,
             "service_restarted": restarted,
             "restart_failed": restart_failed,
+            "restart_detail": restart_detail,
         },
     )
 
@@ -906,6 +1222,8 @@ def _emit_update_result(opts: Options, result: Dict[str, Any]) -> int:
             f" (still {after})" if after else ""
         )
         print(f"Upgrade command completed via {result.get('install_method')}{version}, but the service restart FAILED —")
+        if result.get("restart_detail"):
+            print(f"  ({result.get('restart_detail')})")
         print(f"  the service is still running the old code. Run: {cmd}")
     else:
         print(f"Update failed: {result.get('error')}")
@@ -982,6 +1300,13 @@ def _apply_uninstall(p: Dict[str, Any], opts: Options) -> Dict[str, Any]:
     changed: List[str] = []
     errors: List[str] = []
     kept_manifest = False
+    # The manifest is readable until its own (last) step deletes it: the only reliable
+    # source for the port the task served, used to verify the service process actually
+    # stopped before reporting a clean uninstall.
+    _un_man = manifest.read_manifest() or {}
+    _uninstall_port = _un_man.get("port")
+    _uninstall_holder_names = _runtime_holder_names({"command": _un_man.get("runtime_command") or []})
+    _uninstall_expected_exe = _task_interpreter({"command": _un_man.get("runtime_command") or []})
 
     for step in p["steps"]:
         kind = step["kind"]
@@ -1036,6 +1361,36 @@ def _apply_uninstall(p: Dict[str, Any], opts: Options) -> Dict[str, Any]:
                         # "couldn't delete it" must abort BEFORE we unlink our recorded XML
                         # (so a retry can still find it) and surface as an error — mirroring
                         # the launchd arm above.
+                        # /Delete does not reliably stop a running instance (same
+                        # /End-is-a-request premise as setup): stop it first and wait
+                        # for the port to actually release, or uninstall can report a
+                        # clean state while an orphan pythonw keeps serving. A lingering
+                        # holder of our own runtime is hard-killed (the manifest records
+                        # this port as ours); anything else is reported, not touched.
+                        try:
+                            winsched.end_task(name)
+                        except Exception:
+                            pass
+                        if _uninstall_port:
+                            # Wait (and risk an error) ONLY when the holder is provably
+                            # our own runtime: a foreign occupant (e.g. the WSL relay on
+                            # the recorded port) is not ours to stop, and failing the
+                            # uninstall on it would loop forever on such machines.
+                            verdict, holder = _classify_port_holder(
+                                int(_uninstall_port), _uninstall_holder_names
+                            )
+                            if verdict == "ours":
+                                release_error = _wait_for_port_release(
+                                    int(_uninstall_port),
+                                    kill_names=_uninstall_holder_names,
+                                    expected_exe=_uninstall_expected_exe,
+                                    initial_holder=holder,
+                                )
+                                if release_error:
+                                    errors.append(
+                                        f"service: {release_error} — the task was still removed; "
+                                        "kill the holding process manually if the port stays busy"
+                                    )
                         proc = winsched.delete(name)
                         if proc.returncode != 0:
                             try:

@@ -17,7 +17,7 @@ from .filelock import process_lock
 from .pricing import PricingDatabase
 
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 SIGNATURE_VERSION = 3
 
 # What a persistent usage row must carry to be priceable without rereading its
@@ -77,10 +77,10 @@ _CONTRIBUTION_DAYS_SQL = """
                 SUM(reasoning) AS reasoning_sum,
                 COUNT(*) AS row_count,
                 SUM(CASE WHEN cost > 0 THEN cost ELSE 0 END) AS cost_priced_sum,
-                SUM(CASE WHEN cost <= 0 THEN input ELSE 0 END) AS input_unpriced,
-                SUM(CASE WHEN cost <= 0 THEN output ELSE 0 END) AS output_unpriced,
-                SUM(CASE WHEN cost <= 0 THEN cache_read ELSE 0 END) AS cache_read_unpriced,
-                SUM(CASE WHEN cost <= 0 THEN cache_write ELSE 0 END) AS cache_write_unpriced
+                SUM(CASE WHEN cost <= 0 AND cost_authoritative = 0 THEN input ELSE 0 END) AS input_unpriced,
+                SUM(CASE WHEN cost <= 0 AND cost_authoritative = 0 THEN output ELSE 0 END) AS output_unpriced,
+                SUM(CASE WHEN cost <= 0 AND cost_authoritative = 0 THEN cache_read ELSE 0 END) AS cache_read_unpriced,
+                SUM(CASE WHEN cost <= 0 AND cost_authoritative = 0 THEN cache_write ELSE 0 END) AS cache_write_unpriced
             FROM usage_entries
         """
 
@@ -628,6 +628,19 @@ def _billing_json(entry: dict[str, Any]) -> str:
     return stable_json(billing) if isinstance(billing, dict) else ""
 
 
+def _billing_json_kind(billing_json: str) -> str:
+    try:
+        billing = json.loads(billing_json or "")
+    except (TypeError, ValueError):
+        return ""
+    return str(billing.get("kind") or "") if isinstance(billing, dict) else ""
+
+
+def _entry_cost_authoritative(entry: dict[str, Any]) -> int:
+    billing = entry.get("_billing")
+    return 1 if isinstance(billing, dict) and billing.get("kind") == "fixed" else 0
+
+
 def _entry_key(entry: dict[str, Any]) -> str:
     """Stable identity for a row the source did not name itself.
 
@@ -810,7 +823,8 @@ class UsageEntryStore:
                 cost REAL NOT NULL DEFAULT 0,
                 message_count INTEGER NOT NULL DEFAULT 1,
                 raw_json TEXT NOT NULL,
-                billing_json TEXT NOT NULL DEFAULT ''
+                billing_json TEXT NOT NULL DEFAULT '',
+                cost_authoritative INTEGER NOT NULL DEFAULT 0
             );
             CREATE TABLE IF NOT EXISTS session_records (
                 tool TEXT NOT NULL,
@@ -876,6 +890,10 @@ class UsageEntryStore:
             conn.execute("ALTER TABLE usage_entries ADD COLUMN entry_key TEXT NOT NULL DEFAULT ''")
         if "billing_json" not in columns:
             conn.execute("ALTER TABLE usage_entries ADD COLUMN billing_json TEXT NOT NULL DEFAULT ''")
+        if "cost_authoritative" not in columns:
+            conn.execute(
+                "ALTER TABLE usage_entries ADD COLUMN cost_authoritative INTEGER NOT NULL DEFAULT 0"
+            )
         file_columns = {str(row["name"]) for row in conn.execute("PRAGMA table_info(file_state)").fetchall()}
         if "safe_offset" not in file_columns:
             conn.execute("ALTER TABLE file_state ADD COLUMN safe_offset INTEGER NOT NULL DEFAULT 0")
@@ -945,6 +963,27 @@ class UsageEntryStore:
                     SET started_at_ms = ?, last_seen_at_ms = ?
                     WHERE rowid = ?
                     """,
+                    updates,
+                )
+        if current < 9:
+            # Fixed-billing rows are provider-reported: Tokdash never
+            # reprices one, so the stored cost IS the cost. Mark them
+            # authoritative so the aggregate unpriced-bucket recompute
+            # (cost <= 0) stops guessing at a deliberately-zero
+            # number. This also flips a pre-v9 fixed row with cost = 0
+            # from reprice-if-free to authoritative -- deliberate, per
+            # the billing.kind == "fixed" contract.
+            legacy = conn.execute(
+                "SELECT id, billing_json FROM usage_entries WHERE billing_json != ''"
+            ).fetchall()
+            updates = [
+                (int(row["id"]),)
+                for row in legacy
+                if _billing_json_kind(row["billing_json"]) == "fixed"
+            ]
+            if updates:
+                conn.executemany(
+                    "UPDATE usage_entries SET cost_authoritative = 1 WHERE id = ?",
                     updates,
                 )
         conn.execute(
@@ -1189,8 +1228,8 @@ class UsageEntryStore:
                     INSERT INTO usage_entries (
                         source, file_path, entry_key, model, provider, timestamp,
                         input, output, cache_read, cache_write, reasoning,
-                        cost, message_count, raw_json, billing_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        cost, message_count, raw_json, billing_json, cost_authoritative
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     [
                         (
@@ -1209,6 +1248,7 @@ class UsageEntryStore:
                             e["messageCount"],
                             stable_json(public_usage_entry(e)),
                             _billing_json(e),
+                            _entry_cost_authoritative(e),
                         )
                         for e in entries
                     ],
@@ -1414,8 +1454,8 @@ class UsageEntryStore:
                         INSERT INTO usage_entries (
                             source, file_path, entry_key, model, provider, timestamp,
                             input, output, cache_read, cache_write, reasoning,
-                            cost, message_count, raw_json, billing_json
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            cost, message_count, raw_json, billing_json, cost_authoritative
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ON CONFLICT(source, entry_key) WHERE entry_key != ''
                         DO UPDATE SET
                             file_path = excluded.file_path,
@@ -1430,7 +1470,8 @@ class UsageEntryStore:
                             cost = excluded.cost,
                             message_count = excluded.message_count,
                             raw_json = excluded.raw_json,
-                            billing_json = excluded.billing_json
+                            billing_json = excluded.billing_json,
+                            cost_authoritative = excluded.cost_authoritative
                         WHERE excluded.timestamp < usage_entries.timestamp
                     """
                 else:
@@ -1438,8 +1479,8 @@ class UsageEntryStore:
                         INSERT OR REPLACE INTO usage_entries (
                             source, file_path, entry_key, model, provider, timestamp,
                             input, output, cache_read, cache_write, reasoning,
-                            cost, message_count, raw_json, billing_json
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            cost, message_count, raw_json, billing_json, cost_authoritative
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """
                 for (path, mtime_ns, size), entries, safe_offset, appended in parsed:
                     total_changed_entries += len(entries)
@@ -1467,6 +1508,7 @@ class UsageEntryStore:
                                 e["messageCount"],
                                 stable_json(public_usage_entry(e)),
                                 _billing_json(e),
+                                _entry_cost_authoritative(e),
                             )
                             for e in entries
                         ],
@@ -1602,10 +1644,10 @@ class UsageEntryStore:
                 SUM(reasoning) AS reasoning_sum,
                 SUM(message_count) AS message_count_sum,
                 SUM(CASE WHEN cost > 0 THEN cost ELSE 0 END) AS cost_priced_sum,
-                SUM(CASE WHEN cost <= 0 THEN input ELSE 0 END) AS input_unpriced,
-                SUM(CASE WHEN cost <= 0 THEN output ELSE 0 END) AS output_unpriced,
-                SUM(CASE WHEN cost <= 0 THEN cache_read ELSE 0 END) AS cache_read_unpriced,
-                SUM(CASE WHEN cost <= 0 THEN cache_write ELSE 0 END) AS cache_write_unpriced
+                SUM(CASE WHEN cost <= 0 AND cost_authoritative = 0 THEN input ELSE 0 END) AS input_unpriced,
+                SUM(CASE WHEN cost <= 0 AND cost_authoritative = 0 THEN output ELSE 0 END) AS output_unpriced,
+                SUM(CASE WHEN cost <= 0 AND cost_authoritative = 0 THEN cache_read ELSE 0 END) AS cache_read_unpriced,
+                SUM(CASE WHEN cost <= 0 AND cost_authoritative = 0 THEN cache_write ELSE 0 END) AS cache_write_unpriced
             FROM usage_entries
         """
         if where:

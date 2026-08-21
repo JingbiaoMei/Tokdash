@@ -184,6 +184,7 @@ def _sync_usage_store(tracker: CodingToolsUsageTracker) -> tuple[UsageEntryStore
         signature = build_source_signature(
             files=files,
             parser=parser_sig,
+            extra=parser.runtime_config_signature(),
         )
         store.sync_source(
             name,

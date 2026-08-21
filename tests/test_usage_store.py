@@ -16,7 +16,17 @@ from tokdash.activity_insights import (
     record_structured_tool_call,
 )
 from tokdash.pricing import PricingDatabase
-from tokdash.sources.coding_tools import BaseParser, CodexParser, CodingToolsUsageTracker, _sig_cache
+from tokdash.sources.coding_tools import (
+    AmpParser,
+    BaseParser,
+    CodexParser,
+    CodingToolsUsageTracker,
+    CopilotCLIParser,
+    GrokParser,
+    HermesParser,
+    QoderCliParser,
+    _sig_cache,
+)
 from tokdash.usage_store import (
     UsageEntryStore,
     build_source_signature,
@@ -3643,3 +3653,115 @@ def test_parse_entries_json_accepts_authoritative_zero_cost():
     ]
     data = parse_entries_json({"entries": entries})
     assert abs(data["apps"]["grok"]["cost"] - 2.0) < 1e-9
+
+
+# ---------------------------------------------------------------------------
+# runtime configuration signature -- cache identity invariants
+# ---------------------------------------------------------------------------
+
+
+def test_build_source_signature_extra_round_trip():
+    files = (("/tmp/x.jsonl", 123, 456),)
+    parser_sig = {
+        "object": "tokdash.sources.coding_tools.TestParser",
+        "version": 1,
+        "entry_format": 1,
+    }
+    legacy = build_source_signature(files=files, parser=parser_sig)
+    # extra=None must stay byte-identical with the pre-hook form, so sources
+    # without a runtime hook never reparse because of this addition.
+    assert build_source_signature(files=files, parser=parser_sig, extra=None) == legacy
+    assert json.loads(legacy)["extra"] is None
+    extra = {"usd_per_credit": None, "context_window": 180000}
+    signed = build_source_signature(files=files, parser=parser_sig, extra=extra)
+    assert signed != legacy
+    assert json.loads(signed)["extra"] == extra
+
+
+def test_none_hook_source_replace_signatures_unchanged():
+    """The extra= passthrough is a no-op for parsers whose hook returns None."""
+    for cls in (AmpParser, GrokParser, CopilotCLIParser, HermesParser):
+        parser = cls(PricingDatabase())
+        assert parser.runtime_config_signature() is None
+        files = parser._file_signatures()
+        parser_sig = parser.persistent_parser_signature()
+        legacy = build_source_signature(files=files, parser=parser_sig)
+        current = build_source_signature(
+            files=files, parser=parser_sig, extra=parser.runtime_config_signature()
+        )
+        assert current == legacy
+
+
+def _qoder_cli_pinned_root(root: Path) -> Path:
+    """One pinned-model transcript line: ratio present, all token buckets zero."""
+    transcript = root / "projects" / "p" / "aaaaaaaa-bbbb.jsonl"
+    transcript.parent.mkdir(parents=True, exist_ok=True)
+    line = {
+        "type": "assistant",
+        "uuid": "r1",
+        "timestamp": "2026-08-21T12:00:00.000Z",
+        "message": {
+            "role": "assistant",
+            "model": "qwen3.8-max",
+            "usage": {
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0,
+                "request_id": "r1",
+                "context_usage_ratio": 0.05,
+            },
+        },
+        "sessionId": "s1",
+    }
+    transcript.write_text(json.dumps(line) + "\n", encoding="utf-8")
+    return root
+
+
+def _qoder_cli_parser(monkeypatch, tmp_path, root: Path) -> QoderCliParser:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    for var in ("QODER_CLI_HOME", "QODER_CONFIG_DIR", "QODER_USD_PER_CREDIT", "QODER_CLI_CONTEXT_WINDOW"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("QODER_CLI_HOME", str(root))
+    return QoderCliParser(PricingDatabase())
+
+
+def test_qoder_cli_persistent_signature_tracks_runtime_config(monkeypatch, tmp_path):
+    """A changed override changes the store signature and triggers a reparse."""
+    root = _qoder_cli_pinned_root(tmp_path / "root")
+    parser = _qoder_cli_parser(monkeypatch, tmp_path, root)
+    store = UsageEntryStore(tmp_path / "usage.sqlite3")
+
+    def sync() -> None:
+        sig = build_source_signature(
+            files=parser._file_signatures(),
+            parser=parser.persistent_parser_signature(),
+            extra=parser.runtime_config_signature(),
+        )
+        store.sync_source("qoder_cli", sig, lambda: parser.collect(None, None))
+
+    sync()
+    unset_sig = store.source_signature("qoder_cli")
+    assert json.loads(unset_sig)["extra"] == {"usd_per_credit": None, "context_window": None}
+    # Pinned model without a window: the ratio is unusable, so no entry.
+    assert store.query_entries(sources=["qoder_cli"]) == []
+
+    monkeypatch.setenv("QODER_CLI_CONTEXT_WINDOW", "200000")
+    sync()
+    explicit_sig = store.source_signature("qoder_cli")
+    assert explicit_sig != unset_sig
+    # Signature change re-parses: the entry appears with the recovered input.
+    rows = store.query_entries(sources=["qoder_cli"])
+    assert len(rows) == 1
+    assert rows[0]["input"] == 10000  # 0.05 * 200000
+
+
+def test_qoder_cli_in_memory_key_includes_runtime_config(monkeypatch, tmp_path):
+    """collect() reparses on an env change without any manual cache clear."""
+    root = _qoder_cli_pinned_root(tmp_path / "root")
+    parser = _qoder_cli_parser(monkeypatch, tmp_path, root)
+    assert parser.collect(None, None) == []
+    monkeypatch.setenv("QODER_CLI_CONTEXT_WINDOW", "200000")
+    entries = parser.collect(None, None)
+    assert len(entries) == 1
+    assert entries[0]["input"] == 10000

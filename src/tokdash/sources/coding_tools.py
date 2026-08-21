@@ -396,8 +396,9 @@ class BaseParser(ABC):
     persistent_parser_version: ClassVar[Optional[int]] = None
 
     # Shared across all instances:
-    #   {source_name: ((file_sigs, pricing_sig), [entries])}
+    #   {source_name: ((file_sigs, pricing_sig, runtime_sig), [entries])}
     # pricing_sig is included so cost values are recomputed when pricing_db.json changes.
+    # runtime_sig covers validated environment overrides that change output.
     _entry_cache: ClassVar[Dict[str, Tuple[tuple, List[Dict[str, Any]]]]] = {}
 
     def __init__(self, pricing_db: PricingDatabase):
@@ -420,6 +421,15 @@ class BaseParser(ABC):
             return tuple(self.pricing_db.signature())
         except (OSError, AttributeError):
             return ()
+
+    def runtime_config_signature(self) -> Optional[Dict[str, Any]]:
+        """Validated environment overrides that affect parse output.
+
+        The default is None: parsers whose output depends only on the
+        source files and the pricing DB keep byte-identical cache
+        signatures on every path that embeds this value.
+        """
+        return None
 
     def persistent_parser_signature(self) -> Dict[str, Any]:
         """Identity of this parser for the persistent usage cache.
@@ -456,14 +466,20 @@ class BaseParser(ABC):
         I/O-bound operation into a fast in-memory scan.
 
         The cache key also includes the pricing DB file signature so that
-        cached cost values are recomputed when pricing_db.json is updated.
+        cached cost values are recomputed when pricing_db.json is updated,
+        and the runtime configuration signature so that a validated
+        environment override triggers a re-parse without file changes.
 
         The cache is a ClassVar shared across all parser instances so that
         separate ``CodingToolsUsageTracker`` objects (e.g. for current-period
         and previous-period in ``compute_usage_with_comparison``) reuse the
         same parsed data.
         """
-        sig = (self._file_signatures(), self._pricing_signature())
+        sig = (
+            self._file_signatures(),
+            self._pricing_signature(),
+            self.runtime_config_signature(),
+        )
         cached = self._entry_cache.get(self.source_name)
         if cached is not None and cached[0] == sig:
             all_entries = cached[1]
@@ -574,7 +590,11 @@ class OpenCodeParser(BaseParser):
         invalidated when the DB file or pricing DB changes on disk.
         The cache is bounded to ``_OPENCODE_QUERY_CACHE_MAX`` entries.
         """
-        sig = (self._file_signatures(), self._pricing_signature())
+        sig = (
+            self._file_signatures(),
+            self._pricing_signature(),
+            self.runtime_config_signature(),
+        )
         # Invalidate all cached queries when the DB or pricing file changes.
         if sig != type(self)._query_cache_sig:
             type(self)._query_cache.clear()
@@ -2814,7 +2834,11 @@ class MimoParser(BaseParser):
         return []
 
     def collect(self, since_date: Optional[datetime] = None, until_date: Optional[datetime] = None) -> List[Dict[str, Any]]:
-        sig = (self._file_signatures(), self._pricing_signature())
+        sig = (
+            self._file_signatures(),
+            self._pricing_signature(),
+            self.runtime_config_signature(),
+        )
         if sig != type(self)._query_cache_sig:
             type(self)._query_cache.clear()
             type(self)._query_cache_sig = sig
@@ -3133,7 +3157,11 @@ class ZCodeParser(BaseParser):
         return []
 
     def collect(self, since_date: Optional[datetime] = None, until_date: Optional[datetime] = None) -> List[Dict[str, Any]]:
-        sig = (self._file_signatures(), self._pricing_signature())
+        sig = (
+            self._file_signatures(),
+            self._pricing_signature(),
+            self.runtime_config_signature(),
+        )
         s_ms = int(self._to_utc(since_date).timestamp() * 1000) if since_date else 0
         u_ms = int(self._to_utc(until_date).timestamp() * 1000) if until_date else 9999999999999
         cache_key = (s_ms, u_ms)
@@ -3353,7 +3381,11 @@ class QoderIdeParser(BaseParser):
         in SQL), with the native-DB rule that a failed read is returned
         empty but NOT cached, so the next collect retries.
         """
-        sig = (self._file_signatures(), self._pricing_signature())
+        sig = (
+            self._file_signatures(),
+            self._pricing_signature(),
+            self.runtime_config_signature(),
+        )
         with type(self)._cache_lock:
             if sig != type(self)._query_cache_sig:
                 type(self)._query_cache.clear()

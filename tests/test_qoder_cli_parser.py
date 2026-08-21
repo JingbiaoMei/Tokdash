@@ -163,9 +163,6 @@ def test_rate_override_changes_cost_not_tokens(monkeypatch, tmp_path):
                  [_t_line("r1", "2026-08-21T12:00:00.000Z", credits=2.5, ratio=1000 / 180000)])
     parser = _parser(monkeypatch, tmp_path, [root])
     base = parser.collect(None, None)
-    # the runtime-config key lands in step 5; until then a manual clear
-    # forces the re-parse the new key would trigger
-    BaseParser._entry_cache.clear()
     monkeypatch.setenv("QODER_USD_PER_CREDIT", "0.02")
     entries = parser.collect(None, None)
     assert len(entries) == 1
@@ -247,7 +244,6 @@ def test_pinned_model_recovery_requires_override(monkeypatch, tmp_path):
     parser = _parser(monkeypatch, tmp_path, [root])
     assert parser.collect(None, None) == []
     # explicit override applies to every model, including this pinned one
-    BaseParser._entry_cache.clear()
     monkeypatch.setenv("QODER_CLI_CONTEXT_WINDOW", "200000")
     entries = parser.collect(None, None)
     assert len(entries) == 1
@@ -260,7 +256,6 @@ def test_explicit_window_override_applies_to_auto(monkeypatch, tmp_path):
                  [_t_line("X", "2026-08-21T12:00:00.000Z", ratio=0.05)])
     parser = _parser(monkeypatch, tmp_path, [root])
     default = parser.collect(None, None)
-    BaseParser._entry_cache.clear()
     monkeypatch.setenv("QODER_CLI_CONTEXT_WINDOW", "200000")
     overridden = parser.collect(None, None)
     assert default[0]["input"] == 9000  # 0.05 * 180000

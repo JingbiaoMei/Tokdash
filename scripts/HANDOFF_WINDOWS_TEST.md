@@ -57,7 +57,7 @@ first; they are OS-agnostic (schtasks is monkeypatched).
 
 Fast path — run the staged end-to-end script:
 
-    powershell -ExecutionPolicy Bypass -File H:\Developing\Agent\Tokdash_Project\tokdash\.claude\worktrees\windows-setup-fix\live_test.ps1
+    powershell -ExecutionPolicy Bypass -File H:\Developing\Agent\Tokdash_Project\tokdash\.claude\worktrees\windows-setup-fix\scripts\live_test.ps1
 
 It builds a throwaway venv (`%LOCALAPPDATA%\tokdash-winfix-test\venv`),
 installs the worktree code, then checks (each printed as [PASS]/[FAIL]):
@@ -212,3 +212,29 @@ green run:
 
     git -C H:\Developing\Agent\Tokdash_Project\tokdash\.claude\worktrees\windows-setup-fix add -A
     git -C <same> commit -m "Fix native Windows setup: per-user logon trigger, stdio safety, foreign-port handling"
+
+## Round 5 (post-review hardening)
+
+Inline review of the green branch found five issues, all fixed:
+
+1. **Blocking — non-English Windows:** readiness required the English
+   "Running" string from `schtasks /Query /V`. The gate now accepts EITHER the
+   task state OR the locale-independent holder check (PID -> image name), and
+   `detect.port_holder` falls back to PowerShell `Get-NetTCPConnection`
+   (invariant output) when netstat's localized state words yield nothing.
+2. Kill authority in `_wait_for_port_release` now also requires the port to
+   answer with Tokdash's fingerprint (image name alone no longer authorizes
+   `taskkill`).
+3. `tasklist` "no tasks match" INFO lines (localized, no leading quote) are
+   no longer parsed as image names.
+4. `update` and `uninstall` reuse the release gate: update does /End -> wait
+   (kill own lingering holder) -> /Run; uninstall does /End -> wait -> /Delete
+   and reports a lingering holder it must not touch.
+5. `plan.py` docstrings now state that planning is mutation-free but
+   read-only probing (incl. subprocesses on Windows) happens; busy messages
+   get a colon.
+
+Also: `live_test.ps1` + this file moved to `scripts/`; `docs/CHANGELOG.md`
+added (v2.0.1 entry). New tests cover the locale readiness path, kill
+authority, tasklist parsing, the PowerShell fallback, and the update/uninstall
+release-gate ordering.

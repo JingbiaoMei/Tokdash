@@ -255,3 +255,22 @@ release-gate ordering.
 - update dry-run text updated to match the stop -> wait -> run flow.
 - Changelog entry moved to the canonical docs/development/CHANGELOG.md
   (the docs/CHANGELOG.md path was deleted in the docs reorg).
+
+## Round 7 (third review pass)
+
+- Holder cache is now real: an unresolvable holder and a not-ours verdict are
+  terminal for the wait (no re-lookup per tick); only a killed PID triggers a
+  refresh. One PowerShell spawn per distinct holder per wait.
+- Ownership classification (`_classify_port_holder`) is shared by setup, update
+  and uninstall: 'free' | 'ours' | 'foreign'. 'ours' = our image name + exact
+  interpreter path when resolvable (stronger than a single /health probe, so a
+  WEDGED own instance that stopped answering is still stopped by uninstall),
+  else the fingerprint. 'foreign' = everything else, never killed.
+- The resolved holder is passed into `_wait_for_port_release` (initial_holder),
+  so the probe/netstat/Get-Process triple is not repeated.
+- Update now fails the restart immediately (with the holder named) when a
+  foreign occupant holds the recorded port, instead of paying a 15s wait; setup
+  likewise fails fast on a foreign occupant.
+- `detect.process_image_path` got the os.name guard its sibling has.
+- Known precision gap (accepted): non-python.exe runtimes (e.g. a pipx
+  tokdash.exe) fall back to the name+fingerprint gate.

@@ -354,6 +354,8 @@ def process_image_path(pid: str) -> Optional[str]:
     a manually-started ``tokdash serve`` from a different venv is never force-killed.
     Locale-independent (bare path on stdout). Fails safe: any error -> None.
     """
+    if os.name != "nt":
+        return None
     try:
         pid_int = int(pid)
     except (TypeError, ValueError):

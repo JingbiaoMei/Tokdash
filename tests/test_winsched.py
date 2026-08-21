@@ -1001,3 +1001,141 @@ def test_port_release_wait_kills_matching_path(monkeypatch):
         55423, kill_names={"pythonw.exe"}, expected_exe=r"C:\rt\pythonw.exe", timeout=2.0
     ) is None
     assert kills == [["taskkill", "/PID", "4242", "/F"]]
+
+
+# --- round-3 review: holder-lookup cache, wedged own instance, update fast fail ---
+
+
+def test_port_release_wait_caches_holder_lookup(monkeypatch):
+    # An unresolvable holder (None) and a not-ours holder must not re-trigger the
+    # (expensive) lookup on every tick: one spawn per wait, not per polling tick,
+    # on hosts whose localized netstat forces the PowerShell fallback.
+    state = {"calls": 0}
+
+    def counting_holder(port):
+        state["calls"] += 1
+        return (777, "wslrelay.exe")
+
+    monkeypatch.setattr(
+        detect, "probe_port",
+        lambda port=55423, *a, **k: {"port": port, "open": True, "is_tokdash": False, "version": None},
+    )
+    monkeypatch.setattr(detect, "port_holder", counting_holder)
+
+    def boom(*a, **k):
+        raise AssertionError("taskkill must not run")
+
+    monkeypatch.setattr(engine.subprocess, "run", boom)
+    assert engine._wait_for_port_release(55423, kill_names={"pythonw.exe"}, timeout=1.2) is not None
+    assert state["calls"] == 1
+
+    state["calls"] = 0
+
+    def counting_none(port):
+        state["calls"] += 1
+        return None
+
+    monkeypatch.setattr(detect, "port_holder", counting_none)
+    assert engine._wait_for_port_release(55423, kill_names={"pythonw.exe"}, timeout=1.2) is not None
+    assert state["calls"] == 1
+
+
+def test_windows_uninstall_stops_wedged_own_instance(windows_env, monkeypatch, capsys):
+    # A wedged own instance that stopped answering /health: the exact interpreter
+    # path is stronger evidence of ownership than a single probe, so uninstall must
+    # still stop it -- not delete the task and report clean while an orphan survives.
+    state = {"killed": False}
+    monkeypatch.setattr(
+        detect, "probe_port",
+        lambda port=55423, *a, **k: {"port": port, "open": not state["killed"], "is_tokdash": False, "version": None},
+    )
+    monkeypatch.setattr(detect, "port_holder", lambda port: (4242, "pythonw.exe"))
+    # The exact interpreter path resolves (the os.name guard in the real
+    # implementation is POSIX-off; stub it directly, as the other path tests do).
+    monkeypatch.setattr(detect, "process_image_path", lambda pid: r"C:\rt\pythonw.exe")
+
+    def fake_run(args, *a, **k):
+        if args[:1] == ["taskkill"]:
+            state["killed"] = True
+        return _ok_proc()
+
+    monkeypatch.setattr(engine.subprocess, "run", fake_run)
+    calls = []
+    monkeypatch.setattr(winsched, "end_task", lambda name=winsched.TASK_NAME: calls.append("end") or _ok_proc())
+    monkeypatch.setattr(winsched, "delete", lambda name=winsched.TASK_NAME: calls.append("delete") or _ok_proc())
+    monkeypatch.setattr(winsched, "is_registered", lambda name=winsched.TASK_NAME: True)
+    monkeypatch.setattr(winsched, "is_registered_strict", lambda name=winsched.TASK_NAME: True)
+    monkeypatch.setattr(winsched, "is_running", lambda name=winsched.TASK_NAME: True)
+
+    task_path = paths.winsched_task_path()
+    task_path.parent.mkdir(parents=True, exist_ok=True)
+    task_path.write_bytes(
+        codecs.BOM_UTF16_LE
+        + winsched.render_task([r"C:\rt\python.exe", "-m", "tokdash"], "127.0.0.1", 55423, marker_id="x").encode("utf-16-le")
+    )
+    svc = {"type": "winsched", "unit": str(task_path), "name": winsched.TASK_NAME,
+           "created_by_setup": True, "marker": "X-Tokdash-Managed id=x"}
+    man = manifest.build_manifest(
+        install_method="pipx", runtime_kind="pipx",
+        runtime_command=[r"C:\rt\python.exe", "-m", "tokdash"],
+        runtime_owned_by_setup=False, python_path=r"C:\rt\python.exe", python_version="3.13.5",
+        service=svc, runtime_marker=None, data_dir=str(paths.data_dir()),
+        bind="127.0.0.1", port=55423,
+    )
+    manifest.write_manifest(man)
+
+    rc, payload = run_json(["uninstall", "--auto", "--json"], capsys)
+    assert rc == 0
+    assert not payload["errors"]
+    assert calls == ["end", "delete"]
+    assert state["killed"] is True
+
+
+def test_windows_update_fails_fast_on_foreign_holder(windows_env, monkeypatch, capsys):
+    # A foreign occupant on the recorded port cannot be bound by the restarted task:
+    # update fails the restart immediately with the reason (no 15s release-wait, no
+    # run_now that would die on "address in use" and report success).
+    monkeypatch.setattr(
+        detect, "probe_port",
+        lambda port=55423, *a, **k: {
+            "port": port, "open": port == 55423, "is_tokdash": port == 55423,
+            "version": "1.9.0" if port == 55423 else None,
+        },
+    )
+    monkeypatch.setattr(detect, "port_holder", lambda port: (777, "wslrelay.exe") if port == 55423 else None)
+
+    def fake_run(args, *a, **k):
+        if args[:1] == ["taskkill"]:
+            raise AssertionError("taskkill must not run for a foreign holder")
+        return _ok_proc()
+
+    monkeypatch.setattr(engine.subprocess, "run", fake_run)
+    calls = []
+    monkeypatch.setattr(winsched, "end_task", lambda name=winsched.TASK_NAME: calls.append("end") or _ok_proc())
+    monkeypatch.setattr(winsched, "run_now", lambda name=winsched.TASK_NAME: calls.append("run") or _ok_proc())
+    monkeypatch.setattr(detect, "find_pipx", lambda: "/usr/bin/pipx")
+
+    task_path = paths.winsched_task_path()
+    task_path.parent.mkdir(parents=True, exist_ok=True)
+    task_path.write_bytes(
+        codecs.BOM_UTF16_LE
+        + winsched.render_task([r"C:\rt\python.exe", "-m", "tokdash"], "127.0.0.1", 55423, marker_id="x").encode("utf-16-le")
+    )
+    svc = {"type": "winsched", "unit": str(task_path), "name": winsched.TASK_NAME,
+           "created_by_setup": True, "marker": "X-Tokdash-Managed id=x"}
+    man = manifest.build_manifest(
+        install_method="pipx", runtime_kind="pipx",
+        runtime_command=[r"C:\rt\python.exe", "-m", "tokdash"],
+        runtime_owned_by_setup=False, python_path=r"C:\rt\python.exe", python_version="3.13.5",
+        service=svc, runtime_marker=None, data_dir=str(paths.data_dir()),
+        bind="127.0.0.1", port=55423,
+    )
+    manifest.write_manifest(man)
+
+    t0 = time.monotonic()
+    rc, payload = run_json(["update", "--json"], capsys)
+    assert rc == 1
+    assert payload["service_restarted"] is False and payload["restart_failed"] is True
+    assert "wslrelay.exe" in payload["restart_detail"]
+    assert "run" not in calls  # no /Run that would die on bind and report success
+    assert time.monotonic() - t0 < 5

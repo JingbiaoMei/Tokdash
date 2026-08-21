@@ -3209,6 +3209,165 @@ class ZCodeParser(BaseParser):
         return list(out)
 
 
+class QoderIdeParser(BaseParser):
+    """Parser for Qoder IDE (GUI) token usage from the local cache DB.
+
+    =======================================================================
+    QODER IDE SQLITE DATABASE SCHEMA
+    =======================================================================
+    Location: one deterministic pick, see clientpaths.qoder_ide_db_path():
+      - Windows: %APPDATA%\\Qoder(CN)\\SharedClientCache\\cache\\db\\local.db
+      - macOS:   ~/Library/Application Support/Qoder(CN)/SharedClientCache/cache/db/local.db
+      - WSL:     the Windows install under /mnt/c
+      - QODER_IDE_DATA_DIR overrides the app user-data root.
+    Read from a temp-dir snapshot (a WAL-mode open of the live DB would
+    create -shm sidecar state in the source tree), exactly like ZCode.
+
+    Table: chat_message -- one row per message (user/assistant/tool). The
+    international build fills token_info ({"prompt_tokens",
+    "completion_tokens", "cached_tokens", "max_input_tokens"}) and
+    model_info ({"model_key": "auto" | "<pinned model>"}); the CN build
+    leaves model_info empty -- every call runs the opaque "auto" router.
+
+    Token accounting:
+      - prompt_tokens INCLUDES the cached slice, so the entry bills
+        prompt - cached as fresh input and the cached slice separately
+        as cacheRead.
+      - Every role with parseable token_info counts: rows are 1:1 with
+        model calls (verified against the ACP context_usage log), so
+        user/tool rows are real usage, not noise.
+    =======================================================================
+    """
+
+    source_name = "qoder"
+    sync_capability = SourceSyncCapability(
+        mode="source_native_db",
+        session_store=False,
+        reason="Qoder IDE is a SQLite DB read from a temp-dir snapshot.",
+    )
+    # Queried live from a coherent snapshot; nothing is stored persistently.
+    persistent_parser_version = None
+
+    _query_cache: ClassVar[Dict[tuple, List[Dict[str, Any]]]] = {}
+    _query_cache_sig: ClassVar[tuple] = ()
+    # Same guard as ZCodeParser: the signature check/clear and the store-time
+    # recheck must run under one lock, or a read in flight under an older
+    # signature can be stored under a newer one.
+    _cache_lock: ClassVar[threading.Lock] = threading.Lock()
+
+    def __init__(self, pricing_db: PricingDatabase):
+        super().__init__(pricing_db)
+        self.db_path = clientpaths.qoder_ide_db_path()
+
+    def _file_signatures(self) -> tuple:
+        if self.db_path is None or not self.db_path.exists():
+            return ()
+        # Main file plus -wal (a missing WAL is a stable state); the live
+        # -shm is excluded, same rule as ZCode.
+        return zcode_snapshot_signatures(self.db_path)
+
+    def _build_entry(self, row: sqlite3.Row) -> Optional[Dict[str, Any]]:
+        try:
+            info = json.loads(row["token_info"])
+        except (TypeError, ValueError):
+            return None
+        if not isinstance(info, dict):
+            return None
+        prompt = max(0, self._i(info.get("prompt_tokens")))
+        # The cached slice is INSIDE prompt_tokens; clamp a torn row that
+        # reports more cache than prompt instead of going negative.
+        cached = min(self._i(info.get("cached_tokens")), prompt)
+        output = self._i(info.get("completion_tokens"))
+        if prompt == 0 and output == 0 and cached == 0:
+            return None
+        model = "auto"
+        try:
+            model_info = json.loads(row["model_info"])
+            model = str(model_info.get("model_key") or "") or "auto"
+        except (TypeError, ValueError):
+            pass
+        input_t = prompt - cached
+        return {
+            "source": self.source_name,
+            "model": model,
+            "input": input_t,
+            "output": output,
+            "cacheRead": cached,
+            "cacheWrite": 0,
+            "cost": self.pricing_db.get_cost(model, input_t, output, cached, 0),
+            "timestamp": int(row["gmt_create"] or 0),
+            "entry_id": f"qoder:{row['id']}",
+        }
+
+    def _parse_all(self) -> Tuple[List[Dict[str, Any]], bool]:
+        """All entries plus a read_ok flag (a failed read is not cacheable)."""
+        if self.db_path is None or not self.db_path.exists():
+            return [], True
+        out: List[Dict[str, Any]] = []
+        read_ok = False
+        snap = None
+        try:
+            with zcode_snapshot(self.db_path) as snap:
+                conn = snap.conn
+                conn.row_factory = sqlite3.Row
+                cur = conn.cursor()
+                # Probe sqlite_master inline (not via _sqlite_table_exists,
+                # which swallows transient errors): an absent table is a
+                # legitimate empty success, a probe error is a failed read.
+                cur.execute(
+                    "SELECT 1 FROM sqlite_master "
+                    "WHERE type='table' AND name='chat_message'"
+                )
+                if cur.fetchone() is not None:
+                    cur.execute(
+                        """
+                        SELECT id, session_id, role, model_info, token_info, gmt_create
+                        FROM chat_message
+                        WHERE length(token_info) > 2
+                        ORDER BY gmt_create
+                        """
+                    )
+                    for row in cur.fetchall():
+                        try:
+                            entry = self._build_entry(row)
+                        except Exception:
+                            continue
+                        if entry is not None:
+                            out.append(entry)
+                read_ok = True
+            if snap.close_failed:
+                # Data was read and is returned, but a snapshot that could
+                # not be closed is a failed (uncached) read.
+                read_ok = False
+        except Exception:
+            read_ok = False
+        return out, read_ok
+
+    def collect(self, since_date: Optional[datetime] = None, until_date: Optional[datetime] = None) -> List[Dict[str, Any]]:
+        """Live snapshot read with in-memory date filtering.
+
+        Like BaseParser.collect() (the date window is applied in memory, not
+        in SQL), with the native-DB rule that a failed read is returned
+        empty but NOT cached, so the next collect retries.
+        """
+        sig = (self._file_signatures(), self._pricing_signature())
+        with type(self)._cache_lock:
+            if sig != type(self)._query_cache_sig:
+                type(self)._query_cache.clear()
+                type(self)._query_cache_sig = sig
+            all_entries = type(self)._query_cache.get(sig)
+        if all_entries is None:
+            all_entries, read_ok = self._parse_all()
+            if read_ok:
+                with type(self)._cache_lock:
+                    if sig == type(self)._query_cache_sig:
+                        type(self)._query_cache[sig] = all_entries
+        s_ms = int(self._to_utc(since_date).timestamp() * 1000) if since_date else 0
+        u_ms = int(self._to_utc(until_date).timestamp() * 1000) if until_date else 9999999999999
+        return [e for e in all_entries if s_ms <= (e.get("timestamp") or 0) < u_ms]
+
+
+
 class DSHParser(BaseParser):
     """Parser for DeepSeek Harness (dsh) session logs.
 

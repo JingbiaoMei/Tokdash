@@ -435,12 +435,12 @@ def test_workbuddy_cache_precedence_and_clamping(monkeypatch, tmp_path):
         _assistant_row("r5", 1787314800005, "default-model",
                        raw_usage=ru(1000, cache_read_input_tokens=111,
                                     prompt_cache_hit_tokens=999)),
-        # Write chain.
-        _assistant_row("w1", 1787314800006, "default-model",
+        # Write chain: nonzero fields are extracted but must not be billed.
+        _assistant_row("w1", 1787314800006, "gpt-5.5",
                        raw_usage=ru(1000, cache_creation_input_tokens=55)),
-        _assistant_row("w2", 1787314800007, "default-model",
+        _assistant_row("w2", 1787314800007, "gpt-5.5",
                        raw_usage=ru(1000, cacheCreationInputTokens=66)),
-        _assistant_row("w3", 1787314800008, "default-model",
+        _assistant_row("w3", 1787314800008, "gpt-5.5",
                        raw_usage=ru(1000, prompt_cache_write_tokens=77)),
         # Clamps: cached cannot exceed prompt, fresh cannot go negative.
         _assistant_row("c1", 1787314800009, "default-model",
@@ -459,11 +459,78 @@ def test_workbuddy_cache_precedence_and_clamping(monkeypatch, tmp_path):
     assert entries["workbuddy:r5"]["cacheRead"] == 111
     # No miss column: fresh falls back to prompt - cached.
     assert entries["workbuddy:r1"]["input"] == 1000 - 111
-    assert entries["workbuddy:w1"]["cacheWrite"] == 55
-    assert entries["workbuddy:w2"]["cacheWrite"] == 66
-    assert entries["workbuddy:w3"]["cacheWrite"] == 77
+    # Nonzero write fields are extracted but not billed until the vendor's
+    # write-slice semantics are verified (FINDINGS.md open item).
+    for rid, write in (("w1", 55), ("w2", 66), ("w3", 77)):
+        e = entries[f"workbuddy:{rid}"]
+        assert e["cacheWrite"] == 0
+        assert e["cost"] == PricingDatabase().get_cost("gpt-5.5", 1000, 10, 0, 0)
+        assert e["cost"] != PricingDatabase().get_cost("gpt-5.5", 1000, 10, 0, write)
+
+    # The write chain is still extracted in WorkBuddy order.
+    def norm(**fields):
+        return parser._usage_from_provider_data({"rawUsage": ru(1000, **fields)})
+
+    assert norm(cache_creation_input_tokens=55)["write"] == 55
+    assert norm(cacheCreationInputTokens=66)["write"] == 66
+    assert norm(prompt_cache_write_tokens=77)["write"] == 77
+    assert norm(cache_creation_input_tokens=55,
+                cacheCreationInputTokens=66)["write"] == 55
     assert entries["workbuddy:c1"]["cacheRead"] == 100
     assert entries["workbuddy:c1"]["input"] == 0
+
+
+def test_workbuddy_adversarial_counters_clamp(monkeypatch, tmp_path):
+    """Negative/inconsistent provider counters must not yield negative
+    buckets or inflate totals."""
+    def ru(prompt, completion, **fields):
+        base = {
+            "prompt_tokens": prompt,
+            "completion_tokens": completion,
+            "total_tokens": prompt + completion,
+            "credit": 0,
+        }
+        base.update(fields)
+        return base
+
+    home = _isolate_home(monkeypatch, tmp_path)
+    monkeypatch.delenv("WORKBUDDY_DATA_DIR", raising=False)
+    root = home / ".workbuddy-ai"
+    rows = [
+        # Negative prompt: cached clamps to 0, nothing goes negative.
+        _assistant_row("n1", 1787314900001, "default-model",
+                       raw_usage=ru(-50, 10, prompt_cache_hit_tokens=10)),
+        # Negative miss: falls back to prompt - cached instead of forcing 0.
+        _assistant_row("n2", 1787314900002, "default-model",
+                       raw_usage=ru(100, 10, prompt_cache_hit_tokens=40,
+                                    prompt_cache_miss_tokens=-5)),
+        # Reasoning above completion: clamped to completion, output 0.
+        _assistant_row("n3", 1787314900003, "default-model",
+                       raw_usage=ru(100, 10,
+                                    completion_tokens_details={"reasoning_tokens": 300})),
+        # Negative reasoning: treated as absent, output unaffected.
+        _assistant_row("n4", 1787314900004, "default-model",
+                       raw_usage=ru(100, 100,
+                                    completion_tokens_details={"reasoning_tokens": -50})),
+    ]
+    _write_transcript(root, "slug", "s1", rows)
+
+    parser = WorkBuddyParser(PricingDatabase())
+    entries = _collect(parser)
+
+    for e in entries.values():
+        for key in ("input", "output", "cacheRead", "cacheWrite", "reasoning"):
+            assert e[key] >= 0
+
+    assert entries["workbuddy:n1"]["input"] == 0
+    assert entries["workbuddy:n1"]["cacheRead"] == 0
+    assert entries["workbuddy:n1"]["output"] == 10
+    assert entries["workbuddy:n2"]["input"] == 60  # 100 - 40; negative miss ignored
+    assert entries["workbuddy:n2"]["output"] == 10
+    assert entries["workbuddy:n3"]["reasoning"] == 10
+    assert entries["workbuddy:n3"]["output"] == 0
+    assert entries["workbuddy:n4"]["reasoning"] == 0
+    assert entries["workbuddy:n4"]["output"] == 100
 
 
 def test_workbuddy_model_verbatim_and_pricing(monkeypatch, tmp_path):

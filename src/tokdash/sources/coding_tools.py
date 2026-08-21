@@ -3562,8 +3562,10 @@ class WorkBuddyParser(BaseParser):
       output     <- completion minus reasoning (reasoning is a subset of
                     completion, OpenAI convention)
       cacheRead  <- WorkBuddy UsageUtils read precedence, clamped to prompt
-      cacheWrite <- WorkBuddy write precedence (0 in all captured rows)
-      cost       <- get_cost(model, fresh, FULL completion, cached, write)
+      cacheWrite <- 0: the vendor's write chain is extracted but unbilled
+                    until it is established whether prompt_tokens /
+                    prompt_cache_miss_tokens include the write slice
+      cost       <- get_cost(model, fresh, FULL completion, cached, 0)
       workbuddy_credit <- rawUsage.credit, per-turn credit, metadata only
 
     Rows are parsed fail-soft: a bad line skips itself, never the file.
@@ -3606,7 +3608,7 @@ class WorkBuddyParser(BaseParser):
         """
         ru = pd.get("rawUsage")
         if isinstance(ru, dict) and ru:
-            prompt = self._i(ru.get("prompt_tokens"))
+            prompt = max(0, self._i(ru.get("prompt_tokens")))
             details = ru.get("prompt_tokens_details")
             # Read chain: WorkBuddy UsageUtils precedence, exactly.
             cached = self._first_positive(
@@ -3615,14 +3617,15 @@ class WorkBuddyParser(BaseParser):
                 details.get("cached_tokens") if isinstance(details, dict) else None,
                 ru.get("prompt_cache_hit_tokens"),
             )
-            cached = min(cached, prompt)
+            # Write chain: extracted in WorkBuddy order, but deliberately
+            # unbilled (see _build_entry).
             write = self._first_positive(
                 ru.get("cache_creation_input_tokens"),
                 ru.get("cacheCreationInputTokens"),
                 ru.get("prompt_cache_write_tokens"),
             )
-            missed = self._i(ru.get("prompt_cache_miss_tokens"))
-            completion = self._i(ru.get("completion_tokens"))
+            missed = max(0, self._i(ru.get("prompt_cache_miss_tokens")))
+            completion = max(0, self._i(ru.get("completion_tokens")))
             comp_details = ru.get("completion_tokens_details")
             reasoning = self._i(
                 comp_details.get("reasoning_tokens") if isinstance(comp_details, dict) else None
@@ -3634,22 +3637,26 @@ class WorkBuddyParser(BaseParser):
                 return None
             # Fallback schema: camel-case, cache/reasoning in details arrays,
             # no cache-write column.
-            prompt = self._i(usage.get("inputTokens"))
+            prompt = max(0, self._i(usage.get("inputTokens")))
             cached = 0
             for detail in usage.get("inputTokensDetails") or []:
                 if isinstance(detail, dict):
-                    cached += self._i(detail.get("cached_tokens"))
-            cached = min(cached, prompt)
+                    cached += max(0, self._i(detail.get("cached_tokens")))
             write = 0
             missed = 0
-            completion = self._i(usage.get("outputTokens"))
+            completion = max(0, self._i(usage.get("outputTokens")))
             reasoning = 0
             for detail in usage.get("outputTokensDetails") or []:
                 if isinstance(detail, dict):
-                    reasoning += self._i(detail.get("reasoning_tokens"))
+                    reasoning += max(0, self._i(detail.get("reasoning_tokens")))
             credit = self._f(usage.get("credit"))
 
-        if prompt <= 0 and completion <= 0:
+        # Subset counters can never exceed their parent, no matter what the
+        # provider stamped.
+        cached = min(max(0, cached), prompt)
+        reasoning = min(max(0, reasoning), completion)
+
+        if prompt == 0 and completion == 0:
             return None
         model = str(pd.get("model") or pd.get("requestModelId") or "workbuddy-auto")
         return {
@@ -3666,7 +3673,6 @@ class WorkBuddyParser(BaseParser):
     def _build_entry(self, usage: Dict[str, Any], ts_ms: int, call_id: str) -> Dict[str, Any]:
         prompt = usage["prompt"]
         cached = usage["cached"]
-        write = usage["write"]
         completion = usage["completion"]
         reasoning = usage["reasoning"]
         # The cache slice is inside prompt_tokens; prefer the explicit miss
@@ -3675,6 +3681,10 @@ class WorkBuddyParser(BaseParser):
         # Reasoning is a subset of completion and compute.py adds it on top of
         # output, so it must be split out of output here.
         output = max(0, completion - reasoning)
+        # usage["write"] is extracted but deliberately unbilled: it is not
+        # yet established whether prompt_tokens / prompt_cache_miss_tokens
+        # include the write slice (every captured row has write = 0), and
+        # emitting it could double-count it. Open item: FINDINGS.md phase 1.
         return {
             "source": self.source_name,
             "model": usage["model"],
@@ -3682,9 +3692,9 @@ class WorkBuddyParser(BaseParser):
             "input": fresh,
             "output": output,
             "cacheRead": cached,
-            "cacheWrite": write,
+            "cacheWrite": 0,
             "reasoning": reasoning,
-            "cost": self.pricing_db.get_cost(usage["model"], fresh, completion, cached, write),
+            "cost": self.pricing_db.get_cost(usage["model"], fresh, completion, cached, 0),
             "workbuddy_credit": usage["credit"],
             "entry_id": f"workbuddy:{call_id}",
             "message_id": call_id,

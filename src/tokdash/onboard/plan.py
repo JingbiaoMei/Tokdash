@@ -42,6 +42,35 @@ def _is_loopback(bind: str) -> bool:
 
 # --- setup ----------------------------------------------------------------------
 
+def _port_owned_by_existing_service(service_type: str, detection: Dict[str, Any], port: int) -> bool:
+    """Is ``port`` the one this setup's previous install was serving?
+
+    Requires BOTH (a) the manifest recorded exactly this port for this service
+    type and (b) a marked service of this setup still exists. A marked task alone
+    is not enough: it proves "we installed a service", not "our service is on
+    THIS port" — without (a), a foreign Tokdash on the port (e.g. a WSL distro's
+    mirrored localhost via wslrelay) is mistaken for our own endpoint.
+    """
+    man = detection.get("manifest") or {}
+    if not man or man.get("port") != port:
+        return False
+    if (man.get("service") or {}).get("type") != service_type:
+        return False
+    es = detection.get("existing_service") or {}
+    try:
+        if service_type == "winsched":
+            task = es.get("winsched_task")
+            return bool(task and winsched.task_is_managed(Path(task)))
+        if service_type == "systemd-user":
+            unit = es.get("systemd_unit")
+            return bool(unit and systemd.unit_is_managed(Path(unit)))
+        if service_type == "launchd":
+            plist = es.get("launchd_plist")
+            return bool(plist and launchd.plist_is_managed(Path(plist)))
+    except Exception:
+        return False
+    return False
+
 
 def build_setup_plan(opts: Options, detection: Dict[str, Any]) -> Dict[str, Any]:
     """Resolve the full setup plan (no side effects)."""
@@ -94,11 +123,43 @@ def build_setup_plan(opts: Options, detection: Dict[str, Any]) -> Dict[str, Any]
     )
 
     # Port.
-    requested_port = opts.port or DEFAULT_PORT
+    previous_man = detection.get("manifest") or {}
+    previous_port = (
+        previous_man.get("port")
+        if previous_man and (previous_man.get("service") or {}).get("type") == service["type"]
+        else None
+    )
+    # Re-setup default: keep the previous install's port (an explicit --port always wins).
+    # detection["port"] was probed for ``opts.port or DEFAULT_PORT`` — re-probe the
+    # resolved port so the plan reasons about the port it will actually use.
+    requested_port = opts.port or previous_port or DEFAULT_PORT
     port = requested_port
-    port_info = detection.get("port") or {}
-    if port_info.get("open"):
+    port_info = detect.probe_port(requested_port)
+    # "Ours" = this install's previous service was serving exactly this port (the
+    # manifest says so and a marked service of this setup still exists): keep it.
+    # Any other Tokdash on the port is a foreign installation — on WSL-hosted machines
+    # that is often a WSL distro mirroring its own Tokdash onto the host's localhost via
+    # wslrelay.exe — and our service would crash-loop trying to bind it.
+    port_is_ours = bool(
+        port_info.get("open") and port_info.get("is_tokdash")
+        and _port_owned_by_existing_service(service["type"], detection, requested_port)
+    )
+    busy_reason = None
+    if port_info.get("open") and not port_is_ours and not force_replacing_unmarked_systemd:
         if port_info.get("is_tokdash"):
+            holder = detect.port_holder_process(requested_port)
+            holder_part = f", held by {holder}" if holder else ""
+            if holder and "wslrelay" in holder.lower():
+                busy_reason = (
+                    f"already serving another Tokdash install{holder_part} — a WSL distro "
+                    "mirrors its localhost onto this port"
+                )
+            else:
+                busy_reason = f"already serving another Tokdash install{holder_part}"
+        else:
+            busy_reason = "(not Tokdash)"
+    if port_info.get("open"):
+        if port_is_ours:
             notes.append(f"Port {requested_port} already serves Tokdash; setup will point the service at it.")
         elif force_replacing_unmarked_systemd:
             notes.append(
@@ -111,16 +172,16 @@ def build_setup_plan(opts: Options, detection: Dict[str, Any]) -> Dict[str, Any]
                 blockers.append(f"port {requested_port} is busy and no free port was found nearby.")
             else:
                 port = free
-                notes.append(f"Port {requested_port} is busy; auto-picked {free}.")
+                notes.append(f"Port {requested_port} is busy {busy_reason}; auto-picked {free}.")
         elif service["type"] != "none":
             # A service we're about to enable+start would crash-loop on a taken port, and
             # `systemctl enable --now` often still returns 0 — so refuse rather than write a
             # unit that can't bind and mis-report success.
             blockers.append(
-                f"Port {requested_port} is busy (not Tokdash); re-run with --port <free> or --auto to auto-pick."
+                f"Port {requested_port} is busy {busy_reason}; re-run with --port <free> or --auto to auto-pick."
             )
         else:
-            warnings.append(f"Port {requested_port} is busy (not Tokdash); `tokdash serve` will need a free --port.")
+            warnings.append(f"Port {requested_port} is busy {busy_reason}; `tokdash serve` will need a free --port.")
 
     data_dir = paths.data_dir()
     env_data_dir = None if paths.is_default_data_dir() else str(data_dir)

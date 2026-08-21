@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import os
 import random
+import sys
 import time
 import threading
 import webbrowser
@@ -905,7 +907,36 @@ def quota_command(args) -> int:
     raise SystemExit(f"Unknown quota action: {action}")
 
 
+def _harden_windows_stdio() -> None:
+    """Keep CLI output from crashing on Windows consoles that are not UTF-8 (or absent).
+
+    Task Scheduler runs the service via ``pythonw.exe`` (GUI subsystem: no console,
+    ``sys.stdout is None``), and legacy conhost/pipe contexts default to cp1252 — both
+    make the first emoji ``print`` raise (UnicodeEncodeError / AttributeError) and kill
+    the process before the server starts. Replace absent streams with devnull and give
+    present text streams ``errors="replace"`` so any character degrades to "?" instead
+    of crashing. Non-Windows is a no-op.
+    """
+    if os.name != "nt":
+        return
+    for name in ("stdout", "stderr"):
+        stream = getattr(sys, name)
+        if stream is None:
+            setattr(sys, name, io.TextIOWrapper(
+                open(os.devnull, "wb"), encoding="utf-8", errors="replace", line_buffering=True,
+            ))
+            continue
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(errors="replace")
+        except (ValueError, OSError):
+            pass
+
+
 def cli(argv: list[str] | None = None, prog: str = "tokdash") -> int:
+    _harden_windows_stdio()
     parser = build_parser(prog=prog)
     args = parser.parse_args(argv)
 
@@ -919,7 +950,10 @@ def cli(argv: list[str] | None = None, prog: str = "tokdash") -> int:
         # doctor prefers the manifest-recorded port; update/uninstall don't use the port at
         # all (update reads the manifest; uninstall falls back to DEFAULT_PORT internally), so
         # a malformed TOKDASH_PORT must NOT make those two die with "Invalid TOKDASH_PORT".
-        if args.port is None and args.command == "setup":
+        # An ABSENT TOKDASH_PORT leaves args.port None so the planner can adopt the
+        # previous install's manifest-recorded port on re-setup — only an explicit
+        # --port or a present TOKDASH_PORT may pin the port ahead of the manifest.
+        if args.port is None and args.command == "setup" and os.environ.get("TOKDASH_PORT", "").strip():
             args.port = _default_port()
         # Imported lazily so serve/export/db don't pay for the onboarding engine.
         from .onboard.engine import run_lifecycle

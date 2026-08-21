@@ -289,3 +289,52 @@ def test_serve_starts_quota_poll_thread_before_network_consent(monkeypatch):
     cli._start_quota_poll_daemon()
 
     assert started == ["tokdash-quota-poll"]
+
+# --- Windows stdio hardening (serve under pythonw / cp1252 consoles) ---------------
+
+
+def test_harden_stdio_noop_on_posix(monkeypatch):
+    monkeypatch.setattr(cli.os, "name", "posix")
+    original = sys.stdout
+    cli._harden_windows_stdio()
+    assert sys.stdout is original
+
+
+def test_harden_stdio_replaces_missing_stream_on_windows(monkeypatch):
+    # pythonw.exe (GUI subsystem, Task Scheduler context): sys.stdout is None and the
+    # first print would raise AttributeError and kill the service before it starts.
+    monkeypatch.setattr(cli.os, "name", "nt")
+    monkeypatch.setattr(sys, "stdout", None)
+    monkeypatch.setattr(sys, "stderr", None)
+    cli._harden_windows_stdio()
+    try:
+        print("emoji \U0001f680 banner")  # must not raise
+    finally:
+        pass
+    assert sys.stdout is not None and sys.stderr is not None
+
+
+def test_harden_stdio_tolerates_unencodable_chars_on_windows(monkeypatch, capsys):
+    # cp1252 pipe (legacy conhost redirect): emoji must degrade, not crash.
+    import io
+
+    monkeypatch.setattr(cli.os, "name", "nt")
+    buf = io.TextIOWrapper(__import__("io").BytesIO(), encoding="cp1252")
+    monkeypatch.setattr(sys, "stdout", buf)
+    monkeypatch.setattr(sys, "stderr", buf)
+    cli._harden_windows_stdio()
+    try:
+        print("\U0001f680 Starting Tokdash on http://127.0.0.1:55423")
+        buf.flush()
+    finally:
+        pass
+    out = buf.buffer.getvalue().decode("cp1252", errors="replace")
+    assert "Starting Tokdash" in out
+    assert "\U0001f680" not in out  # degraded to '?' on the cp1252 pipe
+
+
+def test_cli_entry_applies_stdio_harden(monkeypatch):
+    calls = []
+    monkeypatch.setattr(cli, "_harden_windows_stdio", lambda: calls.append(1))
+    rc = cli.cli(["version"])
+    assert rc == 0 and calls == [1]

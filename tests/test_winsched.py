@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from tokdash import cli
-from tokdash.onboard import detect, engine, manifest, paths, plan, service_base, winsched
+from tokdash.onboard import detect, engine, manifest, paths, plan, runtime, service_base, winsched
 from tokdash.onboard.engine import run_lifecycle
 
 
@@ -433,3 +433,285 @@ def test_windows_update_restarts_winsched(windows_env, fake_winsched, monkeypatc
 def test_cli_service_choices_include_winsched():
     args = cli.build_parser("tokdash").parse_args(["setup", "--service", "winsched", "--auto"])
     assert args.service == "winsched"
+
+# --- per-user LogonTrigger (standard-user registration) ----------------------------
+
+
+def test_task_logon_trigger_names_current_user(monkeypatch):
+    # A bare <LogonTrigger> means "any user's logon" — a system-wide event Task
+    # Scheduler refuses to register from a standard user (Access denied). The
+    # trigger must name the invoking user to stay registerable non-elevated.
+    monkeypatch.setenv("USERDOMAIN", "HOWARD")
+    monkeypatch.setenv("USERNAME", "H1937")
+    text = winsched.render_task(["C:\\rt\\python.exe", "-m", "tokdash"], "127.0.0.1", 1, marker_id="x")
+    trig = text.split("<LogonTrigger>")[1].split("</LogonTrigger>")[0]
+    assert "<UserId>HOWARD\\H1937</UserId>" in trig
+
+
+def test_task_logon_trigger_uses_bare_username_without_domain(monkeypatch):
+    monkeypatch.delenv("USERDOMAIN", raising=False)
+    monkeypatch.setenv("USERNAME", "H1937")
+    text = winsched.render_task(["C:\\rt\\python.exe", "-m", "tokdash"], "127.0.0.1", 1, marker_id="x")
+    assert "<UserId>H1937</UserId>" in text
+
+
+def test_task_logon_trigger_falls_back_without_user(monkeypatch):
+    # Non-interactive context without USERNAME: degrade to the bare trigger
+    # (pre-fix behaviour, needs elevation) rather than render an invalid definition.
+    monkeypatch.delenv("USERDOMAIN", raising=False)
+    monkeypatch.delenv("USERNAME", raising=False)
+    text = winsched.render_task(["py.exe", "-m", "tokdash"], "127.0.0.1", 1, marker_id="x")
+    assert "<UserId>" not in text
+
+
+def test_task_logon_trigger_escapes_user(monkeypatch):
+    monkeypatch.setenv("USERDOMAIN", "DOM&CO")
+    monkeypatch.setenv("USERNAME", "U")
+    text = winsched.render_task(["py.exe", "-m", "tokdash"], "127.0.0.1", 1, marker_id="x")
+    assert "<UserId>DOM&amp;CO\\U</UserId>" in text
+
+
+def test_windows_setup_stops_previous_instance_before_start(windows_env, monkeypatch, capsys):
+    # A running instance of a previously registered task holds the port and
+    # MultipleInstancesPolicy=IgnoreNew would swallow the fresh /Run — setup must
+    # stop it before registering/starting the replacement.
+    calls = []
+
+    def _record(tag, proc):
+        calls.append(tag)
+        return proc
+
+    monkeypatch.setattr(winsched, "create", lambda task_path, name=winsched.TASK_NAME: _record("create", _ok_proc()))
+    monkeypatch.setattr(winsched, "delete", lambda name=winsched.TASK_NAME: _ok_proc())
+    monkeypatch.setattr(winsched, "run_now", lambda name=winsched.TASK_NAME: _record("run", _ok_proc()))
+    monkeypatch.setattr(winsched, "end_task", lambda name=winsched.TASK_NAME: _record("end", _ok_proc()))
+    monkeypatch.setattr(winsched, "is_registered", lambda name=winsched.TASK_NAME: True)
+    monkeypatch.setattr(winsched, "is_registered_strict", lambda name=winsched.TASK_NAME: True)
+    monkeypatch.setattr(winsched, "is_running", lambda name=winsched.TASK_NAME: True)
+    monkeypatch.setattr(
+        engine,
+        "_wait_for_service_ready",
+        lambda bind, port, **k: {"ok": True, "port": {"port": port, "open": True, "is_tokdash": True, "version": "test"}},
+    )
+    rc, payload = run_json(["setup", "--auto", "--service", "winsched", "--json"], capsys)
+    assert rc == 0
+    assert calls.index("end") < calls.index("create") < calls.index("run")
+
+
+def test_windows_setup_create_access_denied_suggests_elevation(windows_env, monkeypatch, capsys):
+    def _denied(task_path, name=winsched.TASK_NAME):
+        return subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr="ERROR: Access is denied.")
+
+    monkeypatch.setattr(winsched, "create", _denied)
+    monkeypatch.setattr(winsched, "end_task", lambda name=winsched.TASK_NAME: _ok_proc())
+    monkeypatch.setattr(winsched, "is_registered", lambda name=winsched.TASK_NAME: True)
+    rc, payload = run_json(["setup", "--auto", "--service", "winsched", "--json"], capsys)
+    assert rc != 0
+    assert "schtasks /Create failed" in payload["error"]
+    assert "elevated PowerShell" in payload["error"]
+
+
+def test_readiness_refuses_foreign_responder(monkeypatch):
+    # Port answers with Tokdash's fingerprint (e.g. a WSL distro's mirrored
+    # localhost) but our own service is not running: readiness must not pass.
+    monkeypatch.setattr(
+        detect, "probe_port",
+        lambda port=55423, *a, **k: {"port": port, "open": True, "is_tokdash": True, "version": "1.9.0"},
+    )
+    r = engine._wait_for_service_ready(
+        "127.0.0.1", 55423, timeout=0.5, service_up=lambda: False, service_desc="the Task Scheduler task Tokdash"
+    )
+    assert r["ok"] is False
+    assert "foreign/relayed" in r["error"]
+
+
+def test_readiness_refuses_wrong_holder(monkeypatch):
+    # Fingerprint + task "Running" is not enough: the port must be owned by the
+    # service's runtime, not a relay/foreign process answering on its behalf.
+    monkeypatch.setattr(
+        detect, "probe_port",
+        lambda port=55423, *a, **k: {"port": port, "open": True, "is_tokdash": True, "version": "1.9.0"},
+    )
+    monkeypatch.setattr(detect, "port_holder_process", lambda port: "wslrelay.exe")
+    r = engine._wait_for_service_ready(
+        "127.0.0.1", 55423, timeout=0.5, service_up=lambda: True, expected_holders={"pythonw.exe"}
+    )
+    assert r["ok"] is False
+    assert "wslrelay.exe" in r["error"] and "pythonw.exe" in r["error"]
+
+
+def test_readiness_accepts_expected_holder(monkeypatch):
+    monkeypatch.setattr(
+        detect, "probe_port",
+        lambda port=55423, *a, **k: {"port": port, "open": True, "is_tokdash": True, "version": "2.0.0"},
+    )
+    monkeypatch.setattr(detect, "port_holder_process", lambda port: "pythonw.exe")
+    r = engine._wait_for_service_ready(
+        "127.0.0.1", 55423, timeout=0.5, service_up=lambda: True,
+        expected_holders={"pythonw.exe", "python.exe"},
+    )
+    assert r["ok"] is True
+
+
+def test_readiness_ignores_unknown_holder(monkeypatch):
+    # Holder lookup failed (None) -> the gate must not veto a healthy service.
+    monkeypatch.setattr(
+        detect, "probe_port",
+        lambda port=55423, *a, **k: {"port": port, "open": True, "is_tokdash": True, "version": "2.0.0"},
+    )
+    monkeypatch.setattr(detect, "port_holder_process", lambda port: None)
+    r = engine._wait_for_service_ready(
+        "127.0.0.1", 55423, timeout=0.5, service_up=lambda: True, expected_holders={"pythonw.exe"}
+    )
+    assert r["ok"] is True
+
+
+def test_readiness_passes_when_service_running(monkeypatch):
+    monkeypatch.setattr(
+        detect, "probe_port",
+        lambda port=55423, *a, **k: {"port": port, "open": True, "is_tokdash": True, "version": "2.0.0"},
+    )
+    r = engine._wait_for_service_ready("127.0.0.1", 55423, timeout=0.5, service_up=lambda: True)
+    assert r["ok"] is True
+
+
+# --- re-setup: stale-instance port release (uvicorn exit-3 race) -----------------
+#
+# Live-verified failure: schtasks /End is a *request* — the previous pythonw kept the
+# port while the replacement was registered and /Run fired; the fresh instance exited
+# with uvicorn's startup-failure code 3 ("address in use") and readiness passed on the
+# stale responder's fingerprint. The port release must be a precondition of (re)start,
+# and a lingering own-runtime holder must be hard-killed by PID.
+
+
+def test_port_release_wait_passes_when_port_free(monkeypatch):
+    monkeypatch.setattr(
+        detect, "probe_port",
+        lambda port=55423, *a, **k: {"port": port, "open": False, "is_tokdash": False, "version": None},
+    )
+    assert engine._wait_for_port_release(55423, kill_names={"pythonw.exe"}, timeout=1.0) is None
+
+
+def test_port_release_wait_kills_lingering_own_holder(monkeypatch):
+    # The old pythonw outlived schtasks /End: the port still answers and the holder is
+    # our runtime -> taskkill /F by PID; the wait returns once the port frees.
+    state = {"killed": False}
+    monkeypatch.setattr(
+        detect, "probe_port",
+        lambda port=55423, *a, **k: {"port": port, "open": not state["killed"], "is_tokdash": True, "version": "2.0.0"},
+    )
+    monkeypatch.setattr(detect, "port_holder", lambda port: (4242, "pythonw.exe"))
+    kills = []
+
+    def fake_run(args, *a, **k):
+        kills.append(args)
+        if args[:1] == ["taskkill"]:
+            state["killed"] = True
+        return _ok_proc()
+
+    monkeypatch.setattr(engine.subprocess, "run", fake_run)
+    assert engine._wait_for_port_release(55423, kill_names={"pythonw.exe", "python.exe"}, timeout=2.0) is None
+    assert kills == [["taskkill", "/PID", "4242", "/F"]]
+
+
+def test_port_release_wait_never_kills_foreign_holder(monkeypatch):
+    # A non-runtime occupant (wslrelay etc.) is reported, never killed.
+    monkeypatch.setattr(
+        detect, "probe_port",
+        lambda port=55423, *a, **k: {"port": port, "open": True, "is_tokdash": True, "version": "1.9.0"},
+    )
+    monkeypatch.setattr(detect, "port_holder", lambda port: (777, "wslrelay.exe"))
+
+    def boom(*a, **k):
+        raise AssertionError("taskkill must not run for a foreign holder")
+
+    monkeypatch.setattr(engine.subprocess, "run", boom)
+    err = engine._wait_for_port_release(55423, kill_names={"pythonw.exe"}, timeout=0.8)
+    assert err is not None and "still busy" in err and "wslrelay.exe" in err
+
+
+def test_port_release_wait_without_kill_names_never_kills(monkeypatch):
+    # No kill authority (a port this install does not own): report, never touch.
+    monkeypatch.setattr(
+        detect, "probe_port",
+        lambda port=55423, *a, **k: {"port": port, "open": True, "is_tokdash": True, "version": "2.0.0"},
+    )
+    monkeypatch.setattr(detect, "port_holder", lambda port: (4242, "pythonw.exe"))
+
+    def boom(*a, **k):
+        raise AssertionError("taskkill must not run without kill_names")
+
+    monkeypatch.setattr(engine.subprocess, "run", boom)
+    err = engine._wait_for_port_release(55423, timeout=0.8)
+    assert err is not None and "still busy" in err and "PID 4242" in err
+
+
+def test_runtime_holder_names_accepts_pythonw_twin():
+    assert engine._runtime_holder_names({"command": [r"C:\rt\python.exe", "-m", "tokdash"]}) == {
+        "python.exe", "pythonw.exe", "pythonw"
+    }
+    assert engine._runtime_holder_names({"command": [r"C:\rt\tokdash.exe"]}) == {"tokdash.exe"}
+    assert engine._runtime_holder_names(None) is None
+
+
+def test_windows_resetup_kills_stale_holder_before_starting_replacement(windows_env, monkeypatch, capsys):
+    calls = []
+    state = {"killed": False}
+    monkeypatch.setattr(
+        detect, "probe_port",
+        lambda port=55423, *a, **k: {"port": port, "open": not state["killed"], "is_tokdash": True, "version": "2.0.0"},
+    )
+    monkeypatch.setattr(detect, "port_holder", lambda port: (4242, "pythonw.exe"))
+
+    def fake_run(args, *a, **k):
+        if args[:1] == ["taskkill"]:
+            calls.append("kill")
+            state["killed"] = True
+        return _ok_proc()
+
+    monkeypatch.setattr(engine.subprocess, "run", fake_run)
+    monkeypatch.setattr(winsched, "create", lambda task_path, name=winsched.TASK_NAME: calls.append("create") or _ok_proc())
+    monkeypatch.setattr(winsched, "delete", lambda name=winsched.TASK_NAME: _ok_proc())
+    monkeypatch.setattr(winsched, "run_now", lambda name=winsched.TASK_NAME: calls.append("run") or _ok_proc())
+    monkeypatch.setattr(winsched, "end_task", lambda name=winsched.TASK_NAME: calls.append("end") or _ok_proc())
+    monkeypatch.setattr(winsched, "is_registered", lambda name=winsched.TASK_NAME: True)
+    monkeypatch.setattr(winsched, "is_registered_strict", lambda name=winsched.TASK_NAME: True)
+    monkeypatch.setattr(winsched, "is_running", lambda name=winsched.TASK_NAME: True)
+    monkeypatch.setattr(
+        engine,
+        "_wait_for_service_ready",
+        lambda bind, port, **k: {"ok": True, "port": {"port": port, "open": True, "is_tokdash": True, "version": "test"}},
+    )
+    # The runtime the plan sees must be a Windows venv python.exe (the test host's
+    # interpreter would not match the holder's image name).
+    monkeypatch.setattr(
+        runtime, "resolve",
+        lambda flag, detection: {
+            "kind": "existing", "install_method": "manual",
+            "command": [r"C:\rt\python.exe", "-m", "tokdash"], "python": r"C:\rt\python.exe",
+            "owned_by_setup": False, "needs_create": False, "error": None,
+        },
+    )
+
+    # A previous install of ours recorded exactly this port and its marked task exists.
+    task_path = paths.winsched_task_path()
+    task_path.parent.mkdir(parents=True, exist_ok=True)
+    task_path.write_bytes(
+        codecs.BOM_UTF16_LE
+        + winsched.render_task([r"C:\rt\python.exe", "-m", "tokdash"], "127.0.0.1", 55423, marker_id="x").encode("utf-16-le")
+    )
+    svc = {"type": "winsched", "unit": str(task_path), "name": winsched.TASK_NAME,
+           "created_by_setup": True, "marker": "X-Tokdash-Managed id=x"}
+    man = manifest.build_manifest(
+        install_method="manual", runtime_kind="existing",
+        runtime_command=[r"C:\rt\python.exe", "-m", "tokdash"],
+        runtime_owned_by_setup=False, python_path=r"C:\rt\python.exe", python_version="3.13.5",
+        service=svc, runtime_marker=None, data_dir=str(paths.data_dir()),
+        bind="127.0.0.1", port=55423,
+    )
+    manifest.write_manifest(man)
+
+    rc, payload = run_json(["setup", "--auto", "--service", "winsched", "--json"], capsys)
+    assert rc == 0
+    assert payload["port"] == 55423
+    assert calls.index("end") < calls.index("kill") < calls.index("create") < calls.index("run")

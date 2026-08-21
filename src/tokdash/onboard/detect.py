@@ -15,7 +15,7 @@ import subprocess
 import sys
 import urllib.request
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from .. import osinfo
 from . import manifest, paths
@@ -281,6 +281,55 @@ def probe_port(port: int, host: str = "127.0.0.1", timeout: float = 0.5) -> Dict
     except Exception:
         pass
     return info
+
+
+def port_holder(port: int) -> Optional[Tuple[int, str]]:
+    """Best-effort ``(pid, image name)`` of the process holding a listening port.
+
+    Windows only. ``netstat -ano`` gives the owning PID, ``tasklist`` maps PID ->
+    image name. The PID lets the caller identify (and stop) a *specific* stale
+    instance — e.g. a ``pythonw.exe`` that outlived ``schtasks /End`` on re-setup —
+    while the name is used for diagnostics (e.g. telling the user a WSL distro
+    mirrors its own Tokdash onto this port via wslrelay.exe). Fails safe: any
+    error -> None.
+    """
+    if os.name != "nt":
+        return None
+    try:
+        out = subprocess.run(["netstat", "-ano"], capture_output=True, text=True, timeout=10).stdout
+    except Exception:
+        return None
+    pids = set()
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) >= 5 and parts[0].startswith("TCP") and parts[3] == "LISTENING":
+            if parts[1].endswith(f":{port}"):
+                pids.add(parts[4])
+    for pid in sorted(pids):
+        try:
+            out = subprocess.run(
+                ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+                capture_output=True, text=True, timeout=10,
+            ).stdout
+        except Exception:
+            continue
+        first = out.strip().splitlines()[0] if out.strip() else ""
+        name = first.split(",")[0].strip('"') if first else ""
+        if name:
+            try:
+                return int(pid), name
+            except ValueError:
+                continue
+    return None
+
+
+def port_holder_process(port: int) -> Optional[str]:
+    """Best-effort name of the process holding a listening port (Windows only)."""
+    holder = port_holder(port)
+    return holder[1] if holder else None
+
+
+    return None
 
 
 def find_free_port(start: int, host: str = "127.0.0.1", limit: int = 64) -> Optional[int]:

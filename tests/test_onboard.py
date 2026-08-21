@@ -249,10 +249,64 @@ def test_blocked_plan_separates_changes(monkeypatch):
     assert p["changes"] == [] and p["blocked_changes"]
 
 
-def test_busy_tokdash_port_is_reused(monkeypatch):
+def test_busy_tokdash_port_is_reused_when_ours(monkeypatch, tmp_path):
+    # Re-setup/upgrade: the port's Tokdash is this install's own previous service
+    # (a marked unit) — keep the port and point the new service at it.
+    unit = tmp_path / "tokdash.service"
+    unit.write_text("# X-Tokdash-Managed id=abc\n[Service]\n", encoding="utf-8")
     monkeypatch.setattr(detect, "probe_port", lambda *a, **k: {"port": 55423, "open": True, "is_tokdash": True, "version": "0.6.2"})
-    p = plan.build_setup_plan(plan.Options(auto=True), _detection())
+    d = _detection(
+        existing_service={"systemd_unit": str(unit), "launchd_plist": None, "winsched_task": None},
+        manifest={"port": 55423, "service": {"type": "systemd-user"}},
+    )
+    p = plan.build_setup_plan(plan.Options(auto=True), d)
     assert p["port"] == 55423 and any("already serves Tokdash" in n for n in p["notes"])
+
+
+def test_resetup_adopts_previous_port(monkeypatch, tmp_path):
+    # The regression: after setup auto-picked 55424 (55423 held by the WSL relay's
+    # Tokdash), a plain re-setup must keep 55424 — not fall back to the default
+    # 55423 and mistake the relayed fingerprint for our own endpoint.
+    unit = tmp_path / "tokdash.service"
+    unit.write_text("# X-Tokdash-Managed id=abc\n[Service]\n", encoding="utf-8")
+
+    def _probe(port=55423, *a, **k):
+        busy = port in (55423, 55424)
+        return {"port": port, "open": busy, "is_tokdash": busy,
+                "version": "1.9.0" if port == 55423 else "2.0.0"}
+
+    monkeypatch.setattr(detect, "probe_port", _probe)
+    monkeypatch.setattr(detect, "port_holder_process", lambda port: "wslrelay.exe" if port == 55423 else None)
+    d = _detection(
+        manifest={"port": 55424, "service": {"type": "systemd-user"}},
+        existing_service={"systemd_unit": str(unit), "launchd_plist": None, "winsched_task": None},
+    )
+    p = plan.build_setup_plan(plan.Options(auto=True), d)
+    assert p["port"] == 55424
+    assert any("already serves Tokdash" in n for n in p["notes"])
+
+
+def test_busy_foreign_tokdash_port_auto_picks(monkeypatch):
+    # The port answers with Tokdash's fingerprint but no service we wrote holds it
+    # (e.g. a WSL distro mirroring its own Tokdash onto the host via wslrelay):
+    # our service would crash-loop binding it, so auto-pick a free port instead.
+    def _probe(port=55423, *a, **k):
+        busy = port == 55423
+        return {"port": port, "open": busy, "is_tokdash": busy, "version": "0.6.2" if busy else None}
+
+    monkeypatch.setattr(detect, "probe_port", _probe)
+    monkeypatch.setattr(detect, "port_holder_process", lambda port: "wslrelay.exe")
+    p = plan.build_setup_plan(plan.Options(auto=True), _detection())
+    assert p["port"] == 55424
+    assert any("wslrelay.exe" in n and "WSL" in n for n in p["notes"])
+
+
+def test_busy_foreign_tokdash_port_blocks_without_auto(monkeypatch):
+    monkeypatch.setattr(detect, "probe_port", lambda *a, **k: {"port": 55423, "open": True, "is_tokdash": True, "version": "0.6.2"})
+    monkeypatch.setattr(detect, "port_holder_process", lambda port: None)
+    p = plan.build_setup_plan(plan.Options(auto=False), _detection())
+    assert p["ok"] is False
+    assert any("another Tokdash install" in b for b in p["blockers"])
 
 
 def test_systemd_unavailable_falls_back(monkeypatch):
@@ -1452,6 +1506,31 @@ def test_setup_honors_tokdash_port(monkeypatch, capsys):
     rc = cli.cli(["setup", "--auto", "--no-service", "--dry-run", "--json"])
     payload = json.loads(capsys.readouterr().out)
     assert rc == 0 and payload["port"] == 9123
+
+
+def test_setup_implicit_port_stays_none_for_manifest_adoption(monkeypatch):
+    # An implicit setup port must reach the planner as None so a re-setup can adopt
+    # the manifest-recorded port; only an explicit --port or a present TOKDASH_PORT
+    # may pin it ahead of the manifest.
+    import tokdash.onboard.engine as eng
+    seen = {}
+
+    def _fake(opts):
+        seen["port"] = opts.port
+        return 0
+
+    monkeypatch.setattr(eng, "run_lifecycle", _fake)
+    monkeypatch.delenv("TOKDASH_PORT", raising=False)
+    assert cli.cli(["setup", "--no-service"]) == 0
+    assert seen["port"] is None
+
+
+def test_setup_malformed_tokdash_port_still_rejected(monkeypatch):
+    import tokdash.onboard.engine as eng
+    monkeypatch.setattr(eng, "run_lifecycle", lambda opts: 0)
+    monkeypatch.setenv("TOKDASH_PORT", "notaport")
+    with pytest.raises(SystemExit, match="Invalid TOKDASH_PORT"):
+        cli.cli(["setup", "--no-service"])
 
 
 def test_doctor_ignores_tokdash_port_prefers_manifest(monkeypatch, capsys):

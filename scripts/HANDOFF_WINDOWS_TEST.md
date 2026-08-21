@@ -238,3 +238,20 @@ Also: `live_test.ps1` + this file moved to `scripts/`; `docs/CHANGELOG.md`
 added (v2.0.1 entry). New tests cover the locale readiness path, kill
 authority, tasklist parsing, the PowerShell fallback, and the update/uninstall
 release-gate ordering.
+
+## Round 6 (second review pass)
+
+- Uninstall no longer fails (or waits 15s) when a FOREIGN process holds the
+  recorded port: the release wait now runs only when the holder is provably
+  our own runtime (fingerprint + image name + exact interpreter path). The
+  WSL-relay-on-55423 host configuration unblocks cleanly.
+- Kill authority tightened to the exact interpreter: the holder's executable
+  path (PowerShell Get-Process) is compared against the manifest runtime's
+  pythonw twin, so a manually-started `tokdash serve` from another venv is
+  never force-killed by setup/update/uninstall.
+- Holder lookup cached for the life of one wait (plus a 2s TTL in the
+  readiness loop): one PowerShell spawn per wait instead of per tick on
+  hosts with localized netstat.
+- update dry-run text updated to match the stop -> wait -> run flow.
+- Changelog entry moved to the canonical docs/development/CHANGELOG.md
+  (the docs/CHANGELOG.md path was deleted in the docs reorg).

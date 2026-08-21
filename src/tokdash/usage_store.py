@@ -61,6 +61,29 @@ _GROK_EMAIL_REPAIR_META_KEY = "quota_grok_email_scrub_v1"
 # computed under. Advanced only by a committed repricing transaction.
 _PRICING_IDENTITY_META_KEY = "usage_pricing_identity_v1"
 
+# The Stats contribution fetch. Shared verbatim by contribution_days() and
+# contribution_day_rows(), so OpenClaw can read it inside its own snapshot
+# rather than opening a second one that could straddle a racing write.
+_CONTRIBUTION_DAYS_SQL = """
+            SELECT
+                date(timestamp / 1000, 'unixepoch', 'localtime') AS day,
+                source,
+                model,
+                provider,
+                SUM(input) AS input_sum,
+                SUM(output) AS output_sum,
+                SUM(cache_read) AS cache_read_sum,
+                SUM(cache_write) AS cache_write_sum,
+                SUM(reasoning) AS reasoning_sum,
+                COUNT(*) AS row_count,
+                SUM(CASE WHEN cost > 0 THEN cost ELSE 0 END) AS cost_priced_sum,
+                SUM(CASE WHEN cost <= 0 THEN input ELSE 0 END) AS input_unpriced,
+                SUM(CASE WHEN cost <= 0 THEN output ELSE 0 END) AS output_unpriced,
+                SUM(CASE WHEN cost <= 0 THEN cache_read ELSE 0 END) AS cache_read_unpriced,
+                SUM(CASE WHEN cost <= 0 THEN cache_write ELSE 0 END) AS cache_write_unpriced
+            FROM usage_entries
+        """
+
 
 def _as_float(value: Any) -> float | None:
     try:
@@ -1003,63 +1026,121 @@ class UsageEntryStore:
         if self.stored_pricing_identity() == identity:
             return False
         database = pricing_db if pricing_db is not None else self._pricing_db()
+        with usage_db_process_lock(self.path):
+            with closing(self._connect()) as conn:
+                return self._reprice_holding_lock(conn, identity, database, chunk_size=chunk_size)
+
+    def _reprice_holding_lock(
+        self,
+        conn: sqlite3.Connection,
+        identity: str,
+        database: PricingDatabase,
+        *,
+        chunk_size: int = 5000,
+    ) -> bool:
+        """:meth:`apply_pricing`'s body, for a caller that already holds the lock.
+
+        Split out because the process lock is NOT reentrant: POSIX ``flock`` is
+        per open file description, so a second acquisition from the same process
+        blocks against the first forever. The read path takes the lock itself in
+        its last-resort branch and must repair without re-entering it.
+        """
+        row = conn.execute(
+            "SELECT value FROM meta WHERE key = ?", (_PRICING_IDENTITY_META_KEY,)
+        ).fetchone()
+        if row is not None and str(row["value"]) == identity:
+            return False
+
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            last_id = 0
+            while True:
+                rows = conn.execute(
+                    """
+                    SELECT id, cost, raw_json, billing_json
+                    FROM usage_entries
+                    WHERE id > ? AND billing_json != ''
+                    ORDER BY id
+                    LIMIT ?
+                    """,
+                    (last_id, int(chunk_size)),
+                ).fetchall()
+                if not rows:
+                    break
+                last_id = int(rows[-1]["id"])
+                updates: list[tuple[float, str, int]] = []
+                for entry_row in rows:
+                    try:
+                        billing = json.loads(entry_row["billing_json"])
+                    except (TypeError, ValueError):
+                        continue
+                    new_cost = usage_entry_cost(billing, database)
+                    if new_cost == float(entry_row["cost"] or 0.0):
+                        continue
+                    try:
+                        raw = json.loads(entry_row["raw_json"])
+                    except (TypeError, ValueError):
+                        continue
+                    if not isinstance(raw, dict):
+                        continue
+                    raw["cost"] = new_cost
+                    updates.append((new_cost, stable_json(raw), int(entry_row["id"])))
+                if updates:
+                    conn.executemany(
+                        "UPDATE usage_entries SET cost = ?, raw_json = ? WHERE id = ?",
+                        updates,
+                    )
+            conn.execute(
+                "INSERT OR REPLACE INTO meta(key, value) VALUES(?, ?)",
+                (_PRICING_IDENTITY_META_KEY, identity),
+            )
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
+        return True
+
+    def _read_priced(self, read_fn: Callable[[sqlite3.Connection], Any], *, attempts: int = 3) -> Any:
+        """Run *read_fn* against a snapshot whose costs are all one pricing generation.
+
+        A write that lands under superseded pricing commits its rows and drops
+        the stored identity in one transaction (see
+        ``_drop_stale_pricing_identity``). Between that commit and whoever
+        reprices next, the table can hold two pricing generations at once — so a
+        reader must not simply read it. Checking the identity and then reading
+        would be no better: the write can land in the gap between the two.
+
+        So the check and the read share one deferred transaction, which in WAL
+        mode pins a single snapshot: seeing an identity there proves every row in
+        that same snapshot was priced under it. An absent identity means a racing
+        write got in, so this repairs and retries rather than returning a mixed
+        table. The retry is bounded; the final attempt repairs and reads while
+        holding the process lock, which writers need, so nothing can interleave.
+
+        Costs one extra indexed ``meta`` lookup per read when nothing raced,
+        which is the normal case.
+        """
+        for _ in range(max(1, attempts)):
+            with closing(self._connect()) as conn:
+                conn.execute("BEGIN")
+                try:
+                    row = conn.execute(
+                        "SELECT value FROM meta WHERE key = ?", (_PRICING_IDENTITY_META_KEY,)
+                    ).fetchone()
+                    if row is not None:
+                        return read_fn(conn)
+                finally:
+                    conn.rollback()
+            database = self._pricing_db()
+            self.apply_pricing(persistent_pricing_signature(database), database)
 
         with usage_db_process_lock(self.path):
             with closing(self._connect()) as conn:
-                row = conn.execute(
-                    "SELECT value FROM meta WHERE key = ?", (_PRICING_IDENTITY_META_KEY,)
-                ).fetchone()
-                if row is not None and str(row["value"]) == identity:
-                    return False
-
-                conn.execute("BEGIN IMMEDIATE")
-                try:
-                    last_id = 0
-                    while True:
-                        rows = conn.execute(
-                            """
-                            SELECT id, cost, raw_json, billing_json
-                            FROM usage_entries
-                            WHERE id > ? AND billing_json != ''
-                            ORDER BY id
-                            LIMIT ?
-                            """,
-                            (last_id, int(chunk_size)),
-                        ).fetchall()
-                        if not rows:
-                            break
-                        last_id = int(rows[-1]["id"])
-                        updates: list[tuple[float, str, int]] = []
-                        for entry_row in rows:
-                            try:
-                                billing = json.loads(entry_row["billing_json"])
-                            except (TypeError, ValueError):
-                                continue
-                            new_cost = usage_entry_cost(billing, database)
-                            if new_cost == float(entry_row["cost"] or 0.0):
-                                continue
-                            try:
-                                raw = json.loads(entry_row["raw_json"])
-                            except (TypeError, ValueError):
-                                continue
-                            if not isinstance(raw, dict):
-                                continue
-                            raw["cost"] = new_cost
-                            updates.append((new_cost, stable_json(raw), int(entry_row["id"])))
-                        if updates:
-                            conn.executemany(
-                                "UPDATE usage_entries SET cost = ?, raw_json = ? WHERE id = ?",
-                                updates,
-                            )
-                    conn.execute(
-                        "INSERT OR REPLACE INTO meta(key, value) VALUES(?, ?)",
-                        (_PRICING_IDENTITY_META_KEY, identity),
-                    )
-                    conn.commit()
-                except BaseException:
-                    conn.rollback()
-                    raise
-        return True
+                database = self._pricing_db()
+                self._reprice_holding_lock(
+                    conn, stable_json(persistent_pricing_signature(database)), database
+                )
+                return read_fn(conn)
 
     def sync_source(
         self,
@@ -1488,8 +1569,7 @@ class UsageEntryStore:
             query += " WHERE " + " AND ".join(where)
         query += " ORDER BY timestamp ASC, id ASC"
 
-        with closing(self._connect()) as conn:
-            rows = conn.execute(query, args).fetchall()
+        rows = self._read_priced(lambda conn: conn.execute(query, args).fetchall())
 
         out: list[dict[str, Any]] = []
         for row in rows:
@@ -1532,8 +1612,7 @@ class UsageEntryStore:
             query += " WHERE " + " AND ".join(where)
         query += " GROUP BY source, provider, model"
 
-        with closing(self._connect()) as conn:
-            rows = conn.execute(query, args).fetchall()
+        rows = self._read_priced(lambda conn: conn.execute(query, args).fetchall())
 
         apps: dict[str, Any] = {}
         all_models: list[dict[str, Any]] = []
@@ -1641,32 +1720,31 @@ class UsageEntryStore:
     ) -> list[dict[str, Any]]:
         """Return Stats-tab contribution rows using SQL date/model grouping."""
         where, args = self._where(sources=sources, since=since, until=until)
-        query = """
-            SELECT
-                date(timestamp / 1000, 'unixepoch', 'localtime') AS day,
-                source,
-                model,
-                provider,
-                SUM(input) AS input_sum,
-                SUM(output) AS output_sum,
-                SUM(cache_read) AS cache_read_sum,
-                SUM(cache_write) AS cache_write_sum,
-                SUM(reasoning) AS reasoning_sum,
-                COUNT(*) AS row_count,
-                SUM(CASE WHEN cost > 0 THEN cost ELSE 0 END) AS cost_priced_sum,
-                SUM(CASE WHEN cost <= 0 THEN input ELSE 0 END) AS input_unpriced,
-                SUM(CASE WHEN cost <= 0 THEN output ELSE 0 END) AS output_unpriced,
-                SUM(CASE WHEN cost <= 0 THEN cache_read ELSE 0 END) AS cache_read_unpriced,
-                SUM(CASE WHEN cost <= 0 THEN cache_write ELSE 0 END) AS cache_write_unpriced
-            FROM usage_entries
-        """
+        query = _CONTRIBUTION_DAYS_SQL
         if where:
             query += " WHERE " + " AND ".join(where)
         query += " GROUP BY day, source, provider, model ORDER BY day ASC"
 
-        with closing(self._connect()) as conn:
-            rows = conn.execute(query, args).fetchall()
+        rows = self._read_priced(lambda conn: conn.execute(query, args).fetchall())
+        return self._contribution_days_from_rows(rows)
 
+    def contribution_day_rows(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        sources: Optional[Iterable[str]] = None,
+        since: Optional[datetime] = None,
+        until: Optional[datetime] = None,
+    ) -> list[sqlite3.Row]:
+        """The contribution fetch, for a caller reading inside its own snapshot."""
+        where, args = self._where(sources=sources, since=since, until=until)
+        query = _CONTRIBUTION_DAYS_SQL
+        if where:
+            query += " WHERE " + " AND ".join(where)
+        query += " GROUP BY day, source, provider, model ORDER BY day ASC"
+        return conn.execute(query, args).fetchall()
+
+    def _contribution_days_from_rows(self, rows: Iterable[sqlite3.Row]) -> list[dict[str, Any]]:
         by_date: dict[str, dict[str, Any]] = {}
         for row in rows:
             date = str(row["day"] or "")

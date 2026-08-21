@@ -175,6 +175,33 @@ sound, but it throws away a completed parse — the exact cost this design exist
 to avoid — and is not a fixpoint either, since the pricing file can change again
 during the retry.
 
+### ...and the readers in that window
+
+Dropping the identity stops the staleness becoming permanent, but the repair
+lands in a *later* transaction. Between the two, the table genuinely holds two
+pricing generations, and a reader must not report their sum. Checking the
+identity and then reading would not help: a superseded write can commit in the
+gap between the check and the read.
+
+So `_read_priced()` puts both in one deferred transaction, which in WAL mode
+pins a single snapshot — seeing an identity there proves every row *in that same
+snapshot* was priced under it. An absent identity means a racing write got in,
+so the reader repairs and retries instead of returning a mixed table. Retries
+are bounded; the final attempt repairs and reads while holding the process lock,
+which every writer needs, so nothing can interleave and the loop terminates.
+`query_entries`, `aggregate_entries` and `contribution_days` all route through
+it, and OpenClaw takes its model totals and its contribution grid from ONE such
+snapshot rather than opening two that could straddle a write.
+
+Cost on the hot path is one extra indexed `meta` lookup per read. The repair
+branch only runs when a race actually happened.
+
+Note `usage_db_process_lock` is not reentrant — POSIX `flock` is per open file
+description, so a second acquisition from the same process blocks against the
+first forever. That is why the repricing body is split into
+`_reprice_holding_lock()`, which the lock-holding read branch calls directly
+instead of re-entering `apply_pricing()`.
+
 A global pass over `usage_entries` is accepted. The goal is to avoid rereading
 source logs, not to avoid touching cached SQL rows. Measured on 400,000 rows:
 0.4 ms when the identity is unchanged (a single `meta` lookup — the hot path on
@@ -216,6 +243,7 @@ never trigger a global parse again.
 | `USAGE_ENTRY_FORMAT_VERSION` bump | all stored sources | no |
 | `DSH_DECODER_VERSION` / `DSH_ACCOUNTING_VERSION` bump | DSH only | no |
 | A sync landing after another process repriced | no | yes (identity dropped, then rebuilt) |
+| A read landing in that window | no | yes (repaired before the read returns) |
 | A pricing rate, alias or model added/changed/removed | no | yes |
 | `PricingDatabase` implementation change | no | yes |
 

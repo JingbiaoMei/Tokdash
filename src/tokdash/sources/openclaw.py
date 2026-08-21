@@ -381,11 +381,20 @@ def _openclaw_usage_from_store(
         query += " WHERE " + " AND ".join(where)
     query += " GROUP BY model"
 
-    conn = store._connect()  # type: ignore[attr-defined]
-    try:
-        rows = conn.execute(query, args).fetchall()
-    finally:
-        conn.close()
+    # Both fetches share ONE snapshot. Read separately, they could straddle a
+    # write that lands under superseded pricing, and the model totals would then
+    # disagree with the contribution grid built from the other side of it.
+    # _read_priced also guarantees the snapshot carries a single pricing
+    # generation (see UsageEntryStore._read_priced).
+    def _read(conn):
+        return (
+            conn.execute(query, args).fetchall(),
+            store.contribution_day_rows(
+                conn, sources=["openclaw"], since=since_date, until=until_date
+            ),
+        )
+
+    rows, contribution_rows = store._read_priced(_read)  # type: ignore[attr-defined]
 
     models: Dict[str, Any] = {}
     total_tokens = 0
@@ -430,7 +439,7 @@ def _openclaw_usage_from_store(
         "total_tokens_cache": int(total_tokens_cache),
         "cache_hit_rate": _cache_hit_rate(total_tokens_in, total_tokens_cache),
         "models": models,
-        "contributions": store.contribution_days(sources=["openclaw"], since=since_date, until=until_date),
+        "contributions": store._contribution_days_from_rows(contribution_rows),  # type: ignore[attr-defined]
     }
 
 

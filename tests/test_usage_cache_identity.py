@@ -867,8 +867,8 @@ def _priced_db(tmp_path: Path, name: str, rate: float) -> PricingDatabase:
     )
 
 
-def _racing_row(cost: float) -> dict:
-    return {
+def _racing_row(cost: float, entry_id: str | None = None) -> dict:
+    row = {
         "source": "claude",
         "model": "m1",
         "provider": "",
@@ -878,6 +878,9 @@ def _racing_row(cost: float) -> dict:
         "cost": cost,
         "_billing": usage_billing_pricing(["m1"], input_tokens=1_000_000),
     }
+    if entry_id:
+        row["entry_id"] = entry_id
+    return row
 
 
 def test_a_file_sync_landing_after_another_process_repriced_is_not_lost(tmp_path):
@@ -1028,6 +1031,121 @@ def test_a_racing_sync_self_heals_within_the_same_request(_isolated_home, monkey
     assert fresh.apply_pricing(json.loads(identity), PricingDatabase()) is False
     costs = _row_costs(store, "codex")
     assert len(costs) == 2 and all(c == pytest.approx(priced_at_3) for c in costs)
+
+
+def _mixed_price_table(home: Path):
+    """Leave the store holding two pricing generations, mid-race.
+
+    Row `a` has been repriced to p2 by another process; row `b` is then
+    committed by a writer still parsing under p1, which drops the identity. No
+    repair has run yet -- this is exactly the window a reader can land in.
+    """
+    p1, p2 = _priced_db(home, "p1", 1.0), _priced_db(home, "p2", 5.0)
+    id1, id2 = {"rates": "p1"}, {"rates": "p2"}
+    path = usage_store_module.usage_db_path()
+    a, b = str(home / "a.jsonl"), str(home / "b.jsonl")
+
+    writer = UsageEntryStore(path)
+    writer.apply_pricing(id1, p1)
+    writer.sync_files(
+        "claude", ((a, 1, 100),), parser={"v": 1}, pricing_identity=id1,
+        parse_file_entries=lambda _s: [_racing_row(1.0, entry_id="row-a")],
+    )
+    UsageEntryStore(path).apply_pricing(id2, p2)  # another process reprices
+
+    # The late writer commits and stops. Nothing repairs it.
+    writer.sync_files(
+        "claude", ((a, 1, 100), (b, 1, 100)), parser={"v": 1}, pricing_identity=id1,
+        parse_file_entries=lambda fs: (
+            [] if fs[0] == a else [_racing_row(1.0, entry_id="row-b")]
+        ),
+    )
+    assert UsageEntryStore(path).stored_pricing_identity() is None, "setup: mid-race"
+    return path
+
+
+def test_a_reader_never_observes_a_half_repriced_table(_isolated_home):
+    """The window between a superseded commit and its repair must not be visible."""
+    _write_pricing({"m1": {"input": 9.0, "output": 0.0}})
+    path = _mixed_price_table(_isolated_home)
+
+    costs = _row_costs(UsageEntryStore(path), "claude")
+
+    assert len(costs) == 2
+    assert len(set(costs)) == 1, f"reader saw two pricing generations at once: {costs}"
+    assert costs == [pytest.approx(9.0), pytest.approx(9.0)], (
+        "the read repaired to the reader's own pricing"
+    )
+    assert UsageEntryStore(path).stored_pricing_identity() is not None
+
+
+def test_every_read_path_repairs_the_mid_race_window(_isolated_home):
+    """query_entries, aggregate_entries and contribution_days alike."""
+    _write_pricing({"m1": {"input": 9.0, "output": 0.0}})
+    path = _mixed_price_table(_isolated_home)
+    expected = pytest.approx(18.0)  # two rows, 1M input each at 9.0/M
+
+    assert sum(_row_costs(UsageEntryStore(path), "claude")) == expected
+
+    path = _mixed_price_table(_isolated_home)
+    assert UsageEntryStore(path).aggregate_entries(sources=["claude"])["total_cost"] == expected
+
+    path = _mixed_price_table(_isolated_home)
+    days = UsageEntryStore(path).contribution_days(sources=["claude"])
+    assert sum(day["totals"]["cost"] for day in days) == expected
+
+
+def test_openclaw_reads_its_totals_and_grid_from_one_snapshot(_isolated_home, monkeypatch):
+    """Its two fetches must not straddle a racing write."""
+    from tokdash.sources import openclaw
+
+    _write_pricing({"m1": {"input": 9.0, "output": 0.0}})
+    sessions_dir = _isolated_home / ".openclaw" / "sessions"
+    sessions_dir.mkdir(parents=True)
+    (sessions_dir / "s.jsonl").write_text("{}\n", encoding="utf-8")
+    monkeypatch.setattr(
+        openclaw,
+        "_collect_entries",
+        lambda _dirs: [
+            {
+                "msg_dt": datetime(2026, 5, 19, tzinfo=timezone.utc),
+                "model": "m1",
+                "input_raw": 1_000_000,
+                "cache_write": 0,
+                "output": 0,
+                "cache_read": 0,
+                "payload_cost": 0.0,
+                "entry_id": "openclaw:one",
+            }
+        ],
+    )
+    pricing = PricingDatabase()
+    store = openclaw._sync_openclaw_store([str(sessions_dir)], pricing)
+    usage = openclaw._openclaw_usage_from_store(store, None, None)
+
+    grid = sum(day["totals"]["cost"] for day in usage["contributions"])
+    assert usage["total_cost"] == pytest.approx(9.0)
+    assert grid == pytest.approx(usage["total_cost"]), (
+        "model totals and the contribution grid came from one snapshot"
+    )
+
+
+def test_an_unraced_read_does_not_disturb_the_stored_identity(_isolated_home):
+    """The hot path stays a single meta lookup: no repair, no rewrite."""
+    _write_codex(_isolated_home, "c1")
+    _write_pricing(_rates())
+    store, _sources = _sync()
+    identity = store.stored_pricing_identity()
+    costs = _row_costs(store, "codex")
+    assert identity is not None and costs[0] > 0
+
+    for _ in range(3):
+        store.query_entries(sources=["codex"])
+        store.aggregate_entries(sources=["codex"])
+        store.contribution_days(sources=["codex"])
+
+    assert store.stored_pricing_identity() == identity
+    assert _row_costs(store, "codex") == costs
 
 
 # --- 5: the one-time legacy migration ---------------------------------------

@@ -1,8 +1,12 @@
 """Pure planners: turn (options + detection/manifest) into a concrete action list.
 
-These never touch the system — they compute what *would* change. ``apply``/``revert``
-in :mod:`.engine` execute the result, and ``--dry-run`` prints it. Keeping planning pure
-is what makes the whole engine unit-testable without a real systemd/venv (plan §6.1).
+These never *mutate* the system — they compute what *would* change. ``apply``/``revert``
+in :mod:`.engine` execute the result, and ``--dry-run`` prints it. Keeping planning
+mutation-free is what makes the whole engine unit-testable without a real
+systemd/venv (plan §6.1). One read-only exception: ``build_setup_plan`` re-probes the
+*resolved* port (a local HTTP probe, plus netstat/tasklist on Windows for the holder
+name in its messages) because the port it plans for can differ from the one
+``detect_all`` probed — so ``--dry-run`` may open local connections, but never writes.
 """
 from __future__ import annotations
 
@@ -73,7 +77,7 @@ def _port_owned_by_existing_service(service_type: str, detection: Dict[str, Any]
 
 
 def build_setup_plan(opts: Options, detection: Dict[str, Any]) -> Dict[str, Any]:
-    """Resolve the full setup plan (no side effects)."""
+    """Resolve the full setup plan (no mutations; re-probes the resolved port, see module doc)."""
     blockers: List[str] = []
     warnings: List[str] = []
     notes: List[str] = []
@@ -172,16 +176,16 @@ def build_setup_plan(opts: Options, detection: Dict[str, Any]) -> Dict[str, Any]
                 blockers.append(f"port {requested_port} is busy and no free port was found nearby.")
             else:
                 port = free
-                notes.append(f"Port {requested_port} is busy {busy_reason}; auto-picked {free}.")
+                notes.append(f"Port {requested_port} is busy: {busy_reason}; auto-picked {free}.")
         elif service["type"] != "none":
             # A service we're about to enable+start would crash-loop on a taken port, and
             # `systemctl enable --now` often still returns 0 — so refuse rather than write a
             # unit that can't bind and mis-report success.
             blockers.append(
-                f"Port {requested_port} is busy {busy_reason}; re-run with --port <free> or --auto to auto-pick."
+                f"Port {requested_port} is busy: {busy_reason}; re-run with --port <free> or --auto to auto-pick."
             )
         else:
-            warnings.append(f"Port {requested_port} is busy {busy_reason}; `tokdash serve` will need a free --port.")
+            warnings.append(f"Port {requested_port} is busy: {busy_reason}; `tokdash serve` will need a free --port.")
 
     data_dir = paths.data_dir()
     env_data_dir = None if paths.is_default_data_dir() else str(data_dir)

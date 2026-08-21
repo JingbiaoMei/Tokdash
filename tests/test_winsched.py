@@ -419,15 +419,11 @@ def test_windows_update_restarts_winsched(windows_env, fake_winsched, monkeypatc
         engine.subprocess, "run",
         lambda *a, **k: subprocess.CompletedProcess(args=a, returncode=0, stdout="", stderr=""),
     )
-    restarted = []
-
-    def fake_restart(name=winsched.TASK_NAME):
-        restarted.append(True)
-        return _ok_proc()
-
-    monkeypatch.setattr(winsched, "restart", fake_restart)
+    calls = []
+    monkeypatch.setattr(winsched, "end_task", lambda name=winsched.TASK_NAME: calls.append("end") or _ok_proc())
+    monkeypatch.setattr(winsched, "run_now", lambda name=winsched.TASK_NAME: calls.append("run") or _ok_proc())
     rc, payload = run_json(["update", "--json"], capsys)
-    assert rc == 0 and payload["service_restarted"] is True and restarted == [True]
+    assert rc == 0 and payload["service_restarted"] is True and calls == ["end", "run"]
 
 
 def test_cli_service_choices_include_winsched():
@@ -715,3 +711,189 @@ def test_windows_resetup_kills_stale_holder_before_starting_replacement(windows_
     assert rc == 0
     assert payload["port"] == 55423
     assert calls.index("end") < calls.index("kill") < calls.index("create") < calls.index("run")
+
+
+# --- review fixes: locale-independent readiness, kill authority, tasklist parse ---
+
+
+def test_readiness_accepts_holder_match_when_task_state_unreadable(monkeypatch):
+    # Non-English Windows: schtasks reports the state in the UI language, so the
+    # English "Running" match is permanently False. The locale-independent holder
+    # check must carry readiness on its own, or a healthy service fails setup.
+    monkeypatch.setattr(
+        detect, "probe_port",
+        lambda port=55423, *a, **k: {"port": port, "open": True, "is_tokdash": True, "version": "2.0.0"},
+    )
+    monkeypatch.setattr(detect, "port_holder_process", lambda port: "pythonw.exe")
+    r = engine._wait_for_service_ready(
+        "127.0.0.1", 55423, timeout=0.5, service_up=lambda: False,
+        service_desc="the Task Scheduler task Tokdash", expected_holders={"pythonw.exe", "python.exe"},
+    )
+    assert r["ok"] is True
+
+
+def test_readiness_fast_fails_mismatched_holder_even_when_task_running(monkeypatch):
+    monkeypatch.setattr(
+        detect, "probe_port",
+        lambda port=55423, *a, **k: {"port": port, "open": True, "is_tokdash": True, "version": "1.9.0"},
+    )
+    monkeypatch.setattr(detect, "port_holder_process", lambda port: "wslrelay.exe")
+    r = engine._wait_for_service_ready(
+        "127.0.0.1", 55423, timeout=2.0, service_up=lambda: True,
+        service_desc="the Task Scheduler task Tokdash", expected_holders={"pythonw.exe"},
+    )
+    assert r["ok"] is False
+    assert "wslrelay.exe" in r["error"]
+
+
+def test_port_release_wait_requires_tokdash_fingerprint_to_kill(monkeypatch):
+    # A pythonw holding the recorded port that does NOT serve Tokdash (an unrelated
+    # app that moved in after a hand-deleted task) must be reported, never killed.
+    monkeypatch.setattr(
+        detect, "probe_port",
+        lambda port=55423, *a, **k: {"port": port, "open": True, "is_tokdash": False, "version": None},
+    )
+    monkeypatch.setattr(detect, "port_holder", lambda port: (4242, "pythonw.exe"))
+
+    def boom(*a, **k):
+        raise AssertionError("taskkill must not run for a non-Tokdash holder")
+
+    monkeypatch.setattr(engine.subprocess, "run", boom)
+    err = engine._wait_for_port_release(55423, kill_names={"pythonw.exe"}, timeout=0.8)
+    assert err is not None and "still busy" in err and "pythonw.exe" in err
+
+
+def test_image_name_parses_csv_row(monkeypatch):
+    monkeypatch.setattr(
+        detect.subprocess, "run",
+        lambda *a, **k: subprocess.CompletedProcess([], 0, '"pythonw.exe","4242","Console","1","1,000 K"', ""),
+    )
+    assert detect._image_name_for_pid("4242") == "pythonw.exe"
+
+
+def test_image_name_skips_localized_no_match_line(monkeypatch):
+    # When the PID exits between netstat and tasklist, tasklist prints a localized
+    # INFO line instead of a CSV row (no leading quote) -> None, not a bogus name.
+    monkeypatch.setattr(
+        detect.subprocess, "run",
+        lambda *a, **k: subprocess.CompletedProcess([], 0, 'INFO: No tasks are running which match the specified criteria.', ""),
+    )
+    assert detect._image_name_for_pid("4242") is None
+
+
+def test_port_holder_uses_powershell_fallback_when_netstat_localized(monkeypatch):
+    # English netstat yields nothing (localized state words) -> PowerShell fallback,
+    # whose invariant output names the listener.
+    def fake_run(args, *a, **k):
+        if args[:1] == ["netstat"]:
+            return subprocess.CompletedProcess([], 0, "  TCP    127.0.0.1:55424  0.0.0.0:0  AUF EINEM PORT WARTET  4242", "")
+        if args[:1] == ["powershell"]:
+            return subprocess.CompletedProcess([], 0, "4242\n", "")
+        if args[:1] == ["tasklist"]:
+            return subprocess.CompletedProcess([], 0, '"pythonw.exe","4242","Console","1","1,000 K"', "")
+        raise AssertionError(f"unexpected command: {args}")
+
+    monkeypatch.setattr(detect.subprocess, "run", fake_run)
+    monkeypatch.setattr(detect.os, "name", "nt")
+    assert detect.port_holder(55424) == (4242, "pythonw.exe")
+
+
+def test_windows_update_waits_for_port_release_before_run(windows_env, monkeypatch, capsys):
+    # update restarts via /End + /Run: the same stale-instance race as setup
+    # re-registration applies, so the port release must gate the /Run.
+    calls = []
+    state = {"killed": False}
+    monkeypatch.setattr(
+        detect, "probe_port",
+        lambda port=55423, *a, **k: {"port": port, "open": not state["killed"], "is_tokdash": True, "version": "2.0.0"},
+    )
+    monkeypatch.setattr(detect, "port_holder", lambda port: (4242, "pythonw.exe"))
+
+    def fake_run(args, *a, **k):
+        if args[:1] == ["taskkill"]:
+            calls.append("kill")
+            state["killed"] = True
+        return _ok_proc()
+
+    monkeypatch.setattr(engine.subprocess, "run", fake_run)
+    monkeypatch.setattr(winsched, "end_task", lambda name=winsched.TASK_NAME: calls.append("end") or _ok_proc())
+    monkeypatch.setattr(winsched, "run_now", lambda name=winsched.TASK_NAME: calls.append("run") or _ok_proc())
+    monkeypatch.setattr(detect, "winsched_available", lambda: True)
+    monkeypatch.setattr(detect, "find_pipx", lambda: "/usr/bin/pipx")
+
+    svc = {"type": "winsched", "unit": str(paths.winsched_task_path()), "name": winsched.TASK_NAME,
+           "created_by_setup": True, "marker": "X-Tokdash-Managed id=x"}
+    man = manifest.build_manifest(
+        install_method="pipx", runtime_kind="pipx",
+        runtime_command=[r"C:\rt\python.exe", "-m", "tokdash"],
+        runtime_owned_by_setup=False, python_path=r"C:\rt\python.exe", python_version="3.13.5",
+        service=svc, runtime_marker=None, data_dir=str(paths.data_dir()),
+        bind="127.0.0.1", port=55423,
+    )
+    manifest.write_manifest(man)
+
+    rc, payload = run_json(["update", "--json"], capsys)
+    assert rc == 0 and payload["service_restarted"] is True
+    assert calls.index("end") < calls.index("kill") < calls.index("run")
+
+
+def test_windows_uninstall_kills_lingering_holder_before_delete(windows_env, monkeypatch, capsys):
+    # /Delete alone can leave a running pythonw serving the port: uninstall must stop
+    # the task, wait for the port to release (killing our own lingering holder), then
+    # delete.
+    calls = []
+    # 55423 is free during setup; the installed service then holds it (open_55423),
+    # and the stubbed /End does NOT kill it (the stale-instance premise) until setup
+    # hard-kills the holder.
+    state = {"open_55423": False, "killed": False}
+
+    def probe(port=55423, *a, **k):
+        open_ = (port == 55423 and state["open_55423"] and not state["killed"])
+        return {"port": port, "open": open_, "is_tokdash": open_, "version": "2.0.0" if open_ else None}
+
+    monkeypatch.setattr(detect, "probe_port", probe)
+    monkeypatch.setattr(detect, "port_holder", lambda port: (4242, "pythonw.exe"))
+
+    def fake_run(args, *a, **k):
+        if args[:1] == ["taskkill"]:
+            calls.append("kill")
+            state["killed"] = True
+        return _ok_proc()
+
+    monkeypatch.setattr(engine.subprocess, "run", fake_run)
+    monkeypatch.setattr(winsched, "end_task", lambda name=winsched.TASK_NAME: calls.append("end") or _ok_proc())
+    monkeypatch.setattr(winsched, "delete", lambda name=winsched.TASK_NAME: calls.append("delete") or _ok_proc())
+    monkeypatch.setattr(winsched, "is_registered", lambda name=winsched.TASK_NAME: True)
+    monkeypatch.setattr(winsched, "is_registered_strict", lambda name=winsched.TASK_NAME: True)
+    monkeypatch.setattr(winsched, "is_running", lambda name=winsched.TASK_NAME: True)
+    monkeypatch.setattr(
+        engine,
+        "_wait_for_service_ready",
+        lambda bind, port, **k: {"ok": True, "port": {"port": port, "open": True, "is_tokdash": True, "version": "test"}},
+    )
+    monkeypatch.setattr(
+        runtime, "resolve",
+        lambda flag, detection: {
+            "kind": "existing", "install_method": "manual",
+            "command": [r"C:\rt\python.exe", "-m", "tokdash"], "python": r"C:\rt\python.exe",
+            "owned_by_setup": False, "needs_create": False, "error": None,
+        },
+    )
+
+    task_path = paths.winsched_task_path()
+    task_path.parent.mkdir(parents=True, exist_ok=True)
+    task_path.write_bytes(
+        codecs.BOM_UTF16_LE
+        + winsched.render_task([r"C:\rt\python.exe", "-m", "tokdash"], "127.0.0.1", 55423, marker_id="x").encode("utf-16-le")
+    )
+
+    rc, payload = run_json(["setup", "--auto", "--service", "winsched", "--json"], capsys)
+    assert rc == 0 and payload["port"] == 55423
+    calls.clear()
+    state["killed"] = False
+    state["open_55423"] = True  # the installed service is now serving 55423
+
+    rc, payload = run_json(["uninstall", "--auto", "--json"], capsys)
+    assert rc == 0
+    assert calls.index("end") < calls.index("kill") < calls.index("delete")
+    assert not payload["errors"]

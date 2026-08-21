@@ -3532,6 +3532,244 @@ class ReasonixParser(BaseParser):
         return out
 
 
+class WorkBuddyParser(BaseParser):
+    """Parse WorkBuddy (Tencent AI assistant) desktop transcripts.
+
+    WorkBuddy appends one JSON row per event to
+    ``~/.workbuddy-ai/projects/<cwd-slug>/<sessionId>.jsonl`` (same layout on
+    Windows, macOS, and Linux; ``$WORKBUDDY_DATA_DIR`` points the reader at
+    other stores, e.g. a Windows dir from WSL). Assistant message rows carry
+    the per-call usage in ``providerData``:
+
+      {"id": <chat.completion id>, "timestamp": <epoch ms>,
+       "type": "message", "role": "assistant",
+       "providerData": {"messageId": <id>, "model": <id or router alias>,
+                        "rawUsage": {OpenAI-style snake-case usage + credit},
+                        "usage": {camel-case mirror + details arrays}}}
+
+    ``rawUsage`` is the primary adapter; ``usage`` is used only when
+    ``rawUsage`` is absent. ``message.usage`` is deliberately never read: it
+    mixes conventions (``input_tokens`` includes the cached slice while
+    ``cache_read_input_tokens`` repeats it).
+
+    Normalized entry mapping (spec: docs/local/20260821_workbuddy_support/
+    FINDINGS.md, phase 1):
+      model      <- providerData.model VERBATIM (router aliases such as
+                    ``default-model`` are absent from the pricing DB and
+                    cost 0.00; PricingDatabase normalizes for lookup)
+      input      <- prompt minus cache (``prompt_cache_miss_tokens`` when
+                    present; the cache slice is inside prompt_tokens)
+      output     <- completion minus reasoning (reasoning is a subset of
+                    completion, OpenAI convention)
+      cacheRead  <- WorkBuddy UsageUtils read precedence, clamped to prompt
+      cacheWrite <- 0: the vendor's write chain is extracted but unbilled
+                    until it is established whether prompt_tokens /
+                    prompt_cache_miss_tokens include the write slice
+      cost       <- get_cost(model, fresh, FULL completion, cached, 0)
+      workbuddy_credit <- rawUsage.credit, per-turn credit, metadata only
+
+    Rows are parsed fail-soft: a bad line skips itself, never the file.
+    """
+
+    source_name = "workbuddy"
+    sync_capability = SourceSyncCapability(
+        mode="file_replace",
+        append_jsonl=True,
+        reason=(
+            "WorkBuddy transcripts are append-only JSONL and every usage row "
+            "carries a stable providerData.messageId, so entry_id is stable per call."
+        ),
+    )
+    # 1: assistant message rows keyed by the provider call id; cache-inclusive
+    #    prompt split into fresh input / cacheRead, reasoning split out for
+    #    display while billing uses the full completion, cache writes held at 0
+    #    until the vendor's write-slice semantics are verified.
+    persistent_parser_version = 1
+
+    def __init__(self, pricing_db: PricingDatabase):
+        super().__init__(pricing_db)
+        self.roots = clientpaths.workbuddy_roots()
+
+    @staticmethod
+    def _f(value: Any) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return 0.0
+
+    @classmethod
+    def _first_positive(cls, *values: Any) -> int:
+        """First value in the chain that is a positive integer, else 0."""
+        for value in values:
+            n = cls._i(value)
+            if n > 0:
+                return n
+        return 0
+
+    def _usage_from_provider_data(self, pd: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Normalize providerData.rawUsage (primary) or providerData.usage (fallback).
+
+        Returns None when neither carries usable (non-zero) usage.
+        """
+        ru = pd.get("rawUsage")
+        if isinstance(ru, dict) and ru:
+            prompt = max(0, self._i(ru.get("prompt_tokens")))
+            details = ru.get("prompt_tokens_details")
+            # Read chain: WorkBuddy UsageUtils precedence, exactly.
+            cached = self._first_positive(
+                ru.get("cache_read_input_tokens"),
+                ru.get("cacheReadInputTokens"),
+                details.get("cached_tokens") if isinstance(details, dict) else None,
+                ru.get("prompt_cache_hit_tokens"),
+            )
+            # Write chain: extracted in WorkBuddy order, but deliberately
+            # unbilled (see _build_entry).
+            write = self._first_positive(
+                ru.get("cache_creation_input_tokens"),
+                ru.get("cacheCreationInputTokens"),
+                ru.get("prompt_cache_write_tokens"),
+            )
+            missed = max(0, self._i(ru.get("prompt_cache_miss_tokens")))
+            completion = max(0, self._i(ru.get("completion_tokens")))
+            comp_details = ru.get("completion_tokens_details")
+            reasoning = self._i(
+                comp_details.get("reasoning_tokens") if isinstance(comp_details, dict) else None
+            ) or self._i(ru.get("completion_thinking_tokens"))
+            credit = self._f(ru.get("credit"))
+        else:
+            usage = pd.get("usage")
+            if not isinstance(usage, dict) or not usage:
+                return None
+            # Fallback schema: camel-case, cache/reasoning in details arrays,
+            # no cache-write column.
+            prompt = max(0, self._i(usage.get("inputTokens")))
+            cached = 0
+            for detail in usage.get("inputTokensDetails") or []:
+                if isinstance(detail, dict):
+                    cached += max(0, self._i(detail.get("cached_tokens")))
+            write = 0
+            missed = 0
+            completion = max(0, self._i(usage.get("outputTokens")))
+            reasoning = 0
+            for detail in usage.get("outputTokensDetails") or []:
+                if isinstance(detail, dict):
+                    reasoning += max(0, self._i(detail.get("reasoning_tokens")))
+            credit = self._f(usage.get("credit"))
+
+        # Subset counters can never exceed their parent, no matter what the
+        # provider stamped.
+        cached = min(max(0, cached), prompt)
+        reasoning = min(max(0, reasoning), completion)
+
+        if prompt == 0 and completion == 0:
+            return None
+        model = str(pd.get("model") or pd.get("requestModelId") or "workbuddy-auto")
+        return {
+            "model": model,
+            "prompt": prompt,
+            "cached": cached,
+            "write": write,
+            "missed": missed,
+            "completion": completion,
+            "reasoning": reasoning,
+            "credit": credit,
+        }
+
+    def _build_entry(self, usage: Dict[str, Any], ts_ms: int, call_id: str) -> Dict[str, Any]:
+        prompt = usage["prompt"]
+        cached = usage["cached"]
+        completion = usage["completion"]
+        reasoning = usage["reasoning"]
+        # The cache slice is inside prompt_tokens; prefer the explicit miss
+        # count when present, and never go negative.
+        fresh = max(0, usage["missed"] or (prompt - cached))
+        # Reasoning is a subset of completion and compute.py adds it on top of
+        # output, so it must be split out of output here.
+        output = max(0, completion - reasoning)
+        # usage["write"] is extracted but deliberately unbilled: it is not
+        # yet established whether prompt_tokens / prompt_cache_miss_tokens
+        # include the write slice (every captured row has write = 0), and
+        # emitting it could double-count it. Open item: FINDINGS.md phase 1.
+        return {
+            "source": self.source_name,
+            "model": usage["model"],
+            "provider": "",
+            "input": fresh,
+            "output": output,
+            "cacheRead": cached,
+            "cacheWrite": 0,
+            "reasoning": reasoning,
+            "cost": self.pricing_db.get_cost(usage["model"], fresh, completion, cached, 0),
+            "_billing": usage_billing_pricing(
+                [usage["model"]],
+                input_tokens=fresh,
+                output_tokens=completion,
+                cache_read=cached,
+                cache_write=0,
+            ),
+            "workbuddy_credit": usage["credit"],
+            "entry_id": f"workbuddy:{call_id}",
+            "message_id": call_id,
+            "timestamp": int(ts_ms),
+        }
+
+    def _entry_from_row(self, record: Dict[str, Any], seen_call_ids: set) -> Optional[Dict[str, Any]]:
+        if record.get("type") != "message" or record.get("role") != "assistant":
+            return None
+        pd = record.get("providerData")
+        if not isinstance(pd, dict):
+            return None
+        usage = self._usage_from_provider_data(pd)
+        if usage is None:
+            return None
+        call_id = str(pd.get("messageId") or record.get("id") or "").strip()
+        ts_ms = self._i(record.get("timestamp"))
+        if not call_id or ts_ms <= 0:
+            return None
+        if call_id in seen_call_ids:
+            return None
+        seen_call_ids.add(call_id)
+        return self._build_entry(usage, ts_ms, call_id)
+
+    def _file_signatures(self) -> tuple:
+        def _scan() -> tuple:
+            sigs: List[Tuple[str, int, int]] = []
+            for root in self.roots:
+                sigs.extend(_glob_sigs(str(root / "projects" / "*" / "*.jsonl")))
+            return tuple(sorted(set(sigs)))
+
+        cache_key = "workbuddy:" + "|".join(str(r) for r in self.roots)
+        return _timed_sigs(cache_key, _scan)
+
+    def _parse_all(self) -> List[Dict[str, Any]]:
+        out: List[Dict[str, Any]] = []
+        seen_call_ids: set[str] = set()
+        for path_str, _, _ in self._file_signatures():
+            try:
+                handle = open(path_str, "r", encoding="utf-8")
+            except OSError:
+                continue
+            with handle:
+                for line in handle:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        record = json.loads(line)
+                        entry = (
+                            self._entry_from_row(record, seen_call_ids)
+                            if isinstance(record, dict)
+                            else None
+                        )
+                    except Exception:
+                        logger.warning("workbuddy: skipping malformed row in %s", path_str)
+                        entry = None
+                    if entry is not None:
+                        out.append(entry)
+        out.sort(key=lambda item: int(item.get("timestamp", 0) or 0))
+        return out
+
+
 class CodingToolsUsageTracker:
     """Registry-driven tracker for coding clients."""
 
@@ -3559,6 +3797,7 @@ class CodingToolsUsageTracker:
             "zcode": ZCodeParser(self.pricing_db),
             "dsh": DSHParser(self.pricing_db),
             "reasonix": ReasonixParser(self.pricing_db),
+            "workbuddy": WorkBuddyParser(self.pricing_db),
         }
 
     def collect(self, since_date: Optional[datetime] = None, until_date: Optional[datetime] = None, sources: Optional[List[str]] = None):

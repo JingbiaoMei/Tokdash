@@ -96,6 +96,7 @@
 | DeepSeek Harness | ✅ | ✅ |
 | Reasonix | ✅ | ✅ |
 | **ZCode** | ✅ | ✅ |
+| **WorkBuddy** | ✅ | — |
 
 See [Supported clients](docs/reference/SUPPORTED_CLIENTS.md) for local data paths, overrides, and source-specific accounting notes.
 
@@ -503,6 +504,8 @@ DeepSeek Harness (`dsh`) usage and sessions are read locally from `$DSH_HOME/ses
 
 Reasonix usage and sessions are read locally from `$REASONIX_HOME` (default `~/.reasonix`): per-request tokens from the daily `stats/YYYY-MM-DD.jsonl` logs, and session structure from `projects/*/sessions/*.jsonl`. Reasonix talks to whatever providers its `config.toml` names, so the `provider/model` pair in each row is attributed and priced through the normal pricing database; self-hosted models with no published rate count tokens at zero cost. Reasonix records usage per request and never stamps a session id on it, so Session Explorer rows show turns, project and timing without token counts — Overview and Stats carry the full totals.
 ZCode usage is read locally from `$ZCODE_HOME/cli/db/db.sqlite` (default `~/.zcode/cli/db/db.sqlite`; `ZCODE_HOME` follows ZCode's own setting). Each `model_usage` row is one model request, retries included, and the row's `model_id` is priced through the normal pricing database while `provider_id` (e.g. `builtin:zai-start-plan`) is kept as a label. ZCode's `input_tokens` counts cached and uncached prompt tokens together, so the cached share is split into its own bucket and billed at the cache rate, and reasoning tokens are displayed disjoint from output while still billing at the output rate. ZCode also appears in the Sessions tab: turns are read from the same database, billed per (turn, model) with the same rules, top-level sessions only, and a turn that produced no billable tokens still credits its measured time to the tool's active time. ZCode's Coding Plan quota is remote account data and is out of scope for the local parser.
+
+WorkBuddy usage is read locally from `~/.workbuddy-ai/projects/*/*.jsonl` transcripts (`WORKBUDDY_DATA_DIR` takes a comma-separated list of roots to point Tokdash at other stores, e.g. a Windows data dir from WSL). Each assistant message row is one model call; the cached share inside `prompt_tokens` is split into its own bucket and billed at the cache rate, and reasoning tokens are displayed disjoint from output while billing at the output rate. The model id is kept verbatim: explicit ids (e.g. gpt-5.5) price through the normal pricing database, while the Auto router alias (`default-model`) is absent from the pricing DB and costs 0.00. The per-turn `credit` value is stored as metadata only and does not affect cost. WorkBuddy does not appear in the Sessions tab.
 
 `tokdash setup` offers an optional quota step (per-provider network consent, default No, plus the poll interval), and `tokdash doctor` reports the quota state: master switch, per-provider consent, kill switch, effective interval and its source, last poll time, and the stored snapshot count.
 

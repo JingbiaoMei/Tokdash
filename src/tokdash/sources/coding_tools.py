@@ -3580,6 +3580,11 @@ class WorkBuddyParser(BaseParser):
             "carries a stable providerData.messageId, so entry_id is stable per call."
         ),
     )
+    # 1: assistant message rows keyed by the provider call id; cache-inclusive
+    #    prompt split into fresh input / cacheRead, reasoning split out for
+    #    display while billing uses the full completion, cache writes held at 0
+    #    until the vendor's write-slice semantics are verified.
+    persistent_parser_version = 1
 
     def __init__(self, pricing_db: PricingDatabase):
         super().__init__(pricing_db)
@@ -3695,6 +3700,13 @@ class WorkBuddyParser(BaseParser):
             "cacheWrite": 0,
             "reasoning": reasoning,
             "cost": self.pricing_db.get_cost(usage["model"], fresh, completion, cached, 0),
+            "_billing": usage_billing_pricing(
+                [usage["model"]],
+                input_tokens=fresh,
+                output_tokens=completion,
+                cache_read=cached,
+                cache_write=0,
+            ),
             "workbuddy_credit": usage["credit"],
             "entry_id": f"workbuddy:{call_id}",
             "message_id": call_id,

@@ -6,11 +6,20 @@ coding modes).
 """
 
 import json
+import sqlite3
 from pathlib import Path
 
+import pytest
+
+import tokdash.compute as compute
 from tokdash.compute import _collect_parser_tail
 from tokdash.pricing import PricingDatabase
-from tokdash.sources.coding_tools import WorkBuddyParser
+from tokdash.sources.coding_tools import (
+    BaseParser,
+    CodingToolsUsageTracker,
+    WorkBuddyParser,
+    _sig_cache,
+)
 
 
 def _isolate_home(monkeypatch, tmp_path):
@@ -104,6 +113,62 @@ def _write_transcript(root: Path, slug: str, session_id: str, rows) -> Path:
 
 def _collect(parser: WorkBuddyParser):
     return {e["entry_id"]: e for e in parser.collect(None, None)}
+
+
+def _reset_caches():
+    _sig_cache.clear()
+    BaseParser._entry_cache.clear()
+
+
+def _write_pricing(data_dir: Path, model: str, *, input_rate: float,
+                   output_rate: float, cache_read_rate: float) -> None:
+    data_dir.mkdir(parents=True, exist_ok=True)
+    (data_dir / "pricing_db.json").write_text(
+        json.dumps({
+            "version": "workbuddy-test",
+            "aliases": {},
+            "models": {
+                model: {
+                    "input": input_rate,
+                    "output": output_rate,
+                    "cache_read": cache_read_rate,
+                    "cache_write": input_rate,
+                }
+            },
+        }),
+        encoding="utf-8",
+    )
+
+
+def _workbuddy_only_tracker() -> CodingToolsUsageTracker:
+    tracker = CodingToolsUsageTracker()
+    tracker.parsers = {"workbuddy": tracker.parsers["workbuddy"]}
+    return tracker
+
+
+def _private_keys(value):
+    if isinstance(value, dict):
+        found = [key for key in value if key.startswith("_")]
+        for child in value.values():
+            found.extend(_private_keys(child))
+        return found
+    if isinstance(value, list):
+        found = []
+        for child in value:
+            found.extend(_private_keys(child))
+        return found
+    return []
+
+
+def test_workbuddy_declares_persistent_parser_identity(monkeypatch, tmp_path):
+    _isolate_home(monkeypatch, tmp_path)
+    parser = WorkBuddyParser(PricingDatabase())
+
+    assert parser.persistent_parser_version == 1
+    signature = parser.persistent_parser_signature()
+    assert signature["object"].endswith("WorkBuddyParser")
+    assert signature["version"] == 1
+    assert signature["entry_format"] >= 1
 
 
 def test_workbuddy_windows_fixture(monkeypatch, tmp_path):
@@ -384,6 +449,147 @@ def test_workbuddy_reasoning_split_billed_as_completion(monkeypatch, tmp_path):
     assert e["cacheRead"] == 400
     assert e["input"] + e["cacheRead"] + e["output"] + e["reasoning"] == 1000 + 500
     assert e["cost"] == PricingDatabase().get_cost("gpt-5.5", 600, 500, 400, 0)
+    assert e["_billing"] == {
+        "kind": "pricing",
+        "models": ["gpt-5.5"],
+        "input": 600,
+        "output": 500,  # full completion, including the reasoning slice
+        "cache_read": 400,
+        "cache_write": 0,
+    }
+
+
+def test_workbuddy_pricing_change_reprices_without_parsing_logs(monkeypatch, tmp_path):
+    home = _isolate_home(monkeypatch, tmp_path)
+    data_dir = tmp_path / "tokdash-data"
+    monkeypatch.setenv("TOKDASH_DATA_DIR", str(data_dir))
+    monkeypatch.setenv("TOKDASH_USAGE_DB", "1")
+    monkeypatch.setenv("TOKDASH_USAGE_DB_DURABLE", "1")
+    monkeypatch.delenv("WORKBUDDY_DATA_DIR", raising=False)
+    model = "workbuddy-priced-test"
+    _write_pricing(
+        data_dir,
+        model,
+        input_rate=1.0,
+        output_rate=2.0,
+        cache_read_rate=0.1,
+    )
+    transcript = _write_transcript(
+        home / ".workbuddy-ai",
+        "slug",
+        "s1",
+        [_assistant_row(
+            "priced-call",
+            1787314800000,
+            model,
+            raw_usage=_raw_usage(1000, 500, 400, 600, reasoning=200),
+        )],
+    )
+
+    parse_calls = 0
+    original = WorkBuddyParser._parse_all
+
+    def counting_parse(parser):
+        nonlocal parse_calls
+        parse_calls += 1
+        return original(parser)
+
+    monkeypatch.setattr(WorkBuddyParser, "_parse_all", counting_parse)
+    _reset_caches()
+    store, _sources = compute._sync_usage_store(_workbuddy_only_tracker())
+    before = store.aggregate_entries(sources=["workbuddy"])["total_cost"]
+    assert parse_calls == 1
+    assert before == pytest.approx((600 * 1.0 + 500 * 2.0 + 400 * 0.1) / 1_000_000)
+
+    # The durable row must reprice even after its source log disappears.
+    transcript.unlink()
+    _write_pricing(
+        data_dir,
+        model,
+        input_rate=3.0,
+        output_rate=5.0,
+        cache_read_rate=0.2,
+    )
+    _reset_caches()
+    store, _sources = compute._sync_usage_store(_workbuddy_only_tracker())
+    after = store.aggregate_entries(sources=["workbuddy"])["total_cost"]
+
+    assert parse_calls == 1, "a pricing edit must reprice the stored bill, not reread logs"
+    assert after == pytest.approx((600 * 3.0 + 500 * 5.0 + 400 * 0.2) / 1_000_000)
+    assert after != before
+
+
+def test_workbuddy_billing_provenance_never_reaches_api_or_export_output(
+    monkeypatch, tmp_path
+):
+    home = _isolate_home(monkeypatch, tmp_path)
+    data_dir = tmp_path / "tokdash-data"
+    monkeypatch.setenv("TOKDASH_DATA_DIR", str(data_dir))
+    monkeypatch.setenv("TOKDASH_USAGE_DB", "1")
+    monkeypatch.delenv("WORKBUDDY_DATA_DIR", raising=False)
+    model = "workbuddy-private-test"
+    _write_pricing(
+        data_dir,
+        model,
+        input_rate=1.0,
+        output_rate=2.0,
+        cache_read_rate=0.1,
+    )
+    _write_transcript(
+        home / ".workbuddy-ai",
+        "slug",
+        "s1",
+        [_assistant_row(
+            "private-call",
+            1787314800000,
+            model,
+            raw_usage=_raw_usage(1000, 500, 400, 600, reasoning=200),
+        )],
+    )
+
+    original_tracker = CodingToolsUsageTracker
+
+    def tracker_factory():
+        tracker = original_tracker()
+        tracker.parsers = {"workbuddy": tracker.parsers["workbuddy"]}
+        return tracker
+
+    monkeypatch.setattr(compute, "CodingToolsUsageTracker", tracker_factory)
+    _reset_caches()
+    store, _sources = compute._sync_usage_store(tracker_factory())
+    persisted = store.query_entries(sources=["workbuddy"])
+    assert [entry["source"] for entry in persisted] == ["workbuddy"]
+    assert not _private_keys(persisted)
+
+    stored_entries = compute.run_local_coding_tools_json([])["entries"]
+    assert [entry["source"] for entry in stored_entries] == ["workbuddy"]
+    assert not _private_keys(stored_entries)
+
+    # /api/tools aggregates through get_tools_data; `tokdash export` calls
+    # compute_usage. Neither public payload may carry the private record.
+    assert not _private_keys(compute.get_tools_data("all"))
+    assert not _private_keys(compute.compute_usage("all"))
+
+    with sqlite3.connect(store.path) as conn:
+        raw_json, billing_json = conn.execute(
+            "SELECT raw_json, billing_json FROM usage_entries WHERE source = 'workbuddy'"
+        ).fetchone()
+    assert "_billing" not in json.loads(raw_json)
+    assert json.loads(billing_json) == {
+        "kind": "pricing",
+        "models": [model],
+        "input": 600,
+        "output": 500,
+        "cache_read": 400,
+        "cache_write": 0,
+    }
+
+    # The non-persistent fallback path is public too.
+    monkeypatch.setenv("TOKDASH_USAGE_DB", "0")
+    _reset_caches()
+    live_entries = compute.run_local_coding_tools_json([])["entries"]
+    assert [entry["source"] for entry in live_entries] == ["workbuddy"]
+    assert not _private_keys(live_entries)
 
 
 def test_workbuddy_reasoning_thinking_fallback(monkeypatch, tmp_path):

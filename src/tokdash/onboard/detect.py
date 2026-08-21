@@ -346,6 +346,30 @@ def _image_name_for_pid(pid: str) -> Optional[str]:
     return name or None
 
 
+def process_image_path(pid: str) -> Optional[str]:
+    """Full executable path for a PID via ``Get-Process`` (Windows only).
+
+    Lets the kill authority compare the *exact* interpreter a stale instance runs
+    (``pythonw.exe`` from a specific venv) instead of the image basename alone, so
+    a manually-started ``tokdash serve`` from a different venv is never force-killed.
+    Locale-independent (bare path on stdout). Fails safe: any error -> None.
+    """
+    try:
+        pid_int = int(pid)
+    except (TypeError, ValueError):
+        return None
+    cmd = [
+        "powershell", "-NoProfile", "-NonInteractive", "-Command",
+        f"(Get-Process -Id {pid_int} -ErrorAction SilentlyContinue).Path",
+    ]
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=15).stdout
+    except Exception:
+        return None
+    line = out.strip().splitlines()[0].strip() if out.strip() else ""
+    return line or None
+
+
 def port_holder(port: int) -> Optional[Tuple[int, str]]:
     """Best-effort ``(pid, image name)`` of the process holding a listening port.
 

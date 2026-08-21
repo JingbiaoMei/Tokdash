@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import codecs
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -897,3 +898,106 @@ def test_windows_uninstall_kills_lingering_holder_before_delete(windows_env, mon
     assert rc == 0
     assert calls.index("end") < calls.index("kill") < calls.index("delete")
     assert not payload["errors"]
+
+
+# --- round-2 review: foreign holder on uninstall, exact-interpreter kill gate ---
+
+
+def test_windows_uninstall_skips_foreign_holder(windows_env, monkeypatch, capsys):
+    # The host's own configuration: the manifest recorded 55423, and wslrelay (a WSL
+    # distro mirroring its Tokdash) holds it. Uninstall must finish cleanly -- the
+    # foreign holder is not ours to stop, and failing the uninstall on it would loop
+    # forever on such machines.
+    monkeypatch.setattr(
+        detect, "probe_port",
+        lambda port=55423, *a, **k: {
+            "port": port,
+            "open": port == 55423,
+            "is_tokdash": port == 55423,
+            "version": "1.9.0" if port == 55423 else None,
+        },
+    )
+    monkeypatch.setattr(detect, "port_holder", lambda port: (777, "wslrelay.exe") if port == 55423 else None)
+
+    def fake_run(args, *a, **k):
+        if args[:1] == ["taskkill"]:
+            raise AssertionError("taskkill must not run for a foreign holder")
+        return _ok_proc()
+
+    monkeypatch.setattr(engine.subprocess, "run", fake_run)
+    calls = []
+    monkeypatch.setattr(winsched, "end_task", lambda name=winsched.TASK_NAME: calls.append("end") or _ok_proc())
+    monkeypatch.setattr(winsched, "delete", lambda name=winsched.TASK_NAME: calls.append("delete") or _ok_proc())
+    monkeypatch.setattr(winsched, "is_registered", lambda name=winsched.TASK_NAME: True)
+    monkeypatch.setattr(winsched, "is_registered_strict", lambda name=winsched.TASK_NAME: True)
+    monkeypatch.setattr(winsched, "is_running", lambda name=winsched.TASK_NAME: True)
+
+    task_path = paths.winsched_task_path()
+    task_path.parent.mkdir(parents=True, exist_ok=True)
+    task_path.write_bytes(
+        codecs.BOM_UTF16_LE
+        + winsched.render_task([r"C:\rt\python.exe", "-m", "tokdash"], "127.0.0.1", 55423, marker_id="x").encode("utf-16-le")
+    )
+    svc = {"type": "winsched", "unit": str(task_path), "name": winsched.TASK_NAME,
+           "created_by_setup": True, "marker": "X-Tokdash-Managed id=x"}
+    man = manifest.build_manifest(
+        install_method="pipx", runtime_kind="pipx",
+        runtime_command=[r"C:\rt\python.exe", "-m", "tokdash"],
+        runtime_owned_by_setup=False, python_path=r"C:\rt\python.exe", python_version="3.13.5",
+        service=svc, runtime_marker=None, data_dir=str(paths.data_dir()),
+        bind="127.0.0.1", port=55423,
+    )
+    manifest.write_manifest(man)
+
+    t0 = time.monotonic()
+    rc, payload = run_json(["uninstall", "--auto", "--json"], capsys)
+    assert rc == 0
+    assert not payload["errors"]
+    assert calls == ["end", "delete"]
+    # The foreign holder must not cost a release-wait timeout.
+    assert time.monotonic() - t0 < 5
+
+
+def test_port_release_wait_refuses_path_mismatch(monkeypatch):
+    # Same image name + Tokdash fingerprint, but a DIFFERENT interpreter (a manual
+    # serve from another venv): expected_exe positively identifies it as not ours ->
+    # never killed, reported on timeout.
+    monkeypatch.setattr(
+        detect, "probe_port",
+        lambda port=55423, *a, **k: {"port": port, "open": True, "is_tokdash": True, "version": "2.0.0"},
+    )
+    monkeypatch.setattr(detect, "port_holder", lambda port: (4242, "pythonw.exe"))
+    monkeypatch.setattr(detect, "process_image_path", lambda pid: r"C:\other\venv\Scripts\pythonw.exe")
+
+    def boom(*a, **k):
+        raise AssertionError("taskkill must not run for a different interpreter")
+
+    monkeypatch.setattr(engine.subprocess, "run", boom)
+    err = engine._wait_for_port_release(
+        55423, kill_names={"pythonw.exe"}, expected_exe=r"C:\rt\pythonw.exe", timeout=0.8
+    )
+    assert err is not None and "still busy" in err and "pythonw.exe" in err
+
+
+def test_port_release_wait_kills_matching_path(monkeypatch):
+    # The holder IS the exact interpreter the task runs -> kill proceeds.
+    state = {"killed": False}
+    monkeypatch.setattr(
+        detect, "probe_port",
+        lambda port=55423, *a, **k: {"port": port, "open": not state["killed"], "is_tokdash": True, "version": "2.0.0"},
+    )
+    monkeypatch.setattr(detect, "port_holder", lambda port: (4242, "pythonw.exe"))
+    monkeypatch.setattr(detect, "process_image_path", lambda pid: r"C:\rt\pythonw.exe")
+    kills = []
+
+    def fake_run(args, *a, **k):
+        if args[:1] == ["taskkill"]:
+            kills.append(args)
+            state["killed"] = True
+        return _ok_proc()
+
+    monkeypatch.setattr(engine.subprocess, "run", fake_run)
+    assert engine._wait_for_port_release(
+        55423, kill_names={"pythonw.exe"}, expected_exe=r"C:\rt\pythonw.exe", timeout=2.0
+    ) is None
+    assert kills == [["taskkill", "/PID", "4242", "/F"]]

@@ -64,11 +64,28 @@ def test_pricing_content_signature_ignores_reinstall_metadata(tmp_path):
     )
     before = pricing.content_signature()
 
+    # The identity describes the rates this object HOLDS, so it does not move
+    # until the object reloads. Reading it from the file on demand would let it
+    # describe rates that were never applied (see
+    # test_the_pricing_identity_describes_the_rates_that_were_applied).
+    baseline.write_text(
+        json.dumps({"models": {"foo": {"input": 9, "output": 2}}}),
+        encoding="utf-8",
+    )
+    assert pricing.content_signature() == before, "identity must not track an unloaded file"
+
+    # Reinstall metadata still must not change it across a reload.
+    baseline.write_text(baseline_lf, encoding="utf-8")
+    pricing.load()
+    assert pricing.content_signature() == before
+
     stat = baseline.stat()
     os.utime(baseline, ns=(stat.st_atime_ns, stat.st_mtime_ns + 5_000_000_000))
+    pricing.load()
     assert pricing.content_signature() == before
 
     baseline.write_bytes(baseline_lf.replace("\n", "\r\n").encode("utf-8"))
+    pricing.load()
     assert pricing.content_signature() == before
 
     # Same-length content changes still invalidate the identity.
@@ -76,6 +93,7 @@ def test_pricing_content_signature_ignores_reinstall_metadata(tmp_path):
         json.dumps({"models": {"foo": {"input": 9, "output": 2}}}),
         encoding="utf-8",
     )
+    pricing.load()
     assert pricing.content_signature() != before
 
 

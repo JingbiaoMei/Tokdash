@@ -83,6 +83,21 @@ OpenClaw is stored but has no parser class; it uses `OPENCLAW_PARSER_VERSION` in
 `PricingDatabase` implementation, both content-based. **It is not part of any
 parse signature.** It is stored in one `meta` row and applied by repricing.
 
+The content half comes from `PricingDatabase.content_signature()`, which reports
+the identity `load()` computed **from the very bytes it parsed** — not a fresh
+read of the file. That distinction is load-bearing. A `PricingDatabase` holds its
+rates in memory from construction; if the identity were re-derived by reading the
+file later, a write in between would pair the new file's identity with the old
+in-memory rates. The cache would then record costs that were never computed under
+the identity it stamped, and every later request holding the genuinely-new
+pricing would match that identity and skip repricing — permanently.
+
+So `load()` selects the effective file, parses its rates and computes their
+identity in one `read_bytes()`, and publishes all of it as one immutable
+snapshot. `signature()` is the separate, stat-and-hash based drift detector that
+*does* read current files; it answers "should I reload?", which is a different
+question from "what am I holding?".
+
 ## Billing provenance
 
 A stored row carries the inputs it was billed on, in its own `billing_json`
@@ -246,6 +261,7 @@ never trigger a global parse again.
 | A read landing in that window | no | yes (repaired before the read returns) |
 | A pricing rate, alias or model added/changed/removed | no | yes |
 | `PricingDatabase` implementation change | no | yes |
+| The pricing file changing after a database loaded it | no | yes, once that database reloads |
 
 ## Tests
 

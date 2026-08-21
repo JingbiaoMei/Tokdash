@@ -1148,6 +1148,72 @@ def test_an_unraced_read_does_not_disturb_the_stored_identity(_isolated_home):
     assert _row_costs(store, "codex") == costs
 
 
+# --- 4c: the identity must describe the rates that were actually applied ----
+
+
+def _rewrite_rates(path: Path, rate: float) -> None:
+    path.write_text(
+        json.dumps({"version": "t", "aliases": {}, "models": {"m1": {"input": rate, "output": 0.0}}}),
+        encoding="utf-8",
+    )
+
+
+def test_the_pricing_identity_describes_the_rates_that_were_applied(tmp_path):
+    """A pricing object's identity must come from the bytes it parsed.
+
+    Deriving it by rereading the file afterwards is a time-of-check/time-of-use
+    bug: the file can change in between, and the cache then records the NEW
+    file's identity against costs computed from the OLD in-memory rates. Every
+    later request holding the genuinely-new pricing matches that identity and
+    skips repricing — permanently.
+    """
+    backing = tmp_path / "rates.json"
+    _rewrite_rates(backing, 1.0)
+    held = PricingDatabase(db_path=backing, override_path=tmp_path / "absent.json")
+    _rewrite_rates(backing, 5.0)  # the file moves on; `held` still prices at 1.0
+
+    assert held.get_cost("m1", 1_000_000, 0, 0, 0) == pytest.approx(1.0)
+
+    store = UsageEntryStore(tmp_path / "usage.sqlite3")
+    store.sync_files(
+        "claude",
+        ((str(tmp_path / "a.jsonl"), 1, 100),),
+        parser={"v": 1},
+        parse_file_entries=lambda _s: [_racing_row(held.get_cost("m1", 1_000_000, 0, 0, 0))],
+    )
+    store.apply_pricing(usage_store_module.persistent_pricing_signature(held), held)
+    assert _row_costs(store, "claude") == [pytest.approx(1.0)]
+
+    fresh = PricingDatabase(db_path=backing, override_path=tmp_path / "absent.json")
+    assert fresh.get_cost("m1", 1_000_000, 0, 0, 0) == pytest.approx(5.0)
+
+    reader = UsageEntryStore(store.path)
+    assert reader.apply_pricing(
+        usage_store_module.persistent_pricing_signature(fresh), fresh
+    ) is True, "a genuinely newer pricing database must not match the stale rows' identity"
+    assert _row_costs(reader, "claude") == [pytest.approx(5.0)]
+
+
+def test_a_pricing_identity_and_its_rates_come_from_one_read(tmp_path):
+    """The narrow unit fact the test above depends on."""
+    backing = tmp_path / "rates.json"
+    _rewrite_rates(backing, 1.0)
+    held = PricingDatabase(db_path=backing, override_path=tmp_path / "absent.json")
+    identity_at_load = held.content_signature()
+
+    _rewrite_rates(backing, 5.0)
+    assert held.content_signature() == identity_at_load, "identity tracks the loaded bytes"
+    assert held.get_cost("m1", 1_000_000, 0, 0, 0) == pytest.approx(1.0)
+
+    held.load()
+    assert held.content_signature() != identity_at_load, "and moves when the rates do"
+    assert held.get_cost("m1", 1_000_000, 0, 0, 0) == pytest.approx(5.0)
+
+    # signature() is the drift detector, and it DOES read the current files --
+    # that separation is what lets content_signature() stay with the snapshot.
+    assert held.signature() != ()
+
+
 # --- 5: the one-time legacy migration ---------------------------------------
 
 

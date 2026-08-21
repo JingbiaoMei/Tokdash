@@ -7,6 +7,10 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 
+# Identity reported when no usable pricing file exists at all.
+_MISSING_PRICING_CONTENT = ("pricing-content-v1", "missing", 0, "")
+
+
 class PricingDatabase:
     """Local pricing database (per 1M tokens).
 
@@ -19,13 +23,20 @@ class PricingDatabase:
         # edits survive `tokdash update` and don't 500 on a read-only install. Resolved
         # lazily per-load (default None) so TOKDASH_DATA_DIR changes are honored.
         self._override_path_explicit = override_path
-        # pricing + aliases + a memo cache are published together as ONE immutable snapshot
-        # reference (self._state). load() rebuilds the triple and swaps it in a single atomic
-        # assignment, and readers (_resolve_pricing) grab the reference once — so a reload on a
-        # request worker thread (sessions._pricing_signature reloads on signature drift) can
-        # never expose a half-updated pricing/aliases pair, nor leak a stale entry into a
-        # freshly-cleared cache. A single attribute rebind/read is atomic under the GIL, so no lock.
-        self._state: tuple = ({}, {}, {})
+        # pricing + aliases + a memo cache + the CONTENT IDENTITY of the bytes they came
+        # from are published together as ONE immutable snapshot reference (self._state).
+        # load() rebuilds the tuple and swaps it in a single atomic assignment, and readers
+        # (_resolve_pricing) grab the reference once — so a reload on a request worker thread
+        # (sessions._pricing_signature reloads on signature drift) can never expose a
+        # half-updated pricing/aliases pair, nor leak a stale entry into a freshly-cleared
+        # cache. A single attribute rebind/read is atomic under the GIL, so no lock.
+        #
+        # The identity rides in the snapshot because it must describe THESE rates. Deriving
+        # it by rereading the file later is a time-of-check/time-of-use bug: the file can
+        # change in between, and a persistent cache would then record the new file's identity
+        # against costs computed from the old in-memory rates — after which every request
+        # holding the genuinely-new pricing matches that identity and skips repricing forever.
+        self._state: tuple = ({}, {}, {}, _MISSING_PRICING_CONTENT)
         self.load()
 
     @property
@@ -49,11 +60,14 @@ class PricingDatabase:
         # contract (a deleted model stays deleted; what you save is the effective DB) and
         # still fixes the packaged-file-write defects (edits live under TOKDASH_DATA_DIR).
         # A missing/corrupt override falls back to the packaged baseline (never wiped).
-        loaded = self._load_file(self.override_path())
-        if loaded is None:
-            loaded = self._load_file(self.db_path)
-        pricing, aliases = loaded if loaded is not None else ({}, {})
-        self._state = (pricing, aliases, {})  # atomic publish (see __init__)
+        for source, path in (("override", self.override_path()), ("baseline", self.db_path)):
+            loaded = self._read_file(path, source)
+            if loaded is None:
+                continue
+            pricing, aliases, content = loaded
+            self._state = (pricing, aliases, {}, content)  # atomic publish (see __init__)
+            return
+        self._state = ({}, {}, {}, _MISSING_PRICING_CONTENT)
 
     def signature(self) -> tuple:
         """Stat baseline + override so caches keyed on this bust when EITHER changes.
@@ -79,59 +93,44 @@ class PricingDatabase:
         return tuple(sig)
 
     def content_signature(self) -> tuple[str, str, int, str]:
-        """Identify the effective pricing file by content, independent of install metadata.
+        """Identify the pricing data this object actually holds, by content.
 
-        Persistent parse caches use this instead of ``signature()`` so reinstalling an
-        unchanged wheel does not invalidate every stored session merely because the
-        packaged file received a new path or mtime. The source marker preserves the
-        authoritative-override contract, and invalid overrides fall back exactly as
-        ``load()`` does.
+        Computed by :meth:`load` from the very bytes it parsed, and returned
+        unchanged until the next ``load()``. It deliberately does NOT reread the
+        file: persistent caches record this alongside costs computed from these
+        rates, so an identity taken from a later read of a file that has since
+        changed would describe rates that were never applied — and, because the
+        cache then matches that identity, would never be corrected.
+
+        Independent of install metadata, so reinstalling an unchanged wheel does
+        not invalidate stored rows merely because the packaged file received a
+        new path or mtime. The source marker preserves the
+        authoritative-override contract. To notice that the files on disk have
+        moved on, use :meth:`signature` — that is its job — and reload.
         """
-        for source, path in (("override", self.override_path()), ("baseline", self.db_path)):
-            try:
-                raw = path.read_bytes()
-                data = json.loads(raw)
-            except (OSError, ValueError, TypeError):
-                continue
-            if not isinstance(data, dict) or not isinstance(data.get("models"), dict):
-                continue
-            identity = raw
-            if source == "baseline":
-                # Git may check this JSON out with CRLF on Windows while wheels
-                # contain LF. Canonical JSON identifies the same packaged pricing
-                # data consistently across operating systems and reinstall paths.
-                identity = json.dumps(
-                    data,
-                    sort_keys=True,
-                    separators=(",", ":"),
-                    ensure_ascii=False,
-                ).encode("utf-8")
-            return (
-                "pricing-content-v1",
-                source,
-                len(identity),
-                hashlib.blake2b(identity, digest_size=16).hexdigest(),
-            )
-        return ("pricing-content-v1", "missing", 0, "")
+        return self._state[3]
 
-    def _load_file(self, path: Path):
-        """Parse one pricing file. Returns (models, aliases), or None if absent/invalid.
+    def _read_file(self, path: Path, source: str):
+        """Read ONE pricing file once: its rates, its aliases and their identity.
 
-        ``None`` (not empty dicts) signals "no usable file here" so the caller can fall back
-        to the baseline rather than wiping pricing on a missing/corrupt override.
+        Returns ``(models, aliases, content_identity)``, or ``None`` (not empty
+        dicts) to signal "no usable file here" so ``load()`` can fall back to the
+        baseline rather than wiping pricing on a missing/corrupt override.
+
+        Rates and identity come from the same ``read_bytes()`` deliberately —
+        two reads could straddle a write and pair one file's rates with the
+        other's identity.
         """
         try:
-            if not path.exists():
-                return None
-            with open(path, "r", encoding="utf-8") as f:
-                raw = json.load(f) or {}
+            raw = path.read_bytes()
+            data = json.loads(raw) or {}
         except Exception:
             return None
-        if not isinstance(raw, dict) or not isinstance(raw.get("models"), dict):
+        if not isinstance(data, dict) or not isinstance(data.get("models"), dict):
             return None
-        models = {k: v for k, v in raw["models"].items() if isinstance(v, dict)}
+        models = {k: v for k, v in data["models"].items() if isinstance(v, dict)}
         aliases: Dict[str, str] = {}
-        aliases_raw = raw.get("aliases") or {}
+        aliases_raw = data.get("aliases") or {}
         if isinstance(aliases_raw, dict):
             for k, v in aliases_raw.items():
                 if not isinstance(k, str) or not isinstance(v, str):
@@ -142,7 +141,25 @@ class PricingDatabase:
                     continue
                 aliases[nk] = nv
                 aliases.setdefault(nk.split("/")[-1], nv)
-        return models, aliases
+
+        identity = raw
+        if source == "baseline":
+            # Git may check this JSON out with CRLF on Windows while wheels
+            # contain LF. Canonical JSON identifies the same packaged pricing
+            # data consistently across operating systems and reinstall paths.
+            identity = json.dumps(
+                data,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+            ).encode("utf-8")
+        content = (
+            "pricing-content-v1",
+            source,
+            len(identity),
+            hashlib.blake2b(identity, digest_size=16).hexdigest(),
+        )
+        return models, aliases, content
 
     @staticmethod
     def _normalize_key(s: str) -> str:
@@ -211,7 +228,7 @@ class PricingDatabase:
     def _resolve_pricing(self, model: str) -> Optional[Dict[str, Any]]:
         # Grab the published snapshot ONCE so pricing/aliases/cache are a consistent triple
         # even if load() swaps in a new state mid-resolution on another thread.
-        pricing, aliases, cache = self._state
+        pricing, aliases, cache = self._state[:3]
         cached = cache.get(model)
         if cached is not None or model in cache:
             return cached

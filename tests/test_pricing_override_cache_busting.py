@@ -176,6 +176,7 @@ def test_coding_tools_computes_persistent_pricing_signature_once_per_tracker(mon
         name: SimpleNamespace(
             sync_capability=capability,
             _file_signatures=lambda: (),
+            persistent_parser_signature=lambda _name=name: {"object": _name, "version": 1},
         )
         for name in ("claude", "codex", "gemini_cli")
     }

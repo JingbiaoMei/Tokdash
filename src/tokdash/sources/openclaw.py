@@ -11,9 +11,9 @@ try:
     from ..clientpaths import openclaw_agent_sessions_glob
     from ..pricing import PricingDatabase
     from ..usage_store import (
+        USAGE_ENTRY_FORMAT_VERSION,
         UsageEntryStore,
         build_source_signature,
-        parser_code_signature,
         persistent_pricing_signature,
         persistent_usage_db_enabled,
     )
@@ -21,9 +21,9 @@ except ImportError:  # pragma: no cover
     # Allow importing when running this code from the repo by file path.
     from clientpaths import openclaw_agent_sessions_glob
     from pricing import PricingDatabase
+    USAGE_ENTRY_FORMAT_VERSION = 1  # type: ignore
     UsageEntryStore = None  # type: ignore
     build_source_signature = None  # type: ignore
-    parser_code_signature = None  # type: ignore
     persistent_pricing_signature = None  # type: ignore
 
     def persistent_usage_db_enabled() -> bool:  # type: ignore
@@ -305,6 +305,22 @@ def _collect_normalized_entries(
     return [_normalized_entry(e, pricing_db) for e in _collect_entries(session_dirs)]
 
 
+# Explicit semantic version of what the OpenClaw reader STORES in the usage
+# cache. Like the coding-tool parsers, it is a hand-written integer rather than
+# a hash of this module, so an unrelated edit here cannot invalidate the rows.
+# Bump it when extraction, dedup, entry ids, timestamps, token buckets or the
+# recorded billing inputs change.
+OPENCLAW_PARSER_VERSION = 1
+
+
+def _openclaw_parser_signature() -> dict:
+    return {
+        "object": f"{__name__}.openclaw",
+        "version": OPENCLAW_PARSER_VERSION,
+        "entry_format": USAGE_ENTRY_FORMAT_VERSION,
+    }
+
+
 def _sync_openclaw_store(session_dirs: list[str], pricing_db: PricingDatabase) -> UsageEntryStore:
     files = _session_files(session_dirs)
     sig = _signature(files)
@@ -312,7 +328,7 @@ def _sync_openclaw_store(session_dirs: list[str], pricing_db: PricingDatabase) -
     signature = build_source_signature(  # type: ignore[misc]
         files=sig,
         pricing=persistent_pricing_signature(pricing_db),
-        parser=parser_code_signature(_collect_normalized_entries),  # type: ignore[misc]
+        parser=_openclaw_parser_signature(),
     )
     store.sync_source(
         "openclaw",

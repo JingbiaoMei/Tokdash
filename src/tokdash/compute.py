@@ -19,7 +19,6 @@ from .sources.coding_tools import CodingToolsUsageTracker
 from .usage_store import (
     UsageEntryStore,
     build_source_signature,
-    parser_code_signature,
     persistent_pricing_signature,
     persistent_usage_db_enabled,
 )
@@ -143,7 +142,7 @@ def _sync_usage_store(tracker: CodingToolsUsageTracker) -> tuple[UsageEntryStore
         parser = tracker.parsers[name]
         capability = getattr(parser, "sync_capability")
         files = parser._file_signatures()
-        parser_sig = parser_code_signature(parser)
+        parser_sig = parser.persistent_parser_signature()
         if capability.mode == "file_replace":
             store.sync_files(
                 name,

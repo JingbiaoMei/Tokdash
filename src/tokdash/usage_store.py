@@ -20,6 +20,12 @@ from .pricing import PricingDatabase
 SCHEMA_VERSION = 7
 SIGNATURE_VERSION = 3
 
+# What a persistent usage row must carry to be usable by this build. Shared by
+# every persistent usage-parser signature, so bumping it rebuilds every stored
+# source — the one identity that is deliberately global. Per-parser changes use
+# that parser's own version instead.
+USAGE_ENTRY_FORMAT_VERSION = 1
+
 # quota_history consumption: reset times within this many seconds are treated as the same
 # physical window, absorbing the ±1s poll-to-poll jitter (and Codex start-of-window
 # splinters) that would otherwise split one window into two epochs and double/under-count.
@@ -348,15 +354,19 @@ def _parser_file_content_hash(path: Path, stat_result: os.stat_result) -> str:
 
 
 def parser_code_signature(obj: Any) -> dict[str, Any]:
-    """Return a cheap signature for the parser implementation module.
+    """Return a cheap content signature for an implementation module.
 
-    The persistent store is a parse cache, not a source of truth. Including the
-    parser module content in the signature invalidates cached rows after package
-    upgrades or local parser edits, even when the source logs did not change.
-    The signature is content-based (NOT path/mtime-based) so a reinstall or
-    upgrade that leaves the parser code byte-identical — e.g. ``pipx upgrade``
-    restamping every installed file's mtime — keeps the cache instead of
-    forcing a full-corpus reparse on the next dashboard load.
+    NOT the usage-cache parse identity any more. Every coding-tool parser lives
+    in one module, so one hash of it was shared by all of them and editing a
+    single parser invalidated every persistently stored source. Usage parsers
+    now declare an explicit ``persistent_parser_version`` instead — see
+    ``BaseParser.persistent_parser_signature``.
+
+    Still used where a whole module's content genuinely IS the identity: the
+    pricing implementation below, and a handful of single-purpose helpers in
+    ``sessions.py``. The signature is content-based (NOT path/mtime-based) so a
+    reinstall that leaves the code byte-identical — e.g. ``pipx upgrade``
+    restamping every installed file's mtime — does not invalidate anything.
     """
     try:
         obj = getattr(obj, "__wrapped__", obj)

@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Unreleased
+
+### Changed
+
+- The persistent usage cache no longer treats a parser edit or a pricing update as a reason to reread source logs. A cached row used to be validated against one signature that folded in a SHA-1 of the whole `coding_tools.py` module and the complete pricing identity, so adding or changing one parser invalidated every stored coding-tool source (all of them share that file), and adding an unrelated model to the pricing database reparsed every cached log. v2.0.0 shipped both at once and rebuilt the entire cache on upgrade. Three identities are now kept apart: source files, an explicit per-parser `persistent_parser_version`, and pricing. A parser bump invalidates only its own source; the shared `USAGE_ENTRY_FORMAT_VERSION` is the one identity that invalidates all of them, deliberately. DSH still folds in the shared log decoder's own versions, so a decoder bump invalidates DSH and nothing else. Package version, install path and file restamping affect nothing. See `docs/development/technical-notes/USAGE_CACHE_IDENTITY.md`.
+- Pricing changes now reprice cached usage rows instead of reparsing them. Each row stores the billing inputs it was priced from — the exact arguments its parser passes to `PricingDatabase.get_cost`, which are not always the displayed token buckets — so a rate edit, an alias change, a newly added model or a removed one is applied by recomputing the stored cost in a single transaction that opens no source log. Costs the provider itself reported (Pi's `usage.cost.total`, Hermes' actual/estimated cost) are stored as fixed and are never recomputed, and provider-qualified then bare-model fallback order is preserved exactly as a live parse resolves it. The new pricing identity is committed in the same transaction as the rows it describes, so it can never advance ahead of them and a failed pass leaves the last good cache servable. Overview, Stats, contributions, `/api/usage`, `/api/tools` and `tokdash export` all observe the new price immediately.
+- Entry keys for rows a source does not name itself no longer include cost. A repriced row would otherwise stop matching the same logical entry reparsed out of another file, and the duplicate would be counted twice.
+
+### Fixed
+
+- Reinstalling or upgrading Tokdash no longer rebuilds the usage cache on its own. The parse identity is now free of file paths, mtimes and module content, so a `pipx upgrade` that restamps every installed file — or a wheel that lands at a new path — leaves cached rows alone.
+
+### Migration
+
+- The usage database moves to schema 8, which adds a `billing_json` column to `usage_entries`. Rows written before it have no trustworthy billing provenance, so the migration preserves each one's stored cost as a fixed cost rather than guessing at it. Rows whose source file still exists are rebuilt once by the next sync (their parse signature changed shape at the same time) and come back with real provenance; a durable row whose source file is gone keeps exactly the cost it already reported. Session records, quota history and every other durable table are untouched. This is the last global reparse: after it, ordinary parser additions and pricing updates never trigger one again.
+
 ## 2.0.0 - 2026-08-20
 
 ### Added

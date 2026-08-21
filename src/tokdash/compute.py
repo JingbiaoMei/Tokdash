@@ -152,9 +152,14 @@ def _sync_usage_store(tracker: CodingToolsUsageTracker) -> tuple[UsageEntryStore
     """
     store = UsageEntryStore()
     selected = _usage_store_sources(tracker)
+    pricing = persistent_pricing_signature(tracker.pricing_db)
     # Rates first: rows land at the current pricing whether they were already
-    # cached (repriced here) or inserted by the syncs below.
-    store.apply_pricing(persistent_pricing_signature(tracker.pricing_db), tracker.pricing_db)
+    # cached (repriced here) or inserted by the syncs below. Parsing happens
+    # outside the store lock, so each sync also declares the pricing it parsed
+    # under; a sync that lands after another process has moved the database on
+    # drops the stored identity rather than committing costs under someone
+    # else's (see UsageEntryStore._drop_stale_pricing_identity).
+    store.apply_pricing(pricing, tracker.pricing_db)
     for name in selected:
         parser = tracker.parsers[name]
         capability = getattr(parser, "sync_capability")
@@ -165,6 +170,7 @@ def _sync_usage_store(tracker: CodingToolsUsageTracker) -> tuple[UsageEntryStore
                 name,
                 files,
                 parser=parser_sig,
+                pricing_identity=pricing,
                 parse_file_entries=lambda file_sig, parser=parser: _collect_parser_file(parser, file_sig),
                 parse_file_tail_entries=(
                     (lambda file_sig, start_offset, parser=parser: _collect_parser_tail(parser, file_sig, start_offset))
@@ -183,7 +189,12 @@ def _sync_usage_store(tracker: CodingToolsUsageTracker) -> tuple[UsageEntryStore
             name,
             signature,
             lambda parser=parser: parser.collect(None, None),
+            pricing_identity=pricing,
         )
+    # If any sync above dropped the identity, this rebuilds every cost from the
+    # stored billing inputs so the request does not serve a mixed table. It is a
+    # single meta lookup when nothing raced, which is the normal case.
+    store.apply_pricing(pricing, tracker.pricing_db)
     return store, selected
 
 

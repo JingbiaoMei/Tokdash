@@ -148,6 +148,33 @@ failure anywhere rolls back both and the last good cache stays servable. No
 parser is called — not `collect`, not `_parse_all`, not a per-file parser, and
 no source log is opened.
 
+### A sync that lands after someone else repriced
+
+Parsing runs *outside* the store lock — deliberately, so a slow corpus parse
+does not block every other reader. That opens one interleaving: a sync begins
+under pricing P1, another process reprices the whole database to P2 while it
+parses, and only then does it commit its P1-priced rows. Leaving the stored
+identity at P2 would be silently permanent: every later P2 request matches the
+identity, returns early, and never revisits those rows.
+
+So every row-writing transaction declares the pricing it parsed under, and
+`_drop_stale_pricing_identity()` deletes the stored identity **in that same
+transaction** when the two disagree. The identity then means what it always
+meant — "every row here was priced under this" — and the next `apply_pricing`
+rebuilds the costs from `billing_json`. Nothing is reparsed to recover; the
+provenance on the row is what makes that possible.
+
+`_sync_usage_store()` and `_sync_openclaw_store()` also call `apply_pricing()`
+once more after their syncs, so a request that hit this heals before it returns
+instead of leaving a dropped identity for the next one. That trailing call is a
+latency optimization; the in-transaction drop is the correctness fix, and it is
+what survives a process dying between the row commit and the trailing call.
+
+Rejecting the write and retrying under a fresh pricing database would also be
+sound, but it throws away a completed parse — the exact cost this design exists
+to avoid — and is not a fixpoint either, since the pricing file can change again
+during the retry.
+
 A global pass over `usage_entries` is accepted. The goal is to avoid rereading
 source logs, not to avoid touching cached SQL rows. Measured on 400,000 rows:
 0.4 ms when the identity is unchanged (a single `meta` lookup — the hot path on
@@ -188,6 +215,7 @@ never trigger a global parse again.
 | One parser's `persistent_parser_version` bump | that source only | no |
 | `USAGE_ENTRY_FORMAT_VERSION` bump | all stored sources | no |
 | `DSH_DECODER_VERSION` / `DSH_ACCOUNTING_VERSION` bump | DSH only | no |
+| A sync landing after another process repriced | no | yes (identity dropped, then rebuilt) |
 | A pricing rate, alias or model added/changed/removed | no | yes |
 | `PricingDatabase` implementation change | no | yes |
 

@@ -341,16 +341,22 @@ def _sync_openclaw_store(session_dirs: list[str], pricing_db: PricingDatabase) -
     store = UsageEntryStore()
     # Pricing is applied to the stored billing inputs, not folded into the parse
     # signature — a rate edit reprices these rows without rereading any log.
-    store.apply_pricing(persistent_pricing_signature(pricing_db), pricing_db)
+    pricing = persistent_pricing_signature(pricing_db)
+    store.apply_pricing(pricing, pricing_db)
     signature = build_source_signature(  # type: ignore[misc]
         files=sig,
         parser=_openclaw_parser_signature(),
     )
+    # Parsing runs outside the store lock, so declare the pricing it ran under:
+    # a sync landing after another process repriced must not commit its costs
+    # under that process's identity. The trailing call rebuilds them if so.
     store.sync_source(
         "openclaw",
         signature,
         lambda: (_normalized_entry(e, pricing_db) for e in _collect_entries(session_dirs)),
+        pricing_identity=pricing,
     )
+    store.apply_pricing(pricing, pricing_db)
     return store
 
 

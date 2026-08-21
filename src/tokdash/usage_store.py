@@ -947,6 +947,38 @@ class UsageEntryStore:
             ).fetchone()
             return str(row["value"]) if row else None
 
+    def _drop_stale_pricing_identity(self, conn: sqlite3.Connection, pricing_identity: Any) -> bool:
+        """Invalidate the stored pricing identity if this write does not match it.
+
+        Called inside every row-writing transaction. Parsing happens outside the
+        lock, so a sync can finish under pricing the database has already moved
+        past: another process may have repriced everything to P2 while this one
+        was still parsing at P1. Committing those P1 costs under a stored
+        identity of P2 would be silently permanent — every later P2 request
+        short-circuits in :meth:`apply_pricing` and never revisits them.
+
+        So the identity is dropped in the same transaction as the rows. It says
+        "some row here was priced under something else"; the next
+        :meth:`apply_pricing` therefore runs and rebuilds every cost from the
+        stored billing inputs. Nothing is reparsed to recover — that is the
+        whole point of keeping provenance on the row.
+
+        Returns True when the identity was dropped. A caller that passes no
+        identity does not participate in repricing and is left alone.
+        """
+        if pricing_identity is None:
+            return False
+        row = conn.execute(
+            "SELECT value FROM meta WHERE key = ?", (_PRICING_IDENTITY_META_KEY,)
+        ).fetchone()
+        if row is None:
+            # Nothing to poison: the next apply_pricing runs regardless.
+            return False
+        if str(row["value"]) == stable_json(pricing_identity):
+            return False
+        conn.execute("DELETE FROM meta WHERE key = ?", (_PRICING_IDENTITY_META_KEY,))
+        return True
+
     def apply_pricing(
         self,
         pricing_identity: Any,
@@ -1034,6 +1066,8 @@ class UsageEntryStore:
         source: str,
         signature: str,
         parse_entries: Callable[[], Iterable[dict[str, Any]]],
+        *,
+        pricing_identity: Any = None,
     ) -> bool:
         """Sync one source if its signature changed.
 
@@ -1066,6 +1100,7 @@ class UsageEntryStore:
                         return False
 
                 conn.execute("BEGIN IMMEDIATE")
+                self._drop_stale_pricing_identity(conn, pricing_identity)
                 conn.execute("DELETE FROM usage_entries WHERE source = ?", (source,))
                 conn.execute("DELETE FROM file_state WHERE source = ?", (source,))
                 conn.executemany(
@@ -1122,6 +1157,7 @@ class UsageEntryStore:
         file_signatures: Iterable[Any],
         *,
         parser: Any = None,
+        pricing_identity: Any = None,
         parse_file_entries: Callable[[tuple[str, int, int]], Iterable[dict[str, Any]]],
         parse_file_tail_entries: Optional[
             Callable[[tuple[str, int, int], int], tuple[Iterable[dict[str, Any]], int]]
@@ -1274,6 +1310,7 @@ class UsageEntryStore:
         with usage_db_process_lock(self.path):
             with closing(self._connect()) as conn:
                 conn.execute("BEGIN IMMEDIATE")
+                self._drop_stale_pricing_identity(conn, pricing_identity)
                 for path in removed_paths:
                     if keep_missing:
                         conn.execute(

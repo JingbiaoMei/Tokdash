@@ -38,6 +38,7 @@ from tokdash.sources.coding_tools import (
 )
 from tokdash.usage_store import (
     UsageEntryStore,
+    build_source_signature,
     usage_billing_fixed,
     usage_billing_pricing,
     usage_entry_cost,
@@ -848,6 +849,185 @@ def test_a_repriced_row_still_deduplicates_against_a_later_reparse(tmp_path):
     assert len(store.query_entries(sources=["claude"])) == 1, (
         "a repriced row must still collide with its own duplicate"
     )
+
+
+# --- 4b: a sync that lands after another process repriced -------------------
+#
+# Parsing runs OUTSIDE the store lock. So a sync can begin under pricing P1,
+# have another process reprice the whole database to P2 while it parses, and
+# only then commit its P1-priced rows. If the stored identity were left saying
+# P2, every later P2 request would short-circuit in apply_pricing and those
+# rows would keep their P1 cost forever.
+
+
+def _priced_db(tmp_path: Path, name: str, rate: float) -> PricingDatabase:
+    return PricingDatabase(
+        db_path=_pricing_file(tmp_path / f"{name}.json", {"m1": {"input": rate, "output": 0.0}}),
+        override_path=tmp_path / "absent.json",
+    )
+
+
+def _racing_row(cost: float) -> dict:
+    return {
+        "source": "claude",
+        "model": "m1",
+        "provider": "",
+        "timestamp": TS_MS,
+        "input": 1_000_000,
+        "output": 0,
+        "cost": cost,
+        "_billing": usage_billing_pricing(["m1"], input_tokens=1_000_000),
+    }
+
+
+def test_a_file_sync_landing_after_another_process_repriced_is_not_lost(tmp_path):
+    store = UsageEntryStore(tmp_path / "usage.sqlite3")
+    p1, p2 = _priced_db(tmp_path, "p1", 1.0), _priced_db(tmp_path, "p2", 5.0)
+    id1, id2 = {"rates": "p1"}, {"rates": "p2"}
+
+    store.apply_pricing(id1, p1)
+
+    def parse_file(_file_sig):
+        # Another process reprices the database to p2 while this parse runs —
+        # the real interleaving, at the real seam (parsing is outside the lock).
+        UsageEntryStore(store.path).apply_pricing(id2, p2)
+        return [_racing_row(p1.get_cost("m1", 1_000_000, 0, 0, 0))]
+
+    store.sync_files(
+        "claude",
+        ((str(tmp_path / "a.jsonl"), 1, 100),),
+        parser={"v": 1},
+        pricing_identity=id1,
+        parse_file_entries=parse_file,
+    )
+
+    assert store.stored_pricing_identity() is None, (
+        "a write under superseded pricing must invalidate the stored identity"
+    )
+    assert store.apply_pricing(id2, p2) is True, "so the next p2 request still reprices"
+    assert _row_costs(store, "claude") == [pytest.approx(5.0)]
+
+
+def test_a_source_sync_landing_after_another_process_repriced_is_not_lost(tmp_path):
+    store = UsageEntryStore(tmp_path / "usage.sqlite3")
+    p1, p2 = _priced_db(tmp_path, "p1", 1.0), _priced_db(tmp_path, "p2", 5.0)
+    id1, id2 = {"rates": "p1"}, {"rates": "p2"}
+
+    store.apply_pricing(id1, p1)
+
+    def parse_entries():
+        UsageEntryStore(store.path).apply_pricing(id2, p2)
+        return [_racing_row(p1.get_cost("m1", 1_000_000, 0, 0, 0))]
+
+    store.sync_source(
+        "claude",
+        build_source_signature(files=[["a.jsonl", 1, 1]], parser={"v": 1}),
+        parse_entries,
+        pricing_identity=id1,
+    )
+
+    assert store.stored_pricing_identity() is None
+    assert store.apply_pricing(id2, p2) is True
+    assert _row_costs(store, "claude") == [pytest.approx(5.0)]
+
+
+def test_a_sync_under_the_current_pricing_leaves_the_identity_alone(tmp_path):
+    """The normal case must not churn: no race, no invalidation."""
+    store = UsageEntryStore(tmp_path / "usage.sqlite3")
+    p1 = _priced_db(tmp_path, "p1", 1.0)
+    id1 = {"rates": "p1"}
+    store.apply_pricing(id1, p1)
+
+    store.sync_files(
+        "claude",
+        ((str(tmp_path / "a.jsonl"), 1, 100),),
+        parser={"v": 1},
+        pricing_identity=id1,
+        parse_file_entries=lambda _s: [_racing_row(1.0)],
+    )
+
+    assert store.stored_pricing_identity() == usage_store_module.stable_json(id1)
+    assert store.apply_pricing(id1, p1) is False, "an unraced sync leaves nothing to redo"
+
+
+def test_openclaw_sync_landing_after_another_process_repriced_is_not_lost(
+    _isolated_home, monkeypatch, tmp_path
+):
+    """OpenClaw runs the same apply-then-sync sequence and needs the same guard."""
+    from tokdash.sources import openclaw
+
+    sessions_dir = _isolated_home / ".openclaw" / "sessions"
+    sessions_dir.mkdir(parents=True)
+    (sessions_dir / "s.jsonl").write_text("{}\n", encoding="utf-8")
+
+    p1 = _priced_db(tmp_path, "oc1", 1.0)
+    p2 = _priced_db(tmp_path, "oc2", 5.0)
+    store_path = usage_store_module.usage_db_path()
+
+    def collect_entries(_dirs):
+        # Another process reprices mid-parse.
+        UsageEntryStore(store_path).apply_pricing({"rates": "p2"}, p2)
+        return [
+            {
+                "msg_dt": datetime(2026, 5, 19, tzinfo=timezone.utc),
+                "model": "m1",
+                "input_raw": 1_000_000,
+                "cache_write": 0,
+                "output": 0,
+                "cache_read": 0,
+                "payload_cost": 0.0,
+                "entry_id": "openclaw:racing",
+            }
+        ]
+
+    monkeypatch.setattr(openclaw, "_collect_entries", collect_entries)
+    store = openclaw._sync_openclaw_store([str(sessions_dir)], p1)
+
+    # The trailing apply_pricing in _sync_openclaw_store rebuilt the costs under
+    # this request's own database rather than leaving them under p2's identity.
+    assert store.stored_pricing_identity() == usage_store_module.stable_json(
+        usage_store_module.persistent_pricing_signature(p1)
+    )
+    assert _row_costs(store, "openclaw") == [pytest.approx(1.0)]
+    # ...and a later p2 request still reprices, because the identity is p1's.
+    assert UsageEntryStore(store.path).apply_pricing({"rates": "p2"}, p2) is True
+    assert _row_costs(UsageEntryStore(store.path), "openclaw") == [pytest.approx(5.0)]
+
+
+def test_a_racing_sync_self_heals_within_the_same_request(_isolated_home, monkeypatch):
+    """End to end: _sync_usage_store must never return a mixed-price table."""
+    home = _isolated_home
+    _write_codex(home, "c1")
+    _write_pricing(_rates())
+    store, _sources = _sync()
+    priced_at_3 = _row_costs(store, "codex")[0]
+    assert priced_at_3 > 0
+
+    dearer = _rates()
+    dearer[CODEX_MODEL]["input"] = 30.0
+    other_identity = {"rates": "somebody-elses"}
+    original_parse = CodexParser._parse_all
+
+    def parse_then_get_overtaken(self):
+        entries = original_parse(self)
+        # Another process reprices the whole database while this one parses.
+        UsageEntryStore(usage_store_module.usage_db_path()).apply_pricing(
+            other_identity, PricingDatabase()
+        )
+        return entries
+
+    monkeypatch.setattr(CodexParser, "_parse_all", parse_then_get_overtaken)
+    _write_codex(home, "c1", turns=2)  # force a reparse
+    store, _sources = _sync()
+
+    # Whatever the interleaving, the table is internally consistent: every row
+    # priced under the identity the database now claims.
+    identity = store.stored_pricing_identity()
+    assert identity is not None
+    fresh = UsageEntryStore(store.path)
+    assert fresh.apply_pricing(json.loads(identity), PricingDatabase()) is False
+    costs = _row_costs(store, "codex")
+    assert len(costs) == 2 and all(c == pytest.approx(priced_at_3) for c in costs)
 
 
 # --- 5: the one-time legacy migration ---------------------------------------

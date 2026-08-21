@@ -28,6 +28,7 @@
 
 ### development/technical-notes/ — public technical notes and research
 
+- [Usage-cache identity](development/technical-notes/USAGE_CACHE_IDENTITY.md) — how the persistent usage cache separates parse identity, billing provenance and pricing identity, and what each kind of change costs.
 - [Codex usage counting](development/technical-notes/CODEX_USAGE_COUNTING.md) — how Tokdash avoids double-counting Codex usage from MultiAgent V2 subagent replay.
 - [Windows support plan](development/technical-notes/WINDOWS_SUPPORT_PLAN.md) — status and design of native Windows support.
 - [Windows client data paths](development/technical-notes/WINDOWS_CLIENT_PATHS.md) — research backing the Windows-support pass, per-client path survey.

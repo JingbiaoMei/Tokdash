@@ -27,11 +27,23 @@ from typing import Any, ClassVar, Dict, Iterator, List, Optional, Tuple
 try:
     from .. import clientpaths
     from ..pricing import PricingDatabase
+    from ..usage_store import (
+        USAGE_ENTRY_FORMAT_VERSION,
+        usage_billing_fixed,
+        usage_billing_pricing,
+    )
+    from . import dsh_log as dsh_log_module
     from .dsh_log import decode_dsh_session_file, dsh_entry_id, dsh_file_signatures, fold_dsh_usage_samples
 except ImportError:  # pragma: no cover
     # Allow running as a script by file path.
     import clientpaths
     from pricing import PricingDatabase
+    from usage_store import (
+        USAGE_ENTRY_FORMAT_VERSION,
+        usage_billing_fixed,
+        usage_billing_pricing,
+    )
+    import dsh_log as dsh_log_module
     from dsh_log import decode_dsh_session_file, dsh_entry_id, dsh_file_signatures, fold_dsh_usage_samples
 
 logger = logging.getLogger(__name__)
@@ -366,6 +378,20 @@ class BaseParser(ABC):
     source_name: str
     sync_capability = SourceSyncCapability()
 
+    # Explicit semantic version of what this parser STORES in the persistent
+    # usage cache. Required for every file_replace / source_replace parser;
+    # None for source_native_db parsers, which are queried live and never
+    # copied into usage_entries (see test_usage_parser_registry).
+    #
+    # Bump it whenever this parser's stored output changes: extraction, dedup
+    # or entry keys, timestamps, token buckets, or the billing inputs it
+    # records. Do NOT bump it for a refactor that leaves the rows identical.
+    #
+    # It is deliberately a hand-written integer rather than a hash of the
+    # module: every parser in this file shares one source file, so a module
+    # hash made an unrelated parser's edit invalidate all of them.
+    persistent_parser_version: ClassVar[Optional[int]] = None
+
     # Shared across all instances:
     #   {source_name: ((file_sigs, pricing_sig), [entries])}
     # pricing_sig is included so cost values are recomputed when pricing_db.json changes.
@@ -391,6 +417,27 @@ class BaseParser(ABC):
             return tuple(self.pricing_db.signature())
         except (OSError, AttributeError):
             return ()
+
+    def persistent_parser_signature(self) -> Dict[str, Any]:
+        """Identity of this parser for the persistent usage cache.
+
+        Explicit and content-free: it names the class, its declared version and
+        the shared usage-entry format. Package version, install path and file
+        mtimes are absent by construction, so a reinstall or an edit to an
+        unrelated parser cannot invalidate this source's cached rows.
+        """
+        cls = type(self)
+        version = cls.persistent_parser_version
+        if not isinstance(version, int) or isinstance(version, bool) or version < 1:
+            raise ValueError(
+                f"{cls.__module__}.{cls.__name__} is persistently stored but declares "
+                f"no valid persistent_parser_version"
+            )
+        return {
+            "object": f"{cls.__module__}.{cls.__name__}",
+            "version": version,
+            "entry_format": USAGE_ENTRY_FORMAT_VERSION,
+        }
 
     @abstractmethod
     def _parse_all(self) -> List[Dict[str, Any]]:
@@ -466,6 +513,9 @@ class OpenCodeParser(BaseParser):
         session_store=False,
         reason="OpenCode already stores messages in a large SQLite DB and supports SQL date windows.",
     )
+    # Queried live from the source DB; never copied into usage_entries, so
+    # there is nothing stored for a version to identify.
+    persistent_parser_version = None
 
     # Per-query cache: {(s_ms, u_ms): [entries]}, invalidated when DB or pricing changes.
     # Bounded to _OPENCODE_QUERY_CACHE_MAX entries to prevent unbounded growth.
@@ -578,6 +628,10 @@ class CodexParser(BaseParser):
             "deduplicate resumed-history copies across files."
         ),
     )
+    # 1: token_count deltas keyed on the stable usage-state event id, fresh
+    #    input split out of Codex's cache-inclusive input_tokens, placeholder
+    #    models resolved to the file's own first model signal.
+    persistent_parser_version = 1
 
     def __init__(self, pricing_db: PricingDatabase):
         super().__init__(pricing_db)
@@ -748,6 +802,14 @@ class CodexParser(BaseParser):
                         "cost": self.pricing_db.get_cost(entry_model, input_t, output_t, cache_read, 0),
                         "timestamp": int(ts.timestamp() * 1000),
                         "entry_id": event_key or f"{session_file}:{line_no}",
+                        # Codex logs no cache writes, so the billed cache-write
+                        # bucket is 0 rather than the entry's cacheWrite field.
+                        "_billing": usage_billing_pricing(
+                            [entry_model],
+                            input_tokens=input_t,
+                            output_tokens=output_t,
+                            cache_read=cache_read,
+                        ),
                     }
                     if model is None:
                         entry["_model_placeholder"] = True
@@ -782,6 +844,12 @@ class CodexParser(BaseParser):
                         entry["cost"] = self.pricing_db.get_cost(
                             first_model_seen, entry["input"], entry["output"], entry["cacheRead"], 0
                         )
+                        entry["_billing"] = usage_billing_pricing(
+                            [first_model_seen],
+                            input_tokens=entry["input"],
+                            output_tokens=entry["output"],
+                            cache_read=entry["cacheRead"],
+                        )
                 else:
                     # No model signal anywhere in the file: label the rows
                     # explicitly unknown (issue #23) instead of billing them
@@ -792,6 +860,16 @@ class CodexParser(BaseParser):
                         if entry.pop("_model_placeholder", False):
                             entry["model"] = "unknown"
                             entry["cost"] = 0.0
+                            # No model ran here as far as the log knows, so
+                            # there is no pricing key to reprice against. An
+                            # empty candidate list keeps the row at zero under
+                            # any future pricing file, exactly like a reparse.
+                            entry["_billing"] = usage_billing_pricing(
+                                [],
+                                input_tokens=entry["input"],
+                                output_tokens=entry["output"],
+                                cache_read=entry["cacheRead"],
+                            )
             except Exception:
                 continue
 
@@ -805,6 +883,9 @@ class ClaudeParser(BaseParser):
         session_store=True,
         reason="Claude streaming snapshots require full-file dedup context; tail append is unsafe.",
     )
+    # 1: assistant usage rows keyed on message id, streaming snapshots
+    #    collapsed to the latest, cache writes billed at the input rate.
+    persistent_parser_version = 1
 
     def __init__(self, pricing_db: PricingDatabase):
         super().__init__(pricing_db)
@@ -888,6 +969,13 @@ class ClaudeParser(BaseParser):
                         "cost": self.pricing_db.get_cost(model, input_t, output_t, cache_r, cache_w),
                         "timestamp": int(ts.timestamp() * 1000),
                         "entry_id": f"claude:{msg_id}" if msg_id else "",
+                        "_billing": usage_billing_pricing(
+                            [model],
+                            input_tokens=input_t,
+                            output_tokens=output_t,
+                            cache_read=cache_r,
+                            cache_write=cache_w,
+                        ),
                     }
                     if not msg_id:
                         out.append(entry)
@@ -981,6 +1069,9 @@ class GeminiCLIParser(BaseParser):
         append_jsonl=True,
         reason="Gemini JSONL rows have stable message IDs; JSON array files still fall back to file replacement.",
     )
+    # 1: gemini rows keyed on message id, cached prompt tokens subtracted out
+    #    of the inclusive input count, thoughts kept as reasoning.
+    persistent_parser_version = 1
 
     def __init__(self, pricing_db: PricingDatabase):
         super().__init__(pricing_db)
@@ -1011,6 +1102,15 @@ class GeminiCLIParser(BaseParser):
             "reasoning": reasoning,
             "cost": self.pricing_db.get_cost(model, input_t, output_t, cache_r, cache_w),
             "timestamp": int(ts_ms),
+            # The billed key is the raw model, which is what get_cost is called
+            # with above; the displayed model falls back to "unknown".
+            "_billing": usage_billing_pricing(
+                [str(model or "")],
+                input_tokens=input_t,
+                output_tokens=output_t,
+                cache_read=cache_r,
+                cache_write=cache_w,
+            ),
         }
 
     def _file_signatures(self) -> tuple:
@@ -1144,6 +1244,9 @@ class AntigravityCLIParser(BaseParser):
         mode="file_replace",
         reason="Each conversation is an independent SQLite DB; changed DBs are reparsed whole.",
     )
+    # 1: gen_metadata protobuf rows keyed on (db stem, idx), visible output
+    #    preferred over total-minus-reasoning.
+    persistent_parser_version = 1
 
     def __init__(self, pricing_db: PricingDatabase):
         super().__init__(pricing_db)
@@ -1226,6 +1329,13 @@ class AntigravityCLIParser(BaseParser):
             "cost": self.pricing_db.get_cost(model, input_t, output_t, cache_r, cache_w),
             "timestamp": self._i(decoded.get("timestamp")),
             "entry_id": f"antigravity_cli:{db_stem}:{idx}",
+            "_billing": usage_billing_pricing(
+                [model],
+                input_tokens=input_t,
+                output_tokens=output_t,
+                cache_read=cache_r,
+                cache_write=cache_w,
+            ),
         }
 
     def _parse_all(self) -> List[Dict[str, Any]]:
@@ -1274,6 +1384,8 @@ class AmpParser(BaseParser):
         mode="source_replace",
         reason="Parser placeholder returns no rows until a stable local schema is available.",
     )
+    # 1: placeholder — emits nothing. Bump when it starts emitting rows.
+    persistent_parser_version = 1
 
     def __init__(self, pricing_db: PricingDatabase):
         super().__init__(pricing_db)
@@ -1351,6 +1463,10 @@ class KimiParser(BaseParser):
             "Kimi Code usage.record rows dedup on a content hash."
         ),
     )
+    # 1: legacy StatusUpdate rows keyed on message id and Kimi Code
+    #    usage.record rows keyed on a (path, content) hash, wire model names
+    #    mapped through _WIRE_MODEL_MAP.
+    persistent_parser_version = 1
 
     # Wire model names emitted by Kimi Code usage.record rows, mapped to
     # canonical TokDash pricing keys. The display names in the CLI's own
@@ -1403,6 +1519,13 @@ class KimiParser(BaseParser):
             "timestamp": int(ts_ms),
             "message_id": message_id,  # For deduplication
             "entry_id": f"kimi:{message_id}",
+            "_billing": usage_billing_pricing(
+                [model or "kimi-k2.5"],
+                input_tokens=input_other,
+                output_tokens=output_t,
+                cache_read=cache_read,
+                cache_write=cache_write,
+            ),
         }
 
     @staticmethod
@@ -1564,6 +1687,9 @@ class GrokParser(BaseParser):
             "change reparses the whole file."
         ),
     )
+    # 1: inference_done rows attributed to the model announced for their pid,
+    #    reasoning folded into output, cached prompt tokens split out of input.
+    persistent_parser_version = 1
 
     _UNKNOWN_MODEL = "grok-unknown"
     _MODEL_EVENTS = frozenset(
@@ -1651,6 +1777,14 @@ class GrokParser(BaseParser):
             "message_id": entry_id,
             "entry_id": entry_id,
             "estimated": False,
+            # Reasoning is already folded into `output`; Grok has no cache-write
+            # dimension, so the billed cache-write bucket stays 0.
+            "_billing": usage_billing_pricing(
+                [resolved],
+                input_tokens=input_tokens,
+                output_tokens=output,
+                cache_read=cache_read,
+            ),
         }
 
     def _parse_all(self) -> List[Dict[str, Any]]:
@@ -1754,6 +1888,9 @@ class PiAgentParser(BaseParser):
         mode="file_replace",
         reason="Pi Agent JSONL rows have stable top-level IDs but are kept on full-file replacement until tail semantics are proven.",
     )
+    # 1: assistant rows keyed on (session id, row id), totalTokens fallback
+    #    attributed to output, a positive recorded cost.total kept as fixed.
+    persistent_parser_version = 1
 
     def __init__(self, pricing_db: PricingDatabase):
         super().__init__(pricing_db)
@@ -1876,8 +2013,17 @@ class PiAgentParser(BaseParser):
                         cost_total = float(cost_obj.get("total") or 0.0)
                         if cost_total > 0:
                             cost = cost_total
+                            # Pi's own number. A pricing edit must never move it.
+                            billing = usage_billing_fixed(cost_total)
                         else:
                             cost = self.pricing_db.get_cost(model, input_t, output_t, cache_r, cache_w)
+                            billing = usage_billing_pricing(
+                                [model],
+                                input_tokens=input_t,
+                                output_tokens=output_t,
+                                cache_read=cache_r,
+                                cache_write=cache_w,
+                            )
 
                         out.append({
                             "source": self.source_name,
@@ -1891,6 +2037,7 @@ class PiAgentParser(BaseParser):
                             "cost": cost,
                             "timestamp": int(ts.timestamp() * 1000),
                             "entry_id": f"pi_agent:{entry_id}" if entry_id else "",
+                            "_billing": billing,
                         })
             except Exception:
                 continue
@@ -1934,6 +2081,9 @@ class CopilotCLIParser(BaseParser):
         mode="source_replace",
         reason="OTel rows can suppress fallback events across files, so cross-file precedence must be preserved.",
     )
+    # 1: OTel chat spans priced from their own token attributes, events.jsonl
+    #    output-only rows emitted when no OTel row already covers them.
+    persistent_parser_version = 1
 
     def __init__(self, pricing_db: PricingDatabase):
         super().__init__(pricing_db)
@@ -2172,6 +2322,15 @@ class CopilotCLIParser(BaseParser):
             return {
                 "source": self.source_name,
                 "model": model or "unknown",
+                # Billed under the raw attribute value, which is what get_cost
+                # sees; the displayed model falls back to "unknown".
+                "_billing": usage_billing_pricing(
+                    [str(model or "")],
+                    input_tokens=tokens["input"],
+                    output_tokens=tokens["output"],
+                    cache_read=tokens["cacheRead"],
+                    cache_write=tokens["cacheWrite"],
+                ),
                 "provider": provider,
                 "input": tokens["input"],
                 "output": tokens["output"],
@@ -2332,6 +2491,7 @@ class CopilotCLIParser(BaseParser):
                             "cost": self.pricing_db.get_cost(model, 0, output_t, 0, 0),
                             "timestamp": ts_ms,
                             "entry_id": f"copilot_event:{dedup_key}" if dedup_key else "",
+                            "_billing": usage_billing_pricing([model], output_tokens=output_t),
                         })
             except Exception:
                 continue
@@ -2379,6 +2539,9 @@ class HermesParser(BaseParser):
         mode="source_replace",
         reason="Hermes is DB-backed; current safe cache unit is the whole source until DB-native incremental sync is added.",
     )
+    # 1: session-level rows keyed on the Hermes row id, actual/estimated cost
+    #    kept as fixed, otherwise priced provider-qualified then bare.
+    persistent_parser_version = 1
 
     def __init__(self, pricing_db: PricingDatabase):
         super().__init__(pricing_db)
@@ -2487,14 +2650,26 @@ class HermesParser(BaseParser):
                         provider = str(billing_provider or "").strip() or self._infer_provider(str(model or ""))
                         if actual_cost_f > 0:
                             cost = actual_cost_f
+                            # Hermes' own subscription-aware number; never repriced.
+                            billing = usage_billing_fixed(actual_cost_f)
                         elif estimated_cost_f > 0:
                             cost = estimated_cost_f
+                            billing = usage_billing_fixed(estimated_cost_f)
                         else:
                             # Try provider/model first, then bare model
                             provider_model = f"{provider}/{model}" if provider else str(model or "")
                             cost = self.pricing_db.get_cost(provider_model, input_t, output_t, cache_r, cache_w)
                             if cost == 0.0 and provider:
                                 cost = self.pricing_db.get_cost(str(model or ""), input_t, output_t, cache_r, cache_w)
+                            # Same ordered candidates, so a later provider-specific
+                            # rate still shadows the bare key on a reprice.
+                            billing = usage_billing_pricing(
+                                [provider_model] + ([str(model or "")] if provider else []),
+                                input_tokens=input_t,
+                                output_tokens=output_t,
+                                cache_read=cache_r,
+                                cache_write=cache_w,
+                            )
 
                         out.append({
                             "source": self.source_name,
@@ -2513,6 +2688,7 @@ class HermesParser(BaseParser):
                             # of treating each row as a single message.
                             "messageCount": int(self._i(message_count)),
                             "entry_id": f"hermes:{row_id}",
+                            "_billing": billing,
                         })
                     except Exception:
                         continue
@@ -2575,6 +2751,8 @@ class MimoParser(BaseParser):
         session_store=False,
         reason="Mimo is an OpenCode-shaped SQLite DB and supports SQL date windows.",
     )
+    # Queried live from the source DB; nothing is stored persistently.
+    persistent_parser_version = None
 
     _query_cache: ClassVar[Dict[tuple, List[Dict[str, Any]]]] = {}
     _query_cache_sig: ClassVar[tuple] = ()
@@ -2856,6 +3034,8 @@ class ZCodeParser(BaseParser):
         session_store=False,
         reason="ZCode is a WAL-mode SQLite DB and supports SQL date windows.",
     )
+    # Queried live from a coherent snapshot; nothing is stored persistently.
+    persistent_parser_version = None
 
     _query_cache: ClassVar[Dict[tuple, List[Dict[str, Any]]]] = {}
     _query_cache_sig: ClassVar[tuple] = ()
@@ -3052,10 +3232,28 @@ class DSHParser(BaseParser):
             "earlier same-step chunk; changed files are reparsed whole."
         ),
     )
+    # 1: folded (turn, step) usage samples keyed on dsh_entry_id. The shared
+    #    decoder's own versions ride along in persistent_parser_signature().
+    persistent_parser_version = 1
 
     def __init__(self, pricing_db: PricingDatabase):
         super().__init__(pricing_db)
         self.sessions_dir = clientpaths.dsh_sessions_dir()
+
+    def persistent_parser_signature(self) -> Dict[str, Any]:
+        """DSH also depends on the shared log decoder, so its versions ride along.
+
+        Framing/fold semantics live in ``sources/dsh_log.py``, not here: bumping
+        either decoder version changes what this parser stores and must
+        invalidate DSH — and only DSH, which is why it is folded into this
+        source's identity rather than into a shared token.
+        """
+        signature = super().persistent_parser_signature()
+        signature["decoder"] = {
+            "version": dsh_log_module.DSH_DECODER_VERSION,
+            "accounting": dsh_log_module.DSH_ACCOUNTING_VERSION,
+        }
+        return signature
 
     def _file_signatures(self) -> tuple:
         return _timed_sigs(
@@ -3093,6 +3291,13 @@ class DSHParser(BaseParser):
                         "cost": self.pricing_db.get_cost(model, input_t, output_t, cache_r, cache_w),
                         "timestamp": int(sample["timestamp_ms"]),
                         "entry_id": dsh_entry_id(session_id, sample["turn"], sample["step"]),
+                        "_billing": usage_billing_pricing(
+                            [model],
+                            input_tokens=input_t,
+                            output_tokens=output_t,
+                            cache_read=cache_r,
+                            cache_write=cache_w,
+                        ),
                     }
                     by_entry_id[entry["entry_id"]] = entry
             except Exception:
@@ -3143,6 +3348,9 @@ class ReasonixParser(BaseParser):
             "so a changed day file is reparsed whole without rebilling its earlier rows."
         ),
     )
+    # 1: daily stats rows keyed on a content digest plus an occurrence
+    #    counter, prompt split into disjoint input / cacheRead halves.
+    persistent_parser_version = 1
 
     # Reasonix writes up to 9 fractional-second digits. datetime.fromisoformat
     # accepts only 3 or 6 before Python 3.11, and Tokdash supports 3.10, where
@@ -3313,6 +3521,12 @@ class ReasonixParser(BaseParser):
                     ),
                     "timestamp": ts_ms,
                     "entry_id": entry_id,
+                    "_billing": usage_billing_pricing(
+                        [model],
+                        input_tokens=uncached,
+                        output_tokens=completion,
+                        cache_read=cache_hit,
+                    ),
                 })
         out.sort(key=lambda item: int(item.get("timestamp", 0) or 0))
         return out

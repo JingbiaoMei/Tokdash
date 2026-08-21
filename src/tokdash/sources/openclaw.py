@@ -11,20 +11,22 @@ try:
     from ..clientpaths import openclaw_agent_sessions_glob
     from ..pricing import PricingDatabase
     from ..usage_store import (
+        USAGE_ENTRY_FORMAT_VERSION,
         UsageEntryStore,
         build_source_signature,
-        parser_code_signature,
         persistent_pricing_signature,
         persistent_usage_db_enabled,
+        usage_billing_pricing,
     )
 except ImportError:  # pragma: no cover
     # Allow importing when running this code from the repo by file path.
     from clientpaths import openclaw_agent_sessions_glob
     from pricing import PricingDatabase
+    USAGE_ENTRY_FORMAT_VERSION = 1  # type: ignore
     UsageEntryStore = None  # type: ignore
     build_source_signature = None  # type: ignore
-    parser_code_signature = None  # type: ignore
     persistent_pricing_signature = None  # type: ignore
+    usage_billing_pricing = None  # type: ignore
 
     def persistent_usage_db_enabled() -> bool:  # type: ignore
         return False
@@ -266,7 +268,8 @@ def _normalized_entry(entry: Dict[str, Any], pricing_db: PricingDatabase) -> Dic
     tokens_cache_read = _i(entry.get("cache_read"))
 
     cost_db = pricing_db.get_cost(model, tokens_input_raw, tokens_out, tokens_cache_read, tokens_cache_write)
-    cost = cost_db if cost_db > 0.0 else float(entry.get("payload_cost", 0.0) or 0.0)
+    payload_cost = float(entry.get("payload_cost", 0.0) or 0.0)
+    cost = cost_db if cost_db > 0.0 else payload_cost
     if "/" in model:
         provider, model_id = model.split("/", 1)
     else:
@@ -286,6 +289,17 @@ def _normalized_entry(entry: Dict[str, Any], pricing_db: PricingDatabase) -> Dic
         "messageCount": 1,
         "modelId": model_id,
         "entry_id": entry.get("entry_id", ""),
+        # Tokdash pricing wins; OpenClaw's own recorded cost is the fallback
+        # when the model resolves to nothing. Stored so a rate edit reprices
+        # the row instead of reparsing every session file.
+        "_billing": usage_billing_pricing(
+            [model],
+            input_tokens=tokens_input_raw,
+            output_tokens=tokens_out,
+            cache_read=tokens_cache_read,
+            cache_write=tokens_cache_write,
+            fallback=payload_cost,
+        ),
     }
 
 
@@ -305,20 +319,44 @@ def _collect_normalized_entries(
     return [_normalized_entry(e, pricing_db) for e in _collect_entries(session_dirs)]
 
 
+# Explicit semantic version of what the OpenClaw reader STORES in the usage
+# cache. Like the coding-tool parsers, it is a hand-written integer rather than
+# a hash of this module, so an unrelated edit here cannot invalidate the rows.
+# Bump it when extraction, dedup, entry ids, timestamps, token buckets or the
+# recorded billing inputs change.
+OPENCLAW_PARSER_VERSION = 1
+
+
+def _openclaw_parser_signature() -> dict:
+    return {
+        "object": f"{__name__}.openclaw",
+        "version": OPENCLAW_PARSER_VERSION,
+        "entry_format": USAGE_ENTRY_FORMAT_VERSION,
+    }
+
+
 def _sync_openclaw_store(session_dirs: list[str], pricing_db: PricingDatabase) -> UsageEntryStore:
     files = _session_files(session_dirs)
     sig = _signature(files)
     store = UsageEntryStore()
+    # Pricing is applied to the stored billing inputs, not folded into the parse
+    # signature — a rate edit reprices these rows without rereading any log.
+    pricing = persistent_pricing_signature(pricing_db)
+    store.apply_pricing(pricing, pricing_db)
     signature = build_source_signature(  # type: ignore[misc]
         files=sig,
-        pricing=persistent_pricing_signature(pricing_db),
-        parser=parser_code_signature(_collect_normalized_entries),  # type: ignore[misc]
+        parser=_openclaw_parser_signature(),
     )
+    # Parsing runs outside the store lock, so declare the pricing it ran under:
+    # a sync landing after another process repriced must not commit its costs
+    # under that process's identity. The trailing call rebuilds them if so.
     store.sync_source(
         "openclaw",
         signature,
         lambda: (_normalized_entry(e, pricing_db) for e in _collect_entries(session_dirs)),
+        pricing_identity=pricing,
     )
+    store.apply_pricing(pricing, pricing_db)
     return store
 
 
@@ -343,11 +381,20 @@ def _openclaw_usage_from_store(
         query += " WHERE " + " AND ".join(where)
     query += " GROUP BY model"
 
-    conn = store._connect()  # type: ignore[attr-defined]
-    try:
-        rows = conn.execute(query, args).fetchall()
-    finally:
-        conn.close()
+    # Both fetches share ONE snapshot. Read separately, they could straddle a
+    # write that lands under superseded pricing, and the model totals would then
+    # disagree with the contribution grid built from the other side of it.
+    # _read_priced also guarantees the snapshot carries a single pricing
+    # generation (see UsageEntryStore._read_priced).
+    def _read(conn):
+        return (
+            conn.execute(query, args).fetchall(),
+            store.contribution_day_rows(
+                conn, sources=["openclaw"], since=since_date, until=until_date
+            ),
+        )
+
+    rows, contribution_rows = store._read_priced(_read)  # type: ignore[attr-defined]
 
     models: Dict[str, Any] = {}
     total_tokens = 0
@@ -392,7 +439,7 @@ def _openclaw_usage_from_store(
         "total_tokens_cache": int(total_tokens_cache),
         "cache_hit_rate": _cache_hit_rate(total_tokens_in, total_tokens_cache),
         "models": models,
-        "contributions": store.contribution_days(sources=["openclaw"], since=since_date, until=until_date),
+        "contributions": store._contribution_days_from_rows(contribution_rows),  # type: ignore[attr-defined]
     }
 
 

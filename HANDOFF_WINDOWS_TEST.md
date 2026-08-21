@@ -197,6 +197,14 @@ tests/test_onboard.py tests/test_cli_serve.py` (228 passed); full suite
 Re-run the same script: the two new "re-setup: ..." checks and `doctor` are
 the checks to watch.
 
+## Round 4 result: ALL CHECKS PASSED (green)
+
+Live re-run on the host (non-elevated PowerShell): every check passed, including
+the two new re-setup checks (task Running, port 55424 held by pythonw) and
+`doctor`. WSL relay held 55423, setup auto-picked 55424, re-setup retained it,
+uninstall cleaned up and kept usage data, and the debug venv was removed by the
+harness. The fix is live-verified; the branch is ready to merge.
+
 ## Git
 
 Changes are NOT committed (the WSL-side approval channel was down). After a

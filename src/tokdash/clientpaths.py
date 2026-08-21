@@ -303,6 +303,32 @@ def reasonix_projects_dir() -> Path:
     return reasonix_home() / "projects"
 
 
+# --- WorkBuddy ----------------------------------------------------------------
+
+
+def workbuddy_roots() -> List[Path]:
+    """WorkBuddy data roots: ``$WORKBUDDY_DATA_DIR`` (comma-separated) else ``~/.workbuddy-ai``.
+
+    The native path is the same on macOS, Linux, and Windows. On WSL the user
+    points the override at the Windows store (``/mnt/c/Users/<user>/.workbuddy-ai``),
+    or at several roots at once, comma-separated.
+    """
+    explicit = os.environ.get("WORKBUDDY_DATA_DIR", "")
+    roots: List[Path] = []
+    for part in explicit.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        path = Path(part).expanduser()
+        if not path.is_absolute():
+            path = path.resolve()
+        if path not in roots:
+            roots.append(path)
+    if roots:
+        return roots
+    return [Path.home() / ".workbuddy-ai"]
+
+
 # --- OpenClaw -----------------------------------------------------------------
 
 

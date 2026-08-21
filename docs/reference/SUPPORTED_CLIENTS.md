@@ -37,6 +37,7 @@ Tokdash reads usage **locally** from each tool's own session/log files — nothi
 - **DeepSeek Harness**: `$DSH_HOME/sessions/<project-key>/<session-id>/session.jsonl.zstd` (or an uncompressed `session.jsonl`; `DSH_HOME` defaults to `~/.dsh`)
 - **Reasonix**: `$REASONIX_HOME/stats/YYYY-MM-DD.jsonl` for tokens and cost, and `$REASONIX_HOME/projects/*/sessions/*.jsonl` for Session Explorer (`REASONIX_HOME` defaults to `~/.reasonix`). Reasonix records usage per request rather than per session, so session rows carry turns and timing but no token counts; the totals in Overview and Stats are complete.
 - **ZCode**: `$ZCODE_HOME/cli/db/db.sqlite` (default `~/.zcode/cli/db/db.sqlite`, WAL mode; `ZCODE_HOME` follows ZCode's own setting). One `model_usage` row per model request; the cached share inside `input_tokens` is split out and billed at the cache rate. The Sessions tab reads `turn_usage` + `model_usage` from the same database (top-level sessions only; zero-token turns count as activity for active time).
+- **WorkBuddy**: `~/.workbuddy-ai/projects/*/*.jsonl` transcripts (`WORKBUDDY_DATA_DIR` override, comma-separated). One assistant message row per model call; the cached share inside `prompt_tokens` is split out and billed at the cache rate, reasoning is disjoint from output but billed at the output rate, and the per-turn `credit` is kept as metadata only. Auto router aliases (e.g. `default-model`) are absent from the pricing DB and cost 0.00. No Sessions tab.
 
 ---
 

@@ -859,6 +859,8 @@ def test_coding_tool_parsers_declare_sync_capabilities():
     assert modes["copilot_cli"] == "source_replace"
     assert tracker.parsers["gemini_cli"].sync_capability.append_jsonl is True
     assert tracker.parsers["kimi"].sync_capability.append_jsonl is True
+    assert modes["workbuddy"] == "file_replace"
+    assert tracker.parsers["workbuddy"].sync_capability.append_jsonl is True
     assert tracker.parsers["opencode"].sync_capability.session_store is False
 
 

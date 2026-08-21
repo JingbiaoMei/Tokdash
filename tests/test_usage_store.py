@@ -755,7 +755,9 @@ def test_schema_five_migrates_activity_column_without_losing_session_rows(tmp_pa
             "SELECT raw_json FROM session_records WHERE session_id = 'legacy'"
         ).fetchone()[0]
     assert {"activity_json", "started_at_ms", "last_seen_at_ms"}.issubset(columns)
-    assert schema_version == "7"
+    # The point is that a v5 database is migrated forward, not which number is
+    # current; pinning the literal makes every later schema bump fail here.
+    assert schema_version == str(usage_store_module.SCHEMA_VERSION)
     assert json.loads(raw_json)["turns"][0]["tokens"] == 7
     with sqlite3.connect(db_path) as conn:
         bounds = conn.execute(

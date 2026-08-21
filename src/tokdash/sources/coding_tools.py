@@ -27,14 +27,22 @@ from typing import Any, ClassVar, Dict, Iterator, List, Optional, Tuple
 try:
     from .. import clientpaths
     from ..pricing import PricingDatabase
-    from ..usage_store import USAGE_ENTRY_FORMAT_VERSION
+    from ..usage_store import (
+        USAGE_ENTRY_FORMAT_VERSION,
+        usage_billing_fixed,
+        usage_billing_pricing,
+    )
     from . import dsh_log as dsh_log_module
     from .dsh_log import decode_dsh_session_file, dsh_entry_id, dsh_file_signatures, fold_dsh_usage_samples
 except ImportError:  # pragma: no cover
     # Allow running as a script by file path.
     import clientpaths
     from pricing import PricingDatabase
-    from usage_store import USAGE_ENTRY_FORMAT_VERSION
+    from usage_store import (
+        USAGE_ENTRY_FORMAT_VERSION,
+        usage_billing_fixed,
+        usage_billing_pricing,
+    )
     import dsh_log as dsh_log_module
     from dsh_log import decode_dsh_session_file, dsh_entry_id, dsh_file_signatures, fold_dsh_usage_samples
 
@@ -794,6 +802,14 @@ class CodexParser(BaseParser):
                         "cost": self.pricing_db.get_cost(entry_model, input_t, output_t, cache_read, 0),
                         "timestamp": int(ts.timestamp() * 1000),
                         "entry_id": event_key or f"{session_file}:{line_no}",
+                        # Codex logs no cache writes, so the billed cache-write
+                        # bucket is 0 rather than the entry's cacheWrite field.
+                        "_billing": usage_billing_pricing(
+                            [entry_model],
+                            input_tokens=input_t,
+                            output_tokens=output_t,
+                            cache_read=cache_read,
+                        ),
                     }
                     if model is None:
                         entry["_model_placeholder"] = True
@@ -828,6 +844,12 @@ class CodexParser(BaseParser):
                         entry["cost"] = self.pricing_db.get_cost(
                             first_model_seen, entry["input"], entry["output"], entry["cacheRead"], 0
                         )
+                        entry["_billing"] = usage_billing_pricing(
+                            [first_model_seen],
+                            input_tokens=entry["input"],
+                            output_tokens=entry["output"],
+                            cache_read=entry["cacheRead"],
+                        )
                 else:
                     # No model signal anywhere in the file: label the rows
                     # explicitly unknown (issue #23) instead of billing them
@@ -838,6 +860,16 @@ class CodexParser(BaseParser):
                         if entry.pop("_model_placeholder", False):
                             entry["model"] = "unknown"
                             entry["cost"] = 0.0
+                            # No model ran here as far as the log knows, so
+                            # there is no pricing key to reprice against. An
+                            # empty candidate list keeps the row at zero under
+                            # any future pricing file, exactly like a reparse.
+                            entry["_billing"] = usage_billing_pricing(
+                                [],
+                                input_tokens=entry["input"],
+                                output_tokens=entry["output"],
+                                cache_read=entry["cacheRead"],
+                            )
             except Exception:
                 continue
 
@@ -937,6 +969,13 @@ class ClaudeParser(BaseParser):
                         "cost": self.pricing_db.get_cost(model, input_t, output_t, cache_r, cache_w),
                         "timestamp": int(ts.timestamp() * 1000),
                         "entry_id": f"claude:{msg_id}" if msg_id else "",
+                        "_billing": usage_billing_pricing(
+                            [model],
+                            input_tokens=input_t,
+                            output_tokens=output_t,
+                            cache_read=cache_r,
+                            cache_write=cache_w,
+                        ),
                     }
                     if not msg_id:
                         out.append(entry)
@@ -1063,6 +1102,15 @@ class GeminiCLIParser(BaseParser):
             "reasoning": reasoning,
             "cost": self.pricing_db.get_cost(model, input_t, output_t, cache_r, cache_w),
             "timestamp": int(ts_ms),
+            # The billed key is the raw model, which is what get_cost is called
+            # with above; the displayed model falls back to "unknown".
+            "_billing": usage_billing_pricing(
+                [str(model or "")],
+                input_tokens=input_t,
+                output_tokens=output_t,
+                cache_read=cache_r,
+                cache_write=cache_w,
+            ),
         }
 
     def _file_signatures(self) -> tuple:
@@ -1281,6 +1329,13 @@ class AntigravityCLIParser(BaseParser):
             "cost": self.pricing_db.get_cost(model, input_t, output_t, cache_r, cache_w),
             "timestamp": self._i(decoded.get("timestamp")),
             "entry_id": f"antigravity_cli:{db_stem}:{idx}",
+            "_billing": usage_billing_pricing(
+                [model],
+                input_tokens=input_t,
+                output_tokens=output_t,
+                cache_read=cache_r,
+                cache_write=cache_w,
+            ),
         }
 
     def _parse_all(self) -> List[Dict[str, Any]]:
@@ -1464,6 +1519,13 @@ class KimiParser(BaseParser):
             "timestamp": int(ts_ms),
             "message_id": message_id,  # For deduplication
             "entry_id": f"kimi:{message_id}",
+            "_billing": usage_billing_pricing(
+                [model or "kimi-k2.5"],
+                input_tokens=input_other,
+                output_tokens=output_t,
+                cache_read=cache_read,
+                cache_write=cache_write,
+            ),
         }
 
     @staticmethod
@@ -1715,6 +1777,14 @@ class GrokParser(BaseParser):
             "message_id": entry_id,
             "entry_id": entry_id,
             "estimated": False,
+            # Reasoning is already folded into `output`; Grok has no cache-write
+            # dimension, so the billed cache-write bucket stays 0.
+            "_billing": usage_billing_pricing(
+                [resolved],
+                input_tokens=input_tokens,
+                output_tokens=output,
+                cache_read=cache_read,
+            ),
         }
 
     def _parse_all(self) -> List[Dict[str, Any]]:
@@ -1943,8 +2013,17 @@ class PiAgentParser(BaseParser):
                         cost_total = float(cost_obj.get("total") or 0.0)
                         if cost_total > 0:
                             cost = cost_total
+                            # Pi's own number. A pricing edit must never move it.
+                            billing = usage_billing_fixed(cost_total)
                         else:
                             cost = self.pricing_db.get_cost(model, input_t, output_t, cache_r, cache_w)
+                            billing = usage_billing_pricing(
+                                [model],
+                                input_tokens=input_t,
+                                output_tokens=output_t,
+                                cache_read=cache_r,
+                                cache_write=cache_w,
+                            )
 
                         out.append({
                             "source": self.source_name,
@@ -1958,6 +2037,7 @@ class PiAgentParser(BaseParser):
                             "cost": cost,
                             "timestamp": int(ts.timestamp() * 1000),
                             "entry_id": f"pi_agent:{entry_id}" if entry_id else "",
+                            "_billing": billing,
                         })
             except Exception:
                 continue
@@ -2242,6 +2322,15 @@ class CopilotCLIParser(BaseParser):
             return {
                 "source": self.source_name,
                 "model": model or "unknown",
+                # Billed under the raw attribute value, which is what get_cost
+                # sees; the displayed model falls back to "unknown".
+                "_billing": usage_billing_pricing(
+                    [str(model or "")],
+                    input_tokens=tokens["input"],
+                    output_tokens=tokens["output"],
+                    cache_read=tokens["cacheRead"],
+                    cache_write=tokens["cacheWrite"],
+                ),
                 "provider": provider,
                 "input": tokens["input"],
                 "output": tokens["output"],
@@ -2402,6 +2491,7 @@ class CopilotCLIParser(BaseParser):
                             "cost": self.pricing_db.get_cost(model, 0, output_t, 0, 0),
                             "timestamp": ts_ms,
                             "entry_id": f"copilot_event:{dedup_key}" if dedup_key else "",
+                            "_billing": usage_billing_pricing([model], output_tokens=output_t),
                         })
             except Exception:
                 continue
@@ -2560,14 +2650,26 @@ class HermesParser(BaseParser):
                         provider = str(billing_provider or "").strip() or self._infer_provider(str(model or ""))
                         if actual_cost_f > 0:
                             cost = actual_cost_f
+                            # Hermes' own subscription-aware number; never repriced.
+                            billing = usage_billing_fixed(actual_cost_f)
                         elif estimated_cost_f > 0:
                             cost = estimated_cost_f
+                            billing = usage_billing_fixed(estimated_cost_f)
                         else:
                             # Try provider/model first, then bare model
                             provider_model = f"{provider}/{model}" if provider else str(model or "")
                             cost = self.pricing_db.get_cost(provider_model, input_t, output_t, cache_r, cache_w)
                             if cost == 0.0 and provider:
                                 cost = self.pricing_db.get_cost(str(model or ""), input_t, output_t, cache_r, cache_w)
+                            # Same ordered candidates, so a later provider-specific
+                            # rate still shadows the bare key on a reprice.
+                            billing = usage_billing_pricing(
+                                [provider_model] + ([str(model or "")] if provider else []),
+                                input_tokens=input_t,
+                                output_tokens=output_t,
+                                cache_read=cache_r,
+                                cache_write=cache_w,
+                            )
 
                         out.append({
                             "source": self.source_name,
@@ -2586,6 +2688,7 @@ class HermesParser(BaseParser):
                             # of treating each row as a single message.
                             "messageCount": int(self._i(message_count)),
                             "entry_id": f"hermes:{row_id}",
+                            "_billing": billing,
                         })
                     except Exception:
                         continue
@@ -3188,6 +3291,13 @@ class DSHParser(BaseParser):
                         "cost": self.pricing_db.get_cost(model, input_t, output_t, cache_r, cache_w),
                         "timestamp": int(sample["timestamp_ms"]),
                         "entry_id": dsh_entry_id(session_id, sample["turn"], sample["step"]),
+                        "_billing": usage_billing_pricing(
+                            [model],
+                            input_tokens=input_t,
+                            output_tokens=output_t,
+                            cache_read=cache_r,
+                            cache_write=cache_w,
+                        ),
                     }
                     by_entry_id[entry["entry_id"]] = entry
             except Exception:
@@ -3411,6 +3521,12 @@ class ReasonixParser(BaseParser):
                     ),
                     "timestamp": ts_ms,
                     "entry_id": entry_id,
+                    "_billing": usage_billing_pricing(
+                        [model],
+                        input_tokens=uncached,
+                        output_tokens=completion,
+                        cache_read=cache_hit,
+                    ),
                 })
         out.sort(key=lambda item: int(item.get("timestamp", 0) or 0))
         return out

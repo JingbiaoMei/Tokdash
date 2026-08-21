@@ -21,6 +21,7 @@ from .usage_store import (
     build_source_signature,
     persistent_pricing_signature,
     persistent_usage_db_enabled,
+    public_usage_entry,
 )
 
 
@@ -135,9 +136,25 @@ def _collect_parser_tail(parser: Any, file_sig: tuple[str, int, int], start_offs
 
 
 def _sync_usage_store(tracker: CodingToolsUsageTracker) -> tuple[UsageEntryStore, list[str]]:
+    """Bring the persistent usage cache up to date for this tracker's sources.
+
+    Three identities, kept apart on purpose:
+
+    * source identity — the file paths, mtimes and sizes each parser reports,
+      plus the safe offset a tail append stopped at;
+    * parse identity — each parser's explicit ``persistent_parser_version``,
+      so adding or changing one parser cannot invalidate another's rows;
+    * pricing identity — the effective pricing content and implementation,
+      applied by repricing the stored billing inputs. It is NOT part of any
+      parse signature, so a rate edit never reparses a source log.
+
+    See docs/development/technical-notes/USAGE_CACHE_IDENTITY.md.
+    """
     store = UsageEntryStore()
     selected = _usage_store_sources(tracker)
-    pricing = persistent_pricing_signature(tracker.pricing_db)
+    # Rates first: rows land at the current pricing whether they were already
+    # cached (repriced here) or inserted by the syncs below.
+    store.apply_pricing(persistent_pricing_signature(tracker.pricing_db), tracker.pricing_db)
     for name in selected:
         parser = tracker.parsers[name]
         capability = getattr(parser, "sync_capability")
@@ -147,7 +164,6 @@ def _sync_usage_store(tracker: CodingToolsUsageTracker) -> tuple[UsageEntryStore
             store.sync_files(
                 name,
                 files,
-                pricing=pricing,
                 parser=parser_sig,
                 parse_file_entries=lambda file_sig, parser=parser: _collect_parser_file(parser, file_sig),
                 parse_file_tail_entries=(
@@ -161,7 +177,6 @@ def _sync_usage_store(tracker: CodingToolsUsageTracker) -> tuple[UsageEntryStore
             continue
         signature = build_source_signature(
             files=files,
-            pricing=pricing,
             parser=parser_sig,
         )
         store.sync_source(
@@ -181,7 +196,9 @@ def _collect_live_coding_entries(
     if not sources:
         return []
     tracker.collect(since, until, sources)
-    return tracker.to_json().get("entries", [])
+    # Live rows carry the same private billing provenance stored rows do; strip
+    # it here so the live and cached paths hand callers identical shapes.
+    return [public_usage_entry(entry) for entry in tracker.to_json().get("entries", [])]
 
 
 def _merge_parsed_usage(parts: list[Dict[str, Any]]) -> Dict[str, Any]:
@@ -334,7 +351,9 @@ def run_local_coding_tools_json(period_args: list[str]) -> Dict[str, Any]:
             # parsers for this request.
             pass
     tracker.collect(since, until)
-    return tracker.to_json()
+    data = tracker.to_json()
+    data["entries"] = [public_usage_entry(entry) for entry in data.get("entries", [])]
+    return data
 
 
 def cache_hit_rate(tokens_in: Any, tokens_cache: Any) -> Optional[float]:

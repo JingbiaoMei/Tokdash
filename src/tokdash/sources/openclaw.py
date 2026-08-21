@@ -16,6 +16,7 @@ try:
         build_source_signature,
         persistent_pricing_signature,
         persistent_usage_db_enabled,
+        usage_billing_pricing,
     )
 except ImportError:  # pragma: no cover
     # Allow importing when running this code from the repo by file path.
@@ -25,6 +26,7 @@ except ImportError:  # pragma: no cover
     UsageEntryStore = None  # type: ignore
     build_source_signature = None  # type: ignore
     persistent_pricing_signature = None  # type: ignore
+    usage_billing_pricing = None  # type: ignore
 
     def persistent_usage_db_enabled() -> bool:  # type: ignore
         return False
@@ -266,7 +268,8 @@ def _normalized_entry(entry: Dict[str, Any], pricing_db: PricingDatabase) -> Dic
     tokens_cache_read = _i(entry.get("cache_read"))
 
     cost_db = pricing_db.get_cost(model, tokens_input_raw, tokens_out, tokens_cache_read, tokens_cache_write)
-    cost = cost_db if cost_db > 0.0 else float(entry.get("payload_cost", 0.0) or 0.0)
+    payload_cost = float(entry.get("payload_cost", 0.0) or 0.0)
+    cost = cost_db if cost_db > 0.0 else payload_cost
     if "/" in model:
         provider, model_id = model.split("/", 1)
     else:
@@ -286,6 +289,17 @@ def _normalized_entry(entry: Dict[str, Any], pricing_db: PricingDatabase) -> Dic
         "messageCount": 1,
         "modelId": model_id,
         "entry_id": entry.get("entry_id", ""),
+        # Tokdash pricing wins; OpenClaw's own recorded cost is the fallback
+        # when the model resolves to nothing. Stored so a rate edit reprices
+        # the row instead of reparsing every session file.
+        "_billing": usage_billing_pricing(
+            [model],
+            input_tokens=tokens_input_raw,
+            output_tokens=tokens_out,
+            cache_read=tokens_cache_read,
+            cache_write=tokens_cache_write,
+            fallback=payload_cost,
+        ),
     }
 
 
@@ -325,9 +339,11 @@ def _sync_openclaw_store(session_dirs: list[str], pricing_db: PricingDatabase) -
     files = _session_files(session_dirs)
     sig = _signature(files)
     store = UsageEntryStore()
+    # Pricing is applied to the stored billing inputs, not folded into the parse
+    # signature — a rate edit reprices these rows without rereading any log.
+    store.apply_pricing(persistent_pricing_signature(pricing_db), pricing_db)
     signature = build_source_signature(  # type: ignore[misc]
         files=sig,
-        pricing=persistent_pricing_signature(pricing_db),
         parser=_openclaw_parser_signature(),
     )
     store.sync_source(

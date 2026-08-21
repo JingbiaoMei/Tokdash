@@ -1,8 +1,10 @@
 """Regression coverage for runtime and persistent pricing cache identities.
 
 Runtime caches use file metadata plus override content so out-of-band edits are noticed
-immediately. Persistent stores use effective pricing content plus the pricing implementation
-so unchanged reinstalls remain fast while real data or cost-calculation changes rebuild rows.
+immediately. Persistent stores identify pricing by effective content plus the pricing
+implementation, and that identity is applied by REPRICING the stored billing inputs — it is
+not part of any parse signature. So an unchanged reinstall stays fast, and a real rate or
+cost-calculation change reaches the cached cost without rereading a single source log.
 """
 import json
 import os
@@ -14,8 +16,11 @@ import tokdash.compute as compute_module
 import tokdash.usage_store as usage_store_module
 from tokdash.onboard import paths
 from tokdash.pricing import PricingDatabase
+import pytest
+
 from tokdash.sources import openclaw
 from tokdash.sources.coding_tools import ClaudeParser
+from tokdash.usage_store import usage_billing_pricing
 
 
 def _write_override() -> None:
@@ -116,7 +121,10 @@ def test_coding_tools_persistent_store_survives_identical_reinstall(monkeypatch,
                     "timestamp": 1_700_000_000_000,
                     "input": 10,
                     "output": 5,
-                    "cost": 0.0,
+                    "cost": pricing_db.get_cost("foo", 10, 5, 0, 0),
+                    "_billing": usage_billing_pricing(
+                        ["foo"], input_tokens=10, output_tokens=5
+                    ),
                 }
             ]
 
@@ -138,9 +146,15 @@ def test_coding_tools_persistent_store_survives_identical_reinstall(monkeypatch,
         first_db
     ) != usage_store_module.persistent_pricing_signature(changed_db)
 
-    compute_module._sync_usage_store(first_tracker)
+    store, _sources = compute_module._sync_usage_store(first_tracker)
     compute_module._sync_usage_store(reinstalled_tracker)
     assert len(parse_calls) == 1
+
+    def cost() -> float:
+        return store.aggregate_entries(sources=["claude"])["total_cost"]
+
+    # 10 input tokens at 1.0/M plus 5 output tokens at 2.0/M.
+    assert cost() == pytest.approx((10 * 1.0 + 5 * 2.0) / 1_000_000)
 
     original_code_signature = usage_store_module.parser_code_signature
 
@@ -156,10 +170,12 @@ def test_coding_tools_persistent_store_survives_identical_reinstall(monkeypatch,
         changed_pricing_implementation,
     )
     compute_module._sync_usage_store(reinstalled_tracker)
-    assert len(parse_calls) == 2
+    assert len(parse_calls) == 1, "a pricing-implementation change reprices, it does not reparse"
 
     compute_module._sync_usage_store(changed_tracker)
-    assert len(parse_calls) == 3
+    assert len(parse_calls) == 1, "a rate change reprices, it does not reparse"
+    # ...and the new rate actually reached the cached row.
+    assert cost() == pytest.approx((10 * 9.0 + 5 * 2.0) / 1_000_000)
 
 
 def test_coding_tools_computes_persistent_pricing_signature_once_per_tracker(monkeypatch):
@@ -167,8 +183,12 @@ def test_coding_tools_computes_persistent_pricing_signature_once_per_tracker(mon
     pricing_calls: list[object] = []
 
     class FakeStore:
+        def apply_pricing(self, _identity, _pricing_db=None):
+            return False
+
         def sync_files(self, source, _files, **_kwargs):
             sync_calls.append(source)
+            assert "pricing" not in _kwargs, "pricing must not enter a parse signature"
 
     pricing_db = object()
     capability = SimpleNamespace(mode="file_replace", append_jsonl=False)
@@ -230,9 +250,14 @@ def test_openclaw_persistent_store_survives_identical_reinstall(monkeypatch, tmp
         first_db
     ) != usage_store_module.persistent_pricing_signature(changed_db)
 
-    openclaw._sync_openclaw_store([str(sessions_dir)], first_db)
+    store = openclaw._sync_openclaw_store([str(sessions_dir)], first_db)
     openclaw._sync_openclaw_store([str(sessions_dir)], reinstalled_db)
     assert len(parse_calls) == 1
+
+    def cost() -> float:
+        return store.aggregate_entries(sources=["openclaw"])["total_cost"]
+
+    assert cost() == pytest.approx((10 * 1.0 + 5 * 2.0) / 1_000_000)
 
     original_code_signature = usage_store_module.parser_code_signature
 
@@ -248,10 +273,11 @@ def test_openclaw_persistent_store_survives_identical_reinstall(monkeypatch, tmp
         changed_pricing_implementation,
     )
     openclaw._sync_openclaw_store([str(sessions_dir)], reinstalled_db)
-    assert len(parse_calls) == 2
+    assert len(parse_calls) == 1, "a pricing-implementation change reprices, it does not reparse"
 
     openclaw._sync_openclaw_store([str(sessions_dir)], changed_db)
-    assert len(parse_calls) == 3
+    assert len(parse_calls) == 1, "a rate change reprices, it does not reparse"
+    assert cost() == pytest.approx((10 * 9.0 + 5 * 2.0) / 1_000_000)
 
 
 def test_sessions_singleton_reloads_when_override_changes_out_of_band():

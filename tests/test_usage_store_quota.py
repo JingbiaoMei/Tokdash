@@ -8,6 +8,7 @@ import pytest
 from tokdash.sources.quota.types import QuotaSnapshot
 from tokdash.usage_store import (
     _CODEX_PERCENT_SCALE_REPAIR_META_KEY,
+    SCHEMA_VERSION,
     UsageEntryStore,
     _repair_codex_api_percent_scale_rows,
     _repair_grok_snapshot_email_rows,
@@ -493,7 +494,9 @@ def test_quota_schema_migrates_v4_database(tmp_path):
 
     status = UsageEntryStore(db_path).status()
 
-    assert status["meta"]["schema_version"] == "7"
+    # The point is that a v4 database gains the quota tables, not which number
+    # is current; pinning the literal makes every later schema bump fail here.
+    assert status["meta"]["schema_version"] == str(SCHEMA_VERSION)
     assert status["quota_snapshots"] == 0
     with sqlite3.connect(db_path) as conn:
         assert conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='quota_snapshots'").fetchone()

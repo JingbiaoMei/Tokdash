@@ -17,14 +17,21 @@ from .filelock import process_lock
 from .pricing import PricingDatabase
 
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 SIGNATURE_VERSION = 3
 
-# What a persistent usage row must carry to be usable by this build. Shared by
-# every persistent usage-parser signature, so bumping it rebuilds every stored
-# source — the one identity that is deliberately global. Per-parser changes use
-# that parser's own version instead.
+# What a persistent usage row must carry to be priceable without rereading its
+# source log: the `_billing` provenance record built by the parsers below and
+# stored in usage_entries.billing_json. Every persistent usage-parser signature
+# folds this in, so a change to the stored billing shape rebuilds those rows
+# exactly like a parser-version bump. Bump ONLY when the billing record's own
+# format changes — not when a parser changes what it puts in one.
 USAGE_ENTRY_FORMAT_VERSION = 1
+
+# Private keys stripped from a stored row before it is serialized into
+# raw_json, so /api/usage, /api/tools, `tokdash export` and query_entries()
+# never see them. Billing provenance lives in its own column instead.
+PRIVATE_ENTRY_KEYS = ("_billing",)
 
 # quota_history consumption: reset times within this many seconds are treated as the same
 # physical window, absorbing the ±1s poll-to-poll jitter (and Codex start-of-window
@@ -50,6 +57,9 @@ _SCHEMA_READY: set[str] = set()
 _CODEX_PERCENT_SCALE_REPAIR_META_KEY = "quota_codex_percent_scale_repair_v2"
 _CODEX_PERCENT_SCALE_REPAIR_DONE = "done"
 _GROK_EMAIL_REPAIR_META_KEY = "quota_grok_email_scrub_v1"
+# Identity of the pricing data+implementation the stored usage costs were
+# computed under. Advanced only by a committed repricing transaction.
+_PRICING_IDENTITY_META_KEY = "usage_pricing_identity_v1"
 
 
 def _as_float(value: Any) -> float | None:
@@ -360,7 +370,8 @@ def parser_code_signature(obj: Any) -> dict[str, Any]:
     in one module, so one hash of it was shared by all of them and editing a
     single parser invalidated every persistently stored source. Usage parsers
     now declare an explicit ``persistent_parser_version`` instead — see
-    ``BaseParser.persistent_parser_signature``.
+    ``BaseParser.persistent_parser_signature`` and
+    docs/development/technical-notes/USAGE_CACHE_IDENTITY.md.
 
     Still used where a whole module's content genuinely IS the identity: the
     pricing implementation below, and a handful of single-purpose helpers in
@@ -395,9 +406,12 @@ def parser_code_signature(obj: Any) -> dict[str, Any]:
 def persistent_pricing_signature(pricing_db: PricingDatabase) -> dict[str, Any]:
     """Identify effective pricing data and the code that interprets it.
 
-    Persistent rows contain computed costs, so they must be invalidated when either the
-    pricing content or ``PricingDatabase`` implementation changes. Both components are
-    content-based so reinstall paths and mtimes do not affect the identity.
+    This is the *pricing* identity, and it is deliberately kept OUT of every
+    parse signature. Persistent rows carry the billing inputs they were priced
+    from, so a change here is applied by :meth:`UsageEntryStore.apply_pricing`
+    — recomputing stored costs in one transaction — rather than by marking
+    unchanged source logs as changed. Both components are content-based so
+    reinstall paths and mtimes do not affect the identity.
     """
     try:
         content = tuple(pricing_db.content_signature())
@@ -409,7 +423,118 @@ def persistent_pricing_signature(pricing_db: PricingDatabase) -> dict[str, Any]:
     }
 
 
+# ---------------------------------------------------------------------------
+# Billing provenance
+#
+# A persistent usage row stores WHAT it was billed on, not only what it cost.
+# Two kinds:
+#
+#   pricing  the row's cost is Tokdash's own, computed from these token counts
+#            against the named model candidates (tried in order, first non-zero
+#            wins — that is how a parser with a provider-qualified fallback
+#            prices today). `fallback` is an optional source-reported cost used
+#            only when no candidate resolves, which is how OpenClaw bills.
+#   fixed    the cost the source itself reported. Tokdash never recomputes it,
+#            so a pricing edit can never move a provider-reported number.
+#
+# The counts here are the arguments the parser passes to get_cost, which are
+# NOT always the displayed token buckets: sources fold reasoning into output,
+# subtract inclusive cache reads, or bill cache writes at the input rate. Store
+# what was billed; display what was parsed.
+# ---------------------------------------------------------------------------
+
+
+def usage_billing_pricing(
+    models: Iterable[Any],
+    *,
+    input_tokens: Any = 0,
+    output_tokens: Any = 0,
+    cache_read: Any = 0,
+    cache_write: Any = 0,
+    fallback: Any = None,
+) -> dict[str, Any]:
+    """Billing inputs for a row Tokdash prices itself."""
+    record: dict[str, Any] = {
+        "kind": "pricing",
+        "models": [str(model or "") for model in models],
+        "input": int(input_tokens or 0),
+        "output": int(output_tokens or 0),
+        "cache_read": int(cache_read or 0),
+        "cache_write": int(cache_write or 0),
+    }
+    if fallback is not None:
+        record["fallback"] = float(fallback)
+    return record
+
+
+def usage_billing_fixed(cost: Any) -> dict[str, Any]:
+    """Billing record for a cost the source reported; never repriced."""
+    try:
+        return {"kind": "fixed", "cost": float(cost or 0.0)}
+    except (TypeError, ValueError):
+        return {"kind": "fixed", "cost": 0.0}
+
+
+def usage_entry_cost(billing: Any, pricing_db: PricingDatabase) -> float:
+    """Cost of one stored row under *pricing_db*, from its billing record.
+
+    Mirrors the live parsers exactly: candidates are tried in order and the
+    first non-zero result wins, so a provider-qualified key still shadows the
+    bare model name and an unresolved model still costs nothing.
+    """
+    if not isinstance(billing, dict):
+        return 0.0
+    kind = str(billing.get("kind") or "")
+    if kind == "fixed":
+        try:
+            return float(billing.get("cost") or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+    if kind != "pricing":
+        return 0.0
+    models = billing.get("models")
+    cost = 0.0
+    try:
+        for model in models if isinstance(models, list) else []:
+            cost = float(
+                pricing_db.get_cost(
+                    str(model or ""),
+                    int(billing.get("input") or 0),
+                    int(billing.get("output") or 0),
+                    int(billing.get("cache_read") or 0),
+                    int(billing.get("cache_write") or 0),
+                )
+            )
+            if cost > 0:
+                return cost
+    except (TypeError, ValueError, KeyError):
+        return 0.0
+    if cost <= 0 and billing.get("fallback") is not None:
+        try:
+            return float(billing.get("fallback") or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+    return cost
+
+
+def usage_billing_json_fixed(cost: Any) -> str:
+    return stable_json(usage_billing_fixed(cost))
+
+
+def public_usage_entry(entry: dict[str, Any]) -> dict[str, Any]:
+    """The row as every consumer sees it, minus Tokdash-private provenance."""
+    if not any(key in entry for key in PRIVATE_ENTRY_KEYS):
+        return entry
+    return {key: value for key, value in entry.items() if key not in PRIVATE_ENTRY_KEYS}
+
+
 def build_source_signature(*, files: Any, pricing: Any = None, parser: Any = None, extra: Any = None) -> str:
+    """Serialize one cache identity.
+
+    ``pricing`` is retained for the session-record callers and for tests; the
+    usage-entry paths no longer pass it, because pricing changes reprice stored
+    rows instead of invalidating their parse (see ``apply_pricing``).
+    """
     return stable_json(
         {
             "signature_version": SIGNATURE_VERSION,
@@ -468,10 +593,27 @@ def _entry_for_storage(entry: dict[str, Any]) -> Optional[dict[str, Any]]:
     raw["timestamp"] = timestamp
     raw["messageCount"] = _int_field(raw, "messageCount") or 1
     raw["entry_key"] = _entry_key(raw)
+    if not isinstance(raw.get("_billing"), dict):
+        # No provenance: the row keeps whatever cost it arrived with and is
+        # never repriced, rather than being guessed at from its public buckets.
+        raw.pop("_billing", None)
     return raw
 
 
+def _billing_json(entry: dict[str, Any]) -> str:
+    billing = entry.get("_billing")
+    return stable_json(billing) if isinstance(billing, dict) else ""
+
+
 def _entry_key(entry: dict[str, Any]) -> str:
+    """Stable identity for a row the source did not name itself.
+
+    Deliberately price-free. Cost is derived from the fields already in the
+    basis plus whatever pricing file happens to be loaded, so it adds no
+    identity — but including it made the key move whenever a row was repriced.
+    A repriced row would then no longer collide with the same logical entry
+    reparsed out of another file, and one duplicate would be counted twice.
+    """
     explicit = entry.get("entry_id") or entry.get("message_id") or entry.get("id")
     if explicit:
         return str(explicit)
@@ -485,7 +627,6 @@ def _entry_key(entry: dict[str, Any]) -> str:
         "cacheRead": entry.get("cacheRead"),
         "cacheWrite": entry.get("cacheWrite"),
         "reasoning": entry.get("reasoning"),
-        "cost": round(float(entry.get("cost", 0.0) or 0.0), 10),
     }
     digest = hashlib.sha1(stable_json(basis).encode("utf-8")).hexdigest()
     return f"hash:{digest}"
@@ -534,7 +675,14 @@ def _session_time_bounds(raw: dict[str, Any]) -> tuple[Optional[int], Optional[i
 
 
 class UsageEntryStore:
-    """SQLite-backed persistent cache for normalized token usage rows."""
+    """SQLite-backed persistent cache for normalized token usage rows.
+
+    A ``usage_entries`` row holds the public entry in ``raw_json`` (what every
+    caller sees) and its private billing provenance in ``billing_json`` (how
+    its cost was arrived at). Keeping them apart is what lets a pricing change
+    be a repricing pass — :meth:`apply_pricing` — instead of a reason to reread
+    source logs. See docs/development/technical-notes/USAGE_CACHE_IDENTITY.md.
+    """
 
     def __init__(self, db_path: Optional[Path] = None):
         self.path = db_path or usage_db_path()
@@ -638,7 +786,8 @@ class UsageEntryStore:
                 reasoning INTEGER NOT NULL DEFAULT 0,
                 cost REAL NOT NULL DEFAULT 0,
                 message_count INTEGER NOT NULL DEFAULT 1,
-                raw_json TEXT NOT NULL
+                raw_json TEXT NOT NULL,
+                billing_json TEXT NOT NULL DEFAULT ''
             );
             CREATE TABLE IF NOT EXISTS session_records (
                 tool TEXT NOT NULL,
@@ -702,6 +851,8 @@ class UsageEntryStore:
             conn.execute("ALTER TABLE usage_entries ADD COLUMN file_path TEXT NOT NULL DEFAULT ''")
         if "entry_key" not in columns:
             conn.execute("ALTER TABLE usage_entries ADD COLUMN entry_key TEXT NOT NULL DEFAULT ''")
+        if "billing_json" not in columns:
+            conn.execute("ALTER TABLE usage_entries ADD COLUMN billing_json TEXT NOT NULL DEFAULT ''")
         file_columns = {str(row["name"]) for row in conn.execute("PRAGMA table_info(file_state)").fetchall()}
         if "safe_offset" not in file_columns:
             conn.execute("ALTER TABLE file_state ADD COLUMN safe_offset INTEGER NOT NULL DEFAULT 0")
@@ -728,6 +879,24 @@ class UsageEntryStore:
         current = int(row["value"]) if row else 0
         if current > SCHEMA_VERSION:
             raise RuntimeError(f"unsupported usage DB schema {current}; expected <= {SCHEMA_VERSION}")
+        if current < 8:
+            # Legacy rows predate billing provenance. Their cost was computed
+            # under pricing this build cannot identify, so it is preserved as a
+            # fixed cost rather than guessed at: a row whose source file is
+            # still on disk is rebuilt (with real provenance) by the next sync,
+            # because the parse signature changed too; a durable row whose file
+            # is gone keeps exactly the number it already reported.
+            legacy = conn.execute(
+                "SELECT id, cost FROM usage_entries WHERE billing_json = ''"
+            ).fetchall()
+            if legacy:
+                conn.executemany(
+                    "UPDATE usage_entries SET billing_json = ? WHERE id = ?",
+                    [
+                        (usage_billing_json_fixed(row["cost"]), int(row["id"]))
+                        for row in legacy
+                    ],
+                )
         if current < 7:
             rows = conn.execute(
                 """
@@ -770,6 +939,95 @@ class UsageEntryStore:
                 (source,),
             ).fetchone()
             return str(row["signature"]) if row else None
+
+    def stored_pricing_identity(self) -> Optional[str]:
+        with closing(self._connect()) as conn:
+            row = conn.execute(
+                "SELECT value FROM meta WHERE key = ?", (_PRICING_IDENTITY_META_KEY,)
+            ).fetchone()
+            return str(row["value"]) if row else None
+
+    def apply_pricing(
+        self,
+        pricing_identity: Any,
+        pricing_db: Optional[PricingDatabase] = None,
+        *,
+        chunk_size: int = 5000,
+    ) -> bool:
+        """Reprice stored rows from their billing inputs. No parser is called.
+
+        Pricing is not part of any parse signature, so this is the ONLY thing
+        that makes a rate edit, an alias change or a newly added model reach a
+        cached row. It rewrites both the SQL ``cost`` column (what the SQL
+        aggregates read) and ``raw_json``'s public ``cost`` (what query_entries
+        returns) in one transaction, and records the new pricing identity in
+        that same transaction — so the identity can never advance ahead of the
+        rows it claims to describe, and a failure leaves both untouched.
+
+        Fixed (provider-reported) costs and rows with no provenance are read but
+        never rewritten. Returns True when the identity moved.
+        """
+        identity = stable_json(pricing_identity)
+        if self.stored_pricing_identity() == identity:
+            return False
+        database = pricing_db if pricing_db is not None else self._pricing_db()
+
+        with usage_db_process_lock(self.path):
+            with closing(self._connect()) as conn:
+                row = conn.execute(
+                    "SELECT value FROM meta WHERE key = ?", (_PRICING_IDENTITY_META_KEY,)
+                ).fetchone()
+                if row is not None and str(row["value"]) == identity:
+                    return False
+
+                conn.execute("BEGIN IMMEDIATE")
+                try:
+                    last_id = 0
+                    while True:
+                        rows = conn.execute(
+                            """
+                            SELECT id, cost, raw_json, billing_json
+                            FROM usage_entries
+                            WHERE id > ? AND billing_json != ''
+                            ORDER BY id
+                            LIMIT ?
+                            """,
+                            (last_id, int(chunk_size)),
+                        ).fetchall()
+                        if not rows:
+                            break
+                        last_id = int(rows[-1]["id"])
+                        updates: list[tuple[float, str, int]] = []
+                        for entry_row in rows:
+                            try:
+                                billing = json.loads(entry_row["billing_json"])
+                            except (TypeError, ValueError):
+                                continue
+                            new_cost = usage_entry_cost(billing, database)
+                            if new_cost == float(entry_row["cost"] or 0.0):
+                                continue
+                            try:
+                                raw = json.loads(entry_row["raw_json"])
+                            except (TypeError, ValueError):
+                                continue
+                            if not isinstance(raw, dict):
+                                continue
+                            raw["cost"] = new_cost
+                            updates.append((new_cost, stable_json(raw), int(entry_row["id"])))
+                        if updates:
+                            conn.executemany(
+                                "UPDATE usage_entries SET cost = ?, raw_json = ? WHERE id = ?",
+                                updates,
+                            )
+                    conn.execute(
+                        "INSERT OR REPLACE INTO meta(key, value) VALUES(?, ?)",
+                        (_PRICING_IDENTITY_META_KEY, identity),
+                    )
+                    conn.commit()
+                except BaseException:
+                    conn.rollback()
+                    raise
+        return True
 
     def sync_source(
         self,
@@ -815,8 +1073,8 @@ class UsageEntryStore:
                     INSERT INTO usage_entries (
                         source, file_path, entry_key, model, provider, timestamp,
                         input, output, cache_read, cache_write, reasoning,
-                        cost, message_count, raw_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        cost, message_count, raw_json, billing_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     [
                         (
@@ -833,7 +1091,8 @@ class UsageEntryStore:
                             e["reasoning"],
                             e["cost"],
                             e["messageCount"],
-                            stable_json(e),
+                            stable_json(public_usage_entry(e)),
+                            _billing_json(e),
                         )
                         for e in entries
                     ],
@@ -862,7 +1121,6 @@ class UsageEntryStore:
         source: str,
         file_signatures: Iterable[Any],
         *,
-        pricing: Any = None,
         parser: Any = None,
         parse_file_entries: Callable[[tuple[str, int, int]], Iterable[dict[str, Any]]],
         parse_file_tail_entries: Optional[
@@ -876,12 +1134,17 @@ class UsageEntryStore:
         old whole-source replacement. It keeps correctness simple: a changed file
         is fully reparsed and its previous rows are deleted by (source, path),
         while unchanged files remain indexed and queryable.
+
+        Pricing is deliberately NOT part of a file signature. Rows carry their
+        billing inputs (``billing_json``), so a rate edit is applied by
+        :meth:`apply_pricing` instead of marking every unchanged file as
+        changed. Putting pricing back here would reparse the whole corpus on
+        every pricing update.
         """
         files = _normalize_file_signatures(file_signatures)
         file_sig_by_path = {
             path: build_source_signature(
                 files=[(path, mtime_ns, size)],
-                pricing=pricing,
                 parser=parser,
                 extra={"mode": "file"},
             )
@@ -889,7 +1152,6 @@ class UsageEntryStore:
         }
         source_signature = build_source_signature(
             files=files,
-            pricing=pricing,
             parser=parser,
             extra={"mode": "files"},
         )
@@ -944,7 +1206,6 @@ class UsageEntryStore:
                 old_size = int(state.get("size") or state.get("safe_offset") or 0)
                 old_sig = build_source_signature(
                     files=[(path, int(state.get("mtime_ns") or 0), old_size)],
-                    pricing=pricing,
                     parser=parser,
                     extra={"mode": "file"},
                 )
@@ -1035,8 +1296,8 @@ class UsageEntryStore:
                         INSERT INTO usage_entries (
                             source, file_path, entry_key, model, provider, timestamp,
                             input, output, cache_read, cache_write, reasoning,
-                            cost, message_count, raw_json
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            cost, message_count, raw_json, billing_json
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ON CONFLICT(source, entry_key) WHERE entry_key != ''
                         DO UPDATE SET
                             file_path = excluded.file_path,
@@ -1050,7 +1311,8 @@ class UsageEntryStore:
                             reasoning = excluded.reasoning,
                             cost = excluded.cost,
                             message_count = excluded.message_count,
-                            raw_json = excluded.raw_json
+                            raw_json = excluded.raw_json,
+                            billing_json = excluded.billing_json
                         WHERE excluded.timestamp < usage_entries.timestamp
                     """
                 else:
@@ -1058,8 +1320,8 @@ class UsageEntryStore:
                         INSERT OR REPLACE INTO usage_entries (
                             source, file_path, entry_key, model, provider, timestamp,
                             input, output, cache_read, cache_write, reasoning,
-                            cost, message_count, raw_json
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            cost, message_count, raw_json, billing_json
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """
                 for (path, mtime_ns, size), entries, safe_offset, appended in parsed:
                     total_changed_entries += len(entries)
@@ -1085,7 +1347,8 @@ class UsageEntryStore:
                                 e["reasoning"],
                                 e["cost"],
                                 e["messageCount"],
-                                stable_json(e),
+                                stable_json(public_usage_entry(e)),
+                                _billing_json(e),
                             )
                             for e in entries
                         ],
@@ -1115,7 +1378,6 @@ class UsageEntryStore:
                             0,
                             build_source_signature(
                                 files=[(path, mtime_ns, safe_offset)],
-                                pricing=pricing,
                                 parser=parser,
                                 extra={"mode": "file"},
                             ),

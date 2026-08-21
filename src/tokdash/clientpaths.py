@@ -374,6 +374,95 @@ def zcode_db_path() -> Path:
     return zcode_home() / "cli" / "db" / "db.sqlite"
 
 
+# --- Qoder -------------------------------------------------------------------
+
+_QODER_IDE_DB_SUFFIX = Path("SharedClientCache") / "cache" / "db" / "local.db"
+
+
+def _wsl_windows_root() -> Path:
+    """The drvfs mount of the Windows C: drive, for the WSL branch only.
+
+    Kept as a seam so the WSL candidate glob can be tested against a tmp tree.
+    """
+    return Path("/mnt/c")
+
+
+def qoder_ide_db_path() -> Optional[Path]:
+    """First existing Qoder IDE cache DB in priority order, else None.
+
+    One install per machine is the normal state, and the parser snapshots
+    exactly one DB. A single deterministic winner (not a scan of all
+    candidates) keeps a session present in two stores -- reinstall/migration
+    copies -- from being counted twice: chat_message.id is a content id, so a
+    copied row keeps its id and would collide on entry_id.
+
+    Priority: QODER_IDE_DATA_DIR override > native platform dirs > WSL glob.
+    Brand order follows each platform's candidate list: QoderCN before Qoder
+    on Windows/WSL, Qoder before QoderCN on macOS and Linux.
+    """
+
+    def first_file(paths: List[Path]) -> Optional[Path]:
+        return next((p for p in paths if p.is_file()), None)
+
+    env = os.environ.get("QODER_IDE_DATA_DIR", "").strip()
+    if env:
+        return first_file([Path(env).expanduser() / _QODER_IDE_DB_SUFFIX])
+
+    kind = osinfo.os_kind()
+    if kind == "windows":
+        appdata = os.environ.get("APPDATA", "").strip()
+        base = Path(appdata).expanduser() if appdata else Path.home() / "AppData" / "Roaming"
+        return first_file([base / d / _QODER_IDE_DB_SUFFIX for d in ("QoderCN", "Qoder")])
+    if kind == "wsl":
+        # The Windows GUI lives under the drvfs mount. Brand priority first,
+        # then path order within a brand: sorting one combined set would
+        # order by Windows user name and break the QoderCN-before-Qoder
+        # priority across users.
+        candidates: List[Path] = []
+        suffix = str(_QODER_IDE_DB_SUFFIX)
+        for d in ("QoderCN", "Qoder"):
+            candidates += sorted(_wsl_windows_root().glob(f"Users/*/AppData/Roaming/{d}/{suffix}"))
+        return first_file(candidates)
+    if kind == "macos":
+        base = Path.home() / "Library" / "Application Support"
+        return first_file([base / d / _QODER_IDE_DB_SUFFIX for d in ("Qoder", "QoderCN")])
+    # Native Linux.
+    xdg = os.environ.get("XDG_DATA_HOME", "").strip()
+    base = Path(xdg).expanduser() if xdg else Path.home() / ".local" / "share"
+    return first_file([base / d / _QODER_IDE_DB_SUFFIX for d in ("Qoder", "QoderCN")])
+
+
+def qoder_cli_roots() -> List[Path]:
+    """All existing Qoder CLI data roots, in scan order, deduplicated.
+
+    A union, not a switch: QODER_CLI_HOME (Tokdash-only, comma-separated)
+    first, then QODER_CONFIG_DIR (Qoder's real single-root override), then
+    the two default homes. A custom root does not displace the defaults --
+    older sessions can still live under a default dir and the usage history
+    should still count. Overlapping roots can present the same session twice
+    (symlinks, migration copies); the CLI parser dedupes by request id.
+    """
+    roots: List[Path] = []
+    for raw in os.environ.get("QODER_CLI_HOME", "").split(","):
+        raw = raw.strip()
+        if not raw:
+            continue
+        path = Path(raw).expanduser()
+        if not path.is_absolute():
+            path = path.resolve()
+        if path not in roots:
+            roots.append(path)
+    explicit = os.environ.get("QODER_CONFIG_DIR", "").strip()
+    if explicit:
+        path = Path(explicit).expanduser()
+        if path not in roots:
+            roots.append(path)
+    for default in (Path.home() / ".qoder", Path.home() / ".qoder-cn"):
+        if default not in roots:
+            roots.append(default)
+    return [root for root in roots if root.is_dir()]
+
+
 # --- Tokdash data dir / usage DB -------------------------------------------------
 #
 # Mirrors onboard/paths.py::data_dir() (kept as a separate, untouched copy there —

@@ -84,7 +84,20 @@ Check "setup exit code 0" ($rc1 -eq 0) ("rc=$rc1 ; output: " + $setup1Output)
 Check "task registered" ($j1.service.enabled -eq $true) "service block: $($j1.service | ConvertTo-Json -Compress)"
 Check "readiness ok (port really serves the NEW service)" ($j1.readiness.ok -eq $true) "readiness: $($j1.readiness | ConvertTo-Json -Compress)"
 $picked = $j1.port
-Check "auto-picked a free port (not the WSL-held 55423)" ($picked -ne 55423) "port=$picked"
+# If the WSL relay is up it holds 55423 with a foreign Tokdash and setup must avoid it;
+# if it is down, the default 55423 is legitimately used.
+$relayConn = Get-NetTCPConnection -LocalPort 55423 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+$relayHolder = "none"
+if ($relayConn) {
+  $relayProc = Get-Process -Id $relayConn.OwningProcess -ErrorAction SilentlyContinue
+  if ($relayProc) { $relayHolder = $relayProc.ProcessName }
+}
+Write-Host "  (55423 holder before setup: $relayHolder)"
+if ($relayHolder -ne "none") {
+  Check "auto-picked a free port (not the WSL-held 55423)" ($picked -ne 55423) "port=$picked"
+} else {
+  Check "default port 55423 free and used" ($picked -eq 55423) "port=$picked"
+}
 $xml = Get-Content "$env:LOCALAPPDATA\Tokdash\Tokdash.xml" -Raw
 Check "task XML has per-user LogonTrigger UserId" ($xml -match '<UserId>') "the trigger is still any-user (would need elevation)"
 Start-Sleep -Seconds 2

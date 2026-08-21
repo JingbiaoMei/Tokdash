@@ -4347,6 +4347,8 @@ class CodingToolsUsageTracker:
             "dsh": DSHParser(self.pricing_db),
             "reasonix": ReasonixParser(self.pricing_db),
             "workbuddy": WorkBuddyParser(self.pricing_db),
+            "qoder": QoderIdeParser(self.pricing_db),
+            "qoder_cli": QoderCliParser(self.pricing_db),
         }
 
     def collect(self, since_date: Optional[datetime] = None, until_date: Optional[datetime] = None, sources: Optional[List[str]] = None):

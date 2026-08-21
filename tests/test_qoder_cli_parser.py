@@ -587,3 +587,16 @@ def test_cli_parser_identity(monkeypatch, tmp_path):
     assert sig["entry_format"] == USAGE_ENTRY_FORMAT_VERSION
     # the IDE parser stays None: source_native_db, live only
     assert QoderIdeParser.persistent_parser_version is None
+
+
+def test_tracker_registers_qoder_sources():
+    from tokdash.sources.coding_tools import (
+        CodingToolsUsageTracker,
+        QoderIdeParser,
+    )
+
+    tracker = CodingToolsUsageTracker()
+    assert isinstance(tracker.parsers["qoder"], QoderIdeParser)
+    assert isinstance(tracker.parsers["qoder_cli"], QoderCliParser)
+    assert tracker.parsers["qoder_cli"].persistent_parser_version == 1
+    assert tracker.parsers["qoder"].persistent_parser_version is None

@@ -102,37 +102,55 @@ See [Supported clients](docs/reference/SUPPORTED_CLIENTS.md) for local data path
 <p align="center">
   <b>Overview</b><br />
   <a href="https://tokdash.github.io/demo/">
-    <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-overview-en.png" alt="Tokdash overview dashboard - click for live demo" width="860" />
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-overview-en-dark.png" />
+      <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-overview-en-light.png" alt="Tokdash overview dashboard - click for live demo" width="860" />
+    </picture>
   </a>
 </p>
 <p align="center">
   <b>Sessions</b><br />
   <a href="https://tokdash.github.io/demo/">
-    <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-session-en.png" alt="Tokdash sessions view - click for live demo" width="860" />
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-sessions-en-dark.png" />
+      <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-sessions-en-light.png" alt="Tokdash sessions view - click for live demo" width="860" />
+    </picture>
   </a>
 </p>
 <p align="center">
   <b>Monthly usage heatmap</b><br />
   <a href="https://tokdash.github.io/demo/">
-    <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-heatmap-en.png" alt="Tokdash monthly usage heatmap - click for live demo" width="860" />
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-heatmap-en-dark.png" />
+      <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-heatmap-en-light.png" alt="Tokdash monthly usage heatmap - click for live demo" width="860" />
+    </picture>
   </a>
 </p>
 <p align="center">
   <b>Yearly usage heatmap</b><br />
   <a href="https://tokdash.github.io/demo/">
-    <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-heatmap-year-en.png" alt="Tokdash yearly usage heatmap - click for live demo" width="860" />
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-heatmap-year-en-dark.png" />
+      <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-heatmap-year-en-light.png" alt="Tokdash yearly usage heatmap - click for live demo" width="860" />
+    </picture>
   </a>
 </p>
 <p align="center">
   <b>Quota tracking</b><br />
   <a href="https://tokdash.github.io/demo/">
-    <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-quota-en.png" alt="Tokdash quota tracking - click for live demo" width="860" />
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-quota-en-dark.png" />
+      <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-quota-en-light.png" alt="Tokdash quota tracking - click for live demo" width="860" />
+    </picture>
   </a>
 </p>
 <p align="center">
   <b>Codex quota and reset credits</b><br />
   <a href="https://tokdash.github.io/demo/">
-    <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-quota-codex-en.png" alt="Tokdash Codex quota and reset credits - click for live demo" width="440" />
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-quota-codex-en-dark.png" />
+      <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-quota-codex-en-light.png" alt="Tokdash Codex quota and reset credits - click for live demo" width="440" />
+    </picture>
   </a>
 </p>
 

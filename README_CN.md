@@ -100,37 +100,55 @@
 <p align="center">
   <b>总览</b><br />
   <a href="https://tokdash.github.io/demo/">
-    <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-overview-cn.png" alt="Tokdash 总览仪表盘 — 点击体验在线 Demo" width="860" />
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-overview-cn-dark.png" />
+      <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-overview-cn-light.png" alt="Tokdash 总览仪表盘 — 点击体验在线 Demo" width="860" />
+    </picture>
   </a>
 </p>
 <p align="center">
   <b>会话列表</b><br />
   <a href="https://tokdash.github.io/demo/">
-    <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-session-cn.png" alt="Tokdash 会话列表 — 点击体验在线 Demo" width="860" />
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-sessions-cn-dark.png" />
+      <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-sessions-cn-light.png" alt="Tokdash 会话列表 — 点击体验在线 Demo" width="860" />
+    </picture>
   </a>
 </p>
 <p align="center">
   <b>月度使用热力图</b><br />
   <a href="https://tokdash.github.io/demo/">
-    <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-heatmap-cn.png" alt="Tokdash 月度使用热力图 — 点击体验在线 Demo" width="860" />
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-heatmap-cn-dark.png" />
+      <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-heatmap-cn-light.png" alt="Tokdash 月度使用热力图 — 点击体验在线 Demo" width="860" />
+    </picture>
   </a>
 </p>
 <p align="center">
   <b>年度使用热力图</b><br />
   <a href="https://tokdash.github.io/demo/">
-    <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-heatmap-year-cn.png" alt="Tokdash 年度使用热力图 — 点击体验在线 Demo" width="860" />
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-heatmap-year-cn-dark.png" />
+      <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-heatmap-year-cn-light.png" alt="Tokdash 年度使用热力图 — 点击体验在线 Demo" width="860" />
+    </picture>
   </a>
 </p>
 <p align="center">
   <b>额度追踪</b><br />
   <a href="https://tokdash.github.io/demo/">
-    <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-quota-cn.png" alt="Tokdash 额度追踪 — 点击体验在线 Demo" width="860" />
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-quota-cn-dark.png" />
+      <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-quota-cn-light.png" alt="Tokdash 额度追踪 — 点击体验在线 Demo" width="860" />
+    </picture>
   </a>
 </p>
 <p align="center">
   <b>Codex 额度与重置额度</b><br />
   <a href="https://tokdash.github.io/demo/">
-    <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-quota-codex-cn.png" alt="Tokdash Codex 额度与重置额度 — 点击体验在线 Demo" width="440" />
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-quota-codex-cn-dark.png" />
+      <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-quota-codex-cn-light.png" alt="Tokdash Codex 额度与重置额度 — 点击体验在线 Demo" width="440" />
+    </picture>
   </a>
 </p>
 

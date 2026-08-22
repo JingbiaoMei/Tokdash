@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
-from tokdash import clientpaths
+from tokdash import clientpaths, osinfo
 from tokdash.pricing import PricingDatabase
 from tokdash.sources.coding_tools import (
     BaseParser,
@@ -174,25 +174,29 @@ def test_omp_search_dirs_candidates(monkeypatch, tmp_path):
     assert clientpaths.omp_agent_search_dirs() == [home / ".omp" / "agent" / "sessions"]
     monkeypatch.delenv("PI_CODING_AGENT_DIR")
 
+    # omp only redirects to XDG on linux/darwin, so on Windows the app root
+    # is ignored even when it exists. Assert that rule rather than skipping it.
+    default_root = home / ".omp" / "agent" / "sessions"
+    windows = osinfo.is_windows()
+
+    def expect_xdg(sessions_dir):
+        return [default_root] if windows else [default_root, sessions_dir]
+
     # XDG migration without the variable exported (init-xdg's default root
     # is ~/.local/share): trusted only once the omp app root exists there.
     (home / ".local" / "share" / "omp").mkdir(parents=True)
-    assert clientpaths.omp_agent_search_dirs() == [
-        home / ".omp" / "agent" / "sessions",
-        home / ".local" / "share" / "omp" / "sessions",
-    ]
+    assert clientpaths.omp_agent_search_dirs() == expect_xdg(
+        home / ".local" / "share" / "omp" / "sessions"
+    )
     (home / ".local" / "share" / "omp").rmdir()
-    assert clientpaths.omp_agent_search_dirs() == [home / ".omp" / "agent" / "sessions"]
+    assert clientpaths.omp_agent_search_dirs() == [default_root]
 
     # XDG migration with the variable set: only once $XDG_DATA_HOME/omp exists.
     xdg = tmp_path / "xdg"
     monkeypatch.setenv("XDG_DATA_HOME", str(xdg))
-    assert clientpaths.omp_agent_search_dirs() == [home / ".omp" / "agent" / "sessions"]
+    assert clientpaths.omp_agent_search_dirs() == [default_root]
     (xdg / "omp").mkdir(parents=True)
-    assert clientpaths.omp_agent_search_dirs() == [
-        home / ".omp" / "agent" / "sessions",
-        xdg / "omp" / "sessions",
-    ]
+    assert clientpaths.omp_agent_search_dirs() == expect_xdg(xdg / "omp" / "sessions")
     monkeypatch.delenv("XDG_DATA_HOME")
 
     # Named profile trees are scanned alongside the default.

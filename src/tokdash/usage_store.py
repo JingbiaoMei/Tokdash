@@ -1606,7 +1606,10 @@ class UsageEntryStore:
             where.append("timestamp < ?")
             args.append(_timestamp_ms(until))
 
-        query = "SELECT raw_json FROM usage_entries"
+        # cost_authoritative rides along so migrated rows (v8 -> v9)
+        # expose the marker their raw_json lacks; the column is the
+        # source of truth for a recorded cost.
+        query = "SELECT raw_json, cost_authoritative FROM usage_entries"
         if where:
             query += " WHERE " + " AND ".join(where)
         query += " ORDER BY timestamp ASC, id ASC"
@@ -1620,6 +1623,8 @@ class UsageEntryStore:
             except Exception:
                 continue
             if isinstance(obj, dict):
+                if row["cost_authoritative"]:
+                    obj["costAuthoritative"] = True
                 out.append(obj)
         return out
 

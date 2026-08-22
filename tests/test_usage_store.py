@@ -3459,6 +3459,65 @@ def test_v9_migration_backfills_fixed_billing_rows(tmp_path):
     assert m1["cost"] == 0.5
 
 
+def test_v9_migration_fixed_zero_rows_parity_across_read_paths(tmp_path):
+    """A migrated fixed-zero row reads $0 on every path.
+
+    The v9 backfill sets cost_authoritative, but the legacy raw_json
+    has no costAuthoritative marker, so query_entries() must expose
+    the column or parse_entries_json would reprice the free row from
+    its token buckets (aggregate_entries vs query_entries divergence).
+    """
+    from tokdash.compute import parse_entries_json
+
+    db_path = tmp_path / "usage.sqlite3"
+    _v8_usage_db(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO usage_entries (
+                source, entry_key, model, timestamp, input, output, cost,
+                raw_json, billing_json
+            ) VALUES (
+                'grok', 'free-1', 'grok-4.5', 1700000000000, 1000000, 0, 0.0,
+                ?, ?
+            )
+            """,
+            (
+                json.dumps(
+                    {
+                        "source": "grok",
+                        "model": "grok-4.5",
+                        "timestamp": 1700000000000,
+                        "input": 1000000,
+                        "output": 0,
+                        "cost": 0.0,
+                    }
+                ),
+                json.dumps(usage_billing_fixed(0.0)),
+            ),
+        )
+        conn.commit()
+
+    store = UsageEntryStore(db_path)
+    assert store.source_signature("grok") is None
+
+    # SQL aggregate: the authoritative flag keeps the recorded zero.
+    agg = store.aggregate_entries(sources=["grok"])
+    grok = next(m for m in agg["apps"]["grok"]["models"] if m["name"] == "grok-4.5")
+    assert grok["cost"] == 0.0
+
+    # Query path: the column is exposed as the public marker...
+    rows = store.query_entries(sources=["grok"])
+    assert len(rows) == 1
+    assert rows[0]["costAuthoritative"] is True
+    assert rows[0]["cost"] == 0.0
+
+    # ...and parse_entries_json accepts the zero instead of repricing
+    # grok-4.5's 1M input at $2.
+    parse_data = parse_entries_json({"entries": rows})
+    assert parse_data["apps"]["grok"]["cost"] == 0.0
+
+
 def test_sync_paths_populate_cost_authoritative_from_billing(tmp_path):
     store = UsageEntryStore(tmp_path / "usage.sqlite3")
     ts = 1_700_000_000_000

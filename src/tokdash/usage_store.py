@@ -1386,6 +1386,7 @@ class UsageEntryStore:
             Callable[[tuple[str, int, int], int], tuple[Iterable[dict[str, Any]], int]]
         ] = None,
         durable: Optional[bool] = None,
+        cross_file_stable_keys: bool = False,
     ) -> bool:
         """Sync a file-backed source by replacing only changed files.
 
@@ -1399,6 +1400,16 @@ class UsageEntryStore:
         :meth:`apply_pricing` instead of marking every unchanged file as
         changed. Putting pricing back here would reparse the whole corpus on
         every pricing update.
+
+        ``cross_file_stable_keys`` (from the parser's
+        ``SourceSyncCapability``) marks sources whose entry keys can
+        legitimately occur in several files: Codex rollout resumption copies
+        the stable usage-state keys into the resumed file, and Cline forking
+        copies the parent's message ids into a new session file. Such sources
+        keep the earliest occurrence canonical (the upsert below only moves a
+        key to a newer timestamp when the owner was deleted or rewritten, and
+        the reparse-survivors paths promote a surviving copy) instead of
+        letting whichever file parsed last own the key.
         """
         files = _normalize_file_signatures(file_signatures)
         file_sig_by_path = {
@@ -1445,11 +1456,12 @@ class UsageEntryStore:
             if stored.get(file_sig[0], {}).get("signature") != file_sig_by_path[file_sig[0]]
             or int(stored.get(file_sig[0], {}).get("missing") or 0)
         ]
-        if source == "codex" and removed_paths and not keep_missing:
-            # Codex resumed rollouts can contain stable-key copies owned canonically by
-            # an older file. If that older file is deliberately removed, reparse the
-            # remaining files so one surviving occurrence can take ownership after the
-            # canonical rows are deleted. Normal append-only updates remain file-local.
+        if cross_file_stable_keys and removed_paths and not keep_missing:
+            # Cross-file stable keys (Codex resumed rollouts, Cline forks): a
+            # removed file can own a key whose surviving copies live in other
+            # files. Reparse the remaining files so one surviving occurrence
+            # can take ownership after the canonical rows are deleted. Normal
+            # append-only updates remain file-local.
             changed_files = list(files)
 
         if not removed_paths and not changed_files:
@@ -1480,11 +1492,11 @@ class UsageEntryStore:
                 rows = [_entry_for_storage(e) for e in parse_file_entries(file_sig)]
                 parsed.append((file_sig, [e for e in rows if e is not None], int(size), False))
 
-        if source == "codex":
+        if cross_file_stable_keys:
             # A full replacement can remove a stable key currently owned by this
-            # file while an unchanged resumed file still contains a later copy.
-            # Reparse survivors only in that uncommon case so the copy can be
-            # promoted after the old canonical row is deleted.
+            # file while an unchanged copy-bearing file still contains a later
+            # copy. Reparse survivors only in that uncommon case so the copy
+            # can be promoted after the old canonical row is deleted.
             full_replaced_paths = [
                 file_sig[0]
                 for file_sig, _entries, _safe_offset, appended in parsed
@@ -1551,7 +1563,9 @@ class UsageEntryStore:
                         )
 
                 total_changed_entries = 0
-                if source == "codex":
+                if cross_file_stable_keys:
+                    # Earliest occurrence owns the key: a copy restamped by a
+                    # resumed/forked file must not replace the canonical row.
                     insert_sql = """
                         INSERT INTO usage_entries (
                             source, file_path, entry_key, model, provider, timestamp,

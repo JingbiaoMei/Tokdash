@@ -209,7 +209,7 @@ def test_coding_tools_computes_persistent_pricing_signature_once_per_tracker(mon
             assert "pricing" not in _kwargs, "pricing must not enter a parse signature"
 
     pricing_db = object()
-    capability = SimpleNamespace(mode="file_replace", append_jsonl=False)
+    capability = SimpleNamespace(mode="file_replace", append_jsonl=False, cross_file_stable_keys=False)
     parsers = {
         name: SimpleNamespace(
             sync_capability=capability,

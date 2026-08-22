@@ -88,12 +88,20 @@ def _fixture_root(root: Path, transcript=None, segment=None) -> Path:
     if transcript:
         _write_lines(
             root / "projects" / "proj1" / "7255bada-539e-4ca0-bcf2-0b23aed031c3.jsonl",
-            [json.loads(l) for l in (FIXTURES / transcript).read_text().splitlines() if l.strip()],
+            [
+                json.loads(line)
+                for line in (FIXTURES / transcript).read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ],
         )
     if segment:
         _write_lines(
             root / "logs" / "sessions" / "proj1" / "7255bada-539e-4ca0-bcf2-0b23aed031c3" / "segments" / "seg.jsonl",
-            [json.loads(l) for l in (FIXTURES / segment).read_text().splitlines() if l.strip()],
+            [
+                json.loads(line)
+                for line in (FIXTURES / segment).read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ],
         )
     return root
 

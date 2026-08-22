@@ -295,3 +295,37 @@ def test_pi_agent_parser_default_dir_is_recursive(monkeypatch, tmp_path):
 
     assert len(entries) == 2
     assert {entry["entry_id"] for entry in entries} == {"pi_agent:root-msg", "pi_agent:nested-msg"}
+
+
+def test_pi_agent_model_change_modelid_with_slash_is_verbatim(monkeypatch, tmp_path):
+    """pi's modelId is used verbatim even when slash-qualified (OpenRouter
+    style); only omp's model key is provider-qualified and gets split (O3).
+    Splitting pi's modelId would change stored rows and the pricing lookup
+    key without a version bump."""
+    pi_dir = tmp_path / "pi-agent"
+    session_dir = pi_dir / "--project"
+    session_dir.mkdir(parents=True)
+
+    lines = "\n".join([
+        json.dumps({"type": "model_change", "provider": "openrouter", "modelId": "openrouter/claude-sonnet-4"}),
+        json.dumps({
+            "type": "message",
+            "id": "fedcba98",
+            "timestamp": "2026-05-21T21:30:00.000Z",
+            "message": {
+                "role": "assistant",
+                "usage": {"input": 40, "output": 10, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 50},
+            },
+        }),
+    ]) + "\n"
+    (session_dir / "session.jsonl").write_text(lines, encoding="utf-8")
+
+    monkeypatch.setenv("PI_AGENT_DIR", str(pi_dir))
+    _sig_cache.clear()
+    BaseParser._entry_cache.clear()
+
+    parser = PiAgentParser(PricingDatabase())
+    entries = parser.collect(None, None)
+    assert len(entries) == 1
+    assert entries[0]["model"] == "openrouter/claude-sonnet-4"
+    assert entries[0]["provider"] == "openrouter"

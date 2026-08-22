@@ -549,7 +549,6 @@ class OpenCodeParser(BaseParser):
 
     def __init__(self, pricing_db: PricingDatabase):
         super().__init__(pricing_db)
-        self.messages_dir = clientpaths.opencode_messages_dir()
         self.db_path = clientpaths.opencode_db_path()
 
     def _build_entry(self, model: str, provider: str, tokens: Dict[str, Any], ts_ms: int) -> Dict[str, Any]:
@@ -824,7 +823,7 @@ class ClineParser(BaseParser):
         cache_w = min(max(raw_cache_write, 0), raw_input - cache_r)
         return raw_input - cache_r - cache_w, cache_r, cache_w
 
-    def _parse_message_file(self, path_str: str, seen_ids: set) -> List[Dict[str, Any]]:
+    def _parse_message_file(self, path_str: str) -> List[Dict[str, Any]]:
         try:
             with open(path_str, "r", encoding="utf-8") as f:
                 doc = json.load(f)
@@ -841,14 +840,9 @@ class ClineParser(BaseParser):
             metrics = msg.get("metrics")
             if not isinstance(metrics, dict):
                 continue
-            # Source-global dedup: resume rewrites the same file, fork copies
-            # message ids into a new file — see the class docstring (C7).
             msg_id = msg.get("id")
             if msg_id:
                 msg_id = str(msg_id)
-                if msg_id in seen_ids:
-                    continue
-                seen_ids.add(msg_id)
             ts = self._i(msg.get("ts"))
             if ts <= 0:
                 continue
@@ -892,11 +886,21 @@ class ClineParser(BaseParser):
         return out
 
     def _parse_all(self) -> List[Dict[str, Any]]:
-        out: List[Dict[str, Any]] = []
-        seen_ids: set = set()
+        # The store's stable-key upsert keeps the earliest-timestamped
+        # occurrence of a copied id; do the same here so live and
+        # persistent totals agree even when a fork restamps a copy (C7).
+        by_id: Dict[str, Dict[str, Any]] = {}
+        anonymous: List[Dict[str, Any]] = []
         for path_str, _, _ in self._file_signatures():
-            out.extend(self._parse_message_file(path_str, seen_ids))
-        return out
+            for entry in self._parse_message_file(path_str):
+                entry_id = entry["entry_id"]
+                if not entry_id:
+                    anonymous.append(entry)
+                    continue
+                prev = by_id.get(entry_id)
+                if prev is None or entry["timestamp"] < prev["timestamp"]:
+                    by_id[entry_id] = entry
+        return list(by_id.values()) + anonymous
 
 
 class CodexParser(BaseParser):
@@ -2246,20 +2250,23 @@ class PiAgentParser(BaseParser):
                             cur_session_id = str(obj.get("id") or cur_session_id)
                             continue
 
-                        # Track model changes. pi writes a bare modelId; omp
-                        # writes model as a provider-qualified "provider/model"
-                        # string with no provider field, so split the fallback
-                        # — otherwise the pricing lookup sees the slash form
-                        # and prices the row at 0.
+                        # Track model changes. pi's modelId is always a bare id
+                        # and is used verbatim; omp writes model instead, and
+                        # that value may be provider-qualified
+                        # ("provider/model") — split only that form so the
+                        # pricing lookup sees the bare model id (O3).
                         if msg_type == "model_change":
-                            raw_model = obj.get("modelId") or obj.get("model")
-                            if isinstance(raw_model, str) and raw_model and "/" in raw_model:
+                            model_id = obj.get("modelId")
+                            raw_model = obj.get("model")
+                            if isinstance(raw_model, str) and raw_model and "/" in raw_model and not model_id:
                                 prefix, _, suffix = raw_model.partition("/")
                                 cur_provider = obj.get("provider") or prefix or cur_provider
                                 cur_model = suffix or cur_model
                             else:
                                 cur_provider = obj.get("provider") or cur_provider
-                                if isinstance(raw_model, str) and raw_model:
+                                if isinstance(model_id, str) and model_id:
+                                    cur_model = model_id
+                                elif isinstance(raw_model, str) and raw_model:
                                     cur_model = raw_model
                             continue
 
@@ -4712,10 +4719,14 @@ class CodingToolsUsageTracker:
     def collect(self, since_date: Optional[datetime] = None, until_date: Optional[datetime] = None, sources: Optional[List[str]] = None):
         self.entries = []
         self.source_errors = []
+        selected = sources or list(self.parsers.keys())
         # Re-emit the dir-ownership notes computed in __init__ (see
         # _claim_search_dirs); the reset above would otherwise wipe them.
-        self.source_errors.extend(getattr(self, "_dir_conflicts", ()))
-        selected = sources or list(self.parsers.keys())
+        # Only notes for the requested sources — a caller collecting
+        # ["claude"] should not be told about omp's dropped dir.
+        self.source_errors.extend(
+            c for c in getattr(self, "_dir_conflicts", ()) if c["source"] in selected
+        )
         for name in selected:
             parser = self.parsers.get(name)
             if parser:

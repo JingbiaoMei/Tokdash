@@ -65,6 +65,9 @@ def test_recent_sources_have_readme_pills() -> None:
         "WorkBuddy": "workbuddy.png",
         "Qoder IDE": "qoder-ide.png",
         "Qoder CLI": "qoder-cli.png",
+        "omp": "omp.png",
+        "Kilo Code": "kilocode.png",
+        "Cline": "cline.png",
     }
     for document in (
         PROJECT_ROOT / "README.md",

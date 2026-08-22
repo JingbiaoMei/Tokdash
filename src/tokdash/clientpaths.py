@@ -303,9 +303,10 @@ def omp_agent_search_dirs() -> List[Path]:
     ``<config root>/agent/sessions``, and named profiles under
     ``<config root>/profiles/<name>/agent/sessions``. On linux (including WSL) and darwin
     the default profile may be migrated with ``omp config init-xdg``; omp then
-    reads sessions from ``$XDG_DATA_HOME/omp/sessions`` — note the flattened
-    ``agent/`` prefix — and only trusts that path once ``$XDG_DATA_HOME/omp``
-    exists.
+    reads sessions from ``$XDG_DATA_HOME/omp/sessions`` — or
+    ``~/.local/share/omp/sessions`` when the variable is unset, mirroring
+    ``kilo_data_dir`` — note the flattened ``agent/`` prefix — and only
+    trusts that path once the ``omp`` app root under it exists.
 
     ``PI_CODING_AGENT_DIR`` is deliberately NOT a candidate: omp honors it in
     default-profile mode, but ``pi_agent_search_dirs`` already claims that
@@ -317,8 +318,11 @@ def omp_agent_search_dirs() -> List[Path]:
     dirs: List[Path] = [config_root / "agent" / "sessions"]
 
     xdg_data = os.environ.get("XDG_DATA_HOME", "").strip()
-    if xdg_data and not osinfo.is_windows():
-        app_root = Path(xdg_data).expanduser() / "omp"
+    if not osinfo.is_windows():
+        # init-xdg may have run without the variable ever being exported;
+        # its default root is ~/.local/share (mirror kilo_data_dir).
+        base = Path(xdg_data).expanduser() if xdg_data else Path.home() / ".local/share"
+        app_root = base / "omp"
         if app_root.is_dir():
             dirs.append(app_root / "sessions")
 

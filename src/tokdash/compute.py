@@ -17,6 +17,7 @@ from .sources.openclaw import get_usage_for_range as get_session_usage_range
 from .sources.openclaw import get_usage_for_year as get_session_usage_year
 from .sources.coding_tools import CodingToolsUsageTracker
 from .usage_store import (
+    UsageDatabaseSchemaTooNewError,
     UsageEntryStore,
     build_source_signature,
     persistent_pricing_signature,
@@ -159,6 +160,10 @@ def _sync_usage_store(tracker: CodingToolsUsageTracker) -> tuple[UsageEntryStore
     # under; a sync that lands after another process has moved the database on
     # drops the stored identity rather than committing costs under someone
     # else's (see UsageEntryStore._drop_stale_pricing_identity).
+    # This connect also doubles as the too-new-schema guard for every path below:
+    # it runs BEFORE the parsers enumerate their source files, so a mismatched
+    # database costs one open here rather than a full discovery scan per request.
+    # Keep it ahead of the loop -- moving it after would reintroduce that scan.
     store.apply_pricing(pricing, tracker.pricing_db)
     for name in selected:
         parser = tracker.parsers[name]
@@ -357,6 +362,10 @@ def run_local_coding_tools_json(period_args: list[str]) -> Dict[str, Any]:
             entries.extend(_collect_live_coding_entries(tracker, since, until, _usage_store_live_sources(tracker)))
             entries.sort(key=lambda e: int(e.get("timestamp", 0) or 0))
             return {"entries": entries}
+        except UsageDatabaseSchemaTooNewError:
+            # A newer database is terminal for this build; reparsing the logs
+            # instead would hide the skew behind a permanent full-history reparse.
+            raise
         except Exception:
             # The persistent DB is a cache. If it is corrupt or temporarily
             # unavailable, preserve current behavior by falling back to the live
@@ -682,6 +691,11 @@ def get_tools_data_for_range(since: Optional[datetime], until: Optional[datetime
                 # "unavailable" instead of a zero that reads as "no usage".
                 result["source_errors"] = [e["source"] for e in tracker.source_errors]
                 return result
+            except UsageDatabaseSchemaTooNewError:
+                # Fail-open covers a sick cache, not an unreadable one: a newer
+                # schema never heals on retry, so degrading here would reparse the
+                # full history on every request.
+                raise
             except Exception:
                 # Keep the DB fail-open: serving correctness should not depend on
                 # cache health while this backend is still evolving.
@@ -712,6 +726,8 @@ def get_tools_contributions_for_range(since: Optional[datetime], until: Optional
                 live_entries = _collect_live_coding_entries(tracker, since, until, _usage_store_live_sources(tracker))
                 live_days = _contributions_from_entries(live_entries)
                 return _merge_contribution_days([store_days, live_days])
+            except UsageDatabaseSchemaTooNewError:
+                raise
             except Exception:
                 pass
         tracker.collect(since, until)

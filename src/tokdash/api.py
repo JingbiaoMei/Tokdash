@@ -34,6 +34,8 @@ from .assets import (
 )
 from .compute import compute_stats, compute_usage_with_comparison, get_openclaw_data, get_tools_data
 from .dateutil import parse_date_range
+from .usage_store import SCHEMA_VERSION as USAGE_DB_SCHEMA_VERSION
+from .usage_store import UsageDatabaseSchemaTooNewError
 from .sessions import (
     SESSION_TOOLS,
     get_active_time_data,
@@ -976,6 +978,11 @@ def get_usage(
             force_refresh=refresh,
             include_cache_metadata=True,
         )
+    except UsageDatabaseSchemaTooNewError as e:
+        # 500, not 503: 503 is the dashboard retry signal, and a database
+        # written by a newer build never becomes readable on retry. Fail fast
+        # and carry the remediation in the detail.
+        raise HTTPException(status_code=500, detail=str(e))
     except CacheBackpressureError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
@@ -992,6 +999,11 @@ def get_openclaw(period: str = "today") -> Dict[str, Any]:
 
     try:
         return _cached_route("/api/openclaw", _pricing_cache_key(f"openclaw_{period}"), fetch)
+    except UsageDatabaseSchemaTooNewError as e:
+        # 500, not 503: 503 is the dashboard retry signal, and a database
+        # written by a newer build never becomes readable on retry. Fail fast
+        # and carry the remediation in the detail.
+        raise HTTPException(status_code=500, detail=str(e))
     except CacheBackpressureError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
@@ -1010,6 +1022,11 @@ def get_tools(period: str = "today") -> Dict[str, Any]:
             return data
 
         return _cached_route("/api/tools", _pricing_cache_key(f"tools_{period}"), fetch)
+    except UsageDatabaseSchemaTooNewError as e:
+        # 500, not 503: 503 is the dashboard retry signal, and a database
+        # written by a newer build never becomes readable on retry. Fail fast
+        # and carry the remediation in the detail.
+        raise HTTPException(status_code=500, detail=str(e))
     except CacheBackpressureError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
@@ -1027,6 +1044,11 @@ def get_quota() -> Dict[str, Any]:
         from .sources.quota import quota_state
 
         return _cached_route("/api/quota", "quota_state", quota_state)
+    except UsageDatabaseSchemaTooNewError as e:
+        # 500, not 503: 503 is the dashboard retry signal, and a database
+        # written by a newer build never becomes readable on retry. Fail fast
+        # and carry the remediation in the detail.
+        raise HTTPException(status_code=500, detail=str(e))
     except CacheBackpressureError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
@@ -1159,6 +1181,13 @@ def refresh_quota() -> Dict[str, Any]:
         snapshots = collect_enabled_snapshots(include_network=True, store=store)
         remember_current_snapshots(snapshots)
         inserted = store.insert_quota_snapshots(snapshots) if store is not None else 0
+    except UsageDatabaseSchemaTooNewError as e:
+        # Release the reservation first (same reason as below), then convert. A bare
+        # `raise` reaches FastAPI as a generic 500 whose body is "Internal Server
+        # Error", so the dashboard renders "HTTP 500" and the remediation this error
+        # exists to carry is lost on exactly the route a user hits when retrying.
+        _abort_quota_refresh()
+        raise HTTPException(status_code=500, detail=str(e))
     except Exception:
         # A failed refresh must not burn the cooldown slot: release the reservation so
         # the user can retry immediately instead of being locked out for 60 s by a 500.
@@ -1177,6 +1206,11 @@ def get_codex_sessions(period: str = "today", include_review_sessions: Optional[
             cache_key,
             lambda: get_codex_sessions_data(period, include_review_sessions=include_review_sessions),
         )
+    except UsageDatabaseSchemaTooNewError as e:
+        # 500, not 503: 503 is the dashboard retry signal, and a database
+        # written by a newer build never becomes readable on retry. Fail fast
+        # and carry the remediation in the detail.
+        raise HTTPException(status_code=500, detail=str(e))
     except CacheBackpressureError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
@@ -1221,6 +1255,11 @@ def get_sessions(
                 include_review_sessions=include_review_sessions,
             ),
         )
+    except UsageDatabaseSchemaTooNewError as e:
+        # 500, not 503: 503 is the dashboard retry signal, and a database
+        # written by a newer build never becomes readable on retry. Fail fast
+        # and carry the remediation in the detail.
+        raise HTTPException(status_code=500, detail=str(e))
     except CacheBackpressureError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except ValueError as e:
@@ -1258,6 +1297,11 @@ def get_active_time(
             ),
             force_refresh=refresh,
         )
+    except UsageDatabaseSchemaTooNewError as e:
+        # 500, not 503: 503 is the dashboard retry signal, and a database
+        # written by a newer build never becomes readable on retry. Fail fast
+        # and carry the remediation in the detail.
+        raise HTTPException(status_code=500, detail=str(e))
     except CacheBackpressureError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except ValueError as e:
@@ -1349,6 +1393,11 @@ async def serve_service_worker(request: Request):
 def get_stats(year: Optional[int] = None) -> Dict[str, Any]:
     try:
         return _cached_route("/api/stats", _pricing_cache_key(f"stats_{year}"), lambda: compute_stats(year))
+    except UsageDatabaseSchemaTooNewError as e:
+        # 500, not 503: 503 is the dashboard retry signal, and a database
+        # written by a newer build never becomes readable on retry. Fail fast
+        # and carry the remediation in the detail.
+        raise HTTPException(status_code=500, detail=str(e))
     except CacheBackpressureError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
@@ -1364,6 +1413,11 @@ def get_activity_insights(refresh: bool = False) -> dict[str, Any]:
             get_codex_activity_insights,
             force_refresh=refresh,
         )
+    except UsageDatabaseSchemaTooNewError as e:
+        # 500, not 503: 503 is the dashboard retry signal, and a database
+        # written by a newer build never becomes readable on retry. Fail fast
+        # and carry the remediation in the detail.
+        raise HTTPException(status_code=500, detail=str(e))
     except CacheBackpressureError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:  # noqa: BLE001 - isolate parser/index failures from other routes
@@ -1404,6 +1458,11 @@ async def get_version() -> Dict[str, Any]:
         "runtime_version": __version__,
         "install_method": manifest.get("install_method"),
         "update_check_enabled": _update_check_enabled(),
+        # The usage-DB schema this build can read. A constant, not a DB read, so
+        # this route stays as cheap as /health — comparing it against another
+        # process's value is how a version skew is spotted without opening the
+        # database. `tokdash doctor` reports what the file on disk actually holds.
+        "usage_db_schema_supported": USAGE_DB_SCHEMA_VERSION,
     }
 
 

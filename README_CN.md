@@ -435,7 +435,13 @@ Tokdash 默认**只监听 localhost**。
 
 Tokdash 默认会在 `~/.tokdash/usage.sqlite3` 维护一个本地 SQLite 索引。它保存解析后的 token 行以及 Codex/Claude/Kimi/DeepSeek Harness/Reasonix 会话摘要，让仪表盘和 API 的重复读取可以走索引 SQL，而不是每次重新解析所有源日志。源日志仍然是事实来源；这个 DB 是本地性能索引，禁用或不可用时 Tokdash 会回退到实时解析。
 
-缓存的会话行不含价格：它们只保存每轮的计费输入（模型、新增输入、缓存读取与写入、输出），费用在读取时按当前进程加载的价格计算。因此修改价格会立即重算，而不需要重新读取数 GB 日志；共用同一个数据库的两个 Tokdash 版本（例如已安装的服务与源码检出）也不会因价格不同而互相作废对方的行。解析器变更与源文件变更仍会照常触发重新解析。此前写入的行（包括 `TOKDASH_USAGE_DB_DURABLE` 在源日志消失后保留的行）会按存储的合计值重算，结果一致，但无法再区分 Claude/Kimi 的缓存写入与新增输入；只有重新解析这些日志才能恢复该区分。Codex 按 `provider/model` 计费但只存裸模型名，因此它的旧行不会被复用，而是重新解析一次。
+缓存的会话行不含价格：它们只保存每轮的计费输入（模型、新增输入、缓存读取与写入、输出），费用在读取时按当前进程加载的价格计算。因此修改价格会立即重算，而不需要重新读取数 GB 日志；共用同一个数据库的两个 Tokdash 版本也不会因价格不同而互相作废对方的行。但只有在两个版本支持同一 DB schema 时共用才安全：schema 迁移只能向前，一旦较新的版本迁移了该文件，较旧的版本在升级前就无法再打开它，期间所有缓存读取都会失败。`tokdash doctor` 会同时报告磁盘上的 schema 与当前构建支持的 schema。解析器变更与源文件变更仍会照常触发重新解析。此前写入的行（包括 `TOKDASH_USAGE_DB_DURABLE` 在源日志消失后保留的行）会按存储的合计值重算，结果一致，但无法再区分 Claude/Kimi 的缓存写入与新增输入；只有重新解析这些日志才能恢复该区分。Codex 按 `provider/model` 计费但只存裸模型名，因此它的旧行不会被复用，而是重新解析一次。
+
+源码检出请使用独立的数据目录运行，避免迁移已安装服务所用的数据库：
+
+```bash
+TOKDASH_DATA_DIR=output/dev-data PYTHONPATH=src python3 main.py
+```
 
 - `TOKDASH_USAGE_DB`（默认：`1`）——设为 `0`、`false`、`no` 或 `off` 可禁用持久化使用量 DB
 - `TOKDASH_DATA_DIR`（默认：`~/.tokdash`）——Tokdash 本地状态目录

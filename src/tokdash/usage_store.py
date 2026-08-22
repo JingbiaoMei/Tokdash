@@ -20,6 +20,83 @@ from .pricing import PricingDatabase
 SCHEMA_VERSION = 9
 SIGNATURE_VERSION = 3
 
+
+class UsageDatabaseSchemaTooNewError(RuntimeError):
+    """The usage database was written by a newer Tokdash than this build.
+
+    Terminal for this process, not a transient cache fault: migrations only run
+    forward, so no amount of retrying makes a newer database readable. Every
+    cache fallback re-raises this before degrading to the source-log parsers —
+    treating it as "the cache is sick, reread the logs" turns one stale process
+    into a full-history reparse on *every* request, which is how a single
+    version skew pinned a live server at multi-GB RSS until it was restarted.
+
+    Carries the operator-actionable facts: which database, what it holds, and
+    what this build supports.
+    """
+
+    def __init__(self, *, path: Any, found: int, supported: int) -> None:
+        self.path = Path(str(path))
+        self.found = int(found)
+        self.supported = int(supported)
+        super().__init__(
+            f"usage database schema {self.found} at {self.path} is newer than "
+            f"this Tokdash supports (<= {self.supported}); run `tokdash update` "
+            "and restart any other Tokdash processes using this data directory"
+        )
+
+
+def read_stored_schema_version(conn: sqlite3.Connection) -> Optional[int]:
+    """Schema version recorded in ``meta``, or None if this DB predates it.
+
+    None covers both a brand-new (tableless) file and a legacy database with no
+    ``schema_version`` row; both are migrated forward normally.
+    """
+    if conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'meta'"
+    ).fetchone() is None:
+        return None
+    row = conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
+    if row is None:
+        return None
+    try:
+        return int(row["value"])
+    except (TypeError, ValueError):
+        return None
+
+
+def raise_if_usage_db_incompatible(db_path: Optional[Path] = None) -> None:
+    """Cheap pre-flight: refuse a too-new database before any source discovery.
+
+    The full ``_connect`` path already rejects one, but callers reach it only
+    after enumerating their source files — a recursive scan of thousands of
+    session logs. Since the failure is deliberately not cached, every request
+    would repeat that scan and hold a compute slot just to fail again. This runs
+    first: a read-only open and one ``meta`` lookup, no DDL and no migration.
+
+    Silent on anything else. A missing, corrupt or unopenable file is not this
+    function's call to make — the normal connect path reports it, and the
+    ordinary cache fallbacks still cover it.
+    """
+    path = Path(db_path) if db_path is not None else usage_db_path()
+    if not path.exists():
+        return
+    try:
+        conn = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=5)
+    except (sqlite3.Error, ValueError, OSError):
+        return
+    try:
+        conn.row_factory = sqlite3.Row
+        found = read_stored_schema_version(conn)
+    except sqlite3.Error:
+        return
+    finally:
+        conn.close()
+    if found is not None and found > SCHEMA_VERSION:
+        raise UsageDatabaseSchemaTooNewError(
+            path=path, found=found, supported=SCHEMA_VERSION
+        )
+
 # What a persistent usage row must carry to be priceable without rereading its
 # source log: the `_billing` provenance record built by the parsers below and
 # stored in usage_entries.billing_json. Every persistent usage-parser signature
@@ -780,7 +857,26 @@ class UsageEntryStore:
         version = conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
         return version is not None and int(version["value"]) == SCHEMA_VERSION
 
+    def check_compatible(self) -> None:
+        """Public pre-flight guard: see :func:`raise_if_usage_db_incompatible`.
+
+        Call this before enumerating source files, not after.
+        """
+        raise_if_usage_db_incompatible(self.path)
+
+    def _raise_if_schema_too_new(self, conn: sqlite3.Connection) -> None:
+        found = read_stored_schema_version(conn)
+        if found is not None and found > SCHEMA_VERSION:
+            raise UsageDatabaseSchemaTooNewError(
+                path=self.path, found=found, supported=SCHEMA_VERSION
+            )
+
     def _ensure_schema(self, conn: sqlite3.Connection) -> None:
+        # Refuse a newer database BEFORE touching it. Everything below this line
+        # mutates: journal_mode flips the file into WAL, the DDL adds tables, and
+        # the migration chain rewrites rows. None of that is safe against a layout
+        # written by a build we do not know, and none of it is reversible.
+        self._raise_if_schema_too_new(conn)
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
         conn.executescript(
@@ -918,8 +1014,14 @@ class UsageEntryStore:
         )
         row = conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
         current = int(row["value"]) if row else 0
+        # Re-checked under the DDL above: another process may have migrated this
+        # database forward between our pre-mutation check and here. The DDL is all
+        # CREATE ... IF NOT EXISTS / additive ALTERs, so reaching this point on a
+        # newer file has not corrupted it — but the migration chain below would.
         if current > SCHEMA_VERSION:
-            raise RuntimeError(f"unsupported usage DB schema {current}; expected <= {SCHEMA_VERSION}")
+            raise UsageDatabaseSchemaTooNewError(
+                path=self.path, found=current, supported=SCHEMA_VERSION
+            )
         if current < 8:
             # Legacy rows predate billing provenance. Their cost was computed
             # under pricing this build cannot identify, so it is preserved as a

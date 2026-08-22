@@ -805,6 +805,9 @@ def cmd_doctor(opts: Options) -> int:
     service_info = _doctor_service(man, detection)
     _append_service_issues(issues, man, service_info, detection)
 
+    usage_db = _doctor_usage_db()
+    _append_usage_db_issues(issues, usage_db)
+
     from .. import __version__
 
     report = {
@@ -824,6 +827,7 @@ def cmd_doctor(opts: Options) -> int:
         "port": detection["port"],
         "update_check": _doctor_update_check(),
         "quota": _doctor_quota(),
+        "usage_db": usage_db,
         "issues": issues,
     }
 
@@ -926,6 +930,80 @@ def _doctor_update_check() -> Dict[str, Any]:
     from .. import __version__
 
     return {"enabled": True, **updatecheck.check(__version__)}
+
+
+def _doctor_usage_db() -> Dict[str, Any]:
+    """Usage-database schema state for `tokdash doctor`.
+
+    Deliberately does NOT open the database through ``UsageEntryStore``: that path
+    migrates on connect, and doctor has to be able to *report* a database written
+    by a newer build without touching it. A read-only URI connection and a single
+    ``meta`` lookup keep this diagnostic side-effect free.
+    """
+    try:
+        import sqlite3
+        from contextlib import closing
+
+        from ..clientpaths import usage_db_path
+        from ..usage_store import (
+            SCHEMA_VERSION,
+            persistent_usage_db_enabled,
+            read_stored_schema_version,
+        )
+    except Exception:
+        return {"available": False}
+
+    path = usage_db_path()
+    info: Dict[str, Any] = {
+        "available": True,
+        "enabled": persistent_usage_db_enabled(),
+        "supported_schema": int(SCHEMA_VERSION),
+        "path": str(path),
+        "present": path.exists(),
+    }
+    if not info["present"]:
+        return info
+    try:
+        # as_uri() percent-escapes the path and emits the drive-letter form
+        # Windows needs. Interpolating into "file:{path}" instead lets a `?`, `#`
+        # or `%` in a data dir terminate the path early and silently open a
+        # *different* file (or none), which a diagnostic must never do.
+        uri = path.resolve().as_uri() + "?mode=ro"
+        with closing(sqlite3.connect(uri, uri=True, timeout=5)) as conn:
+            conn.row_factory = sqlite3.Row
+            info["stored_schema"] = read_stored_schema_version(conn)
+    except Exception as exc:
+        info["error"] = str(exc)
+    return info
+
+
+def _append_usage_db_issues(issues: List[str], usage_db: Dict[str, Any]) -> None:
+    if not usage_db.get("available") or not usage_db.get("enabled"):
+        # TOKDASH_USAGE_DB=0: nothing reads the file, so its schema cannot affect
+        # a single request. Reporting it would fail doctor over a dormant file.
+        return
+    if not usage_db.get("present"):
+        return
+    if usage_db.get("error"):
+        # Enabled but unreadable is a real fault: every cached read goes through
+        # this file. Printing "unreadable" while doctor still exits 0 is exactly
+        # the silent degradation this whole change exists to remove.
+        issues.append(
+            f"usage database at {usage_db.get('path')} could not be inspected: "
+            f"{usage_db['error']}"
+        )
+        return
+    stored = usage_db.get("stored_schema")
+    supported = usage_db.get("supported_schema")
+    if stored is None or supported is None:
+        return
+    if int(stored) > int(supported):
+        issues.append(
+            f"usage database schema {stored} is newer than this build supports "
+            f"({supported}) — every cached read fails until the versions match. "
+            "Run `tokdash update`, then restart any other Tokdash process using "
+            f"{usage_db.get('path') or 'this data directory'}."
+        )
 
 
 def _doctor_quota() -> Dict[str, Any]:
@@ -1747,6 +1825,19 @@ def _print_doctor_human(r: Dict[str, Any]) -> None:
         snaps = q.get("snapshots")
         last_str = "never" if not last else time.strftime("%Y-%m-%d %H:%M", time.localtime(int(last)))
         print(f"  Quota data:   {snaps if snaps is not None else '—'} snapshots, last poll {last_str}")
+    db = r.get("usage_db", {})
+    if db.get("available"):
+        supported = db.get("supported_schema")
+        if not db.get("enabled"):
+            print(f"  Usage DB:     disabled (TOKDASH_USAGE_DB), this build reads schema {supported}")
+        elif not db.get("present"):
+            print(f"  Usage DB:     not created yet (this build writes schema {supported})")
+        elif db.get("error"):
+            print(f"  Usage DB:     unreadable ({db['error']})")
+        else:
+            stored = db.get("stored_schema")
+            shown = "pre-versioned" if stored is None else f"schema {stored}"
+            print(f"  Usage DB:     {shown} (this build supports {supported})")
     for issue in r["issues"]:
         print(f"  {_warn('⚠')} {issue}")
 

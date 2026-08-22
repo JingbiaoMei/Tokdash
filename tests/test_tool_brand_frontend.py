@@ -11,6 +11,8 @@ import tokdash  # type: ignore[import-untyped]
 STATIC_DIR = Path(tokdash.__file__).parent / "static"
 INDEX_HTML = STATIC_DIR / "index.html"
 ICON_DIR = STATIC_DIR / "icons" / "agents"
+PROJECT_ROOT = STATIC_DIR.parents[2]
+DOCS_PILL_DIR = PROJECT_ROOT / "docs" / "assets" / "agents" / "pills"
 
 
 def _extract_js_function(source: str, signature: str) -> str:
@@ -53,6 +55,27 @@ def test_supported_tool_brand_icons_are_local_and_small() -> None:
     actual = {path.name for path in ICON_DIR.glob("*") if path.is_file()}
     assert expected <= actual
     assert sum((ICON_DIR / name).stat().st_size for name in expected) < 100_000
+
+
+def test_recent_sources_have_readme_pills() -> None:
+    expected = {
+        "WorkBuddy": "workbuddy.png",
+        "Qoder IDE": "qoder-ide.png",
+        "Qoder CLI": "qoder-cli.png",
+    }
+    for document in (
+        PROJECT_ROOT / "README.md",
+        PROJECT_ROOT / "README_CN.md",
+        PROJECT_ROOT / "docs" / "reference" / "SUPPORTED_CLIENTS.md",
+    ):
+        source = document.read_text(encoding="utf-8")
+        for label, filename in expected.items():
+            assert f'title="{label}"' in source
+            assert f'/docs/assets/agents/pills/{filename}' in source
+    for filename in expected.values():
+        pill = DOCS_PILL_DIR / filename
+        assert pill.is_file()
+        assert pill.stat().st_size < 20_000
 
 
 def test_tool_brand_registry_uses_local_lazy_assets_with_a_fallback() -> None:

@@ -25,6 +25,9 @@
   <a href="https://github.com/deepseek-ai/deepseek-harness" title="DeepSeek Harness"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/dsh.png" alt="DeepSeek Harness" height="34"></a>
   <a href="https://reasonix.io/" title="Reasonix"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/reasonix.png" alt="Reasonix" height="34"></a>
   <a href="https://zcode.z.ai" title="ZCode"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/zcode.png" alt="ZCode" height="34"></a>
+  <a href="https://www.workbuddy.ai/" title="WorkBuddy"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/workbuddy.png" alt="WorkBuddy" height="34"></a>
+  <a href="https://qoder.com/" title="Qoder IDE"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/qoder-ide.png" alt="Qoder IDE" height="34"></a>
+  <a href="https://qoder.com/" title="Qoder CLI"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/qoder-cli.png" alt="Qoder CLI" height="34"></a>
 </p>
 
 <p align="center">
@@ -79,20 +82,20 @@
 
 | 客户端 | 用量与费用 | 会话浏览器 |
 |---|:---:|:---:|
-| **OpenCode** | ✅ | ✅ |
-| **Codex** | ✅ | ✅ |
-| **Claude Code** | ✅ | ✅ |
-| **Gemini CLI** | ✅ | — |
-| **Antigravity CLI** | ✅ | — |
-| **OpenClaw** | ✅ | — |
-| **Kimi Code / Kimi CLI** | ✅ | ✅ |
-| **MiMo Code** | ✅ | ✅ |
-| **Grok Build** | ✅ | — |
-| **Pi** | ✅ | ✅ |
-| **GitHub Copilot CLI** | ✅ | — |
-| **Hermes** | ✅ | — |
-| **DeepSeek Harness** | ✅ | ✅ |
-| **Reasonix** | ✅ | ✅ |
+| OpenCode | ✅ | ✅ |
+| Codex | ✅ | ✅ |
+| Claude Code | ✅ | ✅ |
+| Gemini CLI | ✅ | — |
+| Antigravity CLI | ✅ | — |
+| OpenClaw | ✅ | — |
+| Kimi Code / Kimi CLI | ✅ | ✅ |
+| MiMo Code | ✅ | ✅ |
+| Grok Build | ✅ | — |
+| Pi | ✅ | ✅ |
+| GitHub Copilot CLI | ✅ | — |
+| Hermes | ✅ | — |
+| DeepSeek Harness | ✅ | ✅ |
+| Reasonix | ✅ | ✅ |
 | **ZCode** | ✅ | ✅ |
 | **WorkBuddy** | ✅ | — |
 | **Qoder IDE** | ✅ | — |

@@ -48,6 +48,9 @@ TOOLS = [
     ("dsh", "DeepSeek Harness", "dsh.svg"),
     ("reasonix", "Reasonix", "reasonix.svg"),
     ("zcode", "ZCode", "zcode.png"),
+    ("workbuddy", "WorkBuddy", "workbuddy.png"),
+    ("qoder-ide", "Qoder IDE", "qoder.png"),
+    ("qoder-cli", "Qoder CLI", "qoder.png"),
 ]
 
 # Rendered at ~2.4x the README display height (40px) for crispness.

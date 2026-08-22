@@ -380,7 +380,7 @@ def test_usage_store_codex_duplicate_key_preserves_earliest_and_promotes_survivo
         ]
 
     files = ((original_path, 1, 100), (resumed_path, 1, 100))
-    assert store.sync_files("codex", files, parser={"v": 1}, parse_file_entries=parse_file) is True
+    assert store.sync_files("codex", files, parser={"v": 1}, parse_file_entries=parse_file, cross_file_stable_keys=True) is True
     rows = store.query_entries(sources=["codex"])
     assert [(row["entry_id"], row["timestamp"]) for row in rows] == [
         ("codex-token-v1:shared", 1_700_000_000_000),
@@ -391,7 +391,7 @@ def test_usage_store_codex_duplicate_key_preserves_earliest_and_promotes_survivo
     # replace the original occurrence with its restamped copy.
     calls.clear()
     changed = ((original_path, 1, 100), (resumed_path, 2, 200))
-    assert store.sync_files("codex", changed, parser={"v": 1}, parse_file_entries=parse_file) is True
+    assert store.sync_files("codex", changed, parser={"v": 1}, parse_file_entries=parse_file, cross_file_stable_keys=True) is True
     assert calls == [resumed_path]
     rows = store.query_entries(sources=["codex"])
     assert [(row["entry_id"], row["timestamp"]) for row in rows] == [
@@ -409,6 +409,7 @@ def test_usage_store_codex_duplicate_key_preserves_earliest_and_promotes_survivo
         parser={"v": 1},
         parse_file_entries=parse_file,
         durable=False,
+        cross_file_stable_keys=True,
     ) is True
     assert calls == [resumed_path]
     rows = store.query_entries(sources=["codex"])
@@ -444,7 +445,7 @@ def test_usage_store_codex_rewrite_promotes_duplicate_from_unchanged_file(tmp_pa
         return [entry(1_700_000_100_000, "codex-token-v1:shared")]
 
     files = ((original_path, 1, 100), (resumed_path, 1, 100))
-    assert store.sync_files("codex", files, parser={"v": 1}, parse_file_entries=parse_file) is True
+    assert store.sync_files("codex", files, parser={"v": 1}, parse_file_entries=parse_file, cross_file_stable_keys=True) is True
     assert store.query_entries(sources=["codex"])[0]["timestamp"] == 1_700_000_000_000
 
     # Rewriting the canonical file without this event must reconsider the
@@ -452,11 +453,123 @@ def test_usage_store_codex_rewrite_promotes_duplicate_from_unchanged_file(tmp_pa
     calls.clear()
     original_has_shared_event = False
     changed = ((original_path, 2, 90), (resumed_path, 1, 100))
-    assert store.sync_files("codex", changed, parser={"v": 1}, parse_file_entries=parse_file) is True
+    assert store.sync_files("codex", changed, parser={"v": 1}, parse_file_entries=parse_file, cross_file_stable_keys=True) is True
     assert calls == [original_path, resumed_path]
     rows = store.query_entries(sources=["codex"])
     assert [(row["entry_id"], row["timestamp"]) for row in rows] == [
         ("codex-token-v1:shared", 1_700_000_100_000),
+    ]
+
+
+def _cline_entry(timestamp: int, entry_id: str, input_tokens: int) -> dict:
+    return {
+        "source": "cline",
+        "model": "cline-test-model",
+        "provider": "openai-compatible",
+        "timestamp": timestamp,
+        "input": input_tokens,
+        "output": 1,
+        "entry_id": entry_id,
+    }
+
+
+def test_usage_store_cline_fork_duplicate_key_preserves_earliest_and_promotes_survivor(tmp_path):
+    """Cline forking copies the parent's message ids (stable keys) into a new
+    session file. The earliest occurrence must stay canonical; if the
+    canonical file is removed, a surviving copy is promoted instead of the
+    usage being lost."""
+    store = UsageEntryStore(tmp_path / "usage.sqlite3")
+    parent_path = str(tmp_path / "s1.messages.json")
+    fork_path = str(tmp_path / "s2.messages.json")
+    calls: list[str] = []
+
+    def parse_file(file_sig):
+        path = file_sig[0]
+        calls.append(path)
+        if path == parent_path:
+            # The parent owns the shared calls canonically.
+            return [
+                _cline_entry(1_700_000_000_000, "cline:msg_shared_1", 10),
+                _cline_entry(1_700_000_001_000, "cline:msg_shared_2", 20),
+            ]
+        # The fork restamps the copies and adds one fork-only call.
+        return [
+            _cline_entry(1_700_000_100_000, "cline:msg_shared_1", 10),
+            _cline_entry(1_700_000_101_000, "cline:msg_shared_2", 20),
+            _cline_entry(1_700_000_200_000, "cline:msg_fork_only", 30),
+        ]
+
+    files = ((parent_path, 1, 100), (fork_path, 1, 100))
+    assert store.sync_files("cline", files, parser={"v": 1}, parse_file_entries=parse_file, cross_file_stable_keys=True) is True
+    rows = store.query_entries(sources=["cline"])
+    assert [(row["entry_id"], row["timestamp"]) for row in rows] == [
+        ("cline:msg_shared_1", 1_700_000_000_000),
+        ("cline:msg_shared_2", 1_700_000_001_000),
+        ("cline:msg_fork_only", 1_700_000_200_000),
+    ]
+
+    # A later fork edit reparses only the fork and still cannot replace the
+    # parent's canonical rows with the restamped copies.
+    calls.clear()
+    changed = ((parent_path, 1, 100), (fork_path, 2, 200))
+    assert store.sync_files("cline", changed, parser={"v": 1}, parse_file_entries=parse_file, cross_file_stable_keys=True) is True
+    assert calls == [fork_path]
+    rows = store.query_entries(sources=["cline"])
+    assert [(row["entry_id"], row["timestamp"]) for row in rows] == [
+        ("cline:msg_shared_1", 1_700_000_000_000),
+        ("cline:msg_shared_2", 1_700_000_001_000),
+        ("cline:msg_fork_only", 1_700_000_200_000),
+    ]
+
+    # The user deletes the parent session dir (the canonical owner). The fork's
+    # copies must be promoted, not deleted with the file.
+    calls.clear()
+    remaining = ((fork_path, 2, 200),)
+    assert store.sync_files("cline", remaining, parser={"v": 1}, parse_file_entries=parse_file, durable=False, cross_file_stable_keys=True) is True
+    assert calls == [fork_path]
+    rows = store.query_entries(sources=["cline"])
+    assert [(row["entry_id"], row["timestamp"]) for row in rows] == [
+        ("cline:msg_shared_1", 1_700_000_100_000),
+        ("cline:msg_shared_2", 1_700_000_101_000),
+        ("cline:msg_fork_only", 1_700_000_200_000),
+    ]
+
+
+def test_usage_store_cline_rewrite_promotes_duplicate_from_unchanged_file(tmp_path):
+    """A rewrite of the canonical file that drops a shared message must
+    reconsider the unchanged fork file, which still holds a later copy."""
+    store = UsageEntryStore(tmp_path / "usage.sqlite3")
+    parent_path = str(tmp_path / "s1.messages.json")
+    fork_path = str(tmp_path / "s2.messages.json")
+    parent_has_shared = True
+    calls: list[str] = []
+
+    def parse_file(file_sig):
+        path = file_sig[0]
+        calls.append(path)
+        if path == parent_path:
+            if parent_has_shared:
+                return [_cline_entry(1_700_000_000_000, "cline:msg_shared", 10)]
+            return [_cline_entry(1_700_000_500_000, "cline:msg_parent_only", 5)]
+        return [_cline_entry(1_700_000_100_000, "cline:msg_shared", 10)]
+
+    files = ((parent_path, 1, 100), (fork_path, 1, 100))
+    assert store.sync_files("cline", files, parser={"v": 1}, parse_file_entries=parse_file, cross_file_stable_keys=True) is True
+    rows = store.query_entries(sources=["cline"])
+    assert [(row["entry_id"], row["timestamp"]) for row in rows] == [
+        ("cline:msg_shared", 1_700_000_000_000),
+    ]
+
+    # Rewriting the parent without the shared message promotes the fork's copy.
+    calls.clear()
+    parent_has_shared = False
+    changed = ((parent_path, 2, 90), (fork_path, 1, 100))
+    assert store.sync_files("cline", changed, parser={"v": 1}, parse_file_entries=parse_file, cross_file_stable_keys=True) is True
+    assert calls == [parent_path, fork_path]
+    rows = store.query_entries(sources=["cline"])
+    assert [(row["entry_id"], row["timestamp"]) for row in rows] == [
+        ("cline:msg_shared", 1_700_000_100_000),
+        ("cline:msg_parent_only", 1_700_000_500_000),
     ]
 
 

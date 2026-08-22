@@ -30,6 +30,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Sessions tab (the `sessions` table is metadata only for now).
 - Added local Cline, Kilo Code and omp brand marks to dashboard tool rows and charts.
 
+### Changed
+
+- The persistent usage store's cross-file stable-key sync is now a declared capability
+  (`SourceSyncCapability.cross_file_stable_keys`) instead of a hardcoded `source == "codex"`
+  check. Codex sets it (behavior unchanged — its three sync branches key off the flag now)
+  and Cline sets it for forked session files, which copy the parent's message ids under a
+  new session id. Without it, Cline's file-replace sync would let whichever file parsed
+  last own a copied key: deleting the fork file would delete the row with it while the
+  untouched parent is never reparsed, and the usage is gone from totals until the
+  parent's mtime moves. Mirrored store tests cover the Cline fork shape (earliest
+  occurrence canonical, survivor promotion on file removal, promotion on canonical
+  rewrite).
+
 ## 2.1.0 - 2026-08-22
 
 ### Added

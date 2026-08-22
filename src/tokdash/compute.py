@@ -182,6 +182,7 @@ def _sync_usage_store(tracker: CodingToolsUsageTracker) -> tuple[UsageEntryStore
                     if capability.append_jsonl
                     else None
                 ),
+                cross_file_stable_keys=capability.cross_file_stable_keys,
             )
             continue
         if capability.mode != "source_replace":

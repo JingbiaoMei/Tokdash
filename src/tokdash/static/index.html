@@ -4808,19 +4808,35 @@
       }
     }
 
-    async function fetchSelectedServers(path, options = {}, retryOptions = {}) {
-      const servers = selectedServers();
-      const settled = await Promise.allSettled(servers.map((server) => fetchJsonWithRetry(server, path, options, retryOptions)));
+    // Shared settlement policy for ANY per-server fan-out: record each server's
+    // health, refresh the indicator, and keep the first real rejection so a total
+    // failure can report what the server actually said rather than a generic
+    // loadFailed. Both this module's loader and the Quota tab's own fan-out go
+    // through here — they diverged once, and the Quota page silently dropped the
+    // usage-DB `tokdash update` remediation for as long as they did.
+    function collectServerResults(servers, settled) {
       const successes = [];
+      let firstError = null;
       settled.forEach((result, index) => {
         const server = servers[index];
         const ok = result.status === 'fulfilled';
         serverRuntimeStatus.set(server.id, { ok, error: ok ? null : result.reason, checkedAt: Date.now() });
-        if (ok) successes.push({ server, payload: result.value });
+        if (ok) successes.push({ server, value: result.value });
+        else if (!firstError) firstError = result.reason;
       });
       renderServerSettings();
       updateServerIndicator();
-      return successes;
+      return { successes, firstError };
+    }
+
+    async function fetchSelectedServers(path, options = {}, retryOptions = {}) {
+      const servers = selectedServers();
+      const settled = await Promise.allSettled(servers.map((server) => fetchJsonWithRetry(server, path, options, retryOptions)));
+      const { successes, firstError } = collectServerResults(servers, settled);
+      // Partial success is unchanged: the rows that worked are returned and the
+      // failed servers stay flagged on the indicator.
+      if (!successes.length && firstError) throw firstError;
+      return successes.map(({ server, value }) => ({ server, payload: value }));
     }
 
     function updateServerIndicator() {
@@ -4858,7 +4874,9 @@
         const state = serverRuntimeStatus.get(server.id);
         status.className = 'server-health-dot';
         status.dataset.state = state ? (state.ok ? 'ok' : 'error') : 'idle';
-        status.title = state ? t(state.ok ? 'serverStatusOk' : 'serverStatusError') : t('serverStatusIdle');
+        const statusTitle = state ? t(state.ok ? 'serverStatusOk' : 'serverStatusError') : t('serverStatusIdle');
+        const statusDetail = (state && !state.ok && typeof state.error?.message === 'string') ? state.error.message.trim() : '';
+        status.title = statusDetail ? `${statusTitle}: ${statusDetail}` : statusTitle;
         status.setAttribute('aria-label', status.title);
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox'; checkbox.className = 'server-select'; checkbox.checked = selectedIds.has(server.id);
@@ -4989,10 +5007,20 @@
       document.getElementById('addServerBtn')?.addEventListener('click', storeServerFromForm);
     }
 
+    function dashboardFetchStatusText(error) {
+      // 503 is the transient-overload signal and already has its own wording.
+      if (error?.status === 503) return t('temporaryOverload');
+      // Anything else carries a server-authored, actionable detail (a usage-DB
+      // schema mismatch says to run `tokdash update`). Dropping it for a bare
+      // "load failed" is what left users with no way to act on the outage.
+      const detail = typeof error?.message === 'string' ? error.message.trim() : '';
+      return detail ? `${t('loadFailed')}: ${detail}` : t('loadFailed');
+    }
+
     function setDashboardFetchStatus(error) {
       const lastUpdate = document.getElementById('lastUpdate');
       if (!lastUpdate) return;
-      lastUpdate.textContent = error?.status === 503 ? t('temporaryOverload') : t('loadFailed');
+      lastUpdate.textContent = dashboardFetchStatusText(error);
     }
 
     function syncCodexReviewToggle() {
@@ -7513,10 +7541,33 @@
     // it is redundant with the per-bar "Updated x min ago" shown on each provider card.
     let quotaActionStatusResetTimer = null;
 
-    function setQuotaActionStatus(state) {
-      const el = selectedServers().length > 1
+    function quotaStatusElement() {
+      return selectedServers().length > 1
         ? document.getElementById('quotaGlobalStatusLine')
         : document.getElementById('quotaStatusLine');
+    }
+
+    // A failed quota LOAD is not a transient write ack: it must not auto-clear, or
+    // the remediation vanishes a second after it appears. Pass null to clear it
+    // once a load succeeds.
+    function setQuotaFetchStatus(error) {
+      const el = quotaStatusElement();
+      if (!el) return;
+      if (quotaActionStatusResetTimer) {
+        clearTimeout(quotaActionStatusResetTimer);
+        quotaActionStatusResetTimer = null;
+      }
+      if (!error) {
+        el.style.color = 'var(--color-muted)';
+        el.textContent = '';
+        return;
+      }
+      el.style.color = '#DC2626';
+      el.textContent = dashboardFetchStatusText(error);
+    }
+
+    function setQuotaActionStatus(state) {
+      const el = quotaStatusElement();
       if (!el) return;
       if (quotaActionStatusResetTimer) {
         clearTimeout(quotaActionStatusResetTimer);
@@ -8406,9 +8457,12 @@
         const historyPath = `/api/quota/history?granularity=${encodeURIComponent(granularity)}${start ? `&start=${start}` : ''}`;
         const servers = selectedServers();
         const settled = await Promise.allSettled(servers.map(async (server) => ({ server, payload: await fetchJsonWithRetry(server, '/api/quota'), history: await fetchJsonWithRetry(server, historyPath) })));
-        const rows = settled.filter((result) => result.status === 'fulfilled').map((result) => result.value);
-        settled.forEach((result, index) => serverRuntimeStatus.set(servers[index].id, { ok: result.status === 'fulfilled', error: result.status === 'rejected' ? result.reason : null, checkedAt: Date.now() }));
-        if (!rows.length) throw new Error(t('loadFailed'));
+        const { successes, firstError } = collectServerResults(servers, settled);
+        // Preserve the original rejection so a usage-DB schema mismatch reaches the
+        // status line instead of being flattened into loadFailed.
+        if (!successes.length) throw firstError || new Error(t('loadFailed'));
+        const rows = successes.map(({ value }) => value);
+        setQuotaFetchStatus(null);
         const multi = servers.length > 1;
         positionQuotaGlobalControls(multi);
         setQuotaSingleServerLayout(multi);
@@ -8428,13 +8482,19 @@
           renderQuotaProviderCards(payload);
           renderQuotaCharts(history);
         }
+        return true;
       } catch (error) {
         console.error('Error loading quota:', error);
+        setQuotaFetchStatus(error);
         if (lastQuotaServerRows.length <= 1) {
           if (lastQuotaPayload) renderQuotaSettings(lastQuotaPayload);
           if (lastQuotaPayload) renderQuotaProviderCards(lastQuotaPayload);
           if (lastQuotaHistory) renderQuotaCharts(lastQuotaHistory);
         }
+        // Reported rather than rethrown: callers that follow a write with a reload
+        // must not acknowledge "saved" over an active fetch error (which would also
+        // schedule its removal), but a failed reload is not a failed write either.
+        return false;
       }
     }
 
@@ -8442,8 +8502,7 @@
       setQuotaActionStatus('saving');
       try {
         await postJsonWithCsrf(server, '/api/quota/consent', { [key]: true });
-        await loadQuota({ force: true });
-        setQuotaActionStatus('saved');
+        if (await loadQuota({ force: true })) setQuotaActionStatus('saved');
       } catch (error) {
         setQuotaActionStatus(error?.status === 403 ? 'readonly' : 'error');
       }
@@ -8453,8 +8512,7 @@
       setQuotaActionStatus('saving');
       try {
         await postJsonWithCsrf(server, '/api/quota/consent', { credential_scan: !!enabled });
-        await loadQuota({ force: true });
-        setQuotaActionStatus('saved');
+        if (await loadQuota({ force: true })) setQuotaActionStatus('saved');
       } catch (error) {
         setQuotaActionStatus(error?.status === 403 ? 'readonly' : 'error');
       }
@@ -8464,8 +8522,7 @@
       setQuotaActionStatus('saving');
       try {
         await postJsonWithCsrf(server, '/api/quota/settings', { enabled: !!enabled });
-        await loadQuota({ force: true });
-        setQuotaActionStatus('saved');
+        if (await loadQuota({ force: true })) setQuotaActionStatus('saved');
       } catch (error) {
         setQuotaActionStatus(error?.status === 403 ? 'readonly' : 'error');
       }
@@ -8475,8 +8532,7 @@
       setQuotaActionStatus('saving');
       try {
         await postJsonWithCsrf(server, '/api/quota/settings', { poll_interval_minutes: Number(minutes) });
-        await loadQuota({ force: true });
-        setQuotaActionStatus('saved');
+        if (await loadQuota({ force: true })) setQuotaActionStatus('saved');
       } catch (error) {
         setQuotaActionStatus(error?.status === 403 ? 'readonly' : 'error');
       }
@@ -8499,8 +8555,8 @@
         const settled = await Promise.allSettled(selectedServers().map((server) => fetchJsonWithRetry(server, '/api/quota/refresh', { cache: 'no-store' })));
         const rejected = settled.find((result) => result.status === 'rejected');
         if (rejected && settled.every((result) => result.status === 'rejected')) throw rejected.reason;
-        await loadQuota({ force: true });
-        setRefreshUiState('updated', { resetAfterMs: 1800 });
+        const reloaded = await loadQuota({ force: true });
+        setRefreshUiState(reloaded ? 'updated' : 'failed', { resetAfterMs: reloaded ? 1800 : 2600 });
       } catch (error) {
         if (error?.status === 429) {
           await loadQuota({ force: true }).catch(() => {});
@@ -8508,6 +8564,11 @@
           return;
         }
         setRefreshUiState(error?.status === 503 ? 'busy' : 'failed', { resetAfterMs: 2600 });
+        // The button state carries no detail and resets after 2.6s. 503 already has
+        // its own transient 'busy' state, so leaving a persistent banner for it would
+        // be noise -- but a non-transient failure (a usage-DB schema mismatch) must
+        // leave its remediation on screen until a load succeeds.
+        if (error?.status !== 503) setQuotaFetchStatus(error);
       }
     }
 

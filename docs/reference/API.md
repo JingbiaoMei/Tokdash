@@ -76,13 +76,21 @@ tell "this is Tokdash" rather than trusting a generic `{"status":"ok"}` any app 
 Local version/provenance. `install_method` is read from the setup manifest
 (`<data_dir>/install.json`) when present, else `null`.
 
+`usage_db_schema_supported` is the usage-database schema version this build can
+read — a compile-time constant, not a read of the database, so this route stays
+as cheap as `/health`. Comparing it across two Tokdash processes that share a
+data directory is how a version skew is spotted without opening the file;
+migrations run forward only, so the older build cannot read a database the newer
+one has migrated. `tokdash doctor` reports the schema actually stored on disk.
+
 **Response**
 ```json
 {
   "service": "tokdash",
   "runtime_version": "1.0.7",
   "install_method": "pipx",
-  "update_check_enabled": false
+  "update_check_enabled": false,
+  "usage_db_schema_supported": 9
 }
 ```
 

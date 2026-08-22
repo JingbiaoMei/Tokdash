@@ -12,10 +12,12 @@ try:
     from ..pricing import PricingDatabase
     from ..usage_store import (
         USAGE_ENTRY_FORMAT_VERSION,
+        UsageDatabaseSchemaTooNewError,
         UsageEntryStore,
         build_source_signature,
         persistent_pricing_signature,
         persistent_usage_db_enabled,
+        raise_if_usage_db_incompatible,
         usage_billing_pricing,
     )
 except ImportError:  # pragma: no cover
@@ -23,6 +25,14 @@ except ImportError:  # pragma: no cover
     from clientpaths import openclaw_agent_sessions_glob
     from pricing import PricingDatabase
     USAGE_ENTRY_FORMAT_VERSION = 1  # type: ignore
+
+    class UsageDatabaseSchemaTooNewError(RuntimeError):  # type: ignore
+        """Stand-in so the fail-fast `except` clauses below stay valid.
+
+        This branch has no store (``UsageEntryStore is None``), so the guarded
+        cache paths never run and this is never raised.
+        """
+
     UsageEntryStore = None  # type: ignore
     build_source_signature = None  # type: ignore
     persistent_pricing_signature = None  # type: ignore
@@ -30,6 +40,10 @@ except ImportError:  # pragma: no cover
 
     def persistent_usage_db_enabled() -> bool:  # type: ignore
         return False
+
+    def raise_if_usage_db_incompatible(db_path=None) -> None:  # type: ignore
+        """No-op: this branch has no store, so there is no database to guard."""
+        return None
 
 
 def _cache_hit_rate(tokens_in: Any, tokens_cache: Any) -> Optional[float]:
@@ -313,6 +327,11 @@ def _collect_normalized_entries(
         try:
             store = _sync_openclaw_store(session_dirs, pricing_db)
             return store.query_entries(sources=["openclaw"], since=since_date, until=until_date)
+        except UsageDatabaseSchemaTooNewError:
+            # Terminal: retrying or rereading the session logs cannot make a newer
+            # database readable, and doing so on every request is what turns a
+            # version skew into a pinned server.
+            raise
         except Exception:
             pass
 
@@ -336,6 +355,9 @@ def _openclaw_parser_signature() -> dict:
 
 
 def _sync_openclaw_store(session_dirs: list[str], pricing_db: PricingDatabase) -> UsageEntryStore:
+    # First, before _session_files()/_signature() glob and stat the session tree:
+    # on a too-new database that discovery is pure waste, repeated per request.
+    raise_if_usage_db_incompatible()
     files = _session_files(session_dirs)
     sig = _signature(files)
     store = UsageEntryStore()
@@ -490,6 +512,8 @@ def get_session_usage(
     if persistent_usage_db_enabled() and UsageEntryStore is not None:
         try:
             return _openclaw_usage_from_store(_sync_openclaw_store(session_dirs, pricing_db), since_date, until_date)
+        except UsageDatabaseSchemaTooNewError:
+            raise
         except Exception:
             pass
 

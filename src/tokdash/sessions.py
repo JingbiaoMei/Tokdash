@@ -42,7 +42,13 @@ from .sources.dsh_log import (
     dsh_file_signatures,
     fold_dsh_usage_samples,
 )
-from .usage_store import UsageEntryStore, parser_code_signature, persistent_usage_db_enabled
+from .usage_store import (
+    UsageDatabaseSchemaTooNewError,
+    UsageEntryStore,
+    parser_code_signature,
+    persistent_usage_db_enabled,
+    raise_if_usage_db_incompatible,
+)
 
 
 SESSION_TOOLS = ("codex", "claude", "opencode", "pi_agent", "mimo", "kimi", "dsh", "reasonix", "zcode")
@@ -1664,6 +1670,10 @@ def _codex_session_parser_signature() -> dict[str, Any]:
 
 
 def get_codex_activity_insights() -> dict[str, Any]:
+    # Ahead of _codex_file_signatures(): that walk is the expensive half of this
+    # call, and a too-new database throws its result away.
+    if persistent_usage_db_enabled():
+        raise_if_usage_db_incompatible()
     signatures = _codex_file_signatures()
     pricing_sig = _pricing_signature()
     if not persistent_usage_db_enabled():
@@ -3838,6 +3848,11 @@ def _raw_sessions_for_tool(
     if key in {"codex", "claude", "kimi", "dsh", "reasonix"} and persistent_usage_db_enabled():
         try:
             return _stored_sessions_for_tool(key, since_ms=since_ms, until_ms=until_ms)
+        except UsageDatabaseSchemaTooNewError:
+            # Terminal, not transient. Falling back would reparse every source log
+            # on every request for as long as the version skew lasts, which is
+            # vastly worse than surfacing the error once.
+            raise
         except Exception:
             logger.warning(
                 "tokdash persistent session cache failed tool=%s; falling back to source files",
@@ -3926,6 +3941,9 @@ def _stored_sessions_for_tool(
     until_ms: Optional[int] = None,
 ) -> Dict[str, Dict[str, Any]]:
     store = UsageEntryStore()
+    # Before any signature scan: every branch below enumerates that tool's whole
+    # session tree, and on a too-new database all of it is wasted.
+    store.check_compatible()
     if tool == "codex":
         signatures = _codex_file_signatures()
         pricing_sig = _pricing_signature()

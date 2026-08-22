@@ -448,7 +448,13 @@ Persistent usage DB (default on):
 
 Tokdash maintains a local SQLite index at `~/.tokdash/usage.sqlite3` by default. It stores parsed token rows and Codex/Claude/Kimi/DeepSeek Harness/Reasonix session summaries so repeated dashboard and API reads can use indexed SQL instead of reparsing every source log. Source logs remain the source of truth; the DB is a local performance index, and Tokdash falls back to live parsing if it is disabled or unavailable.
 
-Cached session rows are price-neutral: they hold each turn's billing inputs (model, fresh input, cache reads and writes, output), and cost is calculated when they are read, with whatever pricing that process has loaded. Editing a rate therefore reprices instantly instead of rereading gigabytes of logs, and two Tokdash versions sharing one database — an installed service and a checkout, say — do not invalidate each other's rows over pricing. Parser and source-file changes still reparse normally. Rows written before this (including any kept by `TOKDASH_USAGE_DB_DURABLE` after their log is gone) reprice from their stored totals, which reproduces the same figure but cannot separate a Claude or Kimi cache write from fresh input; only a reparse of those logs can restore that distinction. Codex bills under `provider/model` and stores the bare name, so its older rows are reparsed once instead of reused.
+Cached session rows are price-neutral: they hold each turn's billing inputs (model, fresh input, cache reads and writes, output), and cost is calculated when they are read, with whatever pricing that process has loaded. Editing a rate therefore reprices instantly instead of rereading gigabytes of logs, and two Tokdash versions sharing one database do not invalidate each other's rows over pricing. Sharing is only safe while both builds support the same database schema, though: schema migrations run forward only, so once the newer build migrates the file the older one refuses to open it until it is upgraded, and every cached read fails until the versions match. `tokdash doctor` reports the schema on disk alongside the one the running build supports. Parser and source-file changes still reparse normally. Rows written before this (including any kept by `TOKDASH_USAGE_DB_DURABLE` after their log is gone) reprice from their stored totals, which reproduces the same figure but cannot separate a Claude or Kimi cache write from fresh input; only a reparse of those logs can restore that distinction. Codex bills under `provider/model` and stores the bare name, so its older rows are reparsed once instead of reused.
+
+Run a checkout against its own data directory so it never migrates the installed service's database:
+
+```bash
+TOKDASH_DATA_DIR=output/dev-data PYTHONPATH=src python3 main.py
+```
 
 - `TOKDASH_USAGE_DB` (default: `1`) — set to `0`, `false`, `no`, or `off` to disable the persistent usage DB
 - `TOKDASH_DATA_DIR` (default: `~/.tokdash`) — base directory for Tokdash local state

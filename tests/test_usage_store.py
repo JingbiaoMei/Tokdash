@@ -871,6 +871,9 @@ def test_coding_tool_parsers_declare_sync_capabilities():
     assert modes["mimo"] == "source_native_db"
     assert modes["codex"] == "file_replace"
     assert modes["omp"] == "file_replace"
+    assert modes["kilocode"] == "source_native_db"
+    assert modes["cline"] == "file_replace"
+    assert tracker.parsers["cline"].sync_capability.cross_file_stable_keys is True
     assert modes["claude"] == "file_replace"
     assert modes["antigravity_cli"] == "file_replace"
     assert modes["copilot_cli"] == "source_replace"

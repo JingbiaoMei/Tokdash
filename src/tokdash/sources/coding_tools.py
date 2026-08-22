@@ -74,6 +74,12 @@ class SourceSyncCapability:
     mode: str = "source_replace"
     append_jsonl: bool = False
     session_store: bool = False
+    # True when one entry_key can legitimately occur in several files of the
+    # same source (Copied stable keys: Codex rollout resumption, Cline fork).
+    # The store syncs such sources so that the earliest timestamp owns the
+    # key, and re-parses surviving files when the owner is removed or
+    # rewritten. See UsageEntryStore.sync_files.
+    cross_file_stable_keys: bool = False
     reason: str = ""
 
 
@@ -578,6 +584,47 @@ class OpenCodeParser(BaseParser):
                 continue
         return tuple(out)
 
+    def _db_paths(self) -> List[Path]:
+        """Live source databases for this tool (one for OpenCode; Kilo
+        overrides to cover its channel DBs)."""
+        if self.db_path.exists():
+            return [self.db_path]
+        return []
+
+    def _query_db(self, db_path: Path, s_ms: int, u_ms: int) -> List[Dict[str, Any]]:
+        try:
+            conn = connect_sqlite_readonly(db_path)
+        except Exception:
+            return []
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT data, time_created FROM message WHERE time_created >= ? AND time_created < ? ORDER BY time_created",
+                (s_ms, u_ms),
+            )
+            rows = cur.fetchall()
+        finally:
+            conn.close()
+
+        out: List[Dict[str, Any]] = []
+        for data_json, ts_ms in rows:
+            try:
+                data = json.loads(data_json)
+                tokens = data.get("tokens")
+                if not isinstance(tokens, dict):
+                    continue
+                out.append(
+                    self._build_entry(
+                        str(data.get("modelID") or "unknown"),
+                        str(data.get("providerID") or ""),
+                        tokens,
+                        self._i(ts_ms),
+                    )
+                )
+            except Exception:
+                continue
+        return out
+
     def _parse_all(self) -> List[Dict[str, Any]]:
         return []  # collect() is overridden; this satisfies the ABC contract
 
@@ -610,29 +657,13 @@ class OpenCodeParser(BaseParser):
 
         out: List[Dict[str, Any]] = []
 
-        # IMPORTANT: Only use SQLite DB to avoid double-counting!
+        # IMPORTANT: Only use the SQLite DB to avoid double-counting!
         # File storage (~/.local/share/opencode/storage/message) contains the SAME messages as the DB.
         # Using both sources would result in 100% duplication.
         # See: patchFixSetup/09-fixes/OpenCode_Double_Counting_Fix.md
 
-        if self.db_path.exists():
-            try:
-                conn = connect_sqlite_readonly(self.db_path)
-                cur = conn.cursor()
-                cur.execute("SELECT data, time_created FROM message WHERE time_created >= ? AND time_created < ? ORDER BY time_created", (s_ms, u_ms))
-                rows = cur.fetchall()
-                conn.close()
-                for data_json, ts_ms in rows:
-                    try:
-                        data = json.loads(data_json)
-                        tokens = data.get("tokens")
-                        if not isinstance(tokens, dict):
-                            continue
-                        out.append(self._build_entry(str(data.get("modelID") or "unknown"), str(data.get("providerID") or ""), tokens, self._i(ts_ms)))
-                    except Exception:
-                        continue
-            except Exception:
-                pass
+        for db_path in self._db_paths():
+            out.extend(self._query_db(db_path, s_ms, u_ms))
 
         # Evict all entries when cache exceeds bound to prevent unbounded growth.
         if len(type(self)._query_cache) >= _OPENCODE_QUERY_CACHE_MAX:
@@ -641,11 +672,239 @@ class OpenCodeParser(BaseParser):
         return list(out)
 
 
+class KiloCodeParser(OpenCodeParser):
+    """
+    Parser for Kilo Code token usage.
+
+    =======================================================================
+    KILO CODE — OPENCODE CODEBASE, app = "kilo"
+    =======================================================================
+    The CLI and the current VS Code extension are built on the OpenCode
+    codebase. Its SQLite ``message`` table is field-for-field the shape
+    OpenCodeParser already queries (data.modelID / data.providerID /
+    data.tokens), so this subclass only redirects the DB paths:
+    clientpaths.kilo_db_paths() — kilo.db, dev-channel kilo-<channel>.db,
+    and the pre-rename opencode*.db fallback (taken only while no
+    kilo-named file exists, so a migrated install is never read twice).
+    Usage is cache-exclusive (input + cache.read = full prompt), same as
+    OpenCode; recorded cost is ignored and the pricing DB decides.
+    =======================================================================
+    """
+
+    source_name = "kilocode"
+    sync_capability = SourceSyncCapability(
+        mode="source_native_db",
+        session_store=False,
+        reason="Kilo already stores messages in a SQLite DB and supports SQL date windows.",
+    )
+
+    # K1: redeclare both query-cache ClassVars. A subclass otherwise inherits
+    # the base dict object while assigning its own _query_cache_sig, so with
+    # both tools installed OpenCode would silently serve Kilo's rows (and
+    # vice versa) for the same date window.
+    _query_cache: ClassVar[Dict[tuple, List[Dict[str, Any]]]] = {}
+    _query_cache_sig: ClassVar[tuple] = ()
+
+    def __init__(self, pricing_db: PricingDatabase):
+        super().__init__(pricing_db)
+        self.db_paths = clientpaths.kilo_db_paths()
+        # db_path points at the canonical file so code paths that consult it
+        # see a plausible value; _db_paths()/_file_signatures() use db_paths.
+        self.db_path = self.db_paths[0] if self.db_paths else clientpaths.kilo_data_dir() / "kilo.db"
+
+    def _file_signatures(self) -> tuple:
+        out: list[tuple[str, int, int]] = []
+        for db_path in self.db_paths:
+            if not db_path.exists():
+                continue
+            for candidate in (db_path, Path(str(db_path) + "-wal"), Path(str(db_path) + "-shm")):
+                try:
+                    s = candidate.stat()
+                    out.append((str(candidate), s.st_mtime_ns, s.st_size))
+                except (FileNotFoundError, OSError):
+                    continue
+        return tuple(out)
+
+    def _db_paths(self) -> List[Path]:
+        return [db_path for db_path in self.db_paths if db_path.exists()]
+
+
+class ClineParser(BaseParser):
+    """
+    Parser for Cline token usage (CLI; the VS Code extension shares the store).
+
+    =======================================================================
+    CLINE — PER-SESSION MESSAGE FILES ARE THE SOURCE OF TRUTH
+    =======================================================================
+    Data dir: clientpaths.cline_data_dir()
+    ($CLINE_DATA_DIR > $CLINE_DIR/data > ~/.cline/data).
+
+    Token-bearing store: ``sessions/<sessionId>/<sessionId>.messages.json``
+    and subagent siblings ``sessions/<sessionId>/agent_<agentId>.messages.json``.
+    Top level: version, updated_at, agent, sessionId, origin, messages[].
+    Assistant messages carry a stable id (msg_...), epoch-ms ts,
+    metrics {inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens}
+    and modelInfo {id, provider}.
+
+    Why files, not the sessions table: with enableSpawn the parent row's
+    usage is the sum of the PARENT's own model calls only; subagent rows
+    carry no usage at all, and subagent tokens exist only in their
+    agent_*.messages.json. A sessions-db parser undercounts every
+    subagent run; the message files are complete and non-duplicating
+    (each model call is exactly one assistant message in exactly one file).
+    sessions.db is metadata/cross-check only in Phase 1 — a session row
+    with usage but no message file is a deleted session, not a gap to fill.
+
+    Cache-inclusive input (C1): Cline normalizes every provider so
+    inputTokens is the FULL prompt including cache-read/write portions
+    ("Do not add cache fields back on top" — their usage service). The
+    parser splits it into disjoint buckets before emitting, so compute's
+    total = input + cacheW + output + cacheR + reasoning stays correct.
+
+    Dedup key (C7): source-global "cline:<message id>", NOT
+    session-scoped. Resume rewrites the same file in place keeping ids;
+    fork copies the parent's messages (ids and metrics intact) into a NEW
+    session file. A session-scoped key would count every replayed/forked
+    call twice; the global key counts each real model call once. Because
+    ids are copied across files, cline needs the store's
+    cross-file-stable-key sync (SourceSyncCapability.cross_file_stable_keys)
+    for correct ownership when a copy-bearing file is deleted.
+
+    Cost (C6): pricing DB only; metrics.cost is ignored, same as
+    OpenCode/Kilo. Self-hosted ids absent from the DB cost 0.00.
+    =======================================================================
+    """
+
+    source_name = "cline"
+    sync_capability = SourceSyncCapability(
+        mode="file_replace",
+        cross_file_stable_keys=True,
+        reason=(
+            "Each .messages.json is a whole-file JSON document rewritten in place; "
+            "forked session files carry stable message-id copies, so ownership must "
+            "follow the earliest occurrence across files."
+        ),
+    )
+    # 1: assistant messages with dict metrics, cache-inclusive inputTokens
+    #    split into disjoint buckets, source-global "cline:<message id>" key,
+    #    pricing-DB cost only.
+    persistent_parser_version = 1
+
+    def __init__(self, pricing_db: PricingDatabase):
+        super().__init__(pricing_db)
+        self.data_dir = clientpaths.cline_data_dir()
+
+    def _file_signatures(self) -> tuple:
+        def scan() -> tuple:
+            if not self.data_dir.is_dir():
+                return ()
+            sigs: List[Tuple[str, int, int]] = []
+            for path in self.data_dir.glob("sessions/*/*.messages.json"):
+                if not path.is_file():
+                    continue
+                try:
+                    s = path.stat()
+                    sigs.append((str(path), s.st_mtime_ns, s.st_size))
+                except OSError:
+                    continue
+            return tuple(sorted(sigs))
+
+        return _timed_sigs(f"{self.source_name}:{self.data_dir}", scan)
+
+    @staticmethod
+    def _split_cache_inclusive_input(
+        raw_input: int, raw_cache_read: int, raw_cache_write: int
+    ) -> Tuple[int, int, int]:
+        """Disjoint (input, cacheRead, cacheWrite) from Cline's normalized row.
+
+        inputTokens already includes the cache portions; clamp each part so a
+        malformed row (cache share larger than the prompt) cannot go negative.
+        """
+        cache_r = min(max(raw_cache_read, 0), raw_input)
+        cache_w = min(max(raw_cache_write, 0), raw_input - cache_r)
+        return raw_input - cache_r - cache_w, cache_r, cache_w
+
+    def _parse_message_file(self, path_str: str, seen_ids: set) -> List[Dict[str, Any]]:
+        try:
+            with open(path_str, "r", encoding="utf-8") as f:
+                doc = json.load(f)
+        except (OSError, ValueError):
+            return []
+        messages = doc.get("messages") if isinstance(doc, dict) else None
+        if not isinstance(messages, list):
+            return []
+
+        out: List[Dict[str, Any]] = []
+        for msg in messages:
+            if not isinstance(msg, dict) or msg.get("role") != "assistant":
+                continue
+            metrics = msg.get("metrics")
+            if not isinstance(metrics, dict):
+                continue
+            # Source-global dedup: resume rewrites the same file, fork copies
+            # message ids into a new file — see the class docstring (C7).
+            msg_id = msg.get("id")
+            if msg_id:
+                msg_id = str(msg_id)
+                if msg_id in seen_ids:
+                    continue
+                seen_ids.add(msg_id)
+            ts = self._i(msg.get("ts"))
+            if ts <= 0:
+                continue
+
+            model_info = msg.get("modelInfo") if isinstance(msg.get("modelInfo"), dict) else {}
+            model = str(model_info.get("id") or "unknown")
+            provider = str(model_info.get("provider") or "")
+
+            input_t, cache_r, cache_w = self._split_cache_inclusive_input(
+                self._i(metrics.get("inputTokens")),
+                self._i(metrics.get("cacheReadTokens")),
+                self._i(metrics.get("cacheWriteTokens")),
+            )
+            output_t = self._i(metrics.get("outputTokens"))
+            if input_t == 0 and output_t == 0 and cache_r == 0 and cache_w == 0:
+                continue
+
+            # Pricing DB only; metrics.cost is deliberately ignored (C6).
+            cost = self.pricing_db.get_cost(model, input_t, output_t, cache_r, cache_w)
+            billing = usage_billing_pricing(
+                [model],
+                input_tokens=input_t,
+                output_tokens=output_t,
+                cache_read=cache_r,
+                cache_write=cache_w,
+            )
+            out.append({
+                "source": self.source_name,
+                "model": model,
+                "provider": provider,
+                "input": input_t,
+                "output": output_t,
+                "cacheRead": cache_r,
+                "cacheWrite": cache_w,
+                "reasoning": 0,
+                "cost": cost,
+                "timestamp": ts,
+                "entry_id": f"cline:{msg_id}" if msg_id else "",
+                "_billing": billing,
+            })
+        return out
+
+    def _parse_all(self) -> List[Dict[str, Any]]:
+        out: List[Dict[str, Any]] = []
+        seen_ids: set = set()
+        for path_str, _, _ in self._file_signatures():
+            out.extend(self._parse_message_file(path_str, seen_ids))
+        return out
+
+
 class CodexParser(BaseParser):
     source_name = "codex"
     sync_capability = SourceSyncCapability(
         mode="file_replace",
         session_store=True,
+        cross_file_stable_keys=True,
         reason=(
             "Codex JSONL files are reparsed independently; stable usage-state keys "
             "deduplicate resumed-history copies across files."
@@ -4384,6 +4643,8 @@ class CodingToolsUsageTracker:
         self.pricing_db = PricingDatabase()
         self.parsers = {
             "opencode": OpenCodeParser(self.pricing_db),
+            "kilocode": KiloCodeParser(self.pricing_db),
+            "cline": ClineParser(self.pricing_db),
             "codex": CodexParser(self.pricing_db),
             "claude": ClaudeParser(self.pricing_db),
             "gemini_cli": GeminiCLIParser(self.pricing_db),

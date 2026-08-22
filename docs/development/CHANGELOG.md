@@ -11,6 +11,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Added omp (oh-my-pi) as a token and cost source. omp is a port of pi-mono, so its session JSONL is field-compatible with Pi's: Tokdash reads `~/.omp/agent/sessions/` (plus the `$XDG_DATA_HOME/omp/sessions` XDG-migration path once `omp config init-xdg` has created it, named profiles under `~/.omp/profiles/<name>/agent/sessions/`, and `PI_CONFIG_DIR` config roots) with the same per-message accounting as the Pi parser. omp writes its `model_change` as a provider-qualified id (`vllm-hpc/qwen3.8-27B-FP8`), which the shared fallback now splits into provider + bare model so the pricing lookup resolves. Cost comes from the pricing DB rather than omp's bundled catalog — the same self-hosted endpoint must show one price across tools — so self-hosted ids absent from the DB cost 0.00, and the Pi parser keeps its released "recorded cost wins" behavior. Usage is cache-exclusive: `input + cacheRead` equals the full prompt, verified against cold/warm runs on one endpoint.
 - The usage tracker now assigns each tree-scanned directory to exactly one parser at startup. Two sources claiming the same directory (e.g. `PI_CODING_AGENT_DIR` pointed at an omp tree) used to be a silent 2x on totals, because the usage store dedups on `(source, entry_key)` and never across sources; the later-registered source now drops the conflicting dir and the conflict is reported in `source_errors` on every collect.
 - Added a local omp brand mark to dashboard tool rows and charts.
+- Added Kilo Code as a token and cost source. Kilo is built on the OpenCode codebase (CLI and the current VS Code
+  extension share the store), so Tokdash reads the same `message` table shape the OpenCode parser queries, from
+  `~/.local/share/kilo/kilo.db` (XDG data dir + `kilo`): one row per assistant message, the cache share split out
+  of the exclusive input, model from `data.modelID`. Dev-channel `kilo-<channel>.db` files are merged, and a
+  pre-rename `opencode*.db` in the same data dir is read only while no kilo-named file exists, so a migrated
+  install is never double-read. Recorded cost is ignored in favor of the pricing DB; self-hosted ids absent from
+  the DB cost 0.00. Kilo Code does not appear in the Sessions tab.
+- Added Cline as a token and cost source, file-first. Cline's per-session `<sessionId>.messages.json` files (and
+  their `agent_*` subagent siblings) are the single source of truth: with `enableSpawn` the `sessions` table's
+  `usage` covers only the parent's own model calls and subagent rows carry no usage at all, so a sessions-db parser
+  would undercount every spawn, while the message files are complete and non-duplicating. Cline normalizes every
+  provider so `inputTokens` already includes the cache-read/write portions; the parser splits them into disjoint
+  buckets (clamped, so a malformed row cannot go negative) before pricing. Each message id is a stable,
+  source-global dedup key: resuming rewrites the same file in place and forking copies the parent's message ids
+  into a new session file, so a session-scoped key would double-count replayed calls. Cost is priced from the
+  pricing DB, not `metrics.cost`; self-hosted ids absent from the DB cost 0.00. Cline does not appear in the
+  Sessions tab (the `sessions` table is metadata only for now).
+- Added local Cline, Kilo Code and omp brand marks to dashboard tool rows and charts.
 
 ## 2.1.0 - 2026-08-22
 

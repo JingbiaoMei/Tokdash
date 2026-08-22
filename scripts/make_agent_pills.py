@@ -44,6 +44,8 @@ TOOLS = [
     ("grok", "Grok Build", "grok.png"),
     ("pi", "Pi", "pi.png"),
     ("omp", "omp", "omp.png"),
+    ("kilocode", "Kilo Code", "kilocode.png"),
+    ("cline", "Cline", "cline.png"),
     ("copilot", "GitHub Copilot CLI", "copilot.svg"),
     ("hermes", "Hermes", "hermes.png"),
     ("dsh", "DeepSeek Harness", "dsh.svg"),

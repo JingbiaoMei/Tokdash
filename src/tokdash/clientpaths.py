@@ -61,6 +61,48 @@ def opencode_db_path() -> Path:
     return opencode_data_dir() / "opencode.db"
 
 
+# --- Kilo Code -------------------------------------------------------------------
+
+
+def kilo_data_dir() -> Path:
+    explicit = os.environ.get("XDG_DATA_HOME", "").strip()
+    base = Path(explicit).expanduser() if explicit else Path.home() / ".local/share"
+    return base / "kilo"
+
+
+def kilo_db_paths() -> List[Path]:
+    """Kilo SQLite databases, most canonical first.
+
+    Stable installs have a single ``kilo.db``; a dev-channel install can add a
+    ``kilo-<channel>.db``. Pre-rename installs wrote an ``opencode*.db`` into
+    this same data dir (Kilo is built on the OpenCode codebase), and the app
+    reads that legacy name only while no kilo-named file exists — mirrored
+    here so a migrated install is never read twice.
+    """
+    root = kilo_data_dir()
+    kilo_named = sorted(
+        (p for p in root.glob("kilo*.db") if p.is_file()),
+        key=lambda p: (p.name != "kilo.db", p.name),
+    )
+    if kilo_named:
+        return kilo_named
+    return sorted(p for p in root.glob("opencode*.db") if p.is_file())
+
+
+# --- Cline ---------------------------------------------------------------------
+
+
+def cline_data_dir() -> Path:
+    """Cline data dir: ``$CLINE_DATA_DIR``, else ``$CLINE_DIR/data``, else ``~/.cline/data``."""
+    explicit = os.environ.get("CLINE_DATA_DIR", "").strip()
+    if explicit:
+        return Path(explicit).expanduser()
+    cline_dir = os.environ.get("CLINE_DIR", "").strip()
+    if cline_dir:
+        return Path(cline_dir).expanduser() / "data"
+    return Path.home() / ".cline" / "data"
+
+
 # --- Mimo / Mimocode -----------------------------------------------------------
 
 

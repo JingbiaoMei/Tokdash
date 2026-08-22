@@ -79,20 +79,20 @@
 
 | 客户端 | 用量与费用 | 会话浏览器 |
 |---|:---:|:---:|
-| OpenCode | ✅ | ✅ |
-| Codex | ✅ | ✅ |
-| Claude Code | ✅ | ✅ |
-| Gemini CLI | ✅ | — |
-| Antigravity CLI | ✅ | — |
-| OpenClaw | ✅ | — |
-| Kimi Code / Kimi CLI | ✅ | ✅ |
-| MiMo Code | ✅ | ✅ |
-| Grok Build | ✅ | — |
-| Pi | ✅ | ✅ |
-| GitHub Copilot CLI | ✅ | — |
-| Hermes | ✅ | — |
-| DeepSeek Harness | ✅ | ✅ |
-| Reasonix | ✅ | ✅ |
+| **OpenCode** | ✅ | ✅ |
+| **Codex** | ✅ | ✅ |
+| **Claude Code** | ✅ | ✅ |
+| **Gemini CLI** | ✅ | — |
+| **Antigravity CLI** | ✅ | — |
+| **OpenClaw** | ✅ | — |
+| **Kimi Code / Kimi CLI** | ✅ | ✅ |
+| **MiMo Code** | ✅ | ✅ |
+| **Grok Build** | ✅ | — |
+| **Pi** | ✅ | ✅ |
+| **GitHub Copilot CLI** | ✅ | — |
+| **Hermes** | ✅ | — |
+| **DeepSeek Harness** | ✅ | ✅ |
+| **Reasonix** | ✅ | ✅ |
 | **ZCode** | ✅ | ✅ |
 | **WorkBuddy** | ✅ | — |
 | **Qoder IDE** | ✅ | — |

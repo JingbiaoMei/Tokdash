@@ -417,16 +417,49 @@ def test_preflight_stays_silent_on_a_corrupt_database() -> None:
 
 
 @pytest.fixture
-def clean_quota_cooldown():
-    """Isolate the module-global quota refresh cooldown between tests."""
+def clean_quota_cooldown(monkeypatch):
+    """Isolate the quota refresh cooldown and make the store read deterministic.
+
+    Two host dependencies have to go, or this only passes on a machine that
+    happens to have quota providers configured:
+
+    * ``collect_enabled_snapshots`` reads the store via ``collect_local_snapshots``,
+      but with no providers it returns [] -- and ``insert_quota_snapshots`` then
+      short-circuits on empty rows *before* opening the database, so nothing ever
+      reaches the schema guard and the route returns 200.
+    * the real collector is called with ``include_network=True``, so the test would
+      do live provider I/O in CI.
+
+    The stub below touches the store exactly as the real collector does, so the
+    error still comes from the real guard in ``_ensure_schema`` rather than a
+    fabricated raise.
+    """
     pytest.importorskip("fastapi")
     import tokdash.api as api
+    from tokdash.sources import quota as quota_module
+
+    def _collect_touching_store(*, include_network=True, store=None, network_sources=None):
+        if store is not None:
+            store._connect()
+        return []
+
+    monkeypatch.setattr(quota_module, "collect_enabled_snapshots", _collect_touching_store)
 
     saved = (api._quota_last_refresh_monotonic, api._quota_prev_refresh_monotonic)
     api._quota_last_refresh_monotonic = 0.0
     api._quota_prev_refresh_monotonic = 0.0
     yield api
     api._quota_last_refresh_monotonic, api._quota_prev_refresh_monotonic = saved
+
+
+def test_quota_refresh_succeeds_on_a_healthy_database(clean_quota_cooldown) -> None:
+    """Guards the fixture: with a readable DB the route must still return 200.
+
+    Without this, a stub that silently stopped touching the store would make the
+    two tests below pass for the wrong reason.
+    """
+    api = clean_quota_cooldown
+    assert api.refresh_quota() == {"snapshots": 0, "inserted": 0}
 
 
 def test_quota_refresh_converts_the_typed_error_to_an_actionable_500(

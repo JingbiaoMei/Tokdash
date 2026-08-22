@@ -1,6 +1,28 @@
 {
-  "current": "2.1.0",
+  "current": "2.2.0",
   "releases": [
+    {
+      "version": "2.2.0",
+      "date": "2026-08-22",
+      "sections": [
+        {
+          "type": "added",
+          "items": [
+            "Added omp (oh-my-pi) as a local token and cost source, reading the same session format as Pi across the default tree, the init-xdg migration root, and named profiles.",
+            "Added Kilo Code as a local token and cost source, covering the CLI and the current VS Code extension through their shared store, including dev-channel databases.",
+            "Added Cline as a local token and cost source, reading per-session message files so subagent spawns are counted in full rather than dropped.",
+            "Added local omp, Kilo Code, and Cline brand marks throughout dashboard tool rows and charts."
+          ]
+        },
+        {
+          "type": "changed",
+          "items": [
+            "Each scanned session directory is now claimed by exactly one source, so two clients pointed at the same tree can no longer count the same tokens twice.",
+            "The persistent store's cross-file stable-key sync is a declared parser capability instead of a Codex-specific branch, keeping the correct owner for Cline's forked session files."
+          ]
+        }
+      ]
+    },
     {
       "version": "2.1.0",
       "date": "2026-08-22",

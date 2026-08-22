@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 2.2.0 - Unreleased
+
+### Added
+
+- Added omp (oh-my-pi) as a token and cost source. omp is a port of pi-mono, so its session JSONL is field-compatible with Pi's: Tokdash reads `~/.omp/agent/sessions/` (plus the `$XDG_DATA_HOME/omp/sessions` XDG-migration path once `omp config init-xdg` has created it, named profiles under `~/.omp/profiles/<name>/agent/sessions/`, and `PI_CONFIG_DIR` config roots) with the same per-message accounting as the Pi parser. omp writes its `model_change` as a provider-qualified id (`vllm-hpc/qwen3.8-27B-FP8`), which the shared fallback now splits into provider + bare model so the pricing lookup resolves. Cost comes from the pricing DB rather than omp's bundled catalog — the same self-hosted endpoint must show one price across tools — so self-hosted ids absent from the DB cost 0.00, and the Pi parser keeps its released "recorded cost wins" behavior. Usage is cache-exclusive: `input + cacheRead` equals the full prompt, verified against cold/warm runs on one endpoint.
+- The usage tracker now assigns each tree-scanned directory to exactly one parser at startup. Two sources claiming the same directory (e.g. `PI_CODING_AGENT_DIR` pointed at an omp tree) used to be a silent 2x on totals, because the usage store dedups on `(source, entry_key)` and never across sources; the later-registered source now drops the conflicting dir and the conflict is reported in `source_errors` on every collect.
+- Added a local omp brand mark to dashboard tool rows and charts.
+
 ## 2.1.0 - 2026-08-22
 
 ### Added

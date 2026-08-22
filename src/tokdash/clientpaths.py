@@ -249,6 +249,54 @@ def pi_agent_search_dirs() -> List[Path]:
     return [Path.home() / ".pi" / "agent" / "sessions"]
 
 
+# --- omp (oh-my-pi) -----------------------------------------------------------------
+
+
+def omp_agent_search_dirs() -> List[Path]:
+    """omp session-dir candidates, most specific override first.
+
+    omp is a port of pi-mono (its ``packages/utils/src/dirs.ts`` is the source
+    of record). The config root is ``~/.omp`` unless ``PI_CONFIG_DIR``
+    overrides the root name; sessions live under
+    ``<config root>/agent/sessions``, and named profiles under
+    ``<config root>/profiles/<name>/agent/sessions``. On linux (including WSL) and darwin
+    the default profile may be migrated with ``omp config init-xdg``; omp then
+    reads sessions from ``$XDG_DATA_HOME/omp/sessions`` — note the flattened
+    ``agent/`` prefix — and only trusts that path once ``$XDG_DATA_HOME/omp``
+    exists.
+
+    ``PI_CODING_AGENT_DIR`` is deliberately NOT a candidate: omp honors it in
+    default-profile mode, but ``pi_agent_search_dirs`` already claims that
+    override exclusively, and if both parsers scanned it, every token would
+    count twice — the usage store dedups on ``(source, entry_key)``, never
+    across sources.
+    """
+    config_root = Path.home() / (os.environ.get("PI_CONFIG_DIR", "").strip() or ".omp")
+    dirs: List[Path] = [config_root / "agent" / "sessions"]
+
+    xdg_data = os.environ.get("XDG_DATA_HOME", "").strip()
+    if xdg_data and not osinfo.is_windows():
+        app_root = Path(xdg_data).expanduser() / "omp"
+        if app_root.is_dir():
+            dirs.append(app_root / "sessions")
+
+    profiles_root = config_root / "profiles"
+    if profiles_root.is_dir():
+        for profile in sorted(profiles_root.iterdir()):
+            if profile.is_dir():
+                dirs.append(profile / "agent" / "sessions")
+
+    # De-duplicate, keeping order (PI_CONFIG_DIR may point at ".omp" itself).
+    seen: set = set()
+    out: List[Path] = []
+    for d in dirs:
+        key = str(d)
+        if key not in seen:
+            seen.add(key)
+            out.append(d)
+    return out
+
+
 # --- GitHub Copilot CLI -----------------------------------------------------------
 
 

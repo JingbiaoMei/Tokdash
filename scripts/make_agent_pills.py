@@ -43,6 +43,7 @@ TOOLS = [
     ("mimo", None, "mimo.svg"),
     ("grok", "Grok Build", "grok.png"),
     ("pi", "Pi", "pi.png"),
+    ("omp", "omp", "omp.png"),
     ("copilot", "GitHub Copilot CLI", "copilot.svg"),
     ("hermes", "Hermes", "hermes.png"),
     ("dsh", "DeepSeek Harness", "dsh.svg"),

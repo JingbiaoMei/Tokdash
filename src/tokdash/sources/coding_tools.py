@@ -1915,6 +1915,13 @@ class PiAgentParser(BaseParser):
     #    attributed to output, a positive recorded cost.total kept as fixed.
     persistent_parser_version = 1
 
+    # Cost policy hook: when True, a positive usage.cost.total is kept as a
+    # fixed (never-repriced) cost; when False, the row is priced from the
+    # pricing DB. The hook must toggle the whole cost branch — value AND
+    # billing provenance together — so a pricing-DB row is never flagged
+    # cost-authoritative.
+    use_recorded_cost = True
+
     def __init__(self, pricing_db: PricingDatabase):
         super().__init__(pricing_db)
         self.search_dirs = clientpaths.pi_agent_search_dirs()
@@ -1947,7 +1954,7 @@ class PiAgentParser(BaseParser):
                         sigs.append((p_str, mt, sz))
             return tuple(sorted(sigs))
 
-        cache_key = f"pi_agent:{','.join(str(d) for d in self.search_dirs)}"
+        cache_key = f"{self.source_name}:{','.join(str(d) for d in self.search_dirs)}"
         return _timed_sigs(cache_key, scan)
 
     def _parse_all(self) -> List[Dict[str, Any]]:
@@ -1980,10 +1987,21 @@ class PiAgentParser(BaseParser):
                             cur_session_id = str(obj.get("id") or cur_session_id)
                             continue
 
-                        # Track model changes
+                        # Track model changes. pi writes a bare modelId; omp
+                        # writes model as a provider-qualified "provider/model"
+                        # string with no provider field, so split the fallback
+                        # — otherwise the pricing lookup sees the slash form
+                        # and prices the row at 0.
                         if msg_type == "model_change":
-                            cur_provider = obj.get("provider") or cur_provider
-                            cur_model = obj.get("modelId") or cur_model
+                            raw_model = obj.get("modelId") or obj.get("model")
+                            if isinstance(raw_model, str) and raw_model and "/" in raw_model:
+                                prefix, _, suffix = raw_model.partition("/")
+                                cur_provider = obj.get("provider") or prefix or cur_provider
+                                cur_model = suffix or cur_model
+                            else:
+                                cur_provider = obj.get("provider") or cur_provider
+                                if isinstance(raw_model, str) and raw_model:
+                                    cur_model = raw_model
                             continue
 
                         if msg_type != "message":
@@ -2031,10 +2049,12 @@ class PiAgentParser(BaseParser):
                         if input_t == 0 and output_t == 0 and cache_r == 0 and cache_w == 0:
                             continue
 
-                        # Cost: prefer usage.cost.total when present and > 0
+                        # Cost: prefer usage.cost.total when present and > 0,
+                        # unless the source prices from the pricing DB itself
+                        # (use_recorded_cost = False).
                         cost_obj = usage.get("cost") if isinstance(usage.get("cost"), dict) else {}
                         cost_total = float(cost_obj.get("total") or 0.0)
-                        if cost_total > 0:
+                        if self.use_recorded_cost and cost_total > 0:
                             cost = cost_total
                             # Pi's own number. A pricing edit must never move it.
                             billing = usage_billing_fixed(cost_total)
@@ -2059,13 +2079,45 @@ class PiAgentParser(BaseParser):
                             "reasoning": 0,
                             "cost": cost,
                             "timestamp": int(ts.timestamp() * 1000),
-                            "entry_id": f"pi_agent:{entry_id}" if entry_id else "",
+                            "entry_id": f"{self.source_name}:{entry_id}" if entry_id else "",
                             "_billing": billing,
                         })
             except Exception:
                 continue
 
         return out
+
+
+class OmpParser(PiAgentParser):
+    """
+    Parser for omp (oh-my-pi) session files.
+
+    omp is a Rust+TS port of pi-mono; its session JSONL is field-compatible
+    with pi's (see the PiAgentParser docstring), so this subclass inherits
+    _parse_all unchanged and only redirects the search dirs:
+    clientpaths.omp_agent_search_dirs() (~/.omp/agent/sessions, the XDG
+    migration path, named profiles, PI_CONFIG_DIR).
+
+    O2: entry ids and the signature cache key are keyed on self.source_name
+    in the base, so omp rows are "omp:…" and never collide with pi_agent's
+    cache entries.
+
+    O6: omp bills self-hosted models from its bundled catalog, which would
+    price the same endpoint at a different rate than every other source on
+    the dashboard. use_recorded_cost = False prices from the pricing DB
+    instead; self-hosted ids absent from it cost 0.00.
+
+    O5: the two sources share ONE _parse_all implementation. A future edit
+    to PiAgentParser._parse_all changes the stored rows of BOTH pi_agent
+    and omp and needs persistent_parser_version bumps for BOTH.
+    """
+
+    source_name = "omp"
+    use_recorded_cost = False
+
+    def __init__(self, pricing_db: PricingDatabase):
+        super().__init__(pricing_db)
+        self.search_dirs = clientpaths.omp_agent_search_dirs()
 
 
 class CopilotCLIParser(BaseParser):
@@ -4340,6 +4392,7 @@ class CodingToolsUsageTracker:
             "kimi": KimiParser(self.pricing_db),
             "grok": GrokParser(self.pricing_db),
             "pi_agent": PiAgentParser(self.pricing_db),
+            "omp": OmpParser(self.pricing_db),
             "copilot_cli": CopilotCLIParser(self.pricing_db),
             "hermes": HermesParser(self.pricing_db),
             "mimo": MimoParser(self.pricing_db),
@@ -4350,10 +4403,57 @@ class CodingToolsUsageTracker:
             "qoder": QoderIdeParser(self.pricing_db),
             "qoder_cli": QoderCliParser(self.pricing_db),
         }
+        # Two parsers must never scan the same directory: the usage store
+        # dedups on (source, entry_key) and never across sources, so an
+        # overlap (e.g. PI_CODING_AGENT_DIR pointed at an omp tree) would
+        # count every token twice.
+        self._dir_conflicts = self._claim_search_dirs()
+
+    @staticmethod
+    def _dir_claim_key(directory: Any) -> str:
+        key = str(Path(str(directory)).expanduser().resolve())
+        return key.lower() if os.name == "nt" else key
+
+    def _claim_search_dirs(self) -> List[Dict[str, str]]:
+        """Assign each tree-scanned directory to exactly one parser.
+
+        Registration order decides the owner; a later source that claims a
+        dir already claimed drops it from its own search list. The returned
+        conflict notes are re-emitted by collect() — a note appended here in
+        __init__ would be wiped by collect's source_errors reset before any
+        consumer saw it.
+        """
+        claimed: Dict[str, str] = {}
+        conflicts: List[Dict[str, str]] = []
+        for name, parser in self.parsers.items():
+            dirs = getattr(parser, "search_dirs", None)
+            if not dirs:
+                continue
+            kept = []
+            for d in dirs:
+                key = self._dir_claim_key(d)
+                owner = claimed.get(key)
+                if owner is not None and owner != name:
+                    conflicts.append({
+                        "source": name,
+                        "error": (
+                            f"search dir {d} is also claimed by {owner}; {name} dropped "
+                            f"it to avoid counting its tokens twice"
+                        ),
+                    })
+                    continue
+                claimed.setdefault(key, name)
+                kept.append(d)
+            if len(kept) != len(dirs):
+                parser.search_dirs = kept
+        return conflicts
 
     def collect(self, since_date: Optional[datetime] = None, until_date: Optional[datetime] = None, sources: Optional[List[str]] = None):
         self.entries = []
         self.source_errors = []
+        # Re-emit the dir-ownership notes computed in __init__ (see
+        # _claim_search_dirs); the reset above would otherwise wipe them.
+        self.source_errors.extend(getattr(self, "_dir_conflicts", ()))
         selected = sources or list(self.parsers.keys())
         for name in selected:
             parser = self.parsers.get(name)

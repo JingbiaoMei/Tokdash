@@ -13,6 +13,7 @@ Tokdash reads usage **locally** from each tool's own session/log files — nothi
   <a href="https://mimo.xiaomi.com/coder" title="MiMo Code"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/mimo.png" alt="MiMo Code" height="34"></a>
   <a href="https://grok.com/build" title="Grok Build"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/grok.png" alt="Grok Build" height="34"></a>
   <a href="https://pi.dev/" title="Pi"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/pi.png" alt="Pi" height="34"></a>
+  <a href="https://omp.sh/" title="omp"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/omp.png" alt="omp" height="34"></a>
   <a href="https://github.com/features/copilot" title="GitHub Copilot CLI"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/copilot.png" alt="GitHub Copilot CLI" height="34"></a>
   <a href="https://hermes-agent.nousresearch.com/" title="Hermes"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/hermes.png" alt="Hermes" height="34"></a>
   <a href="https://github.com/deepseek-ai/deepseek-harness" title="DeepSeek Harness"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/dsh.png" alt="DeepSeek Harness" height="34"></a>
@@ -35,6 +36,7 @@ Tokdash reads usage **locally** from each tool's own session/log files — nothi
 - **Kimi Code**: `~/.kimi-code/sessions/*/*/agents/*/wire.jsonl` (legacy Kimi CLI: `~/.kimi/sessions/*/*/wire.jsonl`)
 - **Grok Build**: `$GROK_HOME/logs/unified.jsonl` (defaults to `~/.grok`; per-inference prompt/cache/completion/reasoning tokens with model attribution)
 - **Pi**: `~/.pi/agent/sessions/` (override via `PI_AGENT_DIR` env var, comma-separated list of dirs)
+- **omp (oh-my-pi)**: `~/.omp/agent/sessions/` (a port of pi-mono; same JSONL session format as Pi, plus `$XDG_DATA_HOME/omp/sessions` after `omp config init-xdg`, named profiles at `~/.omp/profiles/<name>/agent/sessions/`, and `PI_CONFIG_DIR` for the config root). omp's own `PI_CODING_AGENT_DIR` override is intentionally not scanned by the omp source — Pi owns that variable, and scanning it under both would count every token twice. Usage is cache-exclusive (input + cacheRead = full prompt). Cost is priced from the pricing DB, not omp's bundled catalog, so a self-hosted endpoint shows one price across tools; self-hosted ids absent from the DB cost 0.00. No Sessions tab.
 - **GitHub Copilot CLI**: `~/.copilot/otel/` (full input/cache/cost data — set `COPILOT_OTEL_FILE_EXPORTER_PATH` to enable OTel export) and `~/.copilot/session-state/*/events.jsonl` (output-only fallback when OTel is not enabled)
 - **Hermes**: `~/.hermes/state.db` (override via `HERMES_HOME` env var, comma-separated list of dirs)
 - **DeepSeek Harness**: `$DSH_HOME/sessions/<project-key>/<session-id>/session.jsonl.zstd` (or an uncompressed `session.jsonl`; `DSH_HOME` defaults to `~/.dsh`)

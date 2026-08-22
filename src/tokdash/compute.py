@@ -184,6 +184,7 @@ def _sync_usage_store(tracker: CodingToolsUsageTracker) -> tuple[UsageEntryStore
         signature = build_source_signature(
             files=files,
             parser=parser_sig,
+            extra=parser.runtime_config_signature(),
         )
         store.sync_source(
             name,
@@ -426,7 +427,10 @@ def parse_entries_json(data: Dict[str, Any]) -> Dict[str, Any]:
         # aligned with the per-source semantics and with the Stats tab, which
         # already trusts entry["cost"].
         entry_cost = float(entry.get("cost") or 0.0)
-        if entry_cost > 0:
+        # costAuthoritative marks a recorded zero as the source's own
+        # billing decision (a free request): accept it instead of
+        # guessing a price from the token buckets.
+        if entry_cost > 0 or entry.get("costAuthoritative") is True:
             cost = entry_cost
         else:
             cost = pricing_db.get_cost(full_model_name, input_raw, tokens_out, cache_read, cache_write)

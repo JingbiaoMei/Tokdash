@@ -16,8 +16,24 @@ from tokdash.activity_insights import (
     record_structured_tool_call,
 )
 from tokdash.pricing import PricingDatabase
-from tokdash.sources.coding_tools import BaseParser, CodexParser, CodingToolsUsageTracker, _sig_cache
-from tokdash.usage_store import UsageEntryStore, build_source_signature, parser_code_signature
+from tokdash.sources.coding_tools import (
+    AmpParser,
+    BaseParser,
+    CodexParser,
+    CodingToolsUsageTracker,
+    CopilotCLIParser,
+    GrokParser,
+    HermesParser,
+    QoderCliParser,
+    _sig_cache,
+)
+from tokdash.usage_store import (
+    UsageEntryStore,
+    build_source_signature,
+    parser_code_signature,
+    usage_billing_fixed,
+    usage_billing_pricing,
+)
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:
@@ -3319,3 +3335,492 @@ def test_query_session_records_whole_sessions_keeps_sibling_files(tmp_path):
 
     unwindowed = store.query_session_records("kimi", whole_sessions=True)
     assert len(unwindowed) == 3
+# ---------------------------------------------------------------------------
+# cost_authoritative (schema v9) -- generic usage-store invariants
+# ---------------------------------------------------------------------------
+
+
+def _v8_usage_db(db_path: Path) -> None:
+    """A usage DB left at schema v8: billing provenance present, no cost_authoritative."""
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+        conn.execute("INSERT INTO meta(key, value) VALUES('schema_version', '8')")
+        conn.execute(
+            """
+            CREATE TABLE usage_entries (
+                id INTEGER PRIMARY KEY,
+                source TEXT NOT NULL,
+                file_path TEXT NOT NULL DEFAULT '',
+                entry_key TEXT NOT NULL DEFAULT '',
+                model TEXT NOT NULL,
+                provider TEXT NOT NULL DEFAULT '',
+                timestamp INTEGER NOT NULL,
+                input INTEGER NOT NULL DEFAULT 0,
+                output INTEGER NOT NULL DEFAULT 0,
+                cache_read INTEGER NOT NULL DEFAULT 0,
+                cache_write INTEGER NOT NULL DEFAULT 0,
+                reasoning INTEGER NOT NULL DEFAULT 0,
+                cost REAL NOT NULL DEFAULT 0,
+                message_count INTEGER NOT NULL DEFAULT 1,
+                raw_json TEXT NOT NULL,
+                billing_json TEXT NOT NULL DEFAULT ''
+            )
+            """
+        )
+        conn.commit()
+
+
+def test_usage_store_v9_adds_cost_authoritative_column(tmp_path):
+    db_path = tmp_path / "usage.sqlite3"
+    store = UsageEntryStore(db_path)
+    assert store.source_signature("missing") is None
+    with sqlite3.connect(db_path) as conn:
+        columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(usage_entries)").fetchall()
+        }
+        version = conn.execute(
+            "SELECT value FROM meta WHERE key = 'schema_version'"
+        ).fetchone()[0]
+    assert "cost_authoritative" in columns
+    assert usage_store_module.SCHEMA_VERSION == 9
+    assert version == "9"
+
+
+def test_v9_migration_backfills_fixed_billing_rows(tmp_path):
+    """v8 -> v9 marks fixed-billing rows authoritative, pricing rows unpriced.
+
+    Includes the deliberate change: a pre-v9 fixed row with cost = 0 was
+    repriced by the aggregate unpriced-bucket; after migration it stays 0.0.
+    """
+    db_path = tmp_path / "usage.sqlite3"
+    _v8_usage_db(db_path)
+    rows = [
+        ("fixed", "m1", 0.5, json.dumps(usage_billing_fixed(0.5))),
+        ("fixed-zero", "grok-4.5", 0.0, json.dumps(usage_billing_fixed(0.0))),
+        (
+            "pricing",
+            "m1",
+            0.0,
+            json.dumps(usage_billing_pricing(["m1"], input_tokens=10, output_tokens=5)),
+        ),
+    ]
+    with sqlite3.connect(db_path) as conn:
+        conn.executemany(
+            """
+            INSERT INTO usage_entries (
+                source, entry_key, model, timestamp, input, output, cost,
+                raw_json, billing_json
+            ) VALUES ('pi', ?, ?, 1700000000000, 10, 5, ?, ?, ?)
+            """,
+            [
+                (
+                    key,
+                    model,
+                    cost,
+                    json.dumps(
+                        {
+                            "source": "pi",
+                            "model": model,
+                            "timestamp": 1700000000000,
+                            "input": 10,
+                            "output": 5,
+                            "cost": cost,
+                        }
+                    ),
+                    billing,
+                )
+                for key, model, cost, billing in rows
+            ],
+        )
+        conn.commit()
+
+    store = UsageEntryStore(db_path)
+    # Opening the store runs the v8 -> v9 migration.
+    assert store.source_signature("pi") is None
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        flags = {
+            row["entry_key"]: row["cost_authoritative"]
+            for row in conn.execute(
+                "SELECT entry_key, cost_authoritative FROM usage_entries"
+            ).fetchall()
+        }
+    assert flags == {"fixed": 1, "fixed-zero": 1, "pricing": 0}
+    assert len(store.query_entries()) == 3
+
+    data = store.aggregate_entries(sources=["pi"])
+    # The fixed-zero grok row keeps its recorded 0.0 instead of being priced
+    # from its token buckets like the pre-v9 unpriced bucket would do.
+    grok = next(m for m in data["apps"]["pi"]["models"] if m["name"] == "grok-4.5")
+    assert grok["cost"] == 0.0
+    assert grok["tokens_in"] == 10
+    m1 = next(m for m in data["apps"]["pi"]["models"] if m["name"] == "m1")
+    # fixed 0.5 + the pricing row's unpriced model (no recompute price)
+    assert m1["cost"] == 0.5
+
+
+def test_v9_migration_fixed_zero_rows_parity_across_read_paths(tmp_path):
+    """A migrated fixed-zero row reads $0 on every path.
+
+    The v9 backfill sets cost_authoritative, but the legacy raw_json
+    has no costAuthoritative marker, so query_entries() must expose
+    the column or parse_entries_json would reprice the free row from
+    its token buckets (aggregate_entries vs query_entries divergence).
+    """
+    from tokdash.compute import parse_entries_json
+
+    db_path = tmp_path / "usage.sqlite3"
+    _v8_usage_db(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO usage_entries (
+                source, entry_key, model, timestamp, input, output, cost,
+                raw_json, billing_json
+            ) VALUES (
+                'grok', 'free-1', 'grok-4.5', 1700000000000, 1000000, 0, 0.0,
+                ?, ?
+            )
+            """,
+            (
+                json.dumps(
+                    {
+                        "source": "grok",
+                        "model": "grok-4.5",
+                        "timestamp": 1700000000000,
+                        "input": 1000000,
+                        "output": 0,
+                        "cost": 0.0,
+                    }
+                ),
+                json.dumps(usage_billing_fixed(0.0)),
+            ),
+        )
+        conn.commit()
+
+    store = UsageEntryStore(db_path)
+    assert store.source_signature("grok") is None
+
+    # SQL aggregate: the authoritative flag keeps the recorded zero.
+    agg = store.aggregate_entries(sources=["grok"])
+    grok = next(m for m in agg["apps"]["grok"]["models"] if m["name"] == "grok-4.5")
+    assert grok["cost"] == 0.0
+
+    # Query path: the column is exposed as the public marker...
+    rows = store.query_entries(sources=["grok"])
+    assert len(rows) == 1
+    assert rows[0]["costAuthoritative"] is True
+    assert rows[0]["cost"] == 0.0
+
+    # ...and parse_entries_json accepts the zero instead of repricing
+    # grok-4.5's 1M input at $2.
+    parse_data = parse_entries_json({"entries": rows})
+    assert parse_data["apps"]["grok"]["cost"] == 0.0
+
+
+def test_sync_paths_populate_cost_authoritative_from_billing(tmp_path):
+    store = UsageEntryStore(tmp_path / "usage.sqlite3")
+    ts = 1_700_000_000_000
+    entries = [
+        {
+            "source": "pi",
+            "model": "m1",
+            "timestamp": ts,
+            "input": 10,
+            "output": 5,
+            "cost": 0.5,
+            "_billing": usage_billing_fixed(0.5),
+        },
+        {
+            "source": "pi",
+            "model": "m1",
+            "timestamp": ts + 1000,
+            "input": 10,
+            "output": 5,
+            "cost": 0.0,
+            "_billing": usage_billing_pricing(["m1"], input_tokens=10, output_tokens=5),
+        },
+        {
+            "source": "pi",
+            "model": "m1",
+            "timestamp": ts + 2000,
+            "input": 10,
+            "output": 5,
+            "cost": 0.25,
+        },
+    ]
+    store.sync_source(
+        "pi",
+        build_source_signature(files=[["a.jsonl", 1, 1]], parser={"v": 1}),
+        lambda: entries,
+    )
+    with sqlite3.connect(store.path) as conn:
+        conn.row_factory = sqlite3.Row
+        flags = {
+            row["timestamp"]: row["cost_authoritative"]
+            for row in conn.execute(
+                "SELECT timestamp, cost_authoritative FROM usage_entries WHERE source = 'pi'"
+            ).fetchall()
+        }
+    assert flags == {ts: 1, ts + 1000: 0, ts + 2000: 0}
+
+    # The file_replace path (INSERT OR REPLACE) populates the same column.
+    store.sync_files(
+        "pi2",
+        [("b.jsonl", 1, 1)],
+        parser={"v": 1},
+        parse_file_entries=lambda file_sig: [dict(e, source="pi2") for e in entries],
+    )
+    with sqlite3.connect(store.path) as conn:
+        conn.row_factory = sqlite3.Row
+        flags = {
+            row["timestamp"]: row["cost_authoritative"]
+            for row in conn.execute(
+                "SELECT timestamp, cost_authoritative FROM usage_entries WHERE source = 'pi2'"
+            ).fetchall()
+        }
+    assert flags == {ts: 1, ts + 1000: 0, ts + 2000: 0}
+
+
+def test_sync_files_codex_upsert_updates_cost_authoritative(tmp_path):
+    """DO UPDATE SET must carry cost_authoritative when a copy wins the upsert."""
+    store = UsageEntryStore(tmp_path / "usage.sqlite3")
+
+    def make_entry(ts_ms, billing, cost):
+        return {
+            "source": "codex",
+            "entry_id": "k1",
+            "model": "m",
+            "timestamp": ts_ms,
+            "input": 1,
+            "output": 1,
+            "cost": cost,
+            "_billing": billing,
+        }
+
+    store.sync_files(
+        "codex",
+        [("a.jsonl", 1, 1)],
+        parser={"v": 1},
+        parse_file_entries=lambda file_sig: [
+            make_entry(2_000_000_000_000, usage_billing_pricing(["m"], input_tokens=1, output_tokens=1), 0.0)
+        ],
+    )
+    # b.jsonl's earlier-timestamp copy of k1 wins the conflict upsert.
+    store.sync_files(
+        "codex",
+        [("a.jsonl", 1, 1), ("b.jsonl", 2, 2)],
+        parser={"v": 1},
+        parse_file_entries=lambda file_sig: [
+            make_entry(1_999_999_999_000, usage_billing_fixed(0.1), 0.1)
+        ],
+    )
+    with sqlite3.connect(store.path) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            """
+            SELECT cost_authoritative, cost, file_path
+            FROM usage_entries
+            WHERE source = 'codex' AND entry_key = 'k1'
+            """
+        ).fetchone()
+    assert row is not None
+    assert row["cost_authoritative"] == 1
+    assert row["cost"] == 0.1
+    assert row["file_path"] == "b.jsonl"
+
+
+def test_aggregate_paths_keep_authoritative_free_rows_out_of_recompute(tmp_path):
+    """A group mixing priced, authoritative-free and unpriced rows.
+
+    Only the unpriced (non-authoritative) zero row is repriced; the recorded
+    zero stays 0.0 on both the Overview aggregate and the Stats contribution
+    query.
+    """
+    store = UsageEntryStore(tmp_path / "usage.sqlite3")
+    ts = 1_784_900_000_000
+
+    def row(ts_ms, cost, billing, marker=False):
+        entry = {
+            "source": "grok",
+            "model": "grok-4.5",
+            "provider": "xai",
+            "timestamp": ts_ms,
+            "input": 1_000_000,
+            "output": 0,
+            "cost": cost,
+            "messageCount": 1,
+            "_billing": billing,
+        }
+        if marker:
+            entry["costAuthoritative"] = True
+        return entry
+
+    rows = [
+        row(ts, 2.0, usage_billing_pricing(["grok-4.5"], input_tokens=1_000_000)),
+        row(ts + 1000, 0.0, usage_billing_fixed(0.0), marker=True),
+        row(ts + 2000, 0.0, usage_billing_pricing(["grok-4.5"], input_tokens=1_000_000)),
+    ]
+    store.sync_source(
+        "grok",
+        build_source_signature(files=[["unified.jsonl", 1, 1]], parser={"v": 1}),
+        lambda: rows,
+    )
+
+    data = store.aggregate_entries(sources=["grok"])
+    # 2.0 priced + 0.0 authoritative + 2.0 recomputed.
+    assert abs(data["apps"]["grok"]["cost"] - 4.0) < 1e-9
+    # All three rows' tokens still count.
+    assert data["apps"]["grok"]["tokens_in"] == 3_000_000
+
+    days = store.contribution_days(
+        sources=["grok"],
+        since=datetime.fromtimestamp(1_784_899_999, timezone.utc),
+        until=datetime.fromtimestamp(1_784_900_003, timezone.utc),
+    )
+    assert len(days) == 1
+    assert abs(days[0]["totals"]["cost"] - 4.0) < 1e-9
+
+
+def test_parse_entries_json_accepts_authoritative_zero_cost():
+    from tokdash.compute import parse_entries_json
+
+    # grok-4.5 is $2 input per 1M in the packaged pricing DB: an unmarked
+    # zero-cost row recomputes to $2, an authoritative one stays at 0.0.
+    entries = [
+        {
+            "source": "grok",
+            "model": "grok-4.5",
+            "provider": "xai",
+            "timestamp": 1_784_900_000_000,
+            "input": 1_000_000,
+            "output": 0,
+            "cost": 0.0,
+            "costAuthoritative": True,
+            "messageCount": 1,
+        },
+        {
+            "source": "grok",
+            "model": "grok-4.5",
+            "provider": "xai",
+            "timestamp": 1_784_900_001_000,
+            "input": 1_000_000,
+            "output": 0,
+            "cost": 0.0,
+            "messageCount": 1,
+        },
+    ]
+    data = parse_entries_json({"entries": entries})
+    assert abs(data["apps"]["grok"]["cost"] - 2.0) < 1e-9
+
+
+# ---------------------------------------------------------------------------
+# runtime configuration signature -- cache identity invariants
+# ---------------------------------------------------------------------------
+
+
+def test_build_source_signature_extra_round_trip():
+    files = (("/tmp/x.jsonl", 123, 456),)
+    parser_sig = {
+        "object": "tokdash.sources.coding_tools.TestParser",
+        "version": 1,
+        "entry_format": 1,
+    }
+    legacy = build_source_signature(files=files, parser=parser_sig)
+    # extra=None must stay byte-identical with the pre-hook form, so sources
+    # without a runtime hook never reparse because of this addition.
+    assert build_source_signature(files=files, parser=parser_sig, extra=None) == legacy
+    assert json.loads(legacy)["extra"] is None
+    extra = {"usd_per_credit": None, "context_window": 180000}
+    signed = build_source_signature(files=files, parser=parser_sig, extra=extra)
+    assert signed != legacy
+    assert json.loads(signed)["extra"] == extra
+
+
+def test_none_hook_source_replace_signatures_unchanged():
+    """The extra= passthrough is a no-op for parsers whose hook returns None."""
+    for cls in (AmpParser, GrokParser, CopilotCLIParser, HermesParser):
+        parser = cls(PricingDatabase())
+        assert parser.runtime_config_signature() is None
+        files = parser._file_signatures()
+        parser_sig = parser.persistent_parser_signature()
+        legacy = build_source_signature(files=files, parser=parser_sig)
+        current = build_source_signature(
+            files=files, parser=parser_sig, extra=parser.runtime_config_signature()
+        )
+        assert current == legacy
+
+
+def _qoder_cli_pinned_root(root: Path) -> Path:
+    """One pinned-model transcript line: ratio present, all token buckets zero."""
+    transcript = root / "projects" / "p" / "aaaaaaaa-bbbb.jsonl"
+    transcript.parent.mkdir(parents=True, exist_ok=True)
+    line = {
+        "type": "assistant",
+        "uuid": "r1",
+        "timestamp": "2026-08-21T12:00:00.000Z",
+        "message": {
+            "role": "assistant",
+            "model": "qwen3.8-max",
+            "usage": {
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0,
+                "request_id": "r1",
+                "context_usage_ratio": 0.05,
+            },
+        },
+        "sessionId": "s1",
+    }
+    transcript.write_text(json.dumps(line) + "\n", encoding="utf-8")
+    return root
+
+
+def _qoder_cli_parser(monkeypatch, tmp_path, root: Path) -> QoderCliParser:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    for var in ("QODER_CLI_HOME", "QODER_CONFIG_DIR", "QODER_USD_PER_CREDIT", "QODER_CLI_CONTEXT_WINDOW"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("QODER_CLI_HOME", str(root))
+    return QoderCliParser(PricingDatabase())
+
+
+def test_qoder_cli_persistent_signature_tracks_runtime_config(monkeypatch, tmp_path):
+    """A changed override changes the store signature and triggers a reparse."""
+    root = _qoder_cli_pinned_root(tmp_path / "root")
+    parser = _qoder_cli_parser(monkeypatch, tmp_path, root)
+    store = UsageEntryStore(tmp_path / "usage.sqlite3")
+
+    def sync() -> None:
+        sig = build_source_signature(
+            files=parser._file_signatures(),
+            parser=parser.persistent_parser_signature(),
+            extra=parser.runtime_config_signature(),
+        )
+        store.sync_source("qoder_cli", sig, lambda: parser.collect(None, None))
+
+    sync()
+    unset_sig = store.source_signature("qoder_cli")
+    assert json.loads(unset_sig)["extra"] == {"usd_per_credit": None, "context_window": None}
+    # Pinned model without a window: the ratio is unusable, so no entry.
+    assert store.query_entries(sources=["qoder_cli"]) == []
+
+    monkeypatch.setenv("QODER_CLI_CONTEXT_WINDOW", "200000")
+    sync()
+    explicit_sig = store.source_signature("qoder_cli")
+    assert explicit_sig != unset_sig
+    # Signature change re-parses: the entry appears with the recovered input.
+    rows = store.query_entries(sources=["qoder_cli"])
+    assert len(rows) == 1
+    assert rows[0]["input"] == 10000  # 0.05 * 200000
+
+
+def test_qoder_cli_in_memory_key_includes_runtime_config(monkeypatch, tmp_path):
+    """collect() reparses on an env change without any manual cache clear."""
+    root = _qoder_cli_pinned_root(tmp_path / "root")
+    parser = _qoder_cli_parser(monkeypatch, tmp_path, root)
+    assert parser.collect(None, None) == []
+    monkeypatch.setenv("QODER_CLI_CONTEXT_WINDOW", "200000")
+    entries = parser.collect(None, None)
+    assert len(entries) == 1
+    assert entries[0]["input"] == 10000

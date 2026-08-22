@@ -9,6 +9,7 @@ import glob
 import hashlib
 import json
 import logging
+import math
 import os
 import re
 import shutil
@@ -31,6 +32,7 @@ try:
         USAGE_ENTRY_FORMAT_VERSION,
         usage_billing_fixed,
         usage_billing_pricing,
+        usage_entry_cost,
     )
     from . import dsh_log as dsh_log_module
     from .dsh_log import decode_dsh_session_file, dsh_entry_id, dsh_file_signatures, fold_dsh_usage_samples
@@ -42,6 +44,7 @@ except ImportError:  # pragma: no cover
         USAGE_ENTRY_FORMAT_VERSION,
         usage_billing_fixed,
         usage_billing_pricing,
+        usage_entry_cost,
     )
     import dsh_log as dsh_log_module
     from dsh_log import decode_dsh_session_file, dsh_entry_id, dsh_file_signatures, fold_dsh_usage_samples
@@ -393,8 +396,9 @@ class BaseParser(ABC):
     persistent_parser_version: ClassVar[Optional[int]] = None
 
     # Shared across all instances:
-    #   {source_name: ((file_sigs, pricing_sig), [entries])}
+    #   {source_name: ((file_sigs, pricing_sig, runtime_sig), [entries])}
     # pricing_sig is included so cost values are recomputed when pricing_db.json changes.
+    # runtime_sig covers validated environment overrides that change output.
     _entry_cache: ClassVar[Dict[str, Tuple[tuple, List[Dict[str, Any]]]]] = {}
 
     def __init__(self, pricing_db: PricingDatabase):
@@ -417,6 +421,15 @@ class BaseParser(ABC):
             return tuple(self.pricing_db.signature())
         except (OSError, AttributeError):
             return ()
+
+    def runtime_config_signature(self) -> Optional[Dict[str, Any]]:
+        """Validated environment overrides that affect parse output.
+
+        The default is None: parsers whose output depends only on the
+        source files and the pricing DB keep byte-identical cache
+        signatures on every path that embeds this value.
+        """
+        return None
 
     def persistent_parser_signature(self) -> Dict[str, Any]:
         """Identity of this parser for the persistent usage cache.
@@ -453,14 +466,20 @@ class BaseParser(ABC):
         I/O-bound operation into a fast in-memory scan.
 
         The cache key also includes the pricing DB file signature so that
-        cached cost values are recomputed when pricing_db.json is updated.
+        cached cost values are recomputed when pricing_db.json is updated,
+        and the runtime configuration signature so that a validated
+        environment override triggers a re-parse without file changes.
 
         The cache is a ClassVar shared across all parser instances so that
         separate ``CodingToolsUsageTracker`` objects (e.g. for current-period
         and previous-period in ``compute_usage_with_comparison``) reuse the
         same parsed data.
         """
-        sig = (self._file_signatures(), self._pricing_signature())
+        sig = (
+            self._file_signatures(),
+            self._pricing_signature(),
+            self.runtime_config_signature(),
+        )
         cached = self._entry_cache.get(self.source_name)
         if cached is not None and cached[0] == sig:
             all_entries = cached[1]
@@ -571,7 +590,11 @@ class OpenCodeParser(BaseParser):
         invalidated when the DB file or pricing DB changes on disk.
         The cache is bounded to ``_OPENCODE_QUERY_CACHE_MAX`` entries.
         """
-        sig = (self._file_signatures(), self._pricing_signature())
+        sig = (
+            self._file_signatures(),
+            self._pricing_signature(),
+            self.runtime_config_signature(),
+        )
         # Invalidate all cached queries when the DB or pricing file changes.
         if sig != type(self)._query_cache_sig:
             type(self)._query_cache.clear()
@@ -2811,7 +2834,11 @@ class MimoParser(BaseParser):
         return []
 
     def collect(self, since_date: Optional[datetime] = None, until_date: Optional[datetime] = None) -> List[Dict[str, Any]]:
-        sig = (self._file_signatures(), self._pricing_signature())
+        sig = (
+            self._file_signatures(),
+            self._pricing_signature(),
+            self.runtime_config_signature(),
+        )
         if sig != type(self)._query_cache_sig:
             type(self)._query_cache.clear()
             type(self)._query_cache_sig = sig
@@ -3130,7 +3157,11 @@ class ZCodeParser(BaseParser):
         return []
 
     def collect(self, since_date: Optional[datetime] = None, until_date: Optional[datetime] = None) -> List[Dict[str, Any]]:
-        sig = (self._file_signatures(), self._pricing_signature())
+        sig = (
+            self._file_signatures(),
+            self._pricing_signature(),
+            self.runtime_config_signature(),
+        )
         s_ms = int(self._to_utc(since_date).timestamp() * 1000) if since_date else 0
         u_ms = int(self._to_utc(until_date).timestamp() * 1000) if until_date else 9999999999999
         cache_key = (s_ms, u_ms)
@@ -3207,6 +3238,524 @@ class ZCodeParser(BaseParser):
                         type(self)._query_cache.clear()
                     type(self)._query_cache[cache_key] = out
         return list(out)
+
+
+class QoderIdeParser(BaseParser):
+    """Parser for Qoder IDE (GUI) token usage from the local cache DB.
+
+    =======================================================================
+    QODER IDE SQLITE DATABASE SCHEMA
+    =======================================================================
+    Location: one deterministic pick, see clientpaths.qoder_ide_db_path():
+      - Windows: %APPDATA%\\Qoder(CN)\\SharedClientCache\\cache\\db\\local.db
+      - macOS:   ~/Library/Application Support/Qoder(CN)/SharedClientCache/cache/db/local.db
+      - WSL:     the Windows install under /mnt/c
+      - QODER_IDE_DATA_DIR overrides the app user-data root.
+    Read from a temp-dir snapshot (a WAL-mode open of the live DB would
+    create -shm sidecar state in the source tree), exactly like ZCode.
+
+    Table: chat_message -- one row per message (user/assistant/tool). The
+    international build fills token_info ({"prompt_tokens",
+    "completion_tokens", "cached_tokens", "max_input_tokens"}) and
+    model_info ({"model_key": "auto" | "<pinned model>"}); the CN build
+    leaves model_info empty -- every call runs the opaque "auto" router.
+
+    Token accounting:
+      - prompt_tokens INCLUDES the cached slice, so the entry bills
+        prompt - cached as fresh input and the cached slice separately
+        as cacheRead.
+      - Every role with parseable token_info counts: rows are 1:1 with
+        model calls (verified against the ACP context_usage log), so
+        user/tool rows are real usage, not noise.
+    =======================================================================
+    """
+
+    source_name = "qoder"
+    sync_capability = SourceSyncCapability(
+        mode="source_native_db",
+        session_store=False,
+        reason="Qoder IDE is a SQLite DB read from a temp-dir snapshot.",
+    )
+    # Queried live from a coherent snapshot; nothing is stored persistently.
+    persistent_parser_version = None
+
+    _query_cache: ClassVar[Dict[tuple, List[Dict[str, Any]]]] = {}
+    _query_cache_sig: ClassVar[tuple] = ()
+    # Same guard as ZCodeParser: the signature check/clear and the store-time
+    # recheck must run under one lock, or a read in flight under an older
+    # signature can be stored under a newer one.
+    _cache_lock: ClassVar[threading.Lock] = threading.Lock()
+
+    def __init__(self, pricing_db: PricingDatabase):
+        super().__init__(pricing_db)
+        self.db_path = clientpaths.qoder_ide_db_path()
+
+    def _file_signatures(self) -> tuple:
+        if self.db_path is None or not self.db_path.exists():
+            return ()
+        # Main file plus -wal (a missing WAL is a stable state); the live
+        # -shm is excluded, same rule as ZCode.
+        return zcode_snapshot_signatures(self.db_path)
+
+    def _build_entry(self, row: sqlite3.Row) -> Optional[Dict[str, Any]]:
+        try:
+            info = json.loads(row["token_info"])
+        except (TypeError, ValueError):
+            return None
+        if not isinstance(info, dict):
+            return None
+        prompt = max(0, self._i(info.get("prompt_tokens")))
+        # The cached slice is INSIDE prompt_tokens; clamp a torn row that
+        # reports more cache than prompt instead of going negative.
+        cached = min(self._i(info.get("cached_tokens")), prompt)
+        output = self._i(info.get("completion_tokens"))
+        if prompt == 0 and output == 0 and cached == 0:
+            return None
+        model = "auto"
+        try:
+            model_info = json.loads(row["model_info"])
+            model = str(model_info.get("model_key") or "") or "auto"
+        except (TypeError, ValueError):
+            pass
+        input_t = prompt - cached
+        return {
+            "source": self.source_name,
+            "model": model,
+            "input": input_t,
+            "output": output,
+            "cacheRead": cached,
+            "cacheWrite": 0,
+            "cost": self.pricing_db.get_cost(model, input_t, output, cached, 0),
+            "timestamp": int(row["gmt_create"] or 0),
+            "entry_id": f"qoder:{row['id']}",
+        }
+
+    def _parse_all(self) -> Tuple[List[Dict[str, Any]], bool]:
+        """All entries plus a read_ok flag (a failed read is not cacheable)."""
+        if self.db_path is None or not self.db_path.exists():
+            return [], True
+        out: List[Dict[str, Any]] = []
+        read_ok = False
+        snap = None
+        try:
+            with zcode_snapshot(self.db_path) as snap:
+                conn = snap.conn
+                conn.row_factory = sqlite3.Row
+                cur = conn.cursor()
+                # Probe sqlite_master inline (not via _sqlite_table_exists,
+                # which swallows transient errors): an absent table is a
+                # legitimate empty success, a probe error is a failed read.
+                cur.execute(
+                    "SELECT 1 FROM sqlite_master "
+                    "WHERE type='table' AND name='chat_message'"
+                )
+                if cur.fetchone() is not None:
+                    cur.execute(
+                        """
+                        SELECT id, session_id, role, model_info, token_info, gmt_create
+                        FROM chat_message
+                        WHERE length(token_info) > 2
+                        ORDER BY gmt_create
+                        """
+                    )
+                    for row in cur.fetchall():
+                        try:
+                            entry = self._build_entry(row)
+                        except Exception:
+                            continue
+                        if entry is not None:
+                            out.append(entry)
+                read_ok = True
+            if snap.close_failed:
+                # Data was read and is returned, but a snapshot that could
+                # not be closed is a failed (uncached) read.
+                read_ok = False
+        except Exception:
+            read_ok = False
+        return out, read_ok
+
+    def collect(self, since_date: Optional[datetime] = None, until_date: Optional[datetime] = None) -> List[Dict[str, Any]]:
+        """Live snapshot read with in-memory date filtering.
+
+        Like BaseParser.collect() (the date window is applied in memory, not
+        in SQL), with the native-DB rule that a failed read is returned
+        empty but NOT cached, so the next collect retries.
+        """
+        sig = (
+            self._file_signatures(),
+            self._pricing_signature(),
+            self.runtime_config_signature(),
+        )
+        with type(self)._cache_lock:
+            if sig != type(self)._query_cache_sig:
+                type(self)._query_cache.clear()
+                type(self)._query_cache_sig = sig
+            all_entries = type(self)._query_cache.get(sig)
+        if all_entries is None:
+            all_entries, read_ok = self._parse_all()
+            if read_ok:
+                with type(self)._cache_lock:
+                    if sig == type(self)._query_cache_sig:
+                        type(self)._query_cache[sig] = all_entries
+        s_ms = int(self._to_utc(since_date).timestamp() * 1000) if since_date else 0
+        u_ms = int(self._to_utc(until_date).timestamp() * 1000) if until_date else 9999999999999
+        return [e for e in all_entries if s_ms <= (e.get("timestamp") or 0) < u_ms]
+
+
+def _qoder_cli_iso_ms(value: Any) -> int:
+    """ISO-8601 timestamp (Z or explicit offset) to epoch ms; 0 on failure."""
+    if not isinstance(value, str) or not value.strip():
+        return 0
+    text = value.strip()
+    if text[-1] in ("Z", "z"):
+        text = text[:-1] + "+00:00"
+    try:
+        return int(datetime.fromisoformat(text).astimezone(timezone.utc).timestamp() * 1000)
+    except ValueError:
+        return 0
+
+
+class QoderCliParser(BaseParser):
+    """Parser for Qoder CLI usage: transcript credits + segment tokens.
+
+    =======================================================================
+    QODER CLI STORAGE LAYOUT
+    =======================================================================
+    Roots: clientpaths.qoder_cli_roots() -- the union of QODER_CLI_HOME
+    (Tokdash-only, comma-separated), QODER_CONFIG_DIR (Qoder's real
+    single-root override) and the default homes ~/.qoder (international)
+    and ~/.qoder-cn (CN).
+
+    Per root:
+      projects/<project-id>/<session-id>.jsonl
+          Transcript. COST SOURCE: the assistant row's message.usage
+          carries credits (the exact amount Qoder billed), request_id,
+          context_usage_ratio, and -- depending on build -- token fields.
+          The international build (v1.1.28, verified) zero-fills the
+          token fields and fills credits + ratio.
+      logs/sessions/<project-id>/<session-id>/segments/*.jsonl
+          Segment event log. TOKEN SOURCE: model.response.completed
+          lines carry request_id (top-level; the CN emitter also writes
+          it into data) and the token buckets in data.*.
+
+    Merge: one entry per request_id across both passes and ALL roots.
+    A transcript + segment of one request_id is a MERGE (cost from the
+    transcript, tokens from the segment when non-zero); the same type in
+    two roots is a true duplicate (first root in scan order wins). The
+    merge needs cross-file visibility, so the source syncs as a whole
+    (source_replace), never file by file.
+
+    Token accounting:
+      - input_tokens EXCLUDES the cache buckets (Anthropic style), so
+        the buckets stay separate for the additive aggregator.
+      - context_usage_ratio is prompt_tokens / window and recovered as
+        input = int(round(ratio * window)), exact on every captured
+        request. Windows are model-dependent and only auto @ 180000 is
+        evidenced (both captured machines), so recovery defaults to
+        auto only; a pinned model recovers only under an explicit
+        QODER_CLI_CONTEXT_WINDOW override, which then applies to every
+        model. Recovery also requires both cache buckets to be 0: the
+        ratio is the TOTAL prompt (cache included), and assigning it to
+        input beside non-zero cache buckets would double-count them.
+      - A record with nothing attributable (all token fields 0 and no
+        usable ratio) is skipped even when credits > 0: the aggregator
+        drops zero-token rows before reading their cost, so it could
+        never be displayed (documented under-count edge).
+    =======================================================================
+    """
+
+    source_name = "qoder_cli"
+    sync_capability = SourceSyncCapability(
+        mode="source_replace",
+        append_jsonl=False,
+        session_store=False,
+        reason=(
+            "the cost (transcript) and tokens (segment) of one request live in "
+            "different files, so the per-request_id merge needs cross-file "
+            "visibility"
+        ),
+    )
+    # 1: request_id-keyed transcript/segment merge with billing-provenance
+    #    entries (fixed for credit rows, pricing for token rows).
+    persistent_parser_version = 1
+
+    # The only evidenced context window; model-dependent, so it applies to
+    # auto only unless QODER_CLI_CONTEXT_WINDOW is set explicitly.
+    _AUTO_CONTEXT_WINDOW = 180_000
+    # Documented default for an unset/invalid QODER_USD_PER_CREDIT. An
+    # estimate (not a Qoder-published rate), so credit-derived costs stay
+    # labeled estimates in user-facing docs.
+    _DEFAULT_USD_PER_CREDIT = 0.01
+
+    def __init__(self, pricing_db: PricingDatabase):
+        super().__init__(pricing_db)
+        self.roots = clientpaths.qoder_cli_roots()
+
+    # --- runtime configuration ---------------------------------------------
+
+    def _runtime_config(self) -> Tuple[Optional[float], Optional[int]]:
+        """Validated overrides: (usd_per_credit or None, window or None).
+
+        Unparseable, non-finite, zero or negative values are rejected and
+        treated as unset (the documented default policy applies) instead of
+        blanking the source or letting NaN/negatives into the output.
+        """
+        rate: Optional[float] = None
+        raw = os.environ.get("QODER_USD_PER_CREDIT", "").strip()
+        if raw:
+            try:
+                value = float(raw)
+            except ValueError:
+                value = float("nan")
+            if not math.isfinite(value) or value <= 0:
+                logger.warning(
+                    "tokdash qoder_cli: invalid QODER_USD_PER_CREDIT %r; "
+                    "using the $0.01/credit estimate",
+                    raw,
+                )
+            else:
+                rate = value
+        window: Optional[int] = None
+        raw = os.environ.get("QODER_CLI_CONTEXT_WINDOW", "").strip()
+        if raw:
+            try:
+                value = int(raw)
+            except ValueError:
+                value = None
+            if value is None or value <= 0:
+                logger.warning(
+                    "tokdash qoder_cli: invalid QODER_CLI_CONTEXT_WINDOW %r; "
+                    "window stays unset (auto-only ratio recovery)",
+                    raw,
+                )
+            else:
+                window = value
+        return rate, window
+
+    def runtime_config_signature(self) -> Optional[Dict[str, Any]]:
+        """The validated overrides themselves, for the cache identities.
+
+        Storing the override -- not the effective value -- matters for the
+        window: unset (auto-only recovery) and an explicit 180000 (applies
+        to every model) behave differently and must sign differently, while
+        an invalid value behaves and signs like unset.
+        """
+        rate, window = self._runtime_config()
+        return {"usd_per_credit": rate, "context_window": window}
+
+    # --- discovery -----------------------------------------------------------
+
+    def _discovered_files(self) -> List[Path]:
+        out: List[Path] = []
+        seen = set()
+        for root in self.roots:
+            # Transcripts: top level of projects/<project-id>/ only (the
+            # <session-id>.jsonl files). The transcript/ subdir (GUI
+            # session copies, usage-less) and other files are excluded by
+            # the hex pattern plus the is_file check.
+            candidates = (
+                root.glob("projects/*/[0-9a-f-]*.jsonl"),
+                root.glob("logs/sessions/*/*/segments/*.jsonl"),
+            )
+            for pattern in candidates:
+                for f in sorted(pattern):
+                    if f.is_file() and f not in seen:
+                        seen.add(f)
+                        out.append(f)
+        return out
+
+    def _file_signatures(self) -> tuple:
+        out = []
+        for f in self._discovered_files():
+            s = f.stat()
+            out.append((str(f), s.st_mtime_ns, s.st_size))
+        return tuple(out)
+
+    # --- passes ---------------------------------------------------------------
+
+    def _window_for(self, model: str, override: Optional[int]) -> Optional[int]:
+        if override is not None:
+            return override
+        if model == "auto":
+            return self._AUTO_CONTEXT_WINDOW
+        return None
+
+    @staticmethod
+    def _is_number(value: Any) -> bool:
+        return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+    def _transcript_candidate(self, d: Dict[str, Any], window: Optional[int]) -> Optional[Tuple[str, Dict[str, Any]]]:
+        msg = d.get("message")
+        if not isinstance(msg, dict):
+            return None
+        u = msg.get("usage")
+        if not isinstance(u, dict):
+            return None
+        rid = u.get("request_id") or d.get("uuid")
+        if not rid:
+            return None
+        model = str(msg.get("model") or "") or "auto"
+        # Presence, not truthiness: a present credits: 0 (especially with
+        # billable: false) is a FREE request, not a missing value.
+        has_credits = u.get("credits") is not None
+        credits = float(u["credits"]) if has_credits else 0.0
+        in_t = self._i(u.get("input_tokens"))
+        out_t = self._i(u.get("output_tokens"))
+        cache_r = self._i(u.get("cache_read_input_tokens"))
+        cache_w = self._i(u.get("cache_creation_input_tokens"))
+        ratio = u.get("context_usage_ratio")
+        ratio_usable = (
+            self._is_number(ratio)
+            and self._window_for(model, window) is not None
+        )
+        if in_t == 0 and cache_r == 0 and cache_w == 0 and ratio_usable:
+            in_t = max(0, int(round(float(ratio) * self._window_for(model, window))))
+        # Skip records where nothing is attributable (see class docstring).
+        if in_t == 0 and out_t == 0 and cache_r == 0 and cache_w == 0 and not ratio_usable:
+            return None
+        return str(rid), {
+            "has_credits": has_credits,
+            "credits": credits,
+            "input": in_t,
+            "output": out_t,
+            "cacheRead": cache_r,
+            "cacheWrite": cache_w,
+            "model": model,
+            "ts": _qoder_cli_iso_ms(d.get("timestamp")),
+        }
+
+    def _segment_candidate(self, d: Dict[str, Any]) -> Optional[Tuple[str, Dict[str, Any]]]:
+        if d.get("type") != "model.response.completed":
+            return None
+        data = d.get("data")
+        if not isinstance(data, dict):
+            return None
+        # Top-level is the international reality; the data-level read is a
+        # compatibility fallback for the CN emitter shape.
+        rid = d.get("request_id") or data.get("request_id")
+        if not rid:
+            return None
+        in_t = self._i(data.get("input_tokens"))
+        out_t = self._i(data.get("output_tokens"))
+        cache_r = self._i(data.get("cache_read_input_tokens"))
+        cache_w = self._i(data.get("cache_creation_input_tokens"))
+        # A fully-zero event (the current international behavior)
+        # contributes nothing on its own.
+        if in_t == 0 and out_t == 0 and cache_r == 0 and cache_w == 0:
+            return None
+        return str(rid), {
+            "input": in_t,
+            "output": out_t,
+            "cacheRead": cache_r,
+            "cacheWrite": cache_w,
+            "model": str(data.get("model") or "") or "auto",
+            "ts": _qoder_cli_iso_ms(d.get("ts")),
+        }
+
+    # --- merge ------------------------------------------------------------------
+
+    def _merged_entry(
+        self,
+        rid: str,
+        tcand: Optional[Dict[str, Any]],
+        scand: Optional[Dict[str, Any]],
+        rate: float,
+    ) -> Optional[Dict[str, Any]]:
+        base = tcand if tcand is not None else scand
+        model = base["model"]
+        ts = base["ts"]
+        if scand is not None:
+            # The segment is the finer-grained token truth.
+            in_t, out_t = scand["input"], scand["output"]
+            cr, cw = scand["cacheRead"], scand["cacheWrite"]
+        else:
+            in_t, out_t = tcand["input"], tcand["output"]
+            cr, cw = tcand["cacheRead"], tcand["cacheWrite"]
+        if in_t == 0 and out_t == 0 and cr == 0 and cw == 0:
+            return None
+        if tcand is not None and tcand["has_credits"]:
+            # Provider-reported cost: credits are exact, the credit->USD
+            # rate is an estimate, and the result is never repriced.
+            billing = usage_billing_fixed(tcand["credits"] * rate)
+            cost_authoritative = True
+        else:
+            billing = usage_billing_pricing(
+                [model],
+                input_tokens=in_t,
+                output_tokens=out_t,
+                cache_read=cr,
+                cache_write=cw,
+            )
+            cost_authoritative = False
+        return {
+            "source": self.source_name,
+            "model": model,
+            "input": in_t,
+            "output": out_t,
+            "cacheRead": cr,
+            "cacheWrite": cw,
+            "cost": usage_entry_cost(billing, self.pricing_db),
+            "_billing": billing,
+            "costAuthoritative": cost_authoritative,
+            "entry_id": f"qoder-cli:{rid}",
+            "timestamp": ts,
+        }
+
+    def _parse_all(self) -> List[Dict[str, Any]]:
+        rate, window = self._runtime_config()
+        # The documented default applies when the override is unset or
+        # invalid; the runtime signature still distinguishes unset from an
+        # explicit value, so a later fix re-parses either way.
+        effective_rate = self._DEFAULT_USD_PER_CREDIT if rate is None else rate
+        # One global candidate map per type across ALL roots: first root in
+        # scan order wins between candidates of the same type (true
+        # duplicate), while a transcript in one root and a segment in
+        # another are complementary and merge.
+        transcript_cands: Dict[str, Dict[str, Any]] = {}
+        segment_cands: Dict[str, Dict[str, Any]] = {}
+        for path in self._discovered_files():
+            # Whole-source correctness: an open/read failure on ANY
+            # discovered file aborts the whole parse. sync_source computes
+            # every row before it deletes the stored corpus, so raising
+            # preserves the prior corpus. (Kimi's per-file
+            # catch-and-continue is only safe under file_replace.)
+            with open(path, "r", encoding="utf-8", errors="replace") as handle:
+                lines = handle.readlines()
+            is_segment = "segments" in path.parts
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    d = json.loads(line)
+                except ValueError:
+                    continue  # malformed individual line: skip
+                if not isinstance(d, dict):
+                    continue
+                cand = (
+                    self._segment_candidate(d)
+                    if is_segment
+                    else self._transcript_candidate(d, window)
+                )
+                if cand is None:
+                    continue
+                target = segment_cands if is_segment else transcript_cands
+                rid, data = cand
+                if rid not in target:
+                    target[rid] = data
+        entries: List[Dict[str, Any]] = []
+        for rid, tcand in transcript_cands.items():
+            scand = segment_cands.pop(rid, None)
+            entry = self._merged_entry(rid, tcand, scand, effective_rate)
+            if entry is not None:
+                entries.append(entry)
+        for rid, scand in segment_cands.items():
+            entry = self._merged_entry(rid, None, scand, effective_rate)
+            if entry is not None:
+                entries.append(entry)
+        entries.sort(key=lambda e: e["timestamp"])
+        return entries
+
 
 
 class DSHParser(BaseParser):
@@ -3798,6 +4347,8 @@ class CodingToolsUsageTracker:
             "dsh": DSHParser(self.pricing_db),
             "reasonix": ReasonixParser(self.pricing_db),
             "workbuddy": WorkBuddyParser(self.pricing_db),
+            "qoder": QoderIdeParser(self.pricing_db),
+            "qoder_cli": QoderCliParser(self.pricing_db),
         }
 
     def collect(self, since_date: Optional[datetime] = None, until_date: Optional[datetime] = None, sources: Optional[List[str]] = None):

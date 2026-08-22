@@ -264,3 +264,28 @@ def test_cline_data_dir_resolution(monkeypatch, tmp_path):
 
     monkeypatch.setenv("CLINE_DATA_DIR", str(tmp_path / "explicit"))
     assert clientpaths.cline_data_dir() == tmp_path / "explicit"
+
+
+def test_cline_live_dedup_keeps_earliest_timestamp(monkeypatch, tmp_path):
+    """The store's stable-key upsert keeps the earliest-timestamped copy of a
+    message id; the live path must agree even when a fork restamps the copy
+    (C7)."""
+    data_dir = tmp_path / "data"
+    monkeypatch.setenv("CLINE_DATA_DIR", str(data_dir))
+    _write_session(
+        data_dir,
+        "parent-s1",
+        [_assistant("msg_shared", TS_A, input_tokens=100, output_tokens=5)],
+    )
+    # Fork carries the same id and metrics, restamped later.
+    _write_session(
+        data_dir,
+        "fork-s2",
+        [_assistant("msg_shared", TS_B, input_tokens=100, output_tokens=5)],
+    )
+
+    entries = _fresh(data_dir).collect(None, None)
+
+    assert len(entries) == 1
+    assert entries[0]["entry_id"] == "cline:msg_shared"
+    assert entries[0]["timestamp"] == TS_A

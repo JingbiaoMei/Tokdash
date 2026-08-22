@@ -174,7 +174,17 @@ def test_omp_search_dirs_candidates(monkeypatch, tmp_path):
     assert clientpaths.omp_agent_search_dirs() == [home / ".omp" / "agent" / "sessions"]
     monkeypatch.delenv("PI_CODING_AGENT_DIR")
 
-    # XDG migration: only once $XDG_DATA_HOME/omp exists (init-xdg).
+    # XDG migration without the variable exported (init-xdg's default root
+    # is ~/.local/share): trusted only once the omp app root exists there.
+    (home / ".local" / "share" / "omp").mkdir(parents=True)
+    assert clientpaths.omp_agent_search_dirs() == [
+        home / ".omp" / "agent" / "sessions",
+        home / ".local" / "share" / "omp" / "sessions",
+    ]
+    (home / ".local" / "share" / "omp").rmdir()
+    assert clientpaths.omp_agent_search_dirs() == [home / ".omp" / "agent" / "sessions"]
+
+    # XDG migration with the variable set: only once $XDG_DATA_HOME/omp exists.
     xdg = tmp_path / "xdg"
     monkeypatch.setenv("XDG_DATA_HOME", str(xdg))
     assert clientpaths.omp_agent_search_dirs() == [home / ".omp" / "agent" / "sessions"]
@@ -254,3 +264,7 @@ def test_tracker_reemits_dir_conflicts_after_collect_reset(monkeypatch, tmp_path
     # The reset in collect() must not swallow the note on the next pass either.
     tracker.collect(None, None, ["omp"])
     assert [e["source"] for e in tracker.to_json()["source_errors"]] == ["omp"]
+
+    # A caller collecting other sources is not told about omp's dropped dir.
+    tracker.collect(None, None, ["pi_agent"])
+    assert tracker.to_json()["source_errors"] == []

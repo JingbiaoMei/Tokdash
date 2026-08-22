@@ -97,7 +97,8 @@
 | Reasonix | ✅ | ✅ |
 | **ZCode** | ✅ | ✅ |
 | **WorkBuddy** | ✅ | — |
-| **Qoder** | ✅ | — |
+| **Qoder IDE** | ✅ | — |
+| **Qoder CLI** | ✅ | — |
 
 See [Supported clients](docs/reference/SUPPORTED_CLIENTS.md) for local data paths, overrides, and source-specific accounting notes.
 

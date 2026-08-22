@@ -4,11 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## Unreleased
+## 2.1.0 - 2026-08-22
 
 ### Added
 
+- Added WorkBuddy as a token and cost source. Tokdash reads `~/.workbuddy-ai/projects/*/*.jsonl` (or `WORKBUDDY_DATA_DIR`), treats each assistant message as one model call, splits cached prompt tokens into their own bucket, and keeps reasoning disjoint from output while billing both at the output rate. Explicit model IDs price through the normal database; WorkBuddy's `default-model` router alias remains unpriced. WorkBuddy does not appear in the Sessions tab.
 - Added Qoder as a token and cost source, covering the IDE and the CLI without a Sessions tab. The IDE parser reads every role of `chat_message` from the IDE's `local.db` (international and QoderCN builds; QoderCN first on Windows and WSL) through a disposable snapshot, splits the cached share out of the prompt tokens into its own bucket, and takes the model from `model_key` (`auto` when the router name is absent). The CLI parser merges each request's transcript billing record with its segment token record across all CLI roots (`~/.qoder`, `~/.qoder-cn`, `QODER_CONFIG_DIR`, comma-separated `QODER_CLI_HOME`): rows carrying provider credits keep the provider-reported cost as authoritative, converted at an estimated $0.01 per credit (`QODER_USD_PER_CREDIT` overrides the estimate) and never repriced, while token-only rows price through the normal pricing database. Zero-input records recover input tokens from `context_usage_ratio` against the known context window — `auto` at 180,000 by default, every model once `QODER_CLI_CONTEXT_WINDOW` is set explicitly — and a read failure on any discovered file aborts the whole source instead of replacing the stored corpus with a partial one.
+- Added local WorkBuddy and Qoder brand marks to dashboard tool rows and charts; Qoder IDE and Qoder CLI retain separate labels while sharing the Qoder mark.
 
 ### Changed
 

@@ -1,6 +1,34 @@
 {
-  "current": "2.0.0",
+  "current": "2.1.0",
   "releases": [
+    {
+      "version": "2.1.0",
+      "date": "2026-08-22",
+      "sections": [
+        {
+          "type": "added",
+          "items": [
+            "Added WorkBuddy as a local token and cost source, with cache-aware prompt accounting and per-model pricing.",
+            "Added Qoder IDE and Qoder CLI as separate local usage sources, including authoritative provider-credit costs where Qoder reports them.",
+            "Added local WorkBuddy and Qoder brand marks throughout dashboard tool rows and charts."
+          ]
+        },
+        {
+          "type": "changed",
+          "items": [
+            "Parser changes now invalidate only that parser's persistent usage cache, while pricing changes reprice stored rows without rereading source logs.",
+            "Native-Windows setup, re-setup, doctor, and uninstall now classify and stop owned processes safely while leaving foreign port holders alone."
+          ]
+        },
+        {
+          "type": "fixed",
+          "items": [
+            "Closed cache races that could expose mixed pricing generations or preserve stale costs after a concurrent sync.",
+            "Made Qoder fixture reads explicit UTF-8 so the parser suite passes on Windows consoles with legacy default encodings."
+          ]
+        }
+      ]
+    },
     {
       "version": "2.0.0",
       "date": "2026-08-20",

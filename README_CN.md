@@ -21,6 +21,8 @@
   <a href="https://grok.com/build" title="Grok Build"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/grok.png" alt="Grok Build" height="34"></a>
   <a href="https://pi.dev/" title="Pi"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/pi.png" alt="Pi" height="34"></a>
   <a href="https://omp.sh/" title="omp"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/omp.png" alt="omp" height="34"></a>
+  <a href="https://kilocode.ai/" title="Kilo Code"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/kilocode.png" alt="Kilo Code" height="34"></a>
+  <a href="https://cline.bot/" title="Cline"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/cline.png" alt="Cline" height="34"></a>
   <a href="https://github.com/features/copilot" title="GitHub Copilot CLI"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/copilot.png" alt="GitHub Copilot CLI" height="34"></a>
   <a href="https://hermes-agent.nousresearch.com/" title="Hermes"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/hermes.png" alt="Hermes" height="34"></a>
   <a href="https://github.com/deepseek-ai/deepseek-harness" title="DeepSeek Harness"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/dsh.png" alt="DeepSeek Harness" height="34"></a>
@@ -94,6 +96,8 @@
 | Grok Build | ✅ | — |
 | Pi | ✅ | ✅ |
 | **omp** | ✅ | — |
+| **Kilo Code** | ✅ | — |
+| **Cline** | ✅ | — |
 | GitHub Copilot CLI | ✅ | — |
 | Hermes | ✅ | — |
 | DeepSeek Harness | ✅ | ✅ |

@@ -89,6 +89,11 @@ let currentStartDate = null;
 let currentEndDate = null;
 const statsCache = { default: null };
 const overviewActiveTimeState = { status: 'idle', data: null, key: null, requestId: 0 };
+// Servers-tab stand-ins: the extracted updateDashboard references them; not under test here.
+const lastUsageRowsByServer = new Map();
+function isServersActive() { return false; }
+function renderServersTab() {}
+
 
 const log = { rendered: [], paints: [], stale: [], errors: [], alerts: [] };
 const fetches = [];

@@ -337,7 +337,7 @@ def test_combined_panel_does_not_claim_cross_tool_dedup():
     source = INDEX_HTML.read_text(encoding="utf-8")
     combined_header = source.split('data-i18n="combinedSessions"', 1)[1].split("</section>", 1)[0]
     assert 'data-i18n-title="activeTimeCombinedHint"' in combined_header
-    assert "activeTimePanelHint" not in combined_header
+    assert "agentTimePanelHint" not in combined_header
 
 
 def test_active_time_labels_exist_in_both_languages():
@@ -350,8 +350,7 @@ def test_active_time_labels_exist_in_both_languages():
         "span",
         "activeTimeHint",
         "activeTimeGroupHint",
-        "activeTimePanelHint",
-        "activeTimeCombined",
+        "agentTimePanelHint",
         "activeTimeCombinedHint",
         "activeTimeMultiServerHint",
     ):
@@ -369,6 +368,19 @@ def test_multi_server_totals_are_relabelled_as_sums():
     assert "activeTimeMultiServerHint" in panel_fn
     # The attributes must be updated too, or applyI18n() restores the old wording.
     assert 'setAttribute("data-i18n-title", hintKey)' in panel_fn
+
+
+def test_panel_kpi_shows_agent_time_only():
+    """The header KPI is estimated agent time; the deduplicated clock-time value
+    and its sub-span were removed from all ten panels."""
+    source = INDEX_HTML.read_text(encoding="utf-8")
+    assert "ActiveTotal" not in source
+    assert "session-panel-kpi-sub" not in source
+    labels = re.findall(
+        r'id="(\w+)ActiveLabel" class="session-panel-kpi-label" data-i18n="(\w+)"', source)
+    assert len(labels) == 10, labels
+    for prefix, key in labels:
+        assert key == "agentTime", (prefix, key)
 
 
 # --- SQL loaders ------------------------------------------------------------

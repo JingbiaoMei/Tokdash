@@ -1178,7 +1178,6 @@
     .session-panel-kpi { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 1px; white-space: nowrap; }
     .session-panel-kpi-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-label); }
     .session-panel-kpi-value { font-weight: 800; font-size: 13px; }
-    .session-panel-kpi-sub { font-size: 11px; font-weight: 400; color: var(--color-muted); margin-left: 6px; }
     .session-panel-chev { color: var(--color-muted); font-size: 13px; flex: 0 0 auto; }
     .session-panel-body { padding-top: 8px; }
     /* Theme-specific overrides live in /static/themes.css. */
@@ -1990,7 +1989,7 @@
             <span id="codexPanelKpis" class="session-panel-kpis" hidden>
               <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="panelTokens">Tokens</span><span id="codexPanelTokens" class="session-panel-kpi-value mono">—</span></span>
               <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="cost">Cost</span><span id="codexPanelCost" class="session-panel-kpi-value mono" style="color: var(--color-cost);">—</span></span>
-              <span class="session-panel-kpi"><span id="codexActiveLabel" class="session-panel-kpi-label" data-i18n="activeTime" data-i18n-title="activeTimePanelHint">Estimated active</span><span class="session-panel-kpi-value mono"><span id="codexActiveTotal">—</span><span id="codexActiveAgent" class="session-panel-kpi-sub"></span></span></span>
+              <span class="session-panel-kpi"><span id="codexActiveLabel" class="session-panel-kpi-label" data-i18n="agentTime" data-i18n-title="agentTimePanelHint">EST. agent time</span><span class="session-panel-kpi-value mono"><span id="codexActiveAgent">—</span></span></span>
               <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="panelLast">Last</span><span id="codexPanelLast" class="session-panel-kpi-value mono">—</span></span>
             </span>
             <span class="session-panel-chev" aria-hidden="true">▸</span>
@@ -2060,7 +2059,7 @@
             <span id="claudePanelKpis" class="session-panel-kpis" hidden>
               <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="panelTokens">Tokens</span><span id="claudePanelTokens" class="session-panel-kpi-value mono">—</span></span>
               <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="cost">Cost</span><span id="claudePanelCost" class="session-panel-kpi-value mono" style="color: var(--color-cost);">—</span></span>
-              <span class="session-panel-kpi"><span id="claudeActiveLabel" class="session-panel-kpi-label" data-i18n="activeTime" data-i18n-title="activeTimePanelHint">Estimated active</span><span class="session-panel-kpi-value mono"><span id="claudeActiveTotal">—</span><span id="claudeActiveAgent" class="session-panel-kpi-sub"></span></span></span>
+              <span class="session-panel-kpi"><span id="claudeActiveLabel" class="session-panel-kpi-label" data-i18n="agentTime" data-i18n-title="agentTimePanelHint">EST. agent time</span><span class="session-panel-kpi-value mono"><span id="claudeActiveAgent">—</span></span></span>
               <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="panelLast">Last</span><span id="claudePanelLast" class="session-panel-kpi-value mono">—</span></span>
             </span>
             <span class="session-panel-chev" aria-hidden="true">▸</span>
@@ -2130,7 +2129,7 @@
             <span id="opencodePanelKpis" class="session-panel-kpis" hidden>
               <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="panelTokens">Tokens</span><span id="opencodePanelTokens" class="session-panel-kpi-value mono">—</span></span>
               <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="cost">Cost</span><span id="opencodePanelCost" class="session-panel-kpi-value mono" style="color: var(--color-cost);">—</span></span>
-              <span class="session-panel-kpi"><span id="opencodeActiveLabel" class="session-panel-kpi-label" data-i18n="activeTime" data-i18n-title="activeTimePanelHint">Estimated active</span><span class="session-panel-kpi-value mono"><span id="opencodeActiveTotal">—</span><span id="opencodeActiveAgent" class="session-panel-kpi-sub"></span></span></span>
+              <span class="session-panel-kpi"><span id="opencodeActiveLabel" class="session-panel-kpi-label" data-i18n="agentTime" data-i18n-title="agentTimePanelHint">EST. agent time</span><span class="session-panel-kpi-value mono"><span id="opencodeActiveAgent">—</span></span></span>
               <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="panelLast">Last</span><span id="opencodePanelLast" class="session-panel-kpi-value mono">—</span></span>
             </span>
             <span class="session-panel-chev" aria-hidden="true">▸</span>
@@ -2200,7 +2199,7 @@
             <span id="pi_agentPanelKpis" class="session-panel-kpis" hidden>
               <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="panelTokens">Tokens</span><span id="pi_agentPanelTokens" class="session-panel-kpi-value mono">—</span></span>
               <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="cost">Cost</span><span id="pi_agentPanelCost" class="session-panel-kpi-value mono" style="color: var(--color-cost);">—</span></span>
-              <span class="session-panel-kpi"><span id="pi_agentActiveLabel" class="session-panel-kpi-label" data-i18n="activeTime" data-i18n-title="activeTimePanelHint">Estimated active</span><span class="session-panel-kpi-value mono"><span id="pi_agentActiveTotal">—</span><span id="pi_agentActiveAgent" class="session-panel-kpi-sub"></span></span></span>
+              <span class="session-panel-kpi"><span id="pi_agentActiveLabel" class="session-panel-kpi-label" data-i18n="agentTime" data-i18n-title="agentTimePanelHint">EST. agent time</span><span class="session-panel-kpi-value mono"><span id="pi_agentActiveAgent">—</span></span></span>
               <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="panelLast">Last</span><span id="pi_agentPanelLast" class="session-panel-kpi-value mono">—</span></span>
             </span>
             <span class="session-panel-chev" aria-hidden="true">▸</span>
@@ -2270,7 +2269,7 @@
             <span id="mimoPanelKpis" class="session-panel-kpis" hidden>
               <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="panelTokens">Tokens</span><span id="mimoPanelTokens" class="session-panel-kpi-value mono">—</span></span>
               <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="cost">Cost</span><span id="mimoPanelCost" class="session-panel-kpi-value mono" style="color: var(--color-cost);">—</span></span>
-              <span class="session-panel-kpi"><span id="mimoActiveLabel" class="session-panel-kpi-label" data-i18n="activeTime" data-i18n-title="activeTimePanelHint">Estimated active</span><span class="session-panel-kpi-value mono"><span id="mimoActiveTotal">—</span><span id="mimoActiveAgent" class="session-panel-kpi-sub"></span></span></span>
+              <span class="session-panel-kpi"><span id="mimoActiveLabel" class="session-panel-kpi-label" data-i18n="agentTime" data-i18n-title="agentTimePanelHint">EST. agent time</span><span class="session-panel-kpi-value mono"><span id="mimoActiveAgent">—</span></span></span>
               <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="panelLast">Last</span><span id="mimoPanelLast" class="session-panel-kpi-value mono">—</span></span>
             </span>
             <span class="session-panel-chev" aria-hidden="true">▸</span>
@@ -2340,7 +2339,7 @@
             <span id="kimiPanelKpis" class="session-panel-kpis" hidden>
               <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="panelTokens">Tokens</span><span id="kimiPanelTokens" class="session-panel-kpi-value mono">—</span></span>
               <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="cost">Cost</span><span id="kimiPanelCost" class="session-panel-kpi-value mono" style="color: var(--color-cost);">—</span></span>
-              <span class="session-panel-kpi"><span id="kimiActiveLabel" class="session-panel-kpi-label" data-i18n="activeTime" data-i18n-title="activeTimePanelHint">Estimated active</span><span class="session-panel-kpi-value mono"><span id="kimiActiveTotal">—</span><span id="kimiActiveAgent" class="session-panel-kpi-sub"></span></span></span>
+              <span class="session-panel-kpi"><span id="kimiActiveLabel" class="session-panel-kpi-label" data-i18n="agentTime" data-i18n-title="agentTimePanelHint">EST. agent time</span><span class="session-panel-kpi-value mono"><span id="kimiActiveAgent">—</span></span></span>
               <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="panelLast">Last</span><span id="kimiPanelLast" class="session-panel-kpi-value mono">—</span></span>
             </span>
             <span class="session-panel-chev" aria-hidden="true">▸</span>
@@ -2410,7 +2409,7 @@
             <span id="dshPanelKpis" class="session-panel-kpis" hidden>
               <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="panelTokens">Tokens</span><span id="dshPanelTokens" class="session-panel-kpi-value mono">—</span></span>
               <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="cost">Cost</span><span id="dshPanelCost" class="session-panel-kpi-value mono" style="color: var(--color-cost);">—</span></span>
-              <span class="session-panel-kpi"><span id="dshActiveLabel" class="session-panel-kpi-label" data-i18n="activeTime" data-i18n-title="activeTimePanelHint">Estimated active</span><span class="session-panel-kpi-value mono"><span id="dshActiveTotal">—</span><span id="dshActiveAgent" class="session-panel-kpi-sub"></span></span></span>
+              <span class="session-panel-kpi"><span id="dshActiveLabel" class="session-panel-kpi-label" data-i18n="agentTime" data-i18n-title="agentTimePanelHint">EST. agent time</span><span class="session-panel-kpi-value mono"><span id="dshActiveAgent">—</span></span></span>
               <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="panelLast">Last</span><span id="dshPanelLast" class="session-panel-kpi-value mono">—</span></span>
             </span>
             <span class="session-panel-chev" aria-hidden="true">▸</span>
@@ -2480,7 +2479,7 @@
             <span id="reasonixPanelKpis" class="session-panel-kpis" hidden>
               <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="panelTokens">Tokens</span><span id="reasonixPanelTokens" class="session-panel-kpi-value mono">—</span></span>
               <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="cost">Cost</span><span id="reasonixPanelCost" class="session-panel-kpi-value mono" style="color: var(--color-cost);">—</span></span>
-              <span class="session-panel-kpi"><span id="reasonixActiveLabel" class="session-panel-kpi-label" data-i18n="activeTime" data-i18n-title="activeTimePanelHint">Estimated active</span><span class="session-panel-kpi-value mono"><span id="reasonixActiveTotal">—</span><span id="reasonixActiveAgent" class="session-panel-kpi-sub"></span></span></span>
+              <span class="session-panel-kpi"><span id="reasonixActiveLabel" class="session-panel-kpi-label" data-i18n="agentTime" data-i18n-title="agentTimePanelHint">EST. agent time</span><span class="session-panel-kpi-value mono"><span id="reasonixActiveAgent">—</span></span></span>
               <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="panelLast">Last</span><span id="reasonixPanelLast" class="session-panel-kpi-value mono">—</span></span>
             </span>
             <span class="session-panel-chev" aria-hidden="true">▸</span>
@@ -2550,7 +2549,7 @@
             <span id="zcodePanelKpis" class="session-panel-kpis" hidden>
               <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="panelTokens">Tokens</span><span id="zcodePanelTokens" class="session-panel-kpi-value mono">—</span></span>
               <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="cost">Cost</span><span id="zcodePanelCost" class="session-panel-kpi-value mono" style="color: var(--color-cost);">—</span></span>
-              <span class="session-panel-kpi"><span id="zcodeActiveLabel" class="session-panel-kpi-label" data-i18n="activeTime" data-i18n-title="activeTimePanelHint">Estimated active</span><span class="session-panel-kpi-value mono"><span id="zcodeActiveTotal">—</span><span id="zcodeActiveAgent" class="session-panel-kpi-sub"></span></span></span>
+              <span class="session-panel-kpi"><span id="zcodeActiveLabel" class="session-panel-kpi-label" data-i18n="agentTime" data-i18n-title="agentTimePanelHint">EST. agent time</span><span class="session-panel-kpi-value mono"><span id="zcodeActiveAgent">—</span></span></span>
               <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="panelLast">Last</span><span id="zcodePanelLast" class="session-panel-kpi-value mono">—</span></span>
             </span>
             <span class="session-panel-chev" aria-hidden="true">▸</span>
@@ -2620,7 +2619,7 @@
             <span id="combinedPanelKpis" class="session-panel-kpis" hidden>
               <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="panelTokens">Tokens</span><span id="combinedPanelTokens" class="session-panel-kpi-value mono">—</span></span>
               <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="cost">Cost</span><span id="combinedPanelCost" class="session-panel-kpi-value mono" style="color: var(--color-cost);">—</span></span>
-              <span class="session-panel-kpi"><span id="combinedActiveLabel" class="session-panel-kpi-label" data-i18n="activeTimeCombined" data-i18n-title="activeTimeCombinedHint">Estimated active (sum)</span><span class="session-panel-kpi-value mono"><span id="combinedActiveTotal">—</span><span id="combinedActiveAgent" class="session-panel-kpi-sub"></span></span></span>
+              <span class="session-panel-kpi"><span id="combinedActiveLabel" class="session-panel-kpi-label" data-i18n="agentTime" data-i18n-title="activeTimeCombinedHint">EST. agent time</span><span class="session-panel-kpi-value mono"><span id="combinedActiveAgent">—</span></span></span>
               <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="panelLast">Last</span><span id="combinedPanelLast" class="session-panel-kpi-value mono">—</span></span>
             </span>
             <span class="session-panel-chev" aria-hidden="true">▸</span>
@@ -3826,14 +3825,13 @@
         combinedSessions: 'Combined Sessions',
         activeTime: 'Estimated active',
         activeTimeColumn: 'Active (est.)',
-        agentTime: 'Estimated agent time',
+        agentTime: 'EST. agent time',
         agentTimeCard: 'Agent time (est.)',
         idleCap: 'Idle cap',
         span: 'Span',
         activeTimeHint: 'Estimate from the gaps between token events: each gap counts up to the idle cap (5 min by default). A short pause reads the same as work, one long operation is truncated at the cap, and a session with a single event measures zero.',
         activeTimeGroupHint: 'Estimated, summed over this project’s sessions; sessions running in parallel are counted twice.',
-        activeTimePanelHint: 'Estimated clock time worked in the selected range: overlapping sessions count once, idle gaps beyond the cap are excluded.',
-        activeTimeCombined: 'Estimated active (sum)',
+        agentTimePanelHint: 'Estimated agent working time in the selected range: sessions running at once each count, idle gaps beyond the cap are excluded.',
         activeTimeCombinedHint: 'Each tool’s estimated active time added up. Overlap is deduplicated within a tool but not across tools, so two tools used at once count twice — an upper bound on clock time.',
         activeTimeMultiServerHint: 'Estimates added up across the selected servers. Overlap is deduplicated only within one tool on one server, so concurrent work counts more than once — an upper bound on clock time.',
         agentTimeOverviewHint: 'Estimated agent working time in the selected range, added up across every session tool: agents running at once each count, idle gaps beyond the cap are excluded.',
@@ -4199,14 +4197,13 @@
         combinedSessions: '合并会话',
         activeTime: '预计活跃时长',
         activeTimeColumn: '活跃时长（估算）',
-        agentTime: '预计智能体时长',
+        agentTime: '智能体时长（估算）',
         agentTimeCard: '智能体时长（估算）',
         idleCap: '空闲上限',
         span: '跨度',
         activeTimeHint: '基于 token 事件之间间隔的估算：每段间隔最多按空闲上限（默认 5 分钟）计入。短暂停顿与工作无法区分，单次长耗时操作会被截断到上限，只有一个事件的会话则记为 0。',
         activeTimeGroupHint: '估算值，为该项目下各会话之和；并行运行的会话会被重复计算。',
-        activeTimePanelHint: '所选范围内的预计工作时长：重叠会话只计一次，超过上限的空闲间隔不计入。',
-        activeTimeCombined: '预计活跃时长（合计）',
+        agentTimePanelHint: '所选范围内智能体工作时长的预计值：同时运行的会话分别计入，超过上限的空闲间隔不计入。',
         activeTimeCombinedHint: '各工具预计活跃时长之和。同一工具内的重叠只计一次，但跨工具不去重，因此同时使用两个工具会被计两次——这是时钟时长的上界。',
         activeTimeMultiServerHint: '所选各服务器的预计活跃时长之和。只有同一服务器上的同一工具内部才去重，因此并行工作会被重复计入——这是时钟时长的上界。',
         agentTimeOverviewHint: '所选范围内智能体工作时长的预计值，按全部会话工具相加：同时运行的多个智能体分别计入，超过上限的空闲间隔不计入。',
@@ -6858,35 +6855,25 @@
       if (latestEvents) latestEvents.textContent = formatNumber(latest?.token_events || 0);
       if (latestSeen) latestSeen.textContent = formatSessionDateTime(latest?.last_seen_at);
 
-      // Panel total: deduplicated clock time, with summed agent time underneath —
-      // parallel sessions make the two diverge, so both are worth showing.
+      // Panel total: estimated agent time only (per-session active time summed).
       const summaryTotals = data?.summary || {};
-      const activeTotal = document.getElementById(`${prefix}ActiveTotal`);
       const activeAgent = document.getElementById(`${prefix}ActiveAgent`);
 
-      // Overlap is only deduplicated within one tool on one server: Combined adds
-      // tools together, and mergeSessionLists() adds servers together. Relabel
-      // whenever the number shown is a sum, so the hint never overclaims.
+      // The label is constant; only the hint changes when the number is a sum
+      // (combined tools, or servers merged by mergeSessionLists()).
       const activeLabel = document.getElementById(`${prefix}ActiveLabel`);
       if (activeLabel) {
         const multiServer = selectedServers().length > 1;
-        const isCombined = prefix === "combined";
-        const labelKey = isCombined || multiServer ? "activeTimeCombined" : "activeTime";
         const hintKey = multiServer
           ? "activeTimeMultiServerHint"
-          : isCombined ? "activeTimeCombinedHint" : "activeTimePanelHint";
-        // Set the attributes, not just the text: applyI18n() re-reads them on a
-        // language switch and would otherwise restore the single-server wording.
-        activeLabel.setAttribute("data-i18n", labelKey);
+          : prefix === "combined" ? "activeTimeCombinedHint" : "agentTimePanelHint";
+        // Set the attribute, not just the text: applyI18n() re-reads it on a
+        // language switch and would otherwise restore the single-server hint.
         activeLabel.setAttribute("data-i18n-title", hintKey);
-        activeLabel.textContent = t(labelKey);
         activeLabel.title = t(hintKey);
       }
-      if (activeTotal) activeTotal.textContent = sessions.length ? formatDuration(summaryTotals.active_ms) : "—";
       if (activeAgent) {
-        activeAgent.textContent = sessions.length
-          ? `${t("agentTime")} ${formatDuration(summaryTotals.active_ms_sum)}`
-          : "—";
+        activeAgent.textContent = sessions.length ? formatDuration(summaryTotals.active_ms_sum) : "—";
         const capSeconds = Math.round(Number(summaryTotals.active_gap_cap_ms || 0) / 1000);
         activeAgent.title = capSeconds ? `${t("idleCap")}: ${formatDuration(summaryTotals.active_gap_cap_ms)}` : "";
       }
@@ -8759,7 +8746,7 @@
       renderQuotaCharts(history, { serverId: server.id, utilizationCanvas: block.querySelector('[data-role="utilization"]'), consumptionCanvas: block.querySelector('[data-role="consumption"]'), estimatedBanner: block.querySelector('[data-role="estimated"]') });
     }
 
-    // ---- Servers tab (per-server stats; multi-server only) ---------------------
+    // ---- Servers tab (per-server stats) ----------------------------------------
     // Renders purely from data the rest of the UI already caches: the per-server
     // /api/usage rows (lastUsageResponse._server_rows), serverRuntimeStatus
     // health, the quota rows and merged session lists when those tabs loaded.
@@ -8769,9 +8756,9 @@
     function updateServersTabVisibility() {
       const btn = document.getElementById('serversTabBtn');
       if (!btn) return;
-      const visible = selectedServers().length > 1;
+      const visible = selectedServers().length > 0;
       btn.hidden = !visible;
-      // Selection narrowed to one server while the tab is open: fall back to Overview.
+      // Defensive: no selectable servers while the tab is open: fall back to Overview.
       if (!visible && isServersActive()) activateDashboardTab('overview');
     }
 

@@ -52,6 +52,11 @@ let lastWindowKey = null;
 let overviewBreakdownWindowKey = null;
 let includeCodexReviewSessions = null;
 const overviewActiveTimeState = { status: 'idle', data: null, key: null, requestId: 0 };
+// Servers-tab stand-ins: the extracted updateDashboard references them; not under test here.
+const lastUsageRowsByServer = new Map();
+function isServersActive() { return false; }
+function renderServersTab() {}
+
 
 const log = { rendered: [], errors: [], alerts: [], refreshStates: [], activeCards: [], activeLoads: [], stale: [] };
 const fetches = [];

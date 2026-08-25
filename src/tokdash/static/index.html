@@ -1101,6 +1101,86 @@
       background: #1E293B;
       color: var(--color-text);
     }
+    /* Servers tab (per-server stats) */
+    .servers-strip { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 13px 20px; margin-bottom: 16px; font-size: 13px; color: var(--color-muted); }
+    .servers-strip b { color: var(--color-text); }
+    .servers-strip .mono { font-weight: 600; }
+    .servers-strip .cost { color: var(--color-cost); }
+    .servers-dot-sep { width: 3px; height: 3px; border-radius: 50%; background: var(--color-border); }
+    .servers-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(430px, 100%), 1fr)); gap: 16px; margin-bottom: 16px; }
+    .servers-card { padding: 18px 20px 16px; display: flex; flex-direction: column; gap: 14px; }
+    .servers-card.dead { border-color: rgba(217,72,72,0.45); }
+    .servers-card-head { display: flex; align-items: flex-start; gap: 10px; }
+    .servers-card-head .server-health-dot { margin-top: 5px; flex: 0 0 auto; }
+    .servers-card-who { min-width: 0; }
+    .servers-card-who .name { font-family: "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-weight: 700; font-size: 15px; }
+    .servers-host { font-size: 12px; color: var(--color-muted); margin-top: 2px; max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .servers-when { margin-left: auto; text-align: right; font-size: 12px; color: var(--color-muted); white-space: nowrap; }
+    .servers-when .mono { font-weight: 600; }
+    .servers-when .bad { color: #D94848; font-weight: 600; }
+    .servers-kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+    .servers-kpi { border: 1px solid var(--color-border); border-radius: 12px; padding: 10px 12px; background: color-mix(in srgb, var(--color-text) 2%, transparent); }
+    .servers-kpi .k { font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--color-label); }
+    .servers-kpi .v { font-family: "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-weight: 700; font-size: 16px; margin-top: 3px; display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+    .servers-kpi .v.cost { color: var(--color-cost); }
+    .servers-delta { font-size: 11px; font-weight: 700; border-radius: 999px; padding: 1px 8px; font-family: "Fira Sans", ui-sans-serif, system-ui, sans-serif; }
+    .servers-delta.up { color: #C27C2C; background: color-mix(in srgb, #C27C2C 14%, transparent); }
+    .servers-delta.down { color: #2F9E5B; background: color-mix(in srgb, #2F9E5B 12%, transparent); }
+    .servers-stale-tag { font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #D94848; border: 1px solid rgba(217,72,72,0.4); border-radius: 6px; padding: 1px 6px; font-family: "Fira Sans", ui-sans-serif, system-ui, sans-serif; }
+    .servers-share-row { display: grid; grid-template-columns: 100px 1fr 52px; align-items: center; gap: 10px; font-size: 12px; color: var(--color-muted); }
+    .servers-share-row + .servers-share-row { margin-top: 6px; }
+    .servers-bar-track { height: 7px; border-radius: 999px; background: color-mix(in srgb, var(--color-text) 8%, transparent); overflow: hidden; }
+    .servers-bar-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--color-primary), var(--color-secondary)); }
+    .servers-share-row .pct { text-align: right; font-family: "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-weight: 600; color: var(--color-text); }
+    .servers-card h4 { margin: 2px 0 8px; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: var(--color-label); }
+    .servers-tool-row { display: grid; grid-template-columns: 128px 1fr 74px 66px; gap: 10px; align-items: center; font-size: 12.5px; padding: 3px 0; }
+    .servers-tool-row .n, .servers-model-row .n { font-family: "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .servers-tool-row .tk, .servers-model-row .tk { text-align: right; color: var(--color-muted); font-family: "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+    .servers-tool-row .cs, .servers-model-row .cs { text-align: right; color: var(--color-cost); font-family: "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-weight: 600; font-size: 12px; }
+    .servers-model-row { display: grid; grid-template-columns: 1fr 74px 66px; gap: 10px; font-size: 12.5px; padding: 3px 0; }
+    .servers-meta { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; border-top: 1px solid var(--color-border); padding-top: 12px; font-size: 12.5px; color: var(--color-muted); }
+    .servers-meta b { color: var(--color-text); font-family: "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .servers-quota-link { color: var(--color-primary); cursor: pointer; font-weight: 600; background: none; border: 0; padding: 0; font: inherit; }
+    .servers-quota-link:hover { text-decoration: underline; }
+    .servers-src-errors { display: flex; gap: 4px; align-items: baseline; font-size: 12px; color: #C27C2C; }
+    .servers-dead-note { font-size: 13px; color: #D94848; font-weight: 600; }
+    .servers-table-wrap { overflow-x: auto; }
+    .servers-compare { width: 100%; border-collapse: collapse; font-size: 12.5px; min-width: 760px; }
+    .servers-compare th, .servers-compare td { padding: 8px 14px; text-align: right; white-space: nowrap; }
+    .servers-compare th { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-label); border-bottom: 1px solid var(--color-border); }
+    .servers-compare th:first-child, .servers-compare td:first-child { text-align: left; }
+    .servers-compare td { border-bottom: 1px solid color-mix(in srgb, var(--color-border) 60%, transparent); font-family: "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+    .servers-compare td.row-label { font-family: inherit; color: var(--color-muted); font-weight: 600; }
+    .servers-compare td .st, .servers-strip .st { color: #D94848; font-size: 9px; vertical-align: super; margin-left: 2px; cursor: help; font-family: "Fira Sans", ui-sans-serif, system-ui, sans-serif; }
+    .servers-compare tr:last-child td { border-bottom: none; }
+    .servers-compare th.combined, .servers-compare td.combined { background: color-mix(in srgb, var(--color-primary) 5%, transparent); }
+    .servers-compare th.combined { color: var(--color-primary); }
+    .servers-footnote { font-size: 11.5px; color: var(--color-muted); padding: 10px 14px 4px; }
+    /* Collapsible session panels (Sessions tab) */
+    .session-panel { display: block; }
+    .session-panel-summary {
+      list-style: none; cursor: pointer;
+      display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+      padding: 6px 8px; min-height: 44px; margin: -8px; border-radius: 8px;
+    }
+    .session-panel-summary::-webkit-details-marker { display: none; }
+    .session-panel-summary:hover { background: rgba(226,232,240,0.35); }
+    html.dark .session-panel-summary:hover { background: rgba(148,163,184,0.07); }
+    .session-panel-summary h2 { margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 46vw; }
+    .session-panel-count {
+      font-family: "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 11px; font-weight: 600; color: var(--color-muted);
+      border: 1px solid var(--color-border); border-radius: 999px; padding: 2px 10px;
+      background: color-mix(in srgb, var(--color-text) 3%, transparent); white-space: nowrap;
+    }
+    .session-panel-toggle { cursor: default; }
+    .session-panel-kpis { margin-left: auto; display: inline-flex; align-items: center; gap: 18px; flex-wrap: wrap; justify-content: flex-end; }
+    .session-panel-kpi { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 1px; white-space: nowrap; }
+    .session-panel-kpi-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-label); }
+    .session-panel-kpi-value { font-weight: 800; font-size: 13px; }
+    .session-panel-kpi-sub { font-size: 11px; font-weight: 400; color: var(--color-muted); margin-left: 6px; }
+    .session-panel-chev { color: var(--color-muted); font-size: 13px; flex: 0 0 auto; }
+    .session-panel-body { padding-top: 8px; }
     /* Theme-specific overrides live in /static/themes.css. */
 
     html.dark .heatmap-cell { border-color: rgba(71,85,105,0.4); }
@@ -1712,6 +1792,7 @@
         <button class="tab-btn" data-tab="sessions" aria-selected="false" data-i18n="sessionsPage">Sessions</button>
         <button class="tab-btn" data-tab="stats" aria-selected="false" data-i18n="stats">Stats</button>
         <button class="tab-btn" data-tab="quota" aria-selected="false" data-i18n="quota">Quota</button>
+        <button class="tab-btn" data-tab="servers" aria-selected="false" data-i18n="servers" id="serversTabBtn" hidden>Servers</button>
         <button class="tab-btn" data-tab="pricing" aria-selected="false" data-i18n="pricingDb">Pricing</button>
       </nav>
     </header>
@@ -1893,22 +1974,29 @@
 
     <!-- Sessions Tab -->
     <div id="sessions-content" class="tab-content">
+      <div class="flex items-center justify-end gap-2 mb-4">
+        <button id="sessionsExpandAll" class="btn btn-ghost" type="button" data-i18n="sessionsExpandAll">Expand all</button>
+        <button id="sessionsCollapseAll" class="btn btn-ghost" type="button" data-i18n="sessionsCollapseAll">Collapse all</button>
+      </div>
       <section class="surface p-5 mb-6">
-        <div class="flex items-center justify-between gap-3 mb-4">
-          <div>
-            <h2 class="text-base font-extrabold mono" data-i18n="codexSessions">Codex Sessions</h2>
-            <p class="text-xs mt-1" style="color: var(--color-muted);" data-i18n="sessionsRangeDesc">Latest session plus sessions for the selected range.</p>
-          </div>
-          <label class="flex items-center gap-2 text-xs font-semibold" style="color: var(--color-muted);">
-            <input id="codexReviewToggle" type="checkbox" />
-            <span data-i18n="showReviewSessions">Show review sessions</span>
-          </label>
-          <div class="text-right">
-            <div id="codexActiveLabel" class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="activeTime" data-i18n-title="activeTimePanelHint" title="Estimated clock time worked in the selected range: overlapping sessions count once, idle gaps beyond the cap are excluded.">Estimated active</div>
-            <div id="codexActiveTotal" class="mt-1 font-extrabold">—</div>
-            <div id="codexActiveAgent" class="text-xs mt-1" style="color: var(--color-muted);">—</div>
-          </div>
-        </div>
+        <details class="session-panel" data-panel-details="codex">
+          <summary class="session-panel-summary">
+            <h2 class="text-base font-extrabold mono" data-i18n="codexSessions" data-i18n-title="sessionsRangeDesc">Codex Sessions</h2>
+            <span id="codexPanelCount" class="session-panel-count"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></span>
+            <label class="flex items-center gap-2 text-xs font-semibold session-panel-toggle" style="color: var(--color-muted);">
+              <input id="codexReviewToggle" type="checkbox" />
+              <span data-i18n="showReviewSessions">Show review sessions</span>
+            </label>
+            <span id="codexPanelKpis" class="session-panel-kpis" hidden>
+              <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="panelTokens">Tokens</span><span id="codexPanelTokens" class="session-panel-kpi-value mono">—</span></span>
+              <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="cost">Cost</span><span id="codexPanelCost" class="session-panel-kpi-value mono" style="color: var(--color-cost);">—</span></span>
+              <span class="session-panel-kpi"><span id="codexActiveLabel" class="session-panel-kpi-label" data-i18n="activeTime" data-i18n-title="activeTimePanelHint">Estimated active</span><span class="session-panel-kpi-value mono"><span id="codexActiveTotal">—</span><span id="codexActiveAgent" class="session-panel-kpi-sub"></span></span></span>
+              <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="panelLast">Last</span><span id="codexPanelLast" class="session-panel-kpi-value mono">—</span></span>
+            </span>
+            <span class="session-panel-chev" aria-hidden="true">▸</span>
+          </summary>
+          <div class="session-panel-body">
+
         <div id="codexLatestSession" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4 mb-5">
           <div class="surface p-4">
             <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="latestSession">Latest Session</div>
@@ -1960,20 +2048,25 @@
             </tbody>
           </table>
         </div>
+        </div>
+        </details>
       </section>
 
       <section class="surface p-5 mb-6">
-        <div class="flex items-center justify-between gap-3 mb-4">
-          <div>
-            <h2 class="text-base font-extrabold mono" data-i18n="claudeSessions">Claude Code Sessions</h2>
-            <p class="text-xs mt-1" style="color: var(--color-muted);" data-i18n="sessionsRangeDesc">Latest session plus sessions for the selected range.</p>
-          </div>
-          <div class="text-right">
-            <div id="claudeActiveLabel" class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="activeTime" data-i18n-title="activeTimePanelHint" title="Estimated clock time worked in the selected range: overlapping sessions count once, idle gaps beyond the cap are excluded.">Estimated active</div>
-            <div id="claudeActiveTotal" class="mt-1 font-extrabold">—</div>
-            <div id="claudeActiveAgent" class="text-xs mt-1" style="color: var(--color-muted);">—</div>
-          </div>
-        </div>
+        <details class="session-panel" data-panel-details="claude">
+          <summary class="session-panel-summary">
+            <h2 class="text-base font-extrabold mono" data-i18n="claudeSessions" data-i18n-title="sessionsRangeDesc">Claude Code Sessions</h2>
+            <span id="claudePanelCount" class="session-panel-count"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></span>
+            <span id="claudePanelKpis" class="session-panel-kpis" hidden>
+              <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="panelTokens">Tokens</span><span id="claudePanelTokens" class="session-panel-kpi-value mono">—</span></span>
+              <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="cost">Cost</span><span id="claudePanelCost" class="session-panel-kpi-value mono" style="color: var(--color-cost);">—</span></span>
+              <span class="session-panel-kpi"><span id="claudeActiveLabel" class="session-panel-kpi-label" data-i18n="activeTime" data-i18n-title="activeTimePanelHint">Estimated active</span><span class="session-panel-kpi-value mono"><span id="claudeActiveTotal">—</span><span id="claudeActiveAgent" class="session-panel-kpi-sub"></span></span></span>
+              <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="panelLast">Last</span><span id="claudePanelLast" class="session-panel-kpi-value mono">—</span></span>
+            </span>
+            <span class="session-panel-chev" aria-hidden="true">▸</span>
+          </summary>
+          <div class="session-panel-body">
+
         <div id="claudeLatestSession" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4 mb-5">
           <div class="surface p-4">
             <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="latestSession">Latest Session</div>
@@ -2025,20 +2118,25 @@
             </tbody>
           </table>
         </div>
+        </div>
+        </details>
       </section>
 
       <section class="surface p-5 mb-6">
-        <div class="flex items-center justify-between gap-3 mb-4">
-          <div>
-            <h2 class="text-base font-extrabold mono" data-i18n="opencodeSessions">OpenCode Sessions</h2>
-            <p class="text-xs mt-1" style="color: var(--color-muted);" data-i18n="sessionsRangeDesc">Latest session plus sessions for the selected range.</p>
-          </div>
-          <div class="text-right">
-            <div id="opencodeActiveLabel" class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="activeTime" data-i18n-title="activeTimePanelHint" title="Estimated clock time worked in the selected range: overlapping sessions count once, idle gaps beyond the cap are excluded.">Estimated active</div>
-            <div id="opencodeActiveTotal" class="mt-1 font-extrabold">—</div>
-            <div id="opencodeActiveAgent" class="text-xs mt-1" style="color: var(--color-muted);">—</div>
-          </div>
-        </div>
+        <details class="session-panel" data-panel-details="opencode">
+          <summary class="session-panel-summary">
+            <h2 class="text-base font-extrabold mono" data-i18n="opencodeSessions" data-i18n-title="sessionsRangeDesc">OpenCode Sessions</h2>
+            <span id="opencodePanelCount" class="session-panel-count"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></span>
+            <span id="opencodePanelKpis" class="session-panel-kpis" hidden>
+              <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="panelTokens">Tokens</span><span id="opencodePanelTokens" class="session-panel-kpi-value mono">—</span></span>
+              <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="cost">Cost</span><span id="opencodePanelCost" class="session-panel-kpi-value mono" style="color: var(--color-cost);">—</span></span>
+              <span class="session-panel-kpi"><span id="opencodeActiveLabel" class="session-panel-kpi-label" data-i18n="activeTime" data-i18n-title="activeTimePanelHint">Estimated active</span><span class="session-panel-kpi-value mono"><span id="opencodeActiveTotal">—</span><span id="opencodeActiveAgent" class="session-panel-kpi-sub"></span></span></span>
+              <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="panelLast">Last</span><span id="opencodePanelLast" class="session-panel-kpi-value mono">—</span></span>
+            </span>
+            <span class="session-panel-chev" aria-hidden="true">▸</span>
+          </summary>
+          <div class="session-panel-body">
+
         <div id="opencodeLatestSession" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4 mb-5">
           <div class="surface p-4">
             <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="latestSession">Latest Session</div>
@@ -2090,20 +2188,25 @@
             </tbody>
           </table>
         </div>
+        </div>
+        </details>
       </section>
 
       <section class="surface p-5 mb-6">
-        <div class="flex items-center justify-between gap-3 mb-4">
-          <div>
-            <h2 class="text-base font-extrabold mono" data-i18n="piSessions">Pi Sessions</h2>
-            <p class="text-xs mt-1" style="color: var(--color-muted);" data-i18n="sessionsRangeDesc">Latest session plus sessions for the selected range.</p>
-          </div>
-          <div class="text-right">
-            <div id="pi_agentActiveLabel" class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="activeTime" data-i18n-title="activeTimePanelHint" title="Estimated clock time worked in the selected range: overlapping sessions count once, idle gaps beyond the cap are excluded.">Estimated active</div>
-            <div id="pi_agentActiveTotal" class="mt-1 font-extrabold">—</div>
-            <div id="pi_agentActiveAgent" class="text-xs mt-1" style="color: var(--color-muted);">—</div>
-          </div>
-        </div>
+        <details class="session-panel" data-panel-details="pi_agent">
+          <summary class="session-panel-summary">
+            <h2 class="text-base font-extrabold mono" data-i18n="piSessions" data-i18n-title="sessionsRangeDesc">Pi Sessions</h2>
+            <span id="pi_agentPanelCount" class="session-panel-count"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></span>
+            <span id="pi_agentPanelKpis" class="session-panel-kpis" hidden>
+              <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="panelTokens">Tokens</span><span id="pi_agentPanelTokens" class="session-panel-kpi-value mono">—</span></span>
+              <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="cost">Cost</span><span id="pi_agentPanelCost" class="session-panel-kpi-value mono" style="color: var(--color-cost);">—</span></span>
+              <span class="session-panel-kpi"><span id="pi_agentActiveLabel" class="session-panel-kpi-label" data-i18n="activeTime" data-i18n-title="activeTimePanelHint">Estimated active</span><span class="session-panel-kpi-value mono"><span id="pi_agentActiveTotal">—</span><span id="pi_agentActiveAgent" class="session-panel-kpi-sub"></span></span></span>
+              <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="panelLast">Last</span><span id="pi_agentPanelLast" class="session-panel-kpi-value mono">—</span></span>
+            </span>
+            <span class="session-panel-chev" aria-hidden="true">▸</span>
+          </summary>
+          <div class="session-panel-body">
+
         <div id="pi_agentLatestSession" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4 mb-5">
           <div class="surface p-4">
             <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="latestSession">Latest Session</div>
@@ -2155,20 +2258,25 @@
             </tbody>
           </table>
         </div>
+        </div>
+        </details>
       </section>
 
       <section class="surface p-5 mb-6">
-        <div class="flex items-center justify-between gap-3 mb-4">
-          <div>
-            <h2 class="text-base font-extrabold mono" data-i18n="mimoSessions">Mimo Sessions</h2>
-            <p class="text-xs mt-1" style="color: var(--color-muted);" data-i18n="sessionsRangeDesc">Latest session plus sessions for the selected range.</p>
-          </div>
-          <div class="text-right">
-            <div id="mimoActiveLabel" class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="activeTime" data-i18n-title="activeTimePanelHint" title="Estimated clock time worked in the selected range: overlapping sessions count once, idle gaps beyond the cap are excluded.">Estimated active</div>
-            <div id="mimoActiveTotal" class="mt-1 font-extrabold">—</div>
-            <div id="mimoActiveAgent" class="text-xs mt-1" style="color: var(--color-muted);">—</div>
-          </div>
-        </div>
+        <details class="session-panel" data-panel-details="mimo">
+          <summary class="session-panel-summary">
+            <h2 class="text-base font-extrabold mono" data-i18n="mimoSessions" data-i18n-title="sessionsRangeDesc">Mimo Sessions</h2>
+            <span id="mimoPanelCount" class="session-panel-count"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></span>
+            <span id="mimoPanelKpis" class="session-panel-kpis" hidden>
+              <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="panelTokens">Tokens</span><span id="mimoPanelTokens" class="session-panel-kpi-value mono">—</span></span>
+              <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="cost">Cost</span><span id="mimoPanelCost" class="session-panel-kpi-value mono" style="color: var(--color-cost);">—</span></span>
+              <span class="session-panel-kpi"><span id="mimoActiveLabel" class="session-panel-kpi-label" data-i18n="activeTime" data-i18n-title="activeTimePanelHint">Estimated active</span><span class="session-panel-kpi-value mono"><span id="mimoActiveTotal">—</span><span id="mimoActiveAgent" class="session-panel-kpi-sub"></span></span></span>
+              <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="panelLast">Last</span><span id="mimoPanelLast" class="session-panel-kpi-value mono">—</span></span>
+            </span>
+            <span class="session-panel-chev" aria-hidden="true">▸</span>
+          </summary>
+          <div class="session-panel-body">
+
         <div id="mimoLatestSession" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4 mb-5">
           <div class="surface p-4">
             <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="latestSession">Latest Session</div>
@@ -2220,20 +2328,25 @@
             </tbody>
           </table>
         </div>
+        </div>
+        </details>
       </section>
 
       <section class="surface p-5 mb-6">
-        <div class="flex items-center justify-between gap-3 mb-4">
-          <div>
-            <h2 class="text-base font-extrabold mono" data-i18n="kimiSessions">Kimi Sessions</h2>
-            <p class="text-xs mt-1" style="color: var(--color-muted);" data-i18n="sessionsRangeDesc">Latest session plus sessions for the selected range.</p>
-          </div>
-          <div class="text-right">
-            <div id="kimiActiveLabel" class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="activeTime" data-i18n-title="activeTimePanelHint" title="Estimated clock time worked in the selected range: overlapping sessions count once, idle gaps beyond the cap are excluded.">Estimated active</div>
-            <div id="kimiActiveTotal" class="mt-1 font-extrabold">—</div>
-            <div id="kimiActiveAgent" class="text-xs mt-1" style="color: var(--color-muted);">—</div>
-          </div>
-        </div>
+        <details class="session-panel" data-panel-details="kimi">
+          <summary class="session-panel-summary">
+            <h2 class="text-base font-extrabold mono" data-i18n="kimiSessions" data-i18n-title="sessionsRangeDesc">Kimi Sessions</h2>
+            <span id="kimiPanelCount" class="session-panel-count"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></span>
+            <span id="kimiPanelKpis" class="session-panel-kpis" hidden>
+              <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="panelTokens">Tokens</span><span id="kimiPanelTokens" class="session-panel-kpi-value mono">—</span></span>
+              <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="cost">Cost</span><span id="kimiPanelCost" class="session-panel-kpi-value mono" style="color: var(--color-cost);">—</span></span>
+              <span class="session-panel-kpi"><span id="kimiActiveLabel" class="session-panel-kpi-label" data-i18n="activeTime" data-i18n-title="activeTimePanelHint">Estimated active</span><span class="session-panel-kpi-value mono"><span id="kimiActiveTotal">—</span><span id="kimiActiveAgent" class="session-panel-kpi-sub"></span></span></span>
+              <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="panelLast">Last</span><span id="kimiPanelLast" class="session-panel-kpi-value mono">—</span></span>
+            </span>
+            <span class="session-panel-chev" aria-hidden="true">▸</span>
+          </summary>
+          <div class="session-panel-body">
+
         <div id="kimiLatestSession" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4 mb-5">
           <div class="surface p-4">
             <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="latestSession">Latest Session</div>
@@ -2285,20 +2398,25 @@
             </tbody>
           </table>
         </div>
+        </div>
+        </details>
       </section>
 
       <section class="surface p-5 mb-6">
-        <div class="flex items-center justify-between gap-3 mb-4">
-          <div>
-            <h2 class="text-base font-extrabold mono" data-i18n="dshSessions">DeepSeek Harness Sessions</h2>
-            <p class="text-xs mt-1" style="color: var(--color-muted);" data-i18n="sessionsRangeDesc">Latest session plus sessions for the selected range.</p>
-          </div>
-          <div class="text-right">
-            <div id="dshActiveLabel" class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="activeTime" data-i18n-title="activeTimePanelHint" title="Estimated clock time worked in the selected range: overlapping sessions count once, idle gaps beyond the cap are excluded.">Estimated active</div>
-            <div id="dshActiveTotal" class="mt-1 font-extrabold">—</div>
-            <div id="dshActiveAgent" class="text-xs mt-1" style="color: var(--color-muted);">—</div>
-          </div>
-        </div>
+        <details class="session-panel" data-panel-details="dsh">
+          <summary class="session-panel-summary">
+            <h2 class="text-base font-extrabold mono" data-i18n="dshSessions" data-i18n-title="sessionsRangeDesc">DeepSeek Harness Sessions</h2>
+            <span id="dshPanelCount" class="session-panel-count"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></span>
+            <span id="dshPanelKpis" class="session-panel-kpis" hidden>
+              <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="panelTokens">Tokens</span><span id="dshPanelTokens" class="session-panel-kpi-value mono">—</span></span>
+              <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="cost">Cost</span><span id="dshPanelCost" class="session-panel-kpi-value mono" style="color: var(--color-cost);">—</span></span>
+              <span class="session-panel-kpi"><span id="dshActiveLabel" class="session-panel-kpi-label" data-i18n="activeTime" data-i18n-title="activeTimePanelHint">Estimated active</span><span class="session-panel-kpi-value mono"><span id="dshActiveTotal">—</span><span id="dshActiveAgent" class="session-panel-kpi-sub"></span></span></span>
+              <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="panelLast">Last</span><span id="dshPanelLast" class="session-panel-kpi-value mono">—</span></span>
+            </span>
+            <span class="session-panel-chev" aria-hidden="true">▸</span>
+          </summary>
+          <div class="session-panel-body">
+
         <div id="dshLatestSession" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4 mb-5">
           <div class="surface p-4">
             <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="latestSession">Latest Session</div>
@@ -2350,21 +2468,25 @@
             </tbody>
           </table>
         </div>
+        </div>
+        </details>
       </section>
 
       <section class="surface p-5 mb-6">
-        <div class="flex items-center justify-between gap-3 mb-4">
-          <div>
-            <h2 class="text-base font-extrabold mono" data-i18n="reasonixSessions">Reasonix Sessions</h2>
-            <p class="text-xs mt-1" style="color: var(--color-muted);" data-i18n="sessionsRangeDesc">Latest session plus sessions for the selected range.</p>
-            <p class="text-xs mt-1" style="color: var(--color-muted);" data-i18n="reasonixNoSessionTokens">Reasonix records usage per request, not per session, so these rows show turns and timing only — token totals are in Overview and Stats. Active time here is measured from the per-step durations Reasonix records, not estimated from gaps.</p>
-          </div>
-          <div class="text-right">
-            <div id="reasonixActiveLabel" class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="activeTime" data-i18n-title="activeTimePanelHint" title="Estimated clock time worked in the selected range: overlapping sessions count once, idle gaps beyond the cap are excluded.">Estimated active</div>
-            <div id="reasonixActiveTotal" class="mt-1 font-extrabold">—</div>
-            <div id="reasonixActiveAgent" class="text-xs mt-1" style="color: var(--color-muted);">—</div>
-          </div>
-        </div>
+        <details class="session-panel" data-panel-details="reasonix">
+          <summary class="session-panel-summary">
+            <h2 class="text-base font-extrabold mono" data-i18n="reasonixSessions" data-i18n-title="reasonixNoSessionTokens">Reasonix Sessions</h2>
+            <span id="reasonixPanelCount" class="session-panel-count"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></span>
+            <span id="reasonixPanelKpis" class="session-panel-kpis" hidden>
+              <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="panelTokens">Tokens</span><span id="reasonixPanelTokens" class="session-panel-kpi-value mono">—</span></span>
+              <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="cost">Cost</span><span id="reasonixPanelCost" class="session-panel-kpi-value mono" style="color: var(--color-cost);">—</span></span>
+              <span class="session-panel-kpi"><span id="reasonixActiveLabel" class="session-panel-kpi-label" data-i18n="activeTime" data-i18n-title="activeTimePanelHint">Estimated active</span><span class="session-panel-kpi-value mono"><span id="reasonixActiveTotal">—</span><span id="reasonixActiveAgent" class="session-panel-kpi-sub"></span></span></span>
+              <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="panelLast">Last</span><span id="reasonixPanelLast" class="session-panel-kpi-value mono">—</span></span>
+            </span>
+            <span class="session-panel-chev" aria-hidden="true">▸</span>
+          </summary>
+          <div class="session-panel-body">
+
         <div id="reasonixLatestSession" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4 mb-5">
           <div class="surface p-4">
             <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="latestSession">Latest Session</div>
@@ -2416,20 +2538,25 @@
             </tbody>
           </table>
         </div>
+        </div>
+        </details>
       </section>
 
       <section class="surface p-5 mb-6">
-        <div class="flex items-center justify-between gap-3 mb-4">
-          <div>
-            <h2 class="text-base font-extrabold mono" data-i18n="zcodeSessions">ZCode Sessions</h2>
-            <p class="text-xs mt-1" style="color: var(--color-muted);" data-i18n="sessionsRangeDesc">Latest session plus sessions for the selected range.</p>
-          </div>
-          <div class="text-right">
-            <div id="zcodeActiveLabel" class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="activeTime" data-i18n-title="activeTimePanelHint" title="Estimated clock time worked in the selected range: overlapping sessions count once, idle gaps beyond the cap are excluded.">Estimated active</div>
-            <div id="zcodeActiveTotal" class="mt-1 font-extrabold">—</div>
-            <div id="zcodeActiveAgent" class="text-xs mt-1" style="color: var(--color-muted);">—</div>
-          </div>
-        </div>
+        <details class="session-panel" data-panel-details="zcode">
+          <summary class="session-panel-summary">
+            <h2 class="text-base font-extrabold mono" data-i18n="zcodeSessions" data-i18n-title="sessionsRangeDesc">ZCode Sessions</h2>
+            <span id="zcodePanelCount" class="session-panel-count"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></span>
+            <span id="zcodePanelKpis" class="session-panel-kpis" hidden>
+              <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="panelTokens">Tokens</span><span id="zcodePanelTokens" class="session-panel-kpi-value mono">—</span></span>
+              <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="cost">Cost</span><span id="zcodePanelCost" class="session-panel-kpi-value mono" style="color: var(--color-cost);">—</span></span>
+              <span class="session-panel-kpi"><span id="zcodeActiveLabel" class="session-panel-kpi-label" data-i18n="activeTime" data-i18n-title="activeTimePanelHint">Estimated active</span><span class="session-panel-kpi-value mono"><span id="zcodeActiveTotal">—</span><span id="zcodeActiveAgent" class="session-panel-kpi-sub"></span></span></span>
+              <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="panelLast">Last</span><span id="zcodePanelLast" class="session-panel-kpi-value mono">—</span></span>
+            </span>
+            <span class="session-panel-chev" aria-hidden="true">▸</span>
+          </summary>
+          <div class="session-panel-body">
+
         <div id="zcodeLatestSession" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4 mb-5">
           <div class="surface p-4">
             <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="latestSession">Latest Session</div>
@@ -2481,20 +2608,25 @@
             </tbody>
           </table>
         </div>
+        </div>
+        </details>
       </section>
 
       <section class="surface p-5">
-        <div class="flex items-center justify-between gap-3 mb-4">
-          <div>
-            <h2 class="text-base font-extrabold mono" data-i18n="combinedSessions">Combined Sessions</h2>
-            <p class="text-xs mt-1" style="color: var(--color-muted);" data-i18n="combinedSessionsDesc">Cross-tool session view grouped by project for the selected range.</p>
-          </div>
-          <div class="text-right">
-            <div id="combinedActiveLabel" class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="activeTimeCombined" data-i18n-title="activeTimeCombinedHint" title="Each tool's estimated active time added up. Overlap is deduplicated within a tool but not across tools, so two tools used at once count twice — an upper bound on clock time.">Estimated active (sum)</div>
-            <div id="combinedActiveTotal" class="mt-1 font-extrabold">—</div>
-            <div id="combinedActiveAgent" class="text-xs mt-1" style="color: var(--color-muted);">—</div>
-          </div>
-        </div>
+        <details class="session-panel" data-panel-details="combined">
+          <summary class="session-panel-summary">
+            <h2 class="text-base font-extrabold mono" data-i18n="combinedSessions" data-i18n-title="combinedSessionsDesc">Combined Sessions</h2>
+            <span id="combinedPanelCount" class="session-panel-count"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></span>
+            <span id="combinedPanelKpis" class="session-panel-kpis" hidden>
+              <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="panelTokens">Tokens</span><span id="combinedPanelTokens" class="session-panel-kpi-value mono">—</span></span>
+              <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="cost">Cost</span><span id="combinedPanelCost" class="session-panel-kpi-value mono" style="color: var(--color-cost);">—</span></span>
+              <span class="session-panel-kpi"><span id="combinedActiveLabel" class="session-panel-kpi-label" data-i18n="activeTimeCombined" data-i18n-title="activeTimeCombinedHint">Estimated active (sum)</span><span class="session-panel-kpi-value mono"><span id="combinedActiveTotal">—</span><span id="combinedActiveAgent" class="session-panel-kpi-sub"></span></span></span>
+              <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="panelLast">Last</span><span id="combinedPanelLast" class="session-panel-kpi-value mono">—</span></span>
+            </span>
+            <span class="session-panel-chev" aria-hidden="true">▸</span>
+          </summary>
+          <div class="session-panel-body">
+
         <div id="combinedLatestSession" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4 mb-5">
           <div class="surface p-4">
             <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="latestSession">Latest Session</div>
@@ -2547,6 +2679,8 @@
             </tbody>
           </table>
         </div>
+        </div>
+        </details>
       </section>
     </div>
 
@@ -2936,6 +3070,11 @@
           </div>
         </div>
       </section>
+    </div>
+
+    <!-- Servers Tab -->
+    <div id="servers-content" class="tab-content">
+      <div id="serversTabBody" class="surface p-10 text-center"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
     </div>
 
     <!-- Pricing Tab -->
@@ -3503,6 +3642,35 @@
         addAServer: 'Add a server',
         serverUrl: 'https://host:55423/tokdash',
         serverLabelOptional: 'Name (optional)',
+        serversThisHost: 'this host',
+        serversReachable: '{ok} / {n} reachable',
+        serversCombined: 'combined',
+        serversUpdatedAt: 'updated',
+        serversStalest: 'stalest',
+        serversLastSeen: 'last seen',
+        serversUnreachable: 'unreachable',
+        serversNoDataYet: 'No data yet \u2014 first refresh for this server failed',
+        serversStale: 'stale',
+        serversStaleFootnote: 'st \u2014 stale: last successful read this session; unreachable servers are excluded from the Combined column until a refresh succeeds.',
+        serversCombinedCol: 'Combined (reachable)',
+        serversShareTokens: 'Share \u00b7 tokens',
+        serversShareCost: 'Share \u00b7 cost',
+        serversToolsTop: 'Tools (top 4)',
+        serversTopModels: 'Top models',
+        serversSessionsRange: 'Sessions in range',
+        serversSessionsNotLoaded: 'not loaded \u2014 open Sessions to populate',
+        serversQuota: 'Quota',
+        serversQuotaNotLoaded: 'not loaded \u2014 open Quota to populate',
+        serversQuotaOk: 'enabled \u00b7 {n} providers ok',
+        serversQuotaPartial: 'enabled \u00b7 {ok} ok \u00b7 {bad} unavailable',
+        serversQuotaCombinedOk: '{n} providers ok',
+        serversQuotaCombinedPartial: '{ok} ok \u00b7 {bad} unavailable',
+        serversQuotaDisabled: 'disabled',
+        serversSourceErrors: 'source errors',
+        statusRowLabel: 'Status',
+        cacheReadRow: 'Cache read',
+        topToolRow: 'Top tool',
+        topModelRow: 'Top model',
         testServer: 'Test',
         testingServer: 'Testing…',
         addServer: 'Add server',
@@ -3672,6 +3840,10 @@
         activeTimeToolsUnavailable: 'No data read for: {tools}',
         combinedSessionsDesc: 'Cross-tool session view grouped by project for the selected range.',
         sessionsRangeDesc: 'Latest session plus sessions for the selected range.',
+        panelTokens: 'Tokens',
+        panelLast: 'Last',
+        sessionsExpandAll: 'Expand all',
+        sessionsCollapseAll: 'Collapse all',
         showReviewSessions: 'Show review sessions',
         latestSession: 'Latest Session',
         freshInput: 'Fresh Input',
@@ -3843,6 +4015,35 @@
         addAServer: '添加服务器',
         serverUrl: 'https://主机:55423/tokdash',
         serverLabelOptional: '名称（可选）',
+        serversThisHost: '本机',
+        serversReachable: '{ok} / {n} 台在线',
+        serversCombined: '合计',
+        serversUpdatedAt: '更新',
+        serversStalest: '最旧',
+        serversLastSeen: '最近访问',
+        serversUnreachable: '无法连接',
+        serversNoDataYet: '暂无数据 — 该服务器首次刷新失败',
+        serversStale: '过期',
+        serversStaleFootnote: 'st — 过期：本次会话最近一次成功读取；无法连接的服务器不计入合计列，直到刷新成功。',
+        serversCombinedCol: '合计（可连接）',
+        serversShareTokens: '占比 · Token',
+        serversShareCost: '占比 · 费用',
+        serversToolsTop: '工具（前 4）',
+        serversTopModels: '常用模型（前 3）',
+        serversSessionsRange: '范围内会话',
+        serversSessionsNotLoaded: '未加载 — 打开 Sessions 页查看',
+        serversQuota: 'Quota',
+        serversQuotaNotLoaded: '未加载 — 打开 Quota 页查看',
+        serversQuotaOk: '已启用 · {n} 个提供商正常',
+        serversQuotaPartial: '已启用 · {ok} 正常 · {bad} 不可用',
+        serversQuotaCombinedOk: '{n} 个提供商正常',
+        serversQuotaCombinedPartial: '{ok} 正常 · {bad} 不可用',
+        serversQuotaDisabled: '已禁用',
+        serversSourceErrors: '数据源错误',
+        statusRowLabel: '状态',
+        cacheReadRow: '缓存读取',
+        topToolRow: '最用工具',
+        topModelRow: '最用模型',
         testServer: '测试',
         testingServer: '测试中…',
         addServer: '添加服务器',
@@ -4012,6 +4213,10 @@
         activeTimeToolsUnavailable: '未能读取：{tools}',
         combinedSessionsDesc: '按项目汇总所选时间范围内的跨工具会话视图。',
         sessionsRangeDesc: '显示最近一条会话摘要，以及所选时间范围内的会话列表。',
+        panelTokens: 'Token 数',
+        panelLast: '最近',
+        sessionsExpandAll: '全部展开',
+        sessionsCollapseAll: '全部折叠',
         showReviewSessions: '显示审核会话',
         latestSession: '最近会话',
         freshInput: '新输入',
@@ -4170,6 +4375,11 @@
 
     function isPricingActive() {
       const el = document.getElementById('pricing-content');
+      return !!el && el.classList.contains('active');
+    }
+
+    function isServersActive() {
+      const el = document.getElementById('servers-content');
       return !!el && el.classList.contains('active');
     }
 
@@ -4912,6 +5122,7 @@
         } else { const placeholder = document.createElement('span'); placeholder.className = 'server-remove-placeholder'; placeholder.setAttribute('aria-hidden', 'true'); row.appendChild(placeholder); }
         return row;
       }));
+      updateServersTabVisibility();
       updateServerIndicator();
     }
 
@@ -5132,6 +5343,7 @@
       }
       if (lastUsageResponse && isOverviewActive()) renderOverviewTab(lastUsageResponse);
       if (isSessionsActive()) renderSessionsTab();
+      if (isServersActive()) renderServersTab();
 
       const statsContent = document.getElementById('stats-content');
       if (statsContent?.classList.contains('active') && statsLoaded) {
@@ -6029,6 +6241,7 @@
           if (!rows.length) throw new Error(t('loadFailed'));
           const combined = combineUsagePayloads(rows.map((row) => row.payload));
           combined._server_rows = rows;
+          rows.forEach((row) => lastUsageRowsByServer.set(row.server.id, { payload: row.payload, at: Date.now() }));
           combined._stalest_server = rows.slice().sort((a, b) => String(a.payload.timestamp || '').localeCompare(String(b.payload.timestamp || '')))[0]?.server || null;
           return combined;
         });
@@ -6068,6 +6281,7 @@
 
         if (isOverviewActive()) renderOverviewTab(lastUsageResponse);
         if (isSessionsActive()) renderSessionsTab();
+        if (isServersActive()) renderServersTab();
       } catch (error) {
         console.error('Error fetching data:', error);
         // Superseded: the user is waiting on another range, so this failure is
@@ -6076,12 +6290,16 @@
           inFlightResultDiscarded = true;
           return;
         }
+        // A total outage after a successful load leaves _server_rows holding the
+        // last good data; mark it so the Servers tab reads it as stale, not fresh.
+        if (lastUsageResponse) lastUsageResponse._server_rows_stale = true;
         setDashboardFetchStatus(error);
         if (forceRefresh) {
           setRefreshUiState(error?.status === 503 ? 'busy' : 'failed', { resetAfterMs: 2600 });
         }
         if (isOverviewActive() && lastUsageResponse) renderOverviewTab(lastUsageResponse);
         if (isSessionsActive()) renderSessionsTab();
+        if (isServersActive()) renderServersTab();
         if (error?.status !== 503 && !lastUsageResponse) {
           alert('Failed to fetch data. Check console for details.');
         }
@@ -6533,6 +6751,79 @@
       });
     }
 
+    // ---- Collapsible session panels -------------------------------------------
+    // All tool sections start collapsed. A per-panel user override persists in
+    // localStorage; a fetch error with no sessions still forces the panel open so
+    // failures stay visible.
+    const SESSION_COLLAPSE_KEY = "tokdash-sessions-collapsed";
+    let sessionCollapseOverrides = (function () {
+      try {
+        const parsed = JSON.parse(localStorage.getItem(SESSION_COLLAPSE_KEY) || "{}");
+        return parsed && typeof parsed === "object" ? parsed : {};
+      } catch (_error) {
+        return {};
+      }
+    })();
+
+    function saveSessionCollapseOverrides() {
+      try {
+        localStorage.setItem(SESSION_COLLAPSE_KEY, JSON.stringify(sessionCollapseOverrides));
+      } catch (_error) { /* storage unavailable: prefs simply do not persist */ }
+    }
+
+    // Pure state machine, kept top-level so tests can extract it
+    // (pattern: tests/test_frontend_normalizer_sync.py).
+    function sessionPanelShouldOpen(override, data) {
+      if (typeof override === "boolean") return !override;
+      const sessions = data && Array.isArray(data.sessions) ? data.sessions.length : 0;
+      if (sessions === 0 && data && data.error) return true;
+      return false;
+    }
+
+    function sessionPanelSetOpen(details, open) {
+      if (!details) return;
+      details.open = !!open;
+      const chev = details.querySelector(".session-panel-chev");
+      if (chev) chev.textContent = details.open ? "\u25BE" : "\u25B8";
+    }
+
+    function initSessionPanels() {
+      document.querySelectorAll("details[data-panel-details]").forEach((details) => {
+        const panel = details.dataset.panelDetails;
+        details.addEventListener("click", (event) => {
+          // Only a plain click on the summary row folds the panel. Interactive
+          // controls inside the row (the Codex review toggle) and body clicks do
+          // not; the browser's own toggle is what we record.
+          const summary = details.querySelector("summary");
+          if (!summary || !summary.contains(event.target)) return;
+          if (event.target.closest("label, input, a, button")) return;
+          requestAnimationFrame(() => {
+            sessionCollapseOverrides[panel] = !details.open;
+            saveSessionCollapseOverrides();
+            const chev = details.querySelector(".session-panel-chev");
+            if (chev) chev.textContent = details.open ? "\u25BE" : "\u25B8";
+          });
+        });
+      });
+      document.getElementById("sessionsExpandAll")?.addEventListener("click", () => {
+        // Record an explicit open override per panel: the state machine's default is
+        // collapsed, so merely clearing the store would let the next re-render
+        // (auto-refresh, range change, i18n switch) snap the panels shut again.
+        sessionCollapseOverrides = {};
+        document.querySelectorAll("details[data-panel-details]").forEach((details) => {
+          sessionCollapseOverrides[details.dataset.panelDetails] = false;
+          sessionPanelSetOpen(details, true);
+        });
+        saveSessionCollapseOverrides();
+      });
+      document.getElementById("sessionsCollapseAll")?.addEventListener("click", () => {
+        // Collapsed is the default, so clearing the store is stable across re-renders.
+        sessionCollapseOverrides = {};
+        saveSessionCollapseOverrides();
+        document.querySelectorAll("details[data-panel-details]").forEach((details) => sessionPanelSetOpen(details, false));
+      });
+    }
+
     function updateSessionPanel(prefix, data, options = {}) {
       const showTool = !!options.showTool;
       const latest = data?.latest_session || null;
@@ -6599,6 +6890,25 @@
         const capSeconds = Math.round(Number(summaryTotals.active_gap_cap_ms || 0) / 1000);
         activeAgent.title = capSeconds ? `${t("idleCap")}: ${formatDuration(summaryTotals.active_gap_cap_ms)}` : "";
       }
+
+      // Collapsible panel: count chip, header KPIs, latest-card grid visibility,
+      // and the open state from the state machine.
+      const latestGrid = document.getElementById(`${prefix}LatestSession`);
+      if (latestGrid) latestGrid.style.display = latest ? "" : "none";
+      const countChip = document.getElementById(`${prefix}PanelCount`);
+      if (countChip) countChip.textContent = `${formatNumber(sessions.length)} ${t("sessions")}`;
+      const panelKpis = document.getElementById(`${prefix}PanelKpis`);
+      if (panelKpis) panelKpis.hidden = !sessions.length;
+      if (sessions.length) {
+        const panelTokens = document.getElementById(`${prefix}PanelTokens`);
+        if (panelTokens) panelTokens.textContent = formatTokenCount(Number(summaryTotals.tokens) || sessions.reduce((sum, row) => sum + (Number(row.tokens) || 0), 0));
+        const panelCost = document.getElementById(`${prefix}PanelCost`);
+        if (panelCost) panelCost.textContent = formatCurrency(Number(summaryTotals.cost) || sessions.reduce((sum, row) => sum + (Number(row.cost) || 0), 0));
+        const panelLast = document.getElementById(`${prefix}PanelLast`);
+        if (panelLast) panelLast.textContent = latest ? formatSessionTime(latest.last_seen_at) : "—";
+      }
+      sessionPanelSetOpen(document.querySelector(`details[data-panel-details="${prefix}"]`),
+        sessionPanelShouldOpen(sessionCollapseOverrides[prefix], data));
 
       const tbody = document.getElementById(`${prefix}SessionsTable`);
       if (!tbody) return;
@@ -8449,6 +8759,531 @@
       renderQuotaCharts(history, { serverId: server.id, utilizationCanvas: block.querySelector('[data-role="utilization"]'), consumptionCanvas: block.querySelector('[data-role="consumption"]'), estimatedBanner: block.querySelector('[data-role="estimated"]') });
     }
 
+    // ---- Servers tab (per-server stats; multi-server only) ---------------------
+    // Renders purely from data the rest of the UI already caches: the per-server
+    // /api/usage rows (lastUsageResponse._server_rows), serverRuntimeStatus
+    // health, the quota rows and merged session lists when those tabs loaded.
+    // No extra fetches, no API changes.
+    const lastUsageRowsByServer = new Map(); // serverId -> { payload, at } (last good read this session)
+
+    function updateServersTabVisibility() {
+      const btn = document.getElementById('serversTabBtn');
+      if (!btn) return;
+      const visible = selectedServers().length > 1;
+      btn.hidden = !visible;
+      // Selection narrowed to one server while the tab is open: fall back to Overview.
+      if (!visible && isServersActive()) activateDashboardTab('overview');
+    }
+
+    function serverHostLabel(server) {
+      if (server.id === 'local') return t('serversThisHost');
+      try { return new URL(server.baseUrl).host; } catch (_error) { return server.baseUrl; }
+    }
+
+    function serverTimeOfDay(value) {
+      const dt = value ? new Date(value) : null;
+      if (!dt || Number.isNaN(dt.getTime())) return '\u2014';
+      const p = (n) => String(n).padStart(2, '0');
+      return `${p(dt.getHours())}:${p(dt.getMinutes())}:${p(dt.getSeconds())}`;
+    }
+
+    function serverQuotaSummary(serverId) {
+      const row = (lastQuotaServerRows || []).find((r) => r.server && r.server.id === serverId);
+      if (!row) return t('serversQuotaNotLoaded');
+      const payload = row.payload || {};
+      if (payload.enabled === false) return t('serversQuotaDisabled');
+      const providers = Object.values(payload.providers || {});
+      if (!providers.length) return t('serversQuotaNotLoaded');
+      const ok = providers.filter((p) => p.status === 'ok' || p.status === 'local_plan').length;
+      const bad = providers.length - ok;
+      return bad ? t('serversQuotaPartial').replace('{ok}', String(ok)).replace('{bad}', String(bad)) : t('serversQuotaOk').replace('{n}', String(ok));
+    }
+
+    function serverSessionCounts() {
+      const counts = new Map();
+      let any = false;
+      (Array.isArray(SESSION_TOOL_KEYS) ? SESSION_TOOL_KEYS : []).forEach((tool) => {
+        (lastSessionsResponses && lastSessionsResponses[tool] && lastSessionsResponses[tool].sessions || []).forEach((row) => {
+          const id = row._server && row._server.id;
+          if (id) { counts.set(id, (counts.get(id) || 0) + 1); any = true; }
+        });
+      });
+      return any ? counts : null;
+    }
+
+    function serversDeltaChip(pct) {
+      if (pct === null || pct === undefined || Number.isNaN(Number(pct))) return null;
+      const v = Number(pct);
+      const chip = document.createElement('span');
+      chip.className = `servers-delta ${v >= 0 ? 'up' : 'down'}`;
+      chip.textContent = `${v >= 0 ? '+' : '\u2212'}${Math.abs(v).toFixed(1)}%`;
+      return chip;
+    }
+
+    function serversKpiBlock(labelKey, text, opts = {}) {
+      const wrap = document.createElement('div');
+      wrap.className = 'servers-kpi';
+      const label = document.createElement('div');
+      label.className = 'k';
+      label.setAttribute('data-i18n', labelKey);
+      label.textContent = t(labelKey);
+      wrap.appendChild(label);
+      const value = document.createElement('div');
+      value.className = opts.cost ? 'v cost' : 'v';
+      value.textContent = text;
+      if (opts.stale) {
+        const tag = document.createElement('span');
+        tag.className = 'servers-stale-tag';
+        tag.textContent = t('serversStale');
+        value.appendChild(document.createTextNode(' '));
+        value.appendChild(tag);
+      } else {
+        const chip = opts.deltaPct === undefined ? null : serversDeltaChip(opts.deltaPct);
+        if (chip) { value.appendChild(document.createTextNode(' ')); value.appendChild(chip); }
+      }
+      wrap.appendChild(value);
+      return wrap;
+    }
+
+    function serversShareRow(labelKey, pct) {
+      const row = document.createElement('div');
+      row.className = 'servers-share-row';
+      const label = document.createElement('span');
+      label.setAttribute('data-i18n', labelKey);
+      label.textContent = t(labelKey);
+      const track = document.createElement('div');
+      track.className = 'servers-bar-track';
+      const fill = document.createElement('div');
+      fill.className = 'servers-bar-fill';
+      fill.style.width = `${Math.max(0, Math.min(100, pct))}%`;
+      track.appendChild(fill);
+      const pctEl = document.createElement('span');
+      pctEl.className = 'pct';
+      pctEl.textContent = `${pct.toFixed(1)}%`;
+      row.append(label, track, pctEl);
+      return row;
+    }
+
+    function byToolTotals(byTool) {
+      let tokensIn = 0, tokensCache = 0;
+      Object.values(byTool || {}).forEach((entry) => {
+        tokensIn += Number(entry.tokens_in) || 0;
+        tokensCache += Number(entry.tokens_cache) || 0;
+      });
+      return { tokensIn, tokensCache };
+    }
+
+    function serversCard(server, row, ctx) {
+      const card = document.createElement('article');
+      const fresh = !!row;
+      const stale = !fresh ? ctx.staleOf(server.id) : null;
+      const payload = (row && row.payload) || (stale && stale.payload) || null;
+      const status = serverRuntimeStatus.get(server.id);
+      const dead = !fresh && (!status || !status.ok);
+      card.className = `surface servers-card${dead ? ' dead' : ''}`;
+
+      const head = document.createElement('div');
+      head.className = 'servers-card-head';
+      const dot = document.createElement('span');
+      dot.className = 'server-health-dot';
+      dot.dataset.state = dead ? 'error' : 'ok';
+      head.appendChild(dot);
+      const who = document.createElement('div');
+      who.className = 'servers-card-who';
+      const nameRow = document.createElement('div');
+      const name = document.createElement('span');
+      name.className = 'name';
+      name.textContent = server.label;
+      nameRow.appendChild(name);
+      const hostLine = document.createElement('div');
+      hostLine.className = 'servers-host';
+      hostLine.textContent = serverHostLabel(server);
+      who.append(nameRow, hostLine);
+      const when = document.createElement('div');
+      when.className = 'servers-when';
+      if (fresh) {
+        when.textContent = `${t('serversUpdatedAt')} `;
+        const time = document.createElement('span');
+        time.className = 'mono';
+        time.textContent = serverTimeOfDay(payload.timestamp);
+        when.appendChild(time);
+      } else if (dead) {
+        when.innerHTML = `<span class="bad">${t('serversUnreachable')}</span><br>${t('serversLastSeen')} `;
+        const time = document.createElement('span');
+        time.className = 'mono';
+        time.textContent = payload ? serverTimeOfDay(payload.timestamp) : '\u2014';
+        when.appendChild(time);
+      } else {
+        // Reachable per the last probe, but this refresh produced no usage row. A
+        // cached read still gives a real last-seen, so only fall back to a dash.
+        when.textContent = t('serversLastSeen') + ' ';
+        const time = document.createElement('span');
+        time.className = 'mono';
+        time.textContent = payload ? serverTimeOfDay(payload.timestamp) : '\u2014';
+        when.appendChild(time);
+      }
+      head.append(who, when);
+      card.appendChild(head);
+
+      if (!payload) {
+        const note = document.createElement('div');
+        note.className = 'servers-dead-note';
+        note.textContent = t('serversNoDataYet');
+        card.appendChild(note);
+        return card;
+      }
+
+      const cmp = payload.comparison || {};
+      const kpis = document.createElement('div');
+      kpis.className = 'servers-kpis';
+      kpis.appendChild(serversKpiBlock('totalTokens', formatTokenCount(payload.total_tokens), { deltaPct: cmp.tokens_pct, stale: !fresh }));
+      kpis.appendChild(serversKpiBlock('cost', formatCurrency(payload.total_cost), { cost: true, deltaPct: cmp.cost_pct, stale: !fresh }));
+      kpis.appendChild(serversKpiBlock('totalMessages', formatNumber(payload.total_messages), { deltaPct: cmp.messages_pct, stale: !fresh }));
+      card.appendChild(kpis);
+
+      if (fresh && ctx.multi) {
+        const shares = document.createElement('div');
+        const tokenShare = ctx.totalTokens > 0 ? (Number(payload.total_tokens) || 0) / ctx.totalTokens * 100 : 0;
+        const costShare = ctx.totalCost > 0 ? (Number(payload.total_cost) || 0) / ctx.totalCost * 100 : 0;
+        shares.appendChild(serversShareRow('serversShareTokens', tokenShare));
+        shares.appendChild(serversShareRow('serversShareCost', costShare));
+        card.appendChild(shares);
+      }
+
+      if (fresh) {
+        const tools = Object.entries(payload.by_tool || {}).filter(([, v]) => (Number(v.tokens) || 0) > 0)
+          .sort((a, b) => (Number(b[1].cost) || 0) - (Number(a[1].cost) || 0)).slice(0, 4);
+        if (tools.length) {
+          const toolsBox = document.createElement('div');
+          const toolsH = document.createElement('h4');
+          toolsH.setAttribute('data-i18n', 'serversToolsTop');
+          toolsH.textContent = t('serversToolsTop');
+          toolsBox.appendChild(toolsH);
+          const maxCost = Math.max(...tools.map(([, v]) => Number(v.cost) || 0), 1);
+          tools.forEach(([toolName, v]) => {
+            const tr = document.createElement('div');
+            tr.className = 'servers-tool-row';
+            const n = document.createElement('span');
+            n.className = 'n';
+            n.textContent = formatToolName(toolName);
+            n.title = formatToolName(toolName);
+            const track = document.createElement('div');
+            track.className = 'servers-bar-track';
+            const fill = document.createElement('div');
+            fill.className = 'servers-bar-fill';
+            fill.style.width = `${Math.max(2, (Number(v.cost) || 0) / maxCost * 100)}%`;
+            track.appendChild(fill);
+            const tk = document.createElement('span');
+            tk.className = 'tk';
+            tk.textContent = formatTokenCount(v.tokens);
+            const cs = document.createElement('span');
+            cs.className = 'cs';
+            cs.textContent = formatCurrency(v.cost);
+            tr.append(n, track, tk, cs);
+            toolsBox.appendChild(tr);
+          });
+          card.appendChild(toolsBox);
+        }
+        const models = (payload.top_models || []).slice(0, 3);
+        if (models.length) {
+          const modelsBox = document.createElement('div');
+          const modelsH = document.createElement('h4');
+          modelsH.setAttribute('data-i18n', 'serversTopModels');
+          modelsH.textContent = t('serversTopModels');
+          modelsBox.appendChild(modelsH);
+          models.forEach((m) => {
+            const mr = document.createElement('div');
+            mr.className = 'servers-model-row';
+            const n = document.createElement('span');
+            n.className = 'n';
+            n.textContent = m.name;
+            n.title = m.name;
+            const tk = document.createElement('span');
+            tk.className = 'tk';
+            tk.textContent = formatTokenCount(m.tokens);
+            const cs = document.createElement('span');
+            cs.className = 'cs';
+            cs.textContent = formatCurrency(m.cost);
+            mr.append(n, tk, cs);
+            modelsBox.appendChild(mr);
+          });
+          card.appendChild(modelsBox);
+        }
+      }
+
+      const meta = document.createElement('div');
+      meta.className = 'servers-meta';
+      const sessionsSpan = document.createElement('span');
+      sessionsSpan.setAttribute('data-i18n', 'serversSessionsRange');
+      sessionsSpan.textContent = t('serversSessionsRange');
+      const sessionsVal = document.createElement('b');
+      if (ctx.sessionCounts && ctx.sessionCounts.has(server.id)) {
+        sessionsVal.textContent = formatNumber(ctx.sessionCounts.get(server.id));
+      } else {
+        sessionsVal.textContent = '\u2014';
+        const hint = document.createElement('span');
+        hint.textContent = ` ${t('serversSessionsNotLoaded')}`;
+        sessionsSpan.appendChild(hint);
+      }
+      sessionsSpan.appendChild(document.createTextNode(' '));
+      sessionsSpan.appendChild(sessionsVal);
+      meta.appendChild(sessionsSpan);
+      const quotaSpan = document.createElement('span');
+      quotaSpan.setAttribute('data-i18n', 'serversQuota');
+      quotaSpan.textContent = t('serversQuota');
+      const quotaLink = document.createElement('button');
+      quotaLink.type = 'button';
+      quotaLink.className = 'servers-quota-link';
+      quotaLink.textContent = serverQuotaSummary(server.id);
+      quotaLink.addEventListener('click', () => activateDashboardTab('quota'));
+      quotaSpan.appendChild(document.createTextNode(' '));
+      quotaSpan.appendChild(quotaLink);
+      meta.appendChild(quotaSpan);
+      card.appendChild(meta);
+
+      if (fresh && Array.isArray(payload.source_errors) && payload.source_errors.length) {
+        const errs = document.createElement('div');
+        errs.className = 'servers-src-errors';
+        const errsLabel = document.createElement('span');
+        errsLabel.setAttribute('data-i18n', 'serversSourceErrors');
+        errsLabel.textContent = `${t('serversSourceErrors')}: `;
+        errs.appendChild(errsLabel);
+        errs.appendChild(document.createTextNode(payload.source_errors.join('; ')));
+        card.appendChild(errs);
+      }
+      return card;
+    }
+
+    function serversCompareTable(servers, byId, ctx) {
+      const table = document.createElement('table');
+      table.className = 'servers-compare';
+      const usage = lastUsageResponse || {};
+      // A flagged refresh (total outage after a good load) means `usage` is the
+      // last good data, so the Combined column reads stale like every per-server
+      // cell does. Computed once in renderServersTab and threaded via ctx.
+      const combinedStale = !!ctx.combinedStale;
+      const head = document.createElement('thead');
+      const headRow = document.createElement('tr');
+      const corner = document.createElement('th');
+      corner.textContent = ''; // intentionally empty corner cell
+      headRow.appendChild(corner);
+      const combinedTh = document.createElement('th');
+      combinedTh.className = 'combined';
+      combinedTh.setAttribute('data-i18n', 'serversCombinedCol');
+      combinedTh.textContent = t('serversCombinedCol');
+      headRow.appendChild(combinedTh);
+      servers.forEach((sv) => {
+        const th = document.createElement('th');
+        th.textContent = sv.label;
+        headRow.appendChild(th);
+      });
+      head.appendChild(headRow);
+      table.appendChild(head);
+
+      const tbody = document.createElement('tbody');
+      const combinedTopTool = Object.entries(usage.by_tool || {}).sort((a, b) => (Number(b[1].cost) || 0) - (Number(a[1].cost) || 0))[0];
+      const combinedTopModel = (usage.top_models || [])[0];
+      const sessionsTotal = ctx.sessionCounts ? [...ctx.sessionCounts.values()].reduce((a, b) => a + b, 0) : null;
+
+      const cellText = (sv) => {
+        const row = byId.get(sv.id);
+        if (row) return { value: row.payload, stale: false };
+        const stale = ctx.staleOf(sv.id);
+        return stale ? { value: stale.payload, stale: true } : { value: null, stale: true };
+      };
+
+      const rows = [
+        ['status', (combined, sv) => {
+          if (combined) return { text: '\u2014' };
+          const row = byId.get(sv.id);
+          if (row) return { html: `<span class="server-health-dot" data-state="ok" style="display:inline-block;margin-right:6px;"></span>${t('serverStatusOk')}` };
+          return { html: `<span class="server-health-dot" data-state="error" style="display:inline-block;margin-right:6px;"></span>${t('serverStatusError')}`, stale: true };
+        }],
+        ['updated', (combined, sv) => {
+          const cell = combined ? { value: usage, stale: combinedStale } : cellText(sv);
+          if (!cell.value) return { text: '\u2014' };
+          return { text: serverTimeOfDay(cell.value.timestamp), stale: cell.stale };
+        }],
+        ['tokens', (combined, sv) => {
+          const cell = combined ? { value: usage, stale: combinedStale } : cellText(sv);
+          if (!cell.value) return { text: '\u2014' };
+          return { text: formatTokenCount(cell.value.total_tokens), stale: cell.stale };
+        }],
+        ['input', (combined, sv) => {
+          const cell = combined ? { value: usage, stale: combinedStale } : cellText(sv);
+          if (!cell.value) return { text: '\u2014' };
+          const { tokensIn } = byToolTotals(cell.value.by_tool);
+          return { text: formatTokenCount(tokensIn), stale: cell.stale };
+        }],
+        ['cache', (combined, sv) => {
+          const cell = combined ? { value: usage, stale: combinedStale } : cellText(sv);
+          if (!cell.value) return { text: '\u2014' };
+          const { tokensCache } = byToolTotals(cell.value.by_tool);
+          return { text: formatTokenCount(tokensCache), stale: cell.stale };
+        }],
+        ['output', (combined, sv) => {
+          const cell = combined ? { value: usage, stale: combinedStale } : cellText(sv);
+          if (!cell.value) return { text: '\u2014' };
+          const { tokensIn, tokensCache } = byToolTotals(cell.value.by_tool);
+          const out = Math.max(0, (Number(cell.value.total_tokens) || 0) - tokensIn - tokensCache);
+          return { text: formatTokenCount(out), stale: cell.stale };
+        }],
+        ['cacheHit', (combined, sv) => {
+          const cell = combined ? { value: usage, stale: combinedStale } : cellText(sv);
+          if (!cell.value) return { text: '\u2014' };
+          return { text: formatHitRate(cell.value.cache_hit_rate), stale: cell.stale };
+        }],
+        ['cost', (combined, sv) => {
+          const cell = combined ? { value: usage, stale: combinedStale } : cellText(sv);
+          if (!cell.value) return { text: '\u2014' };
+          return { text: formatCurrency(cell.value.total_cost), stale: cell.stale };
+        }],
+        ['messages', (combined, sv) => {
+          const cell = combined ? { value: usage, stale: combinedStale } : cellText(sv);
+          if (!cell.value) return { text: '\u2014' };
+          return { text: formatNumber(cell.value.total_messages), stale: cell.stale };
+        }],
+        ['sessions', (combined, sv) => {
+          if (combined) return sessionsTotal === null ? { text: t('serversSessionsNotLoaded') } : { text: formatNumber(sessionsTotal), stale: combinedStale };
+          if (!ctx.sessionCounts) return { text: t('serversSessionsNotLoaded'), stale: !byId.has(sv.id) };
+          const count = ctx.sessionCounts.get(sv.id);
+          return { text: count === undefined ? '\u2014' : formatNumber(count), stale: !byId.has(sv.id) };
+        }],
+        ['topTool', (combined, sv) => {
+          const cell = combined ? { value: usage, stale: combinedStale } : cellText(sv);
+          const entry = combined ? combinedTopTool : Object.entries((cell.value && cell.value.by_tool) || {}).sort((a, b) => (Number(b[1].cost) || 0) - (Number(a[1].cost) || 0))[0];
+          if (!entry) return { text: '\u2014' };
+          return { text: formatToolName(entry[0]), stale: cell.stale };
+        }],
+        ['topModel', (combined, sv) => {
+          const cell = combined ? { value: usage, stale: combinedStale } : cellText(sv);
+          const model = combined ? combinedTopModel : (cell.value && (cell.value.top_models || [])[0]);
+          if (!model) return { text: '\u2014' };
+          return { text: String(model.name || ''), stale: cell.stale };
+        }],
+        ['quota', (combined, sv) => {
+          if (combined) {
+            const rows = servers.map((x) => (lastQuotaServerRows || []).find((r) => r.server && r.server.id === x.id)).filter(Boolean);
+            if (rows.length !== servers.length) return { text: '\u2014' };
+            const providers = rows.reduce((acc, r) => acc.concat(Object.values((r.payload || {}).providers || {})), []);
+            const ok = providers.filter((p) => p.status === 'ok' || p.status === 'local_plan').length;
+            const bad = providers.length - ok;
+            return { text: bad
+              ? t('serversQuotaCombinedPartial').replace('{ok}', String(ok)).replace('{bad}', String(bad))
+              : t('serversQuotaCombinedOk').replace('{n}', String(ok)) };
+          }
+          return { text: serverQuotaSummary(sv.id), stale: !byId.has(sv.id) };
+        }],
+      ];
+      const rowLabels = { status: t('statusRowLabel'), updated: t('lastUpdated'), tokens: t('panelTokens'), input: t('input'), cache: t('cacheReadRow'), output: t('output'), cacheHit: t('hitPct'), cost: t('cost'), messages: t('totalMessages'), sessions: t('serversSessionsRange'), topTool: t('topToolRow'), topModel: t('topModelRow'), quota: t('serversQuota') };
+      rows.forEach(([key, fn]) => {
+        const tr = document.createElement('tr');
+        const label = document.createElement('td');
+        label.className = 'row-label';
+        label.textContent = rowLabels[key];
+        tr.appendChild(label);
+        const combinedTd = document.createElement('td');
+        combinedTd.className = 'combined';
+        const c = fn(true, null);
+        if (c.html) combinedTd.innerHTML = c.html; else combinedTd.textContent = c.text;
+        if (c.stale) {
+          const st = document.createElement('span');
+          st.className = 'st';
+          st.title = t('serversStale');
+          st.textContent = 'st';
+          combinedTd.appendChild(document.createTextNode(' '));
+          combinedTd.appendChild(st);
+        }
+        tr.appendChild(combinedTd);
+        servers.forEach((sv) => {
+          const td = document.createElement('td');
+          const cell = fn(false, sv);
+          if (cell.html) td.innerHTML = cell.html; else td.textContent = cell.text;
+          if (cell.stale) {
+            const st = document.createElement('span');
+            st.className = 'st';
+            st.title = t('serversStale');
+            st.textContent = 'st';
+            td.appendChild(document.createTextNode(' '));
+            td.appendChild(st);
+          }
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      return table;
+    }
+
+    function renderServersTab() {
+      const host = document.getElementById('serversTabBody');
+      if (!host) return;
+      const servers = selectedServers();
+      if (!servers.length) return;
+      // Zero usage rows is a renderable state (every selected server unreachable on
+      // this refresh): show the 0/N strip and the dead cards, not the placeholder.
+      // A flagged set (total outage after a good load) counts as zero fresh rows too.
+      const rows = (lastUsageResponse && !lastUsageResponse._server_rows_stale && lastUsageResponse._server_rows) || [];
+      const byId = new Map(rows.map((r) => [r.server.id, r]));
+      const okCount = servers.filter((sv) => byId.has(sv.id)).length;
+      const sessionCounts = serverSessionCounts();
+      const usage = lastUsageResponse || {};
+      const totalTokens = Number(usage.total_tokens) || 0;
+      const totalCost = Number(usage.total_cost) || 0;
+      // The combined figures (strip + table column) are drawn from the same last
+      // good data, so they carry the stale mark until a refresh lands.
+      const combinedStale = !!(lastUsageResponse && lastUsageResponse._server_rows_stale);
+      const ctx = { staleOf: (id) => lastUsageRowsByServer.get(id) || null, sessionCounts, totalTokens, totalCost, multi: okCount > 1, combinedStale };
+
+      const frag = document.createDocumentFragment();
+      const strip = document.createElement('section');
+      strip.className = 'surface servers-strip';
+      const stripDot = document.createElement('span');
+      stripDot.className = 'server-health-dot';
+      stripDot.dataset.state = okCount ? 'ok' : 'error';
+      strip.appendChild(stripDot);
+      const reachable = document.createElement('span');
+      reachable.innerHTML = `<b>${t('serversReachable').replace('{ok}', String(okCount)).replace('{n}', String(servers.length))}</b>`;
+      strip.appendChild(reachable);
+      const sep1 = document.createElement('span'); sep1.className = 'servers-dot-sep'; strip.appendChild(sep1);
+      const combinedSpan = document.createElement('span');
+      combinedSpan.innerHTML = `${t('serversCombined')} <b class="mono">${formatTokenCount(totalTokens)}</b> <span class="cost">${formatCurrency(totalCost)}</span> \u00b7 <b class="mono">${formatNumber(usage.total_messages || 0)}</b> ${t('totalMessages')}`;
+      strip.appendChild(combinedSpan);
+      const sep2 = document.createElement('span'); sep2.className = 'servers-dot-sep'; strip.appendChild(sep2);
+      const timestamps = rows.map((r) => String(r.payload.timestamp || '')).filter(Boolean).sort();
+      const freshness = document.createElement('span');
+      if (timestamps.length > 1) {
+        freshness.innerHTML = `${t('serversUpdatedAt')} <b class="mono">${serverTimeOfDay(timestamps[timestamps.length - 1])}</b> \u00b7 ${t('serversStalest')} <b class="mono">${serverTimeOfDay(timestamps[0])}</b>`;
+      } else if (timestamps.length === 1) {
+        freshness.innerHTML = `${t('serversUpdatedAt')} <b class="mono">${serverTimeOfDay(timestamps[0])}</b>`;
+      } else {
+        freshness.innerHTML = `${t('serversUpdatedAt')} <b class="mono">\u2014</b>`;
+      }
+      // A flagged refresh leaves no fresh timestamps, so the mark lands on the
+      // freshness line: it qualifies the "updated —" claim, not the totals.
+      if (combinedStale) {
+        freshness.innerHTML += ` <span class="st" title="${t('serversStale')}">st</span>`;
+      }
+      strip.appendChild(freshness);
+      frag.appendChild(strip);
+
+      const cards = document.createElement('section');
+      cards.className = 'servers-cards';
+      servers.forEach((sv) => cards.appendChild(serversCard(sv, byId.get(sv.id), ctx)));
+      frag.appendChild(cards);
+
+      const tableWrap = document.createElement('section');
+      tableWrap.className = 'surface p-5 mb-6 servers-table-wrap';
+      tableWrap.appendChild(serversCompareTable(servers, byId, ctx));
+      const footnote = document.createElement('div');
+      footnote.className = 'servers-footnote';
+      footnote.setAttribute('data-i18n', 'serversStaleFootnote');
+      footnote.textContent = t('serversStaleFootnote');
+      tableWrap.appendChild(footnote);
+      frag.appendChild(tableWrap);
+      host.replaceChildren(frag);
+    }
+
     async function loadQuota(options = {}) {
       try {
         const range = currentQuotaRange();
@@ -8757,6 +9592,7 @@
       }
       if (tab === 'overview' && lastUsageResponse) renderOverviewTab(lastUsageResponse);
       if (tab === 'sessions') ensureSessionsLoaded();
+      if (tab === 'servers') renderServersTab();
       if (tab === 'quota' && !quotaLoaded) loadQuota();
       if (tab === 'pricing' && !pricingDbLoaded) loadPricingDb();
     }
@@ -8788,6 +9624,7 @@
     document.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') closeSessionModal();
     });
+    initSessionPanels();
 
     // Stats
     const statsCache = {

@@ -61,3 +61,5 @@ companion/windows/stdout.txt
 # Local-only analysis & planning notes (machine-specific usage data; not for the public repo)
 docs/local/
 .cosyncing/
+
+scratchpad/

@@ -46,6 +46,7 @@ let inFlightResultDiscarded = false;
 let updateIsManualRefresh = false;
 let refreshUiState = 'idle';
 let lastUsageResponse = null;
+let lastRefreshReport = null;
 let lastSessionsResponses = null;
 let sessionsLoadedKey = null;
 let lastWindowKey = null;
@@ -80,6 +81,9 @@ function isOverviewActive() { return true; }
 function renderOverviewTab(data) { log.rendered.push(data && data.range); }
 function renderSessionsTab() {}
 function renderRefreshButton() {}
+function hideUsageRefreshReport() {}
+function showUsageRefreshReport(report) { lastRefreshReport = report; }
+function refreshReportRangeLabel() { return 'test range'; }
 function clearOverviewBreakdowns() { overviewBreakdownWindowKey = null; }
 function setOverviewState(state) { log.stale.push(!!(state && (state.pending || state.stale))); }
 function setRefreshUiState(state) { refreshUiState = state; log.refreshStates.push(state); }
@@ -234,6 +238,10 @@ def _run(tmp_path: Path, scenario: str) -> dict:
         _extract_js_function(source, signature)
         for signature in (
             "function windowKeyFor(customDays, dateFrom, dateTo) {",
+            "function usageSourceErrors(payload) {",
+            "function reconcileUsageRows(rows, windowKey, servers = selectedServers(), cache = lastUsageRowsByServer) {",
+            "function usageToolFingerprint(entry) {",
+            "function buildUsageRefreshReport(before, after, details = {}) {",
             "function activeTimeRequestKey(customDays, dateFrom, dateTo) {",
             "function invalidateOverviewActiveTime(customDays, dateFrom, dateTo) {",
             "async function updateDashboard(customDays = null, dateFrom = null, dateTo = null, options = {}) {",

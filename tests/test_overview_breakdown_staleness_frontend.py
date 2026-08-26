@@ -76,6 +76,7 @@ let inFlightResultDiscarded = false;
 let updateIsManualRefresh = false;
 let refreshUiState = 'idle';
 let lastUsageResponse = null;
+let lastRefreshReport = null;
 let lastSessionsResponses = null;
 let sessionsLoadedKey = null;
 let lastWindowKey = null;
@@ -121,6 +122,9 @@ function isSessionsActive() { return false; }
 function isOverviewActive() { return true; }
 function renderSessionsTab() {}
 function renderRefreshButton() {}
+function hideUsageRefreshReport() {}
+function showUsageRefreshReport(report) { lastRefreshReport = report; }
+function refreshReportRangeLabel() { return 'test range'; }
 function setRefreshUiState(state) { refreshUiState = state; }
 function setDashboardFetchStatus(error) { log.errors.push(String(error && error.message || error)); }
 function updateTimestamp() {}
@@ -363,6 +367,10 @@ def _run(tmp_path: Path, scenario: str) -> dict:
         _extract_js_function(source, signature)
         for signature in (
             "function windowKeyFor(customDays, dateFrom, dateTo) {",
+            "function usageSourceErrors(payload) {",
+            "function reconcileUsageRows(rows, windowKey, servers = selectedServers(), cache = lastUsageRowsByServer) {",
+            "function usageToolFingerprint(entry) {",
+            "function buildUsageRefreshReport(before, after, details = {}) {",
             "function activeTimeRequestKey(customDays, dateFrom, dateTo) {",
             "function invalidateOverviewActiveTime(customDays, dateFrom, dateTo) {",
             "function clearOverviewBreakdowns() {",
@@ -516,10 +524,14 @@ def test_the_cleared_markup_matches_the_placeholder_the_page_ships(tmp_path):
     cleared = _extract_js_function(source, "function clearOverviewBreakdowns() {")
 
     for shipped in (
-        '<p class="tokdash-loading-placeholder text-center py-10" style="color: var(--color-muted);">'
-        '<span class="tokdash-loading-label" data-i18n="loading">Loading…</span></p>',
-        '<td colspan="8" class="tokdash-loading-placeholder text-center py-10" style="color: var(--color-muted);">'
-        '<span class="tokdash-loading-label" data-i18n="loading">Loading…</span></td>',
+        (
+            '<p class="tokdash-loading-placeholder text-center py-10" style="color: var(--color-muted);">'
+            '<span class="tokdash-loading-label" data-i18n="loading">Loading…</span></p>'
+        ),
+        (
+            '<td colspan="8" class="tokdash-loading-placeholder text-center py-10" style="color: var(--color-muted);">'
+            '<span class="tokdash-loading-label" data-i18n="loading">Loading…</span></td>'
+        ),
     ):
         assert shipped in source, "the initial markup moved; update clearOverviewBreakdowns"
 

@@ -319,12 +319,112 @@
     #refreshBtn {
       min-width: 128px;
     }
+    .refresh-control {
+      position: relative;
+      display: inline-flex;
+    }
+    .refresh-report {
+      position: absolute;
+      z-index: 115;
+      top: calc(100% + 10px);
+      right: 0;
+      width: min(390px, calc(100vw - 24px));
+      padding: 15px;
+      border: 1px solid color-mix(in srgb, var(--color-primary) 18%, var(--color-border));
+      border-radius: 16px;
+      color: var(--color-text);
+      background: color-mix(in srgb, var(--color-surface-glass) 97%, var(--color-bg));
+      box-shadow: var(--shadow-md), 0 18px 44px color-mix(in srgb, var(--color-text) 15%, transparent);
+      backdrop-filter: blur(18px);
+      transform-origin: top right;
+      animation: refresh-report-in var(--t-fast) cubic-bezier(.16, 1, .3, 1);
+    }
+    .refresh-report[hidden] { display: none; }
+    .refresh-report-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: start; }
+    .refresh-report-mark {
+      display: grid;
+      width: 30px;
+      height: 30px;
+      place-items: center;
+      border-radius: 10px;
+      color: var(--color-primary);
+      background: color-mix(in srgb, var(--color-primary) 11%, transparent);
+    }
+    .refresh-report[data-status="preserved"] .refresh-report-mark,
+    .refresh-report[data-status="partial"] .refresh-report-mark,
+    .refresh-report[data-status="failed"] .refresh-report-mark {
+      color: #B45309;
+      background: color-mix(in srgb, #D97706 13%, transparent);
+    }
+    .refresh-report-title { margin: 0; font-size: 14px; font-weight: 850; letter-spacing: -0.01em; }
+    .refresh-report-meta { margin: 2px 0 0; color: var(--color-muted); font-size: 11px; line-height: 1.4; }
+    .refresh-report-close {
+      display: grid;
+      width: 28px;
+      height: 28px;
+      place-items: center;
+      border: 0;
+      border-radius: 9px;
+      color: var(--color-muted);
+      background: transparent;
+      cursor: pointer;
+    }
+    .refresh-report-close:hover { color: var(--color-text); background: color-mix(in srgb, var(--color-text) 7%, transparent); }
+    .refresh-report-close:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+    .refresh-report-deltas {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 7px;
+      margin-top: 13px;
+    }
+    .refresh-report-delta {
+      min-width: 0;
+      padding: 9px 10px;
+      border: 1px solid color-mix(in srgb, var(--color-border) 78%, transparent);
+      border-radius: 11px;
+      background: color-mix(in srgb, var(--color-primary) 3%, transparent);
+    }
+    .refresh-report-delta strong { display: block; overflow: hidden; font-size: 13px; font-weight: 850; text-overflow: ellipsis; white-space: nowrap; }
+    .refresh-report-delta span { display: block; margin-top: 2px; color: var(--color-muted); font-size: 10px; font-weight: 700; }
+    .refresh-report-summary {
+      display: flex;
+      gap: 7px;
+      align-items: flex-start;
+      margin: 11px 1px 0;
+      color: var(--color-muted);
+      font-size: 11px;
+      line-height: 1.45;
+    }
+    .refresh-report-summary svg { flex: 0 0 auto; margin-top: 1px; color: var(--color-primary); }
+    .refresh-report-retained {
+      margin: 9px 0 0;
+      padding: 9px 10px;
+      border-radius: 11px;
+      color: color-mix(in srgb, #92400E 88%, var(--color-text));
+      background: color-mix(in srgb, #F59E0B 11%, transparent);
+      font-size: 11px;
+      font-weight: 650;
+      line-height: 1.45;
+    }
+    @keyframes refresh-report-in {
+      from { opacity: 0; transform: translateY(-4px) scale(.985); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
     .refresh-icon-spin {
       animation: tokdash-spin 0.9s linear infinite;
       transform-origin: 50% 50%;
     }
     @keyframes tokdash-spin {
       to { transform: rotate(360deg); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .refresh-report { animation: none; }
+      .refresh-icon-spin { animation-duration: 1.8s; }
+    }
+
+    @media (max-width: 640px) {
+      .refresh-report { right: auto; left: 0; }
     }
 
     .btn-ghost {
@@ -1691,13 +1791,41 @@
           </div>
 
           <div class="topbar-actions">
-            <button id="refreshBtn" class="btn btn-primary" aria-label="Refresh dashboard">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path d="M20 12a8 8 0 1 1-2.343-5.657" stroke="white" stroke-width="2" stroke-linecap="round"/>
-              <path d="M20 4v6h-6" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-              <span data-i18n="refresh">Refresh</span>
-            </button>
+            <div class="refresh-control">
+              <button id="refreshBtn" class="btn btn-primary" aria-label="Refresh dashboard" aria-controls="refreshReport" aria-expanded="false">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M20 12a8 8 0 1 1-2.343-5.657" stroke="white" stroke-width="2" stroke-linecap="round"/>
+                  <path d="M20 4v6h-6" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <span data-i18n="refresh">Refresh</span>
+              </button>
+              <section id="refreshReport" class="refresh-report" role="status" aria-live="polite" aria-atomic="true" data-status="complete" hidden>
+                <div class="refresh-report-head">
+                  <span class="refresh-report-mark" aria-hidden="true">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                      <path d="m7 12 3 3 7-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                  </span>
+                  <div>
+                    <h2 id="refreshReportTitle" class="refresh-report-title">Scan complete</h2>
+                    <p id="refreshReportMeta" class="refresh-report-meta"></p>
+                  </div>
+                  <button id="refreshReportClose" class="refresh-report-close" type="button" aria-label="Close">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                  </button>
+                </div>
+                <div class="refresh-report-deltas" aria-label="Changes after scan">
+                  <div class="refresh-report-delta"><strong id="refreshReportTokens" class="mono">—</strong><span data-i18n="refreshReportTokens">Tokens</span></div>
+                  <div class="refresh-report-delta"><strong id="refreshReportCost" class="mono">—</strong><span data-i18n="refreshReportCost">Cost</span></div>
+                  <div class="refresh-report-delta"><strong id="refreshReportMessages" class="mono">—</strong><span data-i18n="refreshReportMessages">Messages</span></div>
+                </div>
+                <p class="refresh-report-summary">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 7h16M4 12h10M4 17h13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                  <span id="refreshReportSummary"></span>
+                </p>
+                <p id="refreshReportRetained" class="refresh-report-retained" hidden></p>
+              </section>
+            </div>
             <button id="releaseNotesToggle" class="btn btn-ghost compact-control release-notes-trigger" type="button" aria-controls="releaseNotesDialog" aria-expanded="false">
               <svg class="release-notes-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                 <path d="M6.5 4.5h11a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.7"/>
@@ -3540,6 +3668,7 @@
     let refreshCooldownTimer = null;
     let refreshCooldownRemaining = 0;
     let lastUsageResponse = null;
+    let lastRefreshReport = null;
     const SESSION_TOOL_KEYS = ['codex', 'claude', 'opencode', 'pi_agent', 'mimo', 'kimi', 'dsh', 'reasonix', 'zcode'];
     let lastSessionsResponses = { codex: null, claude: null, opencode: null, pi_agent: null, mimo: null, kimi: null, dsh: null, reasonix: null, zcode: null, combined: null };
     let lastCombinedModels = [];
@@ -3635,6 +3764,21 @@
         refreshBusy: 'Busy',
         refreshFailed: 'Failed — retry',
         refreshCooldown: 'Wait {n}s',
+        refreshReportComplete: 'Scan complete',
+        refreshReportPreserved: 'Scan complete · previous data kept',
+        refreshReportPartial: 'Scan incomplete',
+        refreshReportFailed: 'Scan failed · previous data kept',
+        refreshReportTokens: 'Tokens',
+        refreshReportCost: 'Cost',
+        refreshReportMessages: 'Messages',
+        refreshReportNoBaseline: 'Baseline saved · {n} tools found',
+        refreshReportToolsChanged: '{n} tools changed',
+        refreshReportNoChanges: 'No usage changes found',
+        refreshReportRetained: 'Kept the previous result for {names}; this scan could not read complete data.',
+        refreshReportUnavailable: 'No earlier result was available for {names}; displayed totals may be incomplete.',
+        refreshReportRange: '{range} · {time}',
+        refreshReportDiffLabel: 'Changes after scan',
+        refreshReportClose: 'Close scan report',
         settings: 'Settings',
         servers: 'Servers',
         allServers: 'Use all',
@@ -3650,8 +3794,8 @@
         serversUnreachable: 'unreachable',
         serversNoDataYet: 'No data yet \u2014 first refresh for this server failed',
         serversStale: 'stale',
-        serversStaleFootnote: 'st \u2014 stale: last successful read this session; unreachable servers are excluded from the Combined column until a refresh succeeds.',
-        serversCombinedCol: 'Combined (reachable)',
+        serversStaleFootnote: 'st \u2014 stale: last complete read for this range; retained values remain in the displayed Combined total until a complete refresh succeeds.',
+        serversCombinedCol: 'Combined (displayed)',
         serversShareTokens: 'Share \u00b7 tokens',
         serversShareCost: 'Share \u00b7 cost',
         serversToolsTop: 'Tools (top 4)',
@@ -4007,6 +4151,21 @@
         refreshBusy: '繁忙',
         refreshFailed: '失败，请重试',
         refreshCooldown: '{n} 秒后重试',
+        refreshReportComplete: '扫描完成',
+        refreshReportPreserved: '扫描完成 · 已保留旧数据',
+        refreshReportPartial: '扫描不完整',
+        refreshReportFailed: '扫描失败 · 已保留旧数据',
+        refreshReportTokens: 'Tokens',
+        refreshReportCost: '费用',
+        refreshReportMessages: '消息数',
+        refreshReportNoBaseline: '已建立基准 · 找到 {n} 个工具',
+        refreshReportToolsChanged: '{n} 个工具发生变化',
+        refreshReportNoChanges: '未发现用量变化',
+        refreshReportRetained: '{names} 本次未能完整读取，已保留该范围的上一次结果。',
+        refreshReportUnavailable: '{names} 没有可用的旧结果，当前合计可能不完整。',
+        refreshReportRange: '{range} · {time}',
+        refreshReportDiffLabel: '扫描后的变化',
+        refreshReportClose: '关闭扫描报告',
         settings: '设置',
         servers: '服务器',
         allServers: '全部启用',
@@ -4022,8 +4181,8 @@
         serversUnreachable: '无法连接',
         serversNoDataYet: '暂无数据 — 该服务器首次刷新失败',
         serversStale: '过期',
-        serversStaleFootnote: 'st — 过期：本次会话最近一次成功读取；无法连接的服务器不计入合计列，直到刷新成功。',
-        serversCombinedCol: '合计（可连接）',
+        serversStaleFootnote: 'st — 过期：该范围最近一次完整读取；刷新完整成功前，保留值仍计入当前展示的合计。',
+        serversCombinedCol: '合计（当前展示）',
         serversShareTokens: '占比 · Token',
         serversShareCost: '占比 · 费用',
         serversToolsTop: '工具（前 4）',
@@ -4938,6 +5097,174 @@
       }
     }
 
+    function usageSourceErrors(payload) {
+      return [...new Set((Array.isArray(payload?.source_errors) ? payload.source_errors : [])
+        .map((value) => String(value || '').trim())
+        .filter(Boolean))];
+    }
+
+    // A refresh fans out to every selected server. Never let one unreachable server
+    // or one incomplete source silently shrink the combined figures: for the same
+    // time window, reuse that server's last complete snapshot. Clean rows replace the
+    // snapshot in O(server count); no payload is copied to localStorage or re-fetched.
+    function reconcileUsageRows(rows, windowKey, servers = selectedServers(), cache = lastUsageRowsByServer) {
+      const freshById = new Map((Array.isArray(rows) ? rows : []).map((row) => [row.server.id, row]));
+      const accepted = [];
+      const retained = [];
+      const unavailable = [];
+
+      (Array.isArray(servers) ? servers : []).forEach((server) => {
+        const row = freshById.get(server.id) || null;
+        const sources = usageSourceErrors(row?.payload);
+        const previous = cache.get(server.id);
+        const matchingPrevious = previous?.windowKey === windowKey && previous?.payload ? previous : null;
+
+        if (row && !sources.length) {
+          const cleanRow = { ...row, _retained: false, _partial: false };
+          accepted.push(cleanRow);
+          cache.set(server.id, { payload: row.payload, at: Date.now(), windowKey });
+          return;
+        }
+
+        const reason = row ? 'source-errors' : 'unreachable';
+        if (matchingPrevious) {
+          accepted.push({
+            server,
+            payload: matchingPrevious.payload,
+            _retained: true,
+            _partial: false,
+            _reason: reason,
+            _source_errors: sources,
+          });
+          retained.push({ server, reason, sources });
+          return;
+        }
+
+        // On the first read there is no safe baseline to restore. Keep whatever the
+        // server did return, label it incomplete, and make the scan receipt explicit.
+        if (row) accepted.push({ ...row, _retained: false, _partial: true, _source_errors: sources });
+        unavailable.push({ server, reason, sources });
+      });
+
+      return { rows: accepted, retained, unavailable };
+    }
+
+    function usageToolFingerprint(entry) {
+      const row = entry || {};
+      return ['tokens', 'total_tokens', 'tokens_in', 'tokens_out', 'tokens_cache', 'cost', 'total_cost', 'messages', 'total_messages']
+        .map((key) => Number(row[key]) || 0)
+        .join(':');
+    }
+
+    function buildUsageRefreshReport(before, after, details = {}) {
+      const baseline = !!before && !!after;
+      const number = (value) => Number(value) || 0;
+      const beforeTools = before?.by_tool || {};
+      const afterTools = after?.by_tool || {};
+      const toolNames = new Set([...Object.keys(beforeTools), ...Object.keys(afterTools)]);
+      let toolsChanged = 0;
+      toolNames.forEach((name) => {
+        if (usageToolFingerprint(beforeTools[name]) !== usageToolFingerprint(afterTools[name])) toolsChanged += 1;
+      });
+      const retained = Array.isArray(details.retained) ? details.retained : [];
+      const unavailable = Array.isArray(details.unavailable) ? details.unavailable : [];
+      const status = details.failed
+        ? 'failed'
+        : unavailable.length
+          ? 'partial'
+          : retained.length
+            ? 'preserved'
+            : 'complete';
+      return {
+        status,
+        baseline,
+        windowKey: details.windowKey || '',
+        rangeLabel: details.rangeLabel || '',
+        completedAt: details.completedAt || new Date().toISOString(),
+        tokens: baseline ? number(after.total_tokens) - number(before.total_tokens) : null,
+        cost: baseline ? number(after.total_cost) - number(before.total_cost) : null,
+        messages: baseline ? number(after.total_messages) - number(before.total_messages) : null,
+        toolsChanged: baseline ? toolsChanged : Object.keys(afterTools).length,
+        retained,
+        unavailable,
+        error: details.error || '',
+      };
+    }
+
+    function refreshReportRangeLabel() {
+      const preset = document.getElementById('dateRangePresetLabel')?.textContent?.trim() || '';
+      const exact = document.getElementById('dateRangeExactLabel')?.textContent?.trim() || '';
+      return [preset, exact].filter(Boolean).join(' · ') || t('customRange');
+    }
+
+    function signedRefreshValue(value, formatter) {
+      if (value === null || value === undefined) return '—';
+      const numeric = Number(value) || 0;
+      if (numeric === 0) return formatter(0);
+      return `${numeric > 0 ? '+' : '−'}${formatter(Math.abs(numeric))}`;
+    }
+
+    function refreshIssueLabel(item) {
+      const name = item?.server?.label || item?.server?.id || t('servers');
+      const sources = Array.isArray(item?.sources) && item.sources.length
+        ? ` (${item.sources.map((source) => formatToolName(source)).join(', ')})`
+        : '';
+      return `${name}${sources}`;
+    }
+
+    function showUsageRefreshReport(report) {
+      const panel = document.getElementById('refreshReport');
+      if (!panel || !report) return;
+      lastRefreshReport = report;
+      panel.dataset.status = report.status;
+      const titleKeys = {
+        complete: 'refreshReportComplete',
+        preserved: 'refreshReportPreserved',
+        partial: 'refreshReportPartial',
+        failed: 'refreshReportFailed',
+      };
+      document.getElementById('refreshReportTitle').textContent = t(titleKeys[report.status] || 'refreshReportComplete');
+      const completed = new Date(report.completedAt);
+      const time = Number.isNaN(completed.getTime())
+        ? ''
+        : completed.toLocaleTimeString(currentLang === 'zh' ? 'zh-CN' : 'en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      document.getElementById('refreshReportMeta').textContent = t('refreshReportRange')
+        .replace('{range}', report.rangeLabel || refreshReportRangeLabel())
+        .replace('{time}', time);
+      document.getElementById('refreshReportTokens').textContent = signedRefreshValue(report.tokens, (value) => formatTokenCount(value));
+      document.getElementById('refreshReportCost').textContent = signedRefreshValue(report.cost, (value) => formatCurrency(value));
+      document.getElementById('refreshReportMessages').textContent = signedRefreshValue(report.messages, (value) => formatNumber(value));
+      panel.querySelector('.refresh-report-deltas')?.setAttribute('aria-label', t('refreshReportDiffLabel'));
+      document.getElementById('refreshReportSummary').textContent = report.baseline
+        ? (report.toolsChanged
+          ? t('refreshReportToolsChanged').replace('{n}', formatNumber(report.toolsChanged))
+          : t('refreshReportNoChanges'))
+        : t('refreshReportNoBaseline').replace('{n}', formatNumber(report.toolsChanged));
+
+      const retained = document.getElementById('refreshReportRetained');
+      const notes = [];
+      if (report.retained.length) {
+        notes.push(t('refreshReportRetained').replace('{names}', report.retained.map(refreshIssueLabel).join(', ')));
+      }
+      if (report.unavailable.length) {
+        notes.push(t('refreshReportUnavailable').replace('{names}', report.unavailable.map(refreshIssueLabel).join(', ')));
+      }
+      if (report.error && !notes.length) notes.push(report.error);
+      retained.textContent = notes.join(' ');
+      retained.hidden = !notes.length;
+      document.getElementById('refreshReportClose')?.setAttribute('aria-label', t('refreshReportClose'));
+      panel.hidden = false;
+      document.getElementById('refreshBtn')?.setAttribute('aria-expanded', 'true');
+    }
+
+    function hideUsageRefreshReport({ focusButton = false } = {}) {
+      const panel = document.getElementById('refreshReport');
+      if (panel) panel.hidden = true;
+      const button = document.getElementById('refreshBtn');
+      button?.setAttribute('aria-expanded', 'false');
+      if (focusButton) button?.focus();
+    }
+
     function updateTimestamp() {
       if (!lastUsageResponse?.timestamp) return;
       const cacheMeta = lastUsageResponse.response_cache || null;
@@ -5279,6 +5606,9 @@
       }
       renderServerSettings();
       renderServerFormStatus();
+      if (lastRefreshReport && !document.getElementById('refreshReport')?.hidden) {
+        showUsageRefreshReport(lastRefreshReport);
+      }
       updateQuotaVisibilityLabel();  // imperative label (data-i18n removed), re-derive on switch
       const quotaUnitEl = document.getElementById('quotaConsumptionUnit');
       if (quotaUnitEl && !quotaUnitEl.hasAttribute('data-i18n')) {
@@ -6172,6 +6502,9 @@
     async function updateDashboard(customDays = null, dateFrom = null, dateTo = null, options = {}) {
       const forceRefresh = !!options.forceRefresh;
       const windowKey = windowKeyFor(customDays, dateFrom, dateTo);
+      if (forceRefresh || (lastRefreshReport?.windowKey && lastRefreshReport.windowKey !== windowKey)) {
+        hideUsageRefreshReport();
+      }
 
       // The date picker moved its label before this ran, so whatever is on screen now
       // sits under a heading that does not name it. Drop the deferred breakdowns and
@@ -6228,6 +6561,8 @@
       inFlightResultDiscarded = false;
       updateIsManualRefresh = forceRefresh;
       const refreshStartedAt = Date.now();
+      const previousUsageForReport = lastWindowKey === windowKey ? lastUsageResponse : null;
+      const reportRangeLabel = refreshReportRangeLabel();
       if (forceRefresh) {
         setRefreshUiState('refreshing');
       }
@@ -6235,11 +6570,18 @@
 
       try {
         const usagePromise = fetchSelectedServers(usageApiUrl).then((rows) => {
-          if (!rows.length) throw new Error(t('loadFailed'));
-          const combined = combineUsagePayloads(rows.map((row) => row.payload));
-          combined._server_rows = rows;
-          rows.forEach((row) => lastUsageRowsByServer.set(row.server.id, { payload: row.payload, at: Date.now() }));
-          combined._stalest_server = rows.slice().sort((a, b) => String(a.payload.timestamp || '').localeCompare(String(b.payload.timestamp || '')))[0]?.server || null;
+          const reconciliation = reconcileUsageRows(rows, windowKey);
+          if (!reconciliation.rows.length) throw new Error(t('loadFailed'));
+          const combined = combineUsagePayloads(reconciliation.rows.map((row) => row.payload));
+          // The Servers tab treats only complete reads as fresh. Retained rows remain
+          // available through lastUsageRowsByServer and the combined total is marked
+          // stale, while first-read partial rows stay visible with their source errors.
+          combined._server_rows = reconciliation.rows.filter((row) => !row._retained);
+          combined._retained_server_rows = reconciliation.rows.filter((row) => row._retained);
+          combined._has_retained_server_rows = reconciliation.retained.length > 0;
+          combined._has_incomplete_server_rows = reconciliation.unavailable.length > 0;
+          combined._scan_reconciliation = reconciliation;
+          combined._stalest_server = reconciliation.rows.slice().sort((a, b) => String(a.payload.timestamp || '').localeCompare(String(b.payload.timestamp || '')))[0]?.server || null;
           return combined;
         });
         // Held locally until this load is known to still be the current one.
@@ -6272,6 +6614,13 @@
         if (forceRefresh) {
           const cacheMeta = lastUsageResponse?.response_cache || null;
           setRefreshUiState(cacheMeta?.served_from_cache ? 'cached' : 'updated', { resetAfterMs: 1800 });
+          const scan = lastUsageResponse?._scan_reconciliation || {};
+          showUsageRefreshReport(buildUsageRefreshReport(previousUsageForReport, lastUsageResponse, {
+            windowKey,
+            rangeLabel: reportRangeLabel,
+            retained: scan.retained,
+            unavailable: scan.unavailable,
+          }));
         } else if (refreshUiState !== 'idle') {
           setRefreshUiState('idle');
         }
@@ -6293,6 +6642,20 @@
         setDashboardFetchStatus(error);
         if (forceRefresh) {
           setRefreshUiState(error?.status === 503 ? 'busy' : 'failed', { resetAfterMs: 2600 });
+          const retained = previousUsageForReport
+            ? selectedServers().map((server) => ({ server, reason: 'unreachable', sources: [] }))
+            : [];
+          const unavailable = previousUsageForReport
+            ? []
+            : selectedServers().map((server) => ({ server, reason: 'unreachable', sources: [] }));
+          showUsageRefreshReport(buildUsageRefreshReport(previousUsageForReport, previousUsageForReport, {
+            failed: true,
+            windowKey,
+            rangeLabel: reportRangeLabel,
+            retained,
+            unavailable,
+            error: error?.message || String(error),
+          }));
         }
         if (isOverviewActive() && lastUsageResponse) renderOverviewTab(lastUsageResponse);
         if (isSessionsActive()) renderSessionsTab();
@@ -8751,7 +9114,7 @@
     // /api/usage rows (lastUsageResponse._server_rows), serverRuntimeStatus
     // health, the quota rows and merged session lists when those tabs loaded.
     // No extra fetches, no API changes.
-    const lastUsageRowsByServer = new Map(); // serverId -> { payload, at } (last good read this session)
+    const lastUsageRowsByServer = new Map(); // serverId -> { payload, at, windowKey } (last complete read)
 
     function updateServersTabVisibility() {
       const btn = document.getElementById('serversTabBtn');
@@ -9219,8 +9582,22 @@
       const totalCost = Number(usage.total_cost) || 0;
       // The combined figures (strip + table column) are drawn from the same last
       // good data, so they carry the stale mark until a refresh lands.
-      const combinedStale = !!(lastUsageResponse && lastUsageResponse._server_rows_stale);
-      const ctx = { staleOf: (id) => lastUsageRowsByServer.get(id) || null, sessionCounts, totalTokens, totalCost, multi: okCount > 1, combinedStale };
+      const combinedStale = !!(lastUsageResponse && (
+        lastUsageResponse._server_rows_stale
+        || lastUsageResponse._has_retained_server_rows
+        || lastUsageResponse._has_incomplete_server_rows
+      ));
+      const ctx = {
+        staleOf: (id) => {
+          const entry = lastUsageRowsByServer.get(id) || null;
+          return entry?.windowKey === lastWindowKey ? entry : null;
+        },
+        sessionCounts,
+        totalTokens,
+        totalCost,
+        multi: okCount > 1,
+        combinedStale,
+      };
 
       const frag = document.createDocumentFragment();
       const strip = document.createElement('section');
@@ -12100,6 +12477,7 @@
       // TASK 2: on the Quota tab the global refresh button refreshes quota data instead
       // of the Overview/Sessions dashboard fetch below (unchanged on every other tab).
       if (isQuotaActive()) {
+        hideUsageRefreshReport();
         refreshQuotaViaGlobalButton();
         return;
       }
@@ -12110,6 +12488,9 @@
         const today = new Date();
         updateDashboardByDateRange(today, today, { forceRefresh: true });
       }
+    });
+    document.getElementById('refreshReportClose')?.addEventListener('click', () => {
+      hideUsageRefreshReport({ focusButton: true });
     });
 
     document.getElementById('readableTokensToggle')?.addEventListener('click', () => {
@@ -12130,6 +12511,9 @@
     document.addEventListener('keydown', (event) => {
       if (event.key === 'Escape' && !settingsPanel?.hidden) {
         setSettingsPanelOpen(false, true);
+      }
+      if (event.key === 'Escape' && !document.getElementById('refreshReport')?.hidden) {
+        hideUsageRefreshReport({ focusButton: true });
       }
     });
 

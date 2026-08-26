@@ -426,10 +426,11 @@ def test_parity_with_usage_parser(monkeypatch, tmp_path):
     ]
     for period, date_from, date_to in windows:
         since_ms, until_ms = sessions._window_bounds(period, date_from, date_to)
+        unbounded = period == "all" and date_from is None and date_to is None
         s_dt = (datetime.fromtimestamp(since_ms / 1000, tz=timezone.utc)
-                if since_ms is not None else None)
+                if since_ms is not None and not unbounded else None)
         u_dt = (datetime.fromtimestamp(until_ms / 1000, tz=timezone.utc)
-                if until_ms is not None else None)
+                if until_ms is not None and not unbounded else None)
         entries = parser.collect(s_dt, u_dt)
         p_in = sum(e["input"] + e["cacheWrite"] for e in entries)
         p_cache = sum(e["cacheRead"] for e in entries)

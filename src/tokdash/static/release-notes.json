@@ -1,6 +1,32 @@
 {
-  "current": "2.2.0",
+  "current": "2.3.0",
   "releases": [
+    {
+      "version": "2.3.0",
+      "date": "2026-08-26",
+      "sections": [
+        {
+          "type": "added",
+          "items": [
+            "Added Session Explorer support for Antigravity CLI, Cline, Grok Build, Hermes, Kilo Code, and omp, with per-turn usage and active time.",
+            "Added a Servers tab for comparing configured Tokdash instances and collapsible per-tool session panels.",
+            "Refresh now reports source-level additions, updates, removals, and unchanged rows from incremental scans."
+          ]
+        },
+        {
+          "type": "changed",
+          "items": [
+            "Overview and session runtime cards now report agent time consistently, and unchanged source files are reused during rescans."
+          ]
+        },
+        {
+          "type": "fixed",
+          "items": [
+            "Fixed queued dashboard refreshes, stale date-range breakdowns, Antigravity WAL metadata invalidation, and Cline project fallback."
+          ]
+        }
+      ]
+    },
     {
       "version": "2.2.0",
       "date": "2026-08-22",

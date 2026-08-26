@@ -6430,10 +6430,18 @@
     // (3A) can tell whether cached session responses still match the active range.
     let sessionsLoadedKey = null;
     let lastWindowKey = null;
+    let lastUsageServerKey = null;
 
     function windowKeyFor(customDays, dateFrom, dateTo) {
       if (dateFrom && dateTo) return `${dateFrom}_${dateTo}`;
       return `p:${customDays ? String(customDays) : 'today'}`;
+    }
+
+    function usageServerKeyFor(servers = selectedServers()) {
+      return (Array.isArray(servers) ? servers : [])
+        .map((server) => String(server?.id ?? server?.url ?? ''))
+        .sort()
+        .join(',');
     }
 
     function sessionRequestKeyFor(tool, customDays, dateFrom, dateTo) {
@@ -6552,6 +6560,8 @@
       // streams only when the Sessions tab is actually open; otherwise defer them
       // to ensureSessionsLoaded() so a cold page load no longer fans out 4 parses.
       const wantSessions = isSessionsActive();
+      const usageServers = selectedServers();
+      const usageServerKey = usageServerKeyFor(usageServers);
 
       // The card's own fetch waits in the finally below, so clear a figure from
       // another range here, while the new one is still loading.
@@ -6561,29 +6571,42 @@
       inFlightResultDiscarded = false;
       updateIsManualRefresh = forceRefresh;
       const refreshStartedAt = Date.now();
-      const previousUsageForReport = lastWindowKey === windowKey ? lastUsageResponse : null;
+      const previousUsageForReport = lastWindowKey === windowKey && lastUsageServerKey === usageServerKey
+        ? lastUsageResponse
+        : null;
       const reportRangeLabel = refreshReportRangeLabel();
       if (forceRefresh) {
         setRefreshUiState('refreshing');
       }
       renderRefreshButton();
 
+      let usageFetchError = null;
+      let usageReconciliation = null;
       try {
-        const usagePromise = fetchSelectedServers(usageApiUrl).then((rows) => {
-          const reconciliation = reconcileUsageRows(rows, windowKey);
-          if (!reconciliation.rows.length) throw new Error(t('loadFailed'));
-          const combined = combineUsagePayloads(reconciliation.rows.map((row) => row.payload));
-          // The Servers tab treats only complete reads as fresh. Retained rows remain
-          // available through lastUsageRowsByServer and the combined total is marked
-          // stale, while first-read partial rows stay visible with their source errors.
-          combined._server_rows = reconciliation.rows.filter((row) => !row._retained);
-          combined._retained_server_rows = reconciliation.rows.filter((row) => row._retained);
-          combined._has_retained_server_rows = reconciliation.retained.length > 0;
-          combined._has_incomplete_server_rows = reconciliation.unavailable.length > 0;
-          combined._scan_reconciliation = reconciliation;
-          combined._stalest_server = reconciliation.rows.slice().sort((a, b) => String(a.payload.timestamp || '').localeCompare(String(b.payload.timestamp || '')))[0]?.server || null;
-          return combined;
-        });
+        const usagePromise = fetchSelectedServers(usageApiUrl)
+          .catch((error) => {
+            // fetchSelectedServers rejects only when every selected server failed.
+            // Feed that empty result through the same per-server policy as a partial
+            // outage so only exact-range snapshots for these servers can survive.
+            usageFetchError = error;
+            return [];
+          })
+          .then((rows) => {
+            const reconciliation = reconcileUsageRows(rows, windowKey, usageServers);
+            usageReconciliation = reconciliation;
+            if (!reconciliation.rows.length) throw usageFetchError || new Error(t('loadFailed'));
+            const combined = combineUsagePayloads(reconciliation.rows.map((row) => row.payload));
+            // The Servers tab treats only complete reads as fresh. Retained rows remain
+            // available through lastUsageRowsByServer and the combined total is marked
+            // stale, while first-read partial rows stay visible with their source errors.
+            combined._server_rows = reconciliation.rows.filter((row) => !row._retained);
+            combined._retained_server_rows = reconciliation.rows.filter((row) => row._retained);
+            combined._has_retained_server_rows = reconciliation.retained.length > 0;
+            combined._has_incomplete_server_rows = reconciliation.unavailable.length > 0;
+            combined._scan_reconciliation = reconciliation;
+            combined._stalest_server = reconciliation.rows.slice().sort((a, b) => String(a.payload.timestamp || '').localeCompare(String(b.payload.timestamp || '')))[0]?.server || null;
+            return combined;
+          });
         // Held locally until this load is known to still be the current one.
         let usageData;
         let sessionResponses = null;
@@ -6609,17 +6632,25 @@
           sessionsLoadedKey = windowKey;
         }
         lastWindowKey = windowKey;
+        lastUsageServerKey = usageServerKey;
 
         updateTimestamp();
+        if (usageFetchError) setDashboardFetchStatus(usageFetchError);
         if (forceRefresh) {
-          const cacheMeta = lastUsageResponse?.response_cache || null;
-          setRefreshUiState(cacheMeta?.served_from_cache ? 'cached' : 'updated', { resetAfterMs: 1800 });
+          if (usageFetchError) {
+            setRefreshUiState(usageFetchError?.status === 503 ? 'busy' : 'failed', { resetAfterMs: 2600 });
+          } else {
+            const cacheMeta = lastUsageResponse?.response_cache || null;
+            setRefreshUiState(cacheMeta?.served_from_cache ? 'cached' : 'updated', { resetAfterMs: 1800 });
+          }
           const scan = lastUsageResponse?._scan_reconciliation || {};
           showUsageRefreshReport(buildUsageRefreshReport(previousUsageForReport, lastUsageResponse, {
+            failed: !!usageFetchError,
             windowKey,
             rangeLabel: reportRangeLabel,
             retained: scan.retained,
             unavailable: scan.unavailable,
+            error: usageFetchError?.message || '',
           }));
         } else if (refreshUiState !== 'idle') {
           setRefreshUiState('idle');
@@ -6642,19 +6673,14 @@
         setDashboardFetchStatus(error);
         if (forceRefresh) {
           setRefreshUiState(error?.status === 503 ? 'busy' : 'failed', { resetAfterMs: 2600 });
-          const retained = previousUsageForReport
-            ? selectedServers().map((server) => ({ server, reason: 'unreachable', sources: [] }))
-            : [];
-          const unavailable = previousUsageForReport
-            ? []
-            : selectedServers().map((server) => ({ server, reason: 'unreachable', sources: [] }));
+          const scan = usageReconciliation || reconcileUsageRows([], windowKey, usageServers);
           showUsageRefreshReport(buildUsageRefreshReport(previousUsageForReport, previousUsageForReport, {
             failed: true,
             windowKey,
             rangeLabel: reportRangeLabel,
-            retained,
-            unavailable,
-            error: error?.message || String(error),
+            retained: scan.retained,
+            unavailable: scan.unavailable,
+            error: usageFetchError?.message || error?.message || String(error),
           }));
         }
         if (isOverviewActive() && lastUsageResponse) renderOverviewTab(lastUsageResponse);
@@ -6678,7 +6704,12 @@
         // over, and #lastUpdate turning into "Load failed" is one small line in the
         // header. Stay marked until something actually lands, so those numbers are
         // never presented as this range's answer.
-        setOverviewState({ stale: !!lastUsageResponse && lastWindowKey !== windowKey });
+        setOverviewState({
+          stale: !!lastUsageResponse && (
+            lastWindowKey !== windowKey
+            || lastUsageServerKey !== usageServerKeyFor()
+          ),
+        });
         renderRefreshButton();
         const queued = pendingDashboardRequest;
         pendingDashboardRequest = null;

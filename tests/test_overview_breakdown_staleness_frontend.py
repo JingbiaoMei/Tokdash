@@ -80,6 +80,7 @@ let lastRefreshReport = null;
 let lastSessionsResponses = null;
 let sessionsLoadedKey = null;
 let lastWindowKey = null;
+let lastUsageServerKey = null;
 let overviewBreakdownWindowKey = null;
 let overviewRenderToken = 0;
 let lastCombinedModels = [];
@@ -367,6 +368,7 @@ def _run(tmp_path: Path, scenario: str) -> dict:
         _extract_js_function(source, signature)
         for signature in (
             "function windowKeyFor(customDays, dateFrom, dateTo) {",
+            "function usageServerKeyFor(servers = selectedServers()) {",
             "function usageSourceErrors(payload) {",
             "function reconcileUsageRows(rows, windowKey, servers = selectedServers(), cache = lastUsageRowsByServer) {",
             "function usageToolFingerprint(entry) {",

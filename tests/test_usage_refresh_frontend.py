@@ -170,5 +170,5 @@ def test_refresh_report_is_accessible_and_the_scan_stays_incremental() -> None:
     assert "refreshReportComplete: '扫描完成'" in html
     assert "usageApiUrl += '&refresh=1';" in updater
     assert updater.count("fetchSelectedServers(usageApiUrl)") == 1
-    assert "reconcileUsageRows(rows, windowKey)" in updater
+    assert "reconcileUsageRows(rows, windowKey, usageServers)" in updater
     assert "localStorage" not in reconcile

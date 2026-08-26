@@ -50,6 +50,7 @@ let lastRefreshReport = null;
 let lastSessionsResponses = null;
 let sessionsLoadedKey = null;
 let lastWindowKey = null;
+let lastUsageServerKey = null;
 let overviewBreakdownWindowKey = null;
 let includeCodexReviewSessions = null;
 const overviewActiveTimeState = { status: 'idle', data: null, key: null, requestId: 0 };
@@ -75,7 +76,8 @@ function fetchSelectedServers(url) {
 }
 function fetchSessionsResponses() { return Promise.resolve({}); }
 function combineUsagePayloads(payloads) { return { ...payloads[0] }; }
-function selectedServers() { return [{ id: 'local' }]; }
+let selected = [{ id: 'local', label: 'Local' }];
+function selectedServers() { return selected; }
 function isSessionsActive() { return false; }
 function isOverviewActive() { return true; }
 function renderOverviewTab(data) { log.rendered.push(data && data.range); }
@@ -225,6 +227,34 @@ async function main() {
     out.status = overviewActiveTimeState.status;
   }
 
+  if (scenario === 'server-selection-total-outage') {
+    pick('X');
+    await settle();
+    resolveRange('X', {
+      total_tokens: 100,
+      total_cost: 1,
+      total_messages: 2,
+      by_tool: { codex: { tokens: 100, cost: 1 } },
+    });
+    await settle(); await settle();
+
+    selected = [{ id: 'remote', label: 'Studio' }];
+    pick('X', { forceRefresh: true });
+    await settle();
+    rejectRange('X', 'offline');
+    await settle(); await settle();
+
+    out.report = lastRefreshReport && {
+      status: lastRefreshReport.status,
+      retained: lastRefreshReport.retained.map((item) => item.server.id),
+      unavailable: lastRefreshReport.unavailable.map((item) => item.server.id),
+      baseline: lastRefreshReport.baseline,
+    };
+    out.lastStale = log.stale.at(-1);
+    out.lastUsageServerKey = lastUsageServerKey;
+    out.totalTokens = lastUsageResponse && lastUsageResponse.total_tokens;
+  }
+
   process.stdout.write(JSON.stringify(out));
 }
 
@@ -238,6 +268,7 @@ def _run(tmp_path: Path, scenario: str) -> dict:
         _extract_js_function(source, signature)
         for signature in (
             "function windowKeyFor(customDays, dateFrom, dateTo) {",
+            "function usageServerKeyFor(servers = selectedServers()) {",
             "function usageSourceErrors(payload) {",
             "function reconcileUsageRows(rows, windowKey, servers = selectedServers(), cache = lastUsageRowsByServer) {",
             "function usageToolFingerprint(entry) {",
@@ -325,3 +356,18 @@ def test_a_new_range_does_not_open_on_the_old_range_error(tmp_path):
 
     assert out["statusesRendered"] == ["loading"], "the card must not render as failed"
     assert out["status"] != "error"
+
+
+def test_total_outage_never_relabels_another_server_selections_aggregate(tmp_path):
+    """A same-range server change must not make the previous selection a baseline."""
+    out = _run(tmp_path, "server-selection-total-outage")
+
+    assert out["report"] == {
+        "status": "failed",
+        "retained": [],
+        "unavailable": ["remote"],
+        "baseline": False,
+    }
+    assert out["lastStale"] is True, "the local-only total is not Studio's total"
+    assert out["lastUsageServerKey"] == "local"
+    assert out["totalTokens"] == 100

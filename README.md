@@ -91,17 +91,17 @@
 | Codex | ✅ | ✅ |
 | Claude Code | ✅ | ✅ |
 | Gemini CLI | ✅ | — |
-| Antigravity CLI | ✅ | — |
+| Antigravity CLI | ✅ | ✅ |
 | OpenClaw | ✅ | — |
 | Kimi Code / Kimi CLI | ✅ | ✅ |
 | MiMo Code | ✅ | ✅ |
-| Grok Build | ✅ | — |
+| Grok Build | ✅ | ✅ |
 | Pi | ✅ | ✅ |
-| **omp** | ✅ | — |
-| **Kilo Code** | ✅ | — |
-| **Cline** | ✅ | — |
+| **omp** | ✅ | ✅ |
+| **Kilo Code** | ✅ | ✅ |
+| **Cline** | ✅ | ✅ |
 | GitHub Copilot CLI | ✅ | — |
-| Hermes | ✅ | — |
+| Hermes | ✅ | ✅ |
 | DeepSeek Harness | ✅ | ✅ |
 | Reasonix | ✅ | ✅ |
 | **ZCode** | ✅ | ✅ |
@@ -537,7 +537,7 @@ Tokdash is a local HTTP server. Common endpoints:
 - `GET /api/usage?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD`
 - `GET /api/tools?period=...` (coding tools only)
 - `GET /api/openclaw?period=...` (OpenClaw only)
-- `GET /api/sessions?tool=codex|claude|opencode|pi_agent|mimo|kimi|dsh|reasonix|zcode&period=...` (append `&include_review_sessions=true` to include Codex review/permission sessions, hidden by default)
+- `GET /api/sessions?tool=codex|claude|opencode|pi_agent|omp|mimo|kimi|dsh|reasonix|zcode|kilocode|grok|hermes|antigravity_cli|cline&period=...` (append `&include_review_sessions=true` to include Codex review/permission sessions, hidden by default)
 - `GET /api/active-time?period=...` (active time across every session tool, plus a per-tool breakdown)
 - `GET /api/quota` and `GET /api/quota/history` (subscription quota snapshots; network refresh is write-gated and opt-in)
 - `GET /api/stats` (contribution calendar & statistics)

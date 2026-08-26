@@ -8,7 +8,7 @@ import pytest
 import tokdash
 
 INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
-PANELS = ("codex", "claude", "opencode", "pi_agent", "mimo", "kimi", "dsh", "reasonix", "zcode", "combined")
+PANELS = ("codex", "claude", "opencode", "pi_agent", "mimo", "kimi", "dsh", "reasonix", "zcode", "kilocode", "omp", "grok", "hermes", "antigravity_cli", "cline", "combined")
 
 
 def _extract_js_function(src: str, signature: str) -> str:

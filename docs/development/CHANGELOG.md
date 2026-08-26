@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 2.3.0 - 2026-08-26
+
+### Added
+
+- Added Session Explorer support for Antigravity CLI, Cline, Grok Build, Hermes, Kilo Code and omp. Each integration reuses the source parser's token mapping and pricing rules, exposes per-session turns and active time, and has its own dashboard panel and regression suite.
+- Added a Servers tab for comparing configured Tokdash instances, with reachable/stale state, usage shares, leading tools and models, session counts and quota summaries. Session panels can now be collapsed independently.
+- Refresh now reports source-level changes from the incremental usage scan, including added, updated, removed and unchanged rows.
+
+### Changed
+
+- Overview and session-panel runtime KPIs now show agent time consistently. The Servers tab remains available with one configured server so its health and details are still visible.
+- Coding-tool rescans now reuse unchanged source entries and update only changed files while preserving the last complete view when a source read is partial or fails.
+
+### Fixed
+
+- Antigravity conversation titles and projects now refresh when only the summary database WAL changes.
+- Cline now falls back to the session record's working directory when its metadata database has no usable project.
+- Dashboard refresh requests are queued instead of dropped when another update is in flight, and stale overview breakdowns cannot overwrite the currently selected date range.
+
 ## 2.2.0 - 2026-08-22
 
 ### Added

@@ -169,6 +169,10 @@ def antigravity_conversations_glob() -> str:
     return str(antigravity_conversations_dir() / "*.db")
 
 
+def antigravity_summaries_db_path() -> Path:
+    return antigravity_cli_dir() / "conversation_summaries.db"
+
+
 def gemini_chats_json_glob(root: Optional[Path] = None) -> str:
     root = root if root is not None else gemini_root()
     return str(root / "tmp" / "*" / "chats" / "session-*.json")

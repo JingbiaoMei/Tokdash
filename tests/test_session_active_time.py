@@ -372,13 +372,19 @@ def test_multi_server_totals_are_relabelled_as_sums():
 
 def test_panel_kpi_shows_agent_time_only():
     """The header KPI is estimated agent time; the deduplicated clock-time value
-    and its sub-span were removed from all ten panels."""
+    and its sub-span were removed from every panel."""
     source = INDEX_HTML.read_text(encoding="utf-8")
     assert "ActiveTotal" not in source
     assert "session-panel-kpi-sub" not in source
     labels = re.findall(
         r'id="(\w+)ActiveLabel" class="session-panel-kpi-label" data-i18n="(\w+)"', source)
-    assert len(labels) == 10, labels
+    panels = set(re.findall(r'data-panel-details="(\w+)"', source))
+    # Every rendered panel carries exactly one agent-time KPI label, and the
+    # ids must be unique: a duplicated panel block clones its ids too, and a
+    # set comparison (labels vs panels) cannot see that — both sides grow
+    # together. len == len(set) is what counts the clones.
+    assert len(labels) == len({prefix for prefix, _ in labels}), labels
+    assert {prefix for prefix, _ in labels} == panels, (labels, panels)
     for prefix, key in labels:
         assert key == "agentTime", (prefix, key)
 

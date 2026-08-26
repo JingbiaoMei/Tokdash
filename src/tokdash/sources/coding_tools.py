@@ -728,6 +728,106 @@ class KiloCodeParser(OpenCodeParser):
         return [db_path for db_path in self.db_paths if db_path.exists()]
 
 
+def _split_cline_cache_inclusive_input(
+    raw_input: int, raw_cache_read: int, raw_cache_write: int
+) -> Tuple[int, int, int]:
+    """Disjoint (input, cacheRead, cacheWrite) from Cline's normalized row.
+
+    inputTokens already includes the cache portions; clamp each part so a
+    malformed row (cache share larger than the prompt) cannot go negative.
+    """
+    cache_r = min(max(raw_cache_read, 0), raw_input)
+    cache_w = min(max(raw_cache_write, 0), raw_input - cache_r)
+    return raw_input - cache_r - cache_w, cache_r, cache_w
+
+
+def cline_message_file_signatures(data_dir: Path) -> tuple:
+    """(path, mtime_ns, size) of every sessions/*/*.messages.json file.
+
+    Shared by ClineParser._file_signatures and the Sessions-tab loader so
+    the two can never see different file sets.
+    """
+    if not data_dir.is_dir():
+        return ()
+    sigs: List[Tuple[str, int, int]] = []
+    for path in data_dir.glob("sessions/*/*.messages.json"):
+        if not path.is_file():
+            continue
+        try:
+            s = path.stat()
+            sigs.append((str(path), s.st_mtime_ns, s.st_size))
+        except OSError:
+            continue
+    return tuple(sorted(sigs))
+
+
+def parse_cline_message_file(
+    path_str: str, unavailable: Optional[type[Exception]] = None
+) -> List[Dict[str, Any]]:
+    """Assistant model-call rows from one .messages.json file.
+
+    Row: {entry_id, ts, model, provider, input, output, cacheRead,
+    cacheWrite}. No cost: priced on read by whichever consumer (Overview
+    or the Sessions harness) holds the pricing DB. Badly shaped files
+    yield [] (the caller decides whether to log it); a transient open
+    failure (lock/AV/indexer) also yields [] unless ``unavailable`` gives
+    an exception class, in which case it is raised so the caller can
+    retry the file instead of memoizing an empty parse.
+    """
+    try:
+        with open(path_str, "r", encoding="utf-8") as f:
+            doc = json.load(f)
+    except OSError as exc:
+        if unavailable is not None:
+            raise unavailable(path_str) from exc
+        return []
+    except ValueError:
+        return []
+    messages = doc.get("messages") if isinstance(doc, dict) else None
+    if not isinstance(messages, list):
+        return []
+
+    out: List[Dict[str, Any]] = []
+    for msg in messages:
+        if not isinstance(msg, dict) or msg.get("role") != "assistant":
+            continue
+        metrics = msg.get("metrics")
+        if not isinstance(metrics, dict):
+            continue
+        msg_id = msg.get("id")
+        if msg_id:
+            msg_id = str(msg_id)
+        ts = BaseParser._i(msg.get("ts"))
+        if ts <= 0:
+            continue
+
+        model_info = msg.get("modelInfo") if isinstance(msg.get("modelInfo"), dict) else {}
+        model = str(model_info.get("id") or "unknown")
+        provider = str(model_info.get("provider") or "")
+
+        input_t, cache_r, cache_w = _split_cline_cache_inclusive_input(
+            BaseParser._i(metrics.get("inputTokens")),
+            BaseParser._i(metrics.get("cacheReadTokens")),
+            BaseParser._i(metrics.get("cacheWriteTokens")),
+        )
+        output_t = BaseParser._i(metrics.get("outputTokens"))
+        if input_t == 0 and output_t == 0 and cache_r == 0 and cache_w == 0:
+            continue
+
+        # Pricing DB only; metrics.cost is deliberately ignored (C6).
+        out.append({
+            "entry_id": f"cline:{msg_id}" if msg_id else "",
+            "ts": ts,
+            "model": model,
+            "provider": provider,
+            "input": input_t,
+            "output": output_t,
+            "cacheRead": cache_r,
+            "cacheWrite": cache_w,
+        })
+    return out
+
+
 class ClineParser(BaseParser):
     """
     Parser for Cline token usage (CLI; the VS Code extension shares the store).
@@ -794,93 +894,47 @@ class ClineParser(BaseParser):
         self.data_dir = clientpaths.cline_data_dir()
 
     def _file_signatures(self) -> tuple:
-        def scan() -> tuple:
-            if not self.data_dir.is_dir():
-                return ()
-            sigs: List[Tuple[str, int, int]] = []
-            for path in self.data_dir.glob("sessions/*/*.messages.json"):
-                if not path.is_file():
-                    continue
-                try:
-                    s = path.stat()
-                    sigs.append((str(path), s.st_mtime_ns, s.st_size))
-                except OSError:
-                    continue
-            return tuple(sorted(sigs))
-
-        return _timed_sigs(f"{self.source_name}:{self.data_dir}", scan)
+        return _timed_sigs(
+            f"{self.source_name}:{self.data_dir}",
+            lambda: cline_message_file_signatures(self.data_dir),
+        )
 
     @staticmethod
     def _split_cache_inclusive_input(
         raw_input: int, raw_cache_read: int, raw_cache_write: int
     ) -> Tuple[int, int, int]:
-        """Disjoint (input, cacheRead, cacheWrite) from Cline's normalized row.
-
-        inputTokens already includes the cache portions; clamp each part so a
-        malformed row (cache share larger than the prompt) cannot go negative.
-        """
-        cache_r = min(max(raw_cache_read, 0), raw_input)
-        cache_w = min(max(raw_cache_write, 0), raw_input - cache_r)
-        return raw_input - cache_r - cache_w, cache_r, cache_w
+        return _split_cline_cache_inclusive_input(
+            raw_input, raw_cache_read, raw_cache_write
+        )
 
     def _parse_message_file(self, path_str: str) -> List[Dict[str, Any]]:
-        try:
-            with open(path_str, "r", encoding="utf-8") as f:
-                doc = json.load(f)
-        except (OSError, ValueError):
-            return []
-        messages = doc.get("messages") if isinstance(doc, dict) else None
-        if not isinstance(messages, list):
-            return []
-
+        # The shared helper yields unpriced rows; the parser adds the
+        # pricing-DB cost (metrics.cost ignored, C6) and billing record.
         out: List[Dict[str, Any]] = []
-        for msg in messages:
-            if not isinstance(msg, dict) or msg.get("role") != "assistant":
-                continue
-            metrics = msg.get("metrics")
-            if not isinstance(metrics, dict):
-                continue
-            msg_id = msg.get("id")
-            if msg_id:
-                msg_id = str(msg_id)
-            ts = self._i(msg.get("ts"))
-            if ts <= 0:
-                continue
-
-            model_info = msg.get("modelInfo") if isinstance(msg.get("modelInfo"), dict) else {}
-            model = str(model_info.get("id") or "unknown")
-            provider = str(model_info.get("provider") or "")
-
-            input_t, cache_r, cache_w = self._split_cache_inclusive_input(
-                self._i(metrics.get("inputTokens")),
-                self._i(metrics.get("cacheReadTokens")),
-                self._i(metrics.get("cacheWriteTokens")),
+        for row in parse_cline_message_file(path_str):
+            cost = self.pricing_db.get_cost(
+                row["model"], row["input"], row["output"],
+                row["cacheRead"], row["cacheWrite"],
             )
-            output_t = self._i(metrics.get("outputTokens"))
-            if input_t == 0 and output_t == 0 and cache_r == 0 and cache_w == 0:
-                continue
-
-            # Pricing DB only; metrics.cost is deliberately ignored (C6).
-            cost = self.pricing_db.get_cost(model, input_t, output_t, cache_r, cache_w)
             billing = usage_billing_pricing(
-                [model],
-                input_tokens=input_t,
-                output_tokens=output_t,
-                cache_read=cache_r,
-                cache_write=cache_w,
+                [row["model"]],
+                input_tokens=row["input"],
+                output_tokens=row["output"],
+                cache_read=row["cacheRead"],
+                cache_write=row["cacheWrite"],
             )
             out.append({
                 "source": self.source_name,
-                "model": model,
-                "provider": provider,
-                "input": input_t,
-                "output": output_t,
-                "cacheRead": cache_r,
-                "cacheWrite": cache_w,
+                "model": row["model"],
+                "provider": row["provider"],
+                "input": row["input"],
+                "output": row["output"],
+                "cacheRead": row["cacheRead"],
+                "cacheWrite": row["cacheWrite"],
                 "reasoning": 0,
                 "cost": cost,
-                "timestamp": ts,
-                "entry_id": f"cline:{msg_id}" if msg_id else "",
+                "timestamp": row["ts"],
+                "entry_id": row["entry_id"],
                 "_billing": billing,
             })
         return out
@@ -2076,59 +2130,98 @@ class GrokParser(BaseParser):
     def _parse_all(self) -> List[Dict[str, Any]]:
         if not self.log_path.is_file():
             return []
-        model_by_pid: Dict[Any, str] = {}
-        seen: set = set()
+        # The row rules live in iter_grok_usage_rows, shared with the sessions
+        # harness: both sides price one survivor set, so they cannot drift.
         out: List[Dict[str, Any]] = []
-        try:
-            with self.log_path.open("r", encoding="utf-8", errors="replace") as handle:
-                for line in handle:
-                    # Cheap pre-filter before JSON parsing: only model events and token rows matter.
-                    if "inference_done" not in line and "model" not in line:
-                        continue
-                    try:
-                        row = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    if not isinstance(row, dict):
-                        continue
-                    msg = str(row.get("msg") or "")
-                    ctx = row.get("ctx") if isinstance(row.get("ctx"), dict) else {}
-                    pid = row.get("pid")
-
-                    if msg in self._MODEL_EVENTS:
-                        model = self._model_change(msg, ctx)
-                        if model and pid is not None:
-                            model_by_pid[pid] = model
-                        continue
-
-                    if msg != "shell.turn.inference_done":
-                        continue
-                    timestamp = self._timestamp_ms(row.get("ts"))
-                    if timestamp is None:
-                        continue
-                    prompt = self._int(ctx.get("prompt_tokens"))
-                    cache_read = min(self._int(ctx.get("cached_prompt_tokens")), prompt)
-                    input_tokens = max(0, prompt - cache_read)
-                    # reasoning is billed as output; fold it in (pricing has no reasoning rate).
-                    output = self._int(ctx.get("completion_tokens")) + self._int(ctx.get("reasoning_tokens"))
-                    if input_tokens + cache_read + output <= 0:
-                        continue
-                    # Token rows carry no model id — attribute via the row's process. A row we
-                    # can't attribute can't be priced, so exclude it rather than bucket it under
-                    # an unpriceable unknown model.
-                    model = model_by_pid.get(pid)
-                    if not model:
-                        continue
-                    entry = self._entry(
-                        pid, self._int(ctx.get("loop_index")), model, timestamp, input_tokens, cache_read, output
-                    )
-                    if entry["entry_id"] in seen:
-                        continue
-                    seen.add(entry["entry_id"])
-                    out.append(entry)
-        except (OSError, UnicodeError):
-            return []
+        for row in iter_grok_usage_rows(self.log_path):
+            out.append(
+                self._entry(
+                    row["pid"],
+                    row["loop_index"],
+                    row["model"],
+                    row["timestamp_ms"],
+                    row["input_tokens"],
+                    row["cache_read"],
+                    row["output"],
+                )
+            )
         return out
+
+
+def iter_grok_usage_rows(log_path: Path) -> Iterator[Dict[str, Any]]:
+    """The Grok unified.jsonl survivor set, shared by GrokParser (Overview)
+    and the sessions harness so the two cannot drift on row rules: the string
+    pre-filter, the JSON skip, pid-keyed model attribution, the min/max token
+    derivation, the all-zero drop, unattributable-pid exclusion, and the
+    global entry_id first-wins dedupe.
+
+    Yields one dict per surviving row: sid, pid, loop_index, model,
+    timestamp_ms, input_tokens, cache_read, output, entry_id.
+    """
+    model_by_pid: Dict[Any, str] = {}
+    seen: set = set()
+    try:
+        with log_path.open("r", encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                # Cheap pre-filter before JSON parsing: only model events and token rows matter.
+                if "inference_done" not in line and "model" not in line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(row, dict):
+                    continue
+                msg = str(row.get("msg") or "")
+                ctx = row.get("ctx") if isinstance(row.get("ctx"), dict) else {}
+                pid = row.get("pid")
+
+                if msg in GrokParser._MODEL_EVENTS:
+                    model = GrokParser._model_change(msg, ctx)
+                    if model and pid is not None:
+                        model_by_pid[pid] = model
+                    continue
+
+                if msg != "shell.turn.inference_done":
+                    continue
+                timestamp = GrokParser._timestamp_ms(row.get("ts"))
+                if timestamp is None:
+                    continue
+                prompt = GrokParser._int(ctx.get("prompt_tokens"))
+                cache_read = min(GrokParser._int(ctx.get("cached_prompt_tokens")), prompt)
+                input_tokens = max(0, prompt - cache_read)
+                # reasoning is billed as output; fold it in (pricing has no reasoning rate).
+                output = GrokParser._int(ctx.get("completion_tokens")) + GrokParser._int(ctx.get("reasoning_tokens"))
+                if input_tokens + cache_read + output <= 0:
+                    continue
+                # Token rows carry no model id — attribute via the row's process. A row we
+                # can't attribute can't be priced, so exclude it rather than bucket it under
+                # an unpriceable unknown model.
+                model = model_by_pid.get(pid)
+                if not model:
+                    continue
+                loop_index = GrokParser._int(ctx.get("loop_index"))
+                entry_id = f"grok:{pid}:{timestamp}:{loop_index}"
+                if entry_id in seen:
+                    continue
+                seen.add(entry_id)
+                yield {
+                    "sid": row.get("sid"),
+                    "pid": pid,
+                    "loop_index": loop_index,
+                    "model": model,
+                    "timestamp_ms": timestamp,
+                    "input_tokens": input_tokens,
+                    "cache_read": cache_read,
+                    "output": output,
+                    "entry_id": entry_id,
+                }
+    except (OSError, UnicodeError):
+        # Deliberate divergence from the legacy whole-file discard: the log is
+        # append-only, so a mid-read error must not erase the valid prefix.
+        # The entry cache is keyed on the file signature, so the next change
+        # to the file re-parses it from scratch.
+        return
 
 
 class PiAgentParser(BaseParser):
@@ -4637,6 +4730,17 @@ class WorkBuddyParser(BaseParser):
         return out
 
 
+def search_dir_claim_key(directory: Any) -> str:
+    """Canonical ownership key for a tree-scanned directory.
+
+    Shared by CodingToolsUsageTracker._claim_search_dirs (Overview) and the
+    sessions loaders that must agree with it on dir ownership (e.g. omp drops
+    the dirs pi_agent claims), so the two implementations cannot drift.
+    """
+    key = str(Path(str(directory)).expanduser().resolve())
+    return key.lower() if os.name == "nt" else key
+
+
 class CodingToolsUsageTracker:
     """Registry-driven tracker for coding clients."""
 
@@ -4677,11 +4781,6 @@ class CodingToolsUsageTracker:
         # count every token twice.
         self._dir_conflicts = self._claim_search_dirs()
 
-    @staticmethod
-    def _dir_claim_key(directory: Any) -> str:
-        key = str(Path(str(directory)).expanduser().resolve())
-        return key.lower() if os.name == "nt" else key
-
     def _claim_search_dirs(self) -> List[Dict[str, str]]:
         """Assign each tree-scanned directory to exactly one parser.
 
@@ -4699,7 +4798,7 @@ class CodingToolsUsageTracker:
                 continue
             kept = []
             for d in dirs:
-                key = self._dir_claim_key(d)
+                key = search_dir_claim_key(d)
                 owner = claimed.get(key)
                 if owner is not None and owner != name:
                     conflicts.append({

@@ -280,7 +280,7 @@ def test_frontend_session_registry_includes_dsh():
     index = Path(sessions.__file__).parent / "static" / "index.html"
     source = index.read_text(encoding="utf-8")
     assert "'codex', 'claude', 'opencode', 'pi_agent', 'mimo', 'kimi', 'dsh', 'reasonix'" in source
-    assert "kimi: null, dsh: null, reasonix: null, zcode: null, combined: null" in source
+    assert "kimi: null, dsh: null, reasonix: null, zcode: null, kilocode: null, omp: null, grok: null, hermes: null, antigravity_cli: null, cline: null, combined: null" in source
     assert 'updateSessionPanel("dsh", lastSessionsResponses.dsh);' in source
     assert 'initSortHeaders("dsh", renderSessionsTab);' in source
     assert "dsh: { ...DEFAULT_SORT }," in source

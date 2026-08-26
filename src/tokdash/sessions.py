@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import glob
 import hashlib
 import json
 import logging
@@ -12,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 from functools import lru_cache, wraps
 from pathlib import Path
 from typing import Any, Callable, Collection, Dict, Iterable, Optional
+from urllib.parse import unquote
 
 from . import clientpaths
 from .activity_insights import (
@@ -27,12 +29,18 @@ from .dateutil import parse_date_range
 from .pricing import PricingDatabase
 from .sources.coding_tools import (
     CODEX_DEFAULT_MODEL,
+    AntigravityCLIParser,
+    HermesParser,
     KimiParser,
     ZCodeSnapshotError,
+    cline_message_file_signatures,
     codex_fork_ancestry,
     codex_replay_key_session_id,
     codex_token_event_key,
     connect_sqlite_readonly,
+    iter_grok_usage_rows,
+    parse_cline_message_file,
+    search_dir_claim_key,
     zcode_snapshot,
 )
 from .sources import dsh_log
@@ -51,7 +59,7 @@ from .usage_store import (
 )
 
 
-SESSION_TOOLS = ("codex", "claude", "opencode", "pi_agent", "mimo", "kimi", "dsh", "reasonix", "zcode")
+SESSION_TOOLS = ("codex", "claude", "opencode", "pi_agent", "omp", "mimo", "kimi", "dsh", "reasonix", "zcode", "kilocode", "grok", "hermes", "antigravity_cli", "cline")
 logger = logging.getLogger(__name__)
 TOOL_LABELS = {
     "codex": "Codex",
@@ -63,6 +71,12 @@ TOOL_LABELS = {
     "dsh": "DeepSeek Harness",
     "reasonix": "Reasonix",
     "zcode": "ZCode",
+    "kilocode": "Kilo Code",
+    "omp": "omp",
+    "grok": "Grok Build",
+    "hermes": "Hermes",
+    "antigravity_cli": "Antigravity CLI",
+    "cline": "Cline",
 }
 
 _PRICING_DB = PricingDatabase()
@@ -374,6 +388,8 @@ def reload_pricing_db() -> None:
     _load_opencode_sessions.cache_clear()
     _parse_pi_session_file.cache_clear()
     _load_pi_sessions.cache_clear()
+    _parse_omp_session_file.cache_clear()
+    _load_omp_sessions.cache_clear()
     _parse_kimi_session_file.cache_clear()
     _load_kimi_sessions.cache_clear()
     _parse_dsh_session_file.cache_clear()
@@ -381,6 +397,13 @@ def reload_pricing_db() -> None:
     _parse_reasonix_session_file.cache_clear()
     _load_reasonix_sessions.cache_clear()
     _load_mimo_sessions.cache_clear()
+    _load_kilocode_sessions.cache_clear()
+    _load_grok_sessions.cache_clear()
+    _load_hermes_sessions.cache_clear()
+    _load_antigravity_sessions.cache_clear()
+    _load_antigravity_summaries.cache_clear()
+    _parse_cline_message_file.cache_clear()
+    _load_cline_sessions.cache_clear()
 
 
 def _truthy_env(name: str) -> bool:
@@ -2128,6 +2151,7 @@ def _append_opencode_turn(
     title: Any = "",
     slug: Any = "",
     recorded_cost: Any = None,
+    billing_rule: str = "input-plus-cache-write",
 ) -> None:
     fresh_input = int(fresh_input or 0)
     cache_write = int(cache_write or 0)
@@ -2148,7 +2172,7 @@ def _append_opencode_turn(
         data_cost = 0.0
     bill = _billing_record(
         full_model_name,
-        "input-plus-cache-write",
+        billing_rule,
         input_tokens=fresh_input,
         output_tokens=output_tokens,
         cache_read=cache_read,
@@ -2196,6 +2220,9 @@ def _load_opencode_sessions_scalar(
     *,
     since_ms: Optional[int] = None,
     until_ms: Optional[int] = None,
+    tool: str = "opencode",
+    use_recorded_cost: bool = True,
+    billing_rule: str = "input-plus-cache-write",
 ) -> Dict[str, Dict[str, Any]]:
     window_clause, args = _opencode_window_clause(since_ms, until_ms)
     role_clause = "json_valid(m.data) AND json_extract(m.data, '$.role') = 'assistant'"
@@ -2208,14 +2235,14 @@ def _load_opencode_sessions_scalar(
     conn = connect_sqlite_readonly(db_path)
     try:
         session_cols = _sqlite_columns(conn, "session")
-        title_expr = "s.title" if "title" in session_cols else "''"
-        slug_expr = "s.slug" if "slug" in session_cols else "''"
+        title_expr = "COALESCE(s.title, '')" if "title" in session_cols else "''"
+        slug_expr = "COALESCE(s.slug, '')" if "slug" in session_cols else "''"
         cur = conn.cursor()
         cur.execute(
             f"""
             SELECT
-              s.id,
-              s.directory,
+              COALESCE(s.id, m.session_id),
+              COALESCE(s.directory, ''),
               {title_expr},
               {slug_expr},
               COALESCE(p.worktree, ''),
@@ -2231,13 +2258,16 @@ def _load_opencode_sessions_scalar(
               json_extract(m.data, '$.path.root'),
               json_extract(m.data, '$.cost')
             FROM message m
-            JOIN session s ON m.session_id = s.id
+            LEFT JOIN session s ON m.session_id = s.id
             LEFT JOIN project p ON s.project_id = p.id
             {where_clause}
             ORDER BY m.time_created ASC
             """,
             args,
         )
+        # LEFT JOIN is deliberate: a message whose session row was deleted must
+        # still produce a turn (the token parser bills it — parity, rule 3 of
+        # docs/local/20260825_sessions_logging_harness/SPEC_kilocode.md).
         turn_index_by_session: Dict[str, int] = {}
         for (
             session_id,
@@ -2260,6 +2290,7 @@ def _load_opencode_sessions_scalar(
             _append_opencode_turn(
                 sessions,
                 turn_index_by_session,
+                tool=tool,
                 session_id=session_id,
                 directory=directory,
                 worktree=worktree,
@@ -2275,7 +2306,8 @@ def _load_opencode_sessions_scalar(
                 root=root,
                 title=title,
                 slug=slug,
-                recorded_cost=recorded_cost,
+                recorded_cost=recorded_cost if use_recorded_cost else None,
+                billing_rule=billing_rule,
             )
         _attach_window_context(conn, sessions, since_ms, until_ms, role_filtered=True)
     finally:
@@ -2289,6 +2321,9 @@ def _load_opencode_sessions_raw_json(
     *,
     since_ms: Optional[int] = None,
     until_ms: Optional[int] = None,
+    tool: str = "opencode",
+    use_recorded_cost: bool = True,
+    billing_rule: str = "input-plus-cache-write",
 ) -> Dict[str, Dict[str, Any]]:
     window_clause, args = _opencode_window_clause(since_ms, until_ms)
 
@@ -2296,21 +2331,21 @@ def _load_opencode_sessions_raw_json(
     conn = connect_sqlite_readonly(db_path)
     try:
         session_cols = _sqlite_columns(conn, "session")
-        title_expr = "s.title" if "title" in session_cols else "''"
-        slug_expr = "s.slug" if "slug" in session_cols else "''"
+        title_expr = "COALESCE(s.title, '')" if "title" in session_cols else "''"
+        slug_expr = "COALESCE(s.slug, '')" if "slug" in session_cols else "''"
         cur = conn.cursor()
         cur.execute(
             f"""
             SELECT
-              s.id,
-              s.directory,
+              COALESCE(s.id, m.session_id),
+              COALESCE(s.directory, ''),
               {title_expr},
               {slug_expr},
               COALESCE(p.worktree, ''),
               m.time_created,
               m.data
             FROM message m
-            JOIN session s ON m.session_id = s.id
+            LEFT JOIN session s ON m.session_id = s.id
             LEFT JOIN project p ON s.project_id = p.id
             {window_clause}
             ORDER BY m.time_created ASC
@@ -2336,6 +2371,7 @@ def _load_opencode_sessions_raw_json(
             _append_opencode_turn(
                 sessions,
                 turn_index_by_session,
+                tool=tool,
                 session_id=session_id,
                 directory=directory,
                 worktree=worktree,
@@ -2351,7 +2387,8 @@ def _load_opencode_sessions_raw_json(
                 root=path_info.get("root"),
                 title=title,
                 slug=slug,
-                recorded_cost=data.get("cost"),
+                recorded_cost=data.get("cost") if use_recorded_cost else None,
+                billing_rule=billing_rule,
             )
         _attach_window_context(conn, sessions, since_ms, until_ms, role_filtered=False)
     finally:
@@ -2394,8 +2431,26 @@ def _pi_session_id_from_path(path: Path) -> str:
     return stem
 
 
-@_cached_session_parser()
-def _parse_pi_session_file(path_str: str, _mtime_ns: int, _size: int, _pricing_sig: tuple = ()) -> Optional[Dict[str, Any]]:
+def _parse_pi_family_session_file(
+    path_str: str,
+    _mtime_ns: int,
+    _size: int,
+    _pricing_sig: tuple = (),
+    *,
+    tool: str,
+    use_recorded_cost: bool,
+    title_row: str,
+    split_model_change: bool,
+) -> Optional[Dict[str, Any]]:
+    """Shared core for the pi_agent and omp session files (one JSONL format).
+
+    ``title_row`` selects the display-name row: pi reads
+    ``type:"session_info"`` / ``name``, omp reads ``type:"title"`` / ``title``
+    (still accepting a pi-style ``session_info`` row). ``split_model_change``
+    applies omp's O3 split of a provider-qualified ``model`` field; pi's
+    bare-``modelId`` path stays verbatim. ``use_recorded_cost`` keeps pi's
+    "recorded cost wins" semantics; omp prices from the pricing DB (O6).
+    """
     session_path = Path(path_str)
     if not session_path.exists():
         return None
@@ -2437,9 +2492,29 @@ def _parse_pi_session_file(path_str: str, _mtime_ns: int, _size: int, _pricing_s
                 session_name = _clean_display_name(obj.get("name")) or session_name
                 cwd = str(obj.get("cwd") or cwd)
                 continue
+            if title_row != "session_info" and obj_type == title_row:
+                session_name = _clean_display_name(obj.get(title_row)) or session_name
+                continue
             if obj_type == "model_change":
-                current_provider = str(obj.get("provider") or current_provider)
-                current_model = str(obj.get("modelId") or current_model)
+                if split_model_change:
+                    # O3: omp writes a provider-qualified model ("provider/model")
+                    # where pi writes a bare modelId; split only that form so the
+                    # pricing lookup sees the bare model id.
+                    model_id = obj.get("modelId")
+                    raw_model = obj.get("model")
+                    if isinstance(raw_model, str) and raw_model and "/" in raw_model and not model_id:
+                        prefix, _, suffix = raw_model.partition("/")
+                        current_provider = str(obj.get("provider") or prefix or current_provider)
+                        current_model = suffix or current_model
+                    else:
+                        current_provider = str(obj.get("provider") or current_provider)
+                        if isinstance(model_id, str) and model_id:
+                            current_model = model_id
+                        elif isinstance(raw_model, str) and raw_model:
+                            current_model = raw_model
+                else:
+                    current_provider = str(obj.get("provider") or current_provider)
+                    current_model = str(obj.get("modelId") or current_model)
                 continue
             if obj_type != "message":
                 continue
@@ -2489,33 +2564,60 @@ def _parse_pi_session_file(path_str: str, _mtime_ns: int, _size: int, _pricing_s
                 output_tokens=output_tokens,
                 cache_read=cache_read,
                 cache_write=cache_write,
-                fixed_cost=cost_total if cost_total > 0 else None,
+                fixed_cost=(cost_total if cost_total > 0 else None) if use_recorded_cost else None,
             )
             turn_index += 1
-            turns.append(
-                _build_turn(
-                    turn_index=turn_index,
-                    timestamp_ms=timestamp_ms,
-                    model=model,
-                    tokens_in=fresh_input + cache_write,
-                    tokens_cache=cache_read,
-                    tokens_out=output_tokens,
-                    tokens_reasoning=0,
-                    bill=bill,
-                )
+            turn = _build_turn(
+                turn_index=turn_index,
+                timestamp_ms=timestamp_ms,
+                model=model,
+                tokens_in=fresh_input + cache_write,
+                tokens_cache=cache_read,
+                tokens_out=output_tokens,
+                tokens_reasoning=0,
+                bill=bill,
             )
+            # omp: a resume continuation re-logs rows into a second file under
+            # the same session UUID with the same outer id; the cross-file
+            # merge collapses by that id (Reconciliation rule 4). pi keeps the
+            # released field-identity merge and carries no event key.
+            if entry_id and tool == "omp":
+                turn["_event_key"] = f"omp:{session_id}:{entry_id}"
+            turns.append(turn)
 
     if not turns:
         return None
 
     project = _project_from_repo_or_path(None, cwd or None)
     return {
-        "tool": "pi_agent",
+        "tool": tool,
         "session_id": session_id,
         "display_name": session_name or first_user_preview or _fallback_display_name(session_id, project),
         "project": project,
         "turns": turns,
     }
+
+
+@_cached_session_parser()
+def _parse_pi_session_file(path_str: str, _mtime_ns: int, _size: int, _pricing_sig: tuple = ()) -> Optional[Dict[str, Any]]:
+    return _parse_pi_family_session_file(
+        path_str, _mtime_ns, _size, _pricing_sig,
+        tool="pi_agent",
+        use_recorded_cost=True,
+        title_row="session_info",
+        split_model_change=False,
+    )
+
+
+@_cached_session_parser()
+def _parse_omp_session_file(path_str: str, _mtime_ns: int, _size: int, _pricing_sig: tuple = ()) -> Optional[Dict[str, Any]]:
+    return _parse_pi_family_session_file(
+        path_str, _mtime_ns, _size, _pricing_sig,
+        tool="omp",
+        use_recorded_cost=False,
+        title_row="title",
+        split_model_change=True,
+    )
 
 
 @_cached_session_aggregate()
@@ -2544,6 +2646,441 @@ def _load_pi_sessions(signature: tuple[tuple[str, int, int], ...], pricing_sig: 
 
 def _pi_sessions() -> Dict[str, Dict[str, Any]]:
     return _load_pi_sessions(_pi_session_signatures(), _pricing_signature())
+
+
+def _hermes_db_paths() -> list[Path]:
+    """Each existing <dir>/state.db, in search-dir order, MINUS any dir
+    pi_agent or omp claims.
+
+    HermesParser is registered after pi_agent/omp in CodingToolsUsageTracker,
+    so _claim_search_dirs drops a dir those own from its search list (the
+    usage store never dedups across sources). The harness must drop the same
+    dirs or the Sessions tab counts tokens Overview counted under another
+    tool; search_dir_claim_key keeps the ownership key shared.
+    """
+    claimed = set()
+    for dirs in (clientpaths.pi_agent_search_dirs(), clientpaths.omp_agent_search_dirs()):
+        claimed.update(search_dir_claim_key(d) for d in dirs)
+    paths: list[Path] = []
+    for d in clientpaths.hermes_search_dirs():
+        if search_dir_claim_key(d) in claimed:
+            continue
+        db = d / "state.db"
+        if db.exists():
+            paths.append(db)
+    return paths
+
+
+def _hermes_db_signature() -> tuple[tuple[str, int, int], ...]:
+    """state.db plus its WAL sidecars (the parser stats the DB alone; the
+    sidecars only add invalidation, never parity)."""
+    signatures: list[tuple[str, int, int]] = []
+    for db_path in _hermes_db_paths():
+        for candidate in (db_path, Path(str(db_path) + "-wal"), Path(str(db_path) + "-shm")):
+            try:
+                st = candidate.stat()
+                signatures.append((str(candidate), st.st_mtime_ns, st.st_size))
+            except OSError:
+                continue
+    return tuple(signatures)
+
+
+def _hermes_user_preview(conn: sqlite3.Connection, session_id: str) -> str:
+    """First user-message text for title-less sessions; failure-tolerant."""
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT content FROM messages WHERE session_id = ? AND role = 'user' "
+            "ORDER BY id LIMIT 1",
+            (session_id,),
+        )
+        row = cur.fetchone()
+    except sqlite3.Error:
+        return ""
+    if not row:
+        return ""
+    return _message_text_preview({"role": "user", "content": row[0]})
+
+
+@lru_cache(maxsize=8)
+def _load_hermes_sessions(signature: tuple[tuple[str, int, int], ...], _pricing_sig: tuple = ()) -> Dict[str, Dict[str, Any]]:
+    sessions: Dict[str, Dict[str, Any]] = {}
+    # Claimed ids, mirroring the parser's seen_ids: claimed at first sight,
+    # before the zero-row skip, so a zero row in an earlier dir suppresses a
+    # later dir's real row on both sides (parity).
+    claimed: set = set()
+    for path_str, _mtime_ns, _size in signature:
+        if path_str.endswith(("-wal", "-shm")):
+            continue
+        db_path = Path(path_str)
+        if not db_path.exists():
+            continue
+        try:
+            conn = connect_sqlite_readonly(db_path)
+        except (OSError, sqlite3.Error):
+            continue
+        try:
+            try:
+                has_title = "title" in _sqlite_columns(conn, "sessions")
+                cur = conn.cursor()
+                cur.execute(
+                    f"""
+                    SELECT id, model, billing_provider, started_at,
+                           input_tokens, output_tokens,
+                           cache_read_tokens, cache_write_tokens,
+                           reasoning_tokens, estimated_cost_usd, actual_cost_usd
+                           {', title' if has_title else ", ''"}
+                    FROM sessions
+                    WHERE model IS NOT NULL AND TRIM(model) != ''
+                    """
+                )
+                rows = cur.fetchall()
+            except (OSError, sqlite3.Error):
+                # Corrupt/foreign DB: the parser skips it per-DB, so the
+                # harness does too (parity), and the remaining DBs still serve.
+                rows = None
+            if rows is not None:
+                for row in rows:
+                    try:
+                        (
+                            row_id, model, billing_provider, started_at,
+                            input_t, output_t,
+                            cache_r, cache_w, reasoning,
+                            estimated_cost, actual_cost, title_raw,
+                        ) = row
+                        sid = str(row_id)
+                        # Dedup across state.db files: first search-dir wins.
+                        if sid in claimed:
+                            continue
+                        claimed.add(sid)
+                        input_t = _to_int(input_t)
+                        output_t = _to_int(output_t)
+                        cache_r = _to_int(cache_r)
+                        cache_w = _to_int(cache_w)
+                        reasoning = _to_int(reasoning)
+                        actual_f = float(actual_cost or 0.0)
+                        estimated_f = float(estimated_cost or 0.0)
+                        # The parser keeps exactly the rows with tokens or a
+                        # positive recorded cost.
+                        if (input_t + output_t + cache_r + cache_w + reasoning) <= 0 and not (
+                            actual_f > 0 or estimated_f > 0
+                        ):
+                            continue
+                        # Verbatim parser expression: seconds, or ms if > 1e12.
+                        try:
+                            sa = float(started_at or 0.0)
+                        except (ValueError, TypeError):
+                            sa = 0.0
+                        ts_ms = int(sa * 1000) if sa < 1e12 else int(sa)
+                        model = str(model)
+                        provider = (
+                            str(billing_provider or "").strip()
+                            or HermesParser._infer_provider(model)
+                        )
+                        full_model = f"{provider}/{model}" if provider else model
+                        bill = _billing_record(
+                            full_model,
+                            "split-cache-write",
+                            input_tokens=input_t,
+                            output_tokens=output_t,
+                            cache_read=cache_r,
+                            cache_write=cache_w,
+                            # Cost precedence, parser 2990-3013: a recorded
+                            # positive cost is never repriced; a recorded zero
+                            # falls through to the pricing DB.
+                            fixed_cost=(
+                                actual_f if actual_f > 0
+                                else estimated_f if estimated_f > 0
+                                else None
+                            ),
+                        )
+                        turn = _build_turn(
+                            turn_index=1,
+                            timestamp_ms=ts_ms,
+                            model=model,
+                            tokens_in=input_t + cache_w,
+                            tokens_cache=cache_r,
+                            tokens_out=output_t,
+                            tokens_reasoning=reasoning,
+                            bill=bill,
+                        )
+                        turn["_event_key"] = f"hermes:{sid}"
+                        # One extra query per title-less session; fine at
+                        # current hermes scale, revisit if histories grow.
+                        title = _clean_display_name(title_raw) or _hermes_user_preview(conn, sid)
+                        raw: Dict[str, Any] = {
+                            "tool": "hermes",
+                            "session_id": sid,
+                            "project": "unknown",  # schema v12 records no cwd
+                            "turns": [turn],
+                        }
+                        if title:
+                            raw["display_name"] = title
+                            raw["_display_name_explicit"] = True
+                        sessions[sid] = raw
+                    except (ValueError, TypeError, OverflowError):
+                        continue
+        finally:
+            conn.close()
+    return sessions
+
+
+def _hermes_sessions() -> Dict[str, Dict[str, Any]]:
+    signature = _hermes_db_signature()
+    if not signature:
+        return {}
+    return _load_hermes_sessions(signature, _pricing_signature())
+
+
+def _antigravity_db_signatures() -> tuple[tuple[str, int, int], ...]:
+    """Same tuples as AntigravityCLIParser._file_signatures (pinned equal by
+    the parity test): per DB, the path, the max mtime across db/-wal/-shm,
+    and the db size plus the WAL size."""
+    sigs: list[tuple[str, int, int]] = []
+    for db_path_str in glob.glob(clientpaths.antigravity_conversations_glob()):
+        db_path = Path(db_path_str)
+        try:
+            db_stat = db_path.stat()
+        except (FileNotFoundError, OSError):
+            continue
+        max_mtime = int(db_stat.st_mtime_ns)
+        total_size = int(db_stat.st_size)
+        wal_path = Path(str(db_path) + "-wal")
+        shm_path = Path(str(db_path) + "-shm")
+        for sidecar in (wal_path, shm_path):
+            try:
+                sidecar_stat = sidecar.stat()
+            except (FileNotFoundError, OSError):
+                continue
+            max_mtime = max(max_mtime, int(sidecar_stat.st_mtime_ns))
+            if sidecar == wal_path:
+                total_size += int(sidecar_stat.st_size)
+        sigs.append((str(db_path), max_mtime, total_size))
+    return tuple(sorted(sigs))
+
+
+def _antigravity_summary_signatures() -> tuple[tuple[str, int, int], ...]:
+    """conversation_summaries.db + WAL sidecars, extra key material for
+    _load_antigravity_sessions. The summary read is already invalidated
+    by its own signature (see _antigravity_summaries), but a summary-only
+    edit must also invalidate the sessions aggregate, or stale
+    titles/projects persist until some conversation DB changes."""
+    db_path = clientpaths.antigravity_summaries_db_path()
+    if not db_path.exists():
+        return ()
+    out: list[tuple[str, int, int]] = []
+    for candidate in (
+        db_path,
+        Path(str(db_path) + "-wal"),
+        Path(str(db_path) + "-shm"),
+    ):
+        try:
+            st = candidate.stat()
+            out.append((str(candidate), st.st_mtime_ns, st.st_size))
+        except (FileNotFoundError, OSError):
+            continue
+    return tuple(out)
+
+
+@lru_cache(maxsize=4)
+def _load_antigravity_summaries(db_sig: tuple) -> Dict[str, Dict[str, str]]:
+    """conversation_id -> {"title", "project"}; missing/corrupt -> {}."""
+    try:
+        conn = connect_sqlite_readonly(clientpaths.antigravity_summaries_db_path())
+    except (OSError, sqlite3.Error):
+        return {}
+    try:
+        try:
+            rows = conn.execute(
+                "SELECT conversation_id, title, workspace_uris FROM conversation_summaries"
+            ).fetchall()
+        except sqlite3.Error:
+            return {}
+    finally:
+        conn.close()
+    out: Dict[str, Dict[str, str]] = {}
+    for conversation_id, title, workspace_uris in rows:
+        project = "unknown"
+        try:
+            uris = json.loads(workspace_uris) if workspace_uris else []
+        except (TypeError, ValueError):
+            uris = []
+        if isinstance(uris, list):
+            for uri in uris:
+                if isinstance(uri, str) and uri.startswith("file://"):
+                    project = _project_from_repo_or_path(
+                        None, unquote(uri[len("file://"):]) or None
+                    )
+                    break
+        out[str(conversation_id)] = {
+            "title": _clean_display_name(title),
+            "project": project,
+        }
+    return out
+
+
+def _antigravity_summaries() -> Dict[str, Dict[str, str]]:
+    sig = _antigravity_summary_signatures()
+    if not sig:
+        return {}
+    return _load_antigravity_summaries(sig)
+
+
+@lru_cache(maxsize=8)
+def _load_antigravity_sessions(
+    signature: tuple[tuple[str, int, int], ...],
+    _pricing_sig: tuple = (),
+    summary_sig: tuple = (),
+) -> Dict[str, Dict[str, Any]]:
+    summaries = _antigravity_summaries()
+    sessions: Dict[str, Dict[str, Any]] = {}
+    for path_str, _mtime, _size in signature:
+        db_path = Path(path_str)
+        rows = None
+        # The parser's dual opener (Reconciliation rule 6): RO first, plain
+        # connect only if recovery needs a writable connection. A DB that
+        # fails both contributes nothing to Overview and Sessions alike.
+        for opener in (connect_sqlite_readonly, lambda p: sqlite3.connect(str(p))):
+            try:
+                conn = opener(db_path)
+            except (sqlite3.Error, OSError):
+                continue
+            try:
+                rows = conn.execute(
+                    "SELECT idx, data FROM gen_metadata ORDER BY idx"
+                ).fetchall()
+                break
+            except (sqlite3.Error, OSError):
+                pass
+            finally:
+                try:
+                    conn.close()
+                except (sqlite3.Error, OSError):
+                    pass
+        if rows is None:
+            continue
+        sid = db_path.stem
+        turns: list[Dict[str, Any]] = []
+        for idx, data in rows:
+            try:
+                # One decoder, shared with the parser (rule 3): zero drift.
+                decoded = AntigravityCLIParser._decode_row(data)
+                if decoded is None:
+                    continue
+                input_t = _to_int(decoded.get("input"))
+                output_t = _to_int(decoded.get("output"))
+                cache_r = _to_int(decoded.get("cacheRead"))
+                cache_w = _to_int(decoded.get("cacheWrite"))
+                reasoning = _to_int(decoded.get("reasoning"))
+                # The parser's guard verbatim (rule 4): the zero-check covers
+                # only input/output/cacheRead, so a reasoning-only row AND a
+                # pure cacheWrite-only row are both dropped, on both sides.
+                if input_t == 0 and output_t == 0 and cache_r == 0:
+                    continue
+                model = str(decoded.get("model") or "unknown")
+                bill = _billing_record(
+                    model,
+                    "split-cache-write",
+                    input_tokens=input_t,
+                    output_tokens=output_t,
+                    cache_read=cache_r,
+                    cache_write=cache_w,
+                )
+                turn = _build_turn(
+                    turn_index=len(turns) + 1,
+                    timestamp_ms=_to_int(decoded.get("timestamp")),
+                    model=model,
+                    tokens_in=input_t + cache_w,
+                    tokens_cache=cache_r,
+                    tokens_out=output_t,
+                    tokens_reasoning=reasoning,
+                    bill=bill,
+                )
+                turn["_event_key"] = f"antigravity_cli:{sid}:{_to_int(idx)}"
+                turns.append(turn)
+            except (ValueError, TypeError, OverflowError):
+                continue
+        if not turns:
+            continue
+        raw: Dict[str, Any] = {
+            "tool": "antigravity_cli",
+            "session_id": sid,
+            "project": "unknown",
+            "is_review_session": False,
+            "turns": turns,
+        }
+        # agy titles are machine-generated: no _display_name_explicit marker.
+        summary = summaries.get(sid)
+        if summary:
+            if summary.get("title"):
+                raw["display_name"] = summary["title"]
+            if summary.get("project") and summary["project"] != "unknown":
+                raw["project"] = summary["project"]
+        sessions[sid] = raw
+    return sessions
+
+
+def _antigravity_sessions() -> Dict[str, Dict[str, Any]]:
+    signature = _antigravity_db_signatures()
+    if not signature:
+        return {}
+    return _load_antigravity_sessions(
+        signature, _pricing_signature(), _antigravity_summary_signatures()
+    )
+
+
+def _omp_session_roots() -> list[Path]:
+    """omp_agent_search_dirs() minus the dirs pi_agent claims.
+
+    Overview assigns each tree-scanned dir to exactly one parser in
+    registration order (pi_agent precedes omp, coding_tools
+    _claim_search_dirs); the usage store never dedups across sources, so a
+    shared dir would count its tokens twice. The Sessions tab must agree with
+    where Overview counts: a dir pi claims (e.g. PI_CODING_AGENT_DIR pointed
+    at an omp tree) shows under pi_agent only. search_dir_claim_key is the one
+    shared ownership key so the two implementations cannot drift.
+    """
+    claimed = {search_dir_claim_key(d) for d in clientpaths.pi_agent_search_dirs()}
+    return [
+        d for d in clientpaths.omp_agent_search_dirs()
+        if search_dir_claim_key(d) not in claimed
+    ]
+
+
+def _omp_session_signatures() -> tuple[tuple[str, int, int], ...]:
+    signatures: list[tuple[str, int, int]] = []
+    for root in _omp_session_roots():
+        signatures.extend(_iter_file_signatures(root))
+    signatures.sort(key=lambda item: item[0])
+    return tuple(signatures)
+
+
+@_cached_session_aggregate()
+def _load_omp_sessions(signature: tuple[tuple[str, int, int], ...], pricing_sig: tuple = ()) -> Dict[str, Dict[str, Any]]:
+    sessions: Dict[str, Dict[str, Any]] = {}
+    transient_miss = False
+    for path_str, mtime_ns, size in signature:
+        try:
+            raw = _parse_session_file(
+                _parse_omp_session_file, path_str, mtime_ns, size, pricing_sig
+            )
+        except _SessionFileUnavailable:
+            transient_miss = True
+            continue
+        if not raw:
+            continue
+        session_id = str(raw["session_id"])
+        if session_id in sessions:
+            sessions[session_id] = _merge_raw_session(sessions[session_id], raw)
+        else:
+            sessions[session_id] = raw
+    if transient_miss:
+        raise _PartialSessionView(sessions)
+    return sessions
+
+
+def _omp_sessions() -> Dict[str, Dict[str, Any]]:
+    return _load_omp_sessions(_omp_session_signatures(), _pricing_signature())
 
 
 # Kimi Code names each workspace dir ``wd_<slug>_<12 hex>``; the slug is a
@@ -2918,14 +3455,14 @@ def _load_mimo_sessions_scalar(
             where_clause = f"{where_clause} AND {import_clause}"
 
         session_cols = _sqlite_columns(conn, "session")
-        title_expr = "s.title" if "title" in session_cols else "''"
-        slug_expr = "s.slug" if "slug" in session_cols else "''"
+        title_expr = "COALESCE(s.title, '')" if "title" in session_cols else "''"
+        slug_expr = "COALESCE(s.slug, '')" if "slug" in session_cols else "''"
         cur = conn.cursor()
         cur.execute(
             f"""
             SELECT
-              s.id,
-              s.directory,
+              COALESCE(s.id, m.session_id),
+              COALESCE(s.directory, ''),
               {title_expr},
               {slug_expr},
               COALESCE(p.worktree, ''),
@@ -2941,13 +3478,16 @@ def _load_mimo_sessions_scalar(
               json_extract(m.data, '$.path.root'),
               json_extract(m.data, '$.cost')
             FROM message m
-            JOIN session s ON m.session_id = s.id
+            LEFT JOIN session s ON m.session_id = s.id
             LEFT JOIN project p ON s.project_id = p.id
             {where_clause}
             ORDER BY m.time_created ASC
             """,
             args,
         )
+        # LEFT JOIN is deliberate: a message whose session row was deleted must
+        # still produce a turn (the token parser bills it — parity, rule 3 of
+        # docs/local/20260825_sessions_logging_harness/SPEC_kilocode.md).
         turn_index_by_session: Dict[str, int] = {}
         for (
             session_id,
@@ -3012,14 +3552,14 @@ def _load_mimo_sessions_raw_json(
         where_clause = window_clause
 
         session_cols = _sqlite_columns(conn, "session")
-        title_expr = "s.title" if "title" in session_cols else "''"
-        slug_expr = "s.slug" if "slug" in session_cols else "''"
+        title_expr = "COALESCE(s.title, '')" if "title" in session_cols else "''"
+        slug_expr = "COALESCE(s.slug, '')" if "slug" in session_cols else "''"
         cur = conn.cursor()
         cur.execute(
             f"""
             SELECT
-              s.id,
-              s.directory,
+              COALESCE(s.id, m.session_id),
+              COALESCE(s.directory, ''),
               {title_expr},
               {slug_expr},
               COALESCE(p.worktree, ''),
@@ -3027,13 +3567,16 @@ def _load_mimo_sessions_raw_json(
               m.data,
               m.id
             FROM message m
-            JOIN session s ON m.session_id = s.id
+            LEFT JOIN session s ON m.session_id = s.id
             LEFT JOIN project p ON s.project_id = p.id
             {where_clause}
             ORDER BY m.time_created ASC
             """,
             args,
         )
+        # LEFT JOIN is deliberate: a message whose session row was deleted must
+        # still produce a turn (the token parser bills it — parity, rule 3 of
+        # docs/local/20260825_sessions_logging_harness/SPEC_kilocode.md).
         turn_index_by_session: Dict[str, int] = {}
         for session_id, directory, title, slug, worktree, created_ms, data_json, message_id in cur.fetchall():
             if imported_ids and str(message_id) in imported_ids:
@@ -3087,6 +3630,77 @@ def _mimo_sessions(since_ms: Optional[int] = None, until_ms: Optional[int] = Non
     if not signature:
         return {}
     return _load_mimo_sessions(signature, _pricing_signature(), since_ms, until_ms)
+
+
+def _kilocode_db_signature() -> tuple[tuple[str, int, int], ...]:
+    """Same shape as KiloCodeParser._file_signatures (the parity test compares)."""
+    signatures: list[tuple[str, int, int]] = []
+    for path in clientpaths.kilo_db_paths():
+        if not path.exists():
+            continue
+        for candidate in (path, Path(str(path) + "-wal"), Path(str(path) + "-shm")):
+            try:
+                st = candidate.stat()
+                signatures.append((str(candidate), st.st_mtime_ns, st.st_size))
+            except OSError:
+                continue
+    return tuple(signatures)
+
+
+@lru_cache(maxsize=8)
+def _load_kilocode_sessions(
+    signature: tuple[tuple[str, int, int], ...],
+    _pricing_sig: tuple = (),
+    since_ms: Optional[int] = None,
+    until_ms: Optional[int] = None,
+) -> Dict[str, Dict[str, Any]]:
+    if not signature:
+        return {}
+    # One session lives in exactly one channel DB; the cross-DB merge is
+    # defensive (dedupes turns by identity key, keeps the earlier duplicate).
+    sessions: Dict[str, Dict[str, Any]] = {}
+    for path_str, _mtime, _size in signature:
+        if path_str.endswith(("-wal", "-shm")):
+            continue
+        db_path = Path(path_str)
+        if not db_path.exists():
+            continue
+        try:
+            db_sessions = _load_opencode_sessions_scalar(
+                db_path,
+                since_ms=since_ms,
+                until_ms=until_ms,
+                tool="kilocode",
+                use_recorded_cost=False,
+                billing_rule="split-cache-write",
+            )
+        except sqlite3.Error:
+            try:
+                db_sessions = _load_opencode_sessions_raw_json(
+                    db_path,
+                    since_ms=since_ms,
+                    until_ms=until_ms,
+                    tool="kilocode",
+                    use_recorded_cost=False,
+                    billing_rule="split-cache-write",
+                )
+            except sqlite3.Error:
+                logger.warning(
+                    "tokdash kilocode db %s unreadable; skipped", db_path, exc_info=True
+                )
+                continue
+        for sid, raw in db_sessions.items():
+            if sid in sessions:
+                sessions[sid] = _merge_raw_session(sessions[sid], raw)
+            else:
+                sessions[sid] = raw
+    return sessions
+
+
+def _kilocode_sessions(since_ms: Optional[int] = None, until_ms: Optional[int] = None) -> Dict[str, Dict[str, Any]]:
+    return _load_kilocode_sessions(
+        _kilocode_db_signature(), _pricing_signature(), since_ms, until_ms
+    )
 
 
 def _dsh_session_signatures() -> tuple[tuple[str, int, int], ...]:
@@ -3200,6 +3814,119 @@ def _dsh_session_parser_signature() -> dict[str, Any]:
 
 def _dsh_sessions() -> Dict[str, Dict[str, Any]]:
     return _load_dsh_sessions(_dsh_session_signatures(), _pricing_signature())
+
+
+def _grok_log_path() -> Path:
+    return clientpaths.grok_home() / "logs" / "unified.jsonl"
+
+
+def _grok_log_signature() -> tuple[tuple[str, int, int], ...]:
+    """The unified log plus every summary.json: one append to the log changes
+    its size, any summary touch changes its title/project inputs."""
+    signatures: list[tuple[str, int, int]] = []
+    log = _grok_log_path()
+    try:
+        st = log.stat()
+        signatures.append((str(log), st.st_mtime_ns, st.st_size))
+    except OSError:
+        pass
+    sessions_dir = clientpaths.grok_sessions_dir()
+    if sessions_dir.is_dir():
+        for path in sorted(sessions_dir.rglob("summary.json")):
+            try:
+                st = path.stat()
+                signatures.append((str(path), st.st_mtime_ns, st.st_size))
+            except OSError:
+                continue
+    return tuple(signatures)
+
+
+def _grok_summaries() -> Dict[str, Dict[str, Any]]:
+    """``info.id`` -> summary.json contents, first match wins.
+
+    The URL-encoded cwd dir name is only a discovery key; the id inside the
+    summary is the session identity (it equals the log's sid).
+    """
+    out: Dict[str, Dict[str, Any]] = {}
+    sessions_dir = clientpaths.grok_sessions_dir()
+    if not sessions_dir.is_dir():
+        return out
+    for path in sorted(sessions_dir.rglob("summary.json")):
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                data = json.load(handle)
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        info = data.get("info") if isinstance(data.get("info"), dict) else {}
+        sid = str(info.get("id") or "").strip()
+        if not sid or sid in out:
+            continue
+        out[sid] = data
+    return out
+
+
+@lru_cache(maxsize=8)
+def _load_grok_sessions(signature: tuple[tuple[str, int, int], ...], pricing_sig: tuple = ()) -> Dict[str, Dict[str, Any]]:
+    log = _grok_log_path()
+    if not log.is_file():
+        return {}
+    # The rows are GrokParser's own survivor set (iter_grok_usage_rows), so
+    # the harness and Overview price the same rows and cannot drift.
+    by_session: Dict[str, Dict[str, Any]] = {}
+    for row in iter_grok_usage_rows(log):
+        sid = str(row["sid"] or "").strip() or "grok:unattributed"
+        raw = by_session.setdefault(
+            sid,
+            {
+                "tool": "grok",
+                "session_id": sid,
+                "project": "unknown",
+                "turns": [],
+            },
+        )
+        bill = _billing_record(
+            row["model"],
+            "fresh-input",
+            input_tokens=row["input_tokens"],
+            output_tokens=row["output"],
+            cache_read=row["cache_read"],
+            cache_write=0,
+        )
+        turn = _build_turn(
+            turn_index=len(raw["turns"]) + 1,
+            timestamp_ms=row["timestamp_ms"],
+            model=row["model"],
+            tokens_in=row["input_tokens"],
+            tokens_cache=row["cache_read"],
+            tokens_out=row["output"],
+            tokens_reasoning=0,
+            bill=bill,
+        )
+        turn["_event_key"] = row["entry_id"]
+        raw["turns"].append(turn)
+
+    summaries = _grok_summaries()
+    for sid, raw in by_session.items():
+        summary = summaries.get(sid)
+        if not isinstance(summary, dict):
+            continue
+        info = summary.get("info") if isinstance(summary.get("info"), dict) else {}
+        cwd = str(info.get("cwd") or "")
+        if cwd:
+            raw["project"] = _project_from_repo_or_path(None, cwd)
+        title = _clean_display_name(summary.get("generated_title")) or _clean_display_name(
+            summary.get("session_summary")
+        )
+        if title:
+            raw["display_name"] = title
+            raw["_display_name_explicit"] = True
+    return by_session
+
+
+def _grok_sessions() -> Dict[str, Dict[str, Any]]:
+    return _load_grok_sessions(_grok_log_signature(), _pricing_signature())
 
 
 def _reasonix_session_signatures() -> tuple[tuple[str, int, int], ...]:
@@ -3839,6 +4566,316 @@ def _zcode_store(
     return raw_sessions
 
 
+# ---------------------------------------------------------------------------
+# Cline (sessions/*/*.messages.json files + db/sessions.db metadata)
+# ---------------------------------------------------------------------------
+
+_CLINE_USER_INPUT_RE = re.compile(r"^<user_input[^>]*>(.*)</user_input>\s*$", re.DOTALL)
+
+
+def _cline_prompt_text(prompt: Any) -> Optional[str]:
+    """Prompt text with the <user_input …> wrapper stripped, or None."""
+    if not isinstance(prompt, str):
+        return None
+    stripped = prompt.strip()
+    if not stripped:
+        return None
+    match = _CLINE_USER_INPUT_RE.match(stripped)
+    text = (match.group(1) if match else stripped).strip()
+    return text or None
+
+
+def _cline_file_signatures() -> tuple:
+    return cline_message_file_signatures(clientpaths.cline_data_dir())
+
+
+def _cline_db_path() -> Path:
+    return clientpaths.cline_data_dir() / "db" / "sessions.db"
+
+
+def _cline_db_signature() -> tuple:
+    # db + -wal + -shm: a live Cline DB keeps rows in -wal until it
+    # checkpoints, and checkpoints rewrite -shm, so the signature must
+    # see all three (mirror _zcode_db_signature).
+    db_path = _cline_db_path()
+    if not db_path.exists():
+        return ()
+    out: list[tuple[str, int, int]] = []
+    for candidate in (
+        db_path,
+        Path(str(db_path) + "-wal"),
+        Path(str(db_path) + "-shm"),
+    ):
+        try:
+            st = candidate.stat()
+            out.append((str(candidate), st.st_mtime_ns, st.st_size))
+        except (FileNotFoundError, OSError):
+            continue
+    return tuple(out)
+
+
+def _cline_record_file_signatures() -> tuple:
+    """(path, mtime_ns, size) of every per-directory record file
+    (<dir>/<dir>.json), the title/project fallback read by
+    _load_cline_sessions. They must ride in the aggregate key: a record
+    edit has to invalidate a cached view even when no message file and
+    the DB stay put. Message files are excluded — already signed."""
+    sessions_root = clientpaths.cline_data_dir() / "sessions"
+    if not sessions_root.is_dir():
+        return ()
+    sigs: list[tuple[str, int, int]] = []
+    for path in sessions_root.glob("*/*.json"):
+        if not path.is_file() or path.name.endswith(".messages.json"):
+            continue
+        try:
+            s = path.stat()
+            sigs.append((str(path), s.st_mtime_ns, s.st_size))
+        except OSError:
+            continue
+    return tuple(sorted(sigs))
+
+
+@_cached_session_parser()
+def _parse_cline_message_file(
+    path_str: str, _mtime_ns: int, _size: int, _pricing_sig: tuple
+) -> list[dict]:
+    """One .messages.json -> its surviving assistant rows, annotated with
+    the session directory and (for agent_* files) the stream id.
+
+    A transient open failure (lock/AV/indexer) raises
+    _SessionFileUnavailable instead of caching []: a finished file's
+    signature never changes again, so a cached empty parse would hide
+    the session for the life of the process.
+
+    A non-empty file that yields no rows is either corrupt JSON or a
+    session with no assistant model call; classify so the warning is
+    true in the first case and silent in the second.
+    """
+    rows = parse_cline_message_file(path_str, unavailable=_SessionFileUnavailable)
+    if not rows and _size > 0:
+        try:
+            with open(path_str, "r", encoding="utf-8") as f:
+                json.load(f)
+        except (OSError, ValueError):
+            logger.warning("tokdash cline message file unreadable, skipped: %s", path_str)
+    if not rows:
+        return []
+    path = Path(path_str)
+    # agent_<agentId>.messages.json -> stream id agent_<agentId>.
+    stem = path.stem
+    stream_id = (
+        stem[: -len(".messages")]
+        if stem.startswith("agent_") and stem.endswith(".messages")
+        else None
+    )
+    return [
+        {**row, "_session_dir": path.parent.name, "_stream_id": stream_id}
+        for row in rows
+    ]
+
+
+def _cline_metadata_map(db_sig: tuple, dir_ids: list[str]) -> Dict[str, Dict[str, Optional[str]]]:
+    """session_id -> {"title", "project"} from db/sessions.db.
+
+    Metadata only: title is metadata_json.title, else the prompt with its
+    wrapper stripped; project is workspace_root, else cwd. Any failure
+    degrades to {} (record-file fallback) and never touches tokens.
+    """
+    if not db_sig or not dir_ids:
+        return {}
+    try:
+        conn = connect_sqlite_readonly(_cline_db_path())
+    except (OSError, sqlite3.Error):
+        logger.warning(
+            "tokdash cline sessions.db unreadable; falling back to record files",
+            exc_info=True,
+        )
+        return {}
+    out: Dict[str, Dict[str, Optional[str]]] = {}
+    try:
+        cur = conn.cursor()
+        for start in range(0, len(dir_ids), 400):
+            chunk = dir_ids[start : start + 400]
+            placeholders = ",".join("?" * len(chunk))
+            try:
+                cur.execute(
+                    "SELECT session_id, prompt, cwd, workspace_root, metadata_json "
+                    "FROM sessions WHERE session_id IN (" + placeholders + ")",
+                    chunk,
+                )
+            except sqlite3.Error:
+                # Absent/partial schema in a fresh store: metadata empty,
+                # turns unaffected.
+                logger.warning(
+                    "tokdash cline sessions.db query failed; falling back to record files",
+                    exc_info=True,
+                )
+                return {}
+            for session_id, prompt, cwd, workspace_root, metadata_json in cur.fetchall():
+                title = None
+                if metadata_json:
+                    try:
+                        metadata = json.loads(metadata_json)
+                    except ValueError:
+                        metadata = None
+                    if isinstance(metadata, dict):
+                        raw_title = metadata.get("title")
+                        if isinstance(raw_title, str) and raw_title.strip():
+                            title = _clean_display_name(raw_title)
+                if not title:
+                    title = _clean_display_name(_cline_prompt_text(prompt))
+                project = _project_from_repo_or_path(
+                    None, workspace_root or cwd or None
+                )
+                out[str(session_id)] = {"title": title, "project": project}
+    finally:
+        conn.close()
+    return out
+
+
+def _cline_record_fallbacks(record: Dict[str, Any]) -> tuple[Optional[str], Optional[str]]:
+    """(title, project) from the <id>.json record file, after the DB."""
+    if not record:
+        return None, None
+    metadata = record.get("metadata")
+    if not isinstance(metadata, dict):
+        metadata = {}
+    title = None
+    raw_title = metadata.get("title")
+    if isinstance(raw_title, str) and raw_title.strip():
+        title = _clean_display_name(raw_title)
+    if not title:
+        title = _clean_display_name(_cline_prompt_text(metadata.get("prompt")))
+    if not title:
+        title = _clean_display_name(_cline_prompt_text(record.get("prompt")))
+    project = None
+    cwd = record.get("cwd")
+    if isinstance(cwd, str) and cwd.strip():
+        project = _project_from_repo_or_path(None, cwd)
+    return title, project
+
+
+def _cline_record_file(session_dir: str) -> Dict[str, Any]:
+    path = clientpaths.cline_data_dir() / "sessions" / session_dir / f"{session_dir}.json"
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            doc = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return doc if isinstance(doc, dict) else {}
+
+
+@_cached_session_aggregate()
+def _load_cline_sessions(
+    file_sigs: tuple, db_sig: tuple, _pricing_sig: tuple, _record_sig: tuple = ()
+) -> Dict[str, Dict[str, Any]]:
+    # (1) Global fold (C7): dedup by cline:<msg id>, earliest ts wins,
+    #     tie -> the lexicographically earlier file (sorted iteration).
+    #     The surviving copy's directory owns the turn.
+    by_id: Dict[str, tuple[str, Optional[str], dict]] = {}
+    anonymous: list[tuple[str, Optional[str], dict]] = []
+    transient_miss = False
+    for path_str, mtime_ns, size in file_sigs:
+        try:
+            rows = _parse_session_file(
+                _parse_cline_message_file, path_str, mtime_ns, size, _pricing_sig
+            )
+        except _SessionFileUnavailable:
+            transient_miss = True
+            continue
+        if not rows:
+            continue
+        for row in rows:
+            key = row["entry_id"]
+            if not key:
+                anonymous.append((row["_session_dir"], row["_stream_id"], row))
+                continue
+            prev = by_id.get(key)
+            if prev is None or row["ts"] < prev[2]["ts"]:
+                by_id[key] = (row["_session_dir"], row["_stream_id"], row)
+
+    # Bucket the surviving turns by directory once; scanning every row per
+    # directory made step (3) O(dirs x turns).
+    spec_by_dir: Dict[str, list[tuple[int, Optional[str], dict]]] = {}
+    for d, stream_id, row in by_id.values():
+        spec_by_dir.setdefault(d, []).append((row["ts"], stream_id, row))
+    for d, stream_id, row in anonymous:
+        spec_by_dir.setdefault(d, []).append((row["ts"], stream_id, row))
+    if not spec_by_dir:
+        if transient_miss:
+            raise _PartialSessionView({})
+        return {}
+
+    # (2) Metadata for the directories with surviving turns.
+    meta = _cline_metadata_map(db_sig, sorted(spec_by_dir))
+
+    # (3) Raw sessions: one per directory, turns ts-sorted, turn_index 1-based.
+    sessions: Dict[str, Dict[str, Any]] = {}
+    for session_dir, spec in sorted(spec_by_dir.items()):
+        spec.sort(key=lambda item: item[0])
+
+        turns: list[Dict[str, Any]] = []
+        for ts, stream_id, row in spec:
+            bill = _billing_record(
+                row["model"],
+                "split-cache-write",
+                input_tokens=row["input"],
+                output_tokens=row["output"],
+                cache_read=row["cacheRead"],
+                cache_write=row["cacheWrite"],
+            )
+            turn = _build_turn(
+                turn_index=len(turns) + 1,
+                timestamp_ms=row["ts"],
+                model=row["model"],
+                tokens_in=row["input"] + row["cacheWrite"],
+                tokens_cache=row["cacheRead"],
+                tokens_out=row["output"],
+                tokens_reasoning=0,
+                bill=bill,
+            )
+            if row["entry_id"]:
+                turn["_event_key"] = row["entry_id"]
+            if stream_id:
+                turn["_stream_id"] = stream_id
+            turns.append(turn)
+
+        info = meta.get(session_dir) or {}
+        title = info.get("title")
+        project = info.get("project")
+        project_needs_fallback = not project or project == "unknown"
+        if not title or project_needs_fallback:
+            r_title, r_project = _cline_record_fallbacks(
+                _cline_record_file(session_dir)
+            )
+            title = title or r_title
+            if project_needs_fallback:
+                project = r_project or project
+
+        raw: Dict[str, Any] = {
+            "tool": "cline",
+            "session_id": session_dir,
+            "project": project or "unknown",
+            "is_review_session": False,
+            "turns": turns,
+        }
+        if title:
+            raw["display_name"] = title
+        sessions[session_dir] = raw
+    if transient_miss:
+        raise _PartialSessionView(sessions)
+    return sessions
+
+
+def _cline_sessions() -> Dict[str, Dict[str, Any]]:
+    return _load_cline_sessions(
+        _cline_file_signatures(),
+        _cline_db_signature(),
+        _pricing_signature(),
+        _cline_record_file_signatures(),
+    )
+
+
 def _raw_sessions_for_tool(
     tool: str,
     since_ms: Optional[int] = None,
@@ -3866,8 +4903,12 @@ def _raw_sessions_for_tool(
             return _claude_sessions()
         if key == "opencode":
             return _opencode_sessions(since_ms=since_ms, until_ms=until_ms)
+        if key == "kilocode":
+            return _kilocode_sessions(since_ms=since_ms, until_ms=until_ms)
         if key == "pi_agent":
             return _pi_sessions()
+        if key == "omp":
+            return _omp_sessions()
         if key == "mimo":
             return _mimo_sessions(since_ms=since_ms, until_ms=until_ms)
         if key == "kimi":
@@ -3878,6 +4919,14 @@ def _raw_sessions_for_tool(
             return _reasonix_sessions()
         if key == "zcode":
             return _zcode_sessions(since_ms=since_ms, until_ms=until_ms)
+        if key == "grok":
+            return _grok_sessions()
+        if key == "hermes":
+            return _hermes_sessions()
+        if key == "antigravity_cli":
+            return _antigravity_sessions()
+        if key == "cline":
+            return _cline_sessions()
     except (OSError, sqlite3.Error):
         # A live-parse failure (locked dir, unreadable file, corrupt DB) degrades
         # to an empty view instead of erroring the whole tool's session endpoint.

@@ -1949,7 +1949,7 @@
         </div>
         <div class="surface p-5">
           <div class="text-xs font-semibold uppercase tracking-wider flex items-center gap-1" style="color: var(--color-label);">
-            <span id="overviewActiveLabel" data-i18n="agentTimeCard">Agent time (est.)</span>
+            <span id="overviewActiveLabel" data-i18n="agentTime">EST. agent time</span>
             <span id="overviewActiveHint" class="cursor-help select-none" style="opacity:0.6;" data-i18n-title="agentTimeOverviewHint" title="Estimated agent working time in the selected range, added up across every session tool: agents running at once each count, idle gaps beyond the cap are excluded.">ⓘ</span>
           </div>
           <div id="overviewActiveTime" class="text-3xl sm:text-4xl font-extrabold mt-2" style="color: var(--color-secondary);">-</div>
@@ -2101,9 +2101,12 @@
 
     <!-- Sessions Tab -->
     <div id="sessions-content" class="tab-content">
-      <div class="flex items-center justify-end gap-2 mb-4">
+      <div id="sessionsPanelToolbar" class="flex items-center justify-end gap-2 mb-4">
         <button id="sessionsExpandAll" class="btn btn-ghost" type="button" data-i18n="sessionsExpandAll">Expand all</button>
         <button id="sessionsCollapseAll" class="btn btn-ghost" type="button" data-i18n="sessionsCollapseAll">Collapse all</button>
+      </div>
+      <div id="sessionsEmptyState" class="surface p-5 mb-6" hidden>
+        <div class="text-sm" style="color: var(--color-muted);" data-i18n="sessionsEmptyRange">No sessions in the selected range.</div>
       </div>
       <section class="surface p-5 mb-6">
         <details class="session-panel" data-panel-details="codex">
@@ -4396,7 +4399,6 @@
         activeTime: 'Estimated active',
         activeTimeColumn: 'Active (est.)',
         agentTime: 'EST. agent time',
-        agentTimeCard: 'Agent time (est.)',
         idleCap: 'Idle cap',
         span: 'Span',
         activeTimeHint: 'Estimate from the gaps between token events: each gap counts up to the idle cap (5 min by default). A short pause reads the same as work, one long operation is truncated at the cap, and a session with a single event measures zero.',
@@ -4408,6 +4410,7 @@
         activeTimeToolsUnavailable: 'No data read for: {tools}',
         combinedSessionsDesc: 'Cross-tool session view grouped by project for the selected range.',
         sessionsRangeDesc: 'Latest session plus sessions for the selected range.',
+        sessionsEmptyRange: 'No sessions in the selected range.',
         panelTokens: 'Tokens',
         panelLast: 'Last',
         sessionsExpandAll: 'Expand all',
@@ -4789,7 +4792,6 @@
         activeTime: '预计活跃时长',
         activeTimeColumn: '活跃时长（估算）',
         agentTime: '智能体时长（估算）',
-        agentTimeCard: '智能体时长（估算）',
         idleCap: '空闲上限',
         span: '跨度',
         activeTimeHint: '基于 token 事件之间间隔的估算：每段间隔最多按空闲上限（默认 5 分钟）计入。短暂停顿与工作无法区分，单次长耗时操作会被截断到上限，只有一个事件的会话则记为 0。',
@@ -4801,6 +4803,7 @@
         activeTimeToolsUnavailable: '未能读取：{tools}',
         combinedSessionsDesc: '按项目汇总所选时间范围内的跨工具会话视图。',
         sessionsRangeDesc: '显示最近一条会话摘要，以及所选时间范围内的会话列表。',
+        sessionsEmptyRange: '所选范围内没有会话。',
         panelTokens: 'Token 数',
         panelLast: '最近',
         sessionsExpandAll: '全部展开',
@@ -6204,16 +6207,7 @@
       return { icon: null, color: '#64748B', fallback: label.charAt(0) || '?' };
     }
 
-    function createToolIdentity(tool, options = {}) {
-      const meta = toolBrandMeta(tool);
-      const identity = document.createElement('span');
-      identity.className = 'tool-identity';
-      identity.dataset.compact = String(Boolean(options.compact));
-      identity.dataset.logoKind = meta.logoKind || 'mark';
-      identity.dataset.darkInvert = String(Boolean(meta.darkInvert));
-      identity.style.setProperty('--tool-brand', meta.color);
-      identity.setAttribute('aria-label', formatToolName(tool));
-
+    function createToolBrandIcon(tool, meta) {
       const icon = document.createElement('span');
       icon.className = 'tool-brand-icon';
       icon.setAttribute('aria-hidden', 'true');
@@ -6235,6 +6229,26 @@
           icon.replaceChildren(image);
         }).catch(() => {});
       }
+      return icon;
+    }
+
+    function createToolIdentity(tool, options = {}) {
+      const meta = toolBrandMeta(tool);
+      const identity = document.createElement('span');
+      identity.className = 'tool-identity';
+      identity.dataset.compact = String(Boolean(options.compact));
+      identity.dataset.logoKind = meta.logoKind || 'mark';
+      identity.dataset.darkInvert = String(Boolean(meta.darkInvert));
+      identity.style.setProperty('--tool-brand', meta.color);
+
+      const icon = createToolBrandIcon(tool, meta);
+      if (options.iconOnly) {
+        // Decorative: the surrounding heading already names the tool.
+        identity.setAttribute('aria-hidden', 'true');
+        identity.append(icon);
+        return identity;
+      }
+      identity.setAttribute('aria-label', formatToolName(tool));
 
       const label = document.createElement('span');
       label.className = 'tool-brand-label';
@@ -7619,6 +7633,14 @@
     function initSessionPanels() {
       document.querySelectorAll("details[data-panel-details]").forEach((details) => {
         const panel = details.dataset.panelDetails;
+        // Brand logo in the header, same identity system as the Overview.
+        // Icon-only: the h2 already names the harness. Combined gets no
+        // identity: the Overview never renders one, and its letter fallback
+        // would collide with Cline's "C" tile.
+        const title = details.querySelector("summary h2");
+        if (title && panel !== "combined" && !details.querySelector("summary .tool-identity")) {
+          title.insertAdjacentElement("beforebegin", createToolIdentity(panel, { iconOnly: true }));
+        }
         details.addEventListener("click", (event) => {
           // Only a plain click on the summary row folds the panel. Interactive
           // controls inside the row (the Codex review toggle) and body clicks do
@@ -7726,8 +7748,14 @@
         const panelLast = document.getElementById(`${prefix}PanelLast`);
         if (panelLast) panelLast.textContent = latest ? formatSessionTime(latest.last_seen_at) : "—";
       }
-      sessionPanelSetOpen(document.querySelector(`details[data-panel-details="${prefix}"]`),
-        sessionPanelShouldOpen(sessionCollapseOverrides[prefix], data));
+      const panelEl = document.querySelector(`details[data-panel-details="${prefix}"]`);
+      // Zero sessions in range: hide the harness section entirely (the wrapper
+      // included, or its empty surface band shows through). Failed fetches stay
+      // visible so their error row is not swallowed.
+      if (panelEl?.parentElement) {
+        panelEl.parentElement.style.display = (!sessions.length && !data?.error) ? "none" : "";
+      }
+      sessionPanelSetOpen(panelEl, sessionPanelShouldOpen(sessionCollapseOverrides[prefix], data));
 
       const tbody = document.getElementById(`${prefix}SessionsTable`);
       if (!tbody) return;
@@ -7896,6 +7924,25 @@
       updateSessionPanel("cline", lastSessionsResponses.cline);
       lastSessionsResponses.combined = buildCombinedSessionsData(lastSessionsResponses);
       updateSessionPanel("combined", lastSessionsResponses.combined, { showTool: true });
+
+      // Tab-level empty state: shown only when no harness has sessions in range
+      // and no fetch failed (error panels keep their error rows visible).
+      const anyPanelSessions = (lastSessionsResponses.combined?.sessions?.length || 0) > 0;
+      // Tool keys only: the response map also carries `combined` (derived, no
+      // errors of its own) and `_errors` (a plain map, not a response).
+      const anyPanelError = SESSION_TOOL_KEYS.some((k) => lastSessionsResponses[k]?.error);
+      const showEmpty = !anyPanelSessions && !anyPanelError;
+      const emptyStateEl = document.getElementById("sessionsEmptyState");
+      if (emptyStateEl) emptyStateEl.hidden = !showEmpty;
+      // The expand/collapse row has nothing to act on over an empty tab.
+      const toolbarEl = document.getElementById("sessionsPanelToolbar");
+      if (toolbarEl) {
+        toolbarEl.hidden = showEmpty;
+        // Tailwind's display utilities override the base [hidden] rule (see
+        // setQuotaSingleServerLayout); the inline display is what actually
+        // hides the flex row.
+        toolbarEl.style.display = showEmpty ? "none" : "";
+      }
 
       // Initialize sortable headers (idempotent — skips if already initialized)
       initSortHeaders("codex", renderSessionsTab);

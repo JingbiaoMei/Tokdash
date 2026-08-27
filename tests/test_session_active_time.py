@@ -353,6 +353,7 @@ def test_active_time_labels_exist_in_both_languages():
         "agentTimePanelHint",
         "activeTimeCombinedHint",
         "activeTimeMultiServerHint",
+        "sessionsEmptyRange",
     ):
         assert len(re.findall(rf"^\s+{key}: ", source, re.MULTILINE)) == 2, key
 

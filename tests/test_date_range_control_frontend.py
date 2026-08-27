@@ -43,7 +43,9 @@ def test_date_range_trigger_text_is_localized_and_deterministic(
     )
     harness = tmp_path / "date-range-control.js"
     harness.write_text(
-        functions
+        "const LANG_LOCALES = { en: 'en-US', zh: 'zh-CN', ja: 'ja-JP', ko: 'ko-KR', es: 'es-ES', pt: 'pt-BR' };\n"
+        "function langLocale(lang) { return LANG_LOCALES[lang] || 'en-US'; }\n"
+        + functions
         + "\nconst cases = JSON.parse(process.argv[2]);\n"
         + "const result = cases.map(({ start, end, lang }) => "
         + "formatDateRangeTriggerText(new Date(`${start}T12:00:00`), new Date(`${end}T12:00:00`), lang));\n"
@@ -55,6 +57,10 @@ def test_date_range_trigger_text_is_localized_and_deterministic(
         {"start": "2026-08-03", "end": "2026-08-09", "lang": "en"},
         {"start": "2026-08-10", "end": "2026-08-10", "lang": "zh"},
         {"start": "2026-08-03", "end": "2026-08-09", "lang": "zh"},
+        {"start": "2026-08-10", "end": "2026-08-10", "lang": "ja"},
+        {"start": "2026-08-03", "end": "2026-08-09", "lang": "ko"},
+        {"start": "2026-08-10", "end": "2026-08-10", "lang": "es"},
+        {"start": "2026-08-10", "end": "2026-08-10", "lang": "pt"},
     ]
     result = subprocess.run(
         ["node", str(harness), json.dumps(cases)],
@@ -67,6 +73,10 @@ def test_date_range_trigger_text_is_localized_and_deterministic(
         "Aug 3, 2026 – Aug 9, 2026",
         "2026年8月10日",
         "2026年8月3日 – 2026年8月9日",
+        "2026年8月10日",
+        "2026년 8월 3일 – 2026년 8월 9일",
+        "10 ago 2026",
+        "10 de ago. de 2026",
     ]
 
 
@@ -78,8 +88,8 @@ def test_date_range_trigger_markup_and_localization_contract() -> None:
     assert 'class="date-range-calendar-icon"' in source
     assert 'class="date-range-chevron"' in source
     assert 'aria-haspopup="dialog"' in source
-    assert source.count("customRange: '") == 2
-    assert source.count("selectRange: '") == 2
+    assert source.count("customRange: '") == 6
+    assert source.count("selectRange: '") == 6
 
 
 def test_quick_ranges_use_progressive_disclosure_without_horizontal_scroll() -> None:

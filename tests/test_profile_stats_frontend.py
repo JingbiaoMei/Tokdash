@@ -100,6 +100,8 @@ function formatNumber(value) { return new Intl.NumberFormat('en-US').format(Numb
 function formatCurrency(value) { return `$${(Number(value) || 0).toFixed(2)}`; }
 function formatShortDate(value) { return value || '—'; }
 let currentLang = 'en';
+const LANG_LOCALES = { en: 'en-US', zh: 'zh-CN', ja: 'ja-JP', ko: 'ko-KR', es: 'es-ES', pt: 'pt-BR' };
+function langLocale(lang = currentLang) { return LANG_LOCALES[lang] || 'en-US'; }
 let overviewReadableTokens = true;
 """
 
@@ -754,9 +756,9 @@ def test_profile_view_html_and_localization_contract():
     ]
     for element_id in required_ids:
         assert f'id="{element_id}"' in source
-    assert source.count("profileView: '") == 2
-    assert source.count("recordedTokens: '") == 2
-    assert source.count("tokenActivity: '") == 2
+    assert source.count("profileView: '") == 6
+    assert source.count("recordedTokens: '") == 6
+    assert source.count("tokenActivity: '") == 6
     assert ".profile-activity-cell" in source
     assert "border-radius:2px" in source.replace(" ", "")
     assert "function renderProfileView() {" in source
@@ -912,7 +914,7 @@ def test_profile_activity_legend_is_safe_localized_and_mode_aware():
     compact = re.sub(r"\s+", "", source)
 
     assert 'id="profileActivityLegend"' in source
-    assert source.count("activityLegend: '") == 2
+    assert source.count("activityLegend: '") == 6
     assert ".profile-activity-legend{" in compact
     assert ".profile-activity-legend-swatches{" in compact
     assert ".profile-activity-legend-bars{" in compact
@@ -952,9 +954,9 @@ def test_profile_milestone_toggle_defaults_off_persists_and_syncs_both_views():
         "localStorage.getItem(PROFILE_MILESTONES_STORAGE_KEY) === 'on';"
         in source
     )
-    assert source.count("milestones: '") == 2
-    assert source.count("showMilestones: '") == 2
-    assert source.count("hideMilestones: '") == 2
+    assert source.count("milestones: '") == 6
+    assert source.count("showMilestones: '") == 6
+    assert source.count("hideMilestones: '") == 6
     assert ".profile-milestone-toggle{" in compact
     assert '[data-milestones-enabled="false"]' in source
 
@@ -1229,7 +1231,7 @@ def test_overview_profile_summary_markup_and_style_contract():
         "viewFullProfile",
         "overviewProfileUnavailable",
     ]:
-        assert source.count(f"{key}: '") == 2
+        assert source.count(f"{key}: '") == 6
 
     assert ".overview-profile-band{" in compact
     assert "grid-template-columns:minmax(220px,260px)minmax(0,1fr)" in compact
@@ -1436,7 +1438,7 @@ def test_activity_insights_localization_states_and_responsive_contract():
         "activityLocalScope",
         "effortXhigh",
     ):
-        assert source.count(f"{key}: '") == 2
+        assert source.count(f"{key}: '") == 6
     assert "@media(max-width:768px)" in compact
     assert (
         ".profile-activity-insights-kpis{display:grid;"

@@ -360,7 +360,7 @@ def test_the_card_sits_after_total_messages_in_a_six_column_row():
     assert 'id="overviewActiveDelta"' in kpis
     assert 'id="overviewActiveMeta"' in kpis
     # A one-line label, like every other card in the row.
-    assert 'data-i18n="agentTimeCard"' in kpis
+    assert 'data-i18n="agentTime"' in kpis
     assert 'data-i18n-title="agentTimeOverviewHint"' in kpis
 
 
@@ -480,7 +480,7 @@ def test_the_request_key_identifies_the_servers():
 
 def test_active_time_overview_labels_exist_in_both_languages():
     source = INDEX_HTML.read_text(encoding="utf-8")
-    for key in ("agentTime", "agentTimeCard", "agentTimeOverviewHint", "activeTimeToolsUnavailable", "idleCap"):
+    for key in ("agentTime", "agentTimeOverviewHint", "activeTimeToolsUnavailable", "idleCap"):
         assert len(re.findall(rf"^\s+{key}: ", source, re.MULTILINE)) == 2, key
     # The wording the card no longer uses is gone rather than left to rot.
     assert "activeTimeOverviewMultiServerHint" not in source

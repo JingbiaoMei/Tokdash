@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 
@@ -91,6 +92,36 @@ def test_every_panel_has_collapsible_markup():
 
 def test_i18n_keys_in_both_languages():
     source = INDEX_HTML.read_text(encoding="utf-8")
-    import re
     for key in ("panelTokens", "panelLast", "sessionsExpandAll", "sessionsCollapseAll"):
         assert len(re.findall(rf"^\s+{key}: ", source, re.MULTILINE)) == 2, key
+
+
+def test_sessions_panels_have_logos_and_hide_when_empty():
+    """Panel headers reuse the Overview brand identity (icon-only; combined
+    gets none) and zero-session harnesses are hidden, with a tab-level empty
+    state as the fallback."""
+    source = INDEX_HTML.read_text(encoding="utf-8")
+    panels = set(re.findall(r'data-panel-details="(\w+)"', source))
+    assert len(panels) >= 15, panels
+    # Icon-only identity injected once per panel header, combined excluded.
+    assert 'createToolIdentity(panel, { iconOnly: true })' in source
+    assert 'function createToolBrandIcon(tool, meta)' in source
+    assert '!details.querySelector("summary .tool-identity")' in source
+    assert 'panel !== "combined"' in source
+    # Empty-range panels are hidden only when the range has no sessions and
+    # the fetch did not fail. Assert on the guard pieces, not the formatting.
+    hide_line = next(l for l in source.splitlines() if "panelEl.parentElement.style.display" in l)
+    assert "!sessions.length" in hide_line, hide_line
+    assert "!data?.error" in hide_line, hide_line
+    assert '"none"' in hide_line, hide_line
+    # Tab-level empty state and the expand/collapse row share the same gate.
+    assert 'id="sessionsEmptyState"' in source
+    assert 'data-i18n="sessionsEmptyRange"' in source
+    assert 'id="sessionsPanelToolbar"' in source
+    # `hidden` alone is beaten by Tailwind's display utilities on the flex row;
+    # the inline display is what actually hides it, and both must gate on
+    # showEmpty.
+    toolbar_line = next(l for l in source.splitlines() if "toolbarEl.hidden" in l)
+    assert "showEmpty" in toolbar_line, toolbar_line
+    display_line = next(l for l in source.splitlines() if "toolbarEl.style.display" in l)
+    assert "showEmpty" in display_line, display_line

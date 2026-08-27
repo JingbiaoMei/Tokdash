@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 2.3.1 - 2026-08-27
+
+### Changed
+
+- Sessions panels now carry each harness's brand logo in the panel header, reusing the Overview's identity system. A harness with no sessions in the selected range is hidden instead of rendering an empty panel, and when no harness has sessions in range a single empty-state band replaces them all. A panel whose fetch failed stays visible so its error row is not swallowed.
+
+### Fixed
+
+- The first dashboard load no longer races the startup cache warmer into a transient `503`. One foreground request per key may join the warm fill already running on its behalf, bounded by `TOKDASH_STARTUP_WARM_JOIN_SECONDS` (default `30` seconds); every other same-key cold miss keeps the existing fail-fast backpressure, and the warmer's own backpressure no longer logs as a warning. The unused period-only Today usage key is no longer warmed, dropping a duplicate of the largest startup aggregation. Direct callers of `/api/usage?period=today` still compute the same data but no longer find it pre-cached.
+
 ## 2.3.0 - 2026-08-26
 
 ### Added

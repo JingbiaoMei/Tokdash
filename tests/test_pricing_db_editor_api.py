@@ -1,4 +1,6 @@
 import json
+import threading
+from datetime import datetime
 
 from fastapi import HTTPException
 
@@ -163,6 +165,7 @@ def test_startup_warmer_populates_initial_overview_date_range(monkeypatch):
     usage_calls = []
     stats_calls = []
     session_calls = []
+    active_time_calls = []
     activity_calls = []
 
     def fake_usage(period, date_from, date_to):
@@ -181,14 +184,19 @@ def test_startup_warmer_populates_initial_overview_date_range(monkeypatch):
         activity_calls.append(1)
         return {"tools": []}
 
+    def fake_active_time(period, date_from, date_to, *, include_review_sessions):
+        active_time_calls.append((period, date_from, date_to, include_review_sessions))
+        return {"active_ms": 0}
+
     monkeypatch.setattr(api, "compute_usage_with_comparison", fake_usage)
     monkeypatch.setattr(api, "compute_stats", fake_stats)
     monkeypatch.setattr(api, "get_sessions_data", fake_sessions)
+    monkeypatch.setattr(api, "get_active_time_data", fake_active_time)
     monkeypatch.setattr(api, "get_codex_activity_insights", fake_activity)
 
     try:
         api._warm_caches()
-        assert ("today", None, None) in usage_calls
+        assert ("today", None, None) not in usage_calls
         date_range_calls = [call for call in usage_calls if call[1] is not None or call[2] is not None]
         assert len(date_range_calls) == 1
 
@@ -205,7 +213,76 @@ def test_startup_warmer_populates_initial_overview_date_range(monkeypatch):
             assert api._session_response_cache_key(
                 tool, "today", date_from, date_to, None
             ) in api._cache
+        assert active_time_calls == [("today", date_from, date_to, None)]
         assert activity_calls == [1]
         assert api.ACTIVITY_INSIGHTS_CACHE_KEY in api._cache
     finally:
         api._clear_cache()
+
+
+def test_default_usage_request_joins_the_startup_warm(monkeypatch):
+    api._clear_cache()
+    started = threading.Event()
+    release = threading.Event()
+    joined = threading.Event()
+    usage_calls = []
+    response = {}
+    errors = []
+
+    def fake_usage(period, date_from, date_to):
+        usage_calls.append((period, date_from, date_to))
+        started.set()
+        release.wait(timeout=5)
+        return {"period": period, "date_from": date_from, "date_to": date_to}
+
+    monkeypatch.setattr(api, "compute_usage_with_comparison", fake_usage)
+    monkeypatch.setattr(api, "compute_stats", lambda _year: {})
+    monkeypatch.setattr(api, "get_sessions_data", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(api, "get_active_time_data", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(api, "get_codex_activity_insights", lambda: {"tools": []})
+    original_claim = api._claim_startup_warm_wait
+
+    def claim_startup_warm_wait(key):
+        event = original_claim(key)
+        if event is not None:
+            joined.set()
+        return event
+
+    monkeypatch.setattr(api, "_claim_startup_warm_wait", claim_startup_warm_wait)
+
+    warm_thread = threading.Thread(target=api._warm_caches)
+    warm_thread.start()
+    assert started.wait(timeout=5)
+
+    today = datetime.now().astimezone().strftime("%Y-%m-%d")
+
+    def request_usage():
+        try:
+            response["value"] = api.get_usage(period="today", date_from=today, date_to=today)
+        except BaseException as error:  # noqa: BLE001 - captured for the thread assertion
+            errors.append(error)
+
+    request_thread = threading.Thread(target=request_usage)
+    request_thread.start()
+    assert joined.wait(timeout=5)
+    assert request_thread.is_alive(), "the first request should wait for the startup fill"
+
+    # A second tab cannot turn the startup exception into an unbounded waiter pool.
+    try:
+        api.get_usage(period="today", date_from=today, date_to=today)
+    except HTTPException as error:
+        assert error.status_code == 503
+    else:
+        raise AssertionError("only one foreground request may join a startup fill")
+
+    release.set()
+    warm_thread.join(timeout=5)
+    request_thread.join(timeout=5)
+
+    assert not errors
+    assert not warm_thread.is_alive()
+    assert not request_thread.is_alive()
+    assert usage_calls == [("today", today, today)]
+    assert response["value"]["date_from"] == today
+    assert response["value"]["response_cache"]["status"] == "hit"
+    api._clear_cache()

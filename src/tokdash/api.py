@@ -245,17 +245,19 @@ def _warm_caches() -> None:
     """Best-effort background warm so the first user request hits hot caches.
 
     Populates the parser caches (coding_tools._entry_cache, openclaw._ENTRY_CACHE)
-    and the API response cache for the dashboard's initial loads — Overview (today),
-    Stats, and each Sessions tool panel. Without this, the first cold request pays
-    the full multi-second parse (the Sessions tab defers its /api/sessions fan-out
-    until the tab opens, so a cold first visit would pay the codex/claude session
-    store sync serially, per tool, in-request).
+    and the API response cache for the dashboard's initial loads — the exact Overview
+    date range, Stats, and each Sessions tool panel. The period-only Today usage key
+    is intentionally not warmed: the dashboard never requests it, and computing both
+    forms used to duplicate the largest startup aggregation.
+
+    A foreground request for the key currently being warmed may join that one fill;
+    see ``get_cached_or_fetch``. This keeps the browser's first load from racing the
+    warmer into a transient 503 without relaxing the normal backpressure policy.
     Disable with TOKDASH_WARM_ON_START=0.
     Failures are swallowed; warming must never crash `serve`.
     """
     today = datetime.now().astimezone().strftime("%Y-%m-%d")
     warmers = [
-        (_pricing_cache_key("usage_today_None_None"), lambda: compute_usage_with_comparison("today", None, None)),
         (
             _pricing_cache_key(f"usage_today_{today}_{today}"),
             lambda: compute_usage_with_comparison("today", today, today),
@@ -282,10 +284,13 @@ def _warm_caches() -> None:
     )
     warmers.append((ACTIVITY_INSIGHTS_CACHE_KEY, get_codex_activity_insights))
     for key, fetch in warmers:
+        warm_event = _begin_startup_warm(key)
         try:
-            get_cached_or_fetch(key, fetch)
+            get_cached_or_fetch(key, fetch, _startup_warm=True)
         except Exception:
             pass
+        finally:
+            _finish_startup_warm(key, warm_event)
 
 
 @asynccontextmanager
@@ -490,6 +495,15 @@ def _positive_int_env(name: str, default: int) -> int:
 # parse slot. Operators can still lower it with TOKDASH_CACHE_TTL.
 CACHE_TTL = _positive_int_env("TOKDASH_CACHE_TTL", 600)  # seconds
 CACHE_MAX_ENTRIES = _positive_int_env("TOKDASH_CACHE_MAX_ENTRIES", 256)
+STARTUP_WARM_JOIN_SECONDS = _positive_int_env("TOKDASH_STARTUP_WARM_JOIN_SECONDS", 30)
+
+# A startup warmer is the one safe exception to cold-miss fail-fast: the automatic
+# browser load is asking for work that is already running on its behalf. Let at most
+# one foreground request per key wait for that result so a tab storm still cannot
+# occupy the AnyIO worker pool. All ordinary same-key misses retain the old 503 path.
+_startup_warm_guard = threading.Lock()
+_startup_warm_events: dict[str, threading.Event] = {}
+_startup_warm_waiters: set[str] = set()
 
 
 class CacheBackpressureError(RuntimeError):
@@ -517,8 +531,16 @@ _COMPUTE_CONCURRENCY = _positive_int_env("TOKDASH_COMPUTE_CONCURRENCY", 2)
 _compute_semaphore = threading.BoundedSemaphore(_COMPUTE_CONCURRENCY)
 
 
-def _raise_backpressure(message: str, *, key: str, reason: str, had_stale: bool) -> None:
-    logger.warning(
+def _raise_backpressure(
+    message: str,
+    *,
+    key: str,
+    reason: str,
+    had_stale: bool,
+    warn: bool = True,
+) -> None:
+    log = logger.warning if warn else logger.debug
+    log(
         "tokdash cache backpressure key=%s reason=%s had_stale=%s compute_concurrency=%s",
         key,
         reason,
@@ -526,6 +548,42 @@ def _raise_backpressure(message: str, *, key: str, reason: str, had_stale: bool)
         _COMPUTE_CONCURRENCY,
     )
     raise CacheBackpressureError(message)
+
+
+def _begin_startup_warm(key: str) -> threading.Event:
+    event = threading.Event()
+    with _startup_warm_guard:
+        _startup_warm_events[key] = event
+        _startup_warm_waiters.discard(key)
+    return event
+
+
+def _finish_startup_warm(key: str, event: threading.Event) -> None:
+    with _startup_warm_guard:
+        if _startup_warm_events.get(key) is event:
+            # Publish completion before removing the registry entry. Otherwise a
+            # request arriving in the tiny pop-before-set window would see neither
+            # a cached join target nor an unlocked cache key and emit a stray 503.
+            event.set()
+            _startup_warm_events.pop(key, None)
+            _startup_warm_waiters.discard(key)
+            return
+    event.set()
+
+
+def _claim_startup_warm_wait(key: str) -> threading.Event | None:
+    with _startup_warm_guard:
+        event = _startup_warm_events.get(key)
+        if event is None or key in _startup_warm_waiters:
+            return None
+        _startup_warm_waiters.add(key)
+        return event
+
+
+def _release_startup_warm_wait(key: str, event: threading.Event) -> None:
+    with _startup_warm_guard:
+        if _startup_warm_events.get(key) is event:
+            _startup_warm_waiters.discard(key)
 
 
 def _response_cache_metadata(result: CacheFetchResult) -> Dict[str, Any]:
@@ -678,6 +736,8 @@ def get_cached_or_fetch(
     *,
     force_refresh: bool = False,
     return_metadata: bool = False,
+    _startup_warm: bool = False,
+    _startup_waited: bool = False,
 ) -> Any:
     """Cache with single-flight, stale-while-revalidate, and a heavy-compute cap.
 
@@ -685,7 +745,8 @@ def get_cached_or_fetch(
       ``force_refresh=True`` skips this fast path so manual refreshes recompute.
     - Stale hit: returned immediately. At most one daemon refreshes the key in the
       background, so no caller pays the recompute latency and parsers do not stampede.
-    - Cold miss: if this key or the global heavy-compute pool is already busy, fail
+    - Cold miss: one foreground request may join an active startup warm for this key.
+      Otherwise, if this key or the global heavy-compute pool is already busy, fail
       fast with ``CacheBackpressureError`` so request workers do not pile up while
       blocked. A later request can retry once the in-flight fill finishes.
     - A global semaphore bounds how many heavy computes run at once across all keys.
@@ -727,11 +788,29 @@ def get_cached_or_fetch(
         # Another thread is already computing this key.
         if hit is not None:
             return result(hit[1], "stale", now - hit[0])  # serve cached rather than stampede the parser
+        if not force_refresh and not _startup_warm and not _startup_waited:
+            warm_event = _claim_startup_warm_wait(key)
+            if warm_event is not None:
+                try:
+                    warm_event.wait(timeout=STARTUP_WARM_JOIN_SECONDS)
+                finally:
+                    _release_startup_warm_wait(key, warm_event)
+                # The warmer may have completed successfully, failed, or timed out.
+                # Re-enter once: a success is now a hit, a failure can be computed by
+                # this request, and a timeout retains the ordinary fail-fast behavior.
+                return get_cached_or_fetch(
+                    key,
+                    fetch_fn,
+                    force_refresh=force_refresh,
+                    return_metadata=return_metadata,
+                    _startup_waited=True,
+                )
         _raise_backpressure(
             f"Cache fill already in progress for {key}",
             key=key,
             reason="same_key_inflight",
             had_stale=False,
+            warn=not _startup_warm,
         )
     try:
         # Re-check under the lock: a prior holder may have just stored a fresh value.
@@ -748,6 +827,7 @@ def get_cached_or_fetch(
                 key=key,
                 reason="compute_cap",
                 had_stale=False,
+                warn=not _startup_warm,
             )
         try:
             fresh = fetch_fn()

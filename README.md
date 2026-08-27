@@ -433,6 +433,7 @@ Tokdash is **localhost-only by default**.
 - `TOKDASH_CACHE_TTL` (default: `600` seconds)
 - `TOKDASH_CACHE_MAX_ENTRIES` (default: `256`) — bound cached API responses and their idle per-key locks
 - `TOKDASH_COMPUTE_CONCURRENCY` (default: `2`) — cap on simultaneous heavy history reparses; excess cold requests return a fast `503` instead of saturating the server under load
+- `TOKDASH_STARTUP_WARM_JOIN_SECONDS` (default: `30` seconds) — how long the first request for a key still being warmed at startup waits for that fill instead of returning `503`; at most one request per key waits
 - `TOKDASH_LIMIT_CONCURRENCY` (default: `64`) — uvicorn connection cap (backpressure)
 - `TOKDASH_KEEPALIVE` (default: `5` seconds) — uvicorn keep-alive timeout
 - `TOKDASH_ALLOW_ORIGINS` (comma-separated, default: empty)

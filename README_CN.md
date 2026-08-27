@@ -420,6 +420,7 @@ Tokdash 默认**只监听 localhost**。
 - `TOKDASH_CACHE_TTL`（默认：`600` 秒）
 - `TOKDASH_CACHE_MAX_ENTRIES`（默认：`256`）——限制 API 响应缓存及其空闲键锁的数量
 - `TOKDASH_COMPUTE_CONCURRENCY`（默认：`2`）——同时进行的重型历史重解析数量上限；超出的冷请求会立即返回 `503`，而不是在高负载下耗尽服务线程
+- `TOKDASH_STARTUP_WARM_JOIN_SECONDS`（默认：`30` 秒）——启动预热某个键期间，第一个请求该键的请求最多等待该次预热多久，而不是直接返回 `503`；每个键最多只有一个请求等待
 - `TOKDASH_LIMIT_CONCURRENCY`（默认：`64`）——uvicorn 接受的最大并发连接数（背压）
 - `TOKDASH_KEEPALIVE`（默认：`5` 秒）——uvicorn keep-alive 超时
 - `TOKDASH_ALLOW_ORIGINS`（逗号分隔，默认：空）

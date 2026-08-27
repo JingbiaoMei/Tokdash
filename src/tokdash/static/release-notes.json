@@ -1,6 +1,24 @@
 {
-  "current": "2.3.0",
+  "current": "2.3.1",
   "releases": [
+    {
+      "version": "2.3.1",
+      "date": "2026-08-27",
+      "sections": [
+        {
+          "type": "changed",
+          "items": [
+            "Session panels now show each harness's brand logo, and harnesses with no sessions in the selected range are hidden instead of rendering empty panels."
+          ]
+        },
+        {
+          "type": "fixed",
+          "items": [
+            "The first dashboard load after startup no longer returns a transient 503 while the cache warms."
+          ]
+        }
+      ]
+    },
     {
       "version": "2.3.0",
       "date": "2026-08-26",

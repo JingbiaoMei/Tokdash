@@ -45,6 +45,7 @@ def test_get_quota_returns_stored_codex_session_data_without_collecting(monkeypa
         "minimax_api": False,
         "kimi_api": False,
         "grok_api": False,
+        "zai_api": False,
     }
 
 
@@ -62,8 +63,8 @@ def test_get_quota_exposes_new_provider_shells_and_consent_keys():
 
     payload = api.get_quota()
 
-    assert {"minimax", "kimi", "grok"}.issubset(payload["providers"])
-    assert {"minimax_api", "kimi_api", "grok_api"}.issubset(payload["consent"])
+    assert {"minimax", "kimi", "grok", "zai"}.issubset(payload["providers"])
+    assert {"minimax_api", "kimi_api", "grok_api", "zai_api"}.issubset(payload["consent"])
 
 
 def test_quota_state_marks_only_locally_present_provider_shells_detected(monkeypatch, tmp_path):
@@ -78,6 +79,7 @@ def test_quota_state_marks_only_locally_present_provider_shells_detected(monkeyp
     monkeypatch.setattr(quota.clientpaths, "antigravity_cli_dir", lambda: missing)
     monkeypatch.setattr(quota.clientpaths, "minimax_cli_root", lambda: missing)
     monkeypatch.setattr(quota.clientpaths, "grok_home", lambda: missing)
+    monkeypatch.setattr(quota.clientpaths, "zcode_home", lambda: missing)
     monkeypatch.setattr(quota.clientpaths, "kimi_roots", lambda: [missing])
     for name in (
         "CLAUDE_CODE_OAUTH_TOKEN",
@@ -85,6 +87,10 @@ def test_quota_state_marks_only_locally_present_provider_shells_detected(monkeyp
         "MINIMAX_TOKEN_PLAN_GLOBAL_KEY",
         "MINIMAX_TOKEN_PLAN_CN_KEY",
         "KIMI_API_KEY",
+        "ZAI_API_KEY",
+        "Z_AI_API_KEY",
+        "ANTHROPIC_BASE_URL",
+        "ANTHROPIC_AUTH_TOKEN",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -93,8 +99,31 @@ def test_quota_state_marks_only_locally_present_provider_shells_detected(monkeyp
     assert payload["providers"]["codex"]["detected"] is True
     assert all(
         payload["providers"][provider]["detected"] is False
-        for provider in ("claude", "antigravity", "minimax", "kimi", "grok")
+        for provider in ("claude", "antigravity", "minimax", "kimi", "grok", "zai")
     )
+
+
+def test_anthropic_zai_environment_credential_is_discovered_and_detected(monkeypatch, tmp_path):
+    from tokdash.sources import quota
+    from tokdash.sources.quota import credential_sources
+
+    api._clear_cache()
+    missing = tmp_path / "missing"
+    monkeypatch.setattr(quota.clientpaths, "zcode_home", lambda: missing)
+    monkeypatch.setattr(quota.clientpaths, "kimi_roots", lambda: [missing])
+    monkeypatch.setattr(quota.config, "credential_scan_enabled", lambda: False)
+    monkeypatch.setattr(credential_sources.clientpaths, "zcode_home", lambda: missing)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(missing / "claude"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(missing / "data"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(missing / "config"))
+    monkeypatch.setenv("CC_SWITCH_CONFIG_DIR", str(missing / "cc-switch"))
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://api.z.ai/api/anthropic")
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "zai-anthropic-token")
+    monkeypatch.delenv("ZAI_API_KEY", raising=False)
+    monkeypatch.delenv("Z_AI_API_KEY", raising=False)
+
+    assert credential_sources.discover_provider_sources()["zai"] == ["environment"]
+    assert quota.quota_state()["providers"]["zai"]["detected"] is True
 
 
 def test_quota_history_route_uses_stored_snapshots(tmp_path):
@@ -127,6 +156,7 @@ def test_quota_consent_route_persists_provider_flags():
         "minimax_api": False,
         "kimi_api": False,
         "grok_api": False,
+        "zai_api": False,
     }
     assert api.get_quota()["consent"]["codex_api"] is True
 

@@ -15,6 +15,7 @@ QUOTA_KEYS = (
     "minimax_api",
     "kimi_api",
     "grok_api",
+    "zai_api",
 )
 CREDENTIAL_SCAN_KEY = "credential_scan"
 CONSENT_KEYS = (CREDENTIAL_SCAN_KEY, *QUOTA_KEYS)

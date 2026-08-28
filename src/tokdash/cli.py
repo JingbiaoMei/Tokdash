@@ -161,6 +161,7 @@ def build_parser(prog: str) -> argparse.ArgumentParser:
     parser.add_argument("--minimax-api", choices=["on", "off"], help="For `tokdash quota consent`: enable/disable MiniMax Token Plan quota polling.")
     parser.add_argument("--kimi-api", choices=["on", "off"], help="For `tokdash quota consent`: enable/disable Kimi Code quota polling.")
     parser.add_argument("--grok-api", choices=["on", "off"], help="For `tokdash quota consent`: enable/disable Grok Build quota polling.")
+    parser.add_argument("--zai-api", choices=["on", "off"], help="For `tokdash quota consent`: enable/disable Z.ai Coding Plan quota polling.")
     parser.add_argument(
         "--credential-scan",
         choices=["on", "off"],
@@ -881,6 +882,7 @@ def quota_command(args) -> int:
                 "minimax_api": _parse_onoff(args.minimax_api),
                 "kimi_api": _parse_onoff(args.kimi_api),
                 "grok_api": _parse_onoff(args.grok_api),
+                "zai_api": _parse_onoff(args.zai_api),
             }.items()
             if value is not None
         }

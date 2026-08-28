@@ -185,7 +185,7 @@ Tokdash Companion 状态栏应用是一个可选的原生客户端：在 macOS
 
 - 今日费用、Token、消息数和本月累计用量
 - 汇总多个 Tokdash 端点的总计，并按服务器分组显示额度
-- Codex、Claude、Kimi、MiniMax、Antigravity 与 Grok 额度窗口
+- Codex、Claude、Kimi、MiniMax、Antigravity、Grok 与 Z.ai 额度窗口
 - 相对重置时间与可选的低额度通知
 - 可选的登录时启动
 - 跟随系统、English 与简体中文显示语言
@@ -483,11 +483,11 @@ tokdash db watch --pretty
 
 ### 额度跟踪（可选）
 
-「额度」标签页展示订阅用量窗口与重置倒计时，来自两类数据源。**本地日志**（无网络）：Codex 会在会话文件里记录自己的额度，因此 Codex 的 5 小时 / 每周窗口可开箱即用；但它只会在你使用 Codex 时更新，且本地日志永远不包含重置额度或按量功能窗口。请把基于 Codex 会话日志的消耗视为**可能明显出错的估算值**：每个会话会缓存上一次获取到的额度快照，并在后续消息中原样重放，因此数字可能过期，重置边界附近的噪声也可能进一步扭曲某个窗口。「额度」标签页会把这些图表标记为估算。**实时轮询**（默认关闭，按服务商授权）：Tokdash 使用你本机 CLI 已登录的身份调用服务商自己的额度接口；数据更新、更完整，会加入 Codex 重置额度与按量功能窗口，是获得**准确** Codex 消耗所需的数据源，也是 Claude Code、Antigravity、MiniMax、Kimi Code 与 SuperGrok/Grok Build 额度的唯一来源。可在标签页内或用 CLI 按服务商单独开启：
+「额度」标签页展示订阅用量窗口与重置倒计时，来自两类数据源。**本地日志**（无网络）：Codex 会在会话文件里记录自己的额度，因此 Codex 的 5 小时 / 每周窗口可开箱即用；但它只会在你使用 Codex 时更新，且本地日志永远不包含重置额度或按量功能窗口。请把基于 Codex 会话日志的消耗视为**可能明显出错的估算值**：每个会话会缓存上一次获取到的额度快照，并在后续消息中原样重放，因此数字可能过期，重置边界附近的噪声也可能进一步扭曲某个窗口。「额度」标签页会把这些图表标记为估算。**实时轮询**（默认关闭，按服务商授权）：Tokdash 使用你本机 CLI 已登录的身份调用服务商自己的额度接口；数据更新、更完整，会加入 Codex 重置额度与按量功能窗口，是获得**准确** Codex 消耗所需的数据源，也是 Claude Code、Antigravity、MiniMax、Kimi Code、SuperGrok/Grok Build 与 Z.ai Coding Plan 额度的唯一来源。可在标签页内或用 CLI 按服务商单独开启：
 
 ```bash
 tokdash quota consent --codex-api on --claude-api on --antigravity-api on
-tokdash quota consent --minimax-api on --kimi-api on --grok-api on
+tokdash quota consent --minimax-api on --kimi-api on --grok-api on --zai-api on
 tokdash quota consent --credential-scan on   # 允许读取已披露的本地凭据存储
 tokdash quota consent --poll-interval 30      # 后台轮询周期：15、30、60 或 120 分钟
 tokdash quota consent --enabled off           # 总开关：关闭全部额度跟踪
@@ -501,14 +501,14 @@ tokdash quota show
 
 对于固定重置时间的额度窗口，轮询器还会在重置边界附近采样，以便历史记录捕获重置前的峰值和重置后的基线。边界采样默认开启，只调用触发边界的服务商接口，合并时间相近的多个服务商边界，并保证后台轮询周期之间至少间隔 300 秒。设置 `TOKDASH_QUOTA_BOUNDARY_POLL=0` 可关闭边界采样；设置 `TOKDASH_QUOTA_BOUNDARY_POST=0` 可只关闭重置后采样；还可通过 `TOKDASH_QUOTA_BOUNDARY_PRE_SECONDS` 和 `TOKDASH_QUOTA_BOUNDARY_POST_SECONDS` 调整默认 120 秒的提前量与延后量。
 
-实时轮询需要两层独立授权：`quota.credential_scan` 允许只读访问已披露的本地凭据存储，然后每个 `<provider>_api` 键允许向该服务商发起网络请求。Tokdash 只读取原生 CLI 认证/配置文件、OpenCode 的 `auth.json` 与全局供应商配置、当前 Claude 设置，以及通过只读 SQLite 连接读取 CC Switch 的 `providers` 表；不会扫描服务商日志、shell 配置或任意 `{file:...}` 引用。MiniMax 可使用 `mmx` 登录或 Token Plan Subscription Key（`MINIMAX_TOKEN_PLAN_GLOBAL_KEY` / `MINIMAX_TOKEN_PLAN_CN_KEY`）；普通按量 API key 不保证能读取 Token Plan。Kimi 需要 Kimi Code 登录或 key（`KIMI_API_KEY`），Moonshot Open Platform 的按量 key 不适用。SuperGrok/Grok Build 需要 `$GROK_HOME/auth.json` 中的 xAI OAuth 登录，普通 xAI API key 无法读取消费者账单额度。Tokdash 从不刷新或写入服务商凭据。`TOKDASH_QUOTA_POLL=0` 是关闭全部额度跟踪的硬终止开关。`tokdash export` 默认排除额度数据；只有当你确实想把它写入 JSON 时才使用 `--include-quota`。
+实时轮询需要两层独立授权：`quota.credential_scan` 允许只读访问已披露的本地凭据存储，然后每个 `<provider>_api` 键允许向该服务商发起网络请求。Tokdash 只读取原生 CLI 认证/配置文件、OpenCode 的 `auth.json` 与全局供应商配置、当前 Claude 设置，以及通过只读 SQLite 连接读取 CC Switch 的 `providers` 表；不会扫描服务商日志、shell 配置或任意 `{file:...}` 引用。MiniMax 可使用 `mmx` 登录或 Token Plan Subscription Key（`MINIMAX_TOKEN_PLAN_GLOBAL_KEY` / `MINIMAX_TOKEN_PLAN_CN_KEY`）；普通按量 API key 不保证能读取 Token Plan。Kimi 需要 Kimi Code 登录或 key（`KIMI_API_KEY`），Moonshot Open Platform 的按量 key 不适用。SuperGrok/Grok Build 需要 `$GROK_HOME/auth.json` 中的 xAI OAuth 登录，普通 xAI API key 无法读取消费者账单额度。Z.ai 可读取 `$ZCODE_HOME/v2/config.json`、受支持工具配置、`ZAI_API_KEY` 或 `Z_AI_API_KEY` 中的 Coding Plan key，并查询 5 小时 / 每周额度及旧版 MCP 限额。Tokdash 从不刷新或写入服务商凭据。`TOKDASH_QUOTA_POLL=0` 是关闭全部额度跟踪的硬终止开关。`tokdash export` 默认排除额度数据；只有当你确实想把它写入 JSON 时才使用 `--include-quota`。
 
 Tokdash 还会从 `$GROK_HOME/logs/unified.jsonl` 本地统计 Grok Build token。推理记录会提供 prompt、缓存 prompt、completion 与 reasoning token；Tokdash 使用同一 CLI 进程的模型事件完成归属，并通过常规价格数据库计算费用。缺少模型事件的记录会被跳过，不会猜测价格。
 
 DeepSeek Harness（`dsh`）的用量与会话从 `$DSH_HOME/sessions/*/*/session.jsonl.zstd`（或未压缩的 `session.jsonl`）本地读取，`DSH_HOME` 默认为 `~/.dsh`。每个日志由多个独立 zstd 帧拼接而成；Tokdash 会解码全部帧，把每个 step 的早期 usage chunk 折叠进最终消息而不是重复计数，并跳过 fork 会话继承自父会话的前缀，确保父会话与子会话不会对同一批 token 重复计费。
 
 Reasonix 的用量与会话从 `$REASONIX_HOME`（默认 `~/.reasonix`）本地读取：逐次请求的 token 来自每日 `stats/YYYY-MM-DD.jsonl` 日志，会话结构来自 `projects/*/sessions/*.jsonl`。Reasonix 连接的是其 `config.toml` 中配置的任意供应商，因此每行的 `provider/model` 会照常归因并按现有价格库计价；没有公开价格的自建模型只统计 token，费用为 0。Reasonix 按请求记录用量，且不会写入会话 ID，所以会话浏览器中的行只有轮次、项目与时长，没有 token 数 —— 完整总量在概览与统计中。
-ZCode 的用量从 `$ZCODE_HOME/cli/db/db.sqlite`（默认 `~/.zcode/cli/db/db.sqlite`，`ZCODE_HOME` 跟随 ZCode 自身设置）本地读取。`model_usage` 表中每行是一次模型请求（含重试），该行的 `model_id` 照常按现有价格库计价，`provider_id`（如 `builtin:zai-start-plan`）只作标签。ZCode 的 `input_tokens` 把已缓存与未缓存的提示词 token 合在一起计数，因此缓存部分单独分桶、按缓存费率计费；reasoning token 与 output 分开显示，但按 output 费率计费。ZCode 也会出现在 Sessions 标签页：turn 从同一数据库读取，按 (turn, model) 用相同规则计费，只读顶层会话；没有可计费 token 的 turn 仍会将其测量时长计入该工具的活跃时间。ZCode Coding Plan 额度属于远程账户数据，不在本地解析范围内。
+ZCode 的用量从 `$ZCODE_HOME/cli/db/db.sqlite`（默认 `~/.zcode/cli/db/db.sqlite`，`ZCODE_HOME` 跟随 ZCode 自身设置）本地读取。`model_usage` 表中每行是一次模型请求（含重试），该行的 `model_id` 照常按现有价格库计价，`provider_id`（如 `builtin:zai-start-plan`）只作标签。ZCode 的 `input_tokens` 把已缓存与未缓存的提示词 token 合在一起计数，因此缓存部分单独分桶、按缓存费率计费；reasoning token 与 output 分开显示，但按 output 费率计费。ZCode 也会出现在 Sessions 标签页：turn 从同一数据库读取，按 (turn, model) 用相同规则计费，只读顶层会话；没有可计费 token 的 turn 仍会将其测量时长计入该工具的活跃时间。Coding Plan 额度属于远程账户数据，可通过单独授权的 Z.ai 实时轮询器读取。
 
 WorkBuddy 的用量从 `~/.workbuddy-ai/projects/*/*.jsonl` 会话日志本地读取（`WORKBUDDY_DATA_DIR` 可指定逗号分隔的根目录列表，指向其他存储位置，例如 WSL 下的 Windows 数据目录）。每条 assistant 消息行对应一次模型调用；`prompt_tokens` 中包含缓存部分，缓存部分单独分桶、按缓存费率计费；reasoning token 与 output 分开显示，但按 output 费率计费。模型 ID 原样保留：显式模型 ID（如 gpt-5.5）照常按现有价格库计价，Auto 路由别名（`default-model`）不在价格库中，费用为 0.00。每轮的 `credit` 值仅作为元数据存储，不计入费用。WorkBuddy 不出现在 Sessions 标签页。
 

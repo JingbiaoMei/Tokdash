@@ -22,6 +22,8 @@ from .codex import collect_codex_api_snapshots
 from .grok import collect_grok_api_snapshots
 from .kimi import collect_kimi_api_snapshots
 from .minimax import collect_minimax_api_snapshots
+from .zai import collect_zai_api_snapshots
+from .credential_sources import zai_coding_base_url_allowed
 from .types import QuotaSnapshot
 
 _CURRENT_SNAPSHOTS: list[QuotaSnapshot] = []
@@ -66,6 +68,8 @@ def collect_network_snapshots(sources: Iterable[str] | None = None) -> list[Quot
             snapshots.extend(collect_kimi_api_snapshots())
         elif key == "grok_api":
             snapshots.extend(collect_grok_api_snapshots())
+        elif key == "zai_api":
+            snapshots.extend(collect_zai_api_snapshots())
     return snapshots
 
 
@@ -321,6 +325,7 @@ def _network_key_for_provider(name: str) -> str:
         "minimax": "minimax_api",
         "kimi": "kimi_api",
         "grok": "grok_api",
+        "zai": "zai_api",
     }.get(name, f"{name}_api")
 
 
@@ -362,12 +367,17 @@ def _detected_local_providers() -> set[str]:
             ),
         ),
         "grok": (clientpaths.grok_home(), ()),
+        "zai": (clientpaths.zcode_home() / "v2" / "config.json", ("ZAI_API_KEY", "Z_AI_API_KEY")),
     }
     for provider, (path, env_names) in checks.items():
         if path.exists() or any(os.environ.get(name, "").strip() for name in env_names):
             detected.add(provider)
     if os.environ.get("KIMI_API_KEY", "").strip() or any(root.exists() for root in clientpaths.kimi_roots()):
         detected.add("kimi")
+    if os.environ.get("ANTHROPIC_AUTH_TOKEN", "").strip() and zai_coding_base_url_allowed(
+        os.environ.get("ANTHROPIC_BASE_URL", "")
+    ):
+        detected.add("zai")
     if config.credential_scan_enabled():
         try:
             from .credential_sources import discover_provider_sources
@@ -415,7 +425,7 @@ def quota_state(store: UsageEntryStore | None = None) -> dict[str, Any]:
     consent = quota_network_consent()
     providers = {
         name: _provider_shell(name, consent)
-        for name in ("codex", "claude", "antigravity", "minimax", "kimi", "grok")
+        for name in ("codex", "claude", "antigravity", "minimax", "kimi", "grok", "zai")
     }
     for name in _detected_local_providers():
         providers[name]["detected"] = True

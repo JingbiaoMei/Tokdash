@@ -87,8 +87,8 @@ def test_release_notes_accessible_drawer_contract() -> None:
     )
     assert "event.key === 'Escape'" in source
     assert "version?.runtime_version || version?.current" in source
-    assert source.count("whatsNew: '") == 2
-    assert source.count("releaseNotesIntro: '") == 2
+    assert source.count("whatsNew: '") == 6
+    assert source.count("releaseNotesIntro: '") == 6
     assert 'class="btn btn-ghost compact-control release-notes-trigger"' in source
     assert source.index('id="refreshBtn"') < source.index('id="releaseNotesToggle"')
     assert source.index('id="releaseNotesToggle"') < source.index('id="settingsMenu"')

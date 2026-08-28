@@ -355,7 +355,7 @@ def test_active_time_labels_exist_in_both_languages():
         "activeTimeMultiServerHint",
         "sessionsEmptyRange",
     ):
-        assert len(re.findall(rf"^\s+{key}: ", source, re.MULTILINE)) == 2, key
+        assert len(re.findall(rf"^\s+{key}: ", source, re.MULTILINE)) == 6, key
 
 
 def test_multi_server_totals_are_relabelled_as_sums():

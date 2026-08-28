@@ -481,7 +481,7 @@ def test_the_request_key_identifies_the_servers():
 def test_active_time_overview_labels_exist_in_both_languages():
     source = INDEX_HTML.read_text(encoding="utf-8")
     for key in ("agentTime", "agentTimeOverviewHint", "activeTimeToolsUnavailable", "idleCap"):
-        assert len(re.findall(rf"^\s+{key}: ", source, re.MULTILINE)) == 2, key
+        assert len(re.findall(rf"^\s+{key}: ", source, re.MULTILINE)) == 6, key
     # The wording the card no longer uses is gone rather than left to rot.
     assert "activeTimeOverviewMultiServerHint" not in source
 

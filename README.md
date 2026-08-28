@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="README.md">English</a> &nbsp;|&nbsp; <a href="README_CN.md">中文</a>
+  <a href="README.md">English</a> &nbsp;|&nbsp; <a href="README_CN.md">中文</a> &nbsp;|&nbsp; <a href="README_JA.md">日本語</a> &nbsp;|&nbsp; <a href="README_KO.md">한국어</a> &nbsp;|&nbsp; <a href="README_ES.md">Español</a> &nbsp;|&nbsp; <a href="README_PT.md">Português</a>
 </p>
 
 <p align="center">
@@ -81,7 +81,7 @@
 - **Quota tab** *[new]*: subscription window bars with reset countdowns for Codex, Claude Code, and Antigravity. Codex windows work out of the box from local logs; Codex reset credits, metered features, and all Claude/Antigravity quota need opt-in [live polling](#quota-tracking-optional)
 - **Companion Status Bar App** *[new]*: view spend and subscription quota from the macOS menu bar or Windows notification area — on the [Microsoft Store](https://apps.microsoft.com/detail/9ppnmpdq8b52) for Windows — [screenshots and downloads](#tokdash-companion-status-bar-app)
 - **Multi-server views**: add WSL, macOS, and other Tokdash servers in Settings; combine usage across any selection while keeping quota grouped by machine. See [remote access](docs/guides/REMOTE_ACCESS.md).
-- **Themes and app polish**: 10 style themes, light/dark mode, and PWA install support
+- **Themes and app polish**: 10 style themes, light/dark mode, and PWA install support, UI in six languages (English / 中文 / 日本語 / 한국어 / Español / Português)
 
 ### Client support matrix
 
@@ -190,7 +190,7 @@ view of the Tokdash service without keeping the full dashboard open.
 - Codex, Claude, Kimi, MiniMax, Antigravity, Grok, and Z.ai quota windows
 - Relative reset times and optional low-quota notifications
 - Optional launch at login
-- System, English, and Simplified Chinese display languages
+- System language detection plus English, Simplified Chinese, Japanese, Korean, Spanish, and Portuguese
 - No telemetry, credential discovery, port scanning, or direct log parsing
 
 ### Download

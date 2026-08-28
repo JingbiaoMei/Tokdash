@@ -190,8 +190,9 @@ def test_tool_icons_are_unboxed_and_usage_chart_has_an_icon_legend() -> None:
     assert "function renderToolChartLegend(entries, colors) {" in source
     assert "const visibleEntries = entries.slice(0, 6);" in source
     assert "const hiddenCount = entries.length - visibleEntries.length;" in source
-    assert "`+${hiddenCount} more tools`" in source
-    assert "`另有 ${hiddenCount} 个工具`" in source
+    # The overflow legend text is i18n-driven (one key per language).
+    assert "more.textContent = t('moreTools').replace('{n}', hiddenCount);" in source
+    assert source.count("moreTools: '") == 6
     assert ".tool-chart-legend-more{" in compact
     assert "createToolIdentity(tool, { compact: true })" in source
     assert "renderToolChartLegend(entries, colors);" in source
@@ -203,8 +204,8 @@ def test_zcode_session_panel_is_wired_into_the_sessions_tab() -> None:
     assert "zcode: null" in source
     assert 'updateSessionPanel("zcode", lastSessionsResponses.zcode);' in source
     assert 'initSortHeaders("zcode", renderSessionsTab);' in source
-    # One heading key per i18n dictionary (en + zh).
-    assert len(re.findall(r"zcodeSessions:", source)) == 2
+    # One heading key per i18n dictionary (all six languages).
+    assert len(re.findall(r"zcodeSessions:", source)) == 6
     # The panel follows the shared session-panel element contract.
     assert 'data-panel="zcode"' in source
     assert '<tbody id="zcodeSessionsTable">' in source

@@ -54,6 +54,8 @@ def _run_readable_token_js(
     harness = tmp_path / "readable-tokens.js"
     harness.write_text(
         "let currentLang = 'en';\n"
+        "const LANG_LOCALES = { en: 'en-US', zh: 'zh-CN', ja: 'ja-JP', ko: 'ko-KR', es: 'es-ES', pt: 'pt-BR' };\n"
+        "function langLocale(lang = currentLang) { return LANG_LOCALES[lang] || 'en-US'; }\n"
         "const LABELS = { tokensUnit: 'tokens' };\n"
         "function t(key) { return LABELS[key] || key; }\n"
         "function formatNumber(value) { return Number(value || 0).toLocaleString('en-US'); }\n"
@@ -179,7 +181,7 @@ def test_readable_token_switch_markup_and_tooltip_contract() -> None:
     ) < source.index('id="overview-content"')
     assert "#totalTokens:hover+.overview-token-exact-tooltip" in compact
     assert "#totalTokens:focus-visible+.overview-token-exact-tooltip" in compact
-    assert source.count("readableTokens: '") == 2
+    assert source.count("readableTokens: '") == 6
 
 
 def test_readable_token_render_and_toggle_do_not_refetch() -> None:
@@ -285,5 +287,5 @@ def test_settings_panel_groups_display_and_install_controls() -> None:
     assert "window.innerWidth - gutter" in source
     assert "event.key === 'Escape'" in source
     assert "!settingsMenu.contains(event.target)" in source
-    assert source.count("settings: '") == 2
-    assert source.count("colorMode: '") == 2
+    assert source.count("settings: '") == 6
+    assert source.count("colorMode: '") == 6

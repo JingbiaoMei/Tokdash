@@ -93,7 +93,7 @@ def test_every_panel_has_collapsible_markup():
 def test_i18n_keys_in_both_languages():
     source = INDEX_HTML.read_text(encoding="utf-8")
     for key in ("panelTokens", "panelLast", "sessionsExpandAll", "sessionsCollapseAll"):
-        assert len(re.findall(rf"^\s+{key}: ", source, re.MULTILINE)) == 2, key
+        assert len(re.findall(rf"^\s+{key}: ", source, re.MULTILINE)) == 6, key
 
 
 def test_sessions_panels_have_logos_and_hide_when_empty():

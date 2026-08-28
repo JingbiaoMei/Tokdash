@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="README.md">English</a> &nbsp;|&nbsp; <a href="README_CN.md">中文</a>
+  <a href="README.md">English</a> &nbsp;|&nbsp; <a href="README_CN.md">中文</a> &nbsp;|&nbsp; <a href="README_JA.md">日本語</a> &nbsp;|&nbsp; <a href="README_KO.md">한국어</a> &nbsp;|&nbsp; <a href="README_ES.md">Español</a> &nbsp;|&nbsp; <a href="README_PT.md">Português</a>
 </p>
 <p align="center">
   <a href="https://tokdash.github.io/"><img src="https://raw.githubusercontent.com/JingbiaoMei/tokdash/main/docs/assets/tokdash_logo_full.png" alt="Tokdash" width="420" /></a>
@@ -79,7 +79,7 @@
 - **会话浏览器**：逐会话下钻
 - **Companion 状态栏应用** *[新]*：在 macOS 菜单栏或 Windows 通知区域查看费用与订阅额度，Windows 版已上架 [Microsoft Store](https://apps.microsoft.com/detail/9ppnmpdq8b52) — [截图与下载](#tokdash-companion-状态栏应用)
 - **多服务器视图**：在设置中添加 WSL、macOS 或其他 Tokdash 服务器；可合并任意选择的用量，并按机器分组显示额度。参见[远程访问](docs/guides/REMOTE_ACCESS.md)。
-- **主题与应用体验**：10 款样式主题、明暗模式与 PWA 安装支持
+- **主题与应用体验**：10 款样式主题、明暗模式与 PWA 安装支持、六种界面语言（English / 中文 / 日本語 / 한국어 / Español / Português）
 
 ### 客户端支持矩阵
 
@@ -188,7 +188,7 @@ Tokdash Companion 状态栏应用是一个可选的原生客户端：在 macOS
 - Codex、Claude、Kimi、MiniMax、Antigravity、Grok 与 Z.ai 额度窗口
 - 相对重置时间与可选的低额度通知
 - 可选的登录时启动
-- 跟随系统、English 与简体中文显示语言
+- 跟随系统语言，或选择 English、简体中文、日语、韩语、西班牙语与葡萄牙语
 - 无遥测、凭据发现、端口扫描或直接日志解析
 
 ### 下载

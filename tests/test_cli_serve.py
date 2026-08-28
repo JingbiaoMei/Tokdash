@@ -54,12 +54,13 @@ def test_quota_command_parses_actions():
     assert args.codex_api == "on"
 
     args = cli.build_parser("tokdash").parse_args(
-        ["quota", "consent", "--credential-scan", "on", "--minimax-api", "on", "--kimi-api", "on", "--grok-api", "off"]
+        ["quota", "consent", "--credential-scan", "on", "--minimax-api", "on", "--kimi-api", "on", "--grok-api", "off", "--zai-api", "on"]
     )
     assert args.credential_scan == "on"
     assert args.minimax_api == "on"
     assert args.kimi_api == "on"
     assert args.grok_api == "off"
+    assert args.zai_api == "on"
 
 
 def test_quota_consent_cli_updates_config():
@@ -75,6 +76,7 @@ def test_quota_consent_cli_updates_config():
         "minimax_api": False,
         "kimi_api": False,
         "grok_api": False,
+        "zai_api": False,
     }
 
 

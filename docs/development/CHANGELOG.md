@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Unreleased
+
+### Added
+
+- Added opt-in Z.ai Coding Plan quota tracking. Tokdash discovers Coding Plan keys from ZCode, supported OpenCode/Claude-compatible provider configs, or `ZAI_API_KEY` / `Z_AI_API_KEY`, then reads the provider's 5-hour and weekly credit windows plus legacy MCP limits from Z.ai's quota endpoint without refreshing or writing credentials.
+
 ## 2.3.1 - 2026-08-27
 
 ### Changed

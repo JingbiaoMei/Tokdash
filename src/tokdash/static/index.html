@@ -3558,6 +3558,7 @@
             <label class="quota-visibility-item"><input type="checkbox" data-quota-provider="minimax" checked><span>MiniMax</span></label>
             <label class="quota-visibility-item"><input type="checkbox" data-quota-provider="kimi" checked><span>Kimi Code</span></label>
             <label class="quota-visibility-item"><input type="checkbox" data-quota-provider="grok" checked><span>Grok Build</span></label>
+            <label class="quota-visibility-item"><input type="checkbox" data-quota-provider="zai" checked><span>Z.ai</span></label>
           </div>
         </div>
         <span id="quotaGlobalStatusLine" class="text-xs" style="color:var(--color-muted)"></span>
@@ -8686,6 +8687,7 @@
       if (provider === 'minimax') return 'MiniMax';
       if (provider === 'kimi') return 'Kimi Code';
       if (provider === 'grok') return 'Grok Build';
+      if (provider === 'zai') return 'Z.ai';
       return provider || '—';
     }
 
@@ -8722,6 +8724,7 @@
       if (provider === 'minimax') return { key: 'minimax_api', endpoint: 'api.minimax.io or api.minimaxi.com/v1/token_plan/remains', path: '$MMX_CONFIG_DIR/config.json or a MiniMax Token Plan key' };
       if (provider === 'kimi') return { key: 'kimi_api', endpoint: 'api.kimi.com/coding/v1/usages', path: '$KIMI_CODE_HOME credentials/config or KIMI_API_KEY' };
       if (provider === 'grok') return { key: 'grok_api', endpoint: 'cli-chat-proxy.grok.com/v1/billing', path: '$GROK_HOME/auth.json (xAI OAuth only)' };
+      if (provider === 'zai') return { key: 'zai_api', endpoint: 'api.z.ai/api/monitor/usage/quota/limit', path: '$ZCODE_HOME/v2/config.json, supported tool config, or ZAI_API_KEY' };
       return { key: '', endpoint: '', path: '' };
     }
 
@@ -9147,7 +9150,7 @@
         return;
       }
       const providers = payload?.providers || {};
-      const order = ['codex', 'claude', 'antigravity', 'minimax', 'kimi', 'grok'];
+      const order = ['codex', 'claude', 'antigravity', 'minimax', 'kimi', 'grok', 'zai'];
       const cards = document.createDocumentFragment();
       let renderedCards = 0;
 
@@ -9337,7 +9340,7 @@
     // Provider-visibility dropdown state. The user can hide whole providers from both
     // the cards and the charts; the choice is persisted
     // in localStorage and defaults to all-visible. Unknown providers default to visible.
-    const QUOTA_PROVIDERS = ['codex', 'claude', 'antigravity', 'minimax', 'kimi', 'grok'];
+    const QUOTA_PROVIDERS = ['codex', 'claude', 'antigravity', 'minimax', 'kimi', 'grok', 'zai'];
     const QUOTA_VISIBILITY_KEY = 'tokdash-quota-visible';
     let quotaVisibilityState = null;
     let quotaPresentProviders = null;

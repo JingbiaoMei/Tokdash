@@ -152,6 +152,40 @@ def test_discovers_active_claude_settings_without_reading_logs(monkeypatch, tmp_
     assert candidates[0].region == "cn"
 
 
+def test_discovers_zai_coding_plan_from_supported_tool_configs(monkeypatch, tmp_path):
+    claude = tmp_path / ".claude"
+    claude.mkdir()
+    (claude / "settings.json").write_text(
+        json.dumps(
+            {
+                "env": {
+                    "ANTHROPIC_BASE_URL": "https://api.z.ai/api/anthropic",
+                    "ANTHROPIC_AUTH_TOKEN": "zai-claude-secret",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    data_home = tmp_path / "data"
+    auth_path = data_home / "opencode" / "auth.json"
+    auth_path.parent.mkdir(parents=True)
+    auth_path.write_text(
+        json.dumps({"zai-coding-plan": {"type": "api", "key": "zai-opencode-secret"}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(claude))
+    monkeypatch.setenv("XDG_DATA_HOME", str(data_home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "missing-config"))
+    monkeypatch.setenv("CC_SWITCH_CONFIG_DIR", str(tmp_path / "missing-switch"))
+
+    candidates = credential_sources.discover_external_credentials("zai")
+
+    assert {(item.source, item.token, item.base_url) for item in candidates} == {
+        ("claude_settings", "zai-claude-secret", "https://api.z.ai"),
+        ("opencode_auth", "zai-opencode-secret", "https://api.z.ai"),
+    }
+
+
 def test_discovers_auth_only_key_and_provider_block_without_baseurl(monkeypatch, tmp_path):
     # Mirrors Howard's real machine: the working keys live in auth.json only.
     #  - `kimi-for-coding`  : no opencode.json provider block at all

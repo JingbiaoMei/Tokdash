@@ -139,6 +139,8 @@ def _canonical_provider_url(raw: str) -> tuple[str, str, str | None] | None:
         return "minimax", f"{parsed.scheme}://api.minimaxi.com", "cn"
     if host == "api.kimi.com" and parsed.path.rstrip("/").startswith("/coding"):
         return "kimi", f"{parsed.scheme}://api.kimi.com/coding/v1", None
+    if host == "api.z.ai" and parsed.path.startswith(("/api/anthropic", "/api/coding/")):
+        return "zai", f"{parsed.scheme}://api.z.ai", "global"
     return None
 
 
@@ -200,6 +202,8 @@ def _classify_provider_id(provider_id: str) -> tuple[str, str, str | None] | Non
     if "minimax" in pid:
         region = "cn" if ("cn" in pid or "minimaxi" in pid) else "global"
         return "minimax", _PROVIDER_ID_HOSTS["minimax"][region], region
+    if pid in {"zai-coding-plan", "z-ai-coding-plan"} or "zai-coding-plan" in pid:
+        return "zai", "https://api.z.ai", "global"
     return None
 
 
@@ -384,6 +388,7 @@ def discover_provider_sources() -> dict[str, list[str]]:
         "kimi": [root / "config.toml" for root in clientpaths.kimi_roots()]
         + [root / "credentials" / "kimi-code.json" for root in clientpaths.kimi_roots()],
         "grok": [clientpaths.grok_home() / "auth.json"],
+        "zai": [clientpaths.zcode_home() / "v2" / "config.json"],
     }
     for provider, paths in native_checks.items():
         if any(path.is_file() for path in paths):
@@ -394,6 +399,7 @@ def discover_provider_sources() -> dict[str, list[str]]:
         "claude": ("CLAUDE_CODE_OAUTH_TOKEN",),
         "minimax": ("MINIMAX_API_KEY", "MINIMAX_TOKEN_PLAN_GLOBAL_KEY", "MINIMAX_TOKEN_PLAN_CN_KEY"),
         "kimi": ("KIMI_API_KEY",),
+        "zai": ("ZAI_API_KEY", "Z_AI_API_KEY"),
     }
     for provider, names in env_checks.items():
         if any(os.environ.get(name, "").strip() for name in names):

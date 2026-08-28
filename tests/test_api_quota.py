@@ -45,6 +45,7 @@ def test_get_quota_returns_stored_codex_session_data_without_collecting(monkeypa
         "minimax_api": False,
         "kimi_api": False,
         "grok_api": False,
+        "zai_api": False,
     }
 
 
@@ -62,8 +63,8 @@ def test_get_quota_exposes_new_provider_shells_and_consent_keys():
 
     payload = api.get_quota()
 
-    assert {"minimax", "kimi", "grok"}.issubset(payload["providers"])
-    assert {"minimax_api", "kimi_api", "grok_api"}.issubset(payload["consent"])
+    assert {"minimax", "kimi", "grok", "zai"}.issubset(payload["providers"])
+    assert {"minimax_api", "kimi_api", "grok_api", "zai_api"}.issubset(payload["consent"])
 
 
 def test_quota_state_marks_only_locally_present_provider_shells_detected(monkeypatch, tmp_path):
@@ -78,6 +79,7 @@ def test_quota_state_marks_only_locally_present_provider_shells_detected(monkeyp
     monkeypatch.setattr(quota.clientpaths, "antigravity_cli_dir", lambda: missing)
     monkeypatch.setattr(quota.clientpaths, "minimax_cli_root", lambda: missing)
     monkeypatch.setattr(quota.clientpaths, "grok_home", lambda: missing)
+    monkeypatch.setattr(quota.clientpaths, "zcode_home", lambda: missing)
     monkeypatch.setattr(quota.clientpaths, "kimi_roots", lambda: [missing])
     for name in (
         "CLAUDE_CODE_OAUTH_TOKEN",
@@ -85,6 +87,8 @@ def test_quota_state_marks_only_locally_present_provider_shells_detected(monkeyp
         "MINIMAX_TOKEN_PLAN_GLOBAL_KEY",
         "MINIMAX_TOKEN_PLAN_CN_KEY",
         "KIMI_API_KEY",
+        "ZAI_API_KEY",
+        "Z_AI_API_KEY",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -93,7 +97,7 @@ def test_quota_state_marks_only_locally_present_provider_shells_detected(monkeyp
     assert payload["providers"]["codex"]["detected"] is True
     assert all(
         payload["providers"][provider]["detected"] is False
-        for provider in ("claude", "antigravity", "minimax", "kimi", "grok")
+        for provider in ("claude", "antigravity", "minimax", "kimi", "grok", "zai")
     )
 
 
@@ -127,6 +131,7 @@ def test_quota_consent_route_persists_provider_flags():
         "minimax_api": False,
         "kimi_api": False,
         "grok_api": False,
+        "zai_api": False,
     }
     assert api.get_quota()["consent"]["codex_api"] is True
 

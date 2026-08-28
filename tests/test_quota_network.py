@@ -7,10 +7,109 @@ from urllib.error import HTTPError
 
 import pytest
 
-from tokdash.sources.quota import antigravity, claude, codex, grok, kimi, minimax
+from tokdash.sources.quota import antigravity, claude, codex, grok, kimi, minimax, zai
 from tokdash.usage_store import _codex_window_used_percent_from_raw
 
 _FIXTURE_DIR = Path(__file__).parent / "fixtures" / "quota"
+
+
+def test_zai_api_collects_credit_windows_from_zcode_config(monkeypatch, tmp_path):
+    home = tmp_path / ".zcode"
+    config_path = home / "v2" / "config.json"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text(
+        json.dumps(
+            {
+                "provider": {
+                    "builtin:zai-coding-plan": {
+                        "enabled": True,
+                        "options": {
+                            "apiKey": "zai-test-key",
+                            "baseURL": "https://api.z.ai/api/anthropic",
+                        },
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(zai.clientpaths, "zcode_home", lambda: home)
+    monkeypatch.delenv("ZAI_API_KEY", raising=False)
+    monkeypatch.delenv("Z_AI_API_KEY", raising=False)
+
+    payload = {
+        "success": True,
+        "code": 200,
+        "data": {
+            "level": "lite",
+            "limits": [
+                {
+                    "type": "CREDIT_LIMIT",
+                    "unit": 3,
+                    "percentage": 3,
+                    "currentValue": 73,
+                    "usage": 2000,
+                    "remaining": 1926,
+                    "nextResetTime": 1_787_923_589_759,
+                },
+                {
+                    "type": "CREDIT_LIMIT",
+                    "unit": 6,
+                    "percentage": 38,
+                    "currentValue": 3803,
+                    "usage": 10000,
+                    "remaining": 6196,
+                    "nextResetTime": 1_787_951_928_998,
+                },
+            ],
+        },
+    }
+
+    def opener(request, timeout=0):
+        assert request.full_url == "https://api.z.ai/api/monitor/usage/quota/limit"
+        assert request.get_header("Authorization") == "zai-test-key"
+        return FakeResponse(payload)
+
+    snapshots = zai.collect_zai_api_snapshots(opener=opener, now=1_787_900_000)
+
+    assert [(item.bucket, item.used_percent) for item in snapshots] == [("5h", 3.0), ("7d", 38.0)]
+    assert [item.resets_at for item in snapshots] == [1_787_923_589, 1_787_951_928]
+    assert all(item.provider == "zai" and item.plan == "Lite" and item.source == "zai_api" for item in snapshots)
+
+
+def test_zai_api_parses_legacy_token_and_mcp_limits(monkeypatch, tmp_path):
+    monkeypatch.setattr(zai.clientpaths, "zcode_home", lambda: tmp_path / "missing")
+    monkeypatch.setenv("ZAI_API_KEY", "zai-test-key")
+    payload = {
+        "success": True,
+        "data": {
+            "limits": [
+                {"type": "TOKENS_LIMIT", "percentage": 12, "nextResetTime": 1_787_923_589_759},
+                {"type": "TIME_LIMIT", "percentage": 4, "nextResetTime": 1_790_000_000_000},
+            ]
+        },
+    }
+
+    snapshots = zai.collect_zai_api_snapshots(opener=lambda request, timeout=0: FakeResponse(payload), now=1)
+
+    assert [(item.bucket, item.bucket_label) for item in snapshots] == [
+        ("5h", "5-hour window"),
+        ("mcp_monthly", "MCP monthly"),
+    ]
+
+
+def test_zai_api_marks_rejected_key_stale(monkeypatch, tmp_path):
+    monkeypatch.setattr(zai.clientpaths, "zcode_home", lambda: tmp_path / "missing")
+    monkeypatch.setenv("ZAI_API_KEY", "bad-key")
+
+    snapshots = zai.collect_zai_api_snapshots(
+        opener=lambda request, timeout=0: FakeResponse({"success": False, "code": 1001, "msg": "unauthorized"}),
+        now=123,
+    )
+
+    assert len(snapshots) == 1
+    assert snapshots[0].bucket == "api"
+    assert snapshots[0].status == "stale_token"
 
 
 class FakeResponse:

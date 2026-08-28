@@ -1807,14 +1807,14 @@
                     </svg>
                   </span>
                   <div>
-                    <h2 id="refreshReportTitle" class="refresh-report-title">Scan complete</h2>
+                    <h2 id="refreshReportTitle" class="refresh-report-title">Refresh complete</h2>
                     <p id="refreshReportMeta" class="refresh-report-meta"></p>
                   </div>
                   <button id="refreshReportClose" class="refresh-report-close" type="button" aria-label="Close">
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
                   </button>
                 </div>
-                <div class="refresh-report-deltas" aria-label="Changes after scan">
+                <div class="refresh-report-deltas" aria-label="Changes after refresh">
                   <div class="refresh-report-delta"><strong id="refreshReportTokens" class="mono">—</strong><span data-i18n="refreshReportTokens">Tokens</span></div>
                   <div class="refresh-report-delta"><strong id="refreshReportCost" class="mono">—</strong><span data-i18n="refreshReportCost">Cost</span></div>
                   <div class="refresh-report-delta"><strong id="refreshReportMessages" class="mono">—</strong><span data-i18n="refreshReportMessages">Messages</span></div>
@@ -4092,6 +4092,7 @@
     let refreshCooldownRemaining = 0;
     let lastUsageResponse = null;
     let lastRefreshReport = null;
+    let refreshReportDismissedWindowKey = null;
     const SESSION_TOOL_KEYS = ['codex', 'claude', 'opencode', 'pi_agent', 'mimo', 'kimi', 'dsh', 'reasonix', 'zcode', 'kilocode', 'omp', 'grok', 'hermes', 'antigravity_cli', 'cline'];
     let lastSessionsResponses = { codex: null, claude: null, opencode: null, pi_agent: null, mimo: null, kimi: null, dsh: null, reasonix: null, zcode: null, kilocode: null, omp: null, grok: null, hermes: null, antigravity_cli: null, cline: null, combined: null };
     let lastCombinedModels = [];
@@ -4187,21 +4188,21 @@
         refreshBusy: 'Busy',
         refreshFailed: 'Failed — retry',
         refreshCooldown: 'Wait {n}s',
-        refreshReportComplete: 'Scan complete',
-        refreshReportPreserved: 'Scan complete · previous data kept',
-        refreshReportPartial: 'Scan incomplete',
-        refreshReportFailed: 'Scan failed · previous data kept',
+        refreshReportComplete: 'Refresh complete',
+        refreshReportPreserved: 'Refresh complete · previous data kept',
+        refreshReportPartial: 'Refresh incomplete',
+        refreshReportFailed: 'Refresh failed · previous data kept',
         refreshReportTokens: 'Tokens',
         refreshReportCost: 'Cost',
         refreshReportMessages: 'Messages',
         refreshReportNoBaseline: 'Baseline saved · {n} tools found',
         refreshReportToolsChanged: '{n} tools changed',
         refreshReportNoChanges: 'No usage changes found',
-        refreshReportRetained: 'Kept the previous result for {names}; this scan could not read complete data.',
+        refreshReportRetained: 'Kept the previous result for {names}; this refresh could not read complete data.',
         refreshReportUnavailable: 'No earlier result was available for {names}; displayed totals may be incomplete.',
         refreshReportRange: '{range} · {time}',
-        refreshReportDiffLabel: 'Changes after scan',
-        refreshReportClose: 'Close scan report',
+        refreshReportDiffLabel: 'Changes after refresh',
+        refreshReportClose: 'Close refresh report',
         settings: 'Settings',
         servers: 'Servers',
         allServers: 'Use all',
@@ -4580,10 +4581,10 @@
         refreshBusy: '繁忙',
         refreshFailed: '失败，请重试',
         refreshCooldown: '{n} 秒后重试',
-        refreshReportComplete: '扫描完成',
-        refreshReportPreserved: '扫描完成 · 已保留旧数据',
-        refreshReportPartial: '扫描不完整',
-        refreshReportFailed: '扫描失败 · 已保留旧数据',
+        refreshReportComplete: '刷新完成',
+        refreshReportPreserved: '刷新完成 · 已保留旧数据',
+        refreshReportPartial: '刷新不完整',
+        refreshReportFailed: '刷新失败 · 已保留旧数据',
         refreshReportTokens: 'Tokens',
         refreshReportCost: '费用',
         refreshReportMessages: '消息数',
@@ -4593,8 +4594,8 @@
         refreshReportRetained: '{names} 本次未能完整读取，已保留该范围的上一次结果。',
         refreshReportUnavailable: '{names} 没有可用的旧结果，当前合计可能不完整。',
         refreshReportRange: '{range} · {time}',
-        refreshReportDiffLabel: '扫描后的变化',
-        refreshReportClose: '关闭扫描报告',
+        refreshReportDiffLabel: '刷新后的变化',
+        refreshReportClose: '关闭刷新报告',
         settings: '设置',
         servers: '服务器',
         allServers: '全部启用',
@@ -5692,9 +5693,12 @@
       document.getElementById('refreshBtn')?.setAttribute('aria-expanded', 'true');
     }
 
-    function hideUsageRefreshReport({ focusButton = false } = {}) {
+    function hideUsageRefreshReport({ focusButton = false, dismissed = false } = {}) {
       const panel = document.getElementById('refreshReport');
       if (panel) panel.hidden = true;
+      // An explicit dismissal remains in effect for this range, so a background
+      // refresh cannot reopen and re-announce the report every five minutes.
+      if (dismissed) refreshReportDismissedWindowKey = lastRefreshReport?.windowKey || null;
       const button = document.getElementById('refreshBtn');
       button?.setAttribute('aria-expanded', 'false');
       if (focusButton) button?.focus();
@@ -6959,6 +6963,9 @@
       if (forceRefresh || (lastRefreshReport?.windowKey && lastRefreshReport.windowKey !== windowKey)) {
         hideUsageRefreshReport();
       }
+      // The refresh button is an explicit request for new feedback, so it restores
+      // the report even when the user previously dismissed it for this range.
+      if (forceRefresh) refreshReportDismissedWindowKey = null;
 
       // The date picker moved its label before this ran, so whatever is on screen now
       // sits under a heading that does not name it. Drop the deferred breakdowns and
@@ -7020,6 +7027,12 @@
       const previousUsageForReport = lastWindowKey === windowKey && lastUsageServerKey === usageServerKey
         ? lastUsageResponse
         : null;
+      // A refresh is any re-fetch of the exact range and server selection already
+      // on screen. This includes the five-minute timer and other programmatic
+      // reloads, while the first load and a genuine range change remain ordinary
+      // loads and do not present unrelated values as a before/after comparison.
+      const shouldReportRefresh = (forceRefresh || previousUsageForReport !== null)
+        && refreshReportDismissedWindowKey !== windowKey;
       const reportRangeLabel = refreshReportRangeLabel();
       if (forceRefresh) {
         setRefreshUiState('refreshing');
@@ -7089,6 +7102,10 @@
             const cacheMeta = lastUsageResponse?.response_cache || null;
             setRefreshUiState(cacheMeta?.served_from_cache ? 'cached' : 'updated', { resetAfterMs: 1800 });
           }
+        } else if (refreshUiState !== 'idle') {
+          setRefreshUiState('idle');
+        }
+        if (shouldReportRefresh) {
           const scan = lastUsageResponse?._scan_reconciliation || {};
           showUsageRefreshReport(buildUsageRefreshReport(previousUsageForReport, lastUsageResponse, {
             failed: !!usageFetchError,
@@ -7098,8 +7115,6 @@
             unavailable: scan.unavailable,
             error: usageFetchError?.message || '',
           }));
-        } else if (refreshUiState !== 'idle') {
-          setRefreshUiState('idle');
         }
 
         if (isOverviewActive()) renderOverviewTab(lastUsageResponse);
@@ -7119,6 +7134,8 @@
         setDashboardFetchStatus(error);
         if (forceRefresh) {
           setRefreshUiState(error?.status === 503 ? 'busy' : 'failed', { resetAfterMs: 2600 });
+        }
+        if (shouldReportRefresh) {
           const scan = usageReconciliation || reconcileUsageRows([], windowKey, usageServers);
           showUsageRefreshReport(buildUsageRefreshReport(previousUsageForReport, previousUsageForReport, {
             failed: true,
@@ -13018,7 +13035,7 @@
       }
     });
     document.getElementById('refreshReportClose')?.addEventListener('click', () => {
-      hideUsageRefreshReport({ focusButton: true });
+      hideUsageRefreshReport({ focusButton: true, dismissed: true });
     });
 
     document.getElementById('readableTokensToggle')?.addEventListener('click', () => {
@@ -13041,7 +13058,7 @@
         setSettingsPanelOpen(false, true);
       }
       if (event.key === 'Escape' && !document.getElementById('refreshReport')?.hidden) {
-        hideUsageRefreshReport({ focusButton: true });
+        hideUsageRefreshReport({ focusButton: true, dismissed: true });
       }
     });
 

@@ -47,6 +47,7 @@ let updateIsManualRefresh = false;
 let refreshUiState = 'idle';
 let lastUsageResponse = null;
 let lastRefreshReport = null;
+let refreshReportDismissedWindowKey = null;
 let lastSessionsResponses = null;
 let sessionsLoadedKey = null;
 let lastWindowKey = null;
@@ -60,7 +61,7 @@ function isServersActive() { return false; }
 function renderServersTab() {}
 
 
-const log = { rendered: [], errors: [], alerts: [], refreshStates: [], activeCards: [], activeLoads: [], stale: [] };
+const log = { rendered: [], errors: [], alerts: [], refreshStates: [], refreshReports: [], activeCards: [], activeLoads: [], stale: [] };
 const fetches = [];
 
 function deferred() {
@@ -83,8 +84,10 @@ function isOverviewActive() { return true; }
 function renderOverviewTab(data) { log.rendered.push(data && data.range); }
 function renderSessionsTab() {}
 function renderRefreshButton() {}
-function hideUsageRefreshReport() {}
-function showUsageRefreshReport(report) { lastRefreshReport = report; }
+function hideUsageRefreshReport({ dismissed = false } = {}) {
+  if (dismissed) refreshReportDismissedWindowKey = lastRefreshReport?.windowKey || null;
+}
+function showUsageRefreshReport(report) { lastRefreshReport = report; log.refreshReports.push(report); }
 function refreshReportRangeLabel() { return 'test range'; }
 function clearOverviewBreakdowns() { overviewBreakdownWindowKey = null; }
 function setOverviewState(state) { log.stale.push(!!(state && (state.pending || state.stale))); }
@@ -255,6 +258,48 @@ async function main() {
     out.totalTokens = lastUsageResponse && lastUsageResponse.total_tokens;
   }
 
+  if (scenario === 'every-same-range-refresh-reports') {
+    pick('X');
+    await settle();
+    resolveRange('X', { total_tokens: 100, total_cost: 1, total_messages: 2 });
+    await settle(); await settle();
+    out.afterInitialLoad = log.refreshReports.length;
+
+    pick('X');
+    await settle();
+    resolveRange('X', { total_tokens: 125, total_cost: 1.25, total_messages: 3 });
+    await settle(); await settle();
+    out.afterAutomaticRefresh = log.refreshReports.length;
+    out.automaticDelta = lastRefreshReport && lastRefreshReport.tokens;
+
+    hideUsageRefreshReport({ dismissed: true });
+    pick('X');
+    await settle();
+    resolveRange('X', { total_tokens: 150, total_cost: 1.5, total_messages: 4 });
+    await settle(); await settle();
+    out.afterDismissedAutomaticRefresh = log.refreshReports.length;
+
+    pick('X', { forceRefresh: true });
+    await settle();
+    resolveRange('X', { total_tokens: 175, total_cost: 1.75, total_messages: 5 });
+    await settle(); await settle();
+    out.afterForcedRefresh = log.refreshReports.length;
+    out.forcedDelta = lastRefreshReport && lastRefreshReport.tokens;
+
+    hideUsageRefreshReport({ dismissed: true });
+    pick('Y');
+    await settle();
+    resolveRange('Y', { total_tokens: 5, total_cost: 0.05, total_messages: 1 });
+    await settle(); await settle();
+    out.afterRangeChange = log.refreshReports.length;
+
+    pick('Y');
+    await settle();
+    resolveRange('Y', { total_tokens: 10, total_cost: 0.1, total_messages: 2 });
+    await settle(); await settle();
+    out.afterOtherRangeRefresh = log.refreshReports.length;
+  }
+
   process.stdout.write(JSON.stringify(out));
 }
 
@@ -371,3 +416,16 @@ def test_total_outage_never_relabels_another_server_selections_aggregate(tmp_pat
     assert out["lastStale"] is True, "the local-only total is not Studio's total"
     assert out["lastUsageServerKey"] == "local"
     assert out["totalTokens"] == 100
+
+
+def test_every_same_range_refresh_reports_but_initial_and_range_loads_do_not(tmp_path):
+    out = _run(tmp_path, "every-same-range-refresh-reports")
+
+    assert out["afterInitialLoad"] == 0
+    assert out["afterAutomaticRefresh"] == 1
+    assert out["automaticDelta"] == 25
+    assert out["afterDismissedAutomaticRefresh"] == 1
+    assert out["afterForcedRefresh"] == 2
+    assert out["forcedDelta"] == 25
+    assert out["afterRangeChange"] == 2
+    assert out["afterOtherRangeRefresh"] == 3

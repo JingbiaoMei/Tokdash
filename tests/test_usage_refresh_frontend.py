@@ -166,9 +166,13 @@ def test_refresh_report_is_accessible_and_the_scan_stays_incremental() -> None:
     assert 'role="status"' in html
     assert 'aria-live="polite"' in html
     assert 'id="refreshReportClose"' in html
-    assert "refreshReportComplete: 'Scan complete'" in html
-    assert "refreshReportComplete: '扫描完成'" in html
+    assert "refreshReportComplete: 'Refresh complete'" in html
+    assert "refreshReportComplete: '刷新完成'" in html
     assert "usageApiUrl += '&refresh=1';" in updater
     assert updater.count("fetchSelectedServers(usageApiUrl)") == 1
     assert "reconcileUsageRows(rows, windowKey, usageServers)" in updater
+    assert "const shouldReportRefresh = (forceRefresh || previousUsageForReport !== null)" in updater
+    assert "&& refreshReportDismissedWindowKey !== windowKey;" in updater
+    assert updater.count("if (shouldReportRefresh) {") == 2
+    assert html.count("hideUsageRefreshReport({ focusButton: true, dismissed: true });") == 2
     assert "localStorage" not in reconcile

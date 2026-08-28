@@ -275,6 +275,8 @@ function renderQuotaServerBlock(server) { rendered.push(server.id); }
 function renderQuotaSettings() {}
 function renderQuotaProviderCards() {}
 function renderQuotaCharts() {}
+function syncQuotaSingleVisibility() {}
+function quotaPresentProviders() { return new Set(); }
 function makeError(spec) {
   const error = new Error(spec.message);
   if (spec.status !== undefined && spec.status !== null) error.status = spec.status;
@@ -523,6 +525,8 @@ function renderQuotaServerBlock() {}
 function renderQuotaSettings() {}
 function renderQuotaProviderCards() {}
 function renderQuotaCharts() {}
+function syncQuotaSingleVisibility() {}
+function quotaPresentProviders() { return new Set(); }
 async function postJsonWithCsrf() { postCalls += 1; return { ok: true }; }
 async function fetchJsonWithRetry() {
   if (scenario.reloadFails) {

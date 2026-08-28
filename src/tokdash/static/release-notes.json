@@ -1,6 +1,26 @@
 {
-  "current": "2.3.1",
+  "current": "2.4.0",
   "releases": [
+    {
+      "version": "2.4.0",
+      "date": "2026-08-28",
+      "sections": [
+        {
+          "type": "added",
+          "items": [
+            "Added Japanese, Korean, Spanish, and Portuguese dashboard languages, with automatic browser-language detection and locale-aware dates and numbers.",
+            "Added opt-in Z.ai Coding Plan quota tracking for 5-hour, weekly credit, and legacy MCP windows.",
+            "Updated pricing data to 2.0.20 with 14 newly listed models."
+          ]
+        },
+        {
+          "type": "changed",
+          "items": [
+            "Refresh reports now appear for every repeat refresh of the displayed range while respecting an explicit dismissal."
+          ]
+        }
+      ]
+    },
     {
       "version": "2.3.1",
       "date": "2026-08-27",

@@ -89,6 +89,8 @@ def test_quota_state_marks_only_locally_present_provider_shells_detected(monkeyp
         "KIMI_API_KEY",
         "ZAI_API_KEY",
         "Z_AI_API_KEY",
+        "ANTHROPIC_BASE_URL",
+        "ANTHROPIC_AUTH_TOKEN",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -99,6 +101,29 @@ def test_quota_state_marks_only_locally_present_provider_shells_detected(monkeyp
         payload["providers"][provider]["detected"] is False
         for provider in ("claude", "antigravity", "minimax", "kimi", "grok", "zai")
     )
+
+
+def test_anthropic_zai_environment_credential_is_discovered_and_detected(monkeypatch, tmp_path):
+    from tokdash.sources import quota
+    from tokdash.sources.quota import credential_sources
+
+    api._clear_cache()
+    missing = tmp_path / "missing"
+    monkeypatch.setattr(quota.clientpaths, "zcode_home", lambda: missing)
+    monkeypatch.setattr(quota.clientpaths, "kimi_roots", lambda: [missing])
+    monkeypatch.setattr(quota.config, "credential_scan_enabled", lambda: False)
+    monkeypatch.setattr(credential_sources.clientpaths, "zcode_home", lambda: missing)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(missing / "claude"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(missing / "data"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(missing / "config"))
+    monkeypatch.setenv("CC_SWITCH_CONFIG_DIR", str(missing / "cc-switch"))
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://api.z.ai/api/anthropic")
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "zai-anthropic-token")
+    monkeypatch.delenv("ZAI_API_KEY", raising=False)
+    monkeypatch.delenv("Z_AI_API_KEY", raising=False)
+
+    assert credential_sources.discover_provider_sources()["zai"] == ["environment"]
+    assert quota.quota_state()["providers"]["zai"]["detected"] is True
 
 
 def test_quota_history_route_uses_stored_snapshots(tmp_path):

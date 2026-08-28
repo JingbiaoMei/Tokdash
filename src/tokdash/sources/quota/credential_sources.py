@@ -162,6 +162,20 @@ def endpoint_host_allowed(url: str, allowed_hosts: frozenset[str], *, path_prefi
     return path_prefix is None or parsed.path.startswith(path_prefix)
 
 
+_ZAI_CODING_HOSTS = frozenset({"api.z.ai"})
+
+
+def zai_coding_base_url_allowed(url: str) -> bool:
+    """True iff ``url`` is a supported HTTPS Z.ai Coding Plan base URL."""
+    if not endpoint_host_allowed(url, _ZAI_CODING_HOSTS):
+        return False
+    try:
+        path = urlsplit(url).path
+    except Exception:
+        return False
+    return path == "/api/anthropic" or path.startswith(("/api/anthropic/", "/api/coding/"))
+
+
 def _resolve_config_token(value: Any) -> str:
     token = str(value or "").strip()
     if token.startswith("{env:") and token.endswith("}"):
@@ -404,6 +418,10 @@ def discover_provider_sources() -> dict[str, list[str]]:
     for provider, names in env_checks.items():
         if any(os.environ.get(name, "").strip() for name in names):
             add(provider, "environment")
+    if os.environ.get("ANTHROPIC_AUTH_TOKEN", "").strip() and zai_coding_base_url_allowed(
+        os.environ.get("ANTHROPIC_BASE_URL", "")
+    ):
+        add("zai", "environment")
 
     for candidate in discover_external_credentials():
         add(candidate.provider, candidate.source.replace("_", " "))

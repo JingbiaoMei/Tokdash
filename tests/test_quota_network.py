@@ -98,6 +98,48 @@ def test_zai_api_parses_legacy_token_and_mcp_limits(monkeypatch, tmp_path):
     ]
 
 
+def test_zai_api_uses_anthropic_environment_token_only_for_supported_zai_url(monkeypatch, tmp_path):
+    monkeypatch.setattr(zai.clientpaths, "zcode_home", lambda: tmp_path / "missing")
+    monkeypatch.setattr(zai.quota_config, "credential_scan_enabled", lambda: False)
+    monkeypatch.delenv("ZAI_API_KEY", raising=False)
+    monkeypatch.delenv("Z_AI_API_KEY", raising=False)
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "zai-anthropic-token")
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://api.z.ai/api/anthropic")
+
+    def opener(request, timeout=0):
+        assert request.get_header("Authorization") == "zai-anthropic-token"
+        return FakeResponse({"success": True, "data": {"limits": []}})
+
+    snapshots = zai.collect_zai_api_snapshots(opener=opener, now=1)
+
+    assert snapshots[0].raw["credential_source"] == "ANTHROPIC_AUTH_TOKEN"
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    (
+        "https://proxy.example/api.z.ai/v1",
+        "http://api.z.ai/api/anthropic",
+        "https://api.z.ai/v1",
+        "https://api.z.ai/api/anthropicevil",
+    ),
+)
+def test_zai_api_rejects_anthropic_environment_token_for_unapproved_url(monkeypatch, tmp_path, base_url):
+    monkeypatch.setattr(zai.clientpaths, "zcode_home", lambda: tmp_path / "missing")
+    monkeypatch.setattr(zai.quota_config, "credential_scan_enabled", lambda: False)
+    monkeypatch.delenv("ZAI_API_KEY", raising=False)
+    monkeypatch.delenv("Z_AI_API_KEY", raising=False)
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "proxy-token")
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", base_url)
+
+    snapshots = zai.collect_zai_api_snapshots(
+        opener=lambda request, timeout=0: (_ for _ in ()).throw(AssertionError("request must not be sent")), now=1
+    )
+
+    assert snapshots[0].status == "unavailable"
+    assert snapshots[0].raw["error"] == "credentials_not_found"
+
+
 def test_zai_api_marks_rejected_key_stale(monkeypatch, tmp_path):
     monkeypatch.setattr(zai.clientpaths, "zcode_home", lambda: tmp_path / "missing")
     monkeypatch.setenv("ZAI_API_KEY", "bad-key")

@@ -23,6 +23,7 @@ from .grok import collect_grok_api_snapshots
 from .kimi import collect_kimi_api_snapshots
 from .minimax import collect_minimax_api_snapshots
 from .zai import collect_zai_api_snapshots
+from .credential_sources import zai_coding_base_url_allowed
 from .types import QuotaSnapshot
 
 _CURRENT_SNAPSHOTS: list[QuotaSnapshot] = []
@@ -373,6 +374,10 @@ def _detected_local_providers() -> set[str]:
             detected.add(provider)
     if os.environ.get("KIMI_API_KEY", "").strip() or any(root.exists() for root in clientpaths.kimi_roots()):
         detected.add("kimi")
+    if os.environ.get("ANTHROPIC_AUTH_TOKEN", "").strip() and zai_coding_base_url_allowed(
+        os.environ.get("ANTHROPIC_BASE_URL", "")
+    ):
+        detected.add("zai")
     if config.credential_scan_enabled():
         try:
             from .credential_sources import discover_provider_sources

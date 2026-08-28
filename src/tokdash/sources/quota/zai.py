@@ -12,7 +12,7 @@ import urllib.request
 from ... import clientpaths
 from . import config as quota_config
 from .codex import _parse_time
-from .credential_sources import discover_external_credentials, endpoint_host_allowed
+from .credential_sources import discover_external_credentials, endpoint_host_allowed, zai_coding_base_url_allowed
 from .types import QuotaSnapshot
 
 _QUOTA_URL = "https://api.z.ai/api/monitor/usage/quota/limit"
@@ -66,7 +66,7 @@ def _credentials() -> list[_Credential]:
 
     anthropic_url = os.environ.get("ANTHROPIC_BASE_URL", "").strip()
     anthropic_token = os.environ.get("ANTHROPIC_AUTH_TOKEN", "").strip()
-    if anthropic_token and "api.z.ai" in anthropic_url.lower():
+    if anthropic_token and zai_coding_base_url_allowed(anthropic_url):
         out.append(_Credential(anthropic_token, "ANTHROPIC_AUTH_TOKEN"))
 
     out.extend(_zcode_credentials())

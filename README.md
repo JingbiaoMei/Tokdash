@@ -190,7 +190,7 @@ view of the Tokdash service without keeping the full dashboard open.
 - Codex, Claude, Kimi, MiniMax, Antigravity, Grok, and Z.ai quota windows
 - Relative reset times and optional low-quota notifications
 - Optional launch at login
-- System, English, and Simplified Chinese display languages
+- System language detection plus English, Simplified Chinese, Japanese, Korean, Spanish, and Portuguese
 - No telemetry, credential discovery, port scanning, or direct log parsing
 
 ### Download

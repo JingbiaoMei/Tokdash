@@ -188,7 +188,7 @@ Tokdash Companion 状态栏应用是一个可选的原生客户端：在 macOS
 - Codex、Claude、Kimi、MiniMax、Antigravity、Grok 与 Z.ai 额度窗口
 - 相对重置时间与可选的低额度通知
 - 可选的登录时启动
-- 跟随系统、English 与简体中文显示语言
+- 跟随系统语言，或选择 English、简体中文、日语、韩语、西班牙语与葡萄牙语
 - 无遥测、凭据发现、端口扫描或直接日志解析
 
 ### 下载

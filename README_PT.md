@@ -185,10 +185,10 @@ O app Tokdash Companion de barra de status é um app nativo opcional para a barr
 
 - Custo de hoje, tokens, mensagens e uso acumulado do mês
 - Totais combinados e cota agrupada por servidor de vários endpoints Tokdash
-- Janelas de cota de Codex, Claude, Kimi, MiniMax, Antigravity e Grok
+- Janelas de cota de Codex, Claude, Kimi, MiniMax, Antigravity, Grok e Z.ai
 - Tempos de reset relativos e notificações opcionais de cota baixa
 - Inicialização opcional no login
-- Idiomas de exibição: sistema, English e 简体中文
+- Detecção do idioma do sistema e opções English / 简体中文 / 日本語 / 한국어 / Español / Português
 - Sem telemetria, sem descoberta de credenciais, sem varredura de portas nem parsing direto de logs
 
 ### Download
@@ -455,9 +455,11 @@ Por padrão o `tokdash serve` abre o painel no seu navegador uma vez na iniciali
 
 A aba Quota mostra janelas de utilização de assinatura e cronômetros de reset, a partir de duas fontes de dados. **Logs locais** (sem rede): o Codex registra sua própria cota em arquivos de sessão, então as janelas de 5 horas/semana do Codex funcionam de cara — mas só são atualizadas quando você usa o Codex, e os logs nunca contêm créditos de reset ou janelas de recursos medidos. Trate o consumo do Codex dos logs de sessão como uma **estimativa que pode estar materialmente errada**: cada sessão faz cache de seu snapshot de cota na última consulta e o reproduz inalterado em toda mensagem posterior, então os números podem estar desatualizados, e o ruído na fronteira de reset pode ocasionalmente distorcer ainda mais uma janela — a aba Quota rotula esses gráficos como estimados. **Polling ao vivo** (desligado por padrão, consentimento por provedor): o Tokdash chama o endpoint de cota do próprio provedor com o login que sua CLI já tem. É mais fresco, adiciona créditos de reset do Codex e recursos medidos, é necessário para o consumo do Codex **exato**, e é a única fonte de cota para Claude Code, Antigravity, MiniMax, Kimi Code e SuperGrok/Grok Build:
 
+A cota do Z.ai Coding Plan também está disponível apenas pelo polling ao vivo.
+
 ```bash
 tokdash quota consent --codex-api on --claude-api on --antigravity-api on
-tokdash quota consent --minimax-api on --kimi-api on --grok-api on
+tokdash quota consent --minimax-api on --kimi-api on --grok-api on --zai-api on
 tokdash quota consent --credential-scan on   # permita os leitores locais de credenciais divulgados
 tokdash quota consent --poll-interval 30      # cadência de polling em segundo plano: 15, 30, 60 ou 120 min
 tokdash quota consent --enabled off           # interruptor geral: desliga TODO o acompanhamento de cota
@@ -473,12 +475,16 @@ Para janelas de cota com reset fixo, o poler também amostra perto da fronteira 
 
 O polling ao vivo requer duas decisões separadas: `quota.credential_scan` permite acesso somente de leitura aos armazéns de credenciais locais divulgados, e então cada chave `<provider>_api` permite a requisição de rede daquele provedor. O Tokdash lê arquivos de auth/config de CLIs nativos, o `auth.json` do OpenCode mais a configuração global de provedores, os ajustes ativos do Claude e a tabela `providers` do CC Switch através de uma conexão SQLite somente de leitura. Nunca varre logs de provedores, perfis de shell ou referências arbitrarias de `{file:...}`. O MiniMax aceita um login `mmx` ou uma Token Plan Subscription Key (`MINIMAX_TOKEN_PLAN_GLOBAL_KEY` / `MINIMAX_TOKEN_PLAN_CN_KEY`); uma chave normal de pagamento por uso não tem garantia de ter cota de Token Plan. O Kimi aceita um login/chave do Kimi Code (`KIMI_API_KEY`), não uma chave de pagamento por uso da Moonshot Open Platform. A cota do SuperGrok/Grok Build requer o login OAuth da xAI em `$GROK_HOME/auth.json`; uma chave de API normal da xAI não pode acessar a faturação de consumo. No macOS, o Claude Code pode exigir uma aprovação somente de leitura da Keychain de uma vez. O Tokdash nunca renova ou escreve credenciais de provedor. `TOKDASH_QUOTA_POLL=0` é um kill switch rígido para todo o acompanhamento de cota. `tokdash export` exclui dados de cota por padrão; use `--include-quota` apenas quando você intencionalmente quiser no JSON.
 
+O Z.ai aceita uma chave de Coding Plan de `$ZCODE_HOME/v2/config.json`, de uma configuração de ferramenta compatível, de `ZAI_API_KEY` ou de `Z_AI_API_KEY`, e consulta as janelas de créditos de 5 horas/semanais e os limites MCP legados.
+
 O uso de tokens do Grok Build também é analisado localmente de `$GROK_HOME/logs/unified.jsonl`. Seus registros de inferência expõem tokens de prompt, prompt em cache, completion e raciocínio; o Tokdash os atribui usando os eventos de modelo do mesmo processo CLI e calcula o custo a partir do banco de preços normal. Registros sem evento de modelo são pulados em vez de receberem um preço suposto.
 
 O uso e as sessões do DeepSeek Harness (`dsh`) são lidos localmente de `$DSH_HOME/sessions/*/*/session.jsonl.zstd` (ou o `session.jsonl` não comprimido), com `DSH_HOME` padrão em `~/.dsh`. Cada log é uma sequência de quadros zstd concatenados; o Tokdash decodifica todos os quadros, dobra o chunk inicial de uso de cada etapa em sua mensagem finalizada em vez de contá-lo duas vezes, e pula o prefixo herdado de sessões forked para que pai e filho nunca cobrem os mesmos tokens duas vezes.
 
 O uso e as sessões do Reasonix são lidos localmente de `$REASONIX_HOME` (padrão `~/.reasonix`): tokens por requisição dos logs diários `stats/YYYY-MM-DD.jsonl`, e estrutura de sessão de `projects/*/sessions/*.jsonl`. O Reasonix conversa com os provedores que seu `config.toml` nomeia, então o par `provider/model` de cada linha é atribuído e precificado através do banco de preços normal; modelos auto-hospedados sem taxa publicada contam tokens com custo zero. O Reasonix registra o uso por requisição e nunca carimba um id de sessão, então as linhas do Session Explorer mostram turnos, projeto e momento sem contagem de tokens — Visão geral e Estatísticas carregam os totais completos.
 O uso do ZCode é lido localmente de `$ZCODE_HOME/cli/db/db.sqlite` (padrão `~/.zcode/cli/db/db.sqlite`; `ZCODE_HOME` segue o próprio ajuste do ZCode). Cada linha `model_usage` é uma requisição de modelo, retries incluídos, e o `model_id` da linha é precificado através do banco de preços normal enquanto `provider_id` (ex.: `builtin:zai-start-plan`) é mantido como rótulo. O `input_tokens` do ZCode conta tokens de prompt em cache e sem cache juntos, então a parte em cache é separada no seu próprio balde e cobrada à taxa de cache, e tokens de raciocínio são exibidos disjuntos da saída mas cobrados à taxa de saída. O ZCode também aparece na aba Sessões: os turnos são lidos do mesmo banco, cobrados por (turno, modelo) com as mesmas regras, apenas sessões de nível superior, e um turno que não produziu tokens cobráveis ainda credita seu tempo medido ao tempo ativo da ferramenta. A cota Coding Plan do ZCode é dado de conta remota e está fora do escopo do parser local.
+
+A cota do Coding Plan está disponível pelo polling ao vivo do Z.ai, com consentimento separado.
 
 O uso do WorkBuddy é lido localmente de transcripts `~/.workbuddy-ai/projects/*/*.jsonl` (`WORKBUDDY_DATA_DIR` aceita uma lista separada por vírgulas de raízes para apontar o Tokdash para outros armazéns, ex.: um diretório de dados do Windows a partir do WSL). Cada linha de mensagem de assistente é uma chamada de modelo; a parte em cache dentro de `prompt_tokens` é separada no seu próprio balde e cobrada à taxa de cache, e tokens de raciocínio são exibidos disjuntos da saída mas cobrados à taxa de saída. O id do modelo é mantido tal qual: ids explícitos (ex.: gpt-5.5) são precificados através do banco de preços normal, enquanto o alias do roteador Auto (`default-model`) está ausente do banco de preços e custa 0.00. O valor `credit` por turno é armazenado apenas como metadados e não afeta o custo. O WorkBuddy não aparece na aba Sessões.
 

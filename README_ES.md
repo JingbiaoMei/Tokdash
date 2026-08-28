@@ -185,10 +185,10 @@ La aplicación Tokdash Companion de barra de estado es una app nativa opcional p
 
 - Coste de hoy, tokens, mensajes y uso acumulado del mes
 - Totales combinados y cuota agrupada por servidor de varios endpoints de Tokdash
-- Ventanas de cuota de Codex, Claude, Kimi, MiniMax, Antigravity y Grok
+- Ventanas de cuota de Codex, Claude, Kimi, MiniMax, Antigravity, Grok y Z.ai
 - Tiempos de reinicio relativos y notificaciones opcionales de cuota baja
 - Arranque opcional al iniciar sesión
-- Idiomas de visualización: sistema, English y 简体中文
+- Detección del idioma del sistema y opciones English / 简体中文 / 日本語 / 한국어 / Español / Português
 - Sin telemetría, sin descubrimiento de credenciales, sin escaneo de puertos ni parsing directo de logs
 
 ### Descarga
@@ -455,9 +455,11 @@ Por defecto `tokdash serve` abre el panel en tu navegador una vez al arrancar. P
 
 La pestaña Quota muestra ventanas de utilización de suscripción y temporizadores de reinicio, a partir de dos fuentes de datos. **Logs locales** (sin red): Codex registra su propia cuota en archivos de sesión, así que las ventanas de 5 horas/semana de Codex funcionan desde el primer momento — pero solo se actualizan cuando usas Codex, y los logs nunca contienen créditos de reinicio ni ventanas de funciones con medidor. Trata el consumo de Codex desde logs de sesión como una **estimación que puede estar muy errada**: cada sesión cachea su instantánea de cuota en su última consulta y la reproduce sin cambios en cada mensaje posterior, de modo que las cifras pueden estar desactualizadas, y el ruido en los límites de reinicio puede distorsionar aún más una ventana — la pestaña Quota etiqueta estos gráficos como estimados. **Consulta en vivo** (desactivada por defecto, consentimiento por proveedor): Tokdash llama al endpoint de cuota del propio proveedor con la sesión iniciada que ya tiene tu CLI. Es más fresca, añade créditos de reinicio de Codex y funciones con medidor, es necesaria para el consumo de Codex **exacto**, y es la única fuente de cuota para Claude Code, Antigravity, MiniMax, Kimi Code y SuperGrok/Grok Build:
 
+La cuota de Z.ai Coding Plan también está disponible únicamente mediante la consulta en vivo.
+
 ```bash
 tokdash quota consent --codex-api on --claude-api on --antigravity-api on
-tokdash quota consent --minimax-api on --kimi-api on --grok-api on
+tokdash quota consent --minimax-api on --kimi-api on --grok-api on --zai-api on
 tokdash quota consent --credential-scan on   # permite los lectores locales de credenciales divulgados
 tokdash quota consent --poll-interval 30      # cadencia de consulta en fondo: 15, 30, 60 o 120 min
 tokdash quota consent --enabled off           # interruptor general: apaga TODO el seguimiento de cuota
@@ -473,12 +475,16 @@ Para ventanas de cuota con reinicio fijo, el consultor también muestrea cerca d
 
 La consulta en vivo requiere dos decisiones separadas: `quota.credential_scan` permite el acceso de solo lectura a los almacenes de credenciales locales divulgados, y luego cada clave `<provider>_api` permite la petición de red de ese proveedor. Tokdash lee archivos de autenticación/configuración de CLIs nativos, `auth.json` de OpenCode más la configuración global de proveedores, los ajustes activos de Claude y la tabla `providers` de CC Switch a través de una conexión SQLite de solo lectura. Nunca explora logs de proveedores, perfiles de shell ni referencias arbitrarias de `{file:...}`. MiniMax acepta un inicio de sesión `mmx` o una Token Plan Subscription Key (`MINIMAX_TOKEN_PLAN_GLOBAL_KEY` / `MINIMAX_TOKEN_PLAN_CN_KEY`); una clave normal de pago por uso no está garantizada de tener cuota de Token Plan. Kimi acepta un inicio de sesión/clave de Kimi Code (`KIMI_API_KEY`), no una clave de pago por uso de Moonshot Open Platform. La cuota de SuperGrok/Grok Build requiere el inicio de sesión OAuth de xAI en `$GROK_HOME/auth.json`; una clave de API de xAI normal no puede acceder a la facturación de consumo. En macOS, Claude Code puede requerir un permiso de solo lectura de Keychain de una sola vez. Tokdash nunca actualiza ni escribe credenciales de proveedor. `TOKDASH_QUOTA_POLL=0` es un interruptor de emergencia duro para todo el seguimiento de cuota. `tokdash export` excluye datos de cuota por defecto; usa `--include-quota` solo cuando quieras incluirlos intencionadamente en el JSON.
 
+Z.ai acepta una clave de Coding Plan desde `$ZCODE_HOME/v2/config.json`, una configuración de herramienta compatible, `ZAI_API_KEY` o `Z_AI_API_KEY`, y consulta las ventanas de créditos de 5 horas/semanales además de los límites MCP heredados.
+
 El uso de tokens de Grok Build también se analiza localmente desde `$GROK_HOME/logs/unified.jsonl`. Sus registros de inferencia exponen tokens de prompt, prompt en caché, completion y razonamiento; Tokdash los atribuye usando los eventos de modelo del mismo proceso CLI y calcula el coste desde la base de datos de precios normal. Los registros sin evento de modelo se omiten en lugar de asignarles un precio conjetural.
 
 El uso y las sesiones de DeepSeek Harness (`dsh`) se leen localmente desde `$DSH_HOME/sessions/*/*/session.jsonl.zstd` (o `session.jsonl` sin comprimir), con `DSH_HOME` por defecto en `~/.dsh`. Cada log es una secuencia de marcos zstd concatenados; Tokdash decodifica todos los marcos, pliega el chunk inicial de uso de cada paso en su mensaje finalizado en lugar de contarlo dos veces, y omite el prefijo heredado de las sesiones derivadas para que padre e hijo nunca facturen dos veces los mismos tokens.
 
 El uso y las sesiones de Reasonix se leen localmente desde `$REASONIX_HOME` (por defecto `~/.reasonix`): tokens por petición desde los logs diarios `stats/YYYY-MM-DD.jsonl`, y estructura de sesión desde `projects/*/sessions/*.jsonl`. Reasonix habla con los proveedores que nombre su `config.toml`, de modo que el par `provider/model` de cada fila se atribuye y precia a través de la base de datos de precios normal; los modelos autoalojados sin tarifa publicada cuentan tokens a coste cero. Reasonix registra el uso por petición y nunca marca un id de sesión, así que las filas del Explorador de sesiones muestran turnos, proyecto y momento sin recuentos de tokens — Resumen y Estadísticas llevan los totales completos.
 El uso de ZCode se lee localmente desde `$ZCODE_HOME/cli/db/db.sqlite` (por defecto `~/.zcode/cli/db/db.sqlite`; `ZCODE_HOME` sigue el propio ajuste de ZCode). Cada fila `model_usage` es una petición de modelo, reintentos incluidos, y el `model_id` de la fila se precia a través de la base de datos de precios normal mientras `provider_id` (p. ej. `builtin:zai-start-plan`) se conserva como etiqueta. `input_tokens` de ZCode cuenta tokens de prompt en caché y sin caché juntos, así que la parte en caché se separa en su propio cubo y se factura a la tarifa de caché, y los tokens de razonamiento se muestran disuntos de la salida pero se facturan a la tarifa de salida. ZCode también aparece en la pestaña Sesiones: los turnos se leen de la misma base de datos, facturados por (turno, modelo) con las mismas reglas, solo sesiones de nivel superior, y un turno que no produjo tokens factibles aún acredita su tiempo medido al tiempo activo de la herramienta. La cuota Coding Plan de ZCode es datos de cuenta remota y queda fuera del alcance del parser local.
+
+La cuota de Coding Plan está disponible mediante el consultor en vivo de Z.ai con consentimiento independiente.
 
 El uso de WorkBuddy se lee localmente desde transcripciones `~/.workbuddy-ai/projects/*/*.jsonl` (`WORKBUDDY_DATA_DIR` toma una lista separada por comas de raíces para apuntar a otros almacenes, p. ej. un directorio de datos de Windows desde WSL). Cada fila de mensaje de asistente es una llamada de modelo; la parte en caché dentro de `prompt_tokens` se separa en su propio cubo y se factura a la tarifa de caché, y los tokens de razonamiento se muestran disuntos de la salida pero se facturan a la tarifa de salida. El id de modelo se conserva tal cual: los ids explícitos (p. ej. gpt-5.5) se precian a través de la base de datos de precios normal, mientras el alias del router Auto (`default-model`) no existe en la BD de precios y cuesta 0.00. El valor `credit` por turno se almacena solo como metadatos y no afecta al coste. WorkBuddy no aparece en la pestaña Sesiones.
 

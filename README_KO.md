@@ -185,10 +185,10 @@ Tokdash Companion 상태표 앱은 macOS 메뉴 막대 앱, Windows 알림 영�
 
 - 오늘의 비용, 토큰, 메시지, 월 누적 사용량
 - 여러 Tokdash 엔드포인트의 합계와 서버별 그룹 쿼터
-- Codex, Claude, Kimi, MiniMax, Antigravity, Grok 쿼터 윈도우
+- Codex, Claude, Kimi, MiniMax, Antigravity, Grok, Z.ai 쿼터 윈도우
 - 상대적 리셋 시간과 선택적 저쿼터 알림
 - 선택적 로그인 시 자동 실행
-- 시스템 / English / 简体中文 표시 언어
+- 시스템 언어 자동 감지 및 English / 简体中文 / 日本語 / 한국어 / Español / Português
 - 텔레메트리, 자격 증명 탐색, 포트 스캔, 직접 로그 파싱 없음
 
 ### 다운로드
@@ -451,11 +451,13 @@ Tailscale Serve, SSH 포워딩, 명시적 네트워크 바인딩을 통한 원�
 
 ### 쿼터 추적 (선택사항)
 
-Quota 탭은 두 가지 데이터 소스로 구독 이용률 윈도우와 리셋 타이머를 표시합니다. **로컬 로그** (네트워크 불필요): Codex는 세션 파일에 자신의 쿼터를 기록하므로 Codex 5시간/주간 윈도우는 바로 동작합니다 — 다만 Codex를 사용할 때만 업데이트되고, 로그에는 리셋 크레딧이나 미터링 기능 윈도우가 포함되지 않습니다. 세션 로그의 Codex 소비량은 **크게 틀릴 수 있는 추정치**로 취급하세요: 각 세션이 마지막 조회 시점의 쿼터 스냅샷을 캐시해 이후 모든 메시지에서 그대로 재생하므로 수치가เก่า질 수 있고, 리셋 경계 노이즈가 윈도우를 더 왜곡할 수도 있습니다 — Quota 탭은 이 차트를 추정치로 라벨링합니다. **라이브 폴링** (기본값: 꺼짐, 제공자별 동의): Tokdash는 CLI가 이미 가진 로그인으로 제공자 자신의 쿼터 엔드포인트를 호출합니다. 더 최신이고, Codex 리셋 크레딧과 미터링 기능을 추가하며, **정확한** Codex 소비량에는 필수이고, Claude Code, Antigravity, MiniMax, Kimi Code, SuperGrok/Grok Build의 유일한 쿼터 소스입니다:
+Quota 탭은 두 가지 데이터 소스로 구독 이용률 윈도우와 리셋 타이머를 표시합니다. **로컬 로그** (네트워크 불필요): Codex는 세션 파일에 자신의 쿼터를 기록하므로 Codex 5시간/주간 윈도우는 바로 동작합니다 — 다만 Codex를 사용할 때만 업데이트되고, 로그에는 리셋 크레딧이나 미터링 기능 윈도우가 포함되지 않습니다. 세션 로그의 Codex 소비량은 **크게 틀릴 수 있는 추정치**로 취급하세요: 각 세션이 마지막 조회 시점의 쿼터 스냅샷을 캐시해 이후 모든 메시지에서 그대로 재생하므로 수치가 오래될 수 있고, 리셋 경계 노이즈가 윈도우를 더 왜곡할 수도 있습니다 — Quota 탭은 이 차트를 추정치로 라벨링합니다. **라이브 폴링** (기본값: 꺼짐, 제공자별 동의): Tokdash는 CLI가 이미 가진 로그인으로 제공자 자신의 쿼터 엔드포인트를 호출합니다. 더 최신이고, Codex 리셋 크레딧과 미터링 기능을 추가하며, **정확한** Codex 소비량에는 필수이고, Claude Code, Antigravity, MiniMax, Kimi Code, SuperGrok/Grok Build의 유일한 쿼터 소스입니다:
+
+Z.ai Coding Plan 쿼터도 라이브 폴링에서만 사용할 수 있습니다.
 
 ```bash
 tokdash quota consent --codex-api on --claude-api on --antigravity-api on
-tokdash quota consent --minimax-api on --kimi-api on --grok-api on
+tokdash quota consent --minimax-api on --kimi-api on --grok-api on --zai-api on
 tokdash quota consent --credential-scan on   # 공개된 로컬 자격 증명 리더 허용
 tokdash quota consent --poll-interval 30      # 백그라운드 폴링 간격: 15, 30, 60 또는 120분
 tokdash quota consent --enabled off           # 마스터 스위치: 모든 쿼터 추적 끔
@@ -471,12 +473,16 @@ tokdash quota show
 
 라이브 폴링은 두 가지 독립적 결정을 요구합니다: `quota.credential_scan`은 공개된 로컬 자격 증명 스토어에 대한 읽기 전용 접근을 허용하고, 이어 각 `<provider>_api` 키가 해당 제공자의 네트워크 요청을 허용합니다. Tokdash는 네이티브 CLI 인증/설정 파일, OpenCode의 `auth.json`과 전역 제공자 설정, 활성 Claude 설정, CC Switch의 `providers` 테이블을 읽기 전용 SQLite 연결로 읽습니다. 제공자 로그, 셸 프로필, 임의의 `{file:...}` 참조는 절대 스캔하지 않습니다. MiniMax는 `mmx` 로그인 또는 Token Plan Subscription Key(`MINIMAX_TOKEN_PLAN_GLOBAL_KEY` / `MINIMAX_TOKEN_PLAN_CN_KEY`)를 받습니다. 일반 후불 키에는 Token Plan 쿼터가 보장되지 않습니다. Kimi는 Kimi Code 로그인/키(`KIMI_API_KEY`)를 받고, Moonshot Open Platform 후불 키는 받지 않습니다. SuperGrok/Grok Build 쿼터에는 `$GROK_HOME/auth.json`의 xAI OAuth 로그인이 필요합니다. 일반 xAI API 키로는 소비자 과금에 접근할 수 없습니다. macOS에서 Claude Code는 일회성 읽기 전용 키체인 승인을 요구할 수 있습니다. Tokdash는 제공자 자격 증명을 갱신하거나 쓰지 않습니다. `TOKDASH_QUOTA_POLL=0`은 모든 쿼터 추적을 위한 하드 킬 스위치입니다. `tokdash export`는 기본적으로 쿼터 데이터를 제외합니다. JSON에 포함하려면 의도적으로 `--include-quota`를 사용하세요.
 
+Z.ai는 `$ZCODE_HOME/v2/config.json`, 지원되는 도구 설정, `ZAI_API_KEY` 또는 `Z_AI_API_KEY`의 Coding Plan 키를 허용하며 5시간/주간 크레딧 윈도우와 레거시 MCP 한도를 조회합니다.
+
 Grok Build 토큰 사용량도 `$GROK_HOME/logs/unified.jsonl`에서 로컬로 파싱됩니다. 그 추론 레코드는 프롬프트, 캐시된 프롬프트,완성, 추론 토큰을 노출하고, Tokdash는 같은 CLI 프로세스의 모델 이벤트로 귀속하고 통상 가격 데이터베이스로 비용을 계산합니다. 모델 이벤트가 없는 레코드는 추정 가격을 지정하는 대신 건너뜁니다.
 
 DeepSeek Harness(`dsh`) 사용량과 세션은 `$DSH_HOME/sessions/*/*/session.jsonl.zstd`(또는 비압축 `session.jsonl`)에서 로컬로 읽으며, `DSH_HOME` 기본값은 `~/.dsh`입니다. 각 로그는 이어 붙은 zstd 프레임의 시퀀스입니다. Tokdash는 모든 프레임을 디코드하고, 각 단계의 초기 사용량 청크를 확정된 메시지에 접어 이중 계산을 피하며, 포크된 세션의 상속된 프리픽스를 건너뛰어 부모-자식이 같은 토큰을 두 번 과금하지 않게 합니다.
 
 Reasonix 사용량과 세션은 `$REASONIX_HOME`(기본값 `~/.reasonix`)에서 로컬로 읽습니다: 요청별 토큰은 일일 `stats/YYYY-MM-DD.jsonl` 로그에서, 세션 구조는 `projects/*/sessions/*.jsonl`에서. Reasonix는 `config.toml`에 이름이 올라온 제공자와 통신하므로, 각 행의 `provider/model` 페어는 통상 가격 데이터베이스로 귀속·가격화됩니다. 공개 요율이 없는 셀프호스티드 모델은 토큰을 제로 비용으로 집계합니다. Reasonix는 요청별로 사용량을 기록하고 세션 ID를 부여하지 않으므로, Session Explorer 행은 토큰 수 없이 턴, 프로젝트, 시기를 표시합니다 — 전체 합계는 Overview와 Stats에 있습니다.
 ZCode 사용량은 `$ZCODE_HOME/cli/db/db.sqlite`(기본값 `~/.zcode/cli/db/db.sqlite`. `ZCODE_HOME`은 ZCode 자체 설정을 따름)에서 로컬로 읽습니다. 각 `model_usage` 행은 재시도 포함 하나의 모델 요청이며, 행의 `model_id`는 통상 가격 데이터베이스로 가격화되고, `provider_id`(예: `builtin:zai-start-plan`)는 라벨로 유지됩니다. ZCode의 `input_tokens`는 캐시/비캐시 프롬프트 토큰을 합산해서 세므로, 캐시 부분은 별도 버킷으로 분리해 캐시 요율을 적용하고, 추론 토큰은 출력과 분리해 표시하되 출력 요율로 과금됩니다. ZCode는 Sessions 탭에도 나타납니다: 턴은 같은 데이터베이스에서 읽히고 같은 규칙으로 (턴, 모델) 단위로 과금되며, 최상위 세션만 포함합니다. 과금 토큰을 만들지 않은 턴도 측정된 시간을 해당 도구의 활성 시간에 가산합니다. ZCode의 Coding Plan 쿼터는 원격 계정 데이터이며 로컬 파서의 범위 밖입니다.
+
+Coding Plan 쿼터는 별도로 동의한 Z.ai 라이브 폴러를 통해 사용할 수 있습니다.
 
 WorkBuddy 사용량은 `~/.workbuddy-ai/projects/*/*.jsonl` 트랜스크립트에서 로컬로 읽습니다(`WORKBUDDY_DATA_DIR`은 쉼표 구분 루트 목록을 받아 다른 스토어, 예: WSL의 Windows 데이터 디렉터리 등을 지정할 수 있음). 각 어시스턴트 메시지 행은 하나의 모델 호출이며, `prompt_tokens` 안의 캐시 부분은 별도 버킷으로 분리해 캐시 요율을 적용하고, 추론 토큰은 출력과 분리해 표시하되 출력 요율로 과금됩니다. 모델 ID는 그대로 유지됩니다: 명시적 ID(예: gpt-5.5)는 통상 가격 데이터베이스로 가격화되고, Auto 라우터 별칭(`default-model`)은 가격 DB에 없으므로 비용 0.00입니다. 턴별 `credit` 값은 메타데이터로만 저장되며 비용에 영향을 주지 않습니다. WorkBuddy는 Sessions 탭에 나타나지 않습니다.
 

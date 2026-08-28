@@ -19,8 +19,23 @@ import pytest
 import tokdash  # type: ignore[import-untyped]
 
 INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 EXPECTED_LANGUAGES = ("en", "zh", "ja", "ko", "es", "pt")
+README_FILES = (
+    "README.md",
+    "README_CN.md",
+    "README_JA.md",
+    "README_KO.md",
+    "README_ES.md",
+    "README_PT.md",
+)
+TRANSLATED_READMES = (
+    "README_JA.md",
+    "README_KO.md",
+    "README_ES.md",
+    "README_PT.md",
+)
 
 # The plural suffix placeholder is language-specific (CJK languages have no
 # plural), so translations may omit it; every other placeholder is mandatory.
@@ -39,6 +54,15 @@ def _extract_i18n_literal(source: str) -> str:
 def test_i18n_language_parity(tmp_path: Path) -> None:
     source = INDEX_HTML.read_text(encoding="utf-8")
     literal = _extract_i18n_literal(source)
+
+    blocks = dict(
+        re.findall(r"^      ([a-z]+): \{\n(.*?)^      \},?$", literal, re.M | re.S)
+    )
+    assert tuple(blocks) == EXPECTED_LANGUAGES
+    for lang, block in blocks.items():
+        raw_keys = re.findall(r"^        ([a-zA-Z0-9_]+):", block, re.M)
+        duplicates = sorted({key for key in raw_keys if raw_keys.count(key) > 1})
+        assert not duplicates, f"{lang} has duplicate keys: {duplicates}"
 
     harness = tmp_path / "i18n_report.js"
     prelude = (
@@ -80,6 +104,13 @@ def test_i18n_language_parity(tmp_path: Path) -> None:
             f"{lang} key set differs from en"
         )
 
+    referenced = set(
+        re.findall(r'data-i18n(?:-placeholder|-title)?="([^"]+)"', source)
+    )
+    referenced.update(re.findall(r"\bt\('([^']+)'\)", source))
+    missing = referenced - set(reference)
+    assert not missing, f"referenced i18n keys are undefined: {sorted(missing)}"
+
     # Unknown placeholder name anywhere: typo in a translation.
     assert not report["empty"], f"unknown placeholders: {report['empty']}"
 
@@ -115,3 +146,17 @@ def test_language_mechanism_supports_all_languages() -> None:
     # Storing 'system' resolves to the detected browser language.
     assert "stored === 'system'" in source
     assert "selectedLang === 'system' ? detectBrowserLang()" in source
+
+
+@pytest.mark.parametrize("readme", TRANSLATED_READMES)
+def test_translated_readmes_cover_zai_quota(readme: str) -> None:
+    source = (REPO_ROOT / readme).read_text(encoding="utf-8")
+    for marker in ("Z.ai", "--zai-api on", "ZAI_API_KEY", "Z_AI_API_KEY"):
+        assert marker in source, f"{readme} is missing {marker}"
+
+
+@pytest.mark.parametrize("readme", README_FILES)
+def test_readmes_link_every_translation(readme: str) -> None:
+    source = (REPO_ROOT / readme).read_text(encoding="utf-8")
+    for target in README_FILES:
+        assert f'href="{target}"' in source, f"{readme} does not link to {target}"

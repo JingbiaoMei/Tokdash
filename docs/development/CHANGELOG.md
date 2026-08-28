@@ -6,9 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+## 2.4.0 - 2026-08-28
+
 ### Added
 
+- Added Japanese, Korean, Spanish, and Portuguese dashboard languages alongside English and Simplified Chinese. The System option follows the browser language, dates and numbers use the selected locale, and each language has a linked README.
 - Added opt-in Z.ai Coding Plan quota tracking. Tokdash discovers Coding Plan keys from ZCode, supported OpenCode/Claude-compatible provider configs, or `ZAI_API_KEY` / `Z_AI_API_KEY`, then reads the provider's 5-hour and weekly credit windows plus legacy MCP limits from Z.ai's quota endpoint without refreshing or writing credentials.
+- Updated the bundled pricing database to 2.0.20, adding 14 model entries across Z.ai, DeepSeek, Qwen, ByteDance, Tencent, Mistral, Meta, and NVIDIA.
+
+### Changed
+
+- Usage refresh reports now appear for every repeat refresh of the displayed range, including timer-driven refreshes, while an explicit dismissal remains in effect until the range changes or the user requests another refresh.
 
 ## 2.3.1 - 2026-08-27
 

@@ -1,6 +1,18 @@
 {
-  "current": "2.4.0",
+  "current": "2.4.1",
   "releases": [
+    {
+      "version": "2.4.1",
+      "date": "2026-08-28",
+      "sections": [
+        {
+          "type": "fixed",
+          "items": [
+            "Quota provider visibility menus now list the harnesses reported by their own server and keep every server block synchronized when the shared preference changes."
+          ]
+        }
+      ]
+    },
     {
       "version": "2.4.0",
       "date": "2026-08-28",

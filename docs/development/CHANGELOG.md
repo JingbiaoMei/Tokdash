@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+## 2.4.1 - 2026-08-28
+
+### Fixed
+
+- Quota provider visibility controls are now scoped to each server's reported harnesses in multi-server mode. The shared show/hide preference updates every rendered server block, including partial loads where only one of several selected servers responds.
+
 ## 2.4.0 - 2026-08-28
 
 ### Added

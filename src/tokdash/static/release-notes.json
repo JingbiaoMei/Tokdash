@@ -1,6 +1,18 @@
 {
-  "current": "2.4.1",
+  "current": "2.4.2",
   "releases": [
+    {
+      "version": "2.4.2",
+      "date": "2026-08-30",
+      "sections": [
+        {
+          "type": "fixed",
+          "items": [
+            "Yesterday and other past date ranges now recompute once the range has ended, instead of showing the partial figures cached while it was still in progress. Previously only the Refresh button corrected them."
+          ]
+        }
+      ]
+    },
     {
       "version": "2.4.1",
       "date": "2026-08-28",

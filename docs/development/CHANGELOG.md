@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+## 2.4.2 - 2026-08-30
+
+### Fixed
+
+- A past date range is no longer answered from a snapshot taken while that range was still running. The dashboard sends every quick range as an explicit `date_from`/`date_to` pair, so viewing Today on one day and clicking Yesterday on the next built the same response-cache key, and the cache serves a stale entry with no upper bound on its age: the partial mid-day figures came back until the Refresh button forced a recompute. Response-cache keys for a window that can still gain usage now carry the local day they were computed on, so a key without that stamp can only have been filled after its window closed. Yesterday, Last week, Last month, Last year and any custom picker range that repeats an earlier open pair are recomputed once and then cached for good, and the same rule covers `/api/sessions`, `/api/active-time`, `/api/openclaw`, `/api/tools`, `/api/stats` (a past year now caches indefinitely) and `/api/activity-insights`. Today and other ranges that include the current day keep the existing TTL, background revalidation and Refresh behaviour.
+
 ## 2.4.1 - 2026-08-28
 
 ### Fixed

@@ -203,8 +203,10 @@ def test_startup_warmer_populates_initial_overview_date_range(monkeypatch):
         period, date_from, date_to = date_range_calls[0]
         assert period == "today"
         assert date_from == date_to
-        assert api._pricing_cache_key(f"usage_today_{date_from}_{date_to}") in api._cache
-        assert api._pricing_cache_key("stats_None") in api._cache
+        # Both windows include today, so the warmer must stamp them with the current
+        # day exactly as the routes do, or it warms keys no request ever reads.
+        assert api._window_cache_key(f"usage_today_{date_from}_{date_to}", date_from, date_to) in api._cache
+        assert api._window_cache_key("stats_None", None, None) in api._cache
         assert stats_calls == [None]
         assert session_calls == [
             (tool, "today", date_from, date_to, None) for tool in api.SESSION_TOOLS
@@ -215,7 +217,7 @@ def test_startup_warmer_populates_initial_overview_date_range(monkeypatch):
             ) in api._cache
         assert active_time_calls == [("today", date_from, date_to, None)]
         assert activity_calls == [1]
-        assert api.ACTIVITY_INSIGHTS_CACHE_KEY in api._cache
+        assert api._day_scoped_key(api.ACTIVITY_INSIGHTS_CACHE_KEY) in api._cache
     finally:
         api._clear_cache()
 

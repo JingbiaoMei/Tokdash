@@ -350,7 +350,9 @@ def test_activity_insights_uses_own_versioned_cache_key(monkeypatch):
     assert api.get_activity_insights() is expected
     assert captured == {
         "route_name": "/api/activity-insights",
-        "cache_key": "activity_insights_v1",
+        # Day-scoped: the insights window always includes today, so a snapshot
+        # taken yesterday must not answer today's request.
+        "cache_key": api._day_scoped_key("activity_insights_v1"),
         "fetch_fn": fake_activity,
         "force_refresh": False,
     }
@@ -376,7 +378,9 @@ def test_activity_insights_refresh_forces_recompute(monkeypatch):
     assert api.get_activity_insights(refresh=True) is expected
     assert captured == {
         "route_name": "/api/activity-insights",
-        "cache_key": "activity_insights_v1",
+        # Day-scoped: the insights window always includes today, so a snapshot
+        # taken yesterday must not answer today's request.
+        "cache_key": api._day_scoped_key("activity_insights_v1"),
         "fetch_fn": fake_activity,
         "force_refresh": True,
     }

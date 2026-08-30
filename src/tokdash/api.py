@@ -12,7 +12,7 @@ from collections import OrderedDict
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from json import JSONDecodeError
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -218,6 +218,60 @@ class TailnetCORSMiddleware(CORSMiddleware):
         )
 
 
+def _local_today() -> date:
+    """Today in the machine's local timezone, matching the dashboard's date picker.
+
+    The single clock for both halves of the window rule, so the stamp a key carries and
+    the open/closed test that decides whether to stamp it can never disagree.
+    """
+    return datetime.now().astimezone().date()
+
+
+def _usage_window_is_open(date_from: Optional[str], date_to: Optional[str]) -> bool:
+    """True while the requested window can still gain usage.
+
+    A period-only query ("today", "7", ...) is resolved against the clock on every
+    compute, so it is always open. An explicit range stays open until its last day has
+    passed. An unparseable date counts as open, so a bad value can only cost a
+    recompute and never serves incomplete data.
+
+    The comparison is on parsed dates, not on the strings: ``strptime`` accepts an
+    unpadded ``2026-9-1``, which sorts after ``2026-10-01`` lexically and would keep a
+    long-closed window recomputing every day.
+    """
+    if not date_to:
+        return True
+    try:
+        end = datetime.strptime(date_to, "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        return True
+    return end >= _local_today()
+
+
+def _day_scoped_key(base: str) -> str:
+    """Pin a key to the local day it was computed on."""
+    return f"{base}_asof_{_local_today().isoformat()}"
+
+
+def _window_cache_key(base: str, date_from: Optional[str], date_to: Optional[str]) -> str:
+    """Pricing-aware cache key that also pins an OPEN window to its capture day.
+
+    A day's usage is only complete once the day is over, and the response cache serves a
+    stale entry with no upper bound on its age. The dashboard requests every quick range
+    as an explicit date_from/date_to pair, so viewing "Today" on day D and clicking
+    "Yesterday" on day D+1 build the same key: without this scope the second request is
+    answered from the partial mid-day snapshot the first one left behind, and only the
+    Refresh button (force_refresh) recomputes it.
+
+    Stamping the capture day into open-window keys means a key WITHOUT the stamp can only
+    have been filled after its window closed. Past ranges are therefore always complete,
+    and stay cacheable indefinitely because their inputs no longer change.
+    """
+    if _usage_window_is_open(date_from, date_to):
+        base = _day_scoped_key(base)
+    return _pricing_cache_key(base)
+
+
 def _session_response_cache_key(
     tool: str,
     period: str,
@@ -225,8 +279,10 @@ def _session_response_cache_key(
     date_to: Optional[str],
     include_review_sessions: Optional[bool],
 ) -> str:
-    return _pricing_cache_key(
-        f"sessions_{tool.strip().lower()}_{period}_{date_from}_{date_to}_{include_review_sessions}"
+    return _window_cache_key(
+        f"sessions_{tool.strip().lower()}_{period}_{date_from}_{date_to}_{include_review_sessions}",
+        date_from,
+        date_to,
     )
 
 
@@ -236,8 +292,10 @@ def _active_time_cache_key(
     date_to: Optional[str],
     include_review_sessions: Optional[bool],
 ) -> str:
-    return _pricing_cache_key(
-        f"active_time_{period}_{date_from}_{date_to}_{include_review_sessions}"
+    return _window_cache_key(
+        f"active_time_{period}_{date_from}_{date_to}_{include_review_sessions}",
+        date_from,
+        date_to,
     )
 
 
@@ -259,10 +317,10 @@ def _warm_caches() -> None:
     today = datetime.now().astimezone().strftime("%Y-%m-%d")
     warmers = [
         (
-            _pricing_cache_key(f"usage_today_{today}_{today}"),
+            _window_cache_key(f"usage_today_{today}_{today}", today, today),
             lambda: compute_usage_with_comparison("today", today, today),
         ),
-        (_pricing_cache_key("stats_None"), lambda: compute_stats(None)),
+        (_window_cache_key("stats_None", None, None), lambda: compute_stats(None)),
     ]
     # Mirror the dashboard exactly: its default date picker sends an explicit
     # date_from/date_to pair, not period=today. Keeping this key construction shared
@@ -282,7 +340,7 @@ def _warm_caches() -> None:
             lambda: get_active_time_data("today", today, today, include_review_sessions=None),
         )
     )
-    warmers.append((ACTIVITY_INSIGHTS_CACHE_KEY, get_codex_activity_insights))
+    warmers.append((_day_scoped_key(ACTIVITY_INSIGHTS_CACHE_KEY), get_codex_activity_insights))
     for key, fetch in warmers:
         warm_event = _begin_startup_warm(key)
         try:
@@ -1050,7 +1108,7 @@ def get_usage(
 ) -> Dict[str, Any]:
     _validate_date_params(date_from, date_to)
     try:
-        cache_key = _pricing_cache_key(f"usage_{period}_{date_from}_{date_to}")
+        cache_key = _window_cache_key(f"usage_{period}_{date_from}_{date_to}", date_from, date_to)
         return _cached_route(
             "/api/usage",
             cache_key,
@@ -1078,7 +1136,7 @@ def get_openclaw(period: str = "today") -> Dict[str, Any]:
         return data
 
     try:
-        return _cached_route("/api/openclaw", _pricing_cache_key(f"openclaw_{period}"), fetch)
+        return _cached_route("/api/openclaw", _window_cache_key(f"openclaw_{period}", None, None), fetch)
     except UsageDatabaseSchemaTooNewError as e:
         # 500, not 503: 503 is the dashboard retry signal, and a database
         # written by a newer build never becomes readable on retry. Fail fast
@@ -1101,7 +1159,7 @@ def get_tools(period: str = "today") -> Dict[str, Any]:
             data["timestamp"] = datetime.now().isoformat()
             return data
 
-        return _cached_route("/api/tools", _pricing_cache_key(f"tools_{period}"), fetch)
+        return _cached_route("/api/tools", _window_cache_key(f"tools_{period}", None, None), fetch)
     except UsageDatabaseSchemaTooNewError as e:
         # 500, not 503: 503 is the dashboard retry signal, and a database
         # written by a newer build never becomes readable on retry. Fail fast
@@ -1280,7 +1338,9 @@ def refresh_quota() -> Dict[str, Any]:
 @app.get("/api/codex/sessions")
 def get_codex_sessions(period: str = "today", include_review_sessions: Optional[bool] = None) -> Dict[str, Any]:
     try:
-        cache_key = _pricing_cache_key(f"codex_sessions_{period}_{include_review_sessions}")
+        cache_key = _window_cache_key(
+            f"codex_sessions_{period}_{include_review_sessions}", None, None
+        )
         return _cached_route(
             "/api/codex/sessions",
             cache_key,
@@ -1472,7 +1532,10 @@ async def serve_service_worker(request: Request):
 @app.get("/api/stats")
 def get_stats(year: Optional[int] = None) -> Dict[str, Any]:
     try:
-        return _cached_route("/api/stats", _pricing_cache_key(f"stats_{year}"), lambda: compute_stats(year))
+        cache_key = _window_cache_key(
+            f"stats_{year}", None, f"{year}-12-31" if year else None
+        )
+        return _cached_route("/api/stats", cache_key, lambda: compute_stats(year))
     except UsageDatabaseSchemaTooNewError as e:
         # 500, not 503: 503 is the dashboard retry signal, and a database
         # written by a newer build never becomes readable on retry. Fail fast
@@ -1489,7 +1552,7 @@ def get_activity_insights(refresh: bool = False) -> dict[str, Any]:
     try:
         return _cached_route(
             "/api/activity-insights",
-            ACTIVITY_INSIGHTS_CACHE_KEY,
+            _day_scoped_key(ACTIVITY_INSIGHTS_CACHE_KEY),
             get_codex_activity_insights,
             force_refresh=refresh,
         )

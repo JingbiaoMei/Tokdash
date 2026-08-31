@@ -17,6 +17,24 @@ def isolated_usage_db(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def no_background_warmers(monkeypatch):
+    """Keep the lifespan's warm threads out of every test, on ANY code path.
+
+    ``_lifespan`` has no shutdown side, so a thread it starts outlives the
+    ``TestClient`` block that started it — the daily warmer then sleeps on with the
+    test's monkeypatches long gone, and a suite run straddling the warm minute fires a
+    real full-history ``_warm_previous_day()`` mid-run against whatever data dir is
+    current. Both are daemons, so pytest still exits and the damage is silent.
+
+    This lives in conftest rather than in one test file's fixture because any future
+    ``with TestClient(api.app)`` inherits the same problem. Tests that want a warm call
+    the warmers directly.
+    """
+    monkeypatch.setenv("TOKDASH_WARM_ON_START", "0")
+    monkeypatch.setenv("TOKDASH_DAILY_WARM", "0")
+
+
+@pytest.fixture(autouse=True)
 def no_browser_open(request, monkeypatch):
     """Never let a test spawn a real browser, on ANY code path.
 

@@ -222,10 +222,26 @@ def test_the_default_concurrency_scales_with_cores_and_is_bounded(monkeypatch):
 def test_available_cpus_prefers_the_affinity_mask_over_the_host_count(monkeypatch):
     """os.cpu_count() reports the whole host — wrong for a pinned process."""
     monkeypatch.setattr(api.os, "process_cpu_count", None, raising=False)
-    monkeypatch.setattr(api.os, "sched_getaffinity", lambda _pid: set(range(4)))
+    monkeypatch.setattr(
+        api.os, "sched_getaffinity", lambda _pid: set(range(4)), raising=False
+    )
     monkeypatch.setattr(api.os, "cpu_count", lambda: 64)
     monkeypatch.setattr(api, "_cgroup_cpu_quota", lambda: None)
     assert api._available_cpus() == 4
+
+
+def test_available_cpus_falls_back_when_there_is_no_affinity_mask(monkeypatch):
+    """os.sched_getaffinity is Linux-only; macOS and Windows must still get a count.
+
+    The other tests inject the symbol with raising=False, so without this the
+    AttributeError fallback in _available_cpus would only ever run on the platforms
+    where the tests are least likely to be looked at.
+    """
+    monkeypatch.setattr(api.os, "process_cpu_count", None, raising=False)
+    monkeypatch.delattr(api.os, "sched_getaffinity", raising=False)
+    monkeypatch.setattr(api.os, "cpu_count", lambda: 12)
+    monkeypatch.setattr(api, "_cgroup_cpu_quota", lambda: None)
+    assert api._available_cpus() == 12
 
 
 def test_a_cgroup_quota_caps_the_cpu_count(monkeypatch):
@@ -235,7 +251,9 @@ def test_a_cgroup_quota_caps_the_cpu_count(monkeypatch):
     host's cores and take 8 concurrent parses.
     """
     monkeypatch.setattr(api.os, "process_cpu_count", None, raising=False)
-    monkeypatch.setattr(api.os, "sched_getaffinity", lambda _pid: set(range(64)))
+    monkeypatch.setattr(
+        api.os, "sched_getaffinity", lambda _pid: set(range(64)), raising=False
+    )
     monkeypatch.setattr(api.os, "cpu_count", lambda: 64)
     monkeypatch.setattr(api, "_cgroup_cpu_quota", lambda: 2)
     assert api._available_cpus() == 2
@@ -249,7 +267,9 @@ def test_a_quota_lowers_the_resulting_concurrency(monkeypatch):
     An 8-CPU quota giving 4 IS distinguishable from the 8 an unquota'd host returns.
     """
     monkeypatch.setattr(api.os, "process_cpu_count", None, raising=False)
-    monkeypatch.setattr(api.os, "sched_getaffinity", lambda _pid: set(range(64)))
+    monkeypatch.setattr(
+        api.os, "sched_getaffinity", lambda _pid: set(range(64)), raising=False
+    )
     monkeypatch.setattr(api.os, "cpu_count", lambda: 64)
 
     monkeypatch.setattr(api, "_cgroup_cpu_quota", lambda: None)

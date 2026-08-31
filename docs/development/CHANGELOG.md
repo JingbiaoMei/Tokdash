@@ -10,7 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- Hermes named profiles are now scanned by default. Each profile keeps its own session database at `~/.hermes/profiles/<name>/state.db`, which Tokdash previously ignored, so Overview and Session Explorer silently missed that usage unless every profile was listed by hand in `HERMES_HOME`. Profiles are enumerated under each Hermes home, including homes given via `HERMES_HOME`, and a dir listed twice is scanned once. (#54)
+- Hermes named profiles are now scanned by default. Each profile keeps its own session database at `~/.hermes/profiles/<name>/state.db`, which Tokdash previously ignored, so Overview and Session Explorer silently missed that usage unless every profile was listed by hand in `HERMES_HOME`. Profiles are enumerated under each Hermes home, including homes given via `HERMES_HOME`, and a dir listed twice is scanned once. (#54, closes #53, thanks @wangfh5)
 - Yesterday's figures are warmed shortly after the local date rolls over (00:05 by default, `TOKDASH_DAILY_WARM_MINUTE`; disable with `TOKDASH_DAILY_WARM=0`). Every key for a window that can still gain usage goes cold at midnight, and the day that just closed is the one the Yesterday button asks for all day. Its numbers are final, so it is computed once and served from cache from then on. Today is deliberately not warmed at that hour: it holds almost nothing yet, and warming it would put a near-empty snapshot in front of the morning's first request. (#55)
 
 ### Changed

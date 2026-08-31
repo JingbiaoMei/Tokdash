@@ -12,11 +12,17 @@ from pathlib import Path
 from tokdash import clientpaths, osinfo
 
 
-def test_hermes_search_dirs_posix_default(monkeypatch):
-    """POSIX default (this host): ``~/.hermes``, unchanged."""
+def test_hermes_search_dirs_posix_default(monkeypatch, tmp_path):
+    """POSIX default: ``~/.hermes``, and nothing more when it has no profiles.
+
+    Home is isolated to ``tmp_path``: the profile scan reads the real
+    ``~/.hermes/profiles`` otherwise, so this would fail on exactly the
+    multi-profile machines the scan exists for.
+    """
     monkeypatch.delenv("HERMES_HOME", raising=False)
     monkeypatch.setattr(osinfo, "is_windows", lambda: False)
-    assert clientpaths.hermes_search_dirs() == [Path.home() / ".hermes"]
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    assert clientpaths.hermes_search_dirs() == [tmp_path / ".hermes"]
 
 
 def test_hermes_search_dirs_windows_default(monkeypatch):
@@ -27,12 +33,16 @@ def test_hermes_search_dirs_windows_default(monkeypatch):
     assert clientpaths.hermes_search_dirs() == [Path(r"C:\Users\x\AppData\Local") / "hermes"]
 
 
-def test_hermes_search_dirs_windows_default_no_localappdata(monkeypatch):
-    """Simulated Windows default with ``LOCALAPPDATA`` unset: falls back to ``~/AppData/Local``."""
+def test_hermes_search_dirs_windows_default_no_localappdata(monkeypatch, tmp_path):
+    """Simulated Windows default with ``LOCALAPPDATA`` unset: falls back to ``~/AppData/Local``.
+
+    Home is isolated to ``tmp_path`` for the same reason as the POSIX default.
+    """
     monkeypatch.delenv("HERMES_HOME", raising=False)
     monkeypatch.delenv("LOCALAPPDATA", raising=False)
     monkeypatch.setattr(osinfo, "is_windows", lambda: True)
-    assert clientpaths.hermes_search_dirs() == [Path.home() / "AppData" / "Local" / "hermes"]
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    assert clientpaths.hermes_search_dirs() == [tmp_path / "AppData" / "Local" / "hermes"]
 
 
 def test_hermes_search_dirs_env_override_posix(monkeypatch):
@@ -46,6 +56,54 @@ def test_hermes_search_dirs_env_override_windows(monkeypatch):
     monkeypatch.setattr(osinfo, "is_windows", lambda: True)
     monkeypatch.setenv("HERMES_HOME", "/a/b,/c/d")
     assert clientpaths.hermes_search_dirs() == [Path("/a/b"), Path("/c/d")]
+
+
+def test_hermes_search_dirs_scans_named_profiles(monkeypatch, tmp_path):
+    """Named profiles under ``<home>/profiles/<name>`` are scanned by default."""
+    home = tmp_path / ".hermes"
+    (home / "profiles" / "robot2").mkdir(parents=True)
+    (home / "profiles" / "robot1").mkdir(parents=True)
+    (home / "profiles" / "notes.txt").write_text("not a profile")
+    monkeypatch.setenv("HERMES_HOME", str(home))
+
+    assert clientpaths.hermes_search_dirs() == [
+        home,
+        home / "profiles" / "robot1",
+        home / "profiles" / "robot2",
+    ]
+
+
+def test_hermes_search_dirs_profiles_under_each_env_home(monkeypatch, tmp_path):
+    """Each ``HERMES_HOME`` entry contributes its own profiles, base first."""
+    a = tmp_path / "a"
+    b = tmp_path / "b"
+    (a / "profiles" / "p1").mkdir(parents=True)
+    (b / "profiles" / "p2").mkdir(parents=True)
+    monkeypatch.setenv("HERMES_HOME", f"{a},{b}")
+
+    assert clientpaths.hermes_search_dirs() == [
+        a, a / "profiles" / "p1",
+        b, b / "profiles" / "p2",
+    ]
+
+
+def test_hermes_search_dirs_dedups_explicitly_listed_profile(monkeypatch, tmp_path):
+    """The pre-fix workaround (home + its profiles listed by hand) yields no duplicates."""
+    home = tmp_path / ".hermes"
+    profile = home / "profiles" / "robot1"
+    profile.mkdir(parents=True)
+    monkeypatch.setenv("HERMES_HOME", f"{home},{profile}")
+
+    assert clientpaths.hermes_search_dirs() == [home, profile]
+
+
+def test_hermes_search_dirs_no_profiles_dir(monkeypatch, tmp_path):
+    """A home without ``profiles/`` is unchanged."""
+    home = tmp_path / ".hermes"
+    home.mkdir()
+    monkeypatch.setenv("HERMES_HOME", str(home))
+
+    assert clientpaths.hermes_search_dirs() == [home]
 
 
 def test_pi_agent_search_dirs_default(monkeypatch):

@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Added
+
+- Hermes named profiles are now scanned by default. Each profile keeps its own session database at `~/.hermes/profiles/<name>/state.db`, which Tokdash previously ignored, so Overview and Session Explorer silently missed that usage unless every profile was listed by hand in `HERMES_HOME`. Profiles are enumerated under each Hermes home, including homes given via `HERMES_HOME`, and a dir listed twice is scanned once.
+
 ## 2.4.2 - 2026-08-30
 
 ### Fixed

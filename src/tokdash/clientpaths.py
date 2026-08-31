@@ -367,14 +367,48 @@ def copilot_otel_exporter_path() -> str:
 
 
 def hermes_search_dirs() -> List[Path]:
-    """``$HERMES_HOME`` (comma-separated) if set, else ``~/.hermes`` (``%LOCALAPPDATA%\\hermes`` on Windows)."""
+    """Hermes home(s) plus their named profiles, most general first.
+
+    Base homes are ``$HERMES_HOME`` (comma-separated) when set, else
+    ``~/.hermes`` (``%LOCALAPPDATA%\\hermes`` on Windows). Each base then
+    contributes its named profiles from ``<base>/profiles/<name>``, which keep
+    their own ``state.db`` — ``hermes profile create`` never shares session
+    history between profiles (``--clone-all`` explicitly excludes it), so the
+    databases hold disjoint sessions and the row-id dedup in HermesParser /
+    _load_hermes_sessions has nothing to collapse. Mirrors the profile scan in
+    ``omp_agent_search_dirs``.
+
+    Pointing ``HERMES_HOME`` at a profile dir directly still works: a profile
+    has no ``profiles/`` of its own, so it adds nothing, and the order-keeping
+    de-duplication below absorbs a base that is also listed explicitly.
+    """
     hermes_home_env = os.environ.get("HERMES_HOME", "").strip()
     if hermes_home_env:
-        return [Path(d.strip()).expanduser() for d in hermes_home_env.split(",") if d.strip()]
-    if osinfo.is_windows():
+        bases = [Path(d.strip()).expanduser() for d in hermes_home_env.split(",") if d.strip()]
+    elif osinfo.is_windows():
         base = os.environ.get("LOCALAPPDATA") or (Path.home() / "AppData" / "Local")
-        return [Path(base) / "hermes"]
-    return [Path.home() / ".hermes"]
+        bases = [Path(base) / "hermes"]
+    else:
+        bases = [Path.home() / ".hermes"]
+
+    dirs: List[Path] = []
+    for base in bases:
+        dirs.append(base)
+        profiles_root = base / "profiles"
+        try:
+            profiles = sorted(profiles_root.iterdir()) if profiles_root.is_dir() else []
+        except OSError:
+            profiles = []
+        dirs.extend(p for p in profiles if p.is_dir())
+
+    seen: set = set()
+    out: List[Path] = []
+    for d in dirs:
+        key = str(d)
+        if key not in seen:
+            seen.add(key)
+            out.append(d)
+    return out
 
 
 # --- Reasonix -----------------------------------------------------------------

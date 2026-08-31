@@ -194,6 +194,55 @@ def test_hermes_parser_dedup_across_dbs(monkeypatch, tmp_path):
     assert len(entries) == 1
 
 
+def test_hermes_parser_scans_named_profiles(monkeypatch, tmp_path):
+    """Named profiles under ~/.hermes/profiles/<name>/state.db count by default.
+
+    Each profile keeps its own history (hermes never clones session state
+    between profiles), so all three rows are distinct sessions.
+    """
+    monkeypatch.delenv("HERMES_HOME", raising=False)
+    monkeypatch.setattr(osinfo, "is_windows", lambda: False)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    hermes_dir = tmp_path / ".hermes"
+    hermes_dir.mkdir()
+    _create_hermes_db(hermes_dir / "state.db", [_default_row(row_id="main-1")])
+    for name in ("robot1", "robot2"):
+        profile = hermes_dir / "profiles" / name
+        profile.mkdir(parents=True)
+        _create_hermes_db(profile / "state.db", [_default_row(row_id=f"{name}-1")])
+    _sig_cache.clear()
+    BaseParser._entry_cache.clear()
+
+    parser = HermesParser(PricingDatabase())
+    assert parser.search_dirs == [
+        hermes_dir,
+        hermes_dir / "profiles" / "robot1",
+        hermes_dir / "profiles" / "robot2",
+    ]
+    entries = parser.collect(None, None)
+    assert len(entries) == 3
+    assert sum(e["input"] for e in entries) == 3 * 7000
+
+
+def test_hermes_parser_profiles_under_env_home(monkeypatch, tmp_path):
+    """A HERMES_HOME entry brings its own profiles — no need to list them by hand."""
+    home = tmp_path / "custom-hermes"
+    home.mkdir()
+    _create_hermes_db(home / "state.db", [_default_row(row_id="main-1")])
+    profile = home / "profiles" / "robot1"
+    profile.mkdir(parents=True)
+    _create_hermes_db(profile / "state.db", [_default_row(row_id="robot1-1")])
+
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    _sig_cache.clear()
+    BaseParser._entry_cache.clear()
+
+    parser = HermesParser(PricingDatabase())
+    entries = parser.collect(None, None)
+    assert {e["timestamp"] for e in entries}  # sanity: rows survived
+    assert len(entries) == 2
+
+
 def test_hermes_parser_default_dir(monkeypatch, tmp_path):
     """Without HERMES_HOME, defaults to ~/.hermes."""
     monkeypatch.delenv("HERMES_HOME", raising=False)

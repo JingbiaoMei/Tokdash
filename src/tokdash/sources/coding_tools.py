@@ -2940,9 +2940,11 @@ class HermesParser(BaseParser):
     =======================================================================
     HERMES SESSION DATABASE SCHEMA
     =======================================================================
-    Location: ~/.hermes/state.db (SQLite)
+    Location: ~/.hermes/state.db (SQLite), plus every named profile's own
+              ~/.hermes/profiles/<name>/state.db (see clientpaths).
     Override: HERMES_HOME env var — comma-separated list of dirs.
-              Each dir contributes its state.db if present.
+              Each dir contributes its state.db if present, and its
+              profiles/<name>/state.db too.
 
     Query: SELECT id, model, billing_provider, started_at,
                   message_count, input_tokens, output_tokens,

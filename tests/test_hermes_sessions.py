@@ -273,6 +273,44 @@ def test_parity_with_usage_parser(monkeypatch, tmp_path):
     assert raw["p-2"]["turns"][0]["_bill"]["model"] == "openai/gpt-5"
 
 
+def test_named_profiles_scanned(monkeypatch, tmp_path):
+    """Sessions from ~/.hermes/profiles/<name>/state.db surface in the Sessions
+    tab without HERMES_HOME, and the parser bills exactly the same rows."""
+    home = _home(tmp_path)
+    _write_db(home, [_row("main-1", "deepseek-chat", "deepseek", 1779395293.0,
+                          100, 10, 0, 0, title="main")])
+    for name, sid in (("robot1", "r1-1"), ("robot2", "r2-1")):
+        profile = home / "profiles" / name
+        profile.mkdir(parents=True)
+        _write_db(profile, [_row(sid, "deepseek-chat", "deepseek", 1779395294.0,
+                                 200, 20, 0, 0, title=name)])
+    _patch_env(monkeypatch, home)
+
+    raw = _hermes_sessions()
+    assert set(raw) == {"main-1", "r1-1", "r2-1"}
+    assert raw["r1-1"]["display_name"] == "robot1"
+    # Parity: Overview bills the same tokens the Sessions tab lists.
+    assert _entry_sums(_parser_entries(home))["out"] == _turn_sums(raw)["out"] == 50
+
+
+def test_named_profiles_ids_are_disjoint_not_deduped(monkeypatch, tmp_path):
+    """Profiles never share session history, so the row-id dedup that guards
+    multiple HERMES_HOME dirs must not collapse two profiles' distinct rows."""
+    home = _home(tmp_path)
+    _write_db(home, [])
+    for name, sid in (("robot1", "20260521_212809_aaaaaa"),
+                      ("robot2", "20260521_212809_bbbbbb")):
+        profile = home / "profiles" / name
+        profile.mkdir(parents=True)
+        _write_db(profile, [_row(sid, "deepseek-chat", "deepseek", 1779395294.0,
+                                 5000, 500, 0, 0)])
+    _patch_env(monkeypatch, home)
+
+    raw = _hermes_sessions()
+    assert len(raw) == 2
+    assert _turn_sums(raw)["out"] == 1000
+
+
 def test_dedup_first_db_wins(monkeypatch, tmp_path):
     home_a = _home(tmp_path, "homeA")
     home_b = _home(tmp_path, "homeB")

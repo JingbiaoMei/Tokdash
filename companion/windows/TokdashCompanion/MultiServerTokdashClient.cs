@@ -90,13 +90,23 @@ public sealed class MultiServerTokdashClient : ITokdashClient
         bool hasPrevious = rows.All(r => r.Comparison?.CostPrev is not null);
         double? previous = hasPrevious ? rows.Sum(r => r.Comparison!.CostPrev!.Value) : null;
         double totalCost = rows.Sum(r => r.TotalCost);
+        // Mirror the server's own shape: CombinedModels is the full list ranked by
+        // tokens, TopModels its first five, TopModelsByCost the five by cost. This
+        // used to hand back one cost-sorted uncapped list under both array names.
+        var byTokens = models.Values
+            .OrderByDescending(m => m.Tokens).ThenByDescending(m => m.Cost)
+            .ThenBy(m => m.Name, StringComparer.Ordinal).ToList();
+        var byCost = models.Values
+            .OrderByDescending(m => m.Cost).ThenByDescending(m => m.Tokens)
+            .ThenBy(m => m.Name, StringComparer.Ordinal).ToList();
         return new UsageResponse
         {
             Period = rows[0].Period,
             TotalTokens = rows.Sum(r => r.TotalTokens), TotalCost = totalCost,
             TotalMessages = rows.Sum(r => r.TotalMessages), ByTool = tools,
-            CombinedModels = models.Values.OrderByDescending(m => m.Cost).ToList(),
-            TopModels = models.Values.OrderByDescending(m => m.Cost).ToList(),
+            CombinedModels = byTokens,
+            TopModels = byTokens.Take(5).ToList(),
+            TopModelsByCost = byCost.Take(5).ToList(),
             Timestamp = rows.Select(r => r.Timestamp).Where(v => v is not null).Order().FirstOrDefault(),
             Comparison = new Comparison { CostPrev = previous, CostPct = previous is > 0 ? (totalCost - previous.Value) / previous.Value * 100 : null },
         };

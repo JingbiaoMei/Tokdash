@@ -5,45 +5,442 @@
   "total_messages": 248,
   "cache_hit_rate": 0.9274,
   "by_tool": {
-    "codex": { "tokens": 12982308, "cost": 2.10, "tokens_in": 764857, "tokens_cache": 12157952, "cache_hit_rate": 0.9408 },
-    "claude": { "tokens": 4680530, "cost": 1.05, "tokens_in": 77728, "tokens_cache": 4581464, "cache_hit_rate": 0.9833 },
-    "kimi": { "tokens": 779014, "cost": 0.18, "tokens_in": 64785, "tokens_cache": 703479, "cache_hit_rate": 0.9687 },
-    "opencode": { "tokens": 249669, "cost": 0.06, "tokens_in": 10858, "tokens_cache": 237632, "cache_hit_rate": 0.9563 },
-    "openclaw": { "tokens": 409190, "cost": 0.03, "tokens_in": 88112, "tokens_cache": 400505, "cache_hit_rate": 0.8198 }
+    "codex": {
+      "tokens": 12982308,
+      "cost": 2.1,
+      "tokens_in": 764857,
+      "tokens_cache": 12157952,
+      "cache_hit_rate": 0.9408
+    },
+    "claude": {
+      "tokens": 4680530,
+      "cost": 1.05,
+      "tokens_in": 77728,
+      "tokens_cache": 4581464,
+      "cache_hit_rate": 0.9833
+    },
+    "kimi": {
+      "tokens": 779014,
+      "cost": 0.18,
+      "tokens_in": 64785,
+      "tokens_cache": 703479,
+      "cache_hit_rate": 0.9687
+    },
+    "opencode": {
+      "tokens": 249669,
+      "cost": 0.06,
+      "tokens_in": 10858,
+      "tokens_cache": 237632,
+      "cache_hit_rate": 0.9563
+    },
+    "openclaw": {
+      "tokens": 409190,
+      "cost": 0.03,
+      "tokens_in": 88112,
+      "tokens_cache": 400505,
+      "cache_hit_rate": 0.8198
+    }
   },
   "apps": {
     "codex": {
-      "tokens": 12982308, "tokens_in": 764857, "tokens_out": 40815, "tokens_cache": 12157952,
-      "cost": 2.10, "messages": 1099,
+      "tokens": 12982308,
+      "tokens_in": 764857,
+      "tokens_out": 40815,
+      "tokens_cache": 12157952,
+      "cost": 2.1,
+      "messages": 1099,
       "models": [
-        { "name": "openai/gpt-5.6-sol", "tokens": 12112500, "tokens_in": 559468, "tokens_out": 39370, "tokens_cache": 11495680, "cost": 2.10, "messages": 966, "cache_hit_rate": 0.9536 },
-        { "name": "openai/codex-auto-review", "tokens": 869808, "tokens_in": 205388, "tokens_out": 1445, "tokens_cache": 662272, "cost": 0.0, "messages": 133, "cache_hit_rate": 0.7633 }
+        {
+          "name": "openai/gpt-5.6-sol",
+          "tokens": 12732000,
+          "tokens_in": 560000,
+          "tokens_out": 39370,
+          "tokens_cache": 12132630,
+          "cost": 0.78,
+          "messages": 966,
+          "cache_hit_rate": 0.9559
+        },
+        {
+          "name": "openai/o5-deep-research",
+          "tokens": 250308,
+          "tokens_in": 205388,
+          "tokens_out": 1445,
+          "tokens_cache": 43475,
+          "cost": 1.32,
+          "messages": 133,
+          "cache_hit_rate": 0.1747
+        }
       ],
       "cache_hit_rate": 0.9408
     },
     "claude": {
-      "tokens": 4680530, "tokens_in": 77728, "tokens_out": 61610, "tokens_cache": 4581464,
-      "cost": 1.05, "messages": 884,
+      "tokens": 4680530,
+      "tokens_in": 77728,
+      "tokens_out": 61610,
+      "tokens_cache": 4581464,
+      "cost": 1.05,
+      "messages": 884,
       "models": [
-        { "name": "anthropic/claude-opus-4-7", "tokens": 2398093, "tokens_in": 146810, "tokens_out": 23377, "tokens_cache": 2227905, "cost": 0.72, "messages": 196, "cache_hit_rate": 0.9298 },
-        { "name": "anthropic/claude-sonnet-4-6", "tokens": 2282437, "tokens_in": 77728, "tokens_out": 38233, "tokens_cache": 2353559, "cost": 0.33, "messages": 688, "cache_hit_rate": 0.9926 }
+        {
+          "name": "anthropic/claude-opus-4-7",
+          "tokens": 2398093,
+          "tokens_in": 146810,
+          "tokens_out": 23377,
+          "tokens_cache": 2227906,
+          "cost": 0.72,
+          "messages": 196,
+          "cache_hit_rate": 0.9382
+        },
+        {
+          "name": "anthropic/claude-sonnet-4-6",
+          "tokens": 2282437,
+          "tokens_in": 77728,
+          "tokens_out": 38233,
+          "tokens_cache": 2166476,
+          "cost": 0.33,
+          "messages": 688,
+          "cache_hit_rate": 0.9654
+        }
       ],
       "cache_hit_rate": 0.9833
+    },
+    "kimi": {
+      "tokens": 779014,
+      "tokens_in": 64785,
+      "tokens_out": 10750,
+      "tokens_cache": 703479,
+      "cost": 0.18,
+      "messages": 120,
+      "models": [
+        {
+          "name": "moonshot/kimi-k2-thinking",
+          "tokens": 779014,
+          "tokens_in": 64785,
+          "tokens_out": 10750,
+          "tokens_cache": 703479,
+          "cost": 0.18,
+          "messages": 120,
+          "cache_hit_rate": 0.9157
+        }
+      ],
+      "cache_hit_rate": 0.9157
+    },
+    "opencode": {
+      "tokens": 249669,
+      "tokens_in": 10858,
+      "tokens_out": 1179,
+      "tokens_cache": 237632,
+      "cost": 0.06,
+      "messages": 44,
+      "models": [
+        {
+          "name": "anthropic/claude-haiku-4-5",
+          "tokens": 249669,
+          "tokens_in": 10858,
+          "tokens_out": 1179,
+          "tokens_cache": 237632,
+          "cost": 0.06,
+          "messages": 44,
+          "cache_hit_rate": 0.9563
+        }
+      ],
+      "cache_hit_rate": 0.9563
     }
   },
   "coding_apps": {
-    "codex": { "tokens": 12982308, "cost": 2.10, "messages": 1099 },
-    "claude": { "tokens": 4680530, "cost": 1.05, "messages": 884 }
+    "codex": {
+      "tokens": 12982308,
+      "cost": 2.1,
+      "messages": 1099
+    },
+    "claude": {
+      "tokens": 4680530,
+      "cost": 1.05,
+      "messages": 884
+    },
+    "kimi": {
+      "tokens": 779014,
+      "cost": 0.18,
+      "messages": 120
+    },
+    "opencode": {
+      "tokens": 249669,
+      "cost": 0.06,
+      "messages": 44
+    }
   },
+  "coding_models": [
+    {
+      "name": "openai/gpt-5.6-sol",
+      "tokens": 12732000,
+      "tokens_in": 560000,
+      "tokens_out": 39370,
+      "tokens_cache": 12132630,
+      "cost": 0.78,
+      "messages": 966,
+      "cache_hit_rate": 0.9559,
+      "source": "codex"
+    },
+    {
+      "name": "anthropic/claude-opus-4-7",
+      "tokens": 2398093,
+      "tokens_in": 146810,
+      "tokens_out": 23377,
+      "tokens_cache": 2227906,
+      "cost": 0.72,
+      "messages": 196,
+      "cache_hit_rate": 0.9382,
+      "source": "claude"
+    },
+    {
+      "name": "anthropic/claude-sonnet-4-6",
+      "tokens": 2282437,
+      "tokens_in": 77728,
+      "tokens_out": 38233,
+      "tokens_cache": 2166476,
+      "cost": 0.33,
+      "messages": 688,
+      "cache_hit_rate": 0.9654,
+      "source": "claude"
+    },
+    {
+      "name": "moonshot/kimi-k2-thinking",
+      "tokens": 779014,
+      "tokens_in": 64785,
+      "tokens_out": 10750,
+      "tokens_cache": 703479,
+      "cost": 0.18,
+      "messages": 120,
+      "cache_hit_rate": 0.9157,
+      "source": "kimi"
+    },
+    {
+      "name": "openai/o5-deep-research",
+      "tokens": 250308,
+      "tokens_in": 205388,
+      "tokens_out": 1445,
+      "tokens_cache": 43475,
+      "cost": 1.32,
+      "messages": 133,
+      "cache_hit_rate": 0.1747,
+      "source": "codex"
+    },
+    {
+      "name": "anthropic/claude-haiku-4-5",
+      "tokens": 249669,
+      "tokens_in": 10858,
+      "tokens_out": 1179,
+      "tokens_cache": 237632,
+      "cost": 0.06,
+      "messages": 44,
+      "cache_hit_rate": 0.9563,
+      "source": "opencode"
+    }
+  ],
   "top_models": [
-    { "name": "openai/gpt-5.6-sol", "tokens": 12112500, "cost": 2.10 },
-    { "name": "anthropic/claude-opus-4-7", "tokens": 2398093, "cost": 0.72 },
-    { "name": "anthropic/claude-sonnet-4-6", "tokens": 2282437, "cost": 0.33 }
+    {
+      "name": "openai/gpt-5.6-sol",
+      "tokens": 12732000,
+      "tokens_in": 560000,
+      "tokens_out": 39370,
+      "tokens_cache": 12132630,
+      "cost": 0.78,
+      "messages": 966,
+      "cache_hit_rate": 0.9559,
+      "source": "codex"
+    },
+    {
+      "name": "anthropic/claude-opus-4-7",
+      "tokens": 2398093,
+      "tokens_in": 146810,
+      "tokens_out": 23377,
+      "tokens_cache": 2227906,
+      "cost": 0.72,
+      "messages": 196,
+      "cache_hit_rate": 0.9382,
+      "source": "claude"
+    },
+    {
+      "name": "anthropic/claude-sonnet-4-6",
+      "tokens": 2282437,
+      "tokens_in": 77728,
+      "tokens_out": 38233,
+      "tokens_cache": 2166476,
+      "cost": 0.33,
+      "messages": 688,
+      "cache_hit_rate": 0.9654,
+      "source": "claude"
+    },
+    {
+      "name": "moonshot/kimi-k2-thinking",
+      "tokens": 779014,
+      "tokens_in": 64785,
+      "tokens_out": 10750,
+      "tokens_cache": 703479,
+      "cost": 0.18,
+      "messages": 120,
+      "cache_hit_rate": 0.9157,
+      "source": "kimi"
+    },
+    {
+      "name": "openrouter/glm-5",
+      "tokens": 409190,
+      "tokens_in": 88112,
+      "tokens_out": 573,
+      "tokens_cache": 320505,
+      "cost": 0.03,
+      "messages": 31,
+      "cache_hit_rate": 0.7844,
+      "source": "openclaw"
+    }
+  ],
+  "top_models_by_cost": [
+    {
+      "name": "openai/o5-deep-research",
+      "tokens": 250308,
+      "tokens_in": 205388,
+      "tokens_out": 1445,
+      "tokens_cache": 43475,
+      "cost": 1.32,
+      "messages": 133,
+      "cache_hit_rate": 0.1747,
+      "source": "codex"
+    },
+    {
+      "name": "openai/gpt-5.6-sol",
+      "tokens": 12732000,
+      "tokens_in": 560000,
+      "tokens_out": 39370,
+      "tokens_cache": 12132630,
+      "cost": 0.78,
+      "messages": 966,
+      "cache_hit_rate": 0.9559,
+      "source": "codex"
+    },
+    {
+      "name": "anthropic/claude-opus-4-7",
+      "tokens": 2398093,
+      "tokens_in": 146810,
+      "tokens_out": 23377,
+      "tokens_cache": 2227906,
+      "cost": 0.72,
+      "messages": 196,
+      "cache_hit_rate": 0.9382,
+      "source": "claude"
+    },
+    {
+      "name": "anthropic/claude-sonnet-4-6",
+      "tokens": 2282437,
+      "tokens_in": 77728,
+      "tokens_out": 38233,
+      "tokens_cache": 2166476,
+      "cost": 0.33,
+      "messages": 688,
+      "cache_hit_rate": 0.9654,
+      "source": "claude"
+    },
+    {
+      "name": "moonshot/kimi-k2-thinking",
+      "tokens": 779014,
+      "tokens_in": 64785,
+      "tokens_out": 10750,
+      "tokens_cache": 703479,
+      "cost": 0.18,
+      "messages": 120,
+      "cache_hit_rate": 0.9157,
+      "source": "kimi"
+    }
+  ],
+  "openclaw_models": [
+    {
+      "name": "openrouter/glm-5",
+      "tokens": 409190,
+      "tokens_in": 88112,
+      "tokens_out": 573,
+      "tokens_cache": 320505,
+      "cost": 0.03,
+      "messages": 31,
+      "cache_hit_rate": 0.7844
+    }
   ],
   "combined_models": [
-    { "name": "openai/gpt-5.6-sol", "tokens": 12112500, "cost": 2.10, "source": "codex" },
-    { "name": "anthropic/claude-opus-4-7", "tokens": 2398093, "cost": 0.72, "source": "claude" },
-    { "name": "anthropic/claude-sonnet-4-6", "tokens": 2282437, "cost": 0.33, "source": "claude" }
+    {
+      "name": "openai/gpt-5.6-sol",
+      "tokens": 12732000,
+      "tokens_in": 560000,
+      "tokens_out": 39370,
+      "tokens_cache": 12132630,
+      "cost": 0.78,
+      "messages": 966,
+      "cache_hit_rate": 0.9559,
+      "source": "codex"
+    },
+    {
+      "name": "anthropic/claude-opus-4-7",
+      "tokens": 2398093,
+      "tokens_in": 146810,
+      "tokens_out": 23377,
+      "tokens_cache": 2227906,
+      "cost": 0.72,
+      "messages": 196,
+      "cache_hit_rate": 0.9382,
+      "source": "claude"
+    },
+    {
+      "name": "anthropic/claude-sonnet-4-6",
+      "tokens": 2282437,
+      "tokens_in": 77728,
+      "tokens_out": 38233,
+      "tokens_cache": 2166476,
+      "cost": 0.33,
+      "messages": 688,
+      "cache_hit_rate": 0.9654,
+      "source": "claude"
+    },
+    {
+      "name": "moonshot/kimi-k2-thinking",
+      "tokens": 779014,
+      "tokens_in": 64785,
+      "tokens_out": 10750,
+      "tokens_cache": 703479,
+      "cost": 0.18,
+      "messages": 120,
+      "cache_hit_rate": 0.9157,
+      "source": "kimi"
+    },
+    {
+      "name": "openrouter/glm-5",
+      "tokens": 409190,
+      "tokens_in": 88112,
+      "tokens_out": 573,
+      "tokens_cache": 320505,
+      "cost": 0.03,
+      "messages": 31,
+      "cache_hit_rate": 0.7844,
+      "source": "openclaw"
+    },
+    {
+      "name": "openai/o5-deep-research",
+      "tokens": 250308,
+      "tokens_in": 205388,
+      "tokens_out": 1445,
+      "tokens_cache": 43475,
+      "cost": 1.32,
+      "messages": 133,
+      "cache_hit_rate": 0.1747,
+      "source": "codex"
+    },
+    {
+      "name": "anthropic/claude-haiku-4-5",
+      "tokens": 249669,
+      "tokens_in": 10858,
+      "tokens_out": 1179,
+      "tokens_cache": 237632,
+      "cost": 0.06,
+      "messages": 44,
+      "cache_hit_rate": 0.9563,
+      "source": "opencode"
+    }
   ],
   "comparison": {
     "tokens_prev": 21250000,
@@ -54,5 +451,7 @@
     "messages_pct": -11.7
   },
   "timestamp": "2026-07-26T20:20:00+00:00",
-  "response_cache": { "age_seconds": 120 }
+  "response_cache": {
+    "age_seconds": 120
+  }
 }

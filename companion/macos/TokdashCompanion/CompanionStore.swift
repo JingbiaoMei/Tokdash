@@ -330,10 +330,24 @@ final class CompanionStore: NSObject, ObservableObject {
         let previousValues = rows.compactMap { $0.comparison?.costPrev }
         let previous = previousValues.count == rows.count ? previousValues.reduce(0, +) : nil
         let pct = previous.flatMap { $0 > 0 ? (totalCost - $0) / $0 * 100 : nil }
-        let modelRows = models.map { ModelAgg(name: $0.key, tokens: $0.value.tokens, cost: $0.value.cost) }.sorted { $0.cost > $1.cost }
+        // Mirror the server's own shape: combinedModels is the full list ranked by
+        // tokens, topModels its first five, topModelsByCost the five by cost. This
+        // used to hand back one cost-sorted uncapped list under all three names.
+        let merged = models.map { ModelAgg(name: $0.key, tokens: $0.value.tokens, cost: $0.value.cost) }
+        let byTokens = merged.sorted {
+            if $0.tokens != $1.tokens { return $0.tokens > $1.tokens }
+            if $0.cost != $1.cost { return $0.cost > $1.cost }
+            return $0.name < $1.name
+        }
+        let byCost = merged.sorted {
+            if $0.cost != $1.cost { return $0.cost > $1.cost }
+            if $0.tokens != $1.tokens { return $0.tokens > $1.tokens }
+            return $0.name < $1.name
+        }
         return UsageResponse(period: rows.first?.period ?? "", totalTokens: rows.reduce(0) { $0 + $1.totalTokens }, totalCost: totalCost,
             totalMessages: rows.reduce(0) { $0 + $1.totalMessages }, byTool: tools.mapValues { ToolAgg(tokens: $0.tokens, cost: $0.cost) },
-            topModels: modelRows, combinedModels: modelRows, comparison: Comparison(costPct: pct, costPrev: previous),
+            topModels: Array(byTokens.prefix(5)), topModelsByCost: Array(byCost.prefix(5)),
+            combinedModels: byTokens, comparison: Comparison(costPct: pct, costPrev: previous),
             timestamp: rows.compactMap(\.timestamp).min())
     }
 
@@ -771,8 +785,11 @@ struct Snapshot {
 
     var activityText: String? {
         let leadTool = today.byTool?.max(by: { $0.value.cost < $1.value.cost })?.key
-        let leadModel = (today.combinedModels ?? today.topModels ?? [])
-            .max(by: { $0.cost < $1.cost })
+        // top_models_by_cost is the served spend podium. The fallback takes a
+        // maximum over the FULL list, never over topModels: that array holds the
+        // five biggest models by tokens, which need not contain the costliest.
+        let leadModel = today.topModelsByCost?.first
+            ?? (today.combinedModels ?? today.topModels ?? []).max(by: { $0.cost < $1.cost })
         guard let tool = leadTool, let model = leadModel else { return nil }
         let modelName = model.name.split(separator: "/").last.map(String.init) ?? model.name
         return L10n.t("most_used_today", tool, modelName)

@@ -22,6 +22,8 @@ from .usage_store import (
     UsageDatabaseSchemaTooNewError,
     UsageEntryStore,
     build_source_signature,
+    model_cost_rank_key,
+    model_rank_key,
     persistent_pricing_signature,
     persistent_usage_db_enabled,
     public_usage_entry,
@@ -297,13 +299,13 @@ def _merge_parsed_usage(parts: list[Dict[str, Any]]) -> Dict[str, Any]:
             global_ref["messages"] += messages
 
     for app_data in apps.values():
-        app_data["models"] = sorted(app_data["models_dict"].values(), key=lambda x: x["cost"], reverse=True)
+        app_data["models"] = sorted(app_data["models_dict"].values(), key=model_rank_key)
         del app_data["models_dict"]
         for model_ref in app_data["models"]:
             model_ref["cache_hit_rate"] = cache_hit_rate(model_ref["tokens_in"], model_ref["tokens_cache"])
         app_data["cache_hit_rate"] = cache_hit_rate(app_data["tokens_in"], app_data["tokens_cache"])
 
-    all_models = sorted(all_models_dict.values(), key=lambda x: x["cost"], reverse=True)
+    all_models = sorted(all_models_dict.values(), key=model_rank_key)
     for row in all_models:
         row["cache_hit_rate"] = cache_hit_rate(row["tokens_in"], row["tokens_cache"])
 
@@ -508,13 +510,13 @@ def parse_entries_json(data: Dict[str, Any]) -> Dict[str, Any]:
         g["messages"] += messages
 
     for app_data in apps.values():
-        app_data["models"] = sorted(app_data["models_dict"].values(), key=lambda x: x["cost"], reverse=True)
+        app_data["models"] = sorted(app_data["models_dict"].values(), key=model_rank_key)
         del app_data["models_dict"]
         for model_ref in app_data["models"]:
             model_ref["cache_hit_rate"] = cache_hit_rate(model_ref["tokens_in"], model_ref["tokens_cache"])
         app_data["cache_hit_rate"] = cache_hit_rate(app_data["tokens_in"], app_data["tokens_cache"])
 
-    all_models = sorted(all_models_dict.values(), key=lambda x: x["cost"], reverse=True)
+    all_models = sorted(all_models_dict.values(), key=model_rank_key)
     for m in all_models:
         m["cache_hit_rate"] = cache_hit_rate(m["tokens_in"], m["tokens_cache"])
 
@@ -870,6 +872,11 @@ def compute_usage(period: str, date_from: Optional[str] = None, date_to: Optiona
         coding_data = get_tools_data(period)
 
     coding_apps = {k: v for k, v in coding_data.get("apps", {}).items() if k.lower() != "openclaw"}
+    # coding_models inherits its token ranking from all_models rather than sorting
+    # again: every producer of all_models (parse_entries_json, _merge_parsed_usage,
+    # UsageEntryStore.aggregate_entries) sorts with model_rank_key, and a filter
+    # preserves order. API.md documents this array as token-ranked, so a change to
+    # how all_models is ordered breaks that claim here, silently.
     coding_models = [
         m
         for m in coding_data.get("all_models", [])
@@ -901,8 +908,7 @@ def compute_usage(period: str, date_from: Optional[str] = None, date_to: Optiona
 
     openclaw_models = sorted(
         [{"name": k, **v} for k, v in openclaw_data["models"].items() if _has_visible_token_usage(v)],
-        key=lambda x: x.get("cost", 0.0),
-        reverse=True,
+        key=model_rank_key,
     )
 
     combined_by_model: Dict[str, dict] = {}
@@ -935,7 +941,7 @@ def compute_usage(period: str, date_from: Optional[str] = None, date_to: Optiona
     for r in openclaw_models:
         add_row(r)
 
-    combined_models = sorted(combined_by_model.values(), key=lambda x: x.get("cost", 0.0), reverse=True)
+    combined_models = sorted(combined_by_model.values(), key=model_rank_key)
     for row in combined_models:
         row["cache_hit_rate"] = cache_hit_rate(row["tokens_in"], row["tokens_cache"])
     total_messages = openclaw_data["total_messages"] + sum(v.get("messages", 0) for v in coding_apps.values())
@@ -959,6 +965,12 @@ def compute_usage(period: str, date_from: Optional[str] = None, date_to: Optiona
         "coding_apps": coding_apps,
         "coding_models": coding_models,
         "top_models": combined_models[:5],
+        # The spend podium, served rather than derived. Every array here is
+        # ranked by tokens, so a consumer that wants models by money had to sort
+        # the whole list client-side -- and a client holding only top_models
+        # could not: its five are the five biggest, which need not contain the
+        # five priciest.
+        "top_models_by_cost": sorted(combined_models, key=model_cost_rank_key)[:5],
         "openclaw_models": openclaw_models,
         "combined_models": combined_models,
         # Sources that failed to read this collection (empty when all succeeded):

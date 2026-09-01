@@ -108,6 +108,7 @@ public sealed class UsageResponse
     [JsonPropertyName("total_messages")] public long TotalMessages { get; set; }
     [JsonPropertyName("by_tool")] public Dictionary<string, ToolAgg>? ByTool { get; set; }
     [JsonPropertyName("top_models")] public List<ModelAgg>? TopModels { get; set; }
+    [JsonPropertyName("top_models_by_cost")] public List<ModelAgg>? TopModelsByCost { get; set; }
     [JsonPropertyName("combined_models")] public List<ModelAgg>? CombinedModels { get; set; }
     public Comparison? Comparison { get; set; }
     public string? Timestamp { get; set; }

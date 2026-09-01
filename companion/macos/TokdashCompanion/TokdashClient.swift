@@ -126,6 +126,7 @@ struct UsageResponse: Decodable, Sendable {
     let totalMessages: Int
     let byTool: [String: ToolAgg]?
     let topModels: [ModelAgg]?
+    let topModelsByCost: [ModelAgg]?
     let combinedModels: [ModelAgg]?
     let comparison: Comparison?
     let timestamp: String?
@@ -138,6 +139,7 @@ struct UsageResponse: Decodable, Sendable {
         case totalMessages = "total_messages"
         case byTool = "by_tool"
         case topModels = "top_models"
+        case topModelsByCost = "top_models_by_cost"
         case combinedModels = "combined_models"
         case comparison
         case timestamp
@@ -146,11 +148,13 @@ struct UsageResponse: Decodable, Sendable {
 
     init(period: String = "", totalTokens: Int = 0, totalCost: Double = 0,
          totalMessages: Int = 0, byTool: [String: ToolAgg]? = nil,
-         topModels: [ModelAgg]? = nil, combinedModels: [ModelAgg]? = nil,
+         topModels: [ModelAgg]? = nil, topModelsByCost: [ModelAgg]? = nil,
+         combinedModels: [ModelAgg]? = nil,
          comparison: Comparison? = nil, timestamp: String? = nil,
          responseCache: CacheInfo? = nil) {
         self.period = period; self.totalTokens = totalTokens; self.totalCost = totalCost
         self.totalMessages = totalMessages; self.byTool = byTool; self.topModels = topModels
+        self.topModelsByCost = topModelsByCost
         self.combinedModels = combinedModels; self.comparison = comparison
         self.timestamp = timestamp; self.responseCache = responseCache
     }
@@ -274,7 +278,7 @@ extension UsageResponse {
     /// Sentinel for a section that has never fetched successfully.
     static let empty = UsageResponse(
         period: "", totalTokens: 0, totalCost: 0, totalMessages: 0,
-        byTool: nil, topModels: nil, combinedModels: nil,
+        byTool: nil, topModels: nil, topModelsByCost: nil, combinedModels: nil,
         comparison: nil, timestamp: nil, responseCache: nil
     )
 }

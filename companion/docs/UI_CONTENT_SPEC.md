@@ -150,7 +150,9 @@ Most used today  Codex · gpt-5.6
 Selection:
 
 - Leading tool by cost from `by_tool`.
-- Leading model by cost from `top_models`/`combined_models`.
+- Leading model by cost from `top_models_by_cost[0]`, falling back to a maximum
+  by cost over `combined_models`. Not `top_models` — it is token-ranked and
+  capped at five, so the costliest model may not be in it.
 - Omit when the response is empty.
 
 This is the first item to remove if the surface feels crowded.

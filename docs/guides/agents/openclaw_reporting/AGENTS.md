@@ -43,7 +43,7 @@ openclaw cron add \
   --cron "0 8 * * *" \
   --tz "America/Los_Angeles" \
   --session isolated \
-  --message "Query the Tokdash API at http://127.0.0.1:55423/api/usage?period=today and generate a usage report. Format: show total cost, total tokens, top models by cost, and breakdown by tool (OpenClaw vs coding tools). Respond in both English and Chinese." \
+  --message "Query the Tokdash API at http://127.0.0.1:55423/api/usage?period=today and generate a usage report. Format: show total cost, total tokens, top models by cost (the top_models_by_cost field), and breakdown by tool (OpenClaw vs coding tools). Respond in both English and Chinese." \
   --announce \
   --channel whatsapp \
   --to "+15551234567"
@@ -57,7 +57,7 @@ openclaw cron add \
   --cron "0 8 * * *" \
   --tz "America/Los_Angeles" \
   --session isolated \
-  --message "Query the Tokdash API at http://127.0.0.1:55423/api/usage?period=today and generate a usage report in JSON format with: total_cost, total_tokens, top_models (by cost), and tool_breakdown." \
+  --message "Query the Tokdash API at http://127.0.0.1:55423/api/usage?period=today and generate a usage report in JSON format with: total_cost, total_tokens, top_models (most used, by tokens), top_models_by_cost (highest spend), and tool_breakdown." \
   --webhook "https://your-webhook.example.com/tokdash"
 ```
 
@@ -69,7 +69,7 @@ openclaw cron add \
   --cron "0 8 * * 1" \
   --tz "America/Los_Angeles" \
   --session isolated \
-  --message "Query the Tokdash API at http://127.0.0.1:55423/api/usage?period=week and generate a weekly usage summary. Include: total cost, token breakdown, top 5 models by cost, and day-by-day activity highlights." \
+  --message "Query the Tokdash API at http://127.0.0.1:55423/api/usage?period=week and generate a weekly usage summary. Include: total cost, token breakdown, the top 5 models by cost (the top_models_by_cost field), and day-by-day activity highlights." \
   --announce \
   --channel slack \
   --to "channel:C1234567890"

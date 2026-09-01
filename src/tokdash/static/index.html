@@ -4027,6 +4027,28 @@
       const sumFields = (target, source, fields) => fields.forEach((field) => {
         if (target[field] !== undefined || source[field] !== undefined) target[field] = number(target[field]) + number(source[field]);
       });
+      // Mirrors model_rank_key on the server: tokens first, cost only to break a
+      // tie. Merging used to re-sort by cost, so combining servers reordered the
+      // very arrays the server had just ranked by usage.
+      // Ordinal, not localeCompare: the Python keys break a tie by comparing the
+      // name's code units, so a locale collation here would order an exact
+      // tokens-and-cost tie differently on the merged path than on one server's.
+      const byName = (a, b) => {
+        const left = String(a.name ?? a.model ?? '');
+        const right = String(b.name ?? b.model ?? '');
+        return left < right ? -1 : left > right ? 1 : 0;
+      };
+      const byModelRank = (a, b) => (
+        (number(b.tokens ?? b.total_tokens) - number(a.tokens ?? a.total_tokens))
+        || (number(b.cost ?? b.total_cost) - number(a.cost ?? a.total_cost))
+        || byName(a, b)
+      );
+      // Mirrors model_cost_rank_key, for the one array that ranks by money.
+      const byCostRank = (a, b) => (
+        (number(b.cost ?? b.total_cost) - number(a.cost ?? a.total_cost))
+        || (number(b.tokens ?? b.total_tokens) - number(a.tokens ?? a.total_tokens))
+        || byName(a, b)
+      );
       const mergeObject = (key) => {
         const merged = {};
         rows.forEach((row) => Object.entries(row[key] || {}).forEach(([name, value]) => {
@@ -4042,14 +4064,14 @@
                   if (!models.has(modelName)) models.set(modelName, { ...item });
                   else sumFields(models.get(modelName), item, ['tokens','total_tokens','tokens_in','tokens_out','tokens_cache','tokens_cache_write','tokens_reasoning','cost','total_cost','messages','total_messages']);
                 });
-                merged[name].models = [...models.values()].sort((a, b) => number(b.cost ?? b.tokens) - number(a.cost ?? a.tokens));
+                merged[name].models = [...models.values()].sort(byModelRank);
               }
             }
           } else merged[name] = number(merged[name]) + number(value);
         }));
         out[key] = merged;
       };
-      const mergeArray = (key) => {
+      const mergeArray = (key, comparator) => {
         const merged = new Map();
         rows.forEach((row) => (row[key] || []).forEach((item) => {
           const name = String(item?.name ?? item?.model ?? item?.tool ?? '');
@@ -4057,11 +4079,24 @@
           if (!merged.has(name)) merged.set(name, { ...item });
           else sumFields(merged.get(name), item, ['tokens','total_tokens','tokens_in','tokens_out','tokens_cache','tokens_cache_write','tokens_reasoning','cost','total_cost','messages','total_messages']);
         }));
-        out[key] = [...merged.values()].sort((a, b) => number(b.cost ?? b.total_cost ?? b.tokens) - number(a.cost ?? a.total_cost ?? a.tokens));
+        out[key] = [...merged.values()].sort(comparator || byModelRank);
       };
       ['total_tokens','total_cost','total_messages'].forEach((field) => { out[field] = rows.reduce((sum, row) => sum + number(row[field]), 0); });
       ['by_tool','apps','coding_apps'].forEach(mergeObject);
-      ['coding_models','top_models','openclaw_models','combined_models'].forEach(mergeArray);
+      ['coding_models','openclaw_models','combined_models'].forEach((key) => mergeArray(key));
+      // Both podiums are the head of the merged full list rather than a merge of
+      // the per-server podiums: a model outside one server's five contributes
+      // nothing from that server, so merging the capped arrays undercounts it.
+      // Only when every row carried the full list, though -- deriving from a
+      // partial combined_models would drop a pre-combined_models server's models
+      // from top_models altogether, where merging the capped arrays keeps them.
+      if (rows.every((row) => Array.isArray(row.combined_models))) {
+        out.top_models = out.combined_models.slice(0, 5);
+        out.top_models_by_cost = [...out.combined_models].sort(byCostRank).slice(0, 5);
+      } else {
+        mergeArray('top_models');
+        mergeArray('top_models_by_cost', byCostRank);
+      }
       out.timestamp = rows.map((row) => row.timestamp).filter(Boolean).sort()[0] || null;
       // response_cache rides in on the rows[0] deep copy above and is otherwise never
       // re-derived, so a combined view reported the FIRST server's freshness for
@@ -8672,7 +8707,7 @@
       }
 
       updateToolChart(data.by_tool || {});
-      updateModelChart(data.top_models || []);
+      updateModelChart(data.top_models_by_cost || data.combined_models || data.top_models || []);
       lastByTool = data.by_tool || {};
       updateToolsTable(lastByTool);
       lastCombinedModels = data.combined_models || [];
@@ -10110,8 +10145,14 @@
       if (!canvas) return;
       const ctx = canvas.getContext('2d');
 
-      const labels = (topModels || []).slice(0, 5).map((m) => m.name);
-      const values = (topModels || []).slice(0, 5).map((m) => m.cost);
+      // Served pre-ranked as top_models_by_cost. The sort stays because the
+      // fallbacks above (an older server, or a payload without the new field)
+      // hand this a token-ranked list, and this panel is "Top Models by Cost".
+      const byCost = [...(topModels || [])]
+        .sort((a, b) => (Number(b.cost) || 0) - (Number(a.cost) || 0))
+        .slice(0, 5);
+      const labels = byCost.map((m) => m.name);
+      const values = byCost.map((m) => m.cost);
 
       if (!modelChart) {
         modelChart = new Chart(ctx, {

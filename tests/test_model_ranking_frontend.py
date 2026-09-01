@@ -188,3 +188,28 @@ def test_multi_server_merge_builds_both_podiums_from_the_full_list(tmp_path):
     # so neither podium could have been built from the other.
     assert "ocl-big" not in out["by_cost"]
     assert "ocl-small" not in out["by_tokens"]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_merge_keeps_models_from_a_server_without_combined_models(tmp_path):
+    """Deriving the podiums from a partial full list would drop a server entirely."""
+    source = INDEX_HTML.read_text(encoding="utf-8")
+    function = _extract_js_function(source, "function combineUsagePayloads(list) {")
+
+    modern = _payload([("shared-model", 5_000, 1.0)])
+    # A server predating combined_models: it sends only the capped array.
+    legacy = _payload([("shared-model", 5_000, 1.0), ("legacy-only", 4_000, 2.0)])
+    del legacy["combined_models"]
+
+    script = (
+        function
+        + "\nconst input = JSON.parse(process.argv[2]);\n"
+        + "const out = combineUsagePayloads(input);\n"
+        + "process.stdout.write(JSON.stringify(out.top_models));\n"
+    )
+    merged = _run_js(tmp_path, "merge_legacy", script, [modern, legacy])
+
+    names = [row["name"] for row in merged]
+    assert "legacy-only" in names, "a server without combined_models must not vanish"
+    shared = next(row for row in merged if row["name"] == "shared-model")
+    assert shared["tokens"] == 10_000, "both servers' rows must still be summed"

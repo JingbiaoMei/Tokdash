@@ -276,6 +276,50 @@ final class SnapshotTests: XCTestCase {
         ]), 30)
     }
 
+    func testSharedFixturePinsModelRankingAndCostPodium() throws {
+        let usageData = try Data(contentsOf: contractURL("fixtures/usage-today.json"))
+        let today = try JSONDecoder().decode(UsageResponse.self, from: usageData)
+
+        // combined_models is ranked by tokens, and top_models is its first five.
+        let combined = try XCTUnwrap(today.combinedModels)
+        let topModels = try XCTUnwrap(today.topModels)
+        XCTAssertEqual(combined.map(\.tokens), combined.map(\.tokens).sorted(by: >),
+                       "combined_models must be ranked by tokens")
+        XCTAssertEqual(topModels.map(\.name), combined.prefix(5).map(\.name),
+                       "top_models must be the first five of combined_models")
+
+        // The costliest model sits outside the token podium, so a maximum by cost
+        // over top_models names the wrong one. If this ever stops holding, the
+        // fixture has stopped being able to fail a client that does that.
+        let costLeader = try XCTUnwrap(today.topModelsByCost?.first)
+        let trap = try XCTUnwrap(topModels.max(by: { $0.cost < $1.cost }))
+        XCTAssertNotEqual(costLeader.name, trap.name,
+                          "fixture no longer expresses the truncate-then-sort trap")
+        XCTAssertEqual(costLeader.name, "openai/o5-deep-research")
+        XCTAssertFalse(topModels.contains { $0.name == costLeader.name },
+                       "the costliest model must sit outside the token podium")
+
+        let activity = try XCTUnwrap(
+            Snapshot(today: today, month: .empty, quota: .empty, thresholds: .defaults).activityText)
+        XCTAssertTrue(activity.contains("o5-deep-research"))
+        XCTAssertFalse(activity.contains("gpt-5.6-sol"),
+                       "a maximum by cost over top_models would have named this model")
+    }
+
+    func testCombineUsageRanksBothPodiumsFromTheFullList() throws {
+        let usageData = try Data(contentsOf: contractURL("fixtures/usage-today.json"))
+        let today = try JSONDecoder().decode(UsageResponse.self, from: usageData)
+        let combined = CompanionStore.combineUsage([today, today])
+
+        let all = try XCTUnwrap(combined.combinedModels)
+        XCTAssertEqual(all.map(\.tokens), all.map(\.tokens).sorted(by: >))
+        XCTAssertEqual(try XCTUnwrap(combined.topModels).count, 5, "top_models is capped at five")
+        XCTAssertEqual(try XCTUnwrap(combined.topModels).map(\.name), all.prefix(5).map(\.name))
+        XCTAssertEqual(try XCTUnwrap(combined.topModelsByCost?.first).name, "openai/o5-deep-research")
+        // Summed across both servers rather than taken from either one's podium.
+        XCTAssertEqual(all[0].tokens, try XCTUnwrap(today.combinedModels)[0].tokens * 2)
+    }
+
     private func contractURL(_ relativePath: String) -> URL {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

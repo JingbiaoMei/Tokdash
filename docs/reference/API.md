@@ -318,8 +318,8 @@ has no way to compute the spend one. Both podiums are drawn from the same
 These arrays were ordered by cost in earlier versions, against what this table
 said. Tokens and cost usually rank models the same way over a week or a month,
 which is why the mismatch was easy to miss; over a year, where a cheaper model
-can out-work a pricier one, they diverge. Sort client-side if you want models by
-spend.
+can out-work a pricier one, they diverge. For the spend ranking beyond the top
+five, sort `combined_models` client-side.
 
 **Per-app object shape**
 

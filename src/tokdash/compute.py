@@ -872,6 +872,11 @@ def compute_usage(period: str, date_from: Optional[str] = None, date_to: Optiona
         coding_data = get_tools_data(period)
 
     coding_apps = {k: v for k, v in coding_data.get("apps", {}).items() if k.lower() != "openclaw"}
+    # coding_models inherits its token ranking from all_models rather than sorting
+    # again: every producer of all_models (parse_entries_json, _merge_parsed_usage,
+    # UsageEntryStore.aggregate_entries) sorts with model_rank_key, and a filter
+    # preserves order. API.md documents this array as token-ranked, so a change to
+    # how all_models is ordered breaks that claim here, silently.
     coding_models = [
         m
         for m in coding_data.get("all_models", [])

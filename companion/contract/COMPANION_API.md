@@ -89,6 +89,14 @@ over the full `combined_models` when talking to a server that predates the field
 Earlier Tokdash versions ranked the arrays by cost, which is why a client that
 took a maximum over `top_models` used to get away with it.
 
+`fixtures/usage-today.json` is built to catch exactly that. Its seven models rank
+differently by tokens and by cost: `openai/o5-deep-research` is the costliest and
+only the sixth largest, so it is absent from `top_models`, and `openrouter/glm-5`
+is fifth largest and the cheapest, so it is absent from `top_models_by_cost`. A
+client that takes a maximum by cost over `top_models` picks `openai/gpt-5.6-sol`
+and fails the case. Keep that divergence when editing the fixture — an earlier
+version ranked the same both ways, and no client could fail it.
+
 ### `GET /api/usage?period=month`
 
 Fixture: `fixtures/usage-month.json`.

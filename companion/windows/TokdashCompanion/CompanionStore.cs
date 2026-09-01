@@ -692,8 +692,12 @@ public sealed class Snapshot
         get
         {
             var leadTool = Today.ByTool?.OrderByDescending(kv => kv.Value.Cost).Select(kv => (KeyValuePair<string, ToolAgg>?)kv).FirstOrDefault();
-            var leadModel = (Today.CombinedModels ?? Today.TopModels ?? [])
-                .OrderByDescending(m => m.Cost).FirstOrDefault();
+            // top_models_by_cost is the served spend podium. The fallback takes a
+            // maximum over the FULL list, never over TopModels: that array holds the
+            // five biggest models by tokens, which need not contain the costliest.
+            var leadModel = Today.TopModelsByCost?.FirstOrDefault()
+                ?? (Today.CombinedModels ?? Today.TopModels ?? [])
+                    .OrderByDescending(m => m.Cost).FirstOrDefault();
             if (leadTool is null || leadModel is null) return null;
             string modelName = leadModel.Name.Split('/').LastOrDefault() ?? leadModel.Name;
             return L10n.T("most_used_today", leadTool.Value.Key, modelName);

@@ -4030,16 +4030,24 @@
       // Mirrors model_rank_key on the server: tokens first, cost only to break a
       // tie. Merging used to re-sort by cost, so combining servers reordered the
       // very arrays the server had just ranked by usage.
+      // Ordinal, not localeCompare: the Python keys break a tie by comparing the
+      // name's code units, so a locale collation here would order an exact
+      // tokens-and-cost tie differently on the merged path than on one server's.
+      const byName = (a, b) => {
+        const left = String(a.name ?? a.model ?? '');
+        const right = String(b.name ?? b.model ?? '');
+        return left < right ? -1 : left > right ? 1 : 0;
+      };
       const byModelRank = (a, b) => (
         (number(b.tokens ?? b.total_tokens) - number(a.tokens ?? a.total_tokens))
         || (number(b.cost ?? b.total_cost) - number(a.cost ?? a.total_cost))
-        || String(a.name ?? a.model ?? '').localeCompare(String(b.name ?? b.model ?? ''))
+        || byName(a, b)
       );
       // Mirrors model_cost_rank_key, for the one array that ranks by money.
       const byCostRank = (a, b) => (
         (number(b.cost ?? b.total_cost) - number(a.cost ?? a.total_cost))
         || (number(b.tokens ?? b.total_tokens) - number(a.tokens ?? a.total_tokens))
-        || String(a.name ?? a.model ?? '').localeCompare(String(b.name ?? b.model ?? ''))
+        || byName(a, b)
       );
       const mergeObject = (key) => {
         const merged = {};
@@ -4075,14 +4083,19 @@
       };
       ['total_tokens','total_cost','total_messages'].forEach((field) => { out[field] = rows.reduce((sum, row) => sum + number(row[field]), 0); });
       ['by_tool','apps','coding_apps'].forEach(mergeObject);
-      ['coding_models','top_models','openclaw_models','combined_models'].forEach((key) => mergeArray(key));
-      mergeArray('top_models_by_cost', byCostRank);
+      ['coding_models','openclaw_models','combined_models'].forEach((key) => mergeArray(key));
       // Both podiums are the head of the merged full list rather than a merge of
       // the per-server podiums: a model outside one server's five contributes
       // nothing from that server, so merging the capped arrays undercounts it.
-      if (Array.isArray(out.combined_models) && out.combined_models.length) {
+      // Only when every row carried the full list, though -- deriving from a
+      // partial combined_models would drop a pre-combined_models server's models
+      // from top_models altogether, where merging the capped arrays keeps them.
+      if (rows.every((row) => Array.isArray(row.combined_models))) {
         out.top_models = out.combined_models.slice(0, 5);
         out.top_models_by_cost = [...out.combined_models].sort(byCostRank).slice(0, 5);
+      } else {
+        mergeArray('top_models');
+        mergeArray('top_models_by_cost', byCostRank);
       }
       out.timestamp = rows.map((row) => row.timestamp).filter(Boolean).sort()[0] || null;
       // response_cache rides in on the rows[0] deep copy above and is otherwise never

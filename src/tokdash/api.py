@@ -4,6 +4,7 @@ import hashlib
 import ipaddress
 import json
 import logging
+import math
 import os
 import secrets
 import threading
@@ -12,7 +13,7 @@ from collections import OrderedDict
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from json import JSONDecodeError
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -314,35 +315,61 @@ def _warm_caches() -> None:
     Disable with TOKDASH_WARM_ON_START=0.
     Failures are swallowed; warming must never crash `serve`.
     """
-    today = datetime.now().astimezone().strftime("%Y-%m-%d")
+    today = _local_today().isoformat()
+    # Composed by name, not by slicing _day_warm_targets(): the warm order is the order
+    # the dashboard needs these in, and stats belongs second, immediately behind the
+    # Overview usage key. Reordering the per-day targets must not silently demote it.
     warmers = [
-        (
-            _window_cache_key(f"usage_today_{today}_{today}", today, today),
-            lambda: compute_usage_with_comparison("today", today, today),
-        ),
+        _usage_warm_target(today),
         (_window_cache_key("stats_None", None, None), lambda: compute_stats(None)),
+        *_session_warm_targets(today),
+        (_day_scoped_key(ACTIVITY_INSIGHTS_CACHE_KEY), get_codex_activity_insights),
     ]
-    # Mirror the dashboard exactly: its default date picker sends an explicit
-    # date_from/date_to pair, not period=today. Keeping this key construction shared
-    # with the route prevents the warmer and browser from drifting apart again.
+    _run_warmers(warmers)
+
+
+def _day_warm_targets(day: str) -> list:
+    """Every (key, fetch) pair the dashboard asks for with ``day`` as the whole range."""
+    return [_usage_warm_target(day), *_session_warm_targets(day)]
+
+
+def _usage_warm_target(day: str):
+    """The Overview usage pair for ``day``.
+
+    Mirror the dashboard exactly: its date picker sends an explicit date_from/date_to
+    pair, not period=today. Building these through the same key helpers the routes use
+    is what stops the warmer and the browser from drifting apart.
+    """
+    return (
+        _window_cache_key(f"usage_today_{day}_{day}", day, day),
+        lambda: compute_usage_with_comparison("today", day, day),
+    )
+
+
+def _session_warm_targets(day: str) -> list:
+    """The per-tool Sessions pairs for ``day``, plus the cross-tool active time."""
+    targets: list = []
     for tool in SESSION_TOOLS:
-        warmers.append(
+        targets.append(
             (
-                _session_response_cache_key(tool, "today", today, today, None),
+                _session_response_cache_key(tool, "today", day, day, None),
                 lambda tool=tool: get_sessions_data(
-                    tool, "today", today, today, include_review_sessions=None
+                    tool, "today", day, day, include_review_sessions=None
                 ),
             )
         )
-    warmers.append(
+    targets.append(
         (
-            _active_time_cache_key("today", today, today, None),
-            lambda: get_active_time_data("today", today, today, include_review_sessions=None),
+            _active_time_cache_key("today", day, day, None),
+            lambda: get_active_time_data("today", day, day, include_review_sessions=None),
         )
     )
-    warmers.append((_day_scoped_key(ACTIVITY_INSIGHTS_CACHE_KEY), get_codex_activity_insights))
+    return targets
+
+
+def _run_warmers(warmers, *, join_seconds: Optional[float] = None) -> None:
     for key, fetch in warmers:
-        warm_event = _begin_startup_warm(key)
+        warm_event = _begin_startup_warm(key, join_seconds)
         try:
             get_cached_or_fetch(key, fetch, _startup_warm=True)
         except Exception:
@@ -351,10 +378,62 @@ def _warm_caches() -> None:
             _finish_startup_warm(key, warm_event)
 
 
+def _warm_previous_day() -> None:
+    """Warm the day that just ended, shortly after the local date rolls over.
+
+    Every open-window key goes cold at midnight, and the day that just closed is the
+    one the Yesterday button asks for all day. Its numbers are final, so this is
+    computed once and then served from cache for the rest of the day. Today is
+    deliberately NOT warmed here: at 00:05 it holds almost nothing, and warming it
+    would put a near-empty snapshot in front of the morning's first request.
+    """
+    yesterday = (_local_today() - timedelta(days=1)).isoformat()
+    # A shorter join than the startup warm: this one runs while the server is live, so a
+    # racing request pays the join before it learns anything. The two waits rarely stack
+    # — a joiner that times out re-enters with _startup_waited=True and, while the warm
+    # still holds the key lock, is refused immediately as same_key_inflight without ever
+    # reaching _acquire_compute_slot; they compound only if the warm released that lock
+    # inside the window having stored nothing, i.e. it raised. The join alone is reason
+    # enough to shorten it: 10s-to-503 beats 30s-to-503 on a live server.
+    _run_warmers(_day_warm_targets(yesterday), join_seconds=DAILY_WARM_JOIN_SECONDS)
+
+
+def _daily_warm_minute() -> int:
+    """Minutes past local midnight for the daily warm, default 5.
+
+    ``0`` is a legitimate setting (warm exactly at midnight), so this cannot use
+    ``_positive_int_env``, which would silently turn it back into the default. A value
+    outside a day falls back to the default rather than wrapping into an unrelated time.
+    """
+    minute = _non_negative_int_env("TOKDASH_DAILY_WARM_MINUTE", _DEFAULT_DAILY_WARM_MINUTE)
+    return minute if minute < 24 * 60 else _DEFAULT_DAILY_WARM_MINUTE
+
+
+def _seconds_until_daily_warm(now: Optional[datetime] = None) -> float:
+    """Seconds until the next local warm time (default 00:05)."""
+    current = now or datetime.now().astimezone()
+    minute = _daily_warm_minute()
+    target = current.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(minutes=minute)
+    if target <= current:
+        target += timedelta(days=1)
+    return max(1.0, (target - current).total_seconds())
+
+
+def _daily_warm_loop() -> None:
+    while True:
+        time.sleep(_seconds_until_daily_warm())
+        try:
+            _warm_previous_day()
+        except Exception:  # pragma: no cover - a warm failure must never kill the loop
+            logger.debug("tokdash daily warm failed", exc_info=True)
+
+
 @asynccontextmanager
 async def _lifespan(_app: "FastAPI"):
     if os.environ.get("TOKDASH_WARM_ON_START", "1") != "0":
         threading.Thread(target=_warm_caches, name="tokdash-warm", daemon=True).start()
+    if os.environ.get("TOKDASH_DAILY_WARM", "1") != "0":
+        threading.Thread(target=_daily_warm_loop, name="tokdash-daily-warm", daemon=True).start()
     yield
 
 
@@ -554,13 +633,17 @@ def _positive_int_env(name: str, default: int) -> int:
 CACHE_TTL = _positive_int_env("TOKDASH_CACHE_TTL", 600)  # seconds
 CACHE_MAX_ENTRIES = _positive_int_env("TOKDASH_CACHE_MAX_ENTRIES", 256)
 STARTUP_WARM_JOIN_SECONDS = _positive_int_env("TOKDASH_STARTUP_WARM_JOIN_SECONDS", 30)
+# The daily rollover warm runs on a live server, so its join budget is deliberately
+# shorter than the startup one; see _warm_previous_day.
+DAILY_WARM_JOIN_SECONDS = _positive_int_env("TOKDASH_DAILY_WARM_JOIN_SECONDS", 10)
+_DEFAULT_DAILY_WARM_MINUTE = 5  # minutes past local midnight
 
 # A startup warmer is the one safe exception to cold-miss fail-fast: the automatic
 # browser load is asking for work that is already running on its behalf. Let at most
 # one foreground request per key wait for that result so a tab storm still cannot
 # occupy the AnyIO worker pool. All ordinary same-key misses retain the old 503 path.
 _startup_warm_guard = threading.Lock()
-_startup_warm_events: dict[str, threading.Event] = {}
+_startup_warm_events: dict[str, tuple[threading.Event, float]] = {}
 _startup_warm_waiters: set[str] = set()
 
 
@@ -579,14 +662,264 @@ class CacheFetchResult:
         return self.status in {"hit", "stale"}
 
 
+def _non_negative_int_env(name: str, default: int) -> int:
+    """Read a non-negative integer env var. Unlike ``_positive_int_env`` an explicit
+    ``0`` is honoured, so a knob whose whole point is "none" stays reachable."""
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value >= 0 else default
+
+
+def _bounded_float_env(name: str, default: float, *, maximum: float) -> float:
+    """Read a positive, FINITE float env var, clamped to ``maximum``.
+
+    ``float("inf")`` parses, and an unbounded wait would park a worker thread for the
+    life of the process — the exact failure the compute cap exists to prevent.
+    """
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return min(default, maximum)
+    try:
+        value = float(raw)
+    except ValueError:
+        return min(default, maximum)
+    if not math.isfinite(value) or value <= 0:
+        return min(default, maximum)
+    return min(value, maximum)
+
+
+def _parse_cpu_max(path: Path) -> Optional[int]:
+    """Whole CPUs from a cgroup v2 ``cpu.max``, or None when unlimited or unreadable."""
+    try:
+        fields = path.read_text(encoding="utf-8").split()
+    except OSError:
+        return None
+    if not fields or fields[0] == "max":
+        return None
+    try:
+        quota = int(fields[0])
+        period = int(fields[1]) if len(fields) > 1 else 100000
+    except ValueError:
+        return None
+    if quota <= 0 or period <= 0:
+        return None
+    return max(1, quota // period)
+
+
+def _cgroup_v2_cpu_max_paths(root: Path, proc_self_cgroup: Path) -> list:
+    """``cpu.max`` candidates from this process's own cgroup up to the root.
+
+    A container's cgroup is normally namespaced, so the root IS its limit. A systemd
+    unit with ``CPUQuota=`` is not: it sits in a sub-cgroup such as
+    ``/system.slice/tokdash.service`` whose limit the root's ``cpu.max`` never shows —
+    and ``tokdash setup`` installs exactly such a unit. Any ancestor can also cap the
+    leaf, so every level between the two is a candidate.
+    """
+    paths = [root / "cpu.max"]
+    try:
+        lines = proc_self_cgroup.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return paths
+    for line in lines:
+        parts = line.split(":", 2)
+        if len(parts) != 3 or parts[0] != "0":  # only the unified (v2) line
+            continue
+        relative = parts[2].strip().strip("/")
+        if relative:
+            current = root
+            for segment in relative.split("/"):
+                current = current / segment
+                paths.append(current / "cpu.max")
+        break
+    return paths
+
+
+def _parse_cfs_quota(directory: Path) -> Optional[int]:
+    """Whole CPUs from a cgroup v1 cpu controller dir, or None when unlimited."""
+    try:
+        quota = int((directory / "cpu.cfs_quota_us").read_text(encoding="utf-8").strip())
+        period = int((directory / "cpu.cfs_period_us").read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return None
+    if quota <= 0 or period <= 0:  # -1 means unlimited
+        return None
+    return max(1, quota // period)
+
+
+def _cgroup_v1_cpu_dirs(base: Path, proc_self_cgroup: Path) -> list:
+    """cpu controller dirs from the controller root down to this process's own cgroup.
+
+    v1 has the same sub-cgroup shape as v2 — a systemd unit sits at
+    ``/sys/fs/cgroup/cpu/system.slice/<unit>`` — so reading only the root misses
+    exactly the ``CPUQuota=`` that the v2 walk was added to catch.
+    """
+    dirs = [base]
+    try:
+        lines = proc_self_cgroup.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return dirs
+    for line in lines:
+        parts = line.split(":", 2)
+        if len(parts) != 3 or "cpu" not in parts[1].split(","):
+            continue
+        relative = parts[2].strip().strip("/")
+        if relative:
+            current = base
+            for segment in relative.split("/"):
+                current = current / segment
+                dirs.append(current)
+        break
+    return dirs
+
+
+def _cgroup_cpu_quota(
+    root: Path = Path("/sys/fs/cgroup"),
+    proc_self_cgroup: Path = Path("/proc/self/cgroup"),
+    v1_dir: Optional[Path] = None,
+) -> Optional[int]:
+    """Whole CPUs a cgroup quota allows, or None when unlimited or unreadable.
+
+    ``docker --cpus=2`` and systemd's ``CPUQuota=`` both set a CFS quota, not an
+    affinity mask, so neither ``os.cpu_count()`` nor the affinity mask reflects them.
+    The most restrictive level wins. Paths are parameters so this is testable without
+    a container.
+    """
+    quotas = [
+        quota
+        for quota in (
+            _parse_cpu_max(path)
+            for path in _cgroup_v2_cpu_max_paths(root, proc_self_cgroup)
+        )
+        if quota is not None
+    ]
+    if quotas:
+        return min(quotas)
+    # cgroup v1 (legacy), which has the same sub-cgroup shape as v2.
+    base = (root / "cpu") if v1_dir is None else v1_dir
+    v1_quotas = [
+        quota
+        for quota in (
+            _parse_cfs_quota(directory)
+            for directory in _cgroup_v1_cpu_dirs(base, proc_self_cgroup)
+        )
+        if quota is not None
+    ]
+    return min(v1_quotas) if v1_quotas else None
+
+
+def _available_cpus() -> int:
+    """CPUs this process may actually use.
+
+    ``os.cpu_count()`` reports the whole host, which is wrong in precisely the case
+    this scaling protects: a small container on a big machine. Prefer the
+    process-aware count (3.13+), then the scheduler affinity mask, and fold in a
+    cgroup quota, which neither of those reflects.
+    """
+    count: Optional[int] = None
+    process_cpu_count = getattr(os, "process_cpu_count", None)
+    if process_cpu_count is not None:  # Python 3.13+
+        count = process_cpu_count()
+    if count is None:
+        try:
+            count = len(os.sched_getaffinity(0))
+        except AttributeError:  # not Linux
+            count = None
+    if count is None:
+        count = os.cpu_count()
+    quota = _cgroup_cpu_quota()
+    if quota is not None:
+        count = quota if count is None else min(count, quota)
+    return max(1, count or 1)
+
+
+def _default_compute_concurrency() -> int:
+    """Heavy computes allowed at once, scaled to the machine and capped at 8.
+
+    A flat 2 was safe while a cold key almost always had a stale value to serve
+    meanwhile. It is not safe against a *cold* fan-out: the Sessions tab issues one
+    request per tool, so a range change asks for far more distinct cold keys at once
+    than the cap allows. Scaling lets a large host drain that fan-out quickly while a
+    small VPS, Pi or CPU-limited container keeps the original ceiling.
+    """
+    return max(2, min(8, _available_cpus() // 2))
+
+
 # Bound the number of *heavy* computes (full-history reparses) running at once.
 # Without this, a burst of requests for distinct cache keys each grabs an AnyIO
 # worker token and runs a multi-second parse; the pool saturates (so even cache
 # hits and /health can't get a worker) and RSS balloons. Capping heavy work well
 # below the worker pool keeps headroom for cheap requests.
 # This is the app-side companion to the uvicorn backpressure knobs in cli.py.
-_COMPUTE_CONCURRENCY = _positive_int_env("TOKDASH_COMPUTE_CONCURRENCY", 2)
+_COMPUTE_CONCURRENCY = _positive_int_env(
+    "TOKDASH_COMPUTE_CONCURRENCY", _default_compute_concurrency()
+)
 _compute_semaphore = threading.BoundedSemaphore(_COMPUTE_CONCURRENCY)
+
+# How long a cold request may WAIT for a compute slot, and how many may wait at once.
+# Refusing instantly made sense while a stale value was almost always available to
+# serve instead. Once a closed window has to be computed to be correct, a Sessions
+# fan-out is N distinct cold keys arriving together, and an instant refusal rejected
+# every request past the cap while the slot it needed freed a second later — the
+# browser retries only a few times, so panels failed outright. Waiting preserves the
+# cap (parser stampede and RSS ceiling are unchanged) and lets the fan-out drain.
+# The waiter cap keeps a pathological burst from parking the whole worker pool.
+# Computing + parked threads are budgeted TOGETHER against AnyIO's default 40-thread
+# pool (nothing in this tree raises that limiter; cli.py bounds connections, not
+# threads). Deriving the waiter allowance from the concurrency means raising
+# TOKDASH_COMPUTE_CONCURRENCY spends the same budget rather than pushing the total
+# past the pool and starving /health and cache hits — the very failure the cap exists
+# to prevent. A concurrency at or above the budget leaves no waiters, i.e. the old
+# fail-fast behaviour, which is the safe end of the trade.
+_COMPUTE_THREAD_BUDGET = _positive_int_env("TOKDASH_COMPUTE_THREAD_BUDGET", 32)
+
+
+def _default_max_waiters(concurrency: int, budget: Optional[int] = None) -> int:
+    """Requests allowed to park while ``concurrency`` are computing.
+
+    The two share one thread budget, so raising the concurrency spends the waiter
+    allowance rather than pushing the total past AnyIO's pool. At or above the budget
+    this is 0 — the old fail-fast behaviour, which is the safe end of the trade.
+    """
+    ceiling = _COMPUTE_THREAD_BUDGET if budget is None else budget
+    return max(0, ceiling - concurrency)
+
+
+_COMPUTE_WAIT_SECONDS = _bounded_float_env(
+    "TOKDASH_COMPUTE_WAIT_SECONDS", 15.0, maximum=120.0
+)
+_COMPUTE_MAX_WAITERS = _non_negative_int_env(
+    "TOKDASH_COMPUTE_MAX_WAITERS", _default_max_waiters(_COMPUTE_CONCURRENCY)
+)
+_compute_waiters = 0
+_compute_waiters_guard = threading.Lock()
+
+
+def _acquire_compute_slot(*, wait: bool = True) -> bool:
+    """Take a heavy-compute slot, optionally waiting briefly for one to free up.
+
+    ``wait=False`` keeps the old instant refusal for callers that have something else
+    to serve (a stale value, or an opportunistic background refresh): those must never
+    occupy a worker thread waiting when they can answer immediately.
+    """
+    global _compute_waiters
+    if _compute_semaphore.acquire(blocking=False):
+        return True
+    if not wait:
+        return False
+    with _compute_waiters_guard:
+        if _compute_waiters >= _COMPUTE_MAX_WAITERS:
+            return False
+        _compute_waiters += 1
+    try:
+        return _compute_semaphore.acquire(timeout=_COMPUTE_WAIT_SECONDS)
+    finally:
+        with _compute_waiters_guard:
+            _compute_waiters -= 1
 
 
 def _raise_backpressure(
@@ -608,17 +941,27 @@ def _raise_backpressure(
     raise CacheBackpressureError(message)
 
 
-def _begin_startup_warm(key: str) -> threading.Event:
+def _begin_startup_warm(
+    key: str, join_seconds: Optional[float] = None
+) -> threading.Event:
+    """Register a warm fill one foreground request may join.
+
+    The join budget is stored per entry: a warm that runs on a live server (the daily
+    rollover) must not make a racing request wait the startup allowance on top of its
+    own slot wait.
+    """
     event = threading.Event()
+    budget = STARTUP_WARM_JOIN_SECONDS if join_seconds is None else join_seconds
     with _startup_warm_guard:
-        _startup_warm_events[key] = event
+        _startup_warm_events[key] = (event, budget)
         _startup_warm_waiters.discard(key)
     return event
 
 
 def _finish_startup_warm(key: str, event: threading.Event) -> None:
     with _startup_warm_guard:
-        if _startup_warm_events.get(key) is event:
+        entry = _startup_warm_events.get(key)
+        if entry is not None and entry[0] is event:
             # Publish completion before removing the registry entry. Otherwise a
             # request arriving in the tiny pop-before-set window would see neither
             # a cached join target nor an unlocked cache key and emit a stray 503.
@@ -629,18 +972,20 @@ def _finish_startup_warm(key: str, event: threading.Event) -> None:
     event.set()
 
 
-def _claim_startup_warm_wait(key: str) -> threading.Event | None:
+def _claim_startup_warm_wait(key: str) -> tuple[threading.Event, float] | None:
+    """Claim the right to join an in-flight warm, with that warm's join budget."""
     with _startup_warm_guard:
-        event = _startup_warm_events.get(key)
-        if event is None or key in _startup_warm_waiters:
+        entry = _startup_warm_events.get(key)
+        if entry is None or key in _startup_warm_waiters:
             return None
         _startup_warm_waiters.add(key)
-        return event
+        return entry
 
 
 def _release_startup_warm_wait(key: str, event: threading.Event) -> None:
     with _startup_warm_guard:
-        if _startup_warm_events.get(key) is event:
+        entry = _startup_warm_events.get(key)
+        if entry is not None and entry[0] is event:
             _startup_warm_waiters.discard(key)
 
 
@@ -772,7 +1117,7 @@ def _refresh_stale_in_background(
 ) -> None:
     acquired_compute = False
     try:
-        acquired_compute = _compute_semaphore.acquire(blocking=False)
+        acquired_compute = _acquire_compute_slot(wait=False)
         if not acquired_compute:
             logger.debug("tokdash stale refresh deferred key=%s reason=compute_cap", key)
             return
@@ -847,10 +1192,11 @@ def get_cached_or_fetch(
         if hit is not None:
             return result(hit[1], "stale", now - hit[0])  # serve cached rather than stampede the parser
         if not force_refresh and not _startup_warm and not _startup_waited:
-            warm_event = _claim_startup_warm_wait(key)
-            if warm_event is not None:
+            claimed = _claim_startup_warm_wait(key)
+            if claimed is not None:
+                warm_event, join_seconds = claimed
                 try:
-                    warm_event.wait(timeout=STARTUP_WARM_JOIN_SECONDS)
+                    warm_event.wait(timeout=join_seconds)
                 finally:
                     _release_startup_warm_wait(key, warm_event)
                 # The warmer may have completed successfully, failed, or timed out.
@@ -877,7 +1223,18 @@ def get_cached_or_fetch(
         if latest is not None and locked_now - latest[0] < CACHE_TTL and not force_refresh:
             return result(latest[1], "hit", locked_now - latest[0])
         epoch = _cache_epoch_value()
-        if not _compute_semaphore.acquire(blocking=False):
+        # A stale value beats waiting, so only a cold key with nothing to show parks
+        # for a slot. This is what keeps a Sessions fan-out from failing wholesale.
+        #
+        # NOTE: this waits while still holding the per-key lock, so the window in which
+        # a second request for the SAME key is refused as same_key_inflight grows from
+        # "the compute" to "the compute plus up to _COMPUTE_WAIT_SECONDS". That is
+        # deliberate. A fan-out is distinct keys, so it never collides here; the cost
+        # falls on a repeat of one key, where the caller has nothing to be given anyway
+        # and a 503 is the honest answer. Releasing the lock to wait would instead let
+        # several threads compute the same cold key, which is what single-flight exists
+        # to prevent.
+        if not _acquire_compute_slot(wait=latest is None):
             if latest is not None:
                 return result(latest[1], "stale", locked_now - latest[0])
             _raise_backpressure(

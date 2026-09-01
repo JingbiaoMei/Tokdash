@@ -325,7 +325,14 @@ def test_failed_inflight_compute_does_not_poison_later_retry():
 
 
 def test_heavy_compute_semaphore_bounds_concurrency(monkeypatch):
-    """Distinct cold keys over the cap fail fast instead of blocking workers."""
+    """Distinct cold keys over the cap queue for a slot; the cap is never exceeded.
+
+    These used to fail fast, which was safe while a cold key almost always had a stale
+    value to serve meanwhile. Once a closed date range has to be computed to be correct,
+    the Sessions tab's one-request-per-tool fan-out is all cold keys at once, and
+    refusing everything past the cap rejected most of the tab. What must still hold is
+    the cap itself: waiting may not let a third heavy compute run.
+    """
     monkeypatch.setattr(api, "_compute_semaphore", threading.BoundedSemaphore(2))
     counter_lock = threading.Lock()
     state = {"cur": 0, "peak": 0}
@@ -357,10 +364,9 @@ def test_heavy_compute_semaphore_bounds_concurrency(monkeypatch):
     release.set()
     for t in threads:
         t.join(timeout=5)
-    assert state["peak"] == 2
-    assert results == ["v"] * 2
-    assert len(errors) == 4
-    assert all(isinstance(e, api.CacheBackpressureError) for e in errors)
+    assert state["peak"] == 2  # queueing must not raise the ceiling
+    assert results == ["v"] * 6, "a cold fan-out must drain rather than be refused"
+    assert errors == []
 
 
 def test_positive_int_env_defaults_and_validation(monkeypatch):

@@ -1,6 +1,31 @@
 {
-  "current": "2.4.2",
+  "current": "2.4.3",
   "releases": [
+    {
+      "version": "2.4.3",
+      "date": "2026-09-01",
+      "sections": [
+        {
+          "type": "added",
+          "items": [
+            "Hermes named profiles are scanned by default, so usage kept under ~/.hermes/profiles/<name> no longer goes missing from Overview and Session Explorer.",
+            "Yesterday's figures are warmed just after midnight, so the first Yesterday click of the day is already cached."
+          ]
+        },
+        {
+          "type": "changed",
+          "items": [
+            "The cap on concurrent heavy computes now scales with the CPUs this process may actually use, up to 8, instead of a fixed 2."
+          ]
+        },
+        {
+          "type": "fixed",
+          "items": [
+            "Switching to a date range nothing has computed no longer leaves most Sessions panels failing. Requests that cannot get a compute slot now queue briefly instead of being refused outright."
+          ]
+        }
+      ]
+    },
     {
       "version": "2.4.2",
       "date": "2026-08-30",

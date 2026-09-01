@@ -6,61 +6,72 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+## 2.4.3 - 2026-09-01
+
 ### Added
 
-- Hermes named profiles are now scanned by default. Each profile keeps its own session database at `~/.hermes/profiles/<name>/state.db`, which Tokdash previously ignored, so Overview and Session Explorer silently missed that usage unless every profile was listed by hand in `HERMES_HOME`. Profiles are enumerated under each Hermes home, including homes given via `HERMES_HOME`, and a dir listed twice is scanned once.
+- Hermes named profiles are now scanned by default. Each profile keeps its own session database at `~/.hermes/profiles/<name>/state.db`, which Tokdash previously ignored, so Overview and Session Explorer silently missed that usage unless every profile was listed by hand in `HERMES_HOME`. Profiles are enumerated under each Hermes home, including homes given via `HERMES_HOME`, and a dir listed twice is scanned once. (#54, closes #53, thanks @wangfh5)
+- Yesterday's figures are warmed shortly after the local date rolls over (00:05 by default, `TOKDASH_DAILY_WARM_MINUTE`; disable with `TOKDASH_DAILY_WARM=0`). Every key for a window that can still gain usage goes cold at midnight, and the day that just closed is the one the Yesterday button asks for all day. Its numbers are final, so it is computed once and served from cache from then on. Today is deliberately not warmed at that hour: it holds almost nothing yet, and warming it would put a near-empty snapshot in front of the morning's first request. (#55)
+
+### Changed
+
+- The heavy-compute cap now scales with the CPUs the process may actually use, from the previous fixed 2 up to 8. It reads the scheduler affinity mask and any cgroup CPU quota — including a quota on the process's own sub-cgroup, which is where a systemd unit's `CPUQuota=` lives — rather than the host's core count, so a large machine drains a cold fan-out quickly while a small VPS, Raspberry Pi or CPU-limited container keeps the old ceiling. Running and waiting requests share one thread budget (`TOKDASH_COMPUTE_THREAD_BUDGET`, default 32), so raising `TOKDASH_COMPUTE_CONCURRENCY` spends the waiter allowance instead of pushing the total past the worker pool and starving `/health` and cache hits. (#55)
+
+### Fixed
+
+- Switching to a date range nothing has computed no longer fails most of the Sessions tab. That tab issues one request per tool, so a cold range asks for ~17 distinct keys at once, and a request that could not get a heavy-compute slot was refused outright instead of queued: measured against a running server, 13 of 15 tools took an instant `503` while the slot each needed freed about a second later, and the dashboard retries only three times before a panel gives up. A cold request with nothing to show now waits briefly for a slot (`TOKDASH_COMPUTE_WAIT_SECONDS`, default 15 seconds, capped at 120), bounded by a waiter allowance so a burst cannot park the whole worker pool. A stale value or a background refresh still answers immediately and never waits, and the cap on concurrent computes is unchanged. The same fan-out that lost 13 panels now completes in about 3.7 seconds. (#55)
 
 ## 2.4.2 - 2026-08-30
 
 ### Fixed
 
-- A past date range is no longer answered from a snapshot taken while that range was still running. The dashboard sends every quick range as an explicit `date_from`/`date_to` pair, so viewing Today on one day and clicking Yesterday on the next built the same response-cache key, and the cache serves a stale entry with no upper bound on its age: the partial mid-day figures came back until the Refresh button forced a recompute. Response-cache keys for a window that can still gain usage now carry the local day they were computed on, so a key without that stamp can only have been filled after its window closed. Yesterday, Last week, Last month, Last year and any custom picker range that repeats an earlier open pair are recomputed once and then cached for good, and the same rule covers `/api/sessions`, `/api/active-time`, `/api/openclaw`, `/api/tools`, `/api/stats` (a past year now caches indefinitely) and `/api/activity-insights`. Today and other ranges that include the current day keep the existing TTL, background revalidation and Refresh behaviour.
+- A past date range is no longer answered from a snapshot taken while that range was still running. The dashboard sends every quick range as an explicit `date_from`/`date_to` pair, so viewing Today on one day and clicking Yesterday on the next built the same response-cache key, and the cache serves a stale entry with no upper bound on its age: the partial mid-day figures came back until the Refresh button forced a recompute. Response-cache keys for a window that can still gain usage now carry the local day they were computed on, so a key without that stamp can only have been filled after its window closed. Yesterday, Last week, Last month, Last year and any custom picker range that repeats an earlier open pair are recomputed once and then cached for good, and the same rule covers `/api/sessions`, `/api/active-time`, `/api/openclaw`, `/api/tools`, `/api/stats` (a past year now caches indefinitely) and `/api/activity-insights`. Today and other ranges that include the current day keep the existing TTL, background revalidation and Refresh behaviour. (#52)
 
 ## 2.4.1 - 2026-08-28
 
 ### Fixed
 
-- Quota provider visibility controls are now scoped to each server's reported harnesses in multi-server mode. The shared show/hide preference updates every rendered server block, including partial loads where only one of several selected servers responds.
+- Quota provider visibility controls are now scoped to each server's reported harnesses in multi-server mode. The shared show/hide preference updates every rendered server block, including partial loads where only one of several selected servers responds. (#51)
 
 ## 2.4.0 - 2026-08-28
 
 ### Added
 
-- Added Japanese, Korean, Spanish, and Portuguese dashboard languages alongside English and Simplified Chinese. The System option follows the browser language, dates and numbers use the selected locale, and each language has a linked README.
-- Added opt-in Z.ai Coding Plan quota tracking. Tokdash discovers Coding Plan keys from ZCode, supported OpenCode/Claude-compatible provider configs, or `ZAI_API_KEY` / `Z_AI_API_KEY`, then reads the provider's 5-hour and weekly credit windows plus legacy MCP limits from Z.ai's quota endpoint without refreshing or writing credentials.
-- Updated the bundled pricing database to 2.0.20, adding 14 model entries across Z.ai, DeepSeek, Qwen, ByteDance, Tencent, Mistral, Meta, and NVIDIA.
+- Added Japanese, Korean, Spanish, and Portuguese dashboard languages alongside English and Simplified Chinese. The System option follows the browser language, dates and numbers use the selected locale, and each language has a linked README. (#49)
+- Added opt-in Z.ai Coding Plan quota tracking. Tokdash discovers Coding Plan keys from ZCode, supported OpenCode/Claude-compatible provider configs, or `ZAI_API_KEY` / `Z_AI_API_KEY`, then reads the provider's 5-hour and weekly credit windows plus legacy MCP limits from Z.ai's quota endpoint without refreshing or writing credentials. (#48, thanks @Werkaninchen)
+- Updated the bundled pricing database to 2.0.20, adding 14 model entries across Z.ai, DeepSeek, Qwen, ByteDance, Tencent, Mistral, Meta, and NVIDIA. (#50)
 
 ### Changed
 
-- Usage refresh reports now appear for every repeat refresh of the displayed range, including timer-driven refreshes, while an explicit dismissal remains in effect until the range changes or the user requests another refresh.
+- Usage refresh reports now appear for every repeat refresh of the displayed range, including timer-driven refreshes, while an explicit dismissal remains in effect until the range changes or the user requests another refresh. (#47, thanks @674019130)
 
 ## 2.3.1 - 2026-08-27
 
 ### Changed
 
-- Sessions panels now carry each harness's brand logo in the panel header, reusing the Overview's identity system. A harness with no sessions in the selected range is hidden instead of rendering an empty panel, and when no harness has sessions in range a single empty-state band replaces them all. A panel whose fetch failed stays visible so its error row is not swallowed.
+- Sessions panels now carry each harness's brand logo in the panel header, reusing the Overview's identity system. A harness with no sessions in the selected range is hidden instead of rendering an empty panel, and when no harness has sessions in range a single empty-state band replaces them all. A panel whose fetch failed stays visible so its error row is not swallowed. (#45)
 
 ### Fixed
 
-- The first dashboard load no longer races the startup cache warmer into a transient `503`. One foreground request per key may join the warm fill already running on its behalf, bounded by `TOKDASH_STARTUP_WARM_JOIN_SECONDS` (default `30` seconds); every other same-key cold miss keeps the existing fail-fast backpressure, and the warmer's own backpressure no longer logs as a warning. The unused period-only Today usage key is no longer warmed, dropping a duplicate of the largest startup aggregation. Direct callers of `/api/usage?period=today` still compute the same data but no longer find it pre-cached.
+- The first dashboard load no longer races the startup cache warmer into a transient `503`. One foreground request per key may join the warm fill already running on its behalf, bounded by `TOKDASH_STARTUP_WARM_JOIN_SECONDS` (default `30` seconds); every other same-key cold miss keeps the existing fail-fast backpressure, and the warmer's own backpressure no longer logs as a warning. The unused period-only Today usage key is no longer warmed, dropping a duplicate of the largest startup aggregation. Direct callers of `/api/usage?period=today` still compute the same data but no longer find it pre-cached. (#42, thanks @674019130)
 
 ## 2.3.0 - 2026-08-26
 
 ### Added
 
-- Added Session Explorer support for Antigravity CLI, Cline, Grok Build, Hermes, Kilo Code and omp. Each integration reuses the source parser's token mapping and pricing rules, exposes per-session turns and active time, and has its own dashboard panel and regression suite.
-- Added a Servers tab for comparing configured Tokdash instances, with reachable/stale state, usage shares, leading tools and models, session counts and quota summaries. Session panels can now be collapsed independently.
-- Refresh now reports source-level changes from the incremental usage scan, including added, updated, removed and unchanged rows.
+- Added Session Explorer support for Antigravity CLI, Cline, Grok Build, Hermes, Kilo Code and omp. Each integration reuses the source parser's token mapping and pricing rules, exposes per-session turns and active time, and has its own dashboard panel and regression suite. (#40)
+- Added a Servers tab for comparing configured Tokdash instances, with reachable/stale state, usage shares, leading tools and models, session counts and quota summaries. Session panels can now be collapsed independently. (#36)
+- Refresh now reports source-level changes from the incremental usage scan, including added, updated, removed and unchanged rows. (#39, thanks @674019130)
 
 ### Changed
 
-- Overview and session-panel runtime KPIs now show agent time consistently. The Servers tab remains available with one configured server so its health and details are still visible.
-- Coding-tool rescans now reuse unchanged source entries and update only changed files while preserving the last complete view when a source read is partial or fails.
+- Overview and session-panel runtime KPIs now show agent time consistently. The Servers tab remains available with one configured server so its health and details are still visible. (#37)
+- Coding-tool rescans now reuse unchanged source entries and update only changed files while preserving the last complete view when a source read is partial or fails. (#39, thanks @674019130)
 
 ### Fixed
 
-- Antigravity conversation titles and projects now refresh when only the summary database WAL changes.
-- Cline now falls back to the session record's working directory when its metadata database has no usable project.
+- Antigravity conversation titles and projects now refresh when only the summary database WAL changes. (#40)
+- Cline now falls back to the session record's working directory when its metadata database has no usable project. (#40)
 - Dashboard refresh requests are queued instead of dropped when another update is in flight, and stale overview breakdowns cannot overwrite the currently selected date range.
 
 ## 2.2.0 - 2026-08-22

@@ -105,8 +105,8 @@
 | DeepSeek Harness | ✅ | ✅ |
 | Reasonix | ✅ | ✅ |
 | **ZCode** | ✅ | ✅ |
-| **WorkBuddy** | ✅ | — |
-| **Qoder IDE** | ✅ | — |
+| **WorkBuddy** | ✅ | ✅ |
+| **Qoder IDE** | ✅ | ✅ |
 | **Qoder CLI** | ✅ | — |
 
 로컬 데이터 경로, 오버라이드, 소스별 계상 노트는 [지원 클라이언트](docs/reference/SUPPORTED_CLIENTS.md)를 참조하세요.
@@ -484,9 +484,9 @@ ZCode 사용량은 `$ZCODE_HOME/cli/db/db.sqlite`(기본값 `~/.zcode/cli/db/db.
 
 Coding Plan 쿼터는 별도로 동의한 Z.ai 라이브 폴러를 통해 사용할 수 있습니다.
 
-WorkBuddy 사용량은 `~/.workbuddy-ai/projects/*/*.jsonl` 트랜스크립트에서 로컬로 읽습니다(`WORKBUDDY_DATA_DIR`은 쉼표 구분 루트 목록을 받아 다른 스토어, 예: WSL의 Windows 데이터 디렉터리 등을 지정할 수 있음). 각 어시스턴트 메시지 행은 하나의 모델 호출이며, `prompt_tokens` 안의 캐시 부분은 별도 버킷으로 분리해 캐시 요율을 적용하고, 추론 토큰은 출력과 분리해 표시하되 출력 요율로 과금됩니다. 모델 ID는 그대로 유지됩니다: 명시적 ID(예: gpt-5.5)는 통상 가격 데이터베이스로 가격화되고, Auto 라우터 별칭(`default-model`)은 가격 DB에 없으므로 비용 0.00입니다. 턴별 `credit` 값은 메타데이터로만 저장되며 비용에 영향을 주지 않습니다. WorkBuddy는 Sessions 탭에 나타나지 않습니다.
+WorkBuddy 사용량은 `~/.workbuddy-ai/projects/*/*.jsonl` 트랜스크립트에서 로컬로 읽습니다(`WORKBUDDY_DATA_DIR`은 쉼표 구분 루트 목록을 받아 다른 스토어, 예: WSL의 Windows 데이터 디렉터리 등을 지정할 수 있음). 각 어시스턴트 메시지 행은 하나의 모델 호출이며, `prompt_tokens` 안의 캐시 부분은 별도 버킷으로 분리해 캐시 요율을 적용하고, 추론 토큰은 출력과 분리해 표시하되 출력 요율로 과금됩니다. 모델 ID는 그대로 유지됩니다: 명시적 ID(예: gpt-5.5)는 통상 가격 데이터베이스로 가격화되고, Auto 라우터 별칭(`default-model`)은 가격 DB에 없으므로 비용 0.00입니다. 턴별 `credit` 값은 메타데이터로만 저장되며 비용에 영향을 주지 않습니다. Sessions 탭은 같은 루트에서 같은 트랜스크립트 행(과금 대상 어시스턴트 1행 = 1턴)을 읽습니다.
 
-Qoder 사용량은 두 곳에서 로컬로 읽습니다: IDE의 SQLite 데이터베이스(IDE 데이터 디렉터리 아래 `SharedClientCache/cache/db/local.db`. Windows와 WSL에서는 QoderCN 빌드가 국제판보다 우선)와 CLI JSONL 로그(`~/.qoder`와 `~/.qoder-cn`, 그리고 `QODER_CONFIG_DIR`과 쉼표 구분 `QODER_CLI_HOME`). IDE 쪽에서는 모든 롤의 `chat_message` 행이 모두 카운트되고, 캐시 부분은 프롬프트 토큰에서 별도 버킷으로 분리되며, 모델은 `model_key`(라우터 이름이 없으면 `auto`)에서 옵니다. CLI 쪽에서는 각 요청의 트랜스크립트 과금 기록이 모든 루트에서 세그먼트 토큰 기록과 병합됩니다: 제공자 크레딧을 가진 행은 제공자 보고 비용을 권위로 유지(추정 크레딧 1개당 $0.01로 환산, `QODER_USD_PER_CREDIT`이 추정을 오버라이드하며 절대 재가격화되지 않음), 토큰만 있는 행은 통상 가격 데이터베이스로 가격화됩니다. 입력 토큰이 없는 기록은 알려진 컨텍스트 윈도우에 대한 `context_usage_ratio`로 복원합니다 — 기본 `auto`는 180,000, `QODER_CLI_CONTEXT_WINDOW`이 명시 설정된 뒤로는 모든 모델. Qoder는 Sessions 탭에 나타나지 않습니다.
+Qoder 사용량은 두 곳에서 로컬로 읽습니다: IDE의 SQLite 데이터베이스(IDE 데이터 디렉터리 아래 `SharedClientCache/cache/db/local.db`. Windows와 WSL에서는 QoderCN 빌드가 국제판보다 우선)와 CLI JSONL 로그(`~/.qoder`와 `~/.qoder-cn`, 그리고 `QODER_CONFIG_DIR`과 쉼표 구분 `QODER_CLI_HOME`). IDE 쪽에서는 모든 롤의 `chat_message` 행이 모두 카운트되고, 캐시 부분은 프롬프트 토큰에서 별도 버킷으로 분리되며, 모델은 `model_key`(라우터 이름이 없으면 `auto`)에서 옵니다. CLI 쪽에서는 각 요청의 트랜스크립트 과금 기록이 모든 루트에서 세그먼트 토큰 기록과 병합됩니다: 제공자 크레딧을 가진 행은 제공자 보고 비용을 권위로 유지(추정 크레딧 1개당 $0.01로 환산, `QODER_USD_PER_CREDIT`이 추정을 오버라이드하며 절대 재가격화되지 않음), 토큰만 있는 행은 통상 가격 데이터베이스로 가격화됩니다. 입력 토큰이 없는 기록은 알려진 컨텍스트 윈도우에 대한 `context_usage_ratio`로 복원합니다 — 기본 `auto`는 180,000, `QODER_CLI_CONTEXT_WINDOW`이 명시 설정된 뒤로는 모든 모델. Qoder IDE는 Sessions 탭에 표시됩니다: 같은 `chat_message` 행(모든 롤, 해석 가능한 행 1개 = 턴 1개)을 같은 DB의 임시 디렉터리 스냅샷에서 읽습니다.
 `tokdash setup`은 선택적 쿼터 단계(제공자별 네트워크 동의, 기본 No, 그리고 폴링 간격)를 제공하며, `tokdash doctor`는 쿼터 상태를 보고합니다: 마스터 스위치, 제공자별 동의, 킬 스위치, 유효 간격과 그 소스, 마지막 폴링 시각, 저장된 스냅샷 수.
 
 쿼터 스냅샷과 그 히스토리는 로컬 사용량 데이터베이스(`usage.sqlite3`, 기본값: 켜짐)에 있으며, **기본값으로는 무기한 유지**됩니다 — 오래된 스냅샷을 정리하려면 `TOKDASH_QUOTA_RETENTION_DAYS`를 일 단위의 양수로 설정하세요. `TOKDASH_USAGE_DB=0`로 로컬 영속을 옵트아웃하면 Quota 탭은 주요 데이터 경로를 잃습니다: 스냅샷 히스토리가 유지되지 않고, 백그라운드 폴러가 동작하지 않으며, 탭은 수동 **Refresh**(동의한 네트워크 제공자)의 결과를 현재 서버 프로세스 수명 동안 메모리에서만 표시합니다. 정상적인 쿼터 추적을 위해 사용량 DB를 켜 두세요(기본값).

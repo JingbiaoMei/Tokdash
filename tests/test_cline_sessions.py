@@ -556,6 +556,13 @@ def test_cache_invalidation(monkeypatch, tmp_path):
     )
     conn.commit()
     conn.close()
+    # The append can reuse free page space (size unchanged) and land within
+    # the filesystem's mtime tick (10 ms on this host), leaving the
+    # (path, mtime_ns, size) db signature identical to the primed aggregate
+    # entry. Bump the mtime by one ns so the signature moves
+    # deterministically and the bust is exercised for real.
+    st = db.stat()
+    os.utime(db, ns=(st.st_mtime_ns + 1, st.st_mtime_ns + 1))
     raw = sessions._cline_sessions()
     info4 = sessions._parse_cline_message_file.cache_info()
     assert info4.misses == info3.misses  # no message file re-read
@@ -567,7 +574,7 @@ def test_frontend_session_registry_includes_cline():
     index = Path(sessions.__file__).parent / "static" / "index.html"
     source = index.read_text(encoding="utf-8")
     assert "'antigravity_cli', 'cline'" in source
-    assert "antigravity_cli: null, cline: null, combined: null" in source
+    assert "antigravity_cli: null, cline: null, workbuddy: null, qoder: null, combined: null" in source
     assert 'updateSessionPanel("cline", lastSessionsResponses.cline);' in source
     assert 'initSortHeaders("cline", renderSessionsTab);' in source
     assert "cline: { ...DEFAULT_SORT }," in source

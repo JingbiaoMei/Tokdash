@@ -103,8 +103,8 @@
 | DeepSeek Harness | ✅ | ✅ |
 | Reasonix | ✅ | ✅ |
 | **ZCode** | ✅ | ✅ |
-| **WorkBuddy** | ✅ | — |
-| **Qoder IDE** | ✅ | — |
+| **WorkBuddy** | ✅ | ✅ |
+| **Qoder IDE** | ✅ | ✅ |
 | **Qoder CLI** | ✅ | — |
 
 本地数据路径、覆盖变量与各来源的计费说明见[已支持客户端](docs/reference/SUPPORTED_CLIENTS.md)。
@@ -510,9 +510,9 @@ DeepSeek Harness（`dsh`）的用量与会话从 `$DSH_HOME/sessions/*/*/session
 Reasonix 的用量与会话从 `$REASONIX_HOME`（默认 `~/.reasonix`）本地读取：逐次请求的 token 来自每日 `stats/YYYY-MM-DD.jsonl` 日志，会话结构来自 `projects/*/sessions/*.jsonl`。Reasonix 连接的是其 `config.toml` 中配置的任意供应商，因此每行的 `provider/model` 会照常归因并按现有价格库计价；没有公开价格的自建模型只统计 token，费用为 0。Reasonix 按请求记录用量，且不会写入会话 ID，所以会话浏览器中的行只有轮次、项目与时长，没有 token 数 —— 完整总量在概览与统计中。
 ZCode 的用量从 `$ZCODE_HOME/cli/db/db.sqlite`（默认 `~/.zcode/cli/db/db.sqlite`，`ZCODE_HOME` 跟随 ZCode 自身设置）本地读取。`model_usage` 表中每行是一次模型请求（含重试），该行的 `model_id` 照常按现有价格库计价，`provider_id`（如 `builtin:zai-start-plan`）只作标签。ZCode 的 `input_tokens` 把已缓存与未缓存的提示词 token 合在一起计数，因此缓存部分单独分桶、按缓存费率计费；reasoning token 与 output 分开显示，但按 output 费率计费。ZCode 也会出现在 Sessions 标签页：turn 从同一数据库读取，按 (turn, model) 用相同规则计费，只读顶层会话；没有可计费 token 的 turn 仍会将其测量时长计入该工具的活跃时间。Coding Plan 额度属于远程账户数据，可通过单独授权的 Z.ai 实时轮询器读取。
 
-WorkBuddy 的用量从 `~/.workbuddy-ai/projects/*/*.jsonl` 会话日志本地读取（`WORKBUDDY_DATA_DIR` 可指定逗号分隔的根目录列表，指向其他存储位置，例如 WSL 下的 Windows 数据目录）。每条 assistant 消息行对应一次模型调用；`prompt_tokens` 中包含缓存部分，缓存部分单独分桶、按缓存费率计费；reasoning token 与 output 分开显示，但按 output 费率计费。模型 ID 原样保留：显式模型 ID（如 gpt-5.5）照常按现有价格库计价，Auto 路由别名（`default-model`）不在价格库中，费用为 0.00。每轮的 `credit` 值仅作为元数据存储，不计入费用。WorkBuddy 不出现在 Sessions 标签页。
+WorkBuddy 的用量从 `~/.workbuddy-ai/projects/*/*.jsonl` 会话日志本地读取（`WORKBUDDY_DATA_DIR` 可指定逗号分隔的根目录列表，指向其他存储位置，例如 WSL 下的 Windows 数据目录）。每条 assistant 消息行对应一次模型调用；`prompt_tokens` 中包含缓存部分，缓存部分单独分桶、按缓存费率计费；reasoning token 与 output 分开显示，但按 output 费率计费。模型 ID 原样保留：显式模型 ID（如 gpt-5.5）照常按现有价格库计价，Auto 路由别名（`default-model`）不在价格库中，费用为 0.00。每轮的 `credit` 值仅作为元数据存储，不计入费用。Sessions 标签页从相同的根目录读取相同的会话日志行（每个计费的 assistant 行对应一个 turn）。
 
-Qoder 的用量从两处本地读取：IDE 的 SQLite 数据库（IDE 数据目录下 `SharedClientCache/cache/db/local.db`，Windows 与 WSL 下 QoderCN 版优于国际版）和 CLI 的 JSONL 日志（`~/.qoder` 与 `~/.qoder-cn`，另支持 `QODER_CONFIG_DIR` 和逗号分隔的 `QODER_CLI_HOME`）。IDE 侧对 `chat_message` 表中每个角色的行都计数：提示词 token 中的缓存部分单独分入缓存桶，模型取自 `model_key`（路由器未暴露名称时为 `auto`）。CLI 侧按请求将会话 transcript 中的计费记录与 segment 日志中的 token 记录合并（覆盖全部 CLI 根目录）：带 provider credits 的行直接使用 provider 报告的成本作为权威值，按估算的 $0.01/credit 换算（可用 `QODER_USD_PER_CREDIT` 覆盖该估算值）且永不重新计价；仅含 token 的行按常规价格库计价。记录没有 input token 时，用 `context_usage_ratio` 乘上已知的上下文窗口恢复 input——除非显式设置 `QODER_CLI_CONTEXT_WINDOW`，否则窗口只对 `auto` 已知（180,000）。Qoder 不出现在 Sessions 标签页。
+Qoder 的用量从两处本地读取：IDE 的 SQLite 数据库（IDE 数据目录下 `SharedClientCache/cache/db/local.db`，Windows 与 WSL 下 QoderCN 版优于国际版）和 CLI 的 JSONL 日志（`~/.qoder` 与 `~/.qoder-cn`，另支持 `QODER_CONFIG_DIR` 和逗号分隔的 `QODER_CLI_HOME`）。IDE 侧对 `chat_message` 表中每个角色的行都计数：提示词 token 中的缓存部分单独分入缓存桶，模型取自 `model_key`（路由器未暴露名称时为 `auto`）。CLI 侧按请求将会话 transcript 中的计费记录与 segment 日志中的 token 记录合并（覆盖全部 CLI 根目录）：带 provider credits 的行直接使用 provider 报告的成本作为权威值，按估算的 $0.01/credit 换算（可用 `QODER_USD_PER_CREDIT` 覆盖该估算值）且永不重新计价；仅含 token 的行按常规价格库计价。记录没有 input token 时，用 `context_usage_ratio` 乘上已知的上下文窗口恢复 input——除非显式设置 `QODER_CLI_CONTEXT_WINDOW`，否则窗口只对 `auto` 已知（180,000）。Qoder IDE 出现在 Sessions 标签页：相同的 `chat_message` 行（所有角色，每个可解析的行对应一个 turn）从同一数据库的临时目录快照读取。
 `tokdash setup` 会提供一个可选的额度步骤（按服务商的网络授权，默认为否，以及轮询间隔），`tokdash doctor` 会报告额度状态：总开关、按服务商授权、终止开关、生效间隔及其来源、上次轮询时间，以及已保存的快照数量。
 
 额度快照及其历史保存在本地使用量数据库（`usage.sqlite3`，默认开启），**默认永久保留**——将 `TOKDASH_QUOTA_RETENTION_DAYS` 设为正整数天数可开启对更早快照的清理。如果你用 `TOKDASH_USAGE_DB=0` 关闭本地持久化，「额度」标签页将失去主要数据来源：不再保留快照历史，后台轮询也不运行，标签页只会在当前服务进程存活期间展示手动**刷新**（已授权的网络服务商）得到的内存中结果。日常额度跟踪请保持使用量数据库开启（默认）。

@@ -443,7 +443,7 @@ def test_frontend_session_registry_includes_omp():
     index = Path(sessions.__file__).parent / "static" / "index.html"
     source = index.read_text(encoding="utf-8")
     assert "'zcode', 'kilocode', 'omp'" in source
-    assert "kilocode: null, omp: null, grok: null, hermes: null, antigravity_cli: null, cline: null, combined: null" in source
+    assert "kilocode: null, omp: null, grok: null, hermes: null, antigravity_cli: null, cline: null, workbuddy: null, qoder: null, combined: null" in source
     assert 'updateSessionPanel("omp", lastSessionsResponses.omp);' in source
     assert 'initSortHeaders("omp", renderSessionsTab);' in source
     assert "omp: { ...DEFAULT_SORT }," in source

@@ -32,6 +32,8 @@ from .sources.coding_tools import (
     AntigravityCLIParser,
     HermesParser,
     KimiParser,
+    QoderIdeParser,
+    WorkBuddyParser,
     ZCodeSnapshotError,
     cline_message_file_signatures,
     codex_fork_ancestry,
@@ -41,7 +43,9 @@ from .sources.coding_tools import (
     iter_grok_usage_rows,
     parse_cline_message_file,
     search_dir_claim_key,
+    workbuddy_file_signatures,
     zcode_snapshot,
+    zcode_snapshot_signatures,
 )
 from .sources import dsh_log
 from .sources.dsh_log import (
@@ -59,7 +63,7 @@ from .usage_store import (
 )
 
 
-SESSION_TOOLS = ("codex", "claude", "opencode", "pi_agent", "omp", "mimo", "kimi", "dsh", "reasonix", "zcode", "kilocode", "grok", "hermes", "antigravity_cli", "cline")
+SESSION_TOOLS = ("codex", "claude", "opencode", "pi_agent", "omp", "mimo", "kimi", "dsh", "reasonix", "zcode", "kilocode", "grok", "hermes", "antigravity_cli", "cline", "workbuddy", "qoder")
 logger = logging.getLogger(__name__)
 TOOL_LABELS = {
     "codex": "Codex",
@@ -77,6 +81,8 @@ TOOL_LABELS = {
     "hermes": "Hermes",
     "antigravity_cli": "Antigravity CLI",
     "cline": "Cline",
+    "workbuddy": "WorkBuddy",
+    "qoder": "Qoder IDE",
 }
 
 _PRICING_DB = PricingDatabase()
@@ -404,6 +410,8 @@ def reload_pricing_db() -> None:
     _load_antigravity_summaries.cache_clear()
     _parse_cline_message_file.cache_clear()
     _load_cline_sessions.cache_clear()
+    _parse_workbuddy_session_file.cache_clear()
+    _load_workbuddy_sessions.cache_clear()
 
 
 def _truthy_env(name: str) -> bool:
@@ -542,7 +550,9 @@ def _project_from_repo_or_path(repo_url: Optional[str], path: Optional[str]) -> 
         if name:
             return name
     if path:
-        name = Path(path).name
+        # A Windows cwd read through WSL/drvfs still carries backslashes,
+        # which a POSIX Path would treat as one giant name.
+        name = Path(str(path).replace("\\", "/")).name
         if name:
             return name
     return "unknown"
@@ -4138,6 +4148,148 @@ def _reasonix_sessions() -> Dict[str, Dict[str, Any]]:
 
 
 # ======================================================================
+# WorkBuddy sessions: append-only transcripts, one file per session
+#
+# The same transcript set as WorkBuddyParser (the shared
+# workbuddy_file_signatures scan), with per-row normalization delegated to
+# the parser itself, so a vendor schema drift skips rows on both sides.
+# ======================================================================
+
+
+@_cached_session_parser()
+def _parse_workbuddy_session_file(path_str: str, _mtime_ns: int, _size: int, _pricing_sig: tuple = ()) -> Optional[Dict[str, Any]]:
+    """One transcript -> one raw session (file stem = session id).
+
+    Raises _SessionFileUnavailable on open failure (mirror the claude file
+    parser's raise) so a locked file is retried, not cached; None when no
+    usage rows survive. One turn per billed model call (assistant row): an
+    N-step tool loop yields N turns, matching the N entries the parser
+    bills.
+    """
+    session_path = Path(path_str)
+    session_id = session_path.stem
+    project = "unknown"
+    ai_title = ""
+    turns = []
+    seen_call_ids: set = set()
+    # Throwaway parser per file parse (one env read + list build, amortized
+    # by the per-file lru_cache), so WORKBUDDY_DATA_DIR changes and test
+    # monkeypatching always take effect.
+    parser = WorkBuddyParser(_PRICING_DB)
+
+    try:
+        handle = session_path.open("r", encoding="utf-8")
+    except OSError as exc:
+        # A file held without share-read (the app itself, an AV, an indexer)
+        # raises PermissionError on Windows; drop this file rather than
+        # erroring the whole tool's session view. Raised, not returned, so
+        # the failure is not cached against a signature that will never
+        # change again.
+        raise _SessionFileUnavailable(path_str) from exc
+    with handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except Exception:
+                continue
+            if not isinstance(record, dict):
+                continue
+            row_session = str(record.get("sessionId") or "").strip()
+            if row_session:
+                session_id = row_session
+            # The project comes from the first row that carries a sessionId;
+            # file-history-snapshot rows carry a coarser cwd and must not be
+            # used.
+            if project == "unknown" and row_session and record.get("cwd"):
+                project = _project_from_repo_or_path(None, str(record.get("cwd")))
+            if record.get("type") == "ai-title":
+                title = _clean_display_name(record.get("aiTitle"))
+                if title:
+                    ai_title = title
+                continue
+            entry = parser._entry_from_row(record, seen_call_ids)
+            if entry is None:
+                continue
+            model = str(entry.get("model") or "unknown")
+            fresh = int(entry.get("input", 0) or 0)
+            cached = int(entry.get("cacheRead", 0) or 0)
+            output = int(entry.get("output", 0) or 0)
+            reasoning = int(entry.get("reasoning", 0) or 0)
+            # The bill's output is the FULL completion (reasoning is billed
+            # at the output rate); the displayed tokens_out excludes it.
+            turn = _build_turn(
+                turn_index=0,
+                timestamp_ms=entry["timestamp"],
+                model=model,
+                tokens_in=fresh,
+                tokens_cache=cached,
+                tokens_out=output,
+                tokens_reasoning=reasoning,
+                bill=_billing_record(
+                    model,
+                    "fresh-input",
+                    input_tokens=fresh,
+                    output_tokens=output + reasoning,
+                    cache_read=cached,
+                    cache_write=0,
+                ),
+            )
+            turn["_event_key"] = str(entry.get("entry_id") or "")
+            turns.append(turn)
+
+    turns.sort(key=lambda item: int(item.get("timestamp_ms", 0) or 0))
+    for turn_index, turn in enumerate(turns, start=1):
+        turn["turn_index"] = turn_index
+
+    if not turns:
+        return None
+
+    return {
+        "tool": "workbuddy",
+        "session_id": session_id,
+        "display_name": ai_title or _fallback_display_name(session_id, project),
+        "project": project,
+        "turns": turns,
+    }
+
+
+@_cached_session_aggregate()
+def _load_workbuddy_sessions(signature: tuple[tuple[str, int, int], ...], pricing_sig: tuple = ()) -> Dict[str, Dict[str, Any]]:
+    """Mirror _load_claude_sessions: per-file _parse_session_file, merge per
+    session_id with _merge_raw_session; transient misses raise
+    _PartialSessionView so the partial view is returned but never cached."""
+    sessions: Dict[str, Dict[str, Any]] = {}
+    transient_miss = False
+    for path_str, mtime_ns, size in signature:
+        try:
+            raw = _parse_session_file(
+                _parse_workbuddy_session_file, path_str, mtime_ns, size, pricing_sig
+            )
+        except _SessionFileUnavailable:
+            transient_miss = True
+            continue
+        if raw:
+            session_id = str(raw["session_id"])
+            if session_id in sessions:
+                sessions[session_id] = _merge_raw_session(sessions[session_id], raw)
+            else:
+                sessions[session_id] = raw
+    if transient_miss:
+        raise _PartialSessionView(sessions)
+    return sessions
+
+
+def _workbuddy_sessions() -> Dict[str, Dict[str, Any]]:
+    return _load_workbuddy_sessions(
+        workbuddy_file_signatures(clientpaths.workbuddy_roots()),
+        _pricing_signature(),
+    )
+
+
+# ======================================================================
 # ZCode sessions (phase 2): the live native-DB group
 #
 # Reads the same WAL-mode SQLite DB as the usage parser, through the
@@ -4567,6 +4719,206 @@ def _zcode_store(
 
 
 # ---------------------------------------------------------------------------
+# Qoder IDE (live SQLite DB, single file; zcode_snapshot read path)
+#
+# Reads the same local.db as QoderIdeParser through the shared
+# zcode_snapshot - never the source file. One chat_message row is one
+# model call; the row guard/clamp/model logic lives in
+# QoderIdeParser._row_buckets, so Overview and Sessions cannot drift.
+# Read failures raise QoderReadError instead of returning {} (the
+# ZCode contract): no layer can cache a broken read as an empty one,
+# and /api/sessions surfaces it as a 500 the next poll retries. A
+# legitimate empty (no DB, or no chat_message table) IS cached - the
+# signature changes when the DB appears.
+# ---------------------------------------------------------------------------
+
+
+class QoderReadError(RuntimeError):
+    """A transient failure reading the live Qoder IDE database."""
+
+
+# Max (window) entries kept in the loader result cache, mirroring ZCode.
+_QODER_SESSIONS_CACHE_MAX = 32
+
+_qoder_sessions_cache: Dict[tuple, Dict[str, Dict[str, Any]]] = {}
+_qoder_sessions_cache_sig: tuple = ()
+_qoder_sessions_cache_lock = threading.Lock()
+
+
+def _qoder_db_signature() -> tuple:
+    # The exact signature set QoderIdeParser._file_signatures signs:
+    # db + -wal, the live -shm excluded on purpose.
+    db_path = clientpaths.qoder_ide_db_path()
+    if db_path is None or not db_path.exists():
+        return ()
+    return zcode_snapshot_signatures(db_path)
+
+
+def _qoder_load_sessions(
+    conn: sqlite3.Connection,
+    since_ms: Optional[int],
+    until_ms: Optional[int],
+) -> Dict[str, Dict[str, Any]]:
+    """One query: in-window chat_message rows with their session title and
+    project. Half-open window on gmt_create; the bind defaults copy
+    _zcode_load_sessions (the "all" window arrives as (None, None))."""
+    lo = 0 if since_ms is None else int(since_ms)
+    hi = 9999999999999 if until_ms is None else int(until_ms)
+    cur = conn.cursor()
+    # chat_session is the optional side of the join: the parser never
+    # needs it, so a DB that has only chat_message is a legitimate shape
+    # and names fall back (the parser-side rows still all count).
+    cur.execute(
+        "SELECT 1 FROM sqlite_master "
+        "WHERE type='table' AND name='chat_session'"
+    )
+    has_session_table = cur.fetchone() is not None
+    title_cols = ("s.session_title, s.project_uri" if has_session_table
+                  else "NULL AS session_title, NULL AS project_uri")
+    join_clause = ("LEFT JOIN chat_session s ON s.session_id = m.session_id "
+                   if has_session_table else "")
+    cur.execute(
+        f"""
+        SELECT m.id, m.session_id, m.model_info, m.token_info, m.gmt_create,
+               {title_cols}
+        FROM chat_message m
+        {join_clause}
+        WHERE length(m.token_info) > 2
+          AND m.gmt_create >= ?
+          AND m.gmt_create < ?
+        ORDER BY m.gmt_create
+        """,
+        (lo, hi),
+    )
+
+    sessions: Dict[str, Dict[str, Any]] = {}
+    # One throwaway parser for the shared row rule (its __init__ only
+    # resolves the DB path, which this loader already holds open).
+    buckets_of = QoderIdeParser(_PRICING_DB)._row_buckets
+    for row in cur.fetchall():
+        buckets = buckets_of(row)
+        if buckets is None:
+            continue
+        model, input_t, cached, output = buckets
+        session_id = str(row["session_id"] or "").strip()
+        orphan_name = ""
+        if not session_id:
+            # QoderIdeParser bills every row whose token_info parses,
+            # session or not. Dropping a session-less row here would count
+            # it in Overview and hide it in Sessions, so each one becomes
+            # its own synthetic session: parity holds, and no grouping is
+            # invented that the DB does not record. chat_message.id is the
+            # primary key, so the key is unique and stable.
+            session_id = f"qoder-orphan:{row['id']}"
+            # Every synthetic id shares those first 8 characters, so the
+            # short-id fallback would render each orphan as "qoder-or".
+            # Name them by the row that produced them instead.
+            orphan_name = _short_session_id(row["id"])
+        raw = sessions.get(session_id)
+        if raw is None:
+            raw = {
+                "tool": "qoder",
+                "session_id": session_id,
+                "display_name": _clean_display_name(row["session_title"]) or orphan_name,
+                "project": _project_from_repo_or_path(None, row["project_uri"]),
+                "is_review_session": False,
+                "turns": [],
+            }
+            sessions[session_id] = raw
+        # fresh-input = get_cost(model, input, output, cache_read, 0) -
+        # the parser's exact per-row cost expression.
+        turn = _build_turn(
+            turn_index=len(raw["turns"]) + 1,
+            timestamp_ms=int(row["gmt_create"] or 0),
+            model=model,
+            tokens_in=input_t,
+            tokens_cache=cached,
+            tokens_out=output,
+            tokens_reasoning=0,
+            bill=_billing_record(
+                model,
+                "fresh-input",
+                input_tokens=input_t,
+                output_tokens=output,
+                cache_read=cached,
+            ),
+        )
+        turn["_event_key"] = f"qoder:{row['id']}"
+        raw["turns"].append(turn)
+    return sessions
+
+
+def _qoder_sessions(
+    since_ms: Optional[int] = None,
+    until_ms: Optional[int] = None,
+) -> Dict[str, Dict[str, Any]]:
+    global _qoder_sessions_cache_sig
+    sig = (_qoder_db_signature(), _pricing_signature())
+    key = (since_ms, until_ms)
+    # Signature validation and the cache lookup are one critical
+    # section (the ZCode algorithm): a concurrent collector must not
+    # clear and repopulate the cache between them.
+    with _qoder_sessions_cache_lock:
+        if sig != _qoder_sessions_cache_sig:
+            _qoder_sessions_cache.clear()
+            _qoder_sessions_cache_sig = sig
+        cached = _qoder_sessions_cache.get(key)
+    if cached is not None:
+        return cached
+
+    db_path = clientpaths.qoder_ide_db_path()
+    if db_path is None or not db_path.exists():
+        # Legitimate empty: no Qoder IDE DB on this machine. Cached; the
+        # signature changes when the DB appears.
+        return _qoder_store(sig, key, {})
+
+    raw_sessions: Dict[str, Dict[str, Any]]
+    try:
+        with zcode_snapshot(db_path) as snap:
+            conn = snap.conn
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            # An absent table is a legitimate empty success; a probe
+            # error is a failed read (never an "absent table").
+            cur.execute(
+                "SELECT 1 FROM sqlite_master "
+                "WHERE type='table' AND name='chat_message'"
+            )
+            if cur.fetchone() is None:
+                raw_sessions = {}
+            else:
+                raw_sessions = _qoder_load_sessions(conn, since_ms, until_ms)
+    except (ZCodeSnapshotError, sqlite3.Error) as error:
+        # A transient failure: a restored permission or cleared SQLite
+        # error may not change the file signatures, so the result must
+        # not be cached - and it must not be mistaken for an empty
+        # result at any layer, so raise.
+        raise QoderReadError(f"Qoder IDE session read failed: {error}") from error
+
+    if snap.close_failed:
+        # The read completed but the snapshot could not be closed:
+        # return the data, never cache it.
+        return raw_sessions
+    return _qoder_store(sig, key, raw_sessions)
+
+
+def _qoder_store(
+    sig: tuple, key: tuple, raw_sessions: Dict[str, Dict[str, Any]]
+) -> Dict[str, Dict[str, Any]]:
+    global _qoder_sessions_cache, _qoder_sessions_cache_sig
+    # Recheck under the lock: if a concurrent call advanced the
+    # signature while we were reading, this result belongs to the old
+    # signature and must not be stored under the new one (it is still
+    # returned for this request).
+    with _qoder_sessions_cache_lock:
+        if sig == _qoder_sessions_cache_sig:
+            if len(_qoder_sessions_cache) >= _QODER_SESSIONS_CACHE_MAX:
+                _qoder_sessions_cache.clear()
+            _qoder_sessions_cache[key] = raw_sessions
+    return raw_sessions
+
+
+# ---------------------------------------------------------------------------
 # Cline (sessions/*/*.messages.json files + db/sessions.db metadata)
 # ---------------------------------------------------------------------------
 
@@ -4927,6 +5279,10 @@ def _raw_sessions_for_tool(
             return _antigravity_sessions()
         if key == "cline":
             return _cline_sessions()
+        if key == "workbuddy":
+            return _workbuddy_sessions()
+        if key == "qoder":
+            return _qoder_sessions(since_ms=since_ms, until_ms=until_ms)
     except (OSError, sqlite3.Error):
         # A live-parse failure (locked dir, unreadable file, corrupt DB) degrades
         # to an empty view instead of erroring the whole tool's session endpoint.

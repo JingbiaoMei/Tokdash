@@ -3170,6 +3170,146 @@
         </details>
       </section>
 
+      <section class="surface p-5 mb-6">
+        <details class="session-panel" data-panel-details="workbuddy">
+          <summary class="session-panel-summary">
+            <h2 class="text-base font-extrabold mono" data-i18n="workbuddySessions" data-i18n-title="sessionsRangeDesc">WorkBuddy Sessions</h2>
+            <span id="workbuddyPanelCount" class="session-panel-count"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></span>
+            <span id="workbuddyPanelKpis" class="session-panel-kpis" hidden>
+              <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="panelTokens">Tokens</span><span id="workbuddyPanelTokens" class="session-panel-kpi-value mono">—</span></span>
+              <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="cost">Cost</span><span id="workbuddyPanelCost" class="session-panel-kpi-value mono" style="color: var(--color-cost);">—</span></span>
+              <span class="session-panel-kpi"><span id="workbuddyActiveLabel" class="session-panel-kpi-label" data-i18n="agentTime" data-i18n-title="agentTimePanelHint">EST. agent time</span><span class="session-panel-kpi-value mono"><span id="workbuddyActiveAgent">—</span></span></span>
+              <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="panelLast">Last</span><span id="workbuddyPanelLast" class="session-panel-kpi-value mono">—</span></span>
+            </span>
+            <span class="session-panel-chev" aria-hidden="true">▸</span>
+          </summary>
+          <div class="session-panel-body">
+
+        <div id="workbuddyLatestSession" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4 mb-5">
+          <div class="surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="latestSession">Latest Session</div>
+            <div id="workbuddyLatestProject" class="tokdash-loading-placeholder mt-2 font-extrabold mono"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
+            <div id="workbuddyLatestMeta" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
+          </div>
+          <div class="surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="input">Input</div>
+            <div id="workbuddyLatestInput" class="mt-2 font-extrabold">-</div>
+          </div>
+          <div class="surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="cacheRead">Cache Read</div>
+            <div id="workbuddyLatestCache" class="mt-2 font-extrabold">-</div>
+            <div id="workbuddyLatestCachePct" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
+          </div>
+          <div class="surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="output">Output</div>
+            <div id="workbuddyLatestOutput" class="mt-2 font-extrabold">-</div>
+          </div>
+          <div class="surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="totalTokens">Total Tokens</div>
+            <div id="workbuddyLatestTotal" class="mt-2 font-extrabold">-</div>
+          </div>
+          <div class="surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="events">Events</div>
+            <div id="workbuddyLatestEvents" class="mt-2 font-extrabold">-</div>
+            <div id="workbuddyLatestSeen" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
+          </div>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm session-table" aria-label="WorkBuddy sessions table" data-panel="workbuddy">
+            <colgroup><col style="width:16%"><col style="width:10%"><col style="width:9%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:10%"><col style="width:8%"><col style="width:9%"><col style="width:12%"></colgroup>
+            <thead>
+              <tr class="border-b" style="border-color: var(--color-border);">
+                <th class="text-left py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="session" data-sortable="display_name">Session</th>
+                <th class="text-left py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="model">Model</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="input" data-sortable="tokens_in">Input</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cache" data-sortable="tokens_cache">Cache</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="hitPct" data-sortable="cache_hit_rate">Hit %</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="output" data-sortable="tokens_out">Output</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="total" data-sortable="tokens">Total</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cost" data-sortable="cost">Cost</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="activeTimeColumn" data-i18n-title="activeTimeHint" data-sortable="active_ms" title="Estimated from gaps between token events, each counted up to the idle cap (5 min by default).">Active (est.)</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="lastUpdated" data-sortable="last_seen_at">Last updated</th>
+              </tr>
+            </thead>
+            <tbody id="workbuddySessionsTable">
+              <tr><td colspan="10" class="tokdash-loading-placeholder text-center py-10" style="color: var(--color-muted);"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+        </div>
+        </details>
+      </section>
+
+      <section class="surface p-5 mb-6">
+        <details class="session-panel" data-panel-details="qoder">
+          <summary class="session-panel-summary">
+            <h2 class="text-base font-extrabold mono" data-i18n="qoderSessions" data-i18n-title="sessionsRangeDesc">Qoder IDE Sessions</h2>
+            <span id="qoderPanelCount" class="session-panel-count"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></span>
+            <span id="qoderPanelKpis" class="session-panel-kpis" hidden>
+              <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="panelTokens">Tokens</span><span id="qoderPanelTokens" class="session-panel-kpi-value mono">—</span></span>
+              <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="cost">Cost</span><span id="qoderPanelCost" class="session-panel-kpi-value mono" style="color: var(--color-cost);">—</span></span>
+              <span class="session-panel-kpi"><span id="qoderActiveLabel" class="session-panel-kpi-label" data-i18n="agentTime" data-i18n-title="agentTimePanelHint">EST. agent time</span><span class="session-panel-kpi-value mono"><span id="qoderActiveAgent">—</span></span></span>
+              <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="panelLast">Last</span><span id="qoderPanelLast" class="session-panel-kpi-value mono">—</span></span>
+            </span>
+            <span class="session-panel-chev" aria-hidden="true">▸</span>
+          </summary>
+          <div class="session-panel-body">
+
+        <div id="qoderLatestSession" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4 mb-5">
+          <div class="surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="latestSession">Latest Session</div>
+            <div id="qoderLatestProject" class="tokdash-loading-placeholder mt-2 font-extrabold mono"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
+            <div id="qoderLatestMeta" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
+          </div>
+          <div class="surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="input">Input</div>
+            <div id="qoderLatestInput" class="mt-2 font-extrabold">-</div>
+          </div>
+          <div class="surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="cacheRead">Cache Read</div>
+            <div id="qoderLatestCache" class="mt-2 font-extrabold">-</div>
+            <div id="qoderLatestCachePct" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
+          </div>
+          <div class="surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="output">Output</div>
+            <div id="qoderLatestOutput" class="mt-2 font-extrabold">-</div>
+          </div>
+          <div class="surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="totalTokens">Total Tokens</div>
+            <div id="qoderLatestTotal" class="mt-2 font-extrabold">-</div>
+          </div>
+          <div class="surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="events">Events</div>
+            <div id="qoderLatestEvents" class="mt-2 font-extrabold">-</div>
+            <div id="qoderLatestSeen" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
+          </div>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm session-table" aria-label="Qoder IDE sessions table" data-panel="qoder">
+            <colgroup><col style="width:16%"><col style="width:10%"><col style="width:9%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:10%"><col style="width:8%"><col style="width:9%"><col style="width:12%"></colgroup>
+            <thead>
+              <tr class="border-b" style="border-color: var(--color-border);">
+                <th class="text-left py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="session" data-sortable="display_name">Session</th>
+                <th class="text-left py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="model">Model</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="input" data-sortable="tokens_in">Input</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cache" data-sortable="tokens_cache">Cache</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="hitPct" data-sortable="cache_hit_rate">Hit %</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="output" data-sortable="tokens_out">Output</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="total" data-sortable="tokens">Total</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cost" data-sortable="cost">Cost</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="activeTimeColumn" data-i18n-title="activeTimeHint" data-sortable="active_ms" title="Estimated from gaps between token events, each counted up to the idle cap (5 min by default).">Active (est.)</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="lastUpdated" data-sortable="last_seen_at">Last updated</th>
+              </tr>
+            </thead>
+            <tbody id="qoderSessionsTable">
+              <tr><td colspan="10" class="tokdash-loading-placeholder text-center py-10" style="color: var(--color-muted);"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+        </div>
+        </details>
+      </section>
+
       <section class="surface p-5">
         <details class="session-panel" data-panel-details="combined">
           <summary class="session-panel-summary">
@@ -4089,8 +4229,8 @@
     let lastUsageResponse = null;
     let lastRefreshReport = null;
     let refreshReportDismissedWindowKey = null;
-    const SESSION_TOOL_KEYS = ['codex', 'claude', 'opencode', 'pi_agent', 'mimo', 'kimi', 'dsh', 'reasonix', 'zcode', 'kilocode', 'omp', 'grok', 'hermes', 'antigravity_cli', 'cline'];
-    let lastSessionsResponses = { codex: null, claude: null, opencode: null, pi_agent: null, mimo: null, kimi: null, dsh: null, reasonix: null, zcode: null, kilocode: null, omp: null, grok: null, hermes: null, antigravity_cli: null, cline: null, combined: null };
+    const SESSION_TOOL_KEYS = ['codex', 'claude', 'opencode', 'pi_agent', 'mimo', 'kimi', 'dsh', 'reasonix', 'zcode', 'kilocode', 'omp', 'grok', 'hermes', 'antigravity_cli', 'cline', 'workbuddy', 'qoder'];
+    let lastSessionsResponses = { codex: null, claude: null, opencode: null, pi_agent: null, mimo: null, kimi: null, dsh: null, reasonix: null, zcode: null, kilocode: null, omp: null, grok: null, hermes: null, antigravity_cli: null, cline: null, workbuddy: null, qoder: null, combined: null };
     let lastCombinedModels = [];
     let lastAppsBreakdown = null;
     let lastByTool = {};
@@ -4386,6 +4526,8 @@
         hermesSessions: 'Hermes Sessions',
         antigravityCliSessions: 'Antigravity Sessions',
         clineSessions: 'Cline Sessions',
+        qoderSessions: 'Qoder IDE Sessions',
+        workbuddySessions: 'WorkBuddy Sessions',
         piSessions: 'Pi Sessions',
         mimoSessions: 'Mimo Sessions',
         kimiSessions: 'Kimi Sessions',
@@ -4781,6 +4923,8 @@
         hermesSessions: 'Hermes 会话',
         antigravityCliSessions: 'Antigravity 会话',
         clineSessions: 'Cline 会话',
+        qoderSessions: 'Qoder IDE 会话',
+        workbuddySessions: 'WorkBuddy 会话',
         piSessions: 'Pi 会话',
         mimoSessions: 'Mimo 会话',
         kimiSessions: 'Kimi 会话',
@@ -5177,6 +5321,8 @@
         hermesSessions: 'Hermes セッション',
         antigravityCliSessions: 'Antigravity セッション',
         clineSessions: 'Cline セッション',
+        qoderSessions: 'Qoder IDE セッション',
+        workbuddySessions: 'WorkBuddy セッション',
         piSessions: 'Pi セッション',
         mimoSessions: 'Mimo セッション',
         kimiSessions: 'Kimi セッション',
@@ -5573,6 +5719,8 @@
         hermesSessions: 'Hermes 세션',
         antigravityCliSessions: 'Antigravity 세션',
         clineSessions: 'Cline 세션',
+        qoderSessions: 'Qoder IDE 세션',
+        workbuddySessions: 'WorkBuddy 세션',
         piSessions: 'Pi 세션',
         mimoSessions: 'Mimo 세션',
         kimiSessions: 'Kimi 세션',
@@ -5969,6 +6117,8 @@
         hermesSessions: 'Sesiones de Hermes',
         antigravityCliSessions: 'Sesiones de Antigravity',
         clineSessions: 'Sesiones de Cline',
+        qoderSessions: 'Sesiones de Qoder IDE',
+        workbuddySessions: 'Sesiones de WorkBuddy',
         piSessions: 'Sesiones de Pi',
         mimoSessions: 'Sesiones de Mimo',
         kimiSessions: 'Sesiones de Kimi',
@@ -6365,6 +6515,8 @@
         hermesSessions: 'Sessões do Hermes',
         antigravityCliSessions: 'Sessões do Antigravity',
         clineSessions: 'Sessões do Cline',
+        qoderSessions: 'Sessões do Qoder IDE',
+        workbuddySessions: 'Sessões do WorkBuddy',
         piSessions: 'Sessões do Pi',
         mimoSessions: 'Sessões do Mimo',
         kimiSessions: 'Sessões do Kimi',
@@ -9150,6 +9302,8 @@
       hermes: { ...DEFAULT_SORT },
       antigravity_cli: { ...DEFAULT_SORT },
       cline: { ...DEFAULT_SORT },
+      workbuddy: { ...DEFAULT_SORT },
+      qoder: { ...DEFAULT_SORT },
       combined: { ...DEFAULT_SORT },
     };
 
@@ -9537,6 +9691,8 @@
       updateSessionPanel("hermes", lastSessionsResponses.hermes);
       updateSessionPanel("antigravity_cli", lastSessionsResponses.antigravity_cli);
       updateSessionPanel("cline", lastSessionsResponses.cline);
+      updateSessionPanel("qoder", lastSessionsResponses.qoder);
+      updateSessionPanel("workbuddy", lastSessionsResponses.workbuddy);
       lastSessionsResponses.combined = buildCombinedSessionsData(lastSessionsResponses);
       updateSessionPanel("combined", lastSessionsResponses.combined, { showTool: true });
 
@@ -9575,6 +9731,8 @@
       initSortHeaders("hermes", renderSessionsTab);
       initSortHeaders("antigravity_cli", renderSessionsTab);
       initSortHeaders("cline", renderSessionsTab);
+      initSortHeaders("qoder", renderSessionsTab);
+      initSortHeaders("workbuddy", renderSessionsTab);
       initSortHeaders("combined", renderSessionsTab);
     }
 

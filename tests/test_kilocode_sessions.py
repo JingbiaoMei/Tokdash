@@ -103,6 +103,13 @@ def _append_message(db: Path, mid: str, sid: str, ts: int, data: dict) -> None:
     )
     conn.commit()
     conn.close()
+    # A small INSERT can reuse free page space (size unchanged) and land
+    # within the filesystem's mtime tick, leaving the (path, mtime_ns, size)
+    # signature identical to the primed cache entry. Bump the mtime by one ns
+    # so the signature moves deterministically and the bust is exercised for
+    # real, without filesystem luck.
+    st = db.stat()
+    os.utime(db, ns=(st.st_mtime_ns + 1, st.st_mtime_ns + 1))
 
 
 def _proj(pid="p1", worktree="/"):
@@ -230,13 +237,6 @@ def test_user_rows_ignored(monkeypatch, tmp_path):
 
     _append_message(db, "m3", "ses_a", BASE + 2000,
                     _assistant(input=5, output=1, cache={"read": 0, "write": 0}))
-    # The append can reuse free page space (size unchanged) and land within
-    # the filesystem's mtime tick, leaving the (path, mtime_ns, size)
-    # signature identical to the primed cache entry. Bump the mtime by one
-    # ns so the signature moves deterministically and the bust is exercised
-    # for real, without filesystem luck.
-    st = db.stat()
-    os.utime(db, ns=(st.st_mtime_ns + 1, st.st_mtime_ns + 1))
     raw = _kilocode_sessions()
     assert set(raw) == {"ses_a"}
     assert len(raw["ses_a"]["turns"]) == 1

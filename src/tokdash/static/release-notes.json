@@ -1,6 +1,37 @@
 {
-  "current": "2.4.3",
+  "current": "2.5.0",
   "releases": [
+    {
+      "version": "2.5.0",
+      "date": "2026-09-01",
+      "sections": [
+        {
+          "type": "added",
+          "items": [
+            "Zed, Qwen Code and Charm Crush are new usage sources, read locally from each tool's own store.",
+            "WorkBuddy and Qoder IDE now have their own Session Explorer panels, with per-session turns and active time.",
+            "A new /api/insights endpoint returns hour-of-day, weekday, heatmap, per-project and streak analytics in one request.",
+            "Usage responses carry top_models_by_cost alongside the token-ranked top_models, and stats adds messages, most_used_model and highest_cost_model."
+          ]
+        },
+        {
+          "type": "changed",
+          "items": [
+            "Model lists are ordered by tokens, as the API reference always described. The cost ranking is served separately rather than replacing it.",
+            "The favorite model ranks by tokens rather than cost, so a rarely used but expensive model no longer wins.",
+            "A project name is taken from the last element of a Windows path as well as a POSIX one, so the same project seen from Windows and WSL groups together."
+          ]
+        },
+        {
+          "type": "fixed",
+          "items": [
+            "Calendar heatmap days carry a real intensity instead of always zero, so the calendar shades again.",
+            "Current and longest streaks are computed instead of always returning zero.",
+            "Refresh no longer reports success while serving cached data."
+          ]
+        }
+      ]
+    },
     {
       "version": "2.4.3",
       "date": "2026-09-01",

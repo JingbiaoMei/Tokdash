@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Added
+
+- Added Session Explorer support for WorkBuddy and Qoder IDE. Both were already counted in Overview and Stats but had no session rows: WorkBuddy sessions come from the same `projects/*/*.jsonl` transcripts as the usage parser (one turn per billed assistant row, cross-file call-id dedupe), and Qoder IDE sessions come from the same `chat_message` rows read through a temp-dir snapshot of `local.db`, titled and grouped by `chat_session` where that table exists. Each has its own dashboard panel, per-session turns and active time, and reuses the parser's token mapping and pricing rules so session sums match Overview.
+
+### Changed
+
+- A project name is now taken from the last element of a Windows path as well as a POSIX one. A tool that recorded a native Windows working directory (WorkBuddy on Windows, or any harness read from WSL) reported the whole `C:\Users\...\Project` string as the project name, so its sessions never grouped with the same project seen through a POSIX path. Affects every Session Explorer harness; a POSIX directory whose name contains a literal backslash now splits on it.
+
 ## 2.4.3 - 2026-09-01
 
 ### Added

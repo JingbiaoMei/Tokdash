@@ -517,7 +517,7 @@ def test_frontend_session_registry_includes_antigravity_cli():
     index = Path(sessions.__file__).parent / "static" / "index.html"
     source = index.read_text(encoding="utf-8")
     assert "'hermes', 'antigravity_cli'" in source
-    assert "hermes: null, antigravity_cli: null, cline: null, combined: null" in source
+    assert "hermes: null, antigravity_cli: null, cline: null, workbuddy: null, qoder: null, combined: null" in source
     assert 'updateSessionPanel("antigravity_cli", lastSessionsResponses.antigravity_cli);' in source
     assert 'initSortHeaders("antigravity_cli", renderSessionsTab);' in source
     assert "antigravity_cli: { ...DEFAULT_SORT }," in source

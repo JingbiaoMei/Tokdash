@@ -3710,7 +3710,12 @@ class QoderIdeParser(BaseParser):
         # -shm is excluded, same rule as ZCode.
         return zcode_snapshot_signatures(self.db_path)
 
-    def _build_entry(self, row: sqlite3.Row) -> Optional[Dict[str, Any]]:
+    def _row_buckets(self, row: sqlite3.Row) -> Optional[tuple]:
+        """Row guard + clamp + model resolution, shared with the sessions
+        harness (the loader calls this, so a row's buckets can never differ
+        between Overview and Sessions). Returns (model, input_t, cached,
+        output), or None when the row is skipped.
+        """
         try:
             info = json.loads(row["token_info"])
         except (TypeError, ValueError):
@@ -3730,7 +3735,13 @@ class QoderIdeParser(BaseParser):
             model = str(model_info.get("model_key") or "") or "auto"
         except (TypeError, ValueError):
             pass
-        input_t = prompt - cached
+        return model, prompt - cached, cached, output
+
+    def _build_entry(self, row: sqlite3.Row) -> Optional[Dict[str, Any]]:
+        buckets = self._row_buckets(row)
+        if buckets is None:
+            return None
+        model, input_t, cached, output = buckets
         return {
             "source": self.source_name,
             "model": model,
@@ -4494,6 +4505,25 @@ class ReasonixParser(BaseParser):
         return out
 
 
+def workbuddy_file_signatures(roots: List[Path]) -> tuple:
+    """Signatures of every WorkBuddy transcript, one level below ``projects/``.
+
+    Shared by ``WorkBuddyParser`` (Overview) and the sessions harness so both
+    sides scan and TTL-cache under one key instead of drifting apart. Not
+    recursive: a deeper transcript must appear in neither Overview nor
+    Sessions.
+    """
+
+    def _scan() -> tuple:
+        sigs: List[Tuple[str, int, int]] = []
+        for root in roots:
+            sigs.extend(_glob_sigs(str(root / "projects" / "*" / "*.jsonl")))
+        return tuple(sorted(set(sigs)))
+
+    cache_key = "workbuddy:" + "|".join(str(r) for r in roots)
+    return _timed_sigs(cache_key, _scan)
+
+
 class WorkBuddyParser(BaseParser):
     """Parse WorkBuddy (Tencent AI assistant) desktop transcripts.
 
@@ -4694,14 +4724,9 @@ class WorkBuddyParser(BaseParser):
         return self._build_entry(usage, ts_ms, call_id)
 
     def _file_signatures(self) -> tuple:
-        def _scan() -> tuple:
-            sigs: List[Tuple[str, int, int]] = []
-            for root in self.roots:
-                sigs.extend(_glob_sigs(str(root / "projects" / "*" / "*.jsonl")))
-            return tuple(sorted(set(sigs)))
-
-        cache_key = "workbuddy:" + "|".join(str(r) for r in self.roots)
-        return _timed_sigs(cache_key, _scan)
+        # The shared scan keeps Overview and the sessions harness reading the
+        # same TTL-cached signature set (see workbuddy_file_signatures).
+        return workbuddy_file_signatures(self.roots)
 
     def _parse_all(self) -> List[Dict[str, Any]]:
         out: List[Dict[str, Any]] = []

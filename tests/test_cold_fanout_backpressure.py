@@ -24,11 +24,28 @@ pytest.importorskip("fastapi")
 import tokdash.api as api
 
 
+def _drain_compute_waiters(timeout: float = 10.0) -> None:
+    """Let a test's queued recompute stop counting as a waiter before the next starts.
+
+    The compute-cap handoff hands the key lock to a `tokdash-cache-refresh` daemon,
+    so a test can now end while one is still parked for a slot — and a parked daemon
+    holds a `_compute_waiters` increment that the counter assertions further down read
+    as a leak. It is released the moment the test frees the slot, so this is normally
+    a single comparison. The bound only stops a wedged daemon from hanging the suite;
+    it asserts nothing, so such a daemon costs 10s of teardown and is caught by the
+    counter assertions in the tests that follow, not by this helper.
+    """
+    deadline = time.monotonic() + timeout
+    while api._compute_waiters and time.monotonic() < deadline:
+        time.sleep(0.01)
+
+
 @pytest.fixture(autouse=True)
 def _reset(monkeypatch):
     monkeypatch.setenv("TOKDASH_WARM_ON_START", "0")
     api._clear_cache()
     yield
+    _drain_compute_waiters()
     api._clear_cache()
 
 
@@ -119,6 +136,85 @@ def test_a_refresh_over_a_cached_value_never_waits_for_a_slot(monkeypatch):
 
     assert value == "cached"
     assert elapsed < 2.0, "a caller holding a value must not wait for a compute slot"
+
+
+def test_a_capped_refresh_returns_at_once_but_leaves_a_recompute_queued(monkeypatch):
+    """The other half of the contract above: not waiting must not mean not working.
+
+    Returning the cached value instantly is right, but the request used to return
+    with NOTHING computing this key and nothing scheduled — the compute cap is the
+    one branch where no other thread is already filling it. Refresh could then be
+    clicked forever and only ever hand back the same body. The instant return stays;
+    a daemon now inherits the key lock and does the waiting the request refuses to do.
+    """
+    monkeypatch.setattr(api, "_compute_semaphore", threading.BoundedSemaphore(1))
+    monkeypatch.setattr(api, "_COMPUTE_WAIT_SECONDS", 30.0)
+    monkeypatch.setattr(api, "_COMPUTE_MAX_WAITERS", 4)
+    api._cache["queued-key"] = (datetime.now().timestamp(), "cached")
+
+    computed = threading.Event()
+
+    def fetch():
+        computed.set()
+        return "fresh"
+
+    assert api._compute_semaphore.acquire(blocking=False)  # hold the only slot
+    try:
+        started = time.monotonic()
+        value = api.get_cached_or_fetch("queued-key", fetch, force_refresh=True)
+        elapsed = time.monotonic() - started
+    finally:
+        api._compute_semaphore.release()
+
+    assert value == "cached"
+    assert elapsed < 2.0, "the queued recompute must not be paid for on the request path"
+    assert computed.wait(timeout=10), "the capped refresh scheduled no recompute"
+
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and api._cache["queued-key"][1] != "fresh":
+        time.sleep(0.01)
+    assert api._cache["queued-key"][1] == "fresh", "the queued recompute never reached the cache"
+
+
+def test_a_queued_refresh_respects_the_waiter_cap_and_frees_the_key_lock(monkeypatch):
+    """With no waiter allowance the daemon must give up at once and hand the lock back.
+
+    _COMPUTE_MAX_WAITERS is `budget - concurrency`, so it is 0 whenever concurrency is
+    raised to the thread budget — a shipped configuration, not a hypothetical. The
+    queued refresh has to survive being refused, because it holds the key's
+    single-flight lock and a leak there wedges the key until the process restarts.
+    """
+    monkeypatch.setattr(api, "_compute_semaphore", threading.BoundedSemaphore(1))
+    monkeypatch.setattr(api, "_COMPUTE_WAIT_SECONDS", 30.0)
+    monkeypatch.setattr(api, "_COMPUTE_MAX_WAITERS", 0)
+    api._cache["capped-key"] = (datetime.now().timestamp(), "cached")
+
+    calls = []
+
+    def fetch():
+        calls.append(1)
+        return "fresh"
+
+    assert api._compute_semaphore.acquire(blocking=False)
+    try:
+        started = time.monotonic()
+        assert api.get_cached_or_fetch("capped-key", fetch, force_refresh=True) == "cached"
+        assert time.monotonic() - started < 2.0
+
+        # Still holding the only slot, so the daemon can only get one by parking —
+        # which the cap forbids. It must refuse instantly and release the key lock.
+        lock = api._key_locks.get("capped-key")
+        assert lock is not None
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and lock.locked():
+            time.sleep(0.01)
+        assert not lock.locked(), "the queued refresh parked past the waiter cap or leaked the key lock"
+        assert not calls, "a refusal must not run the fetch"
+    finally:
+        api._compute_semaphore.release()
+
+    # Lock handed back: the key is computable again rather than wedged as in-flight.
+    assert api.get_cached_or_fetch("capped-key", fetch, force_refresh=True) == "fresh"
 
 
 def test_an_ordinary_stale_read_still_returns_immediately(monkeypatch):

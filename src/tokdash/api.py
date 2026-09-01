@@ -1121,10 +1121,27 @@ def _refresh_stale_in_background(
     fetch_fn,
     lock: threading.Lock,
     epoch: int,
+    *,
+    wait_for_slot: bool = False,
 ) -> None:
+    """Recompute ``key`` off the request path. Owns ``lock`` and always releases it.
+
+    ``wait_for_slot`` picks which failure is worse when the compute cap is full:
+
+    - False (opportunistic stale-while-revalidate): give up instantly. A value was
+      already handed to the caller and the next read schedules another attempt, so
+      parking a thread buys nothing.
+    - True (the compute-cap handoff below): the caller's own non-blocking acquire
+      just failed, and it is returning stale with no compute in flight for this key.
+      Refusing again would leave nothing recomputing it, so repeated Refresh clicks
+      could never make progress. Waiting here costs a daemon thread, not a request
+      worker. ``_acquire_compute_slot`` still enforces ``_COMPUTE_MAX_WAITERS``, so a
+      burst cannot park an unbounded number of them — and where that cap is 0 this
+      degrades back to an instant deferral rather than overrunning the thread budget.
+    """
     acquired_compute = False
     try:
-        acquired_compute = _acquire_compute_slot(wait=False)
+        acquired_compute = _acquire_compute_slot(wait=wait_for_slot)
         if not acquired_compute:
             logger.debug("tokdash stale refresh deferred key=%s reason=compute_cap", key)
             return
@@ -1138,6 +1155,35 @@ def _refresh_stale_in_background(
         if acquired_compute:
             _compute_semaphore.release()
         _release_key_lock(key, lock)
+
+
+def _schedule_stale_refresh(
+    key: str,
+    fetch_fn,
+    lock: threading.Lock,
+    epoch: int,
+    *,
+    wait_for_slot: bool = False,
+) -> bool:
+    """Hand ``lock`` to a daemon that recomputes ``key``.
+
+    Returns True when the daemon owns the key lock from here on, False when the
+    thread never started and the caller still has to release it. Never releases the
+    lock itself: ``_release_key_lock`` raises on an already-unlocked mutex, so a
+    single owner at every moment is what keeps the two exits from colliding.
+    """
+    try:
+        threading.Thread(
+            target=_refresh_stale_in_background,
+            args=(key, fetch_fn, lock, epoch),
+            kwargs={"wait_for_slot": wait_for_slot},
+            name="tokdash-cache-refresh",
+            daemon=True,
+        ).start()
+        return True
+    except Exception:
+        logger.warning("tokdash failed to start stale refresh key=%s", key, exc_info=True)
+        return False
 
 
 def get_cached_or_fetch(
@@ -1181,16 +1227,8 @@ def get_cached_or_fetch(
                 _release_key_lock(key, lock)
                 return result(latest[1], "hit", locked_now - latest[0])
             epoch = _cache_epoch_value()
-            try:
-                threading.Thread(
-                    target=_refresh_stale_in_background,
-                    args=(key, fetch_fn, lock, epoch),
-                    name="tokdash-cache-refresh",
-                    daemon=True,
-                ).start()
-            except Exception:
+            if not _schedule_stale_refresh(key, fetch_fn, lock, epoch):
                 _release_key_lock(key, lock)
-                logger.warning("tokdash failed to start stale refresh key=%s", key, exc_info=True)
         return result(hit[1], "stale", now - hit[0])
 
     lock, acquired = _try_key_lock(key)
@@ -1223,6 +1261,7 @@ def get_cached_or_fetch(
             had_stale=False,
             warn=not _startup_warm,
         )
+    handed_off = False
     try:
         # Re-check under the lock: a prior holder may have just stored a fresh value.
         latest = _cache_get(key)
@@ -1243,6 +1282,22 @@ def get_cached_or_fetch(
         # to prevent.
         if not _acquire_compute_slot(wait=latest is None):
             if latest is not None:
+                # Return the cached value now — a caller holding a value must never
+                # park a request worker for a slot — but hand this key's single-flight
+                # lock to a background recompute first. Returning bare left NOTHING
+                # computing this key and nothing scheduled, so `refresh=1` could be
+                # clicked forever and only ever get the same body back. The daemon does
+                # the waiting the request refuses to do.
+                #
+                # This widens the same_key_inflight window the NOTE above weighs, but
+                # not for anyone: reaching here requires a cached value, and every
+                # concurrent caller for a key that HAS one (plain read or forced
+                # refresh) is served that value off the failed _try_key_lock rather
+                # than refused. Only a cold key 503s there, and a cold key cannot
+                # reach this branch.
+                handed_off = _schedule_stale_refresh(
+                    key, fetch_fn, lock, epoch, wait_for_slot=True
+                )
                 return result(latest[1], "stale", locked_now - latest[0])
             _raise_backpressure(
                 "Too many cold requests; retry shortly",
@@ -1258,7 +1313,8 @@ def get_cached_or_fetch(
         _cache_set_if_epoch(key, fresh, epoch)
         return result(fresh, "recomputed", 0.0)
     finally:
-        _release_key_lock(key, lock)
+        if not handed_off:
+            _release_key_lock(key, lock)
 
 
 def _format_pricing_db(data: Dict[str, Any]) -> str:

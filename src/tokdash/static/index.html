@@ -352,6 +352,8 @@
     }
     .refresh-report[data-status="preserved"] .refresh-report-mark,
     .refresh-report[data-status="partial"] .refresh-report-mark,
+    .refresh-report[data-status="cached"] .refresh-report-mark,
+    .refresh-report[data-status="cachedPreserved"] .refresh-report-mark,
     .refresh-report[data-status="failed"] .refresh-report-mark {
       color: #B45309;
       background: color-mix(in srgb, #D97706 13%, transparent);
@@ -4061,6 +4063,21 @@
       ['by_tool','apps','coding_apps'].forEach(mergeObject);
       ['coding_models','top_models','openclaw_models','combined_models'].forEach(mergeArray);
       out.timestamp = rows.map((row) => row.timestamp).filter(Boolean).sort()[0] || null;
+      // response_cache rides in on the rows[0] deep copy above and is otherwise never
+      // re-derived, so a combined view reported the FIRST server's freshness for
+      // everyone's data — the refresh report could read "complete" off a recomputed
+      // rows[0] while displaying rows[1]'s older cached body. Merge it like every
+      // other field, on the same weakest-link rule out.timestamp just used: cached if
+      // ANY server was served cache, aged by the oldest body in the mix. `status` is
+      // deliberately dropped — it describes one fetch, and nothing reads it here.
+      const cacheMetas = rows.map((row) => row.response_cache).filter(Boolean);
+      if (cacheMetas.length) {
+        const ages = cacheMetas.map((meta) => Number(meta.age_seconds)).filter(Number.isFinite);
+        out.response_cache = {
+          served_from_cache: cacheMetas.some((meta) => !!meta.served_from_cache),
+          age_seconds: ages.length ? Math.max(...ages) : null,
+        };
+      }
       out.comparison = { ...(out.comparison || {}) };
       [['cost','total_cost'],['tokens','total_tokens'],['messages','total_messages']].forEach(([prefix, totalField]) => {
         const prevField = `${prefix}_prev`;
@@ -4328,6 +4345,9 @@
         refreshReportPreserved: 'Refresh complete · previous data kept',
         refreshReportPartial: 'Refresh incomplete',
         refreshReportFailed: 'Refresh failed · previous data kept',
+        refreshReportCached: 'Nothing refreshed · served from cache',
+        refreshReportCachedAge: 'cached data {age} old',
+        refreshReportCachedPreserved: 'Nothing refreshed · served from cache · previous data kept',
         refreshReportTokens: 'Tokens',
         refreshReportCost: 'Cost',
         refreshReportMessages: 'Messages',
@@ -4725,6 +4745,9 @@
         refreshReportPreserved: '刷新完成 · 已保留旧数据',
         refreshReportPartial: '刷新不完整',
         refreshReportFailed: '刷新失败 · 已保留旧数据',
+        refreshReportCached: '未刷新 · 返回的是缓存',
+        refreshReportCachedAge: '缓存数据已有 {age}',
+        refreshReportCachedPreserved: '未刷新 · 返回的是缓存 · 已保留旧数据',
         refreshReportTokens: 'Tokens',
         refreshReportCost: '费用',
         refreshReportMessages: '消息数',
@@ -5123,6 +5146,9 @@
         refreshReportPreserved: 'スキャン完了 · 前回のデータを保持',
         refreshReportPartial: 'スキャン不完全',
         refreshReportFailed: 'スキャン失敗 · 前回のデータを保持',
+        refreshReportCached: 'スキャン未実行 · キャッシュを返しました',
+        refreshReportCachedAge: 'キャッシュは {age} 前のデータ',
+        refreshReportCachedPreserved: 'スキャン未実行 · キャッシュを返しました · 前回のデータを保持',
         refreshReportTokens: 'トークン',
         refreshReportCost: 'コスト',
         refreshReportMessages: 'メッセージ数',
@@ -5521,6 +5547,9 @@
         refreshReportPreserved: '스캔 완료 · 이전 데이터 유지',
         refreshReportPartial: '스캔 불완전',
         refreshReportFailed: '스캔 실패 · 이전 데이터 유지',
+        refreshReportCached: '스캔 안 함 · 캐시를 반환했습니다',
+        refreshReportCachedAge: '캐시 데이터 {age} 경과',
+        refreshReportCachedPreserved: '스캔 안 함 · 캐시를 반환했습니다 · 이전 데이터 유지',
         refreshReportTokens: '토큰',
         refreshReportCost: '비용',
         refreshReportMessages: '메시지',
@@ -5919,6 +5948,9 @@
         refreshReportPreserved: 'Escaneo completo · se conservaron los datos anteriores',
         refreshReportPartial: 'Escaneo incompleto',
         refreshReportFailed: 'Fallo del escaneo · se conservaron los datos anteriores',
+        refreshReportCached: 'Sin escaneo · datos de la caché',
+        refreshReportCachedAge: 'datos en caché de hace {age}',
+        refreshReportCachedPreserved: 'Sin escaneo · datos de la caché · se conservaron los datos anteriores',
         refreshReportTokens: 'Tokens',
         refreshReportCost: 'Coste',
         refreshReportMessages: 'Mensajes',
@@ -6317,6 +6349,9 @@
         refreshReportPreserved: 'Varredura completa · dados anteriores mantidos',
         refreshReportPartial: 'Varredura incompleta',
         refreshReportFailed: 'Varredura falhou · dados anteriores mantidos',
+        refreshReportCached: 'Sem varredura · dados do cache',
+        refreshReportCachedAge: 'dados em cache de {age} atrás',
+        refreshReportCachedPreserved: 'Sem varredura · dados do cache · dados anteriores mantidos',
         refreshReportTokens: 'Tokens',
         refreshReportCost: 'Custo',
         refreshReportMessages: 'Mensagens',
@@ -7357,16 +7392,48 @@
       });
       const retained = Array.isArray(details.retained) ? details.retained : [];
       const unavailable = Array.isArray(details.unavailable) ? details.unavailable : [];
+      // A refresh the server answered out of its response cache did not refresh
+      // anything. The backend already says so (response_cache.served_from_cache, set
+      // for both `hit` and `stale`); reporting `complete` over it is the lie this
+      // panel used to tell while the timestamp beside it said "cached".
+      const cacheMeta = after?.response_cache || null;
+      const servedFromCache = !!cacheMeta?.served_from_cache;
+      // Only a FORCED refresh can be "you asked for work and got none". An automatic
+      // five-minute tick answered from cache is the TTL doing its job, and both `hit`
+      // and `stale` set served_from_cache — so gating on that flag alone reopened this
+      // panel, in amber, on essentially every tick of a healthy dashboard. The panel
+      // opens on ticks too (shouldReportRefresh only needs a previous payload), so the
+      // flag is not enough on its own to tell "refused work" from "cache working".
+      const cachedDespiteRequest = !!details.forced && servedFromCache;
+      // `preserved` cannot simply outrank `cached`: it reads "Refresh complete ·
+      // previous data kept", so it claims completion in its first two words. When a
+      // cached body ALSO retained rows both facts are true and the user needs both,
+      // so they compose into one title instead of one shadowing the other. `partial`
+      // and `failed` already say plainly that nothing completed, so they still win.
       const status = details.failed
         ? 'failed'
         : unavailable.length
           ? 'partial'
           : retained.length
-            ? 'preserved'
-            : 'complete';
+            ? (cachedDespiteRequest ? 'cachedPreserved' : 'preserved')
+            : cachedDespiteRequest
+              ? 'cached'
+              : 'complete';
+      // The age describes the body being reported as cached, so it follows the
+      // VERDICT rather than the flag. Keyed off cachedDespiteRequest it outlived the
+      // ladder into `failed` and `partial`, and the panel appended "cached data 1h 11m
+      // old" to a refresh that had errored — the same class of lie as the bug this all
+      // started with. On the failure path `after` IS the previous payload, so that age
+      // is doubly wrong: nothing was served from cache, and the number is whatever was
+      // recorded at the last good load. `>= 1` still guards the note itself, since a
+      // sub-second age stays reachable on a genuinely cached forced refresh.
+      const rawAge = Number(cacheMeta?.age_seconds);
+      const ageSeconds = (status === 'cached' || status === 'cachedPreserved')
+        && Number.isFinite(rawAge) ? rawAge : null;
       return {
         status,
         baseline,
+        ageSeconds,
         windowKey: details.windowKey || '',
         rangeLabel: details.rangeLabel || '',
         completedAt: details.completedAt || new Date().toISOString(),
@@ -7411,15 +7478,21 @@
         preserved: 'refreshReportPreserved',
         partial: 'refreshReportPartial',
         failed: 'refreshReportFailed',
+        cached: 'refreshReportCached',
+        cachedPreserved: 'refreshReportCachedPreserved',
       };
       document.getElementById('refreshReportTitle').textContent = t(titleKeys[report.status] || 'refreshReportComplete');
       const completed = new Date(report.completedAt);
       const time = Number.isNaN(completed.getTime())
         ? ''
         : completed.toLocaleTimeString(langLocale(), { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-      document.getElementById('refreshReportMeta').textContent = t('refreshReportRange')
+      const meta = t('refreshReportRange')
         .replace('{range}', report.rangeLabel || refreshReportRangeLabel())
         .replace('{time}', time);
+      const ageNote = Number.isFinite(report.ageSeconds) && report.ageSeconds >= 1
+        ? t('refreshReportCachedAge').replace('{age}', formatDuration(report.ageSeconds * 1000))
+        : '';
+      document.getElementById('refreshReportMeta').textContent = ageNote ? `${meta} · ${ageNote}` : meta;
       document.getElementById('refreshReportTokens').textContent = signedRefreshValue(report.tokens, (value) => formatTokenCount(value));
       document.getElementById('refreshReportCost').textContent = signedRefreshValue(report.cost, (value) => formatCurrency(value));
       document.getElementById('refreshReportMessages').textContent = signedRefreshValue(report.messages, (value) => formatNumber(value));
@@ -8865,6 +8938,7 @@
           const scan = lastUsageResponse?._scan_reconciliation || {};
           showUsageRefreshReport(buildUsageRefreshReport(previousUsageForReport, lastUsageResponse, {
             failed: !!usageFetchError,
+            forced: forceRefresh,
             windowKey,
             rangeLabel: reportRangeLabel,
             retained: scan.retained,
@@ -8895,6 +8969,7 @@
           const scan = usageReconciliation || reconcileUsageRows([], windowKey, usageServers);
           showUsageRefreshReport(buildUsageRefreshReport(previousUsageForReport, previousUsageForReport, {
             failed: true,
+            forced: forceRefresh,
             windowKey,
             rangeLabel: reportRangeLabel,
             retained: scan.retained,

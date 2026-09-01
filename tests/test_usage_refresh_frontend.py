@@ -39,6 +39,7 @@ def _run(tmp_path: Path, script: str) -> dict:
             "function reconcileUsageRows(rows, windowKey, servers = selectedServers(), cache = lastUsageRowsByServer) {",
             "function usageToolFingerprint(entry) {",
             "function buildUsageRefreshReport(before, after, details = {}) {",
+            "function combineUsagePayloads(list) {",
         )
     )
     harness = tmp_path / "refresh.js"
@@ -176,3 +177,204 @@ def test_refresh_report_is_accessible_and_the_scan_stays_incremental() -> None:
     assert updater.count("if (shouldReportRefresh) {") == 2
     assert html.count("hideUsageRefreshReport({ focusButton: true, dismissed: true });") == 2
     assert "localStorage" not in reconcile
+
+
+def test_refresh_report_calls_a_cached_response_cached_not_complete(tmp_path: Path) -> None:
+    """The reported bug: `refresh=1` answered from cache still read "Refresh complete".
+
+    The backend flags it on every cached path (`served_from_cache` is true for both
+    `hit` and `stale`), and the timestamp beside the panel already said "cached" —
+    only this report ignored it. It also has to keep `age_seconds`, which shipped in
+    the same object and was thrown away.
+    """
+    out = _run(
+        tmp_path,
+        """
+const before = { total_tokens: 10, total_cost: 1, total_messages: 2, by_tool: {} };
+const cachedAfter = {
+  total_tokens: 10, total_cost: 1, total_messages: 2, by_tool: {},
+  response_cache: { status: 'stale', served_from_cache: true, age_seconds: 4300 },
+};
+const freshAfter = {
+  total_tokens: 12, total_cost: 1, total_messages: 3, by_tool: {},
+  response_cache: { status: 'recomputed', served_from_cache: false, age_seconds: 0 },
+};
+const noMetaAfter = { total_tokens: 12, total_cost: 1, total_messages: 3, by_tool: {} };
+// The Refresh button. `{}` is the timer tick and is pinned by its own test below.
+const forced = (extra = {}) => ({ forced: true, ...extra });
+const oneRetainedRow = [{ server: { id: 'local' }, reason: 'source-errors', sources: ['codex'] }];
+const cached = buildUsageRefreshReport(before, cachedAfter, forced());
+const recomputed = buildUsageRefreshReport(before, freshAfter, forced());
+const noMeta = buildUsageRefreshReport(before, noMetaAfter, forced());
+const failed = buildUsageRefreshReport(before, cachedAfter, forced({ failed: true, error: 'boom' }));
+const retainedCached = buildUsageRefreshReport(before, cachedAfter, forced({ retained: oneRetainedRow }));
+const retainedFresh = buildUsageRefreshReport(before, freshAfter, forced({ retained: oneRetainedRow }));
+const unavailableCached = buildUsageRefreshReport(before, cachedAfter, forced({ unavailable: oneRetainedRow }));
+process.stdout.write(JSON.stringify({
+  cached: [cached.status, cached.ageSeconds],
+  recomputed: [recomputed.status, recomputed.ageSeconds],
+  noMeta: [noMeta.status, noMeta.ageSeconds],
+  failed: [failed.status, failed.ageSeconds],
+  retainedCached: [retainedCached.status, retainedCached.ageSeconds],
+  retainedFresh: retainedFresh.status,
+  unavailableCached: [unavailableCached.status, unavailableCached.ageSeconds],
+}));
+""",
+    )
+
+    assert out == {
+        # A forced refresh handed a 4300-second-old body must say both things.
+        "cached": ["cached", 4300],
+        "recomputed": ["complete", None],
+        # An older server that ships no response_cache stays on the old verdict.
+        "noMeta": ["complete", None],
+        # `preserved` is NOT one of these: it reads "Refresh complete · previous
+        # data kept", so it claims completion. Cached + retained composes instead,
+        # because both facts are true and the user needs both.
+        "retainedCached": ["cachedPreserved", 4300],
+        "retainedFresh": "preserved",
+        # These two say plainly that nothing completed, so they still outrank cached —
+        # and the age must follow the verdict out, or the panel appends "cached data
+        # 1h 11m old" to a refresh that errored and was never served from cache.
+        "failed": ["failed", None],
+        "unavailableCached": ["partial", None],
+    }
+
+
+def test_the_cached_status_is_wired_into_the_panel_and_every_locale() -> None:
+    """A status with no titleKeys entry falls back to 'Refresh complete' — the bug."""
+    html = INDEX_HTML.read_text(encoding="utf-8")
+
+    for status in ("cached", "cachedPreserved"):
+        assert f"{status}: 'refreshReport" in html, f"{status} has no title key"
+        assert f'.refresh-report[data-status="{status}"]' in html, f"{status} has no styling"
+    assert html.count("refreshReportCached:") == 6
+    assert html.count("refreshReportCachedAge:") == 6
+    assert html.count("refreshReportCachedPreserved:") == 6
+    assert "refreshReportCached: 'Nothing refreshed · served from cache'" in html
+    # The composed title must not inherit "Refresh complete" from refreshReportPreserved.
+    assert "refreshReportCachedPreserved: 'Nothing refreshed · served from cache · previous data kept'" in html
+    # The age note must follow the age, not one status name, or the composed status
+    # silently loses it. showUsageRefreshReport is DOM-bound, so this is pinned here.
+    assert "const ageNote = Number.isFinite(report.ageSeconds) && report.ageSeconds >= 1" in html, (
+        "formatDuration renders '—' below half a second, so a sub-second age would "
+        "read 'cached data — old'"
+    )
+    # The verdict is only honest if the builder is told whether work was requested.
+    updater = _extract_js_function(
+        html,
+        "async function updateDashboard(customDays = null, dateFrom = null, dateTo = null, options = {}) {",
+    )
+    assert updater.count("forced: forceRefresh,") == 2, "both report call sites must pass the flag"
+    assert "Refresh complete" not in html.split("refreshReportCachedPreserved:")[1].split("\n")[0]
+
+
+def test_combined_payloads_merge_response_cache_instead_of_inheriting_row_zero(tmp_path: Path) -> None:
+    """Multi-server: the cached verdict must cover every row, not just rows[0].
+
+    combineUsagePayloads deep-copies rows[0] and then re-derives every field that
+    matters — totals summed, timestamp taken from the oldest row. response_cache was
+    not among them, so a recomputed rows[0] beside a cache-served rows[1] reported
+    "complete" while the panel displayed rows[1]'s older timestamp. It merges on the
+    same weakest-link rule the timestamp uses.
+    """
+    out = _run(
+        tmp_path,
+        """
+const fresh = (n, ts) => ({
+  total_tokens: n, total_cost: 0, total_messages: 0, by_tool: {}, timestamp: ts,
+  response_cache: { status: 'recomputed', served_from_cache: false, age_seconds: 0 },
+});
+const stale = (n, ts, age) => ({
+  total_tokens: n, total_cost: 0, total_messages: 0, by_tool: {}, timestamp: ts,
+  response_cache: { status: 'stale', served_from_cache: true, age_seconds: age },
+});
+const bare = (n, ts) => ({ total_tokens: n, total_cost: 0, total_messages: 0, by_tool: {}, timestamp: ts });
+const meta = (payload) => {
+  const cache = payload.response_cache;
+  return cache ? [!!cache.served_from_cache, cache.age_seconds] : null;
+};
+const before = { total_tokens: 0, total_cost: 0, total_messages: 0, by_tool: {} };
+
+// rows[0] recomputed, rows[1] served cache: the old copy inherited rows[0] and lied.
+const mixed = combineUsagePayloads([fresh(5, '2026-09-01T10:00:00Z'), stale(7, '2026-09-01T09:00:00Z', 4300)]);
+// Both cached: the age is the oldest body in the mix, not the first one.
+const bothCached = combineUsagePayloads([stale(5, '2026-09-01T10:00:00Z', 60), stale(7, '2026-09-01T09:00:00Z', 4300)]);
+const bothFresh = combineUsagePayloads([fresh(5, '2026-09-01T10:00:00Z'), fresh(7, '2026-09-01T09:00:00Z')]);
+// An older server sends no response_cache at all; unknown must not read as cached.
+const noMeta = combineUsagePayloads([bare(5, '2026-09-01T10:00:00Z'), bare(7, '2026-09-01T09:00:00Z')]);
+const single = combineUsagePayloads([stale(5, '2026-09-01T10:00:00Z', 4300)]);
+
+process.stdout.write(JSON.stringify({
+  mixed: meta(mixed),
+  mixedTotal: mixed.total_tokens,
+  mixedTimestamp: mixed.timestamp,
+  mixedStatus: buildUsageRefreshReport(before, mixed, { forced: true }).status,
+  bothCached: meta(bothCached),
+  bothFresh: meta(bothFresh),
+  bothFreshStatus: buildUsageRefreshReport(before, bothFresh, { forced: true }).status,
+  noMeta: meta(noMeta),
+  single: meta(single),
+}));
+""",
+    )
+
+    assert out == {
+        # Any server served from cache makes the combined body a cached one.
+        "mixed": [True, 4300],
+        # The rest of the merge is untouched: totals still sum, timestamp still oldest.
+        "mixedTotal": 12,
+        "mixedTimestamp": "2026-09-01T09:00:00Z",
+        "mixedStatus": "cached",
+        "bothCached": [True, 4300],
+        "bothFresh": [False, 0],
+        "bothFreshStatus": "complete",
+        # No row claims a cache, so the combined body claims none either.
+        "noMeta": None,
+        # The single-row fast path returns the row verbatim, cache metadata included.
+        "single": [True, 4300],
+    }
+
+
+def test_an_automatic_refresh_tick_served_from_cache_stays_complete(tmp_path: Path) -> None:
+    """The cached verdict is about refused work, not about the cache being used.
+
+    shouldReportRefresh only needs a previous payload, so the panel reopens on every
+    five-minute tick, and after the first successful load essentially every tick is
+    answered from cache — both `hit` and `stale` set served_from_cache. Deriving the
+    verdict from that flag alone therefore repainted the panel amber, reading "nothing
+    refreshed", while the TTL was simply doing its job. Only a forced refresh can be
+    "you asked for work and got none".
+    """
+    out = _run(
+        tmp_path,
+        """
+const before = { total_tokens: 10, total_cost: 1, total_messages: 2, by_tool: {} };
+const body = (age) => ({
+  total_tokens: 10, total_cost: 1, total_messages: 2, by_tool: {},
+  response_cache: { status: 'hit', served_from_cache: true, age_seconds: age },
+});
+const retainedRow = [{ server: { id: 'local' }, reason: 'source-errors', sources: ['codex'] }];
+const report = (details) => buildUsageRefreshReport(before, body(120), details);
+process.stdout.write(JSON.stringify({
+  // A timer tick: same cached body, no forced flag.
+  tick: [report({}).status, report({}).ageSeconds],
+  tickRetained: report({ retained: retainedRow }).status,
+  // Identical body, but the user pressed Refresh.
+  clicked: [report({ forced: true }).status, report({ forced: true }).ageSeconds],
+  clickedRetained: report({ forced: true, retained: retainedRow }).status,
+  // An explicit false must behave like an absent flag, not like a forced refresh.
+  explicitFalse: report({ forced: false }).status,
+}));
+""",
+    )
+
+    assert out == {
+        # The cache doing its job is not a warning, and carries no age note.
+        "tick": ["complete", None],
+        "tickRetained": "preserved",
+        # The same body the user actually asked to have refreshed is.
+        "clicked": ["cached", 120],
+        "clickedRetained": "cachedPreserved",
+        "explicitFalse": "complete",
+    }

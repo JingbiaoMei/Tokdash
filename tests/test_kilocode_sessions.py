@@ -94,24 +94,6 @@ def _make_db(path: Path, projects=(), sess=(), messages=()) -> Path:
     return path
 
 
-def _append_message(db: Path, mid: str, sid: str, ts: int, data: dict) -> None:
-    conn = sqlite3.connect(str(db))
-    conn.execute(
-        "INSERT INTO message (id, session_id, time_created, time_updated, data) "
-        "VALUES (?,?,?,?,?)",
-        (mid, sid, ts, ts, json.dumps(data)),
-    )
-    conn.commit()
-    conn.close()
-    # A small INSERT can reuse free page space (size unchanged) and land
-    # within the filesystem's mtime tick, leaving the (path, mtime_ns, size)
-    # signature identical to the primed cache entry. Bump the mtime by one ns
-    # so the signature moves deterministically and the bust is exercised for
-    # real, without filesystem luck.
-    st = db.stat()
-    os.utime(db, ns=(st.st_mtime_ns + 1, st.st_mtime_ns + 1))
-
-
 def _advance_mtime(db: Path) -> None:
     """Give *db* a strictly later mtime, as a real second write would have.
 
@@ -128,6 +110,19 @@ def _advance_mtime(db: Path) -> None:
     """
     st = db.stat()
     os.utime(db, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000_000))
+
+
+def _append_message(db: Path, mid: str, sid: str, ts: int, data: dict) -> None:
+    conn = sqlite3.connect(str(db))
+    conn.execute(
+        "INSERT INTO message (id, session_id, time_created, time_updated, data) "
+        "VALUES (?,?,?,?,?)",
+        (mid, sid, ts, ts, json.dumps(data)),
+    )
+    conn.commit()
+    conn.close()
+    # An append alone need not move the signature; see _advance_mtime.
+    _advance_mtime(db)
 
 
 def _proj(pid="p1", worktree="/"):
@@ -431,7 +426,6 @@ def test_cache_invalidates_on_write(monkeypatch, tmp_path):
 
     _append_message(db, "m2", "ses_a", BASE + 1000,
                     _assistant(input=2, output=2, cache={"read": 0, "write": 0}))
-    _advance_mtime(db)  # see _advance_mtime: an append alone need not move the signature
     second = _kilocode_sessions()
     assert len(second["ses_a"]["turns"]) == 2
     assert [t["timestamp_ms"] for t in second["ses_a"]["turns"]] == [BASE, BASE + 1000]

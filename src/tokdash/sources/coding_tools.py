@@ -24,6 +24,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, ClassVar, Dict, Iterator, List, Optional, Tuple
 
+import zstandard
+
 
 try:
     from .. import clientpaths
@@ -92,6 +94,36 @@ def _timed_sigs(cache_key: str, scan_fn) -> tuple:
     result = scan_fn()
     _sig_cache[cache_key] = (now, result)
     return result
+
+
+def _sqlite_db_signature(db_path: Path) -> Optional[Tuple[str, int, int]]:
+    """One signature entry per SQLite DB, folding its sidecars in.
+
+    file_replace sync calls _parse_all() once per signature entry
+    (compute._collect_parser_file), so emitting a separate entry per
+    sidecar (-journal/-wal/-shm) reparses the whole DB two or three times
+    per sync. Keeping the .db path as the only key also keeps the stored
+    sync keys stable as sidecars appear and disappear, while the folded
+    mtime/size still move whenever the client writes. Same shape as
+    AntigravityCLIParser._file_signatures. Returns None when the .db is
+    absent.
+    """
+    try:
+        db_stat = db_path.stat()
+    except (FileNotFoundError, OSError):
+        return None
+    max_mtime = int(db_stat.st_mtime_ns)
+    total_size = int(db_stat.st_size)
+    for suffix in ("-journal", "-wal", "-shm"):
+        sidecar = Path(str(db_path) + suffix)
+        try:
+            sidecar_stat = sidecar.stat()
+        except (FileNotFoundError, OSError):
+            continue
+        max_mtime = max(max_mtime, int(sidecar_stat.st_mtime_ns))
+        if suffix != "-shm":  # -shm is an index, not content
+            total_size += int(sidecar_stat.st_size)
+    return (str(db_path), max_mtime, total_size)
 
 
 def _rglob_sigs(root: Path, pattern: str = "*.jsonl") -> tuple:
@@ -4768,6 +4800,692 @@ def search_dir_claim_key(directory: Any) -> str:
     return key.lower() if os.name == "nt" else key
 
 
+# ---------------------------------------------------------------------------
+# Zed (threads.db)
+# ---------------------------------------------------------------------------
+
+# Ceiling for the Zed decode cache: one entry per (thread id, updated_at)
+# holding the decoded usage fields. The source blob carries the thread's
+# full message history, so the decode (zstd + JSON) is the refresh cost
+# worth avoiding.
+#
+# Eviction is by absence from the current scan (_parse_all), not FIFO:
+# _parse_all walks every thread in table order on every refresh, so a
+# FIFO bound below the thread count evicts exactly the entries the next
+# scan reaches first — measured at 32: 200 decompressions per run on a
+# 200-thread DB, three runs, zero hits. Scan-scoped pruning sizes the
+# live cache to the install's thread set; this bound is only a ceiling
+# for a pathological DB. _OPENCODE_QUERY_CACHE_MAX is not a precedent:
+# it bounds a handful of date-range result sets, not one entry per row.
+_ZED_DECODE_CACHE_MAX = 4096
+
+
+def _zstd_decompress(blob: bytes) -> bytes:
+    # stream_reader, not the one-shot decompress(): that form requires the
+    # content size in the frame header and raises ZstdError on a valid
+    # frame written without it. Same call as dsh_log.py's zstd read;
+    # read_across_frames also covers a multi-frame blob.
+    return zstandard.ZstdDecompressor().stream_reader(
+        blob, read_across_frames=True
+    ).read()
+
+
+def _zed_rfc3339_to_ms(value: Any) -> Optional[int]:
+    """Zed's ``updated_at`` column (RFC3339) to epoch ms.
+
+    chrono's ``to_rfc3339()`` writes an offset (``+00:00``); fractional
+    seconds are normalized to <= 6 digits because pre-3.11
+    ``fromisoformat`` accepts at most microseconds.
+    """
+    s = str(value or "").strip()
+    if not s:
+        return None
+    if s[-1] in ("Z", "z"):
+        s = s[:-1] + "+00:00"
+    m = re.match(
+        r"^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})(\.\d{1,9})?"
+        r"(Z|[+-]\d{2}:?\d{2})$",
+        s,
+    )
+    if not m:
+        return None
+    date, clock, frac, offset = m.groups()
+    if frac:
+        clock += "." + (frac[1:] + "000000")[:6]
+    if len(offset) == 5:  # +0000 -> +00:00
+        offset = offset[:3] + ":" + offset[3:]
+    try:
+        ts = datetime.fromisoformat(f"{date}T{clock}{offset}")
+    except ValueError:
+        return None
+    return int(ts.timestamp() * 1000)
+
+
+class ZedParser(BaseParser):
+    """
+    Parser for Zed agent-thread token usage.
+
+    =======================================================================
+    ZED — threads.db, ONE ROW PER THREAD, SNAPSHOT SEMANTICS
+    =======================================================================
+    Storage: clientpaths.zed_threads_db() — <zed data dir>/threads/
+    threads.db (per-OS data dir from paths.rs; no env-var override, only
+    the --user-data-dir launch flag, which Tokdash does not mirror — a
+    documented blind spot).
+
+    Each row is a thread: data_type ("zstd" current, "json" legacy) plus
+    a BLOB that is a flat JSON object of the thread struct with a
+    top-level "version" (0.3.0 current; 0.2.0/0.1.0 legacy shapes carry
+    the same cumulative_token_usage + model fields; versionless
+    pre-token rows carry neither). TokenUsage is cache-exclusive —
+    input_tokens excludes the cache_read/cache_creation portions — so
+    the mapping is a pass-through (no subtraction). Zero-valued fields
+    are omitted in serialization (serde skip_serializing_if), so every
+    read defaults to 0.
+
+    cumulative_token_usage is the thread's persisted running total,
+    accumulated with a per-field high-water mark (streaming snapshots
+    add only the delta) and fed by the thread's own completion/
+    compaction streams only: subagent threads are separate rows whose
+    usage is NOT folded into the parent, so counting every non-zero row
+    is complete and double-count-free (no parent_id filter).
+    request_token_usage is a secondary per-message source that
+    mark_token_limit_exceeded can synthesize; Phase 1 reads only the
+    cumulative total.
+
+    Timestamp: the updated_at column (RFC3339). Bucketing and the row
+    timestamp use the same column.
+
+    Cost: Zed persists no cost; pricing DB only (Kilo/Cline/omp policy).
+    =======================================================================
+    """
+
+    source_name = "zed"
+    sync_capability = SourceSyncCapability(
+        mode="file_replace",
+        reason=(
+            "threads.db is one sync unit; each sync replaces the source's "
+            "rows with the current snapshot (a thread's aggregate grows "
+            "as it is used)."
+        ),
+    )
+    # 1: one entry per non-zero thread, cache-exclusive TokenUsage mapped
+    #    pass-through, row timestamp and bucketing from updated_at,
+    #    pricing-DB cost only.
+    persistent_parser_version = 1
+
+    # (thread id, updated_at) -> (input, cacheRead, cacheWrite, output,
+    # provider, model, has_usage).
+    #
+    # ClassVar, not parser-instance state: CodingToolsUsageTracker() is
+    # constructed fresh at every entry point (compute.py:358, 682, 722;
+    # cli.py:326) with no memoization, so an instance cache would be
+    # rebuilt empty on every refresh and the decode work done in full
+    # regardless of updated_at. It follows the existing _query_cache
+    # ClassVar pairs (coding_tools.py:547-548); a future subclass must
+    # redeclare it — the K1 caveat at 700-703 applies (an inherited dict
+    # is silently shared across classes). It must NOT be cleared on
+    # file-signature change: the other parsers' query caches clear
+    # wholesale on signature change (coding_tools.py:645-647, 3255-3257),
+    # but the signature changes on every Zed save — the only time this
+    # parser re-runs — so signature-coupled clearing would empty the
+    # cache exactly when it is needed. Per-row invalidation via
+    # updated_at is the entire mechanism, and _parse_all additionally
+    # prunes every key the current scan did not reach, which drops
+    # deleted and re-saved threads and keeps the cache sized to the live
+    # thread set (see _ZED_DECODE_CACHE_MAX). Correctness never depends
+    # on the cache (re-decoding is always the fallback).
+    _decode_cache: ClassVar[Dict[tuple, Tuple[int, int, int, int, str, str, bool]]] = {}
+
+    def __init__(self, pricing_db: PricingDatabase):
+        super().__init__(pricing_db)
+        self.db_path = clientpaths.zed_threads_db()
+
+    def _file_signatures(self) -> tuple:
+        def scan() -> tuple:
+            if self.db_path is None:
+                return ()
+            # ONE entry for the DB, sidecar mtime/size folded in
+            # (_sqlite_db_signature): a per-sidecar entry would make
+            # file_replace sync parse the whole DB once per sidecar.
+            # sqlez uses the default rollback journal (db.rs/
+            # thread_store.rs); the WAL sidecars are covered anyway.
+            sig = _sqlite_db_signature(self.db_path)
+            return () if sig is None else (sig,)
+
+        return _timed_sigs(f"zed:{self.db_path}", scan)
+
+    def _decode_row(
+        self, row_id: str, updated_at: str, data_type: str, blob: bytes
+    ) -> Tuple[int, int, int, int, str, str, bool]:
+        """Decode (input, cacheRead, cacheWrite, output, provider, model,
+        has_usage) from one thread BLOB, via the ClassVar cache.
+
+        The zstd decompression happens HERE, after the cache lookup: the
+        cache exists to skip the decode of the full message-history blob,
+        so a lookup that ran the decompressor first would defeat it."""
+        key = (row_id, updated_at)
+        hit = self._decode_cache.get(key)
+        if hit is not None:
+            return hit
+        if data_type == "zstd":
+            try:
+                blob = _zstd_decompress(blob)
+            except Exception:
+                blob = None
+        if blob is None:
+            doc = None
+        else:
+            try:
+                doc = json.loads(blob.decode("utf-8"))
+                if not isinstance(doc, dict):
+                    doc = None
+            except (UnicodeDecodeError, ValueError):
+                doc = None
+        if doc is None:
+            decoded = (0, 0, 0, 0, "unknown", "unknown", False)
+        else:
+            usage = doc.get("cumulative_token_usage")
+            if isinstance(usage, dict):
+                input_t = self._i(usage.get("input_tokens"))
+                cache_r = self._i(usage.get("cache_read_input_tokens"))
+                cache_w = self._i(usage.get("cache_creation_input_tokens"))
+                output_t = self._i(usage.get("output_tokens"))
+            else:
+                # Versionless pre-token shape (or future shape change):
+                # nothing to count.
+                input_t = cache_r = cache_w = output_t = 0
+            model_obj = doc.get("model")
+            if isinstance(model_obj, dict):
+                provider = str(model_obj.get("provider") or "unknown")
+                model = str(model_obj.get("model") or "unknown")
+            else:
+                provider, model = "unknown", "unknown"
+            decoded = (
+                input_t, cache_r, cache_w, output_t, provider, model,
+                bool(input_t or cache_r or cache_w or output_t),
+            )
+        if doc is None:
+            # Never cache a failed decode: a transient read or decompress
+            # error would pin the thread at zero tokens until Zed next
+            # saves it under a new updated_at.
+            return decoded
+        if len(self._decode_cache) >= _ZED_DECODE_CACHE_MAX:
+            # Ceiling only; the real eviction is the scan-scoped prune in
+            # _parse_all.
+            self._decode_cache.pop(next(iter(self._decode_cache)))
+        self._decode_cache[key] = decoded
+        return decoded
+
+    def _parse_all(self) -> List[Dict[str, Any]]:
+        # Driven off _file_signatures() so an injected single-file scope
+        # (compute._collect_parser_file) is honoured rather than silently
+        # re-reading self.db_path.
+        sigs = self._file_signatures()
+        if not sigs:
+            return []
+        db_path = Path(sigs[0][0])
+        try:
+            conn = connect_sqlite_readonly(db_path)
+        except sqlite3.Error:
+            return []
+        try:
+            out: List[Dict[str, Any]] = []
+            scanned: set = set()
+            # id, summary, updated_at, created_at, data_type, data
+            for row in conn.execute(
+                "SELECT id, summary, updated_at, created_at, data_type, data "
+                "FROM threads"
+            ):
+                row_id = str(row[0] or "")
+                if not row_id:
+                    continue
+                updated_at = str(row[2] or "")
+                ts_ms = _zed_rfc3339_to_ms(updated_at)
+                if ts_ms is None:
+                    continue
+                blob = row[5]
+                if not isinstance(blob, (bytes, bytearray)):
+                    continue
+                data_type = row[4]
+                if data_type not in ("zstd", "json"):
+                    continue
+                scanned.add((row_id, updated_at))
+                (
+                    input_t, cache_r, cache_w, output_t,
+                    provider, model, has_usage,
+                ) = self._decode_row(row_id, updated_at, data_type, bytes(blob))
+                if not has_usage:
+                    continue
+                out.append({
+                    "source": self.source_name,
+                    "model": model,
+                    "provider": provider,
+                    "input": input_t,
+                    "output": output_t,
+                    "cacheRead": cache_r,
+                    "cacheWrite": cache_w,
+                    "reasoning": 0,
+                    "cost": self.pricing_db.get_cost(model, input_t, output_t, cache_r, cache_w),
+                    "timestamp": ts_ms,
+                    "entry_id": f"zed:{row_id}",
+                    "_billing": usage_billing_pricing(
+                        [model],
+                        input_tokens=input_t,
+                        output_tokens=output_t,
+                        cache_read=cache_r,
+                        cache_write=cache_w,
+                    ),
+                })
+            # Evict on absence from this scan (see _ZED_DECODE_CACHE_MAX):
+            # every live thread was just visited, so anything left over is
+            # a deleted thread or a superseded updated_at.
+            for key in [k for k in self._decode_cache if k not in scanned]:
+                self._decode_cache.pop(key, None)
+            return out
+        finally:
+            conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Qwen Code (append-only session JSONL)
+# ---------------------------------------------------------------------------
+
+
+def qwen_chat_file_signatures(base: Path) -> tuple:
+    """(path, mtime_ns, size) of every Qwen Code session JSONL file."""
+    sigs: List[Tuple[str, int, int]] = []
+    for path in clientpaths.qwen_chat_files(base):
+        try:
+            s = path.stat()
+            sigs.append((str(path), s.st_mtime_ns, s.st_size))
+        except OSError:
+            continue
+    return tuple(sorted(sigs))
+
+
+class QwenCodeParser(BaseParser):
+    """
+    Parser for Qwen Code session JSONL.
+
+    =======================================================================
+    QWEN CODE — APPEND-ONLY RECORD FILES, SOURCE-GLOBAL UUID DEDUP
+    =======================================================================
+    Storage: clientpaths.qwen_runtime_base() — $QWEN_RUNTIME_DIR >
+    $QWEN_HOME > ~/.qwen — with session files at
+    <base>/projects/<id>/chats/<session>.jsonl (plus the pre-rename
+    legacy <base>/tmp/<id>/chats/ layout). The source never rewrites a
+    file; records are appended.
+
+    Records (ChatRecord): uuid, parentUuid, sessionId, timestamp (ISO
+    8601), type (user|assistant|tool_result|system), model?, and
+    usageMetadata? — the provider's GenerateContentResponseUsageMetadata
+    written verbatim on assistant turns — plus subagent markers
+    (isSidechain/agentId, same file) and fork lineage (forkedFrom).
+
+    Token semantics: Gemini cache-inclusive prompt — promptTokenCount
+    already contains cachedContentTokenCount, so the parser splits them
+    into disjoint buckets (same as GeminiCLIParser).
+    thoughtsTokenCount maps to reasoning.
+
+    Dedup key (fork): /branch copies every record of a session —
+    keeping the same uuids — into the new session's file, so a
+    session-scoped key would count forked history twice. The uuid is a
+    source-global key ("qwen:<uuid>"), and the parser declares
+    cross_file_stable_keys so the store's earliest-timestamp ownership
+    (and reparse-survivor promotion) applies — the same machinery as
+    Cline forks; the first source combining it with append_jsonl.
+
+    Subagents: background-subagent records (isSidechain) live in the
+    same session JSONL with their own uuids, so a per-file assistant
+    scan counts them automatically; there are no separate
+    agent_*.jsonl siblings.
+
+    Cost: no cost field is persisted anywhere in the records — pricing
+    DB only.
+    =======================================================================
+    """
+
+    source_name = "qwen_code"
+    sync_capability = SourceSyncCapability(
+        mode="file_replace",
+        append_jsonl=True,
+        cross_file_stable_keys=True,
+        reason=(
+            "Append-only session JSONL with stable record uuids; /branch "
+            "copies a session's records (same uuids) into a new file, so "
+            "ownership must follow the earliest occurrence across files."
+        ),
+    )
+    # 1: assistant records with dict usageMetadata, Gemini cache-inclusive
+    #    prompt split, source-global "qwen:<uuid>" key, pricing-DB cost
+    #    only.
+    persistent_parser_version = 1
+
+    def __init__(self, pricing_db: PricingDatabase):
+        super().__init__(pricing_db)
+        self.base = clientpaths.qwen_runtime_base()
+
+    def _file_signatures(self) -> tuple:
+        return _timed_sigs(
+            f"qwen_code:{self.base}",
+            lambda: qwen_chat_file_signatures(self.base),
+        )
+
+    @staticmethod
+    def _is_int(v: Any) -> bool:
+        return isinstance(v, int) and not isinstance(v, bool)
+
+    def _build_entry(self, model: str, usage: Dict[str, Any], ts_ms: int) -> Dict[str, Any]:
+        raw_prompt = self._i(usage.get("promptTokenCount"))
+        cache_r = self._i(usage.get("cachedContentTokenCount"))
+        output_t = self._i(usage.get("candidatesTokenCount"))
+        reasoning = self._i(usage.get("thoughtsTokenCount"))
+        # Qwen Code persists the provider's usageMetadata verbatim, and
+        # promptTokenCount is cache-inclusive (Gemini semantics): the
+        # cached share is a subset of the prompt, so subtract it into
+        # its own bucket (same split as GeminiCLIParser).
+        input_t = max(0, raw_prompt - cache_r)
+        # Records carry no provider at all, so it stays empty either way
+        # (same as WorkBuddy); only the model id falls back to "unknown".
+        provider = ""
+        if not model:
+            model = "unknown"
+        return {
+            "source": self.source_name,
+            "model": model,
+            "provider": provider,
+            "input": input_t,
+            "output": output_t,
+            "cacheRead": cache_r,
+            "cacheWrite": 0,
+            "reasoning": reasoning,
+            "cost": self.pricing_db.get_cost(model, input_t, output_t, cache_r, 0),
+            "timestamp": ts_ms,
+            "_billing": usage_billing_pricing(
+                [model],
+                input_tokens=input_t,
+                output_tokens=output_t,
+                cache_read=cache_r,
+                cache_write=0,
+            ),
+        }
+
+    def _parse_file(self, path_str: str) -> List[Dict[str, Any]]:
+        out: List[Dict[str, Any]] = []
+        try:
+            handle = open(path_str, "r", encoding="utf-8")
+        except OSError:
+            return out
+        with handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(rec, dict) or rec.get("type") != "assistant":
+                    continue
+                usage = rec.get("usageMetadata")
+                if not isinstance(usage, dict):
+                    continue
+                # Both counts must be real integers; missing/invalid
+                # counts skip the record (spec).
+                if not self._is_int(usage.get("promptTokenCount")):
+                    continue
+                if not self._is_int(usage.get("candidatesTokenCount")):
+                    continue
+                ts_str = rec.get("timestamp")
+                if not isinstance(ts_str, str) or not ts_str:
+                    continue
+                try:
+                    ts = datetime.fromisoformat(
+                        ts_str.replace("Z", "+00:00")
+                    ).astimezone(timezone.utc)
+                except ValueError:
+                    continue
+                model = rec.get("model")
+                model = str(model).strip() if model is not None else ""
+                entry = self._build_entry(model, usage, int(ts.timestamp() * 1000))
+                if (
+                    entry["input"] == 0 and entry["output"] == 0
+                    and entry["cacheRead"] == 0 and entry["reasoning"] == 0
+                ):
+                    continue
+                uuid = rec.get("uuid")
+                entry["entry_id"] = (
+                    f"qwen:{uuid}" if isinstance(uuid, (str, int)) and str(uuid).strip()
+                    else ""
+                )
+                out.append(entry)
+        return out
+
+    def _parse_all(self) -> List[Dict[str, Any]]:
+        # The store's stable-key upsert keeps the earliest-timestamped
+        # copy of a uuid that /branch copied into a second file; do the
+        # same here so live and persistent totals agree even when a fork
+        # restamps a copy.
+        by_id: Dict[str, Dict[str, Any]] = {}
+        anonymous: List[Dict[str, Any]] = []
+        for path_str, _, _ in self._file_signatures():
+            for entry in self._parse_file(path_str):
+                entry_id = entry["entry_id"]
+                if not entry_id:
+                    anonymous.append(entry)
+                    continue
+                prev = by_id.get(entry_id)
+                if prev is None or entry["timestamp"] < prev["timestamp"]:
+                    by_id[entry_id] = entry
+        return list(by_id.values()) + anonymous
+
+
+# ---------------------------------------------------------------------------
+# Crush (per-project crush.db)
+# ---------------------------------------------------------------------------
+
+
+def _crush_ts_to_ms(value: Any) -> Optional[int]:
+    """Crush stamps ``strftime('%s','now')`` — seconds (the schema's
+    "milliseconds" comment is stale). Scale guard: a value below 1e12
+    is seconds (x1000); otherwise it is already ms."""
+    try:
+        v = int(value)
+    except (TypeError, ValueError):
+        return None
+    if v <= 0:
+        return None
+    if v < 1_000_000_000_000:
+        return v * 1000
+    return v
+
+
+class CrushParser(BaseParser):
+    """
+    Parser for Charm Crush (crush) session usage.
+
+    =======================================================================
+    CRUSH — PER-PROJECT crush.db, SESSION AGGREGATES
+    =======================================================================
+    Storage: clientpaths.crush_data_dirs() — $CRUSH_DATA_DIR, a
+    comma-separated list of data dirs, each containing crush.db. Crush
+    writes crush.db inside each project's data dir (default: .crush
+    relative to the working directory) — there is no global root to
+    scan, so Tokdash reads only the listed dirs.
+
+    Read path: the DB is WAL-mode (connect.go sets journal_mode WAL),
+    and a bare read-only connect to a live WAL DB is not enough (rows
+    sit in the WAL), so each DB is read through the shared WAL snapshot
+    helper (zcode_snapshot — first used by ZCodeParser: db + -wal are
+    copied to a temp dir and re-opened).
+
+    Shape: messages carry model/provider but no tokens, so the session
+    counters are the only usage in the DB. One entry per session with
+    non-zero tokens, sub-agent sessions included. NOT top-level only:
+    Crush's own stats queries filter on parent_session_id IS NULL
+    because they count sessions, and cost is the only thing Crush ever
+    folds into a parent — coordinator.updateParentSessionCost is
+    `parentSession.Cost += childSession.Cost` and touches no token
+    field (verified in v0.91.2, the build behind the fixtures) — so a
+    top-level-only filter drops every sub-agent's tokens outright. Each
+    entry is attributed to its own session's last assistant message
+    (role='assistant' AND is_summary_message=0, latest by created_at);
+    mixed-model sessions price at the last model. sessions.cost is
+    ignored — pricing DB only.
+
+    The counters are a LAST-STEP snapshot, not a running total.
+    sessions.sql has TWO writers with opposite semantics, and the
+    accumulating one is not the agent's: UpdateSessionTitleAndUsage
+    (`prompt_tokens = prompt_tokens + ?`) is used only by GenerateTitle,
+    while the run loop assigns — agent.updateSessionTokenCounters is
+    `session.CompletionTokens = usage.OutputTokens` /
+    `session.PromptTokens = usage.InputTokens + usage.CacheReadTokens`
+    with no `+=` — and saves through UpdateSession (`prompt_tokens = ?`,
+    absolute), so every step overwrites the one before. The usage it
+    assigns is one step's: OnStepFinish passes fallbackStepUsage(...,
+    stepResult), which returns stepResult.Usage, and fantasy builds its
+    TotalUsage by SUMMING that field across steps — a field the SDK
+    accumulates cannot itself be cumulative. Note session.Cost += cost
+    sits directly above the token assignment: cost accumulates, tokens
+    do not, which is also why only cost folds into a parent.
+
+    So the DB holds the final request's context size and the final
+    turn's output; earlier steps are lost, and a Summarize run
+    overwrites both with the summarizer's usage. Nothing in crush.db
+    recovers the real totals (messages persist no usage), so Crush reads
+    low on multi-step sessions. Verified against crush v0.91.2 and
+    charm.land/fantasy v0.41.3 (the installed build and its pinned
+    dependency); files and line anchors in
+    docs/local/20260831_crush_support/evidence/. The live capture is
+    consistent with this but cannot prove it alone (15343/167 over 3
+    steps fits either reading) — open item: a multi-turn run with
+    provider-side totals before treating Crush numbers as billing-grade.
+
+    Caveats (documented in SUPPORTED_CLIENTS.md): the last-step
+    undercount above; tokens can be character-count estimates when the
+    provider reports zero (no DB flag); the cache/reasoning split is not
+    persisted (zero by construction); a session's total lands on its
+    updated_at day ("last touched", not "last used").
+    =======================================================================
+    """
+
+    source_name = "crush"
+    sync_capability = SourceSyncCapability(
+        mode="file_replace",
+        reason=(
+            "One WAL-mode crush.db per data dir; a session row is a mutable "
+            "snapshot that Crush rewrites in place, so each sync replaces the "
+            "source's rows with the current values."
+        ),
+    )
+    # 1: one entry per session with non-zero tokens (sub-agents included),
+    #    model from the last assistant message, seconds timestamps,
+    #    pricing-DB cost only (sessions.cost ignored).
+    persistent_parser_version = 1
+
+    def __init__(self, pricing_db: PricingDatabase):
+        super().__init__(pricing_db)
+        self.data_dirs = clientpaths.crush_data_dirs()
+
+    def _db_paths(self) -> List[Path]:
+        return [d / "crush.db" for d in self.data_dirs]
+
+    def _file_signatures(self) -> tuple:
+        def scan() -> tuple:
+            out: List[Tuple[str, int, int]] = []
+            for db in self._db_paths():
+                # ONE entry per project DB, WAL sidecars folded in
+                # (_sqlite_db_signature). A per-sidecar entry would make
+                # file_replace sync snapshot and reparse each DB two or
+                # three times per sync.
+                sig = _sqlite_db_signature(db)
+                if sig is not None:
+                    out.append(sig)
+            return tuple(out)
+
+        return _timed_sigs(
+            "crush:" + ",".join(str(d) for d in self.data_dirs), scan
+        )
+
+    def _parse_db(self, conn: sqlite3.Connection) -> List[Dict[str, Any]]:
+        conn.row_factory = sqlite3.Row
+        # is_summary_message was added by migration 20250810000000 and is
+        # not in initial.sql, but Crush runs goose.Up on every open
+        # (connect.go), so any DB a post-2025-08-10 build has opened
+        # already has the column backfilled. The PRAGMA check is cheap
+        # insurance for a pre-migration file only.
+        cols = {str(r[1]) for r in conn.execute("PRAGMA table_info(messages)").fetchall()}
+        summary_filter = " AND is_summary_message = 0" if "is_summary_message" in cols else ""
+        last_model: Dict[str, Tuple[Optional[str], Optional[str]]] = {}
+        for row in conn.execute(
+            "SELECT session_id, model, provider, created_at FROM messages "
+            f"WHERE role = 'assistant'{summary_filter} "
+            "ORDER BY session_id, created_at DESC"
+        ):
+            sid = str(row["session_id"] or "")
+            if sid and sid not in last_model:
+                last_model[sid] = (row["model"], row["provider"])
+        out: List[Dict[str, Any]] = []
+        for row in conn.execute(
+            "SELECT id, prompt_tokens, completion_tokens, updated_at FROM sessions "
+            "WHERE (prompt_tokens + completion_tokens) > 0"
+        ):
+            sid = str(row["id"] or "")
+            if not sid:
+                continue
+            ts_ms = _crush_ts_to_ms(row["updated_at"])
+            if ts_ms is None:
+                continue
+            model, provider = last_model.get(sid, (None, None))
+            model = str(model).strip() if model is not None else ""
+            provider = str(provider).strip() if provider is not None else ""
+            if not model:
+                model, provider = "unknown", "unknown"
+            input_t = self._i(row["prompt_tokens"])
+            output_t = self._i(row["completion_tokens"])
+            out.append({
+                "source": self.source_name,
+                "model": model,
+                "provider": provider,
+                "input": input_t,
+                "output": output_t,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "reasoning": 0,
+                "cost": self.pricing_db.get_cost(model, input_t, output_t, 0, 0),
+                "timestamp": ts_ms,
+                "entry_id": f"crush:{sid}",
+                "_billing": usage_billing_pricing(
+                    [model],
+                    input_tokens=input_t,
+                    output_tokens=output_t,
+                    cache_read=0,
+                    cache_write=0,
+                ),
+            })
+        return out
+
+    def _parse_all(self) -> List[Dict[str, Any]]:
+        out: List[Dict[str, Any]] = []
+        # Driven off _file_signatures() so file_replace sync's injected
+        # single-file scope reparses one project DB, not all of them.
+        for path_str, _, _ in self._file_signatures():
+            db = Path(path_str)
+            try:
+                # Shared WAL-snapshot helper (first user: ZCodeParser);
+                # see its docstring for the coherence semantics.
+                with zcode_snapshot(db) as snap:
+                    out.extend(self._parse_db(snap.conn))
+            except (ZCodeSnapshotError, sqlite3.Error, OSError):
+                # A locked or corrupt per-project DB must not blank the
+                # others; the signatures move with Crush's next write, so
+                # the next collect retries.
+                logger.warning("crush db %s unreadable; skipped", db, exc_info=True)
+                continue
+        return out
+
+
 class CodingToolsUsageTracker:
     """Registry-driven tracker for coding clients."""
 
@@ -4801,6 +5519,9 @@ class CodingToolsUsageTracker:
             "workbuddy": WorkBuddyParser(self.pricing_db),
             "qoder": QoderIdeParser(self.pricing_db),
             "qoder_cli": QoderCliParser(self.pricing_db),
+            "zed": ZedParser(self.pricing_db),
+            "qwen_code": QwenCodeParser(self.pricing_db),
+            "crush": CrushParser(self.pricing_db),
         }
         # Two parsers must never scan the same directory: the usage store
         # dedups on (source, entry_key) and never across sources, so an

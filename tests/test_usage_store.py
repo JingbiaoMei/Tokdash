@@ -573,6 +573,142 @@ def test_usage_store_cline_rewrite_promotes_duplicate_from_unchanged_file(tmp_pa
     ]
 
 
+def _qwen_entry(timestamp: int, entry_id: str, input_tokens: int) -> dict:
+    return {
+        "source": "qwen_code",
+        "model": "qwen-test-model",
+        "provider": "",
+        "timestamp": timestamp,
+        "input": input_tokens,
+        "output": 1,
+        "entry_id": entry_id,
+    }
+
+
+def test_usage_store_qwen_fork_duplicate_key_preserves_earliest_and_promotes_survivor(tmp_path):
+    """Qwen Code's /branch copies a session's records (same uuids) into the
+    fork's JSONL. The earliest occurrence must stay canonical; if the
+    canonical file is removed, a surviving copy is promoted instead of the
+    usage being lost."""
+    store = UsageEntryStore(tmp_path / "usage.sqlite3")
+    parent_path = str(tmp_path / "s1.jsonl")
+    fork_path = str(tmp_path / "s2.jsonl")
+    calls: list[str] = []
+
+    def parse_file(file_sig):
+        path = file_sig[0]
+        calls.append(path)
+        if path == parent_path:
+            # The parent owns the shared records canonically.
+            return [
+                _qwen_entry(1_700_000_000_000, "qwen:rec_shared_1", 10),
+                _qwen_entry(1_700_000_001_000, "qwen:rec_shared_2", 20),
+            ]
+        # The fork restamps the copies and adds one fork-only record.
+        return [
+            _qwen_entry(1_700_000_100_000, "qwen:rec_shared_1", 10),
+            _qwen_entry(1_700_000_101_000, "qwen:rec_shared_2", 20),
+            _qwen_entry(1_700_000_200_000, "qwen:rec_fork_only", 30),
+        ]
+
+    # The parent lands first; the fork appears in a later sync.
+    assert store.sync_files(
+        "qwen_code", ((parent_path, 1, 100),), parser={"v": 1},
+        parse_file_entries=parse_file, cross_file_stable_keys=True,
+    ) is True
+    rows = store.query_entries(sources=["qwen_code"])
+    assert [(row["entry_id"], row["timestamp"]) for row in rows] == [
+        ("qwen:rec_shared_1", 1_700_000_000_000),
+        ("qwen:rec_shared_2", 1_700_000_001_000),
+    ]
+
+    calls.clear()
+    files = ((parent_path, 1, 100), (fork_path, 1, 100))
+    assert store.sync_files(
+        "qwen_code", files, parser={"v": 1},
+        parse_file_entries=parse_file, cross_file_stable_keys=True,
+    ) is True
+    assert calls == [fork_path]
+    rows = store.query_entries(sources=["qwen_code"])
+    assert [(row["entry_id"], row["timestamp"]) for row in rows] == [
+        ("qwen:rec_shared_1", 1_700_000_000_000),
+        ("qwen:rec_shared_2", 1_700_000_001_000),
+        ("qwen:rec_fork_only", 1_700_000_200_000),
+    ]
+
+    # The user deletes the parent session (the canonical owner). The fork's
+    # copies must be promoted, not deleted with the file.
+    calls.clear()
+    remaining = ((fork_path, 1, 100),)
+    assert store.sync_files(
+        "qwen_code", remaining, parser={"v": 1}, parse_file_entries=parse_file,
+        durable=False, cross_file_stable_keys=True,
+    ) is True
+    assert calls == [fork_path]
+    rows = store.query_entries(sources=["qwen_code"])
+    assert [(row["entry_id"], row["timestamp"]) for row in rows] == [
+        ("qwen:rec_shared_1", 1_700_000_100_000),
+        ("qwen:rec_shared_2", 1_700_000_101_000),
+        ("qwen:rec_fork_only", 1_700_000_200_000),
+    ]
+
+
+def test_usage_store_qwen_owner_append_keeps_canonical_rows(tmp_path):
+    """When the canonical owner file grows and is fully reparsed, the
+    earliest-timestamped canonical rows must survive and the fork's
+    restamped copies must not take ownership."""
+    store = UsageEntryStore(tmp_path / "usage.sqlite3")
+    parent_path = str(tmp_path / "s1.jsonl")
+    fork_path = str(tmp_path / "s2.jsonl")
+    parent_grew = False
+    calls: list[str] = []
+
+    def parse_file(file_sig):
+        path = file_sig[0]
+        calls.append(path)
+        if path == parent_path:
+            rows = [
+                _qwen_entry(1_700_000_000_000, "qwen:rec_shared_1", 10),
+                _qwen_entry(1_700_000_001_000, "qwen:rec_shared_2", 20),
+            ]
+            if parent_grew:
+                rows.append(_qwen_entry(1_700_000_300_000, "qwen:rec_appended", 40))
+            return rows
+        return [
+            _qwen_entry(1_700_000_100_000, "qwen:rec_shared_1", 10),
+            _qwen_entry(1_700_000_101_000, "qwen:rec_shared_2", 20),
+        ]
+
+    files = ((parent_path, 1, 100), (fork_path, 1, 100))
+    assert store.sync_files(
+        "qwen_code", files, parser={"v": 1},
+        parse_file_entries=parse_file, cross_file_stable_keys=True,
+    ) is True
+    rows = store.query_entries(sources=["qwen_code"])
+    assert [(row["entry_id"], row["timestamp"]) for row in rows] == [
+        ("qwen:rec_shared_1", 1_700_000_000_000),
+        ("qwen:rec_shared_2", 1_700_000_001_000),
+    ]
+
+    # The parent appends a record (full reparse: no tail parser declared).
+    # It still owns every key it emitted, so the fork is not reparsed and
+    # the canonical rows keep their earliest timestamps.
+    calls.clear()
+    parent_grew = True
+    changed = ((parent_path, 2, 160), (fork_path, 1, 100))
+    assert store.sync_files(
+        "qwen_code", changed, parser={"v": 1},
+        parse_file_entries=parse_file, cross_file_stable_keys=True,
+    ) is True
+    assert calls == [parent_path]
+    rows = store.query_entries(sources=["qwen_code"])
+    assert [(row["entry_id"], row["timestamp"]) for row in rows] == [
+        ("qwen:rec_shared_1", 1_700_000_000_000),
+        ("qwen:rec_shared_2", 1_700_000_001_000),
+        ("qwen:rec_appended", 1_700_000_300_000),
+    ]
+
+
 def test_usage_store_sync_files_appends_from_safe_offset(tmp_path):
     store = UsageEntryStore(tmp_path / "usage.sqlite3")
     path = str(tmp_path / "a.jsonl")
@@ -988,6 +1124,14 @@ def test_coding_tool_parsers_declare_sync_capabilities():
     assert modes["cline"] == "file_replace"
     assert tracker.parsers["codex"].sync_capability.cross_file_stable_keys is True
     assert tracker.parsers["cline"].sync_capability.cross_file_stable_keys is True
+    assert modes["zed"] == "file_replace"
+    assert modes["qwen_code"] == "file_replace"
+    assert modes["crush"] == "file_replace"
+    # qwen_code is the first source combining append_jsonl with
+    # cross_file_stable_keys (/branch copies record uuids across files).
+    assert tracker.parsers["qwen_code"].sync_capability.append_jsonl is True
+    assert tracker.parsers["qwen_code"].sync_capability.cross_file_stable_keys is True
+    assert tracker.parsers["crush"].sync_capability.append_jsonl is False
     assert modes["claude"] == "file_replace"
     assert modes["antigravity_cli"] == "file_replace"
     assert modes["copilot_cli"] == "source_replace"

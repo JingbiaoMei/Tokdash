@@ -595,6 +595,109 @@ def qoder_cli_roots() -> List[Path]:
     return [root for root in roots if root.is_dir()]
 
 
+# --- Zed ---------------------------------------------------------------------
+
+
+def zed_data_dir() -> Path:
+    """Zed data dir (mirrors paths.rs ``data_dir``).
+
+    No env-var override exists in Zed; the ``--user-data-dir`` launch flag
+    is the only relocation knob and is a documented blind spot here.
+    Flatpak substitutes FLATPAK_XDG_DATA_HOME for the XDG data dir, but
+    paths.rs (152-158) joins APP_NAME_LOWERCASE onto the whole if/else,
+    so the Flatpak dir is ``$FLATPAK_XDG_DATA_HOME/zed`` like every other
+    Linux install.
+    """
+    kind = osinfo.os_kind()
+    if kind == "macos":
+        return Path.home() / "Library" / "Application Support" / "Zed"
+    if kind == "windows":
+        local = os.environ.get("LOCALAPPDATA", "").strip()
+        base = Path(local).expanduser() if local else Path.home() / "AppData" / "Local"
+        return base / "Zed"
+    flatpak = os.environ.get("FLATPAK_XDG_DATA_HOME", "").strip()
+    if flatpak:
+        return Path(flatpak).expanduser() / "zed"
+    explicit = os.environ.get("XDG_DATA_HOME", "").strip()
+    base = Path(explicit).expanduser() if explicit else Path.home() / ".local" / "share"
+    return base / "zed"
+
+
+def zed_threads_db() -> Optional[Path]:
+    """Zed agent-thread database, or None when the install has none."""
+    path = zed_data_dir() / "threads" / "threads.db"
+    return path if path.is_file() else None
+
+
+# --- Qwen Code ------------------------------------------------------------------
+
+
+def qwen_runtime_base() -> Path:
+    """Qwen Code runtime base dir: ``$QWEN_RUNTIME_DIR`` > ``$QWEN_HOME`` >
+    ``~/.qwen`` (storage.ts getRuntimeBaseDir; the in-process and
+    settings-file overrides are not reachable from tokdash — a documented
+    blind spot)."""
+    explicit = os.environ.get("QWEN_RUNTIME_DIR", "").strip()
+    if explicit:
+        return Path(explicit).expanduser()
+    home = os.environ.get("QWEN_HOME", "").strip()
+    if home:
+        return Path(home).expanduser()
+    return Path.home() / ".qwen"
+
+
+def qwen_chat_files(base: Optional[Path] = None) -> List[Path]:
+    """All Qwen Code session JSONL files, de-duplicated.
+
+    Current layout ``<base>/projects/<id>/chats/*.jsonl`` plus the
+    pre-rename legacy ``<base>/tmp/<id>/chats/*.jsonl`` (the class
+    docstring still documents it; older installs may have files there).
+    Resolved paths are de-duplicated in case the two trees overlap.
+    Absent base -> no files.
+    """
+    root = base if base is not None else qwen_runtime_base()
+    seen = set()
+    out: List[Path] = []
+    for pattern in ("projects/*/chats/*.jsonl", "tmp/*/chats/*.jsonl"):
+        for path in sorted(root.glob(pattern)):
+            if not path.is_file():
+                continue
+            try:
+                resolved = path.resolve()
+            except OSError:
+                resolved = path
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            out.append(path)
+    return out
+
+
+# --- Crush ---------------------------------------------------------------------
+
+
+def crush_data_dirs() -> List[Path]:
+    """Crush data dirs from ``$CRUSH_DATA_DIR`` (comma-separated, ``~``
+    allowed).
+
+    Crush stores ``crush.db`` inside each project's data dir (default:
+    ``.crush`` relative to the working directory) — there is no global
+    root to scan, so Tokdash reads only the dirs the user lists. Entries
+    without a ``crush.db`` are dropped. Unset/empty -> no dirs, no rows.
+    """
+    out: List[Path] = []
+    for raw in os.environ.get("CRUSH_DATA_DIR", "").split(","):
+        raw = raw.strip()
+        if not raw:
+            continue
+        path = Path(raw).expanduser()
+        if not path.is_absolute():
+            path = path.resolve()
+        if (path / "crush.db").is_file() and path not in out:
+            out.append(path)
+    return out
+
+
 # --- Tokdash data dir / usage DB -------------------------------------------------
 #
 # Mirrors onboard/paths.py::data_dir() (kept as a separate, untouched copy there —

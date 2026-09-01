@@ -112,6 +112,24 @@ def _append_message(db: Path, mid: str, sid: str, ts: int, data: dict) -> None:
     os.utime(db, ns=(st.st_mtime_ns + 1, st.st_mtime_ns + 1))
 
 
+def _advance_mtime(db: Path) -> None:
+    """Give *db* a strictly later mtime, as a real second write would have.
+
+    _load_kilocode_sessions is an lru_cache keyed on _kilocode_db_signature(),
+    i.e. exactly (path, mtime_ns, size). A SQLite INSERT changes NEITHER when
+    the row fits an already-allocated free page and the write lands in the
+    same clock tick as the previous one — measured 18/40 appends on this
+    filesystem with the fixtures below. When that happens the cache key is
+    unchanged, the loader returns the pre-write result, and a test that
+    appends and re-reads fails through no fault of the code under test (this
+    flaked ~1 run in 8). Production writes are separated in time, so advancing
+    mtime models the real case; the assertion still tests what it claims, that
+    a moved signature invalidates the cache.
+    """
+    st = db.stat()
+    os.utime(db, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000_000))
+
+
 def _proj(pid="p1", worktree="/"):
     return (pid, worktree)
 
@@ -413,6 +431,7 @@ def test_cache_invalidates_on_write(monkeypatch, tmp_path):
 
     _append_message(db, "m2", "ses_a", BASE + 1000,
                     _assistant(input=2, output=2, cache={"read": 0, "write": 0}))
+    _advance_mtime(db)  # see _advance_mtime: an append alone need not move the signature
     second = _kilocode_sessions()
     assert len(second["ses_a"]["turns"]) == 2
     assert [t["timestamp_ms"] for t in second["ses_a"]["turns"]] == [BASE, BASE + 1000]

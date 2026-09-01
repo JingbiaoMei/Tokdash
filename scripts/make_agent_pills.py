@@ -54,6 +54,9 @@ TOOLS = [
     ("workbuddy", "WorkBuddy", "workbuddy.png"),
     ("qoder-ide", "Qoder IDE", "qoder.png"),
     ("qoder-cli", "Qoder CLI", "qoder.png"),
+    ("zed", "Zed", "zed.svg"),
+    ("qwen-code", "Qwen Code", "qwen_code.svg"),
+    ("crush", "Crush", "crush.png"),
 ]
 
 # Rendered at ~2.4x the README display height (40px) for crispness.

@@ -160,3 +160,85 @@ def test_readmes_link_every_translation(readme: str) -> None:
     source = (REPO_ROOT / readme).read_text(encoding="utf-8")
     for target in README_FILES:
         assert f'href="{target}"' in source, f"{readme} does not link to {target}"
+
+
+# --- README client-support parity -------------------------------------------
+#
+# The client support matrix, its pill row and its per-client notes are the same
+# content in all six READMEs, and drift between them is invisible to the rest of
+# the suite: test_recent_sources_have_readme_pills reads only README.md,
+# README_CN.md and SUPPORTED_CLIENTS.md. Two changes in a row drifted anyway —
+# one added three clients to the English and 中文 READMEs alone, and one flipped
+# two matrix rows to a Sessions tick in every language while updating the prose
+# in four of the six, leaving ES and PT contradicting their own table.
+
+# `| Name | ✅ | — |`, bolded or not. Requiring both cells to be a tick or a dash
+# is what keeps the unrelated platform/download table out of the match.
+CLIENT_ROW = re.compile(r"^\| \*{0,2}([^|*]+?)\*{0,2} \| (✅|—) \| (✅|—) \|$", re.M)
+
+PILL_IMAGE = re.compile(r"/docs/assets/agents/pills/([A-Za-z0-9_-]+\.png)")
+
+# Each language's wording of "this client has no Sessions tab". These are
+# counted, not located: the count has to equal English's. That is what catches a
+# translation whose matrix row gained a Sessions tick while its prose still said
+# the client had none. A reworded translation quietly stops being checked rather
+# than failing for the wrong reason, which is the right way for this to age.
+NO_SESSIONS_NOTE = {
+    "README.md": "does not appear in the Sessions tab",
+    "README_CN.md": "不出现在 Sessions 标签页",
+    "README_JA.md": "Sessions タブには登場しません",
+    "README_KO.md": "Sessions 탭에 나타나지 않습니다",
+    "README_ES.md": "no aparece en la pestaña Sesiones",
+    "README_PT.md": "não aparece na aba Sessões",
+}
+
+LOCALIZED_READMES = README_FILES[1:]
+
+
+def _readme_text(name: str) -> str:
+    return (REPO_ROOT / name).read_text(encoding="utf-8")
+
+
+def _client_matrix(source: str) -> dict[str, tuple[str, str]]:
+    return {
+        m.group(1).strip(): (m.group(2), m.group(3))
+        for m in CLIENT_ROW.finditer(source)
+    }
+
+
+@pytest.mark.parametrize("readme", LOCALIZED_READMES)
+def test_readme_client_matrix_matches_english(readme: str) -> None:
+    english = _client_matrix(_readme_text("README.md"))
+    assert len(english) > 20, "client matrix not parsed out of README.md"
+    theirs = _client_matrix(_readme_text(readme))
+    missing = {k: v for k, v in english.items() if k not in theirs}
+    extra = {k: v for k, v in theirs.items() if k not in english}
+    differing = {
+        k: (v, theirs[k]) for k, v in english.items() if k in theirs and theirs[k] != v
+    }
+    assert theirs == english, (
+        f"{readme} client matrix has drifted from README.md: "
+        f"missing={missing} extra={extra} differing_marks={differing}"
+    )
+
+
+@pytest.mark.parametrize("readme", LOCALIZED_READMES)
+def test_readme_client_pills_match_english(readme: str) -> None:
+    english = set(PILL_IMAGE.findall(_readme_text("README.md")))
+    assert len(english) > 20, "no client pills found in README.md"
+    theirs = set(PILL_IMAGE.findall(_readme_text(readme)))
+    assert theirs == english, (
+        f"{readme} pill row has drifted from README.md: "
+        f"missing={sorted(english - theirs)} extra={sorted(theirs - english)}"
+    )
+
+
+@pytest.mark.parametrize("readme", LOCALIZED_READMES)
+def test_readme_no_sessions_notes_match_english(readme: str) -> None:
+    expected = _readme_text("README.md").count(NO_SESSIONS_NOTE["README.md"])
+    assert expected, "English 'no Sessions tab' note not found"
+    found = _readme_text(readme).count(NO_SESSIONS_NOTE[readme])
+    assert found == expected, (
+        f"{readme} says {found} clients have no Sessions tab, README.md says "
+        f"{expected}. A matrix row and its prose have most likely disagreed."
+    )

@@ -40,6 +40,13 @@ pytest -q
 For the manual release checklist, see [RELEASING.md](development/RELEASING.md).
 Important: pushing a tag is not enough to populate GitHub's Releases page. After tagging and pushing, also create the GitHub Release object for that tag.
 
+## Changelog and credit
+
+Merged PRs are credited in [the changelog](development/CHANGELOG.md) by number and handle, e.g.
+`(#48, thanks @yourhandle)`. You do not need to write your own entry — entries are written at
+release time — but a PR description that says plainly what changed and why makes the entry accurate.
+The convention is in [RELEASING.md](development/RELEASING.md#changelog-entries).
+
 ## Security / secrets
 
 - Do **not** commit API keys, cookies, or tokens.

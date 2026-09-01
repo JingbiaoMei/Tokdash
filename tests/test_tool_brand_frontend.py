@@ -38,6 +38,7 @@ def test_supported_tool_brand_icons_are_local_and_small() -> None:
         "cline.png",
         "codex.png",
         "copilot.svg",
+        "crush.png",
         "cursor.svg",
         "dsh.svg",
         "gemini.svg",
@@ -52,12 +53,16 @@ def test_supported_tool_brand_icons_are_local_and_small() -> None:
         "pi.png",
         "reasonix.svg",
         "qoder.png",
+        "qwen_code.svg",
         "workbuddy.png",
         "zcode.png",
+        "zed.svg",
     }
     actual = {path.name for path in ICON_DIR.glob("*") if path.is_file()}
     assert expected <= actual
-    assert sum((ICON_DIR / name).stat().st_size for name in expected) < 100_000
+    # Budget for the 25 supported marks; raises the ceiling when a new
+    # source lands, not on incidental growth of an existing icon.
+    assert sum((ICON_DIR / name).stat().st_size for name in expected) < 110_000
 
 
 def test_recent_sources_have_readme_pills() -> None:
@@ -68,6 +73,9 @@ def test_recent_sources_have_readme_pills() -> None:
         "omp": "omp.png",
         "Kilo Code": "kilocode.png",
         "Cline": "cline.png",
+        "Zed": "zed.png",
+        "Qwen Code": "qwen-code.png",
+        "Crush": "crush.png",
     }
     for document in (
         PROJECT_ROOT / "README.md",
@@ -107,12 +115,15 @@ def test_tool_brand_registry_uses_local_lazy_assets_with_a_fallback() -> None:
         "workbuddy",
         "qoder",
         "qoder_cli",
+        "zed",
+        "qwen_code",
+        "crush",
     ):
         assert re.search(rf"\b{tool}:\s*\{{", body)
     assert "https://" not in body
     assert "/static/icons/agents/" in body
     asset_paths = re.findall(r"icon:\s*'(/static/icons/agents/[^']+)'", body)
-    assert len(asset_paths) == 23
+    assert len(asset_paths) == 26
     assert body.count("/static/icons/agents/qoder.png") == 2
     for asset_path in asset_paths:
         assert (STATIC_DIR / asset_path.removeprefix("/static/")).is_file()

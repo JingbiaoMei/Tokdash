@@ -7922,6 +7922,9 @@
       workbuddy: { icon: '/static/icons/agents/workbuddy.png', color: '#0CC8A3', fallback: 'W' },
       qoder: { icon: '/static/icons/agents/qoder.png', color: '#21D664', fallback: 'Q' },
       qoder_cli: { icon: '/static/icons/agents/qoder.png', color: '#21D664', fallback: 'Q' },
+      zed: { icon: '/static/icons/agents/zed.svg', color: '#111111', fallback: 'Z', darkInvert: true },
+      qwen_code: { icon: '/static/icons/agents/qwen_code.svg', color: '#6D44E8', fallback: 'Q' },
+      crush: { icon: '/static/icons/agents/crush.png', color: '#6B50FF', fallback: 'C' },
     });
     const toolBrandIconPromises = new Map();
 
@@ -8069,6 +8072,9 @@
         workbuddy: 'WorkBuddy',
         qoder: 'Qoder IDE',
         qoder_cli: 'Qoder CLI',
+        zed: 'Zed',
+        qwen_code: 'Qwen Code',
+        crush: 'Crush',
         cursor: 'Cursor',
       };
       if (mapping[key]) return mapping[key];

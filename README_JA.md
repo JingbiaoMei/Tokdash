@@ -32,6 +32,9 @@
   <a href="https://www.workbuddy.ai/" title="WorkBuddy"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/workbuddy.png" alt="WorkBuddy" height="34"></a>
   <a href="https://qoder.com/" title="Qoder IDE"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/qoder-ide.png" alt="Qoder IDE" height="34"></a>
   <a href="https://qoder.com/" title="Qoder CLI"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/qoder-cli.png" alt="Qoder CLI" height="34"></a>
+  <a href="https://zed.dev/" title="Zed"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/zed.png" alt="Zed" height="34"></a>
+  <a href="https://github.com/QwenLM/qwen-code" title="Qwen Code"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/qwen-code.png" alt="Qwen Code" height="34"></a>
+  <a href="https://charm.land/crush" title="Crush"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/crush.png" alt="Crush" height="34"></a>
 </p>
 
 <p align="center">
@@ -108,6 +111,9 @@
 | **WorkBuddy** | ✅ | ✅ |
 | **Qoder IDE** | ✅ | ✅ |
 | **Qoder CLI** | ✅ | — |
+| **Zed** | ✅ | — |
+| **Qwen Code** | ✅ | — |
+| **Crush** | ✅ | — |
 
 ローカルデータパス、オーバーライド、ソース固有の集計に関する注記については [対応クライアント](docs/reference/SUPPORTED_CLIENTS.md) を参照。
 
@@ -487,6 +493,12 @@ Coding Plan クォータは、個別に同意した Z.ai ライブポーラー�
 WorkBuddy の使用量は `~/.workbuddy-ai/projects/*/*.jsonl` トランスクリプトからローカルに読み取ります（`WORKBUDDY_DATA_DIR` はカンマ区切りのルートリストを受け取り、他のストア — 例: WSL からの Windows データディレクトリ — を指定できます）。各アシスタントメッセージ行は 1 つのモデル呼び出しで、`prompt_tokens` 内のキャッシュ部分は独立したバケットに分離してキャッシュレートを適用し、推論トークンは出力と離して表示しつつ出力レートで課金されます。モデル ID はそのまま保持されます: 明示的な ID（例: gpt-5.5）は通常の価格データベースで価格付けされ、Auto ルーターのエイリアス（`default-model`）は価格 DB に存在しないためコスト 0.00 です。ターンごとの `credit` 値はメタデータとしてのみ保存され、コストに影響しません。Sessions タブは同じルートから同じトランスクリプト行（計費対象のアシスタント 1 行 = 1 ターン）を読み取ります。
 
 Qoder の使用量は 2 か所からローカルに読み取ります: IDE の SQLite データベース（IDE データディレクトリ配下の `SharedClientCache/cache/db/local.db`。Windows と WSL では QoderCN ビルドが国際版より優先）と CLI の JSONL ログ（`~/.qoder` と `~/.qoder-cn`、加えて `QODER_CONFIG_DIR` とカンマ区切りの `QODER_CLI_HOME`）。IDE 側では全ロールの `chat_message` 行がすべてカウントされ、キャッシュ部分はプロンプトトークンから独立したバケットに分離され、モデルは `model_key`（ルーター名がない場合は `auto`）から。CLI 側では各リクエストのトランスクリプト課金記録がすべてのルートでセグメントトークン記録とマージされます: プロバイダークレジットを持つ行はプロバイダー報告コストを権威として保持し（推定で 1 クレジット $0.01 で換算、`QODER_USD_PER_CREDIT` が推定を上書きし、再価格付けは決してされない）、トークンのみの行は通常の価格データベースで価格付けされます。入力トークンのない記録は既知のコンテキストウィンドウに対して `context_usage_ratio` から復元します — デフォルトでは `auto` が 180,000、`QODER_CLI_CONTEXT_WINDOW` が明示設定された後はすべてのモデル。Qoder IDE は Sessions タブに表示されます: 同じ `chat_message` 行（全ロール、解析可能な 1 行 = 1 ターン）を同じ DB の一時ディレクトリスナップショットから読み取ります。
+
+Zed の使用量は、OS ごとの Zed データディレクトリ配下の `threads/threads.db` からローカルに読み取ります（Linux: `$XDG_DATA_HOME/zed` または `~/.local/share/zed`、`FLATPAK_XDG_DATA_HOME` も考慮; macOS: `~/Library/Application Support/Zed`; Windows: `%LOCALAPPDATA%\Zed`）。エージェントスレッド 1 本が 1 行で、zstd 圧縮された blob（旧形式の行は素の JSON）が `cumulative_token_usage` を保持します。これはスレッド自身の補完ストリームがフィールドごとの高水位で積み上げた値で、キャッシュ排他（input + cacheRead が全プロンプト）のためバケットはそのまま対応します。サブエージェントのスレッドは独立した行で親に畳み込まれないため、トークンを持つ各スレッドはちょうど 1 回だけカウントされます。スレッドは現在のモデル（モデルを切り替えた場合は最後のモデル）で価格付けされ、価格 DB にないセルフホストの ID はコスト 0.00 です。Zed にはデータディレクトリを差し替える環境変数がないため、`--user-data-dir` フラグが文書化された盲点です。Zed は Sessions タブには登場しません。
+
+Qwen Code の使用量は `<base>/projects/*/chats/*.jsonl`（および改名前の `<base>/tmp/*/chats/*.jsonl`）からローカルに読み取ります。base は `$QWEN_RUNTIME_DIR`、次に `$QWEN_HOME`、次に `~/.qwen` の順で解決します — 設定ファイル側の `runtime_base_dir` は Tokdash からは到達できず、文書化された盲点です。ファイルは追記専用でセッションごとに 1 つ、各アシスタントレコードはプロバイダーの `usageMetadata` をそのまま保持します: `promptTokenCount` はキャッシュを含むため、キャッシュ分は独立したバケットに分離してキャッシュレートで課金し、`thoughtsTokenCount` は推論として表示します。各レコードの `uuid` はソース全体で安定したキーです: `/branch` は親のレコード（同じ uuid）をフォーク先のファイルにコピーするため、使用量ストアは最も早い出現でキーの所有者を決め、正規のファイルが削除されたときは残ったコピーを昇格させます。サブエージェントのレコードはセッションファイルを共有し、自動的にカウントされます。コストは価格 DB からのみで、モデルのないレコードは `unknown` として 0.00 で計上します。Qwen Code は Sessions タブには登場しません。
+
+Crush の使用量は `$CRUSH_DATA_DIR`（それぞれ `crush.db` を含むデータディレクトリのカンマ区切りリスト）からローカルに読み取ります — 必須です。Crush の既定のデータディレクトリは作業ディレクトリの隣にあるプロジェクトごとの `.crush` で、走査できるグローバルなルートが存在しないためです。データベースは WAL モードのため、ZCode と同じコピー＆スナップショット経路で読み取ります。トークンが 0 でないセッションごとに 1 エントリで、サブエージェントのセッションも含みます: Crush が親セッションに畳み込むのはコストだけでトークンは畳み込まないため、Crush 自身の統計クエリが使う最上位のみの条件（`parent_session_id IS NULL`）ではその使用量が落ちてしまいます。各エントリはそのセッションの最後の非サマリーのアシスタントメッセージに帰属します — 複数モデルのセッションは最後のモデルで価格付けされます。注意点が 3 つあります: カウンターは累積ではなくステップごとに代入されるため、最後のリクエストのコンテキストサイズと最後のターンの出力しか保持せず、複数ステップのセッションでは実際より少なく出ます（Crush v0.91.2 で確認。`crush.db` には実際の合計を復元できる情報がありません）。プロバイダーが使用量ゼロを報告した場合、トークンが文字数からの推定値になることがあり、DB 上にその印はありません。そしてキャッシュ／推論の内訳は保存されません。タイムスタンプは秒で、行は `updated_at`（最終更新）でバケットされるため、セッションの全期間の合計が 1 日に載ります。`sessions.cost` は無視し、コストは価格 DB からのみ求めます。Crush は Sessions タブには登場しません。
 `tokdash setup` は任意のクォータステップ（プロバイダーごとのネットワークコンセンツ、デフォルト No、およびポーリング間隔）を提供し、`tokdash doctor` はクォータの状態を報告します: マスタースイッチ、プロバイダーごとのコンセンツ、キルスイッチ、有効間隔とそのソース、最終ポーリング時刻、保存されたスナップショット数。
 
 クォータスナップショットとその履歴はローカル使用量データベース（`usage.sqlite3`、デフォルトで有効）に保存され、**デフォルトで永久に保持されます** — 古いスナップショットを削除するには `TOKDASH_QUOTA_RETENTION_DAYS` を日数の正数に設定してください。`TOKDASH_USAGE_DB=0` でローカル永続化をオプトアウトすると、Quota タブは主データ経路を失います: スナップショット履歴が保持されず、バックグラウンドポーラーは実行されず、タブは手動 **Refresh**（コンセンツ済みのネットワークプロバイダー）の結果を現在のサーバープロセスの生存期間中インメモリで表示するだけです。通常のクォータ追跡には使用量 DB を有効（デフォルト）にしてください。

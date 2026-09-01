@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import bisect
 import json
+import math
 import os
 import subprocess
 import tempfile
@@ -530,27 +532,133 @@ def parse_entries_json(data: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+# ~100 years: a finite stand-in for "all time" that period_to_range_args can
+# turn into a concrete --since/--until window covering every transcript.
+ALL_TIME_DAYS = 36500
+
+NAMED_PERIODS = {
+    "today": 1,
+    "3days": 3,
+    "week": 7,
+    "14days": 14,
+    "month": 30,
+    "year": 365,
+    "all": ALL_TIME_DAYS,
+}
+
+# Shorthand a consumer reaches for when it has a number in hand ("7d", "2w").
+# Not previously accepted, which is how `?period=7d` ended up silently resolving
+# to all time: the token looked deliberate, matched nothing, and fell through to
+# the permissive default. Accepting it removes that whole class of near-miss.
+_PERIOD_UNIT_DAYS = {"d": 1, "w": 7, "m": 30, "y": 365}
+
+
+def _alias_period_days(token: str) -> Optional[int]:
+    """Days for an ``<int><unit>`` shorthand, or None if it isn't one."""
+    if len(token) < 2:
+        return None
+    count, unit = token[:-1], token[-1]
+    multiplier = _PERIOD_UNIT_DAYS.get(unit)
+    if multiplier is None or not count.isdigit():
+        return None
+    return max(1, int(count) * multiplier)
+
+
 def period_to_days(period: str) -> int:
-    # ~100 years: a finite stand-in for "all time" that period_to_range_args can
-    # turn into a concrete --since/--until window covering every transcript.
-    ALL_TIME_DAYS = 36500
     try:
         return max(1, int(period))
-    except ValueError:
-        mapping = {
-            "today": 1,
-            "3days": 3,
-            "week": 7,
-            "14days": 14,
-            "month": 30,
-            "year": 365,
-            "all": ALL_TIME_DAYS,
+    except (TypeError, ValueError):
+        pass
+
+    token = str(period or "").strip().lower()
+    if token in NAMED_PERIODS:
+        return NAMED_PERIODS[token]
+
+    alias = _alias_period_days(token)
+    if alias is not None:
+        return alias
+
+    # Named periods we don't recognise previously fell through to 1 (today),
+    # which silently truncated `?period=all` / `?period=year` to a single day
+    # and looked like a massive undercount. Default to all-time instead so an
+    # unknown period over-reports (visibly wrong) rather than under-reports.
+    # The `range` block on the response is what actually makes the substitution
+    # observable; see resolve_period.
+    return ALL_TIME_DAYS
+
+
+def period_is_recognized(period: str) -> bool:
+    """Whether ``period`` names a window, as opposed to hitting the fallback."""
+    try:
+        int(period)
+        return True
+    except (TypeError, ValueError):
+        pass
+    token = str(period or "").strip().lower()
+    return token in NAMED_PERIODS or _alias_period_days(token) is not None
+
+
+def _canonical_period(period: str) -> str:
+    """The value a caller could have sent to get the same window.
+
+    Aliases collapse onto the named period they equal ("7d" -> "week") so a
+    consumer can echo `period_resolved` straight back and get the same result.
+    """
+    days = period_to_days(period)
+    token = str(period or "").strip().lower()
+    if token in NAMED_PERIODS:
+        return token
+    for name, named_days in NAMED_PERIODS.items():
+        # "month" is a calendar month rather than a fixed 30, so it is never the
+        # canonical spelling of a day count that merely happens to be 30.
+        if named_days == days and name != "month":
+            return name
+    return str(days)
+
+
+def resolve_period(
+    period: str,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+) -> Dict[str, Any]:
+    """The window a request actually ran against, for echoing on the response.
+
+    D1: an unrecognised period resolves to all time but the response echoed the
+    caller's own token back at 200 OK, so a consumer asking for "7d" received a
+    century of data labelled as its own input. Deriving this block from the same
+    range helpers the query uses means the echo cannot drift from the data.
+    """
+    if date_from and date_to:
+        since, until = parse_date_range(date_from, date_to)
+        return {
+            "period_requested": period,
+            "period_resolved": "custom",
+            "from": date_from,
+            "to": date_to,
+            "days": max(1, (until - since).days),
+            "recognized": True,
         }
-        # Named periods we don't recognise previously fell through to 1 (today),
-        # which silently truncated `?period=all` / `?period=year` to a single day
-        # and looked like a massive undercount. Default to all-time instead so an
-        # unknown period over-reports (visibly wrong) rather than under-reports.
-        return mapping.get(period, ALL_TIME_DAYS)
+
+    args = period_to_range_args(period)
+    since, until = _date_range_from_args(args)
+    resolved = _canonical_period(period)
+    block: Dict[str, Any] = {
+        "period_requested": period,
+        "period_resolved": resolved,
+        "days": period_to_days(period),
+        "recognized": period_is_recognized(period),
+    }
+    if since is not None and until is not None:
+        block["from"] = since.date().isoformat()
+        # _date_range_from_args returns a half-open [since, until); report the
+        # last day a row could land on, which is what a reader expects to see.
+        block["to"] = (until - timedelta(days=1)).date().isoformat()
+        # Prefer the window actually queried over the nominal day count. "month"
+        # is a calendar month, so on the 1st it spans one day, not the 30 its
+        # mapping implies -- and a `days` that disagreed with `from`/`to` would
+        # be the same kind of quiet lie this block exists to remove.
+        block["days"] = max(1, (until.date() - since.date()).days)
+    return block
 
 
 def period_to_range_args(period: str) -> list[str]:
@@ -838,6 +946,10 @@ def compute_usage(period: str, date_from: Optional[str] = None, date_to: Optiona
 
     return {
         "period": period,
+        # The window this response actually covers. `period` echoes the caller's
+        # own token, so on its own it cannot show that an unrecognised value was
+        # substituted for something far wider (D1).
+        "range": resolve_period(period, date_from, date_to),
         "total_tokens": total_tokens,
         "total_cost": round(total_cost, 2),
         "total_messages": total_messages,
@@ -941,6 +1053,64 @@ def compute_usage_with_comparison(period: str, date_from: Optional[str] = None, 
     return current
 
 
+def contribution_streaks(contributions: list[Dict[str, Any]]) -> tuple[int, int]:
+    """(current, longest) runs of consecutive active days.
+
+    D3: both fields shipped as a hardcoded 0, which a consumer cannot tell apart
+    from "no streak". The dates needed are already merged and sorted by the time
+    compute_stats builds its response, so this is a fold rather than a query.
+    """
+    dates: list[Any] = []
+    for entry in contributions:
+        try:
+            dates.append(datetime.strptime(str(entry.get("date") or ""), "%Y-%m-%d").date())
+        except ValueError:
+            continue
+    if not dates:
+        return 0, 0
+
+    dates.sort()
+    longest = run = 1
+    for previous, current in zip(dates, dates[1:]):
+        run = run + 1 if (current - previous).days == 1 else 1
+        longest = max(longest, run)
+
+    # A day still in progress has not broken anything, so a streak ending
+    # yesterday is still current. Anything older has lapsed.
+    today = datetime.now().astimezone().date()
+    current_streak = run if (today - dates[-1]).days <= 1 else 0
+    return current_streak, longest
+
+
+def assign_contribution_intensity(contributions: list[Dict[str, Any]]) -> None:
+    """Rank each active day 1-4 by token volume, in place.
+
+    D5: intensity was written as a literal 0 at every constructor and only ever
+    combined with max(), so every day in every response carried 0 and a calendar
+    heatmap had nothing to shade. Quartiles are taken over the days present in
+    the window, so the scale adapts to the range being viewed instead of needing
+    absolute thresholds that go stale as usage grows.
+    """
+    totals = sorted(
+        int((entry.get("totals") or {}).get("tokens", 0) or 0) for entry in contributions
+    )
+    active = [value for value in totals if value > 0]
+    if not active:
+        for entry in contributions:
+            entry["intensity"] = 0
+        return
+
+    for entry in contributions:
+        tokens = int((entry.get("totals") or {}).get("tokens", 0) or 0)
+        if tokens <= 0:
+            entry["intensity"] = 0
+            continue
+        # Rank-based rather than value-based: a handful of very heavy days would
+        # otherwise flatten every ordinary day into the bottom bucket.
+        rank = bisect.bisect_right(active, tokens) / len(active)
+        entry["intensity"] = min(4, max(1, math.ceil(rank * 4)))
+
+
 def compute_stats(year: Optional[int] = None) -> Dict[str, Any]:
     """Contribution graph and stats (OpenClaw + coding tools)."""
     session_data = get_session_usage_year(year) if year else get_session_usage_days(365)
@@ -997,12 +1167,32 @@ def compute_stats(year: Optional[int] = None) -> Dict[str, Any]:
         elif c_day:
             merged.append(c_day)
 
+    # D4: ranking by cost alone puts whichever model is priciest on the podium,
+    # which is not what "favorite" reads as. Accumulate both and publish both.
     model_costs: Dict[str, float] = {}
+    model_tokens: Dict[str, int] = {}
     for day in merged:
         for s in day.get("sources", []):
             model = s.get("modelId", "unknown")
             model_costs[model] = model_costs.get(model, 0.0) + float(s.get("cost", 0.0) or 0.0)
-    favorite_model = max(model_costs.items(), key=lambda x: x[1])[0] if model_costs else "N/A"
+            tokens = s.get("tokens") or {}
+            # Unrolled deliberately. This runs once per source entry -- ~20k of
+            # them for a year -- and the obvious sum(...) over a generator of
+            # int() calls measured 3x slower, which showed up as a visible
+            # regression on /api/stats. Same arithmetic, none of the per-item
+            # generator and coercion overhead.
+            model_tokens[model] = model_tokens.get(model, 0) + (
+                (tokens.get("input") or 0)
+                + (tokens.get("output") or 0)
+                + (tokens.get("cacheRead") or 0)
+                + (tokens.get("cacheWrite") or 0)
+                + (tokens.get("reasoning") or 0)
+            )
+    highest_cost_model = max(model_costs.items(), key=lambda x: x[1])[0] if model_costs else "N/A"
+    most_used_model = max(model_tokens.items(), key=lambda x: x[1])[0] if model_tokens else "N/A"
+
+    assign_contribution_intensity(merged)
+    current_streak, longest_streak = contribution_streaks(merged)
 
     total_tokens = sum(int((d.get("totals") or {}).get("tokens", 0)) for d in merged)
     total_cost = sum(float((d.get("totals") or {}).get("cost", 0.0)) for d in merged)
@@ -1021,11 +1211,19 @@ def compute_stats(year: Optional[int] = None) -> Dict[str, Any]:
         "summary": {"totalTokens": total_tokens, "totalCost": total_cost, "activeDays": active_days, "totalDays": total_days_span},
         "contributions": merged,
         "stats": {
-            "favorite_model": favorite_model,
+            # "favorite" reads as most-used, so it now aliases the token ranking.
+            "favorite_model": most_used_model,
+            "most_used_model": most_used_model,
+            "highest_cost_model": highest_cost_model,
             "total_tokens": total_tokens,
+            "messages": total_messages,
+            # D2: this has always been a message count. Renaming it outright
+            # would break every consumer silently -- the same failure mode as D1
+            # -- so `messages` above is the correct name to migrate to and this
+            # keeps its current value until a release can carry the change.
             "sessions": total_messages,
-            "current_streak": 0,
-            "longest_streak": 0,
+            "current_streak": current_streak,
+            "longest_streak": longest_streak,
             "active_days": active_days,
             "total_days": total_days_span,
         },

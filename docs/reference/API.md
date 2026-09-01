@@ -36,6 +36,7 @@ per-session token); see [`docs/SECURITY.md`](../SECURITY.md) and `PUT /api/prici
 | `GET` | `/api/codex/session` | Convenience wrapper: single Codex session |
 | `GET` | `/api/openclaw` | OpenClaw model breakdown |
 | `GET` | `/api/stats` | Annual stats aggregation |
+| `GET` | `/api/insights` | Fine-grained analytics (hour-of-day, weekday, heatmap, projects, streaks) |
 | `GET` | `/api/pricing-db` | Current pricing database snapshot |
 | `PUT` | `/api/pricing-db` | Update the pricing database (write-gated, requires token) |
 | `GET` | `/` | Web dashboard (HTML) |
@@ -53,9 +54,39 @@ Most endpoints accept a `period` query parameter. Supported values:
 | `week` | Last 7 days |
 | `14days` | Last 14 days |
 | `month` | Current calendar month (1st → today) |
+| `year` | Last 365 days |
+| `all` | All recorded history |
 | `<integer>` | Last N days (e.g. `"30"` for 30 days) |
+| `<integer><unit>` | Shorthand, where unit is `d`/`w`/`m`/`y` (e.g. `7d`, `2w`, `3m`, `1y`) |
 
 For arbitrary ranges, use `date_from` and `date_to` (format `YYYY-MM-DD`) where supported.
+
+### Unrecognised periods, and the `range` block
+
+A `period` that matches none of the above resolves to **all time**, and the response is
+still `200`. On its own the echoed `period` field cannot show this, because it repeats the
+caller's own token back — so a consumer that sent a typo receives a century of data under
+its own label.
+
+Every period-taking response therefore carries a `range` block describing the window that
+was actually queried:
+
+```json
+"range": {
+  "period_requested": "7d",
+  "period_resolved": "week",
+  "from": "2026-08-26",
+  "to": "2026-09-01",
+  "days": 7,
+  "recognized": true
+}
+```
+
+`period_resolved` is always a value you could have sent yourself to get the same window
+(`custom` when `date_from`/`date_to` were used). **Check `recognized`:** when it is `false`
+the period was not understood and `from`/`to` show the all-time window that was substituted.
+`days` reflects the window actually queried, not the nominal mapping — `month` on the 1st of
+the month is 1 day, not 30.
 
 ---
 
@@ -558,13 +589,102 @@ OpenClaw-specific model breakdown.
 
 ## `GET /api/stats`
 
-Yearly stats aggregation.
+Yearly stats aggregation: a contribution grid plus headline totals.
 
 **Query parameters**
 
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `year` | integer | no | Year to query. Defaults to current year if omitted. |
+
+**`stats` fields**
+
+| Field | Type | Description |
+|---|---|---|
+| `favorite_model` | string | Most-used model, by tokens. Alias of `most_used_model`. |
+| `most_used_model` | string | Model with the most tokens in range |
+| `highest_cost_model` | string | Model with the highest cost in range — often a different model |
+| `total_tokens` | integer | Tokens across the window |
+| `messages` | integer | Assistant messages across the window |
+| `sessions` | integer | **Deprecated** — a message count, not a session count. Equal to `messages`; read that instead. |
+| `current_streak` | integer | Consecutive active days ending today or yesterday (`0` when the streak has lapsed) |
+| `longest_streak` | integer | Longest run of consecutive active days in range |
+| `active_days` | integer | Days with any recorded usage |
+| `total_days` | integer | Span from first to last active day, inclusive |
+
+**`contributions[]` fields**
+
+Each entry is one active day, carrying `date`, `totals`, a full `tokenBreakdown`, a
+`sources[]` array (with `modelId` / `providerId`), and `intensity` — a `1`–`4` rank of that
+day's token volume against the other active days in the window (`0` only when a day has no
+tokens). Being a rank rather than an absolute threshold, it stays meaningful as usage grows;
+it is the value a calendar heatmap shades by.
+
+---
+
+## `GET /api/insights`
+
+Fine-grained analytics for report-style consumers — hour-of-day activity, weekday rhythm,
+per-project attribution, streaks. Built for a "year in review" page: one request covers
+every facet, rather than one request per metric.
+
+**Query parameters**
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `period` | string | no | Window to analyse (default `year`). See [Period parameter](#period-parameter). |
+| `date_from` / `date_to` | string | no | Explicit `YYYY-MM-DD` range, instead of `period` |
+| `facets` | string | no | Comma-separated facet list. Omitted, returns the default set. An unknown name is a `400`. |
+| `include_project_names` | boolean | no | `false` replaces project names with `project-1`, `project-2`, … keeping ranks and volumes but not identities. Default `true`. |
+| `refresh` | boolean | no | Bypass the response cache |
+
+**Facets**
+
+| Facet | Contents |
+|---|---|
+| `hourly` | 24 buckets, plus `peak_hour` and `night_share` (the 22:00–02:00 token share) |
+| `weekday` | 7 buckets, plus `peak_weekday` (0 = Monday) |
+| `heatmap` | The dense 7×24 grid (168 cells) plus `max_tokens`, for shading |
+| `daily` | Per-day totals with the same `intensity` ranking `/api/stats` uses |
+| `models` | Ranked by tokens, with `most_used` and `highest_cost` named separately |
+| `tools` | Same ranking per source tool |
+| `projects` | Token totals per project, plus an `unattributed` bucket |
+| `streaks` | `current_streak`, `longest_streak`, `active_days`, `total_days` |
+| `firsts` | First/last active day, busiest day and its tokens, peak hour |
+
+Default set: `hourly`, `weekday`, `heatmap`, `models`, `tools`, `streaks`, `firsts` —
+everything the single composite scan already pays for. `daily` and `projects` are opt-in:
+`daily` is the largest payload and duplicates `/api/stats`, and `projects` needs a second
+scan plus a session-record read.
+
+**Response shape**
+
+```json
+{
+  "schema_version": 1,
+  "range": { "period_requested": "year", "period_resolved": "year", "days": 365, "recognized": true },
+  "facets": ["hourly", "streaks"],
+  "timezone": "BST",
+  "coverage": { "stored_sources": ["claude", "codex"], "live_sources": ["opencode"], "group_count": 8234 },
+  "totals": { "tokens": 0, "cost": 0.0, "messages": 0, "entries": 0 },
+  "hourly": { "buckets": [], "peak_hour": 11, "night_share": 0.2056, "night_hours": [0, 1, 22, 23] },
+  "streaks": { "current_streak": 171, "longest_streak": 171, "active_days": 232, "total_days": 287 }
+}
+```
+
+**Notes**
+
+- **Timezone.** Hour and day buckets are cut in the server's local zone, reported as
+  `timezone`. A machine that changes zone re-buckets its own history; label charts with this
+  value rather than assuming UTC.
+- **Coverage.** `coverage` lists the sources behind the numbers. Tools that keep their own
+  database (OpenCode, KiloCode, Mimo, Zcode, Qoder) are parsed live and appear under
+  `live_sources`; everything else is read from the usage database.
+- **Attribution.** `projects` maps usage rows to projects through the transcript path
+  recorded on each session. Sources whose rows carry no usable path — OpenClaw among them —
+  land in `unattributed` rather than being dropped, so the totals still reconcile.
+- **Caching.** A window that has closed is cached indefinitely, so a past year is computed
+  once and every later request is a cache hit. Only a window including today recomputes.
 
 ---
 

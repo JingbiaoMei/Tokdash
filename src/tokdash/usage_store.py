@@ -215,6 +215,20 @@ def model_rank_key(row: dict[str, Any]) -> tuple[int, float, str]:
     )
 
 
+def model_cost_rank_key(row: dict[str, Any]) -> tuple[float, int, str]:
+    """Ordering for the spend view: most expensive first.
+
+    The mirror of :func:`model_rank_key`, for the one surface that genuinely
+    ranks by money -- the dashboard's "Top Models by Cost" panel. Tokens break a
+    tie. Kept beside the token key so the two cannot drift apart.
+    """
+    return (
+        -float(row.get("cost", 0.0) or 0.0),
+        -int(row.get("tokens", 0) or 0),
+        str(row.get("name", "")),
+    )
+
+
 def _as_float(value: Any) -> float | None:
     try:
         if value is None:

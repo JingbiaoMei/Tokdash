@@ -22,6 +22,7 @@ from .usage_store import (
     UsageDatabaseSchemaTooNewError,
     UsageEntryStore,
     build_source_signature,
+    model_cost_rank_key,
     model_rank_key,
     persistent_pricing_signature,
     persistent_usage_db_enabled,
@@ -959,6 +960,12 @@ def compute_usage(period: str, date_from: Optional[str] = None, date_to: Optiona
         "coding_apps": coding_apps,
         "coding_models": coding_models,
         "top_models": combined_models[:5],
+        # The spend podium, served rather than derived. Every array here is
+        # ranked by tokens, so a consumer that wants models by money had to sort
+        # the whole list client-side -- and a client holding only top_models
+        # could not: its five are the five biggest, which need not contain the
+        # five priciest.
+        "top_models_by_cost": sorted(combined_models, key=model_cost_rank_key)[:5],
         "openclaw_models": openclaw_models,
         "combined_models": combined_models,
         # Sources that failed to read this collection (empty when all succeeded):

@@ -176,6 +176,55 @@ def test_compute_usage_ranks_every_model_array_by_tokens(monkeypatch):
     ]
 
 
+def test_top_models_by_cost_is_the_spend_podium(monkeypatch):
+    """The one array that ranks by money, served so consumers need not derive it."""
+    monkeypatch.setattr(C, "get_tools_data", lambda period: parse_entries_json({"entries": _entries()}))
+    monkeypatch.setattr(C, "get_openclaw_data", lambda period: _openclaw_payload())
+
+    out = compute_usage("today")
+    by_cost = out["top_models_by_cost"]
+
+    assert [m["name"] for m in by_cost] == [
+        "ocl-small",         # $12.00, 3k tokens -- least used, most expensive
+        "pricey-boutique",   # $ 9.00, 4k
+        "mid-runner",        # $ 5.00, 7k
+        "codex-heavy",       # $ 2.00, 8k
+        "cheap-workhorse",   # $ 1.00, 10k
+    ]
+    costs = [m["cost"] for m in by_cost]
+    assert costs == sorted(costs, reverse=True)
+    assert len(by_cost) == 5
+
+    # The two podiums must be genuinely different lists, or this fixture has
+    # stopped exercising the thing it exists to exercise.
+    assert [m["name"] for m in by_cost] != [m["name"] for m in out["top_models"]]
+
+    # Why the array is served rather than derived from top_models: the five
+    # biggest models do not contain the priciest one, so a client holding only
+    # top_models could not compute this.
+    assert "ocl-small" not in [m["name"] for m in out["top_models"]]
+
+    # Both podiums are drawn from the same merged list.
+    names = {m["name"] for m in out["combined_models"]}
+    assert {m["name"] for m in by_cost} <= names
+
+
+def test_cost_podium_ties_break_on_tokens(monkeypatch):
+    entries = [
+        _entry("claude", "same-cost-small", 1_000, 3.0, 1_700_000_000_000),
+        _entry("claude", "same-cost-big", 9_000, 3.0, 1_700_000_000_001),
+    ]
+    monkeypatch.setattr(C, "get_tools_data", lambda period: parse_entries_json({"entries": entries}))
+    monkeypatch.setattr(C, "get_openclaw_data", lambda period: {
+        "total_tokens": 0, "total_cost": 0.0, "total_messages": 0,
+        "total_tokens_in": 0, "total_tokens_cache": 0, "cache_hit_rate": None,
+        "models": {}, "contributions": [],
+    })
+
+    out = compute_usage("today")
+    assert [m["name"] for m in out["top_models_by_cost"]] == ["same-cost-big", "same-cost-small"]
+
+
 def test_stats_podium_agrees_with_the_arrays(monkeypatch):
     """`most_used_model` and `top_models[0]` must not name different models."""
     monkeypatch.setattr(C, "get_tools_data", lambda period: parse_entries_json({"entries": _entries()}))

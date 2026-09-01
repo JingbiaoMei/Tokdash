@@ -132,11 +132,59 @@ def test_cost_chart_picks_its_own_top_five_by_cost(tmp_path):
     assert "ocl-big" not in out["labels"]
 
 
-def test_cost_chart_is_fed_the_full_model_list():
-    """Five models by tokens are not the five by cost, so the chart needs them all."""
+def test_cost_chart_reads_the_served_cost_podium():
+    """The five biggest models are not the five priciest, so top_models will not do."""
     source = INDEX_HTML.read_text(encoding="utf-8")
     call = re.search(r"updateModelChart\((.*?)\);", source, re.S)
     assert call, "updateModelChart call site not found"
-    assert "combined_models" in call.group(1), (
-        "the cost chart must read combined_models; top_models is capped at five by tokens"
+    argument = call.group(1)
+    assert "top_models_by_cost" in argument, "the cost chart must read the served cost podium"
+    # An older server, or a cached payload from before the field existed, still
+    # has to render something sensible.
+    assert "combined_models" in argument and "top_models" in argument
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_multi_server_merge_builds_both_podiums_from_the_full_list(tmp_path):
+    source = INDEX_HTML.read_text(encoding="utf-8")
+    function = _extract_js_function(source, "function combineUsagePayloads(list) {")
+
+    # Six models per server, so each server's own five-entry podium omits one.
+    models = [
+        ("cheap-workhorse", 5_000, 0.5),
+        ("ocl-big", 4_500, 0.25),
+        ("codex-heavy", 4_000, 1.0),
+        ("mid-runner", 3_500, 2.5),
+        ("pricey-boutique", 2_000, 4.5),
+        ("ocl-small", 1_500, 6.0),
+    ]
+    payload = _payload(models)
+    payload["top_models"] = payload["combined_models"][:5]
+    payload["top_models_by_cost"] = sorted(payload["combined_models"], key=lambda r: -r["cost"])[:5]
+
+    script = (
+        function
+        + "\nconst input = JSON.parse(process.argv[2]);\n"
+        + "const out = combineUsagePayloads(input);\n"
+        + "process.stdout.write(JSON.stringify({\n"
+        + "  by_tokens: out.top_models.map((m) => m.name),\n"
+        + "  by_cost: out.top_models_by_cost.map((m) => m.name),\n"
+        + "  costs: out.top_models_by_cost.map((m) => m.cost),\n"
+        + "  big: out.combined_models[0],\n"
+        + "}));\n"
     )
+    out = _run_js(tmp_path, "merge_podiums", script, [payload, payload])
+
+    assert out["by_tokens"] == [
+        "cheap-workhorse", "ocl-big", "codex-heavy", "mid-runner", "pricey-boutique",
+    ]
+    assert out["by_cost"] == [
+        "ocl-small", "pricey-boutique", "mid-runner", "codex-heavy", "cheap-workhorse",
+    ]
+    assert out["costs"] == sorted(out["costs"], reverse=True)
+    # Summed across both servers, not taken from either one's podium.
+    assert out["big"]["tokens"] == 10_000 and out["big"]["cost"] == 1.0
+    # ocl-big sits outside the cost podium and ocl-small outside the token one,
+    # so neither podium could have been built from the other.
+    assert "ocl-big" not in out["by_cost"]
+    assert "ocl-small" not in out["by_tokens"]

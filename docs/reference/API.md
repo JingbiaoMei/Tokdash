@@ -295,6 +295,7 @@ Aggregated token usage and cost across all configured tools.
 | `coding_apps` | object | Same shape as `apps`, filtered to coding tools (excludes browser/research tools) |
 | `coding_models` | array | Flat list of models from coding apps, each tagged with `source` |
 | `top_models` | array | First five entries of `combined_models` |
+| `top_models_by_cost` | array | The five costliest models, ranked by cost |
 | `openclaw_models` | array | OpenClaw-specific model breakdown |
 | `combined_models` | array | All models from all sources, merged |
 | `comparison` | object | Comparison vs previous period: `tokens_prev`, `cost_prev`, `messages_prev`, `tokens_pct`, `cost_pct`, `messages_pct` |
@@ -306,6 +307,13 @@ Every model array in this response -- `coding_models`, `top_models`,
 `openclaw_models`, `combined_models`, and each `apps[].models` -- is ordered by
 **total tokens, descending**, with cost and then name breaking ties. `/api/insights`
 uses the same ordering for its `models` facet.
+
+`top_models_by_cost` is the one exception: it is ordered by **cost, descending**,
+with tokens and then name breaking ties. It is served rather than left to the
+caller because it cannot be derived from `top_models` -- the five biggest models
+need not contain the five costliest, so a client holding only the token podium
+has no way to compute the spend one. Both podiums are drawn from the same
+`combined_models` list.
 
 These arrays were ordered by cost in earlier versions, against what this table
 said. Tokens and cost usually rank models the same way over a week or a month,

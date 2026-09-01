@@ -112,7 +112,7 @@ dimmed last-good data; it never replaces the hero.
 | Provider name | same | top-level key under `providers` (capitalize for display) |
 | Bucket name | same | `bucket` / `bucket_label` |
 | Estimated badge | same | provider-level `estimated: true` |
-| Activity line | `GET /api/usage?period=today` | leading tool by cost from `by_tool`; leading model by cost from `combined_models` / `top_models` |
+| Activity line | `GET /api/usage?period=today` | leading tool by cost from `by_tool`; leading model from `top_models_by_cost[0]`, falling back to a maximum by cost over `combined_models`. Not `top_models`: it is the five biggest by tokens, which need not include the costliest |
 | Freshness | same responses | `timestamp` and `response_cache.age_seconds` when available |
 | Connection | `GET /health` | `service == "tokdash"` required |
 

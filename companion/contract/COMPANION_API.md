@@ -72,12 +72,22 @@ Fields used by the companion:
 | `comparison.cost_pct` | float \| null | "12% below yesterday" / "8% above yesterday". Omit when `null`. |
 | `comparison.cost_prev` | float \| null | Previous-period cost used to recompute a combined percentage across reachable servers. Hide the comparison when any contributing server omits it. |
 | `by_tool` | object | Leading tool by cost (activity line) |
-| `combined_models` / `top_models` | array | Leading model by cost (activity line) |
+| `top_models_by_cost` | array | Leading model by cost (activity line) — take `[0]` |
+| `combined_models` | array | Full model list, ranked by tokens. Cost fallback when `top_models_by_cost` is absent |
+| `top_models` | array | First five of `combined_models`, so ranked by tokens |
 | `timestamp` | string (ISO 8601) | Freshness calculation |
 | `response_cache.age_seconds` | float | Freshness "· cached" hint when useful |
 
 Additive decoding: ignore unknown fields, tolerate absent optional fields. A
 valid response with `total_tokens == 0` is the **empty state**, not an error.
+
+**Do not derive a cost leader from `top_models`.** Every model array except
+`top_models_by_cost` is ranked by tokens, and `top_models` is the first five of
+them — the costliest model need not be among the five biggest, so a maximum over
+`top_models` can name the wrong model. Use `top_models_by_cost[0]`, or a maximum
+over the full `combined_models` when talking to a server that predates the field.
+Earlier Tokdash versions ranked the arrays by cost, which is why a client that
+took a maximum over `top_models` used to get away with it.
 
 ### `GET /api/usage?period=month`
 

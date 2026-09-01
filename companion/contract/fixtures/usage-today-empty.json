@@ -8,6 +8,7 @@
   "apps": {},
   "coding_apps": {},
   "top_models": [],
+  "top_models_by_cost": [],
   "combined_models": [],
   "comparison": {
     "tokens_prev": 0,

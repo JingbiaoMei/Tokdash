@@ -40,6 +40,11 @@
     { "name": "anthropic/claude-opus-4-7", "tokens": 2398093, "cost": 0.72 },
     { "name": "anthropic/claude-sonnet-4-6", "tokens": 2282437, "cost": 0.33 }
   ],
+  "top_models_by_cost": [
+    { "name": "openai/gpt-5.6-sol", "tokens": 12112500, "cost": 2.10 },
+    { "name": "anthropic/claude-opus-4-7", "tokens": 2398093, "cost": 0.72 },
+    { "name": "anthropic/claude-sonnet-4-6", "tokens": 2282437, "cost": 0.33 }
+  ],
   "combined_models": [
     { "name": "openai/gpt-5.6-sol", "tokens": 12112500, "cost": 2.10, "source": "codex" },
     { "name": "anthropic/claude-opus-4-7", "tokens": 2398093, "cost": 0.72, "source": "claude" },

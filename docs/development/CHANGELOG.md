@@ -23,6 +23,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Model arrays are ordered by tokens, as documented. `top_models`, `combined_models`, `coding_models`, `openclaw_models` and each `apps[].models` were sorted by cost while the API reference called `top_models` "top N models by token usage", so a podium built from the array named the priciest model rather than the most-used one. Over a week or a month the two orderings usually coincide, which is what hid it; over a year they separate — in one corpus the model with 10.05B tokens ranked below one with 9.25B because the latter cost more. Cost breaks ties, then name, so the order no longer depends on which source was folded in first. The "Top Models by Cost" chart now takes its own top five by cost from the full model list, and combining several servers ranks the merged arrays the same way one server does. (#61)
+
 - `stats.current_streak` and `stats.longest_streak` are computed instead of returning a hardcoded `0`. Both shipped as literal zeros, which a consumer could not tell apart from "no streak" — on a corpus with a 171-day run, both still read `0`. The dates they need are already merged and sorted in the same response, so this is a fold rather than a query. A streak ending yesterday still counts as current, since a day that has not started yet has not broken anything. (#59)
 
 ## 2.4.3 - 2026-09-01

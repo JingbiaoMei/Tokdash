@@ -294,11 +294,24 @@ Aggregated token usage and cost across all configured tools.
 | `apps` | object | Per-app detailed breakdown (includes `tokens_in`, `tokens_out`, `tokens_cache`, `cost`, `messages`, `models[]`) |
 | `coding_apps` | object | Same shape as `apps`, filtered to coding tools (excludes browser/research tools) |
 | `coding_models` | array | Flat list of models from coding apps, each tagged with `source` |
-| `top_models` | array | Top N models by token usage |
+| `top_models` | array | First five entries of `combined_models` |
 | `openclaw_models` | array | OpenClaw-specific model breakdown |
-| `combined_models` | array | All models from all sources, merged and ranked |
+| `combined_models` | array | All models from all sources, merged |
 | `comparison` | object | Comparison vs previous period: `tokens_prev`, `cost_prev`, `messages_prev`, `tokens_pct`, `cost_pct`, `messages_pct` |
 | `timestamp` | string | ISO 8601 timestamp when the response was generated |
+
+**Model ordering**
+
+Every model array in this response -- `coding_models`, `top_models`,
+`openclaw_models`, `combined_models`, and each `apps[].models` -- is ordered by
+**total tokens, descending**, with cost and then name breaking ties. `/api/insights`
+uses the same ordering for its `models` facet.
+
+These arrays were ordered by cost in earlier versions, against what this table
+said. Tokens and cost usually rank models the same way over a week or a month,
+which is why the mismatch was easy to miss; over a year, where a cheaper model
+can out-work a pricier one, they diverge. Sort client-side if you want models by
+spend.
 
 **Per-app object shape**
 

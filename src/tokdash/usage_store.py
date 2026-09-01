@@ -198,6 +198,23 @@ _INSIGHT_PROJECT_SQL = """
         """
 
 
+def model_rank_key(row: dict[str, Any]) -> tuple[int, float, str]:
+    """Ordering for every model list the API returns: most tokens first.
+
+    These lists used to be sorted by cost, which ranked an expensive model above
+    the one that actually did the work -- ``top_models`` is documented as "top N
+    models by token usage" and did not behave that way. The two orderings agree
+    over short windows, which is why the mismatch stayed invisible until a year
+    of data pulled them apart. Cost breaks ties, then name, so the order does not
+    depend on which source happened to be folded in first.
+    """
+    return (
+        -int(row.get("tokens", 0) or 0),
+        -float(row.get("cost", 0.0) or 0.0),
+        str(row.get("name", "")),
+    )
+
+
 def _as_float(value: Any) -> float | None:
     try:
         if value is None:
@@ -1897,9 +1914,9 @@ class UsageEntryStore:
             total_cache += tokens_cache
 
         for app_ref in apps.values():
-            app_ref["models"].sort(key=lambda x: x["cost"], reverse=True)
+            app_ref["models"].sort(key=model_rank_key)
             app_ref["cache_hit_rate"] = _cache_hit_rate(app_ref["tokens_in"], app_ref["tokens_cache"])
-        all_models.sort(key=lambda x: x["cost"], reverse=True)
+        all_models.sort(key=model_rank_key)
 
         return {
             "total_cost": total_cost,

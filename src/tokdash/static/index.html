@@ -4027,6 +4027,14 @@
       const sumFields = (target, source, fields) => fields.forEach((field) => {
         if (target[field] !== undefined || source[field] !== undefined) target[field] = number(target[field]) + number(source[field]);
       });
+      // Mirrors model_rank_key on the server: tokens first, cost only to break a
+      // tie. Merging used to re-sort by cost, so combining servers reordered the
+      // very arrays the server had just ranked by usage.
+      const byModelRank = (a, b) => (
+        (number(b.tokens ?? b.total_tokens) - number(a.tokens ?? a.total_tokens))
+        || (number(b.cost ?? b.total_cost) - number(a.cost ?? a.total_cost))
+        || String(a.name ?? a.model ?? '').localeCompare(String(b.name ?? b.model ?? ''))
+      );
       const mergeObject = (key) => {
         const merged = {};
         rows.forEach((row) => Object.entries(row[key] || {}).forEach(([name, value]) => {
@@ -4042,7 +4050,7 @@
                   if (!models.has(modelName)) models.set(modelName, { ...item });
                   else sumFields(models.get(modelName), item, ['tokens','total_tokens','tokens_in','tokens_out','tokens_cache','tokens_cache_write','tokens_reasoning','cost','total_cost','messages','total_messages']);
                 });
-                merged[name].models = [...models.values()].sort((a, b) => number(b.cost ?? b.tokens) - number(a.cost ?? a.tokens));
+                merged[name].models = [...models.values()].sort(byModelRank);
               }
             }
           } else merged[name] = number(merged[name]) + number(value);
@@ -4057,7 +4065,7 @@
           if (!merged.has(name)) merged.set(name, { ...item });
           else sumFields(merged.get(name), item, ['tokens','total_tokens','tokens_in','tokens_out','tokens_cache','tokens_cache_write','tokens_reasoning','cost','total_cost','messages','total_messages']);
         }));
-        out[key] = [...merged.values()].sort((a, b) => number(b.cost ?? b.total_cost ?? b.tokens) - number(a.cost ?? a.total_cost ?? a.tokens));
+        out[key] = [...merged.values()].sort(byModelRank);
       };
       ['total_tokens','total_cost','total_messages'].forEach((field) => { out[field] = rows.reduce((sum, row) => sum + number(row[field]), 0); });
       ['by_tool','apps','coding_apps'].forEach(mergeObject);
@@ -8672,7 +8680,7 @@
       }
 
       updateToolChart(data.by_tool || {});
-      updateModelChart(data.top_models || []);
+      updateModelChart((data.combined_models && data.combined_models.length) ? data.combined_models : (data.top_models || []));
       lastByTool = data.by_tool || {};
       updateToolsTable(lastByTool);
       lastCombinedModels = data.combined_models || [];
@@ -10110,8 +10118,13 @@
       if (!canvas) return;
       const ctx = canvas.getContext('2d');
 
-      const labels = (topModels || []).slice(0, 5).map((m) => m.name);
-      const values = (topModels || []).slice(0, 5).map((m) => m.cost);
+      // Model arrays arrive ranked by tokens; this panel is "Top Models by Cost",
+      // so it takes its own top five rather than trusting the arrival order.
+      const byCost = [...(topModels || [])]
+        .sort((a, b) => (Number(b.cost) || 0) - (Number(a.cost) || 0))
+        .slice(0, 5);
+      const labels = byCost.map((m) => m.name);
+      const values = byCost.map((m) => m.cost);
 
       if (!modelChart) {
         modelChart = new Chart(ctx, {

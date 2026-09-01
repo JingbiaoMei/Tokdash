@@ -22,6 +22,7 @@ from .usage_store import (
     UsageDatabaseSchemaTooNewError,
     UsageEntryStore,
     build_source_signature,
+    model_rank_key,
     persistent_pricing_signature,
     persistent_usage_db_enabled,
     public_usage_entry,
@@ -297,13 +298,13 @@ def _merge_parsed_usage(parts: list[Dict[str, Any]]) -> Dict[str, Any]:
             global_ref["messages"] += messages
 
     for app_data in apps.values():
-        app_data["models"] = sorted(app_data["models_dict"].values(), key=lambda x: x["cost"], reverse=True)
+        app_data["models"] = sorted(app_data["models_dict"].values(), key=model_rank_key)
         del app_data["models_dict"]
         for model_ref in app_data["models"]:
             model_ref["cache_hit_rate"] = cache_hit_rate(model_ref["tokens_in"], model_ref["tokens_cache"])
         app_data["cache_hit_rate"] = cache_hit_rate(app_data["tokens_in"], app_data["tokens_cache"])
 
-    all_models = sorted(all_models_dict.values(), key=lambda x: x["cost"], reverse=True)
+    all_models = sorted(all_models_dict.values(), key=model_rank_key)
     for row in all_models:
         row["cache_hit_rate"] = cache_hit_rate(row["tokens_in"], row["tokens_cache"])
 
@@ -508,13 +509,13 @@ def parse_entries_json(data: Dict[str, Any]) -> Dict[str, Any]:
         g["messages"] += messages
 
     for app_data in apps.values():
-        app_data["models"] = sorted(app_data["models_dict"].values(), key=lambda x: x["cost"], reverse=True)
+        app_data["models"] = sorted(app_data["models_dict"].values(), key=model_rank_key)
         del app_data["models_dict"]
         for model_ref in app_data["models"]:
             model_ref["cache_hit_rate"] = cache_hit_rate(model_ref["tokens_in"], model_ref["tokens_cache"])
         app_data["cache_hit_rate"] = cache_hit_rate(app_data["tokens_in"], app_data["tokens_cache"])
 
-    all_models = sorted(all_models_dict.values(), key=lambda x: x["cost"], reverse=True)
+    all_models = sorted(all_models_dict.values(), key=model_rank_key)
     for m in all_models:
         m["cache_hit_rate"] = cache_hit_rate(m["tokens_in"], m["tokens_cache"])
 
@@ -901,8 +902,7 @@ def compute_usage(period: str, date_from: Optional[str] = None, date_to: Optiona
 
     openclaw_models = sorted(
         [{"name": k, **v} for k, v in openclaw_data["models"].items() if _has_visible_token_usage(v)],
-        key=lambda x: x.get("cost", 0.0),
-        reverse=True,
+        key=model_rank_key,
     )
 
     combined_by_model: Dict[str, dict] = {}
@@ -935,7 +935,7 @@ def compute_usage(period: str, date_from: Optional[str] = None, date_to: Optiona
     for r in openclaw_models:
         add_row(r)
 
-    combined_models = sorted(combined_by_model.values(), key=lambda x: x.get("cost", 0.0), reverse=True)
+    combined_models = sorted(combined_by_model.values(), key=model_rank_key)
     for row in combined_models:
         row["cache_hit_rate"] = cache_hit_rate(row["tokens_in"], row["tokens_cache"])
     total_messages = openclaw_data["total_messages"] + sum(v.get("messages", 0) for v in coding_apps.values())

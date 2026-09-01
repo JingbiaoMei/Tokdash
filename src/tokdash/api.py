@@ -33,8 +33,15 @@ from .assets import (
     SW_CACHE_NAME_PLACEHOLDER,
     get_static_cache_name,
 )
-from .compute import compute_stats, compute_usage_with_comparison, get_openclaw_data, get_tools_data
+from .compute import (
+    compute_stats,
+    compute_usage_with_comparison,
+    get_openclaw_data,
+    get_tools_data,
+    resolve_period,
+)
 from .dateutil import parse_date_range
+from .insights import UnknownFacetError, compute_insights
 from .usage_store import SCHEMA_VERSION as USAGE_DB_SCHEMA_VERSION
 from .usage_store import UsageDatabaseSchemaTooNewError
 from .sessions import (
@@ -1489,6 +1496,7 @@ def get_openclaw(period: str = "today") -> Dict[str, Any]:
     def fetch():
         data = get_openclaw_data(period)
         data["period"] = period
+        data["range"] = resolve_period(period)
         data["timestamp"] = datetime.now().isoformat()
         return data
 
@@ -1513,6 +1521,7 @@ def get_tools(period: str = "today") -> Dict[str, Any]:
         def fetch():
             data = get_tools_data(period)
             data["period"] = period
+            data["range"] = resolve_period(period)
             data["timestamp"] = datetime.now().isoformat()
             return data
 
@@ -1781,17 +1790,23 @@ def get_active_time(
     Refresh button can clear a stale figure or one missing a tool that failed.
     """
     _validate_date_params(date_from, date_to)
+    def fetch():
+        data = get_active_time_data(
+            period,
+            date_from,
+            date_to,
+            include_review_sessions=include_review_sessions,
+        )
+        if isinstance(data, dict):
+            data["range"] = resolve_period(period, date_from, date_to)
+        return data
+
     try:
         cache_key = _active_time_cache_key(period, date_from, date_to, include_review_sessions)
         return _cached_route(
             "/api/active-time",
             cache_key,
-            lambda: get_active_time_data(
-                period,
-                date_from,
-                date_to,
-                include_review_sessions=include_review_sessions,
-            ),
+            fetch,
             force_refresh=refresh,
         )
     except UsageDatabaseSchemaTooNewError as e:
@@ -1900,6 +1915,58 @@ def get_stats(year: Optional[int] = None) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(e))
     except CacheBackpressureError as e:
         raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/insights")
+def get_insights(
+    period: str = "year",
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    facets: Optional[str] = None,
+    include_project_names: bool = True,
+    refresh: bool = False,
+) -> Dict[str, Any]:
+    """Facet-selected usage analytics for report-style consumers.
+
+    One request covers every facet a yearly report needs. The alternative -- an
+    endpoint per metric -- is the /api/sessions fan-out shape, which serialises
+    against the compute semaphore and sheds load at 503; a report would open
+    with eight cold round trips instead of one.
+
+    A closed window is cached indefinitely by ``_window_cache_key``, so a past
+    year is computed once and every later view is a cache hit.
+    """
+    _validate_date_params(date_from, date_to)
+    try:
+        cache_key = _window_cache_key(
+            f"insights_{period}_{date_from}_{date_to}_{facets}_{include_project_names}",
+            date_from,
+            date_to,
+        )
+        return _cached_route(
+            "/api/insights",
+            cache_key,
+            lambda: compute_insights(
+                period,
+                date_from,
+                date_to,
+                facets=facets,
+                include_project_names=include_project_names,
+            ),
+            force_refresh=refresh,
+        )
+    except UnknownFacetError as e:
+        # Refused rather than ignored: a dropped facet renders as a blank
+        # section labelled as data, which is the D1 failure mode in a new place.
+        raise HTTPException(status_code=400, detail=str(e))
+    except UsageDatabaseSchemaTooNewError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except CacheBackpressureError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

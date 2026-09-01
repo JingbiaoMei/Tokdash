@@ -162,6 +162,42 @@ _CONTRIBUTION_DAYS_SQL = """
         """
 
 
+# The /api/insights fetch. One scan grouped finely enough to fold into every
+# time-shaped facet (hour-of-day, weekday, weekday x hour, daily, models, tools)
+# without going back to the database per facet. Grouping is sparse in practice --
+# a year of heavy multi-tool use lands around 7.5k groups -- so the fold stays
+# cheap no matter how many facets a caller asks for.
+#
+# Deliberately NOT grouped by file_path: that is one group per file per hour and
+# explodes the row count. The projects facet gets its own coarser scan below.
+_INSIGHT_ROWS_SQL = """
+            SELECT
+                date(timestamp / 1000, 'unixepoch', 'localtime') AS day,
+                CAST(strftime('%H', timestamp / 1000, 'unixepoch', 'localtime') AS INTEGER) AS hour,
+                source,
+                model,
+                provider,
+                SUM(input + output + cache_read + cache_write + reasoning) AS tokens_sum,
+                SUM(cost) AS cost_sum,
+                SUM(message_count) AS message_count_sum,
+                COUNT(*) AS row_count
+            FROM usage_entries
+        """
+
+# The projects facet. Grouped by file_path only, which the caller joins to
+# session_records to recover a project name. usage_entries has no project column,
+# but file_path is populated for every file-backed source and is the same path
+# session_records indexes, so the attribution is a lookup rather than a migration.
+_INSIGHT_PROJECT_SQL = """
+            SELECT
+                file_path,
+                SUM(input + output + cache_read + cache_write + reasoning) AS tokens_sum,
+                SUM(cost) AS cost_sum,
+                SUM(message_count) AS message_count_sum
+            FROM usage_entries
+        """
+
+
 def _as_float(value: Any) -> float | None:
     try:
         if value is None:
@@ -1980,6 +2016,95 @@ class UsageEntryStore:
             )
 
         return [by_date[k] for k in sorted(by_date)]
+
+    def insight_rows(
+        self,
+        *,
+        sources: Optional[Iterable[str]] = None,
+        since: Optional[datetime] = None,
+        until: Optional[datetime] = None,
+    ) -> list[dict[str, Any]]:
+        """One (day, hour, source, model) scan feeding every time-shaped facet.
+
+        Costs are read as stored rather than repriced per group: the unpriced-row
+        recompute that contribution_days() does exists so the Stats grid agrees
+        with Overview to the cent. Insights are ranked and bucketed, never
+        reconciled against another surface, so the extra pricing pass would buy
+        nothing here and doubles the fold.
+        """
+        where, args = self._where(sources=sources, since=since, until=until)
+        query = _INSIGHT_ROWS_SQL
+        if where:
+            query += " WHERE " + " AND ".join(where)
+        query += " GROUP BY day, hour, source, provider, model"
+
+        rows = self._read_priced(lambda conn: conn.execute(query, args).fetchall())
+        return [
+            {
+                "day": str(row["day"] or ""),
+                "hour": int(row["hour"] or 0),
+                "source": str(row["source"] or "unknown"),
+                "model": str(row["model"] or "unknown"),
+                "provider": str(row["provider"] or ""),
+                "tokens": int(row["tokens_sum"] or 0),
+                "cost": float(row["cost_sum"] or 0.0),
+                "messages": int(row["message_count_sum"] or 0),
+                "entries": int(row["row_count"] or 0),
+            }
+            for row in rows
+            if row["day"]
+        ]
+
+    def project_usage_rows(
+        self,
+        *,
+        sources: Optional[Iterable[str]] = None,
+        since: Optional[datetime] = None,
+        until: Optional[datetime] = None,
+    ) -> list[dict[str, Any]]:
+        """Per-file usage totals, for attribution against session_records."""
+        where, args = self._where(sources=sources, since=since, until=until)
+        where.append("file_path != ''")
+        query = _INSIGHT_PROJECT_SQL + " WHERE " + " AND ".join(where) + " GROUP BY file_path"
+
+        rows = self._read_priced(lambda conn: conn.execute(query, args).fetchall())
+        return [
+            {
+                "file_path": str(row["file_path"] or ""),
+                "tokens": int(row["tokens_sum"] or 0),
+                "cost": float(row["cost_sum"] or 0.0),
+                "messages": int(row["message_count_sum"] or 0),
+            }
+            for row in rows
+        ]
+
+    def session_project_map(self) -> dict[str, str]:
+        """file_path -> project name, read from the stored session records.
+
+        session_records keeps its payload as JSON rather than columns, so the
+        project has to be parsed out rather than selected. Only the insights
+        projects facet pays this, and only when that facet is asked for.
+        """
+        rows = self._read_priced(
+            lambda conn: conn.execute(
+                "SELECT file_path, raw_json FROM session_records"
+            ).fetchall()
+        )
+        mapping: dict[str, str] = {}
+        for row in rows:
+            path = str(row["file_path"] or "")
+            if not path or path in mapping:
+                continue
+            try:
+                decoded = json.loads(row["raw_json"] or "null")
+            except (TypeError, ValueError):
+                continue
+            for record in _session_record_list(decoded):
+                project = record.get("project") if isinstance(record, dict) else None
+                if isinstance(project, str) and project and project != "unknown":
+                    mapping[path] = project
+                    break
+        return mapping
 
     def sync_session_files(
         self,

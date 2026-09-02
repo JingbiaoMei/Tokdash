@@ -117,6 +117,18 @@ def build_parser(prog: str) -> argparse.ArgumentParser:
         action="store_true",
         help="Don't automatically open the browser",
     )
+    parser.add_argument(
+        "--dev-fixture",
+        choices=["dense"],
+        default=None,
+        help="Serve seeded synthetic data for visual development (never reads local history)",
+    )
+    parser.add_argument(
+        "--dev-seed",
+        type=int,
+        default=None,
+        help="Reproduce a development fixture dataset with a specific integer seed",
+    )
 
     # Export options
     parser.add_argument(
@@ -252,14 +264,38 @@ def _open_browser(url: str) -> None:
         pass
 
 
-def serve(host: str, port: int, log_level: str, open_browser: bool = True) -> None:
+def serve(
+    host: str,
+    port: int,
+    log_level: str,
+    open_browser: bool = True,
+    dev_fixture: str | None = None,
+    dev_seed: int | None = None,
+) -> None:
     url_host = "localhost" if host in {"0.0.0.0", "::"} else host
     url = f"http://{url_host}:{port}"
     # Tell the app its effective bind/port so the write-protection gate
     # (api._write_guard) can enforce loopback-only mutations and a Host allowlist.
     app.state.bind = host
     app.state.port = port
+    had_fixture_state = hasattr(app.state, "dev_fixture")
+    previous_fixture = getattr(app.state, "dev_fixture", "")
+    had_fixture_seed_state = hasattr(app.state, "dev_fixture_seed")
+    previous_fixture_seed = getattr(app.state, "dev_fixture_seed", 0)
+    if not dev_fixture:
+        fixture_seed = 0
+    elif dev_seed is not None:
+        fixture_seed = dev_seed
+    else:
+        fixture_seed = random.SystemRandom().randrange(1, 2**32)
+    app.state.dev_fixture = dev_fixture or ""
+    app.state.dev_fixture_seed = fixture_seed
     print(f"🚀 Starting Tokdash on {url}")
+    if dev_fixture:
+        print(
+            f"🧪 Development fixture: {dev_fixture} · seed {fixture_seed} "
+            "(synthetic data; local history, credentials, and provider APIs are not read)"
+        )
     if os.environ.get("TOKDASH_NO_RETENTION_NOTICE", "").strip().lower() not in {"1", "true", "yes"}:
         print(
             "ℹ️  Note: Claude Code & Gemini CLI auto-delete sessions older than ~30 days, "
@@ -274,24 +310,40 @@ def serve(host: str, port: int, log_level: str, open_browser: bool = True) -> No
         timer = threading.Timer(1.0, _open_browser, args=(url,))
         timer.daemon = True
         timer.start()
-    _start_usage_db_sync_daemon()
-    # Materialize the credential_scan grandfather once so upgraded installs keep
-    # their existing polling and the persisted consent state is explicit.
-    from .sources.quota import config as quota_config
-    quota_config.ensure_quota_consent_migrated()
-    _start_quota_poll_daemon()
+    if not dev_fixture:
+        _start_usage_db_sync_daemon()
+        # Materialize the credential_scan grandfather once so upgraded installs keep
+        # their existing polling and the persisted consent state is explicit.
+        from .sources.quota import config as quota_config
+
+        quota_config.ensure_quota_consent_migrated()
+        _start_quota_poll_daemon()
     # Backpressure: cap accepted concurrency and keep-alive lifetime so a load burst
     # returns 503 fast instead of queuing forever and wedging the server. The limit
     # sits above the AnyIO worker pool (~40) so cheap cache hits aren't rejected, but
     # is bounded so the connection backlog can't grow without limit.
-    uvicorn.run(
-        app,
-        host=host,
-        port=port,
-        log_level=log_level,
-        limit_concurrency=_positive_int_env("TOKDASH_LIMIT_CONCURRENCY", 64),
-        timeout_keep_alive=_positive_int_env("TOKDASH_KEEPALIVE", 5),
-    )
+    try:
+        uvicorn.run(
+            app,
+            host=host,
+            port=port,
+            log_level=log_level,
+            limit_concurrency=_positive_int_env("TOKDASH_LIMIT_CONCURRENCY", 64),
+            timeout_keep_alive=_positive_int_env("TOKDASH_KEEPALIVE", 5),
+        )
+    finally:
+        # In production uvicorn.run() only returns at shutdown, so this restore is
+        # effectively process teardown. It exists because the test suite calls
+        # serve() in-process with uvicorn.run monkeypatched, and a leaked
+        # app.state.dev_fixture would make every later test serve fixture data.
+        if had_fixture_state:
+            app.state.dev_fixture = previous_fixture
+        else:
+            del app.state.dev_fixture
+        if had_fixture_seed_state:
+            app.state.dev_fixture_seed = previous_fixture_seed
+        else:
+            del app.state.dev_fixture_seed
 
 
 def export(period: str, pretty: bool, output: str | None, include_quota: bool = False) -> None:
@@ -942,6 +994,18 @@ def cli(argv: list[str] | None = None, prog: str = "tokdash") -> int:
     parser = build_parser(prog=prog)
     args = parser.parse_args(argv)
 
+    # Checked before any command dispatch, not inside the serve branch. These live
+    # on the flat top-level parser, so `tokdash export --dev-fixture dense` parses
+    # cleanly -- and used to export the user's REAL usage while looking like it had
+    # opted into synthetic data. Only serve honors them, so only serve accepts them.
+    if args.command != "serve":
+        if args.dev_fixture:
+            parser.error(f"--dev-fixture is only supported by `serve`, not `{args.command}`")
+        if args.dev_seed is not None:
+            parser.error(f"--dev-seed is only supported by `serve`, not `{args.command}`")
+    elif args.dev_seed is not None and not args.dev_fixture:
+        parser.error("--dev-seed requires --dev-fixture")
+
     if args.command == "version":
         print(f"tokdash {__version__}")
         return 0
@@ -964,7 +1028,14 @@ def cli(argv: list[str] | None = None, prog: str = "tokdash") -> int:
 
     if args.command == "serve":
         port = args.port if args.port is not None else _default_port()
-        serve(args.bind, port, args.log_level, open_browser=not args.no_open)
+        serve(
+            args.bind,
+            port,
+            args.log_level,
+            open_browser=not args.no_open,
+            dev_fixture=args.dev_fixture,
+            dev_seed=args.dev_seed,
+        )
         return 0
 
     if args.command == "export":

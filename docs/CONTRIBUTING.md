@@ -30,6 +30,23 @@ Run from source:
 python3 main.py
 ```
 
+For UI work, start the real dashboard against a dense synthetic dataset:
+```bash
+python3 main.py --dev-fixture dense --dev-seed 17
+```
+
+Omit `--dev-seed` for a new dataset on each server start, then copy the printed seed
+to reproduce it. Fixture mode skips the usage and quota background workers, does not
+read local history, credentials, pricing overrides, or quota snapshots, and rejects
+mutating HTTP requests. Overview, `/api/tools` and `/api/openclaw` -- header and day
+grid alike -- scale with the window they were asked for and agree about it, and
+`/api/active-time` answers the review-sessions toggle. The session lists are the
+exception: they serve a fixed set of rows whatever window you ask for.
+
+Both flags are only accepted by `serve` — `tokdash export --dev-fixture dense` is a
+usage error rather than a silent export of your real usage. `/api/insights` returns
+409 while a fixture is active instead of serving real history to a report consumer.
+
 Run tests:
 ```bash
 pytest -q

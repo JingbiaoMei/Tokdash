@@ -63,6 +63,21 @@ SUPPORTED_BASE_PATHS = ("/tokdash",)
 ACTIVITY_INSIGHTS_CACHE_KEY = "activity_insights_v1"
 
 
+def _dev_fixture_mode(app_obj: Optional[FastAPI] = None) -> str:
+    """Return the explicitly enabled visual-development fixture, if any."""
+    target = app_obj or app
+    return str(getattr(target.state, "dev_fixture", "") or "").strip().lower()
+
+
+def _dev_fixture_seed(app_obj: Optional[FastAPI] = None) -> int:
+    """Return the seed pinned for this fixture server process."""
+    target = app_obj or app
+    try:
+        return int(getattr(target.state, "dev_fixture_seed", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _normalize_public_base_path(value: str | None) -> str:
     raw = (value or "").strip()
     if not raw or raw == "/":
@@ -437,9 +452,12 @@ def _daily_warm_loop() -> None:
 
 @asynccontextmanager
 async def _lifespan(_app: "FastAPI"):
-    if os.environ.get("TOKDASH_WARM_ON_START", "1") != "0":
+    # Fixture mode renders synthetic API payloads and must never start work against
+    # real history in the background. Production behavior is unchanged unless the
+    # explicit CLI switch set app.state.dev_fixture before uvicorn starts.
+    if not _dev_fixture_mode(_app) and os.environ.get("TOKDASH_WARM_ON_START", "1") != "0":
         threading.Thread(target=_warm_caches, name="tokdash-warm", daemon=True).start()
-    if os.environ.get("TOKDASH_DAILY_WARM", "1") != "0":
+    if not _dev_fixture_mode(_app) and os.environ.get("TOKDASH_DAILY_WARM", "1") != "0":
         threading.Thread(target=_daily_warm_loop, name="tokdash-daily-warm", daemon=True).start()
     yield
 
@@ -603,6 +621,11 @@ def mutation_denied_reason(
 
 @app.middleware("http")
 async def _write_guard(request: Request, call_next):
+    if request.method.upper() in _MUTATING_METHODS and _dev_fixture_mode(request.app):
+        return JSONResponse(
+            {"detail": "Writes are disabled while a synthetic development fixture is active."},
+            status_code=409,
+        )
     reason = mutation_denied_reason(request.method, request.headers)
     if reason is not None:
         return JSONResponse({"detail": reason}, status_code=403)
@@ -1371,12 +1394,8 @@ def _baseline_version() -> Optional[str]:
     return version if isinstance(version, str) else None
 
 
-def _effective_pricing_db() -> tuple[Dict[str, Any], str]:
-    """The effective pricing DB and its source: the override (authoritative full replacement)
-    when present/valid, else the packaged baseline. Raises 404/500 only on a broken baseline."""
-    override = _read_pricing_override()
-    if override is not None:
-        return override, "override"
+def _baseline_pricing_db() -> tuple[Dict[str, Any], str]:
+    """The packaged baseline pricing DB. Raises 404/500 only on a broken baseline."""
     try:
         base = _validate_pricing_db(json.loads(PRICING_DB_PATH.read_text(encoding="utf-8")))
     except FileNotFoundError:
@@ -1384,6 +1403,15 @@ def _effective_pricing_db() -> tuple[Dict[str, Any], str]:
     except JSONDecodeError as e:
         raise HTTPException(status_code=500, detail=f"pricing_db.json is invalid JSON: {e.msg}")
     return base, "baseline"
+
+
+def _effective_pricing_db() -> tuple[Dict[str, Any], str]:
+    """The effective pricing DB and its source: the override (authoritative full replacement)
+    when present/valid, else the packaged baseline. Raises 404/500 only on a broken baseline."""
+    override = _read_pricing_override()
+    if override is not None:
+        return override, "override"
+    return _baseline_pricing_db()
 
 
 def _clear_pricing_signature_cache() -> None:
@@ -1471,6 +1499,19 @@ def _pricing_cache_key(base: str) -> str:
 
 @app.get("/api/pricing-db")
 def get_pricing_db() -> Dict[str, Any]:
+    if _dev_fixture_mode() == "dense":
+        # The packaged baseline is part of the install, not user data, so the
+        # editor still renders. The override under the data dir is neither read
+        # nor disclosed -- its path alone identifies the real user.
+        baseline, _ = _baseline_pricing_db()
+        return {
+            "path": "<dev-fixture: pricing overrides are not read or written>",
+            "baseline_path": str(PRICING_DB_PATH),
+            "baseline_version": _baseline_version(),
+            "source": "dev-fixture",
+            "data": baseline,
+            "text": _format_pricing_db(baseline),
+        }
     data, source = _effective_pricing_db()
     # `path` is where edits PERSIST (the override under the data dir); baseline is read-only.
     # `baseline_version` is the shipped baseline's version even when an override is in effect,
@@ -1527,6 +1568,12 @@ def get_usage(
     refresh: bool = False,
 ) -> Dict[str, Any]:
     _validate_date_params(date_from, date_to)
+    if _dev_fixture_mode() == "dense":
+        from .dev_fixtures import dense_usage
+
+        return dense_usage(
+            resolve_period(period, date_from, date_to), seed=_dev_fixture_seed()
+        )
     try:
         cache_key = _window_cache_key(f"usage_{period}_{date_from}_{date_to}", date_from, date_to)
         return _cached_route(
@@ -1549,6 +1596,11 @@ def get_usage(
 
 @app.get("/api/openclaw")
 def get_openclaw(period: str = "today") -> Dict[str, Any]:
+    if _dev_fixture_mode() == "dense":
+        from .dev_fixtures import dense_openclaw
+
+        return dense_openclaw(resolve_period(period), seed=_dev_fixture_seed())
+
     def fetch():
         data = get_openclaw_data(period)
         data["period"] = period
@@ -1572,6 +1624,11 @@ def get_openclaw(period: str = "today") -> Dict[str, Any]:
 @app.get("/api/tools")
 def get_tools(period: str = "today") -> Dict[str, Any]:
     """Coding tools usage (local parsers)."""
+
+    if _dev_fixture_mode() == "dense":
+        from .dev_fixtures import dense_tools
+
+        return dense_tools(resolve_period(period), seed=_dev_fixture_seed())
 
     try:
         def fetch():
@@ -1600,6 +1657,10 @@ def get_quota() -> Dict[str, Any]:
     M1 is intentionally local-only: this route never performs provider network I/O.
     """
 
+    if _dev_fixture_mode() == "dense":
+        from .dev_fixtures import dense_quota
+
+        return dense_quota(seed=_dev_fixture_seed())
     try:
         from .sources.quota import quota_state
 
@@ -1623,6 +1684,10 @@ def get_quota_history(
     end: Optional[int] = None,
     max_points: Optional[int] = 300,
 ) -> Dict[str, Any]:
+    if _dev_fixture_mode() == "dense":
+        from .dev_fixtures import dense_quota_history
+
+        return dense_quota_history(granularity, seed=_dev_fixture_seed())
     try:
         from .sources.quota.config import network_enabled
         from .usage_store import UsageEntryStore
@@ -1724,6 +1789,13 @@ def set_quota_settings(payload: Dict[str, Any]) -> Dict[str, Any]:
 # config-write endpoints stay loopback-guarded.
 @app.get("/api/quota/refresh")
 def refresh_quota() -> Dict[str, Any]:
+    if _dev_fixture_mode() == "dense":
+        return {
+            "snapshots": 14,
+            "inserted": 0,
+            "fixture": "dense",
+            "seed": _dev_fixture_seed(),
+        }
     from .sources.quota import config as quota_config
 
     if not quota_config.quota_tracking_enabled():
@@ -1759,6 +1831,12 @@ def refresh_quota() -> Dict[str, Any]:
 
 @app.get("/api/codex/sessions")
 def get_codex_sessions(period: str = "today", include_review_sessions: Optional[bool] = None) -> Dict[str, Any]:
+    if _dev_fixture_mode() == "dense":
+        from .dev_fixtures import dense_sessions
+
+        return dense_sessions(
+            "codex", include_review_sessions, seed=_dev_fixture_seed()
+        )
     try:
         cache_key = _window_cache_key(
             f"codex_sessions_{period}_{include_review_sessions}", None, None
@@ -1782,6 +1860,12 @@ def get_codex_sessions(period: str = "today", include_review_sessions: Optional[
 @app.get("/api/codex/session")
 def get_codex_session(session_id: str) -> Dict[str, Any]:
     try:
+        if _dev_fixture_mode() == "dense":
+            from .dev_fixtures import dense_session_detail
+
+            return dense_session_detail(
+                "codex", session_id, seed=_dev_fixture_seed()
+            )
         return get_codex_session_detail(session_id)
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -1799,6 +1883,12 @@ def get_sessions(
 ) -> Dict[str, Any]:
     _validate_date_params(date_from, date_to)
     try:
+        if _dev_fixture_mode() == "dense":
+            from .dev_fixtures import dense_sessions
+
+            return dense_sessions(
+                tool, include_review_sessions, seed=_dev_fixture_seed()
+            )
         cache_key = _session_response_cache_key(
             tool,
             period,
@@ -1846,6 +1936,15 @@ def get_active_time(
     Refresh button can clear a stale figure or one missing a tool that failed.
     """
     _validate_date_params(date_from, date_to)
+    if _dev_fixture_mode() == "dense":
+        from .dev_fixtures import dense_active_time
+
+        return dense_active_time(
+            resolve_period(period, date_from, date_to),
+            include_review_sessions,
+            seed=_dev_fixture_seed(),
+        )
+
     def fetch():
         data = get_active_time_data(
             period,
@@ -1881,6 +1980,10 @@ def get_active_time(
 @app.get("/api/session")
 def get_session(tool: str, session_id: str) -> Dict[str, Any]:
     try:
+        if _dev_fixture_mode() == "dense":
+            from .dev_fixtures import dense_session_detail
+
+            return dense_session_detail(tool, session_id, seed=_dev_fixture_seed())
         return get_session_detail(tool, session_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -1959,6 +2062,10 @@ async def serve_service_worker(request: Request):
 
 @app.get("/api/stats")
 def get_stats(year: Optional[int] = None) -> Dict[str, Any]:
+    if _dev_fixture_mode() == "dense":
+        from .dev_fixtures import dense_stats
+
+        return dense_stats(year, seed=_dev_fixture_seed())
     try:
         cache_key = _window_cache_key(
             f"stats_{year}", None, f"{year}-12-31" if year else None
@@ -1995,6 +2102,20 @@ def get_insights(
     year is computed once and every later view is a cache hit.
     """
     _validate_date_params(date_from, date_to)
+    if _dev_fixture_mode() == "dense":
+        # Refused rather than synthesized. This route is for external report
+        # consumers, so silently serving real history would defeat the point of
+        # fixture mode -- but its nine facets are a wide enough contract that a
+        # hand-written stand-in would drift from `compute_insights` unnoticed,
+        # which is the same failure the imported rank keys exist to prevent.
+        # An explicit 409 cannot be mistaken for either one.
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "/api/insights is not synthesized in --dev-fixture mode, and real "
+                "usage history is not read while a fixture is active."
+            ),
+        )
     try:
         cache_key = _window_cache_key(
             f"insights_{period}_{date_from}_{date_to}_{facets}_{include_project_names}",
@@ -2029,6 +2150,10 @@ def get_insights(
 
 @app.get("/api/activity-insights")
 def get_activity_insights(refresh: bool = False) -> dict[str, Any]:
+    if _dev_fixture_mode() == "dense":
+        from .dev_fixtures import dense_activity_insights
+
+        return dense_activity_insights(seed=_dev_fixture_seed())
     try:
         return _cached_route(
             "/api/activity-insights",
@@ -2075,6 +2200,15 @@ def _read_install_manifest() -> Dict[str, Any]:
 async def get_version() -> Dict[str, Any]:
     # Local-only version info; async to stay responsive like /health. Provenance
     # fields come from the setup manifest when present (Phase 1+), else None.
+    if _dev_fixture_mode() == "dense":
+        return {
+            "service": "tokdash",
+            "runtime_version": __version__,
+            "install_method": "dev-fixture",
+            "update_check_enabled": False,
+            "usage_db_schema_supported": USAGE_DB_SCHEMA_VERSION,
+            "fixture_seed": _dev_fixture_seed(),
+        }
     manifest = _read_install_manifest()
     return {
         "service": "tokdash",

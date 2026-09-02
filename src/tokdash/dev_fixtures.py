@@ -16,6 +16,16 @@ from collections.abc import Mapping
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
+from .compute import cache_hit_rate
+from .sessions import SESSION_TOOLS, _include_codex_review_sessions
+from .usage_store import model_cost_rank_key, model_rank_key
+
+# Usage sources (Overview, /api/tools) and session tools (Session Explorer,
+# Active Time) are genuinely different sets in production: `cursor` and
+# `gemini_cli` report token usage but expose no session transcripts, so they
+# appear in TOOL_SPECS and not in SESSION_LABELS. The fixture mirrors that split
+# rather than hiding it -- SESSION_LABELS is pinned to the real
+# `sessions.SESSION_TOOLS` by test_dense_fixture_session_tools_match_production.
 TOOL_SPECS = (
     ("codex", "Codex", ("openai/gpt-5.6-sol", "openai/gpt-5.5", "openai/o4-mini")),
     (
@@ -137,7 +147,7 @@ def _model_row(name: str, tokens: int, seed: int) -> dict[str, Any]:
         "tokens_cache": cache_tokens,
         "cost": cost,
         "messages": messages,
-        "cache_hit_rate": round(cache_tokens / (input_tokens + cache_tokens), 4),
+        "cache_hit_rate": cache_hit_rate(input_tokens, cache_tokens),
     }
 
 
@@ -170,6 +180,7 @@ def dense_usage(range_info: Mapping[str, Any], seed: int = 0) -> dict[str, Any]:
             )
             for model_index, model_name in enumerate(model_names)
         ]
+        models.sort(key=model_rank_key)
         tokens = sum(row["tokens"] for row in models)
         tokens_in = sum(row["tokens_in"] for row in models)
         tokens_out = sum(row["tokens_out"] for row in models)
@@ -182,10 +193,15 @@ def dense_usage(range_info: Mapping[str, Any], seed: int = 0) -> dict[str, Any]:
             "cost": round(sum(row["cost"] for row in models), 6),
             "messages": sum(row["messages"] for row in models),
             "models": models,
-            "cache_hit_rate": round(tokens_cache / (tokens_in + tokens_cache), 4),
+            "cache_hit_rate": cache_hit_rate(tokens_in, tokens_cache),
         }
         apps[tool] = app_row
         coding_models.extend({"source": tool, **row} for row in models)
+
+    # API.md documents coding_models as token-ranked, and the real producer gets
+    # that by filtering an already-sorted all_models. Built per tool, this list
+    # came out grouped by tool instead.
+    coding_models.sort(key=model_rank_key)
 
     openclaw_models = [
         _model_row(
@@ -227,11 +243,11 @@ def dense_usage(range_info: Mapping[str, Any], seed: int = 0) -> dict[str, Any]:
     combined_models = []
     for row in combined.values():
         row["cost"] = round(row["cost"], 6)
-        row["cache_hit_rate"] = round(
-            row["tokens_cache"] / (row["tokens_in"] + row["tokens_cache"]), 4
-        )
+        row["cache_hit_rate"] = cache_hit_rate(row["tokens_in"], row["tokens_cache"])
         combined_models.append(row)
-    combined_models.sort(key=lambda row: (-row["tokens"], -row["cost"], row["name"]))
+    # Imported, not re-derived: a fixture whose ordering can drift from the
+    # server's is the one place the drift would go unnoticed.
+    combined_models.sort(key=model_rank_key)
 
     by_tool = {
         tool: {
@@ -251,7 +267,7 @@ def dense_usage(range_info: Mapping[str, Any], seed: int = 0) -> dict[str, Any]:
         "tokens_in": openclaw_input,
         "tokens_cache": openclaw_cache,
         "cost": round(sum(row["cost"] for row in openclaw_models), 6),
-        "cache_hit_rate": round(openclaw_cache / (openclaw_input + openclaw_cache), 4),
+        "cache_hit_rate": cache_hit_rate(openclaw_input, openclaw_cache),
     }
 
     total_tokens = sum(row["tokens"] for row in by_tool.values())
@@ -269,10 +285,9 @@ def dense_usage(range_info: Mapping[str, Any], seed: int = 0) -> dict[str, Any]:
         "total_messages": total_messages,
         "tokens_in": sum(row["tokens_in"] for row in by_tool.values()),
         "tokens_cache": sum(row["tokens_cache"] for row in by_tool.values()),
-        "cache_hit_rate": round(
-            sum(row["tokens_cache"] for row in by_tool.values())
-            / sum(row["tokens_in"] + row["tokens_cache"] for row in by_tool.values()),
-            4,
+        "cache_hit_rate": cache_hit_rate(
+            sum(row["tokens_in"] for row in by_tool.values()),
+            sum(row["tokens_cache"] for row in by_tool.values()),
         ),
         "apps": apps,
         "coding_apps": apps,
@@ -281,9 +296,7 @@ def dense_usage(range_info: Mapping[str, Any], seed: int = 0) -> dict[str, Any]:
         "openclaw_models": openclaw_models,
         "combined_models": combined_models,
         "top_models": combined_models[:5],
-        "top_models_by_cost": sorted(
-            combined_models, key=lambda row: (-row["cost"], -row["tokens"])
-        )[:5],
+        "top_models_by_cost": sorted(combined_models, key=model_cost_rank_key)[:5],
         "comparison": {
             "tokens_prev": int(total_tokens * previous_factor),
             "cost_prev": round(total_cost * previous_factor, 2),
@@ -300,6 +313,121 @@ def dense_usage(range_info: Mapping[str, Any], seed: int = 0) -> dict[str, Any]:
         "source_errors": [],
         "fixture": {"name": "dense", "seed": seed},
     }
+
+
+def dense_tools(range_info: Mapping[str, Any], seed: int = 0) -> dict[str, Any]:
+    """Coding-tool usage in `parse_entries_json` shape, plus the route's envelope.
+
+    Derived from the same seeded draw as :func:`dense_usage` so Overview and
+    /api/tools never disagree about the same window.
+    """
+    usage = dense_usage(range_info, seed=seed)
+    all_models = usage["coding_models"]
+    return {
+        "total_cost": round(sum(row["cost"] for row in all_models), 6),
+        "total_tokens": sum(row["tokens"] for row in all_models),
+        "total_messages": sum(row["messages"] for row in all_models),
+        "cache_hit_rate": cache_hit_rate(
+            sum(row["tokens_in"] for row in all_models),
+            sum(row["tokens_cache"] for row in all_models),
+        ),
+        "apps": usage["apps"],
+        "all_models": all_models,
+        "source_errors": [],
+        "period": usage["period"],
+        "range": dict(range_info),
+        "timestamp": _now_iso(),
+    }
+
+
+def dense_openclaw(range_info: Mapping[str, Any], seed: int = 0) -> dict[str, Any]:
+    """OpenClaw usage in `sources.openclaw.get_session_usage` shape.
+
+    Note `models` is a mapping keyed by model name with no ``name`` field -- that
+    is the real producer's shape, and it differs from every other model list.
+    """
+    usage = dense_usage(range_info, seed=seed)
+    rows = usage["openclaw_models"]
+    total_in = sum(row["tokens_in"] for row in rows)
+    total_cache = sum(row["tokens_cache"] for row in rows)
+    return {
+        "total_tokens": sum(row["tokens"] for row in rows),
+        "total_cost": round(sum(row["cost"] for row in rows), 6),
+        "total_messages": sum(row["messages"] for row in rows),
+        "total_tokens_in": total_in,
+        "total_tokens_cache": total_cache,
+        "cache_hit_rate": cache_hit_rate(total_in, total_cache),
+        "models": {
+            row["name"]: {key: value for key, value in row.items() if key != "name"}
+            for row in rows
+        },
+        "contributions": _openclaw_contributions(range_info, seed),
+        "period": usage["period"],
+        "range": dict(range_info),
+        "timestamp": _now_iso(),
+    }
+
+
+def _openclaw_contributions(
+    range_info: Mapping[str, Any], seed: int
+) -> list[dict[str, Any]]:
+    """Per-day OpenClaw rows over the requested window, never past today."""
+    today = datetime.now().astimezone().date()
+    try:
+        end = min(date.fromisoformat(str(range_info.get("to"))), today)
+    except (TypeError, ValueError):
+        end = today
+    start = end - timedelta(days=max(0, _days_in_range(range_info) - 1))
+
+    days: list[dict[str, Any]] = []
+    for offset in range((end - start).days + 1):
+        day = start + timedelta(days=offset)
+        day_rng = _rng(seed, f"openclaw-day:{day.isoformat()}")
+        if day_rng.random() < 0.12:
+            continue
+        tokens = int(day_rng.triangular(4_000_000, 180_000_000, 41_000_000))
+        tokens_in = int(tokens * 0.12)
+        tokens_cache = int(tokens * 0.73)
+        tokens_out = max(1, tokens - tokens_in - tokens_cache)
+        messages = day_rng.randint(12, 210)
+        cost = round(
+            tokens_in * 0.0000025
+            + tokens_out * 0.0000105
+            + tokens_cache * 0.00000025,
+            6,
+        )
+        model = SESSION_MODELS[day.toordinal() % len(SESSION_MODELS)]
+        days.append(
+            {
+                "date": day.isoformat(),
+                "totals": {"tokens": tokens, "cost": cost, "messages": messages},
+                "intensity": 0,
+                "tokenBreakdown": {
+                    "input": tokens_in,
+                    "output": tokens_out,
+                    "cacheRead": tokens_cache,
+                    "cacheWrite": 0,
+                    "reasoning": 0,
+                },
+                "sources": [
+                    {
+                        "source": "openclaw",
+                        "modelId": model,
+                        "providerId": "unknown",
+                        "tokens": {
+                            "input": tokens_in,
+                            "output": tokens_out,
+                            "cacheRead": tokens_cache,
+                            "cacheWrite": 0,
+                            "reasoning": 0,
+                        },
+                        "cost": cost,
+                        "messages": messages,
+                    }
+                ],
+            }
+        )
+    return days
 
 
 def _session_row(tool: str, index: int, seed: int = 0) -> dict[str, Any]:
@@ -341,7 +469,7 @@ def _session_row(tool: str, index: int, seed: int = 0) -> dict[str, Any]:
         "tokens_reasoning": int(tokens_out * 0.31),
         "tokens": tokens,
         "cache_ratio": round(tokens_cache / tokens, 4),
-        "cache_hit_rate": round(tokens_cache / (tokens_in + tokens_cache), 4),
+        "cache_hit_rate": cache_hit_rate(tokens_in, tokens_cache),
         "cost": round(
             tokens_in * 0.0000025 + tokens_out * 0.0000105 + tokens_cache * 0.00000025,
             6,
@@ -354,17 +482,30 @@ def _session_row(tool: str, index: int, seed: int = 0) -> dict[str, Any]:
     }
 
 
+SESSION_ROWS_PER_TOOL = 18
+
+
 def dense_sessions(
     tool: str, include_review_sessions: bool | None = None, seed: int = 0
 ) -> dict[str, Any]:
-    rows = [_session_row(tool, index, seed) for index in range(18)]
-    if tool == "codex" and include_review_sessions is False:
+    # Same rejection as `sessions.get_sessions_data`, so an unsupported tool still
+    # renders the dashboard's error state instead of a fabricated session list.
+    key = str(tool or "").strip().lower()
+    if key not in SESSION_TOOLS:
+        raise ValueError(f"Unsupported session tool: {tool}")
+
+    # The real route resolves an unset flag through the configured default rather
+    # than treating None as False -- and the response has to report what was
+    # actually applied, or the payload contradicts the rows it ships.
+    include_review = _include_codex_review_sessions(include_review_sessions)
+    rows = [_session_row(key, index, seed) for index in range(SESSION_ROWS_PER_TOOL)]
+    if key == "codex" and not include_review:
         rows = [row for row in rows if not row["is_review_session"]]
     return {
-        "tool": tool,
-        "tool_label": SESSION_LABELS.get(tool, tool.replace("_", " ").title()),
+        "tool": key,
+        "tool_label": SESSION_LABELS.get(key, key.replace("_", " ").title()),
         "period": "fixture",
-        "include_review_sessions": bool(include_review_sessions),
+        "include_review_sessions": include_review,
         "latest_session": rows[0] if rows else None,
         "sessions": rows,
         "summary": {
@@ -383,9 +524,26 @@ def dense_sessions(
 
 
 def dense_session_detail(tool: str, session_id: str, seed: int = 0) -> dict[str, Any]:
-    detail_rng = _rng(seed, f"detail:{tool}:{session_id}")
-    session = _session_row(tool, 0, seed)
-    session["session_id"] = session_id
+    key = str(tool or "").strip().lower()
+    if key not in SESSION_TOOLS:
+        raise ValueError(f"Unsupported session tool: {tool}")
+
+    # Only ids this fixture actually generates resolve. Fabricating a session for
+    # any string meant /api/session could never 404, so the dashboard's
+    # "session not found" path was unreachable -- one of the states the fixture
+    # exists to exercise.
+    known = {
+        _session_row(key, index, seed)["session_id"]: index
+        for index in range(SESSION_ROWS_PER_TOOL)
+    }
+    index = known.get(str(session_id))
+    if index is None:
+        raise FileNotFoundError(
+            f"{SESSION_LABELS.get(key, key.title())} session not found: {session_id}"
+        )
+
+    detail_rng = _rng(seed, f"detail:{key}:{session_id}")
+    session = _session_row(key, index, seed)
     start = datetime.fromisoformat(session["started_at"])
     turns = []
     for index in range(48):
@@ -508,12 +666,17 @@ def _contribution(day: date, seed: int = 0) -> dict[str, Any]:
 
 
 def dense_stats(year: int | None = None, seed: int = 0) -> dict[str, Any]:
+    today = datetime.now().astimezone().date()
     if year is None:
-        end = datetime.now().astimezone().date()
+        end = today
         start = end - timedelta(days=419)
     else:
         start = date(year, 1, 1)
-        end = date(year, 12, 31)
+        # Never past today: real `compute_stats` builds the contribution list from
+        # dates that actually carry usage, so it cannot emit a future day. Asking
+        # the year selector for the current year used to fill the graph through
+        # December with fabricated activity.
+        end = min(date(year, 12, 31), today)
     contributions = [
         _contribution(start + timedelta(days=index), seed)
         for index in range((end - start).days + 1)

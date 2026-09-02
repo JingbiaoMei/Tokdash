@@ -2,9 +2,22 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import contextmanager
+from datetime import datetime, timezone
+
+import pytest
+from fastapi import HTTPException
 
 from tokdash import api, cli
-from tokdash.dev_fixtures import dense_usage, fixture_year_days
+from tokdash.compute import parse_entries_json
+from tokdash.dev_fixtures import (
+    SESSION_LABELS,
+    TOOL_SPECS,
+    dense_usage,
+    fixture_year_days,
+)
+from tokdash.sessions import SESSION_TOOLS
+from tokdash.sources.openclaw import get_session_usage
+from tokdash.usage_store import model_cost_rank_key, model_rank_key
 
 
 @contextmanager
@@ -155,3 +168,206 @@ def test_serve_fixture_skips_real_background_daemons(monkeypatch):
     assert calls == ["dense"]
     assert not hasattr(api.app.state, "dev_fixture")
     assert not hasattr(api.app.state, "dev_fixture_seed")
+
+
+# --- Follow-up coverage: the gaps between what the docs promise and what the
+# --- code enforces (PR #63 review).
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["export", "--dev-fixture", "dense"],
+        ["export", "--dev-seed", "5"],
+        ["quota", "--dev-fixture", "dense", "--dev-seed", "5"],
+        ["db", "--dev-fixture", "dense"],
+        ["version", "--dev-fixture", "dense"],
+    ],
+)
+def test_dev_fixture_flags_are_refused_outside_serve(argv, capsys):
+    """Only serve honors these, so only serve may accept them.
+
+    They sit on the flat top-level parser, so every one of these used to parse
+    cleanly and then run against the user's REAL data with no warning.
+    """
+    with pytest.raises(SystemExit):
+        cli.cli(argv)
+
+    assert "only supported by `serve`" in capsys.readouterr().err
+
+
+def test_dev_seed_still_requires_a_fixture_on_serve(capsys):
+    with pytest.raises(SystemExit):
+        cli.cli(["serve", "--dev-seed", "5"])
+
+    assert "--dev-seed requires --dev-fixture" in capsys.readouterr().err
+
+
+def test_dense_fixture_session_tools_match_production():
+    """SESSION_LABELS is the real session-tool set, not an arbitrary subset.
+
+    Active Time covers 17 tools and Overview covers 12 because usage sources and
+    session tools genuinely differ (cursor and gemini_cli report tokens but ship
+    no transcripts). Pinning the session half here keeps that difference
+    deliberate instead of drifting.
+    """
+    assert set(SESSION_LABELS) == set(SESSION_TOOLS)
+    assert {tool for tool, _label, _models in TOOL_SPECS} - set(SESSION_LABELS) == {
+        "cursor",
+        "gemini_cli",
+    }
+
+
+def test_dense_fixture_model_arrays_use_the_shared_rank_keys():
+    """The fixture must not re-implement the #61 ordering contract."""
+    payload = dense_usage(api.resolve_period("year"), seed=17)
+
+    for key in ("combined_models", "coding_models"):
+        rows = payload[key]
+        assert rows == sorted(rows, key=model_rank_key), key
+
+    assert payload["top_models"] == payload["combined_models"][:5]
+    assert (
+        payload["top_models_by_cost"]
+        == sorted(payload["combined_models"], key=model_cost_rank_key)[:5]
+    )
+    for app_row in payload["apps"].values():
+        assert app_row["models"] == sorted(app_row["models"], key=model_rank_key)
+
+
+def test_dense_fixture_surfaces_session_error_states():
+    """404 and 400 are UI states the fixture exists to exercise."""
+    with dense_fixture():
+        with pytest.raises(HTTPException) as unknown_session:
+            api.get_session(tool="codex", session_id="no-such-session")
+        with pytest.raises(HTTPException) as unknown_tool:
+            api.get_sessions(tool="not-a-real-tool", period="week")
+        with pytest.raises(HTTPException) as unknown_detail_tool:
+            api.get_session(tool="not-a-real-tool", session_id="x")
+
+    assert unknown_session.value.status_code == 404
+    assert unknown_tool.value.status_code == 400
+    assert "Unsupported session tool" in str(unknown_tool.value.detail)
+    assert unknown_detail_tool.value.status_code == 400
+
+
+def test_dense_fixture_stats_never_fabricate_future_days():
+    """`compute_stats` builds days from real usage, so it cannot emit the future."""
+    today = datetime.now().astimezone().date()
+
+    with dense_fixture():
+        current_year = api.get_stats(year=today.year)
+        future_year = api.get_stats(year=today.year + 4)
+        rolling = api.get_stats()
+
+    assert current_year["contributions"][-1]["date"] == today.isoformat()
+    assert all(day["date"] <= today.isoformat() for day in current_year["contributions"])
+    assert future_year["contributions"] == []
+    assert all(day["date"] <= today.isoformat() for day in rolling["contributions"])
+
+
+def test_dense_fixture_review_sessions_follow_the_configured_default(monkeypatch):
+    """An unset flag resolves through the real default, and the payload says so."""
+    monkeypatch.delenv("TOKDASH_INCLUDE_CODEX_GUARDIAN", raising=False)
+    with dense_fixture():
+        off = api.get_sessions(tool="codex", period="week")
+
+    assert off["include_review_sessions"] is False
+    assert not any(row["is_review_session"] for row in off["sessions"])
+
+    monkeypatch.setenv("TOKDASH_INCLUDE_CODEX_GUARDIAN", "1")
+    with dense_fixture():
+        on = api.get_sessions(tool="codex", period="week")
+
+    assert on["include_review_sessions"] is True
+    assert any(row["is_review_session"] for row in on["sessions"])
+
+
+def test_dense_fixture_insights_refuses_instead_of_serving_real_history():
+    """/api/insights is the external report endpoint added by #59."""
+    with dense_fixture():
+        with pytest.raises(HTTPException) as refused:
+            api.get_insights(period="year")
+
+    assert refused.value.status_code == 409
+    assert "not synthesized" in str(refused.value.detail)
+
+
+def test_dense_fixture_tools_route_matches_the_real_producer_shape():
+    real = parse_entries_json(
+        {
+            "entries": [
+                {
+                    "source": "codex",
+                    "model": "gpt-5.6-sol",
+                    "provider": "openai",
+                    "input": 10,
+                    "output": 5,
+                    "cacheRead": 3,
+                }
+            ]
+        }
+    )
+
+    with dense_fixture():
+        fixture = api.get_tools(period="week")
+
+    assert set(fixture) == set(real) | {"source_errors", "period", "range", "timestamp"}
+    assert set(fixture["all_models"][0]) == set(real["all_models"][0])
+    assert set(next(iter(fixture["apps"].values()))) == set(
+        next(iter(real["apps"].values()))
+    )
+    assert fixture["total_tokens"] == sum(
+        row["tokens"] for row in fixture["all_models"]
+    )
+
+
+def test_dense_fixture_openclaw_route_matches_the_real_producer_shape():
+    real = get_session_usage(
+        [],
+        since_date=datetime(2020, 1, 1, tzinfo=timezone.utc),
+        until_date=datetime.now(timezone.utc),
+    )
+
+    with dense_fixture():
+        fixture = api.get_openclaw(period="week")
+
+    assert set(fixture) == set(real) | {"period", "range", "timestamp"}
+    # `models` is a mapping keyed by model name here -- unlike every other model
+    # list in the API -- and a fixture that returned a list would hide that.
+    assert isinstance(fixture["models"], dict)
+    assert all("name" not in row for row in fixture["models"].values())
+    assert fixture["total_tokens"] == sum(
+        row["tokens"] for row in fixture["models"].values()
+    )
+
+
+def test_dense_fixture_pricing_db_never_discloses_the_user_override():
+    with dense_fixture():
+        payload = api.get_pricing_db()
+
+    assert payload["source"] == "dev-fixture"
+    assert str(api._pricing_override_path()) not in payload["path"]
+    # The packaged baseline is part of the install, not user data.
+    assert payload["data"]
+    assert payload["baseline_path"] == str(api.PRICING_DB_PATH)
+
+
+def test_dense_fixture_codex_routes_do_not_read_rollout_files(monkeypatch):
+    """The /api/codex/* pair reads transcripts off disk in the real path."""
+
+    def explode(*_args, **_kwargs):
+        raise AssertionError("fixture mode reached the real Codex reader")
+
+    monkeypatch.setattr(api, "get_codex_sessions_data", explode)
+    monkeypatch.setattr(api, "get_codex_session_detail", explode)
+
+    with dense_fixture():
+        listing = api.get_codex_sessions(period="week", include_review_sessions=True)
+        detail = api.get_codex_session(
+            session_id=listing["sessions"][0]["session_id"]
+        )
+
+    assert listing["tool"] == "codex"
+    assert len(listing["sessions"]) == 18
+    assert detail["turns"]

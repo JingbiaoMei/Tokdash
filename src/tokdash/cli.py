@@ -282,13 +282,12 @@ def serve(
     previous_fixture = getattr(app.state, "dev_fixture", "")
     had_fixture_seed_state = hasattr(app.state, "dev_fixture_seed")
     previous_fixture_seed = getattr(app.state, "dev_fixture_seed", 0)
-    fixture_seed = (
-        dev_seed
-        if dev_fixture and dev_seed is not None
-        else random.SystemRandom().randrange(1, 2**32)
-        if dev_fixture
-        else 0
-    )
+    if not dev_fixture:
+        fixture_seed = 0
+    elif dev_seed is not None:
+        fixture_seed = dev_seed
+    else:
+        fixture_seed = random.SystemRandom().randrange(1, 2**32)
     app.state.dev_fixture = dev_fixture or ""
     app.state.dev_fixture_seed = fixture_seed
     print(f"🚀 Starting Tokdash on {url}")
@@ -333,6 +332,10 @@ def serve(
             timeout_keep_alive=_positive_int_env("TOKDASH_KEEPALIVE", 5),
         )
     finally:
+        # In production uvicorn.run() only returns at shutdown, so this restore is
+        # effectively process teardown. It exists because the test suite calls
+        # serve() in-process with uvicorn.run monkeypatched, and a leaked
+        # app.state.dev_fixture would make every later test serve fixture data.
         if had_fixture_state:
             app.state.dev_fixture = previous_fixture
         else:
@@ -991,6 +994,18 @@ def cli(argv: list[str] | None = None, prog: str = "tokdash") -> int:
     parser = build_parser(prog=prog)
     args = parser.parse_args(argv)
 
+    # Checked before any command dispatch, not inside the serve branch. These live
+    # on the flat top-level parser, so `tokdash export --dev-fixture dense` parses
+    # cleanly -- and used to export the user's REAL usage while looking like it had
+    # opted into synthetic data. Only serve honors them, so only serve accepts them.
+    if args.command != "serve":
+        if args.dev_fixture:
+            parser.error(f"--dev-fixture is only supported by `serve`, not `{args.command}`")
+        if args.dev_seed is not None:
+            parser.error(f"--dev-seed is only supported by `serve`, not `{args.command}`")
+    elif args.dev_seed is not None and not args.dev_fixture:
+        parser.error("--dev-seed requires --dev-fixture")
+
     if args.command == "version":
         print(f"tokdash {__version__}")
         return 0
@@ -1012,8 +1027,6 @@ def cli(argv: list[str] | None = None, prog: str = "tokdash") -> int:
         return run_lifecycle(args)
 
     if args.command == "serve":
-        if args.dev_seed is not None and not args.dev_fixture:
-            parser.error("--dev-seed requires --dev-fixture")
         port = args.port if args.port is not None else _default_port()
         serve(
             args.bind,

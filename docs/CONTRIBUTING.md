@@ -37,7 +37,12 @@ python3 main.py --dev-fixture dense --dev-seed 17
 
 Omit `--dev-seed` for a new dataset on each server start, then copy the printed seed
 to reproduce it. Fixture mode skips the usage and quota background workers, does not
-read local history or credentials, and rejects mutating HTTP requests.
+read local history, credentials, pricing overrides, or quota snapshots, and rejects
+mutating HTTP requests.
+
+Both flags are only accepted by `serve` — `tokdash export --dev-fixture dense` is a
+usage error rather than a silent export of your real usage. `/api/insights` returns
+409 while a fixture is active instead of serving real history to a report consumer.
 
 Run tests:
 ```bash

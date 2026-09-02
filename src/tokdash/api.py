@@ -1394,12 +1394,8 @@ def _baseline_version() -> Optional[str]:
     return version if isinstance(version, str) else None
 
 
-def _effective_pricing_db() -> tuple[Dict[str, Any], str]:
-    """The effective pricing DB and its source: the override (authoritative full replacement)
-    when present/valid, else the packaged baseline. Raises 404/500 only on a broken baseline."""
-    override = _read_pricing_override()
-    if override is not None:
-        return override, "override"
+def _baseline_pricing_db() -> tuple[Dict[str, Any], str]:
+    """The packaged baseline pricing DB. Raises 404/500 only on a broken baseline."""
     try:
         base = _validate_pricing_db(json.loads(PRICING_DB_PATH.read_text(encoding="utf-8")))
     except FileNotFoundError:
@@ -1407,6 +1403,15 @@ def _effective_pricing_db() -> tuple[Dict[str, Any], str]:
     except JSONDecodeError as e:
         raise HTTPException(status_code=500, detail=f"pricing_db.json is invalid JSON: {e.msg}")
     return base, "baseline"
+
+
+def _effective_pricing_db() -> tuple[Dict[str, Any], str]:
+    """The effective pricing DB and its source: the override (authoritative full replacement)
+    when present/valid, else the packaged baseline. Raises 404/500 only on a broken baseline."""
+    override = _read_pricing_override()
+    if override is not None:
+        return override, "override"
+    return _baseline_pricing_db()
 
 
 def _clear_pricing_signature_cache() -> None:
@@ -1494,6 +1499,19 @@ def _pricing_cache_key(base: str) -> str:
 
 @app.get("/api/pricing-db")
 def get_pricing_db() -> Dict[str, Any]:
+    if _dev_fixture_mode() == "dense":
+        # The packaged baseline is part of the install, not user data, so the
+        # editor still renders. The override under the data dir is neither read
+        # nor disclosed -- its path alone identifies the real user.
+        baseline, _ = _baseline_pricing_db()
+        return {
+            "path": "<dev-fixture: pricing overrides are not read or written>",
+            "baseline_path": str(PRICING_DB_PATH),
+            "baseline_version": _baseline_version(),
+            "source": "dev-fixture",
+            "data": baseline,
+            "text": _format_pricing_db(baseline),
+        }
     data, source = _effective_pricing_db()
     # `path` is where edits PERSIST (the override under the data dir); baseline is read-only.
     # `baseline_version` is the shipped baseline's version even when an override is in effect,
@@ -1578,6 +1596,11 @@ def get_usage(
 
 @app.get("/api/openclaw")
 def get_openclaw(period: str = "today") -> Dict[str, Any]:
+    if _dev_fixture_mode() == "dense":
+        from .dev_fixtures import dense_openclaw
+
+        return dense_openclaw(resolve_period(period), seed=_dev_fixture_seed())
+
     def fetch():
         data = get_openclaw_data(period)
         data["period"] = period
@@ -1601,6 +1624,11 @@ def get_openclaw(period: str = "today") -> Dict[str, Any]:
 @app.get("/api/tools")
 def get_tools(period: str = "today") -> Dict[str, Any]:
     """Coding tools usage (local parsers)."""
+
+    if _dev_fixture_mode() == "dense":
+        from .dev_fixtures import dense_tools
+
+        return dense_tools(resolve_period(period), seed=_dev_fixture_seed())
 
     try:
         def fetch():
@@ -1803,6 +1831,12 @@ def refresh_quota() -> Dict[str, Any]:
 
 @app.get("/api/codex/sessions")
 def get_codex_sessions(period: str = "today", include_review_sessions: Optional[bool] = None) -> Dict[str, Any]:
+    if _dev_fixture_mode() == "dense":
+        from .dev_fixtures import dense_sessions
+
+        return dense_sessions(
+            "codex", include_review_sessions, seed=_dev_fixture_seed()
+        )
     try:
         cache_key = _window_cache_key(
             f"codex_sessions_{period}_{include_review_sessions}", None, None
@@ -1826,6 +1860,12 @@ def get_codex_sessions(period: str = "today", include_review_sessions: Optional[
 @app.get("/api/codex/session")
 def get_codex_session(session_id: str) -> Dict[str, Any]:
     try:
+        if _dev_fixture_mode() == "dense":
+            from .dev_fixtures import dense_session_detail
+
+            return dense_session_detail(
+                "codex", session_id, seed=_dev_fixture_seed()
+            )
         return get_codex_session_detail(session_id)
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -1842,13 +1882,13 @@ def get_sessions(
     include_review_sessions: Optional[bool] = None,
 ) -> Dict[str, Any]:
     _validate_date_params(date_from, date_to)
-    if _dev_fixture_mode() == "dense":
-        from .dev_fixtures import dense_sessions
-
-        return dense_sessions(
-            tool, include_review_sessions, seed=_dev_fixture_seed()
-        )
     try:
+        if _dev_fixture_mode() == "dense":
+            from .dev_fixtures import dense_sessions
+
+            return dense_sessions(
+                tool, include_review_sessions, seed=_dev_fixture_seed()
+            )
         cache_key = _session_response_cache_key(
             tool,
             period,
@@ -1937,11 +1977,11 @@ def get_active_time(
 
 @app.get("/api/session")
 def get_session(tool: str, session_id: str) -> Dict[str, Any]:
-    if _dev_fixture_mode() == "dense":
-        from .dev_fixtures import dense_session_detail
-
-        return dense_session_detail(tool, session_id, seed=_dev_fixture_seed())
     try:
+        if _dev_fixture_mode() == "dense":
+            from .dev_fixtures import dense_session_detail
+
+            return dense_session_detail(tool, session_id, seed=_dev_fixture_seed())
         return get_session_detail(tool, session_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -2060,6 +2100,20 @@ def get_insights(
     year is computed once and every later view is a cache hit.
     """
     _validate_date_params(date_from, date_to)
+    if _dev_fixture_mode() == "dense":
+        # Refused rather than synthesized. This route is for external report
+        # consumers, so silently serving real history would defeat the point of
+        # fixture mode -- but its nine facets are a wide enough contract that a
+        # hand-written stand-in would drift from `compute_insights` unnoticed,
+        # which is the same failure the imported rank keys exist to prevent.
+        # An explicit 409 cannot be mistaken for either one.
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "/api/insights is not synthesized in --dev-fixture mode, and real "
+                "usage history is not read while a fixture is active."
+            ),
+        )
     try:
         cache_key = _window_cache_key(
             f"insights_{period}_{date_from}_{date_to}_{facets}_{include_project_names}",

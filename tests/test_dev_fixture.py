@@ -2,16 +2,18 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi import HTTPException
 
 from tokdash import api, cli
 from tokdash.compute import parse_entries_json
+from tokdash.compute import resolve_period
 from tokdash.dev_fixtures import (
     SESSION_LABELS,
     TOOL_SPECS,
+    dense_openclaw,
     dense_usage,
     fixture_year_days,
 )
@@ -95,6 +97,97 @@ def test_dense_fixture_sessions_and_details_cover_overflow_states():
     assert len(detail["turns"]) == 48
     assert len(active["by_tool"]) >= 15
     assert all(row["active_ms"] > 0 for row in active["by_tool"].values())
+
+
+def test_dense_fixture_active_time_scales_with_the_window_and_stays_inside_it():
+    with dense_fixture():
+        payloads = {
+            period: api.get_active_time(period=period)
+            for period in ("today", "week", "year")
+        }
+
+    # Read after the calls: an elapsed-time ceiling only ever grows.
+    now_local = datetime.now().astimezone()
+    midnight = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+    elapsed_today_ms = int((now_local - midnight).total_seconds() * 1000)
+
+    for period, payload in payloads.items():
+        # Production merges intervals clipped to [since_ms, until_ms), so the
+        # union cannot outrun the window, cannot exceed the additive agent time,
+        # and cannot fall below the busiest single tool.
+        assert payload["active_ms"] <= payload["range"]["days"] * 86_400_000, period
+        assert payload["active_ms"] <= payload["active_ms_sum"], period
+        assert payload["active_ms"] >= max(
+            row["active_ms"] for row in payload["by_tool"].values()
+        ), period
+
+    assert payloads["today"]["active_ms"] <= elapsed_today_ms
+    # One frozen figure for every range would make a range bug in the Overview
+    # card indistinguishable from the fixture working.
+    assert (
+        payloads["today"]["active_ms"]
+        < payloads["week"]["active_ms"]
+        < payloads["year"]["active_ms"]
+    )
+
+
+def test_dense_fixture_active_time_answers_the_review_toggle():
+    with dense_fixture():
+        included = api.get_active_time(period="week", include_review_sessions=True)
+        excluded = api.get_active_time(period="week", include_review_sessions=False)
+
+    # The payload has to describe the request that produced it: the dashboard
+    # sends this flag whenever its toggle is set.
+    assert included["include_review_sessions"] is True
+    assert excluded["include_review_sessions"] is False
+    # Review sessions are Codex-only, and dropping them drops their intervals.
+    codex_on = included["by_tool"]["codex"]
+    codex_off = excluded["by_tool"]["codex"]
+    assert codex_off["active_ms"] < codex_on["active_ms"]
+    assert codex_off["session_count"] < codex_on["session_count"]
+    assert excluded["active_ms"] < included["active_ms"]
+
+
+def test_dense_fixture_active_time_ignores_a_window_that_has_not_happened():
+    today = datetime.now().astimezone().date()
+    with dense_fixture():
+        payload = api.get_active_time(
+            date_from=(today - timedelta(days=1)).isoformat(),
+            date_to=(today + timedelta(days=120)).isoformat(),
+        )
+
+    # 122 nominal days, two of which have happened. Active time is measured from
+    # logged events, and the rest of that window has not produced any.
+    assert payload["range"]["days"] > 100
+    assert payload["active_ms"] <= 2 * 86_400_000
+
+
+@pytest.mark.parametrize(
+    "days_before, days_after",
+    [(29, 0), (1, 120)],  # a closed past window, and one running into the future
+)
+def test_dense_fixture_openclaw_grid_stays_inside_the_requested_window(
+    days_before, days_after
+):
+    today = datetime.now().astimezone().date()
+    # Resolved once and passed in: a today-anchored window moves as the test runs.
+    range_info = resolve_period(
+        "custom",
+        (today - timedelta(days=days_before)).isoformat(),
+        (today + timedelta(days=days_after)).isoformat(),
+    )
+    payload = dense_openclaw(range_info, seed=17)
+    dates = [day["date"] for day in payload["contributions"]]
+
+    assert dates == sorted(dates)
+    assert len(dates) == len(set(dates))
+    # Anchoring the walk-back on today instead of on `from` put the whole grid
+    # months before the window whenever `to` ran past today.
+    assert range_info["from"] <= dates[0]
+    assert dates[-1] <= min(range_info["to"], today.isoformat())
+    assert payload["total_tokens"] == sum(
+        day["totals"]["tokens"] for day in payload["contributions"]
+    )
 
 
 def test_dense_fixture_stats_fill_a_leap_year_and_include_multi_source_days():
@@ -340,6 +433,42 @@ def test_dense_fixture_openclaw_route_matches_the_real_producer_shape():
     assert fixture["total_tokens"] == sum(
         row["tokens"] for row in fixture["models"].values()
     )
+
+
+def test_dense_fixture_openclaw_totals_match_its_own_contributions():
+    with dense_fixture():
+        for period in ("today", "week", "month"):
+            payload = api.get_openclaw(period=period)
+            overview = api.get_usage(period=period)
+            days = payload["contributions"]
+
+            # The header, the day grid and the Overview slice are three views of
+            # one window. The real producer folds a single window-filtered pass
+            # into all of them -- and the store-backed path reads them out of one
+            # snapshot -- so a consumer may take a total from one and a chart
+            # from another.
+            assert payload["total_tokens"] == sum(
+                day["totals"]["tokens"] for day in days
+            ), period
+            assert (
+                payload["total_tokens"] == overview["by_tool"]["openclaw"]["tokens"]
+            ), period
+            assert payload["total_messages"] == sum(
+                day["totals"]["messages"] for day in days
+            ), period
+            assert payload["total_cost"] == pytest.approx(
+                sum(day["totals"]["cost"] for day in days), abs=1e-4
+            ), period
+
+            assert days, period
+            for day in days:
+                breakdown = day["tokenBreakdown"]
+                assert (
+                    breakdown["input"] + breakdown["output"] + breakdown["cacheRead"]
+                    == day["totals"]["tokens"]
+                )
+                day_messages = sum(row["messages"] for row in day["sources"])
+                assert day_messages == day["totals"]["messages"]
 
 
 def test_dense_fixture_pricing_db_never_discloses_the_user_override():

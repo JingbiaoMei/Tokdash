@@ -1940,7 +1940,9 @@ def get_active_time(
         from .dev_fixtures import dense_active_time
 
         return dense_active_time(
-            resolve_period(period, date_from, date_to), seed=_dev_fixture_seed()
+            resolve_period(period, date_from, date_to),
+            include_review_sessions,
+            seed=_dev_fixture_seed(),
         )
 
     def fetch():

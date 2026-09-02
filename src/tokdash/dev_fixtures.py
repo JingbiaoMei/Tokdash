@@ -361,46 +361,126 @@ def dense_openclaw(range_info: Mapping[str, Any], seed: int = 0) -> dict[str, An
             row["name"]: {key: value for key, value in row.items() if key != "name"}
             for row in rows
         },
-        "contributions": _openclaw_contributions(range_info, seed),
+        "contributions": _openclaw_contributions(range_info, seed, rows),
         "period": usage["period"],
         "range": dict(range_info),
         "timestamp": _now_iso(),
     }
 
 
-def _openclaw_contributions(
-    range_info: Mapping[str, Any], seed: int
-) -> list[dict[str, Any]]:
-    """Per-day OpenClaw rows over the requested window, never past today."""
+def _effective_span(range_info: Mapping[str, Any]) -> tuple[date, date]:
+    """The part of the requested window that has actually happened.
+
+    A window can run past today -- a custom range with a future `date_to`, or
+    the calendar month -- and production has no events out there, so nothing
+    scaled by the window may reach into it either.
+    """
     today = datetime.now().astimezone().date()
     try:
         end = min(date.fromisoformat(str(range_info.get("to"))), today)
     except (TypeError, ValueError):
         end = today
-    start = end - timedelta(days=max(0, _days_in_range(range_info) - 1))
+    try:
+        start = date.fromisoformat(str(range_info.get("from")))
+    except (TypeError, ValueError):
+        start = end - timedelta(days=max(0, _days_in_range(range_info) - 1))
+    return min(start, end), end
+
+
+def _split_int(total: int, weights: list[float]) -> list[int]:
+    """Split `total` across `weights`; the parts always add back to `total`."""
+    if not weights:
+        raise ValueError("cannot split a total across no weights")
+    weight_total = sum(weights)
+    if total == 0 or weight_total <= 0:
+        parts = [0] * len(weights)
+        parts[0] = total
+        return parts
+    exact = [total * weight / weight_total for weight in weights]
+    # math.floor, not int(): int() truncates toward zero, which would leak a
+    # negative total away instead of distributing it.
+    parts = [math.floor(value) for value in exact]
+    order = sorted(range(len(weights)), key=lambda i: exact[i] - parts[i], reverse=True)
+    for offset in range(total - sum(parts)):
+        parts[order[offset % len(order)]] += 1
+    return parts
+
+
+def _openclaw_contributions(
+    range_info: Mapping[str, Any], seed: int, rows: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Per-day OpenClaw rows over the requested window, never past today.
+
+    Spread from `rows` -- the same model draw behind the header totals and
+    /api/usage's openclaw slice -- so the grid and the totals above it cannot
+    describe different windows. The real producer gets that for free by folding
+    one window-filtered pass of entries into both, and the store-backed path
+    reads both out of a single snapshot for the same reason; drawing the days
+    from their own RNG stream put a header and a chart 40-60% apart.
+    """
+    start, end = _effective_span(range_info)
+    span = [start + timedelta(days=offset) for offset in range((end - start).days + 1)]
+    active = [
+        day
+        for day in span
+        if _rng(seed, f"openclaw-day:{day.isoformat()}").random() >= 0.12
+    ]
+    # Every token in the header has to land on some day.
+    active = active or span[-1:]
+
+    per_day: dict[date, list[dict[str, Any]]] = {day: [] for day in active}
+    for row in rows:
+        model = str(row["name"])
+        row_rng = _rng(seed, f"openclaw-spread:{model}")
+        weights = [row_rng.triangular(0.2, 1.0, 0.55) for _ in active]
+        shares = {
+            key: _split_int(int(row[key]), weights)
+            for key in ("tokens_in", "tokens_out", "tokens_cache", "messages")
+        }
+        # Cost is split in micro-dollars, so the days add back to the row
+        # instead of drifting by a rounding step each.
+        shares["cost"] = _split_int(round(float(row["cost"]) * 1_000_000), weights)
+        for index, day in enumerate(active):
+            tokens_in = shares["tokens_in"][index]
+            tokens_out = shares["tokens_out"][index]
+            tokens_cache = shares["tokens_cache"][index]
+            messages = shares["messages"][index]
+            cost_micros = shares["cost"][index]
+            if not (tokens_in or tokens_out or tokens_cache or messages or cost_micros):
+                continue
+            per_day[day].append(
+                {
+                    "source": "openclaw",
+                    "modelId": model,
+                    "providerId": model.split("/")[0] if "/" in model else "unknown",
+                    "tokens": {
+                        "input": tokens_in,
+                        "output": tokens_out,
+                        "cacheRead": tokens_cache,
+                        "cacheWrite": 0,
+                        "reasoning": 0,
+                    },
+                    "cost": round(cost_micros / 1_000_000, 6),
+                    "messages": messages,
+                }
+            )
 
     days: list[dict[str, Any]] = []
-    for offset in range((end - start).days + 1):
-        day = start + timedelta(days=offset)
-        day_rng = _rng(seed, f"openclaw-day:{day.isoformat()}")
-        if day_rng.random() < 0.12:
+    for day in active:
+        sources = per_day[day]
+        if not sources:
             continue
-        tokens = int(day_rng.triangular(4_000_000, 180_000_000, 41_000_000))
-        tokens_in = int(tokens * 0.12)
-        tokens_cache = int(tokens * 0.73)
-        tokens_out = max(1, tokens - tokens_in - tokens_cache)
-        messages = day_rng.randint(12, 210)
-        cost = round(
-            tokens_in * 0.0000025
-            + tokens_out * 0.0000105
-            + tokens_cache * 0.00000025,
-            6,
-        )
-        model = SESSION_MODELS[day.toordinal() % len(SESSION_MODELS)]
+        tokens_in = sum(row["tokens"]["input"] for row in sources)
+        tokens_out = sum(row["tokens"]["output"] for row in sources)
+        tokens_cache = sum(row["tokens"]["cacheRead"] for row in sources)
         days.append(
             {
                 "date": day.isoformat(),
-                "totals": {"tokens": tokens, "cost": cost, "messages": messages},
+                "totals": {
+                    "tokens": tokens_in + tokens_out + tokens_cache,
+                    "cost": round(sum(row["cost"] for row in sources), 6),
+                    "messages": sum(row["messages"] for row in sources),
+                },
                 "intensity": 0,
                 "tokenBreakdown": {
                     "input": tokens_in,
@@ -409,22 +489,7 @@ def _openclaw_contributions(
                     "cacheWrite": 0,
                     "reasoning": 0,
                 },
-                "sources": [
-                    {
-                        "source": "openclaw",
-                        "modelId": model,
-                        "providerId": "unknown",
-                        "tokens": {
-                            "input": tokens_in,
-                            "output": tokens_out,
-                            "cacheRead": tokens_cache,
-                            "cacheWrite": 0,
-                            "reasoning": 0,
-                        },
-                        "cost": cost,
-                        "messages": messages,
-                    }
-                ],
+                "sources": sources,
             }
         )
     return days
@@ -566,19 +631,82 @@ def dense_session_detail(tool: str, session_id: str, seed: int = 0) -> dict[str,
     return {"session": session, "turns": turns, "timestamp": _now_iso()}
 
 
-def dense_active_time(range_info: Mapping[str, Any], seed: int = 0) -> dict[str, Any]:
+def _window_ms(range_info: Mapping[str, Any]) -> int:
+    """Wall clock the window covers, never counting time that has not happened.
+
+    Production windows are whole local days, but the intervals inside one come
+    from logged events, so a window reaching today or beyond runs only as far
+    as today has.
+    """
+    start, end = _effective_span(range_info)
+    now_local = datetime.now().astimezone()
+    whole_days = (end - start).days
+    if end < now_local.date():
+        return max(1, (whole_days + 1) * 86_400_000)
+    midnight = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+    elapsed_today_ms = int((now_local - midnight).total_seconds() * 1000)
+    return max(1, whole_days * 86_400_000 + elapsed_today_ms)
+
+
+def _active_duty(index: int, days: int, row_rng: random.Random) -> float:
+    """Fraction of the window one tool spent working.
+
+    Falls off with window length because nobody runs an agent two thirds of a
+    year, and rises for the tools the fixture puts at the top of the list.
+    """
+    base = max(0.004, 0.085 - index * 0.0035)
+    return base * days**-0.25 * row_rng.uniform(0.9, 1.1)
+
+
+def dense_active_time(
+    range_info: Mapping[str, Any],
+    include_review_sessions: bool | None = None,
+    seed: int = 0,
+) -> dict[str, Any]:
+    """Cross-tool active time, scaled to the window and bounded by it.
+
+    Every magnitude here is a fraction of the requested window. Production
+    merges intervals that were clipped to `[since_ms, until_ms)`, so `active_ms`
+    can never exceed the span asked for; per-tool constants made this KPI read
+    103h for a one-day range and the same 103h for a year, which is both
+    unreachable and unresponsive -- a range bug in the Overview card would have
+    looked exactly like the fixture working.
+    """
+    include_review = _include_codex_review_sessions(include_review_sessions)
+    days = _days_in_range(range_info)
+    window_ms = _window_ms(range_info)
+
     by_tool: dict[str, dict[str, Any]] = {}
+    duties: list[float] = []
     for index, (tool, label) in enumerate(SESSION_LABELS.items()):
         row_rng = _rng(seed, f"active:{tool}")
+        duty = _active_duty(index, days, row_rng)
+        session_count = 16 + row_rng.randint(0, 5)
+        concurrency = row_rng.uniform(1.35, 1.72)
+        if tool == "codex" and not include_review:
+            # Review sessions are Codex-only, and dropping them drops their
+            # intervals too: the KPI has to move when the toggle does.
+            duty *= 0.82
+            session_count -= 3
+        duties.append(duty)
+        active_ms = int(window_ms * duty)
         by_tool[tool] = {
             "tool_label": label,
-            "session_count": 16 + row_rng.randint(0, 5),
-            "active_ms": int((215 + index * 19) * row_rng.uniform(0.92, 1.08)) * 60_000,
-            "active_ms_sum": int((328 + index * 31) * row_rng.uniform(0.92, 1.08))
-            * 60_000,
+            "session_count": session_count,
+            "active_ms": active_ms,
+            "active_ms_sum": int(active_ms * concurrency),
         }
-    active_ms = sum(row["active_ms"] for row in by_tool.values())
+
+    # The union of the tools' intervals, not their sum: adding them is
+    # `active_ms_sum` arithmetic and overruns the window once enough tools
+    # report. Treating the tools as independent keeps the result between the
+    # busiest single tool and their total, which is where a real union lands.
+    idle = 1.0
+    for duty in duties:
+        idle *= 1.0 - duty
+    active_ms = int(window_ms * (1.0 - idle))
     active_ms_sum = sum(row["active_ms_sum"] for row in by_tool.values())
+
     return {
         "period": range_info.get("period_resolved", "custom"),
         "range": dict(range_info),
@@ -595,7 +723,7 @@ def dense_active_time(range_info: Mapping[str, Any], seed: int = 0) -> dict[str,
         "active_gap_cap_ms": 300_000,
         "active_time_estimated": True,
         "active_time_method": "capped-inter-event-gap",
-        "include_review_sessions": False,
+        "include_review_sessions": include_review,
         "timestamp": _now_iso(),
     }
 

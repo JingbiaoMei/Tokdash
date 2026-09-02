@@ -85,6 +85,23 @@ class SourceSyncCapability:
     reason: str = ""
 
 
+def _iter_jsonl_lines(path: Path) -> Iterator[str]:
+    """Yield a JSONL file's lines without holding the whole file in memory.
+
+    ``read_text().splitlines()`` materialises the file twice -- once as one
+    string, once as a list of lines -- which for a live Codex rollout of a few
+    hundred MB was a ~3 GB transient per parse, paid by every request that
+    found the file changed. Streaming keeps it at one line. Lines keep their
+    trailing newline; ``json.loads`` ignores it. One deliberate difference: a
+    decode error now surfaces from the line that carries it rather than before
+    the first, so the caller's per-file ``except`` keeps the entries decoded
+    ahead of the bad byte where it used to drop the whole file. Clients write
+    UTF-8, so this is a corner the two copies were never worth.
+    """
+    with path.open(encoding="utf-8") as handle:
+        yield from handle
+
+
 def _timed_sigs(cache_key: str, scan_fn) -> tuple:
     """Return file signatures from *scan_fn*, reusing a cached value within TTL."""
     now = _time.monotonic()
@@ -1056,7 +1073,7 @@ class CodexParser(BaseParser):
                 # must still be resolved by THIS file's model signal.
                 file_entry_indices: set[int] = set()
 
-                for line_no, line in enumerate(session_file.read_text(encoding="utf-8").splitlines(), start=1):
+                for line_no, line in enumerate(_iter_jsonl_lines(session_file), start=1):
                     try:
                         msg = json.loads(line)
                     except Exception:
@@ -1293,7 +1310,7 @@ class ClaudeParser(BaseParser):
         for path_str, _, _ in self._file_signatures():
             session_file = Path(path_str)
             try:
-                for line in session_file.read_text(encoding="utf-8").splitlines():
+                for line in _iter_jsonl_lines(session_file):
                     try:
                         obj = json.loads(line)
                     except Exception:

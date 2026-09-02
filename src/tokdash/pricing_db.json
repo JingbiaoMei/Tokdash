@@ -1,6 +1,6 @@
 {
-  "version": "2.0.20",
-  "lastUpdated": "2026-08-27T11:22:46Z",
+  "version": "2.0.21",
+  "lastUpdated": "2026-09-02T15:32:40Z",
   "note": "Comprehensive pricing database with all Moonshot, MiniMax, GLM, and OpenAI models from OpenRouter. Cache pricing estimated at 10% of input for cache_read, 100% of input for cache_write.",
   "aliases": {
     "claude-sonnet-5-20260630": "claude-sonnet-5",
@@ -53,7 +53,10 @@
     "longcat2.0": "longcat-2.0",
     "longcat-2-0": "longcat-2.0",
     "meituan/longcat-2.0": "longcat-2.0",
-    "qwen3.8max": "qwen3.8-max"
+    "qwen3.8max": "qwen3.8-max",
+    "fable-5.1": "claude-fable-5.1",
+    "fable-5-1": "claude-fable-5.1",
+    "fable5.1": "claude-fable-5.1"
   },
   "models": {
     "_comment_moonshot": "=== Moonshot AI / Kimi Models ===",
@@ -3098,6 +3101,15 @@
       "cache_write": 0.8,
       "unit": "per_million_tokens",
       "source": "openrouter.ai/amazon/nova-pro-v1"
+    },
+    "claude-fable-5.1": {
+      "provider": "anthropic",
+      "input": 10.0,
+      "output": 50.0,
+      "cache_read": 0.25,
+      "cache_write": 12.5,
+      "unit": "per_million_tokens",
+      "source": "openrouter.ai/anthropic/claude-fable-5.1"
     }
   }
 }

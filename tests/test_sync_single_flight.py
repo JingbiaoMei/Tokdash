@@ -115,8 +115,14 @@ def test_usage_parsers_stream_instead_of_reading_whole_file(monkeypatch, _isolat
     else:
         _write_claude(_isolated_home, "s1")
 
+    original_read_text = Path.read_text
+
     def forbidden(self, *args, **kwargs):
-        raise AssertionError(f"read_text() on {self}")
+        # Only the logs are in question. Other reads stay allowed: on a fresh
+        # process the platform detector reads /proc/version on the way here.
+        if self.suffix == ".jsonl":
+            raise AssertionError(f"read_text() on {self}")
+        return original_read_text(self, *args, **kwargs)
 
     monkeypatch.setattr(Path, "read_text", forbidden)
     entries = CodingToolsUsageTracker().parsers[source]._parse_all()

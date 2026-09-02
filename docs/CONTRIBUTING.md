@@ -30,6 +30,15 @@ Run from source:
 python3 main.py
 ```
 
+For UI work, start the real dashboard against a dense synthetic dataset:
+```bash
+python3 main.py --dev-fixture dense --dev-seed 17
+```
+
+Omit `--dev-seed` for a new dataset on each server start, then copy the printed seed
+to reproduce it. Fixture mode skips the usage and quota background workers, does not
+read local history or credentials, and rejects mutating HTTP requests.
+
 Run tests:
 ```bash
 pytest -q

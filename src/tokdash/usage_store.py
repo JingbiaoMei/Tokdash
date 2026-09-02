@@ -131,6 +131,50 @@ QUOTA_TORN_READ_MIN_PERCENT = 40.0
 _WRITE_LOCK = threading.RLock()
 _SCHEMA_LOCK = threading.RLock()
 _SCHEMA_READY: set[str] = set()
+
+
+class _SyncFlight:
+    """One source's in-process sync gate: a lock, and how many syncs completed."""
+
+    __slots__ = ("lock", "completed")
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.completed = 0
+
+
+_sync_flights: dict[tuple[str, str], _SyncFlight] = {}
+_sync_flights_guard = threading.Lock()
+
+
+def _single_flight_sync(db_path: Path, kind: str, name: str, run: Callable[[], bool]) -> bool:
+    """Run ``run`` unless an identical sync finished while this caller waited for it.
+
+    Parsing happens outside the store's process lock on purpose, so before this
+    gate every request thread that found a source changed parsed it on its own:
+    a dashboard refresh fans out to several routes, each of which syncs Codex and
+    Claude, and a live multi-hundred-MB rollout was parsed once per thread, at
+    the same moment, for the same rows. Serialising per (database, source) and
+    letting a waiter skip when the holder's sync completed keeps one parse per
+    change. A waiter that arrived while nothing was in flight -- or whose holder
+    raised -- still syncs, so sequential callers see exactly what they did before.
+    The result the skipper serves is at most one sync older than its own would
+    have been, the same window a request already accepts between its scan and
+    its read. Cross-process callers are unaffected; ``usage_db_process_lock``
+    still covers the write.
+    """
+    key = (str(db_path), f"{kind}:{name}")
+    with _sync_flights_guard:
+        flight = _sync_flights.get(key)
+        if flight is None:
+            flight = _sync_flights[key] = _SyncFlight()
+        seen = flight.completed
+    with flight.lock:
+        if flight.completed != seen:
+            return False
+        changed = run()
+        flight.completed += 1
+        return changed
 _CODEX_PERCENT_SCALE_REPAIR_META_KEY = "quota_codex_percent_scale_repair_v2"
 _CODEX_PERCENT_SCALE_REPAIR_DONE = "done"
 _GROK_EMAIL_REPAIR_META_KEY = "quota_grok_email_scrub_v1"
@@ -1455,6 +1499,37 @@ class UsageEntryStore:
         durable: Optional[bool] = None,
         cross_file_stable_keys: bool = False,
     ) -> bool:
+        """:meth:`_sync_files_now`, one in flight per source (see ``_single_flight_sync``)."""
+        return _single_flight_sync(
+            self.path,
+            "files",
+            source,
+            lambda: self._sync_files_now(
+                source,
+                file_signatures,
+                parser=parser,
+                pricing_identity=pricing_identity,
+                parse_file_entries=parse_file_entries,
+                parse_file_tail_entries=parse_file_tail_entries,
+                durable=durable,
+                cross_file_stable_keys=cross_file_stable_keys,
+            ),
+        )
+
+    def _sync_files_now(
+        self,
+        source: str,
+        file_signatures: Iterable[Any],
+        *,
+        parser: Any = None,
+        pricing_identity: Any = None,
+        parse_file_entries: Callable[[tuple[str, int, int]], Iterable[dict[str, Any]]],
+        parse_file_tail_entries: Optional[
+            Callable[[tuple[str, int, int], int], tuple[Iterable[dict[str, Any]], int]]
+        ] = None,
+        durable: Optional[bool] = None,
+        cross_file_stable_keys: bool = False,
+    ) -> bool:
         """Sync a file-backed source by replacing only changed files.
 
         This is the middle tier between agentview-style append ingestion and the
@@ -2138,6 +2213,31 @@ class UsageEntryStore:
         return mapping
 
     def sync_session_files(
+        self,
+        tool: str,
+        file_signatures: Iterable[Any],
+        *,
+        parser: Any = None,
+        parse_file_session: Callable[[tuple[str, int, int]], Any],
+        signature_compatible: Optional[Callable[[str, str], bool]] = None,
+        durable: Optional[bool] = None,
+    ) -> bool:
+        """:meth:`_sync_session_files_now`, one in flight per tool (see ``_single_flight_sync``)."""
+        return _single_flight_sync(
+            self.path,
+            "sessions",
+            tool,
+            lambda: self._sync_session_files_now(
+                tool,
+                file_signatures,
+                parser=parser,
+                parse_file_session=parse_file_session,
+                signature_compatible=signature_compatible,
+                durable=durable,
+            ),
+        )
+
+    def _sync_session_files_now(
         self,
         tool: str,
         file_signatures: Iterable[Any],

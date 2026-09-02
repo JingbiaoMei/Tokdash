@@ -5339,6 +5339,36 @@ def _session_records_to_raw_sessions(tool: str, records: Iterable[Dict[str, Any]
     return sessions
 
 
+_store_sync_state = threading.local()
+
+
+class _store_sync_suppressed:
+    """Inside the block, stored-session reads on this thread skip the source sync.
+
+    A request that reads two windows -- the Overview's active time and its
+    comparison period -- synced every stored tool twice, and while a large
+    rollout was being appended to, the second sync found it changed again and
+    parsed it a second time. The second window only needs what the first sync
+    stored. Thread-local rather than a parameter so the fake loaders tests
+    install over ``_raw_sessions_for_tool`` keep their signature.
+    """
+
+    def __enter__(self) -> None:
+        self._previous = getattr(_store_sync_state, "suppressed", False)
+        _store_sync_state.suppressed = True
+
+    def __exit__(self, *_exc: Any) -> None:
+        _store_sync_state.suppressed = self._previous
+
+
+def _store_sync_wanted() -> bool:
+    return not getattr(_store_sync_state, "suppressed", False)
+
+
+def _skip_session_sync(*_args: Any, **_kwargs: Any) -> bool:
+    return False
+
+
 def _stored_sessions_for_tool(
     tool: str,
     *,
@@ -5349,10 +5379,12 @@ def _stored_sessions_for_tool(
     # Before any signature scan: every branch below enumerates that tool's whole
     # session tree, and on a too-new database all of it is wasted.
     store.check_compatible()
+    sync = _store_sync_wanted()
+    sync_files = store.sync_session_files if sync else _skip_session_sync
     if tool == "codex":
-        signatures = _codex_file_signatures()
+        signatures = _codex_file_signatures() if sync else ()
         pricing_sig = _pricing_signature()
-        store.sync_session_files(
+        sync_files(
             "codex",
             signatures,
             parser=_codex_session_parser_signature(),
@@ -5363,11 +5395,13 @@ def _stored_sessions_for_tool(
         )
     elif tool == "claude":
         all_sigs: list[tuple[str, int, int]] = []
-        for projects_dir in clientpaths.claude_project_dirs():
+        # The walk over every project dir is the expensive half of this branch
+        # and only feeds the sync.
+        for projects_dir in clientpaths.claude_project_dirs() if sync else ():
             all_sigs.extend(_iter_file_signatures(projects_dir))
         all_sigs.sort(key=lambda item: item[0])
         pricing_sig = _pricing_signature()
-        store.sync_session_files(
+        sync_files(
             "claude",
             tuple(all_sigs),
             parser=_claude_session_parser_signature(),
@@ -5379,7 +5413,7 @@ def _stored_sessions_for_tool(
     elif tool == "kimi":
         signatures = _kimi_session_signatures()
         pricing_sig = _pricing_signature()
-        store.sync_session_files(
+        sync_files(
             "kimi",
             signatures,
             parser=_kimi_session_parser_signature(),
@@ -5391,7 +5425,7 @@ def _stored_sessions_for_tool(
     elif tool == "dsh":
         signatures = _dsh_session_signatures()
         pricing_sig = _pricing_signature()
-        store.sync_session_files(
+        sync_files(
             "dsh",
             signatures,
             parser=_dsh_session_parser_signature(),
@@ -5403,7 +5437,7 @@ def _stored_sessions_for_tool(
     elif tool == "reasonix":
         signatures = _reasonix_session_signatures()
         pricing_sig = _pricing_signature()
-        store.sync_session_files(
+        sync_files(
             "reasonix",
             signatures,
             parser=_reasonix_session_parser_signature(),
@@ -5600,10 +5634,12 @@ def _active_time_comparison(
     here drops the comparison rather than the runtime the card exists to show.
     """
     try:
-        prev_by_tool, _, prev_intervals = _active_time_window(
-            *_previous_window_bounds(period, date_from, date_to),
-            include_codex_review=include_codex_review,
-        )
+        # The current window already synced every stored tool; read that.
+        with _store_sync_suppressed():
+            prev_by_tool, _, prev_intervals = _active_time_window(
+                *_previous_window_bounds(period, date_from, date_to),
+                include_codex_review=include_codex_review,
+            )
     except Exception as error:  # noqa: BLE001 - the current window is what matters
         logger.warning("active time comparison unavailable: %s", error, exc_info=True)
         return None

@@ -787,12 +787,25 @@ def get_tools_data(period: str) -> Dict[str, Any]:
     return parse_entries_json(run_tokscale_json(period_args))
 
 
-def get_tools_data_for_range(since: Optional[datetime], until: Optional[datetime]) -> Dict[str, Any]:
+def get_tools_data_for_range(
+    since: Optional[datetime], until: Optional[datetime], *, sync: bool = True
+) -> Dict[str, Any]:
+    """Coding-tool usage for one window.
+
+    ``sync=False`` reads the persistent store as it stands instead of bringing it
+    up to date first. It is for the second window of one request -- the
+    comparison period -- whose sync would only repeat the one the current window
+    just ran, and while a large log is being appended to, would find it changed
+    again and parse it a second time. Never pass it for the first read.
+    """
     if USE_LOCAL_CODING_TOOLS_BACKEND:
         tracker = CodingToolsUsageTracker()
         if persistent_usage_db_enabled():
             try:
-                store, stored_sources = _sync_usage_store(tracker)
+                if sync:
+                    store, stored_sources = _sync_usage_store(tracker)
+                else:
+                    store, stored_sources = UsageEntryStore(), _usage_store_sources(tracker)
                 store_data = store.aggregate_entries(sources=stored_sources, since=since, until=until)
                 live_entries = _collect_live_coding_entries(tracker, since, until, _usage_store_live_sources(tracker))
                 live_data = parse_entries_json({"entries": live_entries})
@@ -1016,7 +1029,13 @@ def previous_period_range(period: str) -> tuple[datetime, datetime]:
     return prev_since, prev_until
 
 
-def _compute_previous_usage(period: str, date_from: Optional[str] = None, date_to: Optional[str] = None) -> Dict[str, Any]:
+def _compute_previous_usage(
+    period: str,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    *,
+    sync: bool = True,
+) -> Dict[str, Any]:
     # If specific dates are provided, calculate previous period based on date range
     if date_from and date_to:
         current_since, current_until = parse_date_range(date_from, date_to)
@@ -1025,11 +1044,11 @@ def _compute_previous_usage(period: str, date_from: Optional[str] = None, date_t
         prev_since = prev_until - duration
 
         openclaw_data = get_session_usage_range(prev_since, prev_until)
-        coding_data = get_tools_data_for_range(prev_since, prev_until)
+        coding_data = get_tools_data_for_range(prev_since, prev_until, sync=sync)
     else:
         since, until = previous_period_range(period)
         openclaw_data = get_session_usage_range(since, until)
-        coding_data = get_tools_data_for_range(since, until)
+        coding_data = get_tools_data_for_range(since, until, sync=sync)
 
     coding_apps = {k: v for k, v in coding_data.get("apps", {}).items() if k.lower() != "openclaw"}
 
@@ -1052,7 +1071,9 @@ def pct_change(current: float, previous: float) -> Optional[float]:
 
 def compute_usage_with_comparison(period: str, date_from: Optional[str] = None, date_to: Optional[str] = None) -> Dict[str, Any]:
     current = compute_usage(period, date_from, date_to)
-    previous = _compute_previous_usage(period, date_from, date_to)
+    # The current window just synced every source; the previous window reads
+    # what that sync stored rather than paying for a second one.
+    previous = _compute_previous_usage(period, date_from, date_to, sync=False)
 
     current["comparison"] = {
         "tokens_prev": previous["total_tokens"],

@@ -1,6 +1,31 @@
 {
-  "current": "2.5.0",
+  "current": "2.5.1",
   "releases": [
+    {
+      "version": "2.5.1",
+      "date": "2026-09-02",
+      "sections": [
+        {
+          "type": "added",
+          "items": [
+            "Claude Fable 5.1 is priced, with fable-5.1 style aliases, instead of showing as $0.",
+            "tokdash serve --dev-fixture dense starts the dashboard against a dense synthetic dataset for UI work, reading none of your real history."
+          ]
+        },
+        {
+          "type": "fixed",
+          "items": [
+            "Refresh while a large Codex session is streaming no longer takes 30-60 s or balloons memory: the Codex and Claude parsers stream their logs, one sync runs per source at a time, and the comparison window reuses the current window's sync."
+          ]
+        },
+        {
+          "type": "changed",
+          "items": [
+            "The first request after upgrading re-parses Codex session files once; on a large history that is a one-off pause of some tens of seconds."
+          ]
+        }
+      ]
+    },
     {
       "version": "2.5.0",
       "date": "2026-09-01",

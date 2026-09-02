@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+## 2.5.1 - 2026-09-02
+
+### Added
+
+- `claude-fable-5.1` is in the pricing database at $10 / $50 per MTok with cache reads at $0.25 and cache writes at $12.50, plus `fable-5.1`, `fable-5-1` and `fable5.1` aliases, so Claude Fable 5.1 usage is priced instead of showing as $0. (#64)
+- `tokdash serve --dev-fixture dense [--dev-seed N]` starts the dashboard against a dense synthetic dataset for UI work. Fixture mode reads no local history, credentials or quota snapshots, skips the background workers and rejects mutating requests; the seed is printed so a dataset can be reproduced. (#63, thanks @674019130)
+
+### Fixed
+
+- A forced Refresh while a large Codex session is streaming no longer takes 30–60 s or pushes the server past 12 GB. Three causes, all on the sync path. The Codex and Claude usage parsers read each changed log with `read_text().splitlines()`, a 3.3 GB transient on a 400 MB rollout; they now stream lines (1.3 s and 55 MB for the same file). Every request thread synced on its own, so a refresh fan-out parsed the same changed file once per route at the same moment; `sync_files` and `sync_session_files` now run one sync per source at a time and a caller that waited for an in-flight sync skips its own. And `/api/usage` and `/api/active-time` synced once for the current window and again for the comparison window, which while a rollout is being appended to found it changed again; the comparison window now reads what the first sync stored. A serial forced Overview refresh with a 450 MB live rollout went from 30–60 s to about 6 s. (#64)
+
+### Changed
+
+- The first request after upgrading re-parses every Codex session file once, because the Codex session-parser signature hashes the whole of `coding_tools.py` and this release edits it. On a large history that is a one-off pause of some tens of seconds. (#64)
+
 ## 2.5.0 - 2026-09-01
 
 ### Added

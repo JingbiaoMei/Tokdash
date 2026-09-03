@@ -35,6 +35,21 @@ def no_background_warmers(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def hermetic_claude_installs(monkeypatch, tmp_path):
+    """Point Claude Code's config dir at an empty dir that exists nowhere.
+
+    With ``quota.credential_scan`` consent on, the quota readers open
+    ``$CLAUDE_CONFIG_DIR/.credentials.json`` and every ``~/.claude*`` install on the
+    machine. Tests that grant that consent to check dashboard plumbing would otherwise
+    read the developer's real sign-in (and on macOS could raise a Keychain prompt), so a
+    run would be both flaky and leaky. Tests that mean to exercise those readers point
+    the paths somewhere themselves.
+    """
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "no-claude-config-dir"))
+    monkeypatch.delenv("TOKDASH_CLAUDE_PROFILES", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def no_browser_open(request, monkeypatch):
     """Never let a test spawn a real browser, on ANY code path.
 

@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from . import osinfo
 
@@ -143,6 +143,95 @@ def claude_config_dir() -> Path:
     """``$CLAUDE_CONFIG_DIR`` if set, else ``~/.claude``."""
     explicit = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
     return Path(explicit).expanduser() if explicit else Path.home() / ".claude"
+
+
+CLAUDE_CONFIG_PREFIX = ".claude"
+CLAUDE_DEFAULT_PROFILE = "default"
+
+
+def _resolve(path: Path) -> str:
+    """Best-effort canonical path for dedupe; ``""`` when the filesystem says no."""
+    try:
+        return str(path.resolve())
+    except Exception:
+        return ""
+
+
+def _sanitize_profile_slug(text: str) -> str:
+    return "".join(ch if ch.isalnum() or ch in "._-" else "-" for ch in text).strip("-.")
+
+
+def _claude_profile_slug(path: Path) -> str:
+    """Profile name for one Claude config dir: ``~/.claude-academic`` -> ``academic``.
+
+    The slug doubles as the quota account id, so it is restricted to characters that
+    read well in a bucket id (``academic_session``) and in a dashboard label. A dir
+    named ``.claude-default`` keeps its full name rather than taking the built-in
+    profile's id, which would merge two subscriptions into one account.
+    """
+    name = path.name
+    if name == CLAUDE_CONFIG_PREFIX:
+        return CLAUDE_DEFAULT_PROFILE
+    if name.startswith(f"{CLAUDE_CONFIG_PREFIX}-"):
+        slug = _sanitize_profile_slug(name[len(CLAUDE_CONFIG_PREFIX) + 1:])
+        if slug and slug != CLAUDE_DEFAULT_PROFILE:
+            return slug
+    return _sanitize_profile_slug(name) or name
+
+
+def claude_profile_dirs() -> List[Tuple[str, Path]]:
+    """Every Claude Code install on this machine, as ``(profile, config_dir)`` pairs.
+
+    ``~/.claude`` (or ``$CLAUDE_CONFIG_DIR``) is always first and is named ``default``.
+    A sibling such as ``~/.claude-academic`` is a second install the user set up by hand
+    and runs as ``CLAUDE_CONFIG_DIR=~/.claude-academic claude``; it signs in to its own
+    subscription and keeps its own ``.credentials.json``, so it needs its own quota. The
+    directory suffix is the profile name, which is what the quota dashboard displays.
+
+    ``TOKDASH_CLAUDE_PROFILES`` (path-separated dirs) replaces the ``~/.claude*`` scan for
+    installs that live outside the home directory; the profile name is then the directory
+    name. Duplicates of the default dir (and of each other, following symlinks) are
+    dropped, since one subscription must not show up as two.
+
+    Only the existence of the directory is checked here. Callers decide what makes a
+    profile worth reporting (for quota, a ``.credentials.json`` of its own).
+    """
+    default_dir = claude_config_dir()
+    out: List[Tuple[str, Path]] = [(CLAUDE_DEFAULT_PROFILE, default_dir)]
+    seen: set[str] = {str(default_dir)}
+    used: set[str] = {CLAUDE_DEFAULT_PROFILE}
+    resolved = _resolve(default_dir)
+    if resolved:
+        seen.add(resolved)
+    explicit = os.environ.get("TOKDASH_CLAUDE_PROFILES", "").strip()
+    if explicit:
+        candidates = [Path(entry).expanduser() for entry in explicit.split(os.pathsep) if entry.strip()]
+    else:
+        candidates = [p for p in sorted(Path.home().glob(f"{CLAUDE_CONFIG_PREFIX}*")) if p.is_dir()]
+    for path in candidates:
+        keys = {str(path)}
+        resolved = _resolve(path)
+        if resolved:
+            keys.add(resolved)
+        if keys & seen or not path.is_dir():
+            continue
+        seen |= keys
+        slug = _claude_profile_slug(path)
+        # Distinct dirs must still land on distinct account ids, or their windows
+        # would share a bucket and overwrite each other in the quota history.
+        if slug in used:
+            # ``$CLAUDE_CONFIG_DIR`` took the default slot, so this dir (usually a
+            # plain ``~/.claude`` beside it) is named after itself instead.
+            slug = _sanitize_profile_slug(path.name) or slug
+        candidate = slug
+        suffix = 2
+        while candidate in used:
+            candidate = f"{slug}-{suffix}"
+            suffix += 1
+        slug = candidate
+        used.add(slug)
+        out.append((slug, path))
+    return out
 
 
 def claude_project_dirs() -> List[Path]:

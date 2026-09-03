@@ -4798,6 +4798,7 @@
         notDetected: 'not detected',
         quotaRegionChina: 'China',
         quotaRegionGlobal: 'Global',
+        quotaProfileDefault: 'Default',
         quotaNoData: 'No quota snapshots yet.',
         enableQuotaApi: 'Enable live polling',
         enableQuotaCredentialScan: 'Allow local credential reads',
@@ -5307,6 +5308,7 @@
         notDetected: '未检测到',
         quotaRegionChina: '中国',
         quotaRegionGlobal: '全球',
+        quotaProfileDefault: '默认',
         quotaNoData: '暂无额度快照。',
         enableQuotaApi: '启用实时轮询',
         enableQuotaCredentialScan: '允许读取本地凭据',
@@ -5817,6 +5819,7 @@
         notDetected: '検出されませんでした',
         quotaRegionChina: '中国',
         quotaRegionGlobal: 'グローバル',
+        quotaProfileDefault: 'デフォルト',
         quotaNoData: 'まだクォータのスナップショットがありません。',
         enableQuotaApi: 'ライブポーリングを有効化',
         enableQuotaCredentialScan: 'ローカル認証情報の読み取りを許可',
@@ -6327,6 +6330,7 @@
         notDetected: '감지되지 않음',
         quotaRegionChina: '중국',
         quotaRegionGlobal: '글로벌',
+        quotaProfileDefault: '기본',
         quotaNoData: '아직 쿼터 스냅샷이 없습니다.',
         enableQuotaApi: '라이브 폴링 사용',
         enableQuotaCredentialScan: '로컬 자격 증명 읽기 허용',
@@ -6837,6 +6841,7 @@
         notDetected: 'no detectado',
         quotaRegionChina: 'China',
         quotaRegionGlobal: 'Global',
+        quotaProfileDefault: 'Predeterminado',
         quotaNoData: 'Aún no hay instantáneas de cuota.',
         enableQuotaApi: 'Activar consulta en vivo',
         enableQuotaCredentialScan: 'Permitir lectura de credenciales locales',
@@ -7347,6 +7352,7 @@
         notDetected: 'não detectado',
         quotaRegionChina: 'China',
         quotaRegionGlobal: 'Global',
+        quotaProfileDefault: 'Padrão',
         quotaNoData: 'Ainda não há instantâneos de cota.',
         enableQuotaApi: 'Ativar polling ao vivo',
         enableQuotaCredentialScan: 'Permitir leitura de credenciais locais',
@@ -11561,6 +11567,15 @@
         // incorrectly imply that it applies to both groups.
         if (regions.size > 1) return '';
       }
+      if (providerKey === 'claude') {
+        // Same reasoning for two Claude subscriptions: `provider.plan` is the default
+        // install's, so on a card that also shows `~/.claude-academic` it belongs on that
+        // install's group heading, not on the card title.
+        const plans = new Set(
+          (provider?.profiles || []).map((profile) => profile?.plan).filter(Boolean)
+        );
+        if (plans.size > 1) return '';
+      }
       const plan = provider?.plan || provider?.tier;
       if (plan) return plan;
       if (providerKey === 'antigravity' || provider?.detected === true) return '';
@@ -11568,6 +11583,15 @@
     }
 
     function quotaProviderCardLabel(providerKey, provider) {
+      if (providerKey === 'claude') {
+        // One sibling and no default install: name the card after the install that is
+        // actually being measured. With the default install present the card stays
+        // "Claude Code" and each install gets its own group heading.
+        const accounts = claudeProfileAccounts(provider);
+        return accounts.length === 1 && accounts[0] !== 'default'
+          ? `Claude Code (${accounts[0]})`
+          : quotaProviderLabel(providerKey);
+      }
       if (providerKey !== 'minimax') return quotaProviderLabel(providerKey);
       const regions = new Set(
         (provider?.buckets || []).map((bucket) => String(bucket.account || '')).filter(Boolean)
@@ -11579,7 +11603,7 @@
 
     function quotaConsentMeta(provider) {
       if (provider === 'codex') return { key: 'codex_api', endpoint: 'chatgpt.com/backend-api/wham/*', path: '$CODEX_HOME/auth.json' };
-      if (provider === 'claude') return { key: 'claude_api', endpoint: 'api.anthropic.com/api/oauth/usage', path: '$CLAUDE_CONFIG_DIR/.credentials.json' };
+      if (provider === 'claude') return { key: 'claude_api', endpoint: 'api.anthropic.com/api/oauth/usage', path: '$CLAUDE_CONFIG_DIR/.credentials.json (and each ~/.claude-* profile)' };
       if (provider === 'antigravity') return { key: 'antigravity_api', endpoint: 'daily-cloudcode-pa.googleapis.com/v1internal:*', path: '~/.gemini/antigravity-cli/antigravity-oauth-token' };
       if (provider === 'minimax') return { key: 'minimax_api', endpoint: 'api.minimax.io or api.minimaxi.com/v1/token_plan/remains', path: '$MMX_CONFIG_DIR/config.json or a MiniMax Token Plan key' };
       if (provider === 'kimi') return { key: 'kimi_api', endpoint: 'api.kimi.com/coding/v1/usages', path: '$KIMI_CODE_HOME credentials/config or KIMI_API_KEY' };
@@ -11706,8 +11730,11 @@
         if (key === '5h' || key.endsWith('_5h')) return t('windowFiveHour');
         if (key === '7d' || key.endsWith('_7d')) return t('windowWeekly');
       } else if (provider === 'claude') {
-        if (key === 'session') return t('windowFiveHour');
-        if (key === 'weekly_all') return t('windowWeekly');
+        // A `~/.claude-<profile>` install prefixes its windows with the profile name
+        // (`academic_session`), the same way MiniMax prefixes by region.
+        const prefix = claudeBucketPrefix(bucket.account);
+        if (key === `${prefix}session`) return t('windowFiveHour');
+        if (key === `${prefix}weekly_all`) return t('windowWeekly');
       } else if (provider === 'kimi' || provider === 'grok') {
         if (key === '5h') return t('windowFiveHour');
         if (key === '7d' || (provider === 'kimi' && key === 'plan')) return t('windowWeekly');
@@ -11743,9 +11770,14 @@
         return `Codex-${short} ${win}`;
       }
       if (provider === 'claude') {
-        if (key === 'session') return `Claude ${t('windowFiveHour')}`;
-        if (key === 'weekly_all') return `Claude ${t('windowWeekly')}`;
-        return `Claude ${item.bucket_label || key}`; // Fable etc.
+        // Two subscriptions, two legend entries: "Claude 5-hour" and "Claude-academic
+        // 5-hour". Without the account in the label the chart would show the same name
+        // twice for two different windows.
+        const name = claudeProfileSeriesName(item.account);
+        const prefix = claudeBucketPrefix(item.account);
+        if (key === `${prefix}session`) return `${name} ${t('windowFiveHour')}`;
+        if (key === `${prefix}weekly_all`) return `${name} ${t('windowWeekly')}`;
+        return `${name} ${item.bucket_label || key}`; // Fable etc.
       }
       if (provider === 'kimi' && key === 'plan') {
         return `Kimi Code ${t('windowWeekly')}`;
@@ -11866,6 +11898,90 @@
       });
     }
 
+    // Bucket-id prefix a Claude install carries: none for the default install,
+    // `<profile>_` for a `~/.claude-<profile>` sibling. Mirrors the backend's
+    // ClaudeProfile.bucket_prefix; history series are keyed by (provider, bucket), so two
+    // subscriptions need two ids or their windows interleave into one zigzag line.
+    function claudeBucketPrefix(account) {
+      const name = String(account || '');
+      return name && name !== 'default' ? `${name}_` : '';
+    }
+
+    // Legend name for one Claude install's series: the default install stays "Claude", a
+    // sibling reads "Claude-academic" after the directory it was set up in.
+    function claudeProfileSeriesName(account) {
+      const name = String(account || '');
+      return name && name !== 'default' ? `Claude-${name}` : 'Claude';
+    }
+
+    // Every Claude install this card reports, default first then by name. Accounts come
+    // from the stored rows unioned with the locally-readable profiles, so an install whose
+    // token expired still appears (its windows are gone, its problem is not).
+    function claudeProfileAccounts(provider) {
+      const accounts = new Set(
+        (provider?.buckets || []).map((bucket) => String(bucket.account || 'default'))
+      );
+      (provider?.profiles || []).forEach((profile) => accounts.add(String(profile?.account || 'default')));
+      return Array.from(accounts).sort((left, right) => {
+        if (left === right) return 0;
+        if (left === 'default') return -1;
+        if (right === 'default') return 1;
+        return left.localeCompare(right);
+      });
+    }
+
+    function claudeProfileGroups(provider) {
+      const buckets = (provider?.buckets || []).filter(isQuotaUsageBucket);
+      const profiles = new Map(
+        (provider?.profiles || []).map((profile) => [String(profile?.account || 'default'), profile])
+      );
+      const groups = claudeProfileAccounts(provider).map((account) => {
+        const profile = profiles.get(account) || null;
+        const detail = profile?.status_detail;
+        return {
+          account,
+          plan: profile?.plan || '',
+          rows: buckets.filter((bucket) => String(bucket.account || 'default') === account),
+          notice: detail && detail !== 'ok' ? detail : '',
+          statusAt: profile?.status_at || null,
+        };
+      });
+      // An install with neither windows nor a problem has nothing to say; the card-level
+      // plan line already covers the case where only one install is in play.
+      return groups.filter((group) => group.rows.length || group.notice);
+    }
+
+    // Group heading for one install: the profile name (the default install's own name is
+    // localized) plus its plan, but only when the installs are on different plans —
+    // `showPlans` is false exactly when the card title's plan line already says it.
+    function claudeProfileGroupLabel(group, showPlans) {
+      const name = group.account === 'default' ? t('quotaProfileDefault') : group.account;
+      return showPlans && group.plan ? `${name} · ${group.plan}` : name;
+    }
+
+    // Claude card: one group of window bars per install on this machine, each under the
+    // profile name it was set up with. The heading carries the install's plan only when
+    // the installs are on different plans, because then the card title's plan line is
+    // suppressed and each group has to speak for itself.
+    function renderClaudeBuckets(card, provider) {
+      const groups = claudeProfileGroups(provider);
+      if (groups.length <= 1) {
+        renderQuotaBucketGroups(card, groups[0]?.rows || [], 'claude');
+        return;
+      }
+      const distinctPlans = new Set(groups.map((group) => group.plan).filter(Boolean));
+      const showPlans = distinctPlans.size > 1;
+      let rendered = 0;
+      groups.forEach((group) => {
+        card.appendChild(quotaSubtitleEl(claudeProfileGroupLabel(group, showPlans), rendered === 0));
+        rendered += 1;
+        if (group.notice) {
+          appendQuotaStatusNoticeFor(card, 'claude', group.notice, group.statusAt);
+        }
+        group.rows.forEach((bucket) => card.appendChild(renderQuotaBucketRow(bucket, 'claude')));
+      });
+    }
+
     // Codex card: the primary account windows (bucket ids exactly "5h"/"7d") render first,
     // then every additional metered feature (Spark today, anything Codex adds later) is
     // grouped under its own subtitle — derived from the bucket label prefix — so the long
@@ -11983,7 +12099,12 @@
     }
 
     function appendQuotaStatusNotice(card, providerKey, provider) {
-      const detail = provider.status_detail;
+      appendQuotaStatusNoticeFor(card, providerKey, provider.status_detail, provider.status_at);
+    }
+
+    // The detail and its time are arguments rather than read off `provider` so a single
+    // install's notice can reuse the same copy on a card that carries several installs.
+    function appendQuotaStatusNoticeFor(card, providerKey, detail, statusAt) {
       if (!detail || detail === 'ok') return;
       const box = document.createElement('div');
       box.className = 'text-xs mt-3 p-2 rounded';
@@ -11996,7 +12117,7 @@
         box.style.color = 'var(--color-muted)';
         box.textContent = t('quotaProviderIssue')
           .replace('{status}', detail)
-          .replace('{time}', formatRelativeAgo(provider.status_at) || t('na'));
+          .replace('{time}', formatRelativeAgo(statusAt) || t('na'));
       }
       card.appendChild(box);
     }
@@ -12080,6 +12201,9 @@
             card.appendChild(empty);
           }
         } else if (providerKey === 'antigravity') {
+          appendQuotaStatusNotice(card, providerKey, provider);
+        } else if (providerKey === 'claude') {
+          renderClaudeBuckets(card, provider);
           appendQuotaStatusNotice(card, providerKey, provider);
         } else if (providerKey === 'codex') {
           renderCodexBuckets(card, buckets);

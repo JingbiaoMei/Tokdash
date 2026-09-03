@@ -190,6 +190,18 @@ Returns current subscription quota state. This route never performs provider net
       "buckets": [
         {"bucket": "5h", "bucket_label": "5-hour window", "used_percent": 25.0, "resets_at": 1782910800}
       ]
+    },
+    "claude": {
+      "network_enabled": true,
+      "plan": "Max 5x",
+      "buckets": [
+        {"account": "default", "bucket": "session", "bucket_label": "Session", "plan": "max", "used_percent": 40.0, "resets_at": 1782910800},
+        {"account": "academic", "bucket": "academic_session", "bucket_label": "Session", "plan": "pro", "used_percent": 12.0, "resets_at": 1782910800}
+      ],
+      "profiles": [
+        {"account": "default", "plan": "Max 5x", "tier": "default_claude_max_5x", "status": "ok", "credential_path": "/home/me/.claude/.credentials.json", "status_detail": null, "status_at": null},
+        {"account": "academic", "plan": "Pro", "tier": "default_claude_pro", "status": "ok", "credential_path": "/home/me/.claude-academic/.credentials.json", "status_detail": "stale_token", "status_at": 1782910800}
+      ]
     }
   },
   "consent": {
@@ -215,6 +227,13 @@ Returns current subscription quota state. This route never performs provider net
 }
 ```
 
+Every bucket row carries the `account` it belongs to and the `plan` recorded with it.
+`claude.profiles` is additive and appears only with `credential_scan` consent: one entry per
+Claude Code install on the machine (`~/.claude`, plus each `~/.claude-<profile>` sibling with
+its own `.credentials.json`), naming the install, the plan read from its local credentials,
+and its own API failure if it has one. `providers.claude.plan`, `tier` and `credential_path`
+keep describing the default install, so an existing consumer sees what it always did.
+
 ## `GET /api/quota/history`
 
 Returns stored quota utilization points and derived consumption deltas.
@@ -229,7 +248,7 @@ Returns stored quota utilization points and derived consumption deltas.
 | `end` | integer epoch seconds | no | – | Inclusive upper bound |
 | `max_points` | integer | no | `300` | Max points per series; series longer than this are evenly downsampled, always keeping the most recent point. Must be a positive integer. |
 
-History series are unified per `(provider, bucket)`: a Codex session row (account `default`) and an API row (real account id) for the same window merge into one series, keeping the freshest point on a timestamp collision. MiniMax uses region-qualified bucket IDs so global and mainland-China Token Plans remain separate series. Series are always bounded by `max_points` (points and consumption deltas are downsampled independently).
+History series are unified per `(provider, bucket)`: a Codex session row (account `default`) and an API row (real account id) for the same window merge into one series, keeping the freshest point on a timestamp collision. MiniMax uses region-qualified bucket IDs so global and mainland-China Token Plans remain separate series, and a `~/.claude-<profile>` install qualifies its windows the same way (`academic_session`) so two Claude subscriptions stay two series. Series are always bounded by `max_points` (points and consumption deltas are downsampled independently).
 
 ## `POST /api/quota/consent`
 

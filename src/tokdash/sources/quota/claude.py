@@ -4,13 +4,16 @@ import json
 import os
 import subprocess
 import sys
+from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError
 import urllib.request
 import time
 
 from ... import clientpaths
+from . import config as quota_config
 from .codex import _normalize_percent, _parse_time
 from .types import QuotaSnapshot
 
@@ -21,6 +24,66 @@ _KEYCHAIN_LABEL = f"macOS Keychain ({CLAUDE_KEYCHAIN_SERVICE})"
 
 def _is_macos() -> bool:
     return sys.platform == "darwin"
+
+
+@dataclass(frozen=True)
+class ClaudeProfile:
+    """One Claude Code install: ``~/.claude`` or a ``CLAUDE_CONFIG_DIR`` sibling.
+
+    ``name`` is both the quota account id and the label the dashboard shows
+    (``default``, ``academic``). A non-default profile reads only its own
+    ``.credentials.json``: ``CLAUDE_CODE_OAUTH_TOKEN`` and the macOS Keychain item are
+    per-user, so applying them to a sibling would report one subscription twice under
+    two names.
+    """
+
+    name: str
+    config_dir: Path
+    is_default: bool = False
+
+    @property
+    def credential_path(self) -> Path:
+        return self.config_dir / ".credentials.json"
+
+    @property
+    def bucket_prefix(self) -> str:
+        """Bucket-id prefix, empty for the default profile.
+
+        Windows are keyed per account (``session`` vs ``academic_session``) because
+        ``quota_history`` unifies a series by ``(provider, bucket)`` alone: two
+        subscriptions on one bucket id would interleave into one zigzag series. Keeping
+        the default profile unprefixed leaves every row stored before this feature
+        reading as the same series it was.
+        """
+        return "" if self.is_default else f"{self.name}_"
+
+
+def _default_profile() -> ClaudeProfile:
+    return ClaudeProfile(
+        clientpaths.CLAUDE_DEFAULT_PROFILE, clientpaths.claude_config_dir(), True
+    )
+
+
+def discover_profiles() -> list[ClaudeProfile]:
+    """Claude installs worth reporting quota for, default profile first.
+
+    The default profile is always included — a missing ``.credentials.json`` there is
+    itself the state the card reports. A ``~/.claude-*`` sibling is included only once
+    it has its own ``.credentials.json``, so a leftover or unrelated ``.claude-*``
+    directory cannot open an empty group on the card.
+
+    Enumerating the home directory and opening the siblings' credential files is a
+    credential access, so it is gated on ``quota.credential_scan`` like every other
+    reader here. Without that consent this returns just the configured default dir,
+    which is exactly the pre-profiles behavior.
+    """
+    profiles = [
+        ClaudeProfile(name, path, name == clientpaths.CLAUDE_DEFAULT_PROFILE)
+        for name, path in clientpaths.claude_profile_dirs()
+    ]
+    if not quota_config.credential_scan_enabled():
+        return profiles[:1]
+    return [p for p in profiles if p.is_default or p.credential_path.is_file()]
 
 
 def _read_keychain_credentials(keychain: str | None = None) -> dict[str, Any] | None:
@@ -63,38 +126,44 @@ def _env_token() -> str:
     return os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "").strip()
 
 
-def _load_credential_data() -> tuple[dict[str, Any] | None, str, dict[str, Any]]:
+def _load_credential_data(profile: ClaudeProfile | None = None) -> tuple[dict[str, Any] | None, str, dict[str, Any]]:
     """Shared credential-source resolution: ``.credentials.json``, then the macOS Keychain.
 
     Callers check ``CLAUDE_CODE_OAUTH_TOKEN`` BEFORE calling this — the explicit override
     must short-circuit both sources, notably the Keychain subprocess and its potential
     permission prompt (it is the documented headless/locked-Keychain escape hatch).
+    Only the default profile may fall back to the Keychain: the item is per-user and holds
+    whichever install signed in last, so reading it for a sibling would attribute one
+    subscription's token to another profile.
     Returns ``(data, source_label, error_meta)``: ``data`` is the parsed blob or ``None``
     on failure, with ``error_meta`` carrying the error fields.
     """
-    path = clientpaths.claude_config_dir() / ".credentials.json"
+    profile = profile if profile is not None else _default_profile()
+    path = profile.credential_path
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(raw, dict):
             return raw, str(path), {}
         return None, str(path), {"error": "credentials_invalid", "message": "not a JSON object"}
     except FileNotFoundError:
-        keychain_data = _read_keychain_credentials()
-        if keychain_data is not None:
-            return keychain_data, _KEYCHAIN_LABEL, {}
+        if profile.is_default:
+            keychain_data = _read_keychain_credentials()
+            if keychain_data is not None:
+                return keychain_data, _KEYCHAIN_LABEL, {}
         return None, str(path), {"error": "credentials_not_found"}
     except Exception as exc:
         return None, str(path), {"error": "credentials_invalid", "message": str(exc)}
 
 
-def read_claude_plan() -> dict[str, Any]:
+def read_claude_plan(profile: ClaudeProfile | None = None) -> dict[str, Any]:
     # Same source precedence as _read_credentials (env var > file > Keychain): the usage
     # data is fetched with the env token's account when the override is set, so plan/tier
     # must not be read from another source's (possibly different) account — and the
     # Keychain subprocess must not run at all. The env var carries no plan metadata.
-    if _env_token():
+    profile = profile if profile is not None else _default_profile()
+    if profile.is_default and _env_token():
         return {"status": "ok", "plan": None, "tier": None, "credential_path": "CLAUDE_CODE_OAUTH_TOKEN"}
-    data, source, _error = _load_credential_data()
+    data, source, _error = _load_credential_data(profile)
     if data is None:
         return {"status": "unavailable", "plan": None, "tier": None, "credential_path": source}
 
@@ -102,6 +171,27 @@ def read_claude_plan() -> dict[str, Any]:
     plan = oauth.get("subscriptionType") or data.get("subscriptionType")
     tier = oauth.get("rateLimitTier") or data.get("rateLimitTier")
     return {"status": "ok", "plan": _plan_label(plan, tier), "tier": tier, "credential_path": source}
+
+
+def read_claude_profiles() -> list[dict[str, Any]]:
+    """Local plan/tier state for every Claude install, default profile first.
+
+    Drives the per-profile headings on the Claude quota card, so a second subscription
+    gets its own name and plan line instead of hiding behind the default install's.
+    """
+    out: list[dict[str, Any]] = []
+    for profile in discover_profiles():
+        state = read_claude_plan(profile)
+        out.append(
+            {
+                "account": profile.name,
+                "status": state.get("status"),
+                "plan": state.get("plan"),
+                "tier": state.get("tier"),
+                "credential_path": state.get("credential_path"),
+            }
+        )
+    return out
 
 
 def _plan_label(plan: Any, tier: Any) -> str | None:
@@ -119,18 +209,29 @@ def _plan_label(plan: Any, tier: Any) -> str | None:
     return None
 
 
-def _read_credentials() -> tuple[str | None, dict[str, Any]]:
-    env_token = _env_token()
-    if env_token:
-        return env_token, {"plan": None, "tier": None, "credential_path": "CLAUDE_CODE_OAUTH_TOKEN"}
-    data, source, error_meta = _load_credential_data()
+def _read_credentials(profile: ClaudeProfile | None = None) -> tuple[str | None, dict[str, Any]]:
+    profile = profile if profile is not None else _default_profile()
+    # ``account`` rides along in every status row's raw payload, so a failure can always
+    # be attributed to the install that produced it.
+    meta: dict[str, Any] = {"account": profile.name}
+    if profile.is_default:
+        env_token = _env_token()
+        if env_token:
+            return env_token, {
+                **meta,
+                "plan": None,
+                "tier": None,
+                "credential_path": "CLAUDE_CODE_OAUTH_TOKEN",
+            }
+    data, source, error_meta = _load_credential_data(profile)
     if data is None:
-        return None, {**error_meta, "credential_path": source}
+        return None, {**meta, **error_meta, "credential_path": source}
     oauth = data.get("claudeAiOauth") if isinstance(data.get("claudeAiOauth"), dict) else {}
     token = oauth.get("accessToken")
     plan = oauth.get("subscriptionType") or data.get("subscriptionType")
     tier = oauth.get("rateLimitTier") or data.get("rateLimitTier")
     return str(token) if token else None, {
+        **meta,
         "expires_at_ms": oauth.get("expiresAt") or data.get("expiresAt"),
         "plan": "/".join(str(v) for v in (plan, tier) if v) or None,
         "tier": tier,
@@ -138,8 +239,14 @@ def _read_credentials() -> tuple[str | None, dict[str, Any]]:
     }
 
 
-def _status_snapshot(status: str, captured_at: int, raw: dict[str, Any]) -> QuotaSnapshot:
-    return QuotaSnapshot("claude", "default", "api", "Claude API", None, None, raw.get("plan"), captured_at, "claude_api", status, raw)
+def _status_snapshot(
+    status: str, captured_at: int, raw: dict[str, Any], profile: ClaudeProfile | None = None
+) -> QuotaSnapshot:
+    # The bucket stays "api" for every profile: both `quota_state` and `quota_history`
+    # special-case that id, and `quota_snapshots` is already unique per account, so two
+    # installs' failures cannot collide.
+    account = (profile if profile is not None else _default_profile()).name
+    return QuotaSnapshot("claude", account, "api", "Claude API", None, None, raw.get("plan"), captured_at, "claude_api", status, raw)
 
 
 def _label_for_limit(limit: dict[str, Any]) -> tuple[str, str]:
@@ -158,20 +265,29 @@ def _label_for_limit(limit: dict[str, Any]) -> tuple[str, str]:
     return kind, kind.replace("_", " ").title()
 
 
-def collect_claude_api_snapshots(
+def _profile_snapshots(
+    profile: ClaudeProfile,
+    token: str | None,
+    meta: dict[str, Any],
     *,
     opener=urllib.request.urlopen,
-    now: int | None = None,
+    captured_at: int,
     timeout: float = 15.0,
 ) -> list[QuotaSnapshot]:
-    captured_at = int(now if now is not None else datetime.now(timezone.utc).timestamp())
-    token, meta = _read_credentials()
+    """One install's usage windows, or a status snapshot when there is nothing to fetch.
+
+    A sibling profile that yields nothing reports nothing: `discover_profiles` already
+    required its credential file, so an empty result here is a state the group heading
+    explains through its own status, not a card-wide absence of data. The default
+    profile keeps reporting ``unavailable`` — that row is what drives the consent and
+    "not detected" card.
+    """
     if not token:
-        return [_status_snapshot("unavailable", captured_at, meta)]
+        return [] if not profile.is_default else [_status_snapshot("unavailable", captured_at, meta, profile)]
     expires_ms = meta.get("expires_at_ms")
     try:
         if expires_ms and int(expires_ms) // 1000 <= captured_at:
-            return [_status_snapshot("stale_token", captured_at, meta)]
+            return [_status_snapshot("stale_token", captured_at, meta, profile)]
     except Exception:
         pass
     req = urllib.request.Request(
@@ -191,11 +307,11 @@ def collect_claude_api_snapshots(
                 time.sleep(0.2)
     except HTTPError as exc:
         status = "stale_token" if exc.code in {401, 403} else "fetch_error"
-        return [_status_snapshot(status, captured_at, {**meta, "error": f"HTTP {exc.code}: {exc.reason}"})]
+        return [_status_snapshot(status, captured_at, {**meta, "error": f"HTTP {exc.code}: {exc.reason}"}, profile)]
     except Exception as exc:
-        return [_status_snapshot("fetch_error", captured_at, {**meta, "error": str(exc)})]
+        return [_status_snapshot("fetch_error", captured_at, {**meta, "error": str(exc)}, profile)]
     if payload is None:
-        return [_status_snapshot("fetch_error", captured_at, {**meta, "error": "empty_response"})]
+        return [_status_snapshot("fetch_error", captured_at, {**meta, "error": "empty_response"}, profile)]
     limits = payload.get("limits") if isinstance(payload.get("limits"), list) else []
     out: list[QuotaSnapshot] = []
     for limit in limits:
@@ -213,8 +329,8 @@ def collect_claude_api_snapshots(
         out.append(
             QuotaSnapshot(
                 "claude",
-                "default",
-                bucket,
+                profile.name,
+                f"{profile.bucket_prefix}{bucket}",
                 label,
                 used,
                 _parse_time(limit.get("resets_at")),
@@ -231,5 +347,37 @@ def collect_claude_api_snapshots(
         obj = payload.get(key) if isinstance(payload.get(key), dict) else {}
         used = _normalize_percent(obj.get("utilization"))
         if used is not None:
-            out.append(QuotaSnapshot("claude", "default", key, label, used, _parse_time(obj.get("resets_at")), meta.get("plan"), captured_at, "claude_api", "ok", {"limit": obj}))
-    return out or [_status_snapshot("unavailable", captured_at, {**meta, "error": "no_limits"})]
+            out.append(QuotaSnapshot("claude", profile.name, f"{profile.bucket_prefix}{key}", label, used, _parse_time(obj.get("resets_at")), meta.get("plan"), captured_at, "claude_api", "ok", {"limit": obj}))
+    return out or [_status_snapshot("unavailable", captured_at, {**meta, "error": "no_limits"}, profile)]
+
+
+def collect_claude_api_snapshots(
+    *,
+    opener=urllib.request.urlopen,
+    now: int | None = None,
+    timeout: float = 15.0,
+    profiles: list[ClaudeProfile] | None = None,
+) -> list[QuotaSnapshot]:
+    """Usage windows for every Claude Code install on this machine, one fetch each.
+
+    Each install is fetched separately and a failure lands on its own status row, so an
+    expired token in one directory cannot blank another subscription's windows. Two
+    directories holding the same access token report once: it is one subscription, and
+    reporting it twice would double its usage in the consumption chart.
+    """
+    captured_at = int(now if now is not None else datetime.now(timezone.utc).timestamp())
+    selected = profiles if profiles is not None else discover_profiles()
+    out: list[QuotaSnapshot] = []
+    seen_tokens: set[str] = set()
+    for profile in selected:
+        token, meta = _read_credentials(profile)
+        if token:
+            if token in seen_tokens:
+                continue
+            seen_tokens.add(token)
+        out.extend(
+            _profile_snapshots(
+                profile, token, meta, opener=opener, captured_at=captured_at, timeout=timeout
+            )
+        )
+    return out

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 
@@ -44,9 +46,22 @@ def hermetic_claude_installs(monkeypatch, tmp_path):
     read the developer's real sign-in (and on macOS could raise a Keychain prompt), so a
     run would be both flaky and leaky. Tests that mean to exercise those readers point
     the paths somewhere themselves.
+
+    ``$HOME`` is part of the surface, not just ``$CLAUDE_CONFIG_DIR``: the sibling scan
+    globs ``Path.home()`` directly, so overriding only the env var would still hand a test
+    the real ``~/.claude-academic`` beside it -- and, because the fake default dir holds no
+    credential file, would let the default profile fall through to the macOS Keychain.
+    Both the env var and the home directory are therefore redirected, to a home that
+    contains no Claude directory at all.
     """
-    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "no-claude-config-dir"))
+    home = tmp_path / "claude-free-home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))  # Windows' home, for parity
+    monkeypatch.setattr(Path, "home", lambda: home, raising=False)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(home / "no-claude-config-dir"))
     monkeypatch.delenv("TOKDASH_CLAUDE_PROFILES", raising=False)
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
 
 
 @pytest.fixture(autouse=True)

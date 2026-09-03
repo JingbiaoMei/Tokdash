@@ -4,6 +4,8 @@ import json
 import os
 import subprocess
 import sys
+from base64 import urlsafe_b64decode
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,6 +22,11 @@ from .types import QuotaSnapshot
 CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 CLAUDE_KEYCHAIN_SERVICE = "Claude Code-credentials"
 _KEYCHAIN_LABEL = f"macOS Keychain ({CLAUDE_KEYCHAIN_SERVICE})"
+# Installs are polled concurrently because each request may hold its full timeout open:
+# three installs behind a throttled endpoint would otherwise cost 3 x 15s of request time.
+_MAX_CONCURRENT_FETCHES = 4
+# Identity claims that survive a token refresh, in the order Claude Code has shipped them.
+_IDENTITY_CLAIMS = ("account_id", "accountId", "organization_id", "sub", "email")
 
 
 def _is_macos() -> bool:
@@ -57,6 +64,21 @@ class ClaudeProfile:
         """
         return "" if self.is_default else f"{self.name}_"
 
+    @property
+    def configured(self) -> bool:
+        """Whether this install is really there, to the level each kind can be checked.
+
+        One predicate serves both callers that need it, so they cannot drift:
+        ``discover_profiles`` refuses to open a group for a sibling that was never signed
+        in, and the Quota tab refuses to add a Claude card for a directory that is only a
+        leftover copy. The default install counts on a config directory alone -- reporting
+        it signed out is that install's own ``unavailable`` state -- or on the environment
+        override, since a headless sign-in has no config directory to be there or not.
+        """
+        if self.is_default:
+            return self.config_dir.is_dir() or bool(_env_token())
+        return self.credential_path.is_file()
+
 
 def _default_profile() -> ClaudeProfile:
     return ClaudeProfile(
@@ -74,16 +96,21 @@ def discover_profiles() -> list[ClaudeProfile]:
 
     Enumerating the home directory and opening the siblings' credential files is a
     credential access, so it is gated on ``quota.credential_scan`` like every other
-    reader here. Without that consent this returns just the configured default dir,
-    which is exactly the pre-profiles behavior.
+    reader here, and the gate comes before the enumeration rather than after it: a
+    machine whose user declined the consent must not have its home directory listed on
+    every dashboard load. Without that consent this returns just the configured default
+    dir, which is exactly the pre-profiles behavior.
     """
+    if not quota_config.credential_scan_enabled():
+        return [_default_profile()]
     profiles = [
         ClaudeProfile(name, path, name == clientpaths.CLAUDE_DEFAULT_PROFILE)
         for name, path in clientpaths.claude_profile_dirs()
     ]
-    if not quota_config.credential_scan_enabled():
-        return profiles[:1]
-    return [p for p in profiles if p.is_default or p.credential_path.is_file()]
+    # The default profile stays whatever is on disk: a missing ``.credentials.json`` there
+    # is the state the card reports, and ``CLAUDE_CODE_OAUTH_TOKEN`` headless users have no
+    # config directory at all.
+    return [p for p in profiles if p.is_default or p.configured]
 
 
 def _read_keychain_credentials(keychain: str | None = None) -> dict[str, Any] | None:
@@ -173,14 +200,20 @@ def read_claude_plan(profile: ClaudeProfile | None = None) -> dict[str, Any]:
     return {"status": "ok", "plan": _plan_label(plan, tier), "tier": tier, "credential_path": source}
 
 
-def read_claude_profiles() -> list[dict[str, Any]]:
+def read_claude_profiles(
+    profiles: list[ClaudeProfile] | None = None,
+) -> list[dict[str, Any]]:
     """Local plan/tier state for every Claude install, default profile first.
 
     Drives the per-profile headings on the Claude quota card, so a second subscription
     gets its own name and plan line instead of hiding behind the default install's.
+
+    ``profiles`` takes the caller's already-discovered list. ``quota_state`` needs these
+    facts before it picks which stored rows are still current, so it enumerates once and
+    passes the result down rather than triggering a second home-directory scan.
     """
     out: list[dict[str, Any]] = []
-    for profile in discover_profiles():
+    for profile in discover_profiles() if profiles is None else profiles:
         state = read_claude_plan(profile)
         out.append(
             {
@@ -237,6 +270,38 @@ def _read_credentials(profile: ClaudeProfile | None = None) -> tuple[str | None,
         "tier": tier,
         "credential_path": source,
     }
+
+
+def _subscription_identity(token: str) -> str:
+    """Key for the subscription a Claude access token belongs to, used to spot one
+    sign-in living in two directories.
+
+    ``cp -r ~/.claude ~/.claude-copy`` copies the sign-in too, and both directories then
+    report the same subscription's windows twice, which the consumption chart adds
+    together. The token string cannot be the key: Claude Code refreshes it in whichever
+    directory is actually used, so the copy keeps a different string for the same
+    subscription and a token comparison silently stops matching. Claude Code's access
+    token is a JWT whose payload names the account, and that survives the refresh, so the
+    identity claim is the key and the raw token is only the fallback for a token that is
+    not a JWT.
+
+    The signature is deliberately not verified. This is a local dedupe key, not an
+    authentication decision; the token goes to Anthropic, which is where that is settled.
+    """
+    parts = token.split(".")
+    if len(parts) != 3:
+        return token
+    try:
+        payload = json.loads(urlsafe_b64decode(parts[1] + "=" * (-len(parts[1]) % 4)))
+    except Exception:
+        return token
+    if not isinstance(payload, dict):
+        return token
+    for claim in _IDENTITY_CLAIMS:
+        value = payload.get(claim)
+        if value:
+            return f"{claim}:{value}"
+    return token
 
 
 def _status_snapshot(
@@ -362,22 +427,49 @@ def collect_claude_api_snapshots(
 
     Each install is fetched separately and a failure lands on its own status row, so an
     expired token in one directory cannot blank another subscription's windows. Two
-    directories holding the same access token report once: it is one subscription, and
-    reporting it twice would double its usage in the consumption chart.
+    directories holding the same sign-in report once (see `_subscription_identity`): it is
+    one subscription, and reporting it twice would double its usage in the chart.
     """
     captured_at = int(now if now is not None else datetime.now(timezone.utc).timestamp())
     selected = profiles if profiles is not None else discover_profiles()
-    out: list[QuotaSnapshot] = []
-    seen_tokens: set[str] = set()
+    # Credentials are read serially first: it is local file I/O, and it lets one
+    # subscription be recognised as a duplicate before any request goes out for it.
+    jobs: list[tuple[ClaudeProfile, str | None, dict[str, Any]]] = []
+    seen_accounts: set[str] = set()
     for profile in selected:
         token, meta = _read_credentials(profile)
         if token:
-            if token in seen_tokens:
+            identity = _subscription_identity(token)
+            if identity in seen_accounts:
                 continue
-            seen_tokens.add(token)
-        out.extend(
-            _profile_snapshots(
-                profile, token, meta, opener=opener, captured_at=captured_at, timeout=timeout
-            )
+            seen_accounts.add(identity)
+        jobs.append((profile, token, meta))
+    if len(jobs) == 1:
+        # The common case, and it stays a direct call: no pool, no thread, in-process.
+        profile, token, meta = jobs[0]
+        return _profile_snapshots(
+            profile, token, meta, opener=opener, captured_at=captured_at, timeout=timeout
         )
-    return out
+    if not jobs:
+        return []
+    # Concurrent because every install may hold its full timeout open, and a slow
+    # api.anthropic.com would otherwise add 15s per install to the poll cycle and to
+    # GET /api/quota/refresh. Results are collected in profile order, so a card's
+    # install sequence never depends on which socket answered first.
+    with ThreadPoolExecutor(
+        max_workers=min(len(jobs), _MAX_CONCURRENT_FETCHES),
+        thread_name_prefix="claude-quota",
+    ) as pool:
+        futures = [
+            pool.submit(
+                _profile_snapshots,
+                profile,
+                token,
+                meta,
+                opener=opener,
+                captured_at=captured_at,
+                timeout=timeout,
+            )
+            for profile, token, meta in jobs
+        ]
+        return [snapshot for future in futures for snapshot in future.result()]

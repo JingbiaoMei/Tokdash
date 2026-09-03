@@ -14,6 +14,8 @@ from ...usage_store import (
 )
 from . import config
 from .antigravity import collect_antigravity_api_snapshots
+from .claude import ClaudeProfile
+from .claude import discover_profiles
 from .claude import read_claude_profiles
 from .claude import collect_claude_api_snapshots
 from .codex import collect_codex_session_snapshots
@@ -329,19 +331,141 @@ def _network_key_for_provider(name: str) -> str:
     }.get(name, f"{name}_api")
 
 
-def _claude_status_for_account(entry: dict[str, Any] | None) -> dict[str, Any]:
-    """One Claude install's API failure detail, with the recovery rule already applied.
+# The account whose API status speaks for the whole card. Two providers can hold two live
+# accounts on one card: Claude Code keeps one sign-in per config directory, MiniMax one per
+# region. Both are configured deliberately, so an expired sibling sign-in or a failing China
+# Token Plan must not be presented as a problem with the default install or the global plan.
+# Providers absent from this map have one account that matters and keep the provider-wide
+# view, which is also the fallback here when a machine has no primary account at all.
+_PRIMARY_ACCOUNT = {"claude": "default", "minimax": "global"}
 
-    ``api`` rows are only written when a fetch FAILS, so a newer success for the same
-    install means the older error row must stop driving the notice — the same rule the
-    card-level status applies, applied per install so a sibling can recover on its own.
+
+def _new_account_view() -> dict[str, Any]:
+    return {
+        "plan": None,
+        "updated_at": 0,
+        "status": None,
+        "status_detail": None,
+        "status_at": None,
+        "ok_at": 0,
+    }
+
+
+def _record_row(view: dict[str, Any], row: dict[str, Any]) -> None:
+    """Fold one stored row into what one account of one provider knows about itself.
+
+    The same view backs the card's status line and the per-account list, so the recovery
+    rule is written once and cannot differ between them. ``api`` rows exist only for
+    FAILURES, so a success never lands in ``status_detail`` and ``ok_at`` cannot come from
+    those rows either: it tracks the newest successful ``*_api`` row of ANY bucket, window
+    rows included, because that observation is what turns an older error row into history.
+    Keyed per account, so one subscription's recovery does not silence another's error.
     """
-    if not entry or entry.get("status_detail") == "ok":
-        return {"status_detail": None, "status_at": None}
-    detail = entry.get("status_detail")
-    if detail and int(entry.get("ok_at") or 0) > int(entry.get("status_at") or 0):
-        detail = None
-    return {"status_detail": detail, "status_at": entry.get("status_at") if detail else None}
+    captured = int(row.get("captured_at") or 0)
+    if captured:
+        view["updated_at"] = max(int(view["updated_at"] or 0), captured)
+    if not view["plan"] and row.get("plan"):
+        view["plan"] = row.get("plan")
+    status = str(row.get("status") or "")
+    if status:
+        view["status"] = "ok" if status == "ok" else status
+    if captured and status == "ok" and str(row.get("source") or "").endswith("_api"):
+        view["ok_at"] = max(int(view["ok_at"] or 0), captured)
+    if row.get("bucket") == "api" and captured >= int(view["status_at"] or 0):
+        view["status_detail"] = status or "unavailable"
+        view["status_at"] = captured or None
+
+
+def _resolved_status(view: dict[str, Any]) -> tuple[str | None, int | None]:
+    """The account's live error: a failure with no successful observation after it."""
+    detail = view.get("status_detail")
+    if (
+        not detail
+        or detail == "ok"  # an `api` row that recorded success is not an error
+        or int(view.get("ok_at") or 0) > int(view.get("status_at") or 0)
+    ):
+        return None, None
+    return str(detail), view.get("status_at")
+
+
+def _account_status(view: dict[str, Any]) -> tuple[str | None, str | None, int | None]:
+    """One account's (status, live error, when it happened), read the same way everywhere.
+
+    `status` alone would repeat the text of the last row seen, and because a success writes
+    no ``api`` row, that row can be a failure the account has long since recovered from. So
+    a retired error promotes the status: card and account list answer through this one
+    function and cannot drift apart.
+    """
+    detail, status_at = _resolved_status(view)
+    status = view.get("status")
+    if detail is None and view.get("status_detail") and status and status != "ok":
+        status = "ok"
+    return status, detail, status_at
+
+
+def _card_view(
+    provider: str,
+    aggregate: dict[str, Any],
+    views: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """The view a card's status line, plan and updated-at are read from.
+
+    Scoped to the provider's primary account when that account reported anything:
+    otherwise one expired sibling sign-in, or a failing MiniMax China plan, would drive
+    the whole card's error. An account that reported nothing has no opinion to impose, so
+    a machine with only the secondary account -- just ``~/.claude-academic``, or only a
+    China Token Plan -- has its card describe the account it does have, and so does every
+    single-account provider, which never enters the map above.
+
+    ``updated_at`` is deliberately NOT scoped this way: the card's "updated" line means
+    when this provider was last observed by anything, and that stays provider-wide.
+    """
+    primary = _PRIMARY_ACCOUNT.get(provider)
+    if primary is not None:
+        scoped = views.get(primary)
+        if scoped is not None:
+            return scoped
+    return aggregate
+
+
+def _account_entries(
+    provider: str,
+    views: dict[str, dict[str, Any]],
+    extra: dict[str, dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """One row per account of one provider, the card's own account first.
+
+    A provider whose card carries several accounts (Claude installs, MiniMax regions) has
+    to say which account a failure belongs to, or one broken secondary account reads as a
+    problem with the healthy primary one. ``extra`` adds facts the stored rows do not
+    carry: for Claude, the plan, tier and credential path read from each install's own
+    file, which also brings in an install whose poll has not run yet.
+    """
+    accounts = dict(views)
+    for name in extra or {}:
+        accounts.setdefault(name, _new_account_view())
+    primary = _PRIMARY_ACCOUNT.get(provider, "default")
+
+    def entry(name: str) -> dict[str, Any]:
+        view = accounts[name]
+        facts = (extra or {}).get(name, {})
+        status, detail, status_at = _account_status(view)
+        row: dict[str, Any] = {
+            "account": name,
+            # A locally-readable plan wins: it is the human label ("Max 5x") rather than
+            # whatever raw subscription string a stored row happened to carry.
+            "plan": facts.get("plan") or view.get("plan"),
+            "status": status or facts.get("status"),
+            "status_detail": detail,
+            "status_at": status_at,
+            "updated_at": int(view.get("updated_at") or 0) or None,
+        }
+        for key in ("tier", "credential_path"):
+            if key in facts:
+                row[key] = facts.get(key)
+        return row
+
+    return [entry(name) for name in sorted(accounts, key=lambda name: (name != primary, name))]
 
 
 def _provider_shell(name: str, consent: dict[str, bool]) -> dict[str, Any]:
@@ -361,12 +485,16 @@ def _provider_shell(name: str, consent: dict[str, bool]) -> dict[str, Any]:
     }
 
 
-def _detected_local_providers() -> set[str]:
+def _detected_local_providers(claude_profiles: list[ClaudeProfile]) -> set[str]:
     """Providers with a local CLI directory or explicit credential override.
 
     This is intentionally read-only and shallow: directory existence and env-var
     presence are enough to drive dashboard visibility. It never opens a provider
     connection or refreshes credentials.
+
+    ``claude_profiles`` is the caller's already-discovered Claude install list (see
+    ``quota_state``), so the home directory is enumerated once per dashboard load rather
+    than once per consumer of that list.
     """
     detected: set[str] = set()
     checks = {
@@ -394,10 +522,11 @@ def _detected_local_providers() -> set[str]:
     ):
         detected.add("zai")
     if config.credential_scan_enabled():
-        # A Claude install is a directory of its own (`~/.claude` plus `~/.claude-*`
-        # siblings, see clientpaths), so a sibling alone still means the provider is
-        # configured. Enumerating the home directory is part of the consented scan.
-        if any(path.exists() for _name, path in clientpaths.claude_profile_dirs()):
+        # A second sign-in in `~/.claude-<profile>` means the provider is configured even
+        # with no `~/.claude` at all. `configured` is the same test `discover_profiles`
+        # uses to admit an install, so a leftover directory that was never signed in can
+        # neither open a card here nor open a group on it.
+        if any(profile.configured for profile in claude_profiles if not profile.is_default):
             detected.add("claude")
         try:
             from .credential_sources import discover_provider_sources
@@ -445,11 +574,31 @@ def quota_state(store: UsageEntryStore | None = None) -> dict[str, Any]:
         latest = [s.as_dict() for s in _CURRENT_SNAPSHOTS]
 
     consent = quota_network_consent()
+    # Claude's per-install facts are needed three times below: to decide whether the
+    # provider is configured at all, to drop the stored windows of installs that no longer
+    # exist, and to name each install on the card. So the home directory is enumerated once
+    # here and each install's credential file opened once here, rather than once per
+    # consumer. Opening a plan reads `.credentials.json` and can raise a macOS Keychain
+    # prompt, so without `credential_scan` consent none of it happens.
+    claude_scan = config.credential_scan_enabled()
+    claude_profiles = discover_profiles()
+    claude_installs = read_claude_profiles(claude_profiles) if claude_scan else []
+    # The installs that exist right now. A renamed or deleted `~/.claude-<profile>` leaves
+    # its window rows behind forever -- `_freshest_usage_rows` keeps the latest row per
+    # (account, bucket) with no expiry -- so without this a subscription the user removed
+    # would keep a card group showing a month-old reading indefinitely. Applied only when
+    # the install list came from a real scan: without consent the card cannot know siblings
+    # exist, and every row stays, exactly as before profiles.
+    claude_live_accounts = (
+        {str(install.get("account") or "") for install in claude_installs}
+        if claude_scan
+        else None
+    )
     providers = {
         name: _provider_shell(name, consent)
         for name in ("codex", "claude", "antigravity", "minimax", "kimi", "grok", "zai")
     }
-    for name in _detected_local_providers():
+    for name in _detected_local_providers(claude_profiles):
         providers[name]["detected"] = True
     last_network_run: int | None = _LAST_POLL_AT
     # When Codex API polling is enabled, the API is the sole oracle for the current-quota
@@ -458,60 +607,30 @@ def quota_state(store: UsageEntryStore | None = None) -> dict[str, Any]:
     # `config.network_enabled` (not raw `consent`) so the `TOKDASH_QUOTA_POLL` kill switch
     # is honored consistently with `quota_history`'s `network_only_providers` gate.
     network_only = {"codex"} if config.network_enabled("codex_api") else set()
-    # Claude is polled once per install (`~/.claude` plus `~/.claude-*` siblings), so its
-    # `api` status rows are per install. With more than one, the card-level status keeps
-    # describing the default install and each sibling's failure is reported per install in
-    # `providers.claude.profiles` instead — otherwise one expired sibling token would warn
-    # about a healthy primary subscription. With a single install there is nothing to
-    # disambiguate, so every row still describes the card.
-    claude_api_accounts = {
-        str(row.get("account") or "default")
-        for row in latest
-        if str(row.get("provider") or "") == "claude" and row.get("bucket") == "api"
-    }
-    claude_status_by_account: dict[str, dict[str, Any]] = {}
+    # One status view per (provider, account), plus a provider-wide view. Both are fed by
+    # the same `_record_row`, so a card and its account list cannot disagree about which
+    # error is still live, and neither needs to know that Claude has several installs.
+    account_views: dict[str, dict[str, dict[str, Any]]] = {}
+    provider_views: dict[str, dict[str, Any]] = {}
     for row in latest:
         provider = str(row.get("provider") or "")
         if provider not in providers:
             providers[provider] = _provider_shell(provider, consent)
         ref = providers[provider]
         account = str(row.get("account") or "default")
-        secondary_claude_status = (
-            provider == "claude"
-            and row.get("bucket") == "api"
-            and len(claude_api_accounts) > 1
-            and account != "default"
-        )
         # Stored quota data is evidence that the provider was configured even if its CLI
         # directory is temporarily unavailable (mounted home, migrated install, etc.).
         ref["detected"] = True
+        _record_row(provider_views.setdefault(provider, _new_account_view()), row)
+        _record_row(
+            account_views.setdefault(provider, {}).setdefault(account, _new_account_view()), row
+        )
         source = str(row.get("source") or "")
         if source.endswith("_api"):
             ref["network_enabled"] = True
             captured = int(row.get("captured_at") or 0)
             if captured:
                 last_network_run = max(last_network_run or 0, captured)
-                if row.get("status") == "ok" and not secondary_claude_status:
-                    ref["_ok_api_at"] = max(int(ref.get("_ok_api_at") or 0), captured)
-        if not secondary_claude_status:
-            ref["status"] = "ok" if row.get("status") == "ok" else str(row.get("status") or ref["status"])
-            if row.get("bucket") == "api":
-                captured = int(row.get("captured_at") or 0)
-                if captured >= int(ref.get("status_at") or 0):
-                    ref["status_detail"] = str(row.get("status") or "unavailable")
-                    ref["status_at"] = captured or None
-        if provider == "claude" and row.get("bucket") == "api":
-            slot = claude_status_by_account.setdefault(
-                account, {"status_detail": None, "status_at": None, "ok_at": 0}
-            )
-            captured = int(row.get("captured_at") or 0)
-            if captured >= int(slot["status_at"] or 0):
-                slot["status_detail"] = str(row.get("status") or "unavailable")
-                slot["status_at"] = captured or None
-            if row.get("status") == "ok":
-                slot["ok_at"] = max(int(slot["ok_at"] or 0), captured)
-        ref["plan"] = ref["plan"] or row.get("plan")
-        ref["updated_at"] = max(int(ref["updated_at"] or 0), int(row.get("captured_at") or 0)) or None
         if row.get("source") and row.get("source") not in ref["sources"]:
             ref["sources"].append(row.get("source"))
         if provider == "codex" and row.get("bucket") == "reset_credits":
@@ -522,15 +641,24 @@ def quota_state(store: UsageEntryStore | None = None) -> dict[str, Any]:
                     "credits": reset_payload.get("credits") if isinstance(reset_payload.get("credits"), list) else [],
                 }
 
-    for ref in providers.values():
-        # Failure status rows (bucket == "api") are only written when a fetch FAILS, so
-        # after recovery the newest "api" row is a stale artifact. Suppress the error
-        # detail (and the banner it drives) once a newer successful API observation exists.
-        ok_at = int(ref.pop("_ok_api_at", 0) or 0)
-        if ref.get("status_detail") and ok_at > int(ref.get("status_at") or 0):
-            ref["status_detail"] = None
-            ref["status_at"] = None
-            ref["status"] = "ok"
+    for name, ref in providers.items():
+        aggregate = provider_views.get(name)
+        if aggregate is None:
+            continue
+        # `status`, `status_detail` and `plan` speak for the card's own account (see
+        # `_card_view`); `updated_at` is the exception and stays provider-wide, because it
+        # answers when this provider was last observed by anything at all.
+        card = _card_view(
+            name,
+            aggregate,
+            account_views.get(name, {}),
+        )
+        status, detail, status_at = _account_status(card)
+        ref["status_detail"] = detail
+        ref["status_at"] = status_at
+        ref["status"] = str(status or ref["status"])
+        ref["plan"] = card.get("plan")
+        ref["updated_at"] = int(aggregate.get("updated_at") or 0) or None
 
     # Apply source authority ONLY to bucket selection (the status/reset_credits/
     # network_enabled loop above must keep reading the full `latest`). Dropping
@@ -545,6 +673,16 @@ def quota_state(store: UsageEntryStore | None = None) -> dict[str, Any]:
             and str(r.get("source")) == "codex_session"
         )
     ]
+    if claude_live_accounts is not None:
+        # Windows of a Claude install that no longer exists are not current data. They
+        # would otherwise hold a card group open indefinitely, since nothing expires a
+        # stored (account, bucket) row.
+        bucket_rows = [
+            row
+            for row in bucket_rows
+            if str(row.get("provider")) != "claude"
+            or str(row.get("account") or "default") in claude_live_accounts
+        ]
     # The Codex endpoint can temporarily return only the weekly window. Current cards
     # must reflect that payload exactly; older per-bucket rows remain available to history.
     if "codex" in network_only:
@@ -578,7 +716,6 @@ def quota_state(store: UsageEntryStore | None = None) -> dict[str, Any]:
                 "account",
                 "bucket",
                 "bucket_label",
-                "plan",
                 "used_percent",
                 "resets_at",
                 "captured_at",
@@ -599,23 +736,23 @@ def quota_state(store: UsageEntryStore | None = None) -> dict[str, Any]:
     # polling is off; claude/antigravity have no session source and are never estimated.
     providers["codex"]["estimated"] = "codex" not in network_only
 
-    # Reading the Claude local plan opens .credentials.json / the macOS Keychain — that is a
-    # credential access, so gate it on credential-scan consent. Without it, a dashboard load
-    # must never touch those stores or trigger a Keychain permission prompt.
-    if config.credential_scan_enabled():
-        claude_profiles = read_claude_profiles()
+    if claude_scan:
         # `plan`, `tier` and `credential_path` describe the DEFAULT install, unchanged from
         # before profiles existed, so the dashboard and both companion apps keep reading
-        # the same thing. `profiles` lists every install with its own plan and failure,
-        # which is what lets the card name a second subscription.
-        primary = next((p for p in claude_profiles if p.get("account") == "default"), None)
-        if primary is None and claude_profiles:
-            primary = claude_profiles[0]
+        # the same thing. `accounts` below carries every install's own plan and failure,
+        # which is what lets the card name a second subscription. The reads themselves
+        # happened above, once, under the same credential-scan consent.
+        primary = next(
+            (p for p in claude_installs if p.get("account") == clientpaths.CLAUDE_DEFAULT_PROFILE),
+            None,
+        )
+        if primary is None and claude_installs:
+            primary = claude_installs[0]
         plan = (primary or {}).get("plan")
         if not plan:
             # Only one install reported a plan (e.g. `~/.claude` is signed out and all the
             # usage is in `~/.claude-academic`): the card can still name it.
-            reported = {p.get("plan") for p in claude_profiles if p.get("plan")}
+            reported = {p.get("plan") for p in claude_installs if p.get("plan")}
             plan = next(iter(reported)) if len(reported) == 1 else None
         providers["claude"]["plan"] = plan
         if (primary or {}).get("status") == "ok":
@@ -624,15 +761,33 @@ def quota_state(store: UsageEntryStore | None = None) -> dict[str, Any]:
             providers["claude"]["detected"] = True
         providers["claude"]["credential_path"] = (primary or {}).get("credential_path")
         providers["claude"]["tier"] = (primary or {}).get("tier")
-        providers["claude"]["profiles"] = [
-            {
-                **profile,
-                **_claude_status_for_account(
-                    claude_status_by_account.get(str(profile.get("account") or ""))
-                ),
+
+    # Per-account rows, for the cards that carry more than one account: `~/.claude` beside a
+    # `~/.claude-<profile>` sibling, or a MiniMax global and China Token Plan. A card needs
+    # this to attribute a failure to the account that owns it instead of blaming the card;
+    # a card with one account does not, and its payload stays as it was.
+    for name, ref in providers.items():
+        views = account_views.get(name, {})
+        extra: dict[str, dict[str, Any]] = {}
+        if name == "claude":
+            views = {
+                account: view
+                for account, view in views.items()
+                if claude_live_accounts is None or account in claude_live_accounts
             }
-            for profile in claude_profiles
-        ]
+            # An install readable locally with nothing polled yet -- signed in, poll not run
+            # -- joins the list from the credential side, so it is named before it has data.
+            for install in claude_installs:
+                account = str(install.get("account") or "")
+                views.setdefault(account, _new_account_view())
+                extra[account] = {
+                    "plan": install.get("plan"),
+                    "tier": install.get("tier"),
+                    "credential_path": install.get("credential_path"),
+                }
+        entries = _account_entries(name, views, extra)
+        if len(entries) > 1:
+            ref["accounts"] = entries
 
     interval_seconds, interval_source = config.effective_poll_interval()
     now = int(datetime.now(timezone.utc).timestamp())

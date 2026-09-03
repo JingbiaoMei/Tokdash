@@ -102,7 +102,9 @@ def test_frontend_normalize_model_name_matches_backend(tmp_path):
 def test_quota_plan_label_does_not_call_detected_providers_undetected(tmp_path):
     src = INDEX_HTML.read_text(encoding="utf-8")
     js_fn = _extract_js_function(
-        src, "function quotaProviderPlanLabel(providerKey, provider) {"
+        # Third argument is a card's own plan decision (Claude, whose card can carry several
+        # installs). These cases pass none, which is what every other provider does.
+        src, "function quotaProviderPlanLabel(providerKey, provider, planOverride) {"
     )
     harness = tmp_path / "quota-plan-label.js"
     harness.write_text(
@@ -149,7 +151,8 @@ def test_quota_plan_label_does_not_call_detected_providers_undetected(tmp_path):
 def test_minimax_china_region_moves_from_bucket_to_card_title(tmp_path):
     src = INDEX_HTML.read_text(encoding="utf-8")
     card_fn = _extract_js_function(
-        src, "function quotaProviderCardLabel(providerKey, provider) {"
+        # Third argument is Claude's install view; MiniMax reads its regions off `buckets`.
+        src, "function quotaProviderCardLabel(providerKey, provider, claudeView) {"
     )
     window_fn = _extract_js_function(
         src, "function quotaWindowLabel(provider, bucket) {"

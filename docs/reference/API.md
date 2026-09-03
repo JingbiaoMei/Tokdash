@@ -195,12 +195,12 @@ Returns current subscription quota state. This route never performs provider net
       "network_enabled": true,
       "plan": "Max 5x",
       "buckets": [
-        {"account": "default", "bucket": "session", "bucket_label": "Session", "plan": "max", "used_percent": 40.0, "resets_at": 1782910800},
-        {"account": "academic", "bucket": "academic_session", "bucket_label": "Session", "plan": "pro", "used_percent": 12.0, "resets_at": 1782910800}
+        {"account": "default", "bucket": "session", "bucket_label": "Session", "used_percent": 40.0, "resets_at": 1782910800},
+        {"account": "academic", "bucket": "academic_session", "bucket_label": "Session", "used_percent": 12.0, "resets_at": 1782910800}
       ],
-      "profiles": [
-        {"account": "default", "plan": "Max 5x", "tier": "default_claude_max_5x", "status": "ok", "credential_path": "/home/me/.claude/.credentials.json", "status_detail": null, "status_at": null},
-        {"account": "academic", "plan": "Pro", "tier": "default_claude_pro", "status": "ok", "credential_path": "/home/me/.claude-academic/.credentials.json", "status_detail": "stale_token", "status_at": 1782910800}
+      "accounts": [
+        {"account": "default", "plan": "Max 5x", "tier": "default_claude_max_5x", "status": "ok", "credential_path": "/home/me/.claude/.credentials.json", "status_detail": null, "status_at": null, "updated_at": 1782910800},
+        {"account": "academic", "plan": "Pro", "tier": "default_claude_pro", "status": "ok", "credential_path": "/home/me/.claude-academic/.credentials.json", "status_detail": "stale_token", "status_at": 1782910800, "updated_at": 1782910800}
       ]
     }
   },
@@ -227,12 +227,20 @@ Returns current subscription quota state. This route never performs provider net
 }
 ```
 
-Every bucket row carries the `account` it belongs to and the `plan` recorded with it.
-`claude.profiles` is additive and appears only with `credential_scan` consent: one entry per
-Claude Code install on the machine (`~/.claude`, plus each `~/.claude-<profile>` sibling with
-its own `.credentials.json`), naming the install, the plan read from its local credentials,
-and its own API failure if it has one. `providers.claude.plan`, `tier` and `credential_path`
-keep describing the default install, so an existing consumer sees what it always did.
+Every bucket row carries the `account` it belongs to.
+
+**`accounts`** is additive and lists the accounts a card measures separately: Claude Code
+installs (`~/.claude`, plus every `~/.claude-<profile>` sibling with its own
+`.credentials.json`; the two extra fields `tier` and `credential_path` are Claude's own and
+appear only with `credential_scan` consent) and MiniMax regions. It appears only once a card
+measures more than one account, so a single-account card's payload is unchanged.
+
+`status`, `status_detail` and `plan` describe the card's own account — the `default` Claude
+install, the `global` MiniMax plan — while each `accounts` entry carries that account's own
+`status_detail` if it is failing. An entry's error clears itself once that same account
+reports a newer success; a failure on one account never moves the other one's card.
+`providers.claude.plan`, `tier` and `credential_path` keep describing the default install, so
+an existing consumer sees what it always did.
 
 ## `GET /api/quota/history`
 

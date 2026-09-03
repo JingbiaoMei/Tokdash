@@ -1,6 +1,19 @@
 {
-  "current": "2.5.1",
+  "current": "2.5.2",
   "releases": [
+    {
+      "version": "2.5.2",
+      "date": "2026-09-03",
+      "sections": [
+        {
+          "type": "added",
+          "items": [
+            "Gemini 3.8 Flash, Tencent HY4 Preview and Muse Spark 1.3, plus the Muse Spark contributor tier, are priced instead of showing as $0.",
+            "Model names that matched nothing now resolve: the Qwen3.8-Flash-Next spellings price as Qwen3.8 Flash, gemini-3.7-flash-control as Gemini 3.7 Flash, and doubao-seed-code, doubao-seed-2.0-code and ark-code as Seed 2.0 Code."
+          ]
+        }
+      ]
+    },
     {
       "version": "2.5.1",
       "date": "2026-09-02",

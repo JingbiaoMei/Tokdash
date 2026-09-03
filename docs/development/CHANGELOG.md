@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 2.5.2 - 2026-09-03
+
+### Added
+
+- Priced Gemini 3.8 Flash, Tencent HY4 Preview, and Muse Spark 1.3 with its contributor tier. All four are listed by tracked providers but were missing from the database. (#67)
+- Model IDs that appeared in session logs with no match now resolve. The `Qwen3.8-Flash-Next` spellings price as Qwen3.8 Flash, `gemini-3.7-flash-control` as Gemini 3.7 Flash, and `doubao-seed-code`, `doubao-seed-2.0-code` and `ark-code` as Seed 2.0 Code. 67M logged tokens were reporting $0. (#67)
+
 ## Unreleased
 
 ## 2.5.1 - 2026-09-02

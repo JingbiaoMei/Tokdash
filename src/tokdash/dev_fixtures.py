@@ -16,7 +16,17 @@ from collections.abc import Mapping
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
-from .compute import cache_hit_rate
+from .compute import cache_hit_rate, contribution_streaks
+from .insights import (
+    INSIGHTS_SCHEMA_VERSION,
+    _fold_daily,
+    _fold_heatmap,
+    _fold_hourly,
+    _fold_weekday,
+    _ranked,
+    _rounded,
+    parse_facets,
+)
 from .sessions import SESSION_TOOLS, _include_codex_review_sessions
 from .usage_store import model_cost_rank_key, model_rank_key
 
@@ -726,6 +736,285 @@ def dense_active_time(
         "include_review_sessions": include_review,
         "timestamp": _now_iso(),
     }
+
+
+# Fictional repository names. A report podium needs real-looking rows to be
+# demoable, and borrowing a live repository's name would put a real project
+# into a screenshot that leaves the machine.
+FIXTURE_PROJECTS = (
+    ("atlas-gateway", 0.235),
+    ("beacon-console", 0.186),
+    ("cinder-ops", 0.104),
+    ("delta-api", 0.092),
+    ("ember-notes", 0.071),
+    ("fjord-index", 0.055),
+    ("granite-cli", 0.041),
+    ("harbor-web", 0.032),
+)
+
+# Share of the window project attribution cannot see. OpenClaw and the live-only
+# sources keep their own stores, so their rows carry no transcript path and no
+# project. Production always has this gap; a fixture without it would hide the
+# one reconciliation rule the report exists to honour.
+FIXTURE_PROJECT_GAP = 0.13
+FIXTURE_UNATTRIBUTED_SHARE = 0.011
+
+# Hour-of-day mass, weekday working shape. Night hours stay non-zero so the
+# night-owl index has something to measure.
+_HOUR_BASE = (
+    0.5, 0.35, 0.25, 0.2, 0.25, 0.4, 1.0, 2.3, 3.9, 5.5,
+    6.9, 6.3, 4.5, 5.1, 6.7, 7.3, 6.5, 5.3, 3.9, 3.1,
+    3.5, 4.3, 3.7, 2.3,
+)
+# One representative hour per four-hour slot, so a window of any length puts
+# mass in every hour bucket instead of only the mid-morning peak.
+_HOUR_SLOTS = ((0, 4), (4, 8), (8, 12), (12, 16), (16, 20), (20, 24))
+
+
+def _insight_sources(usage: Mapping[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    """(tool, model_row) pairs whose shares drive the synthetic rows."""
+    sources = [
+        (tool, model_row)
+        for tool, app in usage["apps"].items()
+        for model_row in app["models"]
+    ]
+    sources.extend(("openclaw", row) for row in usage["openclaw_models"])
+    return sources
+
+
+def _insight_rows(
+    range_info: Mapping[str, Any], usage: Mapping[str, Any], seed: int
+) -> list[dict[str, Any]]:
+    """Rows in the shape `insights._fold_*` consume, summed to the usage totals.
+
+    Drawn from `dense_usage` rather than its own RNG stream, the same way
+    `dense_tools` and `_openclaw_contributions` are: facets and header totals
+    that describe different windows are the failure this file exists to prevent.
+    """
+    start, end = _effective_span(range_info)
+    if end < start:
+        return []
+    days = [start + timedelta(days=offset) for offset in range((end - start).days + 1)]
+
+    day_rng = _rng(seed, "insights:days")
+    weights: list[float] = []
+    for day in days:
+        # Roughly one day in eight is dark, so streaks and "n of N days active"
+        # have something honest to report.
+        if day_rng.random() < 0.11:
+            weights.append(0.0)
+            continue
+        weekend = day.weekday() >= 5
+        weights.append((0.33 if weekend else 1.0) * day_rng.triangular(0.25, 2.1, 0.9))
+
+    active = [index for index, weight in enumerate(weights) if weight > 0]
+    if not active:
+        # `dense_usage` never reports a zero-total window, so the day draw must
+        # not be able to paint itself into one: on a short custom range every day
+        # can come up dark, and then there is nowhere to put the tokens. Hand the
+        # window's own last day the weight rather than returning empty rows,
+        # which would break the sums-to-the-header-totals rule this file exists
+        # to keep.
+        weights[-1] = 1.0
+        active = [len(days) - 1]
+    split = _split_int(int(usage["total_tokens"]), [weights[i] for i in active])
+    day_tokens = [0] * len(days)
+    for index, value in zip(active, split):
+        day_tokens[index] = value
+    msg_split = _split_int(int(usage["total_messages"]), [weights[i] for i in active])
+    day_messages = [0] * len(days)
+    for index, value in zip(active, msg_split):
+        day_messages[index] = value
+
+    sources = _insight_sources(usage)
+    source_share_total = sum(row["tokens"] for _tool, row in sources) or 1
+    rows: list[dict[str, Any]] = []
+    for day, tokens, messages in zip(days, day_tokens, day_messages):
+        if tokens <= 0:
+            continue
+        local = _rng(seed, f"insights:day:{day.isoformat()}")
+        slot_hours = [
+            max(range(lo, hi), key=lambda hour: _HOUR_BASE[hour] * local.uniform(0.5, 1.5))
+            for lo, hi in _HOUR_SLOTS
+        ]
+        hour_weights = [
+            _HOUR_BASE[hour] * (1.0 if index % 3 else local.uniform(0.7, 1.4))
+            for index, hour in enumerate(slot_hours)
+        ]
+        per_hour = _split_int(tokens, hour_weights)
+        per_hour_messages = _split_int(messages, hour_weights)
+        for hour, hour_tokens, hour_messages in zip(slot_hours, per_hour, per_hour_messages):
+            if hour_tokens <= 0:
+                continue
+            shares = [
+                row["tokens"] / source_share_total * local.uniform(0.75, 1.25)
+                for _tool, row in sources
+            ]
+            hour_parts = _split_int(hour_tokens, shares)
+            hour_msg_parts = _split_int(hour_messages, shares)
+            for (tool, model_row), part, part_messages in zip(sources, hour_parts, hour_msg_parts):
+                if part <= 0:
+                    continue
+                per_token_cost = model_row["cost"] / model_row["tokens"] if model_row["tokens"] else 0.0
+                rows.append(
+                    {
+                        "day": day.isoformat(),
+                        "hour": hour,
+                        "source": tool,
+                        "model": str(model_row["name"]),
+                        "tokens": part,
+                        "cost": per_token_cost * part,
+                        "messages": part_messages,
+                        "entries": max(1, round(part_messages / 6)) if part_messages else 1,
+                    }
+                )
+    return rows
+
+
+def _dense_projects(total_tokens: int, total_cost: float, total_messages: int, include_names: bool) -> dict[str, Any]:
+    """A project ranking with the same reconciliation gap production has."""
+    attributed_share = 1.0 - FIXTURE_PROJECT_GAP - FIXTURE_UNATTRIBUTED_SHARE
+    visible = int(total_tokens * attributed_share)
+    unattributed_tokens = int(total_tokens * FIXTURE_UNATTRIBUTED_SHARE)
+    shares = [share for _name, share in FIXTURE_PROJECTS]
+    parts = _split_int(visible, shares)
+    # Cost is split the same three ways the tokens are. Handing the ranked rows
+    # the whole window's cost while they hold 86% of its tokens put a sixth too
+    # much money on the podium's "Top project" tile, which is the one figure a
+    # fixture screenshot is read for.
+    unattributed_cost = total_cost * FIXTURE_UNATTRIBUTED_SHARE
+    cost_parts = _split_int(int(round(total_cost * attributed_share * 1_000_000)), shares)
+    projects = [
+        {
+            "project": name,
+            "tokens": part,
+            "cost": round(cost / 1_000_000, 6),
+            "messages": max(1, round(part / max(1, total_tokens) * total_messages)) if part else 0,
+            "entries": max(1, round(part / 4_000_000)) if part else 0,
+        }
+        for (name, _share), part, cost in zip(FIXTURE_PROJECTS, parts, cost_parts)
+    ]
+    if not include_names:
+        for index, entry in enumerate(projects, start=1):
+            entry["project"] = f"project-{index}"
+    return {
+        "projects": _ranked({row["project"]: row for row in projects}, "project"),
+        "unattributed": {
+            "tokens": unattributed_tokens,
+            "cost": round(unattributed_cost, 6),
+            "messages": max(1, round(unattributed_tokens / max(1, total_tokens) * total_messages)) if total_tokens else 0,
+            "entries": 0,
+        },
+        "attributed_project_count": len(projects),
+        "names_included": bool(include_names),
+    }
+
+
+def dense_insights(
+    range_info: Mapping[str, Any],
+    facets: str | None = None,
+    include_project_names: bool = True,
+    seed: int = 0,
+) -> dict[str, Any]:
+    """Synthetic `/api/insights` payload, folded by the production fold functions.
+
+    The rows are invented; the folds are not. That is what keeps this from
+    drifting out of the shape contract `tests/test_insights_api.py` pins, which
+    is the reason the route used to refuse rather than improvise. Real usage
+    history is never read while a fixture is active.
+    """
+    selected = parse_facets(facets)
+    usage = dense_usage(range_info, seed=seed)
+    rows = _insight_rows(range_info, usage, seed)
+
+    result: dict[str, Any] = {
+        "schema_version": INSIGHTS_SCHEMA_VERSION,
+        "range": dict(range_info),
+        "facets": list(selected),
+        "timezone": str(datetime.now().astimezone().tzinfo),
+        "coverage": {
+            "stored_sources": sorted({tool for tool, _row in _insight_sources(usage) if tool != "openclaw"}),
+            "live_sources": ["openclaw"] if any(row["source"] == "openclaw" for row in rows) else [],
+            "group_count": len(rows),
+        },
+        "totals": _rounded(
+            {
+                "tokens": sum(row["tokens"] for row in rows),
+                "cost": sum(row["cost"] for row in rows),
+                "messages": sum(row["messages"] for row in rows),
+                "entries": sum(row["entries"] for row in rows),
+            }
+        ),
+        "timestamp": _now_iso(),
+        "fixture": {"name": "dense", "seed": seed},
+    }
+
+    if "hourly" in selected:
+        result["hourly"] = _fold_hourly(rows)
+    if "weekday" in selected:
+        result["weekday"] = _fold_weekday(rows)
+    if "heatmap" in selected:
+        result["heatmap"] = _fold_heatmap(rows)
+    if "daily" in selected:
+        result["daily"] = _fold_daily(rows)
+
+    if "models" in selected or "tools" in selected:
+        models: dict[str, dict[str, Any]] = {}
+        tools: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            for bucket, name in ((models, row["model"]), (tools, row["source"])):
+                entry = bucket.setdefault(name, {"tokens": 0, "cost": 0.0, "messages": 0, "entries": 0})
+                entry["tokens"] += row["tokens"]
+                entry["cost"] += row["cost"]
+                entry["messages"] += row["messages"]
+                entry["entries"] += row["entries"]
+        if "models" in selected:
+            ranked = _ranked(models, "model")
+            result["models"] = {
+                "ranked": ranked,
+                "most_used": ranked[0]["model"] if ranked else None,
+                "highest_cost": max(ranked, key=lambda row: row["cost"])["model"] if ranked else None,
+            }
+        if "tools" in selected:
+            result["tools"] = {"ranked": _ranked(tools, "tool")}
+
+    active_days = sorted({row["day"] for row in rows if row["tokens"]})
+    if "streaks" in selected:
+        current, longest = contribution_streaks([{"date": day} for day in active_days])
+        span = 0
+        if active_days:
+            first = date.fromisoformat(active_days[0])
+            last = date.fromisoformat(active_days[-1])
+            span = (last - first).days + 1
+        result["streaks"] = {
+            "current_streak": current,
+            "longest_streak": longest,
+            "active_days": len(active_days),
+            "total_days": span,
+        }
+    if "firsts" in selected:
+        per_day: dict[str, int] = {}
+        for row in rows:
+            per_day[row["day"]] = per_day.get(row["day"], 0) + row["tokens"]
+        busiest = max(per_day.items(), key=lambda item: item[1]) if per_day else None
+        hourly = result.get("hourly") or _fold_hourly(rows)
+        result["firsts"] = {
+            "first_active_day": active_days[0] if active_days else None,
+            "last_active_day": active_days[-1] if active_days else None,
+            "busiest_day": busiest[0] if busiest else None,
+            "busiest_day_tokens": busiest[1] if busiest else 0,
+            "peak_hour": hourly.get("peak_hour"),
+        }
+
+    if "projects" in selected:
+        result["projects"] = _dense_projects(
+            int(usage["total_tokens"]),
+            float(usage["total_cost"]),
+            int(usage["total_messages"]),
+            include_project_names,
+        )
+
+    return result
 
 
 def _contribution(day: date, seed: int = 0) -> dict[str, Any]:

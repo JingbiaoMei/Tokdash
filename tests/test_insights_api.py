@@ -5,6 +5,7 @@ from datetime import date, datetime, timedelta
 import pytest
 
 import tokdash.compute as compute
+import tokdash.dev_fixtures as dev_fixtures
 import tokdash.insights as insights
 
 
@@ -251,3 +252,163 @@ def test_local_day_hour_rejects_unusable_timestamps():
     assert insights._local_day_hour(0) is None
     assert insights._local_day_hour("nonsense") is None
     assert insights._local_day_hour(1767979285610) is not None
+
+
+# --------------------------------------------------------------------------
+# D2 -- the dense dev fixture must not drift from the facet contract
+# --------------------------------------------------------------------------
+
+
+FIXTURE_RANGE = {"period_resolved": "month", "period_requested": "month", "from": "2026-03-02", "to": "2026-03-31", "days": 30}
+ALL_FACET_QUERY = ",".join(insights.ALL_FACETS)
+
+
+@pytest.fixture(scope="module")
+def fixture_payload():
+    return dev_fixtures.dense_insights(
+        FIXTURE_RANGE, facets=ALL_FACET_QUERY, seed=20_260_903
+    )
+
+
+def test_fixture_envelope_carries_every_envelope_key_production_emits():
+    payload = dev_fixtures.dense_insights(FIXTURE_RANGE, facets=ALL_FACET_QUERY, seed=1)
+    envelope = {
+        "schema_version",
+        "range",
+        "facets",
+        "timezone",
+        "coverage",
+        "totals",
+        "timestamp",
+    }
+    assert envelope <= set(payload), envelope - set(payload)
+    assert set(payload["coverage"]) == {"stored_sources", "live_sources", "group_count"}
+    assert set(payload["totals"]) == {"tokens", "cost", "messages", "entries"}
+
+
+def test_fixture_hourly_facet_is_dense_and_serves_the_night_window(fixture_payload):
+    hourly = fixture_payload["hourly"]
+    assert [bucket["hour"] for bucket in hourly["buckets"]] == list(range(24))
+    # The window is served, never assumed by the consumer.
+    assert hourly["night_hours"] == sorted(insights.NIGHT_HOURS)
+    assert 0 <= hourly["night_share"] <= 1
+    assert hourly["peak_hour"] in range(24)
+
+
+def test_fixture_weekday_and_heatmap_facets_keep_their_shape(fixture_payload):
+    weekday = fixture_payload["weekday"]
+    assert [bucket["weekday"] for bucket in weekday["buckets"]] == list(range(7))
+    assert weekday["buckets"][0]["name"] == "Monday"
+    assert len(fixture_payload["heatmap"]["cells"]) == 7 * 24
+    assert set(fixture_payload["heatmap"]["cells"][0]) >= {"weekday", "hour", "tokens"}
+
+
+@pytest.mark.parametrize("days", [1, 2, 3])
+def test_a_short_custom_window_always_finds_a_day_to_put_the_tokens_on(days: int):
+    """Every fixture day has a chance of coming up dark, so a short custom range
+    can draw a window whose days are all dark. The header totals are never zero,
+    so the rows have to carry them somewhere: raising was a 500, and an empty row
+    set would leave the facets describing nothing while Overview showed tokens.
+    """
+    start = date(2026, 5, 5)
+    span = {
+        "period_resolved": "custom",
+        "period_requested": "custom",
+        "from": start.isoformat(),
+        "to": (start + timedelta(days=days - 1)).isoformat(),
+        "days": days,
+    }
+    for seed in range(80):
+        payload = dev_fixtures.dense_insights(span, facets=ALL_FACET_QUERY, seed=seed)
+        usage = dev_fixtures.dense_usage(span, seed=seed)
+
+        assert payload["totals"]["tokens"] == usage["total_tokens"], (days, seed)
+        assert payload["totals"]["messages"] == usage["total_messages"], (days, seed)
+        assert payload["daily"], f"{days}-day window at seed {seed} has no rows to show its tokens"
+        assert len(payload["daily"]) <= days
+        streaks = payload["streaks"]
+        assert 1 <= streaks["active_days"] <= days
+        assert streaks["longest_streak"] <= streaks["active_days"]
+
+
+def test_fixture_daily_facet_is_ordered_and_intensity_ranked(fixture_payload):
+    daily = fixture_payload["daily"]
+    assert daily, "a 30-day window must not come back empty"
+    assert [row["date"] for row in daily] == sorted(row["date"] for row in daily)
+    assert all(0 <= row["intensity"] <= 4 for row in daily)
+    assert all(row["intensity"] == 0 for row in daily if not row["tokens"])
+    assert any(row["intensity"] > 0 for row in daily)
+
+
+def test_fixture_rankings_are_token_descending_and_add_up(fixture_payload):
+    tools = fixture_payload["tools"]["ranked"]
+    assert [row["tokens"] for row in tools] == sorted((row["tokens"] for row in tools), reverse=True)
+    assert sum(row["tokens"] for row in tools) == fixture_payload["totals"]["tokens"]
+
+    models = fixture_payload["models"]
+    assert models["most_used"] == models["ranked"][0]["model"]
+    assert models["highest_cost"] == max(models["ranked"], key=lambda row: row["cost"])["model"]
+
+
+def test_fixture_streaks_and_firsts_agree_with_the_daily_rows(fixture_payload):
+    days = sorted(row["date"] for row in fixture_payload["daily"] if row["tokens"])
+    streaks = fixture_payload["streaks"]
+    firsts = fixture_payload["firsts"]
+    assert streaks["active_days"] == len(days)
+    assert streaks["longest_streak"] >= streaks["current_streak"] >= 0
+    assert firsts["first_active_day"] == days[0]
+    assert firsts["last_active_day"] == days[-1]
+    busiest = max(fixture_payload["daily"], key=lambda row: row["tokens"])
+    assert firsts["busiest_day"] == busiest["date"]
+    assert firsts["busiest_day_tokens"] == busiest["tokens"]
+
+
+def test_fixture_projects_leave_the_reconciliation_gap_the_report_prints(fixture_payload):
+    projects = fixture_payload["projects"]
+    total = fixture_payload["totals"]["tokens"]
+    attributed = sum(row["tokens"] for row in projects["projects"])
+    unattributed = projects["unattributed"]["tokens"]
+    gap = (total - attributed - unattributed) / total
+    # Reporting a facet that covers 100% of the total would demo a rule that
+    # never fires. Production never produces that number either.
+    assert 0.05 < gap < 0.4
+    assert 0 < unattributed < attributed
+
+
+def test_fixture_projects_follow_the_anonymisation_switch():
+    anonymous = dev_fixtures.dense_insights(
+        FIXTURE_RANGE, facets="projects", include_project_names=False, seed=1
+    )
+    names = [row["project"] for row in anonymous["projects"]["projects"]]
+    assert names and all(name.startswith("project-") for name in names)
+    assert anonymous["projects"]["names_included"] is False
+
+
+def test_fixture_totals_match_the_usage_payload_they_are_drawn_from():
+    """Facets and header totals must describe one window, not two draws."""
+    usage = dev_fixtures.dense_usage(FIXTURE_RANGE, seed=5)
+    payload = dev_fixtures.dense_insights(FIXTURE_RANGE, facets=ALL_FACET_QUERY, seed=5)
+    assert payload["totals"]["tokens"] == usage["total_tokens"]
+    assert payload["totals"]["messages"] == usage["total_messages"]
+    # Cost is the one figure allowed a rounding drift: each day jitters a
+    # model's share of that day, and models have different rates per token, so
+    # the folded cost lands near the header cost rather than on it.
+    assert payload["totals"]["cost"] == pytest.approx(usage["total_cost"], rel=1e-3)
+
+
+def test_fixture_is_stable_for_one_seed_and_window():
+    first = dev_fixtures.dense_insights(FIXTURE_RANGE, facets="daily,streaks", seed=11)
+    second = dev_fixtures.dense_insights(FIXTURE_RANGE, facets="daily,streaks", seed=11)
+    assert first["daily"] == second["daily"]
+    assert first["streaks"] == second["streaks"]
+
+
+def test_fixture_window_past_today_invents_nothing():
+    future = dict(FIXTURE_RANGE, **{"from": None, "to": None, "days": None})
+    today = datetime.now().astimezone().date()
+    future["from"] = (today - timedelta(days=3)).isoformat()
+    future["to"] = (today + timedelta(days=9)).isoformat()
+    future["days"] = 13
+    payload = dev_fixtures.dense_insights(future, facets="daily", seed=3)
+    assert payload["daily"], "the elapsed part of the window still has rows"
+    assert all(row["date"] <= today.isoformat() for row in payload["daily"])

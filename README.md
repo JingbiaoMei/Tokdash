@@ -50,7 +50,7 @@
 </p>
 
 > [!NOTE]
-> **New in 2.0: ZCode support.** Tokens, cost, sessions, turns, and measured active time are read locally from ZCode's SQLite database. [Supported clients →](docs/reference/SUPPORTED_CLIENTS.md)
+> **Multiple machines, one dashboard.** Add the Tokdash instances running on WSL, a Mac, or any other box in Settings: Overview, Sessions and Stats combine whatever you select, the Servers tab compares the machines side by side, and the Quota tab keeps each provider's window bars and reset countdowns grouped per machine. [Remote access →](docs/guides/REMOTE_ACCESS.md) · [quota tracking →](#quota-tracking-optional)
 >
 > **Also from the same author: [Cosyncing](https://github.com/cosyncing/cosyncing).** Synchronize and control your agents — from CLI to GUI, from desktop to phone. Pick up right where you left off, anywhere. Cosyncing keeps your coding agents in sync across your own network.
 
@@ -169,6 +169,15 @@ See [Supported clients](docs/reference/SUPPORTED_CLIENTS.md) for local data path
     <picture>
       <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-quota-codex-en-dark.png" />
       <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-quota-codex-en-light.png" alt="Tokdash Codex quota and reset credits - click for live demo" width="440" />
+    </picture>
+  </a>
+</p>
+<p align="center">
+  <b>Multiple servers, one total</b><br />
+  <a href="https://tokdash.github.io/demo/">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-servers-en-dark.png" />
+      <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-servers-en-light.png" alt="Tokdash Servers tab comparing four machines - click for live demo" width="860" />
     </picture>
   </a>
 </p>

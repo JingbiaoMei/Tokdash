@@ -50,7 +50,7 @@
 </p>
 
 > [!NOTE]
-> **2.0 新機能: ZCode 対応。** トークン、コスト、セッション、ターン数、計測されたアクティブ時間は、ZCode の SQLite データベースからローカルに読み取ります。[対応クライアント →](docs/reference/SUPPORTED_CLIENTS.md)
+> **複数のマシンをひとつのダッシュボードで。** 設定から WSL・Mac・その他のマシンで動く Tokdash インスタンスを追加できます。概要・セッション・統計は選択したサーバーを合算し、Servers タブはマシンを並べて比較し、Quota タブは各プロバイダーのウィンドウバーとリセットカウントダウンをマシンごとにまとめて表示します。[リモートアクセス →](docs/guides/REMOTE_ACCESS.md) · [クォータ追跡 →](#クォータ追跡任意)
 >
 > **同じ著者の別プロジェクト: [Cosyncing](https://github.com/cosyncing/cosyncing)。** エージェントの同期と制御 — CLI から GUI へ、デスクトップからスマホへ。中断した箇所からどこでも再開できます。Cosyncing はあなたのネットワーク内でコーディングエージェントを同期します。
 
@@ -169,6 +169,15 @@
     <picture>
       <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-quota-codex-en-dark.png" />
       <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-quota-codex-en-light.png" alt="Tokdash Codex quota and reset credits - click for live demo" width="440" />
+    </picture>
+  </a>
+</p>
+<p align="center">
+  <b>複数サーバー、ひとつの合計</b><br />
+  <a href="https://tokdash.github.io/demo/">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-servers-en-dark.png" />
+      <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-servers-en-light.png" alt="Tokdash Servers tab comparing four machines - click for live demo" width="860" />
     </picture>
   </a>
 </p>

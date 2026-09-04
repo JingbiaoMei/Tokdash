@@ -350,6 +350,91 @@ def test_a_stale_copy_does_not_evict_the_sign_in_that_still_works(monkeypatch, t
     assert [(s.account, s.bucket, s.status) for s in snapshots] == [("work", "work_session", "ok")]
 
 
+def test_a_copy_with_no_recorded_expiry_does_not_outrank_the_live_sign_in(
+    monkeypatch, tmp_path
+):
+    """A missing `expiresAt` must lose to a credential known to be live, not beat it.
+
+    Ranking "no recorded expiry" as the latest expiry hands the poll to whichever copy
+    happens to be missing the field -- a `cp -r` of a file caught mid-write, or an install
+    downgraded to a hand-pasted token. The real sign-in then stops being polled, the
+    reported account and history bucket prefix move to the copy, and if the copy's token is
+    dead the card reports `stale_token` with no windows: the exact failure the ranking was
+    added to prevent, with the inputs the other way round.
+    """
+    home = _home(monkeypatch, tmp_path)
+    _install(home, ".claude", token=_jwt("acct-9", "issued-1"))
+    copy = _install(home, ".claude-copy", token=_jwt("acct-9", "issued-2"))
+    blob = json.loads((copy / ".credentials.json").read_text(encoding="utf-8"))
+    del blob["claudeAiOauth"]["expiresAt"]
+    (copy / ".credentials.json").write_text(json.dumps(blob), encoding="utf-8")
+    config.set_quota_consent({"credential_scan": True})
+    calls: list[str] = []
+
+    def opener(req, timeout=15):
+        calls.append(req.get_header("Authorization"))
+        return FakeResponse(_usage_payload(40, 1_782_909_000))
+
+    snapshots = claude.collect_claude_api_snapshots(opener=opener, now=1_782_907_200)
+
+    assert calls == ["Bearer " + _jwt("acct-9", "issued-1")]  # the install with a known expiry
+    assert [(s.account, s.bucket) for s in snapshots] == [("default", "session")]
+
+
+def test_a_credential_with_no_expiry_still_beats_an_expired_one(monkeypatch, tmp_path):
+    """Not-expired outranks expired first, before any of the tie-breaks below it.
+
+    Demoting a missing expiry must not demote it past a credential that is definitely
+    dead -- a hand-pasted token would then lose to the expired file it was pasted to
+    replace, and the install would report `stale_token` with a working token on disk.
+    """
+    home = _home(monkeypatch, tmp_path)
+    stale = _install(home, ".claude", token=_jwt("acct-9", "issued-1"))
+    _expire(stale)
+    fresh = _install(home, ".claude-work", token=_jwt("acct-9", "issued-2"))
+    blob = json.loads((fresh / ".credentials.json").read_text(encoding="utf-8"))
+    del blob["claudeAiOauth"]["expiresAt"]
+    (fresh / ".credentials.json").write_text(json.dumps(blob), encoding="utf-8")
+    config.set_quota_consent({"credential_scan": True})
+    calls: list[str] = []
+
+    def opener(req, timeout=15):
+        calls.append(req.get_header("Authorization"))
+        return FakeResponse(_usage_payload(40, 1_782_909_000))
+
+    snapshots = claude.collect_claude_api_snapshots(opener=opener, now=1_782_907_200)
+
+    assert calls == ["Bearer " + _jwt("acct-9", "issued-2")]
+    assert [(s.account, s.bucket, s.status) for s in snapshots] == [("work", "work_session", "ok")]
+
+
+def test_a_non_integral_expiry_does_not_kill_the_whole_claude_poll(monkeypatch, tmp_path):
+    """`{"expiresAt": Infinity}` must degrade to "no recorded expiry", not raise.
+
+    `json.loads` accepts the bare `Infinity` literal, and `int(float("inf"))` raises
+    `OverflowError`, which is not a `ValueError`. Uncaught in the ranking it propagates out
+    of `collect_claude_api_snapshots` through `poll_quota`, so ONE install's odd credential
+    file turns `/api/quota/refresh` into a 500 for every provider on the machine.
+    """
+    home = _home(monkeypatch, tmp_path)
+    install = _install(home, ".claude", token=_jwt("acct-9", "issued-1"))
+    path = install / ".credentials.json"
+    path.write_text(
+        json.dumps(json.loads(path.read_text(encoding="utf-8"))).replace(
+            '"expiresAt": 4000000000000', '"expiresAt": Infinity'
+        ),
+        encoding="utf-8",
+    )
+    config.set_quota_consent({"credential_scan": True})
+
+    def opener(req, timeout=15):
+        return FakeResponse(_usage_payload(40, 1_782_909_000))
+
+    snapshots = claude.collect_claude_api_snapshots(opener=opener, now=1_782_907_200)
+
+    assert [(s.account, s.bucket, s.status) for s in snapshots] == [("default", "session", "ok")]
+
+
 def test_two_seats_on_one_organization_are_two_subscriptions(monkeypatch, tmp_path):
     """A Team or Enterprise organization has one org id and one seat per member.
 
@@ -570,12 +655,12 @@ def test_still_failing_install_keeps_reporting_its_error(monkeypatch, tmp_path):
 
 
 def test_windows_of_a_removed_install_are_not_shown_as_current(monkeypatch, tmp_path):
-    """A deleted `~/.claude-lab` stops owning a card group once its rows fall behind.
+    """A deleted `~/.claude-lab` stops owning a card group: its directory is observably gone.
 
-    Nothing expires a stored (account, bucket) row, so an account ages out relative to the
-    freshest Claude row on the machine instead: three poll intervals, and never under an
-    hour. Age rather than the presence of a directory, because a directory that cannot be
-    read for a moment is not a subscription that is gone (see the test below).
+    The rows are as fresh as the surviving install's, so nothing about their age says the
+    install went away -- only the home directory listing does. That listing is the oracle
+    precisely because it cannot be confused by a file that will not open right now (see the
+    tests below).
     """
     from tokdash.sources.quota import quota_state
 
@@ -586,7 +671,7 @@ def test_windows_of_a_removed_install_are_not_shown_as_current(monkeypatch, tmp_
     UsageEntryStore().insert_quota_snapshots(
         [
             _snapshot("default", "session", "Session", 40.0, 1_782_907_200),
-            _snapshot("lab", "lab_session", "Session", 90.0, 1_782_800_000),
+            _snapshot("lab", "lab_session", "Session", 90.0, 1_782_907_200),
         ]
     )
 
@@ -596,13 +681,43 @@ def test_windows_of_a_removed_install_are_not_shown_as_current(monkeypatch, tmp_
     assert [a["account"] for a in provider["accounts"]] == ["default", "academic"]
 
 
+def test_a_removed_installs_expired_sign_in_stops_warning_the_card(monkeypatch, tmp_path):
+    """Retiring the account has to retire its error too, or the card warns about it forever.
+
+    `_provider_status` reports the newest live error of any account behind the card, so a
+    deleted install whose last act was to record `stale_token` would leave a permanent
+    "couldn't refresh -- showing last known" on a card whose remaining install is fine. The
+    retired rows are dropped before any view reads them, so the card, its `accounts` list
+    and its `updated_at` all answer from the installs that are actually there.
+    """
+    from tokdash.sources.quota import quota_state
+
+    home = _home(monkeypatch, tmp_path)
+    _install(home, ".claude", token="tok-base")
+    config.set_quota_consent({"credential_scan": True, "claude_api": True})
+    UsageEntryStore().insert_quota_snapshots(
+        [
+            _snapshot("default", "session", "Session", 40.0, 1_782_907_200),
+            _snapshot("lab", "api", "Claude API", None, 1_782_907_300, status="stale_token"),
+        ]
+    )
+
+    provider = quota_state()["providers"]["claude"]
+
+    assert provider["status_detail"] is None
+    assert provider["status_at"] is None
+    assert provider["updated_at"] == 1_782_907_200  # not the deleted install's newer row
+
+
 def test_an_unreadable_install_keeps_the_windows_it_already_reported(monkeypatch, tmp_path):
     """A credential that cannot be opened right now is not an install that has been removed.
 
-    A mounted or networked home that is not up yet, an `EPERM`, a dotfile manager mid-relink
-    and a plain logout all read as "this directory is gone" to a file check. Retiring the
-    account on the strength of one instant hid a subscription that was still there while the
-    card's own "updated" line stayed fresh, so only AGE retires an account.
+    A plain `claude logout`, an `EPERM` on the file, a dotfile manager mid-relink and a
+    credential caught mid-write all read as "this install is gone" to a file check, which is
+    why the file is never the oracle: the directory is still in the home listing, so the
+    install is still known. Its rows are far older than the default install's here, and that
+    is deliberate -- age is not part of the test, so no amount of it retires a subscription
+    that is still installed.
     """
     from tokdash.sources.quota import quota_state
 
@@ -613,11 +728,110 @@ def test_an_unreadable_install_keeps_the_windows_it_already_reported(monkeypatch
     UsageEntryStore().insert_quota_snapshots(
         [
             _snapshot("default", "session", "Session", 40.0, 1_782_907_200),
-            # One poll interval behind the default install: behind, but inside the bound.
-            _snapshot("academic", "academic_session", "Session", 20.0, 1_782_905_400),
+            # A month behind the default install, and still not retired.
+            _snapshot("academic", "academic_session", "Session", 20.0, 1_780_315_200),
         ]
     )
     (academic / ".credentials.json").unlink()  # unreadable from here on
+
+    provider = quota_state()["providers"]["claude"]
+
+    assert [b["account"] for b in provider["buckets"]] == ["academic", "default"]
+    assert [a["account"] for a in provider["accounts"]] == ["default", "academic"]
+
+
+def test_a_home_that_cannot_be_listed_retires_nothing(monkeypatch, tmp_path):
+    """An unavailable home is an unavailable answer, not the news that every install is gone.
+
+    A networked or encrypted home that is not up yet lists nothing at all, which by the
+    membership test alone would retire every install on the machine at once. Absence has to
+    be OBSERVED, so a listing that could not be read means nothing may be concluded from it.
+    """
+    from tokdash.sources.quota import quota_state
+
+    home = _home(monkeypatch, tmp_path)
+    _install(home, ".claude", token="tok-base")
+    config.set_quota_consent({"credential_scan": True, "claude_api": True})
+    UsageEntryStore().insert_quota_snapshots(
+        [
+            _snapshot("default", "session", "Session", 40.0, 1_782_907_200),
+            _snapshot("academic", "academic_session", "Session", 20.0, 1_782_907_200),
+        ]
+    )
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "not-mounted")
+
+    provider = quota_state()["providers"]["claude"]
+
+    assert [b["account"] for b in provider["buckets"]] == ["academic", "default"]
+
+
+def test_an_unmounted_explicit_profile_volume_retires_nothing(monkeypatch, tmp_path):
+    """`TOKDASH_CLAUDE_PROFILES` names the installs, so a missing path is an unmounted one.
+
+    The variable is how installs outside the home directory are declared. One of them not
+    being a directory right now is the unmounted-volume case, not a deletion -- the user did
+    not stop declaring it -- so the whole answer is untrusted rather than that install being
+    retired.
+    """
+    from tokdash.sources.quota import quota_state
+
+    home = _home(monkeypatch, tmp_path)
+    _install(home, ".claude", token="tok-base")
+    lab = _install(home, "lab", token="tok-lab")
+    monkeypatch.setenv("TOKDASH_CLAUDE_PROFILES", f"{lab}{os.pathsep}{tmp_path / 'volume' / 'work'}")
+    config.set_quota_consent({"credential_scan": True, "claude_api": True})
+    UsageEntryStore().insert_quota_snapshots(
+        [
+            _snapshot("default", "session", "Session", 40.0, 1_782_907_200),
+            _snapshot("work", "work_session", "Session", 20.0, 1_782_907_200),
+        ]
+    )
+
+    provider = quota_state()["providers"]["claude"]
+
+    assert [b["account"] for b in provider["buckets"]] == ["default", "work"]
+
+
+def test_no_credential_scan_consent_retires_nothing(monkeypatch, tmp_path):
+    """Without consent nothing was looked at, so nothing may be concluded gone."""
+    from tokdash.sources.quota import quota_state
+
+    home = _home(monkeypatch, tmp_path)
+    _install(home, ".claude", token="tok-base")
+    config.set_quota_consent({"credential_scan": True, "claude_api": True})
+    UsageEntryStore().insert_quota_snapshots(
+        [
+            _snapshot("default", "session", "Session", 40.0, 1_782_907_200),
+            _snapshot("lab", "lab_session", "Session", 90.0, 1_782_907_200),
+        ]
+    )
+    config.set_quota_consent({"credential_scan": False, "claude_api": True})
+
+    provider = quota_state()["providers"]["claude"]
+
+    assert [b["account"] for b in provider["buckets"]] == ["default", "lab"]
+
+
+def test_a_row_stamped_in_the_future_drops_nothing(monkeypatch, tmp_path):
+    """A poll that ran on a wrong clock must not take the card down with it.
+
+    A VM resumed before NTP, a dual-boot clock skew or a container with a bad RTC writes a
+    `captured_at` in the future, and that row stays the newest one for its bucket for as
+    long as the skew lasts. Nothing here compares one row's age against another's, so the
+    skewed row is just a row.
+    """
+    from tokdash.sources.quota import quota_state
+
+    home = _home(monkeypatch, tmp_path)
+    _install(home, ".claude", token="tok-base")
+    _install(home, ".claude-academic", token="tok-academic")
+    config.set_quota_consent({"credential_scan": True, "claude_api": True})
+    UsageEntryStore().insert_quota_snapshots(
+        [
+            _snapshot("default", "session", "Session", 40.0, 1_782_907_200 + 86_400),
+            _snapshot("academic", "academic_session", "Session", 20.0, 1_782_907_200),
+        ]
+    )
 
     provider = quota_state()["providers"]["claude"]
 
@@ -772,3 +986,477 @@ def test_minimax_region_failure_warns_the_card_and_names_the_region(monkeypatch,
     assert by_account["global"]["status_detail"] is None
     # The healthy region's meter is still there, and still its own.
     assert [(b["account"], b["used_percent"]) for b in provider["buckets"]] == [("global", 30.0)]
+
+
+# --- retirement must not reach the providers whose accounts are not directories ----------
+# `minimax`, `antigravity` and `grok` all write their FAILURE row under a synthetic
+# `default` account when there was no credential to name -- `region if credential else
+# "default"`, `raw.get("email") or "default"`, `meta.get("user_id") or "default"` -- while
+# their successful rows go under the region, email or user id. A retirement rule that ran
+# per provider would therefore let that synthetic row stand in for the whole provider and
+# evict the real accounts' stored bars, which is the opposite of what a failed provider is
+# required to do: `COMPANION_API.md` says its buckets are last-known and stay visible.
+
+
+def _row(provider: str, account: str, bucket: str, used, captured: int, status: str = "ok"):
+    return QuotaSnapshot(
+        provider, account, bucket, bucket, used, 1_782_909_000, None,
+        captured, f"{provider}_api", status, {},
+    )
+
+
+def test_a_minimax_credential_failure_keeps_the_regions_last_known_bars(monkeypatch, tmp_path):
+    from tokdash.sources.quota import quota_state
+
+    _home(monkeypatch, tmp_path)
+    config.set_quota_consent({"credential_scan": True, "minimax_api": True})
+    UsageEntryStore().insert_quota_snapshots(
+        [
+            _row("minimax", "global", "global_5h", 62.0, 1_782_900_000),
+            _row("minimax", "cn", "cn_5h", 44.0, 1_782_900_000),
+            # `credentials_not_found`: no credential to name, so the row lands on `default`
+            # and is the freshest row the provider has.
+            _row("minimax", "default", "api", None, 1_782_907_200, status="unavailable"),
+        ]
+    )
+
+    provider = quota_state()["providers"]["minimax"]
+
+    assert [(b["account"], b["used_percent"]) for b in provider["buckets"]] == [
+        ("cn", 44.0),
+        ("global", 62.0),
+    ]
+    assert provider["status_detail"] == "unavailable"  # still warns about the provider
+
+
+def test_an_antigravity_credential_failure_keeps_the_last_known_bars(monkeypatch, tmp_path):
+    from tokdash.sources.quota import quota_state
+
+    _home(monkeypatch, tmp_path)
+    config.set_quota_consent({"credential_scan": True, "antigravity_api": True})
+    UsageEntryStore().insert_quota_snapshots(
+        [
+            _row("antigravity", "user@example.com", "pool_a", 80.0, 1_782_900_000),
+            _row("antigravity", "default", "api", None, 1_782_907_200, status="fetch_error"),
+        ]
+    )
+
+    provider = quota_state()["providers"]["antigravity"]
+
+    assert [(b["bucket"], b["used_percent"]) for b in provider["buckets"]] == [("pool_a", 80.0)]
+    assert provider["status_detail"] == "fetch_error"
+
+
+def test_a_grok_credential_failure_keeps_the_last_known_bars(monkeypatch, tmp_path):
+    from tokdash.sources.quota import quota_state
+
+    _home(monkeypatch, tmp_path)
+    config.set_quota_consent({"credential_scan": True, "grok_api": True})
+    UsageEntryStore().insert_quota_snapshots(
+        [
+            _row("grok", "user-77", "credits", 15.0, 1_782_900_000),
+            _row("grok", "default", "api", None, 1_782_907_200, status="stale_token"),
+        ]
+    )
+
+    provider = quota_state()["providers"]["grok"]
+
+    assert [(b["bucket"], b["used_percent"]) for b in provider["buckets"]] == [("credits", 15.0)]
+    assert provider["status_detail"] == "stale_token"
+
+
+# --- what the card says about itself -----------------------------------------------------
+
+
+def test_a_consented_machine_with_no_claude_install_names_the_reason(monkeypatch, tmp_path):
+    """An empty home has to produce the `unavailable` row, not an unexplained empty card.
+
+    Admitting the default install only when it is `configured` made `discover_profiles`
+    return nothing at all here, so `collect_claude_api_snapshots` returned nothing, and the
+    card fell back to "No quota snapshots yet." while `network_enabled` kept it on screen --
+    with `status_detail` null, so no surface could say why. Declining the scan produced the
+    row that granting it did not.
+    """
+    _home(monkeypatch, tmp_path)  # no `~/.claude`, no sibling, no env token
+    config.set_quota_consent({"credential_scan": True, "claude_api": True})
+
+    snapshots = claude.collect_claude_api_snapshots(
+        opener=lambda req, timeout=15: FakeResponse({}), now=1_782_907_200
+    )
+
+    assert [(s.account, s.bucket, s.status) for s in snapshots] == [
+        ("default", "api", "unavailable")
+    ]
+
+
+def test_the_card_plan_is_the_default_installs_not_the_first_alphabetically(
+    monkeypatch, tmp_path
+):
+    """`providers.claude.plan` describes the default install, as `API.md` promises.
+
+    Reading it off the provider-wide view took the first plan any row carried, and rows
+    arrive ordered by `(provider, account, bucket)` -- so `academic` came before `default`
+    and a Max 20x install reported `pro`. The local read at the end of `quota_state` used to
+    paper over this, which is why it only showed with `credential_scan` revoked after
+    polling: the one state where nothing overwrites it.
+    """
+    from tokdash.sources.quota import quota_state
+
+    home = _home(monkeypatch, tmp_path)
+    _install(home, ".claude", token="tok-base")
+    _install(home, ".claude-academic", token="tok-academic")
+    config.set_quota_consent({"credential_scan": True, "claude_api": True})
+    UsageEntryStore().insert_quota_snapshots(
+        [
+            _snapshot("academic", "academic_session", "Session", 20.0, 1_782_907_200, plan="pro"),
+            _snapshot("default", "session", "Session", 75.0, 1_782_907_200, plan="max_20x"),
+        ]
+    )
+    config.set_quota_consent({"credential_scan": False, "claude_api": True})
+
+    assert quota_state()["providers"]["claude"]["plan"] == "max_20x"
+
+
+def test_a_sibling_only_card_may_still_name_that_siblings_plan(monkeypatch, tmp_path):
+    """No `~/.claude` behind the card at all: one account's plan may speak for it."""
+    from tokdash.sources.quota import quota_state
+
+    home = _home(monkeypatch, tmp_path)
+    _install(home, ".claude-academic", token="tok-academic")
+    config.set_quota_consent({"credential_scan": True, "claude_api": True})
+    UsageEntryStore().insert_quota_snapshots(
+        [_snapshot("academic", "academic_session", "Session", 20.0, 1_782_907_200, plan="pro")]
+    )
+    config.set_quota_consent({"credential_scan": False, "claude_api": True})
+
+    assert quota_state()["providers"]["claude"]["plan"] == "pro"
+
+
+# --- what the retirement predicate must and must not conclude ----------------------------
+
+
+def test_a_deleted_default_install_is_retired_too(monkeypatch, tmp_path):
+    """Migrating to `~/.claude-work` and deleting `~/.claude` is an ordinary thing to do.
+
+    `claude_profile_dirs` emits `("default", claude_config_dir())` before any existence
+    check, so a set built from the names it returns always contains `default` and could
+    never retire it -- leaving the deleted install's month-old bar on the card and its
+    `stale_token` warning there for good, which is the very thing retirement exists for.
+    Presence has to be observed for the default install like any other.
+    """
+    from tokdash.sources.quota import quota_state
+
+    home = _home(monkeypatch, tmp_path)
+    _install(home, ".claude-work", token="tok-work")
+    config.set_quota_consent({"credential_scan": True, "claude_api": True})
+    UsageEntryStore().insert_quota_snapshots(
+        [
+            _snapshot("default", "session", "Session", 91.0, 1_780_315_200),
+            _snapshot("default", "api", "Claude API", None, 1_780_315_300, status="stale_token"),
+            _snapshot("work", "work_session", "Session", 12.0, 1_782_907_200),
+        ]
+    )
+
+    provider = quota_state()["providers"]["claude"]
+
+    assert [b["account"] for b in provider["buckets"]] == ["work"]
+    assert provider["status_detail"] is None
+    assert provider["updated_at"] == 1_782_907_200
+
+
+def test_a_default_install_behind_an_unlistable_parent_is_kept(monkeypatch, tmp_path):
+    """`CLAUDE_CONFIG_DIR` on an unmounted volume is unobserved, not observably gone."""
+    from tokdash.sources.quota import quota_state
+
+    home = _home(monkeypatch, tmp_path)
+    _install(home, ".claude-work", token="tok-work")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "volume" / "claude"))
+    config.set_quota_consent({"credential_scan": True, "claude_api": True})
+    UsageEntryStore().insert_quota_snapshots(
+        [
+            _snapshot("default", "session", "Session", 91.0, 1_780_315_200),
+            _snapshot("work", "work_session", "Session", 12.0, 1_782_907_200),
+        ]
+    )
+
+    provider = quota_state()["providers"]["claude"]
+
+    assert [b["account"] for b in provider["buckets"]] == ["default", "work"]
+
+
+def test_redirecting_the_default_slot_does_not_retire_the_redirected_install(
+    monkeypatch, tmp_path
+):
+    """Slug allocation is relative to `CLAUDE_CONFIG_DIR`; directory presence is not.
+
+    Pointing the env var at `~/.claude-academic` renames that install `default` and renames
+    the plain `~/.claude` beside it `claude`, so a set of assigned names alone does not
+    contain `academic` -- and the stored `academic` account would be retired with its
+    directory sitting right there in the listing. A directory is known under every name it
+    could have been stored under.
+    """
+    from tokdash.sources.quota import quota_state
+
+    home = _home(monkeypatch, tmp_path)
+    _install(home, ".claude", token="tok-base")
+    academic = _install(home, ".claude-academic", token="tok-academic")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(academic))
+    config.set_quota_consent({"credential_scan": True, "claude_api": True})
+    UsageEntryStore().insert_quota_snapshots(
+        [
+            _snapshot("default", "session", "Session", 40.0, 1_782_907_200),
+            _snapshot("academic", "academic_session", "Session", 20.0, 1_782_907_200),
+        ]
+    )
+
+    provider = quota_state()["providers"]["claude"]
+
+    assert [b["account"] for b in provider["buckets"]] == ["academic", "default"]
+
+
+def test_a_home_naming_no_install_at_all_retires_nothing(monkeypatch, tmp_path):
+    """An empty or opaque listing is not the news that every install was deleted.
+
+    An autofs stub before the mount triggers, an fscrypt home before unlock (entries are
+    there, their names are ciphertext, so nothing matches `.claude*`) and a roaming profile
+    mid-sync all read as "no install exists". Trusting that retires every install on the
+    machine at once, which is the transient-for-deleted confusion the redesign exists to
+    stop; the listing being readable is necessary but not sufficient.
+    """
+    from tokdash.sources.quota import quota_state
+
+    home = _home(monkeypatch, tmp_path)
+    (home / "Documents").mkdir()  # readable, non-empty, and names no Claude install
+    config.set_quota_consent({"credential_scan": True, "claude_api": True})
+    UsageEntryStore().insert_quota_snapshots(
+        [
+            _snapshot("default", "session", "Session", 40.0, 1_782_907_200),
+            _snapshot("academic", "academic_session", "Session", 20.0, 1_782_907_200),
+        ]
+    )
+
+    provider = quota_state()["providers"]["claude"]
+
+    assert [b["account"] for b in provider["buckets"]] == ["academic", "default"]
+
+
+# --- the synthetic account a credential-less failure writes under ------------------------
+
+
+def test_a_credential_less_minimax_failure_names_no_account(monkeypatch, tmp_path):
+    """`credentials_not_found` has no credential to name, so it must name no account.
+
+    MiniMax writes that row under `region if credential else "default"`. Emitting it as an
+    `accounts` entry gives the card a third, untranslated Token Plan group headed `default`
+    that no region corresponds to, and hands a consumer counting healthy accounts one that
+    does not exist. The failure still has to reach the card, so it stays in the
+    provider-wide status -- as an error no account claims, which is the honest shape.
+    """
+    from tokdash.sources.quota import quota_state
+
+    _home(monkeypatch, tmp_path)
+    config.set_quota_consent({"credential_scan": True, "minimax_api": True})
+    UsageEntryStore().insert_quota_snapshots(
+        [
+            _row("minimax", "global", "global_5h", 62.0, 1_782_900_000),
+            _row("minimax", "cn", "cn_5h", 44.0, 1_782_900_000),
+            _row("minimax", "default", "api", None, 1_782_907_200, status="unavailable"),
+        ]
+    )
+
+    provider = quota_state()["providers"]["minimax"]
+
+    assert [a["account"] for a in provider["accounts"]] == ["global", "cn"]
+    assert provider["status_detail"] == "unavailable"  # still warns, still unattributed
+
+
+def test_a_region_that_never_reported_a_window_keeps_its_account(monkeypatch, tmp_path):
+    """`cn` is a real credential that failed early, not the credential-less fallback.
+
+    It measures nothing either, so the rule that drops the synthetic account has to be
+    narrow enough to keep this one -- it is what lets the card put CN's error under CN.
+    """
+    from tokdash.sources.quota import quota_state
+
+    _home(monkeypatch, tmp_path)
+    config.set_quota_consent({"credential_scan": True, "minimax_api": True})
+    UsageEntryStore().insert_quota_snapshots(
+        [
+            _row("minimax", "global", "global_5h", 62.0, 1_782_900_000),
+            _row("minimax", "cn", "api", None, 1_782_907_200, status="stale_token"),
+        ]
+    )
+
+    by_account = {a["account"]: a for a in quota_state()["providers"]["minimax"]["accounts"]}
+
+    assert set(by_account) == {"global", "cn"}
+    assert by_account["cn"]["status_detail"] == "stale_token"
+
+
+def test_the_claude_default_install_keeps_its_account_with_nothing_measured(
+    monkeypatch, tmp_path
+):
+    """Claude's `default` IS an install and is that card's primary account.
+
+    Its `unavailable` row with no windows behind it is what drives the consent and
+    "not detected" card, so the synthetic-account rule must not reach it.
+    """
+    from tokdash.sources.quota import quota_state
+
+    home = _home(monkeypatch, tmp_path)
+    _install(home, ".claude", token="tok-base")
+    _install(home, ".claude-academic", token="tok-academic")
+    config.set_quota_consent({"credential_scan": True, "claude_api": True})
+    UsageEntryStore().insert_quota_snapshots(
+        [
+            _snapshot("default", "api", "Claude API", None, 1_782_907_200, status="unavailable"),
+            _snapshot("academic", "academic_session", "Session", 20.0, 1_782_907_200),
+        ]
+    )
+
+    by_account = {a["account"]: a for a in quota_state()["providers"]["claude"]["accounts"]}
+
+    assert set(by_account) == {"default", "academic"}
+    assert by_account["default"]["status_detail"] == "unavailable"
+
+
+def test_a_negative_expiry_is_expired_rather_than_unknown(monkeypatch, tmp_path):
+    """One field must not be read two ways by two functions.
+
+    `_profile_snapshots` calls a truthy-but-past `expiresAt` expired and reports
+    `stale_token` for it. Classing the same value as "no recorded expiry" in the ranking
+    made it rank as not-expired, so it outranked a credential both functions agree is dead
+    and the poll went to the copy that cannot work.
+    """
+    home = _home(monkeypatch, tmp_path)
+    negative = _install(home, ".claude", token=_jwt("acct-9", "issued-1"))
+    blob = json.loads((negative / ".credentials.json").read_text(encoding="utf-8"))
+    blob["claudeAiOauth"]["expiresAt"] = -1_000
+    (negative / ".credentials.json").write_text(json.dumps(blob), encoding="utf-8")
+    expired = _install(home, ".claude-work", token=_jwt("acct-9", "issued-2"))
+    _expire(expired)  # merely expired, and still the better of the two
+    config.set_quota_consent({"credential_scan": True})
+    calls: list[str] = []
+
+    def opener(req, timeout=15):
+        calls.append(req.get_header("Authorization"))
+        return FakeResponse(_usage_payload(40, 1_782_909_000))
+
+    snapshots = claude.collect_claude_api_snapshots(opener=opener, now=1_782_907_200)
+
+    # Both directories hold the same sign-in, so one of them reports -- and it is the
+    # merely-expired credential, not the negative one, which is what says the negative one
+    # was ranked as expired rather than as an unknown expiry that beats everything expired.
+    # (As an unknown it also carried the default install's tie-break, so it won twice over.)
+    assert calls == []  # neither is live, so no token is sent out
+    assert claude._credential_rank(
+        claude.ClaudeProfile("x", home / ".claude", False),
+        {"expires_at_ms": -1_000},
+        1_782_907_200,
+    )[:2] == (0, 1)  # (not live, expiry recorded)
+    assert [(s.account, s.status) for s in snapshots] == [("work", "stale_token")]
+
+
+def test_an_absurdly_long_expiry_does_not_kill_the_whole_claude_poll(monkeypatch, tmp_path):
+    """A 400-digit `expiresAt` survives `int()` and then overflows on the way into a float.
+
+    `json.loads` builds an arbitrarily long integer literal, so the `OverflowError` guard on
+    the parse does not help: the conversion that raises is the one building the rank tuple.
+    `poll_quota` wraps no collector, so one odd credential file 500s `/api/quota/refresh`
+    for every provider on the machine.
+    """
+    home = _home(monkeypatch, tmp_path)
+    install = _install(home, ".claude", token=_jwt("acct-9", "issued-1"))
+    path = install / ".credentials.json"
+    path.write_text(
+        path.read_text(encoding="utf-8").replace("4000000000000", "9" * 400),
+        encoding="utf-8",
+    )
+    config.set_quota_consent({"credential_scan": True})
+
+    snapshots = claude.collect_claude_api_snapshots(
+        opener=lambda req, timeout=15: FakeResponse(_usage_payload(40, 1_782_909_000)),
+        now=1_782_907_200,
+    )
+
+    assert [(s.account, s.bucket, s.status) for s in snapshots] == [
+        ("default", "session", "ok")
+    ]
+
+
+def test_an_unreadable_credential_is_not_attributed_to_an_older_failure(
+    monkeypatch, tmp_path
+):
+    """`status_account` says whose error the card reports, which is not "someone also failed".
+
+    The sequence is ordinary: CN's key expires, so an older poll left `cn/stale_token`; then
+    the credential file is removed, so the newest poll writes the credential-less failure
+    under the synthetic `default` account. `_measured_accounts` drops that account, as it
+    must -- it is not a Token Plan -- and the card is then left reporting an error that
+    belongs to nothing it lists. A consumer asking only "does any account carry an error"
+    finds CN's and reads the card as attributed, so a provider whose credentials cannot be
+    read at all counts as working. The owner is a fact only the server has.
+    """
+    from tokdash.sources.quota import quota_state
+
+    _home(monkeypatch, tmp_path)
+    config.set_quota_consent({"credential_scan": True, "minimax_api": True})
+    UsageEntryStore().insert_quota_snapshots(
+        [
+            _row("minimax", "global", "global_5h", 62.0, 1_782_900_000),
+            _row("minimax", "cn", "cn_5h", 44.0, 1_782_900_000),
+            _row("minimax", "cn", "api", None, 1_782_900_100, status="stale_token"),
+            # The newest poll: no credential file to read at all.
+            _row("minimax", "default", "api", None, 1_782_907_200, status="unavailable"),
+        ]
+    )
+
+    provider = quota_state()["providers"]["minimax"]
+
+    assert [a["account"] for a in provider["accounts"]] == ["global", "cn"]
+    # CN really is still broken, and says so under its own name.
+    by_account = {a["account"]: a for a in provider["accounts"]}
+    assert by_account["cn"]["status_detail"] == "stale_token"
+    # But the error the CARD reports is the newer, credential-less one, which belongs to no
+    # account listed -- so nothing here may be mistaken for its owner.
+    assert provider["status_detail"] == "unavailable"
+    assert provider["status_account"] is None
+
+
+def test_a_cards_error_names_the_account_it_belongs_to(monkeypatch, tmp_path):
+    """The attributed case: one broken sibling beside a working install."""
+    from tokdash.sources.quota import quota_state
+
+    home = _home(monkeypatch, tmp_path)
+    _install(home, ".claude", token="tok-base")
+    _install(home, ".claude-academic", token="tok-academic")
+    config.set_quota_consent({"credential_scan": True, "claude_api": True})
+    UsageEntryStore().insert_quota_snapshots(
+        [
+            _snapshot("default", "session", "Session", 40.0, 1_782_907_200),
+            _snapshot("academic", "academic_session", "Session", 20.0, 1_782_900_000),
+            _snapshot("academic", "api", "Claude API", None, 1_782_907_200, status="stale_token"),
+        ]
+    )
+
+    provider = quota_state()["providers"]["claude"]
+
+    assert provider["status_detail"] == "stale_token"
+    assert provider["status_account"] == "academic"
+
+
+def test_a_single_account_card_carries_no_status_account(monkeypatch, tmp_path):
+    """`status_account` is only meaningful beside `accounts`, and ships with it."""
+    from tokdash.sources.quota import quota_state
+
+    home = _home(monkeypatch, tmp_path)
+    _install(home, ".claude", token="tok-base")
+    config.set_quota_consent({"credential_scan": True, "claude_api": True})
+    UsageEntryStore().insert_quota_snapshots(
+        [_snapshot("default", "session", "Session", 40.0, 1_782_907_200)]
+    )
+
+    provider = quota_state()["providers"]["claude"]
+
+    assert "accounts" not in provider
+    assert "status_account" not in provider

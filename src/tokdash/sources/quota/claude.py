@@ -79,6 +79,10 @@ class ClaudeProfile:
         ``unavailable`` state -- or on the environment override, since a headless sign-in has
         no config directory to be there or not. A sibling needs its own credential file,
         because a directory copied or restored into place is not a subscription.
+
+        Note this is not the same question as "should this install be reported": the default
+        install is reported even when this is false, so that a machine with no Claude Code at
+        all still names the reason instead of showing an empty card. See ``scan_profiles``.
         """
         if self.is_default:
             return self.config_dir.is_dir() or bool(_env_token())
@@ -91,32 +95,149 @@ def _default_profile() -> ClaudeProfile:
     )
 
 
-def discover_profiles() -> list[ClaudeProfile]:
+@dataclass(frozen=True)
+class ProfileScan:
+    """One enumeration of this machine's Claude installs, and how much to trust it.
+
+    ``profiles`` is what to report quota for. ``known`` is every install the scan actually
+    saw a directory for, or ``None`` when the enumeration was not trustworthy enough to
+    conclude anything from a name's absence -- see ``_namespace_trusted``. Both come out of
+    a single pass, because the home directory is enumerated once per dashboard load.
+    """
+
+    profiles: list[ClaudeProfile]
+    known: frozenset[str] | None
+
+
+def _namespace_trusted(profiles: list[ClaudeProfile]) -> bool:
+    """Whether "this name was not found" may be read as "this install is gone".
+
+    Retiring an install's stored windows on absence is only safe when absence was really
+    observed. The oracle is therefore the *listing that names the installs*, never an
+    individual install's files: a sibling that is present but unreadable -- ``claude
+    logout``, a credential file mid-write, a mode-000 directory -- stays in its parent's
+    listing and so stays known, which is what keeps a transient read from looking like a
+    deletion.
+
+    With ``TOKDASH_CLAUDE_PROFILES`` the variable names the installs outright, so any
+    listed path that is not a directory right now means the answer is unavailable (an
+    unmounted volume), not that the install was removed. Otherwise the listing is the home
+    directory, and failing to read it at all -- unmounted, not yet mounted, EPERM -- is the
+    same unavailable answer.
+
+    Reading the listing is necessary but not sufficient: at least one install directory has
+    to be VISIBLE in it. A listing that names no install at all is not the news that every
+    install was deleted, and the ways to get one are ordinary -- an autofs or NFS stub
+    before the mount triggers, an fscrypt/ecryptfs home before unlock (entries are there,
+    their names are ciphertext, so nothing matches ``.claude*``), a roaming profile
+    mid-sync. Every one of those would otherwise retire every install on the machine at
+    once, which is the transient-for-deleted confusion this whole predicate exists to stop.
+    """
+    # Every failure mode here means "untrusted", including the ones that are not OSError:
+    # `Path.home()` raises RuntimeError with no resolvable home, and an unreadable listing
+    # must never be able to 500 the dashboard on its way to being unanswerable.
+    try:
+        explicit = os.environ.get("TOKDASH_CLAUDE_PROFILES", "").strip()
+        if explicit:
+            if not all(
+                Path(entry).expanduser().is_dir()
+                for entry in explicit.split(os.pathsep)
+                if entry.strip()
+            ):
+                return False
+        else:
+            with os.scandir(Path.home()) as entries:
+                next(iter(entries), None)
+        return any(profile.config_dir.is_dir() for profile in profiles)
+    except Exception:
+        return False
+
+
+def scan_profiles() -> ProfileScan:
     """Claude installs worth reporting quota for, default profile first.
 
-    Every install is admitted on the same test, ``configured``: a config directory (or the
-    environment override) for the default profile, its own ``.credentials.json`` for a
-    ``~/.claude-*`` sibling. That is what keeps a leftover or unrelated ``.claude-*``
-    directory from opening an empty group on the card, and it is what stops a default
-    install that is simply not there -- no ``~/.claude``, sign-in in a sibling only -- from
-    reporting ``unavailable`` over the top of the subscription that IS installed. A
-    signed-in-but-never-polled default install still reports: its directory is there, and
-    "no credentials yet" is that install's own state to report.
+    A sibling is admitted on ``configured`` -- its own ``.credentials.json`` -- which keeps a
+    leftover or unrelated ``.claude-*`` directory from opening an empty group on the card.
+    The default install is admitted whether or not it is configured, because its row is what
+    drives the consent prompt and the "not detected" card: a machine with no ``~/.claude`` at
+    all has to name that reason rather than render an empty card, and the consent-declined
+    path below returns that same row. The one case where it is dropped is a machine whose
+    ``~/.claude`` is not there AND whose sign-in lives in a sibling: the subscription that IS
+    installed then speaks for the card, with no ``unavailable`` notice over the top of it.
 
     Enumerating the home directory and opening the siblings' credential files is a
     credential access, so it is gated on ``quota.credential_scan`` like every other
     reader here, and the gate comes before the enumeration rather than after it: a
     machine whose user declined the consent must not have its home directory listed on
-    every dashboard load. Without that consent this returns just the configured default
-    dir, which is exactly the pre-profiles behavior.
+    every dashboard load. Without that consent this returns just the default dir, which is
+    exactly the pre-profiles behavior, and ``known`` is ``None`` -- nothing was looked at, so
+    nothing may be concluded gone.
     """
     if not quota_config.credential_scan_enabled():
-        return [_default_profile()]
+        return ProfileScan([_default_profile()], None)
     profiles = [
         ClaudeProfile(name, path, name == clientpaths.CLAUDE_DEFAULT_PROFILE)
         for name, path in clientpaths.claude_profile_dirs()
     ]
-    return [p for p in profiles if p.configured]
+    default = next((p for p in profiles if p.is_default), _default_profile())
+    siblings = [p for p in profiles if not p.is_default and p.configured]
+    reportable = siblings if siblings and not default.configured else [default, *siblings]
+    return ProfileScan(reportable, _known_names(profiles, default))
+
+
+def _known_names(
+    profiles: list[ClaudeProfile], default: ClaudeProfile
+) -> frozenset[str] | None:
+    """Account names whose install this scan saw a directory for, or ``None`` for "cannot tell".
+
+    Two things this is careful about, because a name that wrongly falls outside it retires a
+    subscription's stored windows:
+
+    ``claude_profile_dirs`` names the default install whether or not it is there -- it emits
+    ``("default", claude_config_dir())`` before any existence check -- so the default's own
+    presence has to be observed separately, or it could never be retired. It has to be
+    retirable: migrating to ``~/.claude-work`` and deleting ``~/.claude`` is an ordinary
+    thing to do, and it would otherwise leave a month-old bar and a permanent
+    ``stale_token`` on the card for an install that is gone. ``configured`` is that
+    observation (its directory, or the ``CLAUDE_CODE_OAUTH_TOKEN`` override that stands in
+    for one), and a parent that cannot be listed means it was not observed at all, so it
+    stays known.
+
+    Both the ASSIGNED and the INTRINSIC slug of every directory count. Slug allocation is
+    relative to ``CLAUDE_CONFIG_DIR``: point it at ``~/.claude-academic`` and that install
+    is renamed ``default`` while ``~/.claude`` beside it is renamed ``claude``, so a stored
+    ``academic`` account would fall outside a set of assigned names alone -- and be retired
+    with its directory sitting right there in the listing. Membership answers "is this
+    install's directory present", which must not depend on an environment variable, so a
+    directory is known under every name it could have been stored under.
+    """
+    if not _namespace_trusted(profiles):
+        return None
+    names: set[str] = set()
+    for profile in profiles:
+        if profile.is_default:
+            continue
+        names.add(profile.name)
+        names.add(clientpaths.claude_profile_slug(profile.config_dir))
+    if default.configured or not _listable(default.config_dir.parent):
+        names.add(default.name)
+        names.add(clientpaths.claude_profile_slug(default.config_dir))
+    return frozenset(names)
+
+
+def _listable(path: Path) -> bool:
+    """Whether ``path``'s entries can be read at all; false is "cannot tell", never "empty"."""
+    try:
+        with os.scandir(path) as entries:
+            next(iter(entries), None)
+    except Exception:
+        return False
+    return True
+
+
+def discover_profiles() -> list[ClaudeProfile]:
+    """The installs of ``scan_profiles``, for callers that do not need the namespace."""
+    return scan_profiles().profiles
 
 
 def _read_keychain_credentials(keychain: str | None = None) -> dict[str, Any] | None:
@@ -312,25 +433,45 @@ def _subscription_identity(token: str) -> str:
 
 def _credential_rank(
     profile: ClaudeProfile, meta: dict[str, Any], captured_at: int
-) -> tuple[int, float, int]:
+) -> tuple[int, int, int, int]:
     """Rank two credentials for ONE subscription; the highest is the one worth fetching with.
 
     ``cp -r`` leaves a copy behind that goes stale in whichever directory Claude Code is not
     run from, so "first directory found" is not the same as "the sign-in that still works".
-    So: live beats expired, then the one that expires latest, and the default install breaks a
-    full tie so the reported account name does not wander between polls. A credential with no
-    recorded expiry wins the recency comparison rather than losing it -- in practice that is
-    ``CLAUDE_CODE_OAUTH_TOKEN``, which the user pointed at deliberately and which
-    `_read_credentials` already ranks above every file source.
+    So, in order: not-expired beats expired; a known expiry beats no recorded expiry at all;
+    then the one that expires latest; and the default install breaks a full tie so the
+    reported account name does not wander between polls.
+
+    A credential with no recorded expiry is treated as *not expired* but is outranked by any
+    credential known to be live. Ranking it above one would hand the poll to whichever copy
+    happens to have lost its ``expiresAt`` -- a ``cp -r`` of a partly-written file, or an
+    install downgraded to a token pasted by hand -- and the real sign-in would stop being
+    polled while its own numbers went stale. The case the tie-break was written for,
+    ``CLAUDE_CODE_OAUTH_TOKEN``, does not need it: `_read_credentials` already ranks the
+    environment token above every file source, so the two never meet here.
+
+    "No recorded expiry" is a FALSY ``expires_at_ms`` -- absent, null, zero -- and nothing
+    else. A recorded expiry that is negative or otherwise in the past is expired, which is
+    what `_profile_snapshots` already concludes from the same field (``if expires_ms and
+    ... <= captured_at``); classing it as unknown here would let it outrank a credential
+    this function agrees is dead, and have the two readings of one field disagree.
+
+    Milliseconds throughout, and never a float. `json.loads` will build an arbitrarily long
+    integer literal, which survives ``int()`` and integer division intact and then raises
+    ``OverflowError`` on the way into a float -- one odd credential file taking down the
+    whole poll, which is the failure this guard exists to prevent, not to relocate.
     """
+    raw = meta.get("expires_at_ms")
     try:
-        expires_at: float = int(meta.get("expires_at_ms") or 0) // 1000
-    except (TypeError, ValueError):
-        expires_at = 0.0
-    if expires_at == 0:
-        expires_at = float("inf")  # no recorded expiry: not expired, and not outranked
-    live = 1 if expires_at > captured_at else 0
-    return (live, expires_at, 1 if profile.is_default else 0)
+        expires_ms = int(raw) if raw else 0
+    except (TypeError, ValueError, OverflowError):
+        # OverflowError is not a ValueError: `json.loads` accepts the bare `Infinity`
+        # literal, and `int(float("inf"))` raises it. An unparseable expiry is an unknown
+        # one, which the ranking already has a place for.
+        expires_ms = 0
+    known = 1 if expires_ms else 0
+    live = 1 if (not known or expires_ms > captured_at * 1000) else 0
+    return (live, known, expires_ms, 1 if profile.is_default else 0)
 
 
 def _drop_duplicate_subscriptions(
@@ -341,18 +482,16 @@ def _drop_duplicate_subscriptions(
     Installs without a token are untouched: they carry no identity to compare, and the
     default profile's "nothing to read" row is a state the card has to keep reporting.
     """
-    best: dict[str, int] = {}
-    rank: dict[int, tuple[int, float, int]] = {}
+    best: dict[str, tuple[tuple[int, int, int, int], int]] = {}
     for index, (profile, token, meta) in enumerate(jobs):
         if not token:
             continue
         identity = _subscription_identity(token)
-        challenger = _credential_rank(profile, meta, captured_at)
-        rank[index] = challenger
+        challenger = (_credential_rank(profile, meta, captured_at), index)
         incumbent = best.get(identity)
-        if incumbent is None or challenger > rank[incumbent]:
-            best[identity] = index
-    kept = set(best.values())
+        if incumbent is None or challenger[0] > incumbent[0]:
+            best[identity] = challenger
+    kept = {index for _, index in best.values()}
     return [job for index, job in enumerate(jobs) if not job[1] or index in kept]
 
 
@@ -397,7 +536,8 @@ def _profile_snapshots(
     required its credential file, so an empty result here is a state the group heading
     explains through its own status, not a card-wide absence of data. The default
     profile keeps reporting ``unavailable`` — that row is what drives the consent and
-    "not detected" card.
+    "not detected" card, and `scan_profiles` reports the default install whether or not it
+    is configured so that this stays true on a machine with no ``~/.claude`` at all.
     """
     if not token:
         return [] if not profile.is_default else [_status_snapshot("unavailable", captured_at, meta, profile)]

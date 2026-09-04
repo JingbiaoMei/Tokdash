@@ -19,7 +19,7 @@ _BLOB = {
 
 
 @pytest.fixture(autouse=True)
-def real_platform_check(monkeypatch):
+def real_platform_check(monkeypatch, hermetic_claude_installs):
     """Undo the suite-wide Claude redirect for a file whose whole subject is the Keychain.
 
     `hermetic_claude_installs` forces `_is_macos` false so an out-of-the-box default profile
@@ -27,6 +27,13 @@ def real_platform_check(monkeypatch):
     keychain from a consented test. Every test here either pins the check to a chosen value
     or, in the `security(1)` integration test, needs the platform truth, so the whole file
     takes it back.
+
+    Depending on `hermetic_claude_installs` explicitly is what makes "takes it back" true:
+    both are autouse and both `setattr` the same `_is_macos`, so whichever runs last wins,
+    and autouse ordering is not something either one of them gets to state otherwise. Every
+    test below re-pins the check, which would hide a flip everywhere except the one test
+    that wants the real platform -- and that test is skipped off macOS, so the regression
+    would surface first on macOS CI.
     """
     monkeypatch.setattr(claude, "_is_macos", lambda: sys.platform == "darwin")
 

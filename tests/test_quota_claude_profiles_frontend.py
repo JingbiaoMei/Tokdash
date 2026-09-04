@@ -56,6 +56,7 @@ VIEW_FUNCTIONS = [
     "function claudeBucketPrefix(account) {",
     "function claudeBucketKind(account, bucket) {",
     "function claudeProfileSeriesName(account) {",
+    "function quotaCardErrorIsAttributed(provider) {",
     "function quotaAccountNotice(provider, account) {",
     "function claudeCardAccounts(buckets, provider) {",
     "function claudeProfileGroups(buckets, provider) {",
@@ -326,6 +327,9 @@ def test_every_failing_install_is_named_when_none_of_them_reports(tmp_path):
             "buckets": [],
             "status": "stale_token",
             "status_detail": "stale_token",
+            # The card's error is the default install's, so that install's own heading
+            # prints it and the card must not print a second copy.
+            "status_account": "default",
             "accounts": [
                 {"account": "default", "plan": "Max 5x", "status_detail": "stale_token", "status_at": 1_782_907_200},
                 {"account": "academic", "plan": "Pro", "status_detail": "fetch_error", "status_at": 1_782_907_200},
@@ -419,11 +423,14 @@ def test_the_card_is_named_after_the_only_install_it_measures(tmp_path):
 
 MINIMAX_FUNCTIONS = [
     "function isQuotaUsageBucket(bucket) {",
+    "function quotaCardErrorIsAttributed(provider) {",
     "function quotaAccountNotice(provider, account) {",
-    "function miniMaxBucketGroups(buckets) {",
+    "function miniMaxCardAccounts(buckets, provider) {",
+    "function miniMaxBucketGroups(buckets, provider) {",
     "function renderQuotaBucketGroups(card, buckets, provider) {",
     "function quotaSubtitleEl(text, tight) {",
     "function appendQuotaStatusNoticeFor(card, providerKey, detail, statusAt) {",
+    "function appendQuotaStatusNotice(card, providerKey, provider) {",
     "function renderMiniMaxBuckets(card, buckets, provider) {",
 ]
 
@@ -435,6 +442,7 @@ def _minimax_card(tmp_path: Path, src: str, name: str, provider):
         "\n".join(_extract_js_function(src, signature) for signature in MINIMAX_FUNCTIONS),
         "(() => { const card = makeEl('card');"
         "const attributed = renderMiniMaxBuckets(card, (input.buckets || []).filter(isQuotaUsageBucket), input);"
+        "if (!attributed || !quotaCardErrorIsAttributed(input)) appendQuotaStatusNotice(card, 'minimax', input);"
         "return { attributed, children: shape(card) }; })()",
         provider,
     )
@@ -462,6 +470,7 @@ def test_a_failing_region_is_printed_under_that_region(tmp_path):
             "status": "ok",
             "status_detail": "stale_token",
             "status_at": 1_782_907_200,
+            "status_account": "cn",
             "accounts": [
                 {"account": "global"},
                 {"account": "cn", "status_detail": "stale_token", "status_at": 1_782_907_200},
@@ -496,4 +505,298 @@ def test_a_region_failure_still_shows_when_no_regions_are_named(tmp_path):
     )
 
     assert card["attributed"] == 0
-    assert card["children"] == [["bar", "5h"]]
+    assert card["children"] == [["bar", "5h"], ["notice", "fetch_error at 3 minutes ago"]]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_an_unattributed_card_error_goes_above_every_install(tmp_path):
+    """With more than one install on the card, appending the notice attributes it by accident.
+
+    A payload that names no installs -- an older server, or `credential_scan` revoked after
+    polling -- still has an error to print, and a warning box sitting directly under the
+    last install's bars reads as that install's error. That is the same guess, in the other
+    direction, that this card exists to stop making. Above every heading it can only be read
+    as belonging to the card.
+    """
+    src = INDEX_HTML.read_text(encoding="utf-8")
+    card = _card(
+        tmp_path,
+        src,
+        "two-installs-no-account-list",
+        {
+            "buckets": [_window("default", "session"), _window("academic", "academic_session")],
+            "status_detail": "stale_token",
+            "status_at": 1_782_907_200,
+        },
+    )
+
+    assert card["rendered"] == 2
+    assert card["children"] == [
+        ["notice", "Claude Code sign-in expired"],
+        ["heading", "Default"],
+        ["bar", "session"],
+        ["heading", "academic"],
+        ["bar", "academic_session"],
+    ]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_a_card_error_belonging_to_no_listed_region_is_still_printed(tmp_path):
+    """A region printing its OWN failure is not the card printing the card's.
+
+    The sequence is the one `status_account` exists for: CN's key expires, so CN carries a
+    live error under its own heading; then the credential file is removed, so the newest
+    poll writes a credential-less failure under a synthetic account `_measured_accounts`
+    drops. Counting notices placed -- "some region warned, so the card is covered" -- left
+    the newer and more serious error, the one saying the credentials cannot be read at all,
+    printed nowhere on the card. The count answers a different question than attribution.
+    """
+    src = INDEX_HTML.read_text(encoding="utf-8")
+    card = _minimax_card(
+        tmp_path,
+        src,
+        "unattributed-beside-a-failing-region",
+        {
+            "buckets": [_mm_window("global", 30.0), _mm_window("cn", 80.0)],
+            "status": "unavailable",
+            "status_detail": "unavailable",
+            "status_at": 1_782_907_300,
+            # Newest error, owned by no region listed here.
+            "status_account": None,
+            "accounts": [
+                {"account": "global"},
+                {"account": "cn", "status_detail": "stale_token", "status_at": 1_782_907_200},
+            ],
+        },
+    )
+
+    assert card["attributed"] == 1
+    assert card["children"] == [
+        ["heading", "Global"],
+        ["bar", "5h"],
+        ["heading", "China"],
+        ["bar", "5h"],
+        ["notice", "minimax sign-in expired"],
+        ["notice", "unavailable at 3 minutes ago"],
+    ]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_a_claude_card_error_belonging_to_no_install_is_still_printed(tmp_path):
+    """Same rule on the Claude card, where the gap was wider.
+
+    The card notice was gated on the payload naming NO installs, so any account list at all
+    silenced it -- and an error attributed to none of those installs then displayed nowhere,
+    while the Servers tab counted the very same provider as needing attention. The gate is
+    attribution, not the presence of a list.
+    """
+    src = INDEX_HTML.read_text(encoding="utf-8")
+    card = _card(
+        tmp_path,
+        src,
+        "claude-unattributed-with-accounts",
+        {
+            "buckets": [_window("default", "session"), _window("academic", "academic_session")],
+            "status": "unavailable",
+            "status_detail": "unavailable",
+            "status_at": 1_782_907_200,
+            "status_account": None,
+            "accounts": [
+                {"account": "default", "status": "ok", "status_detail": None},
+                {"account": "academic", "status": "ok", "status_detail": None},
+            ],
+        },
+    )
+
+    assert card["rendered"] == 2
+    # Above every heading, for the same reason as the no-accounts case: next to one
+    # install's bars it reads as that install's error.
+    assert card["children"] == [
+        ["notice", "unavailable at 3 minutes ago"],
+        ["heading", "Default"],
+        ["bar", "session"],
+        ["heading", "academic"],
+        ["bar", "academic_session"],
+    ]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_a_failing_region_with_no_bars_still_gets_its_own_heading(tmp_path):
+    """A CN Token Plan whose key was never valid has an `api` status row and no buckets.
+
+    Deriving the regions from `buckets` alone left it out of the groups entirely, so nothing
+    was attributed, and the caller's card-level fallback printed CN's `stale_token` directly
+    under the healthy global plan's bars with no heading -- reading as the global plan's
+    error. Unioning `provider.accounts` in, as the Claude card already does, gives the region
+    a heading of its own to sit under.
+    """
+    src = INDEX_HTML.read_text(encoding="utf-8")
+    card = _minimax_card(
+        tmp_path,
+        src,
+        "cn-error-no-bars",
+        {
+            "buckets": [_mm_window("global", 30.0)],
+            "status": "ok",
+            "status_detail": "stale_token",
+            "status_at": 1_782_907_200,
+            "status_account": "cn",
+            "accounts": [
+                {"account": "global"},
+                {"account": "cn", "status_detail": "stale_token", "status_at": 1_782_907_200},
+            ],
+        },
+    )
+
+    assert card["attributed"] == 1
+    assert card["children"] == [
+        ["heading", "Global"],
+        ["bar", "5h"],
+        ["heading", "China"],
+        ["notice", "minimax sign-in expired"],
+    ]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_two_failing_regions_are_both_shown(tmp_path):
+    """One rendered region carrying an error used to claim the whole card's attribution.
+
+    `attributed = 1` suppressed the card-level notice, and the second account's newer error
+    then displayed nowhere at all.
+    """
+    src = INDEX_HTML.read_text(encoding="utf-8")
+    card = _minimax_card(
+        tmp_path,
+        src,
+        "both-regions-failing",
+        {
+            "buckets": [_mm_window("global", 30.0)],
+            "status": "stale_token",
+            "status_detail": "stale_token",
+            "status_at": 1_782_907_300,
+            "status_account": "cn",
+            "accounts": [
+                {"account": "global", "status_detail": "fetch_error", "status_at": 1_782_907_200},
+                {"account": "cn", "status_detail": "stale_token", "status_at": 1_782_907_300},
+            ],
+        },
+    )
+
+    assert card["attributed"] == 2
+    assert card["children"] == [
+        ["heading", "Global"],
+        ["bar", "5h"],
+        ["notice", "fetch_error at 3 minutes ago"],
+        ["heading", "China"],
+        ["notice", "minimax sign-in expired"],
+    ]
+
+
+# --- the multi-server views read the same payload ----------------------------------------
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_the_servers_tally_does_not_fault_a_working_subscription(tmp_path):
+    """`providers.*.status` is the newest error of ANY account, not a verdict on the card.
+
+    That breadth is deliberate -- a broken credential has to keep warning about the provider
+    -- but counted as a verdict it made a healthy `~/.claude` beside an expired
+    `~/.claude-academic` drop out of the OK tally, and the Servers tab rendered "1 need
+    attention" with no per-account information on screen to correct it.
+
+    Every entry below carries the real payload shape, which is what makes the counting
+    subtle: an account with a LIVE error still reports `status: "ok"`, because
+    `_record_row` takes `status` from the last row it iterated and rows arrive ordered by
+    bucket id, so an install with windows has its "session" row land after its "api" one.
+    Failure is `status` not ok OR a live `status_detail`, exactly as the companion contract
+    defines a failed group -- reading `status` alone counts two expired sign-ins as one
+    working provider.
+    """
+    src = INDEX_HTML.read_text(encoding="utf-8")
+    result = _run(
+        tmp_path,
+        "server-tally",
+        "\n".join(
+            [
+                _extract_js_function(src, "function quotaEntryFailed(entry) {"),
+                _extract_js_function(src, "function quotaCardErrorIsAttributed(provider) {"),
+                _extract_js_function(src, "function quotaProviderCounts(provider) {"),
+                _extract_js_function(src, "function quotaProviderTally(providers) {"),
+            ]
+        ),
+        "{ tally: quotaProviderTally(input), each: input.map(quotaProviderCounts) }",
+        [
+            # A healthy default install beside an expired sibling: the subscription that
+            # works is working, and the Quota tab is where the sibling is named.
+            {
+                "provider": "claude",
+                "status": "ok",
+                "status_detail": "stale_token",
+                "status_account": "academic",
+                "accounts": [
+                    {"account": "default", "status": "ok", "status_detail": None},
+                    {"account": "academic", "status": "ok", "status_detail": "stale_token"},
+                ],
+            },
+            # BOTH sign-ins expired. Every account reports `status: "ok"` from its last
+            # window row, so only `status_detail` distinguishes this from the case above.
+            {
+                "provider": "claude",
+                "status": "ok",
+                "status_detail": "stale_token",
+                "status_account": "academic",
+                "accounts": [
+                    {"account": "default", "status": "ok", "status_detail": "stale_token"},
+                    {"account": "academic", "status": "ok", "status_detail": "stale_token"},
+                ],
+            },
+            # `credentials_not_found`: no credential could be read at all, so the failure
+            # belongs to no account and both regions' bars are only last-known. The card's
+            # error being unattributed is what has to make this need attention.
+            {
+                "provider": "minimax",
+                "status": "unavailable",
+                "status_detail": "unavailable",
+                "status_account": None,
+                "accounts": [
+                    {"account": "global", "status": "ok", "status_detail": None},
+                    {"account": "cn", "status": "ok", "status_detail": None},
+                ],
+            },
+            # The same unreadable-credential card, but with an OLDER per-account failure
+            # still on record: CN's key expired first, then the file was removed. Asking
+            # "does any account carry an error" finds CN's and reads the card as
+            # attributed, so a provider that cannot be polled at all counts as working.
+            # Only `status_account` distinguishes whose error the card is reporting.
+            {
+                "provider": "minimax",
+                "status": "unavailable",
+                "status_detail": "unavailable",
+                "status_account": None,
+                "accounts": [
+                    {"account": "global", "status": "ok", "status_detail": None},
+                    {"account": "cn", "status": "ok", "status_detail": "stale_token"},
+                ],
+            },
+            # An older server sends `accounts` without `status_account`. Attribution is
+            # unavailable rather than negative, so the card needs attention -- which is
+            # exactly what that server's payload produced before any of this.
+            {
+                "provider": "claude",
+                "status": "ok",
+                "status_detail": "stale_token",
+                "accounts": [
+                    {"account": "default", "status": "ok", "status_detail": None},
+                    {"account": "academic", "status": "ok", "status_detail": "stale_token"},
+                ],
+            },
+            # No accounts to attribute: the provider's own status is all there is.
+            {"provider": "codex", "status": "ok", "status_detail": None},
+            {"provider": "grok", "status": "fetch_error", "status_detail": "fetch_error"},
+            # A single-credential provider whose status went `ok` but whose error is live.
+            {"provider": "zai", "status": "ok", "status_detail": "stale_token"},
+        ],
+    )
+
+    assert result["each"] == [True, False, False, False, False, True, False, False]
+    assert result["tally"] == {"ok": 2, "bad": 6}

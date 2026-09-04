@@ -246,12 +246,41 @@ that can read the list prints the notice under that account rather than over the
 Errors clear per account: an account's own newer success retires its error, a success on
 another account does not silence it, and a recovered account stops warning the card.
 
+`status_account` ships beside `accounts` and names which entry the card's `status_detail`
+belongs to, or is `null` when it belongs to none of them — a provider whose credentials could
+not be read at all records that failure under a synthetic account that is not a credential and
+is not listed. It is there because "does any account carry an error" is a different question
+with a different answer: a card that cannot read its credentials *and* holds an older
+per-account failure would otherwise read as attributed, and an unreadable provider would count
+as working. Absent on a single-account card, where the card's error is that account's by
+construction.
+
 `plan` stays provider-wide. `providers.claude.plan`, `tier` and `credential_path` describe the
 default install where there is one and the measured install where there is not, so an existing
-consumer sees what it always did. A Claude account whose own newest row falls more than three
-poll intervals (never under an hour) behind the freshest Claude row on the machine leaves both
-`buckets` and `accounts`: that retires a renamed or deleted `~/.claude-<profile>`, while a
-directory that merely cannot be read at the moment keeps its data.
+consumer sees what it always did — the per-install plans are in `accounts[].plan`.
+
+A Claude install leaves both `buckets` and `accounts` when its config directory is **observed
+to be gone**, which is what retires a renamed or deleted install — a `~/.claude-<profile>`
+sibling, or `~/.claude` itself once the sign-in has moved to a sibling. Absence has to be
+observed: the test is whether the listing that names the installs (the home directory, or the
+paths in `TOKDASH_CLAUDE_PROFILES`) could be read, named at least one install, and did not
+name this one.
+
+An install that is present but unreadable right now keeps its data — `claude logout`, a
+permissions error, a dotfile manager mid-relink, a credential file caught mid-write. So does
+every install whenever the answer is unavailable rather than negative: the listing could not be
+read, it named no install at all (an unmounted or still-locked home, which is not the news that
+every subscription was deleted), or `quota.credential_scan` consent is off.
+
+What membership measures is directory presence, not the name a directory is given on this run.
+`CLAUDE_CONFIG_DIR` reassigns account names around whichever install it points at — aim it at
+`~/.claude-academic` and that install becomes `default` while `~/.claude` becomes `claude` — so
+an install is recognised under every name it could have been stored under, and changing the
+variable does not retire the install it renamed.
+
+Row age is deliberately not part of any of this: it cannot tell a removed install from a
+provider nothing has polled lately, and since Claude API polling is opt-in the second case is
+the common one.
 
 ## `GET /api/quota/history`
 

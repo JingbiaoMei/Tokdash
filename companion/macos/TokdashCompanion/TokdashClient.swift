@@ -220,12 +220,17 @@ struct ProviderQuota: Decodable, Sendable {
     // be refreshed and its buckets are last-known. Spec §7.
     let status: String?
     let statusDetail: String?
-    // Epoch seconds the failure status was observed. Compared against each bucket's
-    // capturedAt to tell last-known rows from ones that refreshed fine. Spec §7.
+    // Epoch seconds the failure status was observed. This is the newest error of ANY
+    // account behind the card, so it drives the GROUP warning; rows compare against their
+    // own account's statusAt in `accounts` where that is present. Spec §7.
     let statusAt: Int?
+    // One entry per credential, present only on a card measuring more than one (a
+    // ~/.claude install beside a ~/.claude-<profile> sibling, MiniMax global + CN).
+    // Absent for single-credential providers and for every pre-`accounts` server. Spec §7.
+    let accounts: [AccountQuota]?
 
     enum CodingKeys: String, CodingKey {
-        case estimated, buckets, status
+        case estimated, buckets, status, accounts
         case statusDetail = "status_detail"
         case statusAt = "status_at"
     }
@@ -233,9 +238,39 @@ struct ProviderQuota: Decodable, Sendable {
     // Explicit memberwise init (with defaults) so test construction with status/
     // statusDetail resolves; Decodable's init(from:) is still synthesized.
     init(estimated: Bool? = nil, buckets: [BucketQuota]? = nil, status: String? = nil,
-         statusDetail: String? = nil, statusAt: Int? = nil) {
+         statusDetail: String? = nil, statusAt: Int? = nil, accounts: [AccountQuota]? = nil) {
         self.estimated = estimated
         self.buckets = buckets
+        self.status = status
+        self.statusDetail = statusDetail
+        self.statusAt = statusAt
+        self.accounts = accounts
+    }
+}
+
+/// One credential behind a provider card, with the failure that belongs to it alone.
+///
+/// `status` is NOT a verdict on its own: the server takes it from the last stored row it
+/// iterated and rows arrive ordered by bucket id, so an install with windows reports
+/// `status: "ok"` beside a live `statusDetail`. Failure is read the same way as for a
+/// group — status present and not "ok", OR a non-empty statusDetail. Spec §7.
+struct AccountQuota: Decodable, Sendable {
+    let account: String?
+    let plan: String?
+    let status: String?
+    let statusDetail: String?
+    let statusAt: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case account, plan, status
+        case statusDetail = "status_detail"
+        case statusAt = "status_at"
+    }
+
+    init(account: String? = nil, plan: String? = nil, status: String? = nil,
+         statusDetail: String? = nil, statusAt: Int? = nil) {
+        self.account = account
+        self.plan = plan
         self.status = status
         self.statusDetail = statusDetail
         self.statusAt = statusAt

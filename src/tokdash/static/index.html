@@ -11865,23 +11865,40 @@
       buckets.forEach((bucket) => card.appendChild(renderQuotaBucketRow(bucket, provider)));
     }
 
-    function miniMaxBucketGroups(buckets) {
-      const accounts = new Set(buckets.map((bucket) => String(bucket.account || '')).filter(Boolean));
-      if (accounts.size <= 1) return [{ account: Array.from(accounts)[0] || '', rows: buckets }];
-      const order = ['global', 'cn', ...Array.from(accounts).filter((account) => !['global', 'cn'].includes(account))];
-      return order
-        .map((account) => ({
-          account,
-          rows: buckets.filter((bucket) => String(bucket.account || '') === account),
-        }))
-        .filter((group) => group.rows.length);
+    // Which Token Plans this card reports: the regions the server named, in display order,
+    // then any region that only shows up on a bucket. Mirrors `claudeCardAccounts`, and for
+    // the same reason -- a region whose key was never valid has an `api` status row and no
+    // buckets at all, so deriving the groups from buckets alone leaves its error with no
+    // heading to sit under, printed beneath a healthy region's bars as if it were theirs.
+    function miniMaxCardAccounts(buckets, provider) {
+      const seen = [];
+      const add = (account) => {
+        if (account && !seen.includes(account)) seen.push(account);
+      };
+      (provider?.accounts || []).forEach((entry) => add(String(entry?.account || '')));
+      buckets.forEach((bucket) => add(String(bucket.account || '')));
+      // The two known regions keep this fixed order whichever way round they were found, so
+      // the card does not reorder itself as rows arrive; anything else follows as named.
+      const canonical = ['global', 'cn'].filter((region) => seen.includes(region));
+      return [...canonical, ...seen.filter((account) => !canonical.includes(account))];
+    }
+
+    function miniMaxBucketGroups(buckets, provider) {
+      const accounts = miniMaxCardAccounts(buckets, provider);
+      // One region (or a payload whose buckets carry no region at all): every bucket belongs
+      // to it, including rows stored before regions were attributed.
+      if (accounts.length <= 1) return [{ account: accounts[0] || '', rows: buckets }];
+      return accounts.map((account) => ({
+        account,
+        rows: buckets.filter((bucket) => String(bucket.account || '') === account),
+      }));
     }
 
     // MiniMax card: one set of bars per Token Plan region, each with its own failure notice
     // under it. Returns how many notices it put under a region, so the caller adds the
     // card-level notice only when the payload could not attribute the failure itself.
     function renderMiniMaxBuckets(card, buckets, provider) {
-      const groups = miniMaxBucketGroups(buckets);
+      const groups = miniMaxBucketGroups(buckets, provider);
       const failures = groups.map((group) => quotaAccountNotice(provider, group.account));
       let attributed = 0;
       if (groups.length <= 1) {
@@ -11894,6 +11911,9 @@
       }
       let rendered = 0;
       groups.forEach(({ account, rows }, index) => {
+        // A region the payload names but has neither bars nor a live error for has nothing
+        // to say; a heading on its own would read as an empty Token Plan.
+        if (!rows.length && !failures[index]) return;
         const label = account === 'cn'
           ? t('quotaRegionChina')
           : account === 'global' ? t('quotaRegionGlobal') : account;
@@ -11951,6 +11971,22 @@
     // when it is fine or the payload names no accounts at all. `accounts` is the one generic
     // list every such card carries -- Claude installs, MiniMax regions -- so a card never
     // has to guess which account a provider-level error was about.
+    // Whether the card's own `status_detail` belongs to an account this card lists. That is
+    // the one question `status_account` exists to answer, and the card needs it for the same
+    // reason the Servers tally does: an error attributed to no listed account is a provider
+    // whose credentials could not be read at all, so no heading prints it, and the card has
+    // to print it itself -- even when a different account already printed its own, older
+    // failure under its own heading. Matching the detail's VALUE against the accounts' is the
+    // fragile version `COMPANION_API.md` warns against. A payload carrying `accounts` with no
+    // `status_account` is an older server, and reads as unattributed, which is what every
+    // card did before either field existed: print the error rather than swallow it.
+    function quotaCardErrorIsAttributed(provider) {
+      const accounts = Array.isArray(provider?.accounts) ? provider.accounts : [];
+      if (!accounts.length) return false;
+      const owner = provider?.status_account;
+      return !!owner && accounts.some((entry) => String(entry?.account || '') === String(owner));
+    }
+
     function quotaAccountNotice(provider, account) {
       const entries = provider?.accounts || [];
       const entry = entries.find((item) => String(item?.account || 'default') === account) || null;
@@ -12012,7 +12048,7 @@
       // be made to look like the default install's.
       let cardNotice = null;
       const detail = provider?.status_detail;
-      if (!(provider?.accounts || []).length && detail && detail !== 'ok') {
+      if (!quotaCardErrorIsAttributed(provider) && detail && detail !== 'ok') {
         cardNotice = { detail, statusAt: provider?.status_at ?? null };
       }
       return { groups, plan, showPlans, cardNotice };
@@ -12026,9 +12062,22 @@
     // many groups rendered, so the caller can fall back to the empty-card state.
     function renderClaudeBuckets(card, view, providerKey) {
       let rendered = 0;
+      // An unattributed card notice goes ABOVE every heading once there is more than one
+      // install, and below the bars when there is only one. A warning box placed next to an
+      // install's rows reads as that install's error, and appending it put it under
+      // whichever install happened to be last -- the same guess, in the other direction,
+      // that this card exists to stop making. Ahead of all the headings it can only be read
+      // as belonging to the card.
+      const noticeFirst = view.cardNotice && view.groups.length > 1;
+      if (noticeFirst) {
+        appendQuotaStatusNoticeFor(card, providerKey, view.cardNotice.detail, view.cardNotice.statusAt);
+      }
       view.groups.forEach((group) => {
         if (view.groups.length > 1) {
-          card.appendChild(quotaSubtitleEl(claudeProfileGroupLabel(group, view.showPlans), rendered === 0));
+          // `tight` is for a heading that opens the card body. With the card notice above
+          // it, the first heading needs the full gap or it reads as a label ON that warning.
+          const tight = rendered === 0 && !noticeFirst;
+          card.appendChild(quotaSubtitleEl(claudeProfileGroupLabel(group, view.showPlans), tight));
         }
         group.rows.forEach((bucket) => card.appendChild(renderQuotaBucketRow(bucket, providerKey)));
         if (group.notice) {
@@ -12038,7 +12087,7 @@
       });
       // Only when something actually rendered: an empty card already prints this same
       // error through the shared empty state, and twice would be twice.
-      if (rendered && view.cardNotice) {
+      if (rendered && view.cardNotice && !noticeFirst) {
         appendQuotaStatusNoticeFor(card, providerKey, view.cardNotice.detail, view.cardNotice.statusAt);
       }
       return rendered;
@@ -12290,7 +12339,11 @@
         } else if (providerKey === 'minimax') {
           // Region-level notices when the payload can attribute one; the card-level notice is
           // the fallback when it cannot, never a second copy of one it already placed.
-          if (!renderMiniMaxBuckets(card, buckets, provider)) {
+          // A region printing its OWN failure does not print the card's: the two come apart
+          // whenever the newest error belongs to no region listed (a credential file that
+          // could not be read at all, beside a region whose key expired earlier).
+          const attributed = renderMiniMaxBuckets(card, buckets, provider);
+          if (!attributed || !quotaCardErrorIsAttributed(provider)) {
             appendQuotaStatusNotice(card, providerKey, provider);
           }
         } else {
@@ -12862,6 +12915,45 @@
       return `${p(dt.getHours())}:${p(dt.getMinutes())}:${p(dt.getSeconds())}`;
     }
 
+    // Failure, exactly as the companion contract defines it for a group: a status that is
+    // present and not ok, OR any live `status_detail`. `status` alone is NOT a verdict --
+    // `_record_row` takes it from the last row it iterated and rows arrive ordered by bucket
+    // id, so for an install with windows the "session" row lands after "api" and leaves
+    // `status: "ok"` beside `status_detail: "stale_token"`. Reading only `status` calls that
+    // account healthy, which is how two expired sign-ins tallied as one OK provider.
+    function quotaEntryFailed(entry) {
+      const detail = entry?.status_detail;
+      if (detail && detail !== 'ok') return true;
+      const status = entry?.status;
+      return !!status && status !== 'ok' && status !== 'local_plan';
+    }
+
+    // Whether one provider counts towards a server's OK tally. `providers.*.status` is the
+    // newest error of ANY account behind the card, which is what keeps the card warning when
+    // one of several credentials breaks -- but read as a verdict on the provider it counts a
+    // working subscription as needing attention just because a sibling install's sign-in
+    // expired. So an account-attributed provider needs one healthy account, AND its own
+    // error has to belong to one of the accounts listed: an error no account claims is a
+    // provider whose credentials could not be read at all, and the accounts' last-known
+    // numbers do not make that OK.
+    function quotaProviderCounts(provider) {
+      const accounts = Array.isArray(provider?.accounts) ? provider.accounts : [];
+      if (!accounts.length) return !quotaEntryFailed(provider);
+      if (!accounts.some((entry) => !quotaEntryFailed(entry))) return false;
+      if (!quotaEntryFailed(provider)) return true;
+      // The card's error has to belong to one of the accounts listed. Asking whether ANY
+      // account carries an error says yes for a card that cannot read its credentials at all
+      // but happens to also hold an older per-account failure, which is an ordinary sequence
+      // (a region's key expires, then the credential file is removed). Shared with the card
+      // body, which prints exactly the errors this rule counts against a provider.
+      return quotaCardErrorIsAttributed(provider);
+    }
+
+    function quotaProviderTally(providers) {
+      const ok = providers.filter(quotaProviderCounts).length;
+      return { ok, bad: providers.length - ok };
+    }
+
     function serverQuotaSummary(serverId) {
       const row = (lastQuotaServerRows || []).find((r) => r.server && r.server.id === serverId);
       if (!row) return t('serversQuotaNotLoaded');
@@ -12869,8 +12961,7 @@
       if (payload.enabled === false) return t('serversQuotaDisabled');
       const providers = Object.values(payload.providers || {});
       if (!providers.length) return t('serversQuotaNotLoaded');
-      const ok = providers.filter((p) => p.status === 'ok' || p.status === 'local_plan').length;
-      const bad = providers.length - ok;
+      const { ok, bad } = quotaProviderTally(providers);
       return bad ? t('serversQuotaPartial').replace('{ok}', String(ok)).replace('{bad}', String(bad)) : t('serversQuotaOk').replace('{n}', String(ok));
     }
 
@@ -13241,8 +13332,7 @@
             const rows = servers.map((x) => (lastQuotaServerRows || []).find((r) => r.server && r.server.id === x.id)).filter(Boolean);
             if (rows.length !== servers.length) return { text: '\u2014' };
             const providers = rows.reduce((acc, r) => acc.concat(Object.values((r.payload || {}).providers || {})), []);
-            const ok = providers.filter((p) => p.status === 'ok' || p.status === 'local_plan').length;
-            const bad = providers.length - ok;
+            const { ok, bad } = quotaProviderTally(providers);
             return { text: bad
               ? t('serversQuotaCombinedPartial').replace('{ok}', String(ok)).replace('{bad}', String(bad))
               : t('serversQuotaCombinedOk').replace('{n}', String(ok)) };

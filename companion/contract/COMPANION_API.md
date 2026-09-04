@@ -106,7 +106,13 @@ derived client-side from the local calendar, not from the response.
 
 ### `GET /api/quota`
 
-Fixture: `fixtures/quota.json` (enabled, multi-provider), `fixtures/quota-disabled.json` (disabled), `fixtures/quota-provider-error.json` (one provider failed refresh).
+Fixture: `fixtures/quota.json` (enabled, multi-provider), `fixtures/quota-disabled.json` (disabled), `fixtures/quota-provider-error.json` (one provider failed refresh), `fixtures/quota-multi-account.json` (one card, two credentials, one of them broken — see [Accounts](#accounts)).
+
+`fixtures/quota-multi-account.json` is regenerated from the server's own
+`quota_state()` and diffed against it by `tests/test_companion_contract_accounts.py`,
+so it cannot drift from the payload; both companions decode that same file and must
+reach the same per-row verdicts. A rule documented here without a fixture and a test
+on both sides is a rule the apps do not have.
 
 Fields used:
 
@@ -221,24 +227,56 @@ present and not `"ok"`, **or** its `status_detail` is non-empty (e.g.
 credential should still warn about the provider.
 
 **Row failed** - drives the inline `⚠` prefix on a quota row and its eligibility
-for low-quota notifications. True when the group is failed **and**
-`buckets[].captured_at < providers.*.status_at`: the failure is newer than this
-row's data, so the row is last-known. The comparison is strictly `<`, so a row
-captured in the same cycle as the failure counts as fresh. When either timestamp
-is absent or null (older servers), fall back to the group's value rather than
-un-suppressing a row that may well be stale.
+for low-quota notifications. True when the failure that applies to this row is
+newer than the row's own data, so the row is last-known:
+
+    if !groupFailed: return false
+    entry = (providers.*.accounts ?? []).find(a => a.account == buckets[].account)
+    if entry:
+        if !accountFailed(entry): return false        # this row's own credential is fine
+        statusAt = entry.status_at ?? providers.*.status_at
+    else:
+        statusAt = providers.*.status_at              # no accounts, or no entry for this one
+    if buckets[].captured_at == null or statusAt == null: return true
+    return buckets[].captured_at < statusAt
+
+where `accountFailed` is the group rule above applied to the entry: `status` present
+and not `"ok"`, **or** a non-empty `status_detail`.
+
+Judge each row against the **owning account**, whenever `providers.*.accounts` is
+present (see [Accounts](#accounts)). `providers.*.status_at` is the newest error of
+*any* account behind the card, so using it for every row makes one permanently
+broken credential suppress rows belonging to a credential that is working: it
+advances `status_at` every cycle, while a bucket that is not reported every cycle
+keeps an older `captured_at`. Those buckets are common and not an edge case -
+Claude's `limits` array carries `weekly_scoped_opus` only once Opus has been used,
+and MiniMax's per-model buckets come and go with the models called - so the healthy
+install's rows would go quiet for as long as the sibling stayed broken.
+
+Note the early return for a healthy entry, which is doing real work: a healthy
+account has `status_at: null`, and a null timestamp otherwise means "fall back", so
+without it every row of the working install would be marked failed - the same bug
+in a new place. Check whether the account failed *before* reaching for its
+timestamp.
+
+The comparison is strictly `<`, so a row captured in the same cycle as the failure
+counts as fresh. Everything not covered above falls back to the group's value
+rather than un-suppressing a row that may well be stale: `accounts` absent (a
+single-credential provider, or an older server), a `buckets[].account` with no
+matching entry, or a failed account whose own `status_at` is missing.
 
 Do **not** use `buckets[].status` for this. It is always `"ok"`: the server only
 writes failure statuses to a synthetic `api` bucket, which it then filters out of
 the payload. Freshness is the only field that discriminates.
 
-Worked examples:
+Worked examples (`status_at` is the account's when `accounts` is present):
 
 | Provider | `captured_at` | `status_at` | Row failed | Why |
 |---|---|---|---|---|
 | codex, fully failed | 1785000000 | 1785030000 | yes | data predates the failure; last-known |
 | minimax, healthy credential | 1785030000 | 1785030000 | no | refreshed in the failing cycle |
 | minimax, broken credential | 1785000000 | 1785030000 | yes | not refreshed this cycle |
+| claude, healthy `default`, broken `academic` | 1785000000 | 1785000000 (`default`) | no | `academic`'s newer error is not this row's |
 
 So a healthy window inside a partially-failed provider renders without a `⚠` and
 still notifies, while its broken sibling is marked and suppressed - both under one
@@ -251,6 +289,50 @@ a failed provider as fresh would alert on stale numbers.
 `status_detail` is one of `unavailable`, `fetch_error`, or `stale_token` (the
 only values the server writes). Treat any other non-empty value as a failure
 too, and an absent/empty value as healthy.
+
+### Accounts
+
+`providers.*.accounts` is present only on a card that measures **more than one
+credential**: a `~/.claude` install beside a `~/.claude-<profile>` sibling, or a
+MiniMax global and mainland-China Token Plan. One entry per credential:
+
+```json
+"accounts": [
+  {"account": "default",  "plan": "Max 20x", "status": "ok",          "status_detail": null,          "status_at": null,       "updated_at": 1785080061},
+  {"account": "academic", "plan": "Pro",     "status": "stale_token", "status_detail": "stale_token", "status_at": 1785080120, "updated_at": 1785000000}
+]
+```
+
+- The card's own account is first (`default` for Claude, `global` for MiniMax);
+  the rest follow by name. `account` matches `buckets[].account`.
+- `status`, `status_detail` and `status_at` are that credential's alone, read
+  exactly as the group rule above, and are what makes row-level precision
+  possible. An account's own newer success retires its error; a success on
+  another account does not.
+- An entry may exist with no matching buckets - a credential that is signed in
+  but not polled yet, or one whose key was never valid. Give it its own heading
+  and print its notice under that heading, not over the card.
+- Absent for a single-credential provider. Do not synthesize it; fall back to the
+  provider-level fields, which is what every pre-`accounts` server returns.
+
+`plan` on an entry is that credential's own. `providers.*.plan` stays the card's
+primary account, so it does not change meaning when a second install appears.
+
+`providers.*.status_account` ships beside `accounts` and names **which entry the
+card's own `status_detail` belongs to**, or is `null` when it belongs to none of
+them — a provider whose credentials could not be read at all records that failure
+under a synthetic account which is not a credential and is not listed here.
+
+Use it whenever you need "is this card's error attributed", such as deciding
+whether a provider is healthy overall. Do **not** substitute "does any entry carry
+a `status_detail`": the two answers diverge exactly when a card that cannot read
+its credentials *also* holds an older per-account failure, which is an ordinary
+sequence (a region's key expires, then the credential file is removed), and the
+older failure is then mistaken for the owner of the newer one. Matching on
+`status_detail` and `status_at` values would usually work and is the fragile
+version — attribution is not something to infer from value equality. Treat a
+missing `status_account` on a payload that has `accounts` as *unavailable*, not as
+`null`, and fall back to whatever you did before this field existed.
 
 ## Low-quota notifications
 

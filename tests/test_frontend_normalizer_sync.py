@@ -160,8 +160,11 @@ def test_minimax_china_region_moves_from_bucket_to_card_title(tmp_path):
     series_fn = _extract_js_function(
         src, "function quotaSeriesLabel(item) {"
     )
+    accounts_fn = _extract_js_function(
+        src, "function miniMaxCardAccounts(buckets, provider) {"
+    )
     groups_fn = _extract_js_function(
-        src, "function miniMaxBucketGroups(buckets) {"
+        src, "function miniMaxBucketGroups(buckets, provider) {"
     )
     harness = tmp_path / "minimax-region-label.js"
     harness.write_text(
@@ -172,6 +175,8 @@ def test_minimax_china_region_moves_from_bucket_to_card_title(tmp_path):
         + window_fn
         + "\n"
         + series_fn
+        + "\n"
+        + accounts_fn
         + "\n"
         + groups_fn
         + "\nconst cases = JSON.parse(process.argv[2]);\n"

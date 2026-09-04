@@ -161,13 +161,18 @@ def _sanitize_profile_slug(text: str) -> str:
     return "".join(ch if ch.isalnum() or ch in "._-" else "-" for ch in text).strip("-.")
 
 
-def _claude_profile_slug(path: Path) -> str:
+def claude_profile_slug(path: Path) -> str:
     """Profile name for one Claude config dir: ``~/.claude-academic`` -> ``academic``.
 
     The slug doubles as the quota account id, so it is restricted to characters that
     read well in a bucket id (``academic_session``) and in a dashboard label. A dir
     named ``.claude-default`` keeps its full name rather than taking the built-in
     profile's id, which would merge two subscriptions into one account.
+
+    This is the name a directory has on its own, before ``claude_profile_dirs`` reassigns
+    it around whatever ``CLAUDE_CONFIG_DIR`` claimed the default slot. Callers that need to
+    recognise a directory by a name it may already have been stored under -- rather than
+    the name it happens to be given on this run -- want this one.
     """
     name = path.name
     if name == CLAUDE_CONFIG_PREFIX:
@@ -216,7 +221,7 @@ def claude_profile_dirs() -> List[Tuple[str, Path]]:
         if keys & seen or not path.is_dir():
             continue
         seen |= keys
-        slug = _claude_profile_slug(path)
+        slug = claude_profile_slug(path)
         # Distinct dirs must still land on distinct account ids, or their windows
         # would share a bucket and overwrite each other in the quota history.
         if slug in used:

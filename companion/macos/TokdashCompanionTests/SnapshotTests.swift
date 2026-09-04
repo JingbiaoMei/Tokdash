@@ -320,6 +320,60 @@ final class SnapshotTests: XCTestCase {
         XCTAssertEqual(all[0].tokens, try XCTUnwrap(today.combinedModels)[0].tokens * 2)
     }
 
+    /// A row is judged against ITS OWN account's failure, not the card's newest one.
+    ///
+    /// The fixture is a healthy `~/.claude` beside a permanently broken
+    /// `~/.claude-academic`, and it is generated from the server's own payload
+    /// (`tests/test_companion_contract_accounts.py` regenerates and diffs it), so decoding
+    /// drift shows up here rather than in the field. `weekly_scoped_opus` is the row that
+    /// matters: Claude only reports it once Opus has been used, so it carries an older
+    /// `captured_at` than the cycle the sibling's failure landed in. Judged against
+    /// `providers.claude.status_at` it is marked last-known and stops notifying for as long
+    /// as the sibling stays broken; judged against its own account it is current. Spec §7.
+    func testSharedMultiAccountFixtureJudgesRowsAgainstTheirOwnAccount() throws {
+        let data = try Data(contentsOf: contractURL("fixtures/quota-multi-account.json"))
+        let quota = try JSONDecoder().decode(QuotaResponse.self, from: data)
+        let prov = try XCTUnwrap(quota.providers?["claude"])
+
+        // The `accounts` list has to decode at all -- neither client read it before.
+        let accounts = try XCTUnwrap(prov.accounts)
+        XCTAssertEqual(accounts.compactMap(\.account), ["default", "academic"])
+        // The healthy account carries no failure timestamp: the case the rule must
+        // short-circuit before reaching for one, or every row of the working install is
+        // marked failed by the missing-timestamp fallback.
+        XCTAssertNil(accounts[0].statusAt)
+        XCTAssertNil(accounts[0].statusDetail)
+        XCTAssertEqual(accounts[1].statusDetail, "stale_token")
+
+        let snap = Snapshot(today: .empty, month: .empty,
+                            quota: QuotaResponse(enabled: true, providers: ["claude": prov],
+                                                 timestamp: nil),
+                            thresholds: .defaults)
+        let group = try XCTUnwrap(snap.allQuotaGroups.first)
+        // The card still warns: one broken credential has to keep warning the provider.
+        XCTAssertTrue(group.failed)
+
+        let failedByBucket = Dictionary(uniqueKeysWithValues: group.rows.map { ($0.bucket, $0.failed) })
+        XCTAssertEqual(failedByBucket["session"], false)
+        XCTAssertEqual(failedByBucket["weekly_all"], false)
+        XCTAssertEqual(failedByBucket["weekly_scoped_opus"], false, "healthy install's own row")
+        XCTAssertEqual(failedByBucket["academic_session"], true, "not refreshed since it broke")
+
+        // Same payload with `accounts` stripped is every pre-accounts server: the fallback
+        // marks the working install's un-refreshed row last-known, which is the behavior
+        // the per-account rule exists to replace. Pinned so the two cannot silently merge.
+        let legacy = ProviderQuota(estimated: prov.estimated, buckets: prov.buckets,
+                                   status: prov.status, statusDetail: prov.statusDetail,
+                                   statusAt: prov.statusAt, accounts: nil)
+        let legacySnap = Snapshot(today: .empty, month: .empty,
+                                  quota: QuotaResponse(enabled: true,
+                                                       providers: ["claude": legacy], timestamp: nil),
+                                  thresholds: .defaults)
+        let legacyRows = try XCTUnwrap(legacySnap.allQuotaGroups.first).rows
+        XCTAssertEqual(Dictionary(uniqueKeysWithValues: legacyRows.map { ($0.bucket, $0.failed) })["weekly_scoped_opus"],
+                       true)
+    }
+
     private func contractURL(_ relativePath: String) -> URL {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

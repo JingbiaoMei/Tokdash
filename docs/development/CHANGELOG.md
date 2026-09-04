@@ -13,6 +13,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Added
+
+- Seven style themes adapted from cosyncing's theme set: Teal Obsidian, Graphite, Nordic Warmth, Cyber Amber, Royal Navy, Soft Minimalist, and Flat White. Each ships light and dark tokens with its own heatmap and chart palettes, and the picker label is translated in all six UI languages. (#68)
+
+### Fixed
+
+- The refresh glyph was hardcoded `stroke="white"` in both the header markup and the re-render template, so it disappeared on themes whose primary button is light (studio and brutalist dark, among others). It now follows the button text color. (#68)
+- Overview KPI values in the monospace themes (Terminal, Cyber Amber) wrapped onto two lines; the cards now use trimmed type with the `sm:` step-up preserved at reduced sizes. (#68)
+- Theme `.ui-input` rules used the `background:` shorthand, which resets the `background-image` that paints the select caret — the dropdown arrow vanished on eleven themes (paper, liquid, terminal and brutalist had it before this branch). They set `background-color` now, and the per-theme option styling moved from `.style-select option` to `.ui-input option`, so every themed select — including the Language dropdown — follows the theme instead of falling back to slate in dark mode. (#68)
+- `--color-label` sat below the WCAG AA 4.5:1 floor in nine theme/mode combinations (seven of them new, plus paper light and studio light); the tokens were darkened or made more opaque until they clear the floor on both page and card backgrounds. (#68)
+- Flat White set `--shadow-*: none`, which is only legal as a sole value and invalidated every composed `box-shadow` in the base stylesheet — panels opened with no separation from the page. The tokens now use a transparent zero shadow that composes legally. (#68)
+- Cyber Amber dark's `--color-cta` was nearly identical to its primary, so cta-toned stats read as duplicates of their neighbours; it is now a distinct orange. Terminal dark rendered slate-blue table text on phosphor green — the slate utilities now remap to theme greens — and both monospace themes apply their font stack to form controls, which do not inherit the body font by default. (#68)
+
 ## 2.5.1 - 2026-09-02
 
 ### Added

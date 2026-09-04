@@ -84,7 +84,7 @@
 - **Pestaña Quota** *[nuevo]*: barras de ventana de suscripción con cuenta atrás de reinicio para Codex, Claude Code y Antigravity. Las ventanas de Codex funcionan desde los logs locales; los créditos de reinicio de Codex, las funciones con medidor y todas las cuotas de Claude/Antigravity necesitan [consulta en vivo](#seguimiento-de-cuota-opcional) con opt-in
 - **App de barra de estado Companion** *[nuevo]*: consulta el gasto y la cuota de suscripción desde la barra de menú de macOS o el área de notificaciones de Windows — para Windows en [Microsoft Store](https://apps.microsoft.com/detail/9ppnmpdq8b52) — [capturas y descargas](#tokdash-companion-app-de-barra-de-estado)
 - **Vistas multiseservidor**: añade servidores de Tokdash de WSL, macOS u otros en Ajustes; combina el uso de cualquier selección manteniendo la cuota agrupada por máquina. Ver [acceso remoto](docs/guides/REMOTE_ACCESS.md).
-- **Temas y acabado de la app**: 10 temas de estilo, modo claro/oscuro, soporte de instalación PWA y UI en 6 idiomas (English / 中文 / 日本語 / 한국어 / Español / Português)
+- **Temas y acabado de la app**: 17 temas de estilo, modo claro/oscuro, soporte de instalación PWA y UI en 6 idiomas (English / 中文 / 日本語 / 한국어 / Español / Português)
 
 ### Matriz de soporte de clientes
 

@@ -1796,8 +1796,8 @@
             <div class="refresh-control">
               <button id="refreshBtn" class="btn btn-primary" aria-label="Refresh dashboard" aria-controls="refreshReport" aria-expanded="false">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <path d="M20 12a8 8 0 1 1-2.343-5.657" stroke="white" stroke-width="2" stroke-linecap="round"/>
-                  <path d="M20 4v6h-6" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M20 12a8 8 0 1 1-2.343-5.657" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                  <path d="M20 4v6h-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
                 <span data-i18n="refresh">Refresh</span>
               </button>
@@ -1903,6 +1903,13 @@
                         <option value="brutalist" data-i18n="styleBrutalist">Brutalist</option>
                         <option value="arcade" data-i18n="styleArcade">Arcade</option>
                         <option value="studio" data-i18n="styleStudio">Studio</option>
+                        <option value="obsidian" data-i18n="styleObsidian">Teal Obsidian</option>
+                        <option value="graphite" data-i18n="styleGraphite">Graphite</option>
+                        <option value="nordic" data-i18n="styleNordic">Nordic Warmth</option>
+                        <option value="amber" data-i18n="styleAmber">Cyber Amber</option>
+                        <option value="navy" data-i18n="styleNavy">Royal Navy</option>
+                        <option value="soft" data-i18n="styleSoft">Soft Minimalist</option>
+                        <option value="flat" data-i18n="styleFlat">Flat White</option>
                       </select>
                     </label>
                     <div class="settings-row">
@@ -1938,7 +1945,7 @@
     <div id="overview-content" class="tab-content active">
 
       <!-- KPI cards -->
-      <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4 mb-6">
+      <section id="overviewKpiGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4 mb-6">
         <div class="surface p-5">
           <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="totalTokens">Total Tokens</div>
           <div id="totalTokensWrap" class="overview-token-value-wrap" data-readable="true">
@@ -4462,6 +4469,13 @@
         styleBrutalist: 'Brutalist',
         styleArcade: 'Arcade',
         styleStudio: 'Studio',
+        styleObsidian: 'Teal Obsidian',
+        styleGraphite: 'Graphite',
+        styleNordic: 'Nordic Warmth',
+        styleAmber: 'Cyber Amber',
+        styleNavy: 'Royal Navy',
+        styleSoft: 'Soft Minimalist',
+        styleFlat: 'Flat White',
         loading: 'Loading…',
         whatsNew: 'What\'s new',
         releaseNotes: 'Release notes',
@@ -4862,6 +4876,13 @@
         styleBrutalist: '粗野主义',
         styleArcade: '街机',
         styleStudio: '工作室',
+        styleObsidian: '青曜石',
+        styleGraphite: '石墨',
+        styleNordic: '北欧暖意',
+        styleAmber: '赛博琥珀',
+        styleNavy: '海军蓝',
+        styleSoft: '柔和极简',
+        styleFlat: '平白',
         loading: '加载中…',
         whatsNew: '更新动态',
         releaseNotes: '更新日志',
@@ -5263,6 +5284,13 @@
         styleBrutalist: 'ブラッタリスト',
         styleArcade: 'アーケード',
         styleStudio: 'スタジオ',
+        styleObsidian: 'ティールオブシディアン',
+        styleGraphite: 'グラファイト',
+        styleNordic: 'ノルディック',
+        styleAmber: 'サイバーアンバー',
+        styleNavy: 'ロイヤルネイビー',
+        styleSoft: 'ソフトミニマル',
+        styleFlat: 'フラットホワイト',
         loading: '読み込み中…',
         whatsNew: '新着情報',
         releaseNotes: 'リリースノート',
@@ -5664,6 +5692,13 @@
         styleBrutalist: '브루탈리스트',
         styleArcade: '아케이드',
         styleStudio: '스튜디오',
+        styleObsidian: '틸 옵시디언',
+        styleGraphite: '그래파이트',
+        styleNordic: '노르딕',
+        styleAmber: '사이버 앰버',
+        styleNavy: '로열 네이비',
+        styleSoft: '소프트 미니멀',
+        styleFlat: '플랫 화이트',
         loading: '로딩 중…',
         whatsNew: '새로운 소식',
         releaseNotes: '릴리스 노트',
@@ -6065,6 +6100,13 @@
         styleBrutalist: 'Brutalista',
         styleArcade: 'Sala de juegos',
         styleStudio: 'Estudio',
+        styleObsidian: 'Obsidiana verde',
+        styleGraphite: 'Grafito',
+        styleNordic: 'Calidez nórdica',
+        styleAmber: 'Ámbar cibernético',
+        styleNavy: 'Azul marino',
+        styleSoft: 'Minimalista suave',
+        styleFlat: 'Blanco plano',
         loading: 'Cargando…',
         whatsNew: 'Novedades',
         releaseNotes: 'Notas de versión',
@@ -6466,6 +6508,13 @@
         styleBrutalist: 'Brutalista',
         styleArcade: 'Arcade',
         styleStudio: 'Estúdio',
+        styleObsidian: 'Obsidiana verde',
+        styleGraphite: 'Grafite',
+        styleNordic: 'Calor nórdico',
+        styleAmber: 'Âmbar cibernético',
+        styleNavy: 'Azul-marinho',
+        styleSoft: 'Minimalista suave',
+        styleFlat: 'Branco plano',
         loading: 'Carregando…',
         whatsNew: 'Novidades',
         releaseNotes: 'Notas de versão',
@@ -7308,8 +7357,8 @@
       const iconClass = spinning ? ' class="refresh-icon-spin"' : '';
       refreshBtn.innerHTML = `
         <svg${iconClass} width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M20 12a8 8 0 1 1-2.343-5.657" stroke="white" stroke-width="2" stroke-linecap="round"/>
-          <path d="M20 4v6h-6" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M20 12a8 8 0 1 1-2.343-5.657" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <path d="M20 4v6h-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
         <span>${label}</span>
       `;

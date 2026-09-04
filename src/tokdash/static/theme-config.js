@@ -11,6 +11,13 @@
       "brutalist",
       "arcade",
       "studio",
+      "obsidian",
+      "graphite",
+      "nordic",
+      "amber",
+      "navy",
+      "soft",
+      "flat",
     ],
     heatColorsMap: {
       elevated: {
@@ -52,6 +59,34 @@
       studio: {
         light: ["#F5F5F4", "#E7E5E4", "#D6D3D1", "#A8A29E", "#78716C", "#57534E", "#334155", "#111827"],
         dark: ["#101215", "#181C20", "#252B31", "#334155", "#475569", "#64748B", "#CBD5E1", "#F8FAFC"],
+      },
+      obsidian: {
+        light: ["#F0F6F5", "#DCEDEB", "#C4E2DE", "#9FD2CC", "#6FBEB5", "#3FA89C", "#0F766E", "#0B5A54"],
+        dark: ["#0C1216", "#10262A", "#0E3E3E", "#0F5A55", "#0F766E", "#14B8A6", "#2DD4BF", "#99F6E4"],
+      },
+      graphite: {
+        light: ["#F8FAFC", "#EEF2F6", "#E2E8F0", "#CBD5E1", "#94A3B8", "#64748B", "#334155", "#0F172A"],
+        dark: ["#0B0F19", "#141B29", "#1E293B", "#334155", "#475569", "#64748B", "#CBD5E1", "#F8FAFC"],
+      },
+      nordic: {
+        light: ["#F7F6F3", "#EFEDE7", "#E2E0F4", "#C9C5EC", "#A5A1E2", "#818CF8", "#6366F1", "#4F46E5"],
+        dark: ["#1A1815", "#262219", "#2E2B45", "#3F3C74", "#4F46E5", "#6366F1", "#818CF8", "#C7D2FE"],
+      },
+      amber: {
+        light: ["#FAF6EE", "#F4EBD9", "#EBD9B4", "#E0C188", "#D2A24E", "#C2871B", "#9E6600", "#7A4E00"],
+        dark: ["#100D08", "#1D1608", "#332408", "#4A3400", "#6B4A00", "#8A5E00", "#D48F00", "#FFC000"],
+      },
+      navy: {
+        light: ["#F0F4FA", "#E1EBF5", "#CBDCF0", "#A8C4E6", "#7FA6D9", "#5485C9", "#1D4ED8", "#1E3A8A"],
+        dark: ["#0A0E1A", "#101A30", "#16264A", "#1D3560", "#2547A0", "#2B5CE6", "#3B82F6", "#93C5FD"],
+      },
+      soft: {
+        light: ["#F4F4F6", "#E9E9F0", "#DBDBEA", "#C5C5E0", "#A9A9D8", "#8B8BD0", "#6366F1", "#4F46E5"],
+        dark: ["#0F0F12", "#17171D", "#23233A", "#34345C", "#4F46E5", "#6366F1", "#818CF8", "#C7D2FE"],
+      },
+      flat: {
+        light: ["#FCFCFC", "#F5F5F5", "#EAEAEA", "#D4D4D4", "#A3A3A3", "#737373", "#404040", "#000000"],
+        dark: ["#0A0A0A", "#141414", "#1F1F1F", "#2E2E2E", "#525252", "#8C8C8C", "#D4D4D4", "#FFFFFF"],
       },
     },
     chartPaletteMap: {
@@ -95,6 +130,34 @@
         light: ["#111827", "#475569", "#2563EB", "#0F766E", "#DC2626", "#A8A29E"],
         dark: ["#F8FAFC", "#CBD5E1", "#60A5FA", "#34D399", "#FB7185", "#78716C"],
       },
+      obsidian: {
+        light: ["#0F766E", "#0369A1", "#B45309", "#6D28D9", "#BE185D", "#5F7370"],
+        dark: ["#2DD4BF", "#38BDF8", "#F59E0B", "#A78BFA", "#F472B6", "#94A3B8"],
+      },
+      graphite: {
+        light: ["#0F172A", "#2563EB", "#10B981", "#C2410C", "#8B5CF6", "#64748B"],
+        dark: ["#F8FAFC", "#3B82F6", "#34D399", "#F97316", "#A78BFA", "#94A3B8"],
+      },
+      nordic: {
+        light: ["#4F46E5", "#0E7490", "#047857", "#B45309", "#BE185D", "#70655B"],
+        dark: ["#818CF8", "#22D3EE", "#34D399", "#FBBF24", "#F472B6", "#A89F95"],
+      },
+      amber: {
+        light: ["#9E6600", "#0369A1", "#047857", "#A3341B", "#BE185D", "#6E5D4F"],
+        dark: ["#FFC000", "#00E5FF", "#4EDBA4", "#FF9E64", "#F472B6", "#A08B72"],
+      },
+      navy: {
+        light: ["#1D4ED8", "#0369A1", "#047857", "#B45309", "#BE185D", "#3B5580"],
+        dark: ["#3B82F6", "#52C7FA", "#10B981", "#F59E0B", "#F472B6", "#A3C2FA"],
+      },
+      soft: {
+        light: ["#4F46E5", "#096F9C", "#047857", "#9E5704", "#BE185D", "#626270"],
+        dark: ["#818CF8", "#38BDF8", "#34D399", "#FBBF24", "#F472B6", "#A0A0B0"],
+      },
+      flat: {
+        light: ["#000000", "#2563EB", "#059669", "#B44409", "#DB2777", "#737373"],
+        dark: ["#FFFFFF", "#3B82F6", "#34D399", "#F97316", "#F472B6", "#A3A3A3"],
+      },
     },
     themeMetaColors: {
       elevated: { light: "#1E40AF", dark: "#0F172A" },
@@ -107,6 +170,13 @@
       brutalist: { light: "#F7F3E9", dark: "#101010" },
       arcade: { light: "#F6EFFF", dark: "#12061F" },
       studio: { light: "#F5F5F4", dark: "#131417" },
+      obsidian: { light: "#F2F5F4", dark: "#0B0E14" },
+      graphite: { light: "#F8FAFC", dark: "#0B0F19" },
+      nordic: { light: "#FBFBFA", dark: "#181614" },
+      amber: { light: "#FAF6EE", dark: "#0F0D0A" },
+      navy: { light: "#F0F4FA", dark: "#0A0E1A" },
+      soft: { light: "#F4F4F6", dark: "#0F0F12" },
+      flat: { light: "#FCFCFC", dark: "#0A0A0A" },
     },
   });
 

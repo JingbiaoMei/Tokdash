@@ -84,7 +84,7 @@
 - **Quota タブ** *[新]*: Codex、Claude Code、Antigravity のサブスクリプションウィンドウバーとリセットカウントダウン。Codex ウィンドウはローカルログからそのまま動作。Codex のリセットクレジット、メーターリング機能、すべての Claude/Antigravity クォータにはオプトインの[ライブポーリング](#クォータ追跡任意)が必要
 - **Companion ステータスバーアプリ** *[新]*: macOS メニューバーまたは Windows 通知領域から支出とサブスクリプションクォータを確認 — Windows 版は[Microsoft Store](https://apps.microsoft.com/detail/9ppnmpdq8b52)に対応 — [スクリーンショットとダウンロード](#tokdash-companion-ステータスバーアプリ)
 - **マルチサーバービュー**: 設定から WSL、macOS、その他の Tokdash サーバーを追加。任意の選択で利用量を統合しつつ、クォータはマシン単位でグループ化。[リモートアクセス](docs/guides/REMOTE_ACCESS.md)を参照。
-- **テーマとアプリの洗練**: 10 種類のスタイルテーマ、ライト/ダークモード、PWA インストール対応、6 ヶ国語の UI（English / 中文 / 日本語 / 한국어 / Español / Português）
+- **テーマとアプリの洗練**: 17 種類のスタイルテーマ、ライト/ダークモード、PWA インストール対応、6 ヶ国語の UI（English / 中文 / 日本語 / 한국어 / Español / Português）
 
 ### クライアント対応マトリックス
 

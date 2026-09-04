@@ -82,7 +82,7 @@
 - **会话浏览器**：逐会话下钻
 - **Companion 状态栏应用** *[新]*：在 macOS 菜单栏或 Windows 通知区域查看费用与订阅额度，Windows 版已上架 [Microsoft Store](https://apps.microsoft.com/detail/9ppnmpdq8b52) — [截图与下载](#tokdash-companion-状态栏应用)
 - **多服务器视图**：在设置中添加 WSL、macOS 或其他 Tokdash 服务器；可合并任意选择的用量，并按机器分组显示额度。参见[远程访问](docs/guides/REMOTE_ACCESS.md)。
-- **主题与应用体验**：10 款样式主题、明暗模式与 PWA 安装支持、六种界面语言（English / 中文 / 日本語 / 한국어 / Español / Português）
+- **主题与应用体验**：17 款样式主题、明暗模式与 PWA 安装支持、六种界面语言（English / 中文 / 日本語 / 한국어 / Español / Português）
 
 ### 客户端支持矩阵
 

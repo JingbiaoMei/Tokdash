@@ -84,7 +84,7 @@
 - **Quota 탭** *[신규]*: Codex, Claude Code, Antigravity의 구독 윈도우 바와 리셋 카운트다운. Codex 윈도우는 로컬 로그로 바로 동작하며, Codex 리셋 크레딧, 미터링 기능, 모든 Claude/Antigravity 쿼터에는 옵트인 [라이브 폴링](#쿼터-추적-선택사항)이 필요합니다
 - **Companion 상태표 앱** *[신규]*: macOS 메뉴 막대나 Windows 알림 영역에서 지출과 구독 쿼터 확인 — Windows는 [Microsoft Store](https://apps.microsoft.com/detail/9ppnmpdq8b52) 제공 — [스크린샷과 다운로드](#tokdash-companion-상태표-앱)
 - **멀티 서버 뷰**: 설정에서 WSL, macOS, 기타 Tokdash 서버를 추가. 임의의 선택 사용량을 합치고 쿼터는 머신별로 그룹화. [원격 접근](docs/guides/REMOTE_ACCESS.md) 참조.
-- **테마와 앱 마감**: 10가지 스타일 테마, 라이트/다크 모드, PWA 설치 지원, 6개 언어 UI (English / 中文 / 日本語 / 한국어 / Español / Português)
+- **테마와 앱 마감**: 17가지 스타일 테마, 라이트/다크 모드, PWA 설치 지원, 6개 언어 UI (English / 中文 / 日本語 / 한국어 / Español / Português)
 
 ### 클라이언트 지원 매트릭스
 

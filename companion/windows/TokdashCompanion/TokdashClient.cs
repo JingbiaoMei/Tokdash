@@ -140,10 +140,33 @@ public sealed class ProviderQuota
     // provider's quota couldn't be refreshed and its buckets are last-known. Spec §7.
     public string? Status { get; set; }
     [JsonPropertyName("status_detail")] public string? StatusDetail { get; set; }
-    // Epoch seconds the failure status was observed. Compared against each bucket's
-    // captured_at to tell last-known rows from ones that refreshed fine. Spec §7.
+    // Epoch seconds the failure status was observed. This is the newest error of ANY
+    // account behind the card, so it drives the GROUP warning; rows compare against their
+    // own account's StatusAt in Accounts where that is present. Spec §7.
     [JsonPropertyName("status_at")] public int? StatusAt { get; set; }
+    // One entry per credential, present only on a card measuring more than one (a
+    // ~/.claude install beside a ~/.claude-<profile> sibling, MiniMax global + CN).
+    // Absent for single-credential providers and for every pre-Accounts server. Spec §7.
+    public List<AccountQuota>? Accounts { get; set; }
     public List<BucketQuota>? Buckets { get; set; }
+}
+
+/// <summary>
+/// One credential behind a provider card, with the failure that belongs to it alone.
+/// <para>
+/// <c>Status</c> is NOT a verdict on its own: the server takes it from the last stored row
+/// it iterated and rows arrive ordered by bucket id, so an install with windows reports
+/// <c>"ok"</c> beside a live <c>StatusDetail</c>. Failure is read the same way as for a
+/// group — status present and not "ok", OR a non-empty StatusDetail. Spec §7.
+/// </para>
+/// </summary>
+public sealed class AccountQuota
+{
+    public string? Account { get; set; }
+    public string? Plan { get; set; }
+    public string? Status { get; set; }
+    [JsonPropertyName("status_detail")] public string? StatusDetail { get; set; }
+    [JsonPropertyName("status_at")] public int? StatusAt { get; set; }
 }
 
 public sealed class BucketQuota

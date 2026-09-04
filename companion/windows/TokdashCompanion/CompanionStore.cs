@@ -745,7 +745,7 @@ public sealed class Snapshot
                         kv.Value.Estimated ?? false,
                         b.Account ?? "",
                         b.RemainingPercent is not null,
-                        IsRowFailed(b.CapturedAt, kv.Value.StatusAt, failed),
+                        IsRowFailed(b, kv.Value, failed),
                         b.CapturedAt is null ? null : DateTimeOffset.FromUnixTimeSeconds(b.CapturedAt.Value))).ToList();
                     if (canonicalProvider.Equals("antigravity", StringComparison.OrdinalIgnoreCase))
                         rows = AntigravityPools(rows);
@@ -799,16 +799,53 @@ public sealed class Snapshot
     // ROW failure drives the inline ⚠ and notification eligibility. buckets[].status is
     // always "ok" (the server only writes failure statuses to the filtered-out "api"
     // bucket), so freshness is the real discriminator: a row is last-known when the
-    // provider's failure is NEWER than the row's data. Strict "<" makes same-cycle
+    // failure that APPLIES TO IT is newer than its data. Strict "<" makes same-cycle
     // equality count as fresh, which is what rescues a healthy credential's window when a
     // sibling credential is broken - every credential in a cycle shares captured_at.
-    // Missing timestamps (older servers) fall back to the group rather than silently
-    // un-suppressing. Spec §7.
-    private static bool IsRowFailed(int? capturedAt, int? statusAt, bool groupFailed)
+    //
+    // The applicable failure is the row's OWN account's, whenever the payload attributes
+    // them. StatusAt on the provider is the newest error of ANY credential behind the
+    // card: a permanently broken sibling advances it every cycle, while a bucket that is
+    // not reported every cycle keeps an older captured_at - and those buckets are
+    // ordinary, not edge cases (Claude's `limits` carries weekly_scoped_opus only once
+    // Opus has been used; MiniMax's per-model buckets come and go with the models called).
+    // Judged against the provider, that marks a working install's rows last-known and
+    // drops them out of low-quota notification for as long as the sibling stays broken. So
+    // a row whose own credential is healthy is fresh, whatever a sibling did.
+    //
+    // Everything else falls back to the group rather than un-suppressing a row that may
+    // well be stale: Accounts absent (single-credential provider, or a pre-Accounts
+    // server), a row naming an account with no entry, or a missing timestamp. Spec §7.
+    private static bool IsRowFailed(BucketQuota bucket, ProviderQuota prov, bool groupFailed)
     {
         if (!groupFailed) return false;
-        if (capturedAt is null || statusAt is null) return true;
-        return capturedAt.Value < statusAt.Value;
+        var entry = AccountEntry(prov, bucket.Account);
+        if (entry is not null)
+        {
+            if (!IsAccountFailed(entry)) return false;
+            int? statusAt = entry.StatusAt ?? prov.StatusAt;
+            if (bucket.CapturedAt is null || statusAt is null) return true;
+            return bucket.CapturedAt.Value < statusAt.Value;
+        }
+        if (bucket.CapturedAt is null || prov.StatusAt is null) return true;
+        return bucket.CapturedAt.Value < prov.StatusAt.Value;
+    }
+
+    private static AccountQuota? AccountEntry(ProviderQuota prov, string? account)
+    {
+        if (prov.Accounts is null || string.IsNullOrEmpty(account)) return null;
+        return prov.Accounts.FirstOrDefault(a => a.Account == account);
+    }
+
+    // Same rule as a group: status present and not "ok", OR a non-empty StatusDetail.
+    // Status alone is not a verdict - a credential with a live error still reports "ok"
+    // once any of its window rows sorts after its "api" row. Spec §7.
+    private static bool IsAccountFailed(AccountQuota entry)
+    {
+        if (!string.IsNullOrWhiteSpace(entry.StatusDetail)
+            && !entry.StatusDetail!.Equals("ok", StringComparison.OrdinalIgnoreCase))
+            return true;
+        return !IsProviderOk(entry.Status);
     }
 }
 

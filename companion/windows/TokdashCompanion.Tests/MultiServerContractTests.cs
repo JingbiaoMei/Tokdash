@@ -1,4 +1,5 @@
 using System.IO;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -122,6 +123,71 @@ public class MultiServerContractTests
 
         Assert.IsTrue(SettingsWindow.ServerRegistriesEqual(original, original));
         Assert.IsFalse(SettingsWindow.ServerRegistriesEqual(original, changed));
+    }
+
+    /// <summary>
+    /// A row is judged against ITS OWN account's failure, not the card's newest one.
+    /// <para>
+    /// The fixture is a healthy <c>~/.claude</c> beside a permanently broken
+    /// <c>~/.claude-academic</c>, generated from the server's own payload
+    /// (<c>tests/test_companion_contract_accounts.py</c> regenerates and diffs it), so
+    /// decoding drift shows up here rather than in the field. <c>weekly_scoped_opus</c> is
+    /// the row that matters: Claude reports it only once Opus has been used, so it carries
+    /// an older captured_at than the cycle the sibling's failure landed in. Judged against
+    /// <c>providers.claude.status_at</c> it is marked last-known and stops notifying for as
+    /// long as the sibling stays broken; judged against its own account it is current.
+    /// Spec §7.
+    /// </para>
+    /// </summary>
+    [TestMethod]
+    public void MultiAccountFixtureJudgesRowsAgainstTheirOwnAccount()
+    {
+        var quota = Decode<QuotaResponse>("quota-multi-account.json");
+        var prov = quota.Providers!["claude"];
+
+        // The Accounts list has to decode at all - neither client read it before.
+        Assert.IsNotNull(prov.Accounts);
+        var accounts = prov.Accounts!;
+        CollectionAssert.AreEqual(new[] { "default", "academic" },
+            accounts.Select(a => a.Account).ToArray());
+        // The healthy account carries no failure timestamp: the case the rule must
+        // short-circuit before reaching for one, or every row of the working install is
+        // marked failed by the missing-timestamp fallback.
+        Assert.IsNull(accounts[0].StatusAt);
+        Assert.IsNull(accounts[0].StatusDetail);
+        Assert.AreEqual("stale_token", accounts[1].StatusDetail);
+
+        var snap = new Snapshot
+        {
+            Today = new UsageResponse(),
+            Month = new UsageResponse(),
+            Quota = quota,
+            Thresholds = QuotaThresholds.Defaults,
+        };
+        var group = snap.AllQuotaGroups.Single();
+        // The card still warns: one broken credential has to keep warning the provider.
+        Assert.IsTrue(group.Failed);
+
+        Assert.IsFalse(group.Rows.Single(r => r.Bucket == "session").Failed);
+        Assert.IsFalse(group.Rows.Single(r => r.Bucket == "weekly_all").Failed);
+        Assert.IsFalse(group.Rows.Single(r => r.Bucket == "weekly_scoped_opus").Failed,
+            "the healthy install's own row, older than the SIBLING's failure");
+        Assert.IsTrue(group.Rows.Single(r => r.Bucket == "academic_session").Failed,
+            "not refreshed since its own sign-in expired");
+
+        // Same payload with Accounts stripped is every pre-Accounts server: the fallback
+        // marks the working install's un-refreshed row last-known, which is the behavior
+        // the per-account rule exists to replace. Pinned so the two cannot silently merge.
+        prov.Accounts = null;
+        var legacy = new Snapshot
+        {
+            Today = new UsageResponse(),
+            Month = new UsageResponse(),
+            Quota = quota,
+            Thresholds = QuotaThresholds.Defaults,
+        };
+        Assert.IsTrue(legacy.AllQuotaGroups.Single().Rows
+            .Single(r => r.Bucket == "weekly_scoped_opus").Failed);
     }
 
     private static T Decode<T>(string fixture) =>

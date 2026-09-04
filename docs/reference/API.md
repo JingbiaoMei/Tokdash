@@ -190,6 +190,18 @@ Returns current subscription quota state. This route never performs provider net
       "buckets": [
         {"bucket": "5h", "bucket_label": "5-hour window", "used_percent": 25.0, "resets_at": 1782910800}
       ]
+    },
+    "claude": {
+      "network_enabled": true,
+      "plan": "Max 5x",
+      "buckets": [
+        {"account": "default", "bucket": "session", "bucket_label": "Session", "used_percent": 40.0, "resets_at": 1782910800},
+        {"account": "academic", "bucket": "academic_session", "bucket_label": "Session", "used_percent": 12.0, "resets_at": 1782910800}
+      ],
+      "accounts": [
+        {"account": "default", "plan": "Max 5x", "tier": "default_claude_max_5x", "status": "ok", "credential_path": "/home/me/.claude/.credentials.json", "status_detail": null, "status_at": null, "updated_at": 1782910800},
+        {"account": "academic", "plan": "Pro", "tier": "default_claude_pro", "status": "ok", "credential_path": "/home/me/.claude-academic/.credentials.json", "status_detail": "stale_token", "status_at": 1782910800, "updated_at": 1782910800}
+      ]
     }
   },
   "consent": {
@@ -215,6 +227,61 @@ Returns current subscription quota state. This route never performs provider net
 }
 ```
 
+Every bucket row carries the `account` it belongs to.
+
+**`accounts`** is additive and lists the accounts a card measures separately: Claude Code
+installs (`~/.claude`, plus every `~/.claude-<profile>` sibling with its own
+`.credentials.json`) and MiniMax regions. It appears only once a card measures more than one
+account, so a single-account card's payload is unchanged, and only for those two providers —
+everywhere else the stored account id is a placeholder or a rotating id, and the card measures
+one account. The two extra fields `tier` and `credential_path` are Claude's own. Claude's whole
+list needs `credential_scan` consent, because which installs exist, and each one's plan, comes
+off the filesystem: with consent withheld the stored rows still render, unnamed.
+
+`status` and `status_detail` name the **newest error any of the provider's accounts is still
+carrying**, with `status_at` dating it. A card speaks for every credential behind it, so one
+broken credential keeps warning about the provider (see
+`companion/contract/COMPANION_API.md`); `accounts` is what says whose error it is, and a card
+that can read the list prints the notice under that account rather than over the whole card.
+Errors clear per account: an account's own newer success retires its error, a success on
+another account does not silence it, and a recovered account stops warning the card.
+
+`status_account` ships beside `accounts` and names which entry the card's `status_detail`
+belongs to, or is `null` when it belongs to none of them — a provider whose credentials could
+not be read at all records that failure under a synthetic account that is not a credential and
+is not listed. It is there because "does any account carry an error" is a different question
+with a different answer: a card that cannot read its credentials *and* holds an older
+per-account failure would otherwise read as attributed, and an unreadable provider would count
+as working. Absent on a single-account card, where the card's error is that account's by
+construction.
+
+`plan` stays provider-wide. `providers.claude.plan`, `tier` and `credential_path` describe the
+default install where there is one and the measured install where there is not, so an existing
+consumer sees what it always did — the per-install plans are in `accounts[].plan`.
+
+A Claude install leaves both `buckets` and `accounts` when its config directory is **observed
+to be gone**, which is what retires a renamed or deleted install — a `~/.claude-<profile>`
+sibling, or `~/.claude` itself once the sign-in has moved to a sibling. Absence has to be
+observed: the test is whether the listing that names the installs (the home directory, or the
+paths in `TOKDASH_CLAUDE_PROFILES`) could be read, named at least one install, and did not
+name this one.
+
+An install that is present but unreadable right now keeps its data — `claude logout`, a
+permissions error, a dotfile manager mid-relink, a credential file caught mid-write. So does
+every install whenever the answer is unavailable rather than negative: the listing could not be
+read, it named no install at all (an unmounted or still-locked home, which is not the news that
+every subscription was deleted), or `quota.credential_scan` consent is off.
+
+What membership measures is directory presence, not the name a directory is given on this run.
+`CLAUDE_CONFIG_DIR` reassigns account names around whichever install it points at — aim it at
+`~/.claude-academic` and that install becomes `default` while `~/.claude` becomes `claude` — so
+an install is recognised under every name it could have been stored under, and changing the
+variable does not retire the install it renamed.
+
+Row age is deliberately not part of any of this: it cannot tell a removed install from a
+provider nothing has polled lately, and since Claude API polling is opt-in the second case is
+the common one.
+
 ## `GET /api/quota/history`
 
 Returns stored quota utilization points and derived consumption deltas.
@@ -229,7 +296,7 @@ Returns stored quota utilization points and derived consumption deltas.
 | `end` | integer epoch seconds | no | – | Inclusive upper bound |
 | `max_points` | integer | no | `300` | Max points per series; series longer than this are evenly downsampled, always keeping the most recent point. Must be a positive integer. |
 
-History series are unified per `(provider, bucket)`: a Codex session row (account `default`) and an API row (real account id) for the same window merge into one series, keeping the freshest point on a timestamp collision. MiniMax uses region-qualified bucket IDs so global and mainland-China Token Plans remain separate series. Series are always bounded by `max_points` (points and consumption deltas are downsampled independently).
+History series are unified per `(provider, bucket)`: a Codex session row (account `default`) and an API row (real account id) for the same window merge into one series, keeping the freshest point on a timestamp collision. MiniMax uses region-qualified bucket IDs so global and mainland-China Token Plans remain separate series, and a `~/.claude-<profile>` install qualifies its windows the same way (`academic_session`) so two Claude subscriptions stay two series. Series are always bounded by `max_points` (points and consumption deltas are downsampled independently).
 
 ## `POST /api/quota/consent`
 

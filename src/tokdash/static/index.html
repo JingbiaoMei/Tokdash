@@ -4798,6 +4798,7 @@
         notDetected: 'not detected',
         quotaRegionChina: 'China',
         quotaRegionGlobal: 'Global',
+        quotaProfileDefault: 'Default',
         quotaNoData: 'No quota snapshots yet.',
         enableQuotaApi: 'Enable live polling',
         enableQuotaCredentialScan: 'Allow local credential reads',
@@ -5307,6 +5308,7 @@
         notDetected: '未检测到',
         quotaRegionChina: '中国',
         quotaRegionGlobal: '全球',
+        quotaProfileDefault: '默认',
         quotaNoData: '暂无额度快照。',
         enableQuotaApi: '启用实时轮询',
         enableQuotaCredentialScan: '允许读取本地凭据',
@@ -5817,6 +5819,7 @@
         notDetected: '検出されませんでした',
         quotaRegionChina: '中国',
         quotaRegionGlobal: 'グローバル',
+        quotaProfileDefault: 'デフォルト',
         quotaNoData: 'まだクォータのスナップショットがありません。',
         enableQuotaApi: 'ライブポーリングを有効化',
         enableQuotaCredentialScan: 'ローカル認証情報の読み取りを許可',
@@ -6327,6 +6330,7 @@
         notDetected: '감지되지 않음',
         quotaRegionChina: '중국',
         quotaRegionGlobal: '글로벌',
+        quotaProfileDefault: '기본',
         quotaNoData: '아직 쿼터 스냅샷이 없습니다.',
         enableQuotaApi: '라이브 폴링 사용',
         enableQuotaCredentialScan: '로컬 자격 증명 읽기 허용',
@@ -6837,6 +6841,7 @@
         notDetected: 'no detectado',
         quotaRegionChina: 'China',
         quotaRegionGlobal: 'Global',
+        quotaProfileDefault: 'Predeterminado',
         quotaNoData: 'Aún no hay instantáneas de cuota.',
         enableQuotaApi: 'Activar consulta en vivo',
         enableQuotaCredentialScan: 'Permitir lectura de credenciales locales',
@@ -7347,6 +7352,7 @@
         notDetected: 'não detectado',
         quotaRegionChina: 'China',
         quotaRegionGlobal: 'Global',
+        quotaProfileDefault: 'Padrão',
         quotaNoData: 'Ainda não há instantâneos de cota.',
         enableQuotaApi: 'Ativar polling ao vivo',
         enableQuotaCredentialScan: 'Permitir leitura de credenciais locais',
@@ -11551,7 +11557,7 @@
       return provider || '—';
     }
 
-    function quotaProviderPlanLabel(providerKey, provider) {
+    function quotaProviderPlanLabel(providerKey, provider, planOverride) {
       if (providerKey === 'minimax') {
         const regions = new Set(
           (provider?.buckets || []).map((bucket) => String(bucket.account || '')).filter(Boolean)
@@ -11561,13 +11567,27 @@
         // incorrectly imply that it applies to both groups.
         if (regions.size > 1) return '';
       }
+      // A card that decided its own plan (Claude, whose card can carry several installs)
+      // has already weighed each install's plan against the ones it renders alongside. The
+      // empty string is a decision, not a gap, so it must not fall through to the generic
+      // line; null means the card had no opinion.
+      if (planOverride !== undefined && planOverride !== null) return planOverride;
       const plan = provider?.plan || provider?.tier;
       if (plan) return plan;
       if (providerKey === 'antigravity' || provider?.detected === true) return '';
       return t('notDetected');
     }
 
-    function quotaProviderCardLabel(providerKey, provider) {
+    function quotaProviderCardLabel(providerKey, provider, claudeView) {
+      if (providerKey === 'claude') {
+        // One sibling and no default install: name the card after the install that is
+        // actually being measured. With the default install present the card stays
+        // "Claude Code" and each install gets its own group heading.
+        const accounts = (claudeView?.groups || []).map((group) => group.account);
+        return accounts.length === 1 && accounts[0] !== 'default'
+          ? `Claude Code (${accounts[0]})`
+          : quotaProviderLabel(providerKey);
+      }
       if (providerKey !== 'minimax') return quotaProviderLabel(providerKey);
       const regions = new Set(
         (provider?.buckets || []).map((bucket) => String(bucket.account || '')).filter(Boolean)
@@ -11579,7 +11599,7 @@
 
     function quotaConsentMeta(provider) {
       if (provider === 'codex') return { key: 'codex_api', endpoint: 'chatgpt.com/backend-api/wham/*', path: '$CODEX_HOME/auth.json' };
-      if (provider === 'claude') return { key: 'claude_api', endpoint: 'api.anthropic.com/api/oauth/usage', path: '$CLAUDE_CONFIG_DIR/.credentials.json' };
+      if (provider === 'claude') return { key: 'claude_api', endpoint: 'api.anthropic.com/api/oauth/usage', path: '$CLAUDE_CONFIG_DIR/.credentials.json (and each ~/.claude-* profile)' };
       if (provider === 'antigravity') return { key: 'antigravity_api', endpoint: 'daily-cloudcode-pa.googleapis.com/v1internal:*', path: '~/.gemini/antigravity-cli/antigravity-oauth-token' };
       if (provider === 'minimax') return { key: 'minimax_api', endpoint: 'api.minimax.io or api.minimaxi.com/v1/token_plan/remains', path: '$MMX_CONFIG_DIR/config.json or a MiniMax Token Plan key' };
       if (provider === 'kimi') return { key: 'kimi_api', endpoint: 'api.kimi.com/coding/v1/usages', path: '$KIMI_CODE_HOME credentials/config or KIMI_API_KEY' };
@@ -11706,8 +11726,11 @@
         if (key === '5h' || key.endsWith('_5h')) return t('windowFiveHour');
         if (key === '7d' || key.endsWith('_7d')) return t('windowWeekly');
       } else if (provider === 'claude') {
-        if (key === 'session') return t('windowFiveHour');
-        if (key === 'weekly_all') return t('windowWeekly');
+        // A `~/.claude-<profile>` install prefixes its windows with the profile name
+        // (`academic_session`), the same way MiniMax prefixes by region.
+        const kind = claudeBucketKind(bucket.account, key);
+        if (kind === 'session') return t('windowFiveHour');
+        if (kind === 'weekly_all') return t('windowWeekly');
       } else if (provider === 'kimi' || provider === 'grok') {
         if (key === '5h') return t('windowFiveHour');
         if (key === '7d' || (provider === 'kimi' && key === 'plan')) return t('windowWeekly');
@@ -11743,9 +11766,14 @@
         return `Codex-${short} ${win}`;
       }
       if (provider === 'claude') {
-        if (key === 'session') return `Claude ${t('windowFiveHour')}`;
-        if (key === 'weekly_all') return `Claude ${t('windowWeekly')}`;
-        return `Claude ${item.bucket_label || key}`; // Fable etc.
+        // Two subscriptions, two legend entries: "Claude 5-hour" and "Claude-academic
+        // 5-hour". Without the account in the label the chart would show the same name
+        // twice for two different windows.
+        const name = claudeProfileSeriesName(item.account);
+        const kind = claudeBucketKind(item.account, key);
+        if (kind === 'session') return `${name} ${t('windowFiveHour')}`;
+        if (kind === 'weekly_all') return `${name} ${t('windowWeekly')}`;
+        return `${name} ${item.bucket_label || key}`; // Fable etc.
       }
       if (provider === 'kimi' && key === 'plan') {
         return `Kimi Code ${t('windowWeekly')}`;
@@ -11837,33 +11865,232 @@
       buckets.forEach((bucket) => card.appendChild(renderQuotaBucketRow(bucket, provider)));
     }
 
-    function miniMaxBucketGroups(buckets) {
-      const accounts = new Set(buckets.map((bucket) => String(bucket.account || '')).filter(Boolean));
-      if (accounts.size <= 1) return [{ account: Array.from(accounts)[0] || '', rows: buckets }];
-      const order = ['global', 'cn', ...Array.from(accounts).filter((account) => !['global', 'cn'].includes(account))];
-      return order
-        .map((account) => ({
-          account,
-          rows: buckets.filter((bucket) => String(bucket.account || '') === account),
-        }))
-        .filter((group) => group.rows.length);
+    // Which Token Plans this card reports: the regions the server named, in display order,
+    // then any region that only shows up on a bucket. Mirrors `claudeCardAccounts`, and for
+    // the same reason -- a region whose key was never valid has an `api` status row and no
+    // buckets at all, so deriving the groups from buckets alone leaves its error with no
+    // heading to sit under, printed beneath a healthy region's bars as if it were theirs.
+    function miniMaxCardAccounts(buckets, provider) {
+      const seen = [];
+      const add = (account) => {
+        if (account && !seen.includes(account)) seen.push(account);
+      };
+      (provider?.accounts || []).forEach((entry) => add(String(entry?.account || '')));
+      buckets.forEach((bucket) => add(String(bucket.account || '')));
+      // The two known regions keep this fixed order whichever way round they were found, so
+      // the card does not reorder itself as rows arrive; anything else follows as named.
+      const canonical = ['global', 'cn'].filter((region) => seen.includes(region));
+      return [...canonical, ...seen.filter((account) => !canonical.includes(account))];
     }
 
-    function renderMiniMaxBuckets(card, buckets) {
-      const groups = miniMaxBucketGroups(buckets);
+    function miniMaxBucketGroups(buckets, provider) {
+      const accounts = miniMaxCardAccounts(buckets, provider);
+      // One region (or a payload whose buckets carry no region at all): every bucket belongs
+      // to it, including rows stored before regions were attributed.
+      if (accounts.length <= 1) return [{ account: accounts[0] || '', rows: buckets }];
+      return accounts.map((account) => ({
+        account,
+        rows: buckets.filter((bucket) => String(bucket.account || '') === account),
+      }));
+    }
+
+    // MiniMax card: one set of bars per Token Plan region, each with its own failure notice
+    // under it. Returns how many notices it put under a region, so the caller adds the
+    // card-level notice only when the payload could not attribute the failure itself.
+    function renderMiniMaxBuckets(card, buckets, provider) {
+      const groups = miniMaxBucketGroups(buckets, provider);
+      const failures = groups.map((group) => quotaAccountNotice(provider, group.account));
+      let attributed = 0;
       if (groups.length <= 1) {
         renderQuotaBucketGroups(card, buckets, 'minimax');
-        return;
+        if (failures[0]) {
+          appendQuotaStatusNoticeFor(card, 'minimax', failures[0].detail, failures[0].statusAt);
+          attributed = 1;
+        }
+        return attributed;
       }
       let rendered = 0;
-      groups.forEach(({ account, rows }) => {
+      groups.forEach(({ account, rows }, index) => {
+        // A region the payload names but has neither bars nor a live error for has nothing
+        // to say; a heading on its own would read as an empty Token Plan.
+        if (!rows.length && !failures[index]) return;
         const label = account === 'cn'
           ? t('quotaRegionChina')
           : account === 'global' ? t('quotaRegionGlobal') : account;
         card.appendChild(quotaSubtitleEl(label, rendered === 0));
         rows.forEach((bucket) => card.appendChild(renderQuotaBucketRow(bucket, 'minimax')));
+        if (failures[index]) {
+          appendQuotaStatusNoticeFor(card, 'minimax', failures[index].detail, failures[index].statusAt);
+          attributed += 1;
+        }
         rendered += 1;
       });
+      return attributed;
+    }
+
+    // Bucket-id prefix a Claude install carries: none for the default install,
+    // `<profile>_` for a `~/.claude-<profile>` sibling. Mirrors the backend's
+    // ClaudeProfile.bucket_prefix; history series are keyed by (provider, bucket), so two
+    // subscriptions need two ids or their windows interleave into one zigzag line.
+    function claudeBucketPrefix(account) {
+      const name = String(account || '');
+      return name && name !== 'default' ? `${name}_` : '';
+    }
+
+    // Which window a Claude bucket measures, with the install's own prefix taken back off.
+    // Everything downstream (window names, series names) then works on the same ids the
+    // single-install card always used, and only this function and `claudeBucketPrefix` know
+    // how the prefix is built. Their Python counterpart is ClaudeProfile.bucket_prefix, and
+    // a cross-language test pins the three together.
+    function claudeBucketKind(account, bucket) {
+      const prefix = claudeBucketPrefix(account);
+      const id = String(bucket || '');
+      return prefix && id.startsWith(prefix) ? id.slice(prefix.length) : id;
+    }
+
+    // Legend name for one Claude install's series: the default install stays "Claude", a
+    // sibling reads "Claude-academic" after the directory it was set up in.
+    function claudeProfileSeriesName(account) {
+      const name = String(account || '');
+      return name && name !== 'default' ? `Claude-${name}` : 'Claude';
+    }
+
+    // Which installs this card reports, in the order the server named them (its own account
+    // first). A window whose install is missing from that list is still given a group, so a
+    // payload gap can never make measured data disappear from the card.
+    function claudeCardAccounts(buckets, provider) {
+      const accounts = (provider?.accounts || []).map((entry) => String(entry?.account || 'default'));
+      buckets.forEach((bucket) => {
+        const account = String(bucket.account || 'default');
+        if (!accounts.includes(account)) accounts.push(account);
+      });
+      return accounts;
+    }
+
+    // The (detail, timestamp) an account of a multi-account card is still carrying, or null
+    // when it is fine or the payload names no accounts at all. `accounts` is the one generic
+    // list every such card carries -- Claude installs, MiniMax regions -- so a card never
+    // has to guess which account a provider-level error was about.
+    // Whether the card's own `status_detail` belongs to an account this card lists. That is
+    // the one question `status_account` exists to answer, and the card needs it for the same
+    // reason the Servers tally does: an error attributed to no listed account is a provider
+    // whose credentials could not be read at all, so no heading prints it, and the card has
+    // to print it itself -- even when a different account already printed its own, older
+    // failure under its own heading. Matching the detail's VALUE against the accounts' is the
+    // fragile version `COMPANION_API.md` warns against. A payload carrying `accounts` with no
+    // `status_account` is an older server, and reads as unattributed, which is what every
+    // card did before either field existed: print the error rather than swallow it.
+    function quotaCardErrorIsAttributed(provider) {
+      const accounts = Array.isArray(provider?.accounts) ? provider.accounts : [];
+      if (!accounts.length) return false;
+      const owner = provider?.status_account;
+      return !!owner && accounts.some((entry) => String(entry?.account || '') === String(owner));
+    }
+
+    function quotaAccountNotice(provider, account) {
+      const entries = provider?.accounts || [];
+      const entry = entries.find((item) => String(item?.account || 'default') === account) || null;
+      const detail = entry ? entry.status_detail : null;
+      if (!detail || detail === 'ok') return null;
+      return { detail, statusAt: entry.status_at ?? null };
+    }
+
+    function claudeProfileGroups(buckets, provider) {
+      const entries = provider?.accounts || [];
+      const groups = claudeCardAccounts(buckets, provider).map((account) => {
+        const entry =
+          entries.find((item) => String(item?.account || 'default') === account) || null;
+        const failure = quotaAccountNotice(provider, account);
+        return {
+          account,
+          plan: entry?.plan || '',
+          rows: buckets.filter((bucket) => String(bucket.account || 'default') === account),
+          notice: failure ? failure.detail : '',
+          statusAt: failure ? failure.statusAt : null,
+        };
+      });
+      // An install with neither windows nor a problem has nothing to say.
+      return groups.filter((group) => group.rows.length || group.notice);
+    }
+
+    // Group heading for one install: the profile name (the default install's own name is
+    // localized) plus its plan, but only when the installs are on different plans —
+    // `showPlans` is false exactly when the card title's plan line already says it.
+    function claudeProfileGroupLabel(group, showPlans) {
+      const name = group.account === 'default' ? t('quotaProfileDefault') : group.account;
+      return showPlans && group.plan ? `${name} · ${group.plan}` : name;
+    }
+
+    // One view of the card's installs, computed once: the groups to render, the plan the
+    // title may name, and whether each heading has to carry its own plan. Computed together
+    // because the title and the body have to agree — deciding them separately let the title
+    // hide a plan (two installs differ) while the body declined to show it (only one install
+    // had anything to render), and the plan vanished from the card altogether.
+    function claudeCardView(buckets, provider) {
+      const groups = claudeProfileGroups(buckets, provider);
+      const plans = new Set(groups.map((group) => group.plan).filter(Boolean));
+      const named = groups.filter((group) => group.plan).length;
+      // null means "no opinion": fall through to the generic plan line and its tail.
+      let plan = groups.length ? provider?.plan || null : null;
+      let showPlans = false;
+      if (groups.length > 1) {
+        // A plan may be printed above all the installs only if every one of them has that
+        // plan. Otherwise it moves to the headings, where each install can claim its own --
+        // including the case where only some installs report a plan at all, which would
+        // otherwise leave the card with no plan anywhere.
+        const shared = named === groups.length && plans.size === 1 ? Array.from(plans)[0] : null;
+        plan = shared === null ? '' : shared;
+        showPlans = plan === '' && plans.size > 0;
+      }
+      // A payload that names no accounts attributes nothing, and the card's own error still
+      // has to be printed somewhere. It goes under the installs rather than onto whichever
+      // one happens to be first, because guessing is how a sibling's expired sign-in used to
+      // be made to look like the default install's.
+      let cardNotice = null;
+      const detail = provider?.status_detail;
+      if (!quotaCardErrorIsAttributed(provider) && detail && detail !== 'ok') {
+        cardNotice = { detail, statusAt: provider?.status_at ?? null };
+      }
+      return { groups, plan, showPlans, cardNotice };
+    }
+
+    // Claude card: one group of window bars per install on this machine, each under the
+    // profile name it was set up with, and each with its own failure notice under its own
+    // bars — so an install that is broken while another is healthy is visible as exactly
+    // that, and a card where every install is broken still says so once per install.
+    // Headings appear only once there is more than one install to tell apart. Returns how
+    // many groups rendered, so the caller can fall back to the empty-card state.
+    function renderClaudeBuckets(card, view, providerKey) {
+      let rendered = 0;
+      // An unattributed card notice goes ABOVE every heading once there is more than one
+      // install, and below the bars when there is only one. A warning box placed next to an
+      // install's rows reads as that install's error, and appending it put it under
+      // whichever install happened to be last -- the same guess, in the other direction,
+      // that this card exists to stop making. Ahead of all the headings it can only be read
+      // as belonging to the card.
+      const noticeFirst = view.cardNotice && view.groups.length > 1;
+      if (noticeFirst) {
+        appendQuotaStatusNoticeFor(card, providerKey, view.cardNotice.detail, view.cardNotice.statusAt);
+      }
+      view.groups.forEach((group) => {
+        if (view.groups.length > 1) {
+          // `tight` is for a heading that opens the card body. With the card notice above
+          // it, the first heading needs the full gap or it reads as a label ON that warning.
+          const tight = rendered === 0 && !noticeFirst;
+          card.appendChild(quotaSubtitleEl(claudeProfileGroupLabel(group, view.showPlans), tight));
+        }
+        group.rows.forEach((bucket) => card.appendChild(renderQuotaBucketRow(bucket, providerKey)));
+        if (group.notice) {
+          appendQuotaStatusNoticeFor(card, providerKey, group.notice, group.statusAt);
+        }
+        rendered += 1;
+      });
+      // Only when something actually rendered: an empty card already prints this same
+      // error through the shared empty state, and twice would be twice.
+      if (rendered && view.cardNotice && !noticeFirst) {
+        appendQuotaStatusNoticeFor(card, providerKey, view.cardNotice.detail, view.cardNotice.statusAt);
+      }
+      return rendered;
     }
 
     // Codex card: the primary account windows (bucket ids exactly "5h"/"7d") render first,
@@ -11983,7 +12210,27 @@
     }
 
     function appendQuotaStatusNotice(card, providerKey, provider) {
-      const detail = provider.status_detail;
+      appendQuotaStatusNoticeFor(card, providerKey, provider.status_detail, provider.status_at);
+    }
+
+    // A card with nothing measurable still has to say something: the provider's own error
+    // if it has one, otherwise the empty-state line. Shared because the Claude card reaches
+    // this state its own way (see `renderClaudeBuckets`), and the two must not diverge.
+    function appendQuotaEmptyState(card, providerKey, provider) {
+      if (provider.status_detail && provider.status_detail !== 'ok') {
+        appendQuotaStatusNotice(card, providerKey, provider);
+        return;
+      }
+      const empty = document.createElement('div');
+      empty.className = 'text-sm py-8 text-center';
+      empty.style.color = 'var(--color-muted)';
+      empty.textContent = t('quotaNoData');
+      card.appendChild(empty);
+    }
+
+    // The detail and its time are arguments rather than read off `provider` so a single
+    // install's notice can reuse the same copy on a card that carries several installs.
+    function appendQuotaStatusNoticeFor(card, providerKey, detail, statusAt) {
       if (!detail || detail === 'ok') return;
       const box = document.createElement('div');
       box.className = 'text-xs mt-3 p-2 rounded';
@@ -11996,7 +12243,7 @@
         box.style.color = 'var(--color-muted)';
         box.textContent = t('quotaProviderIssue')
           .replace('{status}', detail)
-          .replace('{time}', formatRelativeAgo(provider.status_at) || t('na'));
+          .replace('{time}', formatRelativeAgo(statusAt) || t('na'));
       }
       card.appendChild(box);
     }
@@ -12022,6 +12269,9 @@
         renderedCards += 1;
         const provider = providers[providerKey] || {};
         const buckets = Array.isArray(provider.buckets) ? provider.buckets.filter(isQuotaUsageBucket) : [];
+        // Claude's install view is built from the same filtered buckets the body renders, and
+        // the card title reads its plan off it, so both are decided from one list.
+        const claudeView = providerKey === 'claude' ? claudeCardView(buckets, provider) : null;
         const card = document.createElement('div');
         card.className = 'surface p-5';
 
@@ -12030,11 +12280,11 @@
         const titleWrap = document.createElement('div');
         const title = document.createElement('h3');
         title.className = 'text-base font-extrabold mono';
-        title.textContent = quotaProviderCardLabel(providerKey, provider);
+        title.textContent = quotaProviderCardLabel(providerKey, provider, claudeView);
         // Plan label (Pro Lite / Max 5x …) sits INLINE after the provider name as a muted
         // suffix instead of on its own line, so the card reads "Codex · Pro Lite" and the
         // window bars start higher. Antigravity has no plan line.
-        const plan = quotaProviderPlanLabel(providerKey, provider);
+        const plan = quotaProviderPlanLabel(providerKey, provider, claudeView?.plan);
         if (plan) {
           const planSuffix = document.createElement('span');
           planSuffix.className = 'text-xs font-semibold ml-2';
@@ -12069,24 +12319,33 @@
         const antigravityPoolsRendered = providerKey === 'antigravity' && buckets.length
           ? renderAntigravityPools(card, provider)
           : 0;
-        if (!buckets.length || (providerKey === 'antigravity' && !antigravityPoolsRendered)) {
-          if (provider.status_detail && provider.status_detail !== 'ok') {
-            appendQuotaStatusNotice(card, providerKey, provider);
-          } else {
-            const empty = document.createElement('div');
-            empty.className = 'text-sm py-8 text-center';
-            empty.style.color = 'var(--color-muted)';
-            empty.textContent = t('quotaNoData');
-            card.appendChild(empty);
+        if (providerKey === 'claude') {
+          // First, and ahead of the emptiness test: a card where every install is broken has
+          // no window rows at all, and `renderClaudeBuckets` is what still names each
+          // install and puts its failure under it. Only when even that has nothing to say
+          // does the card fall back to the shared empty state. Between the two, every error
+          // is either attributed to its install or printed once by the view's own card-level
+          // notice, so there is no third copy to add here.
+          if (!renderClaudeBuckets(card, claudeView, providerKey)) {
+            appendQuotaEmptyState(card, providerKey, provider);
           }
+        } else if (!buckets.length || (providerKey === 'antigravity' && !antigravityPoolsRendered)) {
+          appendQuotaEmptyState(card, providerKey, provider);
         } else if (providerKey === 'antigravity') {
           appendQuotaStatusNotice(card, providerKey, provider);
         } else if (providerKey === 'codex') {
           renderCodexBuckets(card, buckets);
           appendQuotaStatusNotice(card, providerKey, provider);
         } else if (providerKey === 'minimax') {
-          renderMiniMaxBuckets(card, buckets);
-          appendQuotaStatusNotice(card, providerKey, provider);
+          // Region-level notices when the payload can attribute one; the card-level notice is
+          // the fallback when it cannot, never a second copy of one it already placed.
+          // A region printing its OWN failure does not print the card's: the two come apart
+          // whenever the newest error belongs to no region listed (a credential file that
+          // could not be read at all, beside a region whose key expired earlier).
+          const attributed = renderMiniMaxBuckets(card, buckets, provider);
+          if (!attributed || !quotaCardErrorIsAttributed(provider)) {
+            appendQuotaStatusNotice(card, providerKey, provider);
+          }
         } else {
           renderQuotaBucketGroups(card, buckets, providerKey);
           appendQuotaStatusNotice(card, providerKey, provider);
@@ -12656,6 +12915,45 @@
       return `${p(dt.getHours())}:${p(dt.getMinutes())}:${p(dt.getSeconds())}`;
     }
 
+    // Failure, exactly as the companion contract defines it for a group: a status that is
+    // present and not ok, OR any live `status_detail`. `status` alone is NOT a verdict --
+    // `_record_row` takes it from the last row it iterated and rows arrive ordered by bucket
+    // id, so for an install with windows the "session" row lands after "api" and leaves
+    // `status: "ok"` beside `status_detail: "stale_token"`. Reading only `status` calls that
+    // account healthy, which is how two expired sign-ins tallied as one OK provider.
+    function quotaEntryFailed(entry) {
+      const detail = entry?.status_detail;
+      if (detail && detail !== 'ok') return true;
+      const status = entry?.status;
+      return !!status && status !== 'ok' && status !== 'local_plan';
+    }
+
+    // Whether one provider counts towards a server's OK tally. `providers.*.status` is the
+    // newest error of ANY account behind the card, which is what keeps the card warning when
+    // one of several credentials breaks -- but read as a verdict on the provider it counts a
+    // working subscription as needing attention just because a sibling install's sign-in
+    // expired. So an account-attributed provider needs one healthy account, AND its own
+    // error has to belong to one of the accounts listed: an error no account claims is a
+    // provider whose credentials could not be read at all, and the accounts' last-known
+    // numbers do not make that OK.
+    function quotaProviderCounts(provider) {
+      const accounts = Array.isArray(provider?.accounts) ? provider.accounts : [];
+      if (!accounts.length) return !quotaEntryFailed(provider);
+      if (!accounts.some((entry) => !quotaEntryFailed(entry))) return false;
+      if (!quotaEntryFailed(provider)) return true;
+      // The card's error has to belong to one of the accounts listed. Asking whether ANY
+      // account carries an error says yes for a card that cannot read its credentials at all
+      // but happens to also hold an older per-account failure, which is an ordinary sequence
+      // (a region's key expires, then the credential file is removed). Shared with the card
+      // body, which prints exactly the errors this rule counts against a provider.
+      return quotaCardErrorIsAttributed(provider);
+    }
+
+    function quotaProviderTally(providers) {
+      const ok = providers.filter(quotaProviderCounts).length;
+      return { ok, bad: providers.length - ok };
+    }
+
     function serverQuotaSummary(serverId) {
       const row = (lastQuotaServerRows || []).find((r) => r.server && r.server.id === serverId);
       if (!row) return t('serversQuotaNotLoaded');
@@ -12663,8 +12961,7 @@
       if (payload.enabled === false) return t('serversQuotaDisabled');
       const providers = Object.values(payload.providers || {});
       if (!providers.length) return t('serversQuotaNotLoaded');
-      const ok = providers.filter((p) => p.status === 'ok' || p.status === 'local_plan').length;
-      const bad = providers.length - ok;
+      const { ok, bad } = quotaProviderTally(providers);
       return bad ? t('serversQuotaPartial').replace('{ok}', String(ok)).replace('{bad}', String(bad)) : t('serversQuotaOk').replace('{n}', String(ok));
     }
 
@@ -13035,8 +13332,7 @@
             const rows = servers.map((x) => (lastQuotaServerRows || []).find((r) => r.server && r.server.id === x.id)).filter(Boolean);
             if (rows.length !== servers.length) return { text: '\u2014' };
             const providers = rows.reduce((acc, r) => acc.concat(Object.values((r.payload || {}).providers || {})), []);
-            const ok = providers.filter((p) => p.status === 'ok' || p.status === 'local_plan').length;
-            const bad = providers.length - ok;
+            const { ok, bad } = quotaProviderTally(providers);
             return { text: bad
               ? t('serversQuotaCombinedPartial').replace('{ok}', String(ok)).replace('{bad}', String(bad))
               : t('serversQuotaCombinedOk').replace('{n}', String(ok)) };

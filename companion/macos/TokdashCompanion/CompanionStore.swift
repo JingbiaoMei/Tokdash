@@ -832,7 +832,7 @@ struct Snapshot {
             let failed = !Self.isProviderOk(prov.status) || !(prov.statusDetail?.isEmpty ?? true)
             var rows = (prov.buckets ?? []).compactMap {
                 QuotaRow(provider: display, bucket: $0, estimated: estimated,
-                         failed: Self.isRowFailed(capturedAt: $0.capturedAt, statusAt: prov.statusAt, groupFailed: failed))
+                         failed: Self.isRowFailed(bucket: $0, provider: prov, groupFailed: failed))
             }
             if canonicalProvider.lowercased() == "antigravity" { rows = Self.antigravityPools(rows) }
             guard !rows.isEmpty else { return nil }
@@ -875,10 +875,47 @@ struct Snapshot {
         return out.isEmpty ? rows : out
     }
 
-    private static func isRowFailed(capturedAt: Int?, statusAt: Int?, groupFailed: Bool) -> Bool {
+    /// ROW failure, judged against the failure that actually applies to this row.
+    ///
+    /// `prov.statusAt` is the newest error of ANY credential behind the card, which is
+    /// right for the group warning and wrong for one row. A permanently broken sibling
+    /// advances it every cycle, while a bucket that is not reported every cycle keeps an
+    /// older capturedAt — and those buckets are ordinary, not edge cases: Claude's
+    /// `limits` carries `weekly_scoped_opus` only once Opus has been used, and MiniMax's
+    /// per-model buckets come and go with the models called. Judged against the provider,
+    /// that marks the healthy install's rows last-known and drops them out of low-quota
+    /// notification for as long as the sibling stays broken. So a row whose OWN credential
+    /// is healthy is fresh, whatever a sibling did. Spec §7.
+    ///
+    /// Everything else falls back to the group rather than un-suppressing a row that may
+    /// well be stale: `accounts` absent (single-credential provider, or a pre-`accounts`
+    /// server), a row naming an account with no entry, or a missing timestamp.
+    private static func isRowFailed(bucket: BucketQuota, provider prov: ProviderQuota,
+                                    groupFailed: Bool) -> Bool {
         guard groupFailed else { return false }
-        guard let captured = capturedAt, let status = statusAt else { return true }
+        if let entry = accountEntry(prov, account: bucket.account) {
+            guard isAccountFailed(entry) else { return false }
+            guard let captured = bucket.capturedAt,
+                  let status = entry.statusAt ?? prov.statusAt else { return true }
+            return captured < status
+        }
+        guard let captured = bucket.capturedAt, let status = prov.statusAt else { return true }
         return captured < status
+    }
+
+    private static func accountEntry(_ prov: ProviderQuota, account: String?) -> AccountQuota? {
+        guard let accounts = prov.accounts, let account, !account.isEmpty else { return nil }
+        return accounts.first { $0.account == account }
+    }
+
+    // Same rule as a group: status present and not "ok", OR a non-empty statusDetail.
+    // `status` alone is not a verdict — a credential with a live error still reports
+    // `status: "ok"` once any of its window rows sorts after its "api" row. Spec §7.
+    private static func isAccountFailed(_ entry: AccountQuota) -> Bool {
+        if let detail = entry.statusDetail, !detail.isEmpty, detail.lowercased() != "ok" {
+            return true
+        }
+        return !isProviderOk(entry.status)
     }
 }
 

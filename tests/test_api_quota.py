@@ -696,17 +696,18 @@ def test_get_quota_api_disabled_shows_session_and_marks_estimated():
 
 
 def test_quota_state_does_not_read_claude_credentials_without_scan_consent(monkeypatch):
-    # Regression (#1): read_claude_plan() opens .credentials.json and may trigger the macOS
-    # Keychain. A dashboard load must NOT touch it without credential-scan consent (default off).
+    # Regression (#1): the per-profile plan reader opens .credentials.json and may trigger
+    # the macOS Keychain. A dashboard load must NOT touch it without credential-scan
+    # consent (default off).
     import tokdash.sources.quota as quota
 
     called = []
 
     def tracked(*_a, **_k):
         called.append(True)
-        return {"status": "ok", "plan": "Pro"}
+        return [{"account": "default", "status": "ok", "plan": "Pro"}]
 
-    monkeypatch.setattr(quota, "read_claude_plan", tracked)
+    monkeypatch.setattr(quota, "read_claude_profiles", tracked)
     quota.quota_state()
     assert called == []
 
@@ -720,9 +721,9 @@ def test_quota_state_reads_claude_plan_with_scan_consent(monkeypatch):
 
     def tracked(*_a, **_k):
         called.append(True)
-        return {"status": "ok", "plan": "Pro", "tier": "pro", "credential_path": None}
+        return [{"account": "default", "status": "ok", "plan": "Pro", "tier": "pro", "credential_path": None}]
 
-    monkeypatch.setattr(quota, "read_claude_plan", tracked)
+    monkeypatch.setattr(quota, "read_claude_profiles", tracked)
     payload = quota.quota_state()
     assert called == [True]
     assert payload["providers"]["claude"]["plan"] == "Pro"

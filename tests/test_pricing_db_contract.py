@@ -58,6 +58,28 @@ def test_gpt_5_6_family_pricing():
         assert abs(cost - expected_cost) < 1e-12, f"{model!r} pricing should match official table"
 
 
+def test_gpt_6_astra_pricing():
+    """GPT-6 Astra must match OpenAI's published standard short-context rates.
+
+    The DB stores the standard short-context tier, as the whole GPT-5.6 family above does.
+    Astra's other tiers are all derived from it -- long context is 2x input/cache and 1.5x
+    output past 272K, Batch and Flex halve it, Fast doubles it -- so pinning this one row
+    is what keeps every tier right, and a scrape that picked up a Fast or long-context
+    number instead would land here as a 2x error rather than in someone's cost report.
+    """
+    db = PricingDatabase()
+
+    input_price, output_price, cache_read_price, cache_write_price = 10.0, 50.0, 1.0, 12.5
+    expected_cost = (
+        1000 * input_price
+        + 2000 * output_price
+        + 3000 * cache_read_price
+        + 4000 * cache_write_price
+    ) / 1_000_000
+    cost = db.get_cost("gpt-6-astra", 1000, 2000, 3000, 4000)
+    assert abs(cost - expected_cost) < 1e-12, "gpt-6-astra pricing should match official table"
+
+
 def test_deepseek_v4_flash_0731_pricing():
     """DeepSeek V4 Flash 0731 must match the official cache-hit/miss/output rates."""
     db = PricingDatabase()

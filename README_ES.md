@@ -81,6 +81,7 @@
 - **Integración con statusline** *[nuevo]*: añade un indicador de uso de tokens en vivo a la statusline de Claude Code (o cualquier agente que pueda acceder a un endpoint HTTP local) — ver [Integración con statusline](#integración-con-statusline)
 - **Calendario de contribuciones**: heatmap 2D + vista isométrica 3D con métricas de Tokens/Cost/Messages
 - **Explorador de sesiones**: análisis detallado por sesión
+- **Pestaña Report** *[nuevo]*: informe de tu propia actividad de agentes por semana, mes y año en curso, con una tarjeta compartible por cada nivel de detalle. Cada exportación escribe un PNG claro y uno oscuro
 - **Pestaña Quota** *[nuevo]*: barras de ventana de suscripción con cuenta atrás de reinicio para Codex, Claude Code y Antigravity. Las ventanas de Codex funcionan desde los logs locales; los créditos de reinicio de Codex, las funciones con medidor y todas las cuotas de Claude/Antigravity necesitan [consulta en vivo](#seguimiento-de-cuota-opcional) con opt-in
 - **App de barra de estado Companion** *[nuevo]*: consulta el gasto y la cuota de suscripción desde la barra de menú de macOS o el área de notificaciones de Windows — para Windows en [Microsoft Store](https://apps.microsoft.com/detail/9ppnmpdq8b52) — [capturas y descargas](#tokdash-companion-app-de-barra-de-estado)
 - **Vistas multiseservidor**: añade servidores de Tokdash de WSL, macOS u otros en Ajustes; combina el uso de cualquier selección manteniendo la cuota agrupada por máquina. Ver [acceso remoto](docs/guides/REMOTE_ACCESS.md).

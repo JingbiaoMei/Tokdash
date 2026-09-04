@@ -1714,6 +1714,136 @@
       button.profile-activity-cell[data-milestone]:not(:disabled):is(:hover,:focus-visible){transform:none;transition:none;}
       .release-notes-dialog[open] { animation: none; }
     }
+
+    /* ---- Usage report (Report tab) --------------------------------------
+       Own panel class rather than .surface: the report is a stack of reading
+       panels, and the card hover-lift would move text under the cursor. */
+    .usage-report-shell { max-width: 1180px; margin: 0 auto; }
+    .usage-report-head { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 18px; }
+    .usage-report-title { margin: 0; font-size: 24px; font-weight: 800; letter-spacing: -.01em; }
+    .usage-report-sub { color: var(--color-muted); font-size: 13px; margin-top: 4px; }
+    .usage-report-inprogress { color: var(--color-cta); font-weight: 700; font-size: 12px; margin-left: 8px; }
+    .usage-report-controls { margin-left: auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    /* :not([hidden]) because the class must not out-specify the preflight rule that
+       backs every `el.hidden = true` in this tab. */
+    .usage-report-controls label:not([hidden]) { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .07em; color: var(--color-label); }
+    .usage-report-seg { display: inline-flex; padding: 3px; gap: 3px; border: 1px solid var(--color-border); border-radius: 12px; background: color-mix(in srgb, var(--color-primary) 5%, transparent); }
+    .usage-report-seg button { border: 0; background: transparent; border-radius: 9px; padding: 6px 14px; font-size: 12px; font-weight: 700; color: var(--color-muted); cursor: pointer; transition: background var(--t-fast) ease, color var(--t-fast) ease; }
+    .usage-report-seg button:hover { color: var(--color-text); }
+    .usage-report-seg button[aria-pressed="true"] { background: var(--color-primary); color: #fff; }
+    .usage-report-stack { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; margin-top: 14px; }
+    /* Painted from --color-surface-glass, the token every theme overrides, the way
+       .settings-panel is: a literal here would leave the report the only slate-blue
+       stack on the seventeen themes and both modes. */
+    .usage-report-panel { background: color-mix(in srgb, var(--color-surface-glass) 97%, var(--color-bg)); border: 1px solid var(--color-border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); padding: 18px 20px; }
+    .usage-report-panel-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+    .usage-report-panel-title { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; color: var(--color-label); }
+    .usage-report-spacer { flex: 1; }
+    .usage-report-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; }
+    .usage-report-kpi-label { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .07em; color: var(--color-label); }
+    .usage-report-kpi-value { font-size: 27px; font-weight: 800; margin-top: 6px; letter-spacing: -.02em; }
+    .usage-report-kpi-sub { font-size: 12px; color: var(--color-muted); margin-top: 4px; }
+    .usage-report-pill { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; vertical-align: middle; color: var(--color-cta); background: color-mix(in srgb, var(--color-cta) 16%, transparent); }
+    .usage-report-delta-up { color: #16A34A; font-weight: 800; }
+    .usage-report-delta-down { color: #DC2626; font-weight: 800; }
+    html.dark .usage-report-delta-up { color: #4ADE80; }
+    html.dark .usage-report-delta-down { color: #F87171; }
+    .usage-report-sentence { font-size: 16px; line-height: 1.6; margin: 0; max-width: 80ch; }
+    .usage-report-banner { margin-top: 14px; border: 1px solid var(--color-cta); border-radius: 12px; padding: 10px 14px; background: color-mix(in srgb, var(--color-cta) 12%, transparent); font-size: 13px; line-height: 1.5; }
+    .usage-report-notice { color: var(--color-muted); font-size: 13px; margin: 0; }
+    /* Day maps. The month grid and the year grid share .usage-report-cell and
+       the year variant overrides its size. Both overrides are load-bearing: a
+       grid item only stretches horizontally, so a cell with no explicit height
+       collapses to its own border. */
+    .usage-report-month { display: grid; grid-template-columns: repeat(7, 20px); gap: 6px; width: max-content; }
+    .usage-report-wlabels { display: grid; grid-template-columns: repeat(7, 20px); gap: 6px; margin-bottom: 6px; }
+    .usage-report-wlabels div { font-size: 10px; font-weight: 700; color: var(--color-label); text-align: center; }
+    .usage-report-cell { width: 20px; height: 20px; border-radius: 5px; border: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent); }
+    .usage-report-cell.is-blank { visibility: hidden; }
+    .usage-report-cell[data-token]:hover { outline: 2px solid var(--color-primary); outline-offset: 1px; }
+    .usage-report-year { display: flex; gap: 8px; align-items: flex-start; overflow-x: auto; padding-bottom: 6px; }
+    .usage-report-year-cols { display: flex; gap: 3px; }
+    .usage-report-ycol { display: grid; grid-template-rows: repeat(7, 9px); gap: 3px; }
+    .usage-report-ycol .usage-report-cell { width: 9px; height: 9px; border-radius: 3px; border-width: 0; }
+    .usage-report-mlabels { display: grid; grid-auto-flow: column; grid-auto-columns: 12px; font-size: 10px; color: var(--color-label); font-weight: 700; height: 14px; white-space: nowrap; }
+    .usage-report-legend { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--color-muted); }
+    .usage-report-legend i { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+    .usage-report-streak { margin-top: 12px; font-size: 13px; color: var(--color-muted); }
+
+    /* Podium: the three headline winners, each with the figure that ranks it. */
+    .usage-report-podium { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+    .usage-report-tile { border: 1px solid var(--color-border); border-radius: 12px; padding: 12px 14px; background: color-mix(in srgb, var(--color-primary) 3%, transparent); }
+    .usage-report-tile-kind { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .07em; color: var(--color-label); }
+    .usage-report-tile-name { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 15px; margin-top: 6px; min-width: 0; }
+    .usage-report-tile-name span, .usage-report-tile-name .tool-identity { min-width: 0; }
+    .usage-report-tile-name-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .usage-report-tile-value { font-size: 20px; font-weight: 800; margin-top: 4px; }
+    .usage-report-tile-value .usage-report-inline-share { font-size: 13px; font-weight: 700; color: var(--color-muted); margin-left: 4px; }
+    .usage-report-tile-sub { font-size: 12px; color: var(--color-muted); margin-top: 2px; }
+    .usage-report-note { color: var(--color-muted); font-size: 12px; line-height: 1.5; margin-top: 10px; }
+    .usage-report-note-faint { opacity: .85; }
+
+    /* When you work: hour strip + weekday rhythm, one column each. */
+    .usage-report-when { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 20px; }
+    @media (max-width: 860px) { .usage-report-when { grid-template-columns: 1fr; } }
+    .usage-report-hbars { display: flex; align-items: flex-end; gap: 2px; height: 104px; }
+    .usage-report-hbar { flex: 1; min-width: 0; border-radius: 3px 3px 0 0; background: var(--color-secondary); opacity: .85; }
+    .usage-report-hbar.is-peak { background: var(--color-primary); opacity: 1; }
+    .usage-report-hbar.is-night { outline: 1px dashed color-mix(in srgb, var(--color-cta) 70%, transparent); }
+    .usage-report-hbar-ax { display: flex; justify-content: space-between; font-size: 10px; color: var(--color-muted); margin-top: 4px; }
+    .usage-report-statline { display: flex; align-items: baseline; gap: 8px; padding: 6px 0; border-bottom: 1px dashed var(--color-border); }
+    .usage-report-statline .k { color: var(--color-muted); font-size: 12px; }
+    .usage-report-statline .v { margin-left: auto; font-weight: 800; }
+    .usage-report-wk-row { display: grid; grid-template-columns: 38px minmax(0, 1fr) 92px; align-items: center; gap: 8px; margin: 5px 0; }
+    .usage-report-wk-row .n { font-size: 12px; color: var(--color-label); font-weight: 700; }
+    .usage-report-wk-row.is-peak .n { color: var(--color-primary); }
+    .usage-report-bar { height: 9px; border-radius: 999px; background: color-mix(in srgb, var(--color-border) 70%, transparent); overflow: hidden; }
+    .usage-report-bar i { display: block; height: 100%; background: var(--color-secondary); border-radius: 999px; }
+    .usage-report-wk-row.is-peak .usage-report-bar i { background: var(--color-primary); }
+    .usage-report-wk-row .v { font-size: 12px; text-align: right; color: var(--color-muted); }
+
+    /* Per-agent table. The cost header carries its own qualifier because the
+       figure under it is a list-price equivalent, not a bill. */
+    .usage-report-agents-wrap { overflow-x: auto; min-width: 0; }
+    .usage-report-agents { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .usage-report-agents th, .usage-report-agents td { padding: 8px 10px; text-align: right; white-space: nowrap; }
+    .usage-report-agents th { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--color-label); border-bottom: 1px solid var(--color-border); font-weight: 800; }
+    .usage-report-agents th:first-child, .usage-report-agents td:first-child { text-align: left; }
+    .usage-report-agents tbody tr { border-bottom: 1px solid color-mix(in srgb, var(--color-border) 55%, transparent); }
+    .usage-report-agents tbody tr:hover { background: color-mix(in srgb, var(--color-secondary) 7%, transparent); }
+    .usage-report-agents .usage-report-qual { color: var(--color-label); font-weight: 700; font-size: 9px; display: block; text-transform: none; letter-spacing: 0; }
+    .usage-report-other-row td { color: var(--color-muted); font-weight: 700; font-size: 12px; }
+    .usage-report-disclosure { background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; }
+    .usage-report-disclosure:hover { color: var(--color-text); }
+    .usage-report-sub-row td { color: var(--color-muted); font-size: 12px; }
+
+
+    /* Share cards. Each tier shows both PNGs side by side because every export
+       writes both, whichever theme this app is currently wearing. */
+    .usage-report-share-ctl { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; margin-bottom: 16px; }
+    .usage-report-share-ctl label { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .07em; color: var(--color-label); }
+    .usage-report-share-ctl .ui-input { min-height: 34px; padding: 5px 9px; font-size: 13px; font-weight: 600; letter-spacing: 0; text-transform: none; width: 150px; }
+    .usage-report-cost { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 700; color: var(--color-muted); text-transform: none; letter-spacing: 0; cursor: pointer; }
+    .usage-report-cost input { width: 16px; height: 16px; accent-color: var(--color-primary); }
+    .usage-report-tier-group { border-left: 3px solid #15803D; padding-left: 14px; min-width: 0; }
+    .usage-report-tier-group.is-amber { border-left-color: #B45309; }
+    html.dark .usage-report-tier-group { border-left-color: #4ADE80; }
+    html.dark .usage-report-tier-group.is-amber { border-left-color: #FBBF24; }
+    .usage-report-tier-h { font-size: 13px; font-weight: 800; margin: 0 0 2px; }
+    .usage-report-tier-p { font-size: 12px; color: var(--color-muted); margin: 0 0 10px; max-width: 62ch; }
+    .usage-report-cards { display: grid; grid-template-columns: repeat(auto-fill, 169px); gap: 14px; }
+    .usage-report-cardbox { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+    .usage-report-cardbox canvas { display: block; width: 169px; max-width: 100%; height: auto; border-radius: 10px; border: 1px solid var(--color-border); }
+    .usage-report-cardcap { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--color-muted); }
+    .usage-report-tierchip { font-size: 10px; font-weight: 900; letter-spacing: .06em; text-transform: uppercase; padding: 2px 7px; border-radius: 999px; }
+    .usage-report-tier-green { color: #15803D; background: color-mix(in srgb, #15803D 16%, transparent); }
+    .usage-report-tier-amber { color: #B45309; background: color-mix(in srgb, #B45309 18%, transparent); }
+    html.dark .usage-report-tier-green { color: #4ADE80; background: color-mix(in srgb, #4ADE80 16%, transparent); }
+    html.dark .usage-report-tier-amber { color: #FBBF24; background: color-mix(in srgb, #FBBF24 18%, transparent); }
+    .usage-report-export-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .usage-report-hint { font-size: 12px; color: var(--color-muted); margin: 14px 0 0; }
+    .usage-report-export-status { font-size: 12px; font-weight: 700; color: var(--color-cta); margin: 10px 0 0; }
+    footer.usage-report-caveats { color: var(--color-muted); font-size: 12px; display: grid; gap: 4px; }
   </style>
   <script>document.write(`<link rel="stylesheet" href="${window.tokdashPath('/static/themes.css')}" />`);</script>
 </head>
@@ -1935,6 +2065,7 @@
         <button class="tab-btn" data-tab="overview" aria-selected="true" data-i18n="overview">Overview</button>
         <button class="tab-btn" data-tab="sessions" aria-selected="false" data-i18n="sessionsPage">Sessions</button>
         <button class="tab-btn" data-tab="stats" aria-selected="false" data-i18n="stats">Stats</button>
+        <button class="tab-btn" data-tab="report" aria-selected="false" data-i18n="usageReport">Report</button>
         <button class="tab-btn" data-tab="quota" aria-selected="false" data-i18n="quota">Quota</button>
         <button class="tab-btn" data-tab="servers" aria-selected="false" data-i18n="servers" id="serversTabBtn" hidden>Servers</button>
         <button class="tab-btn" data-tab="pricing" aria-selected="false" data-i18n="pricingDb">Pricing</button>
@@ -3695,6 +3826,167 @@
       </section>
     </div>
 
+    <!-- Report Tab -->
+    <div id="report-content" class="tab-content">
+      <div class="usage-report-shell">
+        <div class="usage-report-head">
+          <div>
+            <h2 class="usage-report-title" id="usageReportTitle">Report</h2>
+            <div class="usage-report-sub mono">
+              <span id="usageReportRange"></span>
+              <span class="usage-report-inprogress" id="usageReportProgress"></span>
+            </div>
+          </div>
+          <div class="usage-report-controls">
+            <label id="usageReportServerWrap" hidden>
+              <span data-i18n="usageReportServerLabel">Server</span>
+              <select id="usageReportServer" class="ui-input compact-control"></select>
+            </label>
+            <div class="usage-report-seg" id="usageReportPeriod" role="group" aria-label="Report period">
+              <button type="button" data-period="week" data-i18n="usageReportPeriodWeek">Week</button>
+              <button type="button" data-period="month" data-i18n="usageReportPeriodMonth">Month</button>
+              <button type="button" data-period="year" data-i18n="usageReportPeriodYear">Year</button>
+            </div>
+          </div>
+        </div>
+
+        <p class="usage-report-notice" id="usageReportScopeLine" style="margin-top:6px"></p>
+        <div id="usageReportBanner" class="usage-report-banner" hidden></div>
+
+        <div id="usageReportStatePanel" class="usage-report-panel" hidden style="margin-top:14px">
+          <div class="usage-report-panel-title" id="usageReportStateTitle"></div>
+          <p class="usage-report-notice" id="usageReportStateBody" style="margin-top:6px"></p>
+          <button class="btn btn-ghost" type="button" id="usageReportRetry" hidden style="margin-top:10px" data-i18n="retry">Retry</button>
+        </div>
+
+        <div class="usage-report-stack" id="usageReportStack">
+          <section class="usage-report-panel">
+            <div class="usage-report-kpis">
+              <div>
+                <div class="usage-report-kpi-label" data-i18n="usageReportTokens">Tokens</div>
+                <div class="usage-report-kpi-value mono" id="usageReportKTokens">—</div>
+                <div class="usage-report-kpi-sub mono" id="usageReportKTokensSub"></div>
+              </div>
+              <div>
+                <div class="usage-report-kpi-label" data-i18n="usageReportCost">Cost</div>
+                <div class="usage-report-kpi-value mono" id="usageReportKCost" style="color: var(--color-cost);">—</div>
+                <div class="usage-report-kpi-sub" id="usageReportKCostSub"></div>
+              </div>
+              <div>
+                <div class="usage-report-kpi-label">
+                  <span data-i18n="usageReportActiveTime">Active time</span>
+                  <span class="usage-report-pill" data-i18n="usageReportEst">est.</span>
+                </div>
+                <div class="usage-report-kpi-value mono" id="usageReportKActive">—</div>
+                <div class="usage-report-kpi-sub mono" id="usageReportKActiveSub"></div>
+              </div>
+              <div>
+                <div class="usage-report-kpi-label" data-i18n="usageReportDays">Active days</div>
+                <div class="usage-report-kpi-value mono" id="usageReportKDays">—</div>
+                <div class="usage-report-kpi-sub mono" id="usageReportKDaysSub"></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="usage-report-panel">
+            <p class="usage-report-sentence" id="usageReportSentence"></p>
+          </section>
+
+          <section class="usage-report-panel">
+            <div class="usage-report-panel-head">
+              <span class="usage-report-panel-title" data-i18n="usageReportDaysTitle">Days</span>
+              <span class="usage-report-spacer"></span>
+              <span class="usage-report-legend" id="usageReportLegend"></span>
+            </div>
+            <div id="usageReportHeat"></div>
+            <div class="usage-report-streak mono" id="usageReportStreak"></div>
+          </section>
+
+          <section class="usage-report-panel">
+            <div class="usage-report-panel-head">
+              <span class="usage-report-panel-title" data-i18n="usageReportPodium">Top of the period</span>
+            </div>
+            <div class="usage-report-podium" id="usageReportPodium"></div>
+            <p class="usage-report-note" id="usageReportGroupNote"></p>
+          </section>
+
+          <section class="usage-report-panel">
+            <div class="usage-report-panel-head">
+              <span class="usage-report-panel-title" data-i18n="usageReportWhen">When you work</span>
+              <span class="usage-report-spacer"></span>
+              <span class="usage-report-note mono" id="usageReportTz" style="margin-top:0"></span>
+            </div>
+            <div class="usage-report-when" id="usageReportWhen"></div>
+          </section>
+
+          <section class="usage-report-panel">
+            <div class="usage-report-panel-head">
+              <span class="usage-report-panel-title" data-i18n="usageReportByAgent">By agent</span>
+            </div>
+            <div class="usage-report-agents-wrap">
+              <table class="usage-report-agents">
+                <thead>
+                  <tr>
+                    <th scope="col" data-i18n="usageReportColAgent">Agent</th>
+                    <th scope="col" data-i18n="usageReportColSessions">Sessions</th>
+                    <th scope="col" data-i18n="usageReportColTokens">Tokens</th>
+                    <th scope="col" data-i18n="usageReportColIn">In</th>
+                    <th scope="col" data-i18n="usageReportColOut">Out</th>
+                    <th scope="col" data-i18n="usageReportColCache">Cache read</th>
+                    <th scope="col"><span data-i18n="usageReportColCost">Cost</span><span class="usage-report-qual" data-i18n="usageReportColCostQual">API list price</span></th>
+                    <th scope="col" data-i18n="usageReportColActive">Active</th>
+                  </tr>
+                </thead>
+                <tbody id="usageReportAgentsBody"></tbody>
+              </table>
+            </div>
+            <p class="usage-report-note" id="usageReportAgentsNote"></p>
+          </section>
+
+          <section class="usage-report-panel">
+            <div class="usage-report-panel-head">
+              <span class="usage-report-panel-title" data-i18n="usageReportShareTitle">Share</span>
+            </div>
+            <p class="usage-report-note" id="usageReportSharePreamble" data-i18n="usageReportSharePreamble" style="margin-top:0">Two cards, two privacy tiers. The preview is the export: same layout, same painted pixels.</p>
+            <div class="usage-report-share-ctl">
+              <label for="usageReportNicknameInput">
+                <span data-i18n="usageReportNickname">Machine nickname</span>
+                <input type="text" id="usageReportNicknameInput" class="ui-input compact-control" maxlength="24" autocomplete="off" spellcheck="false">
+              </label>
+              <label class="usage-report-cost" for="usageReportCostToggle">
+                <input type="checkbox" id="usageReportCostToggle">
+                <span data-i18n="usageReportCostToggle">Include cost (API list price, not your bill)</span>
+              </label>
+            </div>
+
+            <div class="usage-report-tier-group">
+              <p class="usage-report-tier-h" data-i18n="usageReportGreenTitle">Overview card · counts only</p>
+              <p class="usage-report-tier-p" data-i18n="usageReportGreenBody">Tokens, sessions, days, streak, busiest day, estimated active time, top harnesses and models. Safe to post.</p>
+              <div class="usage-report-cards" id="usageReportGreenCards"></div>
+              <div class="usage-report-export-row">
+                <button type="button" class="btn btn-primary compact-control" data-export="green" data-i18n="usageReportExportGreen">Export overview card</button>
+              </div>
+            </div>
+
+            <div class="usage-report-tier-group is-amber" style="margin-top:18px">
+              <p class="usage-report-tier-h" data-i18n="usageReportAmberTitle">Project detail card</p>
+              <p class="usage-report-tier-p" data-i18n="usageReportAmberBody">Everything on the overview card plus the top projects by tokens, and the reconciliation line against the period total.</p>
+              <div class="usage-report-cards" id="usageReportAmberCards"></div>
+              <div class="usage-report-export-row">
+                <button type="button" class="btn btn-primary compact-control" data-export="amber" data-i18n="usageReportExportAmber">Export project detail</button>
+                <button type="button" class="btn btn-ghost compact-control" data-export="all" data-i18n="usageReportExportAll">Export all four</button>
+              </div>
+            </div>
+
+            <p class="usage-report-hint" data-i18n="usageReportBothThemes">Every export writes two PNGs, light and dark, whatever theme this app is in. Export all four writes four, and your browser may ask before it takes the second.</p>
+            <p class="usage-report-export-status" id="usageReportExportStatus" hidden></p>
+          </section>
+        </div>
+
+        <footer class="usage-report-caveats" id="usageReportFooter"></footer>
+      </div>
+    </div>
+
     <!-- Quota Tab -->
     <div id="quota-content" class="tab-content">
       <div id="quotaGlobalControls" class="flex flex-wrap items-center justify-end gap-2 mb-4">
@@ -4756,6 +5048,108 @@
         time: 'Time',
         langSystem: 'System',
         moreTools: '+{n} more tools',
+        usageReport: 'Report',
+        usageReportServerLabel: 'Server',
+        usageReportPeriodWeek: 'Week',
+        usageReportPeriodMonth: 'Month',
+        usageReportPeriodYear: 'Year',
+        usageReportTitleWeek: 'This week',
+        usageReportTitleMonth: 'This month',
+        usageReportTitleYear: 'Year to date',
+        usageReportScope: 'All agent activity recorded on {machine}, including sessions not started from tokdash.',
+        usageReportInProgress: 'in progress · {d} of {n} days',
+        usageReportUnreachable: '{server} did not answer: {error}. The report needs its analytics and usage endpoints.',
+        usageReportTotalsFallback: 'Period totals come from the analytics scan: /api/usage did not answer, so no prior-window delta is printed.',
+        usageReportInsightsMissing: 'The analytics scan did not answer, so the day map, the podium, the rhythm and the agent ranking have no source this load.',
+        usageReportActiveMissing: 'Active time did not answer: for this window the session counts and runtimes are unknown, not zero.',
+        usageReportPartial: 'Some tools could not be read: {tools}. Their usage is not included.',
+        usageReportActiveUnavailable: 'Active time unavailable for: {tools}.',
+        usageReportFacetsMissing: 'This section has no honest source: the server does not serve the {facets} facets (they landed in 2.5.0).',
+        usageReportTokens: 'Tokens',
+        usageReportCost: 'Cost',
+        usageReportActiveTime: 'Active time',
+        usageReportEst: 'est.',
+        usageReportDays: 'Active days',
+        usageReportDaysTitle: 'Days',
+        usageReportCostShort: 'at API list prices — not your bill',
+        usageReportActiveSub: '{agent} of agent time in parallel',
+        usageReportVsPrior: 'vs the prior {n} days',
+        usageReportNoDelta: 'no prior window to compare yet',
+        usageReportNoDeltaYear: 'no delta on a partial year',
+        usageReportDaysSub: '{n} days in the window',
+        usageReportSentence: 'In {range} you drove {sessions} sessions and used {tokens} tokens ({cost}), {pct}% more than {prior}.',
+        usageReportSentenceLess: 'In {range} you drove {sessions} sessions and used {tokens} tokens ({cost}), {pct}% less than {prior}.',
+        usageReportSentenceFlat: 'In {range} you drove {sessions} sessions and used {tokens} tokens ({cost}).',
+        usageReportSentenceWeek: 'this week',
+        usageReportSentenceYear: 'the year to date',
+        usageReportStreak: '{streak}-day streak · {a} of {n} days active · busiest day {date} ({tokens})',
+        usageReportStreakLapsed: 'longest run {streak} days · {a} of {n} days active · busiest day {date} ({tokens})',
+        usageReportEmptyPeriod: 'No activity recorded in this window.',
+        usageReportPodium: 'Top of the period',
+        usageReportTopHarness: 'Top harness',
+        usageReportTopModel: 'Top model',
+        usageReportTopProject: 'Top project',
+        usageReportSessionsActive: '{sessions} sessions · {hours} active',
+        usageReportPodiumProjectNote: '{n} projects · ranked by tokens · {u} unattributed · {g} from sources with no project records (OpenClaw, live tools)',
+        usageReportProjectGroupNote: 'Projects are grouped by repository remote — the same codebase under two remotes appears twice.',
+        usageReportFacetCovers: 'Analytics facets cover {pct} of the period total - a different scan of the same window.',
+        usageReportMissingProjects: 'project records unavailable on this server',
+        usageReportWhen: 'When you work',
+        usageReportWhenTz: 'Local time · {tz}',
+        usageReportPeakHour: 'Peak hour',
+        usageReportNightOwl: 'Night-owl index',
+        usageReportNightNote: 'share of tokens, {window}',
+        usageReportPeakDay: 'Peak day',
+        usageReportByAgent: 'By agent',
+        usageReportColAgent: 'Agent',
+        usageReportColSessions: 'Sessions',
+        usageReportColTokens: 'Tokens',
+        usageReportColIn: 'In',
+        usageReportColOut: 'Out',
+        usageReportColCache: 'Cache read',
+        usageReportColCost: 'Cost',
+        usageReportColCostQual: 'API list price',
+        usageReportColActive: 'Active',
+        usageReportOtherTools: 'Other tools on {machine} · {n}',
+        usageReportToolCount: 'tools',
+        usageReportFooterDays: 'Days begin at {machine}’s local midnight.',
+        usageReportFooterCost: 'Cost figures are API list-price equivalents, not billed spend.',
+        usageReportFooterActive: 'Active time is estimated from recorded event gaps (cap {cap}).',
+        usageReportFooterSrc: 'data: tokdash on {machine} · {n} tool sources · v{version}',
+        usageReportShareTitle: 'Share',
+        usageReportSharePreamble: 'Two cards, two privacy tiers. The preview is the export: same layout, same painted pixels.',
+        usageReportGreenTitle: 'Overview card · counts only',
+        usageReportGreenBody: 'Tokens, sessions, days, streak, busiest day, estimated active time, top harnesses and models. Safe to post.',
+        usageReportAmberTitle: 'Project detail card',
+        usageReportAmberBody: 'Everything on the overview card plus the top projects by tokens, and the reconciliation line against the period total.',
+        usageReportNickname: 'Machine nickname',
+        usageReportCostToggle: 'Include cost (API list price, not your bill)',
+        usageReportExportGreen: 'Export overview card',
+        usageReportExportAmber: 'Export project detail',
+        usageReportExportAll: 'Export all four',
+        usageReportBothThemes: 'Every export writes two PNGs, light and dark, whatever theme this app is in. Export all four writes four, and your browser may ask before it takes the second.',
+        usageReportExported: 'Wrote {n} PNGs: light and dark.',
+        usageReportExportNothing: 'Nothing to export yet: no card painted for this window.',
+        usageReportManifestGreen: 'Counts only · no project names · no prompt text',
+        usageReportManifestAmber: 'Counts + project names · no prompt text · share deliberately',
+        usageReportTierGreen: 'Overview',
+        usageReportTierAmber: 'Project detail',
+        usageReportCardYearTitle: '{year} · year to date',
+        usageReportCardWeekTitle: 'Week of {date}',
+        usageReportCardRange: '{from} – {to} · all agent activity on {machine}',
+        usageReportCardHeroSub: '{sessions} sessions · {requests} requests',
+        usageReportCardHarnesses: 'Top harnesses',
+        usageReportCardModels: 'Top models',
+        usageReportCardProjectsNote: 'Projects · {n} · ranked by tokens',
+        usageReportCardGroupNote: 'Grouped by repository · {u} unattributed · {g} from OpenClaw + live tools (no project records)',
+        usageReportCardAttribution: 'tokdash {version} · {nickname}',
+        usageReportCardActiveTime: 'Active time',
+        usageReportCardBusiestLabel: 'Busiest day',
+        usageReportCardDaysActive: '{a} of {t} days active',
+        usageReportCardStreak: '{streak}-day streak',
+        usageReportCardStreakMax: 'best run {streak} days',
+        usageReportCardCost: '{cost} at API list prices — not your bill',
+        usageReportCardNicknameFallback: 'this machine',
       },
       zh: {
         updateAvailable: '有新版本',
@@ -5163,6 +5557,108 @@
         time: '时间',
         langSystem: '跟随系统',
         moreTools: '另有 {n} 个工具',
+        usageReport: '报告',
+        usageReportServerLabel: '服务器',
+        usageReportPeriodWeek: '周',
+        usageReportPeriodMonth: '月',
+        usageReportPeriodYear: '年',
+        usageReportTitleWeek: '本周',
+        usageReportTitleMonth: '本月',
+        usageReportTitleYear: '年初至今',
+        usageReportScope: '{machine}记录的全部 agent 活动，含未通过 tokdash 启动的会话。',
+        usageReportInProgress: '进行中 · {n} 天中的第 {d} 天',
+        usageReportUnreachable: '{server} 没有响应：{error}。报告需要它的分析与用量接口。',
+        usageReportTotalsFallback: '本期总量取自分析扫描：/api/usage 没有响应，因此不打印与前期区间的差值。',
+        usageReportInsightsMissing: '分析扫描没有响应，本次加载中的日历图、榜单、作息与 agent 排名都没有数据来源。',
+        usageReportActiveMissing: '活跃时长接口没有响应：本区间的会话数与运行时长为未知，而不是 0。',
+        usageReportPartial: '部分工具读取失败：{tools}，其用量未计入。',
+        usageReportActiveUnavailable: '以下工具无法统计活跃时长：{tools}。',
+        usageReportFacetsMissing: '这一区没有诚实的数据来源：该服务器的 tokdash 不提供 {facets} 分面（2.5.0 才加入）。',
+        usageReportTokens: 'Token',
+        usageReportCost: '费用',
+        usageReportActiveTime: '活跃时长',
+        usageReportEst: '估算',
+        usageReportDays: '活跃天数',
+        usageReportDaysTitle: '每日',
+        usageReportCostShort: '按 API 目录价，非实际账单',
+        usageReportActiveSub: '并行 agent 时间合计 {agent}',
+        usageReportVsPrior: '较之前 {n} 天',
+        usageReportNoDelta: '暂无可对比的前期区间',
+        usageReportNoDeltaYear: '进行中的周期不做同比',
+        usageReportDaysSub: '本期共 {n} 天',
+        usageReportSentence: '{range}你驱动了 {sessions} 个会话，消耗 {tokens} token（{cost}），比{prior}多 {pct}%。',
+        usageReportSentenceLess: '{range}你驱动了 {sessions} 个会话，消耗 {tokens} token（{cost}），比{prior}少 {pct}%。',
+        usageReportSentenceFlat: '{range}你驱动了 {sessions} 个会话，消耗 {tokens} token（{cost}）。',
+        usageReportSentenceWeek: '本周',
+        usageReportSentenceYear: '今年年初至今',
+        usageReportStreak: '连续编程 {streak} 天 · {n} 天中 {a} 天有记录 · 最忙的一天 {date}（{tokens}）',
+        usageReportStreakLapsed: '最长连续 {streak} 天 · {n} 天中 {a} 天有记录 · 最忙的一天 {date}（{tokens}）',
+        usageReportEmptyPeriod: '该时段暂无记录。',
+        usageReportPodium: '本期之最',
+        usageReportTopHarness: '最常用 harness',
+        usageReportTopModel: '最常用模型',
+        usageReportTopProject: '投入最多的项目',
+        usageReportSessionsActive: '{sessions} 个会话 · 活跃 {hours}',
+        usageReportPodiumProjectNote: '{n} 个项目 · 按 token 排序 · {u} 未归属 · {g} 来自无项目记录的来源（OpenClaw 及在线工具）',
+        usageReportProjectGroupNote: '项目按仓库 remote 分组 —— 同一代码库挂在两个 remote 下会出现两次。',
+        usageReportFacetCovers: '分析分面覆盖本期总量的 {pct} —— 与总量来自同一窗口的另一次扫描。',
+        usageReportMissingProjects: '该服务器无项目归属记录',
+        usageReportWhen: '你的时间分布',
+        usageReportWhenTz: '当地时间 · {tz}',
+        usageReportPeakHour: '高峰时段',
+        usageReportNightOwl: '夜猫子指数',
+        usageReportNightNote: '{window} 的 token 占比',
+        usageReportPeakDay: '高峰日',
+        usageReportByAgent: '按 agent',
+        usageReportColAgent: '工具',
+        usageReportColSessions: '会话',
+        usageReportColTokens: 'Token',
+        usageReportColIn: '输入',
+        usageReportColOut: '输出',
+        usageReportColCache: '缓存读取',
+        usageReportColCost: '费用',
+        usageReportColCostQual: '目录价',
+        usageReportColActive: '活跃时长',
+        usageReportOtherTools: '{machine}上的其他工具 · {n}',
+        usageReportToolCount: '个工具',
+        usageReportFooterDays: '每日按{machine}的本地零点划分。',
+        usageReportFooterCost: '费用为 API 目录价估算，非实际账单。',
+        usageReportFooterActive: '活跃时长按记录的事件间隔估算（上限 {cap}）。',
+        usageReportFooterSrc: '数据来源：{machine}上的 tokdash · {n} 个工具来源 · v{version}',
+        usageReportShareTitle: '分享',
+        usageReportSharePreamble: '两张卡片，两种隐私级别。预览即导出：同一套排版，同一批像素。',
+        usageReportGreenTitle: '概况卡片 · 仅统计数字',
+        usageReportGreenBody: 'Token、会话、活跃天数、连续记录、最忙的一天、估算活跃时长、常用 harness 与模型。可以直接转发。',
+        usageReportAmberTitle: '项目明细卡片',
+        usageReportAmberBody: '包含概况卡片的全部内容，另加按 token 排序的项目排行，以及与本期总量的对账说明。',
+        usageReportNickname: '机器昵称',
+        usageReportCostToggle: '包含费用（按 API 目录价，非实际账单）',
+        usageReportExportGreen: '导出概况卡片',
+        usageReportExportAmber: '导出项目明细',
+        usageReportExportAll: '一次导出四张',
+        usageReportBothThemes: '每次导出生成浅色与深色两张 PNG，与 app 当前主题无关。「导出四张」会生成四张，浏览器可能在下载第二张前询问是否允许。',
+        usageReportExported: '已写出 {n} 张 PNG：浅色与深色。',
+        usageReportExportNothing: '暂无可导出的卡片：本期没有绘制出卡片。',
+        usageReportManifestGreen: '仅统计数字 · 不含项目名称 · 不含提示词原文',
+        usageReportManifestAmber: '含项目名称 · 不含提示词原文 · 请谨慎分享',
+        usageReportTierGreen: '概况',
+        usageReportTierAmber: '项目明细',
+        usageReportCardYearTitle: '{year} 年 · 年初至今',
+        usageReportCardWeekTitle: '{date} 当周',
+        usageReportCardRange: '{from} – {to} · {machine}的全部 agent 活动',
+        usageReportCardHeroSub: '{sessions} 个会话 · {requests} 次请求',
+        usageReportCardHarnesses: 'Harness 排名',
+        usageReportCardModels: '模型排名',
+        usageReportCardProjectsNote: '项目明细 · 共 {n} 个 · 按 token 排序',
+        usageReportCardGroupNote: '按仓库分组 · {u} 未归属 · {g} 来自 OpenClaw 及在线工具（无项目记录）',
+        usageReportCardAttribution: 'tokdash {version} · {nickname}',
+        usageReportCardActiveTime: '活跃时长',
+        usageReportCardBusiestLabel: '最忙的一天',
+        usageReportCardDaysActive: '{t} 天中 {a} 天有记录',
+        usageReportCardStreak: '连续编程 {streak} 天',
+        usageReportCardStreakMax: '最长连续 {streak} 天',
+        usageReportCardCost: '按 API 目录价估算 {cost}，非实际账单',
+        usageReportCardNicknameFallback: '本机',
       },
 
       ja: {
@@ -5571,6 +6067,108 @@
         time: '時間',
         langSystem: 'システム',
         moreTools: '他 {n} 件のツール',
+        usageReport: 'レポート',
+        usageReportServerLabel: 'サーバー',
+        usageReportPeriodWeek: '週',
+        usageReportPeriodMonth: '月',
+        usageReportPeriodYear: '年',
+        usageReportTitleWeek: '今週',
+        usageReportTitleMonth: '今月',
+        usageReportTitleYear: '年初から現在まで',
+        usageReportScope: '{machine}に記録されたすべてのエージェント活動（tokdash 以外から開始したセッションを含む）。',
+        usageReportInProgress: '集計中 · {n} 日中 {d} 日',
+        usageReportUnreachable: '{server} が応答しません: {error}。レポートには分析と使用量のエンドポイントが必要です。',
+        usageReportTotalsFallback: '期間合計は分析スキャンから取得しています。/api/usage が応答していないため、前期比は表示しません。',
+        usageReportInsightsMissing: '分析スキャンが応答しなかったため、この読み込みではカレンダー、ランキング、活動リズム、エージェント順位に出典がありません。',
+        usageReportActiveMissing: 'アクティブ時間が応答しませんでした。この期間のセッション数と稼働時間は 0 ではなく不明です。',
+        usageReportPartial: '一部のツールを読み取れませんでした: {tools}。使用量は含まれていません。',
+        usageReportActiveUnavailable: 'アクティブ時間を取得できないツール: {tools}。',
+        usageReportFacetsMissing: 'このセクションには誠実なデータ源がありません。このサーバーは {facets} 分面を提供していません（2.5.0 で追加）。',
+        usageReportTokens: 'トークン',
+        usageReportCost: 'コスト',
+        usageReportActiveTime: 'アクティブ時間',
+        usageReportEst: '推定',
+        usageReportDays: '稼働日',
+        usageReportDaysTitle: '日別',
+        usageReportCostShort: 'API 定価ベース — 実際の請求ではありません',
+        usageReportActiveSub: '並列エージェント時間の合計 {agent}',
+        usageReportVsPrior: '前 {n} 日間比',
+        usageReportNoDelta: '比較できる前期がありません',
+        usageReportNoDeltaYear: '進行中の期間は増減を表示しません',
+        usageReportDaysSub: '期間内 {n} 日',
+        usageReportSentence: '{range}は {sessions} セッションを動かし、{tokens} トークン（{cost}）を使いました。{prior}より {pct}% 多い。',
+        usageReportSentenceLess: '{range}は {sessions} セッションを動かし、{tokens} トークン（{cost}）を使いました。{prior}より {pct}% 少ない。',
+        usageReportSentenceFlat: '{range}は {sessions} セッションを動かし、{tokens} トークン（{cost}）を使いました。',
+        usageReportSentenceWeek: '今週',
+        usageReportSentenceYear: '年初から現在まで',
+        usageReportStreak: '連続 {streak} 日 · {n} 日中 {a} 日が稼働 · 最も忙しい日 {date}（{tokens}）',
+        usageReportStreakLapsed: '最長連続 {streak} 日 · {n} 日中 {a} 日が稼働 · 最も忙しい日 {date}（{tokens}）',
+        usageReportEmptyPeriod: 'この期間の記録はありません。',
+        usageReportPodium: '期間中のトップ',
+        usageReportTopHarness: '最多のハーネス',
+        usageReportTopModel: '最多のモデル',
+        usageReportTopProject: '最多のプロジェクト',
+        usageReportSessionsActive: '{sessions} セッション · 稼働 {hours}',
+        usageReportPodiumProjectNote: '{n} プロジェクト · トークン数順 · 帰属先なし {u} · プロジェクト記録のない来源（OpenClaw とライブツール）が {g}',
+        usageReportProjectGroupNote: 'プロジェクトはリポジトリの remote でグループ化しているため、同じコードベースでも remote が異なると 2 件表示されます。',
+        usageReportFacetCovers: '分析ファセットは期間合計の {pct} をカバーします - 同じ期間を別系統で集計した値です。',
+        usageReportMissingProjects: 'このサーバーではプロジェクト記録を利用できません',
+        usageReportWhen: '作業時間帯',
+        usageReportWhenTz: 'ローカル時刻 · {tz}',
+        usageReportPeakHour: 'ピーク時間帯',
+        usageReportNightOwl: '夜型指数',
+        usageReportNightNote: 'トークンシェア、{window}',
+        usageReportPeakDay: 'ピーク曜日',
+        usageReportByAgent: 'エージェント別',
+        usageReportColAgent: 'エージェント',
+        usageReportColSessions: 'セッション',
+        usageReportColTokens: 'トークン',
+        usageReportColIn: '入力',
+        usageReportColOut: '出力',
+        usageReportColCache: 'キャッシュ読み出し',
+        usageReportColCost: 'コスト',
+        usageReportColCostQual: 'API 公称価格',
+        usageReportColActive: '稼働時間',
+        usageReportOtherTools: '{machine}上の他のツール · {n}',
+        usageReportToolCount: 'ツール',
+        usageReportFooterDays: '1 日の区切りは{machine}の現地時刻の午前 0 時です。',
+        usageReportFooterCost: 'コストは API 公称価格換算で、実際の請求額ではありません。',
+        usageReportFooterActive: '稼働時間は記録されたイベント間隔から推定しています（上限 {cap}）。',
+        usageReportFooterSrc: 'データ出所: {machine}の tokdash · {n} 個のツールソース · v{version}',
+        usageReportShareTitle: '共有',
+        usageReportSharePreamble: '2 種のカード、2 段階の公開範囲。プレビューがそのまま書き出しです。同じレイアウト、同じ描画結果です。',
+        usageReportGreenTitle: '概要カード · 集計数のみ',
+        usageReportGreenBody: 'トークン数、セッション数、稼働日、連続日、最も多かった日、推定稼働時間、よく使うハーネスとモデル。そのまま投稿して問題ありません。',
+        usageReportAmberTitle: 'プロジェクト明細カード',
+        usageReportAmberBody: '概要カードの内容に、トークン数順のプロジェクトと期間合計との対応説明を加えています。',
+        usageReportNickname: 'マシンのニックネーム',
+        usageReportCostToggle: 'コストを含める（API 公称価格、実際の請求額ではありません）',
+        usageReportExportGreen: '概要カードを書き出す',
+        usageReportExportAmber: 'プロジェクト明細を書き出す',
+        usageReportExportAll: '4 枚まとめて書き出す',
+        usageReportBothThemes: 'アプリのテーマ設定にかかわらず、書き出す時は明るい色と暗い色の 2 枚の PNG を作ります。「4 枚すべて書き出し」では 4 枚になり、2 枚目の前にブラウザーが許可を求めることがあります。',
+        usageReportExported: 'PNG を {n} 枚保存しました（明るい色・暗い色）。',
+        usageReportExportNothing: '書き出せるカードがありません：この期間のカードが描画されていません。',
+        usageReportManifestGreen: '集計数のみ · プロジェクト名なし · プロンプト本文なし',
+        usageReportManifestAmber: '集計数とプロジェクト名 · プロンプト本文なし · 配布先を考えて共有してください',
+        usageReportTierGreen: '概要',
+        usageReportTierAmber: 'プロジェクト明細',
+        usageReportCardYearTitle: '{year} 年 · 年初から',
+        usageReportCardWeekTitle: '{date} 開始の週',
+        usageReportCardRange: '{from} – {to} · {machine}の全 agent 活動',
+        usageReportCardHeroSub: '{sessions} セッション · {requests} リクエスト',
+        usageReportCardHarnesses: 'ハーネス上位',
+        usageReportCardModels: 'モデル上位',
+        usageReportCardProjectsNote: 'プロジェクト {n} 件 · トークン数順',
+        usageReportCardGroupNote: 'リポジトリ別 · 帰属先なし {u} · OpenClaw とライブツールの分（プロジェクト記録なし）が {g}',
+        usageReportCardAttribution: 'tokdash {version} · {nickname}',
+        usageReportCardActiveTime: '稼働時間',
+        usageReportCardBusiestLabel: '最も多かった日',
+        usageReportCardDaysActive: '{t} 日中 {a} 日が稼働日',
+        usageReportCardStreak: '{streak} 日連続',
+        usageReportCardStreakMax: '最長 {streak} 日連続',
+        usageReportCardCost: 'API 公称価格換算の {cost}（実際の請求額ではありません）',
+        usageReportCardNicknameFallback: 'このマシン',
       },
 
       ko: {
@@ -5979,6 +6577,108 @@
         time: '시간',
         langSystem: '시스템',
         moreTools: '나머지 {n}개 도구',
+        usageReport: '리포트',
+        usageReportServerLabel: '서버',
+        usageReportPeriodWeek: '주',
+        usageReportPeriodMonth: '월',
+        usageReportPeriodYear: '년',
+        usageReportTitleWeek: '이번 주',
+        usageReportTitleMonth: '이번 달',
+        usageReportTitleYear: '연초부터 현재까지',
+        usageReportScope: '{machine}에 기록된 모든 에이전트 활동 (tokdash 외에서 시작한 세션 포함).',
+        usageReportInProgress: '진행 중 · {n}일 중 {d}일',
+        usageReportUnreachable: '{server} 응답 없음: {error}. 리포트에는 분석 및 사용량 엔드포인트가 필요합니다.',
+        usageReportTotalsFallback: '기간 합계는 분석 스캔에서 가져왔습니다. /api/usage가 응답하지 않아 이전 기간 대비를 표시하지 않습니다.',
+        usageReportInsightsMissing: '분석 스캔이 응답하지 않아 이번 로드에서는 날짜 지도, 순위, 활동 리듬, 에이전트 순위에 출처가 없습니다.',
+        usageReportActiveMissing: '활성 시간이 응답하지 않았습니다. 이 기간의 세션 수와 실행 시간은 0이 아니라 알 수 없습니다.',
+        usageReportPartial: '일부 도구를 읽을 수 없습니다: {tools}. 해당 사용량이 포함되지 않았습니다.',
+        usageReportActiveUnavailable: '활성 시간을 가져올 수 없는 도구: {tools}.',
+        usageReportFacetsMissing: '이 섹션에는 신뢰할 수 있는 데이터가 없습니다. 이 서버는 {facets} facet을 제공하지 않습니다 (2.5.0에 추가됨).',
+        usageReportTokens: '토큰',
+        usageReportCost: '비용',
+        usageReportActiveTime: '활성 시간',
+        usageReportEst: '추정',
+        usageReportDays: '활동일',
+        usageReportDaysTitle: '일자별',
+        usageReportCostShort: 'API 정가 기준 — 실제 청구 금액 아님',
+        usageReportActiveSub: '병렬 에이전트 시간 합계 {agent}',
+        usageReportVsPrior: '이전 {n}일 대비',
+        usageReportNoDelta: '비교할 이전 기간이 없습니다',
+        usageReportNoDeltaYear: '진행 중인 기간은 증감을 표시하지 않습니다',
+        usageReportDaysSub: '기간 내 {n}일',
+        usageReportSentence: '{range} 동안 {sessions} 세션을 실행하고 {tokens} 토큰({cost})을 사용했습니다. {prior}보다 {pct}% 많습니다.',
+        usageReportSentenceLess: '{range} 동안 {sessions} 세션을 실행하고 {tokens} 토큰({cost})을 사용했습니다. {prior}보다 {pct}% 적습니다.',
+        usageReportSentenceFlat: '{range} 동안 {sessions} 세션을 실행하고 {tokens} 토큰({cost})을 사용했습니다.',
+        usageReportSentenceWeek: '이번 주',
+        usageReportSentenceYear: '연초부터 현재까지',
+        usageReportStreak: '연속 {streak}일 · {n}일 중 {a}일 활동 · 가장 바빴던 날 {date}({tokens})',
+        usageReportStreakLapsed: '최장 연속 {streak}일 · {n}일 중 {a}일 활동 · 가장 바빴던 날 {date}({tokens})',
+        usageReportEmptyPeriod: '이 기간에는 기록이 없습니다.',
+        usageReportPodium: '해당 기간 최고',
+        usageReportTopHarness: '최다 하네스',
+        usageReportTopModel: '최다 모델',
+        usageReportTopProject: '최다 프로젝트',
+        usageReportSessionsActive: '세션 {sessions}회 · 활동 {hours}',
+        usageReportPodiumProjectNote: '프로젝트 {n}개 · 토큰 순 · 미귀속 {u} · 프로젝트 기록이 없는 소스(OpenClaw, 라이브 툴) {g}',
+        usageReportProjectGroupNote: '프로젝트는 저장소 remote 기준으로 묶기 때문에, 같은 코드베이스라도 remote가 다르면 두 번 표시됩니다.',
+        usageReportFacetCovers: '분석 팩트가 기간 합계의 {pct}를 포함합니다 - 같은 기간을 다른 방식으로 집계한 값입니다.',
+        usageReportMissingProjects: '이 서버에서는 프로젝트 기록을 사용할 수 없습니다',
+        usageReportWhen: '작업 시간대',
+        usageReportWhenTz: '로컬 시간 · {tz}',
+        usageReportPeakHour: '최고 시간대',
+        usageReportNightOwl: '야간 활동 지수',
+        usageReportNightNote: '토큰 비중, {window}',
+        usageReportPeakDay: '최고 요일',
+        usageReportByAgent: '에이전트별',
+        usageReportColAgent: '에이전트',
+        usageReportColSessions: '세션',
+        usageReportColTokens: '토큰',
+        usageReportColIn: '입력',
+        usageReportColOut: '출력',
+        usageReportColCache: '캐시 읽기',
+        usageReportColCost: '비용',
+        usageReportColCostQual: 'API 정가',
+        usageReportColActive: '활동',
+        usageReportOtherTools: '{machine}의 다른 툴 · {n}',
+        usageReportToolCount: '개의 툴',
+        usageReportFooterDays: '하루는 {machine}의 현지 자정을 기준으로 구분합니다.',
+        usageReportFooterCost: '비용은 API 정가 환산액이며 실제 청구액이 아닙니다.',
+        usageReportFooterActive: '활동 시간은 기록된 이벤트 간격으로 추정합니다(상한 {cap}).',
+        usageReportFooterSrc: '데이터: {machine}의 tokdash · 툴 소스 {n}개 · v{version}',
+        usageReportShareTitle: '공유',
+        usageReportSharePreamble: '두 장의 카드, 두 단계의 공개 범위. 미리보기가 그대로 내보내기 결과입니다. 같은 배치, 같은 그려진 픽셀입니다.',
+        usageReportGreenTitle: '개요 카드 · 집계만',
+        usageReportGreenBody: '토큰, 세션, 활동일, 연속 기록, 가장 바빴던 날, 추정 활동 시간, 자주 쓰는 하네스와 모델. 그대로 올려도 됩니다.',
+        usageReportAmberTitle: '프로젝트 상세 카드',
+        usageReportAmberBody: '개요 카드의 모든 내용에 토큰 순 프로젝트 순위와 기간 합계 대비 대응 설명을 더했습니다.',
+        usageReportNickname: '머신 별명',
+        usageReportCostToggle: '비용 포함 (API 정가, 실제 청구액 아님)',
+        usageReportExportGreen: '개요 카드 내보내기',
+        usageReportExportAmber: '프로젝트 상세 내보내기',
+        usageReportExportAll: '네 장 한 번에 내보내기',
+        usageReportBothThemes: '앱의 테마 설정과 관계없이 내보낼 때마다 밝은 색과 어두운 색 PNG 두 장을 만듭니다. 네 장 모두 내보내기는 네 장을 만들며, 두 번째 파일 전에 브라우저가 허용 여부를 물어볼 수 있습니다.',
+        usageReportExported: 'PNG {n}장을 저장했습니다 (밝은 색·어두운 색).',
+        usageReportExportNothing: '내보낼 카드가 없습니다: 이 기간의 카드가 그려지지 않았습니다.',
+        usageReportManifestGreen: '집계만 · 프로젝트명 없음 · 프롬프트 원문 없음',
+        usageReportManifestAmber: '집계와 프로젝트명 · 프롬프트 원문 없음 · 공유 상대를 따져서 공유하세요',
+        usageReportTierGreen: '개요',
+        usageReportTierAmber: '프로젝트 상세',
+        usageReportCardYearTitle: '{year}년 · 연초부터',
+        usageReportCardWeekTitle: '{date} 시작 주',
+        usageReportCardRange: '{from} – {to} · {machine}의 모든 agent 활동',
+        usageReportCardHeroSub: '세션 {sessions}회 · 요청 {requests}회',
+        usageReportCardHarnesses: '상위 하네스',
+        usageReportCardModels: '상위 모델',
+        usageReportCardProjectsNote: '프로젝트 {n}개 · 토큰 순',
+        usageReportCardGroupNote: '저장소별 · 미귀속 {u} · OpenClaw와 라이브 툴 분(프로젝트 기록 없음) {g}',
+        usageReportCardAttribution: 'tokdash {version} · {nickname}',
+        usageReportCardActiveTime: '활동 시간',
+        usageReportCardBusiestLabel: '가장 바빴던 날',
+        usageReportCardDaysActive: '{t}일 중 {a}일 활동',
+        usageReportCardStreak: '{streak}일 연속',
+        usageReportCardStreakMax: '최장 {streak}일 연속',
+        usageReportCardCost: 'API 정가 환산 {cost} (실제 청구액 아님)',
+        usageReportCardNicknameFallback: '이 머신',
       },
 
       es: {
@@ -6387,6 +7087,108 @@
         time: 'Hora',
         langSystem: 'Sistema',
         moreTools: '+{n} herramientas más',
+        usageReport: 'Informe',
+        usageReportServerLabel: 'Servidor',
+        usageReportPeriodWeek: 'Semana',
+        usageReportPeriodMonth: 'Mes',
+        usageReportPeriodYear: 'Año',
+        usageReportTitleWeek: 'Esta semana',
+        usageReportTitleMonth: 'Este mes',
+        usageReportTitleYear: 'En lo que va del año',
+        usageReportScope: 'Toda la actividad de agentes registrada en {machine}, incluidas las sesiones iniciadas fuera de tokdash.',
+        usageReportInProgress: 'en curso · {d} de {n} días',
+        usageReportUnreachable: '{server} no respondió: {error}. El informe necesita sus endpoints de análisis y de uso.',
+        usageReportTotalsFallback: 'Los totales del periodo salen del análisis: /api/usage no respondió, así que no se imprime la variación con el periodo anterior.',
+        usageReportInsightsMissing: 'El análisis no respondió, así que en esta carga el mapa de días, el podio, el ritmo y el ranking de agentes no tienen fuente.',
+        usageReportActiveMissing: 'El tiempo activo no respondió: para esta ventana las sesiones y los tiempos de ejecución son desconocidos, no cero.',
+        usageReportPartial: 'No se pudieron leer algunas herramientas: {tools}. Su uso no está incluido.',
+        usageReportActiveUnavailable: 'Tiempo activo no disponible para: {tools}.',
+        usageReportFacetsMissing: 'Esta sección no tiene una fuente honesta: el servidor no ofrece las facetas {facets} (llegaron en la 2.5.0).',
+        usageReportTokens: 'Tokens',
+        usageReportCost: 'Coste',
+        usageReportActiveTime: 'Tiempo activo',
+        usageReportEst: 'est.',
+        usageReportDays: 'Días activos',
+        usageReportDaysTitle: 'Días',
+        usageReportCostShort: 'a precios de lista de la API — no es tu factura',
+        usageReportActiveSub: '{agent} de tiempo de agente en paralelo',
+        usageReportVsPrior: 'frente a los {n} días anteriores',
+        usageReportNoDelta: 'sin periodo anterior que comparar',
+        usageReportNoDeltaYear: 'sin variación en un periodo en curso',
+        usageReportDaysSub: '{n} días en la ventana',
+        usageReportSentence: 'En {range} ejecutaste {sessions} sesiones y usaste {tokens} tokens ({cost}), un {pct}% más que {prior}.',
+        usageReportSentenceLess: 'En {range} ejecutaste {sessions} sesiones y usaste {tokens} tokens ({cost}), un {pct}% menos que {prior}.',
+        usageReportSentenceFlat: 'En {range} ejecutaste {sessions} sesiones y usaste {tokens} tokens ({cost}).',
+        usageReportSentenceWeek: 'esta semana',
+        usageReportSentenceYear: 'lo que va del año',
+        usageReportStreak: 'racha de {streak} días · {a} de {n} días activos · día más intenso {date} ({tokens})',
+        usageReportStreakLapsed: 'mejor racha {streak} días · {a} de {n} días activos · día más intenso {date} ({tokens})',
+        usageReportEmptyPeriod: 'Sin actividad registrada en este periodo.',
+        usageReportPodium: 'Lo más destacado del periodo',
+        usageReportTopHarness: 'Harness principal',
+        usageReportTopModel: 'Modelo principal',
+        usageReportTopProject: 'Proyecto principal',
+        usageReportSessionsActive: '{sessions} sesiones · {hours} activo',
+        usageReportPodiumProjectNote: '{n} proyectos · ordenados por tokens · {u} sin atribución · {g} de fuentes sin registros de proyecto (OpenClaw, herramientas en vivo)',
+        usageReportProjectGroupNote: 'Los proyectos se agrupan por remote del repositorio: el mismo código con dos remotes aparece dos veces.',
+        usageReportFacetCovers: 'Las facetas de análisis cubren {pct} del total del periodo: un escaneo distinto de la misma ventana.',
+        usageReportMissingProjects: 'sin registros de proyecto en este servidor',
+        usageReportWhen: 'Cuándo trabajas',
+        usageReportWhenTz: 'Hora local · {tz}',
+        usageReportPeakHour: 'Hora punta',
+        usageReportNightOwl: 'Índice nocturno',
+        usageReportNightNote: 'proporción de tokens, {window}',
+        usageReportPeakDay: 'Día punta',
+        usageReportByAgent: 'Por agente',
+        usageReportColAgent: 'Agente',
+        usageReportColSessions: 'Sesiones',
+        usageReportColTokens: 'Tokens',
+        usageReportColIn: 'Entrada',
+        usageReportColOut: 'Salida',
+        usageReportColCache: 'Caché leída',
+        usageReportColCost: 'Coste',
+        usageReportColCostQual: 'Precio de lista API',
+        usageReportColActive: 'Activo',
+        usageReportOtherTools: 'Otras herramientas de {machine} · {n}',
+        usageReportToolCount: 'herramientas',
+        usageReportFooterDays: 'Los días empiezan a la medianoche local de {machine}.',
+        usageReportFooterCost: 'El coste equivale a los precios de lista de la API, no al importe facturado.',
+        usageReportFooterActive: 'El tiempo activo se estima con los intervalos registrados (tope {cap}).',
+        usageReportFooterSrc: 'datos: tokdash en {machine} · {n} fuentes de herramientas · v{version}',
+        usageReportShareTitle: 'Compartir',
+        usageReportSharePreamble: 'Dos tarjetas, dos niveles de privacidad. La vista previa es la exportación: mismo diseño, mismos píxeles pintados.',
+        usageReportGreenTitle: 'Tarjeta resumen · solo recuentos',
+        usageReportGreenBody: 'Tokens, sesiones, días, racha, día más intenso, tiempo activo estimado, principales harness y modelos. Se puede publicar tal cual.',
+        usageReportAmberTitle: 'Tarjeta de proyectos',
+        usageReportAmberBody: 'Todo lo de la tarjeta resumen más los proyectos principales por tokens y la línea de conciliación con el total del periodo.',
+        usageReportNickname: 'Apodo de la máquina',
+        usageReportCostToggle: 'Incluir coste (precio de lista de la API, no tu factura)',
+        usageReportExportGreen: 'Exportar tarjeta resumen',
+        usageReportExportAmber: 'Exportar detalle de proyectos',
+        usageReportExportAll: 'Exportar las cuatro',
+        usageReportBothThemes: 'Cada exportación escribe dos PNG, claro y oscuro, sea cual sea el tema de la aplicación. Exportar las cuatro escribe cuatro, y el navegador puede pedir permiso antes del segundo archivo.',
+        usageReportExported: 'Escritos {n} PNG: claro y oscuro.',
+        usageReportExportNothing: 'Nada que exportar todavía: ninguna tarjeta se pintó para este periodo.',
+        usageReportManifestGreen: 'Solo recuentos · sin nombres de proyecto · sin texto de prompts',
+        usageReportManifestAmber: 'Recuentos y nombres de proyecto · sin texto de prompts · comparte con criterio',
+        usageReportTierGreen: 'Resumen',
+        usageReportTierAmber: 'Detalle de proyectos',
+        usageReportCardYearTitle: '{year} · hasta hoy',
+        usageReportCardWeekTitle: 'Semana del {date}',
+        usageReportCardRange: '{from} – {to} · toda la actividad de agentes en {machine}',
+        usageReportCardHeroSub: '{sessions} sesiones · {requests} solicitudes',
+        usageReportCardHarnesses: 'Harness principales',
+        usageReportCardModels: 'Modelos principales',
+        usageReportCardProjectsNote: 'Proyectos · {n} · ordenados por tokens',
+        usageReportCardGroupNote: 'Agrupado por repositorio · {u} sin atribuir · {g} de OpenClaw y herramientas en vivo (sin registros de proyecto)',
+        usageReportCardAttribution: 'tokdash {version} · {nickname}',
+        usageReportCardActiveTime: 'Tiempo activo',
+        usageReportCardBusiestLabel: 'Día más intenso',
+        usageReportCardDaysActive: '{a} de {t} días activos',
+        usageReportCardStreak: 'racha de {streak} días',
+        usageReportCardStreakMax: 'mejor racha {streak} días',
+        usageReportCardCost: '{cost} a precios de lista de la API, no tu factura',
+        usageReportCardNicknameFallback: 'esta máquina',
       },
 
       pt: {
@@ -6795,6 +7597,108 @@
         time: 'Hora',
         langSystem: 'Sistema',
         moreTools: '+{n} ferramentas a mais',
+        usageReport: 'Relatório',
+        usageReportServerLabel: 'Servidor',
+        usageReportPeriodWeek: 'Semana',
+        usageReportPeriodMonth: 'Mês',
+        usageReportPeriodYear: 'Ano',
+        usageReportTitleWeek: 'Esta semana',
+        usageReportTitleMonth: 'Este mês',
+        usageReportTitleYear: 'Até agora neste ano',
+        usageReportScope: 'Toda a atividade de agentes registrada por {machine}, incluindo sessões iniciadas fora do tokdash.',
+        usageReportInProgress: 'em andamento · {d} de {n} dias',
+        usageReportUnreachable: '{server} não respondeu: {error}. O relatório precisa dos endpoints de análise e de uso.',
+        usageReportTotalsFallback: 'Os totais do período vêm da varredura de análise: /api/usage não respondeu, então não há variação em relação ao período anterior.',
+        usageReportInsightsMissing: 'A varredura de análise não respondeu, então nesta carga o mapa de dias, o pódio, o ritmo e o ranking de agentes não têm fonte.',
+        usageReportActiveMissing: 'O tempo ativo não respondeu: nesta janela as sessões e os tempos de execução são desconhecidos, não zero.',
+        usageReportPartial: 'Algumas ferramentas não puderam ser lidas: {tools}. O uso delas não está incluído.',
+        usageReportActiveUnavailable: 'Tempo ativo indisponível para: {tools}.',
+        usageReportFacetsMissing: 'Esta seção não tem fonte confiável: o servidor não oferece as facetas {facets} (chegaram na 2.5.0).',
+        usageReportTokens: 'Tokens',
+        usageReportCost: 'Custo',
+        usageReportActiveTime: 'Tempo ativo',
+        usageReportEst: 'est.',
+        usageReportDays: 'Dias ativos',
+        usageReportDaysTitle: 'Dias',
+        usageReportCostShort: 'a preços de tabela da API — não é a sua fatura',
+        usageReportActiveSub: '{agent} de tempo de agente em paralelo',
+        usageReportVsPrior: 'vs. os {n} dias anteriores',
+        usageReportNoDelta: 'sem período anterior para comparar',
+        usageReportNoDeltaYear: 'sem variação em um período em andamento',
+        usageReportDaysSub: '{n} dias na janela',
+        usageReportSentence: 'Em {range} você rodou {sessions} sessões e usou {tokens} tokens ({cost}), {pct}% mais que {prior}.',
+        usageReportSentenceLess: 'Em {range} você rodou {sessions} sessões e usou {tokens} tokens ({cost}), {pct}% menos que {prior}.',
+        usageReportSentenceFlat: 'Em {range} você rodou {sessions} sessões e usou {tokens} tokens ({cost}).',
+        usageReportSentenceWeek: 'esta semana',
+        usageReportSentenceYear: 'até agora neste ano',
+        usageReportStreak: 'sequência de {streak} dias · {a} de {n} dias ativos · dia mais ocupado {date} ({tokens})',
+        usageReportStreakLapsed: 'melhor sequência {streak} dias · {a} de {n} dias ativos · dia mais ocupado {date} ({tokens})',
+        usageReportEmptyPeriod: 'Nenhuma atividade registrada neste período.',
+        usageReportPodium: 'O melhor do período',
+        usageReportTopHarness: 'Harness principal',
+        usageReportTopModel: 'Modelo principal',
+        usageReportTopProject: 'Projeto principal',
+        usageReportSessionsActive: '{sessions} sessões · {hours} ativo',
+        usageReportPodiumProjectNote: '{n} projetos · ordenados por tokens · {u} sem atribuição · {g} de fontes sem registros de projeto (OpenClaw, ferramentas ao vivo)',
+        usageReportProjectGroupNote: 'Os projetos são agrupados pelo remote do repositório: o mesmo código com dois remotes aparece duas vezes.',
+        usageReportFacetCovers: 'Os facets de análise cobrem {pct} do total do período: outra leitura da mesma janela.',
+        usageReportMissingProjects: 'sem registros de projeto neste servidor',
+        usageReportWhen: 'Quando você trabalha',
+        usageReportWhenTz: 'Hora local · {tz}',
+        usageReportPeakHour: 'Hora de pico',
+        usageReportNightOwl: 'Índice noturno',
+        usageReportNightNote: 'parcela dos tokens, {window}',
+        usageReportPeakDay: 'Dia de pico',
+        usageReportByAgent: 'Por agente',
+        usageReportColAgent: 'Agente',
+        usageReportColSessions: 'Sessões',
+        usageReportColTokens: 'Tokens',
+        usageReportColIn: 'Entrada',
+        usageReportColOut: 'Saída',
+        usageReportColCache: 'Cache lida',
+        usageReportColCost: 'Custo',
+        usageReportColCostQual: 'Preço de lista da API',
+        usageReportColActive: 'Ativo',
+        usageReportOtherTools: 'Outras ferramentas · {machine} · {n}',
+        usageReportToolCount: 'ferramentas',
+        usageReportFooterDays: 'Os dias começam à meia-noite local marcada por {machine}.',
+        usageReportFooterCost: 'Os valores de custo equivalem aos preços de lista da API, não à fatura.',
+        usageReportFooterActive: 'O tempo ativo é estimado pelos intervalos registrados (limite {cap}).',
+        usageReportFooterSrc: 'dados: tokdash · {machine} · {n} fontes de ferramentas · v{version}',
+        usageReportShareTitle: 'Compartilhar',
+        usageReportSharePreamble: 'Dois cartões, dois níveis de privacidade. A prévia é a exportação: mesmo layout, mesmos pixels pintados.',
+        usageReportGreenTitle: 'Cartão de visão geral · só contagens',
+        usageReportGreenBody: 'Tokens, sessões, dias, sequência, dia mais intenso, tempo ativo estimado, principais harness e modelos. Pode publicar sem medo.',
+        usageReportAmberTitle: 'Cartão de projetos',
+        usageReportAmberBody: 'Tudo do cartão de visão geral mais os principais projetos por tokens e a linha de conciliação com o total do período.',
+        usageReportNickname: 'Apelido da máquina',
+        usageReportCostToggle: 'Incluir custo (preço de lista da API, não sua fatura)',
+        usageReportExportGreen: 'Exportar cartão de visão geral',
+        usageReportExportAmber: 'Exportar detalhes dos projetos',
+        usageReportExportAll: 'Exportar os quatro',
+        usageReportBothThemes: 'Cada exportação grava dois PNGs, claro e escuro, independente do tema do aplicativo. Exportar as quatro grava quatro, e o navegador pode pedir permissão antes do segundo arquivo.',
+        usageReportExported: '{n} PNGs gravados: claro e escuro.',
+        usageReportExportNothing: 'Nada para exportar ainda: nenhum cartão foi pintado para este período.',
+        usageReportManifestGreen: 'Só contagens · sem nomes de projeto · sem texto de prompts',
+        usageReportManifestAmber: 'Contagens e nomes de projeto · sem texto de prompts · compartilhe com cuidado',
+        usageReportTierGreen: 'Visão geral',
+        usageReportTierAmber: 'Detalhes dos projetos',
+        usageReportCardYearTitle: '{year} · ano até agora',
+        usageReportCardWeekTitle: 'Semana de {date}',
+        usageReportCardRange: '{from} – {to} · toda a atividade de agentes registrada por {machine}',
+        usageReportCardHeroSub: '{sessions} sessões · {requests} solicitações',
+        usageReportCardHarnesses: 'Principais harness',
+        usageReportCardModels: 'Principais modelos',
+        usageReportCardProjectsNote: 'Projetos · {n} · ordenados por tokens',
+        usageReportCardGroupNote: 'Agrupado por repositório · {u} sem atribuição · {g} de OpenClaw e ferramentas ao vivo (sem registros de projeto)',
+        usageReportCardAttribution: 'tokdash {version} · {nickname}',
+        usageReportCardActiveTime: 'Tempo ativo',
+        usageReportCardBusiestLabel: 'Dia mais intenso',
+        usageReportCardDaysActive: '{a} de {t} dias ativos',
+        usageReportCardStreak: 'sequência de {streak} dias',
+        usageReportCardStreakMax: 'melhor sequência {streak} dias',
+        usageReportCardCost: '{cost} a preços de lista da API, não sua fatura',
+        usageReportCardNicknameFallback: 'esta máquina',
       },
     };
 
@@ -7225,8 +8129,16 @@
       renderDelta('messagesDelta', cmp.messages_pct);
     }
 
-    function t(key) {
-      return (I18N[currentLang] || I18N.en)[key] || I18N.en[key] || key;
+    // `vars` fills {placeholder} slots. Copy that a sentence renderer owns (the
+    // Report tab) cannot be a data-i18n attribute, so substitution lives here
+    // rather than in a second translator the i18n parity test cannot see.
+    function t(key, vars) {
+      const text = (I18N[currentLang] || I18N.en)[key] || I18N.en[key] || key;
+      if (!vars) return text;
+      return Object.entries(vars).reduce(
+        (acc, [name, value]) => acc.replaceAll(`{${name}}`, String(value ?? '')),
+        String(text),
+      );
     }
 
     function renderLoadingPlaceholder(element, label = t('loading')) {
@@ -7945,6 +8857,11 @@
       // The pricing source line is set imperatively (no data-i18n), so re-derive it from the
       // last payload on a language switch — otherwise it stays frozen in the prior language.
       if (pricingDbLastPayload) setPricingDbSource(pricingDbLastPayload);
+      // The report's sentences are built imperatively, so a language switch
+      // leaves them in the prior language unless the open report is re-rendered.
+      if (typeof usageReportState !== 'undefined' && usageReportState.loaded && !usageReportState.loading) {
+        usageReportRender();
+      }
       if (selectedServers().length > 1 && lastQuotaServerRows.length) {
         document.getElementById('quotaServerBlocks')?.replaceChildren();
         lastQuotaServerRows.forEach((row) => renderQuotaServerBlock(row.server, row.payload, row.history));
@@ -12539,6 +13456,1716 @@
     // Tabs
     let preserveStatsNavigationOnNextActivation = false;
 
+    /* ---- Usage report (Report tab) --------------------------------------
+       A calendar-aligned week / month / year report, scoped to one server:
+       insights facets (streaks, peaks, day maps, projects) have no defined
+       merge semantics across servers, so a merged report is not offered
+       rather than being offered and wrong. Three requests per period switch:
+       /api/insights for the facets, /api/usage for the period totals and the
+       equal-length prior-window delta, /api/active-time for sessions and
+       estimated active time.
+
+       The header's global range control deliberately does not drive this tab.
+       The report owns its window so the printed range line and the day map can
+       never disagree with each other. */
+
+    // The day map needs three facets; the podium, the hour strip and the agent
+    // table need five more. One request carries them all: the server folds every
+    // facet out of the same composite scan, so asking twice costs the machine
+    // the scan again for nothing.
+    const USAGE_REPORT_FACETS = 'daily,streaks,firsts,hourly,weekday,tools,models,projects';
+    const USAGE_REPORT_HEAT_FACETS = 'daily,streaks,firsts';
+    const USAGE_REPORT_PERIODS = ['week', 'month', 'year'];
+    const USAGE_REPORT_PREFS_KEY = 'tokdash-usage-report-prefs';
+    const usageReportState = {
+      period: 'month',
+      serverId: 'local',
+      loaded: false,
+      loading: false,
+      wired: false,
+      model: null,
+      error: null,
+      othersOpen: false,
+      // The footer line and the card stamp name the build of the server the
+      // report was read from, so this is resolved per server rather than once
+      // per page: a remote report carrying the local version is a wrong claim.
+      version: null,
+      versionServerId: null,
+      // A period or server chosen mid-flight, applied when that load lands.
+      pendingPeriod: null,
+      pendingServerId: null,
+      // Share cards. The previews double as the export source, and the token
+      // stops a slow paint from landing after a newer period has rendered.
+      nickname: '',
+      includeCost: false,
+      previews: {},
+      fonts: null,
+      shareToken: 0,
+      exporting: false,
+    };
+
+    function usageReportReadPrefs() {
+      try {
+        const raw = JSON.parse(localStorage.getItem(USAGE_REPORT_PREFS_KEY) || '{}');
+        if (!raw || typeof raw !== 'object') return;
+        if (USAGE_REPORT_PERIODS.includes(raw.period)) usageReportState.period = raw.period;
+        if (typeof raw.serverId === 'string' && raw.serverId) usageReportState.serverId = raw.serverId;
+        if (typeof raw.nickname === 'string') usageReportState.nickname = raw.nickname.trim().slice(0, 24);
+        usageReportState.includeCost = raw.includeCost === true;
+      } catch (_error) { /* a bad blob is no prefs */ }
+    }
+
+    function usageReportWritePrefs() {
+      try {
+        localStorage.setItem(USAGE_REPORT_PREFS_KEY, JSON.stringify({
+          period: usageReportState.period,
+          serverId: usageReportState.serverId,
+          nickname: usageReportState.nickname,
+          includeCost: !!usageReportState.includeCost,
+        }));
+      } catch (_error) { /* private mode or quota */ }
+    }
+
+    function usageReportServers() {
+      return allServers();
+    }
+
+    // Falls back to the first entry when the stored id has been deleted, so a
+    // removed server cannot leave the report pointed at nothing.
+    function usageReportServer() {
+      const servers = usageReportServers();
+      return servers.find((server) => server.id === usageReportState.serverId) || servers[0];
+    }
+
+    // A seam, not an abstraction: the window is always relative to today, and a
+    // node-side test needs a today it can pin.
+    function usageReportToday() {
+      return new Date();
+    }
+
+    function usageReportWindows(period) {
+      const today = usageReportToday();
+      const to = formatDateKey(today);
+      if (period === 'week') {
+        return { date_from: formatDateKey(startOfWeekMonday(today)), date_to: to };
+      }
+      if (period === 'month') {
+        return {
+          date_from: formatDateKey(new Date(today.getFullYear(), today.getMonth(), 1)),
+          date_to: to,
+        };
+      }
+      return { date_from: `${today.getFullYear()}-01-01`, date_to: to };
+    }
+
+    function usageReportPeriodLength(period, fromKey) {
+      const start = parseDateKey(fromKey);
+      if (period === 'week') return 7;
+      if (period === 'month') return new Date(start.getFullYear(), start.getMonth() + 1, 0).getDate();
+      const year = start.getFullYear();
+      const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+      return leap ? 366 : 365;
+    }
+
+    function usageReportDayKeys(fromKey, toKey) {
+      const out = [];
+      const cursor = parseDateKey(fromKey);
+      const stop = parseDateKey(toKey);
+      while (cursor.getTime() <= stop.getTime()) {
+        out.push(formatDateKey(cursor));
+        cursor.setDate(cursor.getDate() + 1);
+      }
+      return out;
+    }
+
+    // The calendar span the grid needs, which is wider than the window: a month
+    // that started on Thursday still draws its Monday column, blank.
+    function usageReportCalendar(period, fromKey, toKey) {
+      const from = parseDateKey(fromKey);
+      const to = parseDateKey(toKey);
+      let start;
+      let stop;
+      if (period === 'week') {
+        start = startOfWeekMonday(from);
+        stop = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6);
+      } else if (period === 'month') {
+        start = new Date(from.getFullYear(), from.getMonth(), 1);
+        stop = new Date(to.getFullYear(), to.getMonth() + 1, 0);
+      } else {
+        start = new Date(to.getFullYear(), 0, 1);
+        stop = new Date(to.getFullYear(), 11, 31);
+      }
+      return usageReportDayKeys(formatDateKey(start), formatDateKey(stop));
+    }
+
+    function usageReportToolLabel(tool) {
+      return formatToolName(tool);
+    }
+
+    // A missing figure prints as an em dash, never as a zero: "0 tokens" and
+    // "this surface has no token figure" are different claims (spec 5.1).
+    const USAGE_REPORT_EM = '—';
+
+    // Shares are printed at the precision the number deserves: rounding 0.4% to
+    // 0% would make a real slice look like a missing one.
+    function usageReportShare(fraction) {
+      const value = Number(fraction);
+      if (fraction === null || fraction === undefined || !Number.isFinite(value)) return USAGE_REPORT_EM;
+      const pct = value * 100;
+      const digits = pct > 0 && pct < 1 ? 2 : pct < 10 ? 1 : 0;
+      return `${pct.toFixed(digits)}%`;
+    }
+
+    function usageReportFigure(value, format) {
+      return value === null || value === undefined ? USAGE_REPORT_EM : format(value);
+    }
+
+    // Podium sub-lines want hours, not "12h 04m": the tile is a glance, not a log.
+    function usageReportHours(ms) {
+      const hours = Number(ms || 0) / 3600000;
+      if (!(hours > 0)) return USAGE_REPORT_EM;
+      if (hours < 1) return `${Math.round(hours * 60)}m`;
+      return `${hours.toLocaleString(langLocale(), { maximumFractionDigits: hours < 10 ? 1 : 0 })}h`;
+    }
+
+    function usageReportHourLabel(hour) {
+      return String(Number(hour) % 24).padStart(2, '0');
+    }
+
+    function usageReportPeakHour(hour) {
+      if (hour === null || hour === undefined) return USAGE_REPORT_EM;
+      return `${usageReportHourLabel(hour)}:00–${usageReportHourLabel(Number(hour) + 1)}:00`;
+    }
+
+    // The served night_hours list -> a printed span, one that walks past midnight
+    // included. The window is never spelled out here (spec 5.7): a copy of the
+    // server's night definition in the page goes stale the day that definition
+    // moves, and the index keeps printing a number nobody chose.
+    function usageReportHourWindow(hours) {
+      const list = [...new Set((hours || []).map(Number).filter((h) => Number.isInteger(h)))].sort((a, b) => a - b);
+      if (!list.length) return USAGE_REPORT_EM;
+      const spans = [];
+      for (const hour of list) {
+        const last = spans[spans.length - 1];
+        // Ascending, so a span only grows forward here; the midnight join is
+        // made once, after the loop, where the two ends of the list meet.
+        if (last && hour === last.end + 1) last.end = hour;
+        else spans.push({ start: hour, end: hour });
+      }
+      if (spans.length > 1 && spans[spans.length - 1].end === 23 && spans[0].start === 0) {
+        spans[spans.length - 1].end = spans[0].end;
+        spans.shift();
+      }
+      return spans
+        .map((span) => `${usageReportHourLabel(span.start)}:00–${usageReportHourLabel(span.end + 1)}:00`)
+        .join(' · ');
+    }
+
+    // Spec 5.2: the projects facet does not cover the period total. Sources with
+    // no stored sessions (OpenClaw, live-only tools) contribute tokens and no
+    // project rows, and printing only the facet's own `unattributed` bucket
+    // understates that gap by an order of magnitude. Three components, always.
+    function usageReportProjectShares(facetTotal, rowSum, unattributedTokens) {
+      const total = Number(facetTotal) || 0;
+      if (total <= 0) return { unattrShare: null, gapShare: null };
+      const unattr = Number(unattributedTokens) || 0;
+      const attributed = Number(rowSum) || 0;
+      return {
+        unattrShare: unattr / total,
+        gapShare: Math.max(0, (total - attributed - unattr) / total),
+      };
+    }
+
+    // The facets and /api/usage are two scans of one window, so they need not
+    // agree. When they visibly disagree the page says which figure is narrower
+    // instead of leaving the reader to find the difference by subtraction.
+    function usageReportShowFacetCoverage(model) {
+      return model.tokens > 0 && model.facetTotal > 0 && model.facetTotal < model.tokens * 0.99;
+    }
+
+    // Asked of the server the report reads, not of the box serving this page:
+    // getRuntimeVersion() is local-only and cached for the whole session, so a
+    // remote report stamped from it would print the wrong build.
+    function usageReportLoadVersion() {
+      const server = usageReportServer();
+      const serverId = (server && server.id) || 'local';
+      if (usageReportState.versionServerId === serverId) return;
+      usageReportState.versionServerId = serverId;
+      usageReportState.version = null;
+      fetchJsonWithRetry(server, '/api/version')
+        .then((payload) => {
+          // A server switch that overtook this answer owns the footer now.
+          if (usageReportState.versionServerId !== serverId) return;
+          usageReportState.version = String((payload && payload.runtime_version) || '') || null;
+          if (!usageReportState.model) return;
+          usageReportRenderFooter(usageReportState.model);
+          // The card attribution carries the same stamp, and this answer usually
+          // lands after the first paint: repaint rather than ship an em dash.
+          usageReportRenderShare(usageReportState.model).catch(() => {});
+        })
+        .catch(() => {
+          // Unknown version: the footer prints the tool count without it, and a
+          // later load for this server may still find an answer.
+          if (usageReportState.versionServerId === serverId) usageReportState.versionServerId = null;
+        });
+    }
+
+    async function loadUsageReport(options = {}) {
+      if (usageReportState.loading) return;
+      usageReportWire();
+      usageReportState.loading = true;
+      usageReportState.error = null;
+      usageReportRenderControls();
+      usageReportRenderLoading();
+
+      const server = usageReportServer();
+      usageReportLoadVersion();
+      // Captured, not re-read: a period switch that lands mid-flight must not
+      // leave the finished model wearing the new period's title.
+      const period = usageReportState.period;
+      const { date_from, date_to } = usageReportWindows(period);
+      const query = `date_from=${date_from}&date_to=${date_to}`;
+      const refresh = options.refresh ? '&refresh=1' : '';
+      const request = (path) => fetchJsonWithRetry(server, `${path}${path.includes('?') ? '&' : '?'}${query}${refresh}`, { cache: 'no-store' });
+      const [insights, usage, activeTime] = await Promise.all([
+        request(`/api/insights?facets=${USAGE_REPORT_FACETS}`).catch((error) => ({ __error: error })),
+        request('/api/usage').catch((error) => ({ __error: error })),
+        // The scope line promises every agent session recorded on the machine,
+        // so the report pins the Codex review-session filter open instead of
+        // inheriting the server default or the Overview tab's toggle: those are
+        // a reader's choice about one card, not this report's claim.
+        request('/api/active-time?include_review_sessions=true').catch((error) => ({ __error: error })),
+      ]);
+
+      usageReportState.loading = false;
+      usageReportState.loaded = true;
+      if (insights.__error && usage.__error) {
+        usageReportState.error = { server, detail: insights.__error.message || String(insights.__error) };
+        usageReportState.model = null;
+        usageReportRender();
+        usageReportApplyPendingChoice();
+        return;
+      }
+      usageReportState.model = usageReportBuildModel({
+        insights, usage, activeTime,
+        period, dateFrom: date_from, dateTo: date_to,
+        insightsMissing: !!insights.__error,
+        usageMissing: !!usage.__error,
+        activeTimeMissing: !!activeTime.__error,
+      });
+      usageReportRender();
+      usageReportApplyPendingChoice();
+    }
+
+    // A control changed while a load was in flight describes data that is not on
+    // screen yet, so the control snaps back and the choice waits here rather than
+    // being dropped: late is honest, silently ignored is not.
+    function usageReportApplyPendingChoice() {
+      const period = usageReportState.pendingPeriod;
+      const serverId = usageReportState.pendingServerId;
+      usageReportState.pendingPeriod = null;
+      usageReportState.pendingServerId = null;
+      const changedPeriod = period && period !== usageReportState.period;
+      const changedServer = serverId && serverId !== usageReportState.serverId;
+      if (!changedPeriod && !changedServer) return;
+      if (changedPeriod) usageReportState.period = period;
+      if (changedServer) usageReportState.serverId = serverId;
+      usageReportWritePrefs();
+      loadUsageReport({ refresh: true });
+    }
+
+    function usageReportBuildModel({ insights, usage, activeTime, period, dateFrom, dateTo, insightsMissing, usageMissing, activeTimeMissing }) {
+      const range = (!insightsMissing && insights.range) || (!usageMissing && usage.range) || {};
+      const fromKey = range.from || dateFrom;
+      const toKey = range.to || dateTo;
+      const ins = insightsMissing ? null : insights;
+      const totals = usageMissing ? (ins ? ins.totals : {}) : usage;
+      const daily = ins && Array.isArray(ins.daily) ? ins.daily : null;
+      const byDate = new Map((daily || []).map((row) => [row.date, row]));
+
+      // Two different scans of the same window disagree (an insights total is
+      // not /api/usage's total), so every figure here names its source instead
+      // of averaging them into a third number nobody computed.
+      const tokens = Number((usageMissing ? (ins && ins.totals && ins.totals.tokens) : usage.total_tokens) || 0);
+      const messages = Number((usageMissing ? (ins && ins.totals && ins.totals.messages) : usage.total_messages) || 0);
+      const cost = Number((usageMissing ? (ins && ins.totals && ins.totals.cost) : usage.total_cost) || 0);
+      const byTool = (!activeTimeMissing && activeTime.by_tool) || {};
+      // A source that did not answer has no session count. Summing an empty map
+      // would print "0 sessions", which is a claim about the window rather than
+      // about the request that failed, so this stays null and prints as a dash.
+      const sessions = activeTimeMissing
+        ? null
+        : Object.values(byTool).reduce((sum, row) => sum + (Number(row.session_count) || 0), 0);
+
+      const windowDays = usageReportDayKeys(fromKey, toKey);
+      const calendar = usageReportCalendar(period, fromKey, toKey);
+      const thresholds = quantileThresholds(calendar.map((day) => (byDate.get(day) || {}).tokens || 0), HEAT_COLORS.length - 1);
+      const inWindow = new Set(windowDays);
+      const lastDay = parseDateKey(toKey);
+      const cells = calendar.map((day) => {
+        const row = byDate.get(day);
+        return {
+          date: day,
+          tokens: row ? Number(row.tokens) || 0 : 0,
+          messages: row ? Number(row.messages) || 0 : 0,
+          level: quantileLevel(row ? row.tokens : 0, thresholds),
+          future: parseDateKey(day) > lastDay,
+          inWindow: inWindow.has(day),
+        };
+      });
+
+      const streaks = (ins && ins.streaks) || null;
+      const firsts = (ins && ins.firsts) || null;
+
+      // The ranking facets. A facet that is absent stays null rather than an
+      // empty list, because "the server does not serve it" and "nothing was
+      // used" are different facts and the section headings say different things.
+      const facetList = (facet, key) => {
+        const block = ins && ins[facet];
+        if (!block || !Array.isArray(block[key])) return null;
+        return block[key];
+      };
+      const tools = facetList('tools', 'ranked');
+      const models = facetList('models', 'ranked');
+      const hourly = (ins && ins.hourly) || null;
+      const weekday = (ins && ins.weekday) || null;
+      const projectsBlock = ins && ins.projects && Array.isArray(ins.projects.projects) ? ins.projects : null;
+      const projectRows = projectsBlock ? projectsBlock.projects.filter((row) => Number(row.tokens) > 0) : [];
+      const facetTotal = (ins && ins.totals && Number(ins.totals.tokens)) || 0;
+      const projectSum = projectRows.reduce((sum, row) => sum + (Number(row.tokens) || 0), 0);
+      const unattributed = (projectsBlock && projectsBlock.unattributed && Number(projectsBlock.unattributed.tokens)) || 0;
+      const { unattrShare, gapShare } = usageReportProjectShares(facetTotal, projectSum, unattributed);
+
+      // One row per tool that recorded tokens in the window. Tokens and cost come
+      // from the facet scan (it is what ranks tools, including the live-only ones
+      // /api/usage cannot rank); the token split comes from /api/usage, which
+      // names the sources it has no split for -- an absent row is an em dash
+      // there, not a zero.
+      const usageByTool = (!usageMissing && usage.by_tool) || {};
+      const usageApps = (!usageMissing && usage.apps) || {};
+      const agentRows = (tools || []).filter((row) => Number(row.tokens) > 0).map((row) => {
+        const tool = row.tool;
+        const app = usageApps[tool];
+        const toolRow = usageByTool[tool];
+        const activity = byTool[tool];
+        const split = app || toolRow;
+        return {
+          tool,
+          tokens: Number(row.tokens) || 0,
+          cost: Number(row.cost) || 0,
+          tokensIn: split && split.tokens_in !== undefined ? Number(split.tokens_in) || 0 : null,
+          // Only /api/usage's per-app rows carry output tokens; OpenClaw has no
+          // such column, so its row prints an em dash rather than a borrowed one.
+          tokensOut: app && app.tokens_out !== undefined ? Number(app.tokens_out) || 0 : null,
+          tokensCache: split && split.tokens_cache !== undefined ? Number(split.tokens_cache) || 0 : null,
+          sessions: activity ? Number(activity.session_count) || 0 : null,
+          activeMs: activity ? Number(activity.active_ms_sum) || 0 : null,
+        };
+      });
+      // Tools with no recorded session have no runtime to print, so they wait in
+      // the expandable row instead of headlining a table full of em dashes. When
+      // active time itself did not answer, no row has one and that rule would
+      // fold the whole table into the disclosure: the ranking then stands on the
+      // token columns it still has.
+      const ranked = activeTimeMissing ? agentRows : agentRows.filter((row) => row.sessions !== null);
+      const agentPrimary = ranked.slice(0, 10);
+      const primaryKeys = new Set(agentPrimary.map((row) => row.tool));
+      const agentOthers = agentRows.filter((row) => !primaryKeys.has(row.tool));
+      const elapsedWeekdays = new Set(windowDays.map((day) => (parseDateKey(day).getDay() + 6) % 7));
+      const sourceErrors = (!usageMissing && Array.isArray(usage.source_errors) ? usage.source_errors : [])
+        .map((entry) => (typeof entry === 'string' ? entry : entry && entry.source) || '')
+        .filter(Boolean);
+
+      return {
+        period,
+        range: { from: fromKey, to: toKey },
+        elapsed: windowDays.length,
+        periodLength: usageReportPeriodLength(period, fromKey),
+        tokens, messages, cost, sessions,
+        tokensFromUsage: !usageMissing,
+        comparison: (!usageMissing && usage.comparison) || null,
+        activeMs: (!activeTimeMissing && Number(activeTime.active_ms)) || 0,
+        agentMs: (!activeTimeMissing && Number(activeTime.active_ms_sum)) || 0,
+        gapCapMs: (!activeTimeMissing && activeTime.active_gap_cap_ms) || null,
+        unavailableTools: (!activeTimeMissing && Object.keys(activeTime.unavailable_tools || {})) || [],
+        sourceErrors,
+        dailyAvailable: !!daily,
+        cells,
+        streaks, firsts,
+        tools, models, hourly, weekday,
+        timezone: (ins && ins.timezone) || null,
+        projectsAvailable: !!projectsBlock,
+        projectRows,
+        projectCount: (projectsBlock && Number(projectsBlock.attributed_project_count)) || 0,
+        facetTotal,
+        unattrShare, gapShare,
+        agentRows, agentPrimary, agentOthers,
+        elapsedWeekdays,
+        atByTool: byTool,
+        coverage: (ins && ins.coverage) || null,
+        isEmpty: tokens === 0 && messages === 0,
+        notices: {
+          insightsMissing,
+          usageMissing,
+          activeTimeMissing,
+        },
+      };
+    }
+
+    /* ------------------------------- render ------------------------------- */
+
+    function usageReportText(el, value) {
+      if (!el) return;
+      el.classList.remove('tokdash-loading-placeholder');
+      el.textContent = value;
+    }
+
+    function usageReportPeriodTitle(model) {
+      if (model.period === 'week') return t('usageReportTitleWeek');
+      if (model.period === 'month') return t('usageReportTitleMonth');
+      return t('usageReportTitleYear');
+    }
+
+    // An equal-length prior window is only a fair comparison inside the data.
+    // Year to date reaches back before the first record, and the server cannot
+    // know that, so the report decides: no delta on the year view, and a
+    // multiple-of-nothing delta anywhere else is not a percentage to print.
+    function usageReportShowDelta(model) {
+      if (model.period === 'year') return false;
+      const pct = model.comparison && model.comparison.tokens_pct;
+      return pct !== null && pct !== undefined && Math.abs(pct) <= 1000;
+    }
+
+    function usageReportRenderControls() {
+      const servers = usageReportServers();
+      const select = document.getElementById('usageReportServer');
+      const wrap = document.getElementById('usageReportServerWrap');
+      if (select && wrap) {
+        wrap.hidden = servers.length < 2;
+        const active = usageReportServer();
+        const ids = select.options.length ? [...select.options].map((option) => option.value) : [];
+        if (ids.join('|') !== servers.map((server) => server.id).join('|')) {
+          select.replaceChildren(...servers.map((server) => {
+            const option = document.createElement('option');
+            option.value = server.id;
+            option.textContent = server.label || server.id;
+            return option;
+          }));
+        }
+        select.value = active.id;
+      }
+      document.querySelectorAll('#usageReportPeriod button').forEach((button) => {
+        button.setAttribute('aria-pressed', String(button.dataset.period === usageReportState.period));
+      });
+    }
+
+    function usageReportRenderLoading() {
+      document.getElementById('usageReportStatePanel').hidden = true;
+      document.getElementById('usageReportBanner').hidden = true;
+      ['usageReportKTokens', 'usageReportKCost', 'usageReportKActive', 'usageReportKDays'].forEach((id) => {
+        renderLoadingPlaceholder(document.getElementById(id));
+      });
+      ['usageReportKTokensSub', 'usageReportKCostSub', 'usageReportKActiveSub', 'usageReportKDaysSub',
+        'usageReportSentence', 'usageReportHeat', 'usageReportStreak', 'usageReportLegend',
+        'usageReportRange', 'usageReportProgress',
+        'usageReportPodium', 'usageReportGroupNote', 'usageReportWhen', 'usageReportTz',
+        'usageReportAgentsBody', 'usageReportAgentsNote', 'usageReportFooter'].forEach((id) => usageReportText(document.getElementById(id), ''));
+      usageReportText(document.getElementById('usageReportTitle'), t(usageReportState.period === 'year' ? 'usageReportTitleYear' : usageReportState.period === 'week' ? 'usageReportTitleWeek' : 'usageReportTitleMonth'));
+      usageReportClearShare();
+    }
+
+    function usageReportRenderState() {
+      const panel = document.getElementById('usageReportStatePanel');
+      const stack = document.getElementById('usageReportStack');
+      const retry = document.getElementById('usageReportRetry');
+      if (!usageReportState.error) {
+        panel.hidden = true;
+        stack.hidden = false;
+        return;
+      }
+      stack.hidden = true;
+      panel.hidden = false;
+      retry.hidden = false;
+      usageReportText(document.getElementById('usageReportStateTitle'), t('usageReport'));
+      usageReportText(document.getElementById('usageReportStateBody'), t('usageReportUnreachable', {
+        server: usageReportState.error.server.label || usageReportState.error.server.id,
+        error: usageReportState.error.detail,
+      }));
+    }
+
+    function usageReportRenderBanner(model) {
+      const banner = document.getElementById('usageReportBanner');
+      const bits = [];
+      // Every source that did not answer is named here, in the order a reader
+      // meets its consequences: the analytics scan feeds most of the page, the
+      // totals endpoint feeds the hero, active time feeds the session counts.
+      if (model.notices.insightsMissing) bits.push(t('usageReportInsightsMissing'));
+      if (model.notices.usageMissing) bits.push(t('usageReportTotalsFallback'));
+      if (model.notices.activeTimeMissing) bits.push(t('usageReportActiveMissing'));
+      if (model.sourceErrors.length) {
+        bits.push(t('usageReportPartial', { tools: model.sourceErrors.map(usageReportToolLabel).join(', ') }));
+      }
+      if (model.unavailableTools.length) {
+        bits.push(t('usageReportActiveUnavailable', { tools: model.unavailableTools.map(usageReportToolLabel).join(', ') }));
+      }
+      banner.hidden = !bits.length;
+      banner.textContent = bits.join(' ');
+    }
+
+    function usageReportDeltaSpan(pct) {
+      const span = document.createElement('span');
+      span.className = pct >= 0 ? 'usage-report-delta-up' : 'usage-report-delta-down';
+      span.textContent = `${pct >= 0 ? '+' : '−'}${Math.abs(pct).toFixed(1)}%`;
+      return span;
+    }
+
+    function usageReportRenderHero(model) {
+      const empty = model.isEmpty;
+      const tokensSub = document.getElementById('usageReportKTokensSub');
+      tokensSub.classList.remove('tokdash-loading-placeholder');
+      usageReportText(document.getElementById('usageReportKTokens'), empty ? '—' : formatTokenCount(model.tokens));
+      tokensSub.replaceChildren();
+      if (!empty) {
+        if (usageReportShowDelta(model)) {
+          tokensSub.append(usageReportDeltaSpan(model.comparison.tokens_pct));
+          tokensSub.append(document.createTextNode(` ${t('usageReportVsPrior', { n: model.elapsed })}`));
+        } else {
+          // Two different silences: a year in progress is not compared by rule,
+          // while a missing prior window is a fact about the data.
+          tokensSub.textContent = model.period === 'year' ? t('usageReportNoDeltaYear') : t('usageReportNoDelta');
+        }
+      }
+      usageReportText(document.getElementById('usageReportKCost'), empty ? '—' : formatCurrency(model.cost));
+      usageReportText(document.getElementById('usageReportKCostSub'), empty ? '' : t('usageReportCostShort'));
+      usageReportText(document.getElementById('usageReportKActive'), empty || !model.activeMs ? '—' : formatDuration(model.activeMs));
+      usageReportText(document.getElementById('usageReportKActiveSub'), empty || !model.agentMs ? '' : t('usageReportActiveSub', { agent: formatDuration(model.agentMs) }));
+      const daysEl = document.getElementById('usageReportKDays');
+      daysEl.classList.remove('tokdash-loading-placeholder');
+      // No streaks facet is no active-day count: "0/30" reads as a month nobody
+      // worked, and the sub-line under this tile already carries the window.
+      if (empty || !model.streaks) {
+        daysEl.textContent = USAGE_REPORT_EM;
+      } else {
+        daysEl.replaceChildren(document.createTextNode(String(model.streaks.active_days)));
+        const total = document.createElement('span');
+        total.style.color = 'var(--color-muted)';
+        total.textContent = `/${model.elapsed}`;
+        daysEl.append(total);
+      }
+      usageReportText(document.getElementById('usageReportKDaysSub'), empty ? '' : t('usageReportDaysSub', { n: model.elapsed }));
+    }
+
+    // The sentence reads "In {range}", so it needs the phrase the head cannot
+    // supply: a bare month name, and a phrase that survives the preposition.
+    function usageReportSentenceRange(model) {
+      if (model.period === 'month') {
+        return parseDateKey(model.range.from).toLocaleDateString(langLocale(), { month: 'long' });
+      }
+      if (model.period === 'week') return t('usageReportSentenceWeek');
+      return t('usageReportSentenceYear');
+    }
+
+    function usageReportRenderSentence(model) {
+      const priorEnd = parseDateKey(model.range.from);
+      priorEnd.setDate(priorEnd.getDate() - 1);
+      const priorStart = new Date(priorEnd);
+      priorStart.setDate(priorStart.getDate() - (model.elapsed - 1));
+      const vars = {
+        range: usageReportSentenceRange(model),
+        sessions: usageReportFigure(model.sessions, formatNumber),
+        tokens: formatTokenCount(model.tokens),
+        cost: formatCurrency(model.cost),
+        prior: `${formatShortDate(priorStart, true)} – ${formatShortDate(priorEnd, true)}`,
+      };
+      if (model.isEmpty) {
+        usageReportText(document.getElementById('usageReportSentence'), t('usageReportEmptyPeriod'));
+        return;
+      }
+      if (!usageReportShowDelta(model)) {
+        usageReportText(document.getElementById('usageReportSentence'), t('usageReportSentenceFlat', vars));
+        return;
+      }
+      vars.pct = Math.abs(model.comparison.tokens_pct).toFixed(1);
+      usageReportText(document.getElementById('usageReportSentence'), t(model.comparison.tokens_pct < 0 ? 'usageReportSentenceLess' : 'usageReportSentence', vars));
+    }
+
+    function usageReportCell(day) {
+      const cell = document.createElement('div');
+      cell.className = 'usage-report-cell';
+      if (day.future || !day.inWindow) {
+        cell.classList.add('is-blank');
+        return cell;
+      }
+      cell.style.background = heatColor(day.level);
+      cell.dataset.token = '1';
+      cell.title = `${day.date} · ${formatTokenCount(day.tokens)} tokens · ${formatNumber(day.messages)} messages`;
+      return cell;
+    }
+
+    function usageReportRenderLegend() {
+      const legend = document.getElementById('usageReportLegend');
+      legend.replaceChildren();
+      const less = document.createElement('span');
+      less.textContent = t('less');
+      legend.append(less);
+      HEAT_COLORS.forEach((color) => {
+        const swatch = document.createElement('i');
+        swatch.style.background = color;
+        legend.append(swatch);
+      });
+      const more = document.createElement('span');
+      more.textContent = t('more');
+      legend.append(more);
+    }
+
+    function usageReportRenderHeat(model) {
+      const host = document.getElementById('usageReportHeat');
+      usageReportRenderLegend();
+      host.replaceChildren();
+      if (!model.dailyAvailable || !model.cells.length) {
+        usageReportText(host, t('usageReportFacetsMissing', { facets: USAGE_REPORT_HEAT_FACETS }));
+        usageReportText(document.getElementById('usageReportStreak'), '');
+        return;
+      }
+
+      const lead = (parseDateKey(model.cells[0].date).getDay() + 6) % 7;
+      if (model.period !== 'year') {
+        const labels = document.createElement('div');
+        labels.className = 'usage-report-wlabels';
+        getDayLabels().forEach((label) => {
+          const cell = document.createElement('div');
+          cell.textContent = label;
+          labels.append(cell);
+        });
+        host.append(labels);
+        const grid = document.createElement('div');
+        grid.className = 'usage-report-month';
+        for (let i = 0; i < lead; i++) {
+          const blank = document.createElement('div');
+          blank.className = 'usage-report-cell is-blank';
+          grid.append(blank);
+        }
+        model.cells.forEach((day) => grid.append(usageReportCell(day)));
+        host.append(grid);
+      } else {
+        const padded = [...Array(lead).fill(null), ...model.cells];
+        const columns = [];
+        for (let i = 0; i < padded.length; i += 7) columns.push(padded.slice(i, i + 7));
+        const wrap = document.createElement('div');
+        wrap.className = 'usage-report-year';
+        const inner = document.createElement('div');
+        const monthRow = document.createElement('div');
+        monthRow.className = 'usage-report-mlabels';
+        const body = document.createElement('div');
+        body.className = 'usage-report-year-cols';
+        const monthNames = getMonthLabels();
+        let lastMonth = null;
+        columns.forEach((column) => {
+          const label = document.createElement('div');
+          const firstReal = column.find(Boolean);
+          if (firstReal) {
+            const month = parseDateKey(firstReal.date).getMonth();
+            if (month !== lastMonth) {
+              label.textContent = monthNames[month];
+              lastMonth = month;
+            }
+          }
+          monthRow.append(label);
+          const col = document.createElement('div');
+          col.className = 'usage-report-ycol';
+          column.forEach((day) => {
+            col.append(day ? usageReportCell(day) : Object.assign(document.createElement('div'), { className: 'usage-report-cell is-blank' }));
+          });
+          body.append(col);
+        });
+        inner.append(monthRow, body);
+        wrap.append(inner);
+        host.append(wrap);
+      }
+
+      usageReportRenderStreak(model);
+    }
+
+    function usageReportRenderStreak(model) {
+      const streaks = model.streaks;
+      const firsts = model.firsts;
+      if (!streaks || !firsts) {
+        usageReportText(document.getElementById('usageReportStreak'), '');
+        return;
+      }
+      const vars = {
+        streak: streaks.current_streak,
+        a: streaks.active_days,
+        n: model.elapsed,
+        date: firsts.busiest_day ? formatShortDate(firsts.busiest_day, true) : '—',
+        tokens: formatTokenCount(firsts.busiest_day_tokens || 0),
+      };
+      // A closed period's current streak is legitimately 0: it lapsed. Printing
+      // "0-day streak" reads as a data gap rather than as what happened.
+      usageReportText(
+        document.getElementById('usageReportStreak'),
+        streaks.current_streak > 0 ? t('usageReportStreak', vars) : t('usageReportStreakLapsed', { ...vars, streak: streaks.longest_streak }),
+      );
+    }
+
+    /* Notes are built from text nodes, never markup: project names, model names
+       and tool names are all data that arrives over the wire. */
+    function usageReportFillNote(el, entries) {
+      if (!el) return;
+      const fragment = document.createDocumentFragment();
+      entries
+        .filter((entry) => entry && String(entry.text || '') !== '')
+        .forEach((entry, index) => {
+          if (index) fragment.append(document.createElement('br'));
+          const span = document.createElement('span');
+          if (entry.faint) span.className = 'usage-report-note-faint';
+          span.textContent = String(entry.text);
+          fragment.append(span);
+        });
+      el.replaceChildren(fragment);
+    }
+
+    function usageReportPlainName(label) {
+      const span = document.createElement('span');
+      span.className = 'usage-report-tile-name-label';
+      span.textContent = label === null || label === undefined ? USAGE_REPORT_EM : String(label);
+      span.title = span.textContent;
+      return span;
+    }
+
+    function usageReportPodiumTile(kindLabel, nameNode, valueText, shareText, subText) {
+      const tile = document.createElement('div');
+      tile.className = 'usage-report-tile';
+
+      const kind = document.createElement('div');
+      kind.className = 'usage-report-tile-kind';
+      kind.textContent = kindLabel;
+
+      const name = document.createElement('div');
+      name.className = 'usage-report-tile-name';
+      name.append(nameNode);
+
+      const value = document.createElement('div');
+      value.className = 'usage-report-tile-value mono';
+      value.textContent = valueText;
+      if (shareText) {
+        const share = document.createElement('span');
+        share.className = 'usage-report-inline-share';
+        share.textContent = ` ${shareText}`;
+        value.append(share);
+      }
+
+      const sub = document.createElement('div');
+      sub.className = 'usage-report-tile-sub mono';
+      sub.textContent = subText;
+
+      tile.append(kind, name, value, sub);
+      return tile;
+    }
+
+    function usageReportRenderPodium(model) {
+      const host = document.getElementById('usageReportPodium');
+      const note = document.getElementById('usageReportGroupNote');
+      if (!host || !note) return;
+
+      const harness = model.tools && model.tools.length ? model.tools[0] : null;
+      const topModel = model.models && model.models.length ? model.models[0] : null;
+      const project = model.projectRows.length ? model.projectRows[0] : null;
+      const shareOf = (tokens) => (model.facetTotal > 0 ? usageReportShare(Number(tokens) / model.facetTotal) : '');
+      const activity = harness ? model.atByTool[harness.tool] : null;
+
+      const tiles = [
+        usageReportPodiumTile(
+          t('usageReportTopHarness'),
+          harness ? createToolIdentity(harness.tool) : usageReportPlainName(null),
+          harness ? formatTokenCount(harness.tokens) : USAGE_REPORT_EM,
+          harness ? shareOf(harness.tokens) : '',
+          harness
+            ? (activity
+              ? t('usageReportSessionsActive', {
+                sessions: formatNumber(activity.session_count || 0),
+                hours: usageReportHours(activity.active_ms_sum),
+              })
+              : USAGE_REPORT_EM)
+            : USAGE_REPORT_EM,
+        ),
+        usageReportPodiumTile(
+          t('usageReportTopModel'),
+          usageReportPlainName(topModel ? topModel.model : null),
+          topModel ? formatTokenCount(topModel.tokens) : USAGE_REPORT_EM,
+          topModel ? shareOf(topModel.tokens) : '',
+          // The token figure ranks the model; the cost under it tells the reader
+          // whether that ranking is also the expensive one.
+          topModel ? `${formatCurrency(topModel.cost)} \u00b7 ${t('usageReportCostShort')}` : USAGE_REPORT_EM,
+        ),
+        usageReportPodiumTile(
+          t('usageReportTopProject'),
+          usageReportPlainName(project ? project.project : null),
+          project ? formatTokenCount(project.tokens) : USAGE_REPORT_EM,
+          project ? shareOf(project.tokens) : '',
+          project ? `${formatCurrency(project.cost)} \u00b7 ${t('usageReportCostShort')}` : USAGE_REPORT_EM,
+        ),
+      ];
+      host.replaceChildren(...tiles);
+
+      if (!model.projectsAvailable) {
+        usageReportFillNote(note, [
+          { text: t('usageReportMissingProjects') },
+          { text: t('usageReportProjectGroupNote'), faint: true },
+        ]);
+        return;
+      }
+      // Every project surface prints all three reconciliation components (5.2):
+      // the ranked rows, the facet's own unattributed bucket, and the share the
+      // facet never sees at all.
+      const entries = [
+        {
+          text: t('usageReportPodiumProjectNote', {
+            n: model.projectCount,
+            u: usageReportShare(model.unattrShare),
+            g: usageReportShare(model.gapShare),
+          }),
+        },
+        { text: t('usageReportProjectGroupNote'), faint: true },
+      ];
+      if (usageReportShowFacetCoverage(model)) {
+        entries.push({ text: t('usageReportFacetCovers', { pct: usageReportShare(model.facetTotal / model.tokens) }), faint: true });
+      }
+      usageReportFillNote(note, entries);
+    }
+
+    function usageReportStatLine(label, value) {
+      const line = document.createElement('div');
+      line.className = 'usage-report-statline';
+      const key = document.createElement('span');
+      key.className = 'k';
+      key.textContent = label;
+      const figure = document.createElement('span');
+      figure.className = 'v mono';
+      figure.textContent = ` ${value}`;
+      line.append(key, figure);
+      return line;
+    }
+
+    function usageReportRenderWhen(model) {
+      const host = document.getElementById('usageReportWhen');
+      if (!host) return;
+      usageReportText(
+        document.getElementById('usageReportTz'),
+        model.hourly && model.timezone ? t('usageReportWhenTz', { tz: model.timezone }) : '',
+      );
+      host.replaceChildren();
+
+      // Only this section collapses when the rhythm facets are absent (5.9);
+      // the rest of the report keeps its own sources.
+      if (!model.hourly || !model.weekday) {
+        const notice = document.createElement('p');
+        notice.className = 'usage-report-notice';
+        notice.style.gridColumn = '1 / -1';
+        notice.textContent = t('usageReportFacetsMissing', { facets: 'hourly,weekday' });
+        host.append(notice);
+        return;
+      }
+
+      const hours = document.createElement('div');
+      const strip = document.createElement('div');
+      strip.className = 'usage-report-hbars';
+      const buckets = model.hourly.buckets || [];
+      const maxHour = Math.max(1, ...buckets.map((row) => Number(row.tokens) || 0));
+      const nightHours = new Set((model.hourly.night_hours || []).map(Number));
+      buckets.forEach((row) => {
+        const bar = document.createElement('div');
+        const classes = ['usage-report-hbar'];
+        if (Number(row.hour) === Number(model.hourly.peak_hour)) classes.push('is-peak');
+        if (nightHours.has(Number(row.hour))) classes.push('is-night');
+        bar.className = classes.join(' ');
+        const tokens = Number(row.tokens) || 0;
+        bar.style.height = `${Math.max(1, Math.round((tokens / maxHour) * 100))}%`;
+        bar.title = `${usageReportHourLabel(row.hour)}:00 \u00b7 ${formatTokenCount(tokens)}`;
+        strip.append(bar);
+      });
+      hours.append(strip);
+      const axis = document.createElement('div');
+      axis.className = 'usage-report-hbar-ax mono';
+      ['00', '06', '12', '18', '23'].forEach((label) => {
+        const tick = document.createElement('span');
+        tick.textContent = label;
+        axis.append(tick);
+      });
+      hours.append(axis);
+
+      const side = document.createElement('div');
+      side.append(usageReportStatLine(t('usageReportPeakHour'), usageReportPeakHour(model.hourly.peak_hour)));
+      const nightShare = model.hourly.night_share;
+      side.append(usageReportStatLine(
+        t('usageReportNightOwl'),
+        nightShare === null || nightShare === undefined ? USAGE_REPORT_EM : usageReportShare(nightShare),
+      ));
+      const nightNote = document.createElement('p');
+      nightNote.className = 'usage-report-notice';
+      nightNote.style.margin = '2px 0 10px';
+      nightNote.textContent = t('usageReportNightNote', { window: usageReportHourWindow(model.hourly.night_hours) });
+      side.append(nightNote);
+
+      // A week or a month has not met every weekday yet. A weekday it never met
+      // prints an empty bar and an em dash, not a zero: "no Thursday has
+      // happened" is not "Thursday used nothing".
+      const weekdays = model.weekday.buckets || [];
+      const maxWeekday = Math.max(1, ...weekdays.map((row) => Number(row.tokens) || 0));
+      const labels = getDayLabels();
+      weekdays.forEach((row) => {
+        const weekday = Number(row.weekday);
+        const reached = model.elapsedWeekdays.has(weekday);
+        const line = document.createElement('div');
+        line.className = `usage-report-wk-row${weekday === Number(model.weekday.peak_weekday) ? ' is-peak' : ''}`;
+        const name = document.createElement('span');
+        name.className = 'n';
+        name.textContent = labels[weekday] || row.name || USAGE_REPORT_EM;
+        const track = document.createElement('span');
+        track.className = 'usage-report-bar';
+        const fill = document.createElement('i');
+        fill.style.width = reached ? `${Math.max(2, Math.round(((Number(row.tokens) || 0) / maxWeekday) * 100))}%` : '0%';
+        track.append(fill);
+        const figure = document.createElement('span');
+        figure.className = 'v mono';
+        figure.textContent = reached ? formatTokenCount(row.tokens) : USAGE_REPORT_EM;
+        line.append(name, track, figure);
+        side.append(line);
+      });
+
+      if (model.weekday.peak_weekday !== null && model.weekday.peak_weekday !== undefined) {
+        const peak = document.createElement('p');
+        peak.className = 'usage-report-notice';
+        peak.style.marginTop = '8px';
+        peak.textContent = `${t('usageReportPeakDay')}: ${labels[Number(model.weekday.peak_weekday)] || USAGE_REPORT_EM}`;
+        side.append(peak);
+      }
+
+      host.append(hours, side);
+    }
+
+    function usageReportAgentRow(row, rowClass) {
+      const tr = document.createElement('tr');
+      if (rowClass) tr.className = rowClass;
+      const name = document.createElement('td');
+      name.append(createToolIdentity(row.tool));
+      tr.append(name);
+      [
+        usageReportFigure(row.sessions, formatNumber),
+        usageReportFigure(row.tokens, formatTokenCount),
+        usageReportFigure(row.tokensIn, formatTokenCount),
+        usageReportFigure(row.tokensOut, formatTokenCount),
+        usageReportFigure(row.tokensCache, formatTokenCount),
+        // A tool nothing was priced for has no cost, which is not the same fact
+        // as a free one, so an unpriced row prints a dash rather than $0.00.
+        row.cost > 0 ? formatCurrency(row.cost) : USAGE_REPORT_EM,
+        usageReportFigure(row.activeMs, formatDuration),
+      ].forEach((text) => {
+        const cell = document.createElement('td');
+        cell.className = 'mono';
+        cell.textContent = text;
+        tr.append(cell);
+      });
+      return tr;
+    }
+
+    function usageReportRenderAgents(model) {
+      const body = document.getElementById('usageReportAgentsBody');
+      const note = document.getElementById('usageReportAgentsNote');
+      if (!body) return;
+
+      if (!model.tools) {
+        const tr = document.createElement('tr');
+        const cell = document.createElement('td');
+        cell.colSpan = 8;
+        cell.textContent = t('usageReportFacetsMissing', { facets: 'tools' });
+        tr.append(cell);
+        body.replaceChildren(tr);
+        usageReportFillNote(note, []);
+        return;
+      }
+
+      const fragment = document.createDocumentFragment();
+      model.agentPrimary.forEach((row) => fragment.append(usageReportAgentRow(row)));
+
+      if (model.agentOthers.length) {
+        const sessions = model.agentOthers.reduce((sum, row) => sum + (row.sessions || 0), 0);
+        const tally = sessions
+          ? `${formatNumber(sessions)} ${t('usageReportColSessions').toLowerCase()}`
+          : `${formatNumber(model.agentOthers.length)} ${t('usageReportToolCount')}`;
+        const tr = document.createElement('tr');
+        tr.className = 'usage-report-other-row';
+        const cell = document.createElement('td');
+        cell.colSpan = 8;
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'usage-report-disclosure';
+        button.setAttribute('aria-expanded', String(usageReportState.othersOpen));
+        button.textContent = `${usageReportState.othersOpen ? '\u25be' : '\u25b8'} ${t('usageReportOtherTools', { n: tally, machine: usageReportMachineName() })}`;
+        button.addEventListener('click', () => {
+          usageReportState.othersOpen = !usageReportState.othersOpen;
+          if (usageReportState.model) usageReportRenderAgents(usageReportState.model);
+        });
+        cell.append(button);
+        tr.append(cell);
+        fragment.append(tr);
+        if (usageReportState.othersOpen) {
+          model.agentOthers.forEach((row) => fragment.append(usageReportAgentRow(row, 'usage-report-sub-row')));
+        }
+      }
+
+      if (!model.agentPrimary.length && !model.agentOthers.length) {
+        const tr = document.createElement('tr');
+        const cell = document.createElement('td');
+        cell.colSpan = 8;
+        cell.textContent = t('usageReportEmptyPeriod');
+        tr.append(cell);
+        fragment.append(tr);
+      }
+
+      body.replaceChildren(fragment);
+
+      // The podium prints the coverage line when it has a podium to qualify. When
+      // it has no project facet, the table is the surface a reader will mistake
+      // for the period totals, so the line moves here instead.
+      usageReportFillNote(note, usageReportShowFacetCoverage(model) && !model.projectsAvailable
+        ? [{ text: t('usageReportFacetCovers', { pct: usageReportShare(model.facetTotal / model.tokens) }) }]
+        : []);
+    }
+
+    function usageReportRenderFooter(model) {
+      const host = document.getElementById('usageReportFooter');
+      if (!host) return;
+      // Both of these are claims about one machine -- whose midnight starts a
+      // day, and whose tokdash did the counting -- so they name the server the
+      // report was read from rather than assuming it is the local one.
+      const machine = usageReportMachineName();
+      const lines = [t('usageReportFooterDays', { machine }), t('usageReportFooterCost')];
+      if (model.gapCapMs) lines.push(t('usageReportFooterActive', { cap: formatDuration(model.gapCapMs) }));
+      if (model.projectsAvailable) lines.push(t('usageReportProjectGroupNote'));
+      if (model.coverage) {
+        const sources = (model.coverage.stored_sources || []).length + (model.coverage.live_sources || []).length;
+        lines.push(t('usageReportFooterSrc', { n: sources, machine, version: usageReportState.version || USAGE_REPORT_EM }));
+      }
+      host.replaceChildren(...lines.map((line) => {
+        const row = document.createElement('div');
+        row.textContent = line;
+        return row;
+      }));
+    }
+
+
+    /* ---------------------------- share cards ---------------------------- */
+
+    /* Two fixed 360x640 cards painted by hand on a canvas at 3x, so an export
+       needs no html2canvas, no foreignObject and no server render (spec D5).
+       All layout lives in usageReportCardModel(), which returns a draw list the
+       painter cannot think with; the fit figures logged below are therefore the
+       same numbers the downloaded file is made of. */
+    const USAGE_REPORT_CARD = { W: 360, H: 640, padX: 24, padTop: 26, padBottom: 18, scale: 3 };
+
+    /* Literal colours rather than CSS variables: a PNG outlives the theme that
+       painted it and answers to neither. The heat ramp is the app's default
+       scale, not the live one, so one month always exports one picture. */
+    const USAGE_REPORT_CARD_PAL = {
+      light: {
+        bg: '#F8FAFC', panel: '#FFFFFF', text: '#0F172A', muted: '#475569', faint: '#94A3B8',
+        border: '#E2E8F0', primary: '#1E40AF', secondary: '#3B82F6', cost: '#0F766E',
+        heat: DEFAULT_HEAT_COLORS_LIGHT, barBg: '#EEF2F7',
+      },
+      dark: {
+        bg: '#0F172A', panel: '#131D31', text: '#E2E8F0', muted: '#94A3B8', faint: '#64748B',
+        border: '#334155', primary: '#60A5FA', secondary: '#93C5FD', cost: '#34D399',
+        heat: DEFAULT_HEAT_COLORS_DARK, barBg: '#1E293B',
+      },
+    };
+    const USAGE_REPORT_TIER_ACCENT = {
+      green: { light: '#15803D', dark: '#4ADE80' },
+      amber: { light: '#B45309', dark: '#FBBF24' },
+    };
+    const USAGE_REPORT_SANS = '"Fira Sans",ui-sans-serif,system-ui,-apple-system,"Segoe UI","Noto Sans CJK SC",sans-serif';
+    const USAGE_REPORT_MONO = '"Fira Code",ui-monospace,SFMono-Regular,Menlo,monospace';
+
+    function usageReportCardFont(size, weight, mono) {
+      return `${weight || 400} ${size}px ${mono ? USAGE_REPORT_MONO : USAGE_REPORT_SANS}`;
+    }
+
+    const usageReportMeasureCtx = document.createElement('canvas').getContext('2d');
+
+    function usageReportTextWidth(text, font) {
+      usageReportMeasureCtx.font = font;
+      return usageReportMeasureCtx.measureText(String(text)).width;
+    }
+
+    function usageReportWrapText(text, font, maxWidth) {
+      const lines = [];
+      let line = '';
+      String(text).split(/\s+/).forEach((word) => {
+        const next = line ? `${line} ${word}` : word;
+        if (line && usageReportTextWidth(next, font) > maxWidth) {
+          lines.push(line);
+          line = word;
+        } else {
+          line = next;
+        }
+      });
+      if (line) lines.push(line);
+      return lines;
+    }
+
+    function usageReportClipText(text, font, maxWidth) {
+      let out = String(text);
+      if (usageReportTextWidth(out, font) <= maxWidth) return out;
+      while (out.length > 1 && usageReportTextWidth(`${out}…`, font) > maxWidth) out = out.slice(0, -1);
+      return `${out}…`;
+    }
+
+    // Webfonts must be in before the first measure, or the layout is computed
+    // against a fallback metric and the paint does not match it.
+    function usageReportCardFonts() {
+      if (!usageReportState.fonts) {
+        usageReportState.fonts = (document.fonts && document.fonts.ready) || Promise.resolve();
+      }
+      return usageReportState.fonts;
+    }
+
+    /* Brand marks reuse the same-origin blob URLs the DOM already fetched, which
+       keeps the canvas untainted and the export writable. */
+    const usageReportCardIcons = new Map();
+
+    function usageReportLoadCardIcons(tools) {
+      const jobs = [...new Set((tools || []).filter(Boolean))].filter((tool) => !usageReportCardIcons.has(tool));
+      return Promise.all(jobs.map((tool) => {
+        const meta = toolBrandMeta(tool);
+        if (!meta || !meta.icon) {
+          usageReportCardIcons.set(tool, null);
+          return Promise.resolve();
+        }
+        return loadToolBrandIcon(meta.icon).then((url) => new Promise((resolve) => {
+          const image = new Image();
+          image.onload = () => {
+            usageReportCardIcons.set(tool, { image, invert: !!meta.darkInvert });
+            resolve();
+          };
+          image.onerror = () => {
+            usageReportCardIcons.set(tool, null);
+            resolve();
+          };
+          image.src = url;
+        })).catch(() => usageReportCardIcons.set(tool, null));
+      }));
+    }
+
+    /* Spec D1: the report belongs to one machine, and the card has to say which.
+       The nickname is the owner's own word for it and wins outright; with none
+       set, a remote server prints its registry label and the local box prints the
+       translated "this machine", because "Local" is a UI label, not a name. */
+    function usageReportMachineName() {
+      if (usageReportState.nickname) return usageReportState.nickname;
+      const server = usageReportServer();
+      const label = String((server && server.label) || '').trim();
+      if (server && server.id !== 'local' && label) return label;
+      return t('usageReportCardNicknameFallback');
+    }
+
+    function usageReportCardTitle(model) {
+      const from = parseDateKey(model.range.from);
+      if (model.period === 'year') return t('usageReportCardYearTitle', { year: from.getFullYear() });
+      if (model.period === 'week') return t('usageReportCardWeekTitle', { date: formatShortDate(model.range.from, true) });
+      // A month needs no copy key: every locale already names it.
+      return from.toLocaleDateString(langLocale(), currentLang === 'zh'
+        ? { year: 'numeric', month: 'long' }
+        : { month: 'long', year: 'numeric' });
+    }
+
+    function usageReportCardModel(model, tier, mode, overrides) {
+      const opts = { maxProjects: 5, cellCap: 11, ...overrides };
+      const pal = USAGE_REPORT_CARD_PAL[mode];
+      const accent = USAGE_REPORT_TIER_ACCENT[tier][mode];
+      const ops = [];
+      const L = USAGE_REPORT_CARD.padX;
+      const R = USAGE_REPORT_CARD.W - USAGE_REPORT_CARD.padX;
+      const contentW = R - L;
+      // Left null when the facet is absent rather than zero-filled: a PNG
+      // outlives the load that made it, so "0 of 30 days active" is the one
+      // number on the card a reader could never find out was a gap.
+      const streaks = model.streaks || null;
+      const firsts = model.firsts || {};
+      const costOn = usageReportState.includeCost && !model.isEmpty;
+      // `top` is the top of the next block, never a baseline: a cursor built out
+      // of baselines is how the first cut let 34px digits walk over a 10px line.
+      let top = USAGE_REPORT_CARD.padTop;
+      const AS = 0.78; // ascent share of font size, close enough for Fira Sans
+
+      const rect = (x, y, w, h, fill, radius) => ops.push({ k: 'rect', x, y, w, h, fill, r: radius || 0 });
+      const text = (x, y, value, style) => ops.push({
+        k: 'text',
+        x,
+        y,
+        text: String(value),
+        font: usageReportCardFont(style.size, style.weight, style.mono),
+        fill: style.fill || pal.text,
+        align: style.align || 'left',
+      });
+      const line = (value, size, style = {}) => {
+        text(L, top + size * AS, value, { size, ...style });
+        top += style.lh || Math.round(size * 1.34);
+      };
+      const label = (value) => {
+        line(String(value).toUpperCase(), 8.5, { weight: 800, fill: accent, lh: 12 });
+        top += 2;
+      };
+
+      // No spine down the left edge: the tier already reads from its own colour,
+      // its eyebrow and its manifest, and dropping it buys back line length.
+      line(t(tier === 'green' ? 'usageReportTierGreen' : 'usageReportTierAmber'), 9, { weight: 800, fill: accent, lh: 12 });
+      line(usageReportClipText(usageReportCardTitle(model), usageReportCardFont(20, 800), contentW), 20, { weight: 800, lh: 24 });
+      usageReportWrapText(
+        t('usageReportCardRange', {
+          from: formatShortDate(model.range.from, true),
+          to: formatShortDate(model.range.to, true),
+          machine: usageReportMachineName(),
+        }),
+        usageReportCardFont(10, 400),
+        contentW,
+      ).forEach((row) => line(row, 10, { fill: pal.muted, lh: 13 }));
+      top += 5;
+
+      let heroSize = 34;
+      const hero = model.isEmpty ? USAGE_REPORT_EM : formatTokenCount(model.tokens);
+      while (heroSize > 20 && usageReportTextWidth(hero, usageReportCardFont(heroSize, 800)) > contentW) heroSize -= 1;
+      text(L, top + heroSize * AS, hero, { size: heroSize, weight: 800, fill: pal.primary });
+      top += heroSize + 4;
+      line(t('usageReportCardHeroSub', {
+        sessions: usageReportFigure(model.sessions, formatNumber),
+        requests: formatNumber(model.messages),
+      }), 11.5, { weight: 700, fill: pal.muted, lh: 15 });
+      if (costOn) line(t('usageReportCardCost', { cost: formatCurrency(model.cost) }), 10, { fill: pal.cost, lh: 13 });
+      top += 7;
+
+      // The heat ramp solves its cell size against the printable width rather
+      // than assuming one, which is what keeps a 53-column year on the card.
+      const days = model.cells;
+      const painted = days.filter((day) => !day.future);
+      const gap = 2;
+      const heatTop = top;
+      // A week in progress is one column of the calendar grid, which on a card
+      // with no weekday labels reads as three stray squares over a hole. Under a
+      // week the days run left to right instead, and the block reserves only the
+      // height it paints: a gap in the middle of a card is the one layout
+      // failure a reader cannot account for.
+      const strip = painted.length <= 7;
+      const cols = strip ? painted.length : Math.ceil((((parseDateKey(days[0].date).getDay() + 6) % 7) + days.length) / 7);
+      const cell = strip ? 18 : Math.max(3, Math.min(opts.cellCap, Math.floor((contentW - gap * (cols - 1)) / Math.max(1, cols))));
+      const heat = (day) => pal.heat[Math.max(0, Math.min(pal.heat.length - 1, day.level))];
+      if (strip) {
+        painted.forEach((day, index) => rect(L + index * (cell + gap), heatTop, cell, cell, heat(day), Math.min(2, cell / 3)));
+      } else {
+        const lead = (parseDateKey(days[0].date).getDay() + 6) % 7;
+        for (let col = 0; col < cols; col += 1) {
+          for (let row = 0; row < 7; row += 1) {
+            const day = days[(col * 7 + row) - lead];
+            if (!day || day.future) continue;
+            rect(L + col * (cell + gap), heatTop + row * (cell + gap), cell, cell, heat(day), Math.min(2, cell / 3));
+          }
+        }
+      }
+      top = heatTop + (strip ? cell : 7 * cell + 6 * gap) + 9;
+
+      const statRow = (labelText, value) => {
+        const baseline = top + 11 * AS;
+        text(L, baseline, labelText, { size: 11, fill: pal.muted });
+        text(R, baseline, value, { size: 11, weight: 800, align: 'right' });
+        top += 14.5;
+      };
+      statRow(t('usageReportCardDaysActive', {
+        a: streaks ? streaks.active_days : USAGE_REPORT_EM,
+        t: model.elapsed,
+      }), streaks
+        ? (streaks.current_streak > 0
+          ? t('usageReportCardStreak', { streak: streaks.current_streak })
+          : t('usageReportCardStreakMax', { streak: streaks.longest_streak }))
+        : USAGE_REPORT_EM);
+      statRow(t('usageReportCardBusiestLabel'), firsts.busiest_day
+        ? `${formatShortDate(firsts.busiest_day, false)} · ${formatTokenCount(firsts.busiest_day_tokens || 0)}`
+        : USAGE_REPORT_EM);
+      statRow(t('usageReportCardActiveTime'), model.activeMs
+        ? `${formatDuration(model.activeMs)} · ${t('usageReportEst')}`
+        : USAGE_REPORT_EM);
+      if (costOn) statRow(t('usageReportCost'), formatCurrency(model.cost));
+      top += 4;
+
+      const rankRow = (rowOpts) => {
+        const iconW = rowOpts.icon ? 19 : 0;
+        const valueW = usageReportTextWidth(rowOpts.value, usageReportCardFont(11, 800)) + 2;
+        const baseline = top + 11 * AS;
+        if (rowOpts.icon) ops.push({ k: 'icon', x: L, y: top - 1, size: 15, tool: rowOpts.icon });
+        text(L + iconW, baseline,
+          usageReportClipText(rowOpts.name, usageReportCardFont(11, 700), contentW - iconW - valueW - 6),
+          { size: 11, weight: 700 });
+        text(R, baseline, rowOpts.value, { size: 11, weight: 800, align: 'right', fill: rowOpts.fill || pal.text });
+        top += 14;
+        if (rowOpts.bar !== null && rowOpts.bar !== undefined) {
+          rect(L, top, contentW, 3, pal.barBg, 1.5);
+          rect(L, top, Math.max(2, contentW * rowOpts.bar), 3, rowOpts.barFill || pal.secondary, 1.5);
+          top += 7;
+        }
+      };
+      const shareValue = (tokens) => `${formatTokenCount(tokens)} · ${usageReportShare(tokens / (model.facetTotal || 1))}`;
+
+      if (model.tools && model.tools.length) {
+        label(t('usageReportCardHarnesses'));
+        const leaders = model.tools.slice(0, 3);
+        leaders.forEach((row) => rankRow({
+          icon: row.tool,
+          name: usageReportToolLabel(row.tool),
+          value: shareValue(row.tokens),
+          bar: row.tokens / (leaders[0].tokens || 1),
+        }));
+        top += 2;
+      }
+      if (model.models && model.models.length) {
+        label(t('usageReportCardModels'));
+        const leaders = model.models.slice(0, 3);
+        leaders.forEach((row) => rankRow({
+          name: row.model,
+          value: shareValue(row.tokens),
+          bar: row.tokens / (leaders[0].tokens || 1),
+        }));
+        top += 2;
+      }
+      if (tier === 'amber') {
+        label(t('usageReportCardProjectsNote', { n: model.projectCount }));
+        if (model.projectsAvailable && model.projectRows.length) {
+          const leaders = model.projectRows.slice(0, opts.maxProjects);
+          leaders.forEach((row) => rankRow({
+            name: row.project,
+            value: shareValue(row.tokens),
+            bar: row.tokens / (leaders[0].tokens || 1),
+            barFill: accent,
+          }));
+          // The reconciliation line is the point of this tier: rows give way to
+          // it, never the other way round.
+          usageReportWrapText(
+            t('usageReportCardGroupNote', { u: usageReportShare(model.unattrShare), g: usageReportShare(model.gapShare) }),
+            usageReportCardFont(9.5, 400),
+            contentW,
+          ).forEach((row) => line(row, 9.5, { fill: pal.muted, lh: 12 }));
+        } else {
+          line(t('usageReportMissingProjects'), 10, { fill: pal.muted });
+        }
+      }
+
+      const manifest = usageReportWrapText(
+        t(tier === 'green' ? 'usageReportManifestGreen' : 'usageReportManifestAmber'),
+        usageReportCardFont(9.5, 800),
+        contentW,
+      );
+      const attributionBaseline = USAGE_REPORT_CARD.H - USAGE_REPORT_CARD.padBottom;
+      const manifestLast = attributionBaseline - 14;
+      const manifestFirst = manifestLast - 12 * (manifest.length - 1);
+      rect(L, manifestFirst - 9.5 * AS - 5, contentW, 1, pal.border);
+      manifest.forEach((row, index) => text(L, manifestFirst + index * 12, row, { size: 9.5, weight: 800, fill: accent }));
+      text(L, attributionBaseline, usageReportClipText(
+        t('usageReportCardAttribution', { version: usageReportState.version || USAGE_REPORT_EM, nickname: usageReportMachineName() }),
+        usageReportCardFont(9.5, 400, true),
+        contentW,
+      ), { size: 9.5, fill: pal.faint, mono: true });
+
+      return { tier, mode, ops, pal, used: top, budget: manifestFirst - 9.5 * AS - 11, opt: opts };
+    }
+
+    /* Paint, measure, adjust (spec 7): shrink the artifact until it fits rather
+       than let content run underneath its own footer. Heat cells shrink before
+       project rows drop, because a small cell is thin and a missing row is a lie. */
+    function usageReportBuildCard(model, tier, mode) {
+      const attempts = tier === 'amber'
+        ? [
+          { maxProjects: 5, cellCap: 11 }, { maxProjects: 5, cellCap: 10 }, { maxProjects: 5, cellCap: 9 },
+          { maxProjects: 4, cellCap: 10 }, { maxProjects: 3, cellCap: 10 }, { maxProjects: 2, cellCap: 9 },
+          { maxProjects: 1, cellCap: 8 },
+          // Last resort: the label and the reconciliation line stay, the rows go.
+          // Still a worse card, but never one that prints over its own footer.
+          { maxProjects: 0, cellCap: 7 },
+        ]
+        : [{ maxProjects: 0, cellCap: 11 }, { maxProjects: 0, cellCap: 9 }, { maxProjects: 0, cellCap: 7 },
+          { maxProjects: 0, cellCap: 5 }];
+      let last = null;
+      // First pass wants breathing room, the second takes anything that fits at
+      // all and lets the logged audit complain about it.
+      for (const slack of [12, 0]) {
+        for (const opt of attempts) {
+          last = usageReportCardModel(model, tier, mode, opt);
+          if (last.budget - last.used >= slack) return last;
+        }
+      }
+      if (last.budget - last.used < 0) last.overflowBy = last.used - last.budget;
+      return last;
+    }
+
+    function usageReportPaintCard(canvas, card) {
+      const scale = USAGE_REPORT_CARD.scale;
+      canvas.width = USAGE_REPORT_CARD.W * scale;
+      canvas.height = USAGE_REPORT_CARD.H * scale;
+      canvas.style.aspectRatio = `${USAGE_REPORT_CARD.W} / ${USAGE_REPORT_CARD.H}`;
+      const ctx = canvas.getContext('2d');
+      ctx.setTransform(scale, 0, 0, scale, 0, 0);
+      ctx.fillStyle = card.pal.bg;
+      ctx.fillRect(0, 0, USAGE_REPORT_CARD.W, USAGE_REPORT_CARD.H);
+      ctx.textBaseline = 'alphabetic';
+      card.ops.forEach((op) => {
+        if (op.k === 'rect') {
+          ctx.fillStyle = op.fill;
+          if (op.r > 0) {
+            ctx.beginPath();
+            ctx.roundRect(op.x, op.y, op.w, op.h, op.r);
+            ctx.fill();
+          } else {
+            ctx.fillRect(op.x, op.y, op.w, op.h);
+          }
+        } else if (op.k === 'text') {
+          ctx.font = op.font;
+          ctx.fillStyle = op.fill;
+          ctx.textAlign = op.align;
+          ctx.fillText(op.text, op.x, op.y);
+        } else if (op.k === 'icon') {
+          const icon = usageReportCardIcons.get(op.tool);
+          if (!icon) return;
+          ctx.save();
+          if (card.mode === 'dark' && icon.invert) ctx.filter = 'invert(1) hue-rotate(180deg)';
+          ctx.drawImage(icon.image, op.x, op.y, op.size, op.size);
+          ctx.restore();
+        }
+      });
+      return canvas;
+    }
+
+    function usageReportCardFilename(model, tier, mode) {
+      return `tokdash-report-${model.range.from}_${model.range.to}-${tier}-${mode}.png`;
+    }
+
+    /* The four previews are the export: the same canvas elements are read back
+       with toBlob, so what a reader inspects is what they download. */
+    async function usageReportRenderShare(model) {
+      const token = (usageReportState.shareToken || 0) + 1;
+      usageReportState.shareToken = token;
+      // Retired up front, not on the far side of the awaits: a download started
+      // while a new period is painting would otherwise name one window and
+      // carry another.
+      usageReportState.previews = {};
+      await usageReportCardFonts();
+      await usageReportLoadCardIcons((model.tools || []).slice(0, 3).map((row) => row.tool));
+      if (token !== usageReportState.shareToken) return;
+
+      const previews = {};
+      const audits = [];
+      [['green', 'usageReportGreenCards'], ['amber', 'usageReportAmberCards']].forEach(([tier, hostId]) => {
+        const host = document.getElementById(hostId);
+        if (!host) return;
+        const boxes = [];
+        ['light', 'dark'].forEach((mode) => {
+          const card = usageReportBuildCard(model, tier, mode);
+          const canvas = usageReportPaintCard(document.createElement('canvas'), card);
+          canvas.dataset.tier = tier;
+          canvas.dataset.mode = mode;
+          canvas.dataset.slack = (card.budget - card.used).toFixed(0);
+          const caption = document.createElement('div');
+          caption.className = 'usage-report-cardcap';
+          const chip = document.createElement('span');
+          chip.className = `usage-report-tierchip usage-report-tier-${tier}`;
+          chip.textContent = t(tier === 'green' ? 'usageReportTierGreen' : 'usageReportTierAmber');
+          const themeLabel = document.createElement('span');
+          themeLabel.className = 'mono';
+          themeLabel.textContent = mode;
+          caption.append(chip, themeLabel);
+          const box = document.createElement('div');
+          box.className = 'usage-report-cardbox';
+          box.append(canvas, caption);
+          boxes.push(box);
+          previews[`${tier}:${mode}`] = canvas;
+          audits.push(`${tier}/${mode}: content y=${card.used.toFixed(0)} of ${card.budget.toFixed(0)}, `
+            + (card.overflowBy ? `OVERFLOW ${card.overflowBy.toFixed(0)}px` : `slack ${(card.budget - card.used).toFixed(0)}px`)
+            + `, ${card.opt.maxProjects || 0} project rows, ${model.cells.length}-day heat`);
+        });
+        host.replaceChildren(...boxes);
+      });
+      usageReportState.previews = previews;
+
+      // Layout fit stays inspectable without becoming interface text.
+      const stack = document.getElementById('usageReportStack');
+      if (stack) {
+        stack.dataset.cardAudit = audits.join(' | ');
+        stack.dataset.cardFile = usageReportCardFilename(model, 'green', 'light');
+      }
+      console.debug(`tokdash report card fit (logical px, ${USAGE_REPORT_CARD.W}x${USAGE_REPORT_CARD.H})\n`
+        + audits.join('\n')
+        + `\nfile: ${usageReportCardFilename(model, 'green', 'light')}`);
+    }
+
+    // Two files per tier, always: the light card and the dark card, whatever
+    // theme this app happens to be showing when the button is pressed.
+    async function usageReportExportCards(tier) {
+      const model = usageReportState.model;
+      if (!model || usageReportState.exporting) return;
+      const previews = usageReportState.previews || {};
+      const status = document.getElementById('usageReportExportStatus');
+      const tiers = tier === 'all' ? ['green', 'amber'] : [tier];
+      usageReportState.exporting = true;
+      let wrote = 0;
+      try {
+        for (const current of tiers) {
+          for (const mode of ['light', 'dark']) {
+            const canvas = previews[`${current}:${mode}`];
+            if (!canvas) continue;
+            const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+            if (!blob) continue;
+            const url = URL.createObjectURL(blob);
+            const anchor = document.createElement('a');
+            anchor.href = url;
+            anchor.download = usageReportCardFilename(model, current, mode);
+            document.body.append(anchor);
+            anchor.click();
+            anchor.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 4000);
+            wrote += 1;
+          }
+        }
+      } finally {
+        usageReportState.exporting = false;
+      }
+      if (status) {
+        status.hidden = false;
+        // Silence here is a button that looks like it did nothing by choice.
+        status.textContent = wrote ? t('usageReportExported', { n: wrote }) : t('usageReportExportNothing');
+      }
+    }
+
+    function usageReportClearShare() {
+      usageReportState.previews = {};
+      ['usageReportGreenCards', 'usageReportAmberCards'].forEach((id) => {
+        const host = document.getElementById(id);
+        if (host) host.replaceChildren();
+      });
+      const status = document.getElementById('usageReportExportStatus');
+      if (status) {
+        status.hidden = true;
+        status.textContent = '';
+      }
+    }
+
+    // The placeholder names what the card prints when the field is empty, which
+    // follows the server the report reads. Values stay out of here: a load that
+    // lands while someone is mid-edit must not swallow text the field has not
+    // committed yet, and this runs on every render.
+    function usageReportShareHint() {
+      const nicknameInput = document.getElementById('usageReportNicknameInput');
+      if (nicknameInput) nicknameInput.placeholder = usageReportMachineName();
+    }
+
+    // Stored prefs go back into the controls once, when the tab is wired, which
+    // is the only moment the field has nothing in it but the stored value.
+    function usageReportSyncShareInputs() {
+      const nicknameInput = document.getElementById('usageReportNicknameInput');
+      if (nicknameInput) nicknameInput.value = usageReportState.nickname;
+      const costToggle = document.getElementById('usageReportCostToggle');
+      if (costToggle) costToggle.checked = !!usageReportState.includeCost;
+      usageReportShareHint();
+    }
+
+    function usageReportWireShare() {
+      const nicknameInput = document.getElementById('usageReportNicknameInput');
+      if (nicknameInput) {
+        nicknameInput.addEventListener('change', () => {
+          usageReportState.nickname = nicknameInput.value.trim().slice(0, 24);
+          nicknameInput.value = usageReportState.nickname;
+          usageReportWritePrefs();
+          // A full render, not just the cards: the nickname is the machine name
+          // the scope line, the footer and the agent table print too.
+          if (usageReportState.model) usageReportRender();
+        });
+      }
+      const costToggle = document.getElementById('usageReportCostToggle');
+      if (costToggle) {
+        costToggle.addEventListener('change', () => {
+          usageReportState.includeCost = costToggle.checked;
+          usageReportWritePrefs();
+          if (usageReportState.model) usageReportRenderShare(usageReportState.model);
+        });
+      }
+      document.querySelectorAll('#report-content [data-export]').forEach((button) => {
+        button.addEventListener('click', () => usageReportExportCards(button.dataset.export));
+      });
+      usageReportSyncShareInputs();
+    }
+
+    function usageReportRender() {
+      usageReportRenderControls();
+      usageReportRenderState();
+      const model = usageReportState.model;
+      if (!model) return;
+      usageReportText(document.getElementById('usageReportTitle'), usageReportPeriodTitle(model));
+      usageReportText(document.getElementById('usageReportRange'),
+        `${formatShortDate(model.range.from, true)} – ${formatShortDate(model.range.to, true)}`);
+      usageReportText(document.getElementById('usageReportProgress'),
+        model.elapsed < model.periodLength ? t('usageReportInProgress', { d: model.elapsed, n: model.periodLength }) : '');
+      usageReportText(document.getElementById('usageReportScopeLine'),
+        t('usageReportScope', { machine: usageReportMachineName() }));
+      usageReportRenderBanner(model);
+      usageReportRenderHero(model);
+      usageReportRenderSentence(model);
+      usageReportRenderHeat(model);
+      usageReportRenderPodium(model);
+      usageReportRenderWhen(model);
+      usageReportRenderAgents(model);
+      usageReportShareHint();
+      usageReportRenderFooter(model);
+      // Last, and off the main paint: the cards wait for webfonts and brand icons.
+      usageReportRenderShare(model).catch((error) => {
+        console.warn('tokdash: the share cards did not paint', error);
+      });
+    }
+
+    function usageReportWire() {
+      if (usageReportState.wired) return;
+      usageReportState.wired = true;
+      usageReportReadPrefs();
+      document.querySelectorAll('#usageReportPeriod button').forEach((button) => {
+        button.addEventListener('click', () => {
+          // A period that describes data still on its way cannot be shown yet,
+          // so it queues: the pressed state comes from the last render, never
+          // from a click that has nothing behind it.
+          if (usageReportState.loading) {
+            usageReportState.pendingPeriod = button.dataset.period;
+            return;
+          }
+          usageReportState.pendingPeriod = null;
+          if (button.dataset.period === usageReportState.period) return;
+          usageReportState.period = button.dataset.period;
+          usageReportWritePrefs();
+          loadUsageReport();
+        });
+      });
+      const select = document.getElementById('usageReportServer');
+      if (select) {
+        select.addEventListener('change', () => {
+          if (usageReportState.loading) {
+            // Held, and the box snaps back to the server the report on screen
+            // actually came from, which is what the load will re-render against.
+            usageReportState.pendingServerId = select.value;
+            select.value = usageReportState.serverId;
+            return;
+          }
+          usageReportState.pendingServerId = null;
+          usageReportState.serverId = select.value;
+          usageReportWritePrefs();
+          loadUsageReport({ refresh: true });
+        });
+      }
+      const retry = document.getElementById('usageReportRetry');
+      if (retry) retry.addEventListener('click', () => loadUsageReport({ refresh: true }));
+      usageReportWireShare();
+    }
+
     function activateDashboardTab(tab) {
       const button = document.querySelector(`.tab-btn[data-tab="${tab}"]`);
       const content = document.getElementById(`${tab}-content`);
@@ -12563,6 +15190,7 @@
       if (tab === 'servers') renderServersTab();
       if (tab === 'quota' && !quotaLoaded) loadQuota();
       if (tab === 'pricing' && !pricingDbLoaded) loadPricingDb();
+      if (tab === 'report' && !usageReportState.loaded) loadUsageReport();
     }
 
     function openOverviewProfile() {

@@ -81,6 +81,7 @@
 - **상태줄 통합** *[신규]*: Claude Code(로컬 HTTP 엔드포인트에 도달할 수 있는 어떤 에이전트든)의 상태줄에 실시간 토큰 사용량 표시기를 넣습니다 — [상태줄 통합](#상태줄-통합) 참조
 - **기여 캘린더**: Tokens/Cost/Messages 지표가 있는 2D 히트맵 + 3D 등각 뷰
 - **세션 탐색기**: 세션별 드릴다운
+- **Report 탭** *[신규]*: 본인 에이전트 활동을 주 / 월 / 연초 누적 기준으로 정리한 보고서. 상세 단계별 공유 카드 2종을 제공하며, 내보낼 때마다 밝은 색과 어두운 색 PNG 두 장을 함께 만듭니다
 - **Quota 탭** *[신규]*: Codex, Claude Code, Antigravity의 구독 윈도우 바와 리셋 카운트다운. Codex 윈도우는 로컬 로그로 바로 동작하며, Codex 리셋 크레딧, 미터링 기능, 모든 Claude/Antigravity 쿼터에는 옵트인 [라이브 폴링](#쿼터-추적-선택사항)이 필요합니다
 - **Companion 상태표 앱** *[신규]*: macOS 메뉴 막대나 Windows 알림 영역에서 지출과 구독 쿼터 확인 — Windows는 [Microsoft Store](https://apps.microsoft.com/detail/9ppnmpdq8b52) 제공 — [스크린샷과 다운로드](#tokdash-companion-상태표-앱)
 - **멀티 서버 뷰**: 설정에서 WSL, macOS, 기타 Tokdash 서버를 추가. 임의의 선택 사용량을 합치고 쿼터는 머신별로 그룹화. [원격 접근](docs/guides/REMOTE_ACCESS.md) 참조.

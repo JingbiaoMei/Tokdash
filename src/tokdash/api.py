@@ -2103,18 +2103,17 @@ def get_insights(
     """
     _validate_date_params(date_from, date_to)
     if _dev_fixture_mode() == "dense":
-        # Refused rather than synthesized. This route is for external report
-        # consumers, so silently serving real history would defeat the point of
-        # fixture mode -- but its nine facets are a wide enough contract that a
-        # hand-written stand-in would drift from `compute_insights` unnoticed,
-        # which is the same failure the imported rank keys exist to prevent.
-        # An explicit 409 cannot be mistaken for either one.
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "/api/insights is not synthesized in --dev-fixture mode, and real "
-                "usage history is not read while a fixture is active."
-            ),
+        # Synthesized, and folded by the same `insights._fold_*` helpers
+        # production uses, so the fixture cannot drift from the facet contract
+        # while the route that serves it goes untested. Real usage history is
+        # still never read while a fixture is active.
+        from .dev_fixtures import dense_insights
+
+        return dense_insights(
+            resolve_period(period, date_from, date_to),
+            facets=facets,
+            include_project_names=include_project_names,
+            seed=_dev_fixture_seed(),
         )
     try:
         cache_key = _window_cache_key(

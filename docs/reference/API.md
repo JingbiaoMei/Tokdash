@@ -298,7 +298,7 @@ Aggregated token usage and cost across all configured tools.
 | `top_models_by_cost` | array | The five costliest models, ranked by cost |
 | `openclaw_models` | array | OpenClaw-specific model breakdown |
 | `combined_models` | array | All models from all sources, merged |
-| `comparison` | object | Comparison vs previous period: `tokens_prev`, `cost_prev`, `messages_prev`, `tokens_pct`, `cost_pct`, `messages_pct` |
+| `comparison` | object | Comparison vs previous period: `tokens_prev`, `cost_prev`, `messages_prev`, `tokens_pct`, `cost_pct`, `messages_pct`. For an explicit `date_from`/`date_to` the prior period is the equal-length range ending the day before `date_from`, which can land wholly or partly before the first recorded session; a `tokens_pct` over +1000% usually means exactly that, so a consumer printing a delta should bound what it prints |
 | `timestamp` | string | ISO 8601 timestamp when the response was generated |
 
 **Model ordering**
@@ -706,6 +706,14 @@ scan plus a session-record read.
   land in `unattributed` rather than being dropped, so the totals still reconcile.
 - **Caching.** A window that has closed is cached indefinitely, so a past year is computed
   once and every later request is a cache hit. Only a window including today recomputes.
+- **Totals.** `totals` is this scan's own sum over the rows the facets were folded from, and
+  it need not equal `/api/usage`'s `total_tokens` for the same window: the two read the store
+  through different paths. Print one of them per figure, and compute facet shares against
+  `totals` so the rows add up against the number above them.
+- **Fixture mode.** Under `--dev-fixture dense` this route answers from the seeded fixture,
+  which invents rows and folds them with the same `insights._fold_*` helpers production uses,
+  then marks the payload with `fixture`. Real usage history is never read while a fixture is
+  active, and the facet shapes are pinned by `tests/test_insights_api.py`.
 
 ---
 

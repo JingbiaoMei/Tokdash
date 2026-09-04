@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from tokdash import api, cli
 from tokdash.compute import parse_entries_json
 from tokdash.compute import resolve_period
+from tokdash.insights import DEFAULT_FACETS
 from tokdash.dev_fixtures import (
     SESSION_LABELS,
     TOOL_SPECS,
@@ -376,14 +377,92 @@ def test_dense_fixture_review_sessions_follow_the_configured_default(monkeypatch
     assert any(row["is_review_session"] for row in on["sessions"])
 
 
-def test_dense_fixture_insights_refuses_instead_of_serving_real_history():
-    """/api/insights is the external report endpoint added by #59."""
-    with dense_fixture():
-        with pytest.raises(HTTPException) as refused:
-            api.get_insights(period="year")
+def test_dense_fixture_insights_answers_without_touching_real_history(monkeypatch):
+    """/api/insights is the endpoint the Report tab reads (facets added in #59).
 
-    assert refused.value.status_code == 409
-    assert "not synthesized" in str(refused.value.detail)
+    Fixture mode used to answer this route with a 409, which kept real history
+    out but left the widest contract in the app unexercised. It now answers from
+    the fixture, so the invariant is restated as a positive: the production
+    aggregation must never run while a fixture is active.
+    """
+
+    def never(*_args, **_kwargs):
+        raise AssertionError("compute_insights ran while a fixture was active")
+
+    monkeypatch.setattr(api, "compute_insights", never)
+    with dense_fixture():
+        payload = api.get_insights(period="month")
+
+    assert payload["fixture"] == {"name": "dense", "seed": 74_019_130}
+    assert payload["facets"] == list(DEFAULT_FACETS)
+    assert payload["totals"]["tokens"] > 0
+    assert payload["range"]["period_resolved"] == "month"
+    assert payload["range"]["to"] <= datetime.now().astimezone().date().isoformat()
+
+
+def test_dense_fixture_insights_accepts_an_explicit_short_range():
+    """`/api/insights` takes date_from/date_to directly, which is a shorter window
+    than any the Report tab can ask for. A one-day window used to 500 for about
+    one seed in eight, because the day draw could leave no day to put the tokens
+    on; the route answering is the whole assertion here.
+    """
+    with dense_fixture():
+        payload = api.get_insights(
+            period="all",
+            date_from="2026-05-05",
+            date_to="2026-05-05",
+            facets="daily,streaks,firsts,projects",
+        )
+
+    assert payload["range"]["from"] == "2026-05-05"
+    assert payload["range"]["days"] == 1
+    assert len(payload["daily"]) == 1
+    assert payload["totals"]["tokens"] > 0
+    assert payload["streaks"]["active_days"] == 1
+
+
+def test_dense_fixture_insights_honours_facet_selection_and_name_anonymisation():
+    with dense_fixture():
+        picked = api.get_insights(period="week", facets="streaks,firsts")
+        anonymous = api.get_insights(period="week", facets="projects", include_project_names=False)
+
+    assert picked["facets"] == ["streaks", "firsts"]
+    assert set(picked) >= {"streaks", "firsts"}
+    assert "hourly" not in picked and "projects" not in picked
+
+    assert anonymous["projects"]["names_included"] is False
+    names = [row["project"] for row in anonymous["projects"]["projects"]]
+    assert names and all(name.startswith("project-") for name in names)
+    assert anonymous["projects"]["projects"][0]["tokens"] >= anonymous["projects"]["projects"][-1]["tokens"]
+
+    with pytest.raises(HTTPException) as refused:
+        api.get_insights(period="week", facets="nope")
+    assert refused.value.status_code == 400
+
+
+def test_dense_fixture_project_cost_follows_its_token_share():
+    """The ranked rows hold about 86% of the window's tokens, because production
+    always has a gap the project facet cannot see. Handing them 100% of its cost
+    put a sixth too much money on the podium's "Top project" tile, which is the
+    figure a fixture screenshot exists to show.
+    """
+    with dense_fixture():
+        payload = api.get_insights(period="month", facets="projects")
+
+    projects = payload["projects"]
+    rows = projects["projects"]
+    unattributed = projects["unattributed"]
+    total_cost = payload["totals"]["cost"]
+    total_tokens = payload["totals"]["tokens"]
+    assert total_cost > 0 and total_tokens > 0
+
+    row_cost = sum(row["cost"] for row in rows)
+    row_tokens = sum(row["tokens"] for row in rows)
+    # Same three-way split as the tokens: the rows, the facet's own unattributed
+    # bucket, and the share the facet never sees at all.
+    assert row_cost / total_cost == pytest.approx(row_tokens / total_tokens, abs=0.01)
+    assert unattributed["cost"] > 0, "the unattributed bucket carries tokens, so it carries cost"
+    assert row_cost + unattributed["cost"] < total_cost, "the invisible gap keeps its share"
 
 
 def test_dense_fixture_tools_route_matches_the_real_producer_shape():

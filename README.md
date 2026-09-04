@@ -81,6 +81,7 @@
 - **Statusline integration** *[new]*: drop a live token-usage indicator into Claude Code's statusline (or any agent that can hit a local HTTP endpoint) — see [Statusline integration](#statusline-integration)
 - **Contribution calendar**: 2D heatmap + 3D isometric view with Tokens/Cost/Messages metrics
 - **Session explorer**: per-session drill-down
+- **Report tab** *[new]*: a week / month / year-to-date report of your own agent activity, with a shareable card for each tier of detail. Every export writes a light and a dark PNG
 - **Quota tab** *[new]*: subscription window bars with reset countdowns for Codex, Claude Code, and Antigravity. Codex windows work out of the box from local logs; Codex reset credits, metered features, and all Claude/Antigravity quota need opt-in [live polling](#quota-tracking-optional)
 - **Companion Status Bar App** *[new]*: view spend and subscription quota from the macOS menu bar or Windows notification area — on the [Microsoft Store](https://apps.microsoft.com/detail/9ppnmpdq8b52) for Windows — [screenshots and downloads](#tokdash-companion-status-bar-app)
 - **Multi-server views**: add WSL, macOS, and other Tokdash servers in Settings; combine usage across any selection while keeping quota grouped by machine. See [remote access](docs/guides/REMOTE_ACCESS.md).

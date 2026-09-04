@@ -44,8 +44,10 @@ grid alike -- scale with the window they were asked for and agree about it, and
 exception: they serve a fixed set of rows whatever window you ask for.
 
 Both flags are only accepted by `serve` — `tokdash export --dev-fixture dense` is a
-usage error rather than a silent export of your real usage. `/api/insights` returns
-409 while a fixture is active instead of serving real history to a report consumer.
+usage error rather than a silent export of your real usage. `/api/insights` answers
+from a seeded fixture while one is active, inventing the rows and folding them with
+the production fold functions, so the Report tab can be developed and screenshotted
+without ever reading your history.
 
 Run tests:
 ```bash

@@ -49,11 +49,19 @@ def hermetic_claude_installs(monkeypatch, tmp_path):
 
     ``$HOME`` is part of the surface, not just ``$CLAUDE_CONFIG_DIR``: the sibling scan
     globs ``Path.home()`` directly, so overriding only the env var would still hand a test
-    the real ``~/.claude-academic`` beside it -- and, because the fake default dir holds no
-    credential file, would let the default profile fall through to the macOS Keychain.
-    Both the env var and the home directory are therefore redirected, to a home that
-    contains no Claude directory at all.
+    the real ``~/.claude-academic`` beside it. Both the env var and the home directory are
+    therefore redirected, to a home that contains no Claude directory at all.
+
+    Redirecting the home is NOT what keeps the Keychain out, though: the default profile
+    falls back to `_read_keychain_credentials()` whenever its credential file is missing,
+    which on a macOS dev box is a `security find-generic-password` subprocess against the
+    developer's real login keychain (and a possible permission prompt) on every consented
+    test. The empty redirected home guarantees that fallthrough, so the platform check the
+    reader gates on is disabled here as well. Tests that mean to exercise those readers
+    point the paths somewhere themselves and restore the platform themselves.
     """
+    from tokdash.sources.quota import claude as claude_quota
+
     home = tmp_path / "claude-free-home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
@@ -62,6 +70,7 @@ def hermetic_claude_installs(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(home / "no-claude-config-dir"))
     monkeypatch.delenv("TOKDASH_CLAUDE_PROFILES", raising=False)
     monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    monkeypatch.setattr(claude_quota, "_is_macos", lambda: False)
 
 
 @pytest.fixture(autouse=True)

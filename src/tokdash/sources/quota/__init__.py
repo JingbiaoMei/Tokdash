@@ -331,13 +331,15 @@ def _network_key_for_provider(name: str) -> str:
     }.get(name, f"{name}_api")
 
 
-# The account whose API status speaks for the whole card. Two providers can hold two live
-# accounts on one card: Claude Code keeps one sign-in per config directory, MiniMax one per
-# region. Both are configured deliberately, so an expired sibling sign-in or a failing China
-# Token Plan must not be presented as a problem with the default install or the global plan.
-# Providers absent from this map have one account that matters and keep the provider-wide
-# view, which is also the fallback here when a machine has no primary account at all.
-_PRIMARY_ACCOUNT = {"claude": "default", "minimax": "global"}
+# The cards that really measure more than one account at once, and the account each card is
+# named after. Claude Code keeps one sign-in per config directory and MiniMax one per region;
+# both are configured deliberately, so an expired sibling sign-in or a failing China Token
+# Plan is another account's state rather than a problem with the default install or the global
+# plan. Membership here is the single place that decides per-account handling: whether a
+# stored account stays separate when the freshest row per bucket is chosen, and whether a card
+# gets an ``accounts`` list at all. The value only orders that list, so the account the card
+# has always spoken for still comes first.
+_MULTI_ACCOUNT_CARDS = {"claude": "default", "minimax": "global"}
 
 
 def _new_account_view() -> dict[str, Any]:
@@ -403,29 +405,57 @@ def _account_status(view: dict[str, Any]) -> tuple[str | None, str | None, int |
     return status, detail, status_at
 
 
-def _card_view(
-    provider: str,
-    aggregate: dict[str, Any],
-    views: dict[str, dict[str, Any]],
-) -> dict[str, Any]:
-    """The view a card's status line, plan and updated-at are read from.
+def _provider_status(
+    aggregate: dict[str, Any], views: dict[str, dict[str, Any]]
+) -> tuple[str | None, str | None, int | None]:
+    """The card's own (status, live error, when it happened), from the accounts behind it.
 
-    Scoped to the provider's primary account when that account reported anything:
-    otherwise one expired sibling sign-in, or a failing MiniMax China plan, would drive
-    the whole card's error. An account that reported nothing has no opinion to impose, so
-    a machine with only the secondary account -- just ``~/.claude-academic``, or only a
-    China Token Plan -- has its card describe the account it does have, and so does every
-    single-account provider, which never enters the map above.
+    A card speaks for every credential it measures, so its error is the NEWEST error any of
+    its accounts is still carrying -- not the error of whichever account the card happens to
+    be named after. The companion contract depends on this breadth: one broken credential has
+    to keep warning about the provider, or a consumer reads a stale meter as a current one.
 
-    ``updated_at`` is deliberately NOT scoped this way: the card's "updated" line means
-    when this provider was last observed by anything, and that stays provider-wide.
+    Resolving it per account rather than from the provider-wide row is what keeps the two
+    failure modes apart: a healthy account's newer success does not silence this account's
+    error, and this account's own recovery does not leave its old error row warning the card
+    forever. Attribution survives because the same resolution runs per account in ``accounts``
+    and each card prints the notice under the account that owns it.
     """
-    primary = _PRIMARY_ACCOUNT.get(provider)
-    if primary is not None:
-        scoped = views.get(primary)
-        if scoped is not None:
-            return scoped
-    return aggregate
+    newest: tuple[int, str | None, str, int | None] | None = None
+    for view in views.values():
+        status, detail, status_at = _account_status(view)
+        if detail is None:
+            continue
+        stamp = int(status_at or 0)
+        if newest is None or stamp > newest[0]:
+            newest = (stamp, status, detail, status_at)
+    if newest is not None:
+        return newest[1], newest[2], newest[3]
+    # Nothing is live: the provider-wide answer, with an error every account has since
+    # recovered from promoted away, exactly as it is in the per-account list.
+    return _account_status(aggregate)[0], None, None
+
+
+def _stale_accounts(
+    views: dict[str, dict[str, Any]], *, newest: int, interval_seconds: int
+) -> set[str]:
+    """Accounts whose stored rows stopped keeping up with the rest of their provider.
+
+    Three poll intervals, and never less than an hour, so an account is never dropped for
+    being one late cycle behind; the floor also means a machine polled on an odd interval
+    cannot retire everything at once. `newest` is the freshest row of any account of that
+    provider, so an account ages out only relative to data this machine still reads. The
+    providers that fold their accounts into one always have `newest` as that one account's
+    timestamp, so they can never retire anything here.
+    """
+    if newest <= 0:
+        return set()
+    cutoff = newest - max(3 * int(interval_seconds or 0), 3600)
+    return {
+        account
+        for account, view in views.items()
+        if int(view.get("updated_at") or 0) < cutoff
+    }
 
 
 def _account_entries(
@@ -437,14 +467,16 @@ def _account_entries(
 
     A provider whose card carries several accounts (Claude installs, MiniMax regions) has
     to say which account a failure belongs to, or one broken secondary account reads as a
-    problem with the healthy primary one. ``extra`` adds facts the stored rows do not
-    carry: for Claude, the plan, tier and credential path read from each install's own
-    file, which also brings in an install whose poll has not run yet.
+    problem with the healthy primary one. Membership of `_MULTI_ACCOUNT_CARDS` decides which
+    cards get here, and the card-level status reads these same views (see
+    ``_provider_status``). ``extra`` adds facts the stored rows do not carry: for Claude, the
+    plan, tier and credential path read from each install's own file, which also brings in an
+    install whose poll has not run yet.
     """
     accounts = dict(views)
     for name in extra or {}:
         accounts.setdefault(name, _new_account_view())
-    primary = _PRIMARY_ACCOUNT.get(provider, "default")
+    primary = _MULTI_ACCOUNT_CARDS.get(provider, "default")
 
     def entry(name: str) -> dict[str, Any]:
         view = accounts[name]
@@ -544,11 +576,13 @@ def _freshest_usage_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
         provider = str(row.get("provider") or "")
         # Existing providers deliberately collapse stale placeholder/default accounts into
-        # the freshest real account. MiniMax is one exception: global and mainland-China
-        # Token Plans are separate and may both be configured intentionally. Claude is the
-        # other: `~/.claude` and a `~/.claude-<profile>` sibling are separate
-        # subscriptions whose newest rows must not evict each other.
-        account = str(row.get("account") or "") if provider in {"minimax", "claude"} else ""
+        # the freshest real account. `_MULTI_ACCOUNT_CARDS` is the exception, and is the only
+        # list of them: MiniMax's global and mainland-China Token Plans, and Claude's
+        # `~/.claude` beside a `~/.claude-<profile>` sibling, are separate subscriptions whose
+        # newest rows must not evict each other.
+        account = (
+            str(row.get("account") or "") if provider in _MULTI_ACCOUNT_CARDS else ""
+        )
         bucket = str(row.get("bucket") or "")
         key = (provider, account, bucket)
         current = selected.get(key)
@@ -583,17 +617,11 @@ def quota_state(store: UsageEntryStore | None = None) -> dict[str, Any]:
     claude_scan = config.credential_scan_enabled()
     claude_profiles = discover_profiles()
     claude_installs = read_claude_profiles(claude_profiles) if claude_scan else []
-    # The installs that exist right now. A renamed or deleted `~/.claude-<profile>` leaves
-    # its window rows behind forever -- `_freshest_usage_rows` keeps the latest row per
-    # (account, bucket) with no expiry -- so without this a subscription the user removed
-    # would keep a card group showing a month-old reading indefinitely. Applied only when
-    # the install list came from a real scan: without consent the card cannot know siblings
-    # exist, and every row stays, exactly as before profiles.
-    claude_live_accounts = (
-        {str(install.get("account") or "") for install in claude_installs}
-        if claude_scan
-        else None
-    )
+    # A renamed or deleted `~/.claude-<profile>` leaves its window rows behind forever --
+    # nothing expires a stored (account, bucket) row -- so a subscription the user removed
+    # would hold a card group open on a month-old reading. Which accounts have fallen behind
+    # is decided from the stored rows below, once their timestamps are known, rather than
+    # from whether a credential file happens to be openable right now.
     providers = {
         name: _provider_shell(name, consent)
         for name in ("codex", "claude", "antigravity", "minimax", "kimi", "grok", "zai")
@@ -641,23 +669,39 @@ def quota_state(store: UsageEntryStore | None = None) -> dict[str, Any]:
                     "credits": reset_payload.get("credits") if isinstance(reset_payload.get("credits"), list) else [],
                 }
 
+    interval_seconds, interval_source = config.effective_poll_interval()
+    # Age, not existence, retires an account's rows. An account whose own newest row has
+    # fallen well behind the freshest row of its provider is one nothing polls any more,
+    # which for a Claude install is also the only reading available once the directory is
+    # gone. Whether a credential file opens right now says nothing about whether stored rows
+    # are current: an unmounted or networked home that is not up yet, a permissions error, a
+    # dotfile manager mid-relink or a logout all read as "deleted", and would hide a
+    # subscription while its card still claimed to be freshly updated. Accounts polled
+    # together also age together, so a home that is entirely unavailable loses none of them.
+    # Providers that fold their accounts into one (`_MULTI_ACCOUNT_CARDS` again) age as one
+    # account and so never drop anything here.
+    stale_accounts: dict[str, set[str]] = {}
+    for name, views in account_views.items():
+        stale_accounts[name] = _stale_accounts(
+            views,
+            newest=int(provider_views.get(name, {}).get("updated_at") or 0),
+            interval_seconds=interval_seconds,
+        )
+        for account in stale_accounts[name]:
+            del views[account]
+
     for name, ref in providers.items():
         aggregate = provider_views.get(name)
         if aggregate is None:
             continue
-        # `status`, `status_detail` and `plan` speak for the card's own account (see
-        # `_card_view`); `updated_at` is the exception and stays provider-wide, because it
-        # answers when this provider was last observed by anything at all.
-        card = _card_view(
-            name,
-            aggregate,
-            account_views.get(name, {}),
-        )
-        status, detail, status_at = _account_status(card)
+        # `status` and `status_detail` are the newest live error of any account behind the
+        # card (see `_provider_status`); `plan` and `updated_at` stay provider-wide, because
+        # they answer what this provider reported and when it was last seen by anything.
+        status, detail, status_at = _provider_status(aggregate, account_views.get(name, {}))
         ref["status_detail"] = detail
         ref["status_at"] = status_at
         ref["status"] = str(status or ref["status"])
-        ref["plan"] = card.get("plan")
+        ref["plan"] = aggregate.get("plan")
         ref["updated_at"] = int(aggregate.get("updated_at") or 0) or None
 
     # Apply source authority ONLY to bucket selection (the status/reset_credits/
@@ -673,16 +717,12 @@ def quota_state(store: UsageEntryStore | None = None) -> dict[str, Any]:
             and str(r.get("source")) == "codex_session"
         )
     ]
-    if claude_live_accounts is not None:
-        # Windows of a Claude install that no longer exists are not current data. They
-        # would otherwise hold a card group open indefinitely, since nothing expires a
-        # stored (account, bucket) row.
-        bucket_rows = [
-            row
-            for row in bucket_rows
-            if str(row.get("provider")) != "claude"
-            or str(row.get("account") or "default") in claude_live_accounts
-        ]
+    bucket_rows = [
+        row
+        for row in bucket_rows
+        if str(row.get("account") or "default")
+        not in stale_accounts.get(str(row.get("provider")), ())
+    ]
     # The Codex endpoint can temporarily return only the weekly window. Current cards
     # must reflect that payload exactly; older per-bucket rows remain available to history.
     if "codex" in network_only:
@@ -767,14 +807,20 @@ def quota_state(store: UsageEntryStore | None = None) -> dict[str, Any]:
     # this to attribute a failure to the account that owns it instead of blaming the card;
     # a card with one account does not, and its payload stays as it was.
     for name, ref in providers.items():
+        if name not in _MULTI_ACCOUNT_CARDS:
+            # Every other provider has its account folded into one by
+            # `_freshest_usage_rows`, so a per-account list would name accounts the card
+            # does not measure separately -- and for antigravity that name is an email.
+            continue
+        if name == "claude" and not claude_scan:
+            # Which installs exist, and each one's plan, come from the filesystem. Without
+            # `credential_scan` consent the card may not learn any of it, stored rows
+            # included; those still render, just unattributed.
+            continue
+        # Aged-out accounts are already gone from these views.
         views = account_views.get(name, {})
         extra: dict[str, dict[str, Any]] = {}
         if name == "claude":
-            views = {
-                account: view
-                for account, view in views.items()
-                if claude_live_accounts is None or account in claude_live_accounts
-            }
             # An install readable locally with nothing polled yet -- signed in, poll not run
             # -- joins the list from the credential side, so it is named before it has data.
             for install in claude_installs:
@@ -784,12 +830,15 @@ def quota_state(store: UsageEntryStore | None = None) -> dict[str, Any]:
                     "plan": install.get("plan"),
                     "tier": install.get("tier"),
                     "credential_path": install.get("credential_path"),
+                    # `read_claude_profiles` knows the install is signed in (or not) from
+                    # its own file, which is the documented answer for an install with no
+                    # snapshot rows yet.
+                    "status": install.get("status"),
                 }
         entries = _account_entries(name, views, extra)
         if len(entries) > 1:
             ref["accounts"] = entries
 
-    interval_seconds, interval_source = config.effective_poll_interval()
     now = int(datetime.now(timezone.utc).timestamp())
     return {
         "providers": providers,

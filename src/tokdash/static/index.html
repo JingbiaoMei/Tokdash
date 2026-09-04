@@ -11877,21 +11877,35 @@
         .filter((group) => group.rows.length);
     }
 
-    function renderMiniMaxBuckets(card, buckets) {
+    // MiniMax card: one set of bars per Token Plan region, each with its own failure notice
+    // under it. Returns how many notices it put under a region, so the caller adds the
+    // card-level notice only when the payload could not attribute the failure itself.
+    function renderMiniMaxBuckets(card, buckets, provider) {
       const groups = miniMaxBucketGroups(buckets);
+      const failures = groups.map((group) => quotaAccountNotice(provider, group.account));
+      let attributed = 0;
       if (groups.length <= 1) {
         renderQuotaBucketGroups(card, buckets, 'minimax');
-        return;
+        if (failures[0]) {
+          appendQuotaStatusNoticeFor(card, 'minimax', failures[0].detail, failures[0].statusAt);
+          attributed = 1;
+        }
+        return attributed;
       }
       let rendered = 0;
-      groups.forEach(({ account, rows }) => {
+      groups.forEach(({ account, rows }, index) => {
         const label = account === 'cn'
           ? t('quotaRegionChina')
           : account === 'global' ? t('quotaRegionGlobal') : account;
         card.appendChild(quotaSubtitleEl(label, rendered === 0));
         rows.forEach((bucket) => card.appendChild(renderQuotaBucketRow(bucket, 'minimax')));
+        if (failures[index]) {
+          appendQuotaStatusNoticeFor(card, 'minimax', failures[index].detail, failures[index].statusAt);
+          attributed += 1;
+        }
         rendered += 1;
       });
+      return attributed;
     }
 
     // Bucket-id prefix a Claude install carries: none for the default install,
@@ -11933,21 +11947,30 @@
       return accounts;
     }
 
+    // The (detail, timestamp) an account of a multi-account card is still carrying, or null
+    // when it is fine or the payload names no accounts at all. `accounts` is the one generic
+    // list every such card carries -- Claude installs, MiniMax regions -- so a card never
+    // has to guess which account a provider-level error was about.
+    function quotaAccountNotice(provider, account) {
+      const entries = provider?.accounts || [];
+      const entry = entries.find((item) => String(item?.account || 'default') === account) || null;
+      const detail = entry ? entry.status_detail : null;
+      if (!detail || detail === 'ok') return null;
+      return { detail, statusAt: entry.status_at ?? null };
+    }
+
     function claudeProfileGroups(buckets, provider) {
       const entries = provider?.accounts || [];
       const groups = claudeCardAccounts(buckets, provider).map((account) => {
         const entry =
           entries.find((item) => String(item?.account || 'default') === account) || null;
-        // Without a per-account list the card's own error can only be about the one install
-        // it knows about, which is its own (default) account.
-        const cardError = !entry && account === 'default' ? provider?.status_detail : null;
-        const detail = entry ? entry.status_detail : cardError;
+        const failure = quotaAccountNotice(provider, account);
         return {
           account,
           plan: entry?.plan || '',
           rows: buckets.filter((bucket) => String(bucket.account || 'default') === account),
-          notice: detail && detail !== 'ok' ? detail : '',
-          statusAt: entry ? entry.status_at ?? null : cardError ? provider?.status_at ?? null : null,
+          notice: failure ? failure.detail : '',
+          statusAt: failure ? failure.statusAt : null,
         };
       });
       // An install with neither windows nor a problem has nothing to say.
@@ -11983,7 +12006,16 @@
         plan = shared === null ? '' : shared;
         showPlans = plan === '' && plans.size > 0;
       }
-      return { groups, plan, showPlans };
+      // A payload that names no accounts attributes nothing, and the card's own error still
+      // has to be printed somewhere. It goes under the installs rather than onto whichever
+      // one happens to be first, because guessing is how a sibling's expired sign-in used to
+      // be made to look like the default install's.
+      let cardNotice = null;
+      const detail = provider?.status_detail;
+      if (!(provider?.accounts || []).length && detail && detail !== 'ok') {
+        cardNotice = { detail, statusAt: provider?.status_at ?? null };
+      }
+      return { groups, plan, showPlans, cardNotice };
     }
 
     // Claude card: one group of window bars per install on this machine, each under the
@@ -12004,6 +12036,11 @@
         }
         rendered += 1;
       });
+      // Only when something actually rendered: an empty card already prints this same
+      // error through the shared empty state, and twice would be twice.
+      if (rendered && view.cardNotice) {
+        appendQuotaStatusNoticeFor(card, providerKey, view.cardNotice.detail, view.cardNotice.statusAt);
+      }
       return rendered;
     }
 
@@ -12237,8 +12274,9 @@
           // First, and ahead of the emptiness test: a card where every install is broken has
           // no window rows at all, and `renderClaudeBuckets` is what still names each
           // install and puts its failure under it. Only when even that has nothing to say
-          // does the card fall back to the shared empty state. It then speaks per-install and
-          // never adds a second card-level notice for the default install.
+          // does the card fall back to the shared empty state. Between the two, every error
+          // is either attributed to its install or printed once by the view's own card-level
+          // notice, so there is no third copy to add here.
           if (!renderClaudeBuckets(card, claudeView, providerKey)) {
             appendQuotaEmptyState(card, providerKey, provider);
           }
@@ -12250,8 +12288,11 @@
           renderCodexBuckets(card, buckets);
           appendQuotaStatusNotice(card, providerKey, provider);
         } else if (providerKey === 'minimax') {
-          renderMiniMaxBuckets(card, buckets);
-          appendQuotaStatusNotice(card, providerKey, provider);
+          // Region-level notices when the payload can attribute one; the card-level notice is
+          // the fallback when it cannot, never a second copy of one it already placed.
+          if (!renderMiniMaxBuckets(card, buckets, provider)) {
+            appendQuotaStatusNotice(card, providerKey, provider);
+          }
         } else {
           renderQuotaBucketGroups(card, buckets, providerKey);
           appendQuotaStatusNotice(card, providerKey, provider);

@@ -18,6 +18,19 @@ _BLOB = {
 }
 
 
+@pytest.fixture(autouse=True)
+def real_platform_check(monkeypatch):
+    """Undo the suite-wide Claude redirect for a file whose whole subject is the Keychain.
+
+    `hermetic_claude_installs` forces `_is_macos` false so an out-of-the-box default profile
+    cannot shell out to `security find-generic-password` against the developer's login
+    keychain from a consented test. Every test here either pins the check to a chosen value
+    or, in the `security(1)` integration test, needs the platform truth, so the whole file
+    takes it back.
+    """
+    monkeypatch.setattr(claude, "_is_macos", lambda: sys.platform == "darwin")
+
+
 def _isolate(monkeypatch, tmp_path):
     """No credentials file, no env token — only the (mocked) Keychain remains."""
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "empty"))

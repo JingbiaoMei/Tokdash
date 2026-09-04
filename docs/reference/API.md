@@ -231,16 +231,27 @@ Every bucket row carries the `account` it belongs to.
 
 **`accounts`** is additive and lists the accounts a card measures separately: Claude Code
 installs (`~/.claude`, plus every `~/.claude-<profile>` sibling with its own
-`.credentials.json`; the two extra fields `tier` and `credential_path` are Claude's own and
-appear only with `credential_scan` consent) and MiniMax regions. It appears only once a card
-measures more than one account, so a single-account card's payload is unchanged.
+`.credentials.json`) and MiniMax regions. It appears only once a card measures more than one
+account, so a single-account card's payload is unchanged, and only for those two providers —
+everywhere else the stored account id is a placeholder or a rotating id, and the card measures
+one account. The two extra fields `tier` and `credential_path` are Claude's own. Claude's whole
+list needs `credential_scan` consent, because which installs exist, and each one's plan, comes
+off the filesystem: with consent withheld the stored rows still render, unnamed.
 
-`status`, `status_detail` and `plan` describe the card's own account — the `default` Claude
-install, the `global` MiniMax plan — while each `accounts` entry carries that account's own
-`status_detail` if it is failing. An entry's error clears itself once that same account
-reports a newer success; a failure on one account never moves the other one's card.
-`providers.claude.plan`, `tier` and `credential_path` keep describing the default install, so
-an existing consumer sees what it always did.
+`status` and `status_detail` name the **newest error any of the provider's accounts is still
+carrying**, with `status_at` dating it. A card speaks for every credential behind it, so one
+broken credential keeps warning about the provider (see
+`companion/contract/COMPANION_API.md`); `accounts` is what says whose error it is, and a card
+that can read the list prints the notice under that account rather than over the whole card.
+Errors clear per account: an account's own newer success retires its error, a success on
+another account does not silence it, and a recovered account stops warning the card.
+
+`plan` stays provider-wide. `providers.claude.plan`, `tier` and `credential_path` describe the
+default install where there is one and the measured install where there is not, so an existing
+consumer sees what it always did. A Claude account whose own newest row falls more than three
+poll intervals (never under an hour) behind the freshest Claude row on the machine leaves both
+`buckets` and `accounts`: that retires a renamed or deleted `~/.claude-<profile>`, while a
+directory that merely cannot be read at the moment keeps its data.
 
 ## `GET /api/quota/history`
 

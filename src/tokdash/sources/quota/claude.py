@@ -26,7 +26,11 @@ _KEYCHAIN_LABEL = f"macOS Keychain ({CLAUDE_KEYCHAIN_SERVICE})"
 # three installs behind a throttled endpoint would otherwise cost 3 x 15s of request time.
 _MAX_CONCURRENT_FETCHES = 4
 # Identity claims that survive a token refresh, in the order Claude Code has shipped them.
-_IDENTITY_CLAIMS = ("account_id", "accountId", "organization_id", "sub", "email")
+# All of them name the SIGN-IN, which is what a copied install shares. `organization_id` is
+# deliberately absent: one Team or Enterprise organization has one organization id and one
+# distinct seat per member, so keying on it would fold two people's subscriptions into one
+# and silently drop the second install's numbers.
+_IDENTITY_CLAIMS = ("account_id", "accountId", "sub", "email")
 
 
 def _is_macos() -> bool:
@@ -68,12 +72,13 @@ class ClaudeProfile:
     def configured(self) -> bool:
         """Whether this install is really there, to the level each kind can be checked.
 
-        One predicate serves both callers that need it, so they cannot drift:
-        ``discover_profiles`` refuses to open a group for a sibling that was never signed
-        in, and the Quota tab refuses to add a Claude card for a directory that is only a
-        leftover copy. The default install counts on a config directory alone -- reporting
-        it signed out is that install's own ``unavailable`` state -- or on the environment
-        override, since a headless sign-in has no config directory to be there or not.
+        One predicate serves every caller that needs it, so they cannot drift:
+        ``discover_profiles`` admits an install with it, and the Quota tab refuses to add a
+        Claude card for a directory that is only a leftover copy. The default install counts
+        on a config directory alone -- reporting it signed out is that install's own
+        ``unavailable`` state -- or on the environment override, since a headless sign-in has
+        no config directory to be there or not. A sibling needs its own credential file,
+        because a directory copied or restored into place is not a subscription.
         """
         if self.is_default:
             return self.config_dir.is_dir() or bool(_env_token())
@@ -89,10 +94,14 @@ def _default_profile() -> ClaudeProfile:
 def discover_profiles() -> list[ClaudeProfile]:
     """Claude installs worth reporting quota for, default profile first.
 
-    The default profile is always included — a missing ``.credentials.json`` there is
-    itself the state the card reports. A ``~/.claude-*`` sibling is included only once
-    it has its own ``.credentials.json``, so a leftover or unrelated ``.claude-*``
-    directory cannot open an empty group on the card.
+    Every install is admitted on the same test, ``configured``: a config directory (or the
+    environment override) for the default profile, its own ``.credentials.json`` for a
+    ``~/.claude-*`` sibling. That is what keeps a leftover or unrelated ``.claude-*``
+    directory from opening an empty group on the card, and it is what stops a default
+    install that is simply not there -- no ``~/.claude``, sign-in in a sibling only -- from
+    reporting ``unavailable`` over the top of the subscription that IS installed. A
+    signed-in-but-never-polled default install still reports: its directory is there, and
+    "no credentials yet" is that install's own state to report.
 
     Enumerating the home directory and opening the siblings' credential files is a
     credential access, so it is gated on ``quota.credential_scan`` like every other
@@ -107,10 +116,7 @@ def discover_profiles() -> list[ClaudeProfile]:
         ClaudeProfile(name, path, name == clientpaths.CLAUDE_DEFAULT_PROFILE)
         for name, path in clientpaths.claude_profile_dirs()
     ]
-    # The default profile stays whatever is on disk: a missing ``.credentials.json`` there
-    # is the state the card reports, and ``CLAUDE_CODE_OAUTH_TOKEN`` headless users have no
-    # config directory at all.
-    return [p for p in profiles if p.is_default or p.configured]
+    return [p for p in profiles if p.configured]
 
 
 def _read_keychain_credentials(keychain: str | None = None) -> dict[str, Any] | None:
@@ -304,6 +310,52 @@ def _subscription_identity(token: str) -> str:
     return token
 
 
+def _credential_rank(
+    profile: ClaudeProfile, meta: dict[str, Any], captured_at: int
+) -> tuple[int, float, int]:
+    """Rank two credentials for ONE subscription; the highest is the one worth fetching with.
+
+    ``cp -r`` leaves a copy behind that goes stale in whichever directory Claude Code is not
+    run from, so "first directory found" is not the same as "the sign-in that still works".
+    So: live beats expired, then the one that expires latest, and the default install breaks a
+    full tie so the reported account name does not wander between polls. A credential with no
+    recorded expiry wins the recency comparison rather than losing it -- in practice that is
+    ``CLAUDE_CODE_OAUTH_TOKEN``, which the user pointed at deliberately and which
+    `_read_credentials` already ranks above every file source.
+    """
+    try:
+        expires_at: float = int(meta.get("expires_at_ms") or 0) // 1000
+    except (TypeError, ValueError):
+        expires_at = 0.0
+    if expires_at == 0:
+        expires_at = float("inf")  # no recorded expiry: not expired, and not outranked
+    live = 1 if expires_at > captured_at else 0
+    return (live, expires_at, 1 if profile.is_default else 0)
+
+
+def _drop_duplicate_subscriptions(
+    jobs: list[tuple[ClaudeProfile, str | None, dict[str, Any]]], *, captured_at: int
+) -> list[tuple[ClaudeProfile, str | None, dict[str, Any]]]:
+    """One job per subscription, keeping the best credential within it.
+
+    Installs without a token are untouched: they carry no identity to compare, and the
+    default profile's "nothing to read" row is a state the card has to keep reporting.
+    """
+    best: dict[str, int] = {}
+    rank: dict[int, tuple[int, float, int]] = {}
+    for index, (profile, token, meta) in enumerate(jobs):
+        if not token:
+            continue
+        identity = _subscription_identity(token)
+        challenger = _credential_rank(profile, meta, captured_at)
+        rank[index] = challenger
+        incumbent = best.get(identity)
+        if incumbent is None or challenger > rank[incumbent]:
+            best[identity] = index
+    kept = set(best.values())
+    return [job for index, job in enumerate(jobs) if not job[1] or index in kept]
+
+
 def _status_snapshot(
     status: str, captured_at: int, raw: dict[str, Any], profile: ClaudeProfile | None = None
 ) -> QuotaSnapshot:
@@ -428,22 +480,19 @@ def collect_claude_api_snapshots(
     Each install is fetched separately and a failure lands on its own status row, so an
     expired token in one directory cannot blank another subscription's windows. Two
     directories holding the same sign-in report once (see `_subscription_identity`): it is
-    one subscription, and reporting it twice would double its usage in the chart.
+    one subscription, and reporting it twice would double its usage in the chart. The copy
+    that still has a live credential is the one that reports, so a stale clone cannot evict
+    the working sign-in and leave the subscription looking signed out.
     """
     captured_at = int(now if now is not None else datetime.now(timezone.utc).timestamp())
     selected = profiles if profiles is not None else discover_profiles()
     # Credentials are read serially first: it is local file I/O, and it lets one
     # subscription be recognised as a duplicate before any request goes out for it.
     jobs: list[tuple[ClaudeProfile, str | None, dict[str, Any]]] = []
-    seen_accounts: set[str] = set()
     for profile in selected:
         token, meta = _read_credentials(profile)
-        if token:
-            identity = _subscription_identity(token)
-            if identity in seen_accounts:
-                continue
-            seen_accounts.add(identity)
         jobs.append((profile, token, meta))
+    jobs = _drop_duplicate_subscriptions(jobs, captured_at=captured_at)
     if len(jobs) == 1:
         # The common case, and it stays a direct call: no pool, no thread, in-process.
         profile, token, meta = jobs[0]

@@ -84,7 +84,7 @@
 - **Aba Quota** *[novo]*: barras de janela de assinatura com contagem regressiva de reset para Codex, Claude Code e Antigravity. As janelas do Codex funcionam direto dos logs locais; créditos de reset do Codex, recursos medidos e todas as cotas do Claude/Antigravity exigem [polling ao vivo](#acompanhamento-de-cota-opcional) opt-in
 - **App de barra de status Companion** *[novo]*: veja gasto e cota de assinatura na barra de menu do macOS ou na área de notificação do Windows — para Windows na [Microsoft Store](https://apps.microsoft.com/detail/9ppnmpdq8b52) — [capturas e downloads](#tokdash-companion-app-de-barra-de-status)
 - **Visões multi-servidor**: adicione servidores Tokdash de WSL, macOS e outros nas Configurações; combine o uso de qualquer seleção mantendo a cota agrupada por máquina. Veja [acesso remoto](docs/guides/REMOTE_ACCESS.md).
-- **Temas e acabamento do app**: 10 temas de estilo, modo claro/escuro, suporte a instalação PWA e UI em 6 idiomas (English / 中文 / 日本語 / 한국어 / Español / Português)
+- **Temas e acabamento do app**: 17 temas de estilo, modo claro/escuro, suporte a instalação PWA e UI em 6 idiomas (English / 中文 / 日本語 / 한국어 / Español / Português)
 
 ### Matriz de suporte de clientes
 

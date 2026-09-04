@@ -50,7 +50,7 @@
 </p>
 
 > [!NOTE]
-> **2.0 신규 기능: ZCode 지원.** 토큰, 비용, 세션, 턴, 측정된 활성 시간은 ZCode의 SQLite 데이터베이스에서 로컬로 읽습니다. [지원 클라이언트 →](docs/reference/SUPPORTED_CLIENTS.md)
+> **여러 기계를 하나의 대시보드에서.** 설정에서 WSL, Mac 또는 다른 기기에서 실행 중인 Tokdash 인스턴스를 추가하세요. 개요·세션·통계는 선택한 서버를 합산하고, Servers 탭은 기계를 나란히 비교하며, Quota 탭은 각 제공자의 윈도우 바와 리셋 카운트다운을 기계별로 묶어 보여줍니다. [원격 접근 →](docs/guides/REMOTE_ACCESS.md) · [쿼터 추적 →](#쿼터-추적-선택사항)
 >
 > **같은 저자의 다른 프로젝트: [Cosyncing](https://github.com/cosyncing/cosyncing).** 에이전트를 동기화하고 제어하세요 — CLI에서 GUI까지, 데스크톱에서 휴대폰까지. 중단한 바로 그 자리에서 어디서든 이어갑니다. Cosyncing은 여러분 자신의 네트워크에서 코딩 에이전트를 동기화합니다.
 
@@ -169,6 +169,15 @@
     <picture>
       <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-quota-codex-en-dark.png" />
       <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-quota-codex-en-light.png" alt="Tokdash Codex quota and reset credits - click for live demo" width="440" />
+    </picture>
+  </a>
+</p>
+<p align="center">
+  <b>여러 서버, 하나의 합계</b><br />
+  <a href="https://tokdash.github.io/demo/">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-servers-en-dark.png" />
+      <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-servers-en-light.png" alt="Tokdash Servers tab comparing four machines - click for live demo" width="860" />
     </picture>
   </a>
 </p>

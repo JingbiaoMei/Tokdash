@@ -49,7 +49,7 @@
 </p>
 
 > [!NOTE]
-> **2.0 新增 ZCode 支持。** 从 ZCode 本地 SQLite 数据库读取 token、费用、会话、轮次与实测活跃时间。[支持的客户端 →](docs/reference/SUPPORTED_CLIENTS.md)
+> **多台机器，一个仪表盘。** 在设置里添加运行在 WSL、Mac 或其他机器上的 Tokdash 实例：总览、会话与统计会按你选择的范围合并，Servers 标签页并排对比每台机器，额度标签页则按机器分别展示各家的额度窗口与重置倒计时。[远程访问 →](docs/guides/REMOTE_ACCESS.md) · [额度跟踪 →](#额度跟踪可选)
 >
 > **同一作者的另一个项目：[Cosyncing](https://github.com/cosyncing/cosyncing)。** 同步并操控你的 agent —— 从 CLI 到 GUI，从桌面到手机。随时随地，从上次中断的地方接着继续。Cosyncing 让你的编码 agent 在你自己的网络中保持同步。
 
@@ -167,6 +167,15 @@
     <picture>
       <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-quota-codex-cn-dark.png" />
       <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-quota-codex-cn-light.png" alt="Tokdash Codex 额度与重置额度 — 点击体验在线 Demo" width="440" />
+    </picture>
+  </a>
+</p>
+<p align="center">
+  <b>多台服务器，一个总计</b><br />
+  <a href="https://tokdash.github.io/demo/">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-servers-cn-dark.png" />
+      <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-servers-cn-light.png" alt="Tokdash 多服务器对比 — 点击体验在线 Demo" width="860" />
     </picture>
   </a>
 </p>

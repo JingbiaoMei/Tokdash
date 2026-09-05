@@ -251,20 +251,80 @@ def gemini_root() -> Path:
     return Path.home() / ".gemini"
 
 
+# Antigravity ships as three products that share one trajectory format and one
+# sibling layout under ~/.gemini: the CLI, the ACP kernel (agy_acp_server, the
+# binary an ACP host such as Paseo, Zed or JetBrains spawns), and the IDE.
+# "antigravity-acp" is quoted from the official kernel's own help text;
+# "antigravity-ide" is reported without a citation and unconfirmed here. Both
+# are safe to list either way -- discovery drops homes that do not exist -- but
+# see docs/development/technical-notes/WINDOWS_CLIENT_PATHS.md before treating
+# the IDE path as verified.
+ANTIGRAVITY_SIBLING_DIR_NAMES = ("antigravity-acp", "antigravity-ide")
+
+
 def antigravity_cli_dir() -> Path:
     return gemini_root() / "antigravity-cli"
 
 
-def antigravity_conversations_dir() -> Path:
-    return antigravity_cli_dir() / "conversations"
+def antigravity_product_dirs() -> List[Path]:
+    """Every existing Antigravity product home, in scan order, deduplicated.
+
+    A union, not a switch: ``$ANTIGRAVITY_HOME`` (Tokdash-only, comma-separated)
+    comes first, then the CLI home, then its ACP and IDE siblings. A custom home
+    does not displace the defaults -- an ACP host and the CLI write to different
+    dirs and both sets of sessions should count.
+
+    Each product home holds ``conversations/*.db`` in the same schema, so one
+    parser reads all of them. Only the CLI and IDE write a
+    ``conversation_summaries.db``; the ACP kernel does not, and callers treat it
+    as optional.
+
+    The siblings are derived from ``antigravity_cli_dir()`` rather than
+    ``gemini_root()`` so that patching the CLI home relocates the whole tree.
+
+    Note the name is Tokdash's own: Antigravity does not currently read
+    ``ANTIGRAVITY_HOME`` itself. Should Google ever ship it, expect relocate
+    semantics rather than the additive ones here.
+    """
+    roots: List[Path] = []
+    seen: set = set()
+
+    def add(path: Path) -> None:
+        # Dedupe on the canonical path, not the spelling: ANTIGRAVITY_HOME is
+        # most useful pointed at a symlink, and a home reached twice would open
+        # and reparse its conversation_summaries.db once per spelling.
+        key = _resolve(path) or str(path)
+        if key in seen:
+            return
+        seen.add(key)
+        roots.append(path)
+
+    for raw in os.environ.get("ANTIGRAVITY_HOME", "").split(","):
+        raw = raw.strip()
+        if not raw:
+            continue
+        path = Path(raw).expanduser()
+        if not path.is_absolute():
+            path = path.resolve()
+        add(path)
+    cli_dir = antigravity_cli_dir()
+    for default in (cli_dir, *(cli_dir.parent / name for name in ANTIGRAVITY_SIBLING_DIR_NAMES)):
+        add(default)
+    return [root for root in roots if root.is_dir()]
 
 
-def antigravity_conversations_glob() -> str:
-    return str(antigravity_conversations_dir() / "*.db")
+def antigravity_conversation_dirs() -> List[Path]:
+    return [d for d in (root / "conversations" for root in antigravity_product_dirs()) if d.is_dir()]
 
 
-def antigravity_summaries_db_path() -> Path:
-    return antigravity_cli_dir() / "conversation_summaries.db"
+def antigravity_conversation_globs() -> List[str]:
+    return [str(d / "*.db") for d in antigravity_conversation_dirs()]
+
+
+def antigravity_summary_db_paths() -> List[Path]:
+    """``conversation_summaries.db`` of every product home that has one."""
+    paths = [root / "conversation_summaries.db" for root in antigravity_product_dirs()]
+    return [p for p in paths if p.is_file()]
 
 
 def gemini_chats_json_glob(root: Optional[Path] = None) -> str:

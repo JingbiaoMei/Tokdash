@@ -157,5 +157,76 @@ def test_quota_client_roots_honor_environment_overrides(monkeypatch):
     assert clientpaths.codex_archived_sessions_dir() == Path("/tmp/codex-home") / "archived_sessions"
     assert clientpaths.claude_config_dir() == Path("/tmp/claude-config")
     assert clientpaths.antigravity_cli_dir() == Path.home() / ".gemini" / "antigravity-cli"
-    assert clientpaths.antigravity_conversations_dir() == Path.home() / ".gemini" / "antigravity-cli" / "conversations"
-    assert clientpaths.antigravity_conversations_glob() == str(Path.home() / ".gemini" / "antigravity-cli" / "conversations" / "*.db")
+
+
+def test_antigravity_product_dirs_union(monkeypatch, tmp_path):
+    """CLI, ACP and IDE homes are scanned together, and only when they exist.
+
+    The ACP kernel (agy_acp_server) writes to ``antigravity-acp``, so an ACP
+    host's sessions must be discovered without the CLI being installed.
+    """
+    monkeypatch.delenv("ANTIGRAVITY_HOME", raising=False)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    gemini = tmp_path / ".gemini"
+
+    assert clientpaths.antigravity_product_dirs() == []
+
+    (gemini / "antigravity-acp" / "conversations").mkdir(parents=True)
+    assert clientpaths.antigravity_product_dirs() == [gemini / "antigravity-acp"]
+    assert clientpaths.antigravity_conversation_dirs() == [
+        gemini / "antigravity-acp" / "conversations"
+    ]
+    # The ACP kernel writes no conversation_summaries.db; callers fall back.
+    assert clientpaths.antigravity_summary_db_paths() == []
+
+    (gemini / "antigravity-cli" / "conversations").mkdir(parents=True)
+    (gemini / "antigravity-ide" / "conversations").mkdir(parents=True)
+    assert clientpaths.antigravity_product_dirs() == [
+        gemini / "antigravity-cli",
+        gemini / "antigravity-acp",
+        gemini / "antigravity-ide",
+    ]
+
+    (gemini / "antigravity-cli" / "conversation_summaries.db").write_bytes(b"")
+    assert clientpaths.antigravity_summary_db_paths() == [
+        gemini / "antigravity-cli" / "conversation_summaries.db"
+    ]
+
+
+def test_antigravity_home_symlink_to_a_default_home_is_one_home(monkeypatch, tmp_path):
+    """A home reached by two spellings is scanned once.
+
+    Dedupe is on the canonical path: pointing ANTIGRAVITY_HOME at a symlink to
+    a default home would otherwise list that home twice, and each listing opens
+    and reparses its conversation_summaries.db.
+    """
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    cli = tmp_path / ".gemini" / "antigravity-cli"
+    (cli / "conversations").mkdir(parents=True)
+    (cli / "conversation_summaries.db").write_bytes(b"")
+    link = tmp_path / "agy-link"
+    link.symlink_to(cli, target_is_directory=True)
+
+    monkeypatch.setenv("ANTIGRAVITY_HOME", str(link))
+    # The env spelling is scanned first and the default is absorbed into it.
+    assert clientpaths.antigravity_product_dirs() == [link]
+    assert clientpaths.antigravity_summary_db_paths() == [link / "conversation_summaries.db"]
+    assert clientpaths.antigravity_conversation_globs() == [str(link / "conversations" / "*.db")]
+
+
+def test_antigravity_home_env_override_is_a_union(monkeypatch, tmp_path):
+    """``$ANTIGRAVITY_HOME`` is comma-separated and prepends to the defaults
+    rather than replacing them: an extra home must not hide the installed one."""
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    gemini = tmp_path / ".gemini"
+    (gemini / "antigravity-cli" / "conversations").mkdir(parents=True)
+    extra = tmp_path / "elsewhere" / "agy"
+    (extra / "conversations").mkdir(parents=True)
+    missing = tmp_path / "not-there"
+
+    monkeypatch.setenv("ANTIGRAVITY_HOME", f"{extra}, {missing} ,")
+    assert clientpaths.antigravity_product_dirs() == [extra, gemini / "antigravity-cli"]
+    assert clientpaths.antigravity_conversation_globs() == [
+        str(extra / "conversations" / "*.db"),
+        str(gemini / "antigravity-cli" / "conversations" / "*.db"),
+    ]

@@ -97,19 +97,15 @@ def _create_antigravity_db(path: Path, rows: list[tuple[int, bytes | bytearray]]
 
 
 def _prepare_antigravity_home(monkeypatch, tmp_path: Path) -> Path:
+    """Relocate the CLI home; the ACP and IDE siblings follow it (they are
+    derived from its parent) and stay absent unless a test creates them."""
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("ANTIGRAVITY_HOME", raising=False)
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     antigravity_cli_dir = tmp_path / ".gemini" / "antigravity-cli"
     conversations_dir = antigravity_cli_dir / "conversations"
     conversations_dir.mkdir(parents=True)
     monkeypatch.setattr(clientpaths, "antigravity_cli_dir", lambda: antigravity_cli_dir)
-    monkeypatch.setattr(clientpaths, "antigravity_conversations_dir", lambda: conversations_dir, raising=False)
-    monkeypatch.setattr(
-        clientpaths,
-        "antigravity_conversations_glob",
-        lambda: str(conversations_dir / "*.db"),
-        raising=False,
-    )
     _sig_cache.clear()
     BaseParser._entry_cache.clear()
     return conversations_dir
@@ -631,4 +627,9 @@ def test_antigravity_cli_signature_scan_only_stats_db_and_sidecars(monkeypatch, 
 
     assert parser._file_signatures()
 
-    assert set(stat_calls) == {"scan.db", "scan.db-wal", "scan.db-shm"}
+    # Locating the product homes (cli/acp/ide) probes a fixed set of
+    # directories once per scan. Everything beyond that must be a conversation
+    # DB or one of its sidecars: no per-file stat on legacy .pb or stray files,
+    # however many the directory holds.
+    dir_probes = {"antigravity-cli", "antigravity-acp", "antigravity-ide", "conversations"}
+    assert set(stat_calls) - dir_probes == {"scan.db", "scan.db-wal", "scan.db-shm"}

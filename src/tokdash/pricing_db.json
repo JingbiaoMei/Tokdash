@@ -1,6 +1,6 @@
 {
-  "version": "2.0.22",
-  "lastUpdated": "2026-09-03T10:17:50Z",
+  "version": "2.0.23",
+  "lastUpdated": "2026-09-05T00:00:00Z",
   "note": "Comprehensive pricing database with all Moonshot, MiniMax, GLM, and OpenAI models from OpenRouter. Cache pricing estimated at 10% of input for cache_read, 100% of input for cache_write.",
   "aliases": {
     "Qwen/Qwen3.8-Flash-Next": "qwen3.8-flash",
@@ -861,6 +861,16 @@
       "unit": "per_million_tokens",
       "source": "openrouter.ai/openai/gpt-5.6-luna-pro",
       "note": "Mirrors official gpt-5.6-luna pricing"
+    },
+    "gpt-6-astra": {
+      "provider": "openai",
+      "input": 10.0,
+      "output": 50.0,
+      "cache_read": 1.0,
+      "cache_write": 12.5,
+      "unit": "per_million_tokens",
+      "source": "developers.openai.com/api/docs/pricing",
+      "note": "Official OpenAI standard short-context pricing, verified 2026-09-05. Requests over the 272K short-context limit bill at 2x input/cache and 1.5x output; Batch and Flex halve these rates and Fast doubles them."
     },
     "gpt-audio": {
       "provider": "openai",

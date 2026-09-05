@@ -1570,14 +1570,85 @@ class GeminiCLIParser(BaseParser):
         return out
 
 
+def antigravity_db_signatures() -> tuple:
+    """Signatures of every Antigravity conversation DB across all product homes.
+
+    Shared by ``AntigravityCLIParser`` (Overview) and the sessions harness so
+    both sides scan the same files under one TTL cache key instead of drifting
+    apart.
+
+    Per DB: the path, the max mtime across ``.db``/``-wal``/``-shm``, and the
+    ``.db`` size plus the WAL size. Antigravity runs its DBs in WAL mode, so
+    folding the sidecars in is what makes a signature move when the client
+    writes; keeping the ``.db`` path as the only key keeps ``file_replace``
+    sync keys stable as sidecars come and go.
+
+    Conversation ids are disjoint across the CLI, ACP and IDE homes, but one DB
+    can still be reachable twice -- most concretely via the workaround this
+    scan replaces, where ACP DBs were symlinked into the CLI's conversations
+    dir. Both the usage ``entry_id`` and the sessions ``session_id`` are the DB
+    stem, so a duplicate stem is dropped; first home in scan order wins.
+
+    What that prevents is not token inflation. ``usage_entries`` has a unique
+    index on ``(source, entry_key)`` and this source inserts with INSERT OR
+    REPLACE, so a second copy replaces the first row rather than adding one.
+    The damage is the file_path the surviving row carries: it is whichever copy
+    parsed last, and the store's per-file DELETE (``usage_store._sync_files_now``,
+    for both removed and fully-reparsed paths) then deletes by the other path,
+    taking rows that represent a DB still on disk. This source leaves
+    ``cross_file_stable_keys`` False -- correctly, now that stems are unique --
+    so no surviving copy is promoted afterwards and that usage stays missing
+    until the remaining file's signature moves again. On the sessions side the
+    cost is plainer: ``sessions[stem]`` is assigned, so one DB's turns replace
+    the other's.
+    """
+
+    globs = clientpaths.antigravity_conversation_globs()
+
+    def _scan() -> tuple:
+        sigs: List[Tuple[str, int, int]] = []
+        seen_stems: set = set()
+        for pattern in globs:
+            for db_path_str in sorted(glob.glob(pattern)):
+                db_path = Path(db_path_str)
+                if db_path.stem in seen_stems:
+                    continue
+                try:
+                    db_stat = db_path.stat()
+                except (FileNotFoundError, OSError):
+                    continue
+                seen_stems.add(db_path.stem)
+                max_mtime = int(db_stat.st_mtime_ns)
+                total_size = int(db_stat.st_size)
+                wal_path = Path(str(db_path) + "-wal")
+                shm_path = Path(str(db_path) + "-shm")
+                for sidecar in (wal_path, shm_path):
+                    try:
+                        sidecar_stat = sidecar.stat()
+                    except (FileNotFoundError, OSError):
+                        continue
+                    max_mtime = max(max_mtime, int(sidecar_stat.st_mtime_ns))
+                    if sidecar == wal_path:
+                        total_size += int(sidecar_stat.st_size)
+                sigs.append((str(db_path), max_mtime, total_size))
+        return tuple(sorted(sigs))
+
+    return _timed_sigs("antigravity_cli:" + "|".join(globs), _scan)
+
+
 class AntigravityCLIParser(BaseParser):
     """
-    Parser for Antigravity CLI (agy) generation metadata SQLite DBs.
+    Parser for Antigravity (agy) generation metadata SQLite DBs.
 
     ========================================================================
-    ANTIGRAVITY CLI GEN_METADATA SCHEMA (fixture-friendly notes)
+    ANTIGRAVITY GEN_METADATA SCHEMA (fixture-friendly notes)
     ========================================================================
-    Location: ~/.gemini/antigravity-cli/conversations/<conversation_uuid>.db
+    Location: <product home>/conversations/<conversation_uuid>.db, where the
+    product homes are ~/.gemini/antigravity-{cli,acp,ide} plus any
+    $ANTIGRAVITY_HOME entry (clientpaths.antigravity_product_dirs). The CLI,
+    the ACP kernel (agy_acp_server, spawned by hosts such as Paseo, Zed and
+    JetBrains) and the IDE all write the same schema, so one parser reads them
+    all and they report under the one antigravity_cli source key.
     Table: gen_metadata(idx INTEGER, data BLOB, size)
 
     Each row is one LLM generation. The data BLOB is protobuf wire format. This
@@ -1619,12 +1690,13 @@ class AntigravityCLIParser(BaseParser):
 
     Known schema version: agy build verified 2026-07-02. The token mapping is
     descriptor-pinned in docs/local/20260702_antigravity_usage/
-    antigravity_gen_metadata_schema.md. Legacy .pb files in the conversations
-    directory are intentionally skipped; only *.db is parsed.
+    antigravity_gen_metadata_schema.md. Legacy .pb files in the CLI
+    conversations directory and the .meta sidecars the ACP kernel writes are
+    intentionally skipped; only *.db is parsed.
 
-    WAL note: Antigravity DBs run in WAL mode. _file_signatures() folds -wal
-    and -shm metadata into each .db signature while preserving the .db path so
-    file_replace sync keys stay stable.
+    WAL note: Antigravity DBs run in WAL mode. antigravity_db_signatures()
+    folds -wal and -shm metadata into each .db signature while preserving the
+    .db path so file_replace sync keys stay stable.
     ========================================================================
     """
 
@@ -1637,36 +1709,11 @@ class AntigravityCLIParser(BaseParser):
     #    preferred over total-minus-reasoning.
     persistent_parser_version = 1
 
-    def __init__(self, pricing_db: PricingDatabase):
-        super().__init__(pricing_db)
-        self.conversations_dir = clientpaths.antigravity_conversations_dir()
-
+    # No cached root: the product homes are re-discovered per scan, so a home
+    # that appears after startup (a first ACP run) is picked up without a
+    # restart.
     def _file_signatures(self) -> tuple:
-        def scan() -> tuple:
-            sigs: List[Tuple[str, int, int]] = []
-            for db_path_str in glob.glob(clientpaths.antigravity_conversations_glob()):
-                db_path = Path(db_path_str)
-                try:
-                    db_stat = db_path.stat()
-                except (FileNotFoundError, OSError):
-                    continue
-
-                max_mtime = int(db_stat.st_mtime_ns)
-                total_size = int(db_stat.st_size)
-                wal_path = Path(str(db_path) + "-wal")
-                shm_path = Path(str(db_path) + "-shm")
-                for sidecar in (wal_path, shm_path):
-                    try:
-                        sidecar_stat = sidecar.stat()
-                    except (FileNotFoundError, OSError):
-                        continue
-                    max_mtime = max(max_mtime, int(sidecar_stat.st_mtime_ns))
-                    if sidecar == wal_path:
-                        total_size += int(sidecar_stat.st_size)
-                sigs.append((str(db_path), max_mtime, total_size))
-            return tuple(sorted(sigs))
-
-        return _timed_sigs(f"antigravity_cli:{self.conversations_dir}", scan)
+        return antigravity_db_signatures()
 
     @classmethod
     def _decode_row(cls, data: bytes) -> Optional[Dict[str, Any]]:

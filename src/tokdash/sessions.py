@@ -35,6 +35,7 @@ from .sources.coding_tools import (
     QoderIdeParser,
     WorkBuddyParser,
     ZCodeSnapshotError,
+    antigravity_db_signatures,
     cline_message_file_signatures,
     codex_fork_ancestry,
     codex_replay_key_session_id,
@@ -2843,89 +2844,78 @@ def _hermes_sessions() -> Dict[str, Dict[str, Any]]:
 
 
 def _antigravity_db_signatures() -> tuple[tuple[str, int, int], ...]:
-    """Same tuples as AntigravityCLIParser._file_signatures (pinned equal by
-    the parity test): per DB, the path, the max mtime across db/-wal/-shm,
-    and the db size plus the WAL size."""
-    sigs: list[tuple[str, int, int]] = []
-    for db_path_str in glob.glob(clientpaths.antigravity_conversations_glob()):
-        db_path = Path(db_path_str)
-        try:
-            db_stat = db_path.stat()
-        except (FileNotFoundError, OSError):
-            continue
-        max_mtime = int(db_stat.st_mtime_ns)
-        total_size = int(db_stat.st_size)
-        wal_path = Path(str(db_path) + "-wal")
-        shm_path = Path(str(db_path) + "-shm")
-        for sidecar in (wal_path, shm_path):
-            try:
-                sidecar_stat = sidecar.stat()
-            except (FileNotFoundError, OSError):
-                continue
-            max_mtime = max(max_mtime, int(sidecar_stat.st_mtime_ns))
-            if sidecar == wal_path:
-                total_size += int(sidecar_stat.st_size)
-        sigs.append((str(db_path), max_mtime, total_size))
-    return tuple(sorted(sigs))
+    """Same tuples as AntigravityCLIParser._file_signatures -- literally the
+    same call, so Overview and Sessions cannot scan different files."""
+    return antigravity_db_signatures()
 
 
 def _antigravity_summary_signatures() -> tuple[tuple[str, int, int], ...]:
-    """conversation_summaries.db + WAL sidecars, extra key material for
+    """Every conversation_summaries.db + WAL sidecars, extra key material for
     _load_antigravity_sessions. The summary read is already invalidated
     by its own signature (see _antigravity_summaries), but a summary-only
     edit must also invalidate the sessions aggregate, or stale
-    titles/projects persist until some conversation DB changes."""
-    db_path = clientpaths.antigravity_summaries_db_path()
-    if not db_path.exists():
-        return ()
+    titles/projects persist until some conversation DB changes.
+
+    Empty when no product home has one: the ACP kernel writes conversations
+    without summaries, so titles and projects fall back to the DB stem."""
     out: list[tuple[str, int, int]] = []
-    for candidate in (
-        db_path,
-        Path(str(db_path) + "-wal"),
-        Path(str(db_path) + "-shm"),
-    ):
-        try:
-            st = candidate.stat()
-            out.append((str(candidate), st.st_mtime_ns, st.st_size))
-        except (FileNotFoundError, OSError):
-            continue
+    for db_path in clientpaths.antigravity_summary_db_paths():
+        for candidate in (
+            db_path,
+            Path(str(db_path) + "-wal"),
+            Path(str(db_path) + "-shm"),
+        ):
+            try:
+                st = candidate.stat()
+                out.append((str(candidate), st.st_mtime_ns, st.st_size))
+            except (FileNotFoundError, OSError):
+                continue
     return tuple(out)
 
 
 @lru_cache(maxsize=4)
 def _load_antigravity_summaries(db_sig: tuple) -> Dict[str, Dict[str, str]]:
-    """conversation_id -> {"title", "project"}; missing/corrupt -> {}."""
-    try:
-        conn = connect_sqlite_readonly(clientpaths.antigravity_summaries_db_path())
-    except (OSError, sqlite3.Error):
-        return {}
-    try:
-        try:
-            rows = conn.execute(
-                "SELECT conversation_id, title, workspace_uris FROM conversation_summaries"
-            ).fetchall()
-        except sqlite3.Error:
-            return {}
-    finally:
-        conn.close()
+    """conversation_id -> {"title", "project"}, merged across every product
+    home that has a summaries DB; missing/corrupt ones contribute nothing.
+
+    Conversation ids are disjoint across homes, so the first-wins merge only
+    matters if a DB is shared by symlink -- matching the stem precedence in
+    antigravity_db_signatures."""
     out: Dict[str, Dict[str, str]] = {}
-    for conversation_id, title, workspace_uris in rows:
-        project = "unknown"
+    for summaries_path in clientpaths.antigravity_summary_db_paths():
         try:
-            uris = json.loads(workspace_uris) if workspace_uris else []
-        except (TypeError, ValueError):
-            uris = []
-        if isinstance(uris, list):
-            for uri in uris:
-                if isinstance(uri, str) and uri.startswith("file://"):
-                    project = _project_from_repo_or_path(
-                        None, unquote(uri[len("file://"):]) or None
-                    )
-                    break
-        out[str(conversation_id)] = {
-            "title": _clean_display_name(title),
-            "project": project,
-        }
+            conn = connect_sqlite_readonly(summaries_path)
+        except (OSError, sqlite3.Error):
+            continue
+        try:
+            try:
+                rows = conn.execute(
+                    "SELECT conversation_id, title, workspace_uris FROM conversation_summaries"
+                ).fetchall()
+            except sqlite3.Error:
+                continue
+        finally:
+            conn.close()
+        for conversation_id, title, workspace_uris in rows:
+            key = str(conversation_id)
+            if key in out:
+                continue
+            project = "unknown"
+            try:
+                uris = json.loads(workspace_uris) if workspace_uris else []
+            except (TypeError, ValueError):
+                uris = []
+            if isinstance(uris, list):
+                for uri in uris:
+                    if isinstance(uri, str) and uri.startswith("file://"):
+                        project = _project_from_repo_or_path(
+                            None, unquote(uri[len("file://"):]) or None
+                        )
+                        break
+            out[key] = {
+                "title": _clean_display_name(title),
+                "project": project,
+            }
     return out
 
 

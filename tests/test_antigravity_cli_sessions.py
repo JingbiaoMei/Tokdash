@@ -55,18 +55,14 @@ def _ts(ms: int) -> tuple[int, int]:
 
 
 def _patch_antigravity(monkeypatch, root: Path) -> tuple[Path, Path]:
+    """Relocate the CLI home; the ACP and IDE siblings are derived from its
+    parent and stay absent unless a test creates them."""
     cli_dir = root / ".gemini" / "antigravity-cli"
     conv_dir = cli_dir / "conversations"
     conv_dir.mkdir(parents=True)
     summaries = cli_dir / "conversation_summaries.db"
+    monkeypatch.delenv("ANTIGRAVITY_HOME", raising=False)
     monkeypatch.setattr(clientpaths, "antigravity_cli_dir", lambda: cli_dir)
-    monkeypatch.setattr(clientpaths, "antigravity_conversations_dir", lambda: conv_dir)
-    monkeypatch.setattr(
-        clientpaths,
-        "antigravity_conversations_glob",
-        lambda: str(conv_dir / "*.db"),
-    )
-    monkeypatch.setattr(clientpaths, "antigravity_summaries_db_path", lambda: summaries)
     return conv_dir, summaries
 
 
@@ -393,8 +389,11 @@ def test_cache_invalidation(monkeypatch, tmp_path):
     _antigravity_sessions()
     assert calls["n"] == first  # lru hit: nothing re-decoded
 
-    # A WAL checkpoint changes the signature tuple -> full re-decode.
+    # A WAL checkpoint changes the signature tuple -> full re-decode. The
+    # scan itself sits behind the shared _SIG_TTL cache, which a real refresh
+    # outlives; drop it so the touch is observed inside the test.
     (conv_dir / "conv-alpha.db-wal").touch()
+    _sig_cache.clear()
     _antigravity_sessions()
     assert calls["n"] == 2 * first
 
@@ -459,6 +458,107 @@ def test_summary_sidecar_signature_invalidates_summary_cache(monkeypatch, tmp_pa
 
     second = sessions._antigravity_summaries()
     assert second["conv-alpha"]["title"] == "Alpha t1tle"
+
+
+def _add_product_home(root: Path, product: str, stem: str, ts_ms: int, *, model=MODEL_A) -> Path:
+    """One conversation DB under a sibling product home, no summaries DB.
+
+    That is exactly the ACP kernel's layout: it writes conversations/*.db (plus
+    .meta sidecars) and no conversation_summaries.db.
+    """
+    conv_dir = root / ".gemini" / product / "conversations"
+    conv_dir.mkdir(parents=True, exist_ok=True)
+    sec, nano = _ts(ts_ms)
+    _create_antigravity_db(
+        conv_dir / f"{stem}.db",
+        [(0, _encode_gen_metadata_blob(
+            model=model, seconds=sec, nanos=nano,
+            input_tokens=700, output_tokens=90, cache_read_tokens=30,
+            response_output_tokens=90))],
+    )
+    (conv_dir / f"{stem}.db.meta").write_bytes(b"ignored sidecar")
+    return conv_dir
+
+
+def test_acp_and_ide_homes_feed_overview_and_sessions(monkeypatch, tmp_path):
+    """Issue #72: an ACP host (Paseo, Zed, JetBrains) spawns the official
+    agy_acp_server kernel, which writes to ~/.gemini/antigravity-acp. Those
+    conversations must count in Overview and list in the Sessions tab, with no
+    conversation_summaries.db to name them."""
+    conv_dir, summaries = _patch_antigravity(monkeypatch, tmp_path)
+    _build_tree(conv_dir, summaries)
+    s1, _, _ = _bounds()
+    _add_product_home(tmp_path, "antigravity-acp", "conv-acp", s1 + 7_200_000)
+    _add_product_home(tmp_path, "antigravity-ide", "conv-ide", s1 + 7_260_000)
+
+    raw = _antigravity_sessions()
+    assert {"conv-acp", "conv-ide"} <= set(raw)
+    # No summaries row: the stem is the fallback name, and it stays unnamed.
+    assert "display_name" not in raw["conv-acp"]
+    assert raw["conv-acp"]["project"] == "unknown"
+    assert raw["conv-acp"]["tool"] == "antigravity_cli"
+
+    entries = AntigravityCLIParser(PricingDatabase())._parse_all()
+    assert {"antigravity_cli:conv-acp:0", "antigravity_cli:conv-ide:0"} <= {
+        e["entry_id"] for e in entries
+    }
+    # The .meta sidecar the kernel writes is not a conversation DB.
+    assert not any(".meta" in e["entry_id"] for e in entries)
+
+    # Both sides still agree once the extra homes are in play.
+    assert _turn_sums(raw)["in"] == _entry_sums(entries)["in"]
+    assert _antigravity_db_signatures() == tuple(
+        AntigravityCLIParser(PricingDatabase())._file_signatures()
+    )
+
+
+def test_acp_home_alone_is_discovered(monkeypatch, tmp_path):
+    """The CLI need not be installed: an ACP-only machine still reports."""
+    monkeypatch.delenv("ANTIGRAVITY_HOME", raising=False)
+    monkeypatch.setattr(
+        clientpaths, "antigravity_cli_dir", lambda: tmp_path / ".gemini" / "antigravity-cli"
+    )
+    s1, _, _ = _bounds()
+    _add_product_home(tmp_path, "antigravity-acp", "conv-acp", s1 + 3_600_000)
+
+    assert set(_antigravity_sessions()) == {"conv-acp"}
+    assert get_sessions_data("antigravity_cli", "all")["sessions"][0]["session_id"] == "conv-acp"
+
+
+def test_symlinked_acp_db_in_the_cli_dir_counts_once(monkeypatch, tmp_path):
+    """The upgrade case: users worked around #72 by symlinking ACP conversation
+    DBs into the CLI's conversations dir. Once both homes are scanned, that DB
+    is reachable twice under one stem, and the stem dedup is what keeps it a
+    single session with a single set of entry ids."""
+    conv_dir, summaries = _patch_antigravity(monkeypatch, tmp_path)
+    _build_tree(conv_dir, summaries)
+    s1, _, _ = _bounds()
+    acp_dir = _add_product_home(tmp_path, "antigravity-acp", "conv-acp", s1 + 3_600_000)
+    (conv_dir / "conv-acp.db").symlink_to(acp_dir / "conv-acp.db")
+
+    entries = AntigravityCLIParser(PricingDatabase())._parse_all()
+    ids = [e["entry_id"] for e in entries]
+    assert len(ids) == len(set(ids))
+    assert sum(1 for i in ids if i.startswith("antigravity_cli:conv-acp:")) == 1
+    assert len(_antigravity_sessions()["conv-acp"]["turns"]) == 1
+
+
+def test_duplicate_stem_across_homes_keeps_the_first_home(monkeypatch, tmp_path):
+    """Two genuinely distinct DBs under one stem: one wins rather than the two
+    interleaving. Hypothetical (a stale migration copy) -- the guard exists for
+    the symlink case above -- but the tie must still break deterministically."""
+    conv_dir, summaries = _patch_antigravity(monkeypatch, tmp_path)
+    _build_tree(conv_dir, summaries)
+    s1, _, _ = _bounds()
+    _add_product_home(tmp_path, "antigravity-acp", "conv-alpha", s1 + 3_600_000)
+
+    entries = AntigravityCLIParser(PricingDatabase())._parse_all()
+    ids = [e["entry_id"] for e in entries]
+    assert len(ids) == len(set(ids))
+    # The CLI home is scanned first: alpha keeps its three surviving rows, not
+    # the single row the ACP-side copy holds.
+    assert sum(1 for i in ids if i.startswith("antigravity_cli:conv-alpha:")) == 3
+    assert len(_antigravity_sessions()["conv-alpha"]["turns"]) == 3
 
 
 def test_parity_with_usage_parser(monkeypatch, tmp_path):

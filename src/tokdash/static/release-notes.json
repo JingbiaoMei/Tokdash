@@ -1,6 +1,36 @@
 {
-  "current": "2.5.2",
+  "current": "2.5.3",
   "releases": [
+    {
+      "version": "2.5.3",
+      "date": "2026-09-05",
+      "sections": [
+        {
+          "type": "added",
+          "items": [
+            "A new Report tab: a period report on this week, this month or the year to date, with a day map, a top harness / model / project podium, an hour-and-weekday rhythm, and a row per harness.",
+            "Two shareable cards at the foot of the Report tab, exported as 1080x1920 PNGs. Every export writes both a light and a dark card, and cost stays off until you ask for it.",
+            "Seven new style themes adapted from cosyncing: Teal Obsidian, Graphite, Nordic Warmth, Cyber Amber, Royal Navy, Soft Minimalist and Flat White, each with its own light and dark tokens, heatmap and chart palettes.",
+            "Antigravity sessions run through an ACP host are now counted. The antigravity-acp and antigravity-ide product homes are scanned alongside antigravity-cli, all reporting under the one Antigravity entry, and ANTIGRAVITY_HOME adds further homes without displacing the defaults.",
+            "A second Claude Code subscription now reaches the Quota tab. With credential scanning consented, every ~/.claude* install that has its own sign-in is polled, and the Claude card groups its windows by install under the directory name it was set up with.",
+            "gpt-6-astra is priced at OpenAI's published standard rates instead of showing as $0.",
+            "tokdash serve --dev-fixture dense now serves /api/insights, so the Report tab can be worked on against the fixture."
+          ]
+        },
+        {
+          "type": "fixed",
+          "items": [
+            "Theme defects across the style set: the refresh glyph and the select caret no longer disappear on light-buttoned themes, Overview KPI values no longer wrap in the monospace themes, Flat White panels have their separation from the page back, and label text that sat below WCAG AA contrast was corrected in nine theme and mode combinations.",
+            "The Report tab's panels follow the active style theme instead of painting a literal white or slate blue on every theme.",
+            "A quota card that measures two accounts no longer blames one of them for the other's failure. A failing MiniMax China plan reads as a problem with that plan rather than the healthy global one, and one region's recovery no longer leaves the other's stale error in place.",
+            "Low-quota alerts no longer go quiet on a working Claude install while a sibling install stays broken. A quota row's last-known marker and its alert eligibility now compare against the status of the account that owns the row.",
+            "A quota card now prints an error that belongs to none of the accounts it lists, instead of letting any account list silence it.",
+            "The multi-server views no longer count a working subscription as needing attention. A provider is OK when at least one of its accounts is healthy and the card's own error belongs to one of them.",
+            "tokdash serve --dev-fixture dense no longer answers /api/insights with a 500 for a short explicit date range."
+          ]
+        }
+      ]
+    },
     {
       "version": "2.5.2",
       "date": "2026-09-03",

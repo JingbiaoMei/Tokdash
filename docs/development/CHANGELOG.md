@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Unreleased
+
+### Changed
+
+- The Report tab is much faster to reopen. Merged sessions are now cached per session, keyed on the files behind each one rather than on the window, so the week, month and year views share one assembly instead of rebuilding it three times and an appended log invalidates only the session it belongs to. On a year window over a 986MB database the tab's three requests fall from 14.92s to 7.07s, of which `/api/active-time` is 10.50s to 2.28s; the first read after a restart is unchanged, since the tab's own windows are warmed at startup. (#74)
+- Session reads merge a session's files in one pass on every harness, not just the store-backed ones. Pi, OMP, Kilo Code and WorkBuddy still folded their files pairwise, which rebuilds the whole accumulated session on every file and grows quadratically with the number of files one session spans -- the shape subagent fan-out produces. (#74)
+- OpenCode, MiMo and Kilo Code no longer key their session cache on the requested window, where three periods took three of the eight slots and a single pricing edit took all of them. They read unwindowed and the window is applied where every other tool applies it. (#74)
+- `TOKDASH_SESSION_CACHE_TURNS` bounds what the new session cache retains, in turns rather than sessions, since one long-running session can outweigh a thousand short ones. The default is 500,000 turns; `0` disables the cache. (#74)
+
 ## 2.5.3 - 2026-09-05
 
 ### Added

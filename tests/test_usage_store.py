@@ -3312,20 +3312,23 @@ def _add_mimo_external_import(db_path: Path, message_ids: list[str]) -> tuple[tu
     return ((str(db_path), stat.st_mtime_ns, stat.st_size),)
 
 
-def test_opencode_session_loaders_use_sql_window_and_match_raw_json_fallback(tmp_path):
+def test_opencode_session_loaders_read_every_row_and_match_the_raw_json_fallback(tmp_path):
+    """The loader takes no window, so the two backends must agree on the lot.
+
+    Windowing moved out of the cache key and into ``_summarize_session``, which is
+    where every store-backed tool has always applied it — the loader's result is
+    now determined by the database alone and reusable for any period.
+    """
     db_path = tmp_path / "opencode.db"
     signature = _create_opencode_session_db(db_path)
 
     sessions_module._load_opencode_sessions.cache_clear()
-    scalar = sessions_module._load_opencode_sessions(signature, (), 1000, 2000)
-    raw = sessions_module._load_opencode_sessions_raw_json(db_path, since_ms=1000, until_ms=2000)
-    all_rows = sessions_module._load_opencode_sessions_raw_json(db_path)
+    scalar = sessions_module._load_opencode_sessions(signature, ())
+    raw = sessions_module._load_opencode_sessions_raw_json(db_path)
 
     assert scalar == raw
     assert set(scalar) == {"s1", "s2"}
-    assert len(all_rows["s1"]["turns"]) == 4
-    assert len(scalar["s1"]["turns"]) == 2
-    assert [turn["timestamp_ms"] for turn in scalar["s1"]["turns"]] == [1000, 1500]
+    assert [turn["timestamp_ms"] for turn in scalar["s1"]["turns"]] == [900, 1000, 1500, 2000]
     turn = next(turn for turn in scalar["s1"]["turns"] if turn["timestamp_ms"] == 1500)
     assert scalar["s1"]["project"] == "tokdash"
     assert scalar["s1"]["display_name"] == "OpenCode title"
@@ -3338,6 +3341,20 @@ def test_opencode_session_loaders_use_sql_window_and_match_raw_json_fallback(tmp
     assert turn["tokens"] == 28
 
 
+def test_an_opencode_window_is_applied_where_the_session_is_summarized(tmp_path):
+    db_path = tmp_path / "opencode.db"
+    signature = _create_opencode_session_db(db_path)
+
+    sessions_module._load_opencode_sessions.cache_clear()
+    loaded = sessions_module._load_opencode_sessions(signature, ())
+
+    # Half-open [1000, 2000): the row at 900 and the one at 2000 are both out.
+    summary = sessions_module._summarize_session(loaded["s1"], 1000, 2000)
+    assert summary["token_events"] == 2
+    assert summary["started_at"] == sessions_module._ms_to_iso(1000)
+    assert summary["last_seen_at"] == sessions_module._ms_to_iso(1500)
+
+
 def test_opencode_loader_falls_back_to_raw_json_when_scalar_query_fails(monkeypatch, tmp_path):
     db_path = tmp_path / "opencode.db"
     signature = _create_opencode_session_db(db_path)
@@ -3348,28 +3365,32 @@ def test_opencode_loader_falls_back_to_raw_json_when_scalar_query_fails(monkeypa
     monkeypatch.setattr(sessions_module, "_load_opencode_sessions_scalar", fail_scalar)
     sessions_module._load_opencode_sessions.cache_clear()
 
-    result = sessions_module._load_opencode_sessions(signature, (), 1000, 2000)
+    result = sessions_module._load_opencode_sessions(signature, ())
 
     assert set(result) == {"s1", "s2"}
-    assert [turn["timestamp_ms"] for turn in result["s1"]["turns"]] == [1000, 1500]
+    assert [turn["timestamp_ms"] for turn in result["s1"]["turns"]] == [900, 1000, 1500, 2000]
     assert len(result["s2"]["turns"]) == 1
 
 
-def test_get_sessions_data_passes_period_window_to_opencode_loader(monkeypatch):
-    captured = {}
+def _windowless_loader(tool, calls):
+    """A loader that takes no window and returns one in-period turn and one older.
 
-    def fake_opencode_sessions(*, since_ms=None, until_ms=None):
-        captured["since_ms"] = since_ms
-        captured["until_ms"] = until_ms
+    Taking no arguments is half the assertion: a caller still passing a window
+    would raise here rather than quietly cache one period's rows under another's.
+    """
+    since_ms, _until_ms = sessions_module._window_bounds("today")
+
+    def load():
+        calls.append(tool)
         return {
             "s1": {
-                "tool": "opencode",
+                "tool": tool,
                 "session_id": "s1",
                 "project": "tokdash",
                 "turns": [
                     sessions_module._build_turn(
-                        turn_index=1,
-                        timestamp_ms=int(since_ms or 0),
+                        turn_index=index,
+                        timestamp_ms=stamp,
                         model="model",
                         tokens_in=1,
                         tokens_cache=0,
@@ -3377,54 +3398,41 @@ def test_get_sessions_data_passes_period_window_to_opencode_loader(monkeypatch):
                         tokens_reasoning=0,
                         bill=sessions_module._billing_record("model", "fresh-input"),
                     )
+                    for index, stamp in enumerate(
+                        (int(since_ms) - 90 * 24 * 60 * 60 * 1000, int(since_ms)), start=1
+                    )
                 ],
             }
         }
 
-    monkeypatch.setattr(sessions_module, "_opencode_sessions", fake_opencode_sessions)
+    return load
+
+
+def test_get_sessions_data_windows_the_opencode_loaders_whole_database(monkeypatch):
+    calls: list[str] = []
+    monkeypatch.setattr(
+        sessions_module, "_opencode_sessions", _windowless_loader("opencode", calls)
+    )
 
     result = sessions_module.get_sessions_data("opencode", "today")
 
-    assert captured["since_ms"] is not None
-    assert captured["until_ms"] is not None
-    assert captured["since_ms"] < captured["until_ms"]
+    assert calls == ["opencode"]
     assert result["summary"]["session_count"] == 1
+    # Two turns loaded, one inside today: the period is applied on the way out.
+    assert result["sessions"][0]["token_events"] == 1
 
 
-def test_get_sessions_data_passes_period_window_to_mimo_loader(monkeypatch):
-    captured = {}
-
-    def fake_mimo_sessions(*, since_ms=None, until_ms=None):
-        captured["since_ms"] = since_ms
-        captured["until_ms"] = until_ms
-        return {
-            "s1": {
-                "tool": "mimo",
-                "session_id": "s1",
-                "project": "tokdash",
-                "turns": [
-                    sessions_module._build_turn(
-                        turn_index=1,
-                        timestamp_ms=int(since_ms or 0),
-                        model="model",
-                        tokens_in=1,
-                        tokens_cache=0,
-                        tokens_out=1,
-                        tokens_reasoning=0,
-                        bill=sessions_module._billing_record("model", "fresh-input"),
-                    )
-                ],
-            }
-        }
-
-    monkeypatch.setattr(sessions_module, "_mimo_sessions", fake_mimo_sessions)
+def test_get_sessions_data_windows_the_mimo_loaders_whole_database(monkeypatch):
+    calls: list[str] = []
+    monkeypatch.setattr(
+        sessions_module, "_mimo_sessions", _windowless_loader("mimo", calls)
+    )
 
     result = sessions_module.get_sessions_data("mimo", "today")
 
-    assert captured["since_ms"] is not None
-    assert captured["until_ms"] is not None
-    assert captured["since_ms"] < captured["until_ms"]
+    assert calls == ["mimo"]
     assert result["summary"]["session_count"] == 1
+    assert result["sessions"][0]["token_events"] == 1
 
 
 def test_opencode_signatures_include_wal_and_shm(monkeypatch, tmp_path):
@@ -3473,20 +3481,21 @@ def test_mimo_signatures_include_wal_and_shm(monkeypatch, tmp_path):
     }
 
 
-def test_mimo_session_loader_uses_sql_window_and_project_worktree(tmp_path):
+def test_mimo_session_loader_reads_every_row_and_the_project_worktree(tmp_path):
     db_path = tmp_path / "mimocode.db"
     signature = _create_opencode_session_db(db_path)
 
     sessions_module._load_mimo_sessions.cache_clear()
-    result = sessions_module._load_mimo_sessions(signature, (), 1000, 2000)
+    result = sessions_module._load_mimo_sessions(signature, ())
 
     assert set(result) == {"s1", "s2"}
-    assert len(result["s1"]["turns"]) == 2
-    assert [turn["timestamp_ms"] for turn in result["s1"]["turns"]] == [1000, 1500]
+    assert [turn["timestamp_ms"] for turn in result["s1"]["turns"]] == [900, 1000, 1500, 2000]
     assert result["s1"]["project"] == "tokdash"
     assert result["s1"]["display_name"] == "OpenCode title"
     assert result["s2"]["project"] == "other"
     assert result["s2"]["display_name"] == "other-slug"
+    # The window is the summary's job now, and it still bounds both ends.
+    assert sessions_module._summarize_session(result["s1"], 1000, 2000)["token_events"] == 2
 
 
 def test_mimo_session_loaders_exclude_external_import_messages(tmp_path):
@@ -3495,13 +3504,13 @@ def test_mimo_session_loaders_exclude_external_import_messages(tmp_path):
     signature = _add_mimo_external_import(db_path, ["at_since", "inside"])
 
     sessions_module._load_mimo_sessions.cache_clear()
-    result = sessions_module._load_mimo_sessions(signature, (), 1000, 2000)
-    raw = sessions_module._load_mimo_sessions_raw_json(db_path, since_ms=1000, until_ms=2000)
+    result = sessions_module._load_mimo_sessions(signature, ())
+    raw = sessions_module._load_mimo_sessions_raw_json(db_path)
 
     assert result == raw
-    assert set(result) == {"s2"}
+    # The two imported messages are gone from s1; the rows Mimo owns remain.
+    assert [turn["timestamp_ms"] for turn in result["s1"]["turns"]] == [900, 2000]
     assert [turn["timestamp_ms"] for turn in result["s2"]["turns"]] == [1500]
-    assert len(result["s2"]["turns"]) == 1
 
 
 def test_mimo_parser_collect_uses_sql_window(monkeypatch, tmp_path):

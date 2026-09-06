@@ -322,14 +322,62 @@ def _active_time_cache_key(
     )
 
 
+def _active_time_payload(
+    period: str,
+    date_from: Optional[str],
+    date_to: Optional[str],
+    include_review_sessions: Optional[bool],
+) -> Any:
+    """What /api/active-time stores under its key — warmer and route alike.
+
+    The route used to add ``range`` inside a closure no warmer could reach, so a
+    warmed key held a payload one field short of the one a request builds. No
+    caller reads that field on this endpoint today, which is precisely why the
+    divergence would have sat there until one did.
+    """
+    data = get_active_time_data(
+        period, date_from, date_to, include_review_sessions=include_review_sessions
+    )
+    if isinstance(data, dict):
+        data["range"] = resolve_period(period, date_from, date_to)
+    return data
+
+
+def _usage_cache_key(period: str, date_from: Optional[str], date_to: Optional[str]) -> str:
+    return _window_cache_key(f"usage_{period}_{date_from}_{date_to}", date_from, date_to)
+
+
+def _insights_cache_key(
+    period: str,
+    date_from: Optional[str],
+    date_to: Optional[str],
+    facets: Optional[str],
+    include_project_names: bool,
+) -> str:
+    return _window_cache_key(
+        f"insights_{period}_{date_from}_{date_to}_{facets}_{include_project_names}",
+        date_from,
+        date_to,
+    )
+
+
 def _warm_caches() -> None:
     """Best-effort background warm so the first user request hits hot caches.
 
     Populates the parser caches (coding_tools._entry_cache, openclaw._ENTRY_CACHE)
     and the API response cache for the dashboard's initial loads — the exact Overview
-    date range, Stats, and each Sessions tool panel. The period-only Today usage key
-    is intentionally not warmed: the dashboard never requests it, and computing both
-    forms used to duplicate the largest startup aggregation.
+    date range, Stats, each Sessions tool panel, and the Report tab's three windows.
+    The period-only Today usage key is intentionally not warmed: the dashboard never
+    requests it, and computing both forms used to duplicate the largest startup
+    aggregation.
+
+    The Report tab's share is the expensive half and goes last. Measured on one
+    machine with a year of history: ~5s for the week, ~5s for the month and ~15s
+    for the year, so roughly 25s on top of a ~22s base warm. The year window is
+    most of it, and it scales with history rather than with the window. That is
+    background CPU, but it is not free — it holds the interpreter lock in slices,
+    so foreground requests during the warm are slower than they would otherwise
+    be. TOKDASH_WARM_ON_START=0 turns the whole warm off.
 
     A foreground request for the key currently being warmed may join that one fill;
     see ``get_cached_or_fetch``. This keeps the browser's first load from racing the
@@ -337,7 +385,10 @@ def _warm_caches() -> None:
     Disable with TOKDASH_WARM_ON_START=0.
     Failures are swallowed; warming must never crash `serve`.
     """
-    today = _local_today().isoformat()
+    # One clock for the whole list: read twice, a warm straddling local midnight
+    # would build the Report keys for a different day than the Overview keys.
+    day = _local_today()
+    today = day.isoformat()
     # Composed by name, not by slicing _day_warm_targets(): the warm order is the order
     # the dashboard needs these in, and stats belongs second, immediately behind the
     # Overview usage key. Reordering the per-day targets must not silently demote it.
@@ -346,6 +397,8 @@ def _warm_caches() -> None:
         (_window_cache_key("stats_None", None, None), lambda: compute_stats(None)),
         *_session_warm_targets(today),
         (_day_scoped_key(ACTIVITY_INSIGHTS_CACHE_KEY), get_codex_activity_insights),
+        # Last: the heaviest warm, and the Overview is the tab that opens first.
+        *_report_warm_targets(day),
     ]
     _run_warmers(warmers)
 
@@ -363,7 +416,7 @@ def _usage_warm_target(day: str):
     is what stops the warmer and the browser from drifting apart.
     """
     return (
-        _window_cache_key(f"usage_today_{day}_{day}", day, day),
+        _usage_cache_key("today", day, day),
         lambda: compute_usage_with_comparison("today", day, day),
     )
 
@@ -383,9 +436,80 @@ def _session_warm_targets(day: str) -> list:
     targets.append(
         (
             _active_time_cache_key("today", day, day, None),
-            lambda: get_active_time_data("today", day, day, include_review_sessions=None),
+            lambda: _active_time_payload("today", day, day, None),
         )
     )
+    return targets
+
+
+# The Report tab's facet request, verbatim (USAGE_REPORT_FACETS in index.html).
+# The facet string is part of the cache key, so a set listed in a different order
+# is a different key: the warm would fill one nobody asks for and the tab would
+# still pay the cold scan.
+REPORT_FACETS = "daily,streaks,firsts,hourly,weekday,tools,models,projects"
+
+
+def _report_windows(day: date) -> list[tuple[str, str]]:
+    """The Report tab's three calendar-aligned windows, all ending on ``day``.
+
+    Mirrors ``usageReportWindows()`` in index.html, Monday week start included.
+    Cheapest first, so the light windows are ready while the year is still going.
+
+    ``day`` is the *server's* local date, because that is what the cache key is
+    stamped with. A reader whose browser sits in a different timezone can ask for
+    a window a day either side of these and miss the warm entirely. That is
+    correct rather than unfortunate — their window really is a different window —
+    and it costs them one cold load, not a wrong number.
+    """
+    return [
+        ((day - timedelta(days=day.weekday())).isoformat(), day.isoformat()),
+        (day.replace(day=1).isoformat(), day.isoformat()),
+        (day.replace(month=1, day=1).isoformat(), day.isoformat()),
+    ]
+
+
+def _report_warm_targets(day: date, *, skip_single_day: bool = False) -> list:
+    """The three requests the Report tab issues, for each of its three windows.
+
+    All three periods, because the tab restores the reader's last one from
+    localStorage and the server cannot know which that was.
+
+    ``skip_single_day`` drops any window that has collapsed to ``day`` alone —
+    the week on a Monday, the month on the 1st. Only the midnight warm passes it;
+    see ``_warm_report_windows`` for why the hour is what makes the difference.
+
+    The tab sends no ``period`` parameter, so each key carries the *route's*
+    default — "today" for usage and active time, "year" for insights — rather
+    than the period the reader picked. Building them through the same helpers
+    the routes use is what keeps that subtlety from silently un-warming this.
+    Active time is also pinned to include_review_sessions=true here, which is a
+    different key from the Overview's, and is why browsing the Overview never
+    warmed this tab.
+    """
+    targets: list = []
+    for date_from, date_to in _report_windows(day):
+        if skip_single_day and date_from == date_to:
+            continue
+        targets.append(
+            (
+                _usage_cache_key("today", date_from, date_to),
+                lambda f=date_from, t=date_to: compute_usage_with_comparison("today", f, t),
+            )
+        )
+        targets.append(
+            (
+                _insights_cache_key("year", date_from, date_to, REPORT_FACETS, True),
+                lambda f=date_from, t=date_to: compute_insights(
+                    "year", f, t, facets=REPORT_FACETS, include_project_names=True
+                ),
+            )
+        )
+        targets.append(
+            (
+                _active_time_cache_key("today", date_from, date_to, True),
+                lambda f=date_from, t=date_to: _active_time_payload("today", f, t, True),
+            )
+        )
     return targets
 
 
@@ -420,6 +544,33 @@ def _warm_previous_day() -> None:
     _run_warmers(_day_warm_targets(yesterday), join_seconds=DAILY_WARM_JOIN_SECONDS)
 
 
+def _warm_report_windows() -> None:
+    """Warm the Report tab's windows for the day that just started.
+
+    A partial exception to the rule above. These windows end today, so they are
+    open and go cold at midnight like every other open key — but a week, month or
+    year at 00:05 is *usually* almost entirely days that have already closed, so
+    the snapshot is worth having rather than near-empty.
+
+    Usually, not always. On a Monday the week window is today alone, on the 1st
+    the month window is, and on 1 January all three are. There the rule above
+    applies unchanged: warming it would put the near-empty snapshot the Overview
+    refuses to cache in front of the morning's first request, and this tab has no
+    auto-refresh, so stale-while-revalidate would show an empty week until the
+    reader loaded it a second time. A single-day window is also cheap to compute
+    cold (a second or two), so skipping it costs the reader nothing.
+
+    The startup warm keeps them: it runs when someone started the server, not at
+    a fixed hour, so there is no near-empty window to protect against.
+
+    Kept separate from ``_warm_previous_day`` rather than folded into it: that
+    one warms a closed day and this one warms open windows, and the two docstrings
+    would otherwise have to argue with each other.
+    """
+    targets = _report_warm_targets(_local_today(), skip_single_day=True)
+    _run_warmers(targets, join_seconds=DAILY_WARM_JOIN_SECONDS)
+
+
 def _daily_warm_minute() -> int:
     """Minutes past local midnight for the daily warm, default 5.
 
@@ -448,6 +599,10 @@ def _daily_warm_loop() -> None:
             _warm_previous_day()
         except Exception:  # pragma: no cover - a warm failure must never kill the loop
             logger.debug("tokdash daily warm failed", exc_info=True)
+        try:
+            _warm_report_windows()
+        except Exception:  # pragma: no cover - and neither half may kill the other
+            logger.debug("tokdash daily report warm failed", exc_info=True)
 
 
 @asynccontextmanager
@@ -1575,7 +1730,7 @@ def get_usage(
             resolve_period(period, date_from, date_to), seed=_dev_fixture_seed()
         )
     try:
-        cache_key = _window_cache_key(f"usage_{period}_{date_from}_{date_to}", date_from, date_to)
+        cache_key = _usage_cache_key(period, date_from, date_to)
         return _cached_route(
             "/api/usage",
             cache_key,
@@ -1945,24 +2100,17 @@ def get_active_time(
             seed=_dev_fixture_seed(),
         )
 
-    def fetch():
-        data = get_active_time_data(
-            period,
-            date_from,
-            date_to,
-            include_review_sessions=include_review_sessions,
-        )
-        if isinstance(data, dict):
-            data["range"] = resolve_period(period, date_from, date_to)
-        return data
-
     try:
         cache_key = _active_time_cache_key(period, date_from, date_to, include_review_sessions)
         return _cached_route(
             "/api/active-time",
             cache_key,
-            fetch,
+            lambda: _active_time_payload(period, date_from, date_to, include_review_sessions),
             force_refresh=refresh,
+            # The Report tab decides whether to re-read from these. Without it the
+            # decision rode on /api/usage alone — the one of the three that is
+            # reliably fast, and so the one least likely to still be stale.
+            include_cache_metadata=True,
         )
     except UsageDatabaseSchemaTooNewError as e:
         # 500, not 503: 503 is the dashboard retry signal, and a database
@@ -2116,10 +2264,8 @@ def get_insights(
             seed=_dev_fixture_seed(),
         )
     try:
-        cache_key = _window_cache_key(
-            f"insights_{period}_{date_from}_{date_to}_{facets}_{include_project_names}",
-            date_from,
-            date_to,
+        cache_key = _insights_cache_key(
+            period, date_from, date_to, facets, include_project_names
         )
         return _cached_route(
             "/api/insights",
@@ -2132,6 +2278,9 @@ def get_insights(
                 include_project_names=include_project_names,
             ),
             force_refresh=refresh,
+            # See /api/active-time: this is the other slow half of the Report tab,
+            # and it carries most of the page.
+            include_cache_metadata=True,
         )
     except UnknownFacetError as e:
         # Refused rather than ignored: a dropped facet renders as a blank

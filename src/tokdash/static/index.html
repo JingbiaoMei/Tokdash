@@ -7747,6 +7747,11 @@
       return !!el && el.classList.contains('active');
     }
 
+    function isUsageReportActive() {
+      const el = document.getElementById('report-content');
+      return !!el && el.classList.contains('active');
+    }
+
     function isPricingActive() {
       const el = document.getElementById('pricing-content');
       return !!el && el.classList.contains('active');
@@ -13790,6 +13795,10 @@
       // A period or server chosen mid-flight, applied when that load lands.
       pendingPeriod: null,
       pendingServerId: null,
+      // The pending silent re-read, and the token that decides whether its answer
+      // is still wanted when it lands. See usageReportScheduleStaleReread.
+      staleTimer: null,
+      loadToken: 0,
       // Share cards. The previews double as the export source, and the token
       // stops a slow paint from landing after a newer period has rendered.
       nickname: '',
@@ -13994,6 +14003,11 @@
           if (usageReportState.versionServerId !== serverId) return;
           usageReportState.version = String((payload && payload.runtime_version) || '') || null;
           if (!usageReportState.model) return;
+          // A model still waiting on the slow two has no footer or card to stamp:
+          // this answer is fired first and is instant, so it can land between the
+          // two paints and would otherwise render the very half-empty card the
+          // partial paint exists to avoid. The full paint stamps it a moment later.
+          if (usageReportState.model.notices.pending) return;
           usageReportRenderFooter(usageReportState.model);
           // The card attribution carries the same stamp, and this answer usually
           // lands after the first paint: repaint rather than ship an em dash.
@@ -14010,6 +14024,13 @@
       if (usageReportState.loading) return;
       usageReportWire();
       usageReportState.loading = true;
+      // Every explicit load invalidates any silent re-read still queued or in
+      // flight: that one describes the window being replaced.
+      usageReportState.loadToken += 1;
+      if (usageReportState.staleTimer) {
+        clearTimeout(usageReportState.staleTimer);
+        usageReportState.staleTimer = null;
+      }
       usageReportState.error = null;
       usageReportRenderControls();
       usageReportRenderLoading();
@@ -14023,34 +14044,176 @@
       const query = `date_from=${date_from}&date_to=${date_to}`;
       const refresh = options.refresh ? '&refresh=1' : '';
       const request = (path) => fetchJsonWithRetry(server, `${path}${path.includes('?') ? '&' : '?'}${query}${refresh}`, { cache: 'no-store' });
-      const [insights, usage, activeTime] = await Promise.all([
-        request(`/api/insights?facets=${USAGE_REPORT_FACETS}`).catch((error) => ({ __error: error })),
-        request('/api/usage').catch((error) => ({ __error: error })),
-        // The scope line promises every agent session recorded on the machine,
-        // so the report pins the Codex review-session filter open instead of
-        // inheriting the server default or the Overview tab's toggle: those are
-        // a reader's choice about one card, not this report's claim.
-        request('/api/active-time?include_review_sessions=true').catch((error) => ({ __error: error })),
-      ]);
 
-      usageReportState.loading = false;
-      usageReportState.loaded = true;
-      if (insights.__error && usage.__error) {
-        usageReportState.error = { server, detail: insights.__error.message || String(insights.__error) };
+      // fetchJson resolves to null when an OK response carries no JSON body — an
+      // empty 200 from a proxy, a captive portal, a Serve hiccup. Reading `.__error`
+      // off null is a TypeError, and one thrown while `loading` is true wedges the
+      // tab for good: the guard at the top then refuses every later load, Retry
+      // included, until a page reload. Normalised here so every branch below is
+      // handed an object, whatever the network did.
+      const settle = (promise) => promise.then(
+        (payload) => (payload && typeof payload === 'object' ? payload : { __error: new Error('empty response') }),
+        (error) => ({ __error: error }),
+      );
+
+      // Sequenced, not fired as one Promise.all. All three are pure-Python
+      // computes on the server's thread pool, so they contend for the GIL rather
+      // than overlapping: fired together on a cold year window, /api/usage went
+      // from 2s alone to 13s, and the paint waited on the slowest of the three
+      // either way. /api/usage alone fills the hero, so it goes first and paints;
+      // the two slow ones start behind it and land under figures the reader is
+      // already reading. Measured cold against v2.5.3 on a year window, median of
+      // three: first number 16.4s -> 1.1s, and the FULL report 16.4s -> 12.3s. The
+      // serial request was expected to cost a couple of seconds of wall clock and
+      // does not — relieving the contention more than pays for it.
+      const notAttempted = () => ({ __error: new Error('not attempted') });
+      let usage = notAttempted();
+      let insights = notAttempted();
+      let activeTime = notAttempted();
+      try {
+        usage = await settle(request('/api/usage'));
+        if (!usage.__error) {
+          usageReportState.model = usageReportBuildModel({
+            insights: null, usage, activeTime: null,
+            period, dateFrom: date_from, dateTo: date_to,
+            // Absent, and the banner is told why: not asked for yet, not refused.
+            insightsMissing: true, usageMissing: false, activeTimeMissing: true,
+            pending: true,
+          });
+          usageReportRenderPartial(usageReportState.model);
+        }
+
+        [insights, activeTime] = await Promise.all([
+          settle(request(`/api/insights?facets=${USAGE_REPORT_FACETS}`)),
+          // The scope line promises every agent session recorded on the machine,
+          // so the report pins the Codex review-session filter open instead of
+          // inheriting the server default or the Overview tab's toggle: those are
+          // a reader's choice about one card, not this report's claim.
+          settle(request('/api/active-time?include_review_sessions=true')),
+        ]);
+
+        if (insights.__error && usage.__error) {
+          usageReportState.error = { server, detail: insights.__error.message || String(insights.__error) };
+          usageReportState.model = null;
+        } else {
+          usageReportState.model = usageReportBuildModel({
+            insights, usage, activeTime,
+            period, dateFrom: date_from, dateTo: date_to,
+            insightsMissing: !!insights.__error,
+            usageMissing: !!usage.__error,
+            activeTimeMissing: !!activeTime.__error,
+          });
+        }
+      } catch (error) {
+        // Defence in depth for the guard at the top of this function. Anything
+        // thrown between here and the finally -- a model bug, a paint bug -- would
+        // otherwise leave `loading` true forever and make the tab refuse every
+        // later load. The error panel at least offers Retry.
+        console.error('tokdash: the report failed to load', error);
+        usageReportState.error = { server, detail: (error && error.message) || String(error) };
         usageReportState.model = null;
-        usageReportRender();
-        usageReportApplyPendingChoice();
+      } finally {
+        usageReportState.loading = false;
+        usageReportState.loaded = true;
+      }
+      usageReportRender();
+      usageReportScheduleStaleReread([usage, insights, activeTime], period, server);
+      usageReportApplyPendingChoice();
+    }
+
+    // How long to leave the server's own background recompute before reading again.
+    // Sized for the slowest of the three on a year of history — the active-time
+    // merge, ~8s cold here — not the average: reading too early spends the one
+    // re-read this load allows on a value still being recomputed.
+    const USAGE_REPORT_STALE_REREAD_MS = 12000;
+
+    // Did the server answer this out of a cache entry it is already recomputing?
+    // Only routes that opt into cache metadata can say; a payload without it is
+    // treated as fresh rather than guessed at.
+    function usageReportServedStale(payload) {
+      const cache = payload && payload.response_cache;
+      return !!cache && cache.status === 'stale';
+    }
+
+    // The morning's first visit is answered out of the 00:05 warm: past its TTL the
+    // server hands the cached value over INSTANTLY and recomputes it in the
+    // background, so the figures are hours old and nothing on the page says so.
+    //
+    // Come back and read again rather than sending refresh=1, which would start a
+    // second full recompute of work the daemon is already doing.
+    //
+    // Any of the three, not just /api/usage: that one recomputes in ~2s and is
+    // reliably fresh by the time the timer fires, while the analytics scan and the
+    // active-time merge are the slow pair that carry most of the page. Keying the
+    // decision on the fastest of the three was how the hero came back current with
+    // a stale heat map, podium and agent table beneath it.
+    function usageReportScheduleStaleReread(payloads, period, server) {
+      if (!payloads.some(usageReportServedStale)) return;
+      // At most one queued at a time. The token, not this handle, is what stops a
+      // late answer from landing on a window the reader has since changed.
+      if (usageReportState.staleTimer) clearTimeout(usageReportState.staleTimer);
+      const token = usageReportState.loadToken;
+      const serverId = (server && server.id) || 'local';
+      usageReportState.staleTimer = setTimeout(() => {
+        usageReportState.staleTimer = null;
+        usageReportSilentReread(token, period, serverId);
+      }, USAGE_REPORT_STALE_REREAD_MS);
+    }
+
+    // A background re-read of the window already on screen.
+    //
+    // Deliberately NOT loadUsageReport. That function owns `loading`, installs a
+    // half-empty model for its first paint and blanks the page to placeholders —
+    // all correct for a load the reader asked for, all wrong for one they cannot
+    // see. Reusing it meant a silent refresh swallowed their clicks, replaced the
+    // live model with the pending one (which the share export could then capture),
+    // and blanked a perfectly good report if the network hiccuped.
+    //
+    // So: touch nothing until a complete, better answer is in hand.
+    async function usageReportSilentReread(token, period, serverId) {
+      if (!usageReportStillWants(token, period, serverId)) return;
+      const server = usageReportServer();
+      if (!server || server.id !== serverId) return;
+
+      const { date_from, date_to } = usageReportWindows(period);
+      const query = `date_from=${date_from}&date_to=${date_to}`;
+      const request = (path) => fetchJsonWithRetry(server, `${path}${path.includes('?') ? '&' : '?'}${query}`, { cache: 'no-store' });
+
+      let usage, insights, activeTime;
+      try {
+        // Fired together, unlike the explicit load: by now these are cache reads
+        // costing milliseconds, and a stale entry answers immediately too, so
+        // there is no cold compute here for them to contend over.
+        [usage, insights, activeTime] = await Promise.all([
+          request('/api/usage'),
+          request(`/api/insights?facets=${USAGE_REPORT_FACETS}`),
+          request('/api/active-time?include_review_sessions=true'),
+        ]);
+      } catch (_error) {
+        // Silent in, silent out. The report on screen is still the best answer this
+        // tab has; blanking it over a refresh nobody asked for is strictly worse
+        // than letting a slightly old one stand.
         return;
       }
+      if (!usage || !insights || !activeTime) return;
+      // Re-checked after the round trip: the reader had all of it to move on.
+      if (!usageReportStillWants(token, period, serverId)) return;
+
       usageReportState.model = usageReportBuildModel({
         insights, usage, activeTime,
         period, dateFrom: date_from, dateTo: date_to,
-        insightsMissing: !!insights.__error,
-        usageMissing: !!usage.__error,
-        activeTimeMissing: !!activeTime.__error,
+        insightsMissing: false, usageMissing: false, activeTimeMissing: false,
       });
       usageReportRender();
-      usageReportApplyPendingChoice();
+    }
+
+    // Is a silent answer for (token, period, serverId) still the thing on screen?
+    // An explicit load bumps the token, so anything it started outranks this.
+    function usageReportStillWants(token, period, serverId) {
+      return !usageReportState.loading
+        && usageReportState.loadToken === token
+        && usageReportState.period === period
+        && usageReportState.serverId === serverId;
     }
 
     // A control changed while a load was in flight describes data that is not on
@@ -14067,10 +14230,15 @@
       if (changedPeriod) usageReportState.period = period;
       if (changedServer) usageReportState.serverId = serverId;
       usageReportWritePrefs();
-      loadUsageReport({ refresh: true });
+      // Not a refresh. This is a queued click on a period or server the reader
+      // has not seen yet, which is an ordinary first load and wants the cache
+      // like any other. Forcing a recompute here turned "clicked while busy"
+      // into the slowest path in the tab, which is backwards: impatience was
+      // being answered with a full cold scan.
+      loadUsageReport();
     }
 
-    function usageReportBuildModel({ insights, usage, activeTime, period, dateFrom, dateTo, insightsMissing, usageMissing, activeTimeMissing }) {
+    function usageReportBuildModel({ insights, usage, activeTime, period, dateFrom, dateTo, insightsMissing, usageMissing, activeTimeMissing, pending = false }) {
       const range = (!insightsMissing && insights.range) || (!usageMissing && usage.range) || {};
       const fromKey = range.from || dateFrom;
       const toKey = range.to || dateTo;
@@ -14204,6 +14372,10 @@
           insightsMissing,
           usageMissing,
           activeTimeMissing,
+          // Not a fourth source. It marks a model built for the first paint,
+          // where the two slow requests are still outstanding rather than
+          // failed, so the banner can tell silence from refusal.
+          pending,
         },
       };
     }
@@ -14289,15 +14461,32 @@
       }));
     }
 
+    // The lines that describe the window rather than the data in it. Shared by
+    // both paints so the partial one cannot print a different range or title
+    // from the full one that replaces it.
+    function usageReportRenderHead(model) {
+      usageReportText(document.getElementById('usageReportTitle'), usageReportPeriodTitle(model));
+      usageReportText(document.getElementById('usageReportRange'),
+        `${formatShortDate(model.range.from, true)} – ${formatShortDate(model.range.to, true)}`);
+      usageReportText(document.getElementById('usageReportProgress'),
+        model.elapsed < model.periodLength ? t('usageReportInProgress', { d: model.elapsed, n: model.periodLength }) : '');
+      usageReportText(document.getElementById('usageReportScopeLine'),
+        t('usageReportScope', { machine: usageReportMachineName() }));
+    }
+
     function usageReportRenderBanner(model) {
       const banner = document.getElementById('usageReportBanner');
       const bits = [];
       // Every source that did not answer is named here, in the order a reader
       // meets its consequences: the analytics scan feeds most of the page, the
       // totals endpoint feeds the hero, active time feeds the session counts.
-      if (model.notices.insightsMissing) bits.push(t('usageReportInsightsMissing'));
+      // On the first paint the slow two have not been asked for yet, so they are
+      // absent without having failed. `pending` keeps that out of the banner,
+      // which would otherwise flash "unavailable" a moment before the data lands.
+      const pending = !!model.notices.pending;
+      if (model.notices.insightsMissing && !pending) bits.push(t('usageReportInsightsMissing'));
       if (model.notices.usageMissing) bits.push(t('usageReportTotalsFallback'));
-      if (model.notices.activeTimeMissing) bits.push(t('usageReportActiveMissing'));
+      if (model.notices.activeTimeMissing && !pending) bits.push(t('usageReportActiveMissing'));
       if (model.sourceErrors.length) {
         bits.push(t('usageReportPartial', { tools: model.sourceErrors.map(usageReportToolLabel).join(', ') }));
       }
@@ -14316,6 +14505,13 @@
     }
 
     function usageReportRenderHero(model) {
+      usageReportRenderHeroTotals(model);
+      usageReportRenderHeroActivity(model);
+    }
+
+    // The half /api/usage answers by itself, so it paints before the other two
+    // requests have even been issued.
+    function usageReportRenderHeroTotals(model) {
       const empty = model.isEmpty;
       const tokensSub = document.getElementById('usageReportKTokensSub');
       tokensSub.classList.remove('tokdash-loading-placeholder');
@@ -14333,6 +14529,12 @@
       }
       usageReportText(document.getElementById('usageReportKCost'), empty ? '—' : formatCurrency(model.cost));
       usageReportText(document.getElementById('usageReportKCostSub'), empty ? '' : t('usageReportCostShort'));
+    }
+
+    // The half that waits: runtime comes from /api/active-time, the active-day
+    // count from the insights streaks facet.
+    function usageReportRenderHeroActivity(model) {
+      const empty = model.isEmpty;
       usageReportText(document.getElementById('usageReportKActive'), empty || !model.activeMs ? '—' : formatDuration(model.activeMs));
       usageReportText(document.getElementById('usageReportKActiveSub'), empty || !model.agentMs ? '' : t('usageReportActiveSub', { agent: formatDuration(model.agentMs) }));
       const daysEl = document.getElementById('usageReportKDays');
@@ -15394,18 +15596,27 @@
       usageReportSyncShareInputs();
     }
 
+    // The first paint, off /api/usage alone: the window lines and the two hero
+    // figures that endpoint fully answers. Every section the other two requests
+    // feed keeps the placeholder usageReportRenderLoading() left on it, so the
+    // page fills in rather than showing em dashes it will have to take back. The
+    // share cards are deliberately not rendered here — they would export a
+    // half-empty report if the reader hit the button in this window.
+    function usageReportRenderPartial(model) {
+      usageReportRenderControls();
+      usageReportRenderState();
+      if (!model) return;
+      usageReportRenderHead(model);
+      usageReportRenderBanner(model);
+      usageReportRenderHeroTotals(model);
+    }
+
     function usageReportRender() {
       usageReportRenderControls();
       usageReportRenderState();
       const model = usageReportState.model;
       if (!model) return;
-      usageReportText(document.getElementById('usageReportTitle'), usageReportPeriodTitle(model));
-      usageReportText(document.getElementById('usageReportRange'),
-        `${formatShortDate(model.range.from, true)} – ${formatShortDate(model.range.to, true)}`);
-      usageReportText(document.getElementById('usageReportProgress'),
-        model.elapsed < model.periodLength ? t('usageReportInProgress', { d: model.elapsed, n: model.periodLength }) : '');
-      usageReportText(document.getElementById('usageReportScopeLine'),
-        t('usageReportScope', { machine: usageReportMachineName() }));
+      usageReportRenderHead(model);
       usageReportRenderBanner(model);
       usageReportRenderHero(model);
       usageReportRenderSentence(model);
@@ -15454,7 +15665,11 @@
           usageReportState.pendingServerId = null;
           usageReportState.serverId = select.value;
           usageReportWritePrefs();
-          loadUsageReport({ refresh: true });
+          // Each server answers out of its own cache, so switching to one is a
+          // first read of that server, not a reason to make it recompute. Only
+          // the retry button below forces one, where the reader is explicitly
+          // asking for another attempt.
+          loadUsageReport();
         });
       }
       const retry = document.getElementById('usageReportRetry');
@@ -18007,6 +18222,16 @@
       if (isQuotaActive()) {
         hideUsageRefreshReport();
         refreshQuotaViaGlobalButton();
+        return;
+      }
+      // Same shape as the Quota branch: the Report tab owns its own window and its
+      // own three requests, so the dashboard fetch below would refresh a range this
+      // tab is not showing. Without this the tab had NO user-reachable way to force
+      // a recompute -- its Retry button is revealed only by the error panel, and the
+      // period and server controls deliberately no longer force one.
+      if (isUsageReportActive()) {
+        hideUsageRefreshReport();
+        loadUsageReport({ refresh: true });
         return;
       }
       // Use current date range if set, otherwise use today

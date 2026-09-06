@@ -193,6 +193,11 @@ def test_startup_warmer_populates_initial_overview_date_range(monkeypatch):
     monkeypatch.setattr(api, "get_sessions_data", fake_sessions)
     monkeypatch.setattr(api, "get_active_time_data", fake_active_time)
     monkeypatch.setattr(api, "get_codex_activity_insights", fake_activity)
+    # This test is about the Overview's slice of the startup warm, which asserts
+    # exact call lists. The Report tab's windows ride the same warm and would add
+    # to every one of them; they are pinned through their own routes in
+    # test_cold_fanout_backpressure.py.
+    monkeypatch.setattr(api, "_report_warm_targets", lambda _day: [])
 
     try:
         api._warm_caches()
@@ -242,6 +247,9 @@ def test_default_usage_request_joins_the_startup_warm(monkeypatch):
     monkeypatch.setattr(api, "get_sessions_data", lambda *_args, **_kwargs: {})
     monkeypatch.setattr(api, "get_active_time_data", lambda *_args, **_kwargs: {})
     monkeypatch.setattr(api, "get_codex_activity_insights", lambda: {"tools": []})
+    # The join being tested is for the Overview's today key; the Report tab's
+    # windows would put three more usage computes on the same warm thread.
+    monkeypatch.setattr(api, "_report_warm_targets", lambda _day: [])
     original_claim = api._claim_startup_warm_wait
 
     def claim_startup_warm_wait(key):

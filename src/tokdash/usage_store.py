@@ -2476,6 +2476,43 @@ class UsageEntryStore:
                         out.append(obj)
         return out
 
+    def query_session_signatures(
+        self, tool: str
+    ) -> list[tuple[str, str, str, Optional[int], Optional[int]]]:
+        """Per-row identity and time bounds for a tool, without decoding a session.
+
+        ``(session_id, file_path, signature, started_at_ms, last_seen_at_ms)`` in
+        the same order :meth:`query_session_records` returns rows, so a caller can
+        group by session and reproduce the window filter without paying the
+        ``raw_json`` decode — which is most of what a read of an unchanged tool
+        costs. The point is to learn *which* sessions changed before deciding what
+        to deserialize.
+
+        No ``missing`` filter, matching the record queries: a row kept after its
+        file disappeared still holds that file's content and still belongs to the
+        session.
+        """
+        with closing(self._connect()) as conn:
+            rows = conn.execute(
+                """
+                SELECT session_id, file_path, signature, started_at_ms, last_seen_at_ms
+                FROM session_records
+                WHERE tool = ?
+                ORDER BY file_path ASC, session_id ASC
+                """,
+                (tool,),
+            ).fetchall()
+        return [
+            (
+                str(row["session_id"]),
+                str(row["file_path"]),
+                str(row["signature"] or ""),
+                row["started_at_ms"],
+                row["last_seen_at_ms"],
+            )
+            for row in rows
+        ]
+
     def query_session_activity_records(self, tool: str) -> list[dict[str, Any]]:
         with closing(self._connect()) as conn:
             rows = conn.execute(

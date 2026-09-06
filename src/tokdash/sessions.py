@@ -9,6 +9,7 @@ import os
 import re
 import sqlite3
 import threading
+from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache, wraps
 from pathlib import Path
@@ -413,6 +414,9 @@ def reload_pricing_db() -> None:
     _load_cline_sessions.cache_clear()
     _parse_workbuddy_session_file.cache_clear()
     _load_workbuddy_sessions.cache_clear()
+    # New rates change every token in the assembly token, so the entries were
+    # already unreachable; dropping them frees the budget they were holding.
+    _SESSION_ASSEMBLY.clear()
 
 
 def _truthy_env(name: str) -> bool:
@@ -1069,7 +1073,14 @@ def _drop_codex_subagent_replay_turns(
     earliest sibling (by first turn timestamp, then session id) keeps it; later
     siblings drop turns whose event key an earlier sibling already retained —
     the same single-survivor rule Overview's global event-key index applies.
+
+    Neither ``sessions`` nor the session dicts inside it are modified: a trimmed
+    session is a shallow copy in the returned mapping. Callers hand this the
+    output of a merge they own today, but the sessions a merge produces are
+    cacheable, and trimming one in place would strip turns from every later read
+    of a different window.
     """
+    result = dict(sessions)
     keys_by_session = {
         session_id: {
             str(turn.get("_event_key"))
@@ -1089,19 +1100,20 @@ def _drop_codex_subagent_replay_turns(
         if not parent_keys:
             orphan_children.append((parent_id, session_id, session))
             continue
+        turns = session.get("turns", [])
         kept = [
             turn
-            for turn in session.get("turns", [])
+            for turn in turns
             if not turn.get("_event_key") or str(turn.get("_event_key")) not in parent_keys
         ]
-        if kept:
-            session["turns"] = kept
+        if not kept:
+            result.pop(session_id, None)
+            keys_by_session.pop(session_id, None)
+        elif len(kept) != len(turns):
+            result[session_id] = {**session, "turns": kept}
             keys_by_session[session_id] = {
                 str(turn.get("_event_key")) for turn in kept if turn.get("_event_key")
             }
-        else:
-            del sessions[session_id]
-            keys_by_session.pop(session_id, None)
 
     orphans_by_parent: Dict[str, list] = {}
     for parent_id, session_id, session in orphan_children:
@@ -1117,33 +1129,41 @@ def _drop_codex_subagent_replay_turns(
         )
         retained_keys: set = set()
         for session_id, session in siblings:
+            turns = session.get("turns", [])
             kept = []
-            for turn in session.get("turns", []):
+            for turn in turns:
                 event_key = str(turn.get("_event_key") or "")
                 if event_key and event_key in retained_keys:
                     continue
                 kept.append(turn)
                 if event_key:
                     retained_keys.add(event_key)
-            if kept:
-                session["turns"] = kept
-            else:
-                del sessions[session_id]
+            if not kept:
+                result.pop(session_id, None)
                 keys_by_session.pop(session_id, None)
-    return sessions
+            elif len(kept) != len(turns):
+                result[session_id] = {**session, "turns": kept}
+    return result
 
 
 def _codex_unwindowed_parent_keys(
-    store: "UsageEntryStore", sessions: Dict[str, Dict[str, Any]]
+    store: "UsageEntryStore",
+    sessions: Dict[str, Dict[str, Any]],
+    tokens: Optional[Dict[str, tuple]] = None,
 ) -> Dict[str, set]:
     """Event keys of fork-parent sessions that a windowed read excluded.
 
-    ``query_session_records(whole_sessions=True)`` only loads sessions touching the
-    window. A forked subagent file keeps its own session id while its replayed
-    prefix turns are restamped into the window, so the parent session can be absent
-    from the result while present in the store. Fetch those parents unbounded by
-    time so the replay dedup is window-independent. A parent with no stored rows
-    yields no keys and the child keeps the prefix (counted once, never dropped).
+    A windowed read only loads sessions touching the window. A forked subagent
+    file keeps its own session id while its replayed prefix turns are restamped
+    into the window, so the parent session can be absent from the result while
+    present in the store. Fetch those parents unbounded by time so the replay
+    dedup is window-independent. A parent with no stored rows yields no keys and
+    the child keeps the prefix (counted once, never dropped).
+
+    ``tokens`` lets the parents come from the same assembly cache the windowed
+    sessions use. Without it this was a second uncached deserialization of the
+    same rows on every request; with it a parent is assembled once and is then
+    already in hand for any later window that does include it.
     """
     missing = {
         str(session["_subagent_parent_id"])
@@ -1152,15 +1172,35 @@ def _codex_unwindowed_parent_keys(
     } - set(sessions)
     if not missing:
         return {}
-    parent_keys: Dict[str, set] = {}
-    for record in store.query_session_records_by_ids("codex", missing):
-        session_id = str(record.get("session_id") or "")
-        keys = parent_keys.setdefault(session_id, set())
-        for turn in record.get("turns") or []:
-            event_key = turn.get("_event_key")
-            if event_key:
-                keys.add(str(event_key))
-    return parent_keys
+    tokens = tokens or {}
+    parents: Dict[str, Dict[str, Any]] = {}
+    stale: list[str] = []
+    for session_id in sorted(missing):
+        token = tokens.get(session_id)
+        cached = _SESSION_ASSEMBLY.get("codex", session_id, token) if token else None
+        if cached is None:
+            stale.append(session_id)
+        else:
+            parents[session_id] = cached
+    if stale:
+        rebuilt = _raw_sessions_from_records(
+            "codex", store.query_session_records_by_ids("codex", stale)
+        )
+        admit: list[tuple[str, Any, Dict[str, Any]]] = []
+        for session_id, session in rebuilt.items():
+            token = tokens.get(session_id)
+            if token:
+                admit.append((session_id, token, session))
+            parents[session_id] = session
+        _SESSION_ASSEMBLY.putall("codex", admit)
+    return {
+        session_id: {
+            str(turn["_event_key"])
+            for turn in session.get("turns", [])
+            if turn.get("_event_key")
+        }
+        for session_id, session in parents.items()
+    }
 def _merge_raw_session_sequence(raws: list[Dict[str, Any]]) -> Dict[str, Any]:
     """Left-fold ``raws`` exactly as repeated :func:`_merge_raw_session` would.
 
@@ -1231,6 +1271,167 @@ def _merge_raw_session_sequence(raws: list[Dict[str, Any]]) -> Dict[str, Any]:
     if not meta["display_name"]:
         meta["display_name"] = _fallback_display_name(meta["session_id"], meta["project"])
     return meta
+
+
+def _merge_grouped_raw_sessions(
+    grouped: Dict[str, list[Dict[str, Any]]]
+) -> Dict[str, Dict[str, Any]]:
+    """Collapse per-session raw lists into one merged session each.
+
+    Loaders accumulate raws per session id and merge here rather than folding as
+    they go: the pairwise fold rebuilds the whole accumulated session on every
+    file, so a session split across K files costs O(K^2). That is the shape
+    subagent fan-out produces on every tool that can attribute several transcripts
+    to one session id, not just the ones large enough to have hit it yet.
+    """
+    return {
+        session_id: _merge_raw_session_sequence(raws)
+        for session_id, raws in grouped.items()
+    }
+
+
+SESSION_CACHE_TURNS_DEFAULT = 500_000
+
+
+@lru_cache(maxsize=4)
+def _parse_turn_budget(raw: str) -> int:
+    if not raw:
+        return SESSION_CACHE_TURNS_DEFAULT
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return SESSION_CACHE_TURNS_DEFAULT
+
+
+def _session_cache_turn_budget() -> int:
+    """Turns the assembly cache may hold; override with ``TOKDASH_SESSION_CACHE_TURNS``.
+
+    Turns rather than sessions because that is what varies by orders of magnitude
+    between installs: one long-running session can outweigh a thousand short ones,
+    and it is bytes the budget exists to bound. Zero empties the cache and keeps
+    it empty.
+
+    Read once per store, not once per session: a cold read of a large tool calls
+    this a thousand times, and the parse behind it never changes between them.
+    """
+    return _parse_turn_budget(os.environ.get("TOKDASH_SESSION_CACHE_TURNS", "").strip())
+
+
+class _SessionAssemblyCache:
+    """Merged sessions kept between requests, keyed by the files behind each one.
+
+    The expensive half of a session read is assembly — deserializing each of a
+    session's rows and merging them — and it repeats in full on every request
+    because nothing above it is keyed on content. The obvious memo, one keyed on
+    the window, does not help: the windows a reader opens end today, so a stored
+    entry is only ever reused inside one route's response-cache TTL, which
+    already absorbs those repeats. A key with no dates in it does help, and is
+    reusable across every window and every period at once.
+
+    Entries are invalidated by token, not by time: the token is the set of files
+    behind the session plus the pricing signature, so an appended log invalidates
+    exactly the one session it belongs to instead of the whole tool.
+
+    Cached sessions are handed out by reference and read by several requests at
+    once, so nothing downstream may modify one. That is already true of the live
+    loaders, whose own memo shares its result the same way.
+    """
+
+    def __init__(self) -> None:
+        self._entries: "OrderedDict[tuple[str, str], tuple[Any, Any, int]]" = OrderedDict()
+        self._turns = 0
+        self._lock = threading.Lock()
+
+    def get(self, tool: str, session_id: str, token: Any) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            entry = self._entries.get((tool, session_id))
+            if entry is None or entry[0] != token:
+                return None
+            self._entries.move_to_end((tool, session_id))
+            return entry[1]
+
+    def putall(
+        self, tool: str, items: Iterable[tuple[str, Any, Dict[str, Any]]]
+    ) -> None:
+        """Admit a batch of ``(session_id, token, session)``, then evict to budget.
+
+        A batch rather than one call per session so the budget is read once per
+        read of a tool, not once per session in it.
+        """
+        budget = _session_cache_turn_budget()
+        with self._lock:
+            if budget <= 0:
+                # Off. Drop whatever a previous budget admitted rather than leave
+                # it resident: a process that starts at zero never fills the cache
+                # at all, so this only matters when the setting changes under a
+                # running server.
+                self._entries.clear()
+                self._turns = 0
+                return
+            for session_id, token, session in items:
+                key = (tool, session_id)
+                prior = self._entries.pop(key, None)
+                if prior is not None:
+                    self._turns -= prior[2]
+                weight = len(session.get("turns") or ())
+                self._entries[key] = (token, session, weight)
+                self._turns += weight
+            # One session over budget on its own still stays: evicting it would
+            # leave the cache permanently empty and re-merge it every request.
+            while self._turns > budget and len(self._entries) > 1:
+                _key, evicted = self._entries.popitem(last=False)
+                self._turns -= evicted[2]
+
+    def clear(self) -> None:
+        with self._lock:
+            self._entries.clear()
+            self._turns = 0
+
+    def stats(self) -> tuple[int, int]:
+        """``(sessions, turns)`` currently held — for tests and diagnostics."""
+        with self._lock:
+            return len(self._entries), self._turns
+
+
+_SESSION_ASSEMBLY = _SessionAssemblyCache()
+
+
+def _assembly_token(file_signatures: Iterable[Any], pricing_sig: tuple) -> tuple:
+    """Identity of the inputs behind one merged session.
+
+    The sorted file set itself rather than a hash of it: it cannot collide, and
+    being set-shaped it catches a file *disappearing* as surely as one changing.
+    Pricing rides along because assembly prices every turn, so a rate edit has to
+    invalidate what a rate edit changes.
+
+    A stored row marked missing keeps its signature and its content, so it
+    correctly does not invalidate; a row deleted outright leaves the set.
+    """
+    return (pricing_sig, tuple(sorted(file_signatures)))
+
+
+def _assemble_raw_sessions(
+    tool: str,
+    pricing_sig: tuple,
+    grouped: Dict[str, list[tuple[Any, Dict[str, Any]]]],
+) -> Dict[str, Dict[str, Any]]:
+    """Merge each session's raws, reusing the ones whose files did not change.
+
+    ``grouped`` maps a session id to ``(file_signature, raw)`` pairs in merge
+    order. The signatures are what the token is built from, so a loader only has
+    to carry the same triple it already iterates.
+    """
+    sessions: Dict[str, Dict[str, Any]] = {}
+    merged: list[tuple[str, Any, Dict[str, Any]]] = []
+    for session_id, entries in grouped.items():
+        token = _assembly_token((signature for signature, _raw in entries), pricing_sig)
+        session = _SESSION_ASSEMBLY.get(tool, session_id, token)
+        if session is None:
+            session = _merge_raw_session_sequence([raw for _signature, raw in entries])
+            merged.append((session_id, token, session))
+        sessions[session_id] = session
+    _SESSION_ASSEMBLY.putall(tool, merged)
+    return sessions
 
 
 def _file_signature(path: Path) -> tuple[str, int, int]:
@@ -1636,7 +1837,7 @@ def _parse_codex_session_file(path_str: str, _mtime_ns: int, _size: int, _pricin
 
 @_cached_session_aggregate()
 def _load_codex_sessions(signature: tuple[tuple[str, int, int], ...], pricing_sig: tuple = ()) -> Dict[str, Dict[str, Any]]:
-    sessions: Dict[str, Dict[str, Any]] = {}
+    grouped: Dict[str, list[tuple[Any, Dict[str, Any]]]] = {}
     transient_miss = False
     for path_str, mtime_ns, size in signature:
         try:
@@ -1648,12 +1849,12 @@ def _load_codex_sessions(signature: tuple[tuple[str, int, int], ...], pricing_si
             continue
         if raw and raw.get("turns"):
             raw = {key: value for key, value in raw.items() if key != "_activity"}
-            session_id = str(raw["session_id"])
-            if session_id in sessions:
-                sessions[session_id] = _merge_raw_session(sessions[session_id], raw)
-            else:
-                sessions[session_id] = raw
-    result = _drop_codex_subagent_replay_turns(sessions)
+            grouped.setdefault(str(raw["session_id"]), []).append(
+                ((path_str, mtime_ns, size), raw)
+            )
+    result = _drop_codex_subagent_replay_turns(
+        _assemble_raw_sessions("codex", pricing_sig, grouped)
+    )
     if transient_miss:
         raise _PartialSessionView(result)
     return result
@@ -1864,7 +2065,7 @@ def _parse_claude_session_file(path_str: str, _mtime_ns: int, _size: int, _prici
 
 @_cached_session_aggregate()
 def _load_claude_sessions(signature: tuple[tuple[str, int, int], ...], pricing_sig: tuple = ()) -> Dict[str, Dict[str, Any]]:
-    sessions: Dict[str, Dict[str, Any]] = {}
+    grouped: Dict[str, list[tuple[Any, Dict[str, Any]]]] = {}
     transient_miss = False
     for path_str, mtime_ns, size in signature:
         try:
@@ -1875,11 +2076,10 @@ def _load_claude_sessions(signature: tuple[tuple[str, int, int], ...], pricing_s
             transient_miss = True
             continue
         if raw:
-            session_id = str(raw["session_id"])
-            if session_id in sessions:
-                sessions[session_id] = _merge_raw_session(sessions[session_id], raw)
-            else:
-                sessions[session_id] = raw
+            grouped.setdefault(str(raw["session_id"]), []).append(
+                ((path_str, mtime_ns, size), raw)
+            )
+    sessions = _assemble_raw_sessions("claude", pricing_sig, grouped)
     if transient_miss:
         raise _PartialSessionView(sessions)
     return sessions
@@ -1910,9 +2110,20 @@ def _opencode_db_signature() -> tuple[tuple[str, int, int], ...]:
 def _load_opencode_sessions(
     signature: tuple[tuple[str, int, int], ...],
     _pricing_sig: tuple = (),
-    since_ms: Optional[int] = None,
-    until_ms: Optional[int] = None,
 ) -> Dict[str, Dict[str, Any]]:
+    """Every session in the database, unwindowed and cached on content alone.
+
+    The window used to be part of this cache key, which meant the three periods a
+    reader opens took three entries out of eight and a rate edit took all of them
+    — a memo keyed on something the reader changes constantly is not much of a
+    memo. Reading unwindowed costs about what the widest window cost anyway
+    (windowing is a scan filter here, not an index seek), and ``_summarize_session``
+    already clips turns to the window it is asked for, which is how every
+    store-backed tool has always worked.
+
+    Loading everything is also what makes the boundary events unnecessary: the
+    event just outside a window is now simply one of the turns in hand.
+    """
     if not signature:
         return {}
     db_path = Path(signature[0][0])
@@ -1920,9 +2131,9 @@ def _load_opencode_sessions(
         return {}
 
     try:
-        return _load_opencode_sessions_scalar(db_path, since_ms=since_ms, until_ms=until_ms)
+        return _load_opencode_sessions_scalar(db_path)
     except sqlite3.Error:
-        return _load_opencode_sessions_raw_json(db_path, since_ms=since_ms, until_ms=until_ms)
+        return _load_opencode_sessions_raw_json(db_path)
 
 
 def _opencode_window_clause(since_ms: Optional[int], until_ms: Optional[int]) -> tuple[str, list[int]]:
@@ -1954,11 +2165,16 @@ def _sql_boundary_event_ms(
 ) -> Dict[str, int]:
     """Nearest assistant event per session on the far side of a window edge.
 
-    These loaders window in SQL, so a session that continues across an edge would
-    otherwise lose the stretch spanning it: the first in-window event looks like
-    the start of its stream, and the last one like the end. Only the nearest
-    event outside matters — anything further away yields the same capped
+    For a caller that windows in SQL: a session continuing across an edge would
+    otherwise lose the stretch spanning it, because the first in-window event
+    looks like the start of its stream and the last one like the end. Only the
+    nearest event outside matters — anything further away yields the same capped
     interval, whose clipped part is identical either way.
+
+    The dashboard's read path no longer asks these loaders for a window (see
+    :func:`_load_opencode_sessions`), so nothing there needs a boundary event:
+    the row outside a window is simply another turn in hand. This stays for
+    callers that do pass one.
     """
     if bound_ms is None:
         return {}
@@ -2408,11 +2624,11 @@ def _load_opencode_sessions_raw_json(
     return sessions
 
 
-def _opencode_sessions(since_ms: Optional[int] = None, until_ms: Optional[int] = None) -> Dict[str, Dict[str, Any]]:
+def _opencode_sessions() -> Dict[str, Dict[str, Any]]:
     signature = _opencode_db_signature()
     if not signature:
         return {}
-    return _load_opencode_sessions(signature, _pricing_signature(), since_ms, until_ms)
+    return _load_opencode_sessions(signature, _pricing_signature())
 
 
 def _pi_session_roots() -> list[Path]:
@@ -2633,7 +2849,7 @@ def _parse_omp_session_file(path_str: str, _mtime_ns: int, _size: int, _pricing_
 
 @_cached_session_aggregate()
 def _load_pi_sessions(signature: tuple[tuple[str, int, int], ...], pricing_sig: tuple = ()) -> Dict[str, Dict[str, Any]]:
-    sessions: Dict[str, Dict[str, Any]] = {}
+    grouped: Dict[str, list[tuple[Any, Dict[str, Any]]]] = {}
     transient_miss = False
     for path_str, mtime_ns, size in signature:
         try:
@@ -2645,11 +2861,10 @@ def _load_pi_sessions(signature: tuple[tuple[str, int, int], ...], pricing_sig: 
             continue
         if not raw:
             continue
-        session_id = str(raw["session_id"])
-        if session_id in sessions:
-            sessions[session_id] = _merge_raw_session(sessions[session_id], raw)
-        else:
-            sessions[session_id] = raw
+        grouped.setdefault(str(raw["session_id"]), []).append(
+            ((path_str, mtime_ns, size), raw)
+        )
+    sessions = _assemble_raw_sessions("pi_agent", pricing_sig, grouped)
     if transient_miss:
         raise _PartialSessionView(sessions)
     return sessions
@@ -3057,7 +3272,7 @@ def _omp_session_signatures() -> tuple[tuple[str, int, int], ...]:
 
 @_cached_session_aggregate()
 def _load_omp_sessions(signature: tuple[tuple[str, int, int], ...], pricing_sig: tuple = ()) -> Dict[str, Dict[str, Any]]:
-    sessions: Dict[str, Dict[str, Any]] = {}
+    grouped: Dict[str, list[tuple[Any, Dict[str, Any]]]] = {}
     transient_miss = False
     for path_str, mtime_ns, size in signature:
         try:
@@ -3069,11 +3284,10 @@ def _load_omp_sessions(signature: tuple[tuple[str, int, int], ...], pricing_sig:
             continue
         if not raw:
             continue
-        session_id = str(raw["session_id"])
-        if session_id in sessions:
-            sessions[session_id] = _merge_raw_session(sessions[session_id], raw)
-        else:
-            sessions[session_id] = raw
+        grouped.setdefault(str(raw["session_id"]), []).append(
+            ((path_str, mtime_ns, size), raw)
+        )
+    sessions = _assemble_raw_sessions("omp", pricing_sig, grouped)
     if transient_miss:
         raise _PartialSessionView(sessions)
     return sessions
@@ -3356,7 +3570,7 @@ def _parse_kimi_session_file(path_str: str, _mtime_ns: int, _size: int, _pricing
 
 @_cached_session_aggregate()
 def _load_kimi_sessions(signature: tuple[tuple[str, int, int], ...], pricing_sig: tuple = ()) -> Dict[str, Dict[str, Any]]:
-    sessions: Dict[str, Dict[str, Any]] = {}
+    grouped: Dict[str, list[tuple[Any, Dict[str, Any]]]] = {}
     transient_miss = False
     for path_str, mtime_ns, size in signature:
         try:
@@ -3368,11 +3582,10 @@ def _load_kimi_sessions(signature: tuple[tuple[str, int, int], ...], pricing_sig
             continue
         if not raw:
             continue
-        session_id = str(raw["session_id"])
-        if session_id in sessions:
-            sessions[session_id] = _merge_raw_session(sessions[session_id], raw)
-        else:
-            sessions[session_id] = raw
+        grouped.setdefault(str(raw["session_id"]), []).append(
+            ((path_str, mtime_ns, size), raw)
+        )
+    sessions = _assemble_raw_sessions("kimi", pricing_sig, grouped)
     if transient_miss:
         raise _PartialSessionView(sessions)
     return sessions
@@ -3419,9 +3632,8 @@ def _mimo_db_signature() -> tuple[tuple[str, int, int], ...]:
 def _load_mimo_sessions(
     signature: tuple[tuple[str, int, int], ...],
     _pricing_sig: tuple = (),
-    since_ms: Optional[int] = None,
-    until_ms: Optional[int] = None,
 ) -> Dict[str, Dict[str, Any]]:
+    """Unwindowed and cached on content alone — see :func:`_load_opencode_sessions`."""
     if not signature:
         return {}
     db_path = Path(signature[0][0])
@@ -3429,9 +3641,9 @@ def _load_mimo_sessions(
         return {}
 
     try:
-        return _load_mimo_sessions_scalar(db_path, since_ms=since_ms, until_ms=until_ms)
+        return _load_mimo_sessions_scalar(db_path)
     except sqlite3.Error:
-        return _load_mimo_sessions_raw_json(db_path, since_ms=since_ms, until_ms=until_ms)
+        return _load_mimo_sessions_raw_json(db_path)
 
 
 def _load_mimo_sessions_scalar(
@@ -3625,11 +3837,11 @@ def _load_mimo_sessions_raw_json(
     return sessions
 
 
-def _mimo_sessions(since_ms: Optional[int] = None, until_ms: Optional[int] = None) -> Dict[str, Dict[str, Any]]:
+def _mimo_sessions() -> Dict[str, Dict[str, Any]]:
     signature = _mimo_db_signature()
     if not signature:
         return {}
-    return _load_mimo_sessions(signature, _pricing_signature(), since_ms, until_ms)
+    return _load_mimo_sessions(signature, _pricing_signature())
 
 
 def _kilocode_db_signature() -> tuple[tuple[str, int, int], ...]:
@@ -3647,29 +3859,57 @@ def _kilocode_db_signature() -> tuple[tuple[str, int, int], ...]:
     return tuple(signatures)
 
 
+def _kilocode_db_signatures(
+    signature: tuple[tuple[str, int, int], ...]
+) -> Dict[str, tuple[tuple[str, int, int], ...]]:
+    """Regroup a flat kilocode signature into one entry per database.
+
+    The inverse of what :func:`_kilocode_db_signature` flattened: each database
+    gets back the ``-wal`` and ``-shm`` siblings recorded alongside it. Those
+    siblings are why the signature covers them at all — a SQLite write can land
+    in the WAL and leave the main file's mtime and size untouched (measured at
+    18 of 40 appends; see ``_advance_mtime`` in the kilocode tests), so a token
+    built from the main file alone would call a changed database unchanged.
+
+    Which sessions a WAL write touched is not knowable without reading it, so
+    invalidation here is per database rather than per session. That costs
+    nothing: a session lives in exactly one channel DB.
+    """
+    grouped: Dict[str, list[tuple[str, int, int]]] = {}
+    for entry in signature:
+        path_str = entry[0]
+        for suffix in ("-wal", "-shm"):
+            if path_str.endswith(suffix):
+                path_str = path_str[: -len(suffix)]
+                break
+        grouped.setdefault(path_str, []).append(entry)
+    return {path_str: tuple(entries) for path_str, entries in grouped.items()}
+
+
 @lru_cache(maxsize=8)
 def _load_kilocode_sessions(
     signature: tuple[tuple[str, int, int], ...],
-    _pricing_sig: tuple = (),
-    since_ms: Optional[int] = None,
-    until_ms: Optional[int] = None,
+    pricing_sig: tuple = (),
 ) -> Dict[str, Dict[str, Any]]:
+    """Unwindowed and cached on content alone — see :func:`_load_opencode_sessions`.
+
+    Dropping the window is also what lets the merge reuse the assembly cache: a
+    session's raws are now fixed by the databases behind it, so the token is
+    exact. While the window was in the key, the same files could yield different
+    sessions and a cached merge would have served one window's turns to another.
+    """
     if not signature:
         return {}
     # One session lives in exactly one channel DB; the cross-DB merge is
     # defensive (dedupes turns by identity key, keeps the earlier duplicate).
-    sessions: Dict[str, Dict[str, Any]] = {}
-    for path_str, _mtime, _size in signature:
-        if path_str.endswith(("-wal", "-shm")):
-            continue
+    grouped: Dict[str, list[tuple[Any, Dict[str, Any]]]] = {}
+    for path_str, db_signature in _kilocode_db_signatures(signature).items():
         db_path = Path(path_str)
         if not db_path.exists():
             continue
         try:
             db_sessions = _load_opencode_sessions_scalar(
                 db_path,
-                since_ms=since_ms,
-                until_ms=until_ms,
                 tool="kilocode",
                 use_recorded_cost=False,
                 billing_rule="split-cache-write",
@@ -3678,8 +3918,6 @@ def _load_kilocode_sessions(
             try:
                 db_sessions = _load_opencode_sessions_raw_json(
                     db_path,
-                    since_ms=since_ms,
-                    until_ms=until_ms,
                     tool="kilocode",
                     use_recorded_cost=False,
                     billing_rule="split-cache-write",
@@ -3690,17 +3928,12 @@ def _load_kilocode_sessions(
                 )
                 continue
         for sid, raw in db_sessions.items():
-            if sid in sessions:
-                sessions[sid] = _merge_raw_session(sessions[sid], raw)
-            else:
-                sessions[sid] = raw
-    return sessions
+            grouped.setdefault(sid, []).append((db_signature, raw))
+    return _assemble_raw_sessions("kilocode", pricing_sig, grouped)
 
 
-def _kilocode_sessions(since_ms: Optional[int] = None, until_ms: Optional[int] = None) -> Dict[str, Dict[str, Any]]:
-    return _load_kilocode_sessions(
-        _kilocode_db_signature(), _pricing_signature(), since_ms, until_ms
-    )
+def _kilocode_sessions() -> Dict[str, Dict[str, Any]]:
+    return _load_kilocode_sessions(_kilocode_db_signature(), _pricing_signature())
 
 
 def _dsh_session_signatures() -> tuple[tuple[str, int, int], ...]:
@@ -3781,19 +4014,17 @@ def _parse_dsh_session_file(path_str: str, _mtime_ns: int, _size: int, _pricing_
 
 @lru_cache(maxsize=8)
 def _load_dsh_sessions(signature: tuple[tuple[str, int, int], ...], pricing_sig: tuple = ()) -> Dict[str, Dict[str, Any]]:
-    sessions: Dict[str, Dict[str, Any]] = {}
+    grouped: Dict[str, list[tuple[Any, Dict[str, Any]]]] = {}
     for path_str, mtime_ns, size in signature:
         raw = _parse_dsh_session_file(path_str, mtime_ns, size, pricing_sig)
         if not raw:
             continue
-        session_id = str(raw["session_id"])
-        if session_id in sessions:
-            # Duplicate physical files for one header id merge; the stable
-            # per-(turn, step) event keys dedup the turns.
-            sessions[session_id] = _merge_raw_session(sessions[session_id], raw)
-        else:
-            sessions[session_id] = raw
-    return sessions
+        # Duplicate physical files for one header id merge; the stable
+        # per-(turn, step) event keys dedup the turns.
+        grouped.setdefault(str(raw["session_id"]), []).append(
+            ((path_str, mtime_ns, size), raw)
+        )
+    return _assemble_raw_sessions("dsh", pricing_sig, grouped)
 
 
 def _dsh_session_parser_signature() -> dict[str, Any]:
@@ -4113,17 +4344,15 @@ def _parse_reasonix_session_file(path_str: str, _mtime_ns: int, _size: int, _pri
 
 @lru_cache(maxsize=8)
 def _load_reasonix_sessions(signature: tuple[tuple[str, int, int], ...], pricing_sig: tuple = ()) -> Dict[str, Dict[str, Any]]:
-    sessions: Dict[str, Dict[str, Any]] = {}
+    grouped: Dict[str, list[tuple[Any, Dict[str, Any]]]] = {}
     for path_str, mtime_ns, size in signature:
         raw = _parse_reasonix_session_file(path_str, mtime_ns, size, pricing_sig)
         if not raw:
             continue
-        session_id = str(raw["session_id"])
-        if session_id in sessions:
-            sessions[session_id] = _merge_raw_session(sessions[session_id], raw)
-        else:
-            sessions[session_id] = raw
-    return sessions
+        grouped.setdefault(str(raw["session_id"]), []).append(
+            ((path_str, mtime_ns, size), raw)
+        )
+    return _assemble_raw_sessions("reasonix", pricing_sig, grouped)
 
 
 def _reasonix_session_parser_signature() -> dict[str, Any]:
@@ -4251,7 +4480,7 @@ def _load_workbuddy_sessions(signature: tuple[tuple[str, int, int], ...], pricin
     """Mirror _load_claude_sessions: per-file _parse_session_file, merge per
     session_id with _merge_raw_session; transient misses raise
     _PartialSessionView so the partial view is returned but never cached."""
-    sessions: Dict[str, Dict[str, Any]] = {}
+    grouped: Dict[str, list[tuple[Any, Dict[str, Any]]]] = {}
     transient_miss = False
     for path_str, mtime_ns, size in signature:
         try:
@@ -4262,11 +4491,10 @@ def _load_workbuddy_sessions(signature: tuple[tuple[str, int, int], ...], pricin
             transient_miss = True
             continue
         if raw:
-            session_id = str(raw["session_id"])
-            if session_id in sessions:
-                sessions[session_id] = _merge_raw_session(sessions[session_id], raw)
-            else:
-                sessions[session_id] = raw
+            grouped.setdefault(str(raw["session_id"]), []).append(
+                ((path_str, mtime_ns, size), raw)
+            )
+    sessions = _assemble_raw_sessions("workbuddy", pricing_sig, grouped)
     if transient_miss:
         raise _PartialSessionView(sessions)
     return sessions
@@ -5244,15 +5472,15 @@ def _raw_sessions_for_tool(
         if key == "claude":
             return _claude_sessions()
         if key == "opencode":
-            return _opencode_sessions(since_ms=since_ms, until_ms=until_ms)
+            return _opencode_sessions()
         if key == "kilocode":
-            return _kilocode_sessions(since_ms=since_ms, until_ms=until_ms)
+            return _kilocode_sessions()
         if key == "pi_agent":
             return _pi_sessions()
         if key == "omp":
             return _omp_sessions()
         if key == "mimo":
-            return _mimo_sessions(since_ms=since_ms, until_ms=until_ms)
+            return _mimo_sessions()
         if key == "kimi":
             return _kimi_sessions()
         if key == "dsh":
@@ -5285,15 +5513,19 @@ def _raw_sessions_for_tool(
     raise ValueError(f"Unsupported session tool: {tool}")
 
 
-def _session_records_to_raw_sessions(tool: str, records: Iterable[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
-    """Rebuild raw sessions from the per-file rows held in the persistent store.
+def _raw_sessions_from_records(tool: str, records: Iterable[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """Merge the per-file rows of each session into one raw session.
 
     Every live loader that can see one session in several files (codex, claude,
-    pi_agent, kimi) merges with _merge_raw_session, so the cached path merges the
-    same way — _merge_raw_session_sequence is that fold in one pass, not a second
-    set of rules. It is what prefers an explicit title over a fallback and dedups
-    turns by event identity; rebuilding the merge differently here is exactly how
-    a cached read starts disagreeing with a live one.
+    pi_agent, kimi) groups its raws and merges them with the same helper, so the
+    cached path is not a second set of rules. That merge is what prefers an
+    explicit title over a fallback and dedups turns by event identity; rebuilding
+    it differently here is exactly how a cached read starts disagreeing with a
+    live one.
+
+    Nothing here reads across sessions, which is what makes the result cacheable
+    a session at a time. The Codex replay dedup does read across them, so it runs
+    after this and not inside it.
     """
     grouped: Dict[str, list[Dict[str, Any]]] = {}
     for record in records:
@@ -5308,25 +5540,109 @@ def _session_records_to_raw_sessions(tool: str, records: Iterable[Dict[str, Any]
         raw["turns"] = _repriced_turns(record.get("turns") or [])
         raw["tool"] = raw.get("tool") or tool
         raw["session_id"] = session_id
-        # Rows written by older versions may carry a falsy project; _merge_raw_session
+        # Rows written by older versions may carry a falsy project; the merge
         # only defers to a sibling row's project when this one reads "unknown".
         raw["project"] = raw.get("project") or "unknown"
         grouped.setdefault(session_id, []).append(raw)
 
-    # Merge each session's rows in one pass. Folding them pairwise re-keyed and
-    # re-copied every turn already merged, which is quadratic in the number of
-    # files a session spans — see _merge_raw_session_sequence.
-    sessions: Dict[str, Dict[str, Any]] = {
-        session_id: _merge_raw_session_sequence(raws) for session_id, raws in grouped.items()
-    }
-
-    if tool == "codex":
-        # Codex-only pass; skip the keys_by_session build for every other tool.
-        sessions = _drop_codex_subagent_replay_turns(sessions)
+    sessions = _merge_grouped_raw_sessions(grouped)
     for session in sessions.values():
         session.setdefault("display_name", _fallback_display_name(session.get("session_id"), session.get("project")))
         session["is_review_session"] = bool(session.get("is_review_session", False))
     return sessions
+
+
+def _session_records_to_raw_sessions(tool: str, records: Iterable[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """Rebuild raw sessions from the per-file rows held in the persistent store."""
+    sessions = _raw_sessions_from_records(tool, records)
+    if tool == "codex":
+        # Codex-only pass; skip the keys_by_session build for every other tool.
+        sessions = _drop_codex_subagent_replay_turns(sessions)
+    return sessions
+
+
+def _row_touches_window(
+    started_at_ms: Optional[int],
+    last_seen_at_ms: Optional[int],
+    since_ms: Optional[int],
+    until_ms: Optional[int],
+) -> bool:
+    """The ``last_seen_at_ms >= ? AND started_at_ms < ?`` filter, in Python.
+
+    Per row, not per session: a session qualifies when *some* row of it clears
+    both bounds, which is not the same as its widest row doing so. A NULL bound
+    fails the test, matching SQL comparison against NULL.
+    """
+    if since_ms is not None and (last_seen_at_ms is None or last_seen_at_ms < since_ms):
+        return False
+    if until_ms is not None and (started_at_ms is None or started_at_ms >= until_ms):
+        return False
+    return True
+
+
+def _stored_session_assembly(
+    store: "UsageEntryStore",
+    tool: str,
+    since_ms: Optional[int],
+    until_ms: Optional[int],
+) -> tuple[Dict[str, Dict[str, Any]], Dict[str, tuple]]:
+    """Merged sessions for the window, plus the token of every session in the store.
+
+    Reads the cheap columns first and deserializes only the sessions the assembly
+    cache does not already hold at the right token. On an unchanged tool that is
+    no ``raw_json`` decode and no merge at all — which together are nearly the
+    whole cost of a stored read.
+
+    The tokens cover every session, not just the windowed ones, because the Codex
+    replay dedup reaches outside the window for fork parents and wants the same
+    cache.
+    """
+    pricing_sig = _pricing_signature()
+    file_signatures: Dict[str, list[tuple[str, str]]] = {}
+    touched: set[str] = set()
+    for session_id, file_path, signature, started_at_ms, last_seen_at_ms in store.query_session_signatures(tool):
+        if not session_id:
+            continue
+        file_signatures.setdefault(session_id, []).append((file_path, signature))
+        if session_id not in touched and _row_touches_window(
+            started_at_ms, last_seen_at_ms, since_ms, until_ms
+        ):
+            touched.add(session_id)
+
+    tokens = {
+        session_id: _assembly_token(signatures, pricing_sig)
+        for session_id, signatures in file_signatures.items()
+    }
+
+    # Ordered by the signature query, which orders rows the same way the record
+    # query does, so sessions come out in the order the uncached rebuild produced
+    # them. Cache misses hold their place until the rebuild fills them in.
+    windowed = [session_id for session_id in file_signatures if session_id in touched]
+    cached = {
+        session_id: _SESSION_ASSEMBLY.get(tool, session_id, tokens[session_id])
+        for session_id in windowed
+    }
+    stale = [session_id for session_id, session in cached.items() if session is None]
+    if stale:
+        rebuilt = _raw_sessions_from_records(
+            tool, store.query_session_records_by_ids(tool, stale)
+        )
+        admit: list[tuple[str, Any, Dict[str, Any]]] = []
+        for session_id in stale:
+            session = rebuilt.get(session_id)
+            # A session missing here held no turns in any row, or its rows went
+            # away between the two queries. Either way there is nothing to cache.
+            if session is not None:
+                admit.append((session_id, tokens[session_id], session))
+                cached[session_id] = session
+        _SESSION_ASSEMBLY.putall(tool, admit)
+
+    sessions = {
+        session_id: session
+        for session_id, session in cached.items()
+        if session is not None
+    }
+    return sessions, tokens
 
 
 _store_sync_state = threading.local()
@@ -5439,16 +5755,11 @@ def _stored_sessions_for_tool(
     else:
         raise ValueError(f"Unsupported stored session tool: {tool}")
 
-    sessions = _session_records_to_raw_sessions(
-        tool,
-        store.query_session_records(
-            tool, since_ms=since_ms, until_ms=until_ms, whole_sessions=True
-        ),
-    )
+    sessions, tokens = _stored_session_assembly(store, tool, since_ms, until_ms)
     if tool == "codex":
         sessions = _drop_codex_subagent_replay_turns(
             sessions,
-            external_parent_keys=_codex_unwindowed_parent_keys(store, sessions),
+            external_parent_keys=_codex_unwindowed_parent_keys(store, sessions, tokens),
         )
         return _apply_codex_title_map(sessions)
     if tool == "kimi":

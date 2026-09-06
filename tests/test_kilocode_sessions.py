@@ -164,8 +164,21 @@ def _dt(ms):
     return datetime.fromtimestamp(ms / 1000, tz=timezone.utc)
 
 
-def _turn_sums(raw):
-    turns = [t for s in raw.values() for t in s["turns"]]
+def _turn_sums(raw, since_ms=None, until_ms=None):
+    """Totals over the window, applied where the reader applies it.
+
+    The loader reads the whole database and caches it on content alone, so the
+    window is no longer its business — ``_summarize_session`` clips, exactly as it
+    does for every store-backed tool. These sums clip the same way so the parity
+    they assert is still parity against the parser's own SQL window.
+    """
+    turns = [
+        t
+        for s in raw.values()
+        for t in s["turns"]
+        if (since_ms is None or t["timestamp_ms"] >= since_ms)
+        and (until_ms is None or t["timestamp_ms"] < until_ms)
+    ]
     return {
         "in": sum(t["tokens_in"] for t in turns),
         "cache": sum(t["tokens_cache"] for t in turns),
@@ -293,8 +306,8 @@ def test_parity_with_usage_parser(monkeypatch, tmp_path):
                                  _dt(until_ms) if until_ms else None)
         assert len(entries) == expected_entries
         assert all(e["source"] == "kilocode" for e in entries)
-        raw = _kilocode_sessions(since_ms=since_ms, until_ms=until_ms)
-        h = _turn_sums(raw)
+        raw = _kilocode_sessions()
+        h = _turn_sums(raw, since_ms, until_ms)
         assert h["in"] == sum(e["input"] + e["cacheWrite"] for e in entries)
         assert h["cache"] == sum(e["cacheRead"] for e in entries)
         assert h["out"] == sum(e["output"] for e in entries)
@@ -306,7 +319,8 @@ def test_parity_with_usage_parser(monkeypatch, tmp_path):
             assert raw["ses_orphan"]["turns"][0]["tokens_in"] == 100 + 250
             assert raw["ses_orphan"]["project"] == "unknown"
         if since_ms is None and until_ms == BASE + 15_000:
-            assert "ses_orphan" not in raw
+            # Still loaded — it is the summary that leaves it out of the window.
+            assert sessions._summarize_session(raw["ses_orphan"], since_ms, until_ms) is None
 
     # Integration 1b: the same fix must hold through the shared loader's
     # default tool="opencode" call — there is no dedicated opencode/mimo
@@ -334,8 +348,15 @@ def test_window_half_open(monkeypatch, tmp_path):
                  _assistant(input=1, output=1, cache={"read": 0, "write": 0})),
         ],
     )
-    raw = _kilocode_sessions(since_ms=S, until_ms=U)
-    assert set(raw) == {"s_at_since"}
+    raw = _kilocode_sessions()
+    assert set(raw) == {"s_at_since", "s_at_until", "s_before"}
+    # The loader reads everything; [since, until) is applied by the summary.
+    summarized = {
+        session_id
+        for session_id, session in raw.items()
+        if sessions._summarize_session(session, S, U) is not None
+    }
+    assert summarized == {"s_at_since"}
     assert raw["s_at_since"]["turns"][0]["timestamp_ms"] == S
 
 
@@ -433,3 +454,46 @@ def test_cache_invalidates_on_write(monkeypatch, tmp_path):
     # A pricing reload also clears the session cache (turns price at load).
     reload_pricing_db()
     assert _kilocode_sessions() == second
+
+
+def test_cache_invalidates_on_a_write_that_only_moves_the_wal(monkeypatch, tmp_path):
+    """A WAL-only write must invalidate the merged session, not just the loader.
+
+    _kilocode_db_signature covers the -wal and -shm siblings precisely because a
+    SQLite write can leave the main file's mtime and size untouched (see
+    _advance_mtime). The merge cache has to be keyed on the same three files: the
+    loader would otherwise miss correctly, re-read the fresh rows, and then be
+    handed back a merge built from the old ones.
+
+    The connection stays open so the WAL is never checkpointed away, which is how
+    a running app's database actually looks on disk.
+    """
+    _patch_env(monkeypatch, tmp_path)
+    db = _kilo_root(tmp_path) / "kilo.db"
+    _make_db(db, projects=[_proj()], sess=[_sess("ses_a")],
+             messages=[_msg("m1", "ses_a", BASE,
+                            _assistant(input=1, output=1, cache={"read": 0, "write": 0}))])
+
+    conn = sqlite3.connect(str(db))
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        assert len(_kilocode_sessions()["ses_a"]["turns"]) == 1
+        before = _kilocode_db_signature()
+
+        conn.execute(
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) "
+            "VALUES (?,?,?,?,?)",
+            _msg("m2", "ses_a", BASE + 1000,
+                 _assistant(input=2, output=2, cache={"read": 0, "write": 0})),
+        )
+        conn.commit()
+        after = _kilocode_db_signature()
+
+        by_path = {entry[0]: entry for entry in before}
+        moved = {entry[0] for entry in after if by_path.get(entry[0]) != entry}
+        assert moved, "the write moved nothing at all; the fixture proves nothing"
+        assert moved <= {f"{db}-wal", f"{db}-shm"}, "the main file moved; not the case under test"
+
+        assert len(_kilocode_sessions()["ses_a"]["turns"]) == 2
+    finally:
+        conn.close()

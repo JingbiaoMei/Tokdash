@@ -245,18 +245,26 @@ def test_the_mimo_fallback_still_excludes_imported_messages(tmp_path, monkeypatc
     assert len(loaded["s1"]["turns"]) == 1, "the imported message is not Mimo's usage"
 
 
-def test_the_mimo_fallback_excludes_imported_boundary_events(tmp_path, monkeypatch):
-    """An imported row outside the window must not become the edge event either."""
+def test_the_mimo_fallback_excludes_an_imported_row_that_precedes_a_window(tmp_path, monkeypatch):
+    """An imported row must not slip in as the row before a caller's window.
+
+    It used to reach that position through a separate boundary lookup, which had
+    to re-apply the import exclusion itself. The loader reads unwindowed now, so
+    the row before a window is just the previous turn and there is no second query
+    to get it wrong — but the exclusion still has to hold there.
+    """
     db_path = _session_db(
         tmp_path / "mimo-boundary.db",
         REPORTED_COST,
         imports=True,
-        # m1 sits in the window at 1000; these two precede it, nearest first.
+        # m1 sits at 1000; these two precede it, the imported one nearest.
         extra_messages=(("imported", 800), ("m0", 700)),
     )
     _deny_json_functions(monkeypatch)
 
-    loaded = sessions._load_mimo_sessions(((str(db_path), 1, 2),), (), 900, 1_100)
+    loaded = sessions._load_mimo_sessions(((str(db_path), 1, 2),))
 
-    assert [turn["timestamp_ms"] for turn in loaded["s1"]["turns"]] == [1_000]
-    assert loaded["s1"]["_prior_event_ms"] == 700, "the imported row at 800 is not an event"
+    assert [turn["timestamp_ms"] for turn in loaded["s1"]["turns"]] == [700, 1_000]
+    assert "_prior_event_ms" not in loaded["s1"]
+    summary = sessions._summarize_session(loaded["s1"], 900, 1_100)
+    assert summary["token_events"] == 1

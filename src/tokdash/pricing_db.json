@@ -1216,10 +1216,10 @@
     },
     "claude-3.5-sonnet": {
       "provider": "anthropic",
-      "input": 6,
-      "output": 30,
-      "cache_read": 0.6,
-      "cache_write": 7.5,
+      "input": 3,
+      "output": 15,
+      "cache_read": 0.3,
+      "cache_write": 3.75,
       "unit": "per_million_tokens",
       "source": "openrouter.ai/anthropic/claude-3.5-sonnet"
     },

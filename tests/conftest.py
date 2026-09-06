@@ -19,6 +19,24 @@ def isolated_usage_db(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def empty_session_assembly_cache():
+    """Keep the process-global merged-session cache out of every other test.
+
+    ``isolated_usage_db`` gives each test its own database, but the assembly
+    cache is keyed on ``(tool, session_id)`` and a token built from file paths
+    and signatures — none of which mention the store. Two tests that reuse a
+    session id and a ``(path, mtime, size)`` triple under different tmp dirs
+    would collide, and the loser would read the other's merge. Nothing does that
+    today; this is here so nothing has to notice when something starts.
+    """
+    from tokdash.sessions import _SESSION_ASSEMBLY
+
+    _SESSION_ASSEMBLY.clear()
+    yield
+    _SESSION_ASSEMBLY.clear()
+
+
+@pytest.fixture(autouse=True)
 def no_background_warmers(monkeypatch):
     """Keep the lifespan's warm threads out of every test, on ANY code path.
 

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 import pytest
 
@@ -557,6 +557,148 @@ def test_a_request_after_the_daily_warm_is_served_from_cache(monkeypatch):
     assert computes == [(yesterday, yesterday)], "the request recomputed despite the warm"
 
 
+def test_the_report_tabs_three_requests_land_on_what_the_warm_filled(monkeypatch):
+    """Pin the report warm through the routes, not by re-deriving its keys.
+
+    This is the whole value of the warm, and the easiest thing to get silently
+    wrong: the tab sends no ``period``, so each key carries that route's own
+    default -- "today" for usage and active time, "year" for insights -- rather
+    than the week/month/year the reader picked. A key built from the reader's
+    period would warm three windows nobody ever asks for, and the tab would open
+    just as cold as before while every assertion about the warmer still passed.
+    """
+    from fastapi.testclient import TestClient
+
+    computes: list[tuple] = []
+
+    def fake_usage(period, date_from, date_to):
+        computes.append(("usage", date_from, date_to))
+        return {"total_tokens": 1}
+
+    def fake_insights(period, date_from, date_to, **kwargs):
+        computes.append(("insights", date_from, date_to))
+        return {"totals": {"tokens": 1}}
+
+    def fake_active_time(period, date_from, date_to, **kwargs):
+        computes.append(("active_time", date_from, date_to))
+        return {"active_ms": 1}
+
+    monkeypatch.setattr(api, "compute_usage_with_comparison", fake_usage)
+    monkeypatch.setattr(api, "compute_insights", fake_insights)
+    monkeypatch.setattr(api, "get_active_time_data", fake_active_time)
+
+    # The unfiltered target list, deliberately not _warm_report_windows(): that one
+    # drops a window collapsed to a single day, so this test would assert 6 keys on
+    # a Monday, 6 on the 1st and 0 on a Monday 1 January -- red on ~17% of dates and
+    # green on the day it was written. The skip rule has its own test below; this one
+    # is about whether a warmed key is the key the route reads.
+    api._run_warmers(api._report_warm_targets(api._local_today()))
+    warmed = list(computes)
+    # Three requests per DISTINCT window. Normally that is nine, but on a Monday
+    # that is also 1 January all three windows collapse onto the same single day,
+    # so the nine targets share three keys and the warmer rightly computes three.
+    windows = set(api._report_windows(api._local_today()))
+    assert len(warmed) == 3 * len(windows)
+
+    with TestClient(api.app) as client:
+        for date_from, date_to in api._report_windows(api._local_today()):
+            window = f"date_from={date_from}&date_to={date_to}"
+            body = client.get(f"/api/usage?{window}").json()
+            assert body["response_cache"]["status"] == "hit", (
+                f"the usage warm missed the tab's key for {date_from}..{date_to}"
+            )
+            client.get(f"/api/insights?facets={api.REPORT_FACETS}&{window}")
+            client.get(f"/api/active-time?include_review_sessions=true&{window}")
+
+    assert computes == warmed, "a Report tab request recomputed despite the warm"
+
+
+def test_a_warmed_active_time_key_holds_what_the_route_would_have_built(monkeypatch):
+    """The route used to add ``range`` inside a closure no warmer could reach.
+
+    Nothing reads that field on this endpoint today, which is exactly why the
+    divergence would have sat there until something did — and why it needs a test
+    rather than a reviewer noticing twice. Both warmers go through
+    ``_active_time_payload`` now; reinstating the closure would show up here.
+    """
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setattr(
+        api, "get_active_time_data", lambda p, f, t, **kw: {"active_ms": 1}
+    )
+    day = api._local_today()
+    date_from, date_to = api._report_windows(day)[-1]  # the year window
+
+    api._run_warmers(api._report_warm_targets(day))
+    with TestClient(api.app) as client:
+        body = client.get(
+            f"/api/active-time?include_review_sessions=true"
+            f"&date_from={date_from}&date_to={date_to}"
+        ).json()
+
+    assert body["response_cache"]["status"] == "hit", "not served from the warm"
+    assert body["range"]["from"] == date_from, "the warmed payload lost `range`"
+    assert body["range"]["to"] == date_to
+
+    # The Overview's own warmed active-time key goes through the same helper.
+    api._clear_cache()
+    api._run_warmers(api._session_warm_targets(day.isoformat()))
+    with TestClient(api.app) as client:
+        overview = client.get(
+            f"/api/active-time?date_from={day.isoformat()}&date_to={day.isoformat()}"
+        ).json()
+    assert overview["range"]["from"] == day.isoformat()
+
+
+def test_the_midnight_warm_skips_a_report_window_that_is_only_today():
+    """A week window on a Monday is today alone; so is a month window on the 1st.
+
+    Warming those at 00:05 is exactly what ``_warm_previous_day`` refuses to do
+    for the Overview, and this tab is the worse place for it: it has no
+    auto-refresh, so stale-while-revalidate would hand the reader a near-empty
+    week and keep handing it over until they loaded the tab a second time. A
+    single-day window is a second or two cold, so skipping it costs nothing.
+    """
+    monday = date(2026, 9, 7)
+    every = [key for key, _ in api._report_warm_targets(monday)]
+    midnight = [key for key, _ in api._report_warm_targets(monday, skip_single_day=True)]
+
+    assert len(every) == 9
+    assert len(midnight) == 6, "the week window's three requests are dropped"
+    assert set(midnight) < set(every)
+
+    # 1 January 2026 is a Thursday, so only the month and year windows collapse;
+    # the week still reaches back into December and is warmed as usual.
+    new_year = date(2026, 1, 1)
+    assert len(api._report_warm_targets(new_year, skip_single_day=True)) == 3
+    assert api._report_windows(new_year)[0] == ("2025-12-29", "2026-01-01")
+
+    # A 1 January that IS a Monday is the one day all three collapse together.
+    assert date(2024, 1, 1).weekday() == 0
+    assert api._report_warm_targets(date(2024, 1, 1), skip_single_day=True) == []
+    assert len(api._report_warm_targets(date(2024, 1, 1))) == 9
+
+    # An ordinary day is untouched, and the startup warm always keeps the lot:
+    # it runs when somebody started the server, not at a fixed hour, so there is
+    # no near-empty window for it to protect against.
+    assert len(api._report_warm_targets(date(2026, 9, 5), skip_single_day=True)) == 9
+
+
+def test_the_report_warm_mirrors_the_tabs_own_windows():
+    """A window off by a day is a key nobody asks for, and the tab stays cold.
+
+    The Monday week start is the one most likely to drift: JavaScript's getDay()
+    calls Sunday 0 and Python's weekday() calls Monday 0.
+    """
+    week, month, year = api._report_windows(date(2026, 9, 6))  # a Sunday
+    assert week == ("2026-08-31", "2026-09-06"), "the week runs Monday to today"
+    assert month == ("2026-09-01", "2026-09-06")
+    assert year == ("2026-01-01", "2026-09-06")
+
+    monday_week, _, _ = api._report_windows(date(2026, 9, 7))
+    assert monday_week == ("2026-09-07", "2026-09-07"), "a Monday starts its own week"
+
+
 def test_stats_is_warmed_second_behind_the_overview_usage_key(monkeypatch):
     """Composing by name must keep the dashboard's order; slicing let it drift."""
     order: list[str] = []
@@ -566,10 +708,14 @@ def test_stats_is_warmed_second_behind_the_overview_usage_key(monkeypatch):
     api._warm_caches()
 
     today = api._local_today().isoformat()
+    report = [key for key, _ in api._report_warm_targets(api._local_today())]
     assert order[0] == api._usage_warm_target(today)[0]
     assert order[1] == api._window_cache_key("stats_None", None, None)
-    assert order[2:-1] == [key for key, _ in api._session_warm_targets(today)]
-    assert order[-1] == api._day_scoped_key(api.ACTIVITY_INSIGHTS_CACHE_KEY)
+    assert order[2:-1 - len(report)] == [key for key, _ in api._session_warm_targets(today)]
+    assert order[-1 - len(report)] == api._day_scoped_key(api.ACTIVITY_INSIGHTS_CACHE_KEY)
+    # The Report tab's windows go last: they are the heaviest warm on the list and
+    # the Overview is the tab that opens first.
+    assert order[-len(report):] == report
 
 
 def test_the_daily_warm_join_is_shorter_than_the_startup_one():

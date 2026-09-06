@@ -12,6 +12,7 @@ from __future__ import annotations
 import ast
 import json
 import re
+from datetime import date, timedelta
 import shutil
 import subprocess
 from pathlib import Path
@@ -40,7 +41,7 @@ MACHINE_KEYS = (
 
 BUILD_MODEL_SIGNATURE = (
     "function usageReportBuildModel({ insights, usage, activeTime, period, dateFrom,"
-    " dateTo, insightsMissing, usageMissing, activeTimeMissing }) {"
+    " dateTo, insightsMissing, usageMissing, activeTimeMissing, pending = false }) {"
 )
 
 HELPERS = (
@@ -407,6 +408,12 @@ process.stdout.write(JSON.stringify({
   whole: shape(build({})),
   noActiveTime: shape(build({ activeTime: { __error: 'boom' }, activeTimeMissing: true })),
   noInsights: shape(build({ insights: { __error: 'boom' }, insightsMissing: true })),
+  // The first paint: /api/usage has landed and the other two have not been
+  // issued, so the model is built over two literal nulls.
+  firstPaint: shape(build({
+    insights: null, activeTime: null,
+    insightsMissing: true, activeTimeMissing: true, pending: true,
+  })),
 }));
 """
 
@@ -442,11 +449,447 @@ def test_a_failed_active_time_leaves_no_count_rather_than_a_zero(tmp_path: Path)
     assert report["noInsights"]["sessions"] == 4
 
 
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_the_first_paint_builds_a_model_over_two_absent_sources(tmp_path: Path) -> None:
+    """The hero paints off /api/usage before the other two have been issued.
+
+    Every read of `insights` and `activeTime` in the model is guarded by its
+    Missing flag, so the first paint can pass literal nulls. Running it is the
+    point: an unguarded read is a TypeError that leaves the tab on its spinner
+    forever, which no amount of reading the source proves absent.
+    """
+    source = _source()
+    body = "\n".join(_extract_js_function(source, sig) for sig in MODEL_SIGNATURES) + MODEL_FIXTURE
+    first = json.loads(_run_node(tmp_path, "usage-report-model.js", body))["firstPaint"]
+
+    assert first["notices"]["pending"] is True, "the banner needs silence told from refusal"
+    assert first["sessions"] is None, "no active time yet is not a count of zero"
+    assert first["hasStreaks"] is False
+    assert first["activeMs"] == 0
+
+
+def test_the_server_warms_the_exact_facet_string_the_tab_asks_for() -> None:
+    """The facet string is part of the insights cache key, character for character.
+
+    These cannot be one constant -- one is Python and one is JavaScript -- so a
+    reordered or extended set on either side warms a key the tab never asks for.
+    Nothing else would notice: the warm still runs, every test that builds keys
+    from the Python constant still passes, and the tab just quietly goes back to
+    paying the cold scan it used to.
+    """
+    from tokdash import api
+
+    block = _report_block(_source())
+    match = re.search(r"const USAGE_REPORT_FACETS = '([^']+)';", block)
+    assert match, "the tab's facet constant moved or changed quoting"
+    assert match.group(1) == api.REPORT_FACETS
+
+
+LOADER_HARNESS = """
+const usageReportState = {
+  loading: false, loaded: false, error: null, model: null,
+  period: 'month', serverId: 'local', staleReread: false,
+};
+const calls = [];
+let responder = () => null;
+function usageReportWire() {}
+function usageReportRenderControls() {}
+function usageReportRenderLoading() { calls.push('renderLoading'); }
+function usageReportServer() { return { id: 'local', label: 'local' }; }
+function usageReportLoadVersion() {}
+function usageReportWindows() { return { date_from: '2026-09-01', date_to: '2026-09-05' }; }
+function usageReportBuildModel(args) { return { notices: {}, args }; }
+function usageReportRenderPartial() { calls.push('partial'); }
+function usageReportRender() { calls.push('render'); }
+function usageReportScheduleStaleReread() {}
+function usageReportApplyPendingChoice() {}
+function fetchJsonWithRetry() { return Promise.resolve(responder()); }
+const USAGE_REPORT_FACETS = 'daily';
+__LOADER__
+(async () => {
+  const out = {};
+  // An OK 200 whose body is not JSON: fetchJson resolves to null.
+  responder = () => null;
+  await loadUsageReport();
+  out.afterNull = { loading: usageReportState.loading, loaded: usageReportState.loaded };
+
+  // The tab must still accept a later load. Before the guard existed this second
+  // call was refused outright and the tab was dead until a page reload.
+  calls.length = 0;
+  responder = () => ({ total_tokens: 5 });
+  await loadUsageReport();
+  out.recovered = calls.includes('render');
+  out.loadingAtRest = usageReportState.loading;
+  process.stdout.write(JSON.stringify(out));
+})();
+"""
+
+
+WINDOWS_HARNESS = """
+let CURSOR = null;
+function usageReportToday() { return CURSOR; }
+__HELPERS__
+const out = JSON.parse(process.argv[2]).map((iso) => {
+  const [y, m, d] = iso.split('-').map(Number);
+  CURSOR = new Date(y, m - 1, d);
+  return ['week', 'month', 'year'].map((period) => {
+    const w = usageReportWindows(period);
+    return [w.date_from, w.date_to];
+  });
+});
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_the_warmers_windows_match_the_tabs_own_across_years(tmp_path: Path) -> None:
+    """The warmer builds its keys in Python; the tab builds the same windows in
+    JavaScript. A mismatch of one day warms a key nobody asks for and the tab
+    quietly stays cold -- with every Python-side test still green.
+
+    Run against the real JS rather than hardcoded expectations, over enough days to
+    cross two year boundaries and a leap day. The riskiest divergence is the week
+    start: JavaScript's getDay() calls Sunday 0, Python's weekday() calls Monday 0.
+    """
+    from tokdash import api
+
+    days = [date(2024, 1, 1) + timedelta(days=n) for n in range(900)]
+    helpers = "\n".join(
+        _extract_js_function(_source(), sig)
+        for sig in (
+            "function formatDateKey(date) {",
+            "function startOfWeekMonday(date) {",
+            "function usageReportWindows(period) {",
+        )
+    )
+    body = WINDOWS_HARNESS.replace("__HELPERS__", helpers)
+    js = json.loads(
+        _run_node(tmp_path, "usage-report-windows.js", body,
+                  json.dumps([day.isoformat() for day in days]))
+    )
+
+    mismatches = [
+        (day.isoformat(), from_js, from_py)
+        for day, from_js in zip(days, js)
+        for from_js, from_py in [([tuple(w) for w in from_js], api._report_windows(day))]
+        if from_js != from_py
+    ]
+    assert not mismatches, mismatches[:5]
+    # Guard the comparison itself: a harness that silently produced nothing would
+    # otherwise "pass" by having no mismatches to report.
+    assert len(js) == len(days)
+    assert js[0] == [["2024-01-01", "2024-01-01"]] * 3, "a Monday 1 January collapses all three"
+
+
+SCHEDULE_HARNESS = """
+const usageReportState = { staleTimer: null, loadToken: 3 };
+let nextId = 1;
+const armed = new Map();
+const cleared = [];
+setTimeout = (fn, ms) => { const id = nextId++; armed.set(id, { fn, ms }); return id; };
+clearTimeout = (id) => { cleared.push(id); armed.delete(id); };
+const reread = [];
+function usageReportSilentReread(token, period, serverId) { reread.push([token, period, serverId]); }
+const USAGE_REPORT_STALE_REREAD_MS = 12000;
+__SERVED__
+__SCHEDULE__
+const fresh = { response_cache: { status: 'hit' } };
+const stale = { response_cache: { status: 'stale' } };
+const bare = {};                       // a route that serves no cache metadata
+const server = { id: 'local' };
+const out = {};
+
+// Nothing stale: nothing armed.
+usageReportScheduleStaleReread([fresh, fresh, fresh], 'month', server);
+out.allFresh = armed.size;
+
+// A route with no metadata must not be guessed at.
+usageReportScheduleStaleReread([bare, bare, bare], 'month', server);
+out.noMetadata = armed.size;
+
+// Only the SLOW pair is stale -- usage is already fresh. This is the case that
+// keying the decision on /api/usage alone used to miss entirely.
+usageReportScheduleStaleReread([fresh, stale, fresh], 'month', server);
+out.slowPairStale = armed.size;
+const firstId = usageReportState.staleTimer;
+
+// A second schedule must retire the first timer, not stack on it.
+usageReportScheduleStaleReread([fresh, fresh, stale], 'month', server);
+out.afterSecond = { armed: armed.size, clearedFirst: cleared.includes(firstId) };
+out.delay = armed.get(usageReportState.staleTimer).ms;
+
+// Firing it hands the silent path the token captured at schedule time.
+armed.get(usageReportState.staleTimer).fn();
+out.fired = reread;
+out.handleCleared = usageReportState.staleTimer === null;
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_only_one_stale_reread_is_ever_armed(tmp_path: Path) -> None:
+    """Scheduling is where the first attempt leaked timers.
+
+    It gated on a boolean that every explicit load reset, so old timers stayed
+    armed and a reader flipping periods could fire several re-reads for the same
+    window -- multiplying request load exactly when the server is contended.
+    Executed, because a source assertion cannot see a timer that was never cleared.
+    """
+    block = _report_block(_source())
+    body = (
+        SCHEDULE_HARNESS
+        .replace("__SERVED__", _extract_js_function(
+            block, "function usageReportServedStale(payload) {"))
+        .replace("__SCHEDULE__", _extract_js_function(
+            block, "function usageReportScheduleStaleReread(payloads, period, server) {"))
+    )
+    out = json.loads(_run_node(tmp_path, "usage-report-schedule.js", body))
+
+    assert out["allFresh"] == 0, "nothing stale, nothing to re-read"
+    assert out["noMetadata"] == 0, "a route that says nothing is treated as fresh"
+    assert out["slowPairStale"] == 1, (
+        "a stale insights/active-time must arm the re-read even when usage is fresh"
+    )
+    assert out["afterSecond"] == {"armed": 1, "clearedFirst": True}, "timers stacked"
+    assert out["delay"] == 12000
+    assert out["fired"] == [[3, "month", "local"]], "the token is captured at schedule time"
+    assert out["handleCleared"] is True
+
+
+REREAD_HARNESS = """
+const usageReportState = {
+  loading: false, loaded: true, error: null, model: { tag: 'original' },
+  period: 'month', serverId: 'local', staleTimer: null, loadToken: 7,
+};
+let mode = 'ok';
+let onRequest = null;
+const renders = [];
+function usageReportServer() { return { id: 'local' }; }
+function usageReportWindows() { return { date_from: '2026-09-01', date_to: '2026-09-05' }; }
+function usageReportBuildModel() { return { tag: 'reread' }; }
+function usageReportRender() { renders.push(usageReportState.model.tag); }
+const USAGE_REPORT_FACETS = 'daily';
+function fetchJsonWithRetry() {
+  if (onRequest) onRequest();
+  if (mode === 'throw') return Promise.reject(new Error('network'));
+  if (mode === 'null') return Promise.resolve(null);
+  return Promise.resolve({ ok: true });
+}
+__REREAD__
+__WANTS__
+const snap = () => ({ model: usageReportState.model.tag, renders: renders.length, loading: usageReportState.loading });
+(async () => {
+  const out = {};
+  mode = 'throw';
+  await usageReportSilentReread(7, 'month', 'local');
+  out.afterFailure = snap();
+
+  mode = 'null';
+  await usageReportSilentReread(7, 'month', 'local');
+  out.afterNull = snap();
+
+  // The reader switches period while the round trip is in flight.
+  mode = 'ok';
+  onRequest = () => { usageReportState.period = 'year'; };
+  await usageReportSilentReread(7, 'month', 'local');
+  out.afterPeriodSwitch = snap();
+  onRequest = null;
+  usageReportState.period = 'month';
+
+  // An explicit load ran and bumped the token.
+  await usageReportSilentReread(6, 'month', 'local');
+  out.afterStaleToken = snap();
+
+  // Nothing changed: it commits.
+  await usageReportSilentReread(7, 'month', 'local');
+  out.afterSuccess = snap();
+  process.stdout.write(JSON.stringify(out));
+})();
+"""
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_a_silent_reread_never_damages_the_report_on_screen(tmp_path: Path) -> None:
+    """The re-read is invisible, so every way it can go wrong is silent too.
+
+    Executed rather than asserted against the source: the first attempt at this
+    reused `loadUsageReport`, and every one of these cases passed its
+    source-string tests while blanking the page, swallowing clicks or leaving a
+    half-empty model in state for the share export to capture.
+    """
+    block = _report_block(_source())
+    body = (
+        REREAD_HARNESS
+        .replace("__REREAD__", _extract_js_function(
+            block, "async function usageReportSilentReread(token, period, serverId) {"))
+        .replace("__WANTS__", _extract_js_function(
+            block, "function usageReportStillWants(token, period, serverId) {"))
+    )
+    out = json.loads(_run_node(tmp_path, "usage-report-reread.js", body))
+
+    for case in ("afterFailure", "afterNull", "afterPeriodSwitch", "afterStaleToken"):
+        assert out[case]["model"] == "original", f"{case} overwrote a good report"
+        assert out[case]["renders"] == 0, f"{case} repainted the page"
+
+    assert out["afterSuccess"]["model"] == "reread", "a clean re-read must commit"
+    assert out["afterSuccess"]["renders"] == 1
+
+    # It must never take the loading flag: that is what swallowed period clicks and
+    # made Retry a no-op during a refresh the reader could not see.
+    for case in out.values():
+        assert case["loading"] is False
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_an_empty_200_does_not_wedge_the_report_tab(tmp_path: Path) -> None:
+    """`fetchJson` resolves to null when an OK response carries no JSON body.
+
+    Sequencing moved the first dereference of that value inside the window where
+    `loading` is true, so the TypeError left the flag set and the guard at the top
+    of `loadUsageReport` then refused every later load -- period buttons, server
+    switch and Retry alike -- until a page reload. Executed rather than asserted
+    against the source, because the bug is control flow, not a string.
+    """
+    block = _report_block(_source())
+    loader = _extract_js_function(block, "async function loadUsageReport(options = {}) {")
+    body = LOADER_HARNESS.replace("__LOADER__", loader)
+    out = json.loads(_run_node(tmp_path, "usage-report-loader.js", body))
+
+    assert out["afterNull"]["loading"] is False, "an empty 200 left the tab wedged"
+    assert out["afterNull"]["loaded"] is True
+    assert out["recovered"] is True, "the tab refused every load after the first failure"
+    assert out["loadingAtRest"] is False
+
+
+def test_a_report_served_from_a_stale_entry_reads_again_once() -> None:
+    """The morning's first visit is answered out of the 00:05 warm.
+
+    Past its TTL the server hands the cached value over instantly AND recomputes
+    it in the background, so the figures are hours old and nothing on the page
+    says so. The tab reads again once when it sees that status -- and must not
+    send refresh=1, which would start a second full recompute of the work the
+    daemon is already doing.
+    """
+    block = _report_block(_source())
+    schedule = _extract_js_function(
+        block, "function usageReportScheduleStaleReread(payloads, period, server) {"
+    )
+    reread = _extract_js_function(
+        block, "async function usageReportSilentReread(token, period, serverId) {"
+    )
+    loader = _extract_js_function(block, "async function loadUsageReport(options = {}) {")
+
+    # Any of the three, not just the fastest one.
+    assert "payloads.some(usageReportServedStale)" in schedule
+    assert "usageReportScheduleStaleReread([usage, insights, activeTime], period, server)" in loader
+
+    # The server is already recomputing these keys; forcing doubles the work.
+    assert "refresh=1" not in reread
+    assert "loadUsageReport" not in reread, (
+        "the silent path must not reuse the loader: that one owns `loading`, the "
+        "partial model and the blanking paint"
+    )
+
+    # A queued re-read describes the window an explicit load is replacing.
+    assert "clearTimeout(usageReportState.staleTimer)" in schedule
+    assert "clearTimeout(usageReportState.staleTimer)" in loader
+    assert "usageReportState.loadToken += 1" in loader
+
+    # Guarded on both sides of the round trip.
+    assert reread.count("usageReportStillWants(token, period, serverId)") == 2
+    # A failed re-read must leave the report on screen alone.
+    assert "return;" in reread.split("catch (_error) {")[1]
+
+
+def test_the_version_stamp_waits_for_the_full_paint() -> None:
+    """/api/version is fired first and answers instantly, so it can land between
+    the two paints. Stamping the partial model would render the footer and the
+    share cards off a half-empty report -- the one thing the partial paint is
+    careful not to do."""
+    block = _report_block(_source())
+    version = _extract_js_function(block, "function usageReportLoadVersion() {")
+    # The whole statement, not the condition and the ordering: asserting those two
+    # separately passes for `if (...notices.pending) { }`, which guards nothing.
+    assert "if (usageReportState.model.notices.pending) return;" in version
+    assert version.index("notices.pending") < version.index("usageReportRenderShare")
+
+
+def test_a_source_not_asked_for_yet_is_not_reported_as_unavailable() -> None:
+    """`pending` is the difference between "not here yet" and "refused".
+
+    Without it the first paint flashes "analytics unavailable" a moment before
+    the analytics land, which is a false claim about the server.
+    """
+    block = _report_block(_source())
+    banner = _extract_js_function(block, "function usageReportRenderBanner(model) {")
+    assert "const pending = !!model.notices.pending;" in banner
+    assert "model.notices.insightsMissing && !pending" in banner
+    assert "model.notices.activeTimeMissing && !pending" in banner
+    # Usage is the request the first paint is made of: by then it has either
+    # landed or failed, so its notice is never suppressed.
+    assert "model.notices.usageMissing && !pending" not in banner
+
+
+def test_the_report_paints_the_hero_before_asking_for_the_slow_two() -> None:
+    """The three requests contend for the server's GIL instead of overlapping.
+
+    Fired as one Promise.all, a 2s /api/usage became a 13s one and the paint
+    waited on the slowest of the set either way. Usage alone fills the hero, so
+    it is awaited and painted before the other two are issued.
+    """
+    block = _report_block(_source())
+    loader = _extract_js_function(block, "async function loadUsageReport(options = {}) {")
+    usage_at = loader.index("await settle(request('/api/usage'))")
+    paint_at = loader.index("usageReportRenderPartial(")
+    insights_at = loader.index("/api/insights?facets=")
+    active_at = loader.index("/api/active-time?include_review_sessions=true")
+    assert usage_at < paint_at < insights_at, "the hero must paint before the slow two start"
+    assert usage_at < paint_at < active_at
+    # The slow two still overlap each other -- sequencing them as well would add
+    # their times rather than trading a little wall clock for a much earlier paint.
+    assert loader.count("await Promise.all([") == 1
+
+
+def test_the_first_paint_renders_only_what_usage_answers() -> None:
+    """Anything else would print an em dash it has to take back a moment later.
+
+    The sections the other two requests feed keep the placeholder
+    usageReportRenderLoading() left on them, so the page fills in instead.
+    """
+    block = _report_block(_source())
+    partial = _extract_js_function(block, "function usageReportRenderPartial(model) {")
+    full = _extract_js_function(block, "function usageReportRender() {")
+    hero = _extract_js_function(block, "function usageReportRenderHero(model) {")
+    assert "usageReportRenderHeroTotals(model)" in partial
+    # The activity half is reached through the whole-hero wrapper, which only the
+    # full paint calls.
+    assert "usageReportRenderHeroActivity(model)" not in partial
+    assert "usageReportRenderHeroActivity(model)" in hero
+    assert "usageReportRenderHero(model)" in full
+    for absent in (
+        "usageReportRenderSentence",
+        "usageReportRenderHeat",
+        "usageReportRenderPodium",
+        "usageReportRenderWhen",
+        "usageReportRenderAgents",
+        "usageReportRenderFooter",
+        "usageReportRenderShare",  # would export a half-empty card
+    ):
+        assert absent not in partial, f"{absent} has no data on the first paint"
+        assert absent in full, f"{absent} must still run once everything has landed"
+    # Both paints take the window lines from one place, so the partial one cannot
+    # print a different range or title from the full one that replaces it.
+    assert "usageReportRenderHead(model)" in partial
+    assert "usageReportRenderHead(model)" in full
+
+
 def test_an_unknown_count_prints_a_dash_everywhere_it_is_read() -> None:
     """`model.sessions` and `model.streaks` are read in four places. A single
     formatNumber(null) among them puts "0 sessions" back on the page."""
     block = _report_block(_source())
-    hero = _extract_js_function(block, "function usageReportRenderHero(model) {")
+    # The activity half of the hero: split out so the first paint can render the
+    # totals half from /api/usage alone, without these two tiles.
+    hero = _extract_js_function(block, "function usageReportRenderHeroActivity(model) {")
     assert "empty || !model.streaks" in hero
     assert "String(model.streaks.active_days)" in hero, "the zero fallback is gone"
     sentence = _extract_js_function(block, "function usageReportRenderSentence(model) {")
@@ -562,8 +1005,13 @@ def test_report_asks_for_the_facets_the_new_sections_need() -> None:
     served = facets_line.split("'")[1].split(",")
     for facet in ("hourly", "weekday", "tools", "models", "projects"):
         assert facet in served, facet
-    # One request for all of them: the server folds every facet out of one scan.
-    assert block.count("/api/insights?facets=") == 1
+    # One request for all of them: the server folds every facet out of one scan, so
+    # asking twice costs the machine the scan again for nothing. Both callers -- the
+    # explicit load and the silent re-read -- must therefore ask for the WHOLE set.
+    # What must never appear is an insights request for a subset.
+    asked = re.findall(r"/api/insights\?facets=\$\{(\w+)\}", block)
+    assert asked, "no insights request found"
+    assert set(asked) == {"USAGE_REPORT_FACETS"}, asked
 
 
 def test_the_day_map_notice_names_only_the_facets_it_is_missing() -> None:
@@ -1171,12 +1619,22 @@ def test_a_control_changed_mid_flight_is_applied_late_not_dropped() -> None:
     block = _report_block(_source())
     loader = _extract_js_function(block, "async function loadUsageReport(options = {}) {")
     wire = _extract_js_function(block, "function usageReportWire() {")
-    assert loader.count("usageReportApplyPendingChoice()") == 2, "both exits of a load settle the queue"
+    # One exit, not two. The load used to return early on a total failure and had to
+    # remember to settle the queue on both paths; the try/finally collapsed them, so
+    # "every exit settles the queue" is now structurally true rather than duplicated.
+    assert loader.count("usageReportApplyPendingChoice()") == 1
+    assert loader.count("return;") == 1, "only the re-entrancy guard at the top may return early"
     assert "usageReportState.pendingPeriod = button.dataset.period" in wire
     assert "usageReportState.pendingServerId = select.value" in wire
     assert "select.value = usageReportState.serverId" in wire, "the box names the server actually on screen"
     applied = _extract_js_function(block, "function usageReportApplyPendingChoice() {")
-    assert "loadUsageReport({ refresh: true })" in applied
+    # A plain load, not a forced one. The queued choice is a period or server the
+    # reader has not seen yet, so it wants the cache like any other first load;
+    # forcing a recompute made clicking during a load the slowest path in the tab.
+    assert "loadUsageReport()" in applied
+    assert "loadUsageReport({ refresh: true })" not in applied, (
+        "a queued choice is a first read, not a refresh"
+    )
     assert "usageReportWritePrefs()" in applied, "a queued choice that lands is the stored choice"
 
 

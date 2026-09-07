@@ -1,6 +1,6 @@
 {
-  "version": "2.0.23",
-  "lastUpdated": "2026-09-05T00:00:00Z",
+  "version": "2.0.24",
+  "lastUpdated": "2026-09-07T11:04:33Z",
   "note": "Comprehensive pricing database with all Moonshot, MiniMax, GLM, and OpenAI models from OpenRouter. Cache pricing estimated at 10% of input for cache_read, 100% of input for cache_write.",
   "aliases": {
     "Qwen/Qwen3.8-Flash-Next": "qwen3.8-flash",
@@ -1216,10 +1216,10 @@
     },
     "claude-3.5-sonnet": {
       "provider": "anthropic",
-      "input": 6,
-      "output": 30,
-      "cache_read": 0.6,
-      "cache_write": 7.5,
+      "input": 3,
+      "output": 15,
+      "cache_read": 0.3,
+      "cache_write": 3.75,
       "unit": "per_million_tokens",
       "source": "openrouter.ai/anthropic/claude-3.5-sonnet"
     },

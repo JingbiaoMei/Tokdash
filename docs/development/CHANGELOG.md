@@ -13,6 +13,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - OpenCode, MiMo and Kilo Code no longer key their session cache on the requested window, where three periods took three of the eight slots and a single pricing edit took all of them. They read unwindowed and the window is applied where every other tool applies it. (#74)
 - `TOKDASH_SESSION_CACHE_TURNS` bounds what the new session cache retains, in turns rather than sessions, since one long-running session can outweigh a thousand short ones. The default is 500,000 turns; `0` disables the cache. (#74)
 
+### Fixed
+
+- `claude-3.5-sonnet` prices at $3 / $15 per MTok with cache reads at $0.30 and cache writes at $3.75, the published Anthropic rate, instead of double it. `claude-3-5-sonnet-20241022` and `-20240620` both normalize to that entry, so every 3.5 Sonnet session, Claude Code's default model from Oct 2024 to early Feb 2025, showed twice its real cost in Overview, Stats and Sessions. The bundled database is 2.0.24; stored rows reprice on read through the pricing content signature. (#75, thanks @roy-tong)
+
 ## 2.5.3 - 2026-09-05
 
 ### Added

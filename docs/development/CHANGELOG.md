@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The Report tab swaps the quick-range presets for period chips -- this and last week, named months, years -- each stepping the window a whole period back. (#76)
+- The share cards follow the app theme, paint at 1800x3200, and carry the theme slug in the filename. The header prints tokens and cost together, with cost on by default and the toggle as the opt-out; the sub line reads days active, sessions, requests and parallel agent time, with no `est.` on a shareable artifact. Month cards use small left-aligned heat squares with outlined boxes for unelapsed days, week cards drop the heat row, and the project card ranks the top 3 projects without the count, the group-by note or the manifest lines. (#76)
+- Durations render in unit words, two units at most: 25 hours reads as "1 day 1 hour", 34 days as "1 month 4 days". (#76)
+- The "at API list prices -- not your bill" qualifier is gone from the Report tab and the share cards. (#76)
+
 - The Report tab is much faster to reopen. Merged sessions are now cached per session, keyed on the files behind each one rather than on the window, so the week, month and year views share one assembly instead of rebuilding it three times and an appended log invalidates only the session it belongs to. On a year window over a 986MB database the tab's three requests fall from 14.92s to 7.07s, of which `/api/active-time` is 10.50s to 2.28s; the first read after a restart is unchanged, since the tab's own windows are warmed at startup. (#74)
 - Session reads merge a session's files in one pass on every harness, not just the store-backed ones. Pi, OMP, Kilo Code and WorkBuddy still folded their files pairwise, which rebuilds the whole accumulated session on every file and grows quadratically with the number of files one session spans -- the shape subagent fan-out produces. (#74)
 - OpenCode, MiMo and Kilo Code no longer key their session cache on the requested window, where three periods took three of the eight slots and a single pricing edit took all of them. They read unwindowed and the window is applied where every other tool applies it. (#74)

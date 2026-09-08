@@ -28,15 +28,14 @@ I18N_LANGS = ("en", "zh", "ja", "ko", "es", "pt")
 # Kana and Han, for the copy rules that only apply where words carry no spaces.
 CJK = r"[぀-ヿ一-鿿]"
 
-# Every line that makes a claim about one machine: whose activity was recorded,
-# whose midnight starts a day, whose tokdash counted, whose other tools these
-# are. All of them take the selected server's name rather than assuming local.
+# Every line that makes a claim about one machine: whose midnight starts a
+# day, whose tokdash counted, whose other tools these are. All of them take the
+# selected server's name rather than assuming local. The card's range line used
+# to be on this list; the cosyncing review cut its "on {machine}" clause.
 MACHINE_KEYS = (
-    "usageReportScope",
     "usageReportOtherTools",
     "usageReportFooterDays",
     "usageReportFooterSrc",
-    "usageReportCardRange",
 )
 
 BUILD_MODEL_SIGNATURE = (
@@ -49,7 +48,7 @@ HELPERS = (
     "function parseDateKey(value) {",
     "function startOfWeekMonday(date) {",
     "function usageReportToday() {",
-    "function usageReportWindows(period) {",
+    "function usageReportWindows(period, back = 0) {",
     "function usageReportPeriodLength(period, fromKey) {",
     "function usageReportDayKeys(fromKey, toKey) {",
     "function usageReportCalendar(period, fromKey, toKey) {",
@@ -362,6 +361,72 @@ process.stdout.write(JSON.stringify(out));
     }
 
 
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_back_steps_whole_periods(tmp_path: Path) -> None:
+    """The top-bar chips walk whole periods back: a past week is the full
+    Monday-to-Sunday, a past month its first to its last, a past year Jan-Dec.
+    Only the current window stops at today."""
+    source = _source()
+    body = "\n".join(_extract_js_function(source, signature) for signature in HELPERS)
+    body += """
+usageReportToday = () => new Date('2026-09-07T12:00:00');
+const out = [];
+for (const period of ['week', 'month', 'year']) {
+  for (const back of [0, 1, 2]) {
+    const w = usageReportWindows(period, back);
+    out.push({ period, back, from: w.date_from, to: w.date_to,
+      length: usageReportPeriodLength(period, w.date_from),
+      elapsed: usageReportDayKeys(w.date_from, w.date_to).length });
+  }
+}
+process.stdout.write(JSON.stringify(out));
+"""
+    rows = json.loads(_run_node(tmp_path, "usage-report-back.js", body))
+    by = {(row["period"], row["back"]): row for row in rows}
+    assert by[("week", 0)]["from"] == "2026-09-07" and by[("week", 0)]["to"] == "2026-09-07"
+    assert (by[("week", 1)]["from"], by[("week", 1)]["to"]) == ("2026-08-31", "2026-09-06")
+    assert (by[("week", 2)]["from"], by[("week", 2)]["to"]) == ("2026-08-24", "2026-08-30")
+    assert (by[("month", 1)]["from"], by[("month", 1)]["to"]) == ("2026-08-01", "2026-08-31")
+    assert (by[("year", 1)]["from"], by[("year", 1)]["to"]) == ("2025-01-01", "2025-12-31")
+    for row in rows:
+        if row["back"] > 0:
+            assert row["elapsed"] == row["length"], f"{row}: a past window must be the whole period"
+
+
+def test_the_report_tab_swaps_quick_ranges_for_period_chips() -> None:
+    """On the Report tab the trailing-window presets step aside for chips that
+    walk the report's period back, named from real dates."""
+    source = _source()
+    assert 'id="overviewQuickRanges"' in source and 'id="reportPeriodChips"' in source
+    tab = _extract_js_function(source, "function activateDashboardTab(tab) {")
+    assert "overviewRanges.hidden = tab === 'report'" in tab
+    assert "reportChips.hidden = tab !== 'report'" in tab
+    defs = _extract_js_function(source, "function usageReportChipDefs() {")
+    assert "getMonthLabels()" in defs, "month chips must be named from real dates"
+    assert "usageReportChipWeeksAgo" in defs
+    render = _extract_js_function(source, "function usageReportRenderPeriodChips() {")
+    assert "usageReportState.pendingBack = def.back" in render, "a mid-load chip click must queue, not drop"
+    controls = _extract_js_function(source, "function usageReportRenderControls() {")
+    assert "usageReportRenderPeriodChips()" in controls
+
+
+def test_a_past_window_names_itself() -> None:
+    """'This month' over an August report is a lie: past windows take the
+    card-style title, and a completed year prints its number, not 'year to date'."""
+    source = _source()
+    title = _extract_js_function(source, "function usageReportPeriodTitle(model) {")
+    assert "usageReportCardTitle(model)" in title
+    card = _extract_js_function(source, "function usageReportCardTitle(model) {")
+    assert "-12-31" in card
+
+
+def test_the_card_filename_names_the_theme() -> None:
+    """The card wears the active style theme, so the export names it -- the
+    same window saved under two themes must not overwrite itself."""
+    fn = _extract_js_function(_source(), "function usageReportCardFilename(model, tier, mode) {")
+    assert "dataset.uiTheme" in fn
+
+
 # --- one source down, executed for real under node --------------------------
 
 
@@ -488,7 +553,7 @@ def test_the_server_warms_the_exact_facet_string_the_tab_asks_for() -> None:
 LOADER_HARNESS = """
 const usageReportState = {
   loading: false, loaded: false, error: null, model: null,
-  period: 'month', serverId: 'local', staleReread: false,
+  period: 'month', back: 0, serverId: 'local', staleReread: false,
 };
 const calls = [];
 let responder = () => null;
@@ -559,7 +624,7 @@ def test_the_warmers_windows_match_the_tabs_own_across_years(tmp_path: Path) -> 
         for sig in (
             "function formatDateKey(date) {",
             "function startOfWeekMonday(date) {",
-            "function usageReportWindows(period) {",
+            "function usageReportWindows(period, back = 0) {",
         )
     )
     body = WINDOWS_HARNESS.replace("__HELPERS__", helpers)
@@ -582,14 +647,14 @@ def test_the_warmers_windows_match_the_tabs_own_across_years(tmp_path: Path) -> 
 
 
 SCHEDULE_HARNESS = """
-const usageReportState = { staleTimer: null, loadToken: 3 };
+const usageReportState = { staleTimer: null, loadToken: 3, back: 0 };
 let nextId = 1;
 const armed = new Map();
 const cleared = [];
 setTimeout = (fn, ms) => { const id = nextId++; armed.set(id, { fn, ms }); return id; };
 clearTimeout = (id) => { cleared.push(id); armed.delete(id); };
 const reread = [];
-function usageReportSilentReread(token, period, serverId) { reread.push([token, period, serverId]); }
+function usageReportSilentReread(token, period, back, serverId) { reread.push([token, period, back, serverId]); }
 const USAGE_REPORT_STALE_REREAD_MS = 12000;
 __SERVED__
 __SCHEDULE__
@@ -600,21 +665,21 @@ const server = { id: 'local' };
 const out = {};
 
 // Nothing stale: nothing armed.
-usageReportScheduleStaleReread([fresh, fresh, fresh], 'month', server);
+usageReportScheduleStaleReread([fresh, fresh, fresh], 'month', 0, server);
 out.allFresh = armed.size;
 
 // A route with no metadata must not be guessed at.
-usageReportScheduleStaleReread([bare, bare, bare], 'month', server);
+usageReportScheduleStaleReread([bare, bare, bare], 'month', 0, server);
 out.noMetadata = armed.size;
 
 // Only the SLOW pair is stale -- usage is already fresh. This is the case that
 // keying the decision on /api/usage alone used to miss entirely.
-usageReportScheduleStaleReread([fresh, stale, fresh], 'month', server);
+usageReportScheduleStaleReread([fresh, stale, fresh], 'month', 0, server);
 out.slowPairStale = armed.size;
 const firstId = usageReportState.staleTimer;
 
 // A second schedule must retire the first timer, not stack on it.
-usageReportScheduleStaleReread([fresh, fresh, stale], 'month', server);
+usageReportScheduleStaleReread([fresh, fresh, stale], 'month', 0, server);
 out.afterSecond = { armed: armed.size, clearedFirst: cleared.includes(firstId) };
 out.delay = armed.get(usageReportState.staleTimer).ms;
 
@@ -641,7 +706,7 @@ def test_only_one_stale_reread_is_ever_armed(tmp_path: Path) -> None:
         .replace("__SERVED__", _extract_js_function(
             block, "function usageReportServedStale(payload) {"))
         .replace("__SCHEDULE__", _extract_js_function(
-            block, "function usageReportScheduleStaleReread(payloads, period, server) {"))
+            block, "function usageReportScheduleStaleReread(payloads, period, back, server) {"))
     )
     out = json.loads(_run_node(tmp_path, "usage-report-schedule.js", body))
 
@@ -652,14 +717,14 @@ def test_only_one_stale_reread_is_ever_armed(tmp_path: Path) -> None:
     )
     assert out["afterSecond"] == {"armed": 1, "clearedFirst": True}, "timers stacked"
     assert out["delay"] == 12000
-    assert out["fired"] == [[3, "month", "local"]], "the token is captured at schedule time"
+    assert out["fired"] == [[3, "month", 0, "local"]], "the token is captured at schedule time"
     assert out["handleCleared"] is True
 
 
 REREAD_HARNESS = """
 const usageReportState = {
   loading: false, loaded: true, error: null, model: { tag: 'original' },
-  period: 'month', serverId: 'local', staleTimer: null, loadToken: 7,
+  period: 'month', back: 0, serverId: 'local', staleTimer: null, loadToken: 7,
 };
 let mode = 'ok';
 let onRequest = null;
@@ -681,27 +746,27 @@ const snap = () => ({ model: usageReportState.model.tag, renders: renders.length
 (async () => {
   const out = {};
   mode = 'throw';
-  await usageReportSilentReread(7, 'month', 'local');
+  await usageReportSilentReread(7, 'month', 0, 'local');
   out.afterFailure = snap();
 
   mode = 'null';
-  await usageReportSilentReread(7, 'month', 'local');
+  await usageReportSilentReread(7, 'month', 0, 'local');
   out.afterNull = snap();
 
   // The reader switches period while the round trip is in flight.
   mode = 'ok';
   onRequest = () => { usageReportState.period = 'year'; };
-  await usageReportSilentReread(7, 'month', 'local');
+  await usageReportSilentReread(7, 'month', 0, 'local');
   out.afterPeriodSwitch = snap();
   onRequest = null;
   usageReportState.period = 'month';
 
   // An explicit load ran and bumped the token.
-  await usageReportSilentReread(6, 'month', 'local');
+  await usageReportSilentReread(6, 'month', 0, 'local');
   out.afterStaleToken = snap();
 
   // Nothing changed: it commits.
-  await usageReportSilentReread(7, 'month', 'local');
+  await usageReportSilentReread(7, 'month', 0, 'local');
   out.afterSuccess = snap();
   process.stdout.write(JSON.stringify(out));
 })();
@@ -721,9 +786,9 @@ def test_a_silent_reread_never_damages_the_report_on_screen(tmp_path: Path) -> N
     body = (
         REREAD_HARNESS
         .replace("__REREAD__", _extract_js_function(
-            block, "async function usageReportSilentReread(token, period, serverId) {"))
+            block, "async function usageReportSilentReread(token, period, back, serverId) {"))
         .replace("__WANTS__", _extract_js_function(
-            block, "function usageReportStillWants(token, period, serverId) {"))
+            block, "function usageReportStillWants(token, period, back, serverId) {"))
     )
     out = json.loads(_run_node(tmp_path, "usage-report-reread.js", body))
 
@@ -772,16 +837,16 @@ def test_a_report_served_from_a_stale_entry_reads_again_once() -> None:
     """
     block = _report_block(_source())
     schedule = _extract_js_function(
-        block, "function usageReportScheduleStaleReread(payloads, period, server) {"
+        block, "function usageReportScheduleStaleReread(payloads, period, back, server) {"
     )
     reread = _extract_js_function(
-        block, "async function usageReportSilentReread(token, period, serverId) {"
+        block, "async function usageReportSilentReread(token, period, back, serverId) {"
     )
     loader = _extract_js_function(block, "async function loadUsageReport(options = {}) {")
 
     # Any of the three, not just the fastest one.
     assert "payloads.some(usageReportServedStale)" in schedule
-    assert "usageReportScheduleStaleReread([usage, insights, activeTime], period, server)" in loader
+    assert "usageReportScheduleStaleReread([usage, insights, activeTime], period, back, server)" in loader
 
     # The server is already recomputing these keys; forcing doubles the work.
     assert "refresh=1" not in reread
@@ -796,7 +861,7 @@ def test_a_report_served_from_a_stale_entry_reads_again_once() -> None:
     assert "usageReportState.loadToken += 1" in loader
 
     # Guarded on both sides of the round trip.
-    assert reread.count("usageReportStillWants(token, period, serverId)") == 2
+    assert reread.count("usageReportStillWants(token, period, back, serverId)") == 2
     # A failed re-read must leave the report on screen alone.
     assert "return;" in reread.split("catch (_error) {")[1]
 
@@ -946,13 +1011,12 @@ def test_report_copy_keys_are_prefixed_and_shared_across_languages() -> None:
 
 def test_every_line_that_names_a_machine_names_the_selected_one() -> None:
     """The report is single-server, and these lines used to be fixed strings
-    about "this machine": read from a remote server, the scope line, the footer,
-    the agent table and the exported card all described the wrong box.
+    about "this machine": read from a remote server, the footer, the agent
+    table and the exported card all described the wrong box.
     """
     source = _source()
     block = _report_block(source)
     for call in (
-        "t('usageReportScope', { machine: usageReportMachineName() })",
         "t('usageReportFooterDays', { machine })",
         "t('usageReportOtherTools', { n: tally, machine: usageReportMachineName() })",
     ):
@@ -984,8 +1048,9 @@ def test_the_machine_placeholder_does_not_split_a_cjk_phrase() -> None:
 
 def test_the_version_stamp_is_read_from_the_server_the_report_reads() -> None:
     """`getRuntimeVersion()` is local-only and cached for the whole session, so
-    a remote report stamped from it printed the local build in its footer line
-    and in the attribution baked into every exported PNG."""
+    a remote report stamped from it printed the local build in its footer line.
+    The stamp no longer rides the exported PNG (cosyncing review item 8), but
+    the footer still names the build the report was read from."""
     version = _extract_js_function(_source(), "function usageReportLoadVersion() {")
     assert "getRuntimeVersion" not in version
     assert "fetchJsonWithRetry(server, '/api/version')" in version
@@ -1183,7 +1248,9 @@ def _em_constant(source: str) -> str:
 
 CARD_SIGNATURES = (
     "const USAGE_REPORT_CARD = {",
-    "const USAGE_REPORT_CARD_PAL = {",
+    "const USAGE_REPORT_CARD_FALLBACK = {",
+    "function usageReportThemeTokens(theme, dark) {",
+    "function usageReportCardPalette(mode) {",
     "const USAGE_REPORT_TIER_ACCENT = {",
     "function usageReportCardFont(size, weight, mono) {",
     "function usageReportTextWidth(text, font) {",
@@ -1257,6 +1324,7 @@ const formatTokenCount = (n) => (Number(n) >= 1e6 ? (Number(n) / 1e6).toFixed(1)
 const formatNumber = (n) => String(n);
 const formatCurrency = (n) => '$' + Number(n).toFixed(2);
 const formatDuration = (ms) => Math.round(Number(ms) / 3600000) + 'h';
+const formatDurationUnits = (ms) => Math.round(Number(ms) / 3600000) + 'h';
 const formatShortDate = (value) => String(value);
 const langLocale = () => 'en-US';
 const usageReportToolLabel = (tool) => String(tool);
@@ -1338,7 +1406,7 @@ def _card_audit(tmp_path: Path, extra: str = "") -> dict:
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
-def test_a_card_fits_its_canvas_and_keeps_its_reconciliation_line(tmp_path: Path) -> None:
+def test_a_card_fits_its_canvas_and_never_runs_under_its_footer(tmp_path: Path) -> None:
     """A card that runs under its own footer is the failure mode of any painter."""
     report = _card_audit(
         tmp_path,
@@ -1369,16 +1437,64 @@ process.stdout.write(JSON.stringify(report));
         assert not [x for x, h in card["rects"] if x == 0 and h > 400], f"{name} grew a spine"
     assert cards["green/light"]["bg"] != cards["green/dark"]["bg"]
     assert cards["green/light"]["heat"] != cards["green/dark"]["heat"]
-    assert cards["green/light"]["rows"] == 0 and cards["amber/light"]["rows"] > 0
-    assert cards["amber/light"]["file"] == "tokdash-report-2026-09-01_2026-09-30-amber-light.png"
-    # Manifest lines wrap, so the privacy copy is read as one blob per card.
+    assert cards["green/light"]["rows"] == 0 and 0 < cards["amber/light"]["rows"] <= 3
+    assert cards["amber/light"]["file"] == "tokdash-report-2026-09-01_2026-09-30-amber-default-light.png"
+    # Neither tier carries a footer manifest or a reconciliation line any more;
+    # the amber tier is a top-3 project ranking and nothing else.
     green = " ".join(cards["green/light"]["texts"])
     amber = " ".join(cards["amber/light"]["texts"])
-    assert "no project names" in green and "no prompt text" in green
-    assert "no prompt text" in amber and "share deliberately" in amber
-    assert "Grouped by repository" in amber, "the reconciliation line is the point of the tier"
+    for blob in (green, amber):
+        assert "no project names" not in blob and "no prompt text" not in blob
+        assert "Grouped by repository" not in blob
+    assert "TOP PROJECTS" in amber and "PROJECTS ·" not in amber, "the project count went with the label"
     assert "tokdash-project-" not in green
     assert "tokdash-project-" in amber
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_the_hero_shows_tokens_and_cost_in_the_cost_colour(tmp_path: Path) -> None:
+    """Cosyncing review item 6: the two figures a shared card is read for are
+    tokens and cost, so they share the hero line -- the cost in the palette's
+    cost colour, and only when the toggle allows money on the card."""
+    report = _card_audit(
+        tmp_path,
+        """
+usageReportState.includeCost = true;
+const card = usageReportBuildCard(busy, 'green', 'light');
+const hero = card.ops.filter((op) => op.k === 'text' && (op.text === '60123.5M' || op.text.startsWith(' · $')));
+process.stdout.write(JSON.stringify({
+  hero: hero.map((op) => ({ text: op.text, fill: op.fill })),
+  cost: card.pal.cost,
+  primary: card.pal.primary,
+}));
+""",
+    )
+    assert report["hero"][0]["text"] == "60123.5M" and report["hero"][0]["fill"] == report["primary"]
+    assert report["hero"][1]["text"] == " · $39412.55" and report["hero"][1]["fill"] == report["cost"]
+    assert report["cost"] != report["primary"], "the cost must not read as more tokens"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_the_card_range_line_is_just_the_window(tmp_path: Path) -> None:
+    """Cosyncing review item 7: "Sep 1 – Sep 30 · all agent activity on
+    mac-studio" restates what the page footer already says, so the card's
+    range line is the window and nothing else."""
+    report = _card_audit(
+        tmp_path,
+        """
+serverUnderTest = { id: 'mac', label: 'mac-studio' };
+usageReportState.nickname = '';
+const card = usageReportBuildCard(busy, 'green', 'light');
+process.stdout.write(JSON.stringify({
+  texts: card.ops.filter((op) => op.k === 'text').map((op) => op.text),
+}));
+""",
+    )
+    joined = " ".join(report["texts"])
+    assert "2026-09-01 – 2026-09-30" in joined
+    assert "mac-studio" not in joined, "the card restated the machine the page footer names"
+    assert "this machine" not in joined
+    assert "{machine}" not in joined, "the placeholder reached the canvas unsubstituted"
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
@@ -1427,16 +1543,19 @@ process.stdout.write(JSON.stringify(out));
     assert any("—" in text for text in report["green"]["texts"]), "a missing figure printed as a zero"
     # Named figures, not just "a dash somewhere": a PNG outlives the load that
     # made it, so a zero-filled streak block or session count is unfalsifiable.
-    texts = report["green"]["texts"]
-    assert "— of 246 days active" in texts, "a missing streaks facet printed 0 days active"
-    assert "— sessions · 0 requests" in texts, "an absent session count printed as 0 sessions"
+    # The hero sub wraps, so read it as one blob.
+    joined = " ".join(report["green"]["texts"])
+    assert "— of 246 days active" in joined, "a missing streaks facet printed 0 days active"
+    assert "— sessions · 0 requests" in joined, "an absent session count printed as 0 sessions"
+    assert "— agent time" in joined, "a missing active-time answer printed as 0"
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
-def test_the_card_names_the_machine_it_was_painted_on(tmp_path: Path) -> None:
-    """Spec D1: one machine per report, and the card says which. A remote server
-    prints its registry label; the local box prints the translated fallback, since
-    "Local" is a UI label and not a name; an owned nickname wins over both."""
+def test_the_machine_name_still_resolves_for_the_page_footer(tmp_path: Path) -> None:
+    """The card no longer names the machine (cosyncing review item 8), but the
+    page footer and the nickname hint still do. A remote server prints its
+    registry label; the local box prints the translated fallback, since "Local"
+    is a UI label and not a name; an owned nickname wins over both."""
     body = _card_harness(_source()) + _extract_js_function(_source(), "function usageReportMachineName() {")
     body += """
 const cases = [
@@ -1459,36 +1578,15 @@ process.stdout.write(JSON.stringify(out));
         "this machine",
         "desk",
     ]
-    assert "nickname: usageReportMachineName()" in _source(), "the card must stamp it, not the raw pref"
     assert "nicknameInput.placeholder = usageReportMachineName()" in _source()
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
-def test_the_card_range_line_names_the_machine_too(tmp_path: Path) -> None:
-    """The attribution used to be the only line on the card that got this right:
-    the range line under the title said "all agent activity on this machine"
-    whatever server the report had been read from."""
-    report = _card_audit(
-        tmp_path,
-        """
-serverUnderTest = { id: 'mac', label: 'mac-studio' };
-usageReportState.nickname = '';
-const card = usageReportBuildCard(busy, 'green', 'light');
-process.stdout.write(JSON.stringify({
-  texts: card.ops.filter((op) => op.k === 'text').map((op) => op.text),
-}));
-""",
-    )
-    joined = " ".join(report["texts"])
-    assert "mac-studio" in joined
-    assert "this machine" not in joined, "the card described the wrong machine"
-    assert "{machine}" not in joined, "the placeholder reached the canvas unsubstituted"
-
-
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
-def test_a_short_window_paints_a_strip_not_a_column_of_strays(tmp_path: Path) -> None:
-    """Three days of a month is one column of the calendar grid; on a card with no
-    weekday labels that reads as three stray squares over an unexplained hole."""
+def test_the_card_heat_drops_the_week_and_squares_the_month(tmp_path: Path) -> None:
+    """The week card drops the heat block -- one row of stretched cells reads
+    as a loading artifact. The month card takes the page's presentation
+    (squares) but pinned to the left edge, not centred; the year keeps the
+    full-width map. Unelapsed days paint as the ramp's empty colour."""
     report = _card_audit(
         tmp_path,
         """
@@ -1499,28 +1597,67 @@ const short = {
   elapsed: 3,
   cells: Array.from({ length: 30 }, (_u, i) => ({
     date: '2026-09-' + String(i + 1).padStart(2, '0'),
-    tokens: (i + 1) * 1e6, level: i % 8, future: i > 2,
+    tokens: (i + 1) * 1e6, level: (i % 7) + 1, future: i > 2,
   })),
+};
+const week = {
+  ...busy,
+  period: 'week',
+  range: { from: '2026-08-31', to: '2026-09-06' },
+  elapsed: 7,
+  cells: Array.from({ length: 7 }, (_u, i) => ({
+    date: '2026-08-' + String(25 + i),
+    tokens: (i + 1) * 1e6, level: (i % 7) + 1, future: false,
+  })),
+};
+const squares = (card, lo, hi) => card.ops.filter((op) => op.k === 'rect' && op.w === op.h && op.w >= lo && op.w < hi);
+const audit = (card, lo, hi) => {
+  const cells = squares(card, lo, hi);
+  return {
+    overflow: Number((card.used - card.budget).toFixed(3)),
+    cells: cells.length,
+    left: cells.length ? Math.min(...cells.map((op) => op.x)) : null,
+    rightEdge: cells.length ? Math.max(...cells.map((op) => op.x + op.w)) : null,
+    empty: cells.filter((op) => op.fill === '#EEF2F7').length,
+  };
 };
 const out = {};
 for (const tier of ['green', 'amber']) {
-  const card = usageReportBuildCard(short, tier, 'light');
-  const cells = card.ops.filter((op) => op.k === 'rect' && op.w === op.h && op.w === 18);
-  out[tier] = {
-    overflow: Number((card.used - card.budget).toFixed(3)),
-    squares: cells.length,
-    rows: [...new Set(cells.map((op) => op.y))].length,
-    xs: cells.map((op) => op.x),
-  };
+  out[tier] = audit(usageReportBuildCard(short, tier, 'light'), 9, 30);
 }
+out.week = audit(usageReportBuildCard(week, 'green', 'light'), 6, 60);
+out.year = audit(usageReportBuildCard(sparse, 'green', 'light'), 3, 9);
 process.stdout.write(JSON.stringify(out));
 """,
     )
-    for tier, card in report.items():
-        assert card["overflow"] <= 0
-        assert card["squares"] == 3, f"{tier} card painted {card['squares']} heat squares for 3 days"
-        assert card["rows"] == 1, f"{tier} card stacked the short window into a column"
-        assert card["xs"] == sorted(set(card["xs"])), f"{tier} card did not run the strip left to right"
+    for name in ("green", "amber"):
+        card = report[name]
+        assert card["overflow"] <= 0, f"{name} card overflows"
+        assert card["cells"] == 30, f"{name} card dropped days from the heat block"
+        assert card["left"] == 24, f"{name} month grid is not pinned to the content edge"
+    assert report["green"]["empty"] == 27, "the unelapsed month must paint as empty cells, not holes"
+    assert report["week"]["cells"] == 0, "the week card still paints its stretched cell row"
+    assert report["week"]["overflow"] <= 0
+    assert report["year"]["cells"] == 371, "the year card dropped days from the heat block"
+    assert report["year"]["rightEdge"] == pytest.approx(336, abs=0.01), "the year map no longer reaches the content edge"
+
+
+def test_the_page_drops_the_week_grid_and_centres_the_month() -> None:
+    """Same call on the report page: the week view's day map is one stretched
+    row of seven cells, so it is dropped (legend too); the month view takes
+    the Stats presentation -- fixed 24px squares, centred, never stretched."""
+    source = _source()
+    heat = _extract_js_function(source, "function usageReportRenderHeat(model) {")
+    week = heat[heat.index("model.period === 'week'") :]
+    assert "usageReportLegend').replaceChildren()" in week
+    assert "usageReportRenderStreak(model);" in week
+    assert week.index("return;") < heat.index("model.period !== 'year'") - heat.index("model.period === 'week'"), (
+        "the week branch must return before the month/year grids are built"
+    )
+    month_rule = next(line for line in source.splitlines() if line.strip().startswith(".usage-report-month {"))
+    assert "repeat(7, 24px)" in month_rule
+    assert "width: max-content" in month_rule and "margin: 0 auto" in month_rule
+    assert "minmax" not in month_rule, "the month grid still stretches"
 
 
 def test_share_panel_offers_two_tiers_and_three_export_paths() -> None:
@@ -1584,13 +1721,20 @@ def test_a_landing_load_leaves_a_half_typed_nickname_alone() -> None:
     assert "usageReportSyncShareInputs()" in wire, "stored prefs still reach the field once, at wire time"
 
 
-def test_share_card_colours_are_literal_and_the_ramp_is_the_default_scale() -> None:
-    """A PNG outlives the theme that painted it, so it must not read live tokens."""
+def test_share_card_colours_follow_the_theme_with_a_literal_fallback() -> None:
+    """The card wears the active theme in both exported modes; the literal slate
+    palette survives only as the no-stylesheet fallback (and the node tests)."""
     source = _source()
-    palette = _extract_js_function(source, "const USAGE_REPORT_CARD_PAL = {")
-    assert "var(--" not in palette
-    assert "heat: DEFAULT_HEAT_COLORS_LIGHT" in palette
-    assert "heat: DEFAULT_HEAT_COLORS_DARK" in palette
+    palette = _extract_js_function(source, "function usageReportCardPalette(mode) {")
+    assert "usageReportThemeTokens(theme, dark)" in palette
+    assert "getHeatColors(theme, dark)" in palette, "the ramp is the theme's own, not the default scale"
+    assert "USAGE_REPORT_CARD_FALLBACK[mode]" in palette
+    tokens = _extract_js_function(source, "function usageReportThemeTokens(theme, dark) {")
+    assert 'html.dark[data-ui-theme="' in tokens, "the dark export must read the theme's dark tokens"
+    fallback = _extract_js_function(source, "const USAGE_REPORT_CARD_FALLBACK = {")
+    assert "var(--" not in fallback
+    assert "heat: DEFAULT_HEAT_COLORS_LIGHT" in fallback
+    assert "heat: DEFAULT_HEAT_COLORS_DARK" in fallback
 
 
 def test_the_prefs_key_follows_the_convention_the_page_already_uses() -> None:
@@ -1608,7 +1752,11 @@ def test_share_prefs_carry_the_nickname_and_the_cost_choice() -> None:
     write = _extract_js_function(source, "function usageReportWritePrefs() {")
     for fn in (read, write):
         assert "nickname" in fn and "includeCost" in fn
-    assert "raw.includeCost === true" in read, "an absent pref must not print money by default"
+    # Cost prints by default (the header is tokens + cost); the toggle is the
+    # opt-out. Only a prefsV-stamped blob may carry that opt-out -- period
+    # clicks write prefs too, so an unstamped includeCost:false is incidental.
+    assert "prefsV === 2" in read, "only a stamped pref may turn cost off"
+    assert "prefsV: 2" in write, "new writes must stamp the blob"
 
 
 def test_a_control_changed_mid_flight_is_applied_late_not_dropped() -> None:

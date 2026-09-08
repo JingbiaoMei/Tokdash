@@ -1,6 +1,27 @@
 {
-  "current": "2.5.3",
+  "current": "2.5.4",
   "releases": [
+    {
+      "version": "2.5.4",
+      "date": "2026-09-08",
+      "sections": [
+        {
+          "type": "changed",
+          "items": [
+            "The Report tab is much faster to reopen: sessions are cached per session and shared across the week, month and year windows instead of being rebuilt three times. TOKDASH_SESSION_CACHE_TURNS bounds what the cache retains.",
+            "The Report tab swaps the quick-range presets for period chips — this and last week, named months, years — each stepping the window a whole period back.",
+            "Share cards follow the app theme, export at 1800x3200, and print tokens and cost together in the header, with cost on by default and the toggle as the opt-out. Month cards use smaller heat squares with empty boxes for days still ahead, week cards drop the heat row, and the project card ranks the top 3 projects.",
+            "Durations render in unit words, two at most: 25 hours reads as 1 day 1 hour, 34 days as 1 month 4 days."
+          ]
+        },
+        {
+          "type": "fixed",
+          "items": [
+            "claude-3.5-sonnet prices at the published $3 / $15 per MTok instead of double, so Claude Code's default model from Oct 2024 to early Feb 2025 showed twice its real cost. Stored rows reprice on read."
+          ]
+        }
+      ]
+    },
     {
       "version": "2.5.3",
       "date": "2026-09-05",

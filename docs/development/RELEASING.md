@@ -10,7 +10,10 @@ Before tagging:
 2. Update `docs/development/CHANGELOG.md` with a new `## X.Y.Z - YYYY-MM-DD` section, following
    [Changelog entries](#changelog-entries) below.
 3. Update `src/tokdash/static/release-notes.json`: set `current` to the package version and add that version as the first release so the in-app **What's new** view stays in sync.
-4. If `README.md` changed this release, mirror the changes into `README_CN.md` so the English and 中文 READMEs stay in sync (sections, flags, and examples should match).
+4. If `README.md` changed this release, mirror the changes into **every** translated README —
+   `README_CN.md`, `README_ES.md`, `README_JA.md`, `README_KO.md`, `README_PT.md` — so all six stay
+   in sync. Sections, flags, examples, and links to other docs should match; only prose is
+   translated. See [README sync](#readme-sync) below.
 5. Ensure the worktree is clean except for intended release changes.
 6. Run the test suite:
    ```bash
@@ -44,6 +47,38 @@ Every entry ends with the PR that made the change, after the final period:
 - If the PR cannot be identified, leave the ref off. A wrong number is worse than none.
 - `src/tokdash/static/release-notes.json` carries no refs or credits. It is rendered as plain text
   in the in-app **What's new** view, so `(#48)` would show up literally and `@handle` would not link.
+
+## README sync
+
+There are six READMEs and they are one document in six languages, not an English original with
+optional translations. A PR that changes `README.md` updates all five siblings in the same PR:
+`README_CN.md`, `README_ES.md`, `README_JA.md`, `README_KO.md`, `README_PT.md`.
+
+What must match across all six:
+
+- **Section skeleton** — the same headings in the same order at the same levels.
+- **Client support matrix** — the same client rows.
+- **Identifiers** — flags, env vars, file paths, config keys, code fences and the commands inside
+  them. Only placeholders inside them are translated (`--port <port>` may become `--port <puerto>`).
+- **Links to other docs** — a guide linked from `README.md` is linked from all six. Pointing a
+  translation at CLI help instead is a dead end for that language.
+- **Feature bullets** — the same list, no language missing an entry.
+
+Only prose is translated. Screenshot URLs, badge label text and store-badge locales are
+per-language by design and are expected to differ.
+
+A quick way to spot drift before opening the PR:
+
+```bash
+# every translation should report the same counts as README.md
+for f in README*.md; do
+  printf '%-14s headings=%s fences=%s\n' "$f" \
+    "$(grep -cE '^#{1,6} ' "$f")" "$(grep -c '^```' "$f")"
+done
+```
+
+Then diff the backticked identifiers per file; a translation missing one usually means a paragraph
+was never carried over.
 
 ## Release sequence
 

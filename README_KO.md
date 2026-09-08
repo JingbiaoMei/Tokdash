@@ -352,7 +352,7 @@ tokdash serve
 
 `http://127.0.0.1:55423`을 엽니다. 기본 포트가 사용 중이면 `tokdash serve --port <port>`를 사용하세요.
 
-런타임 선택, WSL/systemd 동작, macOS launchd, Tailscale, 번들링, 업데이트를 포함한 온보딩 전체 상세는 `tokdash setup` 도움말과 docs를 참조하세요.
+런타임 선택, WSL/systemd 동작, macOS launchd, Tailscale, 번들링, 업데이트 확인, 안전한 제거 동작을 포함한 온보딩 전체 상세는 **[`docs/guides/ONBOARDING.md`](docs/guides/ONBOARDING.md)**를 참조하세요.
 
 ### OpenClaw 다이제스트 (정기 리포트)
 
@@ -487,6 +487,8 @@ tokdash quota show
 
 고정 리셋 쿼터 윈도우의 경우 폴러는 리셋 경계 근처에서도 샘플링해, 히스토리가 리셋 직전 고값과 리셋 직후 베이스라인을 확보하도록 합니다. 경계 샘플링은 기본적으로 켜져 있으며, 윈도우가 트리거한 제공자만 호출하고, 가까운 제공자 경계를 통합하며, 데몬 폴링 주기 사이 최소 300초를 유지합니다. `TOKDASH_QUOTA_BOUNDARY_POLL=0`으로 비활성화, `TOKDASH_QUOTA_BOUNDARY_POST=0`으로 리셋 후 샘플만 비활성화, 기본 120초 리드는 `TOKDASH_QUOTA_BOUNDARY_PRE_SECONDS`와 `TOKDASH_QUOTA_BOUNDARY_POST_SECONDS`로 조정할 수 있습니다.
 
+**여러 Claude Code 설치.** Claude Code는 설정 디렉터리마다 구독을 하나씩 유지하므로, `CLAUDE_CONFIG_DIR=~/.claude-academic claude`로 실행하는 두 번째 로그인은 자체 창을 가진 별도의 구독입니다. 자격 증명 스캔에 동의하면 Tokdash는 `$CLAUDE_CONFIG_DIR`과 자체 `.credentials.json`을 가진 모든 `~/.claude*` 디렉터리를 읽고 각각 따로 폴링한 뒤, 해당 디렉터리가 설정된 프로필 이름(`academic`)으로 Claude Code 카드 안에 묶어 보여줍니다. 기록도 서로 구분되어 `Claude-academic 5-hour`는 `Claude 5-hour` 옆의 독립된 계열이 됩니다. 로그인이 만료된 설치는 정상 설치의 수치를 가리는 대신 자체 알림을 표시하며, 같은 로그인을 담은 두 디렉터리는 한 번만 계산됩니다. 홈 디렉터리 밖에 있는 설치는 `TOKDASH_CLAUDE_PROFILES`에 경로 구분자로 구분한 디렉터리 목록을 지정하세요. 사용량 합계는 손댈 필요가 없었습니다: 모든 `~/.claude*` 설치의 세션 로그는 이전부터 집계되어 왔습니다.
+
 라이브 폴링은 두 가지 독립적 결정을 요구합니다: `quota.credential_scan`은 공개된 로컬 자격 증명 스토어에 대한 읽기 전용 접근을 허용하고, 이어 각 `<provider>_api` 키가 해당 제공자의 네트워크 요청을 허용합니다. Tokdash는 네이티브 CLI 인증/설정 파일, OpenCode의 `auth.json`과 전역 제공자 설정, 활성 Claude 설정, CC Switch의 `providers` 테이블을 읽기 전용 SQLite 연결로 읽습니다. 제공자 로그, 셸 프로필, 임의의 `{file:...}` 참조는 절대 스캔하지 않습니다. MiniMax는 `mmx` 로그인 또는 Token Plan Subscription Key(`MINIMAX_TOKEN_PLAN_GLOBAL_KEY` / `MINIMAX_TOKEN_PLAN_CN_KEY`)를 받습니다. 일반 후불 키에는 Token Plan 쿼터가 보장되지 않습니다. Kimi는 Kimi Code 로그인/키(`KIMI_API_KEY`)를 받고, Moonshot Open Platform 후불 키는 받지 않습니다. SuperGrok/Grok Build 쿼터에는 `$GROK_HOME/auth.json`의 xAI OAuth 로그인이 필요합니다. 일반 xAI API 키로는 소비자 과금에 접근할 수 없습니다. macOS에서 Claude Code는 일회성 읽기 전용 키체인 승인을 요구할 수 있습니다. Tokdash는 제공자 자격 증명을 갱신하거나 쓰지 않습니다. `TOKDASH_QUOTA_POLL=0`은 모든 쿼터 추적을 위한 하드 킬 스위치입니다. `tokdash export`는 기본적으로 쿼터 데이터를 제외합니다. JSON에 포함하려면 의도적으로 `--include-quota`를 사용하세요.
 
 Z.ai는 `$ZCODE_HOME/v2/config.json`, 지원되는 도구 설정, `ZAI_API_KEY` 또는 `Z_AI_API_KEY`의 Coding Plan 키를 허용하며 5시간/주간 크레딧 윈도우와 레거시 MCP 한도를 조회합니다.
@@ -508,7 +510,7 @@ Zed 사용량은 OS별 Zed 데이터 디렉터리 아래의 `threads/threads.db`
 
 Qwen Code 사용량은 `<base>/projects/*/chats/*.jsonl`(그리고 이름 변경 전의 `<base>/tmp/*/chats/*.jsonl`)에서 로컬로 읽습니다. base는 `$QWEN_RUNTIME_DIR`, 그다음 `$QWEN_HOME`, 그다음 `~/.qwen` 순으로 결정됩니다 — 설정 수준의 `runtime_base_dir`은 Tokdash에서 접근할 수 없으며 문서화된 사각지대입니다. 파일은 추가 전용이고 세션당 하나이며, 각 어시스턴트 레코드는 제공자의 `usageMetadata`를 그대로 담습니다: `promptTokenCount`는 캐시를 포함하므로 캐시 몫은 별도 버킷으로 분리해 캐시 요율로 과금하고, `thoughtsTokenCount`는 추론으로 표시합니다. 각 레코드의 `uuid`는 소스 전역에서 안정적인 키입니다: `/branch`는 부모의 레코드(같은 uuid)를 포크 파일로 복사하므로, 사용량 저장소는 가장 이른 출현으로 키 소유를 정하고 정규 파일이 삭제되면 살아남은 사본을 승격시킵니다. 서브에이전트 레코드는 세션 파일을 공유하며 자동으로 계산됩니다. 비용은 가격 DB에서만 나오고, 모델이 없는 레코드는 `unknown`으로 0.00 처리합니다. Qwen Code는 Sessions 탭에 나타나지 않습니다.
 
-Crush 사용량은 `$CRUSH_DATA_DIR`(각각 `crush.db`를 담은 데이터 디렉터리의 쉼표 구분 목록)에서 로컬로 읽습니다 — 필수입니다. Crush의 기본 데이터 디렉터리는 작업 디렉터리 옆의 프로젝트별 `.crush`여서 훑을 전역 루트가 없기 때문입니다. 데이터베이스는 WAL 모드라 ZCode와 같은 복사·스냅샷 경로로 읽습니다. 토큰이 0이 아닌 세션마다 항목 하나이며 서브에이전트 세션도 포함합니다: Crush는 부모 세션에 비용만 접고 토큰은 접지 않으므로, Crush 자체 통계 쿼리가 쓰는 최상위 전용 조건(`parent_session_id IS NULL`)으로는 그 사용량이 누락됩니다. 각 항목은 해당 세션의 마지막 비요약 어시스턴트 메시지에 귀속됩니다 — 여러 모델을 쓴 세션은 마지막 모델로 가격이 매겨집니다. 주의할 점이 셋 있습니다: 카운터는 누적이 아니라 단계별로 대입되므로 마지막 요청의 컨텍스트 크기와 마지막 턴의 출력만 담고 있어 다단계 세션에서는 실제보다 낮게 나옵니다(Crush v0.91.2로 확인했으며, `crush.db`에는 실제 합계를 복원할 수단이 없습니다). 제공자가 사용량 0을 보고하면 토큰이 문자 수 기반 추정치일 수 있고 DB에는 아무 표시가 없습니다. 그리고 캐시/추론 분리는 저장되지 않습니다. 타임스탬프는 초 단위이며 행은 `updated_at`(마지막 변경)으로 묶이므로 세션 전체 기간의 합계가 하루에 몰립니다. `sessions.cost`는 무시하고 비용은 가격 DB에서만 구합니다. Crush는 Sessions 탭에 나타나지 않습니다.
+Crush 사용량은 `$CRUSH_DATA_DIR`(각각 `crush.db`를 담은 데이터 디렉터리의 쉼표 구분 목록)에서 로컬로 읽습니다 — 필수입니다. Crush의 기본 데이터 디렉터리는 작업 디렉터리 옆의 프로젝트별 `.crush`여서 훑을 전역 루트가 없기 때문입니다. 데이터베이스는 WAL 모드라 ZCode와 같은 복사·스냅샷 경로로 읽습니다. 토큰이 0이 아닌 세션마다 그 `prompt_tokens`/`completion_tokens`에서 항목 하나이며 서브에이전트 세션도 포함합니다: Crush는 부모 세션에 비용만 접고 토큰은 접지 않으므로, Crush 자체 통계 쿼리가 쓰는 최상위 전용 조건(`parent_session_id IS NULL`)으로는 그 사용량이 누락됩니다. 각 항목은 해당 세션의 마지막 비요약 어시스턴트 메시지에 귀속됩니다 — 여러 모델을 쓴 세션은 마지막 모델로 가격이 매겨집니다. 주의할 점이 셋 있습니다: 카운터는 누적이 아니라 단계별로 대입되므로 마지막 요청의 컨텍스트 크기와 마지막 턴의 출력만 담고 있어 다단계 세션에서는 실제보다 낮게 나옵니다(Crush v0.91.2로 확인). 제공자가 사용량 0을 보고하면 토큰이 문자 수 기반 추정치일 수 있고 DB에는 아무 표시가 없습니다. 그리고 캐시/추론 분리는 저장되지 않습니다. 타임스탬프는 초 단위이며 행은 `updated_at`(마지막 변경)으로 묶이므로 세션 전체 기간의 합계가 하루에 몰립니다. `sessions.cost`는 무시하고 비용은 가격 DB에서만 구합니다. Crush는 Sessions 탭에 나타나지 않습니다.
 
 `tokdash setup`은 선택적 쿼터 단계(제공자별 네트워크 동의, 기본 No, 그리고 폴링 간격)를 제공하며, `tokdash doctor`는 쿼터 상태를 보고합니다: 마스터 스위치, 제공자별 동의, 킬 스위치, 유효 간격과 그 소스, 마지막 폴링 시각, 저장된 스냅샷 수.
 

@@ -1265,6 +1265,39 @@ class CodexParser(BaseParser):
         return out
 
 
+ClaudeUsageBuckets = Tuple[int, int, int, int]  # (input, output, cache_read, cache_write)
+
+
+def claude_usage_supersedes(
+    total: int,
+    buckets: ClaudeUsageBuckets,
+    best_total: int,
+    best_buckets: ClaudeUsageBuckets,
+) -> bool:
+    """Does this streamed usage write replace the best one kept for its id?
+
+    Claude Code rewrites one assistant turn once per streamed content block,
+    every write sharing the message id, and streamed usage counts are
+    cumulative -- so a larger total is a later, more complete write.
+
+    An equal total with a *different* split is a reclassification: the server
+    resolved the prompt against its cache and moved fresh input into cache-read
+    or cache-write. The later split is the accurate one, and keeping the earlier
+    one would price cached tokens at the fresh-input rate.
+
+    An equal total with an identical split is a genuine duplicate write, so the
+    first wins and a double-written turn keeps its earlier timestamp rather than
+    migrating into a later reporting window.
+
+    Shared by ClaudeParser._parse_all and sessions._parse_claude_session_file:
+    the two must agree on which write is authoritative, and a bug that lost ~20%
+    of all output tokens came from those sites disagreeing.
+    """
+    if total != best_total:
+        return total > best_total
+    return buckets != best_buckets
+
+
 class ClaudeParser(BaseParser):
     source_name = "claude"
     sync_capability = SourceSyncCapability(
@@ -1274,7 +1307,13 @@ class ClaudeParser(BaseParser):
     )
     # 1: assistant usage rows keyed on message id, streaming snapshots
     #    collapsed to the latest, cache writes billed at the input rate.
-    persistent_parser_version = 1
+    # 2: snapshots collapse per claude_usage_supersedes -- fullest total wins,
+    #    an equal total with a changed split takes the later split -- for
+    #    role-bearing rows too. v1 kept the first non-zero write of a
+    #    role-bearing id, which on endpoints that stamp both `type` and
+    #    `message.role` was the partial that carries the whole prompt and no
+    #    output yet -- dropping ~20% of all output tokens.
+    persistent_parser_version = 2
 
     def __init__(self, pricing_db: PricingDatabase):
         super().__init__(pricing_db)
@@ -1304,8 +1343,16 @@ class ClaudeParser(BaseParser):
 
     def _parse_all(self) -> List[Dict[str, Any]]:
         out: List[Dict[str, Any]] = []
-        seen_message_ids = set()
-        snapshot_entries_by_message_id: Dict[str, Dict[str, Any]] = {}
+        # Claude Code rewrites one assistant turn once per streamed content
+        # block, every write sharing the message id, and streamed usage counts
+        # are cumulative -- so the write with the largest total is the finished
+        # turn. Keep that one per id. The first write is usually a partial that
+        # already carries the whole prompt but no output yet, and it is not
+        # distinguishable by shape: whether the row also carries `message.role`
+        # says nothing about whether more writes follow.
+        #
+        # See claude_usage_supersedes for the tie rules.
+        best_by_message_id: Dict[str, Tuple[int, ClaudeUsageBuckets, Dict[str, Any]]] = {}
 
         for path_str, _, _ in self._file_signatures():
             session_file = Path(path_str)
@@ -1336,14 +1383,20 @@ class ClaudeParser(BaseParser):
                     output_t = self._i(usage.get("output_tokens", usage.get("output")))
                     cache_r = self._i(usage.get("cache_read_input_tokens", usage.get("cache_read_tokens")))
                     cache_w = self._i(usage.get("cache_creation_input_tokens", usage.get("cache_write_tokens")))
-                    if input_t + output_t + cache_r + cache_w == 0:
+                    buckets: ClaudeUsageBuckets = (input_t, output_t, cache_r, cache_w)
+                    total_t = sum(buckets)
+                    if total_t == 0:
                         continue
 
                     msg_id = str(msg.get("id") or obj.get("uuid") or "")
-                    # Legacy role-bearing logs write the same message id many
-                    # times; skip the duplicates before building/pricing the entry.
-                    if msg_id and not is_top_level_assistant and msg_id in seen_message_ids:
-                        continue
+                    # A write that cannot supersede this id's best is not worth
+                    # pricing, so bail before building the entry.
+                    if msg_id:
+                        best = best_by_message_id.get(msg_id)
+                        if best is not None and not claude_usage_supersedes(
+                            total_t, buckets, best[0], best[1]
+                        ):
+                            continue
 
                     model = str(msg.get("model") or "unknown")
                     entry = {
@@ -1370,27 +1423,11 @@ class ClaudeParser(BaseParser):
                         out.append(entry)
                         continue
 
-                    if is_top_level_assistant:
-                        # Newer Claude Code builds (so far seen via OpenAI-compatible
-                        # endpoints) log assistant turns as role-less streaming
-                        # snapshots sharing one id; keep the latest, which carries
-                        # the most complete usage.
-                        existing = snapshot_entries_by_message_id.get(msg_id)
-                        if existing is None or entry["timestamp"] >= existing["timestamp"]:
-                            snapshot_entries_by_message_id[msg_id] = entry
-                        continue
-
-                    # First non-zero occurrence of this legacy id.
-                    seen_message_ids.add(msg_id)
-                    out.append(entry)
+                    best_by_message_id[msg_id] = (total_t, buckets, entry)
             except Exception:
                 continue
 
-        out.extend(
-            entry
-            for msg_id, entry in snapshot_entries_by_message_id.items()
-            if msg_id not in seen_message_ids
-        )
+        out.extend(entry for _, _, entry in best_by_message_id.values())
         out.sort(key=lambda entry: int(entry.get("timestamp", 0) or 0))
         return out
 

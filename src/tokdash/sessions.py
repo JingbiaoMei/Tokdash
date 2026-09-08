@@ -37,6 +37,7 @@ from .sources.coding_tools import (
     WorkBuddyParser,
     ZCodeSnapshotError,
     antigravity_db_signatures,
+    claude_usage_supersedes,
     cline_message_file_signatures,
     codex_fork_ancestry,
     codex_replay_key_session_id,
@@ -100,7 +101,10 @@ _SESSION_FILE_PARSER_VERSIONS = {
     #    replay dedup; stored v1 keys/rows predate both.
     "_parse_codex_session_file": 2,
     # 2: turns carry _stream_id so subagents are timed separately from the main agent.
-    "_parse_claude_session_file": 2,
+    # 3: streaming snapshots collapse per claude_usage_supersedes rather than
+    #    keeping the first write, for role-bearing rows too; stored v2 turns
+    #    kept the partial, and its cache split.
+    "_parse_claude_session_file": 3,
     # 2: turns carry _stream_id so concurrent agents are timed separately.
     "_parse_kimi_session_file": 2,
     "_parse_dsh_session_file": 1,
@@ -1941,8 +1945,12 @@ def _parse_claude_session_file(path_str: str, _mtime_ns: int, _size: int, _prici
     ai_title = ""
     agent_name = ""
     turns = []
-    seen_message_ids = set()
-    snapshot_turns_by_message_id: Dict[str, Dict[str, Any]] = {}
+    # One assistant turn is rewritten once per streamed content block, every
+    # write sharing the message id and carrying cumulative usage. Which write is
+    # authoritative is claude_usage_supersedes' call, shared with
+    # ClaudeParser._parse_all so the two cannot disagree; `message.role` says
+    # nothing about whether more writes follow.
+    best_turns_by_message_id: dict[str, tuple[int, tuple[int, int, int, int], Dict[str, Any]]] = {}
 
     try:
         handle = session_path.open("r", encoding="utf-8")
@@ -1999,10 +2007,15 @@ def _parse_claude_session_file(path_str: str, _mtime_ns: int, _size: int, _prici
             if total_tokens == 0:
                 continue
 
-            # Legacy role-bearing logs repeat the same message id; skip the
-            # duplicates before pricing the turn.
-            if message_id and not is_top_level_assistant and message_id in seen_message_ids:
-                continue
+            # A write that cannot supersede this id's best is not worth pricing,
+            # so bail before building the turn.
+            buckets = (fresh_input, output_tokens, cache_read, cache_write)
+            if message_id:
+                best = best_turns_by_message_id.get(message_id)
+                if best is not None and not claude_usage_supersedes(
+                    total_tokens, buckets, best[0], best[1]
+                ):
+                    continue
 
             turn = _build_turn(
                 turn_index=0,
@@ -2030,23 +2043,9 @@ def _parse_claude_session_file(path_str: str, _mtime_ns: int, _size: int, _prici
                 turns.append(turn)
                 continue
 
-            if is_top_level_assistant:
-                # Newer Claude Code builds log assistant turns as role-less
-                # streaming snapshots sharing one id; keep the latest snapshot.
-                existing = snapshot_turns_by_message_id.get(message_id)
-                if existing is None or timestamp_ms >= int(existing.get("timestamp_ms", 0) or 0):
-                    snapshot_turns_by_message_id[message_id] = turn
-                continue
+            best_turns_by_message_id[message_id] = (total_tokens, buckets, turn)
 
-            # First non-zero occurrence of this legacy id.
-            seen_message_ids.add(message_id)
-            turns.append(turn)
-
-    turns.extend(
-        turn
-        for message_id, turn in snapshot_turns_by_message_id.items()
-        if message_id not in seen_message_ids
-    )
+    turns.extend(turn for _, _, turn in best_turns_by_message_id.values())
     turns.sort(key=lambda item: int(item.get("timestamp_ms", 0) or 0))
     for turn_index, turn in enumerate(turns, start=1):
         turn["turn_index"] = turn_index

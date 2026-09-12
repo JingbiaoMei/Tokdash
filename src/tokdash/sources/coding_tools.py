@@ -5194,7 +5194,11 @@ class ZedParser(BaseParser):
 
 
 def qwen_chat_file_signatures(base: Path) -> tuple:
-    """(path, mtime_ns, size) of every Qwen Code session JSONL file."""
+    """(path, mtime_ns, size) of every Qwen Code session JSONL file.
+
+    The raw scan, with no TTL. Neither Overview nor Sessions calls it
+    directly — both go through qwen_file_signatures, which owns the clock.
+    """
     sigs: List[Tuple[str, int, int]] = []
     for path in clientpaths.qwen_chat_files(base):
         try:
@@ -5203,6 +5207,178 @@ def qwen_chat_file_signatures(base: Path) -> tuple:
         except OSError:
             continue
     return tuple(sorted(sigs))
+
+
+def qwen_file_signatures(base: Path) -> tuple:
+    """TTL-wrapped signatures of every Qwen Code chat file.
+
+    Shared by ``QwenCodeParser`` (Overview) and the Sessions harness, and it
+    owns the ``qwen_code:<base>`` TTL key so both sides share one scan and
+    one invalidation clock — the workbuddy_file_signatures shape. A harness
+    that called qwen_chat_file_signatures directly would see a new chat file
+    up to TOKDASH_SIG_TTL seconds before Overview does. The cache-key string
+    must stay as it is: the stored sync identity embeds it.
+    """
+    return _timed_sigs(f"qwen_code:{base}", lambda: qwen_chat_file_signatures(base))
+
+
+def _qwen_is_int(v: Any) -> bool:
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
+def _qwen_user_text(rec: Dict[str, Any]) -> str:
+    """Text of a user ChatRecord's first text part ('' when it has none)."""
+    message = rec.get("message")
+    if not isinstance(message, dict):
+        return ""
+    parts = message.get("parts")
+    if not isinstance(parts, list):
+        return ""
+    for part in parts:
+        if isinstance(part, dict):
+            text = part.get("text")
+            if isinstance(text, str) and text.strip():
+                return text.strip()
+        elif isinstance(part, str) and part.strip():
+            return part.strip()
+    return ""
+
+
+def qwen_row_from_record(rec: Dict[str, Any]) -> Optional[Tuple[str, Dict[str, Any]]]:
+    """(entry_id, row) for one ChatRecord, or None when the parser skips it.
+
+    The single source of truth for the record rules Qwen Code is billed by:
+    the assistant + usageMetadata + int-count + parseable-timestamp skips, the
+    cache-inclusive Gemini prompt split with its max(0, ...) clamp, the model
+    fallback, and the all-zero drop. NO cost and NO _billing: this is the
+    parse_cline_message_file shape — _build_entry prices through
+    self.pricing_db, so a module-level row builder that invented its own
+    PricingDatabase() would silently break QwenCodeParser(custom_db), while
+    each consumer pricing the same row with the database it holds keeps
+    parity by construction.
+
+    entry_id is "qwen:<uuid>" — the source-global fork key — or "" when the
+    uuid is absent or blank (those records go undeduped on every side).
+    """
+    if not isinstance(rec, dict) or rec.get("type") != "assistant":
+        return None
+    usage = rec.get("usageMetadata")
+    if not isinstance(usage, dict):
+        return None
+    # Both counts must be real integers; missing/invalid counts skip the
+    # record (spec).
+    if not _qwen_is_int(usage.get("promptTokenCount")):
+        return None
+    if not _qwen_is_int(usage.get("candidatesTokenCount")):
+        return None
+    ts_str = rec.get("timestamp")
+    if not isinstance(ts_str, str) or not ts_str:
+        return None
+    try:
+        ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00")).astimezone(timezone.utc)
+    except ValueError:
+        return None
+    raw_prompt = BaseParser._i(usage.get("promptTokenCount"))
+    cache_r = BaseParser._i(usage.get("cachedContentTokenCount"))
+    output_t = BaseParser._i(usage.get("candidatesTokenCount"))
+    reasoning = BaseParser._i(usage.get("thoughtsTokenCount"))
+    # promptTokenCount is cache-inclusive (Gemini semantics): the cached share
+    # is a subset of the prompt, so subtract it into its own bucket (same
+    # split as GeminiCLIParser). The clamp must stay HERE: a provider that
+    # reports cached above prompt would otherwise split differently per
+    # consumer.
+    input_t = max(0, raw_prompt - cache_r)
+    model = rec.get("model")
+    model = str(model).strip() if model is not None else ""
+    if not model:
+        model = "unknown"
+    if input_t == 0 and output_t == 0 and cache_r == 0 and reasoning == 0:
+        return None
+    uuid = rec.get("uuid")
+    entry_id = (
+        f"qwen:{uuid}" if isinstance(uuid, (str, int)) and str(uuid).strip()
+        else ""
+    )
+    return entry_id, {
+        "timestamp": int(ts.timestamp() * 1000),
+        "model": model,
+        "provider": "",
+        "input": input_t,
+        "output": output_t,
+        "cacheRead": cache_r,
+        # Qwen Code persists no cache-write bucket: it stays 0 permanently,
+        # so no consumer has a mapping choice to get wrong here.
+        "cacheWrite": 0,
+        "reasoning": reasoning,
+    }
+
+
+def qwen_session_file(
+    path: str, unavailable: Optional[type] = None
+) -> Tuple[List[Tuple[str, Dict[str, Any]]], Dict[str, Any]]:
+    """One chat file -> (rows, meta) with rows = [(entry_id, row), ...] and
+    meta = {"session_id", "cwd", "preview"}.
+
+    meta carries what the rows cannot: user records are not billable, so a
+    rows-only reader cannot produce a display name, and per-file session
+    identity is what the Sessions harness groups forked history by.
+    session_id falls back to the file stem (the file name is the session id);
+    preview is the first type == "user" record's text.
+
+    ``unavailable`` is the caller's exception class (the
+    parse_cline_message_file shape): this module must never name a
+    sessions.py exception — sessions.py already imports coding_tools. With
+    it given, an open failure or a mid-stream read error raises it, so the
+    caller can retry instead of memoizing an empty parse. With None the open
+    failure keeps returning ([], fallback-meta) exactly as
+    QwenCodeParser._parse_file always did; a mid-stream error still escapes
+    that call, because aborting the whole source (rather than syncing a
+    partial corpus to the store) is Overview's shipped behavior.
+    """
+    rows: List[Tuple[str, Dict[str, Any]]] = []
+    session_id = ""
+    cwd = ""
+    preview = ""
+    try:
+        handle = open(path, "r", encoding="utf-8")
+    except OSError as exc:
+        if unavailable is not None:
+            raise unavailable(path) from exc
+        return [], {"session_id": Path(path).stem, "cwd": "", "preview": ""}
+    try:
+        with handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(rec, dict):
+                    continue
+                if not session_id:
+                    sid = rec.get("sessionId")
+                    if isinstance(sid, str) and sid.strip():
+                        session_id = sid.strip()
+                if not cwd:
+                    rec_cwd = rec.get("cwd")
+                    if isinstance(rec_cwd, str) and rec_cwd.strip():
+                        cwd = rec_cwd.strip()
+                if not preview and rec.get("type") == "user":
+                    preview = _qwen_user_text(rec)
+                row_tuple = qwen_row_from_record(rec)
+                if row_tuple is not None:
+                    rows.append(row_tuple)
+    except OSError as exc:
+        if unavailable is not None:
+            raise unavailable(path) from exc
+        raise
+    return rows, {
+        "session_id": session_id or Path(path).stem,
+        "cwd": cwd,
+        "preview": preview,
+    }
 
 
 class QwenCodeParser(BaseParser):
@@ -5268,100 +5444,45 @@ class QwenCodeParser(BaseParser):
         self.base = clientpaths.qwen_runtime_base()
 
     def _file_signatures(self) -> tuple:
-        return _timed_sigs(
-            f"qwen_code:{self.base}",
-            lambda: qwen_chat_file_signatures(self.base),
-        )
+        # The shared TTL wrapper, so Overview and Sessions cannot drift on
+        # either the file set or the invalidation clock.
+        return qwen_file_signatures(self.base)
 
     @staticmethod
     def _is_int(v: Any) -> bool:
-        return isinstance(v, int) and not isinstance(v, bool)
+        return _qwen_is_int(v)
 
-    def _build_entry(self, model: str, usage: Dict[str, Any], ts_ms: int) -> Dict[str, Any]:
-        raw_prompt = self._i(usage.get("promptTokenCount"))
-        cache_r = self._i(usage.get("cachedContentTokenCount"))
-        output_t = self._i(usage.get("candidatesTokenCount"))
-        reasoning = self._i(usage.get("thoughtsTokenCount"))
-        # Qwen Code persists the provider's usageMetadata verbatim, and
-        # promptTokenCount is cache-inclusive (Gemini semantics): the
-        # cached share is a subset of the prompt, so subtract it into
-        # its own bucket (same split as GeminiCLIParser).
-        input_t = max(0, raw_prompt - cache_r)
-        # Records carry no provider at all, so it stays empty either way
-        # (same as WorkBuddy); only the model id falls back to "unknown".
-        provider = ""
-        if not model:
-            model = "unknown"
-        return {
-            "source": self.source_name,
-            "model": model,
-            "provider": provider,
-            "input": input_t,
-            "output": output_t,
-            "cacheRead": cache_r,
-            "cacheWrite": 0,
-            "reasoning": reasoning,
-            "cost": self.pricing_db.get_cost(model, input_t, output_t, cache_r, 0),
-            "timestamp": ts_ms,
-            "_billing": usage_billing_pricing(
-                [model],
-                input_tokens=input_t,
-                output_tokens=output_t,
-                cache_read=cache_r,
-                cache_write=0,
-            ),
-        }
+    def _build_entry(self, entry_id: str, row: Dict[str, Any]) -> Dict[str, Any]:
+        """The shared row plus the two fields only a pricing DB can add.
+
+        Kept on the parser (and not in qwen_row_from_record) because
+        self.pricing_db is injected: an install passing a custom database
+        must price its Overview entries with THAT database, and the Sessions
+        harness prices the identical row through _billing_record. The rule
+        both sides use is the same call: get_cost(model, input, output,
+        cacheRead, 0).
+        """
+        entry = dict(row)
+        entry["source"] = self.source_name
+        entry["entry_id"] = entry_id
+        entry["cost"] = self.pricing_db.get_cost(
+            entry["model"], entry["input"], entry["output"], entry["cacheRead"], 0
+        )
+        entry["_billing"] = usage_billing_pricing(
+            [entry["model"]],
+            input_tokens=entry["input"],
+            output_tokens=entry["output"],
+            cache_read=entry["cacheRead"],
+            cache_write=0,
+        )
+        return entry
 
     def _parse_file(self, path_str: str) -> List[Dict[str, Any]]:
-        out: List[Dict[str, Any]] = []
-        try:
-            handle = open(path_str, "r", encoding="utf-8")
-        except OSError:
-            return out
-        with handle:
-            for line in handle:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    rec = json.loads(line)
-                except ValueError:
-                    continue
-                if not isinstance(rec, dict) or rec.get("type") != "assistant":
-                    continue
-                usage = rec.get("usageMetadata")
-                if not isinstance(usage, dict):
-                    continue
-                # Both counts must be real integers; missing/invalid
-                # counts skip the record (spec).
-                if not self._is_int(usage.get("promptTokenCount")):
-                    continue
-                if not self._is_int(usage.get("candidatesTokenCount")):
-                    continue
-                ts_str = rec.get("timestamp")
-                if not isinstance(ts_str, str) or not ts_str:
-                    continue
-                try:
-                    ts = datetime.fromisoformat(
-                        ts_str.replace("Z", "+00:00")
-                    ).astimezone(timezone.utc)
-                except ValueError:
-                    continue
-                model = rec.get("model")
-                model = str(model).strip() if model is not None else ""
-                entry = self._build_entry(model, usage, int(ts.timestamp() * 1000))
-                if (
-                    entry["input"] == 0 and entry["output"] == 0
-                    and entry["cacheRead"] == 0 and entry["reasoning"] == 0
-                ):
-                    continue
-                uuid = rec.get("uuid")
-                entry["entry_id"] = (
-                    f"qwen:{uuid}" if isinstance(uuid, (str, int)) and str(uuid).strip()
-                    else ""
-                )
-                out.append(entry)
-        return out
+        # unavailable=None keeps this call's swallow-and-return-[] behavior
+        # on a failed open; qwen_session_file is the shared reader the
+        # Sessions harness reaches with the caller's exception class instead.
+        rows, _meta = qwen_session_file(path_str)
+        return [self._build_entry(entry_id, row) for entry_id, row in rows]
 
     def _parse_all(self) -> List[Dict[str, Any]]:
         # The store's stable-key upsert keeps the earliest-timestamped

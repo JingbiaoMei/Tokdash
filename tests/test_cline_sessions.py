@@ -574,7 +574,7 @@ def test_frontend_session_registry_includes_cline():
     index = Path(sessions.__file__).parent / "static" / "index.html"
     source = index.read_text(encoding="utf-8")
     assert "'antigravity_cli', 'cline'" in source
-    assert "antigravity_cli: null, cline: null, workbuddy: null, qoder: null, combined: null" in source
+    assert "antigravity_cli: null, cline: null, workbuddy: null, qoder: null, qwen_code: null, combined: null" in source
     assert 'updateSessionPanel("cline", lastSessionsResponses.cline);' in source
     assert 'initSortHeaders("cline", renderSessionsTab);' in source
     assert "cline: { ...DEFAULT_SORT }," in source

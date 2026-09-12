@@ -113,7 +113,7 @@
 | **Qoder IDE** | ✅ | ✅ |
 | **Qoder CLI** | ✅ | — |
 | **Zed** | ✅ | — |
-| **Qwen Code** | ✅ | — |
+| **Qwen Code** | ✅ | ✅ |
 | **Crush** | ✅ | — |
 
 로컬 데이터 경로, 오버라이드, 소스별 계상 노트는 [지원 클라이언트](docs/reference/SUPPORTED_CLIENTS.md)를 참조하세요.
@@ -508,7 +508,7 @@ Qoder 사용량은 두 곳에서 로컬로 읽습니다: IDE의 SQLite 데이터
 
 Zed 사용량은 OS별 Zed 데이터 디렉터리 아래의 `threads/threads.db`에서 로컬로 읽습니다(Linux: `$XDG_DATA_HOME/zed` 또는 `~/.local/share/zed`, `FLATPAK_XDG_DATA_HOME` 반영; macOS: `~/Library/Application Support/Zed`; Windows: `%LOCALAPPDATA%\Zed`). 에이전트 스레드 하나가 한 행이며, zstd로 압축된 blob(구형 행은 일반 JSON)이 `cumulative_token_usage`를 담습니다. 이 값은 스레드 자신의 완성 스트림이 필드별 최고 수위로 누적한 것으로, 캐시 배타적(input + cacheRead가 전체 프롬프트)이라 버킷이 그대로 대응됩니다. 서브에이전트 스레드는 별도 행이며 부모로 접히지 않으므로, 토큰이 있는 각 스레드는 정확히 한 번만 계산됩니다. 스레드는 현재 모델(모델을 바꾼 경우 마지막 모델)로 가격이 매겨지고, 가격 DB에 없는 자체 호스팅 ID는 비용 0.00입니다. Zed에는 데이터 디렉터리를 바꾸는 환경 변수가 없어 `--user-data-dir` 플래그가 문서화된 사각지대입니다. Zed는 Sessions 탭에 나타나지 않습니다.
 
-Qwen Code 사용량은 `<base>/projects/*/chats/*.jsonl`(그리고 이름 변경 전의 `<base>/tmp/*/chats/*.jsonl`)에서 로컬로 읽습니다. base는 `$QWEN_RUNTIME_DIR`, 그다음 `$QWEN_HOME`, 그다음 `~/.qwen` 순으로 결정됩니다 — 설정 수준의 `runtime_base_dir`은 Tokdash에서 접근할 수 없으며 문서화된 사각지대입니다. 파일은 추가 전용이고 세션당 하나이며, 각 어시스턴트 레코드는 제공자의 `usageMetadata`를 그대로 담습니다: `promptTokenCount`는 캐시를 포함하므로 캐시 몫은 별도 버킷으로 분리해 캐시 요율로 과금하고, `thoughtsTokenCount`는 추론으로 표시합니다. 각 레코드의 `uuid`는 소스 전역에서 안정적인 키입니다: `/branch`는 부모의 레코드(같은 uuid)를 포크 파일로 복사하므로, 사용량 저장소는 가장 이른 출현으로 키 소유를 정하고 정규 파일이 삭제되면 살아남은 사본을 승격시킵니다. 서브에이전트 레코드는 세션 파일을 공유하며 자동으로 계산됩니다. 비용은 가격 DB에서만 나오고, 모델이 없는 레코드는 `unknown`으로 0.00 처리합니다. Qwen Code는 Sessions 탭에 나타나지 않습니다.
+Qwen Code 사용량은 `<base>/projects/*/chats/*.jsonl`(그리고 이름 변경 전의 `<base>/tmp/*/chats/*.jsonl`)에서 로컬로 읽습니다. base는 `$QWEN_RUNTIME_DIR`, 그다음 `$QWEN_HOME`, 그다음 `~/.qwen` 순으로 결정됩니다 — 설정 수준의 `runtime_base_dir`은 Tokdash에서 접근할 수 없으며 문서화된 사각지대입니다. 파일은 추가 전용이고 세션당 하나이며, 각 어시스턴트 레코드는 제공자의 `usageMetadata`를 그대로 담습니다: `promptTokenCount`는 캐시를 포함하므로 캐시 몫은 별도 버킷으로 분리해 캐시 요율로 과금하고, `thoughtsTokenCount`는 추론으로 표시합니다. 각 레코드의 `uuid`는 소스 전역에서 안정적인 키입니다: `/branch`는 부모의 레코드(같은 uuid)를 포크 파일로 복사하므로, 사용량 저장소는 가장 이른 출현으로 키 소유를 정하고 정규 파일이 삭제되면 살아남은 사본을 승격시킵니다. 서브에이전트 레코드는 세션 파일을 공유하며 자동으로 계산됩니다. 비용은 가격 DB에서만 나오고, 모델이 없는 레코드는 `unknown`으로 0.00 처리합니다. Sessions 탭은 같은 어시스턴트 레코드를 읽어 레코드당 한 턴으로 계산하며, 포크로 복제된 이력은 가장 빠른 사본에 귀속됩니다.
 
 Crush 사용량은 `$CRUSH_DATA_DIR`(각각 `crush.db`를 담은 데이터 디렉터리의 쉼표 구분 목록)에서 로컬로 읽습니다 — 필수입니다. Crush의 기본 데이터 디렉터리는 작업 디렉터리 옆의 프로젝트별 `.crush`여서 훑을 전역 루트가 없기 때문입니다. 데이터베이스는 WAL 모드라 ZCode와 같은 복사·스냅샷 경로로 읽습니다. 토큰이 0이 아닌 세션마다 그 `prompt_tokens`/`completion_tokens`에서 항목 하나이며 서브에이전트 세션도 포함합니다: Crush는 부모 세션에 비용만 접고 토큰은 접지 않으므로, Crush 자체 통계 쿼리가 쓰는 최상위 전용 조건(`parent_session_id IS NULL`)으로는 그 사용량이 누락됩니다. 각 항목은 해당 세션의 마지막 비요약 어시스턴트 메시지에 귀속됩니다 — 여러 모델을 쓴 세션은 마지막 모델로 가격이 매겨집니다. 주의할 점이 셋 있습니다: 카운터는 누적이 아니라 단계별로 대입되므로 마지막 요청의 컨텍스트 크기와 마지막 턴의 출력만 담고 있어 다단계 세션에서는 실제보다 낮게 나옵니다(Crush v0.91.2로 확인). 제공자가 사용량 0을 보고하면 토큰이 문자 수 기반 추정치일 수 있고 DB에는 아무 표시가 없습니다. 그리고 캐시/추론 분리는 저장되지 않습니다. 타임스탬프는 초 단위이며 행은 `updated_at`(마지막 변경)으로 묶이므로 세션 전체 기간의 합계가 하루에 몰립니다. `sessions.cost`는 무시하고 비용은 가격 DB에서만 구합니다. Crush는 Sessions 탭에 나타나지 않습니다.
 

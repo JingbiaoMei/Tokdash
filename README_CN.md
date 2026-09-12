@@ -112,7 +112,7 @@
 | **Qoder IDE** | ✅ | ✅ |
 | **Qoder CLI** | ✅ | — |
 | **Zed** | ✅ | — |
-| **Qwen Code** | ✅ | — |
+| **Qwen Code** | ✅ | ✅ |
 | **Crush** | ✅ | — |
 
 本地数据路径、覆盖变量与各来源的计费说明见[已支持客户端](docs/reference/SUPPORTED_CLIENTS.md)。
@@ -535,7 +535,7 @@ Qoder 的用量从两处本地读取：IDE 的 SQLite 数据库（IDE 数据目�
 
 Zed 的用量从 Zed 各操作系统数据目录下的 `threads/threads.db` 本地读取（Linux：`$XDG_DATA_HOME/zed` 或 `~/.local/share/zed`，支持 `FLATPAK_XDG_DATA_HOME`；macOS：`~/Library/Application Support/Zed`；Windows：`%LOCALAPPDATA%\Zed`）。每个 agent 线程是一行，带一个 zstd 压缩的 blob（旧行是纯 JSON），其中的 `cumulative_token_usage` 是线程自身完成流以高水位方式累加的总量——缓存独占（input + cacheRead = 完整提示词），各桶直接映射；子代理线程是独立的行，其用量绝不并入父线程，因此每个非零线程恰好计一次。线程按其当前模型计价（中途换过模型的线程按最后一个模型计价）；不在价格库中的自托管模型 id 计 0.00。Zed 没有环境变量形式的目录覆盖，`--user-data-dir` 启动参数是文档中记载的盲区。Zed 不出现在 Sessions 标签页。
 
-Qwen Code 的用量从 `<base>/projects/*/chats/*.jsonl`（另含改名前的 `<base>/tmp/*/chats/*.jsonl`）本地读取，base 依次取 `$QWEN_RUNTIME_DIR`、`$QWEN_HOME`、`~/.qwen`——settings 级的 `runtime_base_dir` 覆盖项 Tokdash 无法感知，是文档中记载的盲区。文件为 append-only、每会话一个文件；每条 assistant 记录原样携带 provider 的 `usageMetadata`：`promptTokenCount` 含缓存部分，缓存份额单独分入缓存桶并按缓存价计费，`thoughtsTokenCount` 显示为 reasoning。每条记录的 `uuid` 是稳定的、跨文件全局的去重键：`/branch` 会把父会话的记录（uuid 不变）复制进 fork 的文件，因此用量存储以最早出现的时间戳拥有每个键，规范文件被删除时由幸存副本接管。子代理记录与主记录同文件，自动计入。成本按价格库计价；没有模型的记录按 `unknown` 计 token、成本 0.00。Qwen Code 不出现在 Sessions 标签页。
+Qwen Code 的用量从 `<base>/projects/*/chats/*.jsonl`（另含改名前的 `<base>/tmp/*/chats/*.jsonl`）本地读取，base 依次取 `$QWEN_RUNTIME_DIR`、`$QWEN_HOME`、`~/.qwen`——settings 级的 `runtime_base_dir` 覆盖项 Tokdash 无法感知，是文档中记载的盲区。文件为 append-only、每会话一个文件；每条 assistant 记录原样携带 provider 的 `usageMetadata`：`promptTokenCount` 含缓存部分，缓存份额单独分入缓存桶并按缓存价计费，`thoughtsTokenCount` 显示为 reasoning。每条记录的 `uuid` 是稳定的、跨文件全局的去重键：`/branch` 会把父会话的记录（uuid 不变）复制进 fork 的文件，因此用量存储以最早出现的时间戳拥有每个键，规范文件被删除时由幸存副本接管。子代理记录与主记录同文件，自动计入。成本按价格库计价；没有模型的记录按 `unknown` 计 token、成本 0.00。Sessions 标签页读取同一批 assistant 记录，每条记录一个 turn；fork 复制的历史归最早的一份所有。
 
 Crush 的用量从 `$CRUSH_DATA_DIR`（逗号分隔的数据目录列表，每个目录内含 `crush.db`）本地读取——必填，因为 Crush 默认的数据目录是工作目录旁的按项目 `.crush`，没有全局根目录可扫描。数据库为 WAL 模式，Tokdash 通过与 ZCode 相同的复制快照路径读取。每个 token 非零的会话按其 `prompt_tokens`/`completion_tokens` 贡献一条记录（含子 agent 会话）：Crush 只把 cost 汇总进父会话，从不汇总 token，因此若沿用其自身统计查询的顶层口径（`parent_session_id IS NULL`），子 agent 的用量会被整体丢弃。每条记录归因于所属会话最后一条非 summary 的 assistant 消息——混合模型的会话按最后一个模型计价。三处注意事项与来源并列记载：计数器按步赋值而非累加，因此只保留最后一次请求的上下文大小与最后一轮的输出，多步会话会偏低（针对 Crush v0.91.2 核实）；provider 报告零用量时 token 可能是字符数估算（数据库中无标记）；缓存/reasoning 拆分未被持久化。时间戳为秒；行按 `updated_at`（最后触碰时间）分桶，一个会话的整个生命周期总量落在同一天。`sessions.cost` 被忽略，成本只来自价格库。Crush 不出现在 Sessions 标签页。
 

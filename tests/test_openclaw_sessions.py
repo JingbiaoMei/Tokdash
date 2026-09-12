@@ -55,6 +55,14 @@ T_YESTERDAY = int((_TODAY_LOCAL - timedelta(hours=12)).timestamp() * 1000)
 T_TOMORROW_MIDNIGHT = int((_TODAY_LOCAL + timedelta(days=1)).timestamp() * 1000)
 
 
+def _dt_from_ms(ms: int) -> datetime:
+    # _period_range("all") starts a century pre-epoch, and Windows
+    # datetime.fromtimestamp raises OSError [Errno 22] on negative values
+    # where Linux accepts them. Epoch arithmetic is the same datetime on
+    # every platform.
+    return datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(milliseconds=ms)
+
+
 def _clear_caches() -> None:
     openclaw._ENTRY_CACHE.clear()
     sessions._load_openclaw_sessions.cache_clear()
@@ -253,8 +261,8 @@ def test_two_agents_three_sessions_exact_parity(monkeypatch, tmp_path):
     # Same window semantics against get_session_usage totals, day/month/all.
     for period in ("day", "month", "all"):
         since_ms, until_ms = sessions._period_range(period)
-        since_dt = datetime.fromtimestamp(since_ms / 1000, timezone.utc)
-        until_dt = datetime.fromtimestamp(until_ms / 1000, timezone.utc)
+        since_dt = _dt_from_ms(since_ms)
+        until_dt = _dt_from_ms(until_ms)
         live = openclaw.get_session_usage(_dirs(tmp_path), since_dt, until_dt)
         panel = get_sessions_data("openclaw", period)
         assert panel["summary"]["tokens"] == live["total_tokens"], period
@@ -332,8 +340,8 @@ def test_store_synced_view_agrees_including_boundary(monkeypatch, tmp_path):
     assert len(rows) == 3  # the boundary row IS stored; the window excludes it
 
     since_ms, until_ms = sessions._period_range("day")
-    since_dt = datetime.fromtimestamp(since_ms / 1000, timezone.utc)
-    until_dt = datetime.fromtimestamp(until_ms / 1000, timezone.utc)
+    since_dt = _dt_from_ms(since_ms)
+    until_dt = _dt_from_ms(until_ms)
     live = openclaw.get_session_usage(_dirs(tmp_path), since_dt, until_dt)
     panel = get_sessions_data("openclaw", "day")
     assert live["total_messages"] == 2
@@ -358,8 +366,8 @@ def test_until_instant_residual_live_fallback_only(monkeypatch, tmp_path):
     ])
 
     since_ms, until_ms = sessions._period_range("day")
-    since_dt = datetime.fromtimestamp(since_ms / 1000, timezone.utc)
-    until_dt = datetime.fromtimestamp(until_ms / 1000, timezone.utc)
+    since_dt = _dt_from_ms(since_ms)
+    until_dt = _dt_from_ms(until_ms)
     live = openclaw.get_session_usage(_dirs(tmp_path), since_dt, until_dt)
     panel = get_sessions_data("openclaw", "day")
     assert live["total_messages"] == 3

@@ -53,6 +53,7 @@ from .sources.coding_tools import (
     zcode_snapshot_signatures,
 )
 from .sources import dsh_log
+from .sources import openclaw as openclaw_source
 from .sources.dsh_log import (
     decode_dsh_session_file,
     dsh_entry_id,
@@ -68,7 +69,7 @@ from .usage_store import (
 )
 
 
-SESSION_TOOLS = ("codex", "claude", "opencode", "pi_agent", "omp", "mimo", "kimi", "dsh", "reasonix", "zcode", "kilocode", "grok", "hermes", "antigravity_cli", "cline", "workbuddy", "qoder", "qwen_code")
+SESSION_TOOLS = ("codex", "claude", "opencode", "pi_agent", "omp", "mimo", "kimi", "dsh", "reasonix", "zcode", "kilocode", "grok", "hermes", "antigravity_cli", "cline", "workbuddy", "qoder", "qwen_code", "openclaw")
 logger = logging.getLogger(__name__)
 TOOL_LABELS = {
     "codex": "Codex",
@@ -89,6 +90,7 @@ TOOL_LABELS = {
     "workbuddy": "WorkBuddy",
     "qoder": "Qoder IDE",
     "qwen_code": "Qwen Code",
+    "openclaw": "OpenClaw",
 }
 
 _PRICING_DB = PricingDatabase()
@@ -428,6 +430,16 @@ def reload_pricing_db() -> None:
     # harness is on.
     _parse_qwen_code_session_file.cache_clear()
     _load_qwen_code_sessions.cache_clear()
+    # Same rationale as qwen above: pricing_sig is already in this key and
+    # _pricing_signature() moves with the pricing file, so an edit misses on
+    # its own — the clear is memory, not staleness, and it matters here more
+    # than anywhere: this aggregate holds the 62 MB of billed turn dicts, and
+    # two LRU slots are exactly what would otherwise pin the previous
+    # pricing generation. NOT openclaw._ENTRY_CACHE: its rows carry raw
+    # buckets and no cost (pricing happens afterwards, in _normalized_entry
+    # and in the turn), so clearing it would throw away a 6.3 s parse on
+    # every pricing edit for nothing.
+    _load_openclaw_sessions.cache_clear()
     # New rates change every token in the assembly token, so the entries were
     # already unreachable; dropping them frees the budget they were holding.
     _SESSION_ASSEMBLY.clear()
@@ -765,6 +777,10 @@ def _merged_interval_ms(intervals: Iterable[tuple[int, int]]) -> int:
 #   input-plus-cache-write cache writes bill at the input rate, which is how
 #                          Claude, Kimi, OpenCode and Mimo are priced today
 #   split-cache-write      cache writes bill at their own rate (Pi)
+#   split-cache-write-payload
+#                          split cache write, and when the pricing DB resolves
+#                          nothing the cost the SOURCE recorded on the message
+#                          is the fallback (OpenClaw)
 #
 # Changing a rule changes what stored rows cost, deliberately and without a
 # reparse. Changing which counts a parser *extracts* is a parser change and must
@@ -779,6 +795,14 @@ _BILLING_RULES: dict[str, Callable[[Any, Dict[str, Any]], float]] = {
     "split-cache-write": lambda db, bill: db.get_cost(
         bill["model"], bill["input"], bill["output"], bill["cache_read"], bill["cache_write"]
     ),
+    # Known duplication with usage_billing_pricing(..., fallback=payload_cost)
+    # (usage_store.py, used by the OpenClaw source at openclaw.py). Duplicate
+    # ON PURPOSE: repricing runs through _BILLING_RULES via _repriced_turns,
+    # which cannot call the source-side helper. Do not "consolidate" them —
+    # that breaks repricing, which is the whole reason the rule exists.
+    "split-cache-write-payload": lambda db, bill: db.get_cost(
+        bill["model"], bill["input"], bill["output"], bill["cache_read"], bill["cache_write"]
+    ) or float(bill.get("payload_fallback") or 0.0),
 }
 
 
@@ -791,6 +815,7 @@ def _billing_record(
     cache_read: Any = 0,
     cache_write: Any = 0,
     fixed_cost: Any = None,
+    payload_fallback: Any = None,
 ) -> Dict[str, Any]:
     """The billing inputs for one turn, enough to price it under any rates."""
     bill = {
@@ -805,6 +830,12 @@ def _billing_record(
     # number, not something Tokdash may recompute from rates.
     if fixed_cost is not None:
         bill["fixed"] = float(fixed_cost)
+    # NOT the same thing: a fallback for rules that price from the DB first and
+    # only use the source's number when the model resolves to nothing (the
+    # "split-cache-write-payload" rule), so a later rate edit reprices the turn
+    # and retires the fallback.
+    if payload_fallback is not None:
+        bill["payload_fallback"] = float(payload_fallback)
     return bill
 
 
@@ -4672,6 +4703,168 @@ def _qwen_code_sessions() -> Dict[str, Dict[str, Any]]:
 
 
 # ======================================================================
+# openclaw sessions
+# ======================================================================
+# OpenClaw is the odd one: it shares Overview's parse through the source's own
+# signature-keyed corpus cache (openclaw.collect_session_corpus), so one cold
+# pass per corpus change serves both tabs and the same global message-id
+# dedupe decides the winner set in both. There is deliberately no per-file
+# session parser and no second cache here; the build is split from the caching
+# (build_openclaw_sessions is pure) because a corpus with an unreadable file
+# must deliver a partial panel, and _SessionFileUnavailable escaping an
+# aggregate would 500 the route (the aggregate decorator catches
+# _PartialSessionView alone and the route guard catches only OSError and
+# sqlite3.Error).
+
+
+class _CorpusEvicted(Exception):
+    """The corpus snapshot behind an aggregate cache key left openclaw._ENTRY_CACHE.
+
+    A private sentinel, never a shared failure class: lru_cache stores values,
+    not exceptions, so it cannot be memoized, and the try is local to
+    _openclaw_sessions(), so it never reaches the route guard that turned a
+    raised unavailable-error into a 500 for every other harness.
+    """
+
+
+def build_openclaw_sessions(
+    snapshot, pricing_sig: tuple = ()
+) -> Dict[str, Dict[str, Any]]:
+    """Raw sessions from an OpenClaw corpus snapshot. Pure: no cache, no I/O,
+    no exceptions for a partial corpus — both jobs belong to its callers.
+
+    Groups the ALREADY globally-deduped rows by ``meta[row["file"]]``
+    session_id, so the winner set is shared with Overview rather than
+    recomputed. Display mapping matches Overview's own (openclaw.py:
+    ``tokens_in = input_raw + cache_write``); the bill keeps cache_write
+    separate so pricing keeps the split — a harness passing tokens_in =
+    input_raw would price correctly while displaying fewer tokens than
+    Overview, which is exactly what the parity gate catches. ``pricing_sig``
+    is the cached wrapper's key, carried for symmetry; cost is computed from
+    the live pricing DB at build time.
+    """
+    per_session: Dict[str, list] = {}
+    for row in snapshot.rows:
+        meta = snapshot.meta[row["file"]]  # collect() guarantees the key
+        turn = _build_turn(
+            turn_index=0,
+            timestamp_ms=int(row["msg_dt"].timestamp() * 1000),
+            model=row["model"],
+            tokens_in=row["input_raw"] + row["cache_write"],
+            tokens_cache=row["cache_read"],
+            tokens_out=row["output"],
+            tokens_reasoning=0,
+            bill=_billing_record(
+                row["model"],
+                "split-cache-write-payload",
+                input_tokens=row["input_raw"],
+                output_tokens=row["output"],
+                cache_read=row["cache_read"],
+                cache_write=row["cache_write"],
+                payload_fallback=row.get("payload_cost"),
+            ),
+        )
+        entry_id = str(row.get("entry_id") or "")
+        if entry_id:
+            turn["_event_key"] = entry_id
+        per_session.setdefault(str(meta.get("session_id") or ""), []).append(
+            (turn, meta)
+        )
+
+    sessions: Dict[str, Dict[str, Any]] = {}
+    for session_id, pairs in per_session.items():
+        # One raw per file, merged through _merge_raw_session for the rare
+        # session spanning several files (the reset flow); fold order is scan
+        # order, so the FIRST file's preview names a merged session.
+        per_file: Dict[int, Dict[str, Any]] = {}
+        for turn, meta in pairs:
+            file_raw = per_file.get(id(meta))
+            if file_raw is None:
+                # Deliberate deviation from every other harness: project is
+                # the AGENT from the path, not the cwd — 5,611 of 5,632 files
+                # on this corpus record the same cwd, so cwd grouping would
+                # collapse the panel into one project. cwd is the fallback
+                # only when the path has no agents segment.
+                project = meta.get("agent") or _project_from_repo_or_path(
+                    None, meta.get("cwd") or None
+                )
+                # The group's FIRST file names the session; later files carry
+                # no name of their own, so _merge_raw_session's "existing or
+                # new" can never pick a reset archive's preview over the
+                # live file's (and with no preview anywhere, the fallback
+                # still names it).
+                preview = _clean_display_name(meta.get("preview")) if not per_file else ""
+                file_raw = {
+                    "tool": "openclaw",
+                    "session_id": session_id,
+                    "display_name": preview or (
+                        _fallback_display_name(session_id, project) if len(per_file) == 0 else ""
+                    ),
+                    "project": project,
+                    "turns": [],
+                }
+                per_file[id(meta)] = file_raw
+            file_raw["turns"].append(turn)
+        raw: Optional[Dict[str, Any]] = None
+        for file_raw in per_file.values():
+            file_raw["turns"].sort(
+                key=lambda item: int(item.get("timestamp_ms", 0) or 0)
+            )
+            for turn_index, turn in enumerate(file_raw["turns"], start=1):
+                turn["turn_index"] = turn_index
+            raw = file_raw if raw is None else _merge_raw_session(raw, file_raw)
+        if raw is not None:
+            sessions[session_id] = raw
+    return sessions
+
+
+@_cached_session_aggregate(maxsize=2)
+def _load_openclaw_sessions(
+    corpus_signature: tuple, pricing_sig: tuple = ()
+) -> Dict[str, Dict[str, Any]]:
+    """The caching wrapper over build_openclaw_sessions.
+
+    Resolves the corpus by bare _ENTRY_CACHE lookup — no glob, no stat, no
+    second collection: a glob plus stat is 60-67 ms and a warm collect is
+    75 ms on this corpus, so re-collecting here would pay the tree walk on
+    every aggregate miss and make the cache key's claim a lie. The lookup
+    cannot miss in the normal case (the snapshot was cached under this exact
+    signature microseconds earlier); when _ENTRY_CACHE_MAX evicts between the
+    two calls, raise the private sentinel rather than recollect — recollecting
+    inside the wrapper would cache the CURRENT corpus under the OLD signature,
+    a wrong-key entry that outlives the eviction and answers future requests
+    for a corpus that no longer exists. maxsize=2, not the default 8: 68k
+    billed turn dicts measured 62 MB, so eight stale corpus signatures would
+    pin close to half a gigabyte.
+    """
+    snapshot = openclaw_source.corpus_for_signature(corpus_signature)
+    if snapshot is None:
+        raise _CorpusEvicted()
+    return build_openclaw_sessions(snapshot, pricing_sig)
+
+
+def _openclaw_sessions() -> Dict[str, Dict[str, Any]]:
+    # Exactly one collection per request either way, shared with Overview's
+    # live path through openclaw._ENTRY_CACHE.
+    snapshot = openclaw_source.collect_session_corpus(
+        glob.glob(clientpaths.openclaw_agent_sessions_glob())
+    )
+    if snapshot.failed:
+        # Partial panel, uncached by design: never memoize a view built over
+        # an incomplete corpus, never raise from here (Integration 2a is why
+        # raising from the aggregate path 500s instead of degrading). A
+        # partial response sits in the ROUTE cache for up to CACHE_TTL like
+        # every _PartialSessionView does — shared behavior, pinned by test.
+        return build_openclaw_sessions(snapshot, _pricing_signature())
+    try:
+        return _load_openclaw_sessions(snapshot.signature, _pricing_signature())
+    except _CorpusEvicted:
+        # The fresh snapshot is already in hand: build once, uncached, and
+        # nothing else.
+        return build_openclaw_sessions(snapshot, _pricing_signature())
+
+
+# ======================================================================
 # ZCode sessions (phase 2): the live native-DB group
 #
 # Reads the same WAL-mode SQLite DB as the usage parser, through the
@@ -5667,6 +5860,8 @@ def _raw_sessions_for_tool(
             return _qoder_sessions(since_ms=since_ms, until_ms=until_ms)
         if key == "qwen_code":
             return _qwen_code_sessions()
+        if key == "openclaw":
+            return _openclaw_sessions()
     except (OSError, sqlite3.Error):
         # A live-parse failure (locked dir, unreadable file, corrupt DB) degrades
         # to an empty view instead of erroring the whole tool's session endpoint.

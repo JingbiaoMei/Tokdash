@@ -95,7 +95,7 @@
 | Claude Code | ✅ | ✅ |
 | Gemini CLI | ✅ | — |
 | Antigravity CLI | ✅ | ✅ |
-| OpenClaw | ✅ | — |
+| OpenClaw | ✅ | ✅ |
 | Kimi Code / Kimi CLI | ✅ | ✅ |
 | MiMo Code | ✅ | ✅ |
 | Grok Build | ✅ | ✅ |

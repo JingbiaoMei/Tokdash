@@ -618,7 +618,11 @@ async def _lifespan(_app: "FastAPI"):
 
 
 app = FastAPI(title="Tokdash", lifespan=_lifespan)
-app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+# follow_symlink=True: pipx/uv installs the packaged static assets as symlinks into
+# the uv cache. Starlette defaults to follow_symlink=False, where lookup_path()
+# realpath-resolves each request out of STATIC_DIR, fails the commonpath guard, and
+# 404s every /static/** asset. Traversal ("..") is still rejected via abspath.
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR), follow_symlink=True), name="static")
 app.add_middleware(NoCacheMiddleware)
 
 

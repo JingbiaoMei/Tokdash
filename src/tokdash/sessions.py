@@ -45,12 +45,20 @@ from .sources.coding_tools import (
     connect_sqlite_readonly,
     iter_grok_usage_rows,
     parse_cline_message_file,
+    qoder_cli_effective_rate,
+    qoder_cli_file_candidates,
+    qoder_cli_file_signatures,
+    qoder_cli_merged_entry,
+    qoder_cli_runtime_signature,
+    qwen_file_signatures,
+    qwen_session_file,
     search_dir_claim_key,
     workbuddy_file_signatures,
     zcode_snapshot,
     zcode_snapshot_signatures,
 )
 from .sources import dsh_log
+from .sources import openclaw as openclaw_source
 from .sources.dsh_log import (
     decode_dsh_session_file,
     dsh_entry_id,
@@ -66,7 +74,7 @@ from .usage_store import (
 )
 
 
-SESSION_TOOLS = ("codex", "claude", "opencode", "pi_agent", "omp", "mimo", "kimi", "dsh", "reasonix", "zcode", "kilocode", "grok", "hermes", "antigravity_cli", "cline", "workbuddy", "qoder")
+SESSION_TOOLS = ("codex", "claude", "opencode", "pi_agent", "omp", "mimo", "kimi", "dsh", "reasonix", "zcode", "kilocode", "grok", "hermes", "antigravity_cli", "cline", "workbuddy", "qoder", "qwen_code", "openclaw", "qoder_cli")
 logger = logging.getLogger(__name__)
 TOOL_LABELS = {
     "codex": "Codex",
@@ -86,6 +94,9 @@ TOOL_LABELS = {
     "cline": "Cline",
     "workbuddy": "WorkBuddy",
     "qoder": "Qoder IDE",
+    "qwen_code": "Qwen Code",
+    "openclaw": "OpenClaw",
+    "qoder_cli": "Qoder CLI",
 }
 
 _PRICING_DB = PricingDatabase()
@@ -175,7 +186,7 @@ class _PartialSessionView(Exception):
         self.value = value
 
 
-def _parse_session_file(parser, path_str: str, mtime_ns: int, size: int, pricing_sig: tuple):
+def _parse_session_file(parser, path_str: str, mtime_ns: int, size: int, pricing_sig: tuple, *extra):
     """Call a session-file parser, preferring the variant that reports a transient miss.
 
     ``_cached_session_parser`` hangs the raising variant off the wrapper it returns,
@@ -185,11 +196,15 @@ def _parse_session_file(parser, path_str: str, mtime_ns: int, size: int, pricing
     the whole view, so a parser without it falls back to the ordinary call — a
     transient miss then reads as an empty parse, exactly as it did before the retry
     existed. Degraded, not broken.
+
+    ``*extra`` carries parser-specific key material past the shared four-argument
+    contract (qoder_cli forwards its context window); it must be in BOTH call
+    branches or a patched plain callable silently loses it.
     """
     raising = getattr(parser, "raising", None)
     if raising is None:
-        return parser(path_str, mtime_ns, size, pricing_sig)
-    return raising(path_str, mtime_ns, size, pricing_sig)
+        return parser(path_str, mtime_ns, size, pricing_sig, *extra)
+    return raising(path_str, mtime_ns, size, pricing_sig, *extra)
 
 
 def _cached_session_aggregate(maxsize: int = 8):
@@ -418,6 +433,33 @@ def reload_pricing_db() -> None:
     _load_cline_sessions.cache_clear()
     _parse_workbuddy_session_file.cache_clear()
     _load_workbuddy_sessions.cache_clear()
+    # pricing_sig is already in both qwen keys and _pricing_signature() moves
+    # with the pricing file, so an edit misses on its own and no stale cost is
+    # ever served. The clear frees the memory the discarded pricing
+    # generation was holding and keeps this harness on the list every other
+    # harness is on.
+    _parse_qwen_code_session_file.cache_clear()
+    _load_qwen_code_sessions.cache_clear()
+    # Same rationale as qwen above: pricing_sig is already in this key and
+    # _pricing_signature() moves with the pricing file, so an edit misses on
+    # its own — the clear is memory, not staleness, and it matters here more
+    # than anywhere: this aggregate holds the 62 MB of billed turn dicts, and
+    # two LRU slots are exactly what would otherwise pin the previous
+    # pricing generation. NOT openclaw._ENTRY_CACHE: its rows carry raw
+    # buckets and no cost (pricing happens afterwards, in _normalized_entry
+    # and in the turn), so clearing it would throw away a 6.3 s parse on
+    # every pricing edit for nothing.
+    _load_openclaw_sessions.cache_clear()
+    # Same rationale as qwen above: pricing_sig is already in this key and
+    # _pricing_signature() moves with the pricing file, so an edit misses on
+    # its own and a stale cost is never served — the clear buys memory (the
+    # discarded pricing generation's parsed candidates) and consistency with
+    # the list every other harness is on. _parse_qoder_cli_session_file is
+    # the pricing-independent one (candidate buckets, no cost — pricing
+    # happens at merge time through qoder_cli_merged_entry in the aggregate);
+    # it is on the list for the second reason only.
+    _parse_qoder_cli_session_file.cache_clear()
+    _load_qoder_cli_sessions.cache_clear()
     # New rates change every token in the assembly token, so the entries were
     # already unreachable; dropping them frees the budget they were holding.
     _SESSION_ASSEMBLY.clear()
@@ -755,6 +797,10 @@ def _merged_interval_ms(intervals: Iterable[tuple[int, int]]) -> int:
 #   input-plus-cache-write cache writes bill at the input rate, which is how
 #                          Claude, Kimi, OpenCode and Mimo are priced today
 #   split-cache-write      cache writes bill at their own rate (Pi)
+#   split-cache-write-payload
+#                          split cache write, and when the pricing DB resolves
+#                          nothing the cost the SOURCE recorded on the message
+#                          is the fallback (OpenClaw)
 #
 # Changing a rule changes what stored rows cost, deliberately and without a
 # reparse. Changing which counts a parser *extracts* is a parser change and must
@@ -769,6 +815,14 @@ _BILLING_RULES: dict[str, Callable[[Any, Dict[str, Any]], float]] = {
     "split-cache-write": lambda db, bill: db.get_cost(
         bill["model"], bill["input"], bill["output"], bill["cache_read"], bill["cache_write"]
     ),
+    # Known duplication with usage_billing_pricing(..., fallback=payload_cost)
+    # (usage_store.py, used by the OpenClaw source at openclaw.py). Duplicate
+    # ON PURPOSE: repricing runs through _BILLING_RULES via _repriced_turns,
+    # which cannot call the source-side helper. Do not "consolidate" them —
+    # that breaks repricing, which is the whole reason the rule exists.
+    "split-cache-write-payload": lambda db, bill: db.get_cost(
+        bill["model"], bill["input"], bill["output"], bill["cache_read"], bill["cache_write"]
+    ) or float(bill.get("payload_fallback") or 0.0),
 }
 
 
@@ -781,6 +835,7 @@ def _billing_record(
     cache_read: Any = 0,
     cache_write: Any = 0,
     fixed_cost: Any = None,
+    payload_fallback: Any = None,
 ) -> Dict[str, Any]:
     """The billing inputs for one turn, enough to price it under any rates."""
     bill = {
@@ -795,6 +850,12 @@ def _billing_record(
     # number, not something Tokdash may recompute from rates.
     if fixed_cost is not None:
         bill["fixed"] = float(fixed_cost)
+    # NOT the same thing: a fallback for rules that price from the DB first and
+    # only use the source's number when the model resolves to nothing (the
+    # "split-cache-write-payload" rule), so a later rate edit reprices the turn
+    # and retires the fallback.
+    if payload_fallback is not None:
+        bill["payload_fallback"] = float(payload_fallback)
     return bill
 
 
@@ -4507,6 +4568,502 @@ def _workbuddy_sessions() -> Dict[str, Dict[str, Any]]:
 
 
 # ======================================================================
+# Qwen Code sessions (round 2): the append-only chat JSONL
+#
+# Same files, same record rules, same source-global uuid fold as the
+# Overview parser: both sides scan through qwen_file_signatures (one TTL
+# key) and read through qwen_row_from_record, so a record Overview skips
+# cannot appear here and the bucket math cannot drift. Both halves use the
+# same half-open window, so parity is exact, not approximate.
+#
+# /branch forks copy a session's records — uuids included — into the fork's
+# file. The fold (earliest timestamp wins, STRICT less-than, so an
+# equal-stamp copy keeps the first-discovered winner) runs globally BEFORE
+# any grouping, matching QwenCodeParser._parse_all; the winner map carries
+# (turn, meta, index) — the shape cline's by_id settled on — so a winning
+# turn is attributed to the file its OWN copy came from, not whichever file
+# was iterated last. Consequence: the fork's panel shows only the turns it
+# newly generated; totals stay right either way and per-session attribution
+# follows the store's rule, which is the point.
+#
+# Live-parse only, on purpose: qwen declares cross_file_stable_keys, and
+# the store's earliest-timestamp ownership is a second fork-ownership rule.
+# Implementing the dedupe twice — once in SQL, once in Python — is how
+# Overview and Sessions would start disagreeing.
+# ======================================================================
+
+
+@_cached_session_parser()
+def _parse_qwen_code_session_file(
+    path_str: str, _mtime_ns: int, _size: int, _pricing_sig: tuple = ()
+) -> Optional[tuple[list[Dict[str, Any]], Dict[str, Any]]]:
+    """One chat file -> (turns, meta). Raises _SessionFileUnavailable so a
+    transient miss is retried, never cached; None (from the wrapper) means the
+    file was unreadable this attempt.
+
+    The rows arrive unpriced (the shared reader is cost-free by design), so
+    the "fresh-input" rule priced here is the ONLY price this path computes,
+    and _pricing_sig in the cache key is what makes that safe after a pricing
+    edit. Display mapping: Qwen's builder hardcodes cacheWrite to 0, so there
+    is nothing to fold into tokens_in — unlike cline. Do not "fix" this to
+    look like the other harnesses; there is no mapping choice to get wrong.
+    """
+    rows, meta = qwen_session_file(path_str, unavailable=_SessionFileUnavailable)
+    turns: list[Dict[str, Any]] = []
+    for entry_id, row in rows:
+        turn = _build_turn(
+            turn_index=0,
+            timestamp_ms=row["timestamp"],
+            model=row["model"],
+            tokens_in=row["input"],
+            tokens_cache=row["cacheRead"],
+            tokens_out=row["output"],
+            tokens_reasoning=row["reasoning"],
+            bill=_billing_record(
+                row["model"],
+                "fresh-input",
+                input_tokens=row["input"],
+                output_tokens=row["output"],
+                cache_read=row["cacheRead"],
+                cache_write=0,
+            ),
+        )
+        if entry_id:
+            turn["_event_key"] = entry_id
+        turns.append(turn)
+    return turns, meta
+
+
+@_cached_session_aggregate()
+def _load_qwen_code_sessions(
+    signature: tuple[tuple[str, int, int], ...], pricing_sig: tuple = ()
+) -> Dict[str, Dict[str, Any]]:
+    # (1) Global fold first (Reconciliation 3): one winner per "qwen:<uuid>"
+    #     across the whole corpus, earliest timestamp, strict < — ties keep
+    #     the first-encountered copy, settling on discovery order (the shared
+    #     signature order, then row order within the file). Anonymous records
+    #     (no uuid) append unconditionally, counted once per occurrence, as
+    #     Overview does. Grouping before this fold would count forked history
+    #     twice.
+    winners: Dict[str, tuple] = {}   # entry_id -> (turn, meta, index)
+    anonymous: list[tuple] = []      # (turn, meta, index)
+    transient_miss = False
+    for path_str, mtime_ns, size in signature:
+        try:
+            parsed = _parse_session_file(
+                _parse_qwen_code_session_file, path_str, mtime_ns, size, pricing_sig
+            )
+        except _SessionFileUnavailable:
+            transient_miss = True
+            continue
+        if not parsed:
+            continue
+        turns, meta = parsed
+        for index, turn in enumerate(turns):
+            triple = (turn, meta, index)
+            event_key = str(turn.get("_event_key") or "")
+            if not event_key:
+                anonymous.append(triple)
+                continue
+            prev = winners.get(event_key)
+            if prev is None or int(turn["timestamp_ms"]) < int(prev[0]["timestamp_ms"]):
+                winners[event_key] = triple
+
+    # (2) Group the RETAINED winners by their own file's session_id. The
+    #     map's insertion order is preserved deliberately: Overview returns
+    #     list(by_id.values()) + anonymous off an insertion-ordered dict, and
+    #     turn order inside a merged session inherits that.
+    per_session: Dict[str, list[tuple]] = {}
+    for triple in list(winners.values()) + anonymous:
+        session_id = str(triple[1].get("session_id") or "unknown")
+        per_session.setdefault(session_id, []).append(triple)
+
+    sessions: Dict[str, Dict[str, Any]] = {}
+    for session_id, triples in per_session.items():
+        # One raw per file, merged through _merge_raw_session for the rare
+        # session spanning several files (the reset flow); fold order decides
+        # which file's preview names a merged session.
+        per_file: Dict[int, Dict[str, Any]] = {}
+        for turn, meta, _index in triples:
+            file_raw = per_file.get(id(meta))
+            if file_raw is None:
+                project = _project_from_repo_or_path(None, meta.get("cwd") or None)
+                preview = _clean_display_name(meta.get("preview"))
+                file_raw = {
+                    "tool": "qwen_code",
+                    "session_id": session_id,
+                    "display_name": preview or _fallback_display_name(session_id, project),
+                    "project": project,
+                    "turns": [],
+                }
+                per_file[id(meta)] = file_raw
+            file_raw["turns"].append(turn)
+        raw: Optional[Dict[str, Any]] = None
+        for file_raw in per_file.values():
+            file_raw["turns"].sort(
+                key=lambda item: int(item.get("timestamp_ms", 0) or 0)
+            )
+            for turn_index, turn in enumerate(file_raw["turns"], start=1):
+                turn["turn_index"] = turn_index
+            raw = file_raw if raw is None else _merge_raw_session(raw, file_raw)
+        if raw is not None:
+            sessions[session_id] = raw
+    if transient_miss:
+        raise _PartialSessionView(sessions)
+    return sessions
+
+
+def _qwen_code_sessions() -> Dict[str, Dict[str, Any]]:
+    # The shared TTL wrapper, not qwen_chat_file_signatures: one scan and one
+    # invalidation clock for Overview and Sessions together.
+    return _load_qwen_code_sessions(
+        qwen_file_signatures(clientpaths.qwen_runtime_base()),
+        _pricing_signature(),
+    )
+
+
+# ======================================================================
+# openclaw sessions
+# ======================================================================
+# OpenClaw is the odd one: it shares Overview's parse through the source's own
+# signature-keyed corpus cache (openclaw.collect_session_corpus), so one cold
+# pass per corpus change serves both tabs and the same global message-id
+# dedupe decides the winner set in both. There is deliberately no per-file
+# session parser and no second cache here; the build is split from the caching
+# (build_openclaw_sessions is pure) because a corpus with an unreadable file
+# must deliver a partial panel, and _SessionFileUnavailable escaping an
+# aggregate would 500 the route (the aggregate decorator catches
+# _PartialSessionView alone and the route guard catches only OSError and
+# sqlite3.Error).
+
+
+class _CorpusEvicted(Exception):
+    """The corpus snapshot behind an aggregate cache key left openclaw._ENTRY_CACHE.
+
+    A private sentinel, never a shared failure class: lru_cache stores values,
+    not exceptions, so it cannot be memoized, and the try is local to
+    _openclaw_sessions(), so it never reaches the route guard that turned a
+    raised unavailable-error into a 500 for every other harness.
+    """
+
+
+def build_openclaw_sessions(
+    snapshot, pricing_sig: tuple = ()
+) -> Dict[str, Dict[str, Any]]:
+    """Raw sessions from an OpenClaw corpus snapshot. Pure: no cache, no I/O,
+    no exceptions for a partial corpus — both jobs belong to its callers.
+
+    Groups the ALREADY globally-deduped rows by ``meta[row["file"]]``
+    session_id, so the winner set is shared with Overview rather than
+    recomputed. Display mapping matches Overview's own (openclaw.py:
+    ``tokens_in = input_raw + cache_write``); the bill keeps cache_write
+    separate so pricing keeps the split — a harness passing tokens_in =
+    input_raw would price correctly while displaying fewer tokens than
+    Overview, which is exactly what the parity gate catches. ``pricing_sig``
+    is the cached wrapper's key, carried for symmetry; cost is computed from
+    the live pricing DB at build time.
+    """
+    per_session: Dict[str, list] = {}
+    for row in snapshot.rows:
+        meta = snapshot.meta[row["file"]]  # collect() guarantees the key
+        turn = _build_turn(
+            turn_index=0,
+            timestamp_ms=int(row["msg_dt"].timestamp() * 1000),
+            model=row["model"],
+            tokens_in=row["input_raw"] + row["cache_write"],
+            tokens_cache=row["cache_read"],
+            tokens_out=row["output"],
+            tokens_reasoning=0,
+            bill=_billing_record(
+                row["model"],
+                "split-cache-write-payload",
+                input_tokens=row["input_raw"],
+                output_tokens=row["output"],
+                cache_read=row["cache_read"],
+                cache_write=row["cache_write"],
+                payload_fallback=row.get("payload_cost"),
+            ),
+        )
+        entry_id = str(row.get("entry_id") or "")
+        if entry_id:
+            turn["_event_key"] = entry_id
+        per_session.setdefault(str(meta.get("session_id") or ""), []).append(
+            (turn, meta)
+        )
+
+    sessions: Dict[str, Dict[str, Any]] = {}
+    for session_id, pairs in per_session.items():
+        # One raw per file, merged through _merge_raw_session for the rare
+        # session spanning several files (the reset flow); fold order is scan
+        # order, so the FIRST file's preview names a merged session.
+        per_file: Dict[int, Dict[str, Any]] = {}
+        for turn, meta in pairs:
+            file_raw = per_file.get(id(meta))
+            if file_raw is None:
+                # Deliberate deviation from every other harness: project is
+                # the AGENT from the path, not the cwd — 5,611 of 5,632 files
+                # on this corpus record the same cwd, so cwd grouping would
+                # collapse the panel into one project. cwd is the fallback
+                # only when the path has no agents segment.
+                project = meta.get("agent") or _project_from_repo_or_path(
+                    None, meta.get("cwd") or None
+                )
+                # The group's FIRST file names the session; later files carry
+                # no name of their own, so _merge_raw_session's "existing or
+                # new" can never pick a reset archive's preview over the
+                # live file's (and with no preview anywhere, the fallback
+                # still names it).
+                preview = _clean_display_name(meta.get("preview")) if not per_file else ""
+                file_raw = {
+                    "tool": "openclaw",
+                    "session_id": session_id,
+                    "display_name": preview or (
+                        _fallback_display_name(session_id, project) if len(per_file) == 0 else ""
+                    ),
+                    "project": project,
+                    "turns": [],
+                }
+                per_file[id(meta)] = file_raw
+            file_raw["turns"].append(turn)
+        raw: Optional[Dict[str, Any]] = None
+        for file_raw in per_file.values():
+            file_raw["turns"].sort(
+                key=lambda item: int(item.get("timestamp_ms", 0) or 0)
+            )
+            for turn_index, turn in enumerate(file_raw["turns"], start=1):
+                turn["turn_index"] = turn_index
+            raw = file_raw if raw is None else _merge_raw_session(raw, file_raw)
+        if raw is not None:
+            sessions[session_id] = raw
+    return sessions
+
+
+@_cached_session_aggregate(maxsize=2)
+def _load_openclaw_sessions(
+    corpus_signature: tuple, pricing_sig: tuple = ()
+) -> Dict[str, Dict[str, Any]]:
+    """The caching wrapper over build_openclaw_sessions.
+
+    Resolves the corpus by bare _ENTRY_CACHE lookup — no glob, no stat, no
+    second collection: a glob plus stat is 60-67 ms and a warm collect is
+    75 ms on this corpus, so re-collecting here would pay the tree walk on
+    every aggregate miss and make the cache key's claim a lie. The lookup
+    cannot miss in the normal case (the snapshot was cached under this exact
+    signature microseconds earlier); when _ENTRY_CACHE_MAX evicts between the
+    two calls, raise the private sentinel rather than recollect — recollecting
+    inside the wrapper would cache the CURRENT corpus under the OLD signature,
+    a wrong-key entry that outlives the eviction and answers future requests
+    for a corpus that no longer exists. maxsize=2, not the default 8: 68k
+    billed turn dicts measured 62 MB, so eight stale corpus signatures would
+    pin close to half a gigabyte.
+    """
+    snapshot = openclaw_source.corpus_for_signature(corpus_signature)
+    if snapshot is None:
+        raise _CorpusEvicted()
+    return build_openclaw_sessions(snapshot, pricing_sig)
+
+
+def _openclaw_sessions() -> Dict[str, Dict[str, Any]]:
+    # Exactly one collection per request either way, shared with Overview's
+    # live path through openclaw._ENTRY_CACHE.
+    snapshot = openclaw_source.collect_session_corpus(
+        glob.glob(clientpaths.openclaw_agent_sessions_glob())
+    )
+    if snapshot.failed:
+        # Partial panel, uncached by design: never memoize a view built over
+        # an incomplete corpus, never raise from here (Integration 2a is why
+        # raising from the aggregate path 500s instead of degrading). A
+        # partial response sits in the ROUTE cache for up to CACHE_TTL like
+        # every _PartialSessionView does — shared behavior, pinned by test.
+        return build_openclaw_sessions(snapshot, _pricing_signature())
+    try:
+        return _load_openclaw_sessions(snapshot.signature, _pricing_signature())
+    except _CorpusEvicted:
+        # The fresh snapshot is already in hand: build once, uncached, and
+        # nothing else.
+        return build_openclaw_sessions(snapshot, _pricing_signature())
+
+
+# ======================================================================
+# qoder_cli sessions
+# ======================================================================
+# Qoder CLI bills one request across two streams (transcripts carry the
+# credits, segment logs carry the token buckets, joined on request_id), so
+# this harness re-derives NOTHING about the merge: candidate builders, the
+# global first-write-wins fold, the segment-wins-token rule and the
+# credits-vs-pricing billing split all live in the shared module functions
+# of sources/coding_tools.py. The fold below iterates the shared signature
+# in discovery order — the same order the Overview parser folds in — so
+# both sides resolve a duplicate request id to the same winner. The failure
+# handling is deliberately asymmetric with Overview: the token path aborts
+# the whole source on one unreadable file because sync_source computes every
+# row before deleting the stored corpus, while here a locked file becomes a
+# per-file _SessionFileUnavailable and the rest of the panel still renders.
+
+
+@_cached_session_parser()
+def _parse_qoder_cli_session_file(
+    path_str: str, _mtime_ns: int, _size: int, _pricing_sig: tuple, window: Optional[int]
+) -> Optional[list[Dict[str, Any]]]:
+    """One stream file -> its candidate list, through the shared builder.
+
+    The window belongs in THIS key, not just the aggregate's:
+    QODER_CLI_CONTEXT_WINDOW changes the candidate buckets themselves
+    (context_usage_ratio recovers zero input at it), and an aggregate-only
+    invalidation would serve pre-change candidates from the per-file cache
+    until someone flipped the env on a warm process. Candidates carry no
+    cost — pricing happens at merge time in the aggregate — so this parser
+    is the pricing-independent one; its reload_pricing_db clear is memory
+    and consistency, not staleness. OSError is translated to
+    _SessionFileUnavailable HERE, at the Sessions boundary, not in the
+    source (whose _parse_all must keep aborting whole-source).
+    """
+    try:
+        return qoder_cli_file_candidates(Path(path_str), window)
+    except OSError as exc:
+        raise _SessionFileUnavailable(path_str) from exc
+
+
+@_cached_session_aggregate()
+def _load_qoder_cli_sessions(
+    file_sig: tuple,
+    runtime_sig: tuple,
+    pricing_sig: tuple = (),
+) -> Dict[str, Dict[str, Any]]:
+    # (1) The global fold, in file_sig order = _discovered_files order (the
+    #     shared signer keeps it verbatim, which is what first-write-wins
+    #     depends on). One winner per rid per candidate type across ALL
+    #     roots, exactly as _parse_all does it; a per-session or per-root
+    #     dedupe would change which candidate wins and the tokens.
+    rate_override, window = runtime_sig
+    effective_rate = qoder_cli_effective_rate(rate_override)
+    transcript_cands: Dict[str, Dict[str, Any]] = {}
+    segment_cands: Dict[str, Dict[str, Any]] = {}
+    # rid -> (session_id, project, family): when a rid appears in both
+    # families the transcript's attribution wins; a disagreement is a Qoder
+    # rename, not a reason to split the entry.
+    provenance: Dict[str, tuple] = {}
+    transient_miss = False
+    for path_str, mtime_ns, size in file_sig:
+        try:
+            # Through the helper, never .raising directly: a replaced plain
+            # callable must degrade to the ordinary call, not crash the view.
+            cands = _parse_session_file(
+                _parse_qoder_cli_session_file, path_str, mtime_ns, size,
+                pricing_sig, window,
+            )
+        except _SessionFileUnavailable:
+            transient_miss = True
+            continue
+        if not cands:
+            continue
+        for cand in cands:
+            rid = cand["rid"]
+            prev = provenance.get(rid)
+            if cand["family"] == "segment":
+                if rid not in segment_cands:
+                    segment_cands[rid] = cand["cand"]
+                    if prev is None or prev[2] != "transcript":
+                        provenance[rid] = (
+                            cand["session_id"], cand["project"], "segment",
+                        )
+            elif rid not in transcript_cands:
+                transcript_cands[rid] = cand["cand"]
+                if prev is not None and prev[2] == "segment" and prev[0] != cand["session_id"]:
+                    logger.debug(
+                        "tokdash qoder_cli: rid %s disagrees on session (%s vs %s); "
+                        "keeping the transcript's",
+                        rid, prev[0], cand["session_id"],
+                    )
+                provenance[rid] = (cand["session_id"], cand["project"], "transcript")
+
+    # (2) Merge through the shared resolver, in the parser's own order
+    #     (transcript rids first, each consuming its segment twin, then the
+    #     segment-only tail) so the entry sequence — and therefore the
+    #     display order inside a session — cannot drift either.
+    per_session: Dict[str, list] = {}
+    session_project: Dict[str, str] = {}
+
+    def _collect(rid: str, entry: Optional[Dict[str, Any]]) -> None:
+        if entry is None:
+            return
+        session_id, project, _family = provenance[rid]
+        bill = _billing_record(
+            entry["model"],
+            "split-cache-write",
+            input_tokens=entry["input"],
+            output_tokens=entry["output"],
+            cache_read=entry["cacheRead"],
+            cache_write=entry["cacheWrite"],
+            # Credit rows carry the provider's own figure: _turn_cost returns
+            # `fixed` without consulting the rule, so a pricing-file edit
+            # cannot move them — the same fixed-vs-pricing split Overview's
+            # usage_billing_fixed/usage_billing_pricing pair already makes.
+            fixed_cost=entry["cost"] if entry["costAuthoritative"] else None,
+        )
+        turn = _build_turn(
+            turn_index=0,
+            timestamp_ms=entry["timestamp"],
+            model=entry["model"],
+            # Display map: _build_turn has no cacheWrite field, and Qoder
+            # segments DO carry cache writes, so tokens_in folds them in —
+            # passing tokens_in = input would price correctly while
+            # displaying fewer tokens than Overview.
+            tokens_in=entry["input"] + entry["cacheWrite"],
+            tokens_cache=entry["cacheRead"],
+            tokens_out=entry["output"],
+            tokens_reasoning=0,
+            bill=bill,
+        )
+        turn["_event_key"] = entry["entry_id"]
+        per_session.setdefault(session_id, []).append(turn)
+        session_project.setdefault(session_id, project)
+
+    remaining = dict(segment_cands)
+    for rid, tcand in transcript_cands.items():
+        _collect(rid, qoder_cli_merged_entry(
+            _PRICING_DB, "qoder_cli", rid, tcand, remaining.pop(rid, None), effective_rate
+        ))
+    for rid, scand in remaining.items():
+        _collect(rid, qoder_cli_merged_entry(
+            _PRICING_DB, "qoder_cli", rid, None, scand, effective_rate
+        ))
+
+    sessions: Dict[str, Dict[str, Any]] = {}
+    for session_id, turns in per_session.items():
+        turns.sort(key=lambda item: int(item.get("timestamp_ms", 0) or 0))
+        for turn_index, turn in enumerate(turns, start=1):
+            turn["turn_index"] = turn_index
+        sessions[session_id] = {
+            "tool": "qoder_cli",
+            "session_id": session_id,
+            # Deliberate deviation from the majority convention: Qoder CLI
+            # persists no title in either stream, and _fallback_display_name
+            # returns the project when given one — so the conventional call
+            # would print the sanitized project directory as the NAME of
+            # every session on this machine. With an empty project the short
+            # id discriminates, and the project already has its own column.
+            "display_name": _fallback_display_name(session_id, ""),
+            # Verbatim: the segment project dir is a sanitized cwd, the
+            # mapping is not injective, and any separator inserted by a
+            # guessed inverse names a path that never existed.
+            "project": session_project.get(session_id, ""),
+            "turns": turns,
+        }
+    if transient_miss:
+        raise _PartialSessionView(sessions)
+    return sessions
+
+
+def _qoder_cli_sessions() -> Dict[str, Dict[str, Any]]:
+    return _load_qoder_cli_sessions(
+        qoder_cli_file_signatures(clientpaths.qoder_cli_roots()),
+        qoder_cli_runtime_signature(),
+        _pricing_signature(),
+    )
+
+
+# ======================================================================
 # ZCode sessions (phase 2): the live native-DB group
 #
 # Reads the same WAL-mode SQLite DB as the usage parser, through the
@@ -5500,6 +6057,12 @@ def _raw_sessions_for_tool(
             return _workbuddy_sessions()
         if key == "qoder":
             return _qoder_sessions(since_ms=since_ms, until_ms=until_ms)
+        if key == "qwen_code":
+            return _qwen_code_sessions()
+        if key == "openclaw":
+            return _openclaw_sessions()
+        if key == "qoder_cli":
+            return _qoder_cli_sessions()
     except (OSError, sqlite3.Error):
         # A live-parse failure (locked dir, unreadable file, corrupt DB) degrades
         # to an empty view instead of erroring the whole tool's session endpoint.

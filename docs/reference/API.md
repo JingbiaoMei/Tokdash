@@ -449,7 +449,7 @@ List of sessions for a specific tool.
 
 | Name | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `tool` | string | **yes** | – | Tool name: `codex`, `claude`, `opencode`, `pi_agent`, `omp`, `mimo`, `kimi`, `dsh`, `reasonix`, `zcode`, `kilocode`, `grok`, `hermes`, `antigravity_cli`, or `cline` (OpenClaw is served only via `/api/openclaw`) |
+| `tool` | string | **yes** | – | Session tool name. Accepted values are the ones registered in `SESSION_TOOLS` (`src/tokdash/sessions.py`) -- the enumeration lives with the code, not here |
 | `period` | string | no | `"today"` | See [Period parameter](#period-parameter) |
 | `date_from` | string | no | – | Start date (`YYYY-MM-DD`) |
 | `date_to` | string | no | – | End date (`YYYY-MM-DD`) |
@@ -483,7 +483,10 @@ Non-zero provider-reported costs from OpenCode, Pi and Mimo are kept verbatim �
 Pi from `usage.cost.total`, the other two from the message's `cost`. They are the
 provider's own figures, so no rate edit moves them. Zero means the provider
 reported nothing (plan and subscription accounts), and those turns are estimated
-from rates like any other.
+from rates like any other. Qoder CLI credit rows behave the same way in Sessions:
+their cost is the transcript's credits at the estimated `QODER_USD_PER_CREDIT`
+rate, fixed at parse time and never repriced; token-only qoder_cli turns price
+from the DB like everyone else's.
 
 Rows written before turns carried billing inputs — including rows kept by
 `TOKDASH_USAGE_DB_DURABLE` after their source log disappeared — are priced from
@@ -656,7 +659,7 @@ Convenience wrapper for a single Codex session. Equivalent to `/api/session?tool
 
 ## `GET /api/openclaw`
 
-OpenClaw-specific model breakdown.
+OpenClaw-specific model breakdown (aggregate). The per-session drill-down lives at `/api/sessions?tool=openclaw`; this endpoint stays the aggregate one.
 
 **Query parameters**
 

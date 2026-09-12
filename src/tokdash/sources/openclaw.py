@@ -2,10 +2,15 @@ from __future__ import annotations
 
 import glob
 import json
+import logging
 import os
+import re
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 try:
     from ..clientpaths import openclaw_agent_sessions_glob
@@ -61,8 +66,32 @@ def _cache_hit_rate(tokens_in: Any, tokens_cache: Any) -> Optional[float]:
     return round(num / den, 4)
 
 
-def parse_session_file(filepath: str) -> List[Dict[str, Any]]:
-    """Parse a single OpenClaw session JSONL file into a list of entries."""
+class _OpenClawReadUnavailable(Exception):
+    """A transcript could not be opened, or the stream was lost partway.
+
+    Raised only by :func:`parse_session_file` when the caller passes this
+    class as ``unavailable``; the default one-argument call keeps swallowing
+    everything. Owned here — the source owns its failure — and translated by
+    sessions.py at its own boundary, per the harness convention in README.
+    """
+
+
+def parse_session_file(
+    filepath: str, unavailable: Optional[type] = None
+) -> List[Dict[str, Any]]:
+    """Parse a single OpenClaw session JSONL file into a list of entries.
+
+    Called with one argument this behaves exactly as always: any open or read
+    failure yields ``[]`` (not the entries parsed before the failure — the
+    rows before it cannot be trusted to be the whole file). Given
+    ``unavailable`` (an exception class) such a failure raises it instead —
+    without that, a locked transcript is indistinguishable from an empty file
+    to every caller upstream, and the cache would store the hole under a
+    signature that never changes. A torn JSON *line* stays a silent skip in
+    both modes: a raising variant that failed on decode errors would break on
+    every half-written transcript. Losing the stream, though, counts — the
+    rows before it cannot be trusted to be the whole file.
+    """
     entries: List[Dict[str, Any]] = []
     try:
         with open(filepath, "r", encoding="utf-8") as f:
@@ -75,6 +104,8 @@ def parse_session_file(filepath: str) -> List[Dict[str, Any]]:
                 except json.JSONDecodeError:
                     continue
     except Exception:
+        if unavailable is not None:
+            raise unavailable(filepath) from None
         return []
     return entries
 
@@ -139,8 +170,74 @@ def _usage_cost_from_payload(usage: dict) -> float:
 # memory, mirroring coding_tools.BaseParser. Without this, every /api/usage and
 # /api/stats request re-read ~1 GB of session logs with no cache (the dominant
 # cold-start cost).
-_ENTRY_CACHE: Dict[tuple, List[Dict[str, Any]]] = {}
+@dataclass(frozen=True)
+class SessionCorpus:
+    """One pass over a set of session files: rows, per-file identity, failures.
+
+    ``rows`` are the deduped billable assistant messages, each tagged with
+    the ``file`` it came from (the Sessions loader groups through
+    ``meta[row["file"]]``); ``meta`` maps every successfully parsed file to
+    its session identity (``session_id``, falling back to
+    ``<agent>/<file stem>`` for the header-less file, ``cwd``, ``agent``, and
+    the first user message ``preview`` — all captured during this same pass,
+    never by a second read of the tree); ``failed`` names the files that
+    could not be read to the end.
+
+    ``failed`` is part of the declaration, not a comment: production, the
+    store guard and the test fixtures all read it. A corpus with a non-empty
+    ``failed`` is NEVER cached — a hit on ``_ENTRY_CACHE`` is by definition a
+    verified corpus, which is the only way the signature-only cache below can
+    be trusted by both consumers.
+    """
+
+    rows: List[Dict[str, Any]]
+    files: List[str]
+    signature: tuple
+    meta: Dict[str, Dict[str, Any]]
+    failed: frozenset = frozenset()
+
+
+_ENTRY_CACHE: Dict[tuple, SessionCorpus] = {}
 _ENTRY_CACHE_MAX = 8
+
+# Preview capture cap. The display side (sessions._clean_display_name) folds
+# whitespace and truncates to DISPLAY_NAME_MAX_CHARS anyway; this only bounds
+# what the process-wide corpus cache retains per file.
+_PREVIEW_MAX_CHARS = 256
+
+
+def _agent_from_path(path: str) -> str:
+    """Agent name from ``agents/<agent>/sessions/...``; "" when the layout differs.
+
+    Split on BOTH separators, not os.sep: a Windows tree read from WSL arrives
+    with backslashes as data, and an os.sep-only split would hand the whole
+    path tail back as the "agent name".
+    """
+    parts = re.split(r"[/\\]+", path)
+    for i in range(len(parts) - 2):
+        if parts[i] == "agents" and parts[i + 2] == "sessions" and parts[i + 1]:
+            return parts[i + 1]
+    return ""
+
+
+def _user_preview(message: Dict[str, Any]) -> str:
+    """Raw text of a user message's content — the display-name seed.
+
+    _parse_corpus drops user messages from the rows, which is exactly why the
+    preview must be captured during the row pass. Shape mirrors
+    sessions._message_text_preview without importing it: sources never import
+    sessions.
+    """
+    content = message.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: List[str] = []
+        for item in content:
+            if isinstance(item, dict) and isinstance(item.get("text"), str):
+                parts.append(item["text"])
+        return " ".join(parts)
+    return ""
 
 
 def _is_session_transcript(path: str) -> bool:
@@ -185,23 +282,66 @@ def _signature(files: list[str]) -> tuple:
     return tuple(items)  # already path-sorted
 
 
-def _parse_entries(files: list[str]) -> List[Dict[str, Any]]:
-    """Parse countable assistant-usage messages, deduped by top-level ``id``.
+def _parse_corpus(files: list[str], signature: tuple) -> SessionCorpus:
+    """Parse countable assistant-usage messages, deduped by top-level ``id``,
+    and capture per-file session identity in the same pass.
 
-    OpenClaw writes a unique top-level ``id`` per message; deduping by it makes the
-    parse idempotent against any residual snapshot overlap (snapshot files are already
+    OpenClaw writes a unique top-level ``id`` per message; deduping by it makes
+    the parse idempotent against any residual snapshot overlap (snapshot files are already
     excluded by ``_is_session_transcript``) and mirrors ``ClaudeParser``. Rows carry raw
     token fields only — cost is computed at aggregation time so a pricing-DB edit takes
-    effect without re-parsing.
+    effect without re-parsing. The dedupe is SOURCE-GLOBAL in file order and
+    every surviving row is tagged with its ``file``: the Sessions harness
+    consumes this exact stream, so Overview and Sessions can never disagree
+    about which copy of a repeated id won (a per-file re-parse would count a
+    repeated id twice; a per-session dedupe would silently drop rows relative
+    to Overview). The per-file meta (session header, agent, first user
+    message) is captured on the way through because no second read of the
+    tree is allowed.
     """
     out: List[Dict[str, Any]] = []
     seen_ids: set = set()
+    meta: Dict[str, Dict[str, Any]] = {}
+    failed: set = set()
     for filepath in files:
-        for entry in parse_session_file(filepath):
-            if entry.get("type") != "message":
+        file_meta: Dict[str, Any] = {
+            "session_id": "",
+            "cwd": "",
+            "agent": _agent_from_path(filepath),
+            "preview": "",
+        }
+        try:
+            # One collection mode, deliberately: always through the raising
+            # variant, always recording failures, always returning — Overview
+            # keeps degrading exactly as it did when nothing could observe a
+            # failed read.
+            parsed = parse_session_file(filepath, unavailable=_OpenClawReadUnavailable)
+        except _OpenClawReadUnavailable:
+            failed.add(filepath)
+            continue
+        meta[filepath] = file_meta
+        for entry in parsed:
+            etype = entry.get("type")
+            if etype == "session":
+                # First header wins; there is normally exactly one.
+                if not file_meta["session_id"]:
+                    sid = entry.get("id")
+                    if sid:
+                        file_meta["session_id"] = str(sid)
+                if not file_meta["cwd"]:
+                    cwd = entry.get("cwd")
+                    if cwd:
+                        file_meta["cwd"] = str(cwd)
+                continue
+            if etype != "message":
                 continue
             message = entry.get("message", {})
-            if message.get("role") != "assistant":
+            role = message.get("role")
+            if role == "user":
+                if not file_meta["preview"]:
+                    file_meta["preview"] = _user_preview(message)[:_PREVIEW_MAX_CHARS]
+                continue
+            if role != "assistant":
                 continue
             usage = message.get("usage", {})
             if not usage:
@@ -241,23 +381,83 @@ def _parse_entries(files: list[str]) -> List[Dict[str, Any]]:
                     "cache_read": cache_read,
                     "payload_cost": _usage_cost_from_payload(usage),
                     "entry_id": f"openclaw:{entry_id}" if entry_id else f"openclaw:{filepath}:{len(out)}",
+                    "file": filepath,
                 }
             )
-    return out
+
+    # The header-less file (1 on this corpus) gets a synthetic id so it is
+    # still visible rather than silently dropped.
+    for path, file_meta in meta.items():
+        if not file_meta["session_id"]:
+            stem = os.path.splitext(os.path.basename(path))[0]
+            file_meta["session_id"] = (
+                f"{file_meta['agent']}/{stem}" if file_meta["agent"] else stem
+            )
+
+    return SessionCorpus(
+        rows=out,
+        files=list(files),
+        signature=signature,
+        meta=meta,
+        failed=frozenset(failed),
+    )
 
 
-def _collect_entries(session_dirs: list[str]) -> List[Dict[str, Any]]:
-    """Return parsed+deduped entries for *session_dirs*, cached by file signature."""
-    files = _session_files(session_dirs)
+def collect_session_corpus(
+    session_dirs: list[str], files: Optional[list[str]] = None
+) -> SessionCorpus:
+    """Glob (unless the caller already globbed), parse, cache by signature.
+
+    There is ONE collection mode: it always records ``corpus.failed`` and
+    always returns rather than raising, so Overview keeps degrading. A
+    snapshot whose ``failed`` is non-empty is never cached — with a
+    signature-only cache, any other rule lets an unverified read poison a
+    verified one and reproduces the permanent hole through the guard written
+    to close it. Sessions and the store sync both learn about failures by
+    reading ``corpus.failed`` on the object they were handed, and because
+    incomplete corpora are never built into the cache, a cache hit is by
+    definition a complete corpus.
+
+    The store sync passes ``files`` because it has the list in hand and must
+    not walk the tree twice; the live fallback lets the glob run here.
+    """
+    if files is None:
+        files = _session_files(session_dirs)
     sig = _signature(files)
     cached = _ENTRY_CACHE.get(sig)
     if cached is not None:
         return cached
-    entries = _parse_entries(files)
+    corpus = _parse_corpus(files, sig)
+    if corpus.failed:
+        return corpus
     if len(_ENTRY_CACHE) >= _ENTRY_CACHE_MAX:
         _ENTRY_CACHE.clear()
-    _ENTRY_CACHE[sig] = entries
-    return entries
+    _ENTRY_CACHE[sig] = corpus
+    return corpus
+
+
+def corpus_for_signature(signature: tuple) -> Optional[SessionCorpus]:
+    """Bare ``_ENTRY_CACHE`` lookup: no glob, no stat, no parse. May miss.
+
+    The Sessions aggregate resolves the corpus through this so a cache miss
+    costs a dictionary lookup rather than a second tree walk (a glob plus
+    stat is 60-67 ms on this corpus). It misses only when ``_ENTRY_CACHE_MAX``
+    evicted between the collection and the lookup — the caller already holds
+    a fresh snapshot and handles that itself.
+    """
+    return _ENTRY_CACHE.get(signature)
+
+
+def _collect_entries(session_dirs: list[str]) -> List[Dict[str, Any]]:
+    """Return parsed+deduped entries for *session_dirs*, cached by file signature.
+
+    Rows-only view of ``collect_session_corpus``: the live-fallback path in
+    ``_collect_normalized_entries`` never needs the file/meta/failed payload.
+    Do NOT rename this or point its callers at the public name — the patch
+    site in test_usage_db_schema_too_new.py intercepts this private name on
+    purpose, and an alias would leave the patch silently inert.
+    """
+    return collect_session_corpus(session_dirs).rows
 
 
 def _pricing_signature(pricing_db: PricingDatabase) -> tuple:
@@ -342,8 +542,18 @@ def _collect_normalized_entries(
 # cache. Like the coding-tool parsers, it is a hand-written integer rather than
 # a hash of this module, so an unrelated edit here cannot invalidate the rows.
 # Bump it when extraction, dedup, entry ids, timestamps, token buckets or the
-# recorded billing inputs change.
-OPENCLAW_PARSER_VERSION = 1
+# recorded billing inputs change — AND when the reader's completeness rule
+# changes, because a row written from a corpus that had an unreadable file is
+# short: the version records when stored rows stopped being trustworthy, not
+# only when their shape changed. (Precedent: the Claude parser's
+# persistent_parser_version at coding_tools.py:1308, bumped for the same class
+# of reason — version 1 kept a partial usage snapshot.)
+#   1 - original extraction. Its hole: a locked transcript plus any signature
+#       change replaced the whole stored source with the partial set, and the
+#       partial signature was then recorded as current.
+#   2 - completeness rule: an incomplete corpus is never written to the store
+#       (and never cached); anything stored under 1 is reparsed.
+OPENCLAW_PARSER_VERSION = 2
 
 
 def _openclaw_parser_signature() -> dict:
@@ -359,23 +569,48 @@ def _sync_openclaw_store(session_dirs: list[str], pricing_db: PricingDatabase) -
     # on a too-new database that discovery is pure waste, repeated per request.
     raise_if_usage_db_incompatible()
     files = _session_files(session_dirs)
-    sig = _signature(files)
     store = UsageEntryStore()
     # Pricing is applied to the stored billing inputs, not folded into the parse
     # signature — a rate edit reprices these rows without rereading any log.
     pricing = persistent_pricing_signature(pricing_db)
     store.apply_pricing(pricing, pricing_db)
     signature = build_source_signature(  # type: ignore[misc]
-        files=sig,
+        files=_signature(files),
         parser=_openclaw_parser_signature(),
     )
+    # Unchanged corpus: parse nothing. sync_source below short-circuits on the
+    # same comparison, but collection now runs BEFORE it — without this guard
+    # every sync request would pay the tree walk (6.3 s cold on this corpus)
+    # to re-check a fact the stored signature already answers.
+    if store.source_signature("openclaw") == signature:
+        return store
+    # Check and write from ONE collection: the rows committed are exactly the
+    # rows verified complete. A second read of the tree (the shipped design)
+    # could land in a different lock window than the check — and a row-count
+    # comparison could not catch it, because the global id dedupe promotes a
+    # duplicate from a later file when an earlier one fails, so a partial read
+    # can come back with an equal or even larger count.
+    corpus = collect_session_corpus(session_dirs, files=files)
+    if corpus.failed:
+        # Store preservation: sync_source would DELETE the complete stored
+        # corpus and commit the short one, and the partial signature would be
+        # recorded as current — Overview stays short until an unrelated file
+        # happens to change. Decline instead: previous rows untouched, nothing
+        # recorded, the next request retries. The warning is what keeps "the
+        # corpus is short" from silently becoming "Overview is stale".
+        logger.warning(
+            "tokdash openclaw sync declined, keeping stored rows: %d transcript(s) unreadable: %s",
+            len(corpus.failed),
+            sorted(corpus.failed),
+        )
+        return store
     # Parsing runs outside the store lock, so declare the pricing it ran under:
     # a sync landing after another process repriced must not commit its costs
     # under that process's identity. The trailing call rebuilds them if so.
     store.sync_source(
         "openclaw",
         signature,
-        lambda: (_normalized_entry(e, pricing_db) for e in _collect_entries(session_dirs)),
+        lambda: (_normalized_entry(e, pricing_db) for e in corpus.rows),
         pricing_identity=pricing,
     )
     store.apply_pricing(pricing, pricing_db)

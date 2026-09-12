@@ -491,7 +491,7 @@ def test_frontend_session_registry_includes_workbuddy():
     index = Path(sessions.__file__).parent / "static" / "index.html"
     source = index.read_text(encoding="utf-8")
     assert "'antigravity_cli', 'cline', 'workbuddy'" in source
-    assert "cline: null, workbuddy: null, qoder: null, combined: null" in source
+    assert "cline: null, workbuddy: null, qoder: null, qwen_code: null, openclaw: null, qoder_cli: null, combined: null" in source
     assert 'updateSessionPanel("workbuddy", lastSessionsResponses.workbuddy);' in source
     assert 'initSortHeaders("workbuddy", renderSessionsTab);' in source
     assert "workbuddy: { ...DEFAULT_SORT }," in source

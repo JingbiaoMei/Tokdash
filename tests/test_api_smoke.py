@@ -257,13 +257,13 @@ def test_static_mount_follows_symlinks():
 
 @pytest.mark.skipif(os.name == "nt", reason="creating symlinks needs developer mode on Windows")
 def test_static_serves_symlinked_assets(tmp_path):
-    """End-to-end version of the check above: serve a packaged file that is itself a
-    symlink. Reuses the real mount's follow_symlink setting, so this test fails if
-    api.py ever drops it again instead of only asserting the flag.
+    """Resolve a packaged file that is itself a symlink.
+
+    Reuse the real mount's setting so dropping follow_symlink in api.py makes the
+    lookup fail. Avoid TestClient here because synchronous handlers can deadlock
+    with this repository's FastAPI/AnyIO test stack.
     """
-    from fastapi import FastAPI
     from fastapi.staticfiles import StaticFiles
-    from fastapi.testclient import TestClient
 
     follow_symlink = _static_mount().app.follow_symlink
 
@@ -275,14 +275,11 @@ def test_static_serves_symlinked_assets(tmp_path):
     linked.mkdir()
     (linked / "themes.css").symlink_to(real / "themes.css")
 
-    app = FastAPI()
-    app.mount(
-        "/static",
-        StaticFiles(directory=str(linked), follow_symlink=follow_symlink),
-        name="static",
-    )
+    static_files = StaticFiles(directory=str(linked), follow_symlink=follow_symlink)
+    full_path, stat_result = static_files.lookup_path("themes.css")
 
-    assert TestClient(app).get("/static/themes.css").status_code == 200
+    assert full_path == str(linked / "themes.css")
+    assert stat_result is not None
 
 
 def test_public_base_path_rendering():

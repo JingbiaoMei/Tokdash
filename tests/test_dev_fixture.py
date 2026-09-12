@@ -300,7 +300,7 @@ def test_dev_seed_still_requires_a_fixture_on_serve(capsys):
 def test_dense_fixture_session_tools_match_production():
     """SESSION_LABELS is the real session-tool set, not an arbitrary subset.
 
-    Active Time covers 19 tools and Overview covers 12 because usage sources and
+    Active Time covers 20 tools and Overview covers 12 because usage sources and
     session tools genuinely differ (cursor and gemini_cli report tokens but ship
     no transcripts). Pinning the session half here keeps that difference
     deliberate instead of drifting.

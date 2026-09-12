@@ -110,7 +110,7 @@
 | **ZCode** | ✅ | ✅ |
 | **WorkBuddy** | ✅ | ✅ |
 | **Qoder IDE** | ✅ | ✅ |
-| **Qoder CLI** | ✅ | — |
+| **Qoder CLI** | ✅ | ✅ |
 | **Zed** | ✅ | — |
 | **Qwen Code** | ✅ | ✅ |
 | **Crush** | ✅ | — |
@@ -531,7 +531,7 @@ ZCode 的用量从 `$ZCODE_HOME/cli/db/db.sqlite`（默认 `~/.zcode/cli/db/db.s
 
 WorkBuddy 的用量从 `~/.workbuddy-ai/projects/*/*.jsonl` 会话日志本地读取（`WORKBUDDY_DATA_DIR` 可指定逗号分隔的根目录列表，指向其他存储位置，例如 WSL 下的 Windows 数据目录）。每条 assistant 消息行对应一次模型调用；`prompt_tokens` 中包含缓存部分，缓存部分单独分桶、按缓存费率计费；reasoning token 与 output 分开显示，但按 output 费率计费。模型 ID 原样保留：显式模型 ID（如 gpt-5.5）照常按现有价格库计价，Auto 路由别名（`default-model`）不在价格库中，费用为 0.00。每轮的 `credit` 值仅作为元数据存储，不计入费用。Sessions 标签页从相同的根目录读取相同的会话日志行（每个计费的 assistant 行对应一个 turn）。
 
-Qoder 的用量从两处本地读取：IDE 的 SQLite 数据库（IDE 数据目录下 `SharedClientCache/cache/db/local.db`，Windows 与 WSL 下 QoderCN 版优于国际版）和 CLI 的 JSONL 日志（`~/.qoder` 与 `~/.qoder-cn`，另支持 `QODER_CONFIG_DIR` 和逗号分隔的 `QODER_CLI_HOME`）。IDE 侧对 `chat_message` 表中每个角色的行都计数：提示词 token 中的缓存部分单独分入缓存桶，模型取自 `model_key`（路由器未暴露名称时为 `auto`）。CLI 侧按请求将会话 transcript 中的计费记录与 segment 日志中的 token 记录合并（覆盖全部 CLI 根目录）：带 provider credits 的行直接使用 provider 报告的成本作为权威值，按估算的 $0.01/credit 换算（可用 `QODER_USD_PER_CREDIT` 覆盖该估算值）且永不重新计价；仅含 token 的行按常规价格库计价。记录没有 input token 时，用 `context_usage_ratio` 乘上已知的上下文窗口恢复 input——除非显式设置 `QODER_CLI_CONTEXT_WINDOW`，否则窗口只对 `auto` 已知（180,000）。Qoder IDE 出现在 Sessions 标签页：相同的 `chat_message` 行（所有角色，每个可解析的行对应一个 turn）从同一数据库的临时目录快照读取。
+Qoder 的用量从两处本地读取：IDE 的 SQLite 数据库（IDE 数据目录下 `SharedClientCache/cache/db/local.db`，Windows 与 WSL 下 QoderCN 版优于国际版）和 CLI 的 JSONL 日志（`~/.qoder` 与 `~/.qoder-cn`，另支持 `QODER_CONFIG_DIR` 和逗号分隔的 `QODER_CLI_HOME`）。IDE 侧对 `chat_message` 表中每个角色的行都计数：提示词 token 中的缓存部分单独分入缓存桶，模型取自 `model_key`（路由器未暴露名称时为 `auto`）。CLI 侧按请求将会话 transcript 中的计费记录与 segment 日志中的 token 记录合并（覆盖全部 CLI 根目录）：带 provider credits 的行直接使用 provider 报告的成本作为权威值，按估算的 $0.01/credit 换算（可用 `QODER_USD_PER_CREDIT` 覆盖该估算值）且永不重新计价；仅含 token 的行按常规价格库计价。记录没有 input token 时，用 `context_usage_ratio` 乘上已知的上下文窗口恢复 input——除非显式设置 `QODER_CLI_CONTEXT_WINDOW`，否则窗口只对 `auto` 已知（180,000）。Qoder IDE 出现在 Sessions 标签页：相同的 `chat_message` 行（所有角色，每个可解析的行对应一个 turn）从同一数据库的临时目录快照读取。 Qoder CLI 也拥有自己的 Sessions 面板：两条流的逐文件候选按与 Overview 完全相同的顺序、同一胜出规则经由同一个 request_id 合并折叠，credit 行原样保留提供方上报的成本，段项目以净化后的目录标签原样展示，因为该净化不可逆。
 
 Zed 的用量从 Zed 各操作系统数据目录下的 `threads/threads.db` 本地读取（Linux：`$XDG_DATA_HOME/zed` 或 `~/.local/share/zed`，支持 `FLATPAK_XDG_DATA_HOME`；macOS：`~/Library/Application Support/Zed`；Windows：`%LOCALAPPDATA%\Zed`）。每个 agent 线程是一行，带一个 zstd 压缩的 blob（旧行是纯 JSON），其中的 `cumulative_token_usage` 是线程自身完成流以高水位方式累加的总量——缓存独占（input + cacheRead = 完整提示词），各桶直接映射；子代理线程是独立的行，其用量绝不并入父线程，因此每个非零线程恰好计一次。线程按其当前模型计价（中途换过模型的线程按最后一个模型计价）；不在价格库中的自托管模型 id 计 0.00。Zed 没有环境变量形式的目录覆盖，`--user-data-dir` 启动参数是文档中记载的盲区。Zed 不出现在 Sessions 标签页。
 

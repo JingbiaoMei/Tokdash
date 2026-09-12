@@ -481,7 +481,7 @@ def test_frontend_session_registry_includes_qoder():
     index = Path(sessions.__file__).parent / "static" / "index.html"
     source = index.read_text(encoding="utf-8")
     assert "'workbuddy', 'qoder'" in source
-    assert "workbuddy: null, qoder: null, qwen_code: null, combined: null" in source
+    assert "workbuddy: null, qoder: null, qwen_code: null, openclaw: null, combined: null" in source
     assert 'updateSessionPanel("qoder", lastSessionsResponses.qoder);' in source
     assert 'initSortHeaders("qoder", renderSessionsTab);' in source
     assert "qoder: { ...DEFAULT_SORT }," in source

@@ -449,7 +449,7 @@ List of sessions for a specific tool.
 
 | Name | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `tool` | string | **yes** | – | Session tool name. Accepted values are the ones registered in `SESSION_TOOLS` (`src/tokdash/sessions.py`) -- the enumeration lives with the code, not here (OpenClaw is served only via `/api/openclaw`) |
+| `tool` | string | **yes** | – | Session tool name. Accepted values are the ones registered in `SESSION_TOOLS` (`src/tokdash/sessions.py`) -- the enumeration lives with the code, not here |
 | `period` | string | no | `"today"` | See [Period parameter](#period-parameter) |
 | `date_from` | string | no | – | Start date (`YYYY-MM-DD`) |
 | `date_to` | string | no | – | End date (`YYYY-MM-DD`) |
@@ -656,7 +656,7 @@ Convenience wrapper for a single Codex session. Equivalent to `/api/session?tool
 
 ## `GET /api/openclaw`
 
-OpenClaw-specific model breakdown.
+OpenClaw-specific model breakdown (aggregate). The per-session drill-down lives at `/api/sessions?tool=openclaw`; this endpoint stays the aggregate one.
 
 **Query parameters**
 

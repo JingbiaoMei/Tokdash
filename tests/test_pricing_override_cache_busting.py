@@ -233,6 +233,25 @@ def test_coding_tools_computes_persistent_pricing_signature_once_per_tracker(mon
     assert sync_calls == ["claude", "codex", "gemini_cli"]
 
 
+def session_corpus_for_tests(rows, signature=()):
+    """Fixture SessionCorpus whose meta is synthesized from the rows' own
+    ``file`` values, so a row without one fails loudly instead of yielding a
+    session with no project. The sync seam moved from ``_collect_entries`` to
+    ``collect_session_corpus`` because the sync now checks and writes ONE
+    collection; the stub-call assertions below are what prove the patch still
+    bites (a seam that is silently never called looks identical to one that
+    is)."""
+    meta = {}
+    for row in rows:
+        meta.setdefault(
+            row["file"],
+            {"session_id": row["file"], "cwd": "", "agent": "", "preview": ""},
+        )
+    return openclaw.SessionCorpus(
+        rows=list(rows), files=list(meta), signature=signature, meta=meta
+    )
+
+
 def test_openclaw_persistent_store_survives_identical_reinstall(monkeypatch, tmp_path):
     first_db = _installed_pricing_db(tmp_path / "openclaw-v1", 1.0, 1_700_000_000)
     reinstalled_db = _installed_pricing_db(tmp_path / "openclaw-v2", 1.0, 1_800_000_000)
@@ -243,22 +262,25 @@ def test_openclaw_persistent_store_survives_identical_reinstall(monkeypatch, tmp
     (sessions_dir / "session.jsonl").write_text("{}\n", encoding="utf-8")
     parse_calls: list[str] = []
 
-    def collect_entries(_session_dirs):
+    def collect_session_corpus(_session_dirs, files=None):
         parse_calls.append("parsed")
-        return [
-            {
-                "msg_dt": datetime(2026, 8, 12, tzinfo=timezone.utc),
-                "model": "foo",
-                "input_raw": 10,
-                "cache_write": 0,
-                "output": 5,
-                "cache_read": 0,
-                "payload_cost": 0.0,
-                "entry_id": "openclaw:test-entry",
-            }
-        ]
+        return session_corpus_for_tests(
+            [
+                {
+                    "msg_dt": datetime(2026, 8, 12, tzinfo=timezone.utc),
+                    "model": "foo",
+                    "input_raw": 10,
+                    "cache_write": 0,
+                    "output": 5,
+                    "cache_read": 0,
+                    "payload_cost": 0.0,
+                    "entry_id": "openclaw:test-entry",
+                    "file": str(sessions_dir / "session.jsonl"),
+                }
+            ]
+        )
 
-    monkeypatch.setattr(openclaw, "_collect_entries", collect_entries)
+    monkeypatch.setattr(openclaw, "collect_session_corpus", collect_session_corpus)
 
     assert openclaw._pricing_signature(first_db) != openclaw._pricing_signature(reinstalled_db)
     assert usage_store_module.persistent_pricing_signature(

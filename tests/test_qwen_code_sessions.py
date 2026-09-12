@@ -659,7 +659,7 @@ def test_frontend_session_registry_includes_qwen_code():
     index = Path(sessions.__file__).parent / "static" / "index.html"
     source = index.read_text(encoding="utf-8")
     assert "'workbuddy', 'qoder', 'qwen_code'" in source
-    assert "qoder: null, qwen_code: null, combined: null" in source
+    assert "qoder: null, qwen_code: null, openclaw: null, combined: null" in source
     assert 'updateSessionPanel("qwen_code", lastSessionsResponses.qwen_code);' in source
     assert 'initSortHeaders("qwen_code", renderSessionsTab);' in source
     assert "qwen_code: { ...DEFAULT_SORT }," in source

@@ -111,7 +111,7 @@
 | **ZCode** | ✅ | ✅ |
 | **WorkBuddy** | ✅ | ✅ |
 | **Qoder IDE** | ✅ | ✅ |
-| **Qoder CLI** | ✅ | — |
+| **Qoder CLI** | ✅ | ✅ |
 | **Zed** | ✅ | — |
 | **Qwen Code** | ✅ | ✅ |
 | **Crush** | ✅ | — |
@@ -504,7 +504,7 @@ Coding Plan 쿼터는 별도로 동의한 Z.ai 라이브 폴러를 통해 사용
 
 WorkBuddy 사용량은 `~/.workbuddy-ai/projects/*/*.jsonl` 트랜스크립트에서 로컬로 읽습니다(`WORKBUDDY_DATA_DIR`은 쉼표 구분 루트 목록을 받아 다른 스토어, 예: WSL의 Windows 데이터 디렉터리 등을 지정할 수 있음). 각 어시스턴트 메시지 행은 하나의 모델 호출이며, `prompt_tokens` 안의 캐시 부분은 별도 버킷으로 분리해 캐시 요율을 적용하고, 추론 토큰은 출력과 분리해 표시하되 출력 요율로 과금됩니다. 모델 ID는 그대로 유지됩니다: 명시적 ID(예: gpt-5.5)는 통상 가격 데이터베이스로 가격화되고, Auto 라우터 별칭(`default-model`)은 가격 DB에 없으므로 비용 0.00입니다. 턴별 `credit` 값은 메타데이터로만 저장되며 비용에 영향을 주지 않습니다. Sessions 탭은 같은 루트에서 같은 트랜스크립트 행(과금 대상 어시스턴트 1행 = 1턴)을 읽습니다.
 
-Qoder 사용량은 두 곳에서 로컬로 읽습니다: IDE의 SQLite 데이터베이스(IDE 데이터 디렉터리 아래 `SharedClientCache/cache/db/local.db`. Windows와 WSL에서는 QoderCN 빌드가 국제판보다 우선)와 CLI JSONL 로그(`~/.qoder`와 `~/.qoder-cn`, 그리고 `QODER_CONFIG_DIR`과 쉼표 구분 `QODER_CLI_HOME`). IDE 쪽에서는 모든 롤의 `chat_message` 행이 모두 카운트되고, 캐시 부분은 프롬프트 토큰에서 별도 버킷으로 분리되며, 모델은 `model_key`(라우터 이름이 없으면 `auto`)에서 옵니다. CLI 쪽에서는 각 요청의 트랜스크립트 과금 기록이 모든 루트에서 세그먼트 토큰 기록과 병합됩니다: 제공자 크레딧을 가진 행은 제공자 보고 비용을 권위로 유지(추정 크레딧 1개당 $0.01로 환산, `QODER_USD_PER_CREDIT`이 추정을 오버라이드하며 절대 재가격화되지 않음), 토큰만 있는 행은 통상 가격 데이터베이스로 가격화됩니다. 입력 토큰이 없는 기록은 알려진 컨텍스트 윈도우에 대한 `context_usage_ratio`로 복원합니다 — 기본 `auto`는 180,000, `QODER_CLI_CONTEXT_WINDOW`이 명시 설정된 뒤로는 모든 모델. Qoder IDE는 Sessions 탭에 표시됩니다: 같은 `chat_message` 행(모든 롤, 해석 가능한 행 1개 = 턴 1개)을 같은 DB의 임시 디렉터리 스냅샷에서 읽습니다.
+Qoder 사용량은 두 곳에서 로컬로 읽습니다: IDE의 SQLite 데이터베이스(IDE 데이터 디렉터리 아래 `SharedClientCache/cache/db/local.db`. Windows와 WSL에서는 QoderCN 빌드가 국제판보다 우선)와 CLI JSONL 로그(`~/.qoder`와 `~/.qoder-cn`, 그리고 `QODER_CONFIG_DIR`과 쉼표 구분 `QODER_CLI_HOME`). IDE 쪽에서는 모든 롤의 `chat_message` 행이 모두 카운트되고, 캐시 부분은 프롬프트 토큰에서 별도 버킷으로 분리되며, 모델은 `model_key`(라우터 이름이 없으면 `auto`)에서 옵니다. CLI 쪽에서는 각 요청의 트랜스크립트 과금 기록이 모든 루트에서 세그먼트 토큰 기록과 병합됩니다: 제공자 크레딧을 가진 행은 제공자 보고 비용을 권위로 유지(추정 크레딧 1개당 $0.01로 환산, `QODER_USD_PER_CREDIT`이 추정을 오버라이드하며 절대 재가격화되지 않음), 토큰만 있는 행은 통상 가격 데이터베이스로 가격화됩니다. 입력 토큰이 없는 기록은 알려진 컨텍스트 윈도우에 대한 `context_usage_ratio`로 복원합니다 — 기본 `auto`는 180,000, `QODER_CLI_CONTEXT_WINDOW`이 명시 설정된 뒤로는 모든 모델. Qoder IDE는 Sessions 탭에 표시됩니다: 같은 `chat_message` 행(모든 롤, 해석 가능한 행 1개 = 턴 1개)을 같은 DB의 임시 디렉터리 스냅샷에서 읽습니다. Qoder CLI에도 고유 Sessions 패널이 있습니다: 두 스트림의 파일별 후보는 Overview과 동일한 순서·동일한 승자로 동일한 request_id 병합을 통과하며, 크레딧 행은 공급자 보고 비용을 그대로 유지하고, 세그먼트 프로젝트는 정규화 되돌리기가 불가능하므로 정규화된 디렉터리 레이블을 그대로 표시합니다.
 
 Zed 사용량은 OS별 Zed 데이터 디렉터리 아래의 `threads/threads.db`에서 로컬로 읽습니다(Linux: `$XDG_DATA_HOME/zed` 또는 `~/.local/share/zed`, `FLATPAK_XDG_DATA_HOME` 반영; macOS: `~/Library/Application Support/Zed`; Windows: `%LOCALAPPDATA%\Zed`). 에이전트 스레드 하나가 한 행이며, zstd로 압축된 blob(구형 행은 일반 JSON)이 `cumulative_token_usage`를 담습니다. 이 값은 스레드 자신의 완성 스트림이 필드별 최고 수위로 누적한 것으로, 캐시 배타적(input + cacheRead가 전체 프롬프트)이라 버킷이 그대로 대응됩니다. 서브에이전트 스레드는 별도 행이며 부모로 접히지 않으므로, 토큰이 있는 각 스레드는 정확히 한 번만 계산됩니다. 스레드는 현재 모델(모델을 바꾼 경우 마지막 모델)로 가격이 매겨지고, 가격 DB에 없는 자체 호스팅 ID는 비용 0.00입니다. Zed에는 데이터 디렉터리를 바꾸는 환경 변수가 없어 `--user-data-dir` 플래그가 문서화된 사각지대입니다. Zed는 Sessions 탭에 나타나지 않습니다.
 

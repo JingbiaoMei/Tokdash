@@ -483,7 +483,10 @@ Non-zero provider-reported costs from OpenCode, Pi and Mimo are kept verbatim �
 Pi from `usage.cost.total`, the other two from the message's `cost`. They are the
 provider's own figures, so no rate edit moves them. Zero means the provider
 reported nothing (plan and subscription accounts), and those turns are estimated
-from rates like any other.
+from rates like any other. Qoder CLI credit rows behave the same way in Sessions:
+their cost is the transcript's credits at the estimated `QODER_USD_PER_CREDIT`
+rate, fixed at parse time and never repriced; token-only qoder_cli turns price
+from the DB like everyone else's.
 
 Rows written before turns carried billing inputs — including rows kept by
 `TOKDASH_USAGE_DB_DURABLE` after their source log disappeared — are priced from

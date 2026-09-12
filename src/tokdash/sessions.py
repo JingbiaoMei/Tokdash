@@ -45,6 +45,11 @@ from .sources.coding_tools import (
     connect_sqlite_readonly,
     iter_grok_usage_rows,
     parse_cline_message_file,
+    qoder_cli_effective_rate,
+    qoder_cli_file_candidates,
+    qoder_cli_file_signatures,
+    qoder_cli_merged_entry,
+    qoder_cli_runtime_signature,
     qwen_file_signatures,
     qwen_session_file,
     search_dir_claim_key,
@@ -69,7 +74,7 @@ from .usage_store import (
 )
 
 
-SESSION_TOOLS = ("codex", "claude", "opencode", "pi_agent", "omp", "mimo", "kimi", "dsh", "reasonix", "zcode", "kilocode", "grok", "hermes", "antigravity_cli", "cline", "workbuddy", "qoder", "qwen_code", "openclaw")
+SESSION_TOOLS = ("codex", "claude", "opencode", "pi_agent", "omp", "mimo", "kimi", "dsh", "reasonix", "zcode", "kilocode", "grok", "hermes", "antigravity_cli", "cline", "workbuddy", "qoder", "qwen_code", "openclaw", "qoder_cli")
 logger = logging.getLogger(__name__)
 TOOL_LABELS = {
     "codex": "Codex",
@@ -91,6 +96,7 @@ TOOL_LABELS = {
     "qoder": "Qoder IDE",
     "qwen_code": "Qwen Code",
     "openclaw": "OpenClaw",
+    "qoder_cli": "Qoder CLI",
 }
 
 _PRICING_DB = PricingDatabase()
@@ -180,7 +186,7 @@ class _PartialSessionView(Exception):
         self.value = value
 
 
-def _parse_session_file(parser, path_str: str, mtime_ns: int, size: int, pricing_sig: tuple):
+def _parse_session_file(parser, path_str: str, mtime_ns: int, size: int, pricing_sig: tuple, *extra):
     """Call a session-file parser, preferring the variant that reports a transient miss.
 
     ``_cached_session_parser`` hangs the raising variant off the wrapper it returns,
@@ -190,11 +196,15 @@ def _parse_session_file(parser, path_str: str, mtime_ns: int, size: int, pricing
     the whole view, so a parser without it falls back to the ordinary call — a
     transient miss then reads as an empty parse, exactly as it did before the retry
     existed. Degraded, not broken.
+
+    ``*extra`` carries parser-specific key material past the shared four-argument
+    contract (qoder_cli forwards its context window); it must be in BOTH call
+    branches or a patched plain callable silently loses it.
     """
     raising = getattr(parser, "raising", None)
     if raising is None:
-        return parser(path_str, mtime_ns, size, pricing_sig)
-    return raising(path_str, mtime_ns, size, pricing_sig)
+        return parser(path_str, mtime_ns, size, pricing_sig, *extra)
+    return raising(path_str, mtime_ns, size, pricing_sig, *extra)
 
 
 def _cached_session_aggregate(maxsize: int = 8):
@@ -440,6 +450,16 @@ def reload_pricing_db() -> None:
     # and in the turn), so clearing it would throw away a 6.3 s parse on
     # every pricing edit for nothing.
     _load_openclaw_sessions.cache_clear()
+    # Same rationale as qwen above: pricing_sig is already in this key and
+    # _pricing_signature() moves with the pricing file, so an edit misses on
+    # its own and a stale cost is never served — the clear buys memory (the
+    # discarded pricing generation's parsed candidates) and consistency with
+    # the list every other harness is on. _parse_qoder_cli_session_file is
+    # the pricing-independent one (candidate buckets, no cost — pricing
+    # happens at merge time through qoder_cli_merged_entry in the aggregate);
+    # it is on the list for the second reason only.
+    _parse_qoder_cli_session_file.cache_clear()
+    _load_qoder_cli_sessions.cache_clear()
     # New rates change every token in the assembly token, so the entries were
     # already unreachable; dropping them frees the budget they were holding.
     _SESSION_ASSEMBLY.clear()
@@ -4865,6 +4885,185 @@ def _openclaw_sessions() -> Dict[str, Dict[str, Any]]:
 
 
 # ======================================================================
+# qoder_cli sessions
+# ======================================================================
+# Qoder CLI bills one request across two streams (transcripts carry the
+# credits, segment logs carry the token buckets, joined on request_id), so
+# this harness re-derives NOTHING about the merge: candidate builders, the
+# global first-write-wins fold, the segment-wins-token rule and the
+# credits-vs-pricing billing split all live in the shared module functions
+# of sources/coding_tools.py. The fold below iterates the shared signature
+# in discovery order — the same order the Overview parser folds in — so
+# both sides resolve a duplicate request id to the same winner. The failure
+# handling is deliberately asymmetric with Overview: the token path aborts
+# the whole source on one unreadable file because sync_source computes every
+# row before deleting the stored corpus, while here a locked file becomes a
+# per-file _SessionFileUnavailable and the rest of the panel still renders.
+
+
+@_cached_session_parser()
+def _parse_qoder_cli_session_file(
+    path_str: str, _mtime_ns: int, _size: int, _pricing_sig: tuple, window: Optional[int]
+) -> Optional[list[Dict[str, Any]]]:
+    """One stream file -> its candidate list, through the shared builder.
+
+    The window belongs in THIS key, not just the aggregate's:
+    QODER_CLI_CONTEXT_WINDOW changes the candidate buckets themselves
+    (context_usage_ratio recovers zero input at it), and an aggregate-only
+    invalidation would serve pre-change candidates from the per-file cache
+    until someone flipped the env on a warm process. Candidates carry no
+    cost — pricing happens at merge time in the aggregate — so this parser
+    is the pricing-independent one; its reload_pricing_db clear is memory
+    and consistency, not staleness. OSError is translated to
+    _SessionFileUnavailable HERE, at the Sessions boundary, not in the
+    source (whose _parse_all must keep aborting whole-source).
+    """
+    try:
+        return qoder_cli_file_candidates(Path(path_str), window)
+    except OSError as exc:
+        raise _SessionFileUnavailable(path_str) from exc
+
+
+@_cached_session_aggregate()
+def _load_qoder_cli_sessions(
+    file_sig: tuple,
+    runtime_sig: tuple,
+    pricing_sig: tuple = (),
+) -> Dict[str, Dict[str, Any]]:
+    # (1) The global fold, in file_sig order = _discovered_files order (the
+    #     shared signer keeps it verbatim, which is what first-write-wins
+    #     depends on). One winner per rid per candidate type across ALL
+    #     roots, exactly as _parse_all does it; a per-session or per-root
+    #     dedupe would change which candidate wins and the tokens.
+    rate_override, window = runtime_sig
+    effective_rate = qoder_cli_effective_rate(rate_override)
+    transcript_cands: Dict[str, Dict[str, Any]] = {}
+    segment_cands: Dict[str, Dict[str, Any]] = {}
+    # rid -> (session_id, project, family): when a rid appears in both
+    # families the transcript's attribution wins; a disagreement is a Qoder
+    # rename, not a reason to split the entry.
+    provenance: Dict[str, tuple] = {}
+    transient_miss = False
+    for path_str, mtime_ns, size in file_sig:
+        try:
+            # Through the helper, never .raising directly: a replaced plain
+            # callable must degrade to the ordinary call, not crash the view.
+            cands = _parse_session_file(
+                _parse_qoder_cli_session_file, path_str, mtime_ns, size,
+                pricing_sig, window,
+            )
+        except _SessionFileUnavailable:
+            transient_miss = True
+            continue
+        if not cands:
+            continue
+        for cand in cands:
+            rid = cand["rid"]
+            prev = provenance.get(rid)
+            if cand["family"] == "segment":
+                if rid not in segment_cands:
+                    segment_cands[rid] = cand["cand"]
+                    if prev is None or prev[2] != "transcript":
+                        provenance[rid] = (
+                            cand["session_id"], cand["project"], "segment",
+                        )
+            elif rid not in transcript_cands:
+                transcript_cands[rid] = cand["cand"]
+                if prev is not None and prev[2] == "segment" and prev[0] != cand["session_id"]:
+                    logger.debug(
+                        "tokdash qoder_cli: rid %s disagrees on session (%s vs %s); "
+                        "keeping the transcript's",
+                        rid, prev[0], cand["session_id"],
+                    )
+                provenance[rid] = (cand["session_id"], cand["project"], "transcript")
+
+    # (2) Merge through the shared resolver, in the parser's own order
+    #     (transcript rids first, each consuming its segment twin, then the
+    #     segment-only tail) so the entry sequence — and therefore the
+    #     display order inside a session — cannot drift either.
+    per_session: Dict[str, list] = {}
+    session_project: Dict[str, str] = {}
+
+    def _collect(rid: str, entry: Optional[Dict[str, Any]]) -> None:
+        if entry is None:
+            return
+        session_id, project, _family = provenance[rid]
+        bill = _billing_record(
+            entry["model"],
+            "split-cache-write",
+            input_tokens=entry["input"],
+            output_tokens=entry["output"],
+            cache_read=entry["cacheRead"],
+            cache_write=entry["cacheWrite"],
+            # Credit rows carry the provider's own figure: _turn_cost returns
+            # `fixed` without consulting the rule, so a pricing-file edit
+            # cannot move them — the same fixed-vs-pricing split Overview's
+            # usage_billing_fixed/usage_billing_pricing pair already makes.
+            fixed_cost=entry["cost"] if entry["costAuthoritative"] else None,
+        )
+        turn = _build_turn(
+            turn_index=0,
+            timestamp_ms=entry["timestamp"],
+            model=entry["model"],
+            # Display map: _build_turn has no cacheWrite field, and Qoder
+            # segments DO carry cache writes, so tokens_in folds them in —
+            # passing tokens_in = input would price correctly while
+            # displaying fewer tokens than Overview.
+            tokens_in=entry["input"] + entry["cacheWrite"],
+            tokens_cache=entry["cacheRead"],
+            tokens_out=entry["output"],
+            tokens_reasoning=0,
+            bill=bill,
+        )
+        turn["_event_key"] = entry["entry_id"]
+        per_session.setdefault(session_id, []).append(turn)
+        session_project.setdefault(session_id, project)
+
+    remaining = dict(segment_cands)
+    for rid, tcand in transcript_cands.items():
+        _collect(rid, qoder_cli_merged_entry(
+            _PRICING_DB, "qoder_cli", rid, tcand, remaining.pop(rid, None), effective_rate
+        ))
+    for rid, scand in remaining.items():
+        _collect(rid, qoder_cli_merged_entry(
+            _PRICING_DB, "qoder_cli", rid, None, scand, effective_rate
+        ))
+
+    sessions: Dict[str, Dict[str, Any]] = {}
+    for session_id, turns in per_session.items():
+        turns.sort(key=lambda item: int(item.get("timestamp_ms", 0) or 0))
+        for turn_index, turn in enumerate(turns, start=1):
+            turn["turn_index"] = turn_index
+        sessions[session_id] = {
+            "tool": "qoder_cli",
+            "session_id": session_id,
+            # Deliberate deviation from the majority convention: Qoder CLI
+            # persists no title in either stream, and _fallback_display_name
+            # returns the project when given one — so the conventional call
+            # would print the sanitized project directory as the NAME of
+            # every session on this machine. With an empty project the short
+            # id discriminates, and the project already has its own column.
+            "display_name": _fallback_display_name(session_id, ""),
+            # Verbatim: the segment project dir is a sanitized cwd, the
+            # mapping is not injective, and any separator inserted by a
+            # guessed inverse names a path that never existed.
+            "project": session_project.get(session_id, ""),
+            "turns": turns,
+        }
+    if transient_miss:
+        raise _PartialSessionView(sessions)
+    return sessions
+
+
+def _qoder_cli_sessions() -> Dict[str, Dict[str, Any]]:
+    return _load_qoder_cli_sessions(
+        qoder_cli_file_signatures(clientpaths.qoder_cli_roots()),
+        qoder_cli_runtime_signature(),
+        _pricing_signature(),
+    )
+
+
+# ======================================================================
 # ZCode sessions (phase 2): the live native-DB group
 #
 # Reads the same WAL-mode SQLite DB as the usage parser, through the
@@ -5862,6 +6061,8 @@ def _raw_sessions_for_tool(
             return _qwen_code_sessions()
         if key == "openclaw":
             return _openclaw_sessions()
+        if key == "qoder_cli":
+            return _qoder_cli_sessions()
     except (OSError, sqlite3.Error):
         # A live-parse failure (locked dir, unreadable file, corrupt DB) degrades
         # to an empty view instead of erroring the whole tool's session endpoint.

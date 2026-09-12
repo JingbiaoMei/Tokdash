@@ -3461,6 +3461,76 @@
         </details>
       </section>
 
+      <section class="surface p-5 mb-6">
+        <details class="session-panel" data-panel-details="qwen_code">
+          <summary class="session-panel-summary">
+            <h2 class="text-base font-extrabold mono" data-i18n="qwenCodeSessions" data-i18n-title="sessionsRangeDesc">Qwen Code Sessions</h2>
+            <span id="qwen_codePanelCount" class="session-panel-count"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></span>
+            <span id="qwen_codePanelKpis" class="session-panel-kpis" hidden>
+              <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="panelTokens">Tokens</span><span id="qwen_codePanelTokens" class="session-panel-kpi-value mono">—</span></span>
+              <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="cost">Cost</span><span id="qwen_codePanelCost" class="session-panel-kpi-value mono" style="color: var(--color-cost);">—</span></span>
+              <span class="session-panel-kpi"><span id="qwen_codeActiveLabel" class="session-panel-kpi-label" data-i18n="agentTime" data-i18n-title="agentTimePanelHint">EST. agent time</span><span class="session-panel-kpi-value mono"><span id="qwen_codeActiveAgent">—</span></span></span>
+              <span class="session-panel-kpi"><span class="session-panel-kpi-label" data-i18n="panelLast">Last</span><span id="qwen_codePanelLast" class="session-panel-kpi-value mono">—</span></span>
+            </span>
+            <span class="session-panel-chev" aria-hidden="true">▸</span>
+          </summary>
+          <div class="session-panel-body">
+
+        <div id="qwen_codeLatestSession" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4 mb-5">
+          <div class="surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="latestSession">Latest Session</div>
+            <div id="qwen_codeLatestProject" class="tokdash-loading-placeholder mt-2 font-extrabold mono"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
+            <div id="qwen_codeLatestMeta" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
+          </div>
+          <div class="surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="input">Input</div>
+            <div id="qwen_codeLatestInput" class="mt-2 font-extrabold">-</div>
+          </div>
+          <div class="surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="cacheRead">Cache Read</div>
+            <div id="qwen_codeLatestCache" class="mt-2 font-extrabold">-</div>
+            <div id="qwen_codeLatestCachePct" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
+          </div>
+          <div class="surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="output">Output</div>
+            <div id="qwen_codeLatestOutput" class="mt-2 font-extrabold">-</div>
+          </div>
+          <div class="surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="totalTokens">Total Tokens</div>
+            <div id="qwen_codeLatestTotal" class="mt-2 font-extrabold">-</div>
+          </div>
+          <div class="surface p-4">
+            <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="events">Events</div>
+            <div id="qwen_codeLatestEvents" class="mt-2 font-extrabold">-</div>
+            <div id="qwen_codeLatestSeen" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
+          </div>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm session-table" aria-label="Qwen Code sessions table" data-panel="qwen_code">
+            <colgroup><col style="width:16%"><col style="width:10%"><col style="width:9%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:10%"><col style="width:8%"><col style="width:9%"><col style="width:12%"></colgroup>
+            <thead>
+              <tr class="border-b" style="border-color: var(--color-border);">
+                <th class="text-left py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="session" data-sortable="display_name">Session</th>
+                <th class="text-left py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="model">Model</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="input" data-sortable="tokens_in">Input</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cache" data-sortable="tokens_cache">Cache</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="hitPct" data-sortable="cache_hit_rate">Hit %</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="output" data-sortable="tokens_out">Output</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="total" data-sortable="tokens">Total</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cost" data-sortable="cost">Cost</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="activeTimeColumn" data-i18n-title="activeTimeHint" data-sortable="active_ms" title="Estimated from gaps between token events, each counted up to the idle cap (5 min by default).">Active (est.)</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="lastUpdated" data-sortable="last_seen_at">Last updated</th>
+              </tr>
+            </thead>
+            <tbody id="qwen_codeSessionsTable">
+              <tr><td colspan="10" class="tokdash-loading-placeholder text-center py-10" style="color: var(--color-muted);"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+        </div>
+        </details>
+      </section>
+
       <section class="surface p-5">
         <details class="session-panel" data-panel-details="combined">
           <summary class="session-panel-summary">
@@ -4589,8 +4659,8 @@
     let lastUsageResponse = null;
     let lastRefreshReport = null;
     let refreshReportDismissedWindowKey = null;
-    const SESSION_TOOL_KEYS = ['codex', 'claude', 'opencode', 'pi_agent', 'mimo', 'kimi', 'dsh', 'reasonix', 'zcode', 'kilocode', 'omp', 'grok', 'hermes', 'antigravity_cli', 'cline', 'workbuddy', 'qoder'];
-    let lastSessionsResponses = { codex: null, claude: null, opencode: null, pi_agent: null, mimo: null, kimi: null, dsh: null, reasonix: null, zcode: null, kilocode: null, omp: null, grok: null, hermes: null, antigravity_cli: null, cline: null, workbuddy: null, qoder: null, combined: null };
+    const SESSION_TOOL_KEYS = ['codex', 'claude', 'opencode', 'pi_agent', 'mimo', 'kimi', 'dsh', 'reasonix', 'zcode', 'kilocode', 'omp', 'grok', 'hermes', 'antigravity_cli', 'cline', 'workbuddy', 'qoder', 'qwen_code'];
+    let lastSessionsResponses = { codex: null, claude: null, opencode: null, pi_agent: null, mimo: null, kimi: null, dsh: null, reasonix: null, zcode: null, kilocode: null, omp: null, grok: null, hermes: null, antigravity_cli: null, cline: null, workbuddy: null, qoder: null, qwen_code: null, combined: null };
     let lastCombinedModels = [];
     let lastAppsBreakdown = null;
     let lastByTool = {};
@@ -4898,6 +4968,7 @@
         antigravityCliSessions: 'Antigravity Sessions',
         clineSessions: 'Cline Sessions',
         qoderSessions: 'Qoder IDE Sessions',
+        qwenCodeSessions: 'Qwen Code Sessions',
         workbuddySessions: 'WorkBuddy Sessions',
         piSessions: 'Pi Sessions',
         mimoSessions: 'Mimo Sessions',
@@ -5400,6 +5471,7 @@
         antigravityCliSessions: 'Antigravity 会话',
         clineSessions: 'Cline 会话',
         qoderSessions: 'Qoder IDE 会话',
+        qwenCodeSessions: 'Qwen Code 会话',
         workbuddySessions: 'WorkBuddy 会话',
         piSessions: 'Pi 会话',
         mimoSessions: 'Mimo 会话',
@@ -5903,6 +5975,7 @@
         antigravityCliSessions: 'Antigravity セッション',
         clineSessions: 'Cline セッション',
         qoderSessions: 'Qoder IDE セッション',
+        qwenCodeSessions: 'Qwen Code セッション',
         workbuddySessions: 'WorkBuddy セッション',
         piSessions: 'Pi セッション',
         mimoSessions: 'Mimo セッション',
@@ -6406,6 +6479,7 @@
         antigravityCliSessions: 'Antigravity 세션',
         clineSessions: 'Cline 세션',
         qoderSessions: 'Qoder IDE 세션',
+        qwenCodeSessions: 'Qwen Code 세션',
         workbuddySessions: 'WorkBuddy 세션',
         piSessions: 'Pi 세션',
         mimoSessions: 'Mimo 세션',
@@ -6909,6 +6983,7 @@
         antigravityCliSessions: 'Sesiones de Antigravity',
         clineSessions: 'Sesiones de Cline',
         qoderSessions: 'Sesiones de Qoder IDE',
+        qwenCodeSessions: 'Sesiones de Qwen Code',
         workbuddySessions: 'Sesiones de WorkBuddy',
         piSessions: 'Sesiones de Pi',
         mimoSessions: 'Sesiones de Mimo',
@@ -7412,6 +7487,7 @@
         antigravityCliSessions: 'Sessões do Antigravity',
         clineSessions: 'Sessões do Cline',
         qoderSessions: 'Sessões do Qoder IDE',
+        qwenCodeSessions: 'Sessões do Qwen Code',
         workbuddySessions: 'Sessões do WorkBuddy',
         piSessions: 'Sessões do Pi',
         mimoSessions: 'Sessões do Mimo',
@@ -10401,6 +10477,7 @@
       cline: { ...DEFAULT_SORT },
       workbuddy: { ...DEFAULT_SORT },
       qoder: { ...DEFAULT_SORT },
+      qwen_code: { ...DEFAULT_SORT },
       combined: { ...DEFAULT_SORT },
     };
 
@@ -10790,6 +10867,7 @@
       updateSessionPanel("cline", lastSessionsResponses.cline);
       updateSessionPanel("qoder", lastSessionsResponses.qoder);
       updateSessionPanel("workbuddy", lastSessionsResponses.workbuddy);
+      updateSessionPanel("qwen_code", lastSessionsResponses.qwen_code);
       lastSessionsResponses.combined = buildCombinedSessionsData(lastSessionsResponses);
       updateSessionPanel("combined", lastSessionsResponses.combined, { showTool: true });
 
@@ -10830,6 +10908,7 @@
       initSortHeaders("cline", renderSessionsTab);
       initSortHeaders("qoder", renderSessionsTab);
       initSortHeaders("workbuddy", renderSessionsTab);
+      initSortHeaders("qwen_code", renderSessionsTab);
       initSortHeaders("combined", renderSessionsTab);
     }
 

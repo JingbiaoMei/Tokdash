@@ -45,6 +45,8 @@ from .sources.coding_tools import (
     connect_sqlite_readonly,
     iter_grok_usage_rows,
     parse_cline_message_file,
+    qwen_file_signatures,
+    qwen_session_file,
     search_dir_claim_key,
     workbuddy_file_signatures,
     zcode_snapshot,
@@ -66,7 +68,7 @@ from .usage_store import (
 )
 
 
-SESSION_TOOLS = ("codex", "claude", "opencode", "pi_agent", "omp", "mimo", "kimi", "dsh", "reasonix", "zcode", "kilocode", "grok", "hermes", "antigravity_cli", "cline", "workbuddy", "qoder")
+SESSION_TOOLS = ("codex", "claude", "opencode", "pi_agent", "omp", "mimo", "kimi", "dsh", "reasonix", "zcode", "kilocode", "grok", "hermes", "antigravity_cli", "cline", "workbuddy", "qoder", "qwen_code")
 logger = logging.getLogger(__name__)
 TOOL_LABELS = {
     "codex": "Codex",
@@ -86,6 +88,7 @@ TOOL_LABELS = {
     "cline": "Cline",
     "workbuddy": "WorkBuddy",
     "qoder": "Qoder IDE",
+    "qwen_code": "Qwen Code",
 }
 
 _PRICING_DB = PricingDatabase()
@@ -418,6 +421,13 @@ def reload_pricing_db() -> None:
     _load_cline_sessions.cache_clear()
     _parse_workbuddy_session_file.cache_clear()
     _load_workbuddy_sessions.cache_clear()
+    # pricing_sig is already in both qwen keys and _pricing_signature() moves
+    # with the pricing file, so an edit misses on its own and no stale cost is
+    # ever served. The clear frees the memory the discarded pricing
+    # generation was holding and keeps this harness on the list every other
+    # harness is on.
+    _parse_qwen_code_session_file.cache_clear()
+    _load_qwen_code_sessions.cache_clear()
     # New rates change every token in the assembly token, so the entries were
     # already unreachable; dropping them frees the budget they were holding.
     _SESSION_ASSEMBLY.clear()
@@ -4507,6 +4517,161 @@ def _workbuddy_sessions() -> Dict[str, Dict[str, Any]]:
 
 
 # ======================================================================
+# Qwen Code sessions (round 2): the append-only chat JSONL
+#
+# Same files, same record rules, same source-global uuid fold as the
+# Overview parser: both sides scan through qwen_file_signatures (one TTL
+# key) and read through qwen_row_from_record, so a record Overview skips
+# cannot appear here and the bucket math cannot drift. Both halves use the
+# same half-open window, so parity is exact, not approximate.
+#
+# /branch forks copy a session's records — uuids included — into the fork's
+# file. The fold (earliest timestamp wins, STRICT less-than, so an
+# equal-stamp copy keeps the first-discovered winner) runs globally BEFORE
+# any grouping, matching QwenCodeParser._parse_all; the winner map carries
+# (turn, meta, index) — the shape cline's by_id settled on — so a winning
+# turn is attributed to the file its OWN copy came from, not whichever file
+# was iterated last. Consequence: the fork's panel shows only the turns it
+# newly generated; totals stay right either way and per-session attribution
+# follows the store's rule, which is the point.
+#
+# Live-parse only, on purpose: qwen declares cross_file_stable_keys, and
+# the store's earliest-timestamp ownership is a second fork-ownership rule.
+# Implementing the dedupe twice — once in SQL, once in Python — is how
+# Overview and Sessions would start disagreeing.
+# ======================================================================
+
+
+@_cached_session_parser()
+def _parse_qwen_code_session_file(
+    path_str: str, _mtime_ns: int, _size: int, _pricing_sig: tuple = ()
+) -> Optional[tuple[list[Dict[str, Any]], Dict[str, Any]]]:
+    """One chat file -> (turns, meta). Raises _SessionFileUnavailable so a
+    transient miss is retried, never cached; None (from the wrapper) means the
+    file was unreadable this attempt.
+
+    The rows arrive unpriced (the shared reader is cost-free by design), so
+    the "fresh-input" rule priced here is the ONLY price this path computes,
+    and _pricing_sig in the cache key is what makes that safe after a pricing
+    edit. Display mapping: Qwen's builder hardcodes cacheWrite to 0, so there
+    is nothing to fold into tokens_in — unlike cline. Do not "fix" this to
+    look like the other harnesses; there is no mapping choice to get wrong.
+    """
+    rows, meta = qwen_session_file(path_str, unavailable=_SessionFileUnavailable)
+    turns: list[Dict[str, Any]] = []
+    for entry_id, row in rows:
+        turn = _build_turn(
+            turn_index=0,
+            timestamp_ms=row["timestamp"],
+            model=row["model"],
+            tokens_in=row["input"],
+            tokens_cache=row["cacheRead"],
+            tokens_out=row["output"],
+            tokens_reasoning=row["reasoning"],
+            bill=_billing_record(
+                row["model"],
+                "fresh-input",
+                input_tokens=row["input"],
+                output_tokens=row["output"],
+                cache_read=row["cacheRead"],
+                cache_write=0,
+            ),
+        )
+        if entry_id:
+            turn["_event_key"] = entry_id
+        turns.append(turn)
+    return turns, meta
+
+
+@_cached_session_aggregate()
+def _load_qwen_code_sessions(
+    signature: tuple[tuple[str, int, int], ...], pricing_sig: tuple = ()
+) -> Dict[str, Dict[str, Any]]:
+    # (1) Global fold first (Reconciliation 3): one winner per "qwen:<uuid>"
+    #     across the whole corpus, earliest timestamp, strict < — ties keep
+    #     the first-encountered copy, settling on discovery order (the shared
+    #     signature order, then row order within the file). Anonymous records
+    #     (no uuid) append unconditionally, counted once per occurrence, as
+    #     Overview does. Grouping before this fold would count forked history
+    #     twice.
+    winners: Dict[str, tuple] = {}   # entry_id -> (turn, meta, index)
+    anonymous: list[tuple] = []      # (turn, meta, index)
+    transient_miss = False
+    for path_str, mtime_ns, size in signature:
+        try:
+            parsed = _parse_session_file(
+                _parse_qwen_code_session_file, path_str, mtime_ns, size, pricing_sig
+            )
+        except _SessionFileUnavailable:
+            transient_miss = True
+            continue
+        if not parsed:
+            continue
+        turns, meta = parsed
+        for index, turn in enumerate(turns):
+            triple = (turn, meta, index)
+            event_key = str(turn.get("_event_key") or "")
+            if not event_key:
+                anonymous.append(triple)
+                continue
+            prev = winners.get(event_key)
+            if prev is None or int(turn["timestamp_ms"]) < int(prev[0]["timestamp_ms"]):
+                winners[event_key] = triple
+
+    # (2) Group the RETAINED winners by their own file's session_id. The
+    #     map's insertion order is preserved deliberately: Overview returns
+    #     list(by_id.values()) + anonymous off an insertion-ordered dict, and
+    #     turn order inside a merged session inherits that.
+    per_session: Dict[str, list[tuple]] = {}
+    for triple in list(winners.values()) + anonymous:
+        session_id = str(triple[1].get("session_id") or "unknown")
+        per_session.setdefault(session_id, []).append(triple)
+
+    sessions: Dict[str, Dict[str, Any]] = {}
+    for session_id, triples in per_session.items():
+        # One raw per file, merged through _merge_raw_session for the rare
+        # session spanning several files (the reset flow); fold order decides
+        # which file's preview names a merged session.
+        per_file: Dict[int, Dict[str, Any]] = {}
+        for turn, meta, _index in triples:
+            file_raw = per_file.get(id(meta))
+            if file_raw is None:
+                project = _project_from_repo_or_path(None, meta.get("cwd") or None)
+                preview = _clean_display_name(meta.get("preview"))
+                file_raw = {
+                    "tool": "qwen_code",
+                    "session_id": session_id,
+                    "display_name": preview or _fallback_display_name(session_id, project),
+                    "project": project,
+                    "turns": [],
+                }
+                per_file[id(meta)] = file_raw
+            file_raw["turns"].append(turn)
+        raw: Optional[Dict[str, Any]] = None
+        for file_raw in per_file.values():
+            file_raw["turns"].sort(
+                key=lambda item: int(item.get("timestamp_ms", 0) or 0)
+            )
+            for turn_index, turn in enumerate(file_raw["turns"], start=1):
+                turn["turn_index"] = turn_index
+            raw = file_raw if raw is None else _merge_raw_session(raw, file_raw)
+        if raw is not None:
+            sessions[session_id] = raw
+    if transient_miss:
+        raise _PartialSessionView(sessions)
+    return sessions
+
+
+def _qwen_code_sessions() -> Dict[str, Dict[str, Any]]:
+    # The shared TTL wrapper, not qwen_chat_file_signatures: one scan and one
+    # invalidation clock for Overview and Sessions together.
+    return _load_qwen_code_sessions(
+        qwen_file_signatures(clientpaths.qwen_runtime_base()),
+        _pricing_signature(),
+    )
+
+
+# ======================================================================
 # ZCode sessions (phase 2): the live native-DB group
 #
 # Reads the same WAL-mode SQLite DB as the usage parser, through the
@@ -5500,6 +5665,8 @@ def _raw_sessions_for_tool(
             return _workbuddy_sessions()
         if key == "qoder":
             return _qoder_sessions(since_ms=since_ms, until_ms=until_ms)
+        if key == "qwen_code":
+            return _qwen_code_sessions()
     except (OSError, sqlite3.Error):
         # A live-parse failure (locked dir, unreadable file, corrupt DB) degrades
         # to an empty view instead of erroring the whole tool's session endpoint.

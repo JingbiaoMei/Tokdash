@@ -241,6 +241,47 @@ def test_api_endpoints_and_dashboard_smoke(synthetic_api_data):
     assert "no-store" in _static_middleware_cache_control("/static/icons/icon-192.png")
 
 
+def _static_mount():
+    return next(route for route in api.app.routes if getattr(route, "name", None) == "static")
+
+
+def test_static_mount_follows_symlinks():
+    """pipx/uv installs the packaged assets as symlinks into the uv cache.
+
+    With Starlette's default follow_symlink=False, lookup_path() realpath-resolves
+    each request out of STATIC_DIR, fails the commonpath guard, and 404s every
+    /static/** asset. Pin the mount option so it cannot silently regress.
+    """
+    assert _static_mount().app.follow_symlink is True
+
+
+@pytest.mark.skipif(os.name == "nt", reason="creating symlinks needs developer mode on Windows")
+def test_static_serves_symlinked_assets(tmp_path):
+    """Resolve a packaged file that is itself a symlink.
+
+    Reuse the real mount's setting so dropping follow_symlink in api.py makes the
+    lookup fail. Avoid TestClient here because synchronous handlers can deadlock
+    with this repository's FastAPI/AnyIO test stack.
+    """
+    from fastapi.staticfiles import StaticFiles
+
+    follow_symlink = _static_mount().app.follow_symlink
+
+    real = tmp_path / "real"
+    real.mkdir()
+    (real / "themes.css").write_text("body {}", encoding="utf-8")
+
+    linked = tmp_path / "static"
+    linked.mkdir()
+    (linked / "themes.css").symlink_to(real / "themes.css")
+
+    static_files = StaticFiles(directory=str(linked), follow_symlink=follow_symlink)
+    full_path, stat_result = static_files.lookup_path("themes.css")
+
+    assert full_path == str(linked / "themes.css")
+    assert stat_result is not None
+
+
 def test_public_base_path_rendering():
     assert api._normalize_public_base_path("tokdash/") == "/tokdash"
     assert api._normalize_public_base_path("/") == ""

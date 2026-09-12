@@ -505,6 +505,7 @@ tokdash db watch --pretty
 ```bash
 tokdash quota consent --codex-api on --claude-api on --antigravity-api on
 tokdash quota consent --minimax-api on --kimi-api on --grok-api on --zai-api on
+tokdash quota consent --opencode-go-api on
 tokdash quota consent --credential-scan on   # 允许读取已披露的本地凭据存储
 tokdash quota consent --poll-interval 30      # 后台轮询周期：15、30、60 或 120 分钟
 tokdash quota consent --enabled off           # 总开关：关闭全部额度跟踪

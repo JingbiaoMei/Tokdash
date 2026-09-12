@@ -24,6 +24,7 @@ from .codex import collect_codex_api_snapshots
 from .grok import collect_grok_api_snapshots
 from .kimi import collect_kimi_api_snapshots
 from .minimax import collect_minimax_api_snapshots
+from .opencode_go import collect_opencode_go_api_snapshots
 from .zai import collect_zai_api_snapshots
 from .credential_sources import zai_coding_base_url_allowed
 from .types import QuotaSnapshot
@@ -72,6 +73,8 @@ def collect_network_snapshots(sources: Iterable[str] | None = None) -> list[Quot
             snapshots.extend(collect_grok_api_snapshots())
         elif key == "zai_api":
             snapshots.extend(collect_zai_api_snapshots())
+        elif key == "opencode_go_api":
+            snapshots.extend(collect_opencode_go_api_snapshots())
     return snapshots
 
 
@@ -328,6 +331,7 @@ def _network_key_for_provider(name: str) -> str:
         "kimi": "kimi_api",
         "grok": "grok_api",
         "zai": "zai_api",
+        "opencode_go": "opencode_go_api",
     }.get(name, f"{name}_api")
 
 
@@ -627,6 +631,18 @@ def _detected_local_providers(claude_profiles: list[ClaudeProfile]) -> set[str]:
             detected.add(provider)
     if os.environ.get("KIMI_API_KEY", "").strip() or any(root.exists() for root in clientpaths.kimi_roots()):
         detected.add("kimi")
+    if config.credential_scan_enabled():
+        try:
+            from .opencode_go import has_credentials as _has_opencode_go_credentials
+
+            if _has_opencode_go_credentials():
+                detected.add("opencode_go")
+        except Exception:
+            pass
+    elif clientpaths.opencode_auth_path().is_file() or os.environ.get("OPENCODE_API_KEY", "").strip():
+        # Pre-consent detection stays shallow like every other provider (file
+        # presence only); key content is read solely on the consented path above.
+        detected.add("opencode_go")
     if os.environ.get("ANTHROPIC_AUTH_TOKEN", "").strip() and zai_coding_base_url_allowed(
         os.environ.get("ANTHROPIC_BASE_URL", "")
     ):
@@ -699,7 +715,7 @@ def quota_state(store: UsageEntryStore | None = None) -> dict[str, Any]:
     claude_installs = read_claude_profiles(claude_profiles) if claude_scan else []
     providers = {
         name: _provider_shell(name, consent)
-        for name in ("codex", "claude", "antigravity", "minimax", "kimi", "grok", "zai")
+        for name in ("codex", "claude", "antigravity", "minimax", "kimi", "grok", "zai", "opencode_go")
     }
     for name in _detected_local_providers(claude_profiles):
         providers[name]["detected"] = True

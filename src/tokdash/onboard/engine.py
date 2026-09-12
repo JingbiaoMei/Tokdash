@@ -1980,6 +1980,7 @@ def _quota_setup_wizard() -> None:
             ("kimi_api", "Kimi Code", "requires a Kimi Code key or sign-in"),
             ("grok_api", "Grok Build", "requires xAI OAuth; API keys cannot read this quota"),
             ("zai_api", "Z.ai Coding Plan", "requires a Coding Plan key from ZCode or a supported tool"),
+            ("opencode_go_api", "OpenCode Go", "requires an OpenCode Go key in auth.json or OPENCODE_API_KEY"),
         ):
             provider = key.removesuffix("_api")
             if provider not in provider_sources:

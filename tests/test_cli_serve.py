@@ -62,6 +62,9 @@ def test_quota_command_parses_actions():
     assert args.grok_api == "off"
     assert args.zai_api == "on"
 
+    args = cli.build_parser("tokdash").parse_args(["quota", "consent", "--opencode-go-api", "on"])
+    assert args.opencode_go_api == "on"
+
 
 def test_quota_consent_cli_updates_config():
     assert cli.cli(["quota", "consent", "--codex-api", "on", "--claude-api", "off", "--json"]) == 0
@@ -77,6 +80,7 @@ def test_quota_consent_cli_updates_config():
         "kimi_api": False,
         "grok_api": False,
         "zai_api": False,
+        "opencode_go_api": False,
     }
 
 

@@ -474,6 +474,7 @@ Z.ai Coding Plan のクォータもライブポーリングからのみ取得で
 ```bash
 tokdash quota consent --codex-api on --claude-api on --antigravity-api on
 tokdash quota consent --minimax-api on --kimi-api on --grok-api on --zai-api on
+tokdash quota consent --opencode-go-api on
 tokdash quota consent --credential-scan on   # 開示済みのローカル認証情報リーダーを許可
 tokdash quota consent --poll-interval 30      # バックグラウンドポーリング間隔: 15, 30, 60 または 120 分
 tokdash quota consent --enabled off           # マスタースイッチ: 全クォータ追跡をオフ

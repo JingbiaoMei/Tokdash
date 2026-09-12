@@ -474,6 +474,7 @@ Z.ai Coding Plan 쿼터도 라이브 폴링에서만 사용할 수 있습니다.
 ```bash
 tokdash quota consent --codex-api on --claude-api on --antigravity-api on
 tokdash quota consent --minimax-api on --kimi-api on --grok-api on --zai-api on
+tokdash quota consent --opencode-go-api on
 tokdash quota consent --credential-scan on   # 공개된 로컬 자격 증명 리더 허용
 tokdash quota consent --poll-interval 30      # 백그라운드 폴링 간격: 15, 30, 60 또는 120분
 tokdash quota consent --enabled off           # 마스터 스위치: 모든 쿼터 추적 끔

@@ -476,6 +476,7 @@ A cota do Z.ai Coding Plan também está disponível apenas pelo polling ao vivo
 ```bash
 tokdash quota consent --codex-api on --claude-api on --antigravity-api on
 tokdash quota consent --minimax-api on --kimi-api on --grok-api on --zai-api on
+tokdash quota consent --opencode-go-api on
 tokdash quota consent --credential-scan on   # permita os leitores locais de credenciais divulgados
 tokdash quota consent --poll-interval 30      # cadência de polling em segundo plano: 15, 30, 60 ou 120 min
 tokdash quota consent --enabled off           # interruptor geral: desliga TODO o acompanhamento de cota

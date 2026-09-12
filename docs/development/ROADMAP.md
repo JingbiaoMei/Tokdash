@@ -117,7 +117,7 @@ Principle: **no inference**. Only emit entries when numeric token fields exist.
 
 ## Quota tab — additional providers
 The Quota tab tracks Codex, Claude Code, Antigravity, MiniMax, Kimi Code, SuperGrok/Grok
-Build, and Z.ai Coding Plan (separate local-credential-read consent, per-provider network consent, and local sources). Same principles for every addition: read only disclosed allowlisted credential stores, call only that provider's own quota/usage endpoint, never refresh or write tokens, and never scan logs for secrets. Candidates, pending research into each provider's quota surface:
+Build, Z.ai Coding Plan, and OpenCode Go (separate local-credential-read consent, per-provider network consent, and local sources). Same principles for every addition: read only disclosed allowlisted credential stores, call only that provider's own quota/usage endpoint, never refresh or write tokens, and never scan logs for secrets. Candidates, pending research into each provider's quota surface:
 
 - **Xiaomi MiMo plans** — MiMo CLI/API subscription quota.
 

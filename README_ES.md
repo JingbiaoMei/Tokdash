@@ -476,6 +476,7 @@ La cuota de Z.ai Coding Plan también está disponible únicamente mediante la c
 ```bash
 tokdash quota consent --codex-api on --claude-api on --antigravity-api on
 tokdash quota consent --minimax-api on --kimi-api on --grok-api on --zai-api on
+tokdash quota consent --opencode-go-api on
 tokdash quota consent --credential-scan on   # permite los lectores locales de credenciales divulgados
 tokdash quota consent --poll-interval 30      # cadencia de consulta en fondo: 15, 30, 60 o 120 min
 tokdash quota consent --enabled off           # interruptor general: apaga TODO el seguimiento de cuota

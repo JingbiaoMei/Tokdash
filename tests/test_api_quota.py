@@ -46,6 +46,7 @@ def test_get_quota_returns_stored_codex_session_data_without_collecting(monkeypa
         "kimi_api": False,
         "grok_api": False,
         "zai_api": False,
+        "opencode_go_api": False,
     }
 
 
@@ -63,8 +64,8 @@ def test_get_quota_exposes_new_provider_shells_and_consent_keys():
 
     payload = api.get_quota()
 
-    assert {"minimax", "kimi", "grok", "zai"}.issubset(payload["providers"])
-    assert {"minimax_api", "kimi_api", "grok_api", "zai_api"}.issubset(payload["consent"])
+    assert {"minimax", "kimi", "grok", "zai", "opencode_go"}.issubset(payload["providers"])
+    assert {"minimax_api", "kimi_api", "grok_api", "zai_api", "opencode_go_api"}.issubset(payload["consent"])
 
 
 def test_quota_state_marks_only_locally_present_provider_shells_detected(monkeypatch, tmp_path):
@@ -157,6 +158,7 @@ def test_quota_consent_route_persists_provider_flags():
         "kimi_api": False,
         "grok_api": False,
         "zai_api": False,
+        "opencode_go_api": False,
     }
     assert api.get_quota()["consent"]["codex_api"] is True
 

@@ -110,6 +110,7 @@ SESSION_LABELS = {
     "workbuddy": "WorkBuddy",
     "qoder": "Qoder IDE",
     "qwen_code": "Qwen Code",
+    "openclaw": "OpenClaw",
 }
 
 SESSION_MODELS = (

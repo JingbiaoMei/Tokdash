@@ -953,6 +953,26 @@ def test_a_sync_under_the_current_pricing_leaves_the_identity_alone(tmp_path):
     assert store.apply_pricing(id1, p1) is False, "an unraced sync leaves nothing to redo"
 
 
+def session_corpus_for_tests(rows, signature=()):
+    """Fixture SessionCorpus whose meta is synthesized from the rows' own
+    ``file`` values, so a row without one fails loudly instead of yielding a
+    session with no project. The sync seam moved from ``_collect_entries`` to
+    ``collect_session_corpus`` because the sync now checks and writes ONE
+    collection; the stored values below are what prove the patch still bites
+    (a seam that is silently never called looks identical to one that is)."""
+    from tokdash.sources import openclaw
+
+    meta = {}
+    for row in rows:
+        meta.setdefault(
+            row["file"],
+            {"session_id": row["file"], "cwd": "", "agent": "", "preview": ""},
+        )
+    return openclaw.SessionCorpus(
+        rows=list(rows), files=list(meta), signature=signature, meta=meta
+    )
+
+
 def test_openclaw_sync_landing_after_another_process_repriced_is_not_lost(
     _isolated_home, monkeypatch, tmp_path
 ):
@@ -967,23 +987,27 @@ def test_openclaw_sync_landing_after_another_process_repriced_is_not_lost(
     p2 = _priced_db(tmp_path, "oc2", 5.0)
     store_path = usage_store_module.usage_db_path()
 
-    def collect_entries(_dirs):
-        # Another process reprices mid-parse.
+    def collect_session_corpus(_dirs, files=None):
+        # Another process reprices mid-collection — the same point in
+        # _sync_openclaw_store the old mid-parse hook sat at.
         UsageEntryStore(store_path).apply_pricing({"rates": "p2"}, p2)
-        return [
-            {
-                "msg_dt": datetime(2026, 5, 19, tzinfo=timezone.utc),
-                "model": "m1",
-                "input_raw": 1_000_000,
-                "cache_write": 0,
-                "output": 0,
-                "cache_read": 0,
-                "payload_cost": 0.0,
-                "entry_id": "openclaw:racing",
-            }
-        ]
+        return session_corpus_for_tests(
+            [
+                {
+                    "msg_dt": datetime(2026, 5, 19, tzinfo=timezone.utc),
+                    "model": "m1",
+                    "input_raw": 1_000_000,
+                    "cache_write": 0,
+                    "output": 0,
+                    "cache_read": 0,
+                    "payload_cost": 0.0,
+                    "entry_id": "openclaw:racing",
+                    "file": str(sessions_dir / "s.jsonl"),
+                }
+            ]
+        )
 
-    monkeypatch.setattr(openclaw, "_collect_entries", collect_entries)
+    monkeypatch.setattr(openclaw, "collect_session_corpus", collect_session_corpus)
     store = openclaw._sync_openclaw_store([str(sessions_dir)], p1)
 
     # The trailing apply_pricing in _sync_openclaw_store rebuilt the costs under
@@ -1105,19 +1129,22 @@ def test_openclaw_reads_its_totals_and_grid_from_one_snapshot(_isolated_home, mo
     (sessions_dir / "s.jsonl").write_text("{}\n", encoding="utf-8")
     monkeypatch.setattr(
         openclaw,
-        "_collect_entries",
-        lambda _dirs: [
-            {
-                "msg_dt": datetime(2026, 5, 19, tzinfo=timezone.utc),
-                "model": "m1",
-                "input_raw": 1_000_000,
-                "cache_write": 0,
-                "output": 0,
-                "cache_read": 0,
-                "payload_cost": 0.0,
-                "entry_id": "openclaw:one",
-            }
-        ],
+        "collect_session_corpus",
+        lambda _dirs, files=None: session_corpus_for_tests(
+            [
+                {
+                    "msg_dt": datetime(2026, 5, 19, tzinfo=timezone.utc),
+                    "model": "m1",
+                    "input_raw": 1_000_000,
+                    "cache_write": 0,
+                    "output": 0,
+                    "cache_read": 0,
+                    "payload_cost": 0.0,
+                    "entry_id": "openclaw:one",
+                    "file": str(sessions_dir / "s.jsonl"),
+                }
+            ]
+        ),
     )
     pricing = PricingDatabase()
     store = openclaw._sync_openclaw_store([str(sessions_dir)], pricing)

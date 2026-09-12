@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Unreleased
+
+### Added
+
+- Qwen Code appears in the Sessions tab. One turn per usage-bearing chat record, the cache-inclusive prompt split priced with `fresh-input`, and the source-global `qwen:<uuid>` fork dedupe — first-encountered file wins equal timestamps — all consumed through the same module-level reader the Overview parser uses, so the two tabs cannot disagree about which records count. Parity is pinned by a randomized property test over fixture corpora rather than the single 8-record chat file this machine has. Transient read failures degrade to a partial panel and are never cached. UI in all six languages. (#80)
+- OpenClaw appears in the Sessions tab. The per-session drill-down of `/api/sessions?tool=openclaw` consumes the same corpus snapshot the Overview parse produced — one cold pass per corpus change serves both tabs, and one global message-id dedupe decides the winner set in both. Display input folds cache writes the way the Overview fold bills them, and the message's recorded payload cost is the fallback only when the model resolves to nothing in the pricing database; a later rate edit reprices and retires it. The store sync is complete-aware: an unreadable transcript leaves the previous rows and the unrecorded signature in place so the next request retries, and the Sessions view renders the rest as a partial panel. `OPENCLAW_PARSER_VERSION` goes 1 -> 2: after upgrading, the first Overview request rewrites the OpenClaw source rows and pays one cold pass — that request is the repair, not a regression. UI in all six languages. (#81)
+
 ## 2.5.4 - 2026-09-08
 
 ### Changed

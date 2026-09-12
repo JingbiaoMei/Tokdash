@@ -988,6 +988,14 @@ def test_upgrade_path_parser_version_bump(monkeypatch, tmp_path, caplog):
     assert any("openclaw" in r.getMessage().lower() for r in caplog.records)
     lock.release()
 
+    # The follow-up request the comment above promises: because the declined
+    # sync recorded nothing new, the version mismatch still stands and the
+    # next sync completes — the corrupted v1 rows are finally replaced and
+    # the v2 signature is committed.
+    repaired = openclaw._sync_openclaw_store(_dirs(tmp_path), db)
+    assert _stored(repaired)[0] == 2
+    assert repaired.source_signature("openclaw") != v1_sig
+
 
 # ---------------------------------------------------------------------------
 # Route-level staleness (shared behavior, pinned)

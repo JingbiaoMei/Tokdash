@@ -82,7 +82,8 @@ def parse_session_file(
     """Parse a single OpenClaw session JSONL file into a list of entries.
 
     Called with one argument this behaves exactly as always: any open or read
-    failure yields the entries read so far (usually ``[]``). Given
+    failure yields ``[]`` (not the entries parsed before the failure — the
+    rows before it cannot be trusted to be the whole file). Given
     ``unavailable`` (an exception class) such a failure raises it instead —
     without that, a locked transcript is indistinguishable from an empty file
     to every caller upstream, and the cache would store the hole under a

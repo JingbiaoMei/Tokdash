@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Unreleased
+
+### Added
+
+- Qwen Code appears in the Sessions tab. One turn per usage-bearing chat record, the cache-inclusive prompt split priced with `fresh-input`, and the source-global `qwen:<uuid>` fork dedupe — first-encountered file wins equal timestamps — all consumed through the same module-level reader the Overview parser uses, so the two tabs cannot disagree about which records count. Parity is pinned by a randomized property test over fixture corpora rather than the single 8-record chat file this machine has. Transient read failures degrade to a partial panel and are never cached. UI in all six languages. (#80)
+
 ## 2.5.4 - 2026-09-08
 
 ### Changed

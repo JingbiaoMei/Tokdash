@@ -93,6 +93,15 @@ def _usage_store_live_sources(tracker: CodingToolsUsageTracker) -> list[str]:
 
 
 def _collect_parser_file(parser: Any, file_sig: tuple[str, int, int]) -> list[dict[str, Any]]:
+    # Parsers that expose the strict single-file entry point (``_parse_file_strict``)
+    # are parsed through it, so a UsageFileVanished raised on the path the store
+    # handed in reaches sync_files untouched and can be isolated there. The
+    # source-wide ``_parse_all()`` deliberately swallows that condition per file
+    # (the DB-off live path must not lose every other file's entries to one
+    # deletion race), so routing the store through it would defeat the isolation.
+    strict = getattr(parser, "_parse_file_strict", None)
+    if strict is not None:
+        return list(strict(file_sig))
     original_file_signatures = parser._file_signatures
     try:
         parser._file_signatures = lambda: (file_sig,)

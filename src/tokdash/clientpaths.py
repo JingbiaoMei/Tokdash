@@ -852,6 +852,79 @@ def crush_data_dirs() -> List[Path]:
     return out
 
 
+# --- Muse (Meta Muse Code) ---------------------------------------------------------
+
+
+def muse_sessions_root() -> Path:
+    """Muse session store root: ``$XDG_DATA_HOME/muse/sessions`` (default
+    ``~/.local/share/muse/sessions``).
+
+    The XDG layout is the verified one (``evidence/muse_live_record_census.txt``,
+    ``MUSE-FORMAT.md:8`` and the independent reader in ``acs_paths.ts:107`` all
+    agree). Whether Muse honours anything else — a dedicated env var or the
+    macOS/Windows app-data dirs — is unverified (FINDINGS.md open item 5), so
+    no other override is promised here. ``MUSE_DATA_DIR`` appears in a
+    community reader but in no Muse launcher or doc; that is the reader's own
+    convention, not Muse's.
+
+    A RELATIVE ``XDG_DATA_HOME`` is invalid and ignored per the Base
+    Directory spec ("should be ignored" for relative values): resolving it
+    against Tokdash's working directory would miss the real Muse history and
+    scan an unrelated project-relative dir instead. Fall back to
+    ``~/.local/share`` unless the value resolves absolute.
+    """
+    explicit = os.environ.get("XDG_DATA_HOME", "").strip()
+    base = None
+    if explicit:
+        candidate = Path(explicit).expanduser()
+        if candidate.is_absolute():
+            base = candidate
+    if base is None:
+        base = Path.home() / ".local/share"
+    return base / "muse/sessions"
+
+
+def muse_session_files() -> List[Path]:
+    """Every ``session.jsonl`` under the Muse sessions root, recursively.
+
+    Covers the date-sharded top-level logs (``YYYY/MM/DD/<uuid>/session.jsonl``)
+    and the per-child ``subagent/<uuid>/session.jsonl`` logs in one pass; the
+    rule never pattern-matches the date directories, so a build that changes
+    the shard shape costs nothing here. Dot-directories are skipped — the
+    ``.msp-view-v1`` view cache sits alongside the real logs and is not
+    transcripts. Discovery is windowless on purpose: a first sync must index
+    the whole history.
+    """
+    root = muse_sessions_root()
+    if not root.is_dir():
+        return []
+    out: List[Path] = []
+    try:
+        # NOT sorted(root.rglob(...)): sorted() buffers the whole generator
+        # before yielding anything, so a mid-walk OSError would escape with
+        # nothing collected and the "keep the partial walk" contract below
+        # would silently hold nothing. Iterate first, sort at the end —
+        # matching _rglob_sigs.
+        for path in root.rglob("session.jsonl"):
+            try:
+                if not path.is_file():
+                    continue
+                # Skip any file under a dot-directory (.msp-view-v1 cache and
+                # any future hidden view/state dir).
+                rel_parts = path.relative_to(root).parts[:-1]
+                if any(part.startswith(".") for part in rel_parts):
+                    continue
+            except OSError:
+                continue
+            out.append(path)
+    except OSError:
+        # Mid-walk OSError (permission, cloud placeholder): keep whatever the
+        # walk collected before the failure, matching _rglob_sigs' behavior.
+        pass
+    out.sort()
+    return out
+
+
 # --- Tokdash data dir / usage DB -------------------------------------------------
 #
 # Mirrors onboard/paths.py::data_dir() (kept as a separate, untouched copy there —

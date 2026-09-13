@@ -22,6 +22,7 @@ from tokdash.sources.coding_tools import (
     CodexParser,
     CodingToolsUsageTracker,
     CopilotCLIParser,
+    MuseParser,
     GrokParser,
     HermesParser,
     QoderCliParser,
@@ -29,6 +30,7 @@ from tokdash.sources.coding_tools import (
 )
 from tokdash.usage_store import (
     UsageEntryStore,
+    UsageFileVanished,
     build_source_signature,
     parser_code_signature,
     usage_billing_fixed,
@@ -1140,6 +1142,24 @@ def test_coding_tool_parsers_declare_sync_capabilities():
     assert modes["workbuddy"] == "file_replace"
     assert tracker.parsers["workbuddy"].sync_capability.append_jsonl is True
     assert tracker.parsers["opencode"].sync_capability.session_store is False
+    # Muse: the parser is implemented but the source stays OUT of the registry
+    # until the FINDINGS.md open item 1 capture campaign populates
+    # MUSE_CACHE_POLICIES — an entry per provider, since inclusion is
+    # provider-dependent — and resolves fork record-ID behavior (open item 3).
+    # An empty policy map is a build blocker, not a runtime state, so
+    # enabling the registry line without the policies must be a conscious
+    # edit (the registry comment says the same). If the map is ever populated,
+    # this test must be updated alongside the registry line, not silently
+    # bypassed.
+    from tokdash.sources import coding_tools as coding_tools_module
+
+    assert "muse" not in modes
+    assert MuseParser.sync_capability.mode == "file_replace"
+    assert MuseParser.sync_capability.append_jsonl is False
+    assert MuseParser.sync_capability.cross_file_stable_keys is False
+    assert MuseParser.persistent_parser_version == 1
+    assert coding_tools_module.MUSE_CACHE_POLICIES == {}
+    assert coding_tools_module.MUSE_ESTIMATE_MARKER_KEY is None
 
 
 def test_parser_code_signature_unwraps_lru_cache_functions():
@@ -4095,3 +4115,243 @@ def test_qoder_cli_in_memory_key_includes_runtime_config(monkeypatch, tmp_path):
     entries = parser.collect(None, None)
     assert len(entries) == 1
     assert entries[0]["input"] == 10000
+
+
+# ---------------------------------------------------------------------------
+# Typed-vanished-file isolation and the (timestamp, file_path) fork tie-break
+# — generic store contracts (FINDINGS.md Missing-file race + entry_id bullets).
+# Every cross_file_stable_keys source (Codex, Cline, Qwen, and Muse once its
+# fork world resolves) inherits these behaviors; they are store tests on
+# purpose, not Muse-parser tests.
+# ---------------------------------------------------------------------------
+
+
+def _tie_entry(timestamp: int, entry_id: str, model: str = "tie-model") -> dict:
+    return {
+        "source": "tie",
+        "model": model,
+        "provider": "",
+        "timestamp": timestamp,
+        "input": 10,
+        "output": 1,
+        "entry_id": entry_id,
+    }
+
+
+def _stored_usage_rows(db_path, source: str) -> list[dict]:
+    """Raw usage_entries rows — file_path is the point of these tests and
+    query_entries() deliberately does not expose it."""
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        return [
+            dict(row)
+            for row in conn.execute(
+                "SELECT entry_key, file_path, timestamp, model FROM usage_entries"
+                " WHERE source = ? ORDER BY entry_key, file_path",
+                (source,),
+            ).fetchall()
+        ]
+
+
+def test_vanished_enumerated_file_is_skipped_with_rows_kept(tmp_path):
+    """Discovery-to-parse race at the main replacement site: the raced file
+    must be skipped with its stored rows kept and every other file still
+    committing — not a whole-sync abort and, above all, not the silent
+    zero-row delete that a swallowed [] would commit."""
+    db = tmp_path / "usage.sqlite3"
+    store = UsageEntryStore(db)
+    a_path = str(tmp_path / "a.jsonl")
+    b_path = str(tmp_path / "b.jsonl")
+
+    def parse_ok(file_sig):
+        path = file_sig[0]
+        if path == a_path:
+            return [_tie_entry(1_700_000_000_000, "tie:a1")]
+        return [_tie_entry(1_700_000_100_000, "tie:b1")]
+
+    files = ((a_path, 1, 100), (b_path, 1, 100))
+    assert store.sync_files("tie", files, parser={"v": 1}, parse_file_entries=parse_ok) is True
+    assert {row["entry_key"] for row in _stored_usage_rows(db, "tie")} == {"tie:a1", "tie:b1"}
+
+    def parse_raced(file_sig):
+        if file_sig[0] == a_path:
+            raise UsageFileVanished(a_path)
+        return [_tie_entry(1_700_000_200_000, "tie:b2")]
+
+    # A changed on disk (new mtime) and then vanished before the parse opened
+    # it; B changed normally. The raced sync must finish.
+    raced = ((a_path, 2, 110), (b_path, 1, 101))
+    assert store.sync_files("tie", raced, parser={"v": 1}, parse_file_entries=parse_raced) is True
+    rows = _stored_usage_rows(db, "tie")
+    # A's stored rows survive the race untouched (skip, not delete)...
+    assert [row for row in rows if row["file_path"] == a_path and row["entry_key"] == "tie:a1"]
+    # ...and B committed its new state.
+    assert [row for row in rows if row["file_path"] == b_path and row["entry_key"] == "tie:b2"]
+
+    # Retry after the file returns: the skip left file_state at the old
+    # signature, so the still-changed file reparses normally.
+    def parse_back(file_sig):
+        if file_sig[0] == a_path:
+            return [_tie_entry(1_700_000_300_000, "tie:a3")]
+        return [_tie_entry(1_700_000_200_000, "tie:b2")]
+
+    assert store.sync_files("tie", raced, parser={"v": 1}, parse_file_entries=parse_back) is True
+    rows = _stored_usage_rows(db, "tie")
+    assert not [row for row in rows if row["entry_key"] == "tie:a1"]
+    assert [row for row in rows if row["entry_key"] == "tie:a3"]
+
+
+def test_vanished_signal_for_another_path_still_fails_the_sync(tmp_path):
+    """The isolation is keyed on the condition AND the path: a
+    UsageFileVanished raised for a file other than the enumerated one is not
+    this file's race and must not be swallowed."""
+    store = UsageEntryStore(tmp_path / "usage.sqlite3")
+    a_path = str(tmp_path / "a.jsonl")
+
+    def parse(file_sig):
+        raise UsageFileVanished(str(tmp_path / "somewhere-else.jsonl"))
+
+    try:
+        store.sync_files("tie", ((a_path, 1, 100),), parser={"v": 1}, parse_file_entries=parse)
+    except UsageFileVanished as exc:
+        assert exc.filename == str(tmp_path / "somewhere-else.jsonl")
+    else:
+        raise AssertionError("wrong-path vanish must not be isolated")
+
+
+def test_non_vanished_exception_still_fails_the_sync(tmp_path):
+    """The isolation must not become a bug silencer: a TypeError from a real
+    parser bug still fails the whole sync exactly as before."""
+    store = UsageEntryStore(tmp_path / "usage.sqlite3")
+
+    def parse(file_sig):
+        raise TypeError("real parser bug")
+
+    try:
+        store.sync_files("tie", ((str(tmp_path / "a.jsonl"), 1, 100),), parser={"v": 1}, parse_file_entries=parse)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("a non-vanished exception must fail the sync")
+
+
+def test_survivor_vanish_aborts_the_sync_and_keeps_the_key(tmp_path):
+    """A vanished survivor at the cross_file_stable_keys re-parse site must
+    ABORT, not skip: the survivor holds none of the rows in question, so a
+    skip that commits would let the owner lose its key to nothing and delete
+    the only stored copy. Exact sequence: key owned by the owner file, the
+    owner loses the key at re-parse while the survivor vanished mid-sync."""
+    db = tmp_path / "usage.sqlite3"
+    store = UsageEntryStore(db)
+    owner = str(tmp_path / "a-owner.jsonl")
+    survivor = str(tmp_path / "z-survivor.jsonl")
+
+    def parse_both(file_sig):
+        return [_tie_entry(1_700_000_000_000, "tie:shared")]
+
+    files = ((owner, 1, 100), (survivor, 1, 100))
+    assert store.sync_files(
+        "tie", files, parser={"v": 1}, parse_file_entries=parse_both, cross_file_stable_keys=True
+    ) is True
+    rows = _stored_usage_rows(db, "tie")
+    assert [row["entry_key"] for row in rows] == ["tie:shared"]
+    owner_held = [row for row in rows if row["file_path"] == owner]
+    assert owner_held
+
+    # Owner rewritten WITHOUT the key; survivor enumerated-then-vanished.
+    def parse_race(file_sig):
+        if file_sig[0] == owner:
+            return []
+        raise UsageFileVanished(survivor)
+
+    changed = ((owner, 2, 90), (survivor, 1, 100))
+    try:
+        store.sync_files(
+            "tie", changed, parser={"v": 1}, parse_file_entries=parse_race, cross_file_stable_keys=True
+        )
+    except UsageFileVanished as exc:
+        assert exc.filename == survivor
+    else:
+        raise AssertionError("a vanished survivor must abort the sync")
+    # The abort left the table exactly as it was: the key's only stored row
+    # is still there, never a silent delete.
+    rows = _stored_usage_rows(db, "tie")
+    assert [row["entry_key"] for row in rows] == ["tie:shared"]
+    assert [row for row in rows if row["file_path"] == owner]
+
+
+def test_equal_millisecond_copies_resolve_to_smallest_path(tmp_path):
+    """Entry timestamps are milliseconds, so fork copies stamped less than a
+    millisecond apart genuinely TIE. The winner is the lexicographically
+    smallest file_path regardless of parse order — the same tie-break the
+    parser's own by_id dedup applies, which is what makes DB=0 and DB=1 pick
+    the same copy."""
+    db = tmp_path / "usage.sqlite3"
+    store = UsageEntryStore(db)
+    small = str(tmp_path / "a.jsonl")
+    large = str(tmp_path / "b.jsonl")
+
+    def parse(file_sig):
+        # Both files carry the SAME copy at the SAME millisecond.
+        return [_tie_entry(1_700_000_000_000, "tie:shared")]
+
+    # Larger path enumerated FIRST: ownership must still land on the smaller.
+    files = ((large, 1, 100), (small, 1, 100))
+    assert store.sync_files(
+        "tie", files, parser={"v": 1}, parse_file_entries=parse, cross_file_stable_keys=True
+    ) is True
+    rows = [row for row in _stored_usage_rows(db, "tie") if row["entry_key"] == "tie:shared"]
+    assert len(rows) == 1
+    assert rows[0]["file_path"] == small
+
+
+def test_tie_ownership_moves_to_a_later_smaller_path_copy(tmp_path):
+    """A later parse by a smaller-path copy rewrites ownership away from the
+    bigger-path owner (the direction the old strict timestamp< could never
+    move in)."""
+    db = tmp_path / "usage.sqlite3"
+    store = UsageEntryStore(db)
+    small = str(tmp_path / "a.jsonl")
+    large = str(tmp_path / "b.jsonl")
+
+    def parse_large_only(file_sig):
+        return [_tie_entry(1_700_000_000_000, "tie:shared")]
+
+    assert store.sync_files(
+        "tie", ((large, 1, 100),), parser={"v": 1}, parse_file_entries=parse_large_only,
+        cross_file_stable_keys=True,
+    ) is True
+    rows = _stored_usage_rows(db, "tie")
+    assert rows[0]["file_path"] == large
+
+    assert store.sync_files(
+        "tie", ((large, 1, 100), (small, 1, 100)), parser={"v": 1},
+        parse_file_entries=parse_large_only, cross_file_stable_keys=True,
+    ) is True
+    rows = _stored_usage_rows(db, "tie")
+    assert [row for row in rows if row["entry_key"] == "tie:shared"][0]["file_path"] == small
+
+
+def test_owner_rewrite_at_equal_timestamp_keeps_exactly_one_row(tmp_path):
+    """The rewritten owner reparses the same key at the same millisecond: the
+    rewrite must keep exactly one row (the old one replaced, not duplicated
+    and not dropped)."""
+    db = tmp_path / "usage.sqlite3"
+    store = UsageEntryStore(db)
+    owner = str(tmp_path / "a-owner.jsonl")
+
+    def parse(file_sig):
+        return [_tie_entry(1_700_000_000_000, "tie:shared")]
+
+    assert store.sync_files(
+        "tie", ((owner, 1, 100),), parser={"v": 1}, parse_file_entries=parse,
+        cross_file_stable_keys=True,
+    ) is True
+    # Owner rewritten (new signature), same timestamp, same key.
+    assert store.sync_files(
+        "tie", ((owner, 2, 105),), parser={"v": 1}, parse_file_entries=parse,
+        cross_file_stable_keys=True,
+    ) is True
+    rows = [row for row in _stored_usage_rows(db, "tie") if row["entry_key"] == "tie:shared"]
+    assert len(rows) == 1
+    assert rows[0]["timestamp"] == 1_700_000_000_000

@@ -32,6 +32,7 @@ try:
     from ..pricing import PricingDatabase
     from ..usage_store import (
         USAGE_ENTRY_FORMAT_VERSION,
+        UsageFileVanished,
         usage_billing_fixed,
         usage_billing_pricing,
         usage_entry_cost,
@@ -44,6 +45,7 @@ except ImportError:  # pragma: no cover
     from pricing import PricingDatabase
     from usage_store import (
         USAGE_ENTRY_FORMAT_VERSION,
+        UsageFileVanished,
         usage_billing_fixed,
         usage_billing_pricing,
         usage_entry_cost,
@@ -78,9 +80,11 @@ class SourceSyncCapability:
     session_store: bool = False
     # True when one entry_key can legitimately occur in several files of the
     # same source (Copied stable keys: Codex rollout resumption, Cline fork).
-    # The store syncs such sources so that the earliest timestamp owns the
-    # key, and re-parses surviving files when the owner is removed or
-    # rewritten. See UsageEntryStore.sync_files.
+    # The store syncs such sources so that the earliest (timestamp, path)
+    # position owns the key — ties break on the lexicographically smallest
+    # path, matching the parsers' own source-wide dedup — and re-parses
+    # surviving files when the owner is removed or rewritten. See
+    # UsageEntryStore.sync_files.
     cross_file_stable_keys: bool = False
     reason: str = ""
 
@@ -5626,6 +5630,823 @@ class QwenCodeParser(BaseParser):
 
 
 # ---------------------------------------------------------------------------
+# Muse (Meta Muse Code CLI)
+# ---------------------------------------------------------------------------
+
+# Frame types this Muse build emits as retained-frame batch lines. The
+# captured one (evidence/muse_record_id_and_frame_shapes.json) is
+# session_permission_transaction; the capture campaign records any further
+# types the shipping build adds here. A line that looks frame-shaped but
+# names no type in this set is not expanded.
+MUSE_FRAME_TYPES = frozenset({"session_permission_transaction"})
+
+# The durable event behind session/modelChanged is, per the official SDK
+# manifest, runtime.model_reconfigure.completed. The exact serialized payload
+# fields are fixture-pending (capture leg (d2)), so recognition
+# tolerates the plausible serializations of the manifest name: as the
+# payload_type, as payload.kind / payload.type, or as a run event kind.
+# A missed switch leaves every later call attributed to the superseded
+# model AND provider, so the official type is the primary match.
+MUSE_MODEL_RECONFIGURE_TYPES = frozenset({
+    "runtime.model_reconfigure.completed",
+})
+_MUSE_RECONFIGURE_EVENT_KINDS = frozenset({
+    "model_reconfigure.completed",
+})
+
+# The counted-once prompt convention, FINDINGS.md open item 1, as a
+# provider -> (read_included, write_included) policy map. Muse's durable log
+# carries only raw counters; the counted-once oracle (promptTokens) lives on
+# the live session/tokenUsage notification. The official MSP schema says the
+# counters are NOT summable across providers and that cache inclusion is
+# provider-dependent, so inclusion is keyed by the RESOLVED provider rather
+# than one global pair: a session that switches providers applies each
+# call's own provider policy. The public evidence (ccusage's Muse field
+# report, the BurnBar parser) establishes that Meta's input_tokens INCLUDES
+# cache READS — but nothing establishes that it also includes cache WRITES,
+# so even Meta's pair is settled bit by bit (read-beside/write-inclusive,
+# read-inclusive/write-beside and everything else are legitimate worlds for
+# some provider). A provider with no entry is a build blocker: the parser
+# raises rather than borrowing another provider's policy, so the map starts
+# EMPTY ({} -> the parser refuses to build entries at all; tests set it
+# explicitly) and the capture must establish an entry for every provider the
+# registered source can emit.
+MUSE_CACHE_POLICIES: Dict[str, Tuple[bool, bool]] = {}
+
+# Serialized key of the EstimateSource marker (provider_reported /
+# tokenizer_estimate / heuristic_estimate, all in the binary). The durable
+# serialization key is capture-gated (FINDINGS.md leg (e)): None until the
+# capture establishes it, in which case no estimated marker is ever emitted
+# (never invent one); tests set the key explicitly to exercise the mapping.
+MUSE_ESTIMATE_MARKER_KEY: Optional[str] = None
+
+# recorded_at is microseconds since the epoch. Fixed range 2020-09-13 ..
+# 2100-01-01: wide enough that no real Muse timestamp is excluded, narrow
+# enough to catch a field denominated in seconds, milliseconds or
+# nanoseconds, each of which would otherwise read as 1970 or the far future
+# once // 1000 runs. The ceiling is file-relative (see _envelope_ok): a
+# stamp more than a day past the file's own mtime is not trustworthy data.
+_MUSE_TS_MIN_US = 1_600_000_000_000_000
+_MUSE_TS_MAX_US = 4_102_444_800_000_000
+_MUSE_FUTURE_SLACK_US = 86_400_000_000
+
+
+def _muse_int(v: Any) -> bool:
+    """True for a real int: bool subclasses int, so isinstance alone admits True."""
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
+def _muse_pos(rec_tuple: Tuple[Any, ...]) -> tuple:
+    """Composite stream position (sequence, expansion_order) from a record
+    tuple built by MuseParser._read_records. This orders model-state
+    lookups: physical line order is NOT equivalent (retained frames break it)
+    and recorded_at is worse (burst-tied or clock-reordered); expansion_order
+    is (line, child_index) — a tie-breaker, nothing more."""
+    return (rec_tuple[4], rec_tuple[5])
+
+
+class MuseParser(BaseParser):
+    """
+    Parser for Meta's Muse Code CLI durable session logs.
+
+    =======================================================================
+    MUSE CODE — APPEND-ONLY DURAL JSONL, ONE ENTRY PER MODEL CALL
+    =======================================================================
+    Storage (verified, FINDINGS.md): XDG data root, sessions under
+    ``$XDG_DATA_HOME/muse/sessions/YYYY/MM/DD/<uuid>/session.jsonl`` plus
+    ``subagent/<uuid>/session.jsonl`` child logs beneath each session dir.
+    Only ``session.jsonl`` files are transcripts; the ``.msp-view-v1`` view
+    cache and the per-session db files are skipped by discovery.
+
+    Records: envelope ``schema_version == 1``, ``durability == "durable"``,
+    ``record_type == "event"``, string ``id`` (UUIDv4 — carries no order),
+    ``stream = {kind, id}`` (stream id equals the containing directory name,
+    which is the discriminator that keeps parent-mirrored child copies out),
+    validated ``sequence``, ``recorded_at`` in microseconds. Retained-frame
+    batch lines (no top-level id/payload) expand into child records first.
+
+    Usage: one entry per ``payload_type == "runtime.session"`` +
+    ``payload.kind == "run"`` + ``event.kind == "model_completed"`` record;
+    ``usage{input_tokens, output_tokens, cached_tokens, reasoning_tokens}``
+    (optional ``cache_read_tokens``/``cache_write_tokens`` split pair wins as
+    the cache buckets, AUTHORITATIVE — the schema defines the split fields as
+    raw provider counters and leaves cache conventions provider-dependent, so
+    no read+write == cached_tokens equation is established and enforcing one
+    would drop SASE-shaped providers' calls). Reasoning is
+    INSIDE output_tokens (wire schema "output tokens spent on reasoning") so
+    it is split out for display while billing uses the full completion —
+    WorkBuddy convention. ``goal_usage_attribution`` carries the same
+    counters as Goal budget accounting and is ignored (reading both doubles
+    every session).
+
+    Model+provider selection: ONE unit, never two independent lookups. MSP
+    model selection is a single record carrying modelId and optionally
+    providerId; resolving the two fields independently can fabricate a pair
+    that never existed (metadata provider-a/model-a + a model-only switch to
+    model-b would price under provider-a/model-b). The winning record
+    supplies BOTH fields, and a selection record without a provider means
+    NO provider, never the previous one. A model_completed's own
+    ``event.model`` is NOT a selection record — real captures keep
+    provider_id in session metadata — so it overrides the MODEL FIELD ONLY
+    and retains the governing selection's provider (a per-call provider
+    field, if one ever appears, overrides only the provider). The governing
+    selection is the most recent eligible record across session scope and a
+    run-scoped ``model_request_configured`` with the call's
+    ``payload.run_id``. Other runs are ineligible, since accepting them would
+    carry run n-1's selection into run n. Session state includes metadata or
+    the durable ``runtime.model_reconfigure.completed`` model switch earlier
+    in composite
+    ``(sequence, expansion_order)`` position — never in recorded_at. No
+    fourth link; ``reminder_roster`` agent models are an auxiliary roster,
+    not the main model. Nothing resolves -> ("unknown", "") at zero cost
+    (Qwen Code precedent; Muse's own "unpriced leg" posture). A qualified
+    model id splits once on "/" into BOTH fields — aggregate_entries
+    composes display names as f"{provider}/{model}", so keeping the
+    qualified model verbatim next to the extracted prefix would surface
+    meta/meta/model grouped apart from the same model's rows. No pricing
+    candidate is invented from the model name.
+
+    Counted-once cache policy: ``MUSE_CACHE_POLICIES`` — a provider ->
+    (read_included, write_included) map keyed by the RESOLVED provider,
+    because the MSP schema says counters are not summable across providers
+    and inclusion is provider-dependent (one global pair would apply the
+    wrong subtraction to a provider switch mid-session). Evidence settles
+    Meta's bits independently: reads inside input (ccusage, BurnBar),
+    writes unproven. A provider with no entry -> the parser raises rather
+    than borrowing another provider's policy: build blocker per provider,
+    open item 1; the map ships empty and the capture fills it. Only NONZERO
+    calls need a policy — the all-zero guard runs first, so a historical
+    all-zero session (the ccmux echo fixture) under an unestablished
+    provider cannot abort the source.
+
+    Billing: ``_billing = usage_billing_pricing([f"{provider}/{model}",
+    model], ...)`` with parse-time ``get_cost`` walking the same candidates
+    first-nonzero (mirrors usage_entry_cost, so re-pricing on a qualified
+    rate must move the stored row's cost). Muse persists no cost, so a
+    priced cost is always Tokdash's own API-equivalent estimate.
+
+    Forks (open item 3): unresolved. ``cross_file_stable_keys`` stays off
+    until the fork audit decides between ids-intact (stable-key ownership)
+    and ids-reminted (replay-prefix skip); both shippable worlds are
+    capture-gated, and the other two audit outcomes block the source.
+    =======================================================================
+    """
+
+    source_name = "muse"
+    sync_capability = SourceSyncCapability(
+        mode="file_replace",
+        append_jsonl=False,
+        reason=(
+            "session.jsonl is append-only, but Phase 1 reparses whole files: the "
+            "store's tail path (_collect_parser_tail, compute.py:117) hands the "
+            "parser a temp file with only the appended bytes, which loses the "
+            "path-derived session id and the earlier metadata/model records."
+        ),
+    )
+    # 1: per-model_completed entries keyed "muse:<record id>", reasoning split
+    #    out for display, cache buckets per the capture-gated world, composite
+    #    model chain, qualified-first billing candidates.
+    persistent_parser_version = 1
+
+    # Class-level defaults; the capture campaign sets the module constants and
+    # these mirror them. Tests set them on the instance.
+    cache_policies: Dict[str, Tuple[bool, bool]] = MUSE_CACHE_POLICIES
+    estimate_marker_key: Optional[str] = MUSE_ESTIMATE_MARKER_KEY
+
+    def __init__(self, pricing_db: PricingDatabase):
+        super().__init__(pricing_db)
+
+    def _file_signatures(self) -> tuple:
+        # Deliberately NOT behind the shared TTL signature cache (unlike Qwen/
+        # WorkBuddy): the source can prune a session directory within minutes,
+        # and the parser must not serve a cached file list across syncs.
+        items: List[Tuple[str, int, int]] = []
+        for path in clientpaths.muse_session_files():
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            items.append((str(path), int(stat.st_mtime_ns), int(stat.st_size)))
+        return tuple(sorted(items))
+
+    # -- reading and structural validation --------------------------------
+
+    def _read_records(self, file_sig: Tuple[str, int, int]) -> List[Tuple[Any, ...]]:
+        """Expand a session.jsonl into validated envelope records.
+
+        Returns tuples ``(record, record_id, recorded_at_us, parent_dir,
+        sequence, expansion_order)`` in file order with frames expanded in
+        ascending ``child_index``. Every physical line decodes independently:
+        Muse may be mid-append at read time, and a decode failure on the LAST
+        line is the ordinary case (the file signature changes when the append
+        completes and the next sync re-reads it), never an anomaly to distrust.
+        An interior unparseable line is corruption; same treatment — line-
+        scoped skip only, no parser-warning channel exists and a file-wide
+        failure for one line would drop real spend.
+
+        Bytes mode with a per-line decode: a text-mode handle decodes during
+        ITERATION, outside any per-line guard, so a single truncated
+        multi-byte character — the ordinary mid-append state of a file Muse
+        is writing — raised UnicodeDecodeError and lost every earlier valid
+        record in the file. Lines split on b"\\n" bytes, which are never part
+        of a valid UTF-8 sequence, so decode damage is exactly line-scoped.
+
+        Raises UsageFileVanished when the enumerated file itself disappears
+        before the open (never for an auxiliary FileNotFoundError from deeper
+        code) — the typed signal the store isolates on.
+        """
+        path = str(file_sig[0])
+        try:
+            handle = open(path, "rb")
+        except FileNotFoundError as exc:
+            if exc.filename == path:
+                raise UsageFileVanished(path) from exc
+            raise
+        out: List[Tuple[Any, ...]] = []
+        parent_dir = Path(path).parent.name
+        with handle:
+            for line_no, raw_bytes in enumerate(handle):
+                try:
+                    raw = raw_bytes.decode("utf-8").strip()
+                except UnicodeDecodeError:
+                    continue
+                if not raw:
+                    continue
+                try:
+                    obj = json.loads(raw)
+                except Exception:
+                    continue
+                if not isinstance(obj, dict):
+                    continue
+                if "retained_frame" in obj or "frame_schema_version" in obj or "children" in obj:
+                    out.extend(self._expand_frame(obj, parent_dir, line_no))
+                    continue
+                rec = self._envelope_ok(obj, parent_dir)
+                if rec is not None:
+                    out.append((rec, rec.get("id"), rec.get("recorded_at"), parent_dir, rec.get("sequence"), (line_no, 0)))
+        return out
+
+    def _expand_frame(self, obj: Dict[str, Any], parent_dir: str, line_no: int) -> List[Tuple[Any, ...]]:
+        """Expand a recognized retained-frame line, or drop it whole.
+
+        A frame is a batch line whose ``retained_frame`` names a known type,
+        whose ``frame_schema_version == 1``, whose ``children`` is a list, and
+        whose ``outer_log_ordinal`` — when the frame carries one at all — and
+        every child ``child_index`` are non-negative ints excluding bool, with
+        child indices unique. The ordinal is OPTIONAL: the public ccmux
+        Muse 1.0.3 fixture contains a session_permission_transaction frame
+        with frame_schema_version and indexed children but no ordinal, and
+        the expansion position is built from (line, child_index) regardless,
+        so requiring it would drop whole valid frames — and any usage inside
+        them — over a field nothing orders on. Expansion order is ascending
+        child_index — a frame written out of index order still contributes
+        records in stream order. Invalid structure skips the WHOLE frame
+        (expansion order unknowable); inside a VALID frame, corrupt child
+        content (unparseable record_json) is per-child and loses only itself.
+        A line with frame-ish keys but no recognized retained_frame value is
+        not expanded at all; it carries no envelope either way and falls out.
+        """
+        if obj.get("retained_frame") not in MUSE_FRAME_TYPES:
+            return []
+        if obj.get("frame_schema_version") != 1:
+            return []
+        if "outer_log_ordinal" in obj:
+            ordinal = obj.get("outer_log_ordinal")
+            if not _muse_int(ordinal) or ordinal < 0:
+                return []
+        children = obj.get("children")
+        if not isinstance(children, list):
+            return []
+        parsed: List[Tuple[int, Dict[str, Any]]] = []
+        seen: set = set()
+        for child in children:
+            if not isinstance(child, dict):
+                return []
+            idx = child.get("child_index")
+            if not _muse_int(idx) or idx < 0 or idx in seen:
+                return []
+            seen.add(idx)
+            parsed.append((idx, child))
+        out: List[Tuple[Any, ...]] = []
+        for idx, child in sorted(parsed, key=lambda pair: pair[0]):
+            raw = child.get("record_json")
+            if not isinstance(raw, str):
+                continue
+            try:
+                rec = json.loads(raw)
+            except Exception:
+                continue
+            if not isinstance(rec, dict):
+                continue
+            checked = self._envelope_ok(rec, parent_dir)
+            if checked is not None:
+                out.append((checked, checked.get("id"), checked.get("recorded_at"), parent_dir, checked.get("sequence"), (line_no, idx)))
+        return out
+
+    def _envelope_ok(self, rec: Dict[str, Any], parent_dir: str) -> Optional[Dict[str, Any]]:
+        """Common envelope + stream filter + position/timestamp validation.
+
+        Returns the record when it passes, None when it must be skipped. Every
+        record the parser reads passes through here, usage and state alike —
+        the state records deliberately fail the USAGE classifier's payload
+        shape (metadata is payload_type runtime.session.metadata with
+        payload.kind metadata) and only this common layer applies to them.
+        """
+        if rec.get("schema_version") != 1:
+            return None
+        if rec.get("durability") != "durable":
+            return None
+        if rec.get("record_type") != "event":
+            return None
+        rid = rec.get("id")
+        if not isinstance(rid, str) or not rid.strip():
+            return None
+        stream = rec.get("stream")
+        if not isinstance(stream, dict):
+            return None
+        stream_id = stream.get("id")
+        if not isinstance(stream_id, str) or not stream_id:
+            return None
+        # Stream filter: the stream id equals the file's immediate parent
+        # directory name (session uuid for a top-level log, child uuid for a
+        # subagent log). This is the discriminator that keeps parent-mirrored
+        # child copies out while the child's own file counts.
+        if stream_id != parent_dir:
+            return None
+        sequence = rec.get("sequence")
+        if not _muse_int(sequence) or sequence < 0:
+            return None
+        recorded_at = rec.get("recorded_at")
+        if not _muse_int(recorded_at):
+            return None
+        if not (_MUSE_TS_MIN_US <= recorded_at < _MUSE_TS_MAX_US):
+            return None
+        return rec
+
+    # -- classification: usage events and the model/provider chain --------
+
+    @staticmethod
+    def _is_metadata(rec: Dict[str, Any]) -> bool:
+        if rec.get("payload_type") != "runtime.session.metadata":
+            return False
+        payload = rec.get("payload")
+        return isinstance(payload, dict) and payload.get("kind") == "metadata" and isinstance(payload.get("record"), dict)
+
+    @staticmethod
+    def _is_model_configured(rec: Dict[str, Any]) -> bool:
+        if rec.get("payload_type") != "runtime.session":
+            return False
+        payload = rec.get("payload")
+        if not isinstance(payload, dict) or payload.get("kind") != "run":
+            return False
+        event = payload.get("event")
+        return isinstance(event, dict) and event.get("kind") == "model_request_configured"
+
+    @staticmethod
+    def _is_model_changed(rec: Dict[str, Any]) -> bool:
+        # The official durable event behind session/modelChanged is
+        # runtime.model_reconfigure.completed (SDK manifest). Its serialized
+        # payload fields are fixture-pending, so the manifest name is matched
+        # across the plausible positions — payload_type, payload.kind/type,
+        # or the run event kind. Only completed spellings qualify: accepting
+        # an intent or a speculative directive would move attribution before
+        # the durable selection took effect.
+        if rec.get("payload_type") in MUSE_MODEL_RECONFIGURE_TYPES:
+            return True
+        payload = rec.get("payload")
+        if not isinstance(payload, dict):
+            return False
+        if payload.get("kind") in MUSE_MODEL_RECONFIGURE_TYPES or payload.get("type") in MUSE_MODEL_RECONFIGURE_TYPES:
+            return True
+        event = payload.get("event")
+        if isinstance(event, dict) and event.get("kind") in _MUSE_RECONFIGURE_EVENT_KINDS:
+            return True
+        return False
+
+    @staticmethod
+    def _record_model(rec: Dict[str, Any]) -> Optional[str]:
+        """The model a state record declares, if any."""
+        payload = rec.get("payload")
+        if not isinstance(payload, dict):
+            return None
+        if rec.get("payload_type") == "runtime.session.metadata":
+            record = payload.get("record")
+            model = record.get("model_id") if isinstance(record, dict) else None
+        elif MuseParser._is_model_changed(rec):
+            # Which container carries the new model depends on which switch
+            # shape ships (payload-level for the directive speculation,
+            # run-event for the official reconfigure event), so every
+            # plausible position is consulted.
+            model = payload.get("model")
+            if model is None:
+                record = payload.get("record")
+                model = record.get("model") if isinstance(record, dict) else None
+            if model is None:
+                event = payload.get("event")
+                model = event.get("model") if isinstance(event, dict) else None
+        else:  # model_request_configured — capture-gated field shape
+            event = payload.get("event")
+            model = event.get("model") if isinstance(event, dict) else None
+            if model is None:
+                model = payload.get("model")
+        if isinstance(model, str) and model.strip():
+            return model.strip()
+        return None
+
+    @staticmethod
+    def _record_provider(rec: Dict[str, Any]) -> Optional[str]:
+        """The provider a state record declares, if any. Official MSP model
+        selection carries providerId alongside modelId, so every record that
+        can resolve a model can also resolve its provider — the two are read
+        from the same record and travel the same position chain (field names
+        capture-gated, checked across the plausible spellings like
+        _record_model does)."""
+        payload = rec.get("payload")
+        if not isinstance(payload, dict):
+            return None
+        record = payload.get("record")
+        record = record if isinstance(record, dict) else {}
+        if rec.get("payload_type") == "runtime.session.metadata":
+            cand = record.get("provider_id")
+        elif MuseParser._is_model_changed(rec):
+            cand = payload.get("provider_id") or payload.get("provider") or record.get("provider_id")
+            if not cand:
+                event = payload.get("event")
+                if isinstance(event, dict):
+                    cand = event.get("provider_id") or event.get("provider")
+        else:  # model_request_configured
+            event = payload.get("event")
+            cand = None
+            if isinstance(event, dict):
+                cand = event.get("provider_id") or event.get("provider")
+            cand = cand or payload.get("provider_id")
+        if isinstance(cand, str) and cand.strip():
+            return cand.strip()
+        return None
+
+    @staticmethod
+    def _is_usage(rec: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Usage classifier: return the usage dict when this is a
+        model_completed run event with a usage block, else None.
+        goal_usage_attribution carries the same counters as Goal budget
+        accounting over the same calls; reading both doubles every session,
+        so only model_completed emits."""
+        if rec.get("payload_type") != "runtime.session":
+            return None
+        payload = rec.get("payload")
+        if not isinstance(payload, dict) or payload.get("kind") != "run":
+            return None
+        event = payload.get("event")
+        if not isinstance(event, dict) or event.get("kind") != "model_completed":
+            return None
+        usage = event.get("usage")
+        return usage if isinstance(usage, dict) else None
+
+    def _estimate_flag(self, usage: Dict[str, Any], event: Dict[str, Any]) -> Optional[bool]:
+        """Map the capture-gated EstimateSource marker to `estimated`.
+
+        tokenizer_estimate / heuristic_estimate -> True; provider_reported ->
+        False; no marker -> omit the key (an invented False asserts a
+        provenance the source never stated). While the serialized key is
+        unset (MUSE_ESTIMATE_MARKER_KEY is None) nothing is ever emitted.
+        """
+        key = self.estimate_marker_key
+        if not key:
+            return None
+        value = usage.get(key, event.get(key))
+        if value == "tokenizer_estimate" or value == "heuristic_estimate":
+            return True
+        if value == "provider_reported":
+            return False
+        return None
+
+    @staticmethod
+    def _validate_counters(usage: Dict[str, Any]) -> Optional[Dict[str, int]]:
+        """Counter validation before the buckets.
+
+        A present-but-bad counter (bool, negative, non-int) makes the record
+        malformed: _i() would coerce True to 1 and let -5 through, and the
+        store coerces without questioning. The wire schema's TokenUsage
+        required list names all four combined counters, so a required-but-
+        absent field is skipped too — admitting one makes a truncated record
+        indistinguishable from a genuine zero (an absent cached_tokens reads
+        as 0 and turns cached input into ordinary input, the exact inflation
+        the cache rule exists to prevent, and defeats the inclusive-or-beside
+        oracle since a zero cache satisfies both equations). The one tolerated
+        absence is cached_tokens when BOTH split members are present: the
+        schema makes the split pair conditional on one provider capability,
+        so a provider that distinguishes emits both — one member alone is
+        malformed, not half a pair. When the pair exists it is AUTHORITATIVE,
+        with no read+write == cached_tokens cross-check: the official schema
+        defines the split fields as raw provider counters and explicitly
+        leaves cache conventions provider-dependent, so the equation is not
+        established anywhere — SASE's layout treats cached_tokens as the
+        older cache-READ fallback with writes tracked separately, and an
+        equality test would silently drop every billable call from exactly
+        that provider (cached == read, write > 0). A provider/version
+        contract that proves the equation is a capture question, not a
+        default.
+        """
+        def bad(v: Any) -> bool:
+            return not _muse_int(v) or v < 0
+
+        inp = usage.get("input_tokens")
+        outp = usage.get("output_tokens")
+        reasoning = usage.get("reasoning_tokens")
+        cached = usage.get("cached_tokens")
+        read = usage.get("cache_read_tokens")
+        write = usage.get("cache_write_tokens")
+
+        has_read = "cache_read_tokens" in usage
+        has_write = "cache_write_tokens" in usage
+        if has_read != has_write:
+            return None  # half a pair
+        has_split = has_read and has_write
+
+        if any(bad(v) for v in (inp, outp, reasoning)):
+            return None
+        if has_split:
+            if bad(read) or bad(write):
+                return None
+            # cached_tokens, if also present, is NOT cross-checked against
+            # read+write — the pair is authoritative (see docstring).
+        elif "cached_tokens" not in usage or bad(cached):
+            return None
+        return {
+            "input_tokens": int(inp),
+            "output_tokens": int(outp),
+            "reasoning_tokens": int(reasoning),
+            # int(cached) runs ONLY in the branch where the combined value
+            # is used (and was just validated). When the split pair supersedes
+            # it, the combined value is NOT converted at all: it is
+            # convention-varying data the record does not need, and
+            # int("bad") on a superseded field would raise ValueError and
+            # abort the whole sync — violating the per-record malformed-
+            # skip contract over a field nothing reads.
+            "cached_tokens": 0 if has_split else int(cached),
+            "cache_read_tokens": int(read) if has_split else None,
+            "cache_write_tokens": int(write) if has_split else None,
+        }
+
+    # -- entry construction -------------------------------------------------
+
+    def _build_entries(self, records: List[Tuple[Any, ...]], file_sig: Tuple[str, int, int]) -> List[Dict[str, Any]]:
+        """Two passes: collect model-state records, then price each usage
+        record against the most recent model-bearing state strictly earlier
+        in composite (sequence, expansion_order) position. recorded_at is
+        deliberately NOT the ordering source: switch and call stamped in
+        microseconds of each other, or a corrected clock, would pick the wrong
+        'most recent' model exactly when it matters."""
+        path = str(file_sig[0])
+        ceiling = int(file_sig[1]) // 1000 + _MUSE_FUTURE_SLACK_US  # ns -> us, +1 day
+        out: List[Dict[str, Any]] = []
+        # state: (position, model_or_None, provider_or_None, run_id_or_None, scope).
+        # Provider is state, not a scalar: MSP selection carries providerId
+        # alongside modelId, so a provider change must govern later calls only
+        # — a last-wins metadata_provider would let a later switch rewrite
+        # earlier calls' provider, exactly the leak the model chain resolves
+        # by position.
+        state: List[Tuple[tuple, Optional[str], Optional[str], Optional[str], str]] = []
+        usage_recs: List[Tuple[Any, ...]] = []
+        for rec_tuple in records:
+            rec = rec_tuple[0]
+            if not (_MUSE_TS_MIN_US <= int(rec.get("recorded_at") or 0) <= ceiling):
+                # File-relative ceiling: the record appends after the call
+                # completes, so a date more than a day past the file's own
+                # last write is not trustworthy. Skip, never clamp: rewriting
+                # a timestamp invents a value the source never wrote.
+                continue
+            if self._is_metadata(rec):
+                state.append((_muse_pos(rec_tuple), self._record_model(rec), self._record_provider(rec), None, "session"))
+            elif self._is_model_configured(rec):
+                payload = rec.get("payload") or {}
+                run_id = payload.get("run_id")
+                state.append((_muse_pos(rec_tuple), self._record_model(rec), self._record_provider(rec), run_id if isinstance(run_id, str) and run_id else None, "run"))
+            elif self._is_model_changed(rec):
+                state.append((_muse_pos(rec_tuple), self._record_model(rec), self._record_provider(rec), None, "session"))
+            else:
+                if self._is_usage(rec) is not None:
+                    usage_recs.append(rec_tuple)
+        for rec_tuple in usage_recs:
+            rec = rec_tuple[0]
+            usage = self._is_usage(rec)
+            counters = self._validate_counters(usage)
+            if counters is None:
+                continue
+            if counters["cache_read_tokens"] is not None:
+                cache_read = counters["cache_read_tokens"]
+                cache_write = counters["cache_write_tokens"]
+            else:
+                cache_read = counters["cached_tokens"]
+                cache_write = 0
+            completion = max(0, counters["output_tokens"])
+            # The all-zero guard every file source uses, BEFORE selection
+            # and policy resolution. It reads only raw buckets: with input,
+            # completion and both cache buckets at zero, every world's
+            # display buckets are zero too (reasoning is clamped by
+            # completion), so the guard needs no policy — and MUST run
+            # before one: the ccmux fixture's echo session is exactly an
+            # all-zero model_completed under a provider no capture will ever
+            # establish a policy for. Checking the policy first would make
+            # that harmless historical session raise and abort the entire
+            # Muse source on every sync.
+            if counters["input_tokens"] == 0 and completion == 0 and cache_read == 0 and cache_write == 0:
+                continue
+            own_pos = _muse_pos(rec_tuple)
+            model, call_provider = self._resolve_selection(rec_tuple, state, own_pos)
+            provider, model_name = self._split_provider(model)
+            if not provider:
+                provider = call_provider
+            # Policy keyed by the RESOLVED provider of a NONZERO call:
+            # Muse's schema says the counters are not summable across
+            # providers and cache inclusion is provider-dependent, so one
+            # global pair would apply the wrong subtraction to any call made
+            # under a different provider. No provider in the map -> raise:
+            # borrowing another provider's (or a global) policy would
+            # misprice, and silence would hide the gap (build blocker per
+            # provider, open item 1). Only calls that carry tokens need a
+            # policy — see the all-zero guard above.
+            policy = self.cache_policies.get(provider)
+            if policy is None:
+                raise RuntimeError(
+                    f"muse cache convention unresolved for provider {provider!r}: "
+                    "MUSE_CACHE_POLICIES has no entry for it. Inclusion is "
+                    "provider-dependent (FINDINGS.md open item 1) — neither "
+                    "guessing nor borrowing another provider's policy is "
+                    "allowed; the source must not be registered until every "
+                    "provider that can emit nonzero calls has an established "
+                    "entry"
+                )
+            read_included, write_included = policy
+            # Inclusion is per bucket AND per provider: the evidence proves
+            # reads inside input for Meta, not writes. Subtract exactly the
+            # buckets this provider's policy includes — never both on one
+            # global flag (write-beside layouts would have fresh input
+            # undercounted by every cache-write token).
+            input_t = counters["input_tokens"]
+            if read_included:
+                input_t -= cache_read
+            if write_included:
+                input_t -= cache_write
+            input_t = max(0, input_t)
+            reasoning = min(max(0, counters["reasoning_tokens"]), completion)  # subset of output
+            output = max(0, completion - reasoning)  # display bucket
+            candidates = [f"{provider}/{model_name}", model_name] if provider else [model_name]
+            cost = 0.0
+            for cand in candidates:
+                cost = self.pricing_db.get_cost(cand, input_t, completion, cache_read, cache_write)
+                if cost > 0:
+                    break
+            entry = {
+                "source": self.source_name,
+                "model": model_name,
+                "provider": provider,
+                "input": input_t,
+                "output": output,
+                "cacheRead": cache_read,
+                "cacheWrite": cache_write,
+                "reasoning": reasoning,
+                "cost": cost,
+                "_billing": usage_billing_pricing(
+                    candidates,
+                    input_tokens=input_t,
+                    output_tokens=completion,
+                    cache_read=cache_read,
+                    cache_write=cache_write,
+                ),
+                "entry_id": f"muse:{rec.get('id')}",
+                "timestamp": int(rec.get("recorded_at")) // 1000,
+            }
+            estimated = self._estimate_flag(usage, (rec.get("payload") or {}).get("event") or {})
+            if estimated is not None:
+                entry["estimated"] = estimated
+            out.append(entry)
+        return out
+
+    def _resolve_selection(self, usage_rec: Tuple[Any, ...], state: List[Tuple[tuple, Optional[str], Optional[str], Optional[str], str]], own_pos: tuple) -> Tuple[str, str]:
+        """The governing (model, provider) selection, resolved as ONE unit.
+        Official MSP model selection is a single record carrying modelId and
+        optionally providerId. Resolving model and provider from INDEPENDENT
+        records — nearest model-bearing here, nearest provider-bearing there
+        — fabricates pairs that never existed: metadata provider-a/model-a
+        followed by a model-only switch to model-b would price the call under
+        provider-a/model-b, a selection never in force (a real bug: the wrong
+        pricing entry). So a SELECTION RECORD is atomic: the winning record
+        supplies both fields, and a selection record without a provider means
+        NO provider (""), never the previous one.
+
+        A model_completed event's own ``model`` is NOT a selection record.
+        Real captures carry model on the usage event while provider_id stays
+        in the session metadata (BurnBar's observed format); treating a bare
+        per-call model as a providerless selection would clear the governing
+        provider to "" — the wrong pricing candidate, and keyed into the
+        policy map, a spurious unresolved-provider abort on every ordinary
+        Meta call. Per-call fields therefore override FIELD-WISE: a bare
+        event model replaces only the model and retains the governing
+        selection's provider; an event provider field, if one ever appears,
+        replaces only the provider. The governing selection is the newest
+        eligible run- or session-scoped record; never a fourth link
+        (reminder_roster agent models are an auxiliary roster, values include
+        "same-as-main").
+        """
+        payload = usage_rec[0].get("payload") or {}
+        event = payload.get("event")
+        event = event if isinstance(event, dict) else {}
+        cand_model = event.get("model")
+        percall_model = cand_model.strip() if isinstance(cand_model, str) and cand_model.strip() else None
+        cand = event.get("provider_id") or event.get("provider")
+        percall_provider = cand.strip() if isinstance(cand, str) and cand.strip() else None
+        # Governing selection: the nearest eligible earlier selection-bearing
+        # record (model OR provider) strictly before the call. Session state
+        # is always eligible; run state is eligible only when it matches the
+        # call's own payload.run_id. Comparing both scopes by stream position
+        # lets a session/setModel admitted during a run take effect at the
+        # next model-call boundary while preventing run n-1 state from
+        # bleeding into run n.
+        state_model: Optional[str] = None
+        state_provider: Optional[str] = None
+        run_id = payload.get("run_id")
+        best: Optional[Tuple[tuple, Optional[str], Optional[str]]] = None
+        for pos, rec_model, rec_provider, rec_run, scope in state:
+            if scope == "run" and (rec_run is None or rec_run != run_id):
+                continue
+            if scope not in ("run", "session"):
+                continue
+            if rec_model is None and rec_provider is None:
+                continue
+            if pos >= own_pos:
+                continue
+            if best is None or pos > best[0]:
+                best = (pos, rec_model, rec_provider)
+        if best is not None:
+            _pos, state_model, state_provider = best
+        # Field-wise per-call overrides (never pair-wise): the model on a
+        # usage event is an observation, not a selection.
+        model = percall_model if percall_model is not None else state_model
+        provider = percall_provider if percall_provider is not None else state_provider
+        return (model if model is not None else "unknown",
+                provider if provider is not None else "")
+
+    @staticmethod
+    def _split_provider(model: str) -> Tuple[str, str]:
+        """Split a qualified provider/model id into BOTH fields. Splitting
+        only the provider and keeping the qualified string in `model` is a
+        stored-aggregation bug: aggregate_entries composes display names as
+        f\"{provider}/{model}\", so a qualified model kept verbatim next to the
+        extracted prefix surfaces as meta/meta/model, grouped apart from the
+        same model's unqualified rows. Split once; a second \"/\" stays in."""
+        if "/" in model:
+            provider, _, rest = model.partition("/")
+            if provider.strip() and rest.strip():
+                return provider.strip(), rest.strip()
+        return "", model
+
+    def _parse_file_strict(self, file_sig: Tuple[str, int, int]) -> List[Dict[str, Any]]:
+        """Strict single-file entry point for the stored sync.
+
+        Raises UsageFileVanished (never returns []) when the enumerated file
+        disappeared between discovery and open — under file_replace, [] means
+        \"this file now has zero entries\" and the commit would delete every
+        stored row for the path. sync_files catches the typed signal, verifies
+        the path, and skips the file with its rows kept.
+        """
+        records = self._read_records(file_sig)
+        return self._build_entries(records, file_sig)
+
+    def _parse_all(self) -> List[Dict[str, Any]]:
+        # The store's stable-key upsert keeps the earliest (timestamp,
+        # file_path) copy of a record id that a fork restamped into a second
+        # file; do the same here so live and persistent totals agree even when
+        # a fork copies history — the same comparison the store's upsert
+        # applies, tie included: fork copies stamped less than a millisecond
+        # apart tie on timestamp_ms (entry timestamps are milliseconds) and
+        # the lexicographically smallest path must win in BOTH modes.
+        # The DB-off path is also the only place dedup can run at all:
+        # cross_file_stable_keys lives inside sync_files, which
+        # TOKDASH_USAGE_DB=0 bypasses.
+        by_id: Dict[str, Tuple[tuple, Dict[str, Any]]] = {}
+        for file_sig in self._file_signatures():
+            try:
+                entries = self._parse_file_strict(file_sig)
+            except UsageFileVanished:
+                # The DB-off live path skips ONLY the vanished file: every
+                # other file's entries must survive the race, and the source
+                # must never land in source_errors over a deletion (the
+                # tracker's per-source except would blank the whole source).
+                continue
+            path = str(file_sig[0])
+            for entry in entries:
+                entry_id = entry["entry_id"]
+                key = (int(entry["timestamp"]), path)
+                prev = by_id.get(entry_id)
+                if prev is None or key < prev[0]:
+                    by_id[entry_id] = (key, entry)
+        entries = [entry for _key, entry in by_id.values()]
+        entries.sort(key=lambda e: int(e.get("timestamp", 0) or 0))
+        return entries
+
+
+# ---------------------------------------------------------------------------
 # Crush (per-project crush.db)
 # ---------------------------------------------------------------------------
 
@@ -5866,6 +6687,21 @@ class CodingToolsUsageTracker:
             "zed": ZedParser(self.pricing_db),
             "qwen_code": QwenCodeParser(self.pricing_db),
             "crush": CrushParser(self.pricing_db),
+            # Muse stays unregistered until the FINDINGS.md open item 1 capture
+            # campaign populates MUSE_CACHE_POLICIES with an entry for every
+            # provider the source can emit. An unresolved cache convention is a
+            # build blocker, not a runtime state: enabling the source without
+            # a provider's entry would guess that provider's counted-once
+            # convention, and guessing it wrong inflates or deflates every
+            # session under it in both totals and cost.
+            # MUSE_ESTIMATE_MARKER_KEY does NOT gate
+            # registration — the public protocol exposes no estimate-source
+            # member, so it stays None (no marker emitted) until a capture
+            # finds one; a later leg-(e) discovery is a separate, additive
+            # change. Fork record-ID behavior (open item 3) must also be
+            # resolved before enabling. Enable the class and this line
+            # together.
+            # "muse": MuseParser(self.pricing_db),
         }
         # Two parsers must never scan the same directory: the usage store
         # dedups on (source, entry_key) and never across sources, so an

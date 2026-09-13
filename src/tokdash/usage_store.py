@@ -110,6 +110,30 @@ USAGE_ENTRY_FORMAT_VERSION = 1
 # never see them. Billing provenance lives in its own column instead.
 PRIVATE_ENTRY_KEYS = ("_billing",)
 
+
+class UsageFileVanished(FileNotFoundError):
+    """The file a parser was handed to parse disappeared between enumeration and open.
+
+    Discovery and parsing are not atomic: ``_file_signatures()`` enumerates a
+    path, the client deletes it, and the per-file callback then opens a path
+    that is gone. A parser must NOT translate that into an empty entry list —
+    under ``file_replace`` an empty list means "this file now has zero
+    entries", so the sync's commit would delete every stored row for the path,
+    durable mode included (``keep_missing`` only rescues files absent from the
+    *enumerated set*, never a file enumerated-then-vanished).
+
+    The signal is deliberately narrow: a parser raises it only for the open of
+    the exact file the caller handed it (``filename`` records that path), never
+    for an auxiliary ``FileNotFoundError`` from deeper code. ``sync_files``
+    re-verifies ``exc.filename`` against the signature before honoring it, and
+    every other exception keeps its current behavior of failing the sync, so a
+    real parser bug can never be swallowed into stale rows behind a green sync.
+    """
+
+    def __init__(self, path: str):
+        super().__init__(2, "No such file or directory", str(path))
+        self.filename = str(path)
+
 # quota_history consumption: reset times within this many seconds are treated as the same
 # physical window, absorbing the ±1s poll-to-poll jitter (and Codex start-of-window
 # splinters) that would otherwise split one window into two epochs and double/under-count.
@@ -1546,12 +1570,19 @@ class UsageEntryStore:
         ``cross_file_stable_keys`` (from the parser's
         ``SourceSyncCapability``) marks sources whose entry keys can
         legitimately occur in several files: Codex rollout resumption copies
-        the stable usage-state keys into the resumed file, and Cline forking
-        copies the parent's message ids into a new session file. Such sources
-        keep the earliest occurrence canonical (the upsert below only moves a
-        key to a newer timestamp when the owner was deleted or rewritten, and
-        the reparse-survivors paths promote a surviving copy) instead of
-        letting whichever file parsed last own the key.
+        the stable usage-state keys into the resumed file, Cline forking
+        copies the parent's message ids into a new session file, and Muse
+        forks copy whole session logs. Such sources keep the *earliest
+        position* canonical — position being the ``(timestamp, file_path)``
+        pair, with the lexicographically smallest path winning an exact
+        millisecond tie, so the winner is identical in the store and in a
+        parser's own source-wide dedup no matter which copy parses first
+        (entry timestamps are milliseconds, so fork copies stamped less than a
+        millisecond apart genuinely tie). The upsert below only moves a key to
+        a later position, or to the same position from a smaller-or-equal path
+        when the owner was deleted or rewritten, and the reparse-survivors
+        paths promote a surviving copy) instead of letting whichever file
+        parsed last own the key.
         """
         files = _normalize_file_signatures(file_signatures)
         file_sig_by_path = {
@@ -1631,7 +1662,24 @@ class UsageEntryStore:
                     except Exception:
                         appended = False
             if not appended:
-                rows = [_entry_for_storage(e) for e in parse_file_entries(file_sig)]
+                try:
+                    file_entries = list(parse_file_entries(file_sig))
+                except UsageFileVanished as exc:
+                    # Typed-vanished-file isolation: the enumerated path
+                    # disappeared before the parse opened it. Skip this file
+                    # entirely — keep its stored rows and its file_state
+                    # (including its old signature, so a later sync reparses
+                    # it if it is back) — and let every other file commit.
+                    # Returning [] here would silently delete the file's
+                    # rows; any other exception still fails the sync, so the
+                    # isolation cannot swallow a real parser bug. The
+                    # filename check is the second half of the narrowness
+                    # rule: a UsageFileVanished raised for some other path is
+                    # not this file's race.
+                    if exc.filename != path:
+                        raise
+                    continue
+                rows = [_entry_for_storage(e) for e in file_entries]
                 parsed.append((file_sig, [e for e in rows if e is not None], int(size), False))
 
         if cross_file_stable_keys:
@@ -1670,6 +1718,15 @@ class UsageEntryStore:
                 if not appended
             )
             if replacement_lost_owned_keys:
+                # NOTE: no UsageFileVanished catch here, deliberately. Skipping
+                # a vanished survivor at the main site keeps rows that file
+                # itself owns; a survivor re-parsed here holds none of the rows
+                # in question — the old canonical owner does — so skipping it
+                # and committing would let the owner lose its key to nothing
+                # and delete the only stored copy. A vanished file at this site
+                # therefore aborts the sync (the exception propagates before
+                # the write transaction opens); the next sync sees the file out
+                # of discovery and handles its real disappearance.
                 parsed_paths = {file_sig[0] for file_sig, _entries, _safe_offset, _appended in parsed}
                 for file_sig in files:
                     if file_sig[0] in parsed_paths:
@@ -1706,8 +1763,12 @@ class UsageEntryStore:
 
                 total_changed_entries = 0
                 if cross_file_stable_keys:
-                    # Earliest occurrence owns the key: a copy restamped by a
-                    # resumed/forked file must not replace the canonical row.
+                    # Earliest (timestamp, file_path) position owns the key:
+                    # a copy restamped by a resumed/forked file must not
+                    # replace the canonical row, and two copies stamped in
+                    # the same millisecond tie-break on path, never on parse
+                    # order — that is what makes the store and the parsers'
+                    # own by_id dedup pick the same winner under DB=0.
                     insert_sql = """
                         INSERT INTO usage_entries (
                             source, file_path, entry_key, model, provider, timestamp,
@@ -1731,6 +1792,8 @@ class UsageEntryStore:
                             billing_json = excluded.billing_json,
                             cost_authoritative = excluded.cost_authoritative
                         WHERE excluded.timestamp < usage_entries.timestamp
+                           OR (excluded.timestamp = usage_entries.timestamp
+                               AND excluded.file_path <= usage_entries.file_path)
                     """
                 else:
                     insert_sql = """

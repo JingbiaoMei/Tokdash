@@ -418,6 +418,14 @@ def discover_provider_sources() -> dict[str, list[str]]:
     for provider, names in env_checks.items():
         if any(os.environ.get(name, "").strip() for name in names):
             add(provider, "environment")
+    try:
+        from .opencode_go import read_opencode_go_key
+
+        credential = read_opencode_go_key()
+        if credential is not None:
+            add("opencode_go", "environment" if credential.source == "OPENCODE_API_KEY" else "OpenCode auth")
+    except Exception:
+        pass
     if os.environ.get("ANTHROPIC_AUTH_TOKEN", "").strip() and zai_coding_base_url_allowed(
         os.environ.get("ANTHROPIC_BASE_URL", "")
     ):

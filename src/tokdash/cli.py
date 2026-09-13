@@ -174,6 +174,7 @@ def build_parser(prog: str) -> argparse.ArgumentParser:
     parser.add_argument("--kimi-api", choices=["on", "off"], help="For `tokdash quota consent`: enable/disable Kimi Code quota polling.")
     parser.add_argument("--grok-api", choices=["on", "off"], help="For `tokdash quota consent`: enable/disable Grok Build quota polling.")
     parser.add_argument("--zai-api", choices=["on", "off"], help="For `tokdash quota consent`: enable/disable Z.ai Coding Plan quota polling.")
+    parser.add_argument("--opencode-go-api", dest="opencode_go_api", choices=["on", "off"], help="For `tokdash quota consent`: enable/disable OpenCode Go subscription quota polling.")
     parser.add_argument(
         "--credential-scan",
         choices=["on", "off"],
@@ -935,6 +936,7 @@ def quota_command(args) -> int:
                 "kimi_api": _parse_onoff(args.kimi_api),
                 "grok_api": _parse_onoff(args.grok_api),
                 "zai_api": _parse_onoff(args.zai_api),
+                "opencode_go_api": _parse_onoff(args.opencode_go_api),
             }.items()
             if value is not None
         }

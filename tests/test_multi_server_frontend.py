@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -296,6 +297,12 @@ def test_quota_visibility_dropdown_is_scoped_per_server():
     assert 'id="quotaVisibilityHost"' in source
     # Presence is computed per payload and threaded into cards and charts.
     assert "const present = quotaPresentProviders(payload);" in source
+    # Every backend quota provider must be in the shipped visibility list and the
+    # card render order — a provider missing here is filtered out of presence and
+    # can never render, no matter what /api/quota returns.
+    shipped = re.search(r"const QUOTA_PROVIDERS = \[(.*?)\];", source)
+    assert shipped and "'opencode_go'" in shipped.group(1)
+    assert "'opencode_go'" in re.search(r"const order = \[(.*?)\];", source).group(1)
     assert "const present = quotaPresentProviders(row.payload);" in source
     assert "present: quotaPresentProviders(payload)" in source
     assert "syncQuotaServerVisibilityControl(block, payload);" in source

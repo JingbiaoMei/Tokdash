@@ -16,6 +16,7 @@ QUOTA_KEYS = (
     "kimi_api",
     "grok_api",
     "zai_api",
+    "opencode_go_api",
 )
 CREDENTIAL_SCAN_KEY = "credential_scan"
 CONSENT_KEYS = (CREDENTIAL_SCAN_KEY, *QUOTA_KEYS)

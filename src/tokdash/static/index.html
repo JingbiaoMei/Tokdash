@@ -11800,6 +11800,7 @@
       if (provider === 'kimi') return 'Kimi Code';
       if (provider === 'grok') return 'Grok Build';
       if (provider === 'zai') return 'Z.ai';
+      if (provider === 'opencode_go') return 'OpenCode Go';
       return provider || '—';
     }
 
@@ -11851,6 +11852,7 @@
       if (provider === 'kimi') return { key: 'kimi_api', endpoint: 'api.kimi.com/coding/v1/usages', path: '$KIMI_CODE_HOME credentials/config or KIMI_API_KEY' };
       if (provider === 'grok') return { key: 'grok_api', endpoint: 'cli-chat-proxy.grok.com/v1/billing', path: '$GROK_HOME/auth.json (xAI OAuth only)' };
       if (provider === 'zai') return { key: 'zai_api', endpoint: 'api.z.ai/api/monitor/usage/quota/limit', path: '$ZCODE_HOME/v2/config.json, supported tool config, or ZAI_API_KEY' };
+      if (provider === 'opencode_go') return { key: 'opencode_go_api', endpoint: 'opencode.ai/zen/go/v1/usage', path: 'opencode auth.json (opencode-go key) or OPENCODE_API_KEY' };
       return { key: '', endpoint: '', path: '' };
     }
 
@@ -12504,7 +12506,7 @@
         return;
       }
       const providers = payload?.providers || {};
-      const order = ['codex', 'claude', 'antigravity', 'minimax', 'kimi', 'grok', 'zai'];
+      const order = ['codex', 'claude', 'antigravity', 'minimax', 'kimi', 'grok', 'zai', 'opencode_go'];
       const cards = document.createDocumentFragment();
       let renderedCards = 0;
 
@@ -12710,7 +12712,7 @@
     // only offers the providers present in THAT server's /api/quota payload — never the
     // union of harnesses across servers. Single-server mode uses the same control, placed
     // in the settings row via #quotaVisibilityHost.
-    const QUOTA_PROVIDERS = ['codex', 'claude', 'antigravity', 'minimax', 'kimi', 'grok', 'zai'];
+    const QUOTA_PROVIDERS = ['codex', 'claude', 'antigravity', 'minimax', 'kimi', 'grok', 'zai', 'opencode_go'];
     const QUOTA_VISIBILITY_KEY = 'tokdash-quota-visible';
     let quotaVisibilityState = null;
 

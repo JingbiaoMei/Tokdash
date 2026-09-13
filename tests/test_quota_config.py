@@ -17,6 +17,7 @@ def test_quota_network_consent_defaults_off_and_round_trips(tmp_path):
         "kimi_api": False,
         "grok_api": False,
         "zai_api": False,
+        "opencode_go_api": False,
     }
 
     updated = config.set_quota_consent({"codex_api": True, "claude_api": True})
@@ -30,6 +31,7 @@ def test_quota_network_consent_defaults_off_and_round_trips(tmp_path):
         "kimi_api": False,
         "grok_api": False,
         "zai_api": False,
+        "opencode_go_api": False,
     }
     assert config.read_quota_config() == updated
 
@@ -64,6 +66,7 @@ def test_quota_config_preserves_unrelated_config_keys():
         "kimi_api": False,
         "grok_api": False,
         "zai_api": False,
+        "opencode_go_api": False,
     }
 
 

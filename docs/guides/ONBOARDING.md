@@ -131,14 +131,18 @@ Defaults are loopback-first: `127.0.0.1:55423`. `--auto` is **strictly local-onl
 refuses a non-loopback bind. The local API is unauthenticated, so **write endpoints are
 automatically disabled unless the server is bound to loopback** (see `docs/SECURITY.md`).
 
-Interactive `tokdash setup` can configure Tailscale Serve after explicit confirmation and
-record the exact targeted teardown for `tokdash uninstall`. `--auto` never exposes the service;
-it only prints remote-access guidance. SSH forwarding supports authenticated write access, while
-an explicit non-loopback bind remains read-only.
+Interactive `tokdash setup` keeps offering Tailscale Serve after a successful loopback
+setup, with **No selected by default**, and records the exact targeted teardown for
+`tokdash uninstall` when confirmed. `--auto`/`--yes` never configure Serve; they only print
+remote-access guidance. Other access methods — SSH forwarding (the only one that keeps
+browser writes), Cloudflare Tunnel behind Cloudflare Access, and authenticated reverse
+proxies — are configured outside onboarding. An explicit non-loopback bind remains
+read-only.
 
-See [`REMOTE_ACCESS.md`](REMOTE_ACCESS.md) for commands, URLs, WSL2 guidance, and the trade-offs
-between Tailscale Serve, SSH forwarding, and wildcard binding. See [`SECURITY.md`](../SECURITY.md)
-for the complete write-protection model.
+See [`REMOTE_ACCESS.md`](REMOTE_ACCESS.md) for commands, URLs, WSL2 guidance, and the
+trade-offs between SSH forwarding, Tailscale Serve, Cloudflare Tunnel, reverse proxies, and
+wildcard binding. See [`SECURITY.md`](../SECURITY.md) for the complete write-protection
+model.
 
 ## `tokdash doctor`
 

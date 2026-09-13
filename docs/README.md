@@ -8,7 +8,7 @@
 ## guides/ — task-oriented setup guides
 
 - [Onboarding](guides/ONBOARDING.md) — `setup`, `doctor`, `update`, and `uninstall`, Tokdash's Python-native service lifecycle.
-- [Remote access](guides/REMOTE_ACCESS.md) — reaching a Tokdash instance from another machine (Tailscale Serve, SSH forwarding, wildcard binding).
+- [Remote access](guides/REMOTE_ACCESS.md) — reaching a Tokdash instance from another machine (SSH forwarding, Tailscale Serve, Cloudflare Tunnel, authenticated reverse proxy, wildcard binding).
 - [Statusline templates](guides/statusline/README.md) — ready-made Claude Code statusline scripts (bash + PowerShell) that read local Tokdash totals.
 - [Background service & agents](guides/agents/systemd/BACKGROUND_RUN.md) — run Tokdash as a systemd/launchd service, the health-probe auto-restart, and the OpenClaw reporting cron.
 

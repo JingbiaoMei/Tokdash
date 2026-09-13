@@ -73,14 +73,11 @@ def _entry_token(entry: Any) -> str:
 
 
 def read_opencode_go_key() -> _Credential | None:
-    """File-wins credential lookup: auth.json first, OPENCODE_API_KEY fallback."""
-    credential = _auth_file_key()
-    if credential is not None:
-        return credential
+    """Read OPENCODE_API_KEY first, falling back to OpenCode's auth.json."""
     env_token = os.environ.get(_ENV_VAR, "").strip()
     if env_token:
         return _Credential(env_token, _ENV_VAR)
-    return None
+    return _auth_file_key()
 
 
 def has_credentials() -> bool:
@@ -179,8 +176,9 @@ def collect_opencode_go_api_snapshots(*, opener=urllib.request.urlopen, now: int
         except ValueError:
             error_payload = None
         if exc.code == 403 and _is_entitlement_error(error_payload):
-            # Valid key, no Go subscription: silently omitted, no diagnostic.
-            return []
+            # Record entitlement loss so an older successful reading cannot keep
+            # the card healthy. The stored windows remain available as history.
+            return [_status_snapshot("unavailable", captured_at, credential, {"error": "subscription_required"})]
         detail = ""
         if isinstance(error_payload, dict):
             err = error_payload.get("error")

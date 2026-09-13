@@ -469,7 +469,7 @@ Tailscale Serve、SSH フォーワード、明示的なネットワークバイ�
 
 Quota タブは 2 つのデータソースから、サブスクリプションの利用率ウィンドウとリセットタイマーを表示します。**ローカルログ**（ネットワーク不要）: Codex はセッションファイルに自分のクォータを記録するため、Codex の 5 時間 / 週間ウィンドウはそのまま動作します — ただし Codex を使ったときのみ更新され、ログにはリセットクレジットやメーターリング機能ウィンドウが含まれません。セッションログの Codex 消費量は**大幅に誤りうる推定値**として扱うべきです: 各セッションが最後の取得時のクォータスナップショットをキャッシュし、その後の全メッセージで同じものを再生するため、数値が古い場合があり、リセット境界のノイズがウィンドウをさらに歪めることもあります — Quota タブはこれらのチャートを推定値とラベル付けします。**ライブポーリング**（デフォルト無効、プロバイダーごとにオプトイン）: Tokdash は CLI がすでに持っているサインインで、プロバイダー自身のクォータエンドポイントを呼び出します。より新鮮で、Codex のリセットクレジットとメーターリング機能を追加し、**正確な** Codex 消費量には必須であり、Claude Code、Antigravity、MiniMax、Kimi Code、SuperGrok/Grok Build の唯一のクォータソースです:
 
-Z.ai Coding Plan のクォータもライブポーリングからのみ取得できます。
+Z.ai Coding Plan と OpenCode Go のクォータもライブポーリングからのみ取得できます。
 
 ```bash
 tokdash quota consent --codex-api on --claude-api on --antigravity-api on
@@ -493,6 +493,8 @@ tokdash quota show
 ライブポーリングは 2 つの別々の決定を要求します: `quota.credential_scan` は開示済みのローカル認証情報ストアへの読み取り専用アクセスを許可し、その後各 `<provider>_api` キーがそのプロバイダーのネットワークリクエストを許可します。Tokdash はネイティブ CLI の認証 / 設定ファイル、OpenCode の `auth.json` とグローバルプロバイダー設定、アクティブな Claude 設定、CC Switch の `providers` テーブルを読み取り専用の SQLite 接続で読み取ります。プロバイダーのログ、シェルプロファイル、任意の `{file:...}` 参照は決してスキャンしません。MiniMax は `mmx` サインインまたは Token Plan Subscription Key（`MINIMAX_TOKEN_PLAN_GLOBAL_KEY` / `MINIMAX_TOKEN_PLAN_CN_KEY`）を受け付けます。通常の従量課金キーに Token Plan クォータがあるとは限りません。Kimi は Kimi Code サインイン / キー（`KIMI_API_KEY`）を受け付け、Moonshot Open Platform の従量課金キーは受け付けません。SuperGrok/Grok Build のクォータには `$GROK_HOME/auth.json` の xAI OAuth サインインが必要です。通常の xAI API キーではコンシューマー課金にアクセスできません。macOS では Claude Code が 1 回だけの読み取り専用 Keychain 承認を要求することがあります。Tokdash はプロバイダーの認証情報を更新も書き込みもしません。`TOKDASH_QUOTA_POLL=0` は全クォータ追跡のハードキルスイッチです。`tokdash export` はデフォルトでクォータデータを除外します。JSON に含めたいときには意図的に `--include-quota` を使用してください。
 
 Z.ai は `$ZCODE_HOME/v2/config.json`、対応ツールの設定、`ZAI_API_KEY`、または `Z_AI_API_KEY` の Coding Plan キーを受け付け、5 時間 / 週間クレジットウィンドウと従来の MCP 上限を照会します。
+
+OpenCode Go は `OPENCODE_API_KEY` を優先し、未設定の場合は OpenCode の `auth.json` 内の `opencode-go` キーを使って、`opencode.ai/zen/go/v1/usage` からローリング・週間・月間のサブスクリプション使用枠を取得します。Zen の従量課金残高にはキー認証に対応したエンドポイントがないため、追跡しません。
 
 Grok Build のトークン使用量も `$GROK_HOME/logs/unified.jsonl` からローカルにパースされます。その推論レコードはプロンプト、キャッシュ済みプロンプト、補完、推論トークンを公開し、Tokdash は同じ CLI プロセスのモデルイベントを使って帰属させ、通常の価格データベースからコストを計算します。モデルイベントのないレコードは推測価格を割り当てるのではなくスキップされます。
 

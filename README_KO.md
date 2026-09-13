@@ -469,7 +469,7 @@ Tailscale Serve, SSH 포워딩, 명시적 네트워크 바인딩을 통한 원�
 
 Quota 탭은 두 가지 데이터 소스로 구독 이용률 윈도우와 리셋 타이머를 표시합니다. **로컬 로그** (네트워크 불필요): Codex는 세션 파일에 자신의 쿼터를 기록하므로 Codex 5시간/주간 윈도우는 바로 동작합니다 — 다만 Codex를 사용할 때만 업데이트되고, 로그에는 리셋 크레딧이나 미터링 기능 윈도우가 포함되지 않습니다. 세션 로그의 Codex 소비량은 **크게 틀릴 수 있는 추정치**로 취급하세요: 각 세션이 마지막 조회 시점의 쿼터 스냅샷을 캐시해 이후 모든 메시지에서 그대로 재생하므로 수치가 오래될 수 있고, 리셋 경계 노이즈가 윈도우를 더 왜곡할 수도 있습니다 — Quota 탭은 이 차트를 추정치로 라벨링합니다. **라이브 폴링** (기본값: 꺼짐, 제공자별 동의): Tokdash는 CLI가 이미 가진 로그인으로 제공자 자신의 쿼터 엔드포인트를 호출합니다. 더 최신이고, Codex 리셋 크레딧과 미터링 기능을 추가하며, **정확한** Codex 소비량에는 필수이고, Claude Code, Antigravity, MiniMax, Kimi Code, SuperGrok/Grok Build의 유일한 쿼터 소스입니다:
 
-Z.ai Coding Plan 쿼터도 라이브 폴링에서만 사용할 수 있습니다.
+Z.ai Coding Plan과 OpenCode Go 쿼터도 라이브 폴링에서만 사용할 수 있습니다.
 
 ```bash
 tokdash quota consent --codex-api on --claude-api on --antigravity-api on
@@ -493,6 +493,8 @@ tokdash quota show
 라이브 폴링은 두 가지 독립적 결정을 요구합니다: `quota.credential_scan`은 공개된 로컬 자격 증명 스토어에 대한 읽기 전용 접근을 허용하고, 이어 각 `<provider>_api` 키가 해당 제공자의 네트워크 요청을 허용합니다. Tokdash는 네이티브 CLI 인증/설정 파일, OpenCode의 `auth.json`과 전역 제공자 설정, 활성 Claude 설정, CC Switch의 `providers` 테이블을 읽기 전용 SQLite 연결로 읽습니다. 제공자 로그, 셸 프로필, 임의의 `{file:...}` 참조는 절대 스캔하지 않습니다. MiniMax는 `mmx` 로그인 또는 Token Plan Subscription Key(`MINIMAX_TOKEN_PLAN_GLOBAL_KEY` / `MINIMAX_TOKEN_PLAN_CN_KEY`)를 받습니다. 일반 후불 키에는 Token Plan 쿼터가 보장되지 않습니다. Kimi는 Kimi Code 로그인/키(`KIMI_API_KEY`)를 받고, Moonshot Open Platform 후불 키는 받지 않습니다. SuperGrok/Grok Build 쿼터에는 `$GROK_HOME/auth.json`의 xAI OAuth 로그인이 필요합니다. 일반 xAI API 키로는 소비자 과금에 접근할 수 없습니다. macOS에서 Claude Code는 일회성 읽기 전용 키체인 승인을 요구할 수 있습니다. Tokdash는 제공자 자격 증명을 갱신하거나 쓰지 않습니다. `TOKDASH_QUOTA_POLL=0`은 모든 쿼터 추적을 위한 하드 킬 스위치입니다. `tokdash export`는 기본적으로 쿼터 데이터를 제외합니다. JSON에 포함하려면 의도적으로 `--include-quota`를 사용하세요.
 
 Z.ai는 `$ZCODE_HOME/v2/config.json`, 지원되는 도구 설정, `ZAI_API_KEY` 또는 `Z_AI_API_KEY`의 Coding Plan 키를 허용하며 5시간/주간 크레딧 윈도우와 레거시 MCP 한도를 조회합니다.
+
+OpenCode Go는 `OPENCODE_API_KEY`를 우선 사용하고, 설정되지 않은 경우 OpenCode의 `auth.json`에 있는 `opencode-go` 키를 사용해 `opencode.ai/zen/go/v1/usage`에서 롤링·주간·월간 구독 사용량을 조회합니다. Zen 종량제 잔액에는 키 인증을 지원하는 엔드포인트가 없어 추적하지 않습니다.
 
 Grok Build 토큰 사용량도 `$GROK_HOME/logs/unified.jsonl`에서 로컬로 파싱됩니다. 그 추론 레코드는 프롬프트, 캐시된 프롬프트,완성, 추론 토큰을 노출하고, Tokdash는 같은 CLI 프로세스의 모델 이벤트로 귀속하고 통상 가격 데이터베이스로 비용을 계산합니다. 모델 이벤트가 없는 레코드는 추정 가격을 지정하는 대신 건너뜁니다.
 

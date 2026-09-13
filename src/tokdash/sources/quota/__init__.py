@@ -403,7 +403,9 @@ def _account_status(view: dict[str, Any]) -> tuple[str | None, str | None, int |
     function and cannot drift apart.
     """
     detail, status_at = _resolved_status(view)
-    status = view.get("status")
+    # Rows arrive in bucket order, so an older window can be visited after the
+    # current API failure. The unresolved error owns the account's status.
+    status = detail or view.get("status")
     if detail is None and view.get("status_detail") and status and status != "ok":
         status = "ok"
     return status, detail, status_at

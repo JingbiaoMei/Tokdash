@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## Unreleased
+## 2.5.5 - 2026-09-14
 
 ### Added
 
@@ -12,6 +12,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Qwen Code appears in the Sessions tab. One turn per usage-bearing chat record, the cache-inclusive prompt split priced with `fresh-input`, and the source-global `qwen:<uuid>` fork dedupe — first-encountered file wins equal timestamps — all consumed through the same module-level reader the Overview parser uses, so the two tabs cannot disagree about which records count. Parity is pinned by a randomized property test over fixture corpora rather than the single 8-record chat file this machine has. Transient read failures degrade to a partial panel and are never cached. UI in all six languages. (#80)
 - OpenClaw appears in the Sessions tab. The per-session drill-down of `/api/sessions?tool=openclaw` consumes the same corpus snapshot the Overview parse produced — one cold pass per corpus change serves both tabs, and one global message-id dedupe decides the winner set in both. Display input folds cache writes the way the Overview fold bills them, and the message's recorded payload cost is the fallback only when the model resolves to nothing in the pricing database; a later rate edit reprices and retires it. The store sync is complete-aware: an unreadable transcript leaves the previous rows and the unrecorded signature in place so the next request retries, and the Sessions view renders the rest as a partial panel. `OPENCLAW_PARSER_VERSION` goes 1 -> 2: after upgrading, the first Overview request rewrites the OpenClaw source rows and pays one cold pass — that request is the repair, not a regression. UI in all six languages. (#81)
 - Qoder CLI gets its own Sessions panel, distinct from the Qoder IDE one. A turn is one request id: the per-file candidate builders, the global first-write-wins fold across all roots, the segment-wins-token merge and the credits-vs-pricing billing split are module functions now shared with the usage parser, so Sessions and Overview resolve a duplicate request id to the same winner and cannot drift. Credit rows keep the provider-reported cost — credits at the estimated `QODER_USD_PER_CREDIT` — through pricing-file edits; token-only rows reprice. The context window is part of the per-file cache key, because it changes candidate buckets, not just costs. The project column shows the segment's sanitized directory name verbatim (the sanitization is not reversible, so no inverse is guessed) and session names fall back to the short id, since every session on a machine shares its project label. A locked stream file degrades the panel to a partial view instead of an empty one. UI in all six languages. (#82)
+- Added opt-in OpenCode Go quota tracking for rolling, weekly and monthly subscription windows through the key-auth usage endpoint. Zen balance remains unavailable because it has no key-auth endpoint. (#83, thanks @blasphemy)
+
+### Changed
+
+- Expanded the secure remote-access guide with Cloudflare Tunnel plus Access and authenticated Caddy/nginx recipes, including subpath and client limitations. Interactive setup defaults Tailscale Serve to No, and automated setup never enables it. (#84)
+
+### Fixed
+
+- Claude Code turns now keep the fullest cumulative usage snapshot, including logs that carry both top-level `type` and `message.role`. This recovers output tokens lost when an early streamed block was kept and preserves later cache reclassification at equal totals. (#77)
+- Static assets load from symlink-based package installations instead of returning 404, while Starlette continues to reject path traversal outside the packaged static directory. (#79, thanks @ppq1024)
 
 ## 2.5.4 - 2026-09-08
 

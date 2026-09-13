@@ -1,6 +1,33 @@
 {
-  "current": "2.5.4",
+  "current": "2.5.5",
   "releases": [
+    {
+      "version": "2.5.5",
+      "date": "2026-09-14",
+      "sections": [
+        {
+          "type": "added",
+          "items": [
+            "Qwen Code, OpenClaw and Qoder CLI now have Session Explorer panels whose token totals share the same parsing and deduplication rules as Overview.",
+            "Opt-in OpenCode Go quota tracking reads rolling, weekly and monthly subscription windows through the key-auth usage endpoint."
+          ]
+        },
+        {
+          "type": "changed",
+          "items": [
+            "The secure remote-access guide now covers Cloudflare Tunnel with Access and authenticated Caddy/nginx deployments, including client and subpath limitations."
+          ]
+        },
+        {
+          "type": "fixed",
+          "items": [
+            "Claude Code turns keep their fullest cumulative usage snapshot, recovering output tokens that were lost when an early streamed block was retained.",
+            "Static assets load from symlink-based package installations instead of returning 404.",
+            "File-backed usage sync keeps existing rows when a log disappears between discovery and parsing, and cross-file copies choose the same owner with or without the durable database."
+          ]
+        }
+      ]
+    },
     {
       "version": "2.5.4",
       "date": "2026-09-08",

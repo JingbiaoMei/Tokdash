@@ -1158,7 +1158,9 @@ def test_fork_pair_db_modes_agree_on_the_winner(monkeypatch, tmp_path):
     assert len(rows) == 1
     entry_key, file_path, model = rows[0]
     assert model == "sentinel-a"
-    assert file_path.endswith("55555555-0000-4000-8000-00000000000a/session.jsonl")
+    stored_path = Path(file_path)
+    assert stored_path.name == "session.jsonl"
+    assert stored_path.parent.name == "55555555-0000-4000-8000-00000000000a"
 
 
 def test_qualified_rate_prices_row_and_reprice_moves_it(monkeypatch, tmp_path):

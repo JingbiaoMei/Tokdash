@@ -29,24 +29,51 @@ as non-loopback):
   no safe way to expose a writable unauthenticated API.
 - **Host/Origin allowlist.** `Host` (and any `Origin`/`Referer`) must be a loopback address
   derived from the configured bind/port. `Origin`/`Referer` are matched scheme-aware and
-  HTTP-only. This blocks DNS-rebinding and writes arriving through **Tailscale Serve**: it
-  forwards from `127.0.0.1` but carries the tailnet hostname as `Host` and an `https://`
-  `Origin`, both of which are rejected. A malformed/unparseable `Referer` also fails closed
-  (treated as cross-origin → `403`, never a `500`).
+  HTTP-only. An absent `Origin`/`Referer` does not fail this check — the token below is what
+  stops header-less cross-site form posts. This blocks DNS-rebinding and writes arriving
+  through **Tailscale Serve**: it forwards from `127.0.0.1` but carries the tailnet hostname
+  as `Host` and an `https://` `Origin`, both of which are rejected. A malformed/unparseable
+  `Referer` also fails closed (treated as cross-origin → `403`, never a `500`).
 - **Per-session token.** A random token is minted each server start and required as
   `X-Tokdash-Token`. The dashboard fetches it from `GET /api/csrf-token` (itself loopback/
   same-origin gated, so another localhost port can't read it).
 
 For setup commands and a comparison of remote-access methods, see
-[`REMOTE_ACCESS.md`](guides/REMOTE_ACCESS.md). Prefer Tailscale Serve or `ssh -L` forwarding over a
-non-loopback bind.
-The two differ for **writes**: **Tailscale Serve** requests are effectively read-only (their
-foreign `Host` / `https` `Origin` fail the allowlist), but an **`ssh -L` forward to
-`localhost`/`127.0.0.1` preserves a loopback `Host`, so writes from the SSH-authenticated user
-are allowed by design** — SSH itself is the authentication layer there, and reliably
-distinguishing a forwarded-localhost connection from a genuine local one is not possible from
-HTTP headers. If you do not want SSH-forwarded writes, bind to a non-loopback address (which
-disables all writes) or stop the service when you are done.
+[`REMOTE_ACCESS.md`](guides/REMOTE_ACCESS.md). Prefer `ssh -L` forwarding, Tailscale Serve,
+or Cloudflare Tunnel protected by Cloudflare Access over a non-loopback bind.
+
+The methods differ in **who authenticates the reader** and, for **writes**, all but one
+fail the Host/Origin allowlist — provided the gateway preserves the browser's external
+headers:
+
+- **`ssh -L` forwarding** preserves a loopback `Host`, so writes from the
+  SSH-authenticated user are allowed by design — SSH itself is the authentication layer,
+  and reliably distinguishing a forwarded-localhost connection from a genuine local one is
+  not possible from HTTP headers. If you do not want SSH-forwarded writes, bind to a
+  non-loopback address (which disables all writes) or stop the service when you are done.
+- **Tailscale Serve** requests are effectively read-only (their foreign `Host` / `https`
+  `Origin` fail the allowlist). Tailscale identity is the read-access boundary: only
+  devices on your tailnet can connect.
+- **Cloudflare Tunnel** requests fail the same allowlist — cloudflared preserves the
+  external `Host`/`Origin` — and are read-only through the gate. The tunnel alone
+  authenticates no one — a **Cloudflare Access** application in front of the hostname is
+  the read-access boundary.
+- **Authenticated reverse proxies** (Caddy, nginx, SSO proxies) are likewise read-only
+  through the gate, as long as the proxy passes the external `Host`/`Origin`/`Referer`
+  through unchanged (Caddy does so by default; the guide's nginx snippet sets
+  `Host $host`). The proxy's own authentication (basic auth, forward auth, SSO) behind
+  TLS is the read-access boundary. Tokdash cannot verify that the proxy enforces it.
+- **Public tunnels without edge authentication** (Tailscale Funnel, Cloudflare Quick
+  Tunnels, bare ngrok, LocalTunnel) expose the unauthenticated read API to the public
+  internet. Writes still fail closed — these services preserve the external
+  `Host`/`Origin`, which fail the allowlist — but per the policy above, do not expose
+  Tokdash this way.
+
+Every read-only claim above rests on header preservation. A proxy that rewrites `Host` to a
+loopback address **and** also rewrites `Origin`/`Referer` to a loopback origin — or removes
+them — satisfies the allowlist, makes `GET /api/csrf-token` reachable from the network, and
+turns the unauthenticated API writable. Stripping `Origin`/`Referer` alone does not: the
+external `Host` still fails the allowlist. Never configure a gateway that way.
 
 ### Quota refresh and update-check are read-only GETs
 

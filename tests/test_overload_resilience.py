@@ -19,10 +19,12 @@ def _reset_cache():
     api._clear_cache()
     with api._cache_guard:
         api._key_locks.clear()
+        api._inflight_fill_events.clear()
     yield
     api._clear_cache()
     with api._cache_guard:
         api._key_locks.clear()
+        api._inflight_fill_events.clear()
 
 
 def test_fresh_hit_returns_cached_without_recomputing():
@@ -50,7 +52,13 @@ def test_force_refresh_recomputes_fresh_hit_and_updates_cache():
     assert len(calls) == 2
 
 
-def test_force_refresh_returns_cached_value_under_same_key_contention():
+def test_force_refresh_joins_an_inflight_refresh_for_the_same_key():
+    """The loser of the single-flight race waits for the winner's fresh result.
+
+    Two forced refreshes for one key used to split into "recompute" and "serve the
+    stale body at once" — the Refresh button's answer then claimed fresh work while
+    showing the old numbers. The loser now joins the in-flight fill instead.
+    """
     api._cache["k-force-stale"] = (datetime.now().timestamp(), "cached")
     calls = []
     started = threading.Event()
@@ -59,24 +67,46 @@ def test_force_refresh_returns_cached_value_under_same_key_contention():
     def slow_fetch():
         calls.append(1)
         started.set()
-        release.wait(timeout=5)
+        assert release.wait(timeout=5)
         return "fresh"
 
-    refreshed: dict[str, str] = {}
+    refreshed: dict[str, object] = {}
 
     def refresher():
-        refreshed["v"] = api.get_cached_or_fetch("k-force-stale", slow_fetch, force_refresh=True)
+        refreshed["r"] = api.get_cached_or_fetch(
+            "k-force-stale", slow_fetch, force_refresh=True, return_metadata=True
+        )
 
     rt = threading.Thread(target=refresher)
     rt.start()
-    assert started.wait(timeout=5)
+    assert started.wait(timeout=5)  # the winner holds the key lock and is computing
 
-    assert api.get_cached_or_fetch("k-force-stale", slow_fetch, force_refresh=True) == "cached"
+    joined: dict[str, object] = {}
+
+    def joiner():
+        joined["r"] = api.get_cached_or_fetch(
+            "k-force-stale", slow_fetch, force_refresh=True, return_metadata=True
+        )
+
+    jt = threading.Thread(target=joiner)
+    jt.start()
+    # Grace period, like _race() elsewhere: nothing observable distinguishes
+    # "parked on the fill" from "not started yet", so give the joiner a moment to
+    # reach the wait before asserting it has NOT been answered with "cached".
+    time.sleep(0.1)
+    assert "r" not in joined, "the losing refresh was answered from the stale body"
 
     release.set()
     rt.join(timeout=5)
-    assert refreshed["v"] == "fresh"
-    assert len(calls) == 1
+    jt.join(timeout=5)
+    assert not rt.is_alive() and not jt.is_alive()
+    assert refreshed["r"].value == "fresh"
+    assert joined["r"].value == "fresh"
+    # "recomputed", not "hit"/"stale": the dashboard labels the refresh as cached
+    # whenever served_from_cache is true, so a joined result must not say so.
+    assert joined["r"].status == "recomputed"
+    assert joined["r"].served_from_cache is False
+    assert len(calls) == 1  # still one compute for the key
     assert api._cache["k-force-stale"][1] == "fresh"
 
 
@@ -160,6 +190,196 @@ def test_stale_value_served_while_refresh_in_flight():
         time.sleep(0.01)
     assert len(calls) == 1
     assert api._cache["k2"][1] == "fresh"
+
+
+def _stale_entry(key: str, value: str) -> None:
+    api._cache[key] = (datetime.now().timestamp() - (api.CACHE_TTL + 10), value)
+
+
+def test_force_refresh_joins_a_background_stale_refresh_daemon():
+    """The bug: page load schedules a refresh daemon, Refresh clicks, gets stale back.
+
+    A plain read on a stale key hands the single-flight lock to a refresh daemon.
+    A forced refresh arriving while the daemon holds that lock was answered with
+    the same stale body it was clicked to replace; it now joins the daemon's fill.
+    """
+    _stale_entry("k-join", "stale")
+    started = threading.Event()
+    release = threading.Event()
+
+    def slow_fetch():
+        started.set()
+        assert release.wait(timeout=5)
+        return "fresh"
+
+    assert api.get_cached_or_fetch("k-join", slow_fetch) == "stale"  # schedules the daemon
+    assert started.wait(timeout=5)  # the daemon holds the key lock and is computing
+
+    joined: dict[str, object] = {}
+
+    def refresher():
+        joined["r"] = api.get_cached_or_fetch(
+            "k-join", slow_fetch, force_refresh=True, return_metadata=True
+        )
+
+    rt = threading.Thread(target=refresher)
+    rt.start()
+    time.sleep(0.1)  # grace period: the join must be parked, not answered already
+    assert "r" not in joined, "the forced refresh was answered from the stale body"
+
+    release.set()
+    rt.join(timeout=5)
+    assert not rt.is_alive()
+    assert joined["r"].value == "fresh"
+    assert joined["r"].status == "recomputed"
+    assert joined["r"].served_from_cache is False
+    assert api._cache["k-join"][1] == "fresh"
+
+
+def test_force_refresh_join_accepts_the_fresh_value_read_as_hit():
+    """A fill that stored but has not released its lock must not label fresh stale.
+
+    Window: the daemon's _cache_set_if_epoch has run but it still holds the key
+    lock when the forced refresh reads `hit` at entry. `hit` then IS the fresh
+    entry, so a strictly-newer check can never pass; the within-TTL clause is
+    what keeps the fresh value from being returned with status "stale".
+    """
+    key = "k-join-fresh-hit"
+    api._cache[key] = (datetime.now().timestamp(), "fresh")
+    lock, acquired = api._try_key_lock(key)  # simulate the stored-but-unreleased fill
+    assert acquired
+
+    joined: dict[str, object] = {}
+
+    def refresher():
+        joined["r"] = api.get_cached_or_fetch(
+            key, lambda: "unused", force_refresh=True, return_metadata=True
+        )
+
+    rt = threading.Thread(target=refresher)
+    rt.start()
+    time.sleep(0.1)  # grace period: the join must be parked on the fill
+    assert "r" not in joined
+
+    api._release_key_lock(key, lock)
+    rt.join(timeout=5)
+    assert not rt.is_alive()
+    assert joined["r"].value == "fresh"
+    assert joined["r"].status == "recomputed"
+    assert joined["r"].served_from_cache is False
+
+
+def test_force_refresh_join_serves_stale_when_the_inflight_fill_fails():
+    """A join must never turn a failed fill into an error for the Refresh clicker."""
+    _stale_entry("k-join-fail", "stale")
+    started = threading.Event()
+    release = threading.Event()
+
+    def failing_fetch():
+        started.set()
+        assert release.wait(timeout=5)
+        raise RuntimeError("boom")
+
+    assert api.get_cached_or_fetch("k-join-fail", failing_fetch) == "stale"
+    assert started.wait(timeout=5)
+
+    joined: dict[str, object] = {}
+
+    def refresher():
+        joined["r"] = api.get_cached_or_fetch(
+            "k-join-fail", failing_fetch, force_refresh=True, return_metadata=True
+        )
+
+    rt = threading.Thread(target=refresher)
+    rt.start()
+    # Grace period, as in the success test: the daemon still holds the key lock
+    # until release.set(), so this gives the joiner time to park on the fill.
+    time.sleep(0.1)
+    assert "r" not in joined
+
+    release.set()
+    rt.join(timeout=5)
+    assert not rt.is_alive()
+    assert joined["r"].value == "stale"
+    assert joined["r"].status == "stale"
+    assert joined["r"].served_from_cache is True
+
+    # The failed fill wedged nothing: the key is computable again at once.
+    assert api.get_cached_or_fetch("k-join-fail", lambda: "recovered", force_refresh=True) == "recovered"
+
+
+def test_force_refresh_join_times_out_and_falls_back_to_stale(monkeypatch):
+    """A wedged fill must not park the Refresh request past the join budget."""
+    monkeypatch.setattr(api, "_FORCE_REFRESH_JOIN_SECONDS", 0.1)
+    _stale_entry("k-join-timeout", "stale")
+    started = threading.Event()
+    release = threading.Event()
+
+    def slow_fetch():
+        started.set()
+        assert release.wait(timeout=5)
+        return "fresh"
+
+    assert api.get_cached_or_fetch("k-join-timeout", slow_fetch) == "stale"
+    assert started.wait(timeout=5)  # daemon computing; the join will out-wait nothing
+
+    started_at = time.monotonic()
+    result = api.get_cached_or_fetch(
+        "k-join-timeout", slow_fetch, force_refresh=True, return_metadata=True
+    )
+    elapsed = time.monotonic() - started_at
+
+    assert result.value == "stale"
+    assert result.status == "stale"
+    assert elapsed >= 0.1, "the join returned without waiting its budget"
+    assert elapsed < 2.0, "the join hung instead of falling back to stale"
+
+    release.set()
+    deadline = time.monotonic() + 5
+    while api._cache["k-join-timeout"][1] != "fresh" and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert api._cache["k-join-timeout"][1] == "fresh"
+
+
+def test_a_plain_stale_read_does_not_join_the_inflight_fill():
+    """Only the forced refresh pays the join; stale-while-revalidate stays instant."""
+    _stale_entry("k-no-join", "stale")
+    started = threading.Event()
+    release = threading.Event()
+
+    def slow_fetch():
+        started.set()
+        assert release.wait(timeout=5)
+        return "fresh"
+
+    assert api.get_cached_or_fetch("k-no-join", slow_fetch) == "stale"  # schedules the daemon
+    assert started.wait(timeout=5)
+
+    started_at = time.monotonic()
+    result = api.get_cached_or_fetch("k-no-join", slow_fetch, return_metadata=True)
+    assert time.monotonic() - started_at < 0.2, "a plain read parked on the fill"
+    assert result.value == "stale"
+    assert result.status == "stale"
+
+    release.set()
+    deadline = time.monotonic() + 5
+    while api._cache["k-no-join"][1] != "fresh" and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert api._cache["k-no-join"][1] == "fresh"
+
+
+def test_inflight_fill_events_are_drained_with_the_locks():
+    """The join registry tracks fills, so it must be empty once no fill is running."""
+    assert api.get_cached_or_fetch("k-reg-fg", lambda: "v") == "v"
+
+    _stale_entry("k-reg-bg", "old")
+    assert api.get_cached_or_fetch("k-reg-bg", lambda: "new") == "old"  # daemon fill
+    deadline = time.monotonic() + 5
+    while api._cache["k-reg-bg"][1] != "new" and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert api._cache["k-reg-bg"][1] == "new"
+
+    assert api._inflight_fill_events == {}
 
 
 def test_response_cache_and_idle_key_locks_are_bounded(monkeypatch):

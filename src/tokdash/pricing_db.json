@@ -1,6 +1,6 @@
 {
-  "version": "2.0.24",
-  "lastUpdated": "2026-09-07T11:04:33Z",
+  "version": "2.0.25",
+  "lastUpdated": "2026-09-14T16:36:38Z",
   "note": "Comprehensive pricing database with all Moonshot, MiniMax, GLM, and OpenAI models from OpenRouter. Cache pricing estimated at 10% of input for cache_read, 100% of input for cache_write.",
   "aliases": {
     "Qwen/Qwen3.8-Flash-Next": "qwen3.8-flash",
@@ -1409,6 +1409,26 @@
       "cache_write": 0.22,
       "unit": "per_million_tokens",
       "source": "openrouter.ai/deepseek/deepseek-v4-flash-vision-exp"
+    },
+    "deepseek-flash": {
+      "provider": "deepseek",
+      "input": 0.3,
+      "output": 1.2,
+      "cache_read": 0.006,
+      "cache_write": 0.3,
+      "unit": "per_million_tokens",
+      "source": "api-docs.deepseek.com/quick_start/pricing",
+      "note": "Official DeepSeek peak rate as of 2026-09-15; api model id deepseek-flash, version DeepSeek-V4.1-Flash (off-peak is half: 0.15/0.60/0.003)"
+    },
+    "deepseek-v4.1-flash": {
+      "provider": "deepseek",
+      "input": 0.3,
+      "output": 1.2,
+      "cache_read": 0.006,
+      "cache_write": 0.3,
+      "unit": "per_million_tokens",
+      "source": "api-docs.deepseek.com/quick_start/pricing",
+      "note": "Official DeepSeek peak rate as of 2026-09-15; version id DeepSeek-V4.1-Flash as gateways such as OpenCode Go expose it (off-peak is half: 0.15/0.60/0.003)"
     },
     "_comment_google": "=== Google Gemini Models ===",
     "gemini-2.5-flash": {

@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Unreleased
+
+### Fixed
+
+- The Refresh button no longer answers from the stale cache when a recompute for the same view is already in flight — the case behind the "not refreshed, served from cache" banner on entries well past the cache TTL. A forced refresh now joins the in-flight recompute, bounded by the new `TOKDASH_FORCE_REFRESH_JOIN_SECONDS` (default 60s), and serves its fresh result; on timeout or failure it falls back to the previous stale body. Plain reads and auto-refresh are unchanged. (#90)
+
 ## 2.5.5 - 2026-09-14
 
 ### Added

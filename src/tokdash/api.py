@@ -792,8 +792,35 @@ async def _write_guard(request: Request, call_next):
 
 
 _cache: OrderedDict[str, tuple[float, Any]] = OrderedDict()
-_cache_guard = threading.Lock()  # protects _cache, _key_locks, and _cache_epoch
+_cache_guard = threading.Lock()  # protects _cache, _key_locks, _inflight_fills, _force_refresh_join_keys, and _cache_epoch
 _key_locks: OrderedDict[str, threading.Lock] = OrderedDict()
+
+
+class _InflightFill:
+    """Completion of the fill holding a key's single-flight lock.
+
+    ``stored`` distinguishes "the fill finished and cached a fresh value" from
+    "the fill raised or timed out". Cache freshness alone cannot: a failed fill
+    leaves a pre-existing fresh entry in place, and a joiner that trusted
+    freshness would report that old value as recomputed.
+    """
+
+    __slots__ = ("done", "stored")
+
+    def __init__(self) -> None:
+        self.done = threading.Event()
+        self.stored = False
+
+
+# Completion record for the fill holding a key's single-flight lock. The invariant
+# is lock held ⇒ record present, so a forced refresh that loses the lock race can
+# join the in-flight fill instead of answering from the stale body it replaces.
+_inflight_fills: dict[str, _InflightFill] = {}
+# Keys with a forced-refresh joiner parked on their fill. One waiter per key, like
+# the startup-warm join: a parked join costs an AnyIO worker for up to
+# _FORCE_REFRESH_JOIN_SECONDS, and an unbounded count of them could occupy the
+# whole worker pool. Excess forced refreshes keep the stale/503 fallback.
+_force_refresh_join_keys: set[str] = set()
 _cache_epoch = 0
 _pricing_sig_guard = threading.Lock()
 _pricing_baseline_sig_cache: Optional[tuple[str, tuple[str, int, int]]] = None
@@ -1087,6 +1114,14 @@ _COMPUTE_MAX_WAITERS = _non_negative_int_env(
 _compute_waiters = 0
 _compute_waiters_guard = threading.Lock()
 
+# How long a forced refresh (the Refresh button) may wait for a fill already in
+# flight for its key before falling back to the stale body. Bounded like the
+# compute-slot wait: an unbounded join would park a request worker for the life
+# of a wedged fill.
+_FORCE_REFRESH_JOIN_SECONDS = _bounded_float_env(
+    "TOKDASH_FORCE_REFRESH_JOIN_SECONDS", 60.0, maximum=300.0
+)
+
 
 def _acquire_compute_slot(*, wait: bool = True) -> bool:
     """Take a heavy-compute slot, optionally waiting briefly for one to free up.
@@ -1228,6 +1263,11 @@ def _try_key_lock(key: str) -> tuple[threading.Lock, bool]:
             _key_locks[key] = lock
         _key_locks.move_to_end(key)
         acquired = lock.acquire(blocking=False)
+        if acquired:
+            # Keep "lock held ⇒ completion record present": this is the same
+            # critical section a losing caller reads the registry under, so it
+            # can always find the fill to join.
+            _inflight_fills[key] = _InflightFill()
         _prune_key_locks_locked(exclude=key)
         return lock, acquired
 
@@ -1242,10 +1282,23 @@ def _prune_key_locks_locked(*, exclude: Optional[str] = None) -> None:
         if candidate == exclude or candidate_lock.locked():
             continue
         _key_locks.pop(candidate, None)
+        # An idle lock should have no record left, but pop defensively — set
+        # first, so a hypothetical waiter wakes instead of hanging on a leak.
+        fill = _inflight_fills.pop(candidate, None)
+        if fill is not None:
+            fill.done.set()
 
 
 def _release_key_lock(key: str, lock: threading.Lock) -> None:
     with _cache_guard:
+        # Publish completion and drop the record BEFORE releasing the mutex (the
+        # set-then-pop ordering of _finish_startup_warm): a joiner either finds
+        # the record and waits, or finds it gone because the fill is done — and
+        # the fill's _cache_set_if_epoch ran before getting here, so its stored
+        # flag is final.
+        fill = _inflight_fills.pop(key, None)
+        if fill is not None:
+            fill.done.set()
         # Keep unlock and registry cleanup atomic with _try_key_lock(). If the
         # mutex were released first, another caller could acquire this lock
         # before we remove it, letting a later caller create a second lock for
@@ -1278,6 +1331,12 @@ def _cache_set_if_epoch(key: str, value: Any, epoch: int) -> bool:
         _cache.move_to_end(key)
         while len(_cache) > CACHE_MAX_ENTRIES:
             _cache.popitem(last=False)
+        # A forced refresh may be parked on this key's fill: this store is what
+        # entitles that join to report the value as recomputed. Single-flight
+        # means the recorded fill is the one this store belongs to.
+        fill = _inflight_fills.get(key)
+        if fill is not None:
+            fill.stored = True
         _prune_key_locks_locked()
         return True
 
@@ -1383,6 +1442,12 @@ def get_cached_or_fetch(
       ``force_refresh=True`` skips this fast path so manual refreshes recompute.
     - Stale hit: returned immediately. At most one daemon refreshes the key in the
       background, so no caller pays the recompute latency and parsers do not stampede.
+    - Forced refresh losing the single-flight race: the fill in flight IS the
+      recompute it asked for, so it joins that fill (bounded by
+      TOKDASH_FORCE_REFRESH_JOIN_SECONDS, at most one waiter per key) and serves
+      the fresh result. On timeout or fill failure it falls back to the stale
+      value, or — for a cold key — the backpressure answer below. Non-forced
+      reads never join.
     - Cold miss: one foreground request may join an active startup warm for this key.
       Otherwise, if this key or the global heavy-compute pool is already busy, fail
       fast with ``CacheBackpressureError`` so request workers do not pile up while
@@ -1416,8 +1481,51 @@ def get_cached_or_fetch(
     lock, acquired = _try_key_lock(key)
     if not acquired:
         # Another thread is already computing this key.
+        if force_refresh:
+            # The in-flight fill IS the recompute the Refresh button asked for:
+            # wait for it (bounded) and serve its result, rather than answering
+            # with the stale body it was clicked to replace. The record lookup
+            # and the one-waiter claim run under _cache_guard, so lock-busy
+            # implies the record is registered; an absent record means the fill
+            # already finished. At most one joiner parks per key — the wait
+            # holds an AnyIO worker for up to _FORCE_REFRESH_JOIN_SECONDS, and
+            # an unbounded count of them could occupy the whole worker pool.
+            with _cache_guard:
+                fill = _inflight_fills.get(key)
+                if fill is not None:
+                    if key in _force_refresh_join_keys:
+                        fill = None
+                    else:
+                        _force_refresh_join_keys.add(key)
+            if fill is not None:
+                try:
+                    fill.done.wait(timeout=_FORCE_REFRESH_JOIN_SECONDS)
+                finally:
+                    with _cache_guard:
+                        _force_refresh_join_keys.discard(key)
+                # Only a fill that actually stored entitles the join to report
+                # fresh data: a failed fill leaves any pre-existing fresh entry
+                # in place, and freshness alone cannot tell the two apart.
+                if fill.stored:
+                    latest = _cache_get(key)
+                    if latest is not None:
+                        return result(latest[1], "recomputed", 0.0)
+            else:
+                # The fill finished between the lock failure and this lookup, or
+                # another joiner already holds this key's waiter slot; either way
+                # a strictly-newer entry is the remaining proof of a stored fill.
+                # Anything else falls through, mislabeled at worst as stale for
+                # one click — never fresh-when-failed.
+                latest = _cache_get(key)
+                if latest is not None and (hit is None or latest[0] > hit[0]):
+                    return result(latest[1], "recomputed", 0.0)
+            # Fill failed, timed out, or stored nothing provably fresh: fall
+            # through to the ordinary answers. Join at most once — no
+            # re-entering after this.
         if hit is not None:
-            return result(hit[1], "stale", now - hit[0])  # serve cached rather than stampede the parser
+            # Age against NOW, not the entry-time read: a forced refresh reaching
+            # here has already spent up to _FORCE_REFRESH_JOIN_SECONDS waiting.
+            return result(hit[1], "stale", datetime.now().timestamp() - hit[0])  # serve cached rather than stampede the parser
         if not force_refresh and not _startup_warm and not _startup_waited:
             claimed = _claim_startup_warm_wait(key)
             if claimed is not None:
@@ -1473,10 +1581,10 @@ def get_cached_or_fetch(
                 #
                 # This widens the same_key_inflight window the NOTE above weighs, but
                 # not for anyone: reaching here requires a cached value, and every
-                # concurrent caller for a key that HAS one (plain read or forced
-                # refresh) is served that value off the failed _try_key_lock rather
-                # than refused. Only a cold key 503s there, and a cold key cannot
-                # reach this branch.
+                # concurrent plain read for such a key is served that value off the
+                # failed _try_key_lock rather than refused, while a concurrent forced
+                # refresh joins this daemon's fill. Only a cold key 503s there, and a
+                # cold key cannot reach this branch.
                 handed_off = _schedule_stale_refresh(
                     key, fetch_fn, lock, epoch, wait_for_slot=True
                 )

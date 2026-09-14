@@ -115,6 +115,7 @@
 | **Zed** | ✅ | — |
 | **Qwen Code** | ✅ | ✅ |
 | **Crush** | ✅ | — |
+| **Muse Code** | ✅ | — |
 
 See [Supported clients](docs/reference/SUPPORTED_CLIENTS.md) for local data paths, overrides, and source-specific accounting notes.
 

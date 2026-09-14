@@ -115,6 +115,7 @@
 | **Zed** | ✅ | — |
 | **Qwen Code** | ✅ | ✅ |
 | **Crush** | ✅ | — |
+| **Muse Code** | ✅ | — |
 
 Ver [Clientes compatibles](docs/reference/SUPPORTED_CLIENTS.md) para rutas de datos locales, sobrescrituras y notas de contabilización por origen.
 

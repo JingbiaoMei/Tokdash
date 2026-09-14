@@ -9205,6 +9205,7 @@
       zed: { icon: '/static/icons/agents/zed.svg', color: '#111111', fallback: 'Z', darkInvert: true },
       qwen_code: { icon: '/static/icons/agents/qwen_code.svg', color: '#6D44E8', fallback: 'Q' },
       crush: { icon: '/static/icons/agents/crush.png', color: '#6B50FF', fallback: 'C' },
+      muse: { icon: null, color: '#0668E1', fallback: 'M' },
     });
     const toolBrandIconPromises = new Map();
 
@@ -9355,6 +9356,7 @@
         zed: 'Zed',
         qwen_code: 'Qwen Code',
         crush: 'Crush',
+        muse: 'Muse Code',
         cursor: 'Cursor',
       };
       if (mapping[key]) return mapping[key];

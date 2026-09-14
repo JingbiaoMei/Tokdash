@@ -5654,24 +5654,18 @@ _MUSE_RECONFIGURE_EVENT_KINDS = frozenset({
     "model_reconfigure.completed",
 })
 
-# The counted-once prompt convention, FINDINGS.md open item 1, as a
+# The counted-once prompt convention as a
 # provider -> (read_included, write_included) policy map. Muse's durable log
 # carries only raw counters; the counted-once oracle (promptTokens) lives on
 # the live session/tokenUsage notification. The official MSP schema says the
 # counters are NOT summable across providers and that cache inclusion is
 # provider-dependent, so inclusion is keyed by the RESOLVED provider rather
 # than one global pair: a session that switches providers applies each
-# call's own provider policy. The public evidence (ccusage's Muse field
-# report, the BurnBar parser) establishes that Meta's input_tokens INCLUDES
-# cache READS — but nothing establishes that it also includes cache WRITES,
-# so even Meta's pair is settled bit by bit (read-beside/write-inclusive,
-# read-inclusive/write-beside and everything else are legitimate worlds for
-# some provider). A provider with no entry is a build blocker: the parser
-# raises rather than borrowing another provider's policy, so the map starts
-# EMPTY ({} -> the parser refuses to build entries at all; tests set it
-# explicitly) and the capture must establish an entry for every provider the
-# registered source can emit.
-MUSE_CACHE_POLICIES: Dict[str, Tuple[bool, bool]] = {}
+# call's own provider policy. The MIT-licensed ccusage Muse adapter and
+# TokenUsageInsights both treat Meta's input_tokens as including cache reads
+# while keeping cache writes beside it. A provider with no entry remains a
+# hard error instead of borrowing Meta's convention.
+MUSE_CACHE_POLICIES: Dict[str, Tuple[bool, bool]] = {"meta": (True, False)}
 
 # Serialized key of the EstimateSource marker (provider_reported /
 # tokenizer_estimate / heuristic_estimate, all in the binary). The durable
@@ -5770,11 +5764,10 @@ class MuseParser(BaseParser):
     (read_included, write_included) map keyed by the RESOLVED provider,
     because the MSP schema says counters are not summable across providers
     and inclusion is provider-dependent (one global pair would apply the
-    wrong subtraction to a provider switch mid-session). Evidence settles
-    Meta's bits independently: reads inside input (ccusage, BurnBar),
-    writes unproven. A provider with no entry -> the parser raises rather
-    than borrowing another provider's policy: build blocker per provider,
-    open item 1; the map ships empty and the capture fills it. Only NONZERO
+    wrong subtraction to a provider switch mid-session). Public corpus
+    readers establish that Meta includes cache reads and keeps cache writes
+    beside input. A provider with no entry -> the parser raises rather than
+    borrowing another provider's policy. Only NONZERO
     calls need a policy — the all-zero guard runs first, so a historical
     all-zero session (the ccmux echo fixture) under an unestablished
     provider cannot abort the source.
@@ -5785,10 +5778,10 @@ class MuseParser(BaseParser):
     rate must move the stored row's cost). Muse persists no cost, so a
     priced cost is always Tokdash's own API-equivalent estimate.
 
-    Forks (open item 3): unresolved. ``cross_file_stable_keys`` stays off
-    until the fork audit decides between ids-intact (stable-key ownership)
-    and ids-reminted (replay-prefix skip); both shippable worlds are
-    capture-gated, and the other two audit outcomes block the source.
+    Cross-file copies with stable record ids are owned by their earliest
+    ``(timestamp, path)`` occurrence in both database modes. Muse forks that
+    remint copied-prefix ids cannot be distinguished from new calls using the
+    durable records exposed by current public implementations.
     =======================================================================
     """
 
@@ -5796,6 +5789,7 @@ class MuseParser(BaseParser):
     sync_capability = SourceSyncCapability(
         mode="file_replace",
         append_jsonl=False,
+        cross_file_stable_keys=True,
         reason=(
             "session.jsonl is append-only, but Phase 1 reparses whole files: the "
             "store's tail path (_collect_parser_tail, compute.py:117) hands the "
@@ -5803,13 +5797,12 @@ class MuseParser(BaseParser):
             "path-derived session id and the earlier metadata/model records."
         ),
     )
-    # 1: per-model_completed entries keyed "muse:<record id>", reasoning split
-    #    out for display, cache buckets per the capture-gated world, composite
-    #    model chain, qualified-first billing candidates.
-    persistent_parser_version = 1
+    # 2: Meta's counted-once cache policy and cross-file stable-key ownership
+    #    are active for the registered source.
+    persistent_parser_version = 2
 
-    # Class-level defaults; the capture campaign sets the module constants and
-    # these mirror them. Tests set them on the instance.
+    # Class-level defaults mirror the module constants. Tests override them on
+    # the instance when exercising other provider conventions.
     cache_policies: Dict[str, Tuple[bool, bool]] = MUSE_CACHE_POLICIES
     estimate_marker_key: Optional[str] = MUSE_ESTIMATE_MARKER_KEY
 
@@ -6263,23 +6256,20 @@ class MuseParser(BaseParser):
             # global pair would apply the wrong subtraction to any call made
             # under a different provider. No provider in the map -> raise:
             # borrowing another provider's (or a global) policy would
-            # misprice, and silence would hide the gap (build blocker per
-            # provider, open item 1). Only calls that carry tokens need a
-            # policy — see the all-zero guard above.
+            # misprice, and silence would hide a newly introduced provider.
+            # Only calls that carry tokens need a policy — see the all-zero
+            # guard above.
             policy = self.cache_policies.get(provider)
             if policy is None:
                 raise RuntimeError(
                     f"muse cache convention unresolved for provider {provider!r}: "
                     "MUSE_CACHE_POLICIES has no entry for it. Inclusion is "
-                    "provider-dependent (FINDINGS.md open item 1) — neither "
-                    "guessing nor borrowing another provider's policy is "
-                    "allowed; the source must not be registered until every "
-                    "provider that can emit nonzero calls has an established "
-                    "entry"
+                    "provider-dependent, so neither guessing nor borrowing "
+                    "another provider's policy is allowed"
                 )
             read_included, write_included = policy
             # Inclusion is per bucket AND per provider: the evidence proves
-            # reads inside input for Meta, not writes. Subtract exactly the
+            # cache reads inside input for Meta. Subtract exactly the
             # buckets this provider's policy includes — never both on one
             # global flag (write-beside layouts would have fresh input
             # undercounted by every cache-write token).
@@ -6687,21 +6677,9 @@ class CodingToolsUsageTracker:
             "zed": ZedParser(self.pricing_db),
             "qwen_code": QwenCodeParser(self.pricing_db),
             "crush": CrushParser(self.pricing_db),
-            # Muse stays unregistered until the FINDINGS.md open item 1 capture
-            # campaign populates MUSE_CACHE_POLICIES with an entry for every
-            # provider the source can emit. An unresolved cache convention is a
-            # build blocker, not a runtime state: enabling the source without
-            # a provider's entry would guess that provider's counted-once
-            # convention, and guessing it wrong inflates or deflates every
-            # session under it in both totals and cost.
-            # MUSE_ESTIMATE_MARKER_KEY does NOT gate
-            # registration — the public protocol exposes no estimate-source
-            # member, so it stays None (no marker emitted) until a capture
-            # finds one; a later leg-(e) discovery is a separate, additive
-            # change. Fork record-ID behavior (open item 3) must also be
-            # resolved before enabling. Enable the class and this line
-            # together.
-            # "muse": MuseParser(self.pricing_db),
+            # The public protocol exposes no durable estimate-source member,
+            # so no provenance is invented for otherwise valid counters.
+            "muse": MuseParser(self.pricing_db),
         }
         # Two parsers must never scan the same directory: the usage store
         # dedups on (source, entry_key) and never across sources, so an

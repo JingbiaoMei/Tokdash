@@ -792,12 +792,30 @@ async def _write_guard(request: Request, call_next):
 
 
 _cache: OrderedDict[str, tuple[float, Any]] = OrderedDict()
-_cache_guard = threading.Lock()  # protects _cache, _key_locks, _inflight_fill_events, and _cache_epoch
+_cache_guard = threading.Lock()  # protects _cache, _key_locks, _inflight_fills, and _cache_epoch
 _key_locks: OrderedDict[str, threading.Lock] = OrderedDict()
-# Completion event for the fill holding a key's single-flight lock. The invariant
-# is lock held ⇒ event present, so a forced refresh that loses the lock race can
+
+
+class _InflightFill:
+    """Completion of the fill holding a key's single-flight lock.
+
+    ``stored`` distinguishes "the fill finished and cached a fresh value" from
+    "the fill raised or timed out". Cache freshness alone cannot: a failed fill
+    leaves a pre-existing fresh entry in place, and a joiner that trusted
+    freshness would report that old value as recomputed.
+    """
+
+    __slots__ = ("done", "stored")
+
+    def __init__(self) -> None:
+        self.done = threading.Event()
+        self.stored = False
+
+
+# Completion record for the fill holding a key's single-flight lock. The invariant
+# is lock held ⇒ record present, so a forced refresh that loses the lock race can
 # join the in-flight fill instead of answering from the stale body it replaces.
-_inflight_fill_events: dict[str, threading.Event] = {}
+_inflight_fills: dict[str, _InflightFill] = {}
 _cache_epoch = 0
 _pricing_sig_guard = threading.Lock()
 _pricing_baseline_sig_cache: Optional[tuple[str, tuple[str, int, int]]] = None
@@ -1241,10 +1259,10 @@ def _try_key_lock(key: str) -> tuple[threading.Lock, bool]:
         _key_locks.move_to_end(key)
         acquired = lock.acquire(blocking=False)
         if acquired:
-            # Keep "lock held ⇒ completion event present": this is the same
+            # Keep "lock held ⇒ completion record present": this is the same
             # critical section a losing caller reads the registry under, so it
             # can always find the fill to join.
-            _inflight_fill_events[key] = threading.Event()
+            _inflight_fills[key] = _InflightFill()
         _prune_key_locks_locked(exclude=key)
         return lock, acquired
 
@@ -1259,22 +1277,23 @@ def _prune_key_locks_locked(*, exclude: Optional[str] = None) -> None:
         if candidate == exclude or candidate_lock.locked():
             continue
         _key_locks.pop(candidate, None)
-        # An idle lock should have no event left, but pop defensively — set first,
-        # so a hypothetical waiter wakes instead of hanging on a leaked entry.
-        event = _inflight_fill_events.pop(candidate, None)
-        if event is not None:
-            event.set()
+        # An idle lock should have no record left, but pop defensively — set
+        # first, so a hypothetical waiter wakes instead of hanging on a leak.
+        fill = _inflight_fills.pop(candidate, None)
+        if fill is not None:
+            fill.done.set()
 
 
 def _release_key_lock(key: str, lock: threading.Lock) -> None:
     with _cache_guard:
-        # Publish completion and drop the event BEFORE releasing the mutex (the
+        # Publish completion and drop the record BEFORE releasing the mutex (the
         # set-then-pop ordering of _finish_startup_warm): a joiner either finds
-        # the event and waits, or finds it gone because the fill is done — and the
-        # fill stored its result via _cache_set_if_epoch before getting here.
-        event = _inflight_fill_events.pop(key, None)
-        if event is not None:
-            event.set()
+        # the record and waits, or finds it gone because the fill is done — and
+        # the fill's _cache_set_if_epoch ran before getting here, so its stored
+        # flag is final.
+        fill = _inflight_fills.pop(key, None)
+        if fill is not None:
+            fill.done.set()
         # Keep unlock and registry cleanup atomic with _try_key_lock(). If the
         # mutex were released first, another caller could acquire this lock
         # before we remove it, letting a later caller create a second lock for
@@ -1307,6 +1326,12 @@ def _cache_set_if_epoch(key: str, value: Any, epoch: int) -> bool:
         _cache.move_to_end(key)
         while len(_cache) > CACHE_MAX_ENTRIES:
             _cache.popitem(last=False)
+        # A forced refresh may be parked on this key's fill: this store is what
+        # entitles that join to report the value as recomputed. Single-flight
+        # means the recorded fill is the one this store belongs to.
+        fill = _inflight_fills.get(key)
+        if fill is not None:
+            fill.stored = True
         _prune_key_locks_locked()
         return True
 
@@ -1453,27 +1478,31 @@ def get_cached_or_fetch(
         if force_refresh:
             # The in-flight fill IS the recompute the Refresh button asked for:
             # wait for it (bounded) and serve its result, rather than answering
-            # with the stale body it was clicked to replace. The event lookup runs
-            # under _cache_guard, so lock-busy implies the event is registered;
-            # an absent event means the fill already finished, which the re-read
-            # below then sees.
+            # with the stale body it was clicked to replace. The record lookup
+            # runs under _cache_guard, so lock-busy implies the record is
+            # registered; an absent record means the fill already finished.
             with _cache_guard:
-                fill_event = _inflight_fill_events.get(key)
-            if fill_event is not None:
-                fill_event.wait(timeout=_FORCE_REFRESH_JOIN_SECONDS)
-            latest = _cache_get(key)
-            if latest is not None and (
-                hit is None
-                or latest[0] > hit[0]
-                or datetime.now().timestamp() - latest[0] < CACHE_TTL
-            ):
-                return result(latest[1], "recomputed", 0.0)
-            # Fill failed, timed out, or stored nothing newer: fall through to the
-            # ordinary answers. Join at most once — no re-entering after this.
-            # The within-TTL clause matters when the fill stored its fresh value
-            # before this request read `hit` at entry but had not released the lock
-            # yet: latest IS hit then, and "strictly newer" alone would relabel
-            # fresh data as stale.
+                fill = _inflight_fills.get(key)
+            if fill is not None:
+                fill.done.wait(timeout=_FORCE_REFRESH_JOIN_SECONDS)
+                # Only a fill that actually stored entitles the join to report
+                # fresh data: a failed fill leaves any pre-existing fresh entry
+                # in place, and freshness alone cannot tell the two apart.
+                if fill.stored:
+                    latest = _cache_get(key)
+                    if latest is not None:
+                        return result(latest[1], "recomputed", 0.0)
+            else:
+                # The fill finished between the lock failure and this lookup, so
+                # its record is gone; a strictly-newer entry is the remaining
+                # proof that it stored. Anything else falls through, mislabeled
+                # at worst as stale for one click — never fresh-when-failed.
+                latest = _cache_get(key)
+                if latest is not None and (hit is None or latest[0] > hit[0]):
+                    return result(latest[1], "recomputed", 0.0)
+            # Fill failed, timed out, or stored nothing provably fresh: fall
+            # through to the ordinary answers. Join at most once — no
+            # re-entering after this.
         if hit is not None:
             # Age against NOW, not the entry-time read: a forced refresh reaching
             # here has already spent up to _FORCE_REFRESH_JOIN_SECONDS waiting.

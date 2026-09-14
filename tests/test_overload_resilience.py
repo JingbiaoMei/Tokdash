@@ -19,12 +19,12 @@ def _reset_cache():
     api._clear_cache()
     with api._cache_guard:
         api._key_locks.clear()
-        api._inflight_fill_events.clear()
+        api._inflight_fills.clear()
     yield
     api._clear_cache()
     with api._cache_guard:
         api._key_locks.clear()
-        api._inflight_fill_events.clear()
+        api._inflight_fills.clear()
 
 
 def test_fresh_hit_returns_cached_without_recomputing():
@@ -241,13 +241,14 @@ def test_force_refresh_join_accepts_the_fresh_value_read_as_hit():
 
     Window: the daemon's _cache_set_if_epoch has run but it still holds the key
     lock when the forced refresh reads `hit` at entry. `hit` then IS the fresh
-    entry, so a strictly-newer check can never pass; the within-TTL clause is
-    what keeps the fresh value from being returned with status "stale".
+    entry, so a strictly-newer check can never pass; the fill record's stored
+    flag is what lets the join report the value as recomputed.
     """
     key = "k-join-fresh-hit"
-    api._cache[key] = (datetime.now().timestamp(), "fresh")
     lock, acquired = api._try_key_lock(key)  # simulate the stored-but-unreleased fill
     assert acquired
+    # A real fill stores through _cache_set_if_epoch, which marks its record stored.
+    assert api._cache_set_if_epoch(key, "fresh", api._cache_epoch_value())
 
     joined: dict[str, object] = {}
 
@@ -306,6 +307,58 @@ def test_force_refresh_join_serves_stale_when_the_inflight_fill_fails():
 
     # The failed fill wedged nothing: the key is computable again at once.
     assert api.get_cached_or_fetch("k-join-fail", lambda: "recovered", force_refresh=True) == "recovered"
+
+
+def test_force_refresh_join_never_reports_a_failed_fill_as_recomputed():
+    """Fresh cache entry + failed winning fill: the join must not claim fresh work.
+
+    Regression: a join that trusted cache freshness alone would find the
+    pre-existing fresh entry still within TTL after the fill failed and return
+    it with status "recomputed" — the Refresh button reporting success while
+    showing the old numbers. Only a fill that actually stored may be joined.
+    """
+    key = "k-join-fresh-fail"
+    api._cache[key] = (datetime.now().timestamp(), "old-but-fresh")
+    started = threading.Event()
+    release = threading.Event()
+
+    def failing_fetch():
+        started.set()
+        assert release.wait(timeout=5)
+        raise RuntimeError("boom")
+
+    winner_exc: dict[str, BaseException] = {}
+
+    def winner():
+        try:
+            api.get_cached_or_fetch(key, failing_fetch, force_refresh=True)
+        except BaseException as e:  # noqa: BLE001 - capturing for assertion
+            winner_exc["e"] = e
+
+    wt = threading.Thread(target=winner)
+    wt.start()
+    assert started.wait(timeout=5)  # the winner holds the key lock and is computing
+
+    joined: dict[str, object] = {}
+
+    def joiner():
+        joined["r"] = api.get_cached_or_fetch(
+            key, failing_fetch, force_refresh=True, return_metadata=True
+        )
+
+    jt = threading.Thread(target=joiner)
+    jt.start()
+    time.sleep(0.1)  # grace period: the join must be parked on the fill
+    assert "r" not in joined
+
+    release.set()  # the winning fill now fails and stores nothing
+    wt.join(timeout=5)
+    jt.join(timeout=5)
+    assert not wt.is_alive() and not jt.is_alive()
+    assert isinstance(winner_exc.get("e"), RuntimeError)
+    assert joined["r"].value == "old-but-fresh"
+    assert joined["r"].status == "stale"
+    assert joined["r"].served_from_cache is True
 
 
 def test_force_refresh_join_times_out_and_falls_back_to_stale(monkeypatch):
@@ -368,7 +421,7 @@ def test_a_plain_stale_read_does_not_join_the_inflight_fill():
     assert api._cache["k-no-join"][1] == "fresh"
 
 
-def test_inflight_fill_events_are_drained_with_the_locks():
+def test_inflight_fill_records_are_drained_with_the_locks():
     """The join registry tracks fills, so it must be empty once no fill is running."""
     assert api.get_cached_or_fetch("k-reg-fg", lambda: "v") == "v"
 
@@ -379,7 +432,7 @@ def test_inflight_fill_events_are_drained_with_the_locks():
         time.sleep(0.01)
     assert api._cache["k-reg-bg"][1] == "new"
 
-    assert api._inflight_fill_events == {}
+    assert api._inflight_fills == {}
 
 
 def test_response_cache_and_idle_key_locks_are_bounded(monkeypatch):

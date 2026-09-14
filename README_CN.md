@@ -34,6 +34,7 @@
   <a href="https://zed.dev/" title="Zed"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/zed.png" alt="Zed" height="34"></a>
   <a href="https://github.com/QwenLM/qwen-code" title="Qwen Code"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/qwen-code.png" alt="Qwen Code" height="34"></a>
   <a href="https://charm.land/crush" title="Crush"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/crush.png" alt="Crush" height="34"></a>
+  <a href="https://dev.meta.ai/docs/muse-code" title="Muse Code"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/muse.png" alt="Muse Code" height="34"></a>
 </p>
 
 <p align="center">

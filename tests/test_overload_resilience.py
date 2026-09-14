@@ -378,6 +378,20 @@ def test_force_refresh_join_times_out_and_falls_back_to_stale(monkeypatch):
     assert api.get_cached_or_fetch("k-join-timeout", slow_fetch) == "stale"
     assert started.wait(timeout=5)  # daemon computing; the join will out-wait nothing
 
+    # Instrument the fill's completion wait directly: wall-clock bounds around a
+    # 0.1s timeout are unreliable across platforms (Windows/Python 3.12 measured
+    # 0.094), while the recorded call proves the join waited with its budget.
+    with api._cache_guard:
+        fill = api._inflight_fills["k-join-timeout"]
+    waits: list = []
+    real_wait = fill.done.wait
+
+    def spy_wait(timeout=None):
+        waits.append(timeout)
+        return real_wait(timeout)
+
+    fill.done.wait = spy_wait
+
     started_at = time.monotonic()
     result = api.get_cached_or_fetch(
         "k-join-timeout", slow_fetch, force_refresh=True, return_metadata=True
@@ -386,7 +400,7 @@ def test_force_refresh_join_times_out_and_falls_back_to_stale(monkeypatch):
 
     assert result.value == "stale"
     assert result.status == "stale"
-    assert elapsed >= 0.1, "the join returned without waiting its budget"
+    assert waits == [0.1], "the join did not wait its budget on the fill"
     assert elapsed < 2.0, "the join hung instead of falling back to stale"
 
     release.set()

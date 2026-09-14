@@ -114,6 +114,7 @@
 | **Zed** | ✅ | — |
 | **Qwen Code** | ✅ | ✅ |
 | **Crush** | ✅ | — |
+| **Muse Code** | ✅ | — |
 
 本地数据路径、覆盖变量与各来源的计费说明见[已支持客户端](docs/reference/SUPPORTED_CLIENTS.md)。
 

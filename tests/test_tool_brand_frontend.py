@@ -118,6 +118,7 @@ def test_tool_brand_registry_uses_local_lazy_assets_with_a_fallback() -> None:
         "zed",
         "qwen_code",
         "crush",
+        "muse",
     ):
         assert re.search(rf"\b{tool}:\s*\{{", body)
     assert "https://" not in body

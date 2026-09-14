@@ -1142,23 +1142,16 @@ def test_coding_tool_parsers_declare_sync_capabilities():
     assert modes["workbuddy"] == "file_replace"
     assert tracker.parsers["workbuddy"].sync_capability.append_jsonl is True
     assert tracker.parsers["opencode"].sync_capability.session_store is False
-    # Muse: the parser is implemented but the source stays OUT of the registry
-    # until the FINDINGS.md open item 1 capture campaign populates
-    # MUSE_CACHE_POLICIES — an entry per provider, since inclusion is
-    # provider-dependent — and resolves fork record-ID behavior (open item 3).
-    # An empty policy map is a build blocker, not a runtime state, so
-    # enabling the registry line without the policies must be a conscious
-    # edit (the registry comment says the same). If the map is ever populated,
-    # this test must be updated alongside the registry line, not silently
-    # bypassed.
+    # Muse is registered with an explicit Meta cache policy. Stable record ids
+    # use the same cross-file winner rule in both database modes.
     from tokdash.sources import coding_tools as coding_tools_module
 
-    assert "muse" not in modes
-    assert MuseParser.sync_capability.mode == "file_replace"
-    assert MuseParser.sync_capability.append_jsonl is False
-    assert MuseParser.sync_capability.cross_file_stable_keys is False
-    assert MuseParser.persistent_parser_version == 1
-    assert coding_tools_module.MUSE_CACHE_POLICIES == {}
+    assert modes["muse"] == "file_replace"
+    assert isinstance(tracker.parsers["muse"], MuseParser)
+    assert tracker.parsers["muse"].sync_capability.append_jsonl is False
+    assert tracker.parsers["muse"].sync_capability.cross_file_stable_keys is True
+    assert tracker.parsers["muse"].persistent_parser_version == 2
+    assert coding_tools_module.MUSE_CACHE_POLICIES == {"meta": (True, False)}
     assert coding_tools_module.MUSE_ESTIMATE_MARKER_KEY is None
 
 

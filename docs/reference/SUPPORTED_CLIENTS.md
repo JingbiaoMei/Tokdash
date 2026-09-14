@@ -33,6 +33,7 @@ Tokdash reads usage **locally** from each tool's own session/log files — nothi
 
 - **OpenCode**: `~/.local/share/opencode/`
 - **Mimo / Mimocode**: `~/.local/share/mimocode/mimocode.db`
+- **Muse Code**: `$XDG_DATA_HOME/muse/sessions/YYYY/MM/DD/<session-id>/session.jsonl` (defaults to `~/.local/share/muse/sessions/...`), plus each session's nested `subagent/<child-id>/session.jsonl`. Tokdash counts durable `model_completed` records, filters parent-mirrored child streams, expands retained frames, and deduplicates stable record ids across files. For Meta, `input_tokens` includes cache reads while cache writes remain a separate bucket; reasoning is included in `output_tokens`, displayed separately, and billed at the output rate. Cost comes from the pricing database because Muse does not persist cost. Calls from a future provider are rejected until its cache convention is known. A fork that remints copied-prefix ids cannot be distinguished from new calls in the durable format. No Sessions tab.
 - **Codex**: `~/.codex/sessions/`
 - **Claude Code**: `~/.claude/projects/`
 - **Gemini CLI**: `~/.gemini/tmp/*/chats/session-*.json` and `session-*.jsonl`

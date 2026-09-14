@@ -4,11 +4,10 @@ Fixtures here are minimal and hand-built to the shape verified in
 docs/local/20260909_muse_code_support/evidence/ (the offline echo capture, the
 dumped MSP schemas, and the record/frame shape census): every value is inert,
 no raw capture content is copied in, per the FINDINGS.md fixture rule. The
-decisions that only the signed-in capture campaign can make — the
-per-provider cache policy map (open item 1) and the serialized
-estimate-marker key (leg (e)) — are set explicitly per test on the parser
-instance; production ships the map empty / the key None and the source
-unregistered until the capture decides.
+world-sensitive tests override the per-provider cache policy on the parser
+instance. Production uses the public-corpus result for Meta and leaves the
+serialized estimate-marker key unset because no durable public record exposes
+one.
 """
 from __future__ import annotations
 
@@ -22,7 +21,7 @@ from tokdash import clientpaths
 from tokdash.compute import _collect_parser_file
 from tokdash.pricing import PricingDatabase
 from tokdash.sources import coding_tools as ct
-from tokdash.sources.coding_tools import BaseParser, MuseParser
+from tokdash.sources.coding_tools import BaseParser, CodingToolsUsageTracker, MuseParser
 from tokdash.usage_store import UsageEntryStore
 
 SID = "11111111-1111-4111-8111-111111111111"
@@ -35,10 +34,8 @@ BASE_TS = 1_787_600_000_000_000
 
 USAGE = {"input_tokens": 1000, "output_tokens": 200, "cached_tokens": 400, "reasoning_tokens": 50}
 
-# Production ships MUSE_CACHE_POLICIES = {} (every provider unresolved ->
-# every entry refused). Tests that don't care about the world use this
-# both-included convenience map over the provider names the fixtures
-# emit; world-sensitive tests pass their own map explicitly.
+# Tests that use synthetic provider names install policies for those names;
+# production intentionally defines only Meta's verified convention.
 DEFAULT_POLICIES = {p: (True, True) for p in (
     "meta", "", "provider-a", "provider-b", "provider-meta", "provider-run1",
 )}
@@ -658,21 +655,18 @@ def test_file_relative_ceiling(monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Cache policy (capture-gated; tests pin the STRUCTURE around the map)
+# Cache policy
 # ---------------------------------------------------------------------------
 
 
 def test_cache_policy_is_a_provider_keyed_bit_pair(monkeypatch, tmp_path):
     """A provider's policy is (read_included, write_included), settled bit by
-    bit (ccusage/BurnBar support reads inside Meta's input_tokens; nothing
-    proves writes are) and keyed by PROVIDER (the MSP schema: counters are
+    bit and keyed by PROVIDER (the MSP schema: counters are
     not summable across providers, inclusion is provider-dependent). All
     four combinations are legal — a read-inclusive / write-beside policy
     must pass writes through untouched, or every cache-write token would be
-    subtracted from fresh input (an input AND cost undercount). The
-    promptTokens oracle lives only on the live notification; the capture's
-    notification-join test proves which pairs hold, and these fixtures pin
-    the per-bucket arithmetic per policy."""
+    subtracted from fresh input (an input AND cost undercount). These
+    fixtures pin the per-bucket arithmetic for every possible policy."""
     pair = {"input_tokens": 1000, "output_tokens": 200, "reasoning_tokens": 50,
             "cache_read_tokens": 300, "cache_write_tokens": 100}
     write_session(tmp_path, SID, [metadata_record(), usage_record("rec-1", 2, pair)])
@@ -690,6 +684,46 @@ def test_cache_policy_is_a_provider_keyed_bit_pair(monkeypatch, tmp_path):
     assert neither["input"] == 1000
     for e in (both, read_only, write_only, neither):
         assert (e["cacheRead"], e["cacheWrite"]) == (300, 100)  # buckets never move
+
+
+def test_production_meta_policy_matches_public_muse_corpus(monkeypatch, tmp_path):
+    """Exercise the shipped policy without the test helper's override.
+
+    Public Muse implementations expose both the older combined cache field
+    and the newer read/write pair. The pair is authoritative, input contains
+    cache reads while cache writes remain beside it, and reasoning is a subset
+    of output. A retained frame covers the additional durable-record shape
+    handled by Midas.
+    """
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    BaseParser._entry_cache.clear()
+    ct._sig_cache.clear()
+    usage = {
+        "input_tokens": 1000,
+        "output_tokens": 200,
+        "reasoning_tokens": 50,
+        "cached_tokens": 300,
+        "cache_read_tokens": 300,
+        "cache_write_tokens": 100,
+    }
+    write_session(tmp_path, SID, [
+        metadata_record(provider_id="meta", model_id="llama-test"),
+        frame(7, [(0, usage_record("rec-public", 2, usage))]),
+    ])
+
+    tracker = CodingToolsUsageTracker()
+    tracker.collect(None, None, ["muse"])
+    assert tracker.source_errors == []
+    entry = by_id(tracker.entries)["muse:rec-public"]
+
+    assert entry["provider"] == "meta"
+    assert entry["model"] == "llama-test"
+    assert entry["input"] == 700
+    assert entry["cacheRead"] == 300
+    assert entry["cacheWrite"] == 100
+    assert entry["output"] == 150
+    assert entry["reasoning"] == 50
+    assert entry["_billing"]["output"] == 200
 
 
 def test_provider_switch_applies_each_provider_policy(monkeypatch, tmp_path):
@@ -1148,7 +1182,7 @@ def test_fork_pair_db_modes_agree_on_the_winner(monkeypatch, tmp_path):
         "muse", parser2._file_signatures(),
         parser=parser2.persistent_parser_signature(),
         parse_file_entries=lambda fs: _collect_parser_file(parser2, fs),
-        cross_file_stable_keys=True,  # the fork world open item 3 may enable
+        cross_file_stable_keys=parser2.sync_capability.cross_file_stable_keys,
     ) is True
     import sqlite3
     with sqlite3.connect(tmp_path / "usage.sqlite3") as conn:

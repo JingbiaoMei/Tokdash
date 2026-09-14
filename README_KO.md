@@ -115,6 +115,7 @@
 | **Zed** | ✅ | — |
 | **Qwen Code** | ✅ | ✅ |
 | **Crush** | ✅ | — |
+| **Muse Code** | ✅ | — |
 
 로컬 데이터 경로, 오버라이드, 소스별 계상 노트는 [지원 클라이언트](docs/reference/SUPPORTED_CLIENTS.md)를 참조하세요.
 

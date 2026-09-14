@@ -1,6 +1,31 @@
 {
-  "current": "2.5.5",
+  "current": "2.5.6",
   "releases": [
+    {
+      "version": "2.5.6",
+      "date": "2026-09-14",
+      "sections": [
+        {
+          "type": "added",
+          "items": [
+            "Muse Code usage tracking is now enabled, reading parent and subagent session logs with mirrored-stream filtering and cross-fork deduplication.",
+            "DeepSeek V4.1 Flash is priced at the official rates."
+          ]
+        },
+        {
+          "type": "changed",
+          "items": [
+            "Share cards now rank the top five harnesses, models and projects, matching the Report page."
+          ]
+        },
+        {
+          "type": "fixed",
+          "items": [
+            "The Refresh button now waits for a recompute already in progress and shows its fresh result, instead of briefly reporting cached data."
+          ]
+        }
+      ]
+    },
     {
       "version": "2.5.5",
       "date": "2026-09-14",

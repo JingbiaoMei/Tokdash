@@ -4,7 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## Unreleased
+## 2.5.6 - 2026-09-14
+
+### Added
+
+- Muse Code usage tracking is enabled. The parser that shipped capture-gated in 2.5.5 now registers as a usage source, reading parent and subagent session logs, expanding retained frames, filtering mirrored child streams and deduplicating stable record ids across forks. (#86)
+- DeepSeek V4.1 Flash is priced: `deepseek-flash` and `deepseek-v4.1-flash` at the official rates. (#89, closes #88)
+
+### Changed
+
+- Share cards now rank the top five harnesses, models and projects, matching what the Report page itself shows. (#87)
 
 ### Fixed
 

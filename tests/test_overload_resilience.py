@@ -20,11 +20,13 @@ def _reset_cache():
     with api._cache_guard:
         api._key_locks.clear()
         api._inflight_fills.clear()
+        api._force_refresh_join_keys.clear()
     yield
     api._clear_cache()
     with api._cache_guard:
         api._key_locks.clear()
         api._inflight_fills.clear()
+        api._force_refresh_join_keys.clear()
 
 
 def test_fresh_hit_returns_cached_without_recomputing():
@@ -392,6 +394,52 @@ def test_force_refresh_join_times_out_and_falls_back_to_stale(monkeypatch):
     while api._cache["k-join-timeout"][1] != "fresh" and time.monotonic() < deadline:
         time.sleep(0.01)
     assert api._cache["k-join-timeout"][1] == "fresh"
+
+
+def test_force_refresh_join_allows_one_waiter_per_key():
+    """A parked join holds an AnyIO worker, so excess joiners fall back at once.
+
+    Second and later forced refreshes for a key whose fill already has a joiner
+    are answered from the stale body immediately rather than parking more
+    request workers on the same fill for up to the join budget.
+    """
+    _stale_entry("k-join-cap", "stale")
+    started = threading.Event()
+    release = threading.Event()
+
+    def slow_fetch():
+        started.set()
+        assert release.wait(timeout=5)
+        return "fresh"
+
+    assert api.get_cached_or_fetch("k-join-cap", slow_fetch) == "stale"  # schedules the daemon
+    assert started.wait(timeout=5)  # the daemon holds the key lock and is computing
+
+    joined: dict[str, object] = {}
+
+    def first_joiner():
+        joined["r"] = api.get_cached_or_fetch(
+            "k-join-cap", slow_fetch, force_refresh=True, return_metadata=True
+        )
+
+    jt = threading.Thread(target=first_joiner)
+    jt.start()
+    time.sleep(0.1)  # grace period: the first joiner has claimed the waiter slot
+
+    started_at = time.monotonic()
+    extra = api.get_cached_or_fetch(
+        "k-join-cap", slow_fetch, force_refresh=True, return_metadata=True
+    )
+    assert time.monotonic() - started_at < 0.2, "an excess joiner parked on the fill"
+    assert extra.value == "stale"
+    assert extra.status == "stale"
+
+    release.set()
+    jt.join(timeout=5)
+    assert not jt.is_alive()
+    assert joined["r"].value == "fresh"
+    assert joined["r"].status == "recomputed"
+    assert api._force_refresh_join_keys == set()
 
 
 def test_a_plain_stale_read_does_not_join_the_inflight_fill():

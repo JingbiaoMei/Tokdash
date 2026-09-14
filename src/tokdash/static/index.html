@@ -15595,7 +15595,7 @@
     }
 
     function usageReportCardModel(model, tier, mode, overrides) {
-      const opts = { maxProjects: 5, cellCap: 11, ...overrides };
+      const opts = { maxHarnesses: 5, maxModels: 5, maxProjects: 5, cellCap: 11, ...overrides };
       const pal = usageReportCardPalette(mode);
       const accent = USAGE_REPORT_TIER_ACCENT[tier][mode];
       const ops = [];
@@ -15755,7 +15755,7 @@
 
       if (model.tools && model.tools.length) {
         label(t('usageReportCardHarnesses'));
-        const leaders = model.tools.slice(0, 3);
+        const leaders = model.tools.slice(0, opts.maxHarnesses);
         leaders.forEach((row) => rankRow({
           icon: row.tool,
           name: usageReportToolLabel(row.tool),
@@ -15766,7 +15766,7 @@
       }
       if (model.models && model.models.length) {
         label(t('usageReportCardModels'));
-        const leaders = model.models.slice(0, 3);
+        const leaders = model.models.slice(0, opts.maxModels);
         leaders.forEach((row) => rankRow({
           name: row.model,
           value: shareValue(row.tokens),
@@ -15796,20 +15796,25 @@
     }
 
     /* Paint, measure, adjust (spec 7): shrink the artifact until it fits rather
-       than let content run underneath its own footer. Heat cells shrink before
-       project rows drop, because a small cell is thin and a missing row is a lie.
-       The project tier is a top-3 ranking: no more, whatever fits. */
+       than let content run underneath its own footer. Every ranking is a top-5
+       and the five heat cells come before the first dropped project row, but
+       never a row before the last cell size: a small cell is thin and a missing
+       row is a lie, so the ladder holds each row count at every cell size
+       before it gives the row up. */
     function usageReportBuildCard(model, tier, mode) {
-      const attempts = tier === 'amber'
-        ? [
-          { maxProjects: 3, cellCap: 11 }, { maxProjects: 3, cellCap: 10 }, { maxProjects: 3, cellCap: 9 },
-          { maxProjects: 2, cellCap: 10 }, { maxProjects: 1, cellCap: 9 },
-          // Last resort: the label stays, the rows go. Still a worse card, but
-          // never one that prints over its own footer.
-          { maxProjects: 0, cellCap: 7 },
-        ]
-        : [{ maxProjects: 0, cellCap: 11 }, { maxProjects: 0, cellCap: 9 }, { maxProjects: 0, cellCap: 7 },
-          { maxProjects: 0, cellCap: 5 }];
+      const attempts = [];
+      if (tier === 'amber') {
+        for (const projects of [5, 4, 3, 2, 1]) {
+          for (const cellCap of [11, 9, 7, 5]) {
+            attempts.push({ maxProjects: projects, cellCap });
+          }
+        }
+        // Last resort: the label stays, the rows go. Still a worse card, but
+        // never one that prints over its own footer.
+        for (const cellCap of [11, 9, 7, 5]) attempts.push({ maxProjects: 0, cellCap });
+      } else {
+        for (const cellCap of [11, 9, 7, 5]) attempts.push({ maxProjects: 0, cellCap });
+      }
       let last = null;
       // First pass wants breathing room, the second takes anything that fits at
       // all and lets the logged audit complain about it.
@@ -15888,7 +15893,7 @@
       // carry another.
       usageReportState.previews = {};
       await usageReportCardFonts();
-      await usageReportLoadCardIcons((model.tools || []).slice(0, 3).map((row) => row.tool));
+      await usageReportLoadCardIcons((model.tools || []).slice(0, 5).map((row) => row.tool));
       if (token !== usageReportState.shareToken) return;
 
       const previews = {};

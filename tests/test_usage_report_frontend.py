@@ -1360,8 +1360,14 @@ const busy = {
   })),
   streaks: { active_days: 28, current_streak: 12, longest_streak: 173 },
   firsts: { busiest_day: '2026-09-14', busiest_day_tokens: 4123000000 },
-  tools: [{ tool: 'codex', tokens: 4e10 }, { tool: 'claude', tokens: 1.4e10 }, { tool: 'gemini_cli', tokens: 3e9 }],
-  models: [{ model: 'gpt-5.2-pro-thinking max', tokens: 3e10 }, { model: 'claude-fable-5.1', tokens: 1.5e10 }],
+  tools: [
+    { tool: 'codex', tokens: 4e10 }, { tool: 'claude', tokens: 1.4e10 }, { tool: 'gemini_cli', tokens: 3e9 },
+    { tool: 'opencode', tokens: 2e9 }, { tool: 'qoder_cli', tokens: 1e9 },
+  ],
+  models: [
+    { model: 'gpt-5.2-pro-thinking max', tokens: 3e10 }, { model: 'claude-fable-5.1', tokens: 1.5e10 },
+    { model: 'gemini-3-pro', tokens: 1e10 }, { model: 'deepseek-v4', tokens: 5e9 }, { model: 'llama-5-405b', tokens: 2e9 },
+  ],
   projectsAvailable: true,
   projectCount: 258,
   projectRows: Array.from({ length: 8 }, (_u, i) => ({
@@ -1437,10 +1443,10 @@ process.stdout.write(JSON.stringify(report));
         assert not [x for x, h in card["rects"] if x == 0 and h > 400], f"{name} grew a spine"
     assert cards["green/light"]["bg"] != cards["green/dark"]["bg"]
     assert cards["green/light"]["heat"] != cards["green/dark"]["heat"]
-    assert cards["green/light"]["rows"] == 0 and 0 < cards["amber/light"]["rows"] <= 3
+    assert cards["green/light"]["rows"] == 0 and 0 < cards["amber/light"]["rows"] <= 5
     assert cards["amber/light"]["file"] == "tokdash-report-2026-09-01_2026-09-30-amber-default-light.png"
     # Neither tier carries a footer manifest or a reconciliation line any more;
-    # the amber tier is a top-3 project ranking and nothing else.
+    # the amber tier is a top-5 project ranking and nothing else.
     green = " ".join(cards["green/light"]["texts"])
     amber = " ".join(cards["amber/light"]["texts"])
     for blob in (green, amber):

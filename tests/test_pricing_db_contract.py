@@ -94,6 +94,32 @@ def test_deepseek_v4_flash_0731_pricing():
         )
 
 
+def test_deepseek_v4_1_flash_pricing():
+    """DeepSeek V4.1 Flash must match the official peak cache-hit/miss/output rates.
+
+    DeepSeek lists it as ``deepseek-flash`` (version DeepSeek-V4.1-Flash) at $0.30 / $1.20
+    per MTok with cache hits at $0.006, peak; off-peak is half. Gateways such as OpenCode Go
+    expose the version id ``deepseek-v4.1-flash`` instead, so both ids must price, bare and
+    provider-qualified alike -- before this row every OpenCode Go session on the model
+    reported $0.
+    """
+    db = PricingDatabase()
+
+    expected_cost = (
+        1000 * 0.30 + 2000 * 1.20 + 3000 * 0.006 + 4000 * 0.30
+    ) / 1_000_000
+    for model in [
+        "deepseek-flash",
+        "deepseek/deepseek-flash",
+        "deepseek-v4.1-flash",
+        "opencode-go/deepseek-v4.1-flash",
+    ]:
+        cost = db.get_cost(model, 1000, 2000, 3000, 4000)
+        assert abs(cost - expected_cost) < 1e-12, (
+            f"{model!r} should resolve to DeepSeek V4.1 Flash pricing"
+        )
+
+
 def test_deepseek_v4_pro_0813_pricing():
     """DeepSeek V4 Pro 0813 must match the official cache-hit/miss/output rates."""
     db = PricingDatabase()

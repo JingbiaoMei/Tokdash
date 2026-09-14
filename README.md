@@ -157,20 +157,20 @@ See [Supported clients](docs/reference/SUPPORTED_CLIENTS.md) for local data path
   </a>
 </p>
 <p align="center">
+  <b>Usage report</b><br />
+  <a href="https://tokdash.github.io/demo/">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-report-en-dark.png" />
+      <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-report-en-light.png" alt="Tokdash usage report - click for live demo" width="860" />
+    </picture>
+  </a>
+</p>
+<p align="center">
   <b>Quota tracking</b><br />
   <a href="https://tokdash.github.io/demo/">
     <picture>
       <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-quota-en-dark.png" />
       <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-quota-en-light.png" alt="Tokdash quota tracking - click for live demo" width="860" />
-    </picture>
-  </a>
-</p>
-<p align="center">
-  <b>Codex quota and reset credits</b><br />
-  <a href="https://tokdash.github.io/demo/">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-quota-codex-en-dark.png" />
-      <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-quota-codex-en-light.png" alt="Tokdash Codex quota and reset credits - click for live demo" width="440" />
     </picture>
   </a>
 </p>

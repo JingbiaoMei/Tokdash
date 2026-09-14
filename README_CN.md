@@ -156,20 +156,20 @@
   </a>
 </p>
 <p align="center">
+  <b>用量报告</b><br />
+  <a href="https://tokdash.github.io/demo/">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-report-cn-dark.png" />
+      <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-report-cn-light.png" alt="Tokdash 用量报告 — 点击体验在线 Demo" width="860" />
+    </picture>
+  </a>
+</p>
+<p align="center">
   <b>额度追踪</b><br />
   <a href="https://tokdash.github.io/demo/">
     <picture>
       <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-quota-cn-dark.png" />
       <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-quota-cn-light.png" alt="Tokdash 额度追踪 — 点击体验在线 Demo" width="860" />
-    </picture>
-  </a>
-</p>
-<p align="center">
-  <b>Codex 额度与重置额度</b><br />
-  <a href="https://tokdash.github.io/demo/">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-quota-codex-cn-dark.png" />
-      <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-quota-codex-cn-light.png" alt="Tokdash Codex 额度与重置额度 — 点击体验在线 Demo" width="440" />
     </picture>
   </a>
 </p>

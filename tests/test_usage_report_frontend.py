@@ -1424,6 +1424,7 @@ for (const tier of ['green', 'amber']) {
     report.cards[`${tier}/${mode}`] = {
       overflow: Number((card.used - card.budget).toFixed(3)),
       rows: card.opt.maxProjects,
+      harnessIcons: card.ops.filter((op) => op.k === 'icon').length,
       texts: card.ops.filter((op) => op.k === 'text').map((op) => op.text),
       rects: card.ops.filter((op) => op.k === 'rect').map((op) => [op.x, op.h]),
       bg: card.pal.bg,
@@ -1444,6 +1445,9 @@ process.stdout.write(JSON.stringify(report));
     assert cards["green/light"]["bg"] != cards["green/dark"]["bg"]
     assert cards["green/light"]["heat"] != cards["green/dark"]["heat"]
     assert cards["green/light"]["rows"] == 0 and 0 < cards["amber/light"]["rows"] <= 5
+    # The busy month fits three project rows once the heat cells shrink, so
+    # the ladder must spend the cells before it gives up the third row.
+    assert cards["amber/light"]["rows"] >= 3, "a project row was dropped while a smaller heat cell could have paid for it"
     assert cards["amber/light"]["file"] == "tokdash-report-2026-09-01_2026-09-30-amber-default-light.png"
     # Neither tier carries a footer manifest or a reconciliation line any more;
     # the amber tier is a top-5 project ranking and nothing else.
@@ -1455,6 +1459,13 @@ process.stdout.write(JSON.stringify(report));
     assert "TOP PROJECTS" in amber and "PROJECTS ·" not in amber, "the project count went with the label"
     assert "tokdash-project-" not in green
     assert "tokdash-project-" in amber
+    # Both rankings run to five: the fixture carries five of each and every
+    # one must reach the canvas, not a silent top-3.
+    assert cards["green/light"]["harnessIcons"] == 5, "the harness ranking stopped short of five"
+    for harness in ("codex", "claude", "gemini_cli", "opencode", "qoder_cli"):
+        assert harness in green, f"{harness} never reached the card"
+    for model in ("gpt-5.2-pro-thinking max", "claude-fable-5.1", "gemini-3-pro", "deepseek-v4", "llama-5-405b"):
+        assert model in green, f"{model} never reached the card"
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not available")

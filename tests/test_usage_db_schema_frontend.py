@@ -241,9 +241,13 @@ def test_status_line_is_rendered_from_the_shared_helper() -> None:
 QUOTA_PREAMBLE = """
 const scenario = JSON.parse(process.argv[2]);
 const serverRuntimeStatus = new Map();
+const LOCAL_SERVER = { id: 'local', label: 'Local' };
 let lastQuotaServerRows = [];
 let lastQuotaPayload = null;
 let lastQuotaHistory = null;
+// loadQuota() records which server owns the single-server UI. The renderers it repaints
+// are stubbed below, so the scope helpers only have to answer without throwing.
+let quotaSingleScopeOwner = null;
 let quotaLoaded = false;
 let quotaActionStatusResetTimer = null;
 const quotaUtilizationCharts = new Map();
@@ -276,6 +280,8 @@ function renderQuotaSettings() {}
 function renderQuotaProviderCards() {}
 function renderQuotaCharts() {}
 function syncQuotaSingleVisibility() {}
+function quotaSingleScopeServer() { return LOCAL_SERVER; }
+function quotaSingleScopeHostKey() { return 'local'; }
 function quotaPresentProviders() { return new Set(); }
 function makeError(spec) {
   const error = new Error(spec.message);
@@ -496,6 +502,7 @@ const LOCAL_SERVER = { id: 'local', label: 'Local' };
 let lastQuotaServerRows = [];
 let lastQuotaPayload = null;
 let lastQuotaHistory = null;
+let quotaSingleScopeOwner = null;
 let quotaLoaded = false;
 let quotaActionStatusResetTimer = null;
 const quotaUtilizationCharts = new Map();
@@ -526,6 +533,8 @@ function renderQuotaSettings() {}
 function renderQuotaProviderCards() {}
 function renderQuotaCharts() {}
 function syncQuotaSingleVisibility() {}
+function quotaSingleScopeServer() { return LOCAL_SERVER; }
+function quotaSingleScopeHostKey() { return 'local'; }
 function quotaPresentProviders() { return new Set(); }
 async function postJsonWithCsrf() { postCalls += 1; return { ok: true }; }
 async function fetchJsonWithRetry() {

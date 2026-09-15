@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Unreleased
+
+### Fixed
+
+- The Quota tab's provider filter is now per host instead of shared across hosts. (#95, closes #93)
+
 ## 2.5.6 - 2026-09-14
 
 ### Added

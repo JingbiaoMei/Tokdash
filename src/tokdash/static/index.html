@@ -4815,6 +4815,11 @@
     let lastQuotaPayload = null;
     let lastQuotaHistory = null;
     let lastQuotaServerRows = [];
+    // Which server the single-server quota UI is showing. Follows the payload on screen,
+    // not the current selection: a failed reload keeps the previous host's cached payload
+    // visible, and its cards, charts and dropdown must all read that host's visibility map.
+    // Null in the multi-server layout, where every block is its own scope.
+    let quotaSingleScopeOwner = null;
     let pricingDbDirty = false;
     let pricingDbLastText = '';
     let pricingDbLastPayload = null;  // last GET/PUT payload, so the source line can re-localize
@@ -9062,12 +9067,15 @@
       if (typeof usageReportState !== 'undefined' && usageReportState.loaded && !usageReportState.loading) {
         usageReportRender();
       }
-      if (selectedServers().length > 1 && lastQuotaServerRows.length) {
+      // Which quota layout is on screen follows the last render (a null owner means the
+      // per-host blocks), not the current selection: a partial or failed load can leave the
+      // blocks up with one cached row, or the single view up with a multi selection.
+      if (!quotaSingleScopeOwner && lastQuotaServerRows.length) {
         document.getElementById('quotaServerBlocks')?.replaceChildren();
         lastQuotaServerRows.forEach((row) => renderQuotaServerBlock(row.server, row.payload, row.history));
       } else {
-        if (lastQuotaPayload) renderQuotaProviderCards(lastQuotaPayload);
-        if (lastQuotaHistory) renderQuotaCharts(lastQuotaHistory, { present: quotaPresentProviders(lastQuotaPayload) });
+        if (lastQuotaPayload) renderQuotaProviderCards(lastQuotaPayload, null, quotaSingleScopeServer());
+        if (lastQuotaHistory) renderQuotaCharts(lastQuotaHistory, { present: quotaPresentProviders(lastQuotaPayload), hostKey: quotaSingleScopeHostKey() });
         if (lastQuotaPayload) renderQuotaSettings(lastQuotaPayload);
         if (lastQuotaPayload) syncQuotaSingleVisibility(lastQuotaPayload);
       }
@@ -12503,6 +12511,8 @@
       if (!container) return;
       // Visibility is scoped to this payload's provider set, not a global union.
       const present = quotaPresentProviders(payload);
+      // ...and to this host's own show/hide map, not a global one.
+      const hostKey = quotaVisibilityHostKey(ownerServer && ownerServer.id);
       if (payload?.enabled === false) {
         renderQuotaDisabledCard(container, ownerServer);
         return;
@@ -12515,7 +12525,7 @@
       order.forEach((providerKey) => {
         // Provider-visibility dropdown: skip providers the user has hidden or that
         // this server's payload does not report.
-        if (!quotaProviderVisible(providerKey, present)) return;
+        if (!quotaProviderVisible(providerKey, present, hostKey)) return;
         renderedCards += 1;
         const provider = providers[providerKey] || {};
         const buckets = Array.isArray(provider.buckets) ? provider.buckets.filter(isQuotaUsageBucket) : [];
@@ -12708,15 +12718,29 @@
       return [...passthrough, ...pooled];
     }
 
-    // Provider-visibility dropdown ("Show: All / Codex / …"). The show/hide choice is one
-    // persisted display preference (provider -> bool), but the control is scoped per server:
-    // in multi-server mode every server block carries its own dropdown, and each dropdown
-    // only offers the providers present in THAT server's /api/quota payload — never the
-    // union of harnesses across servers. Single-server mode uses the same control, placed
-    // in the settings row via #quotaVisibilityHost.
+    // Provider-visibility dropdown ("Show: All / Codex / ..."). The show/hide choice is a
+    // persisted display preference kept PER HOST (server id -> provider -> bool), and the
+    // control is scoped per server: in multi-server mode every server block carries its own
+    // dropdown, hiding Codex on host A leaves host B alone, and each dropdown only offers the
+    // providers present in THAT server's /api/quota payload - never the union of harnesses
+    // across servers. Single-server mode uses the same control, placed in the settings row via
+    // #quotaVisibilityHost, and stores its choice under the one selected server's id.
     const QUOTA_PROVIDERS = ['codex', 'claude', 'antigravity', 'minimax', 'kimi', 'grok', 'zai', 'opencode_go'];
-    const QUOTA_VISIBILITY_KEY = 'tokdash-quota-visible';
-    let quotaVisibilityState = null;
+    const QUOTA_VISIBILITY_KEY = 'tokdash-quota-visible-by-host';
+    // Builds before per-host storage kept one global provider map under this key. Read-only
+    // now: it seeds hosts the user has not toggled yet, so an upgrade keeps their choices.
+    const QUOTA_VISIBILITY_GLOBAL_KEY = 'tokdash-quota-visible';
+    // serverId -> { provider: bool }, hydrated once from localStorage on first use.
+    let quotaVisibilityByHost = null;
+    let quotaVisibilityGlobalDefaults = null;
+
+    function quotaVisibilityHostKey(hostKey) {
+      return String(hostKey || 'local');
+    }
+
+    function allQuotaProvidersVisible() {
+      return Object.fromEntries(QUOTA_PROVIDERS.map((provider) => [provider, true]));
+    }
 
     // Providers actually present in one server's quota payload: detected locally,
     // network-enabled, or carrying bucket data.
@@ -12729,32 +12753,57 @@
       }));
     }
 
-    function loadQuotaVisibility() {
-      if (quotaVisibilityState) return quotaVisibilityState;
-      const state = Object.fromEntries(QUOTA_PROVIDERS.map((provider) => [provider, true]));
+    function readQuotaVisibilityStorage(key) {
       try {
-        const raw = localStorage.getItem(QUOTA_VISIBILITY_KEY);
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          QUOTA_PROVIDERS.forEach((p) => { if (typeof parsed[p] === 'boolean') state[p] = parsed[p]; });
-        }
-      } catch (e) { /* malformed value — fall back to all-visible */ }
-      quotaVisibilityState = state;
-      return state;
+        const raw = localStorage.getItem(key);
+        return raw ? JSON.parse(raw) : null;
+      } catch (e) { return null; /* malformed value - fall back to all-visible */ }
+    }
+
+    // { serverId: { provider: bool } }. Hosts with no stored entry get the legacy global
+    // preference (all-visible for anyone who never used the old shared dropdown).
+    function loadQuotaVisibilityByHost() {
+      if (quotaVisibilityByHost) return quotaVisibilityByHost;
+      const byHost = {};
+      const stored = readQuotaVisibilityStorage(QUOTA_VISIBILITY_KEY);
+      if (stored && typeof stored === 'object') {
+        Object.keys(stored).forEach((hostKey) => {
+          const value = stored[hostKey];
+          if (!value || typeof value !== 'object') return;
+          const perHost = allQuotaProvidersVisible();
+          QUOTA_PROVIDERS.forEach((p) => { if (typeof value[p] === 'boolean') perHost[p] = value[p]; });
+          byHost[quotaVisibilityHostKey(hostKey)] = perHost;
+        });
+      }
+      const defaults = allQuotaProvidersVisible();
+      const legacy = readQuotaVisibilityStorage(QUOTA_VISIBILITY_GLOBAL_KEY);
+      if (legacy && typeof legacy === 'object') {
+        QUOTA_PROVIDERS.forEach((p) => { if (typeof legacy[p] === 'boolean') defaults[p] = legacy[p]; });
+      }
+      quotaVisibilityGlobalDefaults = defaults;
+      quotaVisibilityByHost = byHost;
+      return quotaVisibilityByHost;
+    }
+
+    function loadQuotaVisibility(hostKey) {
+      const byHost = loadQuotaVisibilityByHost();
+      const key = quotaVisibilityHostKey(hostKey);
+      if (!byHost[key]) byHost[key] = { ...quotaVisibilityGlobalDefaults };
+      return byHost[key];
     }
 
     // `present` is the scope's provider set (that server's payload); omitting it keeps the
     // legacy all-present behavior for any caller without a scope.
-    function quotaProviderVisible(provider, present) {
-      return (present === null || present === undefined || present.has(provider)) && loadQuotaVisibility()[provider] !== false;
+    function quotaProviderVisible(provider, present, hostKey) {
+      return (present === null || present === undefined || present.has(provider)) && loadQuotaVisibility(hostKey)[provider] !== false;
     }
 
     function persistQuotaVisibility() {
-      try { localStorage.setItem(QUOTA_VISIBILITY_KEY, JSON.stringify(loadQuotaVisibility())); } catch (e) { /* ignore */ }
+      try { localStorage.setItem(QUOTA_VISIBILITY_KEY, JSON.stringify(loadQuotaVisibilityByHost())); } catch (e) { /* ignore */ }
     }
 
-    function quotaVisibilityLabelText(present) {
-      const state = loadQuotaVisibility();
+    function quotaVisibilityLabelText(present, hostKey) {
+      const state = loadQuotaVisibility(hostKey);
       const available = QUOTA_PROVIDERS.filter((provider) => present.has(provider));
       const shown = available.filter((provider) => state[provider] !== false);
       if (available.length === 0 || shown.length === 0) return t('quotaVisibilityNone');
@@ -12762,18 +12811,31 @@
       return `${t('quotaVisibilityPrefix')} ${shown.map(quotaProviderLabel).join(', ')}`;
     }
 
-    function buildQuotaVisibilityRow(provider) {
+    // The server whose payload fills the single-server UI (settings row + cards). Reads
+    // quotaSingleScopeOwner, which loadQuota() sets to whatever it last rendered there:
+    // deriving it from the live selection would point a cached payload at the newly
+    // selected host's visibility map after that host's request failed.
+    function quotaSingleScopeServer() {
+      return quotaSingleScopeOwner || LOCAL_SERVER;
+    }
+
+    function quotaSingleScopeHostKey() {
+      return quotaVisibilityHostKey(quotaSingleScopeServer().id);
+    }
+
+    function buildQuotaVisibilityRow(provider, hostKey) {
       const item = document.createElement('label');
       item.className = 'quota-visibility-item';
       const input = document.createElement('input');
       input.type = 'checkbox';
       input.dataset.provider = provider;
-      input.checked = loadQuotaVisibility()[provider] !== false;
+      input.checked = loadQuotaVisibility(hostKey)[provider] !== false;
       input.addEventListener('change', () => {
-        loadQuotaVisibility()[provider] = input.checked;
+        loadQuotaVisibility(hostKey)[provider] = input.checked;
         persistQuotaVisibility();
-        // One shared preference: propagate the change to every rendered scope.
-        applyQuotaVisibilityChange();
+        // Per-host preference: repaint only the host under the cursor. Issue #93: a shared
+        // preference here used to hide the provider on every other server too.
+        refreshQuotaScopeForHost(hostKey);
       });
       const span = document.createElement('span');
       span.textContent = quotaProviderLabel(provider);
@@ -12782,9 +12844,12 @@
       return item;
     }
 
-    function createQuotaVisibilityControl(present) {
+    // `hostKey` is the server this dropdown belongs to. It rides on the wrap element so the
+    // sync helpers can resolve their scope without a server argument in every signature.
+    function createQuotaVisibilityControl(present, hostKey) {
       const wrap = document.createElement('div');
       wrap.className = 'quota-visibility-wrap';
+      wrap.dataset.hostKey = quotaVisibilityHostKey(hostKey);
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'ui-input compact-control quota-visibility-btn';
@@ -12792,7 +12857,7 @@
       btn.setAttribute('aria-expanded', 'false');
       const label = document.createElement('span');
       label.className = 'quota-visibility-label';
-      label.textContent = quotaVisibilityLabelText(present);
+      label.textContent = quotaVisibilityLabelText(present, wrap.dataset.hostKey);
       const caret = document.createElement('span');
       caret.className = 'quota-visibility-caret';
       caret.setAttribute('aria-hidden', 'true');
@@ -12805,7 +12870,7 @@
       panel.setAttribute('aria-label', 'Show providers');
       QUOTA_PROVIDERS.forEach((provider) => {
         if (!present.has(provider)) return;
-        panel.appendChild(buildQuotaVisibilityRow(provider));
+        panel.appendChild(buildQuotaVisibilityRow(provider, wrap.dataset.hostKey));
       });
       btn.addEventListener('click', (event) => {
         event.stopPropagation();
@@ -12820,26 +12885,29 @@
     // Rebuild a scope's dropdown when its provider set changes (refresh / i18n / consent
     // write): options and label follow the new set. Toggles use
     // syncQuotaVisibilityControlInPlace instead, so the open panel is never rebuilt.
-    function syncQuotaVisibilityControl(control, present) {
+    // Re-stamps the control's host (a re-render can hand the single-server slot to another
+    // server) before rebuilding rows and label from that host's preference.
+    function syncQuotaVisibilityControl(control, present, hostKey) {
       const panel = control.querySelector('.quota-visibility-panel');
       if (!panel) return;
+      if (hostKey) control.dataset.hostKey = quotaVisibilityHostKey(hostKey);
       panel.replaceChildren();
       QUOTA_PROVIDERS.forEach((provider) => {
         if (!present.has(provider)) return;
-        panel.appendChild(buildQuotaVisibilityRow(provider));
+        panel.appendChild(buildQuotaVisibilityRow(provider, control.dataset.hostKey));
       });
       const label = control.querySelector('.quota-visibility-label');
-      if (label) label.textContent = quotaVisibilityLabelText(present);
+      if (label) label.textContent = quotaVisibilityLabelText(present, control.dataset.hostKey);
     }
 
     // Toggle path: update one scope's dropdown in place. Label text and checkbox states
-    // follow the shared preference; rows are not rebuilt, so the open panel keeps its
+    // follow that host's own preference; rows are not rebuilt, so the open panel keeps its
     // identity and focus while the user works through the menu.
     function syncQuotaVisibilityControlInPlace(control, present) {
       if (!control || !present) return;
       const label = control.querySelector('.quota-visibility-label');
-      if (label) label.textContent = quotaVisibilityLabelText(present);
-      const state = loadQuotaVisibility();
+      if (label) label.textContent = quotaVisibilityLabelText(present, control.dataset.hostKey);
+      const state = loadQuotaVisibility(control.dataset.hostKey);
       control.querySelectorAll('.quota-visibility-item input').forEach((input) => {
         if (input.dataset.provider) input.checked = state[input.dataset.provider] !== false;
       });
@@ -12883,6 +12951,7 @@
       renderQuotaProviderCards(row.payload, block.querySelector('[data-role="cards"]'), server);
       renderQuotaCharts(row.history, {
         serverId: server.id,
+        hostKey: server.id,
         utilizationCanvas: block.querySelector('[data-role="utilization"]'),
         consumptionCanvas: block.querySelector('[data-role="consumption"]'),
         estimatedBanner: block.querySelector('[data-role="estimated"]'),
@@ -12894,35 +12963,36 @@
     function refreshQuotaSingleScope() {
       if (!lastQuotaPayload) return;
       const present = quotaPresentProviders(lastQuotaPayload);
-      renderQuotaProviderCards(lastQuotaPayload);
-      if (lastQuotaHistory) renderQuotaCharts(lastQuotaHistory, { present });
+      renderQuotaProviderCards(lastQuotaPayload, null, quotaSingleScopeServer());
+      if (lastQuotaHistory) renderQuotaCharts(lastQuotaHistory, { present, hostKey: quotaSingleScopeHostKey() });
       syncQuotaVisibilityControlInPlace(document.getElementById('quotaVisibilityHost')?.querySelector('.quota-visibility-wrap'), present);
     }
 
-    // The show/hide preference is shared across scopes, so a toggle in one dropdown
-    // re-renders every rendered scope — the one under the cursor and all the others —
-    // so no block keeps stale cards, charts, labels, or checkbox state. Branch on the
-    // layout (selected server count), not the successful-row count: a partial multi
-    // load (one of two servers answering) still renders server blocks and must update
-    // them, not the hidden single-server UI.
-    function applyQuotaVisibilityChange() {
-      if (selectedServers().length > 1) {
-        lastQuotaServerRows.forEach((row) => refreshQuotaServerScope(row.server));
-      } else {
+    // Toggle path: a host's dropdown repaints only that host's scope, because every host
+    // keeps its own visibility map. The single-server scope wins on its own host key, so a
+    // cached payload repaints from the map it was drawn from; otherwise the key names a
+    // server block. A partial multi load (one of two servers answering) renders blocks and
+    // updates those, not the hidden single-server UI.
+    function refreshQuotaScopeForHost(hostKey) {
+      const key = quotaVisibilityHostKey(hostKey);
+      if (quotaSingleScopeOwner && key === quotaVisibilityHostKey(quotaSingleScopeOwner.id)) {
         refreshQuotaSingleScope();
+        return;
       }
+      const row = (lastQuotaServerRows || []).find((r) => r.server && r.server.id === key);
+      if (row) refreshQuotaServerScope(row.server);
     }
 
     // Per-server dropdown slot in the block header; hidden entirely when the server
     // reports no providers.
-    function syncQuotaServerVisibilityControl(block, payload) {
+    function syncQuotaServerVisibilityControl(block, payload, server) {
       const host = block.querySelector('[data-role="visibility"]');
       if (!host) return;
       const present = quotaPresentProviders(payload);
       if (!present.size) { host.replaceChildren(); return; }
       const control = host.querySelector('.quota-visibility-wrap');
-      if (control) syncQuotaVisibilityControl(control, present);
-      else host.appendChild(createQuotaVisibilityControl(present));
+      if (control) syncQuotaVisibilityControl(control, present, server.id);
+      else host.appendChild(createQuotaVisibilityControl(present, server.id));
     }
 
     // Single-server dropdown slot in the settings row.
@@ -12932,15 +13002,17 @@
       const present = quotaPresentProviders(payload);
       if (!present.size) { host.replaceChildren(); return; }
       const control = host.querySelector('.quota-visibility-wrap');
-      if (control) syncQuotaVisibilityControl(control, present);
-      else host.appendChild(createQuotaVisibilityControl(present));
+      const key = quotaSingleScopeHostKey();
+      if (control) syncQuotaVisibilityControl(control, present, key);
+      else host.appendChild(createQuotaVisibilityControl(present, key));
     }
 
     function renderQuotaCharts(history, targets = {}) {
       // Provider-visibility filter (per-server "Show: …" dropdown): drop whole provider
       // series the user has hidden, or that this server does not report.
+      const hostKey = quotaVisibilityHostKey(targets.hostKey || targets.serverId);
       const series = collapseAntigravitySeriesForCharts(history?.series || [])
-        .filter((item) => quotaProviderVisible(item.provider, targets.present));
+        .filter((item) => quotaProviderVisible(item.provider, targets.present, hostKey));
       const granularity = history?.granularity || 'hour';
       const palette = getChartPalette();
       const utilizationCanvas = targets.utilizationCanvas || document.getElementById('quotaUtilizationChart');
@@ -13132,9 +13204,9 @@
       enabled.onchange = () => setQuotaEnabled(enabled.checked, server).catch(() => { enabled.checked = !enabled.checked; });
       credentials.onchange = () => setQuotaCredentialScan(credentials.checked, server).catch(() => { credentials.checked = !credentials.checked; });
       interval.onchange = () => setQuotaInterval(interval.value, server);
-      syncQuotaServerVisibilityControl(block, payload);
+      syncQuotaServerVisibilityControl(block, payload, server);
       renderQuotaProviderCards(payload, block.querySelector('[data-role="cards"]'), server);
-      renderQuotaCharts(history, { serverId: server.id, utilizationCanvas: block.querySelector('[data-role="utilization"]'), consumptionCanvas: block.querySelector('[data-role="consumption"]'), estimatedBanner: block.querySelector('[data-role="estimated"]'), present: quotaPresentProviders(payload) });
+      renderQuotaCharts(history, { serverId: server.id, utilizationCanvas: block.querySelector('[data-role="utilization"]'), consumptionCanvas: block.querySelector('[data-role="consumption"]'), estimatedBanner: block.querySelector('[data-role="estimated"]'), present: quotaPresentProviders(payload), hostKey: server.id });
     }
 
     // ---- Servers tab (per-server stats) ----------------------------------------
@@ -13743,6 +13815,9 @@
           rows.forEach((row) => renderQuotaServerBlock(row.server, row.payload, row.history));
         }
         lastQuotaServerRows = rows;
+        // Record what the single-server UI is about to show, so a later repaint (toggle,
+        // language switch, failed reload) reads the same host's visibility map.
+        quotaSingleScopeOwner = multi ? null : rows[0].server;
         const { payload, history } = rows[0];
         lastQuotaPayload = payload;
         lastQuotaHistory = history;
@@ -13750,18 +13825,24 @@
         if (!multi) {
           renderQuotaSettings(payload);
           syncQuotaSingleVisibility(payload);
-          renderQuotaProviderCards(payload);
-          renderQuotaCharts(history, { present: quotaPresentProviders(payload) });
+          renderQuotaProviderCards(payload, null, quotaSingleScopeServer());
+          renderQuotaCharts(history, { present: quotaPresentProviders(payload), hostKey: quotaSingleScopeHostKey() });
         }
         return true;
       } catch (error) {
         console.error('Error loading quota:', error);
         setQuotaFetchStatus(error);
-        if (lastQuotaServerRows.length <= 1) {
+        // Repaint only the layout the last good load actually rendered. The owner already
+        // records it: a server id for the single-server view, null while the per-host blocks
+        // are on screen -- and those keep their cached payloads, so they need nothing here.
+        // A partial multi load leaves one cached row with the blocks still up, so the row
+        // count says nothing about the layout; claiming that row for the single scope would
+        // also hand its host key to the hidden UI and mute the visible block's dropdown.
+        if (quotaSingleScopeOwner) {
           if (lastQuotaPayload) renderQuotaSettings(lastQuotaPayload);
           if (lastQuotaPayload) syncQuotaSingleVisibility(lastQuotaPayload);
-          if (lastQuotaPayload) renderQuotaProviderCards(lastQuotaPayload);
-          if (lastQuotaHistory) renderQuotaCharts(lastQuotaHistory, { present: quotaPresentProviders(lastQuotaPayload) });
+          if (lastQuotaPayload) renderQuotaProviderCards(lastQuotaPayload, null, quotaSingleScopeServer());
+          if (lastQuotaHistory) renderQuotaCharts(lastQuotaHistory, { present: quotaPresentProviders(lastQuotaPayload), hostKey: quotaSingleScopeHostKey() });
         }
         // Reported rather than rethrown: callers that follow a write with a reload
         // must not acknowledge "saved" over an active fetch error (which would also

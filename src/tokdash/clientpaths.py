@@ -266,6 +266,15 @@ def antigravity_cli_dir() -> Path:
     return gemini_root() / "antigravity-cli"
 
 
+def antigravity_oauth_token_paths() -> List[Path]:
+    """Current and legacy Antigravity OAuth token paths, in precedence order."""
+    cli_dir = antigravity_cli_dir()
+    return [
+        cli_dir.parent / "jetski-standalone-oauth-token",
+        cli_dir / "antigravity-oauth-token",
+    ]
+
+
 def antigravity_product_dirs() -> List[Path]:
     """Every existing Antigravity product home, in scan order, deduplicated.
 

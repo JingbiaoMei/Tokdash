@@ -6,6 +6,22 @@ import sqlite3
 from tokdash.sources.quota import credential_sources
 
 
+def test_discovers_current_antigravity_token_path(monkeypatch, tmp_path):
+    current = tmp_path / ".gemini" / "jetski-standalone-oauth-token"
+    legacy = tmp_path / ".gemini" / "antigravity-cli" / "antigravity-oauth-token"
+    current.parent.mkdir(parents=True)
+    current.write_text("credential-present", encoding="utf-8")
+    monkeypatch.setattr(
+        credential_sources.clientpaths,
+        "antigravity_oauth_token_paths",
+        lambda: [current, legacy],
+    )
+
+    summary = credential_sources.discover_provider_sources()
+
+    assert summary["antigravity"] == ["native CLI"]
+
+
 def test_discovers_minimax_and_kimi_from_opencode_without_exposing_values(monkeypatch, tmp_path):
     data_home = tmp_path / "data"
     config_home = tmp_path / "config"

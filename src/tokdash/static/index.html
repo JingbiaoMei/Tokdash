@@ -11849,7 +11849,7 @@
     function quotaConsentMeta(provider) {
       if (provider === 'codex') return { key: 'codex_api', endpoint: 'chatgpt.com/backend-api/wham/*', path: '$CODEX_HOME/auth.json' };
       if (provider === 'claude') return { key: 'claude_api', endpoint: 'api.anthropic.com/api/oauth/usage', path: '$CLAUDE_CONFIG_DIR/.credentials.json (and each ~/.claude-* profile)' };
-      if (provider === 'antigravity') return { key: 'antigravity_api', endpoint: 'daily-cloudcode-pa.googleapis.com/v1internal:*', path: '~/.gemini/antigravity-cli/antigravity-oauth-token' };
+      if (provider === 'antigravity') return { key: 'antigravity_api', endpoint: 'daily-cloudcode-pa.googleapis.com/v1internal:*', path: '~/.gemini/jetski-standalone-oauth-token (legacy: ~/.gemini/antigravity-cli/antigravity-oauth-token)' };
       if (provider === 'minimax') return { key: 'minimax_api', endpoint: 'api.minimax.io or api.minimaxi.com/v1/token_plan/remains', path: '$MMX_CONFIG_DIR/config.json or a MiniMax Token Plan key' };
       if (provider === 'kimi') return { key: 'kimi_api', endpoint: 'api.kimi.com/coding/v1/usages', path: '$KIMI_CODE_HOME credentials/config or KIMI_API_KEY' };
       if (provider === 'grok') return { key: 'grok_api', endpoint: 'cli-chat-proxy.grok.com/v1/billing', path: '$GROK_HOME/auth.json (xAI OAuth only)' };

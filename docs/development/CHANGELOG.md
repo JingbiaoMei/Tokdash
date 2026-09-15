@@ -4,10 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## Unreleased
+## 2.5.7 - 2026-09-15
+
+### Added
+
+- The README gallery now includes Usage Report screenshots in English and Chinese, refreshed classic-theme dashboard screenshots, and the Muse Code logo pill across all six languages. (#91)
 
 ### Fixed
 
+- Antigravity quota tracking now reads the current OAuth token from `~/.gemini/jetski-standalone-oauth-token`, falls back to the legacy token path, and labels the account from its ID token without retaining credential material. (#94, closes #92)
 - The Quota tab's provider filter is now per host instead of shared across hosts. (#95, closes #93)
 
 ## 2.5.6 - 2026-09-14

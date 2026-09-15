@@ -1,6 +1,19 @@
 {
-  "current": "2.5.6",
+  "current": "2.5.7",
   "releases": [
+    {
+      "version": "2.5.7",
+      "date": "2026-09-15",
+      "sections": [
+        {
+          "type": "fixed",
+          "items": [
+            "Antigravity quota tracking now discovers the current OAuth token, while retaining compatibility with the legacy token path.",
+            "The Quota tab's provider filter is stored per host, so changing one host no longer changes the others."
+          ]
+        }
+      ]
+    },
     {
       "version": "2.5.6",
       "date": "2026-09-14",

@@ -990,6 +990,46 @@ def test_antigravity_api_normalizes_model_quota(monkeypatch, tmp_path):
     assert "ya29.token" not in json.dumps(snapshots[0].raw)
 
 
+def test_antigravity_prefers_current_token_path_and_reads_email_from_id_token(monkeypatch, tmp_path):
+    gemini_root = tmp_path / ".gemini"
+    ag_dir = gemini_root / "antigravity-cli"
+    ag_dir.mkdir(parents=True)
+    (gemini_root / "jetski-standalone-oauth-token").write_text(
+        json.dumps(
+            {
+                "token": {"access_token": "current-token", "refresh_token": "current-refresh"},
+                "id_token": _jwt({"email": "current@example.com"}),
+            }
+        ),
+        encoding="utf-8",
+    )
+    (ag_dir / "antigravity-oauth-token").write_text(
+        json.dumps({"access_token": "legacy-token", "email": "legacy@example.com"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(antigravity.clientpaths, "antigravity_cli_dir", lambda: ag_dir)
+
+    token, meta = antigravity._read_token()
+
+    assert token == "current-token"
+    assert meta["email"] == "current@example.com"
+    assert meta["path"] == str(gemini_root / "jetski-standalone-oauth-token")
+    assert "current-refresh" not in json.dumps(meta)
+
+
+def test_antigravity_falls_back_to_legacy_token_path(monkeypatch, tmp_path):
+    ag_dir = tmp_path / ".gemini" / "antigravity-cli"
+    ag_dir.mkdir(parents=True)
+    legacy_path = ag_dir / "antigravity-oauth-token"
+    legacy_path.write_text(json.dumps({"access_token": "legacy-token"}), encoding="utf-8")
+    monkeypatch.setattr(antigravity.clientpaths, "antigravity_cli_dir", lambda: ag_dir)
+
+    token, meta = antigravity._read_token()
+
+    assert token == "legacy-token"
+    assert meta["path"] == str(legacy_path)
+
+
 def test_antigravity_api_null_remaining_with_reset_is_exhausted_window(monkeypatch, tmp_path):
     # When the weekly limit is hit, fetchAvailableModels returns remainingFraction: null
     # alongside a weekly resetTime. The collector must NOT skip these (else the stored

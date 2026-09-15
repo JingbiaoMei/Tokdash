@@ -397,7 +397,7 @@ def discover_provider_sources() -> dict[str, list[str]]:
     native_checks = {
         "codex": [clientpaths.codex_home() / "auth.json"],
         "claude": [clientpaths.claude_config_dir() / ".credentials.json"],
-        "antigravity": [clientpaths.antigravity_cli_dir() / "antigravity-oauth-token"],
+        "antigravity": clientpaths.antigravity_oauth_token_paths(),
         "minimax": [clientpaths.minimax_cli_root() / "config.json"],
         "kimi": [root / "config.toml" for root in clientpaths.kimi_roots()]
         + [root / "credentials" / "kimi-code.json" for root in clientpaths.kimi_roots()],

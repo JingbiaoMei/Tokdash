@@ -73,6 +73,12 @@ the ones that do NOT do this (Hermes) or that use a Linux-only convention on Win
   `antigravity-ide` is an uncited aside in #72 and has not been seen locally. Discovery is fail-soft — a home
   that does not exist contributes nothing — so a wrong sibling name costs nothing but should not be cited as
   verified. Confirm it against an IDE install before treating it as known.
+- **OAuth is shared at the `.gemini` root.** AGY 1.2.3 names
+  `~/.gemini/jetski-standalone-oauth-token` in its shipped binary. Tokdash reads that file first and falls back to
+  `~/.gemini/antigravity-cli/antigravity-oauth-token` for older installs. On Windows these resolve below
+  `%USERPROFILE%\.gemini`. The current JSON keeps the access token under `token.access_token` and the account email
+  in the top-level `id_token` JWT payload. Tokdash decodes that unverified identity claim only as a display label;
+  it never exposes the JWT or nested token fields. ([issue #92](https://github.com/JingbiaoMei/Tokdash/issues/92))
 
 ### Codex
 - **Keep `Path.home() / ".codex"`** — portable dotfile via the Rust `dirs` crate. ✅ *Implemented:*

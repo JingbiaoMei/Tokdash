@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import platform
 from datetime import datetime, timezone
@@ -19,6 +20,19 @@ _USER_AGENT = f"antigravity/1.0.0 {platform.system().lower()}/{platform.machine(
 _TOKEN_KEYS = {"access_token", "refresh_token", "id_token", "token"}
 
 
+def _jwt_payload(token: Any) -> dict[str, Any]:
+    """Decode unverified identity claims used only for the local account label."""
+    if not isinstance(token, str):
+        return {}
+    try:
+        payload = token.split(".")[1]
+        payload += "=" * (-len(payload) % 4)
+        decoded = json.loads(base64.urlsafe_b64decode(payload).decode("utf-8"))
+    except Exception:
+        return {}
+    return decoded if isinstance(decoded, dict) else {}
+
+
 def _safe_token_meta(data: dict[str, Any], path: str) -> dict[str, Any]:
     meta: dict[str, Any] = {"path": path}
     for key, value in data.items():
@@ -32,17 +46,31 @@ def _safe_token_meta(data: dict[str, Any], path: str) -> dict[str, Any]:
     for key in ("expiry", "expires_at", "expiry_date"):
         if key in token_obj:
             meta[key] = token_obj.get(key)
+    if not meta.get("email"):
+        email = _jwt_payload(data.get("id_token")).get("email")
+        if isinstance(email, str) and email:
+            meta["email"] = email
     return meta
 
 
 def _read_token() -> tuple[str | None, dict[str, Any]]:
-    path = clientpaths.antigravity_cli_dir() / "antigravity-oauth-token"
-    try:
-        text = path.read_text(encoding="utf-8").strip()
-    except FileNotFoundError:
-        return None, {"error": "token_not_found", "path": str(path)}
-    except Exception as exc:
-        return None, {"error": "token_invalid", "message": str(exc), "path": str(path)}
+    # Verified against the shipped AGY 1.2.3 binary on 2026-09-15. Keep the
+    # original product-home path for installs that predate the Jetski rename.
+    paths = clientpaths.antigravity_oauth_token_paths()
+    for path in paths:
+        try:
+            text = path.read_text(encoding="utf-8").strip()
+            break
+        except FileNotFoundError:
+            continue
+        except Exception as exc:
+            return None, {"error": "token_invalid", "message": str(exc), "path": str(path)}
+    else:
+        return None, {
+            "error": "token_not_found",
+            "path": str(paths[0]),
+            "legacy_path": str(paths[1]),
+        }
     try:
         data = json.loads(text)
         if not isinstance(data, dict):

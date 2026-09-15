@@ -35,6 +35,7 @@
   <a href="https://zed.dev/" title="Zed"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/zed.png" alt="Zed" height="34"></a>
   <a href="https://github.com/QwenLM/qwen-code" title="Qwen Code"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/qwen-code.png" alt="Qwen Code" height="34"></a>
   <a href="https://charm.land/crush" title="Crush"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/crush.png" alt="Crush" height="34"></a>
+  <a href="https://dev.meta.ai/docs/muse-code" title="Muse Code"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/muse.png" alt="Muse Code" height="34"></a>
 </p>
 
 <p align="center">
@@ -156,20 +157,20 @@
   </a>
 </p>
 <p align="center">
+  <b>사용 리포트</b><br />
+  <a href="https://tokdash.github.io/demo/">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-report-en-dark.png" />
+      <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-report-en-light.png" alt="Tokdash usage report - click for live demo" width="860" />
+    </picture>
+  </a>
+</p>
+<p align="center">
   <b>쿼터 추적</b><br />
   <a href="https://tokdash.github.io/demo/">
     <picture>
       <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-quota-en-dark.png" />
       <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-quota-en-light.png" alt="Tokdash quota tracking - click for live demo" width="860" />
-    </picture>
-  </a>
-</p>
-<p align="center">
-  <b>Codex 쿼터와 리셋 크레딧</b><br />
-  <a href="https://tokdash.github.io/demo/">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-quota-codex-en-dark.png" />
-      <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-quota-codex-en-light.png" alt="Tokdash Codex quota and reset credits - click for live demo" width="440" />
     </picture>
   </a>
 </p>

@@ -57,6 +57,7 @@ TOOLS = [
     ("zed", "Zed", "zed.svg"),
     ("qwen-code", "Qwen Code", "qwen_code.svg"),
     ("crush", "Crush", "crush.png"),
+    ("muse", "Muse Code", "muse.svg"),
 ]
 
 # Rendered at ~2.4x the README display height (40px) for crispness.

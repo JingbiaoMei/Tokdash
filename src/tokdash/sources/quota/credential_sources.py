@@ -403,6 +403,7 @@ def discover_provider_sources() -> dict[str, list[str]]:
         + [root / "credentials" / "kimi-code.json" for root in clientpaths.kimi_roots()],
         "grok": [clientpaths.grok_home() / "auth.json"],
         "zai": [clientpaths.zcode_home() / "v2" / "config.json"],
+        "commandcode": [clientpaths.commandcode_auth_path()],
     }
     for provider, paths in native_checks.items():
         if any(path.is_file() for path in paths):
@@ -414,6 +415,7 @@ def discover_provider_sources() -> dict[str, list[str]]:
         "minimax": ("MINIMAX_API_KEY", "MINIMAX_TOKEN_PLAN_GLOBAL_KEY", "MINIMAX_TOKEN_PLAN_CN_KEY"),
         "kimi": ("KIMI_API_KEY",),
         "zai": ("ZAI_API_KEY", "Z_AI_API_KEY"),
+        "commandcode": ("COMMAND_CODE_API_KEY", "COMMANDCODE_API_KEY"),
     }
     for provider, names in env_checks.items():
         if any(os.environ.get(name, "").strip() for name in names):
@@ -424,6 +426,14 @@ def discover_provider_sources() -> dict[str, list[str]]:
         credential = read_opencode_go_key()
         if credential is not None:
             add("opencode_go", "environment" if credential.source == "OPENCODE_API_KEY" else "OpenCode auth")
+    except Exception:
+        pass
+    try:
+        from .commandcode import read_commandcode_key
+
+        credential = read_commandcode_key()
+        if credential is not None:
+            add("commandcode", "environment" if credential.source in {"COMMAND_CODE_API_KEY", "COMMANDCODE_API_KEY"} else "Command Code auth")
     except Exception:
         pass
     if os.environ.get("ANTHROPIC_AUTH_TOKEN", "").strip() and zai_coding_base_url_allowed(

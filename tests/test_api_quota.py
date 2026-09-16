@@ -47,6 +47,7 @@ def test_get_quota_returns_stored_codex_session_data_without_collecting(monkeypa
         "grok_api": False,
         "zai_api": False,
         "opencode_go_api": False,
+        "commandcode_api": False,
     }
 
 
@@ -159,6 +160,7 @@ def test_quota_consent_route_persists_provider_flags():
         "grok_api": False,
         "zai_api": False,
         "opencode_go_api": False,
+        "commandcode_api": False,
     }
     assert api.get_quota()["consent"]["codex_api"] is True
 

@@ -473,12 +473,13 @@ Por defecto `tokdash serve` abre el panel en tu navegador una vez al arrancar. P
 
 La pestaña Quota muestra ventanas de utilización de suscripción y temporizadores de reinicio, a partir de dos fuentes de datos. **Logs locales** (sin red): Codex registra su propia cuota en archivos de sesión, así que las ventanas de 5 horas/semana de Codex funcionan desde el primer momento — pero solo se actualizan cuando usas Codex, y los logs nunca contienen créditos de reinicio ni ventanas de funciones con medidor. Trata el consumo de Codex desde logs de sesión como una **estimación que puede estar muy errada**: cada sesión cachea su instantánea de cuota en su última consulta y la reproduce sin cambios en cada mensaje posterior, de modo que las cifras pueden estar desactualizadas, y el ruido en los límites de reinicio puede distorsionar aún más una ventana — la pestaña Quota etiqueta estos gráficos como estimados. **Consulta en vivo** (desactivada por defecto, consentimiento por proveedor): Tokdash llama al endpoint de cuota del propio proveedor con la sesión iniciada que ya tiene tu CLI. Es más fresca, añade créditos de reinicio de Codex y funciones con medidor, es necesaria para el consumo de Codex **exacto**, y es la única fuente de cuota para Claude Code, Antigravity, MiniMax, Kimi Code y SuperGrok/Grok Build:
 
-Las cuotas de Z.ai Coding Plan y OpenCode Go también están disponibles únicamente mediante la consulta en vivo.
+Las cuotas de Z.ai Coding Plan, OpenCode Go y Command Code también están disponibles únicamente mediante la consulta en vivo.
 
 ```bash
 tokdash quota consent --codex-api on --claude-api on --antigravity-api on
 tokdash quota consent --minimax-api on --kimi-api on --grok-api on --zai-api on
 tokdash quota consent --opencode-go-api on
+tokdash quota consent --commandcode-api on
 tokdash quota consent --credential-scan on   # permite los lectores locales de credenciales divulgados
 tokdash quota consent --poll-interval 30      # cadencia de consulta en fondo: 15, 30, 60 o 120 min
 tokdash quota consent --enabled off           # interruptor general: apaga TODO el seguimiento de cuota
@@ -499,6 +500,8 @@ La consulta en vivo requiere dos decisiones separadas: `quota.credential_scan` p
 Z.ai acepta una clave de Coding Plan desde `$ZCODE_HOME/v2/config.json`, una configuración de herramienta compatible, `ZAI_API_KEY` o `Z_AI_API_KEY`, y consulta las ventanas de créditos de 5 horas/semanales además de los límites MCP heredados.
 
 OpenCode Go usa primero `OPENCODE_API_KEY` y, si no está definida, la clave `opencode-go` del `auth.json` de OpenCode; consulta las ventanas de suscripción móviles, semanales y mensuales en `opencode.ai/zen/go/v1/usage`. El saldo de pago por uso de Zen no tiene un endpoint con autenticación por clave y no se registra.
+
+Command Code lee la clave de la cuenta de `COMMAND_CODE_API_KEY`, luego `COMMANDCODE_API_KEY`, luego `~/.commandcode/auth.json` y, por último, la entrada `commandcode` del `auth.json` de OpenCode (nunca se refresca ni se reescribe). Consulta `api.commandcode.ai/alpha/billing/credits` y `/alpha/billing/subscriptions` para las ventanas de 5 horas y semanal, además del crédito mensual. Las barras de 5 horas y semanal vienen directas de la API; **la mensual se deriva**: el catálogo del plan aporta el total, se resta el crédito restante y el resultado se etiqueta con el plan resuelto (Go / GOAT / Pro / Max 10x / Max 20x / Team Pro / Provider). Cuando no se puede resolver una suscripción activa con su plan, la barra mensual y su etiqueta de plan se retiran en lugar de seguir mostrando la lectura anterior.
 
 El uso de tokens de Grok Build también se analiza localmente desde `$GROK_HOME/logs/unified.jsonl`. Sus registros de inferencia exponen tokens de prompt, prompt en caché, completion y razonamiento; Tokdash los atribuye usando los eventos de modelo del mismo proceso CLI y calcula el coste desde la base de datos de precios normal. Los registros sin evento de modelo se omiten en lugar de asignarles un precio conjetural.
 

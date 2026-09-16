@@ -304,12 +304,12 @@ Persists the separate local-credential-read consent (`credential_scan`) and per-
 
 **Request**
 ```json
-{"credential_scan": true, "codex_api": true, "minimax_api": true, "kimi_api": true, "grok_api": true}
+{"credential_scan": true, "codex_api": true, "minimax_api": true, "kimi_api": true, "grok_api": true, "commandcode_api": true}
 ```
 
 **Response**
 ```json
-{"consent": {"credential_scan": true, "codex_api": true, "claude_api": false, "antigravity_api": false, "minimax_api": true, "kimi_api": true, "grok_api": true}}
+{"consent": {"credential_scan": true, "codex_api": true, "claude_api": false, "antigravity_api": false, "minimax_api": true, "kimi_api": true, "grok_api": true, "commandcode_api": true}}
 ```
 
 ## `POST /api/quota/settings`

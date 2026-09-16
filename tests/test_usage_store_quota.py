@@ -48,6 +48,88 @@ def test_quota_snapshots_are_idempotent_and_reported_in_status(tmp_path):
     assert store.status()["quota_snapshots"] == 2
 
 
+def test_rewriting_one_observation_slot_keeps_the_latest_write(tmp_path):
+    """A second write to one ``(provider, account, bucket, source, captured_at)`` slot wins.
+
+    The UNIQUE key is the observation slot, so a re-write is the same observation re-taken.
+    Under the previous ``INSERT OR IGNORE`` the second write was silently dropped, which is
+    what broke Command Code's monthly withdrawal: its suppression row shares its cycle's
+    ``captured_at`` with the real row, so the withdrawal (``used_percent=None``) was the
+    second insert and vanished, leaving the stale bar rendering until some later cycle
+    happened to land in a different wall-clock second.
+    """
+    store = UsageEntryStore(tmp_path / "usage.sqlite3")
+    real = _snapshot("monthly", 1.96, BASE_TS)
+    withdrawal = QuotaSnapshot(
+        provider="codex",
+        account="acct",
+        bucket="monthly",
+        bucket_label="Monthly",
+        used_percent=None,
+        resets_at=None,
+        plan=None,
+        captured_at=BASE_TS,
+        source="codex_session",
+        status="ok",
+        raw={"suppressed": "plan_unresolved"},
+    )
+
+    assert store.insert_quota_snapshots([real]) == 1
+    # Same slot: the count must not grow, but the withdrawal must still take effect.
+    assert store.insert_quota_snapshots([withdrawal]) == 0
+
+    latest = store.latest_quota_snapshots()
+    assert len(latest) == 1
+    assert latest[0]["used_percent"] is None
+    assert latest[0]["plan"] is None
+    assert latest[0]["raw"] == {"suppressed": "plan_unresolved"}
+
+
+def test_rewriting_a_slot_does_not_renumber_the_rowid(tmp_path):
+    """A same-slot re-write must update in place, not delete and re-insert.
+
+    ``quota_history`` breaks ties on rowid (``ORDER BY captured_at, id``: "the later
+    insert wins"), and a session row and an API row legitimately describe the SAME window
+    at the same ``captured_at``. ``poll_quota`` re-inserts the session rows every cycle by
+    design (the collector already committed them, so it is a no-op), which means a
+    delete-and-reinsert conflict action would hand the stale session row a fresh, higher
+    rowid on every cycle and let it win that tiebreak forever -- silently reverting the
+    chart to the session estimate after the API reading had already replaced it.
+    """
+    store = UsageEntryStore(tmp_path / "usage.sqlite3")
+    session = _snapshot("5h", 10.0, BASE_TS)
+    api = QuotaSnapshot(
+        provider="codex",
+        account="acct",
+        bucket="5h",
+        bucket_label="5h",
+        used_percent=99.0,
+        resets_at=BASE_TS + 3600,
+        plan="pro",
+        captured_at=BASE_TS,
+        source="codex_api",
+        status="ok",
+        raw={"used": 99.0},
+    )
+
+    # The collector commits the session row itself, then poll_quota inserts both.
+    store.commit_quota_session_batch([session], "codex_session", [])
+    store.insert_quota_snapshots([session, api])
+    session_rowid = next(
+        row["id"] for row in store.query_quota_snapshots() if row["source"] == "codex_session"
+    )
+
+    # Two more cycles re-insert only the session row (the documented harmless no-op).
+    for _ in range(2):
+        store.insert_quota_snapshots([session])
+
+    # The session row still holds its original rowid, so the API row keeps the higher one.
+    assert next(
+        row["id"] for row in store.query_quota_snapshots() if row["source"] == "codex_session"
+    ) == session_rowid
+    assert store.quota_history(granularity="hour")["series"][0]["points"][0]["used_percent"] == 99.0
+
+
 def _codex_api_raw(primary_used: float, secondary_used: float) -> dict:
     return {
         "usage": {

@@ -471,12 +471,13 @@ Tailscale Serve、SSH フォーワード、明示的なネットワークバイ�
 
 Quota タブは 2 つのデータソースから、サブスクリプションの利用率ウィンドウとリセットタイマーを表示します。**ローカルログ**（ネットワーク不要）: Codex はセッションファイルに自分のクォータを記録するため、Codex の 5 時間 / 週間ウィンドウはそのまま動作します — ただし Codex を使ったときのみ更新され、ログにはリセットクレジットやメーターリング機能ウィンドウが含まれません。セッションログの Codex 消費量は**大幅に誤りうる推定値**として扱うべきです: 各セッションが最後の取得時のクォータスナップショットをキャッシュし、その後の全メッセージで同じものを再生するため、数値が古い場合があり、リセット境界のノイズがウィンドウをさらに歪めることもあります — Quota タブはこれらのチャートを推定値とラベル付けします。**ライブポーリング**（デフォルト無効、プロバイダーごとにオプトイン）: Tokdash は CLI がすでに持っているサインインで、プロバイダー自身のクォータエンドポイントを呼び出します。より新鮮で、Codex のリセットクレジットとメーターリング機能を追加し、**正確な** Codex 消費量には必須であり、Claude Code、Antigravity、MiniMax、Kimi Code、SuperGrok/Grok Build の唯一のクォータソースです:
 
-Z.ai Coding Plan と OpenCode Go のクォータもライブポーリングからのみ取得できます。
+Z.ai Coding Plan、OpenCode Go、Command Code のクォータもライブポーリングからのみ取得できます。
 
 ```bash
 tokdash quota consent --codex-api on --claude-api on --antigravity-api on
 tokdash quota consent --minimax-api on --kimi-api on --grok-api on --zai-api on
 tokdash quota consent --opencode-go-api on
+tokdash quota consent --commandcode-api on
 tokdash quota consent --credential-scan on   # 開示済みのローカル認証情報リーダーを許可
 tokdash quota consent --poll-interval 30      # バックグラウンドポーリング間隔: 15, 30, 60 または 120 分
 tokdash quota consent --enabled off           # マスタースイッチ: 全クォータ追跡をオフ
@@ -497,6 +498,8 @@ tokdash quota show
 Z.ai は `$ZCODE_HOME/v2/config.json`、対応ツールの設定、`ZAI_API_KEY`、または `Z_AI_API_KEY` の Coding Plan キーを受け付け、5 時間 / 週間クレジットウィンドウと従来の MCP 上限を照会します。
 
 OpenCode Go は `OPENCODE_API_KEY` を優先し、未設定の場合は OpenCode の `auth.json` 内の `opencode-go` キーを使って、`opencode.ai/zen/go/v1/usage` からローリング・週間・月間のサブスクリプション使用枠を取得します。Zen の従量課金残高にはキー認証に対応したエンドポイントがないため、追跡しません。
+
+Command Code は `COMMAND_CODE_API_KEY`、`COMMANDCODE_API_KEY`、`~/.commandcode/auth.json`、最後に OpenCode の `auth.json` の `commandcode` エントリの順でアカウントキーを読み取ります（更新も書き戻しもしません）。`api.commandcode.ai/alpha/billing/credits` と `/alpha/billing/subscriptions` をポーリングして、5 時間・週間の使用上限と月間クレジット枠を取得します。5 時間と週間のバーは API の値をそのまま表示し、**月間は算出値**です。プランカタログが総量を与え、残クレジットを差し引き、解決したプラン名（Go / GOAT / Pro / Max 10x / Max 20x / Team Pro / Provider）を付けます。有効なサブスクリプションとプランを解決できないときは、前回の読み値を残さず月間バーとプラン名を撤回します。
 
 Grok Build のトークン使用量も `$GROK_HOME/logs/unified.jsonl` からローカルにパースされます。その推論レコードはプロンプト、キャッシュ済みプロンプト、補完、推論トークンを公開し、Tokdash は同じ CLI プロセスのモデルイベントを使って帰属させ、通常の価格データベースからコストを計算します。モデルイベントのないレコードは推測価格を割り当てるのではなくスキップされます。
 

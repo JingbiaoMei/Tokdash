@@ -167,8 +167,8 @@ def _downsample_snapshots(snapshots: list[QuotaSnapshot]) -> list[QuotaSnapshot]
     """Keep the first observation per (provider, account, bucket, hour).
 
     Bounds row growth for both the one-time backfill (huge history) and per-cycle tail
-    reads. Live polling is already coarse; the `INSERT OR IGNORE` UNIQUE key is the final
-    dedup net, so this is purely a volume guard.
+    reads. Live polling is already coarse; the UNIQUE key on the insert is the final dedup
+    net, so this is purely a volume guard.
     """
     kept: dict[tuple[str, str, str, int], QuotaSnapshot] = {}
     for snapshot in sorted(snapshots, key=lambda item: item.captured_at):

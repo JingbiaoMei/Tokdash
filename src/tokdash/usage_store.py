@@ -2636,11 +2636,31 @@ class UsageEntryStore:
             for row in rows
         }
 
+    # Upsert, not IGNORE and not REPLACE. The UNIQUE key IS the observation slot, so writing
+    # it twice is the same observation re-taken and the latest write must win: under IGNORE a
+    # second collection inside the same wall-clock second was silently dropped, which discards
+    # a withdrawal row (a bucket's used_percent set to NULL to retire a stale bar) and leaves
+    # the stale bar rendering until a later cycle landed in a different second.
+    #
+    # REPLACE would also make the latest write win, but it is a DELETE plus an INSERT, so it
+    # renumbers the rowid on every write -- and `quota_history` breaks ties on rowid
+    # (`ORDER BY captured_at, id`: "the later insert wins"). Session rows are re-inserted every
+    # cycle by design (see `poll_quota`), so a REPLACE would let a stale session row leapfrog
+    # the newer API row for the same window and win the tiebreak forever. An in-place upsert
+    # keeps the rowid stable, so the tiebreak still orders rows by when they were first
+    # written while the newest content wins.
     _QUOTA_SNAPSHOT_INSERT_SQL = """
-        INSERT OR IGNORE INTO quota_snapshots(
+        INSERT INTO quota_snapshots(
             provider, account, bucket, bucket_label, used_percent,
             resets_at, plan, captured_at, source, status, raw_json
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(provider, account, bucket, source, captured_at) DO UPDATE SET
+            bucket_label = excluded.bucket_label,
+            used_percent = excluded.used_percent,
+            resets_at = excluded.resets_at,
+            plan = excluded.plan,
+            status = excluded.status,
+            raw_json = excluded.raw_json
     """
     _QUOTA_WATERMARK_UPSERT_SQL = """
         INSERT INTO quota_file_state(source, path, mtime_ns, size, safe_offset, updated_at_ms)

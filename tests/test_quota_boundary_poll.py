@@ -249,6 +249,29 @@ def test_network_collection_dispatches_new_provider_collectors(monkeypatch):
     assert calls == ["minimax", "kimi", "grok", "zai"]
 
 
+def test_network_collection_dispatches_commandcode_collector(monkeypatch):
+    calls = []
+    monkeypatch.setattr(config, "enabled_network_sources", lambda: ["commandcode_api", "opencode_go_api"])
+    monkeypatch.setattr(quota, "collect_commandcode_api_snapshots", lambda: calls.append("commandcode") or [])
+    monkeypatch.setattr(quota, "collect_opencode_go_api_snapshots", lambda: calls.append("opencode_go") or [])
+
+    quota.collect_network_snapshots()
+
+    assert calls == ["commandcode", "opencode_go"]
+
+
+def test_commandcode_fixed_epoch_window_is_a_boundary_target():
+    """Command Code windows are fixed-epoch (used falls only at a rollover, which also
+    advances `resets_at`), so they DO qualify as boundary-poll targets — intended."""
+    now = 1_000
+    rows = [
+        _row("commandcode", "5h", now + 500),
+        _row("commandcode", "7d", now + 99_000),
+    ]
+
+    assert next_boundary_poll_at(now, rows, _CFG) == now + 380
+
+
 def test_record_boundary_poll_metric_increments_quota_meta():
     from tokdash.usage_store import UsageEntryStore
 

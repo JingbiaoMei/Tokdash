@@ -411,8 +411,43 @@ def _account_status(view: dict[str, Any]) -> tuple[str | None, str | None, int |
     return status, detail, status_at
 
 
+# The account name a poller invents for a failure when it has no credential to name:
+# ``account or "default"`` (Codex), ``meta.get("user_id") or "default"`` (Grok),
+# ``region if credential else "default"`` (MiniMax), ``raw.get("email") or "default"``
+# (Antigravity).
+_FALLBACK_ACCOUNT = "default"
+# Cards whose ``default`` IS a credential the user can see before it has ever answered:
+# Claude names its ``~/.claude`` install that way and lists it in ``accounts``, so its
+# sign-in errors belong to that install alone and print under its own heading.
+_CARDS_WITH_A_DEFAULT_CREDENTIAL = frozenset({"claude"})
+
+
+def _is_fallback_account(provider: str, account: str, view: dict[str, Any]) -> bool:
+    """Whether this view is where nameless failures were filed, rather than an account.
+
+    The name alone does not answer it. The same ``default`` is a REAL account wherever it is
+    the credential's *id* that is missing rather than the credential: Antigravity files a
+    whole signed-in account under ``default`` when the ID token carries no email, and Kimi,
+    Z.ai and OpenCode Go name every account they ever write that. What separates the two is
+    that a fallback view has never carried a successful ``*_api`` observation -- nothing it
+    was asked about answered, so there is no credential behind it to speak for.
+
+    A name that once answered and no longer does stays a real account, which is the
+    conservative direction: stored rows cannot tell a poller that stopped reporting an id
+    from an account that went away, and warning is the safe reading of that ambiguity.
+    Window rows from a local log (``codex_session``) are not an answer either -- they are
+    the client's own record, not the provider's, which is why ``ok_at`` counts ``*_api``
+    rows only (see ``_record_row``).
+    """
+    return (
+        account == _FALLBACK_ACCOUNT
+        and provider not in _CARDS_WITH_A_DEFAULT_CREDENTIAL
+        and int(view.get("ok_at") or 0) == 0
+    )
+
+
 def _provider_status(
-    aggregate: dict[str, Any], views: dict[str, dict[str, Any]]
+    provider: str, aggregate: dict[str, Any], views: dict[str, dict[str, Any]]
 ) -> tuple[str | None, str | None, int | None, str | None]:
     """The card's own (status, live error, when it happened, whose it is), from its accounts.
 
@@ -426,6 +461,15 @@ def _provider_status(
     error, and this account's own recovery does not leave its old error row warning the card
     forever. Attribution survives because the same resolution runs per account in ``accounts``
     and each card prints the notice under the account that owns it.
+
+    One error is exempt from that per-account recovery rule: the one filed under a fallback
+    account (see ``_is_fallback_account``), which by definition has never answered
+    successfully, so its own view can never recover. Holding it to per-account rules would
+    leave a two-minute gap in a credential file warning on the card forever. A newer success
+    anywhere on the provider retires it -- which is safe precisely because nothing measured
+    is behind that name. Every account that has answered even once, ``default`` included,
+    still has to recover by its own answer, so a real sign-in that expires keeps warning the
+    card however healthy its siblings are.
 
     The fourth element names the account the returned error came from, which is the one fact
     a consumer cannot re-derive: "some account also has an error" is not "this error is that
@@ -442,6 +486,8 @@ def _provider_status(
         if detail is None:
             continue
         stamp = int(status_at or 0)
+        if _is_fallback_account(provider, account, view) and int(aggregate.get("ok_at") or 0) > stamp:
+            continue  # the provider answered since; the nameless failure is history
         if newest is None or stamp > newest[0]:
             newest = (stamp, status, detail, status_at, account)
     if newest is not None:
@@ -806,7 +852,7 @@ def quota_state(store: UsageEntryStore | None = None) -> dict[str, Any]:
         # card (see `_provider_status`); `plan` and `updated_at` stay provider-wide, because
         # they answer what this provider reported and when it was last seen by anything.
         views = account_views.get(name, {})
-        status, detail, status_at, owner = _provider_status(aggregate, views)
+        status, detail, status_at, owner = _provider_status(name, aggregate, views)
         ref["status_detail"] = detail
         ref["status_at"] = status_at
         ref["status"] = str(status or ref["status"])

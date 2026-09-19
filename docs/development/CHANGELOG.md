@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Unreleased
+
+### Fixed
+
+- A quota card stops warning "couldn't refresh" once the provider answers again. A poll that finds no credential to read files its failure under a synthetic account name that never receives a success, so per-account recovery could never retire it and a single gap in `~/.codex/auth.json` kept the Codex, Grok and MiniMax cards warning for days after they recovered. A newer success anywhere on the provider now retires that failure. Accounts that have answered at least once are unaffected, `default` included — it is a real account on Antigravity, Kimi, Z.ai and OpenCode Go — and still recover only on their own success. (#96)
+
 ## 2.5.7 - 2026-09-15
 
 ### Added

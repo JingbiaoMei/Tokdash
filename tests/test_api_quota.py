@@ -596,6 +596,130 @@ def test_stale_token_banner_shows_when_failure_is_newest():
     assert payload["providers"]["codex"]["status_detail"] == "stale_token"
 
 
+def test_nameless_fallback_failure_clears_once_the_provider_answers_again():
+    """A poll with no credential to name files its failure under ``default``, while every
+    success is stamped with the account the credential actually named. That fallback view
+    therefore never recovers on its own, so a newer success on a sibling account has to
+    retire it -- otherwise a two-minute gap in ``auth.json`` warns on the card forever.
+
+    The ``codex_session`` row is the shape stored databases really have: the local rollout
+    parser files its windows under ``default`` too. It is the client's own record rather
+    than the provider's answer, so it must not make this view look like a live account."""
+    from tokdash.sources.quota.types import QuotaSnapshot
+    from tokdash.usage_store import UsageEntryStore
+
+    api._clear_cache()
+    UsageEntryStore().insert_quota_snapshots(
+        [
+            QuotaSnapshot(
+                "codex", "default", "5h", "5-hour window", 41.0, None, None,
+                1_782_910_000, "codex_session", "ok", {},
+            ),
+            QuotaSnapshot(
+                "codex", "default", "api", "Codex API", None, None, None,
+                1_782_900_000, "codex_api", "unavailable", {"error": "auth_not_found"},
+            ),
+            QuotaSnapshot(
+                "codex", "637ec3ac", "5h", "5-hour window", 70.0, None, "Pro Lite",
+                1_782_907_200, "codex_api", "ok", {},
+            ),
+        ]
+    )
+
+    codex = api.get_quota()["providers"]["codex"]
+    assert codex["status_detail"] is None
+    assert codex["status_at"] is None
+    assert codex["status"] == "ok"
+
+
+def test_nameless_fallback_failure_still_warns_when_it_is_the_newest_row():
+    """The retirement is a timestamp comparison, not a suppression: with nothing answered
+    since, a credential-less failure is the provider's live state and must still print."""
+    from tokdash.sources.quota.types import QuotaSnapshot
+    from tokdash.usage_store import UsageEntryStore
+
+    api._clear_cache()
+    UsageEntryStore().insert_quota_snapshots(
+        [
+            QuotaSnapshot(
+                "codex", "637ec3ac", "5h", "5-hour window", 70.0, None, "Pro Lite",
+                1_782_900_000, "codex_api", "ok", {},
+            ),
+            QuotaSnapshot(
+                "codex", "default", "api", "Codex API", None, None, None,
+                1_782_907_200, "codex_api", "unavailable", {"error": "auth_not_found"},
+            ),
+        ]
+    )
+
+    codex = api.get_quota()["providers"]["codex"]
+    assert codex["status_detail"] == "unavailable"
+    assert codex["status"] == "unavailable"
+
+
+def test_named_account_that_only_fails_keeps_warning_despite_a_healthy_sibling():
+    """A named account is a credential the user can see, so it answers for itself. The
+    global Token Plan polling fine does not retire a ``cn`` key that has never worked."""
+    from tokdash.sources.quota.types import QuotaSnapshot
+    from tokdash.usage_store import UsageEntryStore
+
+    api._clear_cache()
+    UsageEntryStore().insert_quota_snapshots(
+        [
+            QuotaSnapshot(
+                "minimax", "cn", "api", "MiniMax Token Plan", None, None, None,
+                1_782_903_600, "minimax_api", "fetch_error", {"error": "403"},
+            ),
+            QuotaSnapshot(
+                "minimax", "global", "global_5h", "5-hour window", 12.0, None, "Token Plan",
+                1_782_907_200, "minimax_api", "ok", {},
+            ),
+        ]
+    )
+
+    minimax = api.get_quota()["providers"]["minimax"]
+    assert minimax["status_detail"] == "fetch_error"
+    assert minimax["status_account"] == "cn"
+    assert {a["account"] for a in minimax["accounts"]} == {"global", "cn"}
+
+
+def test_default_account_that_has_answered_keeps_its_own_error():
+    """``default`` is only a fallback name where nothing behind it ever answered.
+
+    Antigravity files a fully signed-in account under ``default`` whenever the ID token
+    carries no email (the live shape on the maintainer's machine: ~115k successful
+    ``antigravity_api`` rows under that name beside a second email-named account), and Kimi,
+    Z.ai and OpenCode Go name every account they write that. So a card must not read the
+    name as "credential-less" and let a sibling's success bury a real expired sign-in --
+    exactly the regression per-account retirement (#70) was added to prevent.
+    """
+    from tokdash.sources.quota.types import QuotaSnapshot
+    from tokdash.usage_store import UsageEntryStore
+
+    api._clear_cache()
+    UsageEntryStore().insert_quota_snapshots(
+        [
+            QuotaSnapshot(
+                "antigravity", "default", "gemini-3-flash", "Gemini 3 Flash", 10.0, None, None,
+                1_782_890_000, "antigravity_api", "ok", {},
+            ),
+            QuotaSnapshot(
+                "antigravity", "default", "api", "Antigravity API", None, None, None,
+                1_782_900_000, "antigravity_api", "stale_token", {"error": "HTTP 401"},
+            ),
+            QuotaSnapshot(
+                "antigravity", "jing@example.com", "gemini-3-flash", "Gemini 3 Flash",
+                12.0, None, None, 1_782_907_200, "antigravity_api", "ok", {},
+            ),
+        ]
+    )
+
+    antigravity = api.get_quota()["providers"]["antigravity"]
+    assert antigravity["status_detail"] == "stale_token"
+    assert antigravity["status"] == "stale_token"
+    assert antigravity["status_at"] == 1_782_900_000
+
+
 def test_codex_plan_label_normalized_in_state_only():
     """Card label shows "Pro Lite"; stored rows keep the raw plan_type."""
     from tokdash.sources.quota.types import QuotaSnapshot

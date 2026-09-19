@@ -245,6 +245,14 @@ broken credential keeps warning about the provider (see
 that can read the list prints the notice under that account rather than over the whole card.
 Errors clear per account: an account's own newer success retires its error, a success on
 another account does not silence it, and a recovered account stops warning the card.
+The synthetic account a credential-less failure is filed under is the one exception: nothing
+it was asked about ever answered, so it cannot recover by its own answer, and a newer success
+on any of the provider's real accounts retires it. Otherwise a credential file missing for one
+poll cycle keeps the card reading "couldn't refresh" after the provider recovered. That
+exception is decided by whether the account has ever reported a successful API observation,
+not by its name: an account named `default` because the credential carried no id of its own
+(an Antigravity sign-in with no email on its ID token, every Kimi, Z.ai and OpenCode Go
+account) is a real account, and its error keeps warning the card until it answers again.
 
 `status_account` ships beside `accounts` and names which entry the card's `status_detail`
 belongs to, or is `null` when it belongs to none of them — a provider whose credentials could

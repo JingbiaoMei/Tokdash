@@ -433,9 +433,10 @@ def _is_fallback_account(provider: str, account: str, view: dict[str, Any]) -> b
     The name alone does not answer it. The same ``default`` is a REAL account wherever it is
     the credential's *id* that is missing rather than the credential: Antigravity files a
     whole signed-in account under ``default`` when the ID token carries no email, and Kimi,
-    Z.ai and OpenCode Go name every account they ever write that. What separates the two is
-    that a fallback view has never carried a successful ``*_api`` observation -- nothing it
-    was asked about answered, so there is no credential behind it to speak for.
+    Z.ai, OpenCode Go and Command Code name every account they ever write that. What
+    separates the two is that a fallback view has never carried a successful ``*_api``
+    observation -- nothing it was asked about answered, so there is no credential behind it
+    to speak for.
 
     A name that once answered and no longer does stays a real account, which is the
     conservative direction: stored rows cannot tell a poller that stopped reporting an id

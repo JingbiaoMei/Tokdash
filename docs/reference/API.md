@@ -251,8 +251,9 @@ on any of the provider's real accounts retires it. Otherwise a credential file m
 poll cycle keeps the card reading "couldn't refresh" after the provider recovered. That
 exception is decided by whether the account has ever reported a successful API observation,
 not by its name: an account named `default` because the credential carried no id of its own
-(an Antigravity sign-in with no email on its ID token, every Kimi, Z.ai and OpenCode Go
-account) is a real account, and its error keeps warning the card until it answers again.
+(an Antigravity sign-in with no email on its ID token, every Kimi, Z.ai, OpenCode Go and
+Command Code account) is a real account, and its error keeps warning the card until it
+answers again.
 
 `status_account` ships beside `accounts` and names which entry the card's `status_detail`
 belongs to, or is `null` when it belongs to none of them — a provider whose credentials could

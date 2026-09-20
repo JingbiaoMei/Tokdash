@@ -12,6 +12,7 @@ All fixtures are synthetic; no live payloads or account identifiers.
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from pathlib import Path
 
@@ -179,18 +180,19 @@ def test_parser_reads_only_session_message_when_both_tables_exist(monkeypatch, t
     assert entries[0]["timestamp"] == TS_COLD
 
 
-def test_parser_falls_back_to_legacy_rows_when_v2_table_is_empty(monkeypatch, tmp_path):
+@pytest.mark.parametrize("control_type", [None, "agent-switched", "user", "idle"])
+def test_parser_falls_back_to_legacy_rows_before_v2_assistant(monkeypatch, tmp_path, control_type):
     """The v2 tables can be migrated in long before the app switches writes.
 
-    While ``session_message`` is empty the legacy ``message`` table is still
-    the live one, so existence alone must not select the v2 table — that would
+    While ``session_message`` has only control/user events (or no rows),
+    legacy ``message`` is still live; selecting v2 at that point would
     report zero usage from an otherwise healthy v1 database.
     """
     xdg = tmp_path / "xdg"
     monkeypatch.setenv("XDG_DATA_HOME", str(xdg))
     _make_v2_message_db(
         xdg / "opencode" / "opencode.db",
-        [],
+        [] if control_type is None else [(TS_WARM, control_type, {})],
         legacy_rows=[
             (TS_COLD, _v1_assistant(input=1000, output=100, cache={"read": 40, "write": 5})),
             (TS_WARM, _v1_user()),
@@ -440,14 +442,21 @@ def test_v2_boundary_events_skip_user_rows_on_both_loaders(tmp_path):
         assert loaded["_next_event_ms"] == UNTIL + 30_000
 
 
-def test_loaders_read_legacy_rows_and_join_the_legacy_session_before_the_switch(tmp_path):
-    """Empty v2 tables must not shadow the live legacy schema.
+@pytest.mark.parametrize("control_type", [None, "agent-switched", "user", "idle"])
+def test_loaders_read_legacy_rows_and_join_the_legacy_session_before_the_switch(tmp_path, control_type):
+    """V2 tables without assistant rows must not shadow the live legacy schema.
 
     The join must also come from the legacy ``session`` table: ``session_v2``
     here is stale (a different project, blank title), so using it would change
     the project and the display name.
     """
     db_path = _make_pre_switch_session_db(tmp_path / "opencode.db")
+    if control_type is not None:
+        with sqlite3.connect(db_path) as conn:
+            conn.execute(
+                "INSERT INTO session_message VALUES('control', 's1', ?, 0, ?, ?, '{}')",
+                (control_type, TS_WARM, TS_WARM),
+            )
 
     scalar = sessions._load_opencode_sessions_scalar(db_path)
     raw = sessions._load_opencode_sessions_raw_json(db_path)
@@ -619,6 +628,11 @@ def test_session_loader_picks_up_the_v2_switch_without_cache_clearing(tmp_path):
     finally:
         conn.close()
 
+    # Fast writes can share an mtime on coarse-resolution filesystems while
+    # these inserts leave the database size unchanged. Make the fixture's
+    # signature change deterministic; production still uses actual file stats.
+    stat = db_path.stat()
+    os.utime(db_path, ns=(stat.st_atime_ns, sig_before[0][1] + 2_000_000_000))
     sig_after = ((str(db_path), db_path.stat().st_mtime_ns, db_path.stat().st_size),)
     assert sig_after != sig_before
 
@@ -662,3 +676,16 @@ def test_v2_loaders_work_without_json_functions(tmp_path, monkeypatch):
     )["s1"]
     assert windowed["_prior_event_ms"] == SINCE - 30_000
     assert windowed["_next_event_ms"] == UNTIL + 30_000
+
+
+@pytest.mark.parametrize("control_type", [None, "agent-switched", "user"])
+def test_v2_only_database_without_assistants_is_empty(tmp_path, control_type):
+    db = _make_v2_message_db(
+        tmp_path / "opencode.db",
+        [] if control_type is None else [(TS_COLD, control_type, {})],
+    )
+    with sqlite3.connect(db) as conn:
+        conn.executescript(PROJECT_DDL + SESSION_V2_DDL)
+    assert OpenCodeParser(PricingDatabase())._query_db(db, 0, UNTIL) == []
+    assert sessions._load_opencode_sessions_scalar(db) == {}
+    assert sessions._load_opencode_sessions_raw_json(db) == {}

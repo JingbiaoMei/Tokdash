@@ -338,29 +338,22 @@ def _sqlite_table_exists(conn: sqlite3.Connection, table: str) -> bool:
         return False
 
 
-def _sqlite_table_has_rows(conn: sqlite3.Connection, table: str) -> bool:
-    """Cheap ``LIMIT 1`` probe: migrations can create a table well before the
-    first row lands in it."""
-    try:
-        cur = conn.cursor()
-        cur.execute(f"SELECT 1 FROM {table} LIMIT 1")
-        return cur.fetchone() is not None
-    except sqlite3.Error:
-        return False
-
-
 def _opencode_message_table(conn: sqlite3.Connection) -> str:
-    """The one OpenCode/Kilo message table a database may be read from.
+    """Choose one message history without double-counting migrated rows.
 
-    v2 moved new messages to ``session_message`` and froze the legacy
-    ``message`` table — and ``session_message`` already contains the migrated
-    v1 rows, so reading both would double-count every old message. The schema
-    can also be migrated in before the app switches writes, though: while the
-    v2 table is empty the legacy one is still live. Kilo's DBs may be either
-    shape, hence the per-connection detection.
+    Before the v2 switch, session_message can already contain control events
+    such as agent-switched while message still holds all assistant usage.
+    Only an assistant row establishes v2 as the active history. The probe
+    deliberately uses no JSON functions so the raw session loader works on
+    SQLite builds without JSON1. A v2-only database may also be empty.
     """
-    if _sqlite_table_exists(conn, "session_message") and _sqlite_table_has_rows(conn, "session_message"):
-        return "session_message"
+    if _sqlite_table_exists(conn, "session_message"):
+        if not _sqlite_table_exists(conn, "message"):
+            return "session_message"
+        if conn.execute(
+            "SELECT 1 FROM session_message WHERE type = 'assistant' LIMIT 1"
+        ).fetchone() is not None:
+            return "session_message"
     return "message"
 
 

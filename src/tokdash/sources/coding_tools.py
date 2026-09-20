@@ -338,6 +338,32 @@ def _sqlite_table_exists(conn: sqlite3.Connection, table: str) -> bool:
         return False
 
 
+def _sqlite_table_has_rows(conn: sqlite3.Connection, table: str) -> bool:
+    """Cheap ``LIMIT 1`` probe: migrations can create a table well before the
+    first row lands in it."""
+    try:
+        cur = conn.cursor()
+        cur.execute(f"SELECT 1 FROM {table} LIMIT 1")
+        return cur.fetchone() is not None
+    except sqlite3.Error:
+        return False
+
+
+def _opencode_message_table(conn: sqlite3.Connection) -> str:
+    """The one OpenCode/Kilo message table a database may be read from.
+
+    v2 moved new messages to ``session_message`` and froze the legacy
+    ``message`` table — and ``session_message`` already contains the migrated
+    v1 rows, so reading both would double-count every old message. The schema
+    can also be migrated in before the app switches writes, though: while the
+    v2 table is empty the legacy one is still live. Kilo's DBs may be either
+    shape, hence the per-connection detection.
+    """
+    if _sqlite_table_exists(conn, "session_message") and _sqlite_table_has_rows(conn, "session_message"):
+        return "session_message"
+    return "message"
+
+
 def _mimo_imported_message_ids(conn: sqlite3.Connection) -> set[str]:
     imported: set[str] = set()
     for table in ("external_import", "claude_import"):
@@ -584,6 +610,26 @@ class BaseParser(ABC):
             return 0
 
 
+def _opencode_model_identity(data: Dict[str, Any]) -> tuple[str, str]:
+    """Model and provider for an OpenCode-family message payload.
+
+    Legacy rows (and Kilo's v1 DBs) carry flat ``modelID``/``providerID``;
+    the v2 schema nests them under ``model.id``/``model.providerID``. Both
+    forms are accepted because a v1 row migrated into a v2 database can
+    arrive in either shape, and per-field fallback keeps a row that kept
+    only one of the two fields billable.
+    """
+    model = data.get("modelID")
+    provider = data.get("providerID")
+    model_info = data.get("model")
+    if isinstance(model_info, dict):
+        if not model:
+            model = model_info.get("id")
+        if not provider:
+            provider = model_info.get("providerID")
+    return str(model or "unknown"), str(provider or "")
+
+
 class OpenCodeParser(BaseParser):
     source_name = "opencode"
     sync_capability = SourceSyncCapability(
@@ -649,11 +695,23 @@ class OpenCodeParser(BaseParser):
         except Exception:
             return []
         try:
+            # Exactly one message table may be read per database — the rule and
+            # its history live in _opencode_message_table. Per connection, not
+            # per parser: Kilo's DBs may still be v1.
+            message_table = _opencode_message_table(conn)
+            if message_table == "session_message":
+                query = (
+                    "SELECT data, time_created FROM session_message "
+                    "WHERE type = 'assistant' AND time_created >= ? AND time_created < ? "
+                    "ORDER BY time_created"
+                )
+            else:
+                query = (
+                    "SELECT data, time_created FROM message "
+                    "WHERE time_created >= ? AND time_created < ? ORDER BY time_created"
+                )
             cur = conn.cursor()
-            cur.execute(
-                "SELECT data, time_created FROM message WHERE time_created >= ? AND time_created < ? ORDER BY time_created",
-                (s_ms, u_ms),
-            )
+            cur.execute(query, (s_ms, u_ms))
             rows = cur.fetchall()
         finally:
             conn.close()
@@ -665,14 +723,8 @@ class OpenCodeParser(BaseParser):
                 tokens = data.get("tokens")
                 if not isinstance(tokens, dict):
                     continue
-                out.append(
-                    self._build_entry(
-                        str(data.get("modelID") or "unknown"),
-                        str(data.get("providerID") or ""),
-                        tokens,
-                        self._i(ts_ms),
-                    )
-                )
+                model, provider = _opencode_model_identity(data)
+                out.append(self._build_entry(model, provider, tokens, self._i(ts_ms)))
             except Exception:
                 continue
         return out

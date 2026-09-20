@@ -22,6 +22,7 @@ from tokdash.sources.coding_tools import (
     CodexParser,
     CodingToolsUsageTracker,
     CopilotCLIParser,
+    MiniMaxCodeParser,
     MuseParser,
     GrokParser,
     HermesParser,
@@ -1129,8 +1130,9 @@ def test_coding_tool_parsers_declare_sync_capabilities():
     assert modes["zed"] == "file_replace"
     assert modes["qwen_code"] == "file_replace"
     assert modes["crush"] == "file_replace"
-    # qwen_code is the first source combining append_jsonl with
-    # cross_file_stable_keys (/branch copies record uuids across files).
+    # qwen_code was the first source combining append_jsonl with
+    # cross_file_stable_keys (/branch copies record uuids across files);
+    # minimax is the second (a copied history fork keeps its message_ids).
     assert tracker.parsers["qwen_code"].sync_capability.append_jsonl is True
     assert tracker.parsers["qwen_code"].sync_capability.cross_file_stable_keys is True
     assert tracker.parsers["crush"].sync_capability.append_jsonl is False
@@ -1153,6 +1155,15 @@ def test_coding_tool_parsers_declare_sync_capabilities():
     assert tracker.parsers["muse"].persistent_parser_version == 2
     assert coding_tools_module.MUSE_CACHE_POLICIES == {"meta": (True, False)}
     assert coding_tools_module.MUSE_ESTIMATE_MARKER_KEY is None
+
+    # MiniMax Code: append-only transcripts whose message_ids survive a
+    # copied history fork, so the tail path and the cross-file winner rule
+    # are both live for this source.
+    assert modes["minimax"] == "file_replace"
+    assert isinstance(tracker.parsers["minimax"], MiniMaxCodeParser)
+    assert tracker.parsers["minimax"].sync_capability.append_jsonl is True
+    assert tracker.parsers["minimax"].sync_capability.cross_file_stable_keys is True
+    assert tracker.parsers["minimax"].persistent_parser_version == 1
 
 
 def test_parser_code_signature_unwraps_lru_cache_functions():

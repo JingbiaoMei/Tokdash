@@ -36,6 +36,7 @@
   <a href="https://github.com/QwenLM/qwen-code" title="Qwen Code"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/qwen-code.png" alt="Qwen Code" height="34"></a>
   <a href="https://charm.land/crush" title="Crush"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/crush.png" alt="Crush" height="34"></a>
   <a href="https://dev.meta.ai/docs/muse-code" title="Muse Code"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/muse.png" alt="Muse Code" height="34"></a>
+  <a href="https://github.com/MiniMax-AI/minimax-code" title="MiniMax Code"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/minimax.png" alt="MiniMax Code" height="34"></a>
 </p>
 
 <p align="center">
@@ -117,6 +118,7 @@
 | **Qwen Code** | ✅ | ✅ |
 | **Crush** | ✅ | — |
 | **Muse Code** | ✅ | — |
+| **MiniMax Code** | ✅ | — |
 
 ローカルデータパス、オーバーライド、ソース固有の集計に関する注記については [対応クライアント](docs/reference/SUPPORTED_CLIENTS.md) を参照。
 

@@ -8,6 +8,7 @@ These small local assets are used only to identify coding-tool rows in Tokdash. 
 - Zed mark: the official Zed logo from the [Zed repository](https://github.com/zed-industries/zed), black fill (`zed.svg`). The packaged copy and the source mark are byte-identical; keep them that way.
 - Qwen Code mark: the Qwen hexagon logo from the qwen-code desktop-shell bootstrap asset, Qwen purple `#6D44E8` (`qwen_code.svg`). The packaged copy and the source mark are byte-identical; keep them that way.
 - Crush mark: the official Crush icon (`crush-icon-solo.png`) from the [Crush repository](https://github.com/charmbracelet/crush), 512x512 transparent (`crush.png`). The packaged copy is a 32x32 downscale of the same icon.
+- MiniMax mark: the official MiniMax brand mark (white wave-M on the pink→orange gradient), taken from minimax.io's 512px Open Graph share image (`og:image`, served at 300x300; `docs/assets/agents/minimax.png` is the file verbatim). The packaged copy is a 64x64 downscale. Its gradient carries its own contrast on both themes, so the entry has no `darkInvert`; the brand pink at the gradient's start (`#E11580`) is the chart/label accent color.
 
 All marks remain the property of their respective owners.
 

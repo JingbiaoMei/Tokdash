@@ -9214,6 +9214,7 @@
       qwen_code: { icon: '/static/icons/agents/qwen_code.svg', color: '#6D44E8', fallback: 'Q' },
       crush: { icon: '/static/icons/agents/crush.png', color: '#6B50FF', fallback: 'C' },
       muse: { icon: null, color: '#0668E1', fallback: 'M' },
+      minimax: { icon: '/static/icons/agents/minimax.png', color: '#E11580', fallback: 'M' },
     });
     const toolBrandIconPromises = new Map();
 
@@ -9365,6 +9366,7 @@
         qwen_code: 'Qwen Code',
         crush: 'Crush',
         muse: 'Muse Code',
+        minimax: 'MiniMax Code',
         cursor: 'Cursor',
       };
       if (mapping[key]) return mapping[key];

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+
+import pytest
 from datetime import datetime
 from urllib.error import HTTPError
 
@@ -477,9 +479,10 @@ def test_limited_false_reports_unavailable_no_usage_limits(monkeypatch, tmp_path
 
     api_rows = [s for s in snapshots if s.bucket == "api"]
     assert [s.raw["error"] for s in api_rows] == ["no_usage_limits"]
-    # No fabricated 0% window bars: 5h/7d are absent, leaving the subscription's
-    # Monthly row and the cycle's status row.
-    assert sorted(_by_bucket(snapshots)) == ["api", "monthly"]
+    # Explicit withdrawals retire any previously stored limits.
+    assert sorted(_by_bucket(snapshots)) == ["5h", "7d", "api", "monthly"]
+    assert _by_bucket(snapshots)["5h"].used_percent is None
+    assert _by_bucket(snapshots)["7d"].used_percent is None
     assert _by_bucket(snapshots)["monthly"].used_percent is not None
     assert {s.captured_at for s in snapshots} == {7}
 
@@ -497,7 +500,7 @@ def test_percent_clamped_and_caps_without_numbers_ignored(monkeypatch, tmp_path)
     )
 
     assert buckets["5h"].used_percent == 100.0
-    assert "7d" not in buckets
+    assert buckets["7d"].used_percent is None
 
 
 def test_whoami_org_scopes_the_billing_requests(monkeypatch, tmp_path):
@@ -725,3 +728,77 @@ def test_history_running_high_needs_no_code_change_for_fixed_epoch_windows(monke
     consumption = history["series"][0]["consumption"]
     assert [(p["consumed_percent"]) for p in consumption] == [2.0, 1.5]
     assert history["series"][0]["estimated"] is False
+
+
+@pytest.mark.parametrize("same_second", [False, True])
+@pytest.mark.parametrize("removed", ["all", "weekly"])
+def test_removed_limits_withdraw_stored_bars_and_plan(monkeypatch, tmp_path, same_second, removed):
+    from tokdash import api
+    from tokdash.usage_store import UsageEntryStore
+
+    _auth_files(tmp_path, monkeypatch, native={"apiKey": "user_test"})
+    store = UsageEntryStore()
+    store.insert_quota_snapshots(commandcode.collect_commandcode_api_snapshots(
+        opener=_opener(_live_routes()), now=1_789_000_000,
+    ))
+    credits = json.loads(json.dumps(CREDITS_GOAT))
+    subscription = json.loads(json.dumps(SUBSCRIPTION_GOAT))
+    subscription["data"]["status"] = "canceled"
+    if removed == "all":
+        credits["windowLimits"] = {"limited": False}
+    else:
+        credits["windowLimits"]["weekly"] = None
+    store.insert_quota_snapshots(commandcode.collect_commandcode_api_snapshots(
+        opener=_opener(_live_routes(credits=credits, subscription=subscription)),
+        now=1_789_000_000 if same_second else 1_789_000_100,
+    ))
+    api._clear_cache()
+    provider = api.get_quota()["providers"]["commandcode"]
+    assert provider["plan"] is None
+    buckets = {row["bucket"]: row for row in provider["buckets"]}
+    assert buckets["monthly"]["used_percent"] is None
+    assert buckets["7d"]["used_percent"] is None
+    if removed == "all":
+        assert buckets["5h"]["used_percent"] is None
+    else:
+        assert buckets["5h"]["used_percent"] is not None
+
+
+@pytest.mark.parametrize("balance", ["missing", None, "invalid", True, -1, float("nan"), float("inf")])
+def test_invalid_monthly_balance_preserves_last_valid_reading(monkeypatch, tmp_path, balance):
+    from tokdash import api
+    from tokdash.usage_store import UsageEntryStore
+
+    _auth_files(tmp_path, monkeypatch, native={"apiKey": "user_test"})
+    store = UsageEntryStore()
+    good = commandcode.collect_commandcode_api_snapshots(opener=_opener(_live_routes()), now=1_789_000_000)
+    store.insert_quota_snapshots(good)
+    credits = json.loads(json.dumps(CREDITS_GOAT))
+    if balance == "missing":
+        del credits["credits"]["monthlyCredits"]
+    else:
+        credits["credits"]["monthlyCredits"] = balance
+    rows = commandcode.collect_commandcode_api_snapshots(
+        opener=_opener(_live_routes(credits=credits)), now=1_789_000_100,
+    )
+    assert "monthly" not in _by_bucket(rows)
+    assert _by_bucket(rows)["api"].raw["error"] == "invalid_monthly_credits"
+    store.insert_quota_snapshots(rows)
+    api._clear_cache()
+    provider = api.get_quota()["providers"]["commandcode"]
+    assert provider["status"] == "fetch_error"
+    monthly = next(row for row in provider["buckets"] if row["bucket"] == "monthly")
+    assert monthly["used_percent"] == _by_bucket(good)["monthly"].used_percent
+    assert monthly["captured_at"] == 1_789_000_000
+
+
+@pytest.mark.parametrize("balance", [0, "0", "35"])
+def test_valid_numeric_monthly_balances(monkeypatch, tmp_path, balance):
+    _auth_files(tmp_path, monkeypatch, native={"apiKey": "user_test"})
+    credits = json.loads(json.dumps(CREDITS_GOAT))
+    credits["credits"]["monthlyCredits"] = balance
+    rows = commandcode.collect_commandcode_api_snapshots(
+        opener=_opener(_live_routes(credits=credits)), now=1_789_000_000,
+    )
+    assert _by_bucket(rows)["monthly"].used_percent == (70 - float(balance)) / 70 * 100
+    assert "api" not in _by_bucket(rows)

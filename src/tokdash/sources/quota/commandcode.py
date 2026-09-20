@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -259,17 +260,14 @@ def _clamped_percent(used: float, cap: float) -> float:
 def _window_rows(
     limits: Any, captured_at: int, credential: _Credential, plan: str | None
 ) -> list[QuotaSnapshot]:
-    if not isinstance(limits, dict) or limits.get("limited") is not True:
-        # limited:false means this account reports no window limits at all: emit no
-        # bars rather than fabricating them at 0%.
-        return []
     rows: list[QuotaSnapshot] = []
     for key, bucket, label in _WINDOWS:
-        window = limits.get(key)
-        if not isinstance(window, dict):
-            continue
-        cap = _positive_float(window.get("cap"))
+        window = limits.get(key) if isinstance(limits, dict) and limits.get("limited") is True else None
+        cap = _positive_float(window.get("cap")) if isinstance(window, dict) else 0.0
         if cap <= 0:
+            # Stored buckets survive omission: explicitly retire a removed limit and
+            # its old plan, just as we do for an unresolved Monthly window.
+            rows.append(_suppression_row(captured_at, credential, "no_usage_limit", (bucket, label)))
             continue
         used = _positive_float(window.get("used"))
         rows.append(
@@ -282,10 +280,13 @@ def _window_rows(
     return rows
 
 
-def _suppression_row(captured_at: int, credential: _Credential, reason: str) -> QuotaSnapshot:
-    """The Monthly bucket's withdrawal row.
+def _suppression_row(
+    captured_at: int, credential: _Credential, reason: str,
+    bucket: tuple[str, str] = _MONTHLY_BUCKET,
+) -> QuotaSnapshot:
+    """A removed or unresolved bucket's withdrawal row.
 
-    Omitting the bucket would leave the last stored Monthly row as the freshest one for
+    Omitting the bucket would leave its last stored row as the freshest one for
     ``_freshest_usage_rows``, so an unsubscribed account would keep rendering a stale bar
     and keep naming its old plan. ``status`` stays ``ok`` (this is not an error) and
     ``used_percent``/``plan`` are null, so the bar and the plan label both disappear.
@@ -297,7 +298,7 @@ def _suppression_row(captured_at: int, credential: _Credential, reason: str) -> 
     bar lingered until a later cycle happened to land in a different second.
     """
     return QuotaSnapshot(
-        PROVIDER, "default", _MONTHLY_BUCKET[0], _MONTHLY_BUCKET[1], None, None, None,
+        PROVIDER, "default", bucket[0], bucket[1], None, None, None,
         captured_at, SOURCE, "ok",
         {"credential_source": credential.source, "suppressed": reason},
     )
@@ -320,7 +321,13 @@ def _monthly_row(
     against a live account is visible in stored rows.
     """
     block = credits.get("credits") if isinstance(credits.get("credits"), dict) else {}
-    monthly = _positive_float(block.get("monthlyCredits"))
+    balance = block.get("monthlyCredits")
+    try:
+        monthly = float(balance)
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError("invalid_monthly_credits") from None
+    if isinstance(balance, bool) or not math.isfinite(monthly) or monthly < 0:
+        raise ValueError("invalid_monthly_credits")
     purchased = _positive_float(block.get("purchasedCredits"))
     free = _positive_float(block.get("freeCredits"))
 
@@ -412,23 +419,25 @@ def collect_commandcode_api_snapshots(
             # than merely skipped (see `_suppression_row`).
             snapshots.append(_suppression_row(captured_at, credential, "plan_unresolved"))
         else:
-            snapshots.append(
-                _monthly_row(
-                    credits,
-                    subscription,
-                    plan_id_used,
-                    resolved,
-                    captured_at,
-                    credential,
+            try:
+                monthly_row = _monthly_row(
+                    credits, subscription, plan_id_used, resolved, captured_at, credential,
                 )
-            )
+            except ValueError as exc:
+                # A malformed balance is a failed observation, not an exhausted pool.
+                # Keep the last valid Monthly reading under the error notice.
+                failures.append(_status_snapshot(
+                    "fetch_error", captured_at, credential, {"error": str(exc)},
+                ))
+            else:
+                snapshots.append(monthly_row)
 
         # The plan label is carried only when the window rows' plan actually resolved;
         # the suppression case above leaves them plan-less along with the Monthly bar.
         window_plan = resolved[0] if resolved is not None and subscription is not None and status in _PLAN_STATUS_GATE else None
         window_rows = _window_rows(credits.get("windowLimits"), captured_at, credential, window_plan)
         snapshots.extend(window_rows)
-        if not window_rows:
+        if not any(row.used_percent is not None for row in window_rows):
             failures.append(_status_snapshot("unavailable", captured_at, credential, {"error": "no_usage_limits"}))
 
     # Failure rows precede snapshot rows in this list, but the order does NOT decide the

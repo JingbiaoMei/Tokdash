@@ -464,6 +464,11 @@ ignored in both directions.
 | `activityHistogramTodayWeek` | on | histogram faces on today/week; off means no strip there; month/year grids are unaffected |
 | `perServerRows` | on | per-server rows when more than one server is enabled |
 
+Each switch persists on change with no OK/Apply - using the settings window's
+existing debounced autosave where one exists (the Windows window's 600 ms
+pattern is the reference), immediate write on macOS. "On change" means a few
+hundred ms of debounce is compliant; a separate save step is not.
+
 The period segment and the inline active-time figure are **not** settings -
 core hero furniture, always on. The selected period persists on its own as
 `selectedPeriod` (`today|week|month|year`, default `today`).
@@ -614,7 +619,9 @@ consent POST is web-only). Failures are silent.
   failure alone must not suppress its healthy sibling windows.
 - **Reset credits** ride the same opt-in and the same scheduled quota read:
   when the `resetCredits` component is on, notify once a future credit enters
-  its last 48 hours. Dedup by `(provider, credits[].id, expires_at)` - a
+  its last 48 hours - the edge is inclusive: `expires_at - now <= 48 h`
+  arms. (`credits.json` freezes the clock at exactly 48 h and pins armed.)
+  Dedup by `(provider, credits[].id, expires_at)` - a
   credit carries its own identity, so no re-arm rule is needed. Suppressed
   while the Codex provider group failed (last-known credit data is not a
   basis for an "expire in" warning). Click -> open the companion's quota

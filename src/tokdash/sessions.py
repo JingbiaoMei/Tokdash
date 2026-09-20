@@ -36,6 +36,8 @@ from .sources.coding_tools import (
     QoderIdeParser,
     WorkBuddyParser,
     ZCodeSnapshotError,
+    _opencode_message_table,
+    _opencode_model_identity,
     antigravity_db_signatures,
     claude_usage_supersedes,
     cline_message_file_signatures,
@@ -2208,6 +2210,53 @@ def _opencode_window_clause(since_ms: Optional[int], until_ms: Optional[int]) ->
     return (" WHERE " + " AND ".join(where)) if where else "", args
 
 
+def _opencode_and_clause(window_clause: str, clause: str) -> str:
+    """AND a predicate onto the window's WHERE (or start one when unwindowed)."""
+    if not clause:
+        return window_clause
+    return f"{window_clause} AND {clause}" if window_clause else f" WHERE {clause}"
+
+
+def _opencode_session_table(conn: sqlite3.Connection, message_table: str) -> str:
+    """The session table matching the resolved message table.
+
+    ``session_v2`` is joined only while v2 is the active message table: in
+    the pre-switch state the legacy ``session`` rows are the ones the
+    messages reference, and joining an empty (or stale) ``session_v2`` would
+    blank the titles/directories. ``session_v2`` stays the fallback for a v2
+    database with no legacy ``session`` table left.
+    """
+    if message_table == "session_message" and _sqlite_table_exists(conn, "session_v2"):
+        return "session_v2"
+    if _sqlite_table_exists(conn, "session"):
+        return "session"
+    return "session_v2" if _sqlite_table_exists(conn, "session_v2") else "session"
+
+
+def _opencode_role_clause(message_table: str) -> str:
+    """SQL predicate keeping assistant rows on the JSON1 (scalar) path.
+
+    Both branches require valid JSON: the SELECTs ``json_extract`` every row
+    that passes, and one malformed payload would otherwise raise "malformed
+    JSON" and push the whole database through the raw fallback. The raw loader
+    has its own JSON-free type clause.
+    """
+    if message_table == "session_message":
+        return "json_valid(m.data) AND m.type = 'assistant'"
+    return "json_valid(m.data) AND json_extract(m.data, '$.role') = 'assistant'"
+
+
+# Flat (v1) field first, then nested (v2), with '' treated as missing: matches
+# ``_opencode_model_identity`` for every shape either schema writes (both
+# fields are always strings, so the helper's extra falsy cases cannot occur).
+_OPENCODE_MODEL_EXPR = (
+    "COALESCE(NULLIF(json_extract(m.data, '$.modelID'), ''), json_extract(m.data, '$.model.id'))"
+)
+_OPENCODE_PROVIDER_EXPR = (
+    "COALESCE(NULLIF(json_extract(m.data, '$.providerID'), ''), json_extract(m.data, '$.model.providerID'))"
+)
+
+
 def _boundary_edge_clauses(before: bool, extra_clause: str) -> list[str]:
     """Rows on the far side of a window edge, before any role filtering."""
     clauses = [f"m.time_created {'<' if before else '>='} ?"]
@@ -2222,6 +2271,7 @@ def _sql_boundary_event_ms(
     *,
     before: bool,
     extra_clause: str = "",
+    message_table: str = "message",
 ) -> Dict[str, int]:
     """Nearest assistant event per session on the far side of a window edge.
 
@@ -2235,16 +2285,19 @@ def _sql_boundary_event_ms(
     :func:`_load_opencode_sessions`), so nothing there needs a boundary event:
     the row outside a window is simply another turn in hand. This stays for
     callers that do pass one.
+
+    ``message_table`` defaults to the legacy table so Mimo keeps today's
+    behavior; the OpenCode loader passes the table its database actually has.
     """
     if bound_ms is None:
         return {}
     clauses = _boundary_edge_clauses(before, extra_clause)
-    clauses.append("json_valid(m.data) AND json_extract(m.data, '$.role') = 'assistant'")
+    clauses.append(_opencode_role_clause(message_table))
     try:
         rows = conn.execute(
             f"""
             SELECT m.session_id, {'MAX' if before else 'MIN'}(m.time_created)
-            FROM message m
+            FROM {message_table} m
             WHERE {' AND '.join(clauses)}
             GROUP BY m.session_id
             """,
@@ -2263,6 +2316,7 @@ def _raw_boundary_event_ms(
     before: bool,
     extra_clause: str = "",
     exclude_ids: Collection[str] = (),
+    message_table: str = "message",
 ) -> Dict[str, int]:
     """The same lookup for loaders that cannot filter roles in SQL.
 
@@ -2273,17 +2327,24 @@ def _raw_boundary_event_ms(
     correctly reports as none. Rows the caller excludes are skipped the same way,
     for the same reason: their ids come from a list this path cannot expand in
     SQL either.
+
+    The v2 ``session_message`` table carries the role as a plain ``type``
+    column, so there the predicate stays in SQL and no Python role check is
+    needed. ``message_table`` defaults to the legacy table for Mimo.
     """
     pending = {str(session_id) for session_id in session_ids}
     if bound_ms is None or not pending:
         return {}
     excluded = set(exclude_ids)
     clauses = _boundary_edge_clauses(before, extra_clause)
+    is_v2 = message_table == "session_message"
+    if is_v2:
+        clauses.append("m.type = 'assistant'")
     try:
         cursor = conn.execute(
             f"""
             SELECT m.session_id, m.time_created, m.data, m.id
-            FROM message m
+            FROM {message_table} m
             WHERE {' AND '.join(clauses)}
             ORDER BY m.time_created {'DESC' if before else 'ASC'}
             """,
@@ -2299,12 +2360,13 @@ def _raw_boundary_event_ms(
                 continue
             if excluded and str(message_id) in excluded:
                 continue
-            try:
-                data = json.loads(data_json)
-            except Exception:
-                continue
-            if not isinstance(data, dict) or data.get("role") != "assistant":
-                continue
+            if not is_v2:
+                try:
+                    data = json.loads(data_json)
+                except Exception:
+                    continue
+                if not isinstance(data, dict) or data.get("role") != "assistant":
+                    continue
             found[key] = int(created_ms)
             pending.discard(key)
             if not pending:
@@ -2323,6 +2385,7 @@ def _attach_window_context(
     role_filtered: bool,
     extra_clause: str = "",
     exclude_ids: Collection[str] = (),
+    message_table: str = "message",
 ) -> None:
     """Hand the summarizer the events just outside the window it asked for."""
     for key, bound_ms, before in (
@@ -2330,7 +2393,13 @@ def _attach_window_context(
         ("_next_event_ms", until_ms, False),
     ):
         if role_filtered:
-            boundary = _sql_boundary_event_ms(conn, bound_ms, before=before, extra_clause=extra_clause)
+            boundary = _sql_boundary_event_ms(
+                conn,
+                bound_ms,
+                before=before,
+                extra_clause=extra_clause,
+                message_table=message_table,
+            )
         else:
             boundary = _raw_boundary_event_ms(
                 conn,
@@ -2339,6 +2408,7 @@ def _attach_window_context(
                 before=before,
                 extra_clause=extra_clause,
                 exclude_ids=exclude_ids,
+                message_table=message_table,
             )
         for session_id, session in sessions.items():
             event_ms = boundary.get(str(session_id))
@@ -2512,16 +2582,15 @@ def _load_opencode_sessions_scalar(
     billing_rule: str = "input-plus-cache-write",
 ) -> Dict[str, Dict[str, Any]]:
     window_clause, args = _opencode_window_clause(since_ms, until_ms)
-    role_clause = "json_valid(m.data) AND json_extract(m.data, '$.role') = 'assistant'"
-    if window_clause:
-        where_clause = f"{window_clause} AND {role_clause}"
-    else:
-        where_clause = f" WHERE {role_clause}"
 
     sessions: Dict[str, Dict[str, Any]] = {}
     conn = connect_sqlite_readonly(db_path)
     try:
-        session_cols = _sqlite_columns(conn, "session")
+        message_table = _opencode_message_table(conn)
+        session_table = _opencode_session_table(conn, message_table)
+        where_clause = _opencode_and_clause(window_clause, _opencode_role_clause(message_table))
+
+        session_cols = _sqlite_columns(conn, session_table)
         title_expr = "COALESCE(s.title, '')" if "title" in session_cols else "''"
         slug_expr = "COALESCE(s.slug, '')" if "slug" in session_cols else "''"
         cur = conn.cursor()
@@ -2539,13 +2608,13 @@ def _load_opencode_sessions_scalar(
               json_extract(m.data, '$.tokens.cache.read'),
               json_extract(m.data, '$.tokens.output'),
               json_extract(m.data, '$.tokens.reasoning'),
-              json_extract(m.data, '$.modelID'),
-              json_extract(m.data, '$.providerID'),
+              {_OPENCODE_MODEL_EXPR},
+              {_OPENCODE_PROVIDER_EXPR},
               json_extract(m.data, '$.path.cwd'),
               json_extract(m.data, '$.path.root'),
               json_extract(m.data, '$.cost')
-            FROM message m
-            LEFT JOIN session s ON m.session_id = s.id
+            FROM {message_table} m
+            LEFT JOIN {session_table} s ON m.session_id = s.id
             LEFT JOIN project p ON s.project_id = p.id
             {where_clause}
             ORDER BY m.time_created ASC
@@ -2596,7 +2665,9 @@ def _load_opencode_sessions_scalar(
                 recorded_cost=recorded_cost if use_recorded_cost else None,
                 billing_rule=billing_rule,
             )
-        _attach_window_context(conn, sessions, since_ms, until_ms, role_filtered=True)
+        _attach_window_context(
+            conn, sessions, since_ms, until_ms, role_filtered=True, message_table=message_table
+        )
     finally:
         conn.close()
 
@@ -2617,7 +2688,16 @@ def _load_opencode_sessions_raw_json(
     sessions: Dict[str, Dict[str, Any]] = {}
     conn = connect_sqlite_readonly(db_path)
     try:
-        session_cols = _sqlite_columns(conn, "session")
+        message_table = _opencode_message_table(conn)
+        session_table = _opencode_session_table(conn, message_table)
+        is_v2 = message_table == "session_message"
+        # v2 keeps the role in a plain column, so this loader can still filter
+        # in SQL without reaching for JSON functions (which it exists precisely
+        # because the SQLite build may not have).
+        type_clause = "m.type = 'assistant'" if is_v2 else ""
+        where_clause = _opencode_and_clause(window_clause, type_clause)
+
+        session_cols = _sqlite_columns(conn, session_table)
         title_expr = "COALESCE(s.title, '')" if "title" in session_cols else "''"
         slug_expr = "COALESCE(s.slug, '')" if "slug" in session_cols else "''"
         cur = conn.cursor()
@@ -2631,10 +2711,10 @@ def _load_opencode_sessions_raw_json(
               COALESCE(p.worktree, ''),
               m.time_created,
               m.data
-            FROM message m
-            LEFT JOIN session s ON m.session_id = s.id
+            FROM {message_table} m
+            LEFT JOIN {session_table} s ON m.session_id = s.id
             LEFT JOIN project p ON s.project_id = p.id
-            {window_clause}
+            {where_clause}
             ORDER BY m.time_created ASC
             """,
             args,
@@ -2645,8 +2725,12 @@ def _load_opencode_sessions_raw_json(
                 data = json.loads(data_json)
             except Exception:
                 continue
+            # Valid JSON is not necessarily an object; anything else has
+            # nothing to bill and must not raise out of the loader.
+            if not isinstance(data, dict):
+                continue
 
-            if data.get("role") != "assistant":
+            if not is_v2 and data.get("role") != "assistant":
                 continue
 
             tokens = data.get("tokens")
@@ -2655,6 +2739,7 @@ def _load_opencode_sessions_raw_json(
 
             cache = tokens.get("cache") if isinstance(tokens.get("cache"), dict) else {}
             path_info = data.get("path") if isinstance(data.get("path"), dict) else {}
+            model, provider = _opencode_model_identity(data)
             _append_opencode_turn(
                 sessions,
                 turn_index_by_session,
@@ -2663,8 +2748,8 @@ def _load_opencode_sessions_raw_json(
                 directory=directory,
                 worktree=worktree,
                 created_ms=created_ms,
-                model=data.get("modelID"),
-                provider=data.get("providerID"),
+                model=model,
+                provider=provider,
                 fresh_input=tokens.get("input", 0),
                 cache_write=cache.get("write", 0),
                 cache_read=cache.get("read", 0),
@@ -2677,7 +2762,9 @@ def _load_opencode_sessions_raw_json(
                 recorded_cost=data.get("cost") if use_recorded_cost else None,
                 billing_rule=billing_rule,
             )
-        _attach_window_context(conn, sessions, since_ms, until_ms, role_filtered=False)
+        _attach_window_context(
+            conn, sessions, since_ms, until_ms, role_filtered=False, message_table=message_table
+        )
     finally:
         conn.close()
 

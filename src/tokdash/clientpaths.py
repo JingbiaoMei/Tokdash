@@ -409,6 +409,70 @@ def minimax_cli_root() -> Path:
     return Path(explicit).expanduser() if explicit else Path.home() / ".mmx"
 
 
+# --- MiniMax Code (mcode) ----------------------------------------------------
+#
+# MiniMax Code (npm @minimax-ai/code, CLI ``mcode``) is a different product
+# from the ``mmx`` CLI above: mmx keeps its credentials in ``~/.mmx`` (which
+# is what the MiniMax quota provider reads), while MiniMax Code lives under
+# ``~/.minimax`` and provides its own session history.
+
+_MINIMAX_CODE_DEFAULT_DIR = ".minimax"
+
+
+def minimax_code_data_dir() -> Path:
+    """``$MINIMAX_DATA_DIR``, else the legacy ``$MAVIS_DATA_DIR``, else ``~/.minimax``.
+
+    Unlike most overrides in this module this one is the harness's own: the
+    v0.4.12 bundle resolves the data dir as
+    ``env.MINIMAX_DATA_DIR || env.MAVIS_DATA_DIR || default``, so an install
+    relocated by either variable is followed automatically. Empty or
+    whitespace-only values count as unset, matching the harness's ``.trim()``.
+    """
+    for name in ("MINIMAX_DATA_DIR", "MAVIS_DATA_DIR"):
+        explicit = os.environ.get(name, "").strip()
+        if explicit:
+            return Path(explicit).expanduser()
+    return Path.home() / _MINIMAX_CODE_DEFAULT_DIR
+
+
+def minimax_code_session_files() -> List[Path]:
+    """Every ``messages.jsonl`` under ``<home>/v2/sessions``, sorted.
+
+    Layout verified against an installed v0.4.12: each session gets one
+    nested date-sharded directory
+    ``YYYY/MM/DD/<HH-MM-SS-mmm-session_<id>>/`` (the session manifest's own
+    ``layout`` key reads ``v2-final-dated-session``) holding the
+    append-only transcript ``messages.jsonl`` (plus ``llm-call.json``
+    request captures and a ``manifest.json``, none of which carry usage the
+    transcript does not). Discovery is a deep walk rather than a date-shaped
+    pattern on purpose: the shard shape is the harness's business, and a build
+    that changes it should cost nothing here. Dot-directories are skipped.
+    Mirrors ``muse_session_files`` including the iterate-then-sort and
+    keep-the-partial-walk contracts.
+    """
+    root = minimax_code_data_dir() / "v2" / "sessions"
+    if not root.is_dir():
+        return []
+    out: List[Path] = []
+    try:
+        for path in root.rglob("messages.jsonl"):
+            try:
+                if not path.is_file():
+                    continue
+                rel_parts = path.relative_to(root).parts[:-1]
+                if any(part.startswith(".") for part in rel_parts):
+                    continue
+            except OSError:
+                continue
+            out.append(path)
+    except OSError:
+        # Mid-walk OSError (permission, cloud placeholder): keep whatever the
+        # walk collected before the failure, matching _rglob_sigs' behavior.
+        pass
+    out.sort()
+    return out
+
+
 # --- Grok Build -------------------------------------------------------------
 
 

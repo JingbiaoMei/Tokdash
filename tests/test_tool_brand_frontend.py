@@ -47,6 +47,7 @@ def test_supported_tool_brand_icons_are_local_and_small() -> None:
         "kimi.png",
         "kilocode.png",
         "mimo.svg",
+        "minimax.png",
         "openclaw.png",
         "opencode.png",
         "omp.png",
@@ -76,6 +77,7 @@ def test_recent_sources_have_readme_pills() -> None:
         "Zed": "zed.png",
         "Qwen Code": "qwen-code.png",
         "Crush": "crush.png",
+        "MiniMax Code": "minimax.png",
     }
     for document in (
         PROJECT_ROOT / "README.md",
@@ -119,12 +121,13 @@ def test_tool_brand_registry_uses_local_lazy_assets_with_a_fallback() -> None:
         "qwen_code",
         "crush",
         "muse",
+        "minimax",
     ):
         assert re.search(rf"\b{tool}:\s*\{{", body)
     assert "https://" not in body
     assert "/static/icons/agents/" in body
     asset_paths = re.findall(r"icon:\s*'(/static/icons/agents/[^']+)'", body)
-    assert len(asset_paths) == 26
+    assert len(asset_paths) == 27
     assert body.count("/static/icons/agents/qoder.png") == 2
     for asset_path in asset_paths:
         assert (STATIC_DIR / asset_path.removeprefix("/static/")).is_file()

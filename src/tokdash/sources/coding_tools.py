@@ -6686,6 +6686,197 @@ class CrushParser(BaseParser):
         return out
 
 
+class MiniMaxCodeParser(BaseParser):
+    """
+    Parser for MiniMax Code (npm ``@minimax-ai/code``, CLI ``mcode``).
+
+    =======================================================================
+    MINIMAX CODE — DATED SESSION DIRS, ONE ENTRY PER ASSISTANT CALL
+    =======================================================================
+    Storage (verified against an installed v0.4.12): the harness home is
+    ``$MINIMAX_DATA_DIR``, else the legacy ``$MAVIS_DATA_DIR``, else
+    ``~/.minimax``; each session is one directory under
+    ``<home>/v2/sessions/YYYY/MM/DD/<stamp>-session_<id>/`` (nested date
+    shard; the session ``manifest.json`` records ``layout:
+    "v2-final-dated-session"``) holding the append-only transcript
+    ``messages.jsonl``. The directory also
+    carries a
+    ``manifest.json``, request captures (``llm-call.json``) and a
+    ``history-catalog.json``; none adds usage the transcript does not already
+    carry, and the SQLite projection beside them
+    (``v2/sqlite/runtime-state.sqlite``, table
+    ``local_runtime_token_usage``) folds one row per TURN — losing per-call
+    resolution while the transcript keeps every call — so the transcript is
+    the source and the DB is not read.
+
+    Rows: one JSON object per message, ``{message_id, turn_id, message}``.
+    Only ``message.role == "assistant"`` rows are billable; each carries the
+    call's ``model`` / ``provider`` and a
+    ``usage{input, output, cacheRead, cacheWrite, totalTokens,
+    cost{input, output, cacheRead, cacheWrite, total}}`` object.
+    The four token fields are already disjoint: the capture verifies
+    ``totalTokens == input + output + cacheRead + cacheWrite``, so they map
+    onto the four buckets verbatim with no subtraction — unlike the
+    cache-inclusive prompts of Qwen/WorkBuddy. That identity is the whole
+    basis for verbatim pass-through, so the parser re-checks it per row and
+    warns once per pass when it breaks: a future cache-inclusive build then
+    surfaces as a log signal instead of a silent cacheRead double-count.
+    ``cost`` is the harness's own billing estimate — a per-bucket object
+    with a ``total``, all-zero in the capture (MiniMax's subscription plan
+    reports no per-call USD); Tokdash never reads it and prices from the
+    pricing DB instead, so a real per-call cost there would price a row the
+    harness left at 0.
+    ``message.timestamp`` is epoch milliseconds — verified against the
+    transcript, the ``llm-call.json`` captures and the SQLite projection on
+    the live install — so the ``timestamp > 0`` sanity check needs no unit
+    guard (same bar as Cline/Qwen).
+
+    ``message_id`` (``msg-<base64>``) is the dedup key. It is unique within
+    a transcript (a duplicate is a rewrite, dropped) and, because ids are
+    minted per message, a fork that copies the parent's rows verbatim would
+    carry the same ids — cross_file_stable_keys lets the usage store own
+    those keys by earliest occurrence (Codex/Cline precedent). Whether
+    MiniMax's history-fork flow copies or remints ids is capture-pending; a
+    reminting fork would read as new calls, the same standing caveat Muse
+    documents for its forks.
+
+    A model switch mid-session needs no state walk: every row carries its own
+    ``model``, so each call prices at the model that made it (per-row, like
+    Codex; nothing to carry over, unlike Muse's selection records).
+    =======================================================================
+    """
+
+    source_name = "minimax"
+    sync_capability = SourceSyncCapability(
+        mode="file_replace",
+        append_jsonl=True,
+        cross_file_stable_keys=True,
+        reason=(
+            "messages.jsonl is append-only and every assistant row is "
+            "self-contained (own model, own usage), so an appended tail is "
+            "complete on its own; message_id is stable across copied forks."
+        ),
+    )
+    # 1: disjoint buckets from the usage object verbatim, priced from the
+    #    pricing DB; message_id keys.
+    persistent_parser_version = 1
+    # Re-armed by _parse_all each pass; guards the one-warning drift signal.
+    _drift_warned = False
+
+    def _file_signatures(self) -> tuple:
+        items: List[Tuple[str, int, int]] = []
+        for path in clientpaths.minimax_code_session_files():
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            items.append((str(path), int(stat.st_mtime_ns), int(stat.st_size)))
+        return tuple(items)
+
+    def _entry_from_row(self, record: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        msg = record.get("message")
+        if not isinstance(msg, dict) or msg.get("role") != "assistant":
+            return None
+        usage = msg.get("usage")
+        if not isinstance(usage, dict):
+            return None
+        input_t = max(0, self._i(usage.get("input")))
+        output_t = max(0, self._i(usage.get("output")))
+        cache_r = max(0, self._i(usage.get("cacheRead")))
+        cache_w = max(0, self._i(usage.get("cacheWrite")))
+        bucket_sum = input_t + output_t + cache_r + cache_w
+        if bucket_sum <= 0:
+            return None
+        ts_ms = self._i(msg.get("timestamp"))
+        if ts_ms <= 0:
+            return None
+        msg_id = record.get("message_id")
+        if msg_id:
+            msg_id = str(msg_id)
+
+        model = str(msg.get("model") or "unknown")
+        provider = str(msg.get("provider") or "")
+
+        # Verbatim pass-through is only sound while the buckets stay
+        # disjoint. If a future build goes cache-inclusive (Qwen/WorkBuddy
+        # style), the declared total stops matching the sum — warn once per
+        # pass so the drift is visible instead of silently double-counting
+        # cacheRead.
+        total_t = self._i(usage.get("totalTokens"))
+        if total_t > 0 and total_t != bucket_sum and not self._drift_warned:
+            self._drift_warned = True
+            logger.warning(
+                "minimax: usage buckets no longer disjoint in %s: "
+                "totalTokens=%s != input+output+cacheRead+cacheWrite=%s",
+                model, total_t, bucket_sum,
+            )
+
+        return {
+            "source": self.source_name,
+            "model": model,
+            "provider": provider,
+            "input": input_t,
+            "output": output_t,
+            "cacheRead": cache_r,
+            "cacheWrite": cache_w,
+            "reasoning": 0,
+            "cost": self.pricing_db.get_cost(model, input_t, output_t, cache_r, cache_w),
+            "timestamp": int(ts_ms),
+            "entry_id": f"minimax:{msg_id}" if msg_id else "",
+            "_billing": usage_billing_pricing(
+                [model],
+                input_tokens=input_t,
+                output_tokens=output_t,
+                cache_read=cache_r,
+                cache_write=cache_w,
+            ),
+        }
+
+    def _parse_all(self) -> List[Dict[str, Any]]:
+        # The store's stable-key upsert keeps the earliest-timestamped
+        # occurrence of a copied id; do the same here so live and
+        # persistent totals agree even when a fork restamps a copy (Cline/
+        # Qwen precedent). Within one transcript a repeated message_id is a
+        # rewrite, not a new call; ties keep the first-seen occurrence, and
+        # files scan in sorted-path order, matching the store's
+        # earliest-(timestamp, path) ownership.
+        by_id: Dict[str, Dict[str, Any]] = {}
+        anonymous: List[Dict[str, Any]] = []
+        self._drift_warned = False
+        for path_str, _, _ in self._file_signatures():
+            try:
+                handle = open(path_str, "r", encoding="utf-8")
+            except OSError:
+                continue
+            with handle:
+                for line in handle:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        record = json.loads(line)
+                        entry = (
+                            self._entry_from_row(record)
+                            if isinstance(record, dict)
+                            else None
+                        )
+                    except Exception:
+                        logger.warning("minimax: skipping malformed row in %s", path_str)
+                        entry = None
+                    if entry is None:
+                        continue
+                    entry_id = entry["entry_id"]
+                    if not entry_id:
+                        anonymous.append(entry)
+                        continue
+                    prev = by_id.get(entry_id)
+                    if prev is None or entry["timestamp"] < prev["timestamp"]:
+                        by_id[entry_id] = entry
+        out = list(by_id.values()) + anonymous
+        out.sort(key=lambda item: int(item.get("timestamp", 0) or 0))
+        return out
+
+
 class CodingToolsUsageTracker:
     """Registry-driven tracker for coding clients."""
 
@@ -6725,6 +6916,7 @@ class CodingToolsUsageTracker:
             # The public protocol exposes no durable estimate-source member,
             # so no provenance is invented for otherwise valid counters.
             "muse": MuseParser(self.pricing_db),
+            "minimax": MiniMaxCodeParser(self.pricing_db),
         }
         # Two parsers must never scan the same directory: the usage store
         # dedups on (source, entry_key) and never across sources, so an

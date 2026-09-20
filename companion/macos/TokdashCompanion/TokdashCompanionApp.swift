@@ -89,11 +89,15 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
-        if response.notification.request.content.userInfo["openQuota"] != nil {
+        // Low-quota taps open the Low view; reset-credit taps open the All view,
+        // because the credits row lives under the Codex group there (and only there).
+        let info = response.notification.request.content.userInfo
+        let opensAll = info["openQuotaAll"] != nil
+        if opensAll || info["openQuota"] != nil {
             let s = store
             Task { @MainActor in
                 guard let s else { return }
-                s.quotaView = .low
+                s.quotaView = opensAll ? .all : .low
                 Self.openQuotaWindow(store: s)  // static -> no self capture across the @Sendable Task
             }
         }

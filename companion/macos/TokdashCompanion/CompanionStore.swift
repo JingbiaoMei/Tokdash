@@ -5,7 +5,10 @@ import ServiceManagement
 @preconcurrency import UserNotifications
 
 private enum MultiServerAttempt: Sendable {
-    case success(CompanionServerSettings, UsageResponse, UsageResponse, QuotaResponse)
+    /// One server's fetch group for the selected period: usage, optional active-time
+    /// (nil = the endpoint failed/404 this cycle), and quota. The glance sources are not
+    /// fetched per-server in v1.1 (no combined multi-server face exists in the contract).
+    case success(CompanionServerSettings, usage: UsageResponse, activeMs: Int?, quota: QuotaResponse)
     case failure(CompanionServerSettings, busy: Bool, wrongService: Bool)
 }
 
@@ -29,8 +32,14 @@ final class CompanionStore: NSObject, ObservableObject {
     private var serverFailureCounts: [String: Int] = [:]
 
     // Last-good per section, retained across refreshes for partial-state rendering.
-    private var lastToday: UsageResponse?
-    private var lastMonth: UsageResponse?
+    // The usage-side last-goods belong to the *selected period* and are cleared the
+    // moment the segment changes (contract rule 2: while the new window is in flight
+    // the hero/delta/ranks/glance show skeletons; quota stays exactly as it was).
+    private var lastUsage: UsageResponse?
+    private var lastActiveMs: Int?
+    private var lastInsights: InsightsResponse?
+    private var lastStats: StatsResponse?
+    private var lastPerServer: [PerServerUsage] = []
     private var lastQuota: QuotaResponse?
 
     // Refresh scheduler: 60s while open, 10min while closed, backoff on failure,
@@ -137,20 +146,105 @@ final class CompanionStore: NSObject, ObservableObject {
         }
     }
 
+    // MARK: - Period segment
+
+    /// The hero segment control's selection (persisted as `selectedPeriod`, default
+    /// today). Views read `settings.selectedPeriod` and change it only via
+    /// ``selectPeriod(_:)``.
+    var selectedPeriod: UsagePeriod { settings.selectedPeriod }
+
+    /// Select a hero period. The choice persists, and selecting a different segment
+    /// fires the whole fetch group for the new window immediately. While it is in
+    /// flight the hero/delta/rank blocks and the glance show their loading skeleton
+    /// (the usage-side last-good is dropped); quota and connectivity stay exactly as
+    /// they were (contract rule 2).
+    func selectPeriod(_ period: UsagePeriod) {
+        guard settings.selectedPeriod != period else { return }
+        settings.selectedPeriod = period
+        settings.save()
+        lastUsage = nil
+        lastActiveMs = nil
+        lastInsights = nil
+        lastStats = nil
+        lastPerServer = []
+        if let current = snapshot {
+            snapshot = Snapshot(period: period, usage: nil, activeMs: nil,
+                                insights: nil, stats: nil,
+                                quota: current.quota, thresholds: current.thresholds,
+                                components: settings.components, now: Self.now,
+                                usageFailed: false, quotaFailed: current.quotaFailed,
+                                perServer: [], showPerServerRows: current.showPerServerRows)
+        }
+        refresh()
+    }
+
+    // MARK: - Server diagnostics (Settings only)
+
+    /// The server's `runtime_version`, read on Settings open. nil until fetched.
+    @Published private(set) var serverRuntimeVersion: String?
+    /// The version for the "Server update available: v{latest}" row; nil renders nothing.
+    @Published private(set) var serverUpdateBadgeVersion: String?
+    private var serverDiagnosticsTask: Task<Void, Never>?
+
+    /// Settings-open probe: `GET /api/version`, then - only when the server itself has
+    /// update-check enabled - `GET /api/update-check`. Failures are silent, nothing is
+    /// ever POSTed, and this never runs in the flyout or on a schedule.
+    func fetchServerUpdateInfo() {
+        serverDiagnosticsTask?.cancel()
+        serverDiagnosticsTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let version = try await self.client.serverVersion()
+                guard !Task.isCancelled else { return }
+                self.serverRuntimeVersion = version.runtimeVersion
+                self.serverUpdateBadgeVersion = nil
+                guard version.updateCheckEnabled == true else { return }
+                let check = try await self.client.serverUpdateCheck()
+                guard !Task.isCancelled else { return }
+                self.serverUpdateBadgeVersion = Self.serverBadgeVersion(from: check)
+            } catch {
+                // Silent: the badge is a courtesy, not a feature the user can act on here.
+            }
+        }
+    }
+
+    /// Badge rule: `enabled && update_available && latest != null`. `enabled == false`
+    /// means the server's owner has not given update-check consent: render nothing and
+    /// never try to change that. Pure so the gate is unit-testable without a client.
+    nonisolated static func serverBadgeVersion(from check: ServerUpdateCheckResponse) -> String? {
+        guard check.enabled == true, check.updateAvailable == true,
+              let latest = check.latest, !latest.isEmpty else { return nil }
+        return latest
+    }
+
     // MARK: - Refresh
 
     /// Rebuild the current snapshot from last-good data with the (possibly new)
     /// thresholds, so the Low view re-evaluates immediately without a network refresh.
     func applyThresholds() {
         guard let q = lastQuota, q.enabled else { return }
-        var snap = Snapshot(today: lastToday ?? .empty, month: lastMonth ?? .empty,
-                            quota: q, thresholds: settings.thresholds)
+        var snap = Snapshot(period: settings.selectedPeriod, usage: lastUsage, activeMs: lastActiveMs,
+                            insights: lastInsights, stats: lastStats, quota: q,
+                            thresholds: settings.thresholds, components: settings.components,
+                            now: Self.now,
+                            perServer: lastPerServer, showPerServerRows: showPerServerRows)
         if let cur = snapshot {
-            snap.todayFailed = cur.todayFailed
-            snap.monthFailed = cur.monthFailed
+            snap.usageFailed = cur.usageFailed
             snap.quotaFailed = cur.quotaFailed
         }
         snapshot = snap
+    }
+
+    /// Rebuild after a Components toggle change. Cannot share applyThresholds'
+    /// quota-enabled guard: the hero components gate even when quota tracking is off.
+    func applyComponentsChange() {
+        snapshot = Snapshot(period: settings.selectedPeriod, usage: lastUsage, activeMs: lastActiveMs,
+                            insights: lastInsights, stats: lastStats,
+                            quota: lastQuota ?? .empty, thresholds: settings.thresholds,
+                            components: settings.components, now: Self.now,
+                            usageFailed: snapshot?.usageFailed ?? false,
+                            quotaFailed: snapshot?.quotaFailed ?? false,
+                            perServer: lastPerServer, showPerServerRows: showPerServerRows)
     }
 
     /// Manual / immediate refresh. Cancels any in-flight refresh and reschedules
@@ -183,52 +277,56 @@ final class CompanionStore: NSObject, ObservableObject {
             connectionState = .connected
 
             // Fetch each section independently so one failed request no longer
-            // discards the other two. Last-good is retained per section; a failed
-            // section keeps its previous data and the UI shows an inline warning.
-            async let todayAttempt = client.usage(period: "today")
-            async let monthAttempt = client.usage(period: "month")
+            // discards the others, for the SELECTED period (contract rule 2). Active-time
+            // and the glance source are optional decorations: their fetch helpers swallow
+            // every failure into nil and never warn (rule 6). A component whose toggle is
+            // off does not fetch its source at all.
+            let period = settings.selectedPeriod
+            let glanceSource = Self.glanceSource(for: period, components: settings.components,
+                                                 today: Date(), calendar: .current)
+            async let usageAttempt = Self.fetchUsage(client, period: period)
             async let quotaAttempt = client.quota()
+            async let activeAttempt = Self.activeTimeOptional(client, period: period)
+            async let glanceAttempt = Self.fetchGlance(client, source: glanceSource)
 
-            var todayFailed = false, monthFailed = false, quotaFailed = false
-            var todayBusy = false, monthBusy = false, quotaBusy = false
-            do { lastToday = try await todayAttempt } catch let e as TokdashError { todayFailed = true; if case .busy = e { todayBusy = true } } catch { todayFailed = true }
-            do { lastMonth = try await monthAttempt } catch let e as TokdashError { monthFailed = true; if case .busy = e { monthBusy = true } } catch { monthFailed = true }
+            var usageFailed = false, usageBusy = false, quotaFailed = false, quotaBusy = false
+            do { lastUsage = try await usageAttempt } catch let e as TokdashError { usageFailed = true; if case .busy = e { usageBusy = true } } catch { usageFailed = true }
             do { lastQuota = try await quotaAttempt } catch let e as TokdashError { quotaFailed = true; if case .busy = e { quotaBusy = true } } catch { quotaFailed = true }
+            lastActiveMs = await activeAttempt
+            let glance = await glanceAttempt
+            lastInsights = glance.insights
+            lastStats = glance.stats
 
             if Task.isCancelled { return }
 
-            var snap = Snapshot(today: lastToday ?? .empty, month: lastMonth ?? .empty,
-                                quota: lastQuota ?? .empty, thresholds: settings.thresholds)
-            snap.todayFailed = todayFailed
-            snap.monthFailed = monthFailed
-            snap.quotaFailed = quotaFailed
-            self.snapshot = snap
+            let snap = rebuildSnapshot(usageFailed: usageFailed, quotaFailed: quotaFailed)
             self.lastError = nil
             self.connectionState = .connected
 
-            let allFailed = todayFailed && monthFailed && quotaFailed
+            let allFailed = usageFailed && quotaFailed
             if allFailed {
-                // Health ok but every data endpoint failed. If all were 503, the service
+                // Health ok but both real endpoints failed. If both were 503, the service
                 // is busy: show the Busy banner + dimmed last-good, not Connected.
-                if todayBusy && monthBusy && quotaBusy { connectionState = .busy }
+                if usageBusy && quotaBusy { connectionState = .busy }
                 failures += 1
                 partial = false
             } else {
                 lastFetchAt = Date()
                 // Data time: prefer the API timestamp (naive UTC parsed via parseTimestamp),
                 // else fall back to fetch time minus the cache age, else fetch time. Spec §freshness.
-                if let ts = lastToday?.timestamp,
+                if let ts = lastUsage?.timestamp,
                    let parsed = Self.parseTimestamp(ts) {
                     lastDataTime = parsed
-                } else if let age = lastToday?.responseCache?.ageSeconds {
+                } else if let age = lastUsage?.responseCache?.ageSeconds {
                     lastDataTime = (lastFetchAt ?? Date()).addingTimeInterval(-age)
                 } else {
                     lastDataTime = lastFetchAt
                 }
                 failures = 0
-                partial = todayFailed || monthFailed || quotaFailed // partial -> 15s short retry
+                partial = usageFailed || quotaFailed // partial -> 15s short retry
                 let fresh = evaluateLowQuotaNotifications(snap)
                 if !fresh.isEmpty { postLowQuotaNotification(fresh) }
+                postCreditExpiryNotificationsIfNeeded(snap)
             }
         } catch let error as TokdashError {
             if Task.isCancelled { return }
@@ -243,8 +341,108 @@ final class CompanionStore: NSObject, ObservableObject {
         }
     }
 
+    // MARK: - Per-period fetch helpers
+
+    /// Usage for the selected period. Week uses `date_from`/`date_to` (local Monday ..
+    /// today); `period=week` is a rolling 7-day window and is never sent.
+    nonisolated static func usageRequestPath(for period: UsagePeriod, today: Date, calendar: Calendar) -> String {
+        guard period == .week else { return "/api/usage?period=\(period.token)" }
+        let (from, to) = weekRange(today: today, calendar: calendar)
+        return "/api/usage?date_from=\(from)&date_to=\(to)"
+    }
+
+    private nonisolated static func fetchUsage(_ client: TokdashClient, period: UsagePeriod) async throws -> UsageResponse {
+        if period == .week {
+            let (from, to) = weekRange(today: Date(), calendar: Calendar.current)
+            return try await client.usageRange(from: from, to: to)
+        }
+        return try await client.usage(period: period.token)
+    }
+
+    /// Active-time is optional (rule 6): any failure/404 is nil, silently.
+    private nonisolated static func activeTimeOptional(_ client: TokdashClient, period: UsagePeriod) async -> Int? {
+        do {
+            let response: ActiveTimeResponse
+            if period == .week {
+                let (from, to) = weekRange(today: Date(), calendar: Calendar.current)
+                response = try await client.activeTimeRange(from: from, to: to)
+            } else {
+                response = try await client.activeTime(period: period.token)
+            }
+            return response.activeMs
+        } catch {
+            return nil
+        }
+    }
+
+    /// The glance's single source for the period, or nil when no face will render.
+    /// Component-off means no request at all (glance-off / histogram-off cycles contain
+    /// no /api/insights or /api/stats request). Failure yields nil silently (rule 6).
+    enum GlanceSource: Equatable, Sendable {
+        case insightsHourly
+        case insightsDaily
+        case stats
+
+        /// Endpoint path the source hits - used by the contract tests' requests_absent rule.
+        var requestPath: String {
+            switch self {
+            case .insightsHourly, .insightsDaily: return "/api/insights"
+            case .stats: return "/api/stats"
+            }
+        }
+    }
+
+    nonisolated static func glanceSource(for period: UsagePeriod, components: CompanionComponents,
+                                         today: Date, calendar: Calendar) -> GlanceSource? {
+        guard components.activityGlance else { return nil }
+        switch period {
+        case .today: return components.activityHistogramTodayWeek ? .insightsHourly : nil
+        case .week: return components.activityHistogramTodayWeek ? .insightsDaily : nil
+        case .month, .year: return .stats
+        }
+    }
+
+    private nonisolated static func fetchGlance(_ client: TokdashClient, source: GlanceSource?) async
+        -> (insights: InsightsResponse?, stats: StatsResponse?) {
+        guard let source else { return (nil, nil) }
+        do {
+            switch source {
+            case .insightsHourly:
+                return (try await client.insightsHourlyToday(), nil)
+            case .insightsDaily:
+                let (from, to) = weekRange(today: Date(), calendar: Calendar.current)
+                return (try await client.insightsDaily(from: from, to: to), nil)
+            case .stats:
+                return (nil, try await client.stats())
+            }
+        } catch {
+            return (nil, nil)
+        }
+    }
+
+    /// Rebuild and publish the snapshot from the stored last-goods. Also returns it so
+    /// callers can evaluate notifications on the exact snapshot they just published.
+    @discardableResult
+    private func rebuildSnapshot(usageFailed: Bool, quotaFailed: Bool) -> Snapshot {
+        let snap = Snapshot(period: settings.selectedPeriod, usage: lastUsage, activeMs: lastActiveMs,
+                            insights: lastInsights, stats: lastStats,
+                            quota: lastQuota ?? .empty, thresholds: settings.thresholds,
+                            components: settings.components, now: Self.now,
+                            usageFailed: usageFailed, quotaFailed: quotaFailed,
+                            perServer: lastPerServer, showPerServerRows: showPerServerRows)
+        snapshot = snap
+        return snap
+    }
+
+    /// Per-server rows render only with the component on and more than one enabled
+    /// server (one server would only echo the hero).
+    var showPerServerRows: Bool {
+        settings.components.perServerRows && settings.servers.filter(\.enabled).count > 1
+    }
+
     private func runMultiServerRefresh(_ servers: [CompanionServerSettings]) async {
-        typealias ServerResult = (server: CompanionServerSettings, today: UsageResponse, month: UsageResponse, quota: QuotaResponse)
+        typealias ServerResult = (server: CompanionServerSettings, usage: UsageResponse, activeMs: Int?, quota: QuotaResponse)
+        let period = settings.selectedPeriod
         let attempts: [MultiServerAttempt] = await withTaskGroup(of: MultiServerAttempt.self) { group in
             for server in servers {
                 group.addTask {
@@ -253,11 +451,13 @@ final class CompanionStore: NSObject, ObservableObject {
                     do {
                         let health = try await client.health()
                         guard health.service == "tokdash" else { return .failure(server, busy: false, wrongService: true) }
-                        async let today = client.usage(period: "today")
-                        async let month = client.usage(period: "month")
+                        async let usage = Self.fetchUsage(client, period: period)
                         async let quota = client.quota()
-                        let values = try await (today, month, quota)
-                        return .success(server, values.0, values.1, values.2)
+                        // Active time is an optional decoration (rule 6): a failed read
+                        // yields nil and the combined hero drops the segment.
+                        async let active = Self.activeTimeOptional(client, period: period)
+                        let values = try await (usage, quota, active)
+                        return .success(server, usage: values.0, activeMs: values.2, quota: values.1)
                     } catch let error as TokdashError {
                         if case .busy = error { return .failure(server, busy: true, wrongService: false) }
                         return .failure(server, busy: false, wrongService: false)
@@ -272,8 +472,8 @@ final class CompanionStore: NSObject, ObservableObject {
         }
         if Task.isCancelled { return }
         let results: [ServerResult] = attempts.compactMap { attempt in
-            guard case let .success(server, today, month, quota) = attempt else { return nil }
-            return (server, today, month, quota)
+            guard case let .success(server, usage, activeMs, quota) = attempt else { return nil }
+            return (server, usage, activeMs, quota)
         }
         failedServerIDs = Set(attempts.compactMap { attempt in
             guard case let .failure(server, _, _) = attempt else { return nil }
@@ -298,8 +498,7 @@ final class CompanionStore: NSObject, ObservableObject {
             }
             return
         }
-        let today = Self.combineUsage(results.map(\.today))
-        let month = Self.combineUsage(results.map(\.month))
+        let usage = Self.combineUsage(results.map(\.usage))
         var providers: [String: ProviderQuota] = [:]
         for result in results {
             for (provider, value) in result.quota.providers ?? [:] {
@@ -307,16 +506,50 @@ final class CompanionStore: NSObject, ObservableObject {
             }
         }
         let quota = QuotaResponse(enabled: results.contains(where: { $0.quota.enabled }), providers: providers, timestamp: nil)
-        lastToday = today; lastMonth = month; lastQuota = quota
-        var snap = Snapshot(today: today, month: month, quota: quota, thresholds: settings.thresholds)
-        snap.todayFailed = false; snap.monthFailed = false; snap.quotaFailed = false
-        snapshot = snap; connectionState = .connected; lastFetchAt = Date()
+        lastUsage = usage; lastQuota = quota
+        lastInsights = nil; lastStats = nil
+        lastActiveMs = Self.combinedActiveMs(results.map { ($0.activeMs, failedServerIDs.contains($0.server.id)) })
+        // Per-server rows in settings order, from this same fan-out - never an extra
+        // request (contract §Per-server rows). Failed servers stay listed as "unreachable".
+        lastPerServer = Self.perServerRows(servers: servers, results: results.map { ($0.server, $0.usage) },
+                                           failedIDs: failedServerIDs)
+        let snap = rebuildSnapshot(usageFailed: false, quotaFailed: false)
+        connectionState = .connected; lastFetchAt = Date()
         lastDataTime = results.compactMap { result in
-            result.today.timestamp.flatMap(Self.parseTimestamp)
+            result.usage.timestamp.flatMap(Self.parseTimestamp)
         }.min() ?? lastFetchAt
         failures = 0; partial = results.count != servers.count
         let fresh = evaluateLowQuotaNotifications(snap)
         if !fresh.isEmpty { postLowQuotaNotification(fresh) }
+        postCreditExpiryNotificationsIfNeeded(snap)
+    }
+
+    /// Multi-server active-time sum (contract §Active time): sum `active_ms` across
+    /// reachable servers, but if *any* enabled server lacks active-time data this cycle
+    /// (failed endpoint or unreachable), drop the segment rather than present a
+    /// known-partial sum. Pure so it is unit-testable.
+    nonisolated static func combinedActiveMs(_ perServer: [(activeMs: Int?, failed: Bool)]) -> Int? {
+        var total = 0
+        for entry in perServer {
+            if entry.failed { return nil }
+            guard let ms = entry.activeMs else { return nil }
+            total += ms
+        }
+        return total
+    }
+
+    /// Per-server rows in settings order; unreachable servers keep their row with the
+    /// "unreachable" tag, never dimmed numbers. Pure/testable.
+    nonisolated static func perServerRows(servers: [CompanionServerSettings],
+                                          results: [(server: CompanionServerSettings, usage: UsageResponse)],
+                                          failedIDs: Set<String>) -> [PerServerUsage] {
+        servers.map { server in
+            if failedIDs.contains(server.id) { return PerServerUsage(label: server.label, usage: nil) }
+            guard let result = results.first(where: { $0.server.id == server.id }) else {
+                return PerServerUsage(label: server.label, usage: nil)
+            }
+            return PerServerUsage(label: server.label, usage: result.usage)
+        }
     }
 
     nonisolated static func combineUsage(_ rows: [UsageResponse]) -> UsageResponse {
@@ -327,9 +560,21 @@ final class CompanionStore: NSObject, ObservableObject {
             for item in row.combinedModels ?? row.topModels ?? [] { let old = models[item.name] ?? (0, 0); models[item.name] = (old.tokens + item.tokens, old.cost + item.cost) }
         }
         let totalCost = rows.reduce(0) { $0 + $1.totalCost }
-        let previousValues = rows.compactMap { $0.comparison?.costPrev }
-        let previous = previousValues.count == rows.count ? previousValues.reduce(0, +) : nil
-        let pct = previous.flatMap { $0 > 0 ? (totalCost - $0) / $0 * 100 : nil }
+        let totalTokens = rows.reduce(0) { $0 + $1.totalTokens }
+        let totalMessages = rows.reduce(0) { $0 + $1.totalMessages }
+        // Multi-server delta row: recompute each pct from summed current and previous
+        // totals; omit a metric when any contributing server omits its *_prev
+        // (contract §Full delta row).
+        func combined(_ current: Double, _ prev: (Comparison) -> Double?) -> (prev: Double?, pct: Double?) {
+            guard !rows.isEmpty else { return (nil, nil) }
+            let prevs = rows.compactMap { $0.comparison.map(prev) }
+            guard prevs.count == rows.count else { return (nil, nil) }
+            let sum = prevs.reduce(0, +)
+            return (sum, sum > 0 ? (current - sum) / sum * 100 : nil)
+        }
+        let cost = combined(totalCost) { $0.costPrev }
+        let tokens = combined(Double(totalTokens)) { $0.tokensPrev }
+        let messages = combined(Double(totalMessages)) { $0.messagesPrev }
         // Mirror the server's own shape: combinedModels is the full list ranked by
         // tokens, topModels its first five, topModelsByCost the five by cost. This
         // used to hand back one cost-sorted uncapped list under all three names.
@@ -344,10 +589,12 @@ final class CompanionStore: NSObject, ObservableObject {
             if $0.tokens != $1.tokens { return $0.tokens > $1.tokens }
             return $0.name < $1.name
         }
-        return UsageResponse(period: rows.first?.period ?? "", totalTokens: rows.reduce(0) { $0 + $1.totalTokens }, totalCost: totalCost,
-            totalMessages: rows.reduce(0) { $0 + $1.totalMessages }, byTool: tools.mapValues { ToolAgg(tokens: $0.tokens, cost: $0.cost) },
+        return UsageResponse(period: rows.first?.period ?? "", totalTokens: totalTokens, totalCost: totalCost,
+            totalMessages: totalMessages, byTool: tools.mapValues { ToolAgg(tokens: $0.tokens, cost: $0.cost) },
             topModels: Array(byTokens.prefix(5)), topModelsByCost: Array(byCost.prefix(5)),
-            combinedModels: byTokens, comparison: Comparison(costPct: pct, costPrev: previous),
+            combinedModels: byTokens,
+            comparison: Comparison(tokensPct: tokens.pct, costPct: cost.pct, messagesPct: messages.pct,
+                                   costPrev: cost.prev, tokensPrev: tokens.prev, messagesPrev: messages.prev),
             timestamp: rows.compactMap(\.timestamp).min())
     }
 
@@ -476,6 +723,12 @@ final class CompanionStore: NSObject, ObservableObject {
         return String(s[...dot]) + three + String(rest)
     }
 
+    /// Clock seam for the reset-credits rules ("the clock for 'days remaining' is the
+    /// client's own; tests freeze it to the payload timestamp"). Production always nil.
+    /// Mirrors the ``CompanionSettings/pathOverride`` test-seam style.
+    nonisolated(unsafe) static var clockOverride: Date?
+    nonisolated static var now: Date { clockOverride ?? Date() }
+
     // MARK: - Low-quota notifications
 
     /// Notify only on a crossing from above to at-or-below the threshold, evaluated
@@ -525,6 +778,260 @@ final class CompanionStore: NSObject, ObservableObject {
                                             trigger: UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false))
             center.add(req)
         }
+    }
+
+    // MARK: - Reset-credit expiry notifications
+
+    /// One credit whose last 48 hours has begun (or will, given the frozen clock).
+    struct CreditAlertItem: Sendable {
+        let provider: String        // display name, e.g. "Codex"
+        let count: Int              // provider's available_count
+        let clause: String          // localized "in 2 d" / "tomorrow" / "today"
+        let expiresAt: Date
+    }
+
+    /// Reset credits ride the SAME low-quota opt-in and the same scheduled quota read
+    /// (no extra polling, rule 8). Notify once a future credit enters its last 48
+    /// hours; dedup by (provider, credit id, expires_at) - a credit carries its own
+    /// identity, so no re-arm rule is needed. Suppressed while the provider's group
+    /// failed: last-known credit data is not a basis for an "expire in" warning.
+    /// Requires the `resetCredits` component (it gates the row AND the notification).
+    internal func evaluateResetCreditNotifications(_ snap: Snapshot) -> [CreditAlertItem] {
+        guard settings.lowQuotaNotifications, snap.components.resetCredits, snap.quota.enabled else { return [] }
+        var fresh: [CreditAlertItem] = []
+        for group in snap.allQuotaGroups {
+            guard let prov = group.providerEntry, !group.failed,
+                  let credits = prov.resetCredits, (credits.availableCount ?? 0) >= 1 else { continue }
+            let canonical = group.canonicalProvider.lowercased()
+            guard canonical == "codex" else { continue }
+            for credit in credits.credits ?? [] {
+                guard let raw = credit.expiresAt, let expiry = Self.parseTimestamp(raw),
+                      expiry > snap.now,
+                      expiry.timeIntervalSince(snap.now) <= 48 * 3600 else { continue }
+                let key = "credit|\(canonical)|\(credit.id ?? "")|\(Int(expiry.timeIntervalSince1970))"
+                if notifiedKeys.insert(key).inserted {
+                    fresh.append(CreditAlertItem(provider: group.provider,
+                                                 count: credits.availableCount ?? 0,
+                                                 clause: Self.creditsClause(expiry: expiry, now: snap.now),
+                                                 expiresAt: expiry))
+                }
+            }
+        }
+        return fresh
+    }
+
+    private func postCreditExpiryNotificationsIfNeeded(_ snap: Snapshot) {
+        let fresh = evaluateResetCreditNotifications(snap)
+        guard !fresh.isEmpty, let first = fresh.first else { return }
+        let center = UNUserNotificationCenter.current()
+        center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
+            guard granted else { return }
+            let content = UNMutableNotificationContent()
+            content.title = L10n.t("notif_credits_title")
+            content.body = L10n.t("notif_credits_body", first.count, first.clause)
+            // Click opens the quota section in the All view (where the row lives).
+            content.userInfo = ["openQuotaAll": true]
+            let id = "tokdash-credit-expiry-\(Date().timeIntervalSince1970)"
+            let req = UNNotificationRequest(identifier: id, content: content,
+                                            trigger: UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false))
+            center.add(req)
+        }
+    }
+
+    /// "Days remaining" clause from the soonest FUTURE expiry, floored to whole days:
+    /// >= 2 d -> "in {d} d"; 1..<2 d -> "tomorrow"; < 1 d -> "today". Expired entries
+    /// are ignored by the caller for both the row clause and the notification.
+    nonisolated static func creditsClause(expiry: Date, now: Date) -> String {
+        let remaining = expiry.timeIntervalSince(now)
+        let days = Int(remaining / 86_400)
+        if days >= 2 { return L10n.t("credits_in_days", days) }
+        if remaining >= 86_400 { return L10n.t("credits_tomorrow") }
+        return L10n.t("credits_today")
+    }
+
+    // MARK: - Period calendar math (week = local Monday .. today, NEVER period=week)
+
+    /// "yyyy-MM-dd" in the calendar's timezone. POSIX locale so a non-Latin-digit locale
+    /// can never corrupt a query parameter.
+    nonisolated static func dayString(_ date: Date, calendar: Calendar) -> String {
+        let fmt = DateFormatter()
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.calendar = calendar
+        fmt.timeZone = calendar.timeZone
+        fmt.dateFormat = "yyyy-MM-dd"
+        return fmt.string(from: date)
+    }
+
+    nonisolated static func date(fromDayString s: String, calendar: Calendar) -> Date? {
+        let fmt = DateFormatter()
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.calendar = calendar
+        fmt.timeZone = calendar.timeZone
+        fmt.dateFormat = "yyyy-MM-dd"
+        return fmt.date(from: s)
+    }
+
+    /// Start-of-day Monday on or before `date`. First-weekday-independent: computed from
+    /// the weekday index (Mon = 2 in Gregorian), not `calendar.firstWeekday`.
+    nonisolated static func startOfWeekMonday(_ date: Date, calendar: Calendar) -> Date {
+        let start = calendar.startOfDay(for: date)
+        let weekday = calendar.component(.weekday, from: start) // Sun = 1 ... Sat = 7
+        let offset = (weekday + 5) % 7                          // Mon -> 0, Sun -> 6
+        return calendar.date(byAdding: .day, value: -offset, to: start) ?? start
+    }
+
+    /// `date_from`/`date_to` pair: local Monday .. today. Contract §Period windows.
+    nonisolated static func weekRange(today: Date, calendar: Calendar) -> (from: String, to: String) {
+        (dayString(startOfWeekMonday(today, calendar: calendar), calendar: calendar),
+         dayString(today, calendar: calendar))
+    }
+
+    // MARK: - Active time ladder (E-active)
+
+    /// "active <1 m" / "active 42 m" / "active 3 h 12 m" / "active 74 d 5 h". Zero and
+    /// absent data render NO segment at all (the caller checks), never "active 0 m".
+    /// Input is MILLISECONDS (contract: every duration field is ms).
+    nonisolated static func activeText(activeMs: Int) -> String {
+        let seconds = activeMs / 1000
+        if seconds < 60 { return L10n.t("active_label", L10n.t("dur_lt1m")) }
+        if seconds < 3600 { return L10n.t("active_label", L10n.t("dur_m", seconds / 60)) }
+        if seconds < 86_400 {
+            return L10n.t("active_label", L10n.t("dur_hm", seconds / 3600, (seconds % 3600) / 60))
+        }
+        return L10n.t("active_label", L10n.t("dur_dh", seconds / 86_400, (seconds % 86_400) / 3600))
+    }
+
+    // MARK: - Tool display names and logos (E3)
+
+    /// Display names for the by_tool keys the server actually emits; anything unknown
+    /// gets the id capitalized, never a blank row.
+    nonisolated static func toolDisplayName(for tool: String) -> String {
+        switch tool.lowercased() {
+        case "codex": return "Codex"
+        case "claude": return "Claude"
+        case "kimi": return "Kimi"
+        case "opencode": return "OpenCode"
+        case "openclaw": return "OpenClaw"
+        case "gemini": return "Gemini"
+        default:
+            guard let first = tool.first else { return tool }
+            return first.uppercased() + tool.dropFirst()
+        }
+    }
+
+    /// Asset-catalog image name for a tool id, nil when no mark ships for it - a tool
+    /// without a shipped logo renders text-only (never a placeholder).
+    nonisolated static func logoAssetName(for tool: String) -> String? {
+        switch tool.lowercased() {
+        case "codex": return "AgentCodex"
+        case "claude": return "AgentClaude"
+        case "kimi": return "AgentKimi"
+        case "opencode": return "AgentOpenCode"
+        case "gemini": return "AgentGemini"
+        default: return nil
+        }
+    }
+
+    /// "openai/gpt-5.6-sol" -> "gpt-5.6-sol". Model rows strip the provider prefix.
+    nonisolated static func stripProviderPrefix(_ model: String) -> String {
+        model.split(separator: "/").last.map(String.init) ?? model
+    }
+
+    // MARK: - Activity glance faces (E9)
+
+    /// Pure face selection so the contract tests can pin every period/component combo
+    /// without a live server. All-zero faces return nil (component hides itself).
+    /// Both week and grid anchor on the PAYLOAD's newest date, not the wall clock:
+    /// the server's window is the source of truth and frozen fixtures stay testable.
+    nonisolated static func glanceFace(period: UsagePeriod, insights: InsightsResponse?, stats: StatsResponse?,
+                                       components: CompanionComponents,
+                                       calendar: Calendar) -> Snapshot.GlanceFace? {
+        guard components.activityGlance else { return nil }
+        switch period {
+        case .today:
+            guard components.activityHistogramTodayWeek, let insights else { return nil }
+            return hourFace(insights)
+        case .week:
+            guard components.activityHistogramTodayWeek, let insights else { return nil }
+            return dayFace(daily: insights.daily, calendar: calendar)
+        case .month, .year:
+            return gridFace(stats: stats, windowDays: period == .month ? 90 : 180, calendar: calendar)
+        }
+    }
+
+    /// 24 hourly bars, index = hour; the server's sparse buckets map onto their hour.
+    private nonisolated static func hourFace(_ insights: InsightsResponse) -> Snapshot.GlanceFace? {
+        let buckets = insights.hourly?.buckets ?? []
+        guard !buckets.isEmpty else { return nil }
+        var bars = [Int](repeating: 0, count: 24)
+        for bucket in buckets {
+            guard let hour = bucket.hour, (0...23).contains(hour) else { continue }
+            bars[hour] = bucket.tokens ?? 0
+        }
+        if bars.allSatisfy({ $0 == 0 }) { return nil }
+        return .hours(bars: bars, peakHour: insights.hourly?.peakHour)
+    }
+
+    /// Mon..Sun columns of the week containing the daily facet's newest date. The
+    /// facet is sparse (no entry = no usage), so missing days render as empty zero
+    /// columns, not skipped ones.
+    private nonisolated static func dayFace(daily: [DailyPoint]?,
+                                            calendar: Calendar) -> Snapshot.GlanceFace? {
+        guard let daily, !daily.isEmpty else { return nil }
+        let dates = daily.compactMap { point -> Date? in
+            guard let raw = point.date else { return nil }
+            return date(fromDayString: raw, calendar: calendar)
+        }
+        guard let newest = dates.max() else { return nil }
+        let monday = startOfWeekMonday(newest, calendar: calendar)
+        var tokens: [Int] = []
+        for offset in 0..<7 {
+            guard let day = calendar.date(byAdding: .day, value: offset, to: monday) else { tokens.append(0); continue }
+            let key = dayString(day, calendar: calendar)
+            tokens.append(daily.first { $0.date == key }?.tokens ?? 0)
+        }
+        if tokens.allSatisfy({ $0 == 0 }) { return nil }
+        return .days(tokens: tokens)
+    }
+
+    /// GitHub-style contribution grid: windowDays trailing days ending at the NEWEST
+    /// date in the payload (not `Date()` - the tests and offline cycles have no clock
+    /// truth), column-major weeks starting Monday, out-of-window cells nil.
+    private nonisolated static func gridFace(stats: StatsResponse?, windowDays: Int,
+                                             calendar: Calendar) -> Snapshot.GlanceFace? {
+        let contributions = stats?.contributions ?? []
+        guard !contributions.isEmpty else { return nil }
+        let dated: [(date: Date, intensity: Int)] = contributions.compactMap { c in
+            guard let raw = c.date, let date = date(fromDayString: raw, calendar: calendar) else { return nil }
+            return (date, min(4, max(0, c.intensity ?? 0)))
+        }
+        guard let anchor = dated.map(\.date).max(),
+              let windowStart = calendar.date(byAdding: .day, value: -(windowDays - 1), to: anchor)
+        else { return nil }
+        let gridStart = startOfWeekMonday(windowStart, calendar: calendar)
+        let intensityByDay = Dictionary(dated.map { (dayString($0.date, calendar: calendar), $0.intensity) },
+                                        uniquingKeysWith: { $0 + $1 })
+        var columns: [[Int?]] = []
+        var week = 0
+        while true {
+            guard let columnStart = calendar.date(byAdding: .day, value: week * 7, to: gridStart) else { break }
+            var column: [Int?] = []
+            var anyCell = false
+            for dow in 0..<7 {
+                guard let cell = calendar.date(byAdding: .day, value: dow, to: columnStart) else { column.append(nil); continue }
+                if cell < windowStart || cell > anchor { column.append(nil); continue }
+                anyCell = true
+                column.append(intensityByDay[dayString(cell, calendar: calendar)] ?? 0)
+            }
+            guard anyCell else { break } // past the anchor: remaining columns are all nil
+            columns.append(column)
+            week += 1
+            if week > 53 { break } // 180-day window is ~27 columns; hard stop for safety
+        }
+        let filled = columns.flatMap { $0 }.compactMap { $0 }.filter { $0 > 0 }.count
+        if filled == 0 { return nil }
+        return .grid(columns: columns, filledCells: filled, windowDays: windowDays,
+                     firstCellDate: dayString(gridStart, calendar: calendar))
     }
 
     // MARK: - Update checking
@@ -698,9 +1205,10 @@ final class CompanionStore: NSObject, ObservableObject {
     }
 
     /// Live label for the menu-bar item: reflects connection state and usage.
+    /// Period-neutral wording: the hero number behind it is whichever period is selected.
     var tooltipText: String {
-        if let snap = snapshot, snap.today.totalTokens > 0 {
-            return L10n.t("tooltip_today", snap.todayCostText, snap.todayTokensCompact)
+        if let snap = snapshot, (snap.usage?.totalTokens ?? 0) > 0 {
+            return L10n.t("tooltip_usage", snap.costText, snap.tokensCompact)
         }
         switch connectionState {
         case .connecting: return L10n.t("tooltip_connecting")
@@ -743,56 +1251,246 @@ enum ConnectionState {
 
 enum QuotaView { case low, all }
 
+/// One render pass over the selected period. The hero, delta row, ranks and glance
+/// all read the snapshot for `period`; quota is period-independent. `usage == nil`
+/// means the selected period's first fetch is still in flight (loading skeleton).
 struct Snapshot {
-    let today: UsageResponse
-    let month: UsageResponse
+    let period: UsagePeriod
+    let usage: UsageResponse?
+    let activeMs: Int?
+    let insights: InsightsResponse?
+    let stats: StatsResponse?
     let quota: QuotaResponse
     let thresholds: QuotaThresholds
+    let components: CompanionComponents
+    /// Clock this snapshot was built with (test-freezable). Drives the credits clause.
+    let now: Date
 
     // Per-section status from the latest refresh. A failed section keeps its
     // last-good data (held by the store) and the UI shows an inline warning.
-    var todayFailed: Bool = false
-    var monthFailed: Bool = false
+    var usageFailed: Bool = false
     var quotaFailed: Bool = false
 
-    var todayCostText: String { String(format: "$%.2f", today.totalCost) }
-    var monthCostText: String { String(format: "$%.2f", month.totalCost) }
+    // Per-server hero values from this cycle's fan-out (empty for a single server;
+    // this cycle only, no persistence - contract §Per-server rows).
+    var perServer: [PerServerUsage] = []
+    var showPerServerRows: Bool = false
 
-    var todayTokensCompact: String { Self.compactTokens(today.totalTokens) }
-    var monthTokensCompact: String { Self.compactTokens(month.totalTokens) }
+    init(period: UsagePeriod = .today,
+         usage: UsageResponse? = nil,
+         activeMs: Int? = nil,
+         insights: InsightsResponse? = nil,
+         stats: StatsResponse? = nil,
+         quota: QuotaResponse = .empty,
+         thresholds: QuotaThresholds = .defaults,
+         components: CompanionComponents = CompanionComponents(),
+         now: Date = Date(),
+         usageFailed: Bool = false,
+         quotaFailed: Bool = false,
+         perServer: [PerServerUsage] = [],
+         showPerServerRows: Bool = false) {
+        self.period = period; self.usage = usage; self.activeMs = activeMs
+        self.insights = insights; self.stats = stats; self.quota = quota
+        self.thresholds = thresholds; self.components = components; self.now = now
+        self.usageFailed = usageFailed; self.quotaFailed = quotaFailed
+        self.perServer = perServer; self.showPerServerRows = showPerServerRows
+    }
 
-    /// Today secondary line: "18.7M tokens · 248 messages" (+ " · retrying" on partial failure).
-    var todaySubLine: String {
-        let suffix = todayFailed ? L10n.t("today_retrying_suffix") : ""
-        return L10n.t("today_tokens_messages", todayTokensCompact, today.totalMessages, suffix)
+    /// True while the selected period's data has never landed and no failure has been
+    /// reported: the hero/delta/rank blocks and glance show their loading skeleton.
+    var usageLoading: Bool { usage == nil && !usageFailed }
+    var isEmptyUsage: Bool { usage?.totalTokens == 0 }
+
+    var kickerText: String { L10n.t(period.kickerKey) }
+
+    var perServerRows: [PerServerRow] { perServer.map(PerServerRow.init) }
+
+    var costText: String { String(format: "$%.2f", usage?.totalCost ?? 0) }
+    var tokensCompact: String { Self.compactTokens(usage?.totalTokens ?? 0) }
+
+    /// Hero secondary line: "18.7M tokens · 248 messages · active 3 h 12 m".
+    /// The active segment follows the ladder in CompanionStore.activeText (zero and
+    /// absent data render NO segment, never "active 0 m"); usage failure swaps it for
+    /// the shipped " · retrying" suffix.
+    var subLine: String {
+        var suffix = usageFailed ? L10n.t("today_retrying_suffix") : ""
+        if suffix.isEmpty, let active = activeSegmentText {
+            suffix = " · " + active
+        }
+        return L10n.t("today_tokens_messages", tokensCompact, usage?.totalMessages ?? 0, suffix)
+    }
+
+    var activeSegmentText: String? {
+        guard let ms = activeMs, ms > 0 else { return nil }
+        return CompanionStore.activeText(activeMs: ms)
     }
 
     static func compactTokens(_ value: Int) -> String {
         if value >= 1_000_000 {
-            return String(format: "%.1fM", Double(value) / 1_000_000)
+            var text = String(format: "%.1f", Double(value) / 1_000_000)
+            if text.hasSuffix(".0") { text = String(text.dropLast(2)) }
+            return text + "M"
         }
         if value >= 1_000 {
-            return "\(value / 1000)k"
+            // Round - not floor - to the shown precision (contract §Token compact
+            // notation): 249_669 renders "250k".
+            return "\(Int((Double(value) / 1000).rounded()))k"
         }
         return "\(value)"
     }
 
-    var comparisonText: String? {
-        guard let pct = today.comparison?.costPct else { return nil }
-        let abs = abs(pct)
-        return pct <= 0 ? L10n.t("comparison_below", Int(abs)) : L10n.t("comparison_above", Int(abs))
+    // MARK: Full delta row (E1)
+
+    /// One metric of the delta line; `direction` colors the span (-1 down / 0 flat / +1 up).
+    struct DeltaPiece: Equatable {
+        let text: String
+        let direction: Int
     }
 
-    var activityText: String? {
-        let leadTool = today.byTool?.max(by: { $0.value.cost < $1.value.cost })?.key
-        // top_models_by_cost is the served spend podium. The fallback takes a
-        // maximum over the FULL list, never over topModels: that array holds the
-        // five biggest models by tokens, which need not contain the costliest.
-        let leadModel = today.topModelsByCost?.first
-            ?? (today.combinedModels ?? today.topModels ?? []).max(by: { $0.cost < $1.cost })
-        guard let tool = leadTool, let model = leadModel else { return nil }
-        let modelName = model.name.split(separator: "/").last.map(String.init) ?? model.name
-        return L10n.t("most_used_today", tool, modelName)
+    var deltaSentence: String { L10n.t(period.vsKey) }
+
+    /// `{glyph} {pct}% cost · {glyph} {pct}% tokens · {glyph} {pct}% msgs {sentence}`.
+    /// A null metric is omitted; all three null hides the row entirely (healthy-year).
+    var deltaPieces: [DeltaPiece]? {
+        guard components.fullDeltaRow, let comparison = usage?.comparison else { return nil }
+        var pieces: [DeltaPiece] = []
+        if let pct = comparison.costPct {
+            pieces.append(Self.deltaPiece(L10n.t("delta_cost", Self.deltaGlyph(pct), Self.deltaValue(pct)), pct: pct))
+        }
+        if let pct = comparison.tokensPct {
+            pieces.append(Self.deltaPiece(L10n.t("delta_tokens", Self.deltaGlyph(pct), Self.deltaValue(pct)), pct: pct))
+        }
+        if let pct = comparison.messagesPct {
+            pieces.append(Self.deltaPiece(L10n.t("delta_msgs", Self.deltaGlyph(pct), Self.deltaValue(pct)), pct: pct))
+        }
+        return pieces.isEmpty ? nil : pieces
+    }
+
+    /// Flat text of the delta line (what the contract tests pin).
+    var deltaRowText: String? {
+        guard let pieces = deltaPieces else { return nil }
+        return pieces.map(\.text).joined(separator: " · ") + " " + deltaSentence
+    }
+
+    /// Glyph: `▲` for > 0, `▼` for < 0, `±` for exactly 0.
+    nonisolated static func deltaGlyph(_ pct: Double) -> String {
+        pct > 0 ? "▲" : (pct < 0 ? "▼" : "±")
+    }
+
+    /// abs(round(pct)): -11.7 renders 12.
+    nonisolated static func deltaValue(_ pct: Double) -> Int {
+        Int(pct.rounded()).magnitude
+    }
+
+    private nonisolated static func deltaPiece(_ text: String, pct: Double) -> DeltaPiece {
+        DeltaPiece(text: text, direction: pct > 0 ? 1 : (pct < 0 ? -1 : 0))
+    }
+
+    /// The shipped single comparison line, cost-only and worded ("12% below
+    /// yesterday") - what the hero shows with `fullDeltaRow` off (1.0.2 behavior,
+    /// except the sentence now follows the selected segment like every period string).
+    var comparisonLine: String? {
+        guard !components.fullDeltaRow, let pct = usage?.comparison?.costPct else { return nil }
+        let word = L10n.t(period.wordKey)
+        return pct <= 0
+            ? L10n.t("comparison_below", Int(abs(pct)), word)
+            : L10n.t("comparison_above", Int(abs(pct)), word)
+    }
+
+    /// Color signal for the cost-only line: -1 "below" / +1 "above" (nil with no line).
+    var comparisonDirection: Int? {
+        guard comparisonLine != nil, let pct = usage?.comparison?.costPct else { return nil }
+        return pct < 0 ? -1 : (pct > 0 ? 1 : 0)
+    }
+
+    // MARK: Top ranks (E3)
+
+    struct RankEntry: Identifiable, Equatable {
+        let id: String
+        let label: String
+        let valueText: String
+        let logoAsset: String?
+        /// Bar width 0...1 relative to the biggest entry of the SAME list (mock §ranks).
+        let fraction: Double
+    }
+
+    /// by_tool sorted by tokens descending, top 3. Labels are display names, values
+    /// compact tokens; a tool id with no shipped mark gets NO logo (never a placeholder).
+    var topTools: [RankEntry] {
+        guard components.topRanks, let usage else { return [] }
+        let sorted = (usage.byTool ?? [:]).sorted {
+            if $0.value.tokens != $1.value.tokens { return $0.value.tokens > $1.value.tokens }
+            return $0.key < $1.key
+        }
+        let shown = sorted.prefix(3)
+        let maxTokens = max(shown.map { $0.value.tokens }.max() ?? 0, 1)
+        return shown.map { entry in
+            RankEntry(id: entry.key,
+                      label: CompanionStore.toolDisplayName(for: entry.key),
+                      valueText: Self.compactTokens(entry.value.tokens),
+                      logoAsset: CompanionStore.logoAssetName(for: entry.key),
+                      fraction: Double(entry.value.tokens) / Double(maxTokens))
+        }
+    }
+
+    /// First three of combined_models (tokens-ranked) - never a cost sort - with the
+    /// provider prefix stripped and no logos on model rows.
+    var topModels: [RankEntry] {
+        guard components.topRanks, let usage else { return [] }
+        let list = usage.combinedModels ?? usage.topModels ?? []
+        let shown = Array(list.prefix(3))
+        let maxTokens = max(shown.map(\.tokens).max() ?? 0, 1)
+        return shown.map { model in
+            RankEntry(id: model.name,
+                      label: CompanionStore.stripProviderPrefix(model.name),
+                      valueText: Self.compactTokens(model.tokens),
+                      logoAsset: nil,
+                      fraction: Double(model.tokens) / Double(maxTokens))
+        }
+    }
+
+    var toolsKickerText: String { L10n.t("top_tools_kicker", L10n.t(period.suffixKey)) }
+    var modelsKickerText: String { L10n.t("top_models_kicker", L10n.t(period.suffixKey)) }
+
+    // MARK: Reset credits (E2)
+
+    /// The quiet row under the provider group in the All view: rendered only when the
+    /// component is on, quota tracking is enabled, the provider is Codex, and
+    /// available_count >= 1. The Low view never shows it (provider context, not a window).
+    func creditsNotice(providerDisplay: String, canonicalProvider: String,
+                       resetCredits: ResetCredits?) -> String? {
+        guard components.resetCredits, quota.enabled,
+              canonicalProvider.lowercased() == "codex",
+              let resetCredits, (resetCredits.availableCount ?? 0) >= 1 else { return nil }
+        return Self.creditsRowText(provider: providerDisplay, reset: resetCredits, now: now)
+    }
+
+    /// "⚡ Codex · 2 reset credits · expire in 2 d" from the soonest FUTURE credit;
+    /// expired entries are ignored, and with no future expiry the whole clause (the
+    /// "expire" word included) drops away.
+    static func creditsRowText(provider: String, reset: ResetCredits, now: Date) -> String {
+        let count = reset.availableCount ?? 0
+        let futures = (reset.credits ?? []).compactMap { credit -> Date? in
+            guard let raw = credit.expiresAt, let date = CompanionStore.parseTimestamp(raw), date > now else { return nil }
+            return date
+        }
+        guard let soonest = futures.min() else {
+            return L10n.t("credits_row_plain", provider, count)
+        }
+        return L10n.t("credits_row", provider, count, CompanionStore.creditsClause(expiry: soonest, now: now))
+    }
+
+    // MARK: Activity glance (E9)
+
+    enum GlanceFace: Equatable {
+        case hours(bars: [Int], peakHour: Int?)
+        case days(tokens: [Int])   // exactly 7 columns, Mon..Sun, gaps = 0
+        case grid(columns: [[Int?]], filledCells: Int, windowDays: Int, firstCellDate: String)
+    }
+
+    var glanceFace: GlanceFace? {
+        CompanionStore.glanceFace(period: period, insights: insights, stats: stats,
+                                  components: components, calendar: .current)
     }
 
     /// Windows below their low-quota threshold, sorted by remaining ascending.
@@ -819,10 +1517,11 @@ struct Snapshot {
     /// (spec §7), not a full-surface failure. GROUP failure = status != "ok" OR a non-empty
     /// status_detail (e.g. stale_token, even when status is "ok"); a provider with several
     /// credentials reports the detail for the whole provider, so this stays broad.
-    var allQuotaGroups: [(provider: String, rows: [QuotaRow], failed: Bool)] {
+    var allQuotaGroups: [(provider: String, canonicalProvider: String, rows: [QuotaRow], failed: Bool,
+                          providerEntry: ProviderQuota?)] {
         guard quota.enabled else { return [] }
         let providers = quota.providers ?? [:]
-        return providers.compactMap { (name, prov) -> (provider: String, rows: [QuotaRow], failed: Bool)? in
+        return providers.compactMap { (name, prov) -> (provider: String, canonicalProvider: String, rows: [QuotaRow], failed: Bool, providerEntry: ProviderQuota?)? in
             let nameParts = name.components(separatedBy: " · ")
             let canonicalProvider = nameParts.last ?? name
             let display = nameParts.count == 1
@@ -836,7 +1535,7 @@ struct Snapshot {
             }
             if canonicalProvider.lowercased() == "antigravity" { rows = Self.antigravityPools(rows) }
             guard !rows.isEmpty else { return nil }
-            return (display, rows, failed)
+            return (display, canonicalProvider, rows, failed, prov)
         }
     }
 
@@ -1092,12 +1791,113 @@ struct QuotaRow: Identifiable {
     }
 }
 
+// MARK: - Period / components / per-server value types
+
+/// The flyout's single selected period. `token` goes on the wire (`period=`);
+/// the key sets localize every period-dependent string, so no format string ever
+/// hardcodes "today" (contract: period strings follow the selected segment).
+enum UsagePeriod: String, Codable, CaseIterable, Sendable {
+    case today
+    case week
+    case month
+    case year
+
+    var token: String { rawValue }
+    var segmentKey: String { "period_\(rawValue)" }
+    var kickerKey: String {
+        switch self {
+        case .today: return "today"
+        case .week: return "kicker_week"
+        case .month: return "kicker_month"
+        case .year: return "kicker_year"
+        }
+    }
+    /// Hero-rank suffix: "today" / "this week" / "this month" / "this year".
+    var suffixKey: String { "suffix_\(rawValue)" }
+    /// Delta-row sentence: "vs yesterday" / "vs last week" / ...
+    var vsKey: String {
+        switch self {
+        case .today: return "vs_yesterday"
+        case .week: return "vs_last_week"
+        case .month: return "vs_last_month"
+        case .year: return "vs_last_year"
+        }
+    }
+    /// Cost-only comparison word: "yesterday" / "last week" / ...
+    var wordKey: String {
+        switch self {
+        case .today: return "word_yesterday"
+        case .week: return "word_last_week"
+        case .month: return "word_last_month"
+        case .year: return "word_last_year"
+        }
+    }
+    /// Failure-hero title key: "Today's data unavailable" / "This week's data unavailable" / ...
+    var unavailableKey: String { "unavailable_\(rawValue)" }
+}
+
+/// Settings v3 "Components" toggles (contract schema). Every key defaults true and a
+/// whole MISSING components object means all-on, so a v2 file upgrades untouched.
+struct CompanionComponents: Codable, Equatable, Sendable {
+    var fullDeltaRow = true
+    var topRanks = true
+    var resetCredits = true
+    var activityGlance = true
+    var activityHistogramTodayWeek = true
+    var perServerRows = true
+
+    init() {}
+
+    private enum CodingKeys: String, CodingKey {
+        case fullDeltaRow, topRanks, resetCredits, activityGlance
+        case activityHistogramTodayWeek, perServerRows
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        fullDeltaRow = try values.decodeIfPresent(Bool.self, forKey: .fullDeltaRow) ?? true
+        topRanks = try values.decodeIfPresent(Bool.self, forKey: .topRanks) ?? true
+        resetCredits = try values.decodeIfPresent(Bool.self, forKey: .resetCredits) ?? true
+        activityGlance = try values.decodeIfPresent(Bool.self, forKey: .activityGlance) ?? true
+        activityHistogramTodayWeek = try values.decodeIfPresent(Bool.self, forKey: .activityHistogramTodayWeek) ?? true
+        perServerRows = try values.decodeIfPresent(Bool.self, forKey: .perServerRows) ?? true
+    }
+}
+
+/// One server's contribution to this cycle's hero, kept for the per-server rows.
+/// `usage == nil` marks an unreachable server (never dimmed numbers).
+struct PerServerUsage: Sendable {
+    let label: String
+    let usage: UsageResponse?
+
+    var reachable: Bool { usage != nil }
+    var costText: String { String(format: "$%.2f", usage?.totalCost ?? 0) }
+    var tokensCompact: String { Snapshot.compactTokens(usage?.totalTokens ?? 0) }
+}
+
+/// View-ready per-server row: label + "cost · compact tokens", or label + "unreachable".
+struct PerServerRow: Identifiable, Equatable {
+    let id: String     // server label doubles as identity for a single cycle
+    let label: String
+    let valueText: String
+    let reachable: Bool
+
+    init(_ usage: PerServerUsage) {
+        id = usage.label
+        label = usage.label
+        reachable = usage.reachable
+        valueText = usage.reachable
+            ? "\(usage.costText) · \(usage.tokensCompact)"
+            : L10n.t("server_unreachable_short")
+    }
+}
+
 // MARK: - Settings
 
 struct CompanionSettings: Codable {
     static let defaultBaseURL = "http://127.0.0.1:55423"
 
-    var version: Int = 2
+    var version: Int = 3
     var servers: [CompanionServerSettings] = [.make(baseURL: CompanionSettings.defaultBaseURL)]
     var baseURL: String {
         get { servers.first(where: { $0.enabled })?.baseURL ?? servers.first?.baseURL ?? Self.defaultBaseURL }
@@ -1120,6 +1920,10 @@ struct CompanionSettings: Codable {
     var availableUpdateURL: String? = nil
     /// A version the user explicitly skipped; suppresses the badge for that version only.
     var skippedUpdateVersion: String? = nil
+    /// v3: the six feature components (contract schema) and the selected segment.
+    var components: CompanionComponents = CompanionComponents()
+    /// v3: persisted separately from components - it's a preference, not a toggle.
+    var selectedPeriod: UsagePeriod = .today
 
     private enum CodingKeys: String, CodingKey {
         case version
@@ -1134,6 +1938,8 @@ struct CompanionSettings: Codable {
         case availableUpdateVersion
         case availableUpdateURL
         case skippedUpdateVersion
+        case components
+        case selectedPeriod
     }
 
     init(
@@ -1146,9 +1952,13 @@ struct CompanionSettings: Codable {
         lastUpdateCheckAt: Date? = nil,
         availableUpdateVersion: String? = nil,
         availableUpdateURL: String? = nil,
-        skippedUpdateVersion: String? = nil
+        skippedUpdateVersion: String? = nil,
+        components: CompanionComponents = CompanionComponents(),
+        selectedPeriod: UsagePeriod = .today
     ) {
-        self.version = 2
+        self.version = 3
+        self.components = components
+        self.selectedPeriod = selectedPeriod
         self.servers = [.make(baseURL: baseURL)]
         self.launchAtLogin = launchAtLogin
         self.lowQuotaNotifications = lowQuotaNotifications
@@ -1166,7 +1976,7 @@ struct CompanionSettings: Codable {
     /// never resets the server URL or opt-ins.
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
-        version = 2
+        version = 3
         if let decoded = try values.decodeIfPresent([CompanionServerSettings].self, forKey: .servers), !decoded.isEmpty {
             servers = decoded
         } else {
@@ -1182,11 +1992,18 @@ struct CompanionSettings: Codable {
         availableUpdateVersion = try values.decodeIfPresent(String.self, forKey: .availableUpdateVersion)
         availableUpdateURL = try values.decodeIfPresent(String.self, forKey: .availableUpdateURL)
         skippedUpdateVersion = try values.decodeIfPresent(String.self, forKey: .skippedUpdateVersion)
+        // v2 files have no components/selectedPeriod: absent means all-on / today, so
+        // upgrading never silently disables a shipped feature (contract schema v3).
+        components = try values.decodeIfPresent(CompanionComponents.self, forKey: .components) ?? CompanionComponents()
+        // Decode the period as a string first: a value written by a FUTURE build (a new
+        // segment) falls back to today instead of throwing away the whole settings file.
+        let periodRaw = try values.decodeIfPresent(String.self, forKey: .selectedPeriod)
+        selectedPeriod = periodRaw.flatMap(UsagePeriod.init(rawValue:)) ?? .today
     }
 
     func encode(to encoder: Encoder) throws {
         var values = encoder.container(keyedBy: CodingKeys.self)
-        try values.encode(2, forKey: .version)
+        try values.encode(3, forKey: .version)
         try values.encode(servers, forKey: .servers)
         try values.encode(launchAtLogin, forKey: .launchAtLogin)
         try values.encode(lowQuotaNotifications, forKey: .lowQuotaNotifications)

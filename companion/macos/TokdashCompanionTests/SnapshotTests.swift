@@ -20,7 +20,9 @@ final class SnapshotTests: XCTestCase {
     func testCompactTokens() {
         XCTAssertEqual(Snapshot.compactTokens(0), "0")
         XCTAssertEqual(Snapshot.compactTokens(999), "999")
-        XCTAssertEqual(Snapshot.compactTokens(249669), "249k")
+        // v1.1 contract: round (not floor) to the shown precision; the M tier also
+        // drops a trailing ".0" (12,982,308 -> "13M"). See ContractV11Tests for those.
+        XCTAssertEqual(Snapshot.compactTokens(249669), "250k")
         XCTAssertEqual(Snapshot.compactTokens(18_700_000), "18.7M")
     }
 
@@ -123,7 +125,7 @@ final class SnapshotTests: XCTestCase {
         XCTAssertEqual(L10n.t("percent_left", 14), "剩余 14%")
         XCTAssertEqual(L10n.t("server_connected", "wsl"), "wsl · 已连接")
         XCTAssertEqual(CompanionStore.serverLabel(for: "http://127.0.0.1:55423"), "本地")
-        XCTAssertEqual(L10n.t("comparison_below", 12), "低于昨日 12%")
+        XCTAssertEqual(L10n.t("comparison_below", 12, L10n.t("word_yesterday")), "低于昨日 12%")
         XCTAssertEqual(L10n.t("resets_in_hours", 5, ""), "5 小时后重置")
         XCTAssertEqual(L10n.t("resets_in_days", 3, ""), "3 天后重置")
         XCTAssertEqual(makeClaudeRow(bucket: "session", label: "Session", left: 14).displayBucketLabel, "5 小时")
@@ -168,6 +170,9 @@ final class SnapshotTests: XCTestCase {
         XCTAssertTrue(settings.lowQuotaNotifications)
         XCTAssertEqual(settings.thresholds, QuotaThresholds(fiveHour: 27, weekly: 13, other: 19))
         XCTAssertEqual(settings.language, .system)
+        // v3: a v1/v2 file upgrades without disabling anything (contract schema v3).
+        XCTAssertEqual(settings.components, CompanionComponents())
+        XCTAssertEqual(settings.selectedPeriod, .today)
 
         let migratedData = try JSONEncoder().encode(settings)
         let migrated = try JSONDecoder().decode(CompanionSettings.self, from: migratedData)
@@ -210,7 +215,7 @@ final class SnapshotTests: XCTestCase {
             ])],
             timestamp: nil
         )
-        let snap = Snapshot(today: .empty, month: .empty, quota: quota, thresholds: .defaults)
+        let snap = Snapshot(quota: quota, thresholds: .defaults)
         let low = snap.lowQuotaRows
 
         XCTAssertEqual(low.count, 1)
@@ -229,7 +234,7 @@ final class SnapshotTests: XCTestCase {
             ])],
             timestamp: nil
         )
-        let snap = Snapshot(today: .empty, month: .empty, quota: quota, thresholds: .defaults)
+        let snap = Snapshot(quota: quota, thresholds: .defaults)
         let low = snap.lowQuotaRows
 
         XCTAssertEqual(low.count, 2)
@@ -248,8 +253,7 @@ final class SnapshotTests: XCTestCase {
 
         XCTAssertEqual(String(combined.totalTokens), expectedToday["tokens_exact"] as? String)
         XCTAssertEqual(String(combined.totalMessages), expectedToday["messages"] as? String)
-        XCTAssertEqual(Snapshot(today: combined, month: .empty, quota: .empty, thresholds: .defaults).todayCostText,
-                       expectedToday["cost"] as? String)
+        XCTAssertEqual(Snapshot(usage: combined).costText, expectedToday["cost"] as? String)
         XCTAssertEqual(Int((combined.comparison?.costPct ?? 0).rounded()), -12)
 
         let quotaData = try Data(contentsOf: contractURL("fixtures/quota.json"))
@@ -258,13 +262,14 @@ final class SnapshotTests: XCTestCase {
         for label in ["Local", "Second"] {
             for (provider, value) in quota.providers ?? [:] { providers["\(label) · \(provider)"] = value }
         }
-        let snap = Snapshot(today: combined, month: .empty,
-                            quota: QuotaResponse(enabled: true, providers: providers, timestamp: nil), thresholds: .defaults)
+        let snap = Snapshot(usage: combined,
+                            quota: QuotaResponse(enabled: true, providers: providers, timestamp: nil),
+                            thresholds: .defaults)
         let expectedLow = try XCTUnwrap(expected["quota_low"] as? [String: Any])
         XCTAssertEqual(expectedLow["dedupe_identical_subscriptions"] as? Bool, true)
         XCTAssertLessThanOrEqual(snap.lowQuotaRows.count, try XCTUnwrap(expectedLow["visible_count_max"] as? Int))
         XCTAssertTrue(snap.lowQuotaRows.allSatisfy { !$0.provider.contains(" · ") })
-        let lowerCaseLabelSnap = Snapshot(today: .empty, month: .empty,
+        let lowerCaseLabelSnap = Snapshot(
             quota: QuotaResponse(enabled: true, providers: ["wsl · codex": try XCTUnwrap(quota.providers?["codex"])], timestamp: nil),
             thresholds: .defaults)
         XCTAssertEqual(lowerCaseLabelSnap.allQuotaGroups.first?.provider, "wsl · Codex")
@@ -299,11 +304,16 @@ final class SnapshotTests: XCTestCase {
         XCTAssertFalse(topModels.contains { $0.name == costLeader.name },
                        "the costliest model must sit outside the token podium")
 
-        let activity = try XCTUnwrap(
-            Snapshot(today: today, month: .empty, quota: .empty, thresholds: .defaults).activityText)
-        XCTAssertTrue(activity.contains("o5-deep-research"))
-        XCTAssertFalse(activity.contains("gpt-5.6-sol"),
-                       "a maximum by cost over top_models would have named this model")
+        // E3: the ranks strip shows the FIRST THREE of combined_models (tokens-ranked),
+        // never a cost sort - which is exactly what the podium trap above punishes.
+        let ranks = Snapshot(usage: today).topModels
+        XCTAssertEqual(ranks.map(\.label), combined.prefix(3).map { CompanionStore.stripProviderPrefix($0.name) })
+        XCTAssertFalse(ranks.contains { $0.label.contains("o5-deep-research") },
+                       "the costliest model sits outside the token podium and must not be promoted")
+        // Model rows never carry logos; the value is compact tokens.
+        XCTAssertTrue(ranks.allSatisfy { $0.logoAsset == nil })
+        XCTAssertEqual(ranks[0].valueText, Snapshot.compactTokens(combined[0].tokens))
+        _ = costLeader
     }
 
     func testCombineUsageRanksBothPodiumsFromTheFullList() throws {
@@ -345,9 +355,7 @@ final class SnapshotTests: XCTestCase {
         XCTAssertNil(accounts[0].statusDetail)
         XCTAssertEqual(accounts[1].statusDetail, "stale_token")
 
-        let snap = Snapshot(today: .empty, month: .empty,
-                            quota: QuotaResponse(enabled: true, providers: ["claude": prov],
-                                                 timestamp: nil),
+        let snap = Snapshot(quota: QuotaResponse(enabled: true, providers: ["claude": prov], timestamp: nil),
                             thresholds: .defaults)
         let group = try XCTUnwrap(snap.allQuotaGroups.first)
         // The card still warns: one broken credential has to keep warning the provider.
@@ -365,9 +373,8 @@ final class SnapshotTests: XCTestCase {
         let legacy = ProviderQuota(estimated: prov.estimated, buckets: prov.buckets,
                                    status: prov.status, statusDetail: prov.statusDetail,
                                    statusAt: prov.statusAt, accounts: nil)
-        let legacySnap = Snapshot(today: .empty, month: .empty,
-                                  quota: QuotaResponse(enabled: true,
-                                                       providers: ["claude": legacy], timestamp: nil),
+        let legacySnap = Snapshot(quota: QuotaResponse(enabled: true,
+                                                        providers: ["claude": legacy], timestamp: nil),
                                   thresholds: .defaults)
         let legacyRows = try XCTUnwrap(legacySnap.allQuotaGroups.first).rows
         XCTAssertEqual(Dictionary(uniqueKeysWithValues: legacyRows.map { ($0.bucket, $0.failed) })["weekly_scoped_opus"],
@@ -429,7 +436,7 @@ final class SnapshotTests: XCTestCase {
             ],
             timestamp: nil
         )
-        let snap = Snapshot(today: .empty, month: .empty, quota: quota, thresholds: .defaults)
+        let snap = Snapshot(quota: quota, thresholds: .defaults)
         let groups = snap.allQuotaGroups
         let codex = groups.first(where: { $0.provider == "Codex" })!
         let antigravity = groups.first(where: { $0.provider == "Antigravity" })!
@@ -467,7 +474,7 @@ final class SnapshotTests: XCTestCase {
                 BucketQuota(bucket: "5h", bucketLabel: "5-hour", remainingPercent: remaining, resetsAt: resetsAt, account: "a")
             ], status: status, statusDetail: detail)
         ], timestamp: nil)
-        return Snapshot(today: .empty, month: .empty, quota: quota, thresholds: .defaults)
+        return Snapshot(quota: quota, thresholds: .defaults)
     }
 
     @MainActor
@@ -512,7 +519,7 @@ final class SnapshotTests: XCTestCase {
                 BucketQuota(bucket: "cn_general_5h", bucketLabel: "CN 5-hour", remainingPercent: staleRemaining, resetsAt: 1782910800, account: "cn", capturedAt: SnapshotTests.statusAt - 30000),
             ], status: "ok", statusDetail: "stale_token", statusAt: statusAt)
         ], timestamp: nil)
-        return Snapshot(today: .empty, month: .empty, quota: quota, thresholds: .defaults)
+        return Snapshot(quota: quota, thresholds: .defaults)
     }
 
     // A fully failed provider: every bucket predates the failure, so no row is eligible.
@@ -522,7 +529,7 @@ final class SnapshotTests: XCTestCase {
                 BucketQuota(bucket: "5h", bucketLabel: "5-hour", remainingPercent: remaining, resetsAt: 1782910800, account: "a", capturedAt: SnapshotTests.statusAt - 30000)
             ], status: "error", statusDetail: "fetch_error", statusAt: SnapshotTests.statusAt)
         ], timestamp: nil)
-        return Snapshot(today: .empty, month: .empty, quota: quota, thresholds: .defaults)
+        return Snapshot(quota: quota, thresholds: .defaults)
     }
 
     @MainActor

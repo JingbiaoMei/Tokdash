@@ -32,8 +32,45 @@ actor TokdashClient {
         try await get("/api/usage?period=\(period)", timeout: 20)
     }
 
+    /// Calendar-week window: `date_from`/`date_to` (local Monday .. today). `period=week`
+    /// is a rolling 7-day window and must never be used for the segment. Contract §Period windows.
+    func usageRange(from: String, to: String) async throws -> UsageResponse {
+        try await get("/api/usage?date_from=\(from)&date_to=\(to)", timeout: 20)
+    }
+
+    func activeTime(period: String) async throws -> ActiveTimeResponse {
+        try await get("/api/active-time?period=\(period)", timeout: 20)
+    }
+
+    func activeTimeRange(from: String, to: String) async throws -> ActiveTimeResponse {
+        try await get("/api/active-time?date_from=\(from)&date_to=\(to)", timeout: 20)
+    }
+
+    func insightsHourlyToday() async throws -> InsightsResponse {
+        try await get("/api/insights?facets=hourly&period=today", timeout: 20)
+    }
+
+    func insightsDaily(from: String, to: String) async throws -> InsightsResponse {
+        try await get("/api/insights?facets=daily&date_from=\(from)&date_to=\(to)", timeout: 20)
+    }
+
+    func stats() async throws -> StatsResponse {
+        try await get("/api/stats", timeout: 20)
+    }
+
     func quota() async throws -> QuotaResponse {
         try await get("/api/quota", timeout: 20)
+    }
+
+    /// Settings-only diagnostics (contract: never the flyout, never on a schedule).
+    func serverVersion() async throws -> VersionResponse {
+        try await get("/api/version", timeout: 10)
+    }
+
+    /// Settings-only. Deliberately consent-gated server-side and read-only; the consent
+    /// POST stays web-only, the companion never writes.
+    func serverUpdateCheck() async throws -> ServerUpdateCheckResponse {
+        try await get("/api/update-check", timeout: 20)
     }
 
     // MARK: - Core
@@ -175,20 +212,30 @@ struct Comparison: Decodable, Sendable {
     let tokensPct: Double?
     let costPct: Double?
     let messagesPct: Double?
+    // The *_prev fields let a multi-server companion recompute each percentage from
+    // summed current and previous totals (contract §Full delta row). A metric whose
+    // *_prev is omitted by any contributing server is omitted from the combined row.
     let costPrev: Double?
+    let tokensPrev: Double?
+    let messagesPrev: Double?
 
     enum CodingKeys: String, CodingKey {
         case tokensPct = "tokens_pct"
         case costPct = "cost_pct"
         case messagesPct = "messages_pct"
         case costPrev = "cost_prev"
+        case tokensPrev = "tokens_prev"
+        case messagesPrev = "messages_prev"
     }
 
-    init(tokensPct: Double? = nil, costPct: Double? = nil, messagesPct: Double? = nil, costPrev: Double? = nil) {
+    init(tokensPct: Double? = nil, costPct: Double? = nil, messagesPct: Double? = nil,
+         costPrev: Double? = nil, tokensPrev: Double? = nil, messagesPrev: Double? = nil) {
         self.tokensPct = tokensPct
         self.costPct = costPct
         self.messagesPct = messagesPct
         self.costPrev = costPrev
+        self.tokensPrev = tokensPrev
+        self.messagesPrev = messagesPrev
     }
 
     init(from decoder: Decoder) throws {
@@ -197,6 +244,8 @@ struct Comparison: Decodable, Sendable {
         costPct = try values.decodeIfPresent(Double.self, forKey: .costPct)
         messagesPct = try values.decodeIfPresent(Double.self, forKey: .messagesPct)
         costPrev = try values.decodeIfPresent(Double.self, forKey: .costPrev)
+        tokensPrev = try values.decodeIfPresent(Double.self, forKey: .tokensPrev)
+        messagesPrev = try values.decodeIfPresent(Double.self, forKey: .messagesPrev)
     }
 }
 
@@ -229,22 +278,47 @@ struct ProviderQuota: Decodable, Sendable {
     // Absent for single-credential providers and for every pre-`accounts` server. Spec §7.
     let accounts: [AccountQuota]?
 
-    enum CodingKeys: String, CodingKey {
-        case estimated, buckets, status, accounts
-        case statusDetail = "status_detail"
-        case statusAt = "status_at"
-    }
-
     // Explicit memberwise init (with defaults) so test construction with status/
     // statusDetail resolves; Decodable's init(from:) is still synthesized.
     init(estimated: Bool? = nil, buckets: [BucketQuota]? = nil, status: String? = nil,
-         statusDetail: String? = nil, statusAt: Int? = nil, accounts: [AccountQuota]? = nil) {
+         statusDetail: String? = nil, statusAt: Int? = nil, accounts: [AccountQuota]? = nil,
+         resetCredits: ResetCredits? = nil) {
         self.estimated = estimated
         self.buckets = buckets
         self.status = status
         self.statusDetail = statusDetail
         self.statusAt = statusAt
         self.accounts = accounts
+        self.resetCredits = resetCredits
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case estimated, buckets, status, accounts
+        case statusDetail = "status_detail"
+        case statusAt = "status_at"
+        case resetCredits = "reset_credits"
+    }
+}
+
+/// `providers.codex.reset_credits` (contract §Reset credits). `expires_at` is an
+/// ISO 8601 *string* - unlike the epoch numbers everywhere else in the quota payload.
+struct ResetCredits: Decodable, Sendable, Equatable {
+    let availableCount: Int?
+    let credits: [ResetCredit]?
+
+    enum CodingKeys: String, CodingKey {
+        case availableCount = "available_count"
+        case credits
+    }
+}
+
+struct ResetCredit: Decodable, Sendable, Equatable {
+    let id: String?
+    let expiresAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case expiresAt = "expires_at"
     }
 }
 
@@ -320,4 +394,90 @@ extension UsageResponse {
 
 extension QuotaResponse {
     static let empty = QuotaResponse(enabled: false, providers: nil, timestamp: nil)
+}
+
+// MARK: - v1.1 optional-section payloads (additive; failure/404 hides the section silently)
+
+/// `GET /api/active-time` (selected period). `active_ms` is MILLISECONDS - every duration
+/// in this payload is; every epoch in the quota payload is seconds. `by_tool`, `comparison`
+/// and the `*_sum` fields are not rendered in v1.1 and decode-ignored.
+struct ActiveTimeResponse: Decodable, Sendable {
+    let activeMs: Int?
+    let timestamp: String?
+
+    enum CodingKeys: String, CodingKey {
+        case activeMs = "active_ms"
+        case timestamp
+    }
+}
+
+/// `GET /api/insights?facets=hourly...` / `?facets=daily...`. Exactly one facet per
+/// request; only the requested facet is present.
+struct InsightsResponse: Decodable, Sendable {
+    let hourly: HourlyFacet?
+    let daily: [DailyPoint]?
+}
+
+struct HourlyFacet: Decodable, Sendable {
+    let buckets: [HourBucket]?
+    let peakHour: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case buckets
+        case peakHour = "peak_hour"
+    }
+}
+
+struct HourBucket: Decodable, Sendable {
+    let hour: Int?
+    let tokens: Int?
+}
+
+/// One day of the `daily` facet. Sparse: a date with no usage has no entry.
+struct DailyPoint: Decodable, Sendable {
+    let date: String?
+    let tokens: Int?
+    let intensity: Int?
+}
+
+/// `GET /api/stats` - a rolling 365 days of contributions; v1.1 windows it client-side
+/// (trailing 90 days for month, 180 for year). `summary.*` / `stats.*` are not rendered.
+struct StatsResponse: Decodable, Sendable {
+    let contributions: [Contribution]?
+}
+
+struct Contribution: Decodable, Sendable {
+    let date: String?
+    let totals: ContributionTotals?
+    // int 0..4, ranked quartiles server-side
+    let intensity: Int?
+}
+
+struct ContributionTotals: Decodable, Sendable {
+    let tokens: Int?
+}
+
+/// `GET /api/version` - Settings only.
+struct VersionResponse: Decodable, Sendable {
+    let runtimeVersion: String?
+    let updateCheckEnabled: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case runtimeVersion = "runtime_version"
+        case updateCheckEnabled = "update_check_enabled"
+    }
+}
+
+/// `GET /api/update-check` - Settings only, never a POST. `enabled == false` means the
+/// server has no update-check consent: render nothing, never try to change that.
+struct ServerUpdateCheckResponse: Decodable, Sendable {
+    let enabled: Bool?
+    let updateAvailable: Bool?
+    let latest: String?
+
+    enum CodingKeys: String, CodingKey {
+        case enabled
+        case updateAvailable = "update_available"
+        case latest
+    }
 }

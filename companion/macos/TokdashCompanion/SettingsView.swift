@@ -10,6 +10,7 @@ struct SettingsView: View {
     @State private var otherThreshold: Double = 15
     @State private var language: AppLanguage = .system
     @State private var automaticUpdateChecks: Bool = false
+    @State private var components: CompanionComponents = CompanionComponents()
     @State private var serverSaveTasks: [String: Task<Void, Never>] = [:]
     @State private var testResults: [String: ConnectionTest] = [:]
     @State private var testTasks: [String: Task<Void, Never>] = [:]
@@ -63,6 +64,16 @@ struct SettingsView: View {
                     Text(L10n.t("threshold_other", Int(otherThreshold)))
                 }
             }
+            // v1.1 feature components (Settings schema v3). All six default on; a v2
+            // file decodes to all-on, so upgrading never silently hides a feature.
+            Section(L10n.t("section_components")) {
+                componentToggle("comp_full_delta_row", desc: "comp_full_delta_row_desc", isOn: $components.fullDeltaRow)
+                componentToggle("comp_top_ranks", desc: "comp_top_ranks_desc", isOn: $components.topRanks)
+                componentToggle("comp_reset_credits", desc: "comp_reset_credits_desc", isOn: $components.resetCredits)
+                componentToggle("comp_activity_glance", desc: "comp_activity_glance_desc", isOn: $components.activityGlance)
+                componentToggle("comp_histogram_today_week", desc: "comp_histogram_today_week_desc", isOn: $components.activityHistogramTodayWeek)
+                componentToggle("comp_per_server_rows", desc: "comp_per_server_rows_desc", isOn: $components.perServerRows)
+            }
             Section(L10n.t("section_updates")) {
                 Text(L10n.t("update_current_version", CompanionStore.currentVersion))
                     .font(.caption)
@@ -83,6 +94,28 @@ struct SettingsView: View {
                 Text(store.lastUpdateCheckText)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                // E7: the SERVER's own runtime version and update badge, read on every
+                // Settings open (GET /api/version, then /api/update-check only when the
+                // server says update checks are enabled). Both are Settings-only reads,
+                // both fail silently, and the companion never POSTs.
+                if let runtime = store.serverRuntimeVersion {
+                    HStack {
+                        Text(L10n.t("server_runtime_row"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(L10n.t("server_runtime_version", runtime))
+                            .font(.caption)
+                            .monospacedDigit()
+                    }
+                }
+                if let badge = store.serverUpdateBadgeVersion {
+                    Label(L10n.t("server_update_available", badge), systemImage: "arrow.down.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             Section(L10n.t("section_language")) {
                 Picker(L10n.t("section_language"), selection: $language) {
@@ -102,8 +135,15 @@ struct SettingsView: View {
         // Match the clean white content surface used by standard settings windows in
         // light mode while retaining a readable system-managed surface in dark mode.
         .background(Color(nsColor: .textBackgroundColor).ignoresSafeArea())
-        .onAppear { loadSettings() }
+        .onAppear {
+            loadSettings()
+            store.fetchServerUpdateInfo()
+        }
         .onChange(of: launchAtLogin) { _, _ in saveSettings() }
+        .onChange(of: components) { _, _ in
+            saveSettings()
+            store.applyComponentsChange() // toggled components appear without a refetch
+        }
         .onChange(of: lowQuotaNotifications) { _, _ in saveSettings() }
         .onChange(of: fiveHourThreshold) { _, _ in saveSettings() }
         .onChange(of: weeklyThreshold) { _, _ in saveSettings() }
@@ -122,6 +162,16 @@ struct SettingsView: View {
             Button(L10n.t("cancel"), role: .cancel) { pendingRemovalID = nil }
         } message: {
             Text(L10n.t("remove_last_enabled_message"))
+        }
+    }
+
+    /// One Components toggle with its caption line (mock: title + short gray note).
+    private func componentToggle(_ titleKey: String, desc: String, isOn: Binding<Bool>) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Toggle(L10n.t(titleKey), isOn: isOn)
+            Text(L10n.t(desc))
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -352,6 +402,7 @@ struct SettingsView: View {
         otherThreshold = store.settings.thresholds.other
         language = store.settings.language
         automaticUpdateChecks = store.settings.automaticUpdateChecks
+        components = store.settings.components
     }
 
     private func scheduleServerSave(_ id: String) {
@@ -380,6 +431,7 @@ struct SettingsView: View {
         // Only persist the URL when it's a valid absolute http/https URL.
         store.settings.servers = validServers
         store.settings.lowQuotaNotifications = lowQuotaNotifications
+        store.settings.components = components
         let thresholds = QuotaThresholds(fiveHour: fiveHourThreshold, weekly: weeklyThreshold, other: otherThreshold)
         let thresholdsChanged = store.settings.thresholds != thresholds
         store.settings.thresholds = thresholds

@@ -36,7 +36,7 @@
       "kind": "day-histogram",
       "columns": 7,
       "labels": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
-      "missing_days": ["Wed"],
+      "missing_days": ["Tue"],
       "caption": null
     },
     "credits_row": null,

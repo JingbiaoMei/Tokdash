@@ -587,6 +587,9 @@ group in the All view**:
 - The Low view never shows the row (it is provider context, not a window).
 - The clock for "days remaining" is the client's own; tests freeze it to the
   payload `timestamp` so fixtures stay deterministic.
+- A muted "use or lose" hint is right-aligned on the same row (design from
+  the approved mock). It is static decoration, like the bolt: not part of the
+  pinned row string and not localized per-credit.
 
 ### Server update badge
 
@@ -632,7 +635,7 @@ pinned under the English locale; both suites run cases in English.
 | Case | Period | Fixtures | Expected outcome |
 |---|---|---|---|
 | `healthy` | today | usage-today + active-time-today + insights-today + quota | Connected; hero $3.42 / 18.7M / 248 · active 3 h 12 m; delta row "▼ 12% cost · ▼ 12% tokens · ▼ 12% msgs vs yesterday"; top tools "Codex 13M…" + top models "gpt-5.6-sol 12.7M…"; 24-bar histogram "Peak 14:00"; Low shows Claude weekly (8%) + Codex 5h (14%); no credits row |
-| `healthy-week` | week | usage-week + active-time-week + insights-week + quota | Week is a calendar window (`date_from` Mon..today, never `period=week`); hero $9.86 / 61.2M / 1043 · active 2 d 4 h; delta "…vs last week"; 7-column day histogram with an empty Wednesday column; kickers "this week" |
+| `healthy-week` | week | usage-week + active-time-week + insights-week + quota | Week is a calendar window (`date_from` Mon..today, never `period=week`); hero $9.86 / 61.2M / 1043 · active 2 d 4 h; delta "…vs last week"; 7-column day histogram with an empty Tuesday column; kickers "this week" |
 | `healthy-month` | month | usage-month + active-time-month + stats + quota | hero $48.90 / 281M / 4218 · active 9 d 20 h; delta "…vs last month"; 90-day Mon..Sun grid, 68 filled cells |
 | `healthy-year` | year | usage-year + active-time-year + stats + quota | hero $312.40 / 1243.5M / 13204 · active 74 d 5 h; delta row **absent** (previous year is zero, all `*_pct` null); 180-day grid, 143 filled cells |
 | `empty` | today | usage-today-empty + active-time-zero + insights-empty + quota | hero "No usage recorded today"; no active segment; no delta row; no top ranks; glance hidden (all-zero source) |

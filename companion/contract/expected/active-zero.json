@@ -1,0 +1,14 @@
+{
+  "case": "active-zero",
+  "period": "today",
+  "fixtures": {
+    "health": "health.json",
+    "usage": "usage-today.json",
+    "active_time": "active-time-zero.json",
+    "quota": "quota.json"
+  },
+  "expected": {
+    "today": { "cost": "$3.42", "active": null },
+    "comment": "active_ms 0 renders no segment - the segment is absent, not 'active 0 m'"
+  }
+}

@@ -1,13 +1,25 @@
 {
   "case": "multi-server",
+  "period": "today",
   "servers": [
-    { "id": "local", "label": "Local", "usage_today": "usage-today.json", "usage_month": "usage-month.json", "quota": "quota.json" },
-    { "id": "second", "label": "Second", "usage_today": "usage-today.json", "usage_month": "usage-month.json", "quota": "quota.json" }
+    { "id": "local", "label": "Local", "usage": "usage-today.json", "active_time": "active-time-today.json", "quota": "quota.json" },
+    { "id": "second", "label": "Second", "usage": "usage-today.json", "active_time": "active-time-today.json", "quota": "quota.json" }
   ],
   "expected": {
     "connection": "2 servers",
-    "today": { "cost": "$6.84", "tokens_exact": "37400000", "messages": "496", "comparison": "12% below yesterday" },
-    "month": { "cost": "$97.80", "tokens_exact": "562000000" },
+    "today": {
+      "cost": "$6.84",
+      "tokens_exact": "37400000",
+      "messages": "496",
+      "active": "active 6 h 24 m",
+      "active_comment": "union of two servers, each 3 h 12 m - the hero sums active_ms across reachable servers"
+    },
+    "delta_row": "▼ 12% cost · ▼ 12% tokens · ▼ 12% msgs vs yesterday",
+    "per_server_rows": [
+      { "label": "Local", "cost": "$3.42", "tokens_compact": "18.7M" },
+      { "label": "Second", "cost": "$3.42", "tokens_compact": "18.7M" }
+    ],
+    "per_server_footnote": "combined in hero · this cycle only",
     "quota_all_server_order": ["Local", "Second"],
     "quota_low": {
       "visible_count_max": 2,

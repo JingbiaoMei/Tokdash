@@ -1,0 +1,47 @@
+{
+  "case": "healthy-week",
+  "period": "week",
+  "fixtures": {
+    "health": "health.json",
+    "usage": "usage-week.json",
+    "active_time": "active-time-week.json",
+    "insights": "insights-week.json",
+    "quota": "quota.json"
+  },
+  "expected": {
+    "connection": "Local · Connected",
+    "dot": "ok",
+    "period_segment": { "visible": true, "selected": "Week" },
+    "week_request": {
+      "comment": "week must be a calendar week via date_from/date_to, never period=week",
+      "uses_date_range": true,
+      "date_from_weekday": "Mon",
+      "date_to": "the selected day"
+    },
+    "today": {
+      "cost": "$9.86",
+      "tokens_compact": "61.2M",
+      "tokens_exact": "61200000",
+      "messages": "1043",
+      "active": "active 2 d 4 h"
+    },
+    "delta_row": "▼ 10% cost · ▼ 8% tokens · ▼ 5% msgs vs last week",
+    "top_ranks": {
+      "kicker_tools": "Top tools · this week",
+      "kicker_models": "Top models · this week",
+      "tools": ["Codex 41.9M", "Claude 14.5M", "Kimi 4.8M"],
+      "models": ["gpt-5.6-sol 38.1M", "claude-opus-4-7 10.9M", "claude-sonnet-4-6 9.4M"]
+    },
+    "glance": {
+      "kind": "day-histogram",
+      "columns": 7,
+      "labels": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+      "missing_days": ["Wed"],
+      "caption": null
+    },
+    "credits_row": null,
+    "per_server_rows": null,
+    "banner": null,
+    "freshness_contains": "Updated"
+  }
+}

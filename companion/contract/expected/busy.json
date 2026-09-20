@@ -1,9 +1,11 @@
 {
   "case": "busy",
+  "period": "today",
   "fixtures": {
     "health": "health.json",
-    "usage_today": "503",
-    "usage_month": "503",
+    "usage": "503",
+    "active_time": "503",
+    "insights": "503",
     "quota": "503"
   },
   "expected": {

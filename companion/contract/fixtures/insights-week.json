@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "timezone": "Etc/UTC",
+  "coverage": {
+    "stored_sources": [
+      "codex",
+      "claude",
+      "kimi",
+      "opencode",
+      "openclaw"
+    ],
+    "live_sources": [],
+    "group_count": 5
+  },
+  "timestamp": "2026-07-26T20:20:00+00:00",
+  "response_cache": {
+    "age_seconds": 45
+  },
+  "range": {
+    "period_requested": "today",
+    "period_resolved": "custom",
+    "from": "2026-07-20",
+    "to": "2026-07-26",
+    "days": 7,
+    "recognized": true
+  },
+  "facets": [
+    "daily"
+  ],
+  "totals": {
+    "tokens": 61200000,
+    "cost": 9.86,
+    "messages": 1043,
+    "entries": 96
+  },
+  "daily": [
+    {
+      "date": "2026-07-20",
+      "tokens": 11200000,
+      "cost": 1.82,
+      "messages": 190,
+      "entries": 190,
+      "intensity": 3
+    },
+    {
+      "date": "2026-07-22",
+      "tokens": 13400000,
+      "cost": 2.14,
+      "messages": 230,
+      "entries": 230,
+      "intensity": 3
+    },
+    {
+      "date": "2026-07-23",
+      "tokens": 9800000,
+      "cost": 1.57,
+      "messages": 175,
+      "entries": 175,
+      "intensity": 2
+    },
+    {
+      "date": "2026-07-24",
+      "tokens": 12100000,
+      "cost": 2.03,
+      "messages": 210,
+      "entries": 210,
+      "intensity": 3
+    },
+    {
+      "date": "2026-07-25",
+      "tokens": 7600000,
+      "cost": 1.32,
+      "messages": 140,
+      "entries": 140,
+      "intensity": 2
+    },
+    {
+      "date": "2026-07-26",
+      "tokens": 7100000,
+      "cost": 0.98,
+      "messages": 98,
+      "entries": 98,
+      "intensity": 1
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "period": "month",
+  "range": {
+    "period_requested": "month",
+    "period_resolved": "month",
+    "days": 1,
+    "recognized": true,
+    "from": "2026-07-26",
+    "to": "2026-07-26"
+  },
+  "active_ms": 850800000,
+  "active_ms_sum": 973800000,
+  "comparison": {
+    "active_ms_prev": 792000000,
+    "active_ms_sum_prev": 900000000,
+    "active_ms_pct": 7.4,
+    "active_ms_sum_pct": 8.2
+  },
+  "by_tool": {
+    "codex": {
+      "tool_label": "Codex",
+      "session_count": 14,
+      "active_ms": 510480000,
+      "active_ms_sum": 584280000
+    },
+    "claude": {
+      "tool_label": "Claude",
+      "session_count": 9,
+      "active_ms": 280764000,
+      "active_ms_sum": 321354000
+    },
+    "opencode": {
+      "tool_label": "OpenCode",
+      "session_count": 2,
+      "active_ms": 59556000,
+      "active_ms_sum": 68166000
+    }
+  },
+  "unavailable_tools": [],
+  "active_gap_cap_ms": 900000,
+  "active_time_estimated": true,
+  "active_time_method": "capped-inter-event-gap",
+  "include_review_sessions": false,
+  "timestamp": "2026-07-26T20:20:00+00:00",
+  "response_cache": {
+    "age_seconds": 45
+  }
+}

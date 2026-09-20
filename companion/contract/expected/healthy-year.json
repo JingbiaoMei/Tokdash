@@ -1,0 +1,36 @@
+{
+  "case": "healthy-year",
+  "period": "year",
+  "fixtures": {
+    "health": "health.json",
+    "usage": "usage-year.json",
+    "active_time": "active-time-year.json",
+    "stats": "stats-contributions.json",
+    "quota": "quota.json"
+  },
+  "expected": {
+    "connection": "Local · Connected",
+    "dot": "ok",
+    "period_segment": { "visible": true, "selected": "Year" },
+    "today": {
+      "cost": "$312.40",
+      "tokens_compact": "1243.5M",
+      "tokens_exact": "1243500000",
+      "messages": "13204",
+      "active": "active 74 d 5 h"
+    },
+    "delta_row": null,
+    "delta_row_comment": "previous-year totals are all zero, so every *_pct is null and the row is hidden entirely",
+    "top_ranks": {
+      "kicker_tools": "Top tools · this year",
+      "kicker_models": "Top models · this year",
+      "tools": ["Codex 812.4M", "Claude 344.6M", "OpenCode 86.5M"],
+      "models": ["gpt-5.6-sol 780M", "claude-opus-4-7 220M", "claude-sonnet-4-6 140M"]
+    },
+    "glance": { "kind": "grid", "window_days": 180, "rows": 7, "filled_cells": 143, "first_column_weekday": "Mon" },
+    "credits_row": null,
+    "per_server_rows": null,
+    "banner": null,
+    "freshness_contains": "Updated"
+  }
+}

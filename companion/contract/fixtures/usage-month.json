@@ -9,6 +9,12 @@
     "claude": { "tokens": 89000000, "cost": 15.40, "tokens_in": 2100000, "tokens_cache": 86000000, "cache_hit_rate": 0.9758 },
     "kimi": { "tokens": 21000000, "cost": 2.30, "tokens_in": 470000, "tokens_cache": 20300000, "cache_hit_rate": 0.9777 }
   },
+  "combined_models": [
+    { "name": "openai/gpt-5.6-sol", "tokens": 154000000, "tokens_in": 6100000, "tokens_out": 980000, "tokens_cache": 146920000, "cost": 27.10, "messages": 2410, "cache_hit_rate": 0.9554, "source": "codex" },
+    { "name": "anthropic/claude-opus-4-7", "tokens": 71000000, "tokens_in": 1500000, "tokens_out": 700000, "tokens_cache": 68800000, "cost": 11.30, "messages": 780, "cache_hit_rate": 0.9718, "source": "claude" },
+    { "name": "anthropic/claude-sonnet-4-6", "tokens": 64000000, "tokens_in": 1400000, "tokens_out": 640000, "tokens_cache": 61960000, "cost": 7.40, "messages": 1490, "cache_hit_rate": 0.9775, "source": "claude" },
+    { "name": "moonshot/kimi-k2-thinking", "tokens": 21000000, "tokens_in": 470000, "tokens_out": 210000, "tokens_cache": 20320000, "cost": 2.30, "messages": 410, "cache_hit_rate": 0.9771, "source": "kimi" }
+  ],
   "comparison": {
     "tokens_prev": 312000000,
     "cost_prev": 54.10,

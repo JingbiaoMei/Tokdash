@@ -1,0 +1,17 @@
+{
+  "case": "histogram-off",
+  "period": "today",
+  "settings_overrides": { "components": { "activityGlance": true, "activityHistogramTodayWeek": false } },
+  "fixtures": {
+    "health": "health.json",
+    "usage": "usage-today.json",
+    "active_time": "active-time-today.json",
+    "insights": "insights-today.json",
+    "quota": "quota.json"
+  },
+  "expected": {
+    "glance": null,
+    "requests_absent": ["/api/insights"],
+    "comment": "with the histogram sub-option off, today and week show no strip; month/year grids are unaffected"
+  }
+}

@@ -1,0 +1,96 @@
+{
+  "period": "today",
+  "range": {
+    "period_requested": "today",
+    "period_resolved": "custom",
+    "from": "2026-07-20",
+    "to": "2026-07-26",
+    "days": 7,
+    "recognized": true
+  },
+  "total_tokens": 61200000,
+  "total_cost": 9.86,
+  "total_messages": 1043,
+  "cache_hit_rate": 0.9512,
+  "by_tool": {
+    "codex": {
+      "tokens": 41900000,
+      "cost": 6.72,
+      "tokens_in": 2514000,
+      "tokens_cache": 39386000,
+      "cache_hit_rate": 0.94
+    },
+    "claude": {
+      "tokens": 14500000,
+      "cost": 2.68,
+      "tokens_in": 435000,
+      "tokens_cache": 14065000,
+      "cache_hit_rate": 0.97
+    },
+    "kimi": {
+      "tokens": 4800000,
+      "cost": 0.46,
+      "tokens_in": 192000,
+      "tokens_cache": 4608000,
+      "cache_hit_rate": 0.96
+    }
+  },
+  "combined_models": [
+    {
+      "name": "openai/gpt-5.6-sol",
+      "tokens": 38100000,
+      "tokens_in": 1905000,
+      "tokens_out": 381000,
+      "tokens_cache": 36195000,
+      "cost": 5.6,
+      "messages": 702,
+      "cache_hit_rate": 0.95,
+      "source": "codex"
+    },
+    {
+      "name": "anthropic/claude-opus-4-7",
+      "tokens": 10900000,
+      "tokens_in": 762999,
+      "tokens_out": 109000,
+      "tokens_cache": 10137001,
+      "cost": 2.05,
+      "messages": 214,
+      "cache_hit_rate": 0.93,
+      "source": "claude"
+    },
+    {
+      "name": "anthropic/claude-sonnet-4-6",
+      "tokens": 9400000,
+      "tokens_in": 282000,
+      "tokens_out": 94000,
+      "tokens_cache": 9118000,
+      "cost": 1.12,
+      "messages": 79,
+      "cache_hit_rate": 0.97,
+      "source": "claude"
+    },
+    {
+      "name": "moonshot/kimi-k2-thinking",
+      "tokens": 4800000,
+      "tokens_in": 192000,
+      "tokens_out": 48000,
+      "tokens_cache": 4608000,
+      "cost": 0.46,
+      "messages": 102,
+      "cache_hit_rate": 0.96,
+      "source": "kimi"
+    }
+  ],
+  "comparison": {
+    "tokens_prev": 66400000,
+    "cost_prev": 10.97,
+    "messages_prev": 1102,
+    "tokens_pct": -7.8,
+    "cost_pct": -10.1,
+    "messages_pct": -5.4
+  },
+  "timestamp": "2026-07-26T20:20:00+00:00",
+  "response_cache": {
+    "age_seconds": 60
+  }
+}

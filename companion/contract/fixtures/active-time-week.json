@@ -1,0 +1,48 @@
+{
+  "period": "today",
+  "range": {
+    "period_requested": "today",
+    "period_resolved": "custom",
+    "from": "2026-07-20",
+    "to": "2026-07-26",
+    "days": 7,
+    "recognized": true
+  },
+  "active_ms": 188400000,
+  "active_ms_sum": 205200000,
+  "comparison": {
+    "active_ms_prev": 201600000,
+    "active_ms_sum_prev": 216000000,
+    "active_ms_pct": -6.5,
+    "active_ms_sum_pct": -5.0
+  },
+  "by_tool": {
+    "codex": {
+      "tool_label": "Codex",
+      "session_count": 14,
+      "active_ms": 113040000,
+      "active_ms_sum": 123120000
+    },
+    "claude": {
+      "tool_label": "Claude",
+      "session_count": 9,
+      "active_ms": 62172000,
+      "active_ms_sum": 67716000
+    },
+    "opencode": {
+      "tool_label": "OpenCode",
+      "session_count": 2,
+      "active_ms": 13188000,
+      "active_ms_sum": 14364000
+    }
+  },
+  "unavailable_tools": [],
+  "active_gap_cap_ms": 900000,
+  "active_time_estimated": true,
+  "active_time_method": "capped-inter-event-gap",
+  "include_review_sessions": false,
+  "timestamp": "2026-07-26T20:20:00+00:00",
+  "response_cache": {
+    "age_seconds": 45
+  }
+}

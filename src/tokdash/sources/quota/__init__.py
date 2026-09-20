@@ -18,6 +18,7 @@ from .claude import ClaudeProfile
 from .claude import read_claude_profiles
 from .claude import scan_profiles
 from .claude import collect_claude_api_snapshots
+from .commandcode import collect_commandcode_api_snapshots
 from .codex import collect_codex_session_snapshots
 from .codex import collect_codex_session_snapshots_incremental
 from .codex import collect_codex_api_snapshots
@@ -75,6 +76,8 @@ def collect_network_snapshots(sources: Iterable[str] | None = None) -> list[Quot
             snapshots.extend(collect_zai_api_snapshots())
         elif key == "opencode_go_api":
             snapshots.extend(collect_opencode_go_api_snapshots())
+        elif key == "commandcode_api":
+            snapshots.extend(collect_commandcode_api_snapshots())
     return snapshots
 
 
@@ -134,8 +137,9 @@ def poll_quota(
     if store is not None:
         if snapshots:
             # Session snapshots were already committed (atomically with their watermarks)
-            # by the incremental collector, so the UNIQUE key ignores them here and
-            # ``inserted`` counts the network rows this cycle added.
+            # by the incremental collector, so re-inserting them here is a same-slot rewrite:
+            # the row count does not grow and ``inserted`` counts only the network rows this
+            # cycle added.
             inserted = store.insert_quota_snapshots(snapshots)
         store.quota_meta_set(_LAST_POLL_META_KEY, str(now))
     enabled_sources = config.enabled_network_sources() if include_network else []
@@ -332,6 +336,7 @@ def _network_key_for_provider(name: str) -> str:
         "grok": "grok_api",
         "zai": "zai_api",
         "opencode_go": "opencode_go_api",
+        "commandcode": "commandcode_api",
     }.get(name, f"{name}_api")
 
 
@@ -428,9 +433,10 @@ def _is_fallback_account(provider: str, account: str, view: dict[str, Any]) -> b
     The name alone does not answer it. The same ``default`` is a REAL account wherever it is
     the credential's *id* that is missing rather than the credential: Antigravity files a
     whole signed-in account under ``default`` when the ID token carries no email, and Kimi,
-    Z.ai and OpenCode Go name every account they ever write that. What separates the two is
-    that a fallback view has never carried a successful ``*_api`` observation -- nothing it
-    was asked about answered, so there is no credential behind it to speak for.
+    Z.ai, OpenCode Go and Command Code name every account they ever write that. What
+    separates the two is that a fallback view has never carried a successful ``*_api``
+    observation -- nothing it was asked about answered, so there is no credential behind it
+    to speak for.
 
     A name that once answered and no longer does stays a real account, which is the
     conservative direction: stored rows cannot tell a poller that stopped reporting an id
@@ -687,10 +693,25 @@ def _detected_local_providers(claude_profiles: list[ClaudeProfile]) -> set[str]:
                 detected.add("opencode_go")
         except Exception:
             pass
-    elif clientpaths.opencode_auth_path().is_file() or os.environ.get("OPENCODE_API_KEY", "").strip():
-        # Pre-consent detection stays shallow like every other provider (file
-        # presence only); key content is read solely on the consented path above.
-        detected.add("opencode_go")
+        try:
+            from .commandcode import has_credentials as _has_commandcode_credentials
+
+            if _has_commandcode_credentials():
+                detected.add("commandcode")
+        except Exception:
+            pass
+    else:
+        if clientpaths.opencode_auth_path().is_file() or os.environ.get("OPENCODE_API_KEY", "").strip():
+            # Pre-consent detection stays shallow like every other provider (file
+            # presence only); key content is read solely on the consented path above.
+            detected.add("opencode_go")
+        # Command Code's native auth file is the shallow pre-consent signal. A key that
+        # exists ONLY in OpenCode's auth.json cannot surface the card before consent --
+        # reading that file's contents is exactly what the consent gate withholds.
+        if clientpaths.commandcode_auth_path().is_file() or any(
+            os.environ.get(name, "").strip() for name in ("COMMAND_CODE_API_KEY", "COMMANDCODE_API_KEY")
+        ):
+            detected.add("commandcode")
     if os.environ.get("ANTHROPIC_AUTH_TOKEN", "").strip() and zai_coding_base_url_allowed(
         os.environ.get("ANTHROPIC_BASE_URL", "")
     ):
@@ -763,7 +784,7 @@ def quota_state(store: UsageEntryStore | None = None) -> dict[str, Any]:
     claude_installs = read_claude_profiles(claude_profiles) if claude_scan else []
     providers = {
         name: _provider_shell(name, consent)
-        for name in ("codex", "claude", "antigravity", "minimax", "kimi", "grok", "zai", "opencode_go")
+        for name in ("codex", "claude", "antigravity", "minimax", "kimi", "grok", "zai", "opencode_go", "commandcode")
     }
     for name in _detected_local_providers(claude_profiles):
         providers[name]["detected"] = True

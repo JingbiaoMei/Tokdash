@@ -251,8 +251,9 @@ on any of the provider's real accounts retires it. Otherwise a credential file m
 poll cycle keeps the card reading "couldn't refresh" after the provider recovered. That
 exception is decided by whether the account has ever reported a successful API observation,
 not by its name: an account named `default` because the credential carried no id of its own
-(an Antigravity sign-in with no email on its ID token, every Kimi, Z.ai and OpenCode Go
-account) is a real account, and its error keeps warning the card until it answers again.
+(an Antigravity sign-in with no email on its ID token, every Kimi, Z.ai, OpenCode Go and
+Command Code account) is a real account, and its error keeps warning the card until it
+answers again.
 
 `status_account` ships beside `accounts` and names which entry the card's `status_detail`
 belongs to, or is `null` when it belongs to none of them — a provider whose credentials could
@@ -312,12 +313,12 @@ Persists the separate local-credential-read consent (`credential_scan`) and per-
 
 **Request**
 ```json
-{"credential_scan": true, "codex_api": true, "minimax_api": true, "kimi_api": true, "grok_api": true}
+{"credential_scan": true, "codex_api": true, "minimax_api": true, "kimi_api": true, "grok_api": true, "commandcode_api": true}
 ```
 
 **Response**
 ```json
-{"consent": {"credential_scan": true, "codex_api": true, "claude_api": false, "antigravity_api": false, "minimax_api": true, "kimi_api": true, "grok_api": true}}
+{"consent": {"credential_scan": true, "codex_api": true, "claude_api": false, "antigravity_api": false, "minimax_api": true, "kimi_api": true, "grok_api": true, "commandcode_api": true}}
 ```
 
 ## `POST /api/quota/settings`

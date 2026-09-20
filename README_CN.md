@@ -502,12 +502,13 @@ tokdash db watch --pretty
 
 ### 额度跟踪（可选）
 
-「额度」标签页展示订阅用量窗口与重置倒计时，来自两类数据源。**本地日志**（无网络）：Codex 会在会话文件里记录自己的额度，因此 Codex 的 5 小时 / 每周窗口可开箱即用；但它只会在你使用 Codex 时更新，且本地日志永远不包含重置额度或按量功能窗口。请把基于 Codex 会话日志的消耗视为**可能明显出错的估算值**：每个会话会缓存上一次获取到的额度快照，并在后续消息中原样重放，因此数字可能过期，重置边界附近的噪声也可能进一步扭曲某个窗口。「额度」标签页会把这些图表标记为估算。**实时轮询**（默认关闭，按服务商授权）：Tokdash 使用你本机 CLI 已登录的身份调用服务商自己的额度接口；数据更新、更完整，会加入 Codex 重置额度与按量功能窗口，是获得**准确** Codex 消耗所需的数据源，也是 Claude Code、Antigravity、MiniMax、Kimi Code、SuperGrok/Grok Build、Z.ai Coding Plan 与 OpenCode Go 额度的唯一来源。可在标签页内或用 CLI 按服务商单独开启：
+「额度」标签页展示订阅用量窗口与重置倒计时，来自两类数据源。**本地日志**（无网络）：Codex 会在会话文件里记录自己的额度，因此 Codex 的 5 小时 / 每周窗口可开箱即用；但它只会在你使用 Codex 时更新，且本地日志永远不包含重置额度或按量功能窗口。请把基于 Codex 会话日志的消耗视为**可能明显出错的估算值**：每个会话会缓存上一次获取到的额度快照，并在后续消息中原样重放，因此数字可能过期，重置边界附近的噪声也可能进一步扭曲某个窗口。「额度」标签页会把这些图表标记为估算。**实时轮询**（默认关闭，按服务商授权）：Tokdash 使用你本机 CLI 已登录的身份调用服务商自己的额度接口；数据更新、更完整，会加入 Codex 重置额度与按量功能窗口，是获得**准确** Codex 消耗所需的数据源，也是 Claude Code、Antigravity、MiniMax、Kimi Code、SuperGrok/Grok Build、Z.ai Coding Plan、OpenCode Go 与 Command Code 额度的唯一来源。可在标签页内或用 CLI 按服务商单独开启：
 
 ```bash
 tokdash quota consent --codex-api on --claude-api on --antigravity-api on
 tokdash quota consent --minimax-api on --kimi-api on --grok-api on --zai-api on
 tokdash quota consent --opencode-go-api on
+tokdash quota consent --commandcode-api on
 tokdash quota consent --credential-scan on   # 允许读取已披露的本地凭据存储
 tokdash quota consent --poll-interval 30      # 后台轮询周期：15、30、60 或 120 分钟
 tokdash quota consent --enabled off           # 总开关：关闭全部额度跟踪
@@ -526,6 +527,8 @@ tokdash quota show
 实时轮询需要两层独立授权：`quota.credential_scan` 允许只读访问已披露的本地凭据存储，然后每个 `<provider>_api` 键允许向该服务商发起网络请求。Tokdash 只读取原生 CLI 认证/配置文件、OpenCode 的 `auth.json` 与全局供应商配置、当前 Claude 设置，以及通过只读 SQLite 连接读取 CC Switch 的 `providers` 表；不会扫描服务商日志、shell 配置或任意 `{file:...}` 引用。MiniMax 可使用 `mmx` 登录或 Token Plan Subscription Key（`MINIMAX_TOKEN_PLAN_GLOBAL_KEY` / `MINIMAX_TOKEN_PLAN_CN_KEY`）；普通按量 API key 不保证能读取 Token Plan。Kimi 需要 Kimi Code 登录或 key（`KIMI_API_KEY`），Moonshot Open Platform 的按量 key 不适用。SuperGrok/Grok Build 需要 `$GROK_HOME/auth.json` 中的 xAI OAuth 登录，普通 xAI API key 无法读取消费者账单额度。Z.ai 可读取 `$ZCODE_HOME/v2/config.json`、受支持工具配置、`ZAI_API_KEY` 或 `Z_AI_API_KEY` 中的 Coding Plan key，并查询 5 小时 / 每周额度及旧版 MCP 限额。Tokdash 从不刷新或写入服务商凭据。`TOKDASH_QUOTA_POLL=0` 是关闭全部额度跟踪的硬终止开关。`tokdash export` 默认排除额度数据；只有当你确实想把它写入 JSON 时才使用 `--include-quota`。
 
 OpenCode Go 优先使用 `OPENCODE_API_KEY`，未设置时读取 OpenCode 的 `auth.json` 中的 `opencode-go` key，并从 `opencode.ai/zen/go/v1/usage` 查询滚动 / 每周 / 每月订阅额度窗口。Zen 按量付费余额没有支持 key 认证的接口，因此不跟踪。
+
+Command Code 依次从 `COMMAND_CODE_API_KEY`、`COMMANDCODE_API_KEY`、`~/.commandcode/auth.json`，再到 OpenCode `auth.json` 中的 `commandcode` 条目读取账号密钥（不会刷新或写回）。它轮询 `api.commandcode.ai/alpha/billing/credits` 与 `/alpha/billing/subscriptions`，获取 5 小时 / 每周用量上限以及每月额度窗口。5 小时与每周进度条直接来自接口；**每月窗口是推算的**：套餐目录给出额度池，减去剩余额度并套用解析出的套餐名（Go / GOAT / Pro / Max 10x / Max 20x / Team Pro / Provider）。当无法解析出有效订阅及套餐时，每月进度条与其套餐名会被撤回，而不是继续显示上一次的读数。
 
 Tokdash 还会从 `$GROK_HOME/logs/unified.jsonl` 本地统计 Grok Build token。推理记录会提供 prompt、缓存 prompt、completion 与 reasoning token；Tokdash 使用同一 CLI 进程的模型事件完成归属，并通过常规价格数据库计算费用。缺少模型事件的记录会被跳过，不会猜测价格。
 

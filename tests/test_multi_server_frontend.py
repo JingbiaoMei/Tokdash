@@ -319,7 +319,9 @@ def test_quota_visibility_dropdown_is_scoped_per_server():
     # can never render, no matter what /api/quota returns.
     shipped = re.search(r"const QUOTA_PROVIDERS = \[(.*?)\];", source)
     assert shipped and "'opencode_go'" in shipped.group(1)
+    assert "'commandcode'" in shipped.group(1)
     assert "'opencode_go'" in re.search(r"const order = \[(.*?)\];", source).group(1)
+    assert "'commandcode'" in re.search(r"const order = \[(.*?)\];", source).group(1)
     assert "const present = quotaPresentProviders(row.payload);" in source
     assert "present: quotaPresentProviders(payload)" in source
     assert "syncQuotaServerVisibilityControl(block, payload, server);" in source

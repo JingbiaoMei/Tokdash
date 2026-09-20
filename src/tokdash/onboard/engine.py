@@ -1908,7 +1908,8 @@ def _quota_setup_wizard() -> None:
     print("      works out of the box, Codex only, updates only when you use Codex.")
     print("    - Live polling (off by default): asks each provider's quota endpoint using")
     print("      the sign-in your CLI already has. Fresher, adds Codex reset credits, and")
-    print("      is the only source for Claude, Antigravity, MiniMax, Kimi, Grok, and Z.ai quota.")
+    print("      is the only source for Claude, Antigravity, MiniMax, Kimi, Grok, Z.ai,")
+    print("      OpenCode Go, and Command Code quota.")
     print("      Read-only; Tokdash never refreshes or writes credentials.")
 
     # Master switch — identical to the Quota tab's "Quota tracking" toggle (config
@@ -1933,7 +1934,7 @@ def _quota_setup_wizard() -> None:
 
     print("\n  Local credential access is separate from provider network consent.")
     print("  If allowed, Tokdash may read only these credential/config stores:")
-    print("    - native Codex, Claude, Antigravity, mmx, Kimi Code, Grok, and ZCode auth/config files")
+    print("    - native Codex, Claude, Antigravity, mmx, Kimi Code, Grok, ZCode, and Command Code auth/config files")
     print("    - OpenCode auth.json plus its global provider config")
     print("    - CC Switch's providers table, opened read-only")
     print("  Tokdash never reads provider logs, shell profiles, or arbitrary referenced files.")
@@ -1981,6 +1982,7 @@ def _quota_setup_wizard() -> None:
             ("grok_api", "Grok Build", "requires xAI OAuth; API keys cannot read this quota"),
             ("zai_api", "Z.ai Coding Plan", "requires a Coding Plan key from ZCode or a supported tool"),
             ("opencode_go_api", "OpenCode Go", "requires an OpenCode Go key in auth.json or OPENCODE_API_KEY"),
+            ("commandcode_api", "Command Code", "requires ~/.commandcode/auth.json, COMMAND_CODE_API_KEY, or the OpenCode commandcode entry"),
         ):
             provider = key.removesuffix("_api")
             if provider not in provider_sources:

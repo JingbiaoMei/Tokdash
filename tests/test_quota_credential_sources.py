@@ -202,6 +202,46 @@ def test_discovers_zai_coding_plan_from_supported_tool_configs(monkeypatch, tmp_
     }
 
 
+def test_discovers_commandcode_from_native_file_env_and_opencode(monkeypatch, tmp_path):
+    commandcode_home = tmp_path / ".commandcode"
+    commandcode_home.mkdir()
+    monkeypatch.setattr(
+        credential_sources.clientpaths, "commandcode_home", lambda: commandcode_home
+    )
+    monkeypatch.setattr(
+        credential_sources.clientpaths, "commandcode_auth_path", lambda: commandcode_home / "auth.json"
+    )
+    monkeypatch.setattr(credential_sources.clientpaths, "opencode_auth_path", lambda: tmp_path / "missing-auth.json")
+    for name in ("COMMAND_CODE_API_KEY", "COMMANDCODE_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+
+    # No file, no env: nothing found.
+    assert "commandcode" not in credential_sources.discover_provider_sources()
+
+    # Native auth file: both the shallow path check and the key read agree.
+    auth_path = commandcode_home / "auth.json"
+    auth_path.write_text(json.dumps({"apiKey": "user_native", "userName": "me"}), encoding="utf-8")
+    assert credential_sources.discover_provider_sources()["commandcode"] == ["Command Code auth", "native CLI"]
+
+    # Environment wins over the file (the shallow native-CLI label still shows).
+    monkeypatch.setenv("COMMANDCODE_API_KEY", "user_env")
+    assert credential_sources.discover_provider_sources()["commandcode"] == ["environment", "native CLI"]
+
+    # OpenCode's auth.json entry is the last resort.
+    monkeypatch.delenv("COMMANDCODE_API_KEY", raising=False)
+    auth_path.unlink()
+    opencode_auth = tmp_path / "opencode-auth.json"
+    opencode_auth.write_text(
+        json.dumps({"commandcode": {"type": "api", "key": "user_opencode"}}), encoding="utf-8"
+    )
+    monkeypatch.setattr(credential_sources.clientpaths, "opencode_auth_path", lambda: opencode_auth)
+
+    summary = credential_sources.discover_provider_sources()
+
+    assert summary["commandcode"] == ["Command Code auth"]
+    assert "user_opencode" not in json.dumps(summary)
+
+
 def test_discovers_auth_only_key_and_provider_block_without_baseurl(monkeypatch, tmp_path):
     # Mirrors Howard's real machine: the working keys live in auth.json only.
     #  - `kimi-for-coding`  : no opencode.json provider block at all

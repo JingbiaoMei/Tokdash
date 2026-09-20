@@ -61,6 +61,24 @@ def opencode_db_path() -> Path:
     return opencode_data_dir() / "opencode.db"
 
 
+# --- Command Code ---------------------------------------------------------------
+
+
+def commandcode_home() -> Path:
+    """Command Code's own home: ``~/.commandcode``.
+
+    The vendor CLI has no env override for this directory (it builds the path from
+    ``$HOME``/``%USERPROFILE%`` and the literal name ``.commandcode``), so there is
+    nothing to resolve but the home plus the fixed name.
+    """
+    return Path.home() / ".commandcode"
+
+
+def commandcode_auth_path() -> Path:
+    """Command Code's persisted sign-in: ``~/.commandcode/auth.json`` (``{apiKey, userName}``)."""
+    return commandcode_home() / "auth.json"
+
+
 # --- Kilo Code -------------------------------------------------------------------
 
 

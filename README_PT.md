@@ -473,12 +473,13 @@ Por padrão o `tokdash serve` abre o painel no seu navegador uma vez na iniciali
 
 A aba Quota mostra janelas de utilização de assinatura e cronômetros de reset, a partir de duas fontes de dados. **Logs locais** (sem rede): o Codex registra sua própria cota em arquivos de sessão, então as janelas de 5 horas/semana do Codex funcionam de cara — mas só são atualizadas quando você usa o Codex, e os logs nunca contêm créditos de reset ou janelas de recursos medidos. Trate o consumo do Codex dos logs de sessão como uma **estimativa que pode estar materialmente errada**: cada sessão faz cache de seu snapshot de cota na última consulta e o reproduz inalterado em toda mensagem posterior, então os números podem estar desatualizados, e o ruído na fronteira de reset pode ocasionalmente distorcer ainda mais uma janela — a aba Quota rotula esses gráficos como estimados. **Polling ao vivo** (desligado por padrão, consentimento por provedor): o Tokdash chama o endpoint de cota do próprio provedor com o login que sua CLI já tem. É mais fresco, adiciona créditos de reset do Codex e recursos medidos, é necessário para o consumo do Codex **exato**, e é a única fonte de cota para Claude Code, Antigravity, MiniMax, Kimi Code e SuperGrok/Grok Build:
 
-As cotas do Z.ai Coding Plan e do OpenCode Go também estão disponíveis apenas pelo polling ao vivo.
+As cotas do Z.ai Coding Plan, do OpenCode Go e do Command Code também estão disponíveis apenas pelo polling ao vivo.
 
 ```bash
 tokdash quota consent --codex-api on --claude-api on --antigravity-api on
 tokdash quota consent --minimax-api on --kimi-api on --grok-api on --zai-api on
 tokdash quota consent --opencode-go-api on
+tokdash quota consent --commandcode-api on
 tokdash quota consent --credential-scan on   # permita os leitores locais de credenciais divulgados
 tokdash quota consent --poll-interval 30      # cadência de polling em segundo plano: 15, 30, 60 ou 120 min
 tokdash quota consent --enabled off           # interruptor geral: desliga TODO o acompanhamento de cota
@@ -499,6 +500,8 @@ O polling ao vivo requer duas decisões separadas: `quota.credential_scan` permi
 O Z.ai aceita uma chave de Coding Plan de `$ZCODE_HOME/v2/config.json`, de uma configuração de ferramenta compatível, de `ZAI_API_KEY` ou de `Z_AI_API_KEY`, e consulta as janelas de créditos de 5 horas/semanais e os limites MCP legados.
 
 O OpenCode Go usa primeiro `OPENCODE_API_KEY` e, se não estiver definida, a chave `opencode-go` do `auth.json` do OpenCode; consulta as janelas de assinatura móveis, semanais e mensais em `opencode.ai/zen/go/v1/usage`. O saldo de pagamento por uso do Zen não tem endpoint com autenticação por chave e não é acompanhado.
+
+O Command Code lê a chave da conta de `COMMAND_CODE_API_KEY`, depois `COMMANDCODE_API_KEY`, depois `~/.commandcode/auth.json` e, por fim, da entrada `commandcode` do `auth.json` do OpenCode (nunca é renovada nem regravada). Ele consulta `api.commandcode.ai/alpha/billing/credits` e `/alpha/billing/subscriptions` para as janelas de 5 horas e semanal, além do crédito mensal. As barras de 5 horas e semanal vêm direto da API; **a mensal é derivada**: o catálogo do plano define o total, o crédito restante é subtraído e o resultado recebe o nome do plano resolvido (Go / GOAT / Pro / Max 10x / Max 20x / Team Pro / Provider). Quando não é possível resolver uma assinatura ativa com plano, a barra mensal e seu rótulo de plano são retirados em vez de continuar mostrando a leitura anterior.
 
 O uso de tokens do Grok Build também é analisado localmente de `$GROK_HOME/logs/unified.jsonl`. Seus registros de inferência expõem tokens de prompt, prompt em cache, completion e raciocínio; o Tokdash os atribui usando os eventos de modelo do mesmo processo CLI e calcula o custo a partir do banco de preços normal. Registros sem evento de modelo são pulados em vez de receberem um preço suposto.
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import bisect
 import json
+import logging
 import math
 import os
 import subprocess
@@ -34,6 +35,7 @@ from .usage_store import (
 # BACKEND CONFIGURATION
 # ============================================================
 # Local coding-tools parsers have no tokscale runtime dependency.
+logger = logging.getLogger(__name__)
 USE_LOCAL_CODING_TOOLS_BACKEND = True
 # ============================================================
 
@@ -85,11 +87,22 @@ def _usage_store_sources(tracker: CodingToolsUsageTracker) -> list[str]:
 
 
 def _usage_store_live_sources(tracker: CodingToolsUsageTracker) -> list[str]:
-    return [
+    live = [
         name
         for name, parser in tracker.parsers.items()
         if getattr(parser, "sync_capability").mode == "source_native_db"
     ]
+    # A source whose sync raised is answered from the live parsers for this
+    # request; `_sync_usage_store` drops it from the stored list at the same
+    # time, so there is no double count and no stale row. If the live read fails
+    # too, collect() records it in source_errors and the dashboard shows
+    # "unavailable" rather than a zero that reads as "no usage".
+    live.extend(
+        name
+        for name in getattr(tracker, "sync_failures", ()) or ()
+        if name not in live
+    )
+    return live
 
 
 def _collect_parser_file(parser: Any, file_sig: tuple[str, int, int]) -> list[dict[str, Any]]:
@@ -162,10 +175,19 @@ def _sync_usage_store(tracker: CodingToolsUsageTracker) -> tuple[UsageEntryStore
       applied by repricing the stored billing inputs. It is NOT part of any
       parse signature, so a rate edit never reparses a source log.
 
+    One source's failure stays one source's failure. A parser that raises here -
+    Goose's ledger table after a Goose upgrade, ZCode's snapshot caught mid-copy -
+    used to unwind the whole loop into the caller's `except Exception`, which
+    threw away a store that was working for the other twenty sources and served
+    every later request from a full live scan. A failed source is dropped from
+    the returned list, so its stored rows are not read, and recorded on the
+    tracker so the live parsers answer just that source for this request.
+
     See docs/development/technical-notes/USAGE_CACHE_IDENTITY.md.
     """
     store = UsageEntryStore()
     selected = _usage_store_sources(tracker)
+    failed: list[str] = []
     pricing = persistent_pricing_signature(tracker.pricing_db)
     # Rates first: rows land at the current pricing whether they were already
     # cached (repriced here) or inserted by the syncs below. Parsing happens
@@ -178,8 +200,8 @@ def _sync_usage_store(tracker: CodingToolsUsageTracker) -> tuple[UsageEntryStore
     # database costs one open here rather than a full discovery scan per request.
     # Keep it ahead of the loop -- moving it after would reintroduce that scan.
     store.apply_pricing(pricing, tracker.pricing_db)
-    for name in selected:
-        parser = tracker.parsers[name]
+
+    def sync_one(name: str, parser: Any) -> None:
         capability = getattr(parser, "sync_capability")
         files = parser._file_signatures()
         parser_sig = parser.persistent_parser_signature()
@@ -197,9 +219,9 @@ def _sync_usage_store(tracker: CodingToolsUsageTracker) -> tuple[UsageEntryStore
                 ),
                 cross_file_stable_keys=capability.cross_file_stable_keys,
             )
-            continue
+            return
         if capability.mode != "source_replace":
-            continue
+            return
         signature = build_source_signature(
             files=files,
             parser=parser_sig,
@@ -211,6 +233,29 @@ def _sync_usage_store(tracker: CodingToolsUsageTracker) -> tuple[UsageEntryStore
             lambda parser=parser: parser.collect(None, None),
             pricing_identity=pricing,
         )
+
+    synced: list[str] = []
+    for name in selected:
+        try:
+            sync_one(name, tracker.parsers[name])
+        except UsageDatabaseSchemaTooNewError:
+            # Not a sick source: a newer schema is terminal for this build, and
+            # routing the source live would hide the skew behind a permanent
+            # full-history reparse. Let it reach the caller's re-raise.
+            raise
+        except Exception as exc:
+            failed.append(name)
+            logger.warning(
+                "usage store: sync failed for %s (%s); answering it from the "
+                "live parsers and leaving its stored rows unread",
+                name,
+                exc,
+            )
+            continue
+        synced.append(name)
+    if failed:
+        tracker.sync_failures = list(dict.fromkeys(tracker.sync_failures + failed))
+    selected = synced
     # If any sync above dropped the identity, this rebuilds every cost from the
     # stored billing inputs so the request does not serve a mixed table. It is a
     # single meta lookup when nothing raced, which is the normal case.

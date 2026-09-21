@@ -75,8 +75,14 @@ file timestamp) survived.
 | Pi | 🟢 No | indefinite | JSONL | nothing to do |
 | GitHub Copilot CLI | 🟢 No | indefinite | JSONL + SQLite | nothing to do (manual `/session prune` only) |
 | OpenClaw | 🟢 No | indefinite | JSONL | nothing to do (a session reset/delete renames the file to `.reset`/`.deleted` but keeps it on disk — Tokdash still reads it) |
+| Goose | 🟡 own retention unmeasured; **Tokdash follows the database** | unverified | SQLite | no Goose setting measured — but deleting a session in Goose takes its `usage_ledger` rows with it (`ON DELETE CASCADE`), so that usage leaves the Tokdash index at the next sync and the durable mode does not override it |
+| Roo Code | 🟢 No | indefinite | JSON per task | nothing to do; and the reverse is also true — delete a task directory and Tokdash keeps the rows it already indexed, so the usage stays on the dashboard |
 
 Legend: 🔴 erodes by default · 🟡 can erode if you opt in · 🟢 durable by default.
+
+Goose and Roo Code were added after the 2026-06-02 survey above, so neither row is a
+retention audit: the Goose row states only what deleting a session does to Tokdash's
+index, and Roo's own pruning was not measured.
 
 ---
 
@@ -128,7 +134,11 @@ The persistent usage DB is a local performance index, not a raw-log archive or b
 1. **It makes warm reads fast.** Repeated Overview, Stats, OpenClaw, and supported session
    queries can use indexed SQL instead of scanning every log file.
 2. **It can retain rows Tokdash has already indexed.** The default durable mode keeps cached
-   rows when a source file temporarily disappears or a parser returns no rows.
+   rows when a source file temporarily disappears or a parser returns no rows. For a
+   file-per-task source that is a permanent outcome rather than a temporary one: deleting a
+   Roo Code task directory leaves its usage on the dashboard. A source that owns one
+   database instead follows that database's contents, so deleting a Goose session does
+   remove its usage at the next sync.
 3. **It cannot reconstruct logs it never saw.** If Claude Code or Gemini CLI deletes a file
    before Tokdash syncs it, the DB has nothing to preserve.
 4. **It is still derived data.** Parser fixes, pricing updates, and explicit resyncs may

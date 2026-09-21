@@ -1,6 +1,27 @@
 {
-  "current": "2.5.7",
+  "current": "2.6.0",
   "releases": [
+    {
+      "version": "2.6.0",
+      "date": "2026-09-21",
+      "sections": [
+        {
+          "type": "added",
+          "items": [
+            "MiniMax Code usage tracking: per-call token usage from the mcode CLI lands in Overview, the period filters and Stats, beside the MiniMax quota card that already covered the account side.",
+            "Command Code subscription quota tracking shows the 5-hour and weekly windows the API reports and a monthly window derived from the resolved plan, behind an explicit consent: tokdash quota consent --credential-scan on --commandcode-api on.",
+            "OpenCode v2's session_message / session_v2 schema is read, so usage written after OpenCode's migration is counted again in Overview and Sessions. Kilo Code databases are detected the same way."
+          ]
+        },
+        {
+          "type": "fixed",
+          "items": [
+            "A quota card stops warning that it couldn't refresh as soon as the provider answers again, instead of warning for days after it recovered.",
+            "A quota window updated twice in the same second now keeps the newer reading, so a bar that should be withdrawn really disappears."
+          ]
+        }
+      ]
+    },
     {
       "version": "2.5.7",
       "date": "2026-09-15",

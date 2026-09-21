@@ -265,9 +265,9 @@ public sealed class MultiServerTokdashClient : ITokdashClient
             // row entirely - never a percentage computed from a known-incomplete sum.
             Comparison = new Comparison
             {
-                CostPct = CombinedPct(rows, r => r.TotalCost, c => c.CostPrev, c => c.CostPct),
-                TokensPct = CombinedPct(rows, r => (double)r.TotalTokens, c => c.TokensPrev, c => c.TokensPct),
-                MessagesPct = CombinedPct(rows, r => (double)r.TotalMessages, c => c.MessagesPrev, c => c.MessagesPct),
+                CostPct = CombinedPct(rows, r => r.TotalCost, c => c.CostPrev),
+                TokensPct = CombinedPct(rows, r => (double)r.TotalTokens, c => c.TokensPrev),
+                MessagesPct = CombinedPct(rows, r => (double)r.TotalMessages, c => c.MessagesPrev),
             },
         };
     }
@@ -276,18 +276,19 @@ public sealed class MultiServerTokdashClient : ITokdashClient
     /// <c>(sumCurrent - sumPrev) / sumPrev * 100</c>, or null when any server omits the
     /// metric's <c>*_prev</c>, or when the summed previous total is not positive. The
     /// server's own <c>*_pct</c> values are NOT averaged - percentages of different bases
-    /// don't average. The server's pct is only trusted when there's exactly one row.
+    /// don't average. This also governs a one-survivor fan-out: the contract drops a
+    /// metric whose only contributing server omits <c>*_prev</c> (a lone survivor's own
+    /// pct is not trusted past that - the recompute is identical when prev is present),
+    /// which matches the macOS twin exactly.
     /// </summary>
     private static double? CombinedPct(
         IReadOnlyList<UsageResponse> rows,
         Func<UsageResponse, double> current,
-        Func<Comparison, double?> prev,
-        Func<Comparison, double?> ownPct)
+        Func<Comparison, double?> prev)
     {
         if (rows.Count == 0) return null;
         var comparisons = rows.Select(r => r.Comparison).ToList();
         if (comparisons.Any(c => c is null)) return null;
-        if (rows.Count == 1) return ownPct(comparisons[0]!);
         if (comparisons.Any(c => prev(c!) is null)) return null;
         // Non-null by the guard above; the ?? 0 keeps the compiler happy, never taken.
         double sumPrev = rows.Sum(r => prev(r.Comparison!) ?? 0);

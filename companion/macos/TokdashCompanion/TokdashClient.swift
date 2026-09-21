@@ -59,7 +59,10 @@ actor TokdashClient {
     }
 
     func quota() async throws -> QuotaResponse {
-        try await get("/api/quota", timeout: 20)
+        // Raw-data path: the All view pins "provider order as detected", and
+        // Foundation's Dictionary decode loses JSON object key order - so the
+        // wire order is captured from the same bytes (QuotaResponse.decode).
+        try await QuotaResponse.decode(from: getData("/api/quota", timeout: 20))
     }
 
     /// Settings-only diagnostics (contract: never the flyout, never on a schedule).
@@ -76,6 +79,17 @@ actor TokdashClient {
     // MARK: - Core
 
     private func get<T: Decodable>(_ path: String, timeout: TimeInterval) async throws -> T {
+        let data = try await getData(path, timeout: timeout)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        do {
+            return try decoder.decode(T.self, from: data)
+        } catch {
+            throw TokdashError.decode(error)
+        }
+    }
+
+    private func getData(_ path: String, timeout: TimeInterval) async throws -> Data {
         guard let url = Self.buildURL(baseURL: baseURL, path: path) else {
             throw TokdashError.badBaseURL
         }
@@ -93,13 +107,7 @@ actor TokdashClient {
             guard (200..<300).contains(http.statusCode) else {
                 throw TokdashError.httpStatus(http.statusCode)
             }
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .iso8601
-            do {
-                return try decoder.decode(T.self, from: data)
-            } catch {
-                throw TokdashError.decode(error)
-            }
+            return data
         } catch let error as TokdashError {
             throw error
         } catch let error as URLError where error.code == .timedOut {
@@ -260,6 +268,107 @@ struct QuotaResponse: Decodable, Sendable {
     let enabled: Bool
     let providers: [String: ProviderQuota]?
     let timestamp: Int?
+    /// Provider keys in WIRE order (contract §All view: "provider order as
+    /// detected"). Foundation loses object key order, so this is captured from the
+    /// raw bytes by ``decode(from:)``; nil on paths that never saw the bytes.
+    var providerWireOrder: [String]? = nil
+
+    private enum CodingKeys: String, CodingKey {
+        case enabled, providers, timestamp
+    }
+
+    /// Decode the quota payload and capture the provider key sequence in one pass.
+    nonisolated static func decode(from data: Data) throws -> QuotaResponse {
+        var resp = try JSONDecoder().decode(QuotaResponse.self, from: data)
+        resp.providerWireOrder = wireProviderKeys(in: data)
+        return resp
+    }
+
+    /// The immediate key names of the top-level "providers" JSON object, in
+    /// document order - read structurally: a minimal walker that tracks quoted
+    /// strings (escapes included) and bracket depth, so braces or `"providers"`
+    /// appearing inside string VALUES cannot shift the key scan. nil when the
+    /// payload is not an object, has no `providers`, or `providers` is not an object.
+    nonisolated static func wireProviderKeys(in data: Data) -> [String]? {
+        let bytes = [UInt8](data)
+        var i = 0
+        func ws() {
+            while i < bytes.count {
+                let b = bytes[i]
+                if b == 0x20 || b == 0x09 || b == 0x0A || b == 0x0D { i += 1 } else { break }
+            }
+        }
+        // bytes[i] must be the opening quote; advances past the closing one.
+        func stringLit() -> String? {
+            guard i < bytes.count, bytes[i] == 0x22 else { return nil }
+            i += 1
+            var out: [UInt8] = []
+            while i < bytes.count {
+                let b = bytes[i]
+                if b == 0x5C { out.append(b); i += 1; if i < bytes.count { out.append(bytes[i]); i += 1 }; continue }
+                if b == 0x22 { i += 1; return String(decoding: out, as: UTF8.self) }
+                out.append(b); i += 1
+            }
+            return nil
+        }
+        func skipValue() -> Bool {
+            ws()
+            guard i < bytes.count else { return false }
+            let b = bytes[i]
+            if b == 0x22 { return stringLit() != nil }
+            if b == 0x7B || b == 0x5B {
+                var depth = 0
+                while i < bytes.count {
+                    let c = bytes[i]
+                    if c == 0x22 { if stringLit() == nil { return false }; continue }
+                    if c == 0x7B || c == 0x5B { depth += 1 }
+                    else if c == 0x7D || c == 0x5D {
+                        depth -= 1
+                        if depth == 0 { i += 1; return true }
+                    }
+                    i += 1
+                }
+                return false
+            }
+            while i < bytes.count {
+                let c = bytes[i]
+                if c == 0x2C || c == 0x7D || c == 0x5D { break }
+                i += 1
+            }
+            return true
+        }
+        func colon() -> Bool { ws(); guard i < bytes.count, bytes[i] == 0x3A else { return false }; i += 1; return true }
+
+        ws()
+        guard i < bytes.count, bytes[i] == 0x7B else { return nil }
+        i += 1
+        while true {
+            ws()
+            guard let key = stringLit(), colon() else { return nil }
+            if key == "providers" {
+                ws()
+                guard i < bytes.count, bytes[i] == 0x7B else { return nil }
+                i += 1
+                var keys: [String] = []
+                while true {
+                    ws()
+                    if i < bytes.count, bytes[i] == 0x7D { i += 1; break }
+                    guard let provider = stringLit(), colon() else { return nil }
+                    guard skipValue() else { return nil }
+                    keys.append(provider)
+                    ws()
+                    if i < bytes.count, bytes[i] == 0x2C { i += 1; continue }
+                    if i < bytes.count, bytes[i] == 0x7D { i += 1; break }
+                    return nil
+                }
+                return keys
+            }
+            guard skipValue() else { return nil }
+            ws()
+            if i < bytes.count, bytes[i] == 0x2C { i += 1; continue }
+            return nil // top-level members exhausted without finding "providers"
+        }
+    }
 }
 
 struct ProviderQuota: Decodable, Sendable {

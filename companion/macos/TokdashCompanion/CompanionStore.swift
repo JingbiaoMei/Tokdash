@@ -499,13 +499,12 @@ final class CompanionStore: NSObject, ObservableObject {
             return
         }
         let usage = Self.combineUsage(results.map(\.usage))
-        var providers: [String: ProviderQuota] = [:]
-        for result in results {
-            for (provider, value) in result.quota.providers ?? [:] {
-                providers["\(result.server.label) · \(provider)"] = value
-            }
-        }
-        let quota = QuotaResponse(enabled: results.contains(where: { $0.quota.enabled }), providers: providers, timestamp: nil)
+        // Merged display order must not follow task-group completion order: it is
+        // settings order x wire order (contract §Multi-server "server ordering" +
+        // §All view "provider order as detected").
+        let quota = Self.mergedQuota(servers.compactMap { server in
+            results.first { $0.server.id == server.id }.map { ($0.server.label, $0.quota) }
+        })
         lastUsage = usage; lastQuota = quota
         lastInsights = nil; lastStats = nil
         // Every enabled server feeds the sum, not just the ones that answered: a server
@@ -558,6 +557,26 @@ final class CompanionStore: NSObject, ObservableObject {
         }
     }
 
+    /// Merge per-server quota payloads into the display model: keys get the server
+    /// label prefix, and the group order is settings order x wire order (contract
+    /// §Multi-server "server ordering" + §All view "provider order as detected").
+    nonisolated static func mergedQuota(_ results: [(label: String, quota: QuotaResponse)]) -> QuotaResponse {
+        var providers: [String: ProviderQuota] = [:]
+        var order: [String] = []
+        for result in results {
+            let wire = result.quota.providerWireOrder ?? (result.quota.providers?.keys.sorted() ?? [])
+            for provider in wire {
+                guard let value = result.quota.providers?[provider] else { continue }
+                let key = "\(result.label) · \(provider)"
+                providers[key] = value
+                order.append(key)
+            }
+        }
+        return QuotaResponse(enabled: results.contains(where: { $0.quota.enabled }),
+                             providers: providers, timestamp: nil,
+                             providerWireOrder: order)
+    }
+
     nonisolated static func combineUsage(_ rows: [UsageResponse]) -> UsageResponse {
         var tools: [String: (tokens: Int, cost: Double)] = [:]
         var models: [String: (tokens: Int, cost: Double)] = [:]
@@ -573,8 +592,8 @@ final class CompanionStore: NSObject, ObservableObject {
         // (contract §Full delta row).
         func combined(_ current: Double, _ prev: (Comparison) -> Double?) -> (prev: Double?, pct: Double?) {
             guard !rows.isEmpty else { return (nil, nil) }
-            // A metric omits when ANY server omits its comparison OR its own *_prev
-            // value - both absence shapes must drop the metric, not just the first.
+            // Either absence shape drops the metric: the whole `comparison` object,
+            // or just this metric's `*_prev` on any contributing server.
             var prevs: [Double] = []
             for row in rows {
                 guard let comparison = row.comparison, let value = prev(comparison) else { return (nil, nil) }
@@ -1532,7 +1551,19 @@ struct Snapshot {
                           providerEntry: ProviderQuota?)] {
         guard quota.enabled else { return [] }
         let providers = quota.providers ?? [:]
-        return providers.compactMap { (name, prov) -> (provider: String, canonicalProvider: String, rows: [QuotaRow], failed: Bool, providerEntry: ProviderQuota?)? in
+        // Provider order as detected (contract §All view): Foundation dictionaries
+        // carry no order, so the decode path supplies the wire key sequence and the
+        // fan-out merge supplies settings-order x wire-order. With neither, sort -
+        // arbitrary-per-launch beats arbitrary-per-launch.
+        let names: [String]
+        if let wire = quota.providerWireOrder {
+            names = wire.filter { providers[$0] != nil }
+                + providers.keys.filter { !wire.contains($0) }.sorted()
+        } else {
+            names = providers.keys.sorted()
+        }
+        return names.compactMap { name -> (provider: String, canonicalProvider: String, rows: [QuotaRow], failed: Bool, providerEntry: ProviderQuota?)? in
+            guard let prov = providers[name] else { return nil }
             let nameParts = name.components(separatedBy: " · ")
             let canonicalProvider = nameParts.last ?? name
             let display = nameParts.count == 1

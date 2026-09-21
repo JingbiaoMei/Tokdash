@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from stat import S_ISREG
 from typing import Any
 from urllib.error import HTTPError
 import urllib.request
@@ -78,7 +79,13 @@ class ClaudeProfile:
         on a config directory alone -- reporting it signed out is that install's own
         ``unavailable`` state -- or on the environment override, since a headless sign-in has
         no config directory to be there or not. A sibling needs its own credential file,
-        because a directory copied or restored into place is not a subscription.
+        because a directory copied or restored into place is not a subscription -- and
+        neither is one that cannot be stat'd, an ``EACCES`` out of a mode-000 install, which
+        answers the same way: no credential to poll with. That is a different question from
+        the file being GONE, which is what ``credential_observably_absent`` asks, and it is
+        why this swallows the error rather than letting it answer that one:
+        ``Path.is_file()`` re-raises whatever ``_ignore_error`` does not recognise,
+        ``EACCES`` included, and it runs on every dashboard load.
 
         Note this is not the same question as "should this install be reported": the default
         install is reported even when this is false, so that a machine with no Claude Code at
@@ -86,7 +93,38 @@ class ClaudeProfile:
         """
         if self.is_default:
             return self.config_dir.is_dir() or bool(_env_token())
-        return self.credential_path.is_file()
+        try:
+            return self.credential_path.is_file()
+        except OSError:
+            return False
+
+    @property
+    def credential_observably_absent(self) -> bool:
+        """Whether there is observably no credential FILE at this path.
+
+        Asked in ``configured``'s terms, or the two disagree again: that one demands
+        ``is_file()``, so anything other than a regular file -- nothing at the path, or a
+        directory a dotfile manager left in the file's place -- stops the polling just as
+        surely and leaves the same permanently frozen card this predicate exists to end. So
+        absence means ``ENOENT`` or "not a regular file", and nothing else.
+
+        A file that will not OPEN is the opposite case, and the one to keep reporting for:
+        an ``EACCES`` on the file, or on a directory that cannot be searched, fails the read
+        while leaving ``stat()`` free to answer, and a regular file there gets polled again
+        the moment it opens. Hence ``OSError`` is "cannot tell".
+
+        What neither covers is a credential that goes missing and comes back -- an
+        unlink-then-relink, a dangling symlink, a rename caught mid-flight. That reads as
+        absence and blanks the install's bars for one poll cycle, which is the accepted cost
+        and the asymmetric direction: retirement hides stored rows, so the next cycle puts
+        them back, while quoting rows nothing can ever refresh has no such way back.
+        """
+        try:
+            return not S_ISREG(self.credential_path.stat().st_mode)
+        except FileNotFoundError:
+            return True
+        except OSError:
+            return False
 
 
 def _default_profile() -> ClaudeProfile:
@@ -101,12 +139,15 @@ class ProfileScan:
 
     ``profiles`` is what to report quota for. ``known`` is every install the scan actually
     saw a directory for, or ``None`` when the enumeration was not trustworthy enough to
-    conclude anything from a name's absence -- see ``_namespace_trusted``. Both come out of
-    a single pass, because the home directory is enumerated once per dashboard load.
+    conclude anything from a name's absence -- see ``_namespace_trusted``. ``signed_out`` is
+    the installs inside that listing whose sign-in is observably gone -- see
+    ``_signed_out_names``. All three come out of a single pass, because the home directory is
+    enumerated once per dashboard load.
     """
 
     profiles: list[ClaudeProfile]
     known: frozenset[str] | None
+    signed_out: frozenset[str] = frozenset()
 
 
 def _namespace_trusted(profiles: list[ClaudeProfile]) -> bool:
@@ -114,10 +155,12 @@ def _namespace_trusted(profiles: list[ClaudeProfile]) -> bool:
 
     Retiring an install's stored windows on absence is only safe when absence was really
     observed. The oracle is therefore the *listing that names the installs*, never an
-    individual install's files: a sibling that is present but unreadable -- ``claude
-    logout``, a credential file mid-write, a mode-000 directory -- stays in its parent's
-    listing and so stays known, which is what keeps a transient read from looking like a
-    deletion.
+    individual install's files: a sibling that is present but unreadable -- a credential
+    file mid-write, a mode-000 directory, a dotfile manager mid-relink -- stays in its
+    parent's listing and so stays known, which is what keeps a transient read from looking
+    like a deletion. An install that IS listed but has no sign-in left to poll is the one
+    absence an individual install's own files do answer, and ``_signed_out_names`` settles
+    it.
 
     With ``TOKDASH_CLAUDE_PROFILES`` the variable names the installs outright, so any
     listed path that is not a directory right now means the answer is unavailable (an
@@ -182,11 +225,16 @@ def scan_profiles() -> ProfileScan:
     default = next((p for p in profiles if p.is_default), _default_profile())
     siblings = [p for p in profiles if not p.is_default and p.configured]
     reportable = siblings if siblings and not default.configured else [default, *siblings]
-    return ProfileScan(reportable, _known_names(profiles, default))
+    trusted = _namespace_trusted(profiles)
+    return ProfileScan(
+        reportable,
+        _known_names(profiles, default, trusted),
+        _signed_out_names(profiles) if trusted else frozenset(),
+    )
 
 
 def _known_names(
-    profiles: list[ClaudeProfile], default: ClaudeProfile
+    profiles: list[ClaudeProfile], default: ClaudeProfile, trusted: bool
 ) -> frozenset[str] | None:
     """Account names whose install this scan saw a directory for, or ``None`` for "cannot tell".
 
@@ -211,7 +259,7 @@ def _known_names(
     install's directory present", which must not depend on an environment variable, so a
     directory is known under every name it could have been stored under.
     """
-    if not _namespace_trusted(profiles):
+    if not trusted:
         return None
     names: set[str] = set()
     for profile in profiles:
@@ -223,6 +271,64 @@ def _known_names(
         names.add(default.name)
         names.add(clientpaths.claude_profile_slug(default.config_dir))
     return frozenset(names)
+
+
+def _signed_out_names(profiles: list[ClaudeProfile]) -> frozenset[str]:
+    """Sibling installs that are still on disk with no sign-in left to poll.
+
+    ``scan_profiles`` admits a sibling on ``configured``, so once ``claude logout`` removes
+    its ``.credentials.json`` the install stops being polled for good. Nothing can refresh
+    its window rows, and nothing can supersede the failure it last recorded -- typically
+    ``stale_token``, whose whole message is "open Claude Code once to refresh it", advice
+    for a sign-in that is not there to refresh. Its directory is still listed, so ``known``
+    keeps the name and the card goes on quoting numbers that nothing will ever update.
+
+    That is the one state where an install's own files may be the oracle, and the
+    asymmetry that makes it safe is that retirement HIDES stored rows rather than deleting
+    them: sign in again and the windows come back on the next poll. The alternative has no
+    such correction -- an unpolled account keeps its frozen bars for as long as the
+    directory is left in place.
+
+    Deliberately not about whether the SUBSCRIPTION still works. A token Anthropic has
+    stopped accepting, or one Claude Code lets lapse, is still a sign-in this machine holds:
+    the install is polled, its `stale_token` row stays live, and its windows stay the last
+    thing it measured -- the same deal every other provider's card makes. Only a sign-in
+    that is off THIS machine ends the reporting, because that is the state that ends the
+    polling and leaves the numbers with no way back.
+
+    The default install is exempt. It is polled whether or not it is configured, so its own
+    ``unavailable`` row is what names its state and keeps its error from going stale, and
+    those rows also drive the consent and "not detected" card.
+
+    Both the ASSIGNED and the INTRINSIC slug count, for the reason spelled out in
+    ``_known_names``: which name a directory carries depends on ``CLAUDE_CONFIG_DIR``, so a
+    signed-out install has to be retired under either name it could have stored rows under.
+
+    But a name is only this install's to retire if no OTHER install answers to it, and that
+    is where this set parts company with ``_known_names``. There, naming a directory twice
+    can only ever KEEP rows, so a name that belongs to someone else costs nothing. Here it
+    retires them, and the two names are allocated by different rules: the intrinsic slug is
+    a property of the directory, while the assigned one is handed out relative to
+    ``CLAUDE_CONFIG_DIR`` and made unique with a ``-2`` suffix. They collide exactly when an
+    install is demoted out of a name another install now holds -- point the variable at
+    ``~/.claude-academic`` and the plain ``~/.claude`` beside it is renamed ``claude`` while
+    keeping the intrinsic slug ``default``, which is the live redirected install's account.
+    Sign out of that ``~/.claude`` and retiring ``default`` blanks the working subscription.
+    So a name any pollable install answers to is withheld, and only the remainder retires.
+    """
+    claimed: set[str] = set()
+    candidates: set[str] = set()
+    for profile in profiles:
+        names = {profile.name, clientpaths.claude_profile_slug(profile.config_dir)}
+        if (
+            profile.is_default
+            or profile.configured
+            or not profile.credential_observably_absent
+        ):
+            claimed |= names
+        else:
+            candidates |= names
+    return frozenset(candidates - claimed)
 
 
 def _listable(path: Path) -> bool:
@@ -533,9 +639,11 @@ def _profile_snapshots(
     """One install's usage windows, or a status snapshot when there is nothing to fetch.
 
     A sibling profile that yields nothing reports nothing: `discover_profiles` already
-    required its credential file, so an empty result here is a state the group heading
-    explains through its own status, not a card-wide absence of data. The default
-    profile keeps reporting ``unavailable`` — that row is what drives the consent and
+    required its credential file, so an empty result here is not a card-wide absence of
+    data. An install that has LOST that file is not polled at all, and `quota_state`
+    retires the stored rows of an account nothing can refresh any more, so a signed-out
+    install stops being quoted as though it were live. The default profile keeps
+    reporting ``unavailable`` — that row is what drives the consent and
     "not detected" card, and `scan_profiles` reports the default install whether or not it
     is configured so that this stays true on a machine with no ``~/.claude`` at all.
     """

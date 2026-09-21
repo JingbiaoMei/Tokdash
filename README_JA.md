@@ -37,6 +37,8 @@
   <a href="https://charm.land/crush" title="Crush"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/crush.png" alt="Crush" height="34"></a>
   <a href="https://dev.meta.ai/docs/muse-code" title="Muse Code"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/muse.png" alt="Muse Code" height="34"></a>
   <a href="https://github.com/MiniMax-AI/minimax-code" title="MiniMax Code"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/minimax.png" alt="MiniMax Code" height="34"></a>
+  <a href="https://github.com/aaif-goose/goose" title="Goose"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/goose.png" alt="Goose" height="34"></a>
+  <a href="https://github.com/RooCodeInc/Roo-Code" title="Roo Code"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/roo-code.png" alt="Roo Code" height="34"></a>
 </p>
 
 <p align="center">
@@ -119,6 +121,8 @@
 | **Crush** | ✅ | — |
 | **Muse Code** | ✅ | — |
 | **MiniMax Code** | ✅ | — |
+| **Goose** | ✅ | ✅ |
+| **Roo Code** | ✅ | ✅ |
 
 ローカルデータパス、オーバーライド、ソース固有の集計に関する注記については [対応クライアント](docs/reference/SUPPORTED_CLIENTS.md) を参照。
 
@@ -521,6 +525,10 @@ Zed の使用量は、OS ごとの Zed データディレクトリ配下の `thr
 Qwen Code の使用量は `<base>/projects/*/chats/*.jsonl`（および改名前の `<base>/tmp/*/chats/*.jsonl`）からローカルに読み取ります。base は `$QWEN_RUNTIME_DIR`、次に `$QWEN_HOME`、次に `~/.qwen` の順で解決します — 設定ファイル側の `runtime_base_dir` は Tokdash からは到達できず、文書化された盲点です。ファイルは追記専用でセッションごとに 1 つ、各アシスタントレコードはプロバイダーの `usageMetadata` をそのまま保持します: `promptTokenCount` はキャッシュを含むため、キャッシュ分は独立したバケットに分離してキャッシュレートで課金し、`thoughtsTokenCount` は推論として表示します。各レコードの `uuid` はソース全体で安定したキーです: `/branch` は親のレコード（同じ uuid）をフォーク先のファイルにコピーするため、使用量ストアは最も早い出現でキーの所有者を決め、正規のファイルが削除されたときは残ったコピーを昇格させます。サブエージェントのレコードはセッションファイルを共有し、自動的にカウントされます。コストは価格 DB からのみで、モデルのないレコードは `unknown` として 0.00 で計上します。Sessions タブは同じアシスタントレコードを読み取り、1 件を 1 ターンとして計上します。フォークで複製された履歴は最も早いコピーに帰属します。
 
 Crush の使用量は `$CRUSH_DATA_DIR`（それぞれ `crush.db` を含むデータディレクトリのカンマ区切りリスト）からローカルに読み取ります — 必須です。Crush の既定のデータディレクトリは作業ディレクトリの隣にあるプロジェクトごとの `.crush` で、走査できるグローバルなルートが存在しないためです。データベースは WAL モードのため、ZCode と同じコピー＆スナップショット経路で読み取ります。トークンが 0 でないセッションごとに、その `prompt_tokens`／`completion_tokens` から 1 エントリで、サブエージェントのセッションも含みます: Crush が親セッションに畳み込むのはコストだけでトークンは畳み込まないため、Crush 自身の統計クエリが使う最上位のみの条件（`parent_session_id IS NULL`）ではその使用量が落ちてしまいます。各エントリはそのセッションの最後の非サマリーのアシスタントメッセージに帰属します — 複数モデルのセッションは最後のモデルで価格付けされます。注意点が 3 つあります: カウンターは累積ではなくステップごとに代入されるため、最後のリクエストのコンテキストサイズと最後のターンの出力しか保持せず、複数ステップのセッションでは実際より少なく出ます（Crush v0.91.2 で確認）。プロバイダーが使用量ゼロを報告した場合、トークンが文字数からの推定値になることがあり、DB 上にその印はありません。そしてキャッシュ／推論の内訳は保存されません。タイムスタンプは秒で、行は `updated_at`（最終更新）でバケットされるため、セッションの全期間の合計が 1 日に載ります。`sessions.cost` は無視し、コストは価格 DB からのみ求めます。Crush は Sessions タブには登場しません。
+
+Goose の使用量は単一のグローバルデータディレクトリ内の `sessions/sessions.db` からローカルに読み取ります。順に `$GOOSE_PATH_ROOT/data`、なければ `$XDG_DATA_HOME/goose`、さらになければ `~/.local/share/goose` です（macOS は Linux と同じ既定値に解決されるためプラットフォーム別の分岐は無く、Windows の位置は未検証です）。データベースは WAL モードなので ZCode と同じコピー＋スナップショット経由で読みます。`usage_ledger` が唯一のトークン源で、モデルリクエスト 1 件が 1 行でモデルもその行に載るため、モデル混在のセッションはリクエストごとに課金されます。`input_tokens` はキャッシュ命中分を既に含むので、新規分を input、キャッシュ分をキャッシュ単価で計上し、`output_tokens` は総量です。Goose は reasoning の内訳をどこにも永続化しないためです。`cost`、`cost_source`、および `sessions.accumulated_*` / `total_tokens` 列は一切読みません。accumulated 系は台帳合計の写しであり、`total_tokens` は最後のリクエストのスナップショットにすぎず、両方読めば 1 リクエストが二重計上になります。料金は価格データベースのみを用いるため、セルフホストのモデルは 0.00 です。Goose でセッションを削除すると、台帳行はデータベースごと無くなるのでここからも用量が消えます。Sessions タブは最上位セッションのみ、台帳行 1 件につき 1 ターンで表示します。アクティブ時間は Goose が自身の assistant メッセージに記録するリクエスト所要時間から取り、Goose が名前を付けなかったセッションは最初のプロンプトで見出しを付けます。定期実行の recipe は現状ふつうのセッションとして並みます。
+
+Roo Code の使用量は拡張機能のグローバルストレージからローカルに読みます。マシン上に存在する `<globalStorage>/rooveterinaryinc.roo-cline/tasks/<taskId>/` すべてです。プロファイル込みの VS Code / Code - Insiders / VSCodium のデスクトップツリー、WSL セッションが書く `~/.vscode-server*`、WSL における `/mnt/c` 配下の Windows デスクトップツリー、Windows の `%APPDATA%`、macOS の `~/Library/Application Support`、そして `@roo-code/cli` が書く `~/.vscode-mock/global-storage` を含みます。`TOKDASH_ROO_STORAGE_DIR` は移動先のストレージをこの列表に置き換えではなく追加します。`ui_messages.json` がトークン源で、完了した `api_req_started` リクエスト 1 件が 1 エントリ、これは Roo 自身のタスク合計が足し上げるものとちょうど同じです。`tokensIn` はキャッシュ込みで input / cacheRead / cacheWrite に分割し、`tokensOut` は総量です。Roo は推論トークンを計算しますが永続化はしないためです。記録済みの `cost` は読まず、価格データベースで計上します。終わらなかったリクエストはトークンキーの無いプレフライト印だけを残し、rewind はファイルを切り詰めて削除印を追記するので、どちらも復活させません。モデルはそのファイルに無く、同じディレクトリの `api_conversation_history.json` 内にある Roo 自身の `<model>` タグから来ており、リクエストごとに対応付けます。`tasks/_index.json` と `history_item.json` のタスク別合計は一切読みません。インデックスはデバウンスで書かれ、稼働中のタスクに対して 4 リクエスト遅れている実測があるためです。見落としは伏せず記載します。タスクディレクトリを削除すると、Tokdash は消えたファイルの行を残すのでダッシュボード上の用量はそのまま残ります。Sessions タブはタスクディレクトリ 1 件を 1 セッションとして扱い（再開後も同じ）、委任されたサブタスクは課金されますが一覧には出ません。
 
 `tokdash setup` は任意のクォータステップ（プロバイダーごとのネットワークコンセンツ、デフォルト No、およびポーリング間隔）を提供し、`tokdash doctor` はクォータの状態を報告します: マスタースイッチ、プロバイダーごとのコンセンツ、キルスイッチ、有効間隔とそのソース、最終ポーリング時刻、保存されたスナップショット数。
 

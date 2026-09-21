@@ -6686,6 +6686,648 @@ class CrushParser(BaseParser):
         return out
 
 
+class GooseSchemaError(RuntimeError):
+    """A Goose database that has Goose's own ``sessions`` table but no
+    ``usage_ledger``, so this reader cannot account for it."""
+
+
+def _goose_ts_to_ms(value: Any) -> Optional[int]:
+    """Goose's ``created_timestamp`` is an INTEGER epoch SECONDS column."""
+    try:
+        seconds = int(value)
+    except (TypeError, ValueError):
+        return None
+    if seconds <= 0:
+        return None
+    # Defensive only: a seconds clock cannot reach 1e11 before the year 5138,
+    # so a value above it was already written in ms.
+    return seconds if seconds > 100_000_000_000 else seconds * 1000
+
+
+class GooseParser(BaseParser):
+    """
+    Parser for Goose (Block's open-source agent) token usage.
+
+    =======================================================================
+    GOOSE — ONE SESSIONS.db, LEDGER ROWS ARE THE ONLY TRUTH
+    =======================================================================
+    Storage: clientpaths.goose_sessions_db() — $GOOSE_PATH_ROOT/data, else
+    $XDG_DATA_HOME/goose, else ~/.local/share/goose, joined with
+    sessions/sessions.db. ONE global database, not a tree to scan; macOS
+    resolves the same XDG default as Linux (verified on v1.51.0), so there is
+    no platform branch. Absent file -> empty success.
+
+    Read path: the database is WAL-mode, so it goes through the shared
+    zcode_snapshot() helper (first user: ZCodeParser, same rule as
+    CrushParser). The source file is never opened, because even a ?mode=ro
+    open of a live WAL database creates the -shm coordination file in Goose's
+    data directory.
+
+    Table: usage_ledger — one row per model request, model on the row, so a
+    mixed-model session prices per request. Accounting rules (see
+    docs/development/technical-notes/GOOSE_ROO_SUPPORT_DESIGN.md):
+      - input_tokens is INCLUSIVE of the cached slice, so the entry bills
+        max(0, input - cache_read) as fresh input and cacheRead separately.
+      - output_tokens is gross. Goose persists no reasoning split anywhere
+        (no column, and no reasoning field in messages.metadata_json.usage),
+        so reasoning stays 0 and output is billed whole rather than guessed.
+      - cost / cost_source are ignored; pricing comes from the pricing
+        database, which leaves a self-hosted model at 0.00.
+      - is_compaction = 1 rows are real billed requests and are kept; the
+        compaction label belongs to the Sessions panel, not to the totals.
+      - a row is kept when any token bucket is positive. There is no status
+        column, and a failed request writes no ledger row at all.
+
+    NEVER read sessions.accumulated_* / total_tokens / input_tokens /
+    output_tokens / cost, nor messages.tokens. The accumulated columns
+    duplicate SUM(usage_ledger) exactly (fixture session 20260920_7: 16854
+    input / 304 output / 17158 total / 8320 cache-read both ways), while
+    total_tokens and friends hold only the LAST request's snapshot (8659 /
+    8527 / 132 / 8320 for that same session). Summing the session columns
+    undercounts every multi-request session, and summing both double-counts
+    the last one: the Crush snapshot trap in a new costume. messages.tokens
+    is NULL in every captured row.
+
+    Empty is split in two on purpose. No database, or one with no tables, is
+    an empty success. A database carrying Goose's ``sessions`` table but no
+    ``usage_ledger`` raises GooseSchemaError instead: an empty parse records no
+    source signature, so the store would keep serving its previous rows and
+    nothing anywhere would say the table went missing under a Goose upgrade.
+    A failed read raises for the same reason — see _parse_all.
+    =======================================================================
+    """
+
+    source_name = "goose"
+    sync_capability = SourceSyncCapability(
+        mode="source_replace",
+        reason=(
+            "Goose owns one SQLite database, and its ledger rows leave with the "
+            "session (ON DELETE CASCADE) rather than with a file the store can "
+            "notice going missing, so whole-source replacement is what lets a "
+            "deleted session's usage leave the Tokdash index. Same reasoning as "
+            "Hermes."
+        ),
+    )
+    # 1: one entry per usage_ledger row, keyed on session + row id + the row's
+    #    own second; cache-inclusive input split; gross output; pricing-DB
+    #    cost only (ledger cost/cost_source ignored).
+    persistent_parser_version = 1
+
+    def __init__(self, pricing_db: PricingDatabase):
+        super().__init__(pricing_db)
+        self.db_path = clientpaths.goose_sessions_db()
+
+    def _file_signatures(self) -> tuple:
+        db = self.db_path
+        if db is None:
+            return ()
+
+        def scan() -> tuple:
+            # ONE entry per DB with the -wal/-shm sidecars folded in, the way
+            # CrushParser does it. A per-sidecar entry would make the stored
+            # sync snapshot and reparse the whole database two or three times
+            # per sync.
+            sig = _sqlite_db_signature(db)
+            return (sig,) if sig is not None else ()
+
+        # Keyed on the resolved path, not just "goose": several parsers over
+        # several databases in one process must not share one TTL entry.
+        return _timed_sigs(f"goose:{db}", scan)
+
+    def _parse_db(self, conn: sqlite3.Connection) -> List[Dict[str, Any]]:
+        conn.row_factory = sqlite3.Row
+        # Probed inline rather than through a helper that could swallow
+        # sqlite3.Error: an absent table is a legitimate empty success, but a
+        # probe error must surface as a failed read rather than be mistaken
+        # for an absent table.
+        names = {
+            str(r[0])
+            for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+        }
+        if "usage_ledger" not in names:
+            if "sessions" in names:
+                raise GooseSchemaError(
+                    "Goose database has a sessions table but no usage_ledger; "
+                    "its schema is not one this reader can account for"
+                )
+            return []
+
+        out: List[Dict[str, Any]] = []
+        for row in conn.execute(
+            """
+            SELECT id, session_id, created_timestamp, model,
+                   input_tokens, output_tokens,
+                   cache_read_tokens, cache_write_tokens
+            FROM usage_ledger
+            ORDER BY session_id, id
+            """
+        ):
+            session_id = str(row["session_id"] or "").strip()
+            if not session_id:
+                continue
+            input_total = self._i(row["input_tokens"])
+            output_t = self._i(row["output_tokens"])
+            cache_r = self._i(row["cache_read_tokens"])
+            cache_w = self._i(row["cache_write_tokens"])
+            # Keep-guard: token presence. Failed requests write no ledger row.
+            if input_total + output_t + cache_r + cache_w <= 0:
+                continue
+            ts_ms = _goose_ts_to_ms(row["created_timestamp"])
+            if ts_ms is None:
+                continue
+            model = str(row["model"] or "").strip() or "unknown"
+            # Fresh input only: input_tokens already contains the cached
+            # slice, and get_cost bills the buckets additively.
+            input_t = max(0, input_total - cache_r)
+            row_id = row["id"]
+            out.append({
+                "source": self.source_name,
+                "model": model,
+                # The ledger records no provider, and the session-level
+                # provider_name is not per-request evidence, so no provider is
+                # invented here; pricing resolves on the model string.
+                "provider": "",
+                "input": input_t,
+                "output": output_t,
+                "cacheRead": cache_r,
+                "cacheWrite": cache_w,
+                "reasoning": 0,
+                "cost": self.pricing_db.get_cost(model, input_t, output_t, cache_r, cache_w),
+                "timestamp": ts_ms,
+                # AUTOINCREMENT means SQLite never reissues an id inside one
+                # live database, so the composite key is not about rowid
+                # reuse. It is about the case AUTOINCREMENT does not cover: a
+                # recreated sessions.db restarts the sequence at 1, and the
+                # store is unique on (source, entry_key), so a bare row id
+                # would let a new install overwrite the old install's rows.
+                "entry_id": f"goose:{session_id}:{row_id}:{row['created_timestamp']}",
+                "_billing": usage_billing_pricing(
+                    [model],
+                    input_tokens=input_t,
+                    output_tokens=output_t,
+                    cache_read=cache_r,
+                    cache_write=cache_w,
+                ),
+            })
+        return out
+
+    def _parse_all(self) -> List[Dict[str, Any]]:
+        db = self.db_path
+        if db is None:
+            return []
+        # Unlike CrushParser, which has one DB per project and skips a bad one
+        # so it cannot blank the others, Goose has exactly one database. A
+        # failed read therefore raises rather than returning []: the caller
+        # records it as an unavailable source instead of reading it as zero,
+        # and BaseParser.collect() never caches the result, so the next
+        # collect retries.
+        with zcode_snapshot(db) as snap:
+            return self._parse_db(snap.conn)
+
+
+# ---------------------------------------------------------------------------
+# Roo Code (VS Code extension + @roo-code/cli)
+# ---------------------------------------------------------------------------
+
+# Roo writes no model field anywhere. It does write its own prompt header into
+# every user record of the task's conversation file, and that header carries
+# <model>...</model>, so the model is recovered from Roo's own string rather
+# than inferred from a setting.
+_ROO_MODEL_TAG_RE = re.compile(r"<model>([^<]+)</model>")
+
+# A request's own <model> tag sits within tens of milliseconds of the
+# api_req_started row it belongs to (measured 4-59 ms across the captured
+# corpus), while the nearest OTHER request's tag is seconds away. The window
+# separates the two without guessing; outside it the model in force is used.
+# 500 ms, not a generous slack: the window is how far a request with no record
+# of its own may borrow a NEIGHBOUR'S model, so widening it widens the
+# misattribution rather than the recovery. Measured own-tag distances are
+# 4-59 ms, and the one captured request whose record arrived late was 333 s
+# late, which lands on the model in force either way.
+_ROO_MODEL_TAG_WINDOW_MS = 500
+
+# Eviction bound for the per-conversation-file model maps. Roo's corpus grows
+# one directory per task forever, so an unbounded dict here is a slow leak with
+# a year clock. Same cap as _OPENCODE_QUERY_CACHE_MAX above and
+# _ZCODE_SESSIONS_CACHE_MAX in sessions.py; a miss only costs a re-read.
+_ROO_MODEL_CACHE_MAX = 32
+_roo_model_cache: Dict[str, Tuple[tuple, List[Tuple[int, str]]]] = {}
+
+
+_roo_roots_cache: Dict[tuple, Tuple[float, List[Path]]] = {}
+
+
+def _roo_roots() -> List[Path]:
+    """``clientpaths.roo_storage_roots()`` with the same short TTL as _timed_sigs.
+
+    The enumeration IS the cost: on WSL every ``/mnt/c`` candidate is a Windows
+    round trip, measured at ~45 ms here for the whole fan-out, and both Roo
+    surfaces need the answer on every read. Keying on the three inputs that
+    decide the set -- home, the relocation override, and the env vars the roots
+    read -- rather than on the directories themselves is what makes the cache
+    useful, since discovering those directories is the thing being paid for. A
+    relocated or newly created root is picked up at the next TTL boundary.
+    """
+    key = (
+        str(Path.home()),
+        os.environ.get("TOKDASH_ROO_STORAGE_DIR", ""),
+        os.environ.get("XDG_DATA_HOME", ""),
+        os.environ.get("APPDATA", ""),
+    )
+    now = _time.monotonic()
+    hit = _roo_roots_cache.get(key)
+    if hit is not None and (now - hit[0]) < _SIG_TTL:
+        return list(hit[1])
+    roots = clientpaths.roo_storage_roots()
+    _roo_roots_cache[key] = (now, list(roots))
+    return roots
+
+
+def roo_task_file_signatures() -> tuple:
+    """(path, mtime_ns, size) of every task's ui_messages.json.
+
+    Shared by RooCodeParser._file_signatures and the Sessions-tab loader so the
+    two can never see different task sets or run on different invalidation
+    clocks, the way cline_message_file_signatures() serves Cline's two callers.
+
+    Only ui_messages.json appears here. api_conversation_history.json is read
+    for the model tag and must stay out: usage_entries is unique on
+    (source, entry_key) and Roo's keys are task-scoped, so a second signature
+    path emitting the same keys would fight the first over one stored row, and
+    deleting either file would erase the other's usage.
+
+    Cached under a key naming the roots, so Overview and Sessions share one
+    scan and one invalidation clock rather than each paying the full tree walk.
+    """
+    return _timed_sigs(
+        "roo_code:" + ",".join(str(r) for r in _roo_roots()),
+        _scan_roo_task_file_signatures,
+    )
+
+
+def _scan_roo_task_file_signatures() -> tuple:
+    sigs: List[Tuple[str, int, int]] = []
+    for path in clientpaths.roo_task_message_files():
+        try:
+            s = path.stat()
+        except OSError:
+            continue
+        sigs.append((str(path), s.st_mtime_ns, s.st_size))
+    return tuple(sorted(sigs))
+
+
+def _roo_conversation_tags(conv_path: Path) -> List[Tuple[int, str]]:
+    """[(ts, model)] from one api_conversation_history.json, oldest first.
+
+    Only user records carry the header: Roo builds the environment_details block
+    for the role it sends to the model, and the captured corpus has the tag on 5
+    of 5 user records and 0 of 5 assistant records. content is a string on a
+    plain text turn and a list of typed parts when a tool result rides along,
+    so both shapes are read. When a record somehow carries several tags the last
+    one wins, because Roo appends the freshest environment block.
+    """
+    try:
+        doc = json.loads(conv_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    records = doc if isinstance(doc, list) else []
+
+    out: List[Tuple[int, str]] = []
+    for rec in records:
+        if not isinstance(rec, dict) or rec.get("role") != "user":
+            continue
+        try:
+            ts = int(rec.get("ts") or 0)
+        except (TypeError, ValueError):
+            continue
+        if ts <= 0:
+            continue
+        texts: List[str] = []
+        content = rec.get("content")
+        if isinstance(content, str):
+            texts.append(content)
+        elif isinstance(content, list):
+            for part in content:
+                if isinstance(part, dict) and isinstance(part.get("text"), str):
+                    texts.append(part["text"])
+        model = ""
+        for text in texts:
+            match = _ROO_MODEL_TAG_RE.search(text)
+            if match:
+                model = match.group(1).strip()
+        if model:
+            out.append((ts, model))
+    out.sort()
+    return out
+
+
+def _roo_model_tags(messages_path: Path) -> List[Tuple[int, str]]:
+    """The task's model tags, cached on the CONVERSATION file's own signature.
+
+    The task file is what syncs, but the map belongs to its sibling, so the
+    cache key and signature are the sibling's. Bounded, see _ROO_MODEL_CACHE_MAX.
+    """
+    conv = messages_path.parent / "api_conversation_history.json"
+    try:
+        st = conv.stat()
+    except OSError:
+        return []
+    key = str(conv)
+    sig = (st.st_mtime_ns, st.st_size)
+    cached = _roo_model_cache.get(key)
+    if cached is not None and cached[0] == sig:
+        return cached[1]
+    tags = _roo_conversation_tags(conv)
+    if len(_roo_model_cache) >= _ROO_MODEL_CACHE_MAX:
+        _roo_model_cache.clear()
+    _roo_model_cache[key] = (sig, tags)
+    return tags
+
+
+def _roo_model_for(tags: List[Tuple[int, str]], ts: int) -> str:
+    """Model of the request stamped at ``ts``, or "unknown".
+
+    Nearest tag inside the window first: Roo writes the api_req_started marker
+    BEFORE the conversation record that carries the tag, so a "newest tag at or
+    before the row" rule leaves the first request of every task unresolved (it
+    cost 4 of the 12 rows in the captured corpus, each 24-50 ms from its own
+    tag). Past the window the newest tag at or before the row is the model in
+    force, which is Roo's own persisted string rather than a guess, and only a
+    task with no tag at all falls through to "unknown".
+    """
+    if not tags:
+        return "unknown"
+    best_delta: Optional[int] = None
+    best_model = ""
+    newest_before = ""
+    for tag_ts, model in tags:
+        delta = abs(tag_ts - ts)
+        if best_delta is None or delta < best_delta:
+            best_delta, best_model = delta, model
+        if tag_ts <= ts:
+            newest_before = model
+    if best_delta is not None and best_delta <= _ROO_MODEL_TAG_WINDOW_MS:
+        return best_model
+    return newest_before or "unknown"
+
+
+def parse_roo_task_file(
+    path_str: str, unavailable: Optional[type[Exception]] = None
+) -> List[Dict[str, Any]]:
+    """Billable request rows from one ui_messages.json, WITHOUT the model.
+
+    Row: {entry_id, ts, provider, input, output, cacheRead, cacheWrite}. No
+    cost: priced on read by whichever consumer holds the pricing DB, exactly as
+    parse_cline_message_file() leaves it.
+
+    NOT a consumer entry point on its own — use roo_task_rows(), which adds the
+    model. Kept separate because the Sessions loader and Overview must both go
+    through the pairing, and a caller that reads only this file prices every
+    turn as unknown while Overview prices the real model.
+
+    Only say:"api_req_started" carries usage, and that one filter is what
+    excludes every marker type: ask:"resume_task" boundaries, say:"subtask_result"
+    hand-offs, api_req_retry_delayed (Roo rewrites the original row when a retry
+    lands, so a retry is never a second row) and api_req_deleted, which marks a
+    rewind whose rows were already truncated out of the file. Subtracting the
+    deletion marker on top would double-count the rewind.
+
+    A payload with no token keys at all is a request that never finished: the
+    captured aborted child holds its lone row at the pre-flight
+    {"apiProtocol":"openai"}, and Roo fills that same row in when the response
+    arrives. An all-zero row is a request that failed before billing. Both are
+    skipped; a partial:true row is still being streamed.
+    """
+    try:
+        with open(path_str, "r", encoding="utf-8") as handle:
+            doc = json.load(handle)
+    except OSError as exc:
+        if unavailable is not None:
+            raise unavailable(path_str) from exc
+        return []
+    except ValueError:
+        return []
+    messages = doc if isinstance(doc, list) else []
+    task_id = Path(path_str).parent.name
+
+    out: List[Dict[str, Any]] = []
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+        if msg.get("type") != "say" or msg.get("say") != "api_req_started":
+            continue
+        if msg.get("partial"):
+            continue
+        try:
+            ts = int(msg.get("ts") or 0)
+        except (TypeError, ValueError):
+            continue
+        if ts <= 0:
+            continue
+        text = msg.get("text")
+        if not isinstance(text, str):
+            continue
+        try:
+            payload = json.loads(text)
+        except ValueError:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        if "tokensIn" not in payload and "tokensOut" not in payload:
+            continue  # pre-flight marker; the response rewrites this row
+
+        # tokensIn is cache-inclusive and Roo reports both slices, so the split
+        # is Cline's: bill the fresh part as input, the two cache parts apart.
+        input_t, cache_r, cache_w = _split_cline_cache_inclusive_input(
+            BaseParser._i(payload.get("tokensIn")),
+            BaseParser._i(payload.get("cacheReads")),
+            BaseParser._i(payload.get("cacheWrites")),
+        )
+        # tokensOut is gross: Roo computes reasoning tokens but never persists
+        # them, so output is billed and displayed whole with no reasoning split.
+        output_t = BaseParser._i(payload.get("tokensOut"))
+        if input_t + output_t + cache_r + cache_w <= 0:
+            continue
+        out.append({
+            # Task-scoped and stamped, so stable across re-reads of a rewritten
+            # file. The one shape it cannot express is two api_req_started rows
+            # inside one task in the same millisecond: the store's unique index
+            # would fold them into one row. Roo stamps one row per completed
+            # request, so this needs two requests to finish within 1 ms; Cline's
+            # own message ids make the same case impossible, and Roo writes no
+            # such id. Accepted rather than worked around, on those odds.
+            "entry_id": f"roo_code:{task_id}:{ts}",
+            "ts": ts,
+            # Roo persists the protocol per request; it is the only provider
+            # evidence on the row, so it is what the provider field carries.
+            "provider": str(payload.get("apiProtocol") or ""),
+            "input": input_t,
+            "output": output_t,
+            "cacheRead": cache_r,
+            "cacheWrite": cache_w,
+        })
+    return out
+
+
+def roo_task_rows(
+    messages_path: Path, unavailable: Optional[type[Exception]] = None
+) -> List[Dict[str, Any]]:
+    """One task's request rows with the model resolved: the single producer.
+
+    Both RooCodeParser and the Sessions-tab loader call this, the way both
+    Cline surfaces call cline_message_file_signatures(). The pairing cannot be
+    left to the callers: the tokens live in ui_messages.json and the model lives
+    in the sibling api_conversation_history.json, so a loader fed
+    parse_roo_task_file() alone would show "unknown" on every turn while
+    Overview priced the real model, which moves the panel's model column AND
+    its per-model _bills grouping apart from the dashboard's own totals.
+    """
+    path = Path(messages_path)
+    rows = parse_roo_task_file(str(path), unavailable=unavailable)
+    if not rows:
+        return []
+    tags = _roo_model_tags(path)
+    for row in rows:
+        row["model"] = _roo_model_for(tags, int(row["ts"]))
+    return rows
+
+
+class RooCodeParser(BaseParser):
+    """
+    Parser for Roo Code (VS Code extension and @roo-code/cli) token usage.
+
+    =======================================================================
+    ROO CODE — ONE ui_messages.json PER TASK, COMPLETED REQUESTS ONLY
+    =======================================================================
+    Storage: clientpaths.roo_storage_roots() — the extension's
+    ``<globalStorage>/rooveterinaryinc.roo-cline/tasks/<taskId>/`` for VS Code,
+    Code - Insiders and VSCodium (profiles included), the WSL
+    ``~/.vscode-server*`` server roots and the ``/mnt/c`` desktop tree, and the
+    ``~/.vscode-mock/global-storage/tasks/<taskId>/`` the CLI writes. A union of
+    existing roots, never a single winner, and TOKDASH_ROO_STORAGE_DIR adds a
+    customStoragePath relocation to that list rather than replacing it.
+
+    Corpus: tasks/<taskId>/ui_messages.json, one JSON array per task, rewritten
+    whole in place. So mode="file_replace" and NOT an incremental tail: a rewind
+    (performRewind -> truncateClineMessages) shortens the file, and an
+    append-only reader would keep billing rows Roo has already removed.
+
+    Billing: one entry per say:"api_req_started" message whose payload carries
+    token keys, which is exactly what Roo's own task total sums — verified
+    against a live task whose six rows and its history_item.json both read
+    56126 input / 670 output. Nothing is subtracted:
+      - tokensIn is cache-inclusive and splits into input / cacheRead /
+        cacheWrite through the same helper Cline uses;
+      - tokensOut is gross; Roo computes reasoning tokens but never persists
+        them, so reasoning stays 0 and output is billed whole;
+      - cost is ignored, pricing comes from the pricing database, so a
+        self-hosted endpoint lands at 0.00 like any unlisted model id;
+      - the per-task totals in history_item.json and tasks/_index.json are not
+        read either — the index is written on a debounce and was caught four
+        requests behind its own task (46181/590 against a true 56126/670), and
+        it had no entry at all for the aborted child that did have a row.
+
+    Model: no field anywhere; recovered from Roo's own <model> header in the
+    task's conversation file, per request. See _roo_model_for for the pairing
+    rule and why the obvious one is wrong, and roo_task_rows for why Overview
+    and Sessions must share one producer.
+
+    Task discovery is a directory glob. _index.json is not a discovery path:
+    the live run produced a task dir with a history_item.json and a billable
+    row and no index entry, so index-driven discovery loses real usage.
+    =======================================================================
+    """
+
+    source_name = "roo_code"
+    sync_capability = SourceSyncCapability(
+        mode="file_replace",
+        reason=(
+            "One whole-file JSON per task, rewritten in place; each sync "
+            "replaces that task's rows with the current contents of its file."
+        ),
+        # 3.54.0 has no fork or message-copy path at all (no case-sensitive
+        # "Fork" anywhere in the 14.8 MB bundle), so one entry_key never
+        # legitimately appears in two task files.
+        cross_file_stable_keys=False,
+    )
+    # 1: one entry per completed api_req_started row, cache-inclusive tokensIn
+    #    split, gross tokensOut, model paired from the sibling conversation
+    #    file, epoch-ms timestamps kept as written, pricing-DB cost only.
+    persistent_parser_version = 1
+
+    def __init__(self, pricing_db: PricingDatabase):
+        super().__init__(pricing_db)
+        self.roots = _roo_roots()
+
+    def _file_signatures(self) -> tuple:
+        # The shared signer owns the TTL and the cache key, which is what keeps
+        # this surface and the Sessions loader on one scan and one clock.
+        return roo_task_file_signatures()
+
+    def _entries(self, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        out: List[Dict[str, Any]] = []
+        for row in rows:
+            model = str(row.get("model") or "unknown")
+            input_t = int(row["input"])
+            output_t = int(row["output"])
+            cache_r = int(row["cacheRead"])
+            cache_w = int(row["cacheWrite"])
+            out.append({
+                "source": self.source_name,
+                "model": model,
+                "provider": row["provider"],
+                "input": input_t,
+                "output": output_t,
+                "cacheRead": cache_r,
+                "cacheWrite": cache_w,
+                "reasoning": 0,
+                "cost": self.pricing_db.get_cost(
+                    model, input_t, output_t, cache_r, cache_w
+                ),
+                # Roo's ts is already epoch milliseconds (1789932971243 in the
+                # capture), so there is no unit conversion here.
+                "timestamp": int(row["ts"]),
+                "entry_id": row["entry_id"],
+                "_billing": usage_billing_pricing(
+                    [model],
+                    input_tokens=input_t,
+                    output_tokens=output_t,
+                    cache_read=cache_r,
+                    cache_write=cache_w,
+                ),
+            })
+        return out
+
+    def _parse_file_strict(self, file_sig: Tuple[str, int, int]) -> List[Dict[str, Any]]:
+        """Strict single-file entry point for the stored sync.
+
+        Raises UsageFileVanished rather than returning [] when the task
+        directory disappears between enumeration and open. Under file_replace,
+        [] means "this file now has zero entries" and the commit deletes every
+        stored row for the path, so a task deleted mid-sync would silently lose
+        all of its usage. MuseParser._parse_file_strict is the reference.
+        """
+        return self._entries(
+            roo_task_rows(Path(file_sig[0]), unavailable=UsageFileVanished)
+        )
+
+    def _parse_all(self) -> List[Dict[str, Any]]:
+        out: List[Dict[str, Any]] = []
+        for file_sig in self._file_signatures():
+            try:
+                rows = roo_task_rows(
+                    Path(file_sig[0]), unavailable=UsageFileVanished
+                )
+            except UsageFileVanished:
+                # Only the vanished task is skipped: the live path must not
+                # hand the tracker a source-level error, which would cost every
+                # other task its entries.
+                continue
+            out.extend(self._entries(rows))
+        out.sort(key=lambda e: int(e.get("timestamp", 0) or 0))
+        return out
+
+
 class MiniMaxCodeParser(BaseParser):
     """
     Parser for MiniMax Code (npm ``@minimax-ai/code``, CLI ``mcode``).
@@ -6887,6 +7529,12 @@ class CodingToolsUsageTracker:
     def __init__(self):
         self.entries: List[Dict[str, Any]] = []
         self.source_errors: List[Dict[str, str]] = []
+        # Sources whose persistent-store sync raised (compute._sync_usage_store).
+        # compute.py answers those from the live parsers for this request and
+        # skips their stored rows, so one sick source costs one source instead of
+        # pushing every source off the store path. The tracker is built per
+        # request, so this never outlives one.
+        self.sync_failures: List[str] = []
         self.pricing_db = PricingDatabase()
         self.parsers = {
             "opencode": OpenCodeParser(self.pricing_db),
@@ -6917,6 +7565,8 @@ class CodingToolsUsageTracker:
             # so no provenance is invented for otherwise valid counters.
             "muse": MuseParser(self.pricing_db),
             "minimax": MiniMaxCodeParser(self.pricing_db),
+            "goose": GooseParser(self.pricing_db),
+            "roo_code": RooCodeParser(self.pricing_db),
         }
         # Two parsers must never scan the same directory: the usage store
         # dedups on (source, entry_key) and never across sources, so an

@@ -113,6 +113,15 @@ def _cost(store: UsageEntryStore, source: str) -> float:
     return store.aggregate_entries(sources=[source])["total_cost"]
 
 
+def _break_goose_discovery(monkeypatch) -> None:
+    """A Goose database whose ledger table vanished underneath the parser."""
+
+    def boom(self):  # pragma: no cover - the body is the point
+        raise RuntimeError("no such table: usage_ledger")
+
+    monkeypatch.setattr(coding_tools.GooseParser, "_file_signatures", boom)
+
+
 def _row_costs(store: UsageEntryStore, source: str) -> list[float]:
     return [float(row["cost"]) for row in store.query_entries(sources=[source])]
 
@@ -1620,3 +1629,59 @@ def _live_entries(sources: list[str]) -> list[dict]:
         usage_store_module.public_usage_entry(entry)
         for entry in tracker.to_json()["entries"]
     ]
+
+
+# --- one sick source stays one sick source ----------------------------------
+
+
+def test_a_source_that_fails_to_sync_is_dropped_rather_than_fatal(
+    _isolated_home, monkeypatch
+):
+    """The failure is confined to the source that raised.
+
+    Goose reads a database it does not control, so its schema can change under
+    the parser on any version bump. That raise used to unwind the whole sync
+    loop; here it costs Goose one request and nothing else.
+    """
+    _write_codex(_isolated_home, "c1")
+    _write_pricing(_rates())
+    _break_goose_discovery(monkeypatch)
+
+    tracker = CodingToolsUsageTracker()
+    _sig_cache.clear()
+    BaseParser._entry_cache.clear()
+    store, stored = compute._sync_usage_store(tracker)
+
+    assert "goose" in tracker.sync_failures
+    assert "goose" not in stored
+    assert "codex" in stored
+    # The healthy source kept its stored rows...
+    assert [row["source"] for row in store.query_entries(sources=stored)] == ["codex"]
+    # ...and the failed one is answered by the live parsers for this request.
+    assert "goose" in compute._usage_store_live_sources(tracker)
+
+
+def test_one_sick_source_does_not_push_the_overview_off_the_store(
+    _isolated_home, parse_counts, monkeypatch
+):
+    """Blast radius, measured at the request rather than at the loop.
+
+    The raise landed in run_local_coding_tools_json's `except Exception`, whose
+    fallback is a full live scan -- for this request and for every later one,
+    since nothing about the failure is transient. Confining it means the healthy
+    source is still served from stored rows, which is what `parse_counts` reads
+    as zero.
+    """
+    _write_codex(_isolated_home, "c1")
+    _write_pricing(_rates())
+    compute.run_local_coding_tools_json([])  # first request warms the store
+    _reset(parse_counts)
+
+    _break_goose_discovery(monkeypatch)
+    entries = compute.run_local_coding_tools_json([])["entries"]
+
+    # Only the sources this test wrote are asserted: the fake home pins the
+    # roots it knows about, and DB-backed live sources read wherever they find
+    # themselves, which is not what this is measuring.
+    assert [entry["source"] for entry in entries if entry["source"] == "codex"] == ["codex"]
+    assert parse_counts["codex"] == 0

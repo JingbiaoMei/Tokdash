@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Unreleased
+
+### Fixed
+
+- A signed-out Claude Code profile stops reporting quota it can never refresh. `claude logout` deletes a `~/.claude-<profile>` install's `.credentials.json` and leaves the directory behind, and a sibling is only polled while it has that file, so nothing polled it any more. Retirement keyed on the directory being gone, though, so its stored windows stayed on the card indefinitely, alongside the `stale_token` failure it happened to record last -- whose whole message is to open Claude Code and refresh a sign-in that is no longer there. An install whose sign-in is observably absent now retires the way a deleted one does, and retirement hides stored rows rather than deleting them, so signing in again brings the windows back on the next poll. A credential that is merely unreadable right now -- an `EACCES` on it, an install directory that cannot be searched -- keeps its last-known windows, and one that is only momentarily missing (a relink, a dangling symlink, a rename caught mid-flight) blanks its bars for one poll cycle and gets them back. Something that is not a file at the credential path retires, since the polling rule needs a regular file and so could not poll it either. as does a sign-in that is still on disk but that Anthropic has stopped accepting, which stays reported with its windows and its warning. The default install keeps its old behavior: it is polled with or without a credential, so its own `unavailable` row already explains it. Also stopped an unreadable install's directory from failing the whole quota read: `Path.is_file()` re-raises `EACCES` instead of returning `False`, and it ran on every dashboard load.
+
 ## 2.6.0 - 2026-09-21
 
 ### Added

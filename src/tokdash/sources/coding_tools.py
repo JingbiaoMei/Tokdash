@@ -6877,6 +6877,478 @@ class MiniMaxCodeParser(BaseParser):
         return out
 
 
+class DevinParser(BaseParser):
+    """
+    Parser for Devin CLI (Cognition) token usage.
+
+    =======================================================================
+    DEVIN CLI -- CLOSED-SOURCE RUST CLI, ONE SQLITE STORE, NO CLI LOG PARSE
+    =======================================================================
+    Verified from Devin CLI 3000.10.31 (the schema and record fields compiled
+    into the binary, plus its shipped docs bundle; recorded in
+    docs/local/20260921_devin_cli_support/evidence/):
+
+      * Store: ``sessions.db`` in the CLI data dir, WAL mode with -wal/-shm.
+        Linux and macOS use ``~/.local/share/devin/cli``, Windows uses
+        ``%APPDATA%\\devin\\cli`` -- all three from the vendor's own
+        troubleshooting page, quoted in evidence/03. clientpaths.devin_db_paths()
+        resolves them, including the Windows-host store seen from WSL, and also
+        tries ``~/Library/Application Support/devin/cli`` on macOS in case the
+        Rust build maps app data there instead.
+      * ``message_nodes`` is the conversation forest, one row per node, the whole
+        message as JSON in ``chat_message``. A migration DROPs the older flat
+        ``messages`` table, so there is no legacy table to read.
+      * The per-call record carries explicit ``input_tokens``,
+        ``output_tokens``, ``cache_read_tokens`` and ``cache_creation_tokens``.
+        Tokens are read, never inferred.
+      * ``sessions.model`` is the session's model and ``sessions.hidden`` marks
+        internal helper sessions (the summarizer).
+
+    NOT yet confirmed against a populated store -- no Devin install exists on the
+    dev machines and the CLI cannot be pointed at a local model, so a trial
+    capture is required (Q1-Q12 in FINDINGS.md). The behaviour chosen for each
+    gap, and why:
+
+      * cache convention (Q3): treated as cache-EXCLUSIVE, input + cacheRead =
+        the full prompt. These are the Anthropic usage names, where cache reads
+        are a separate bucket from input. If the capture shows the opposite, the
+        split flips and ``test_cache_split_is_exclusive_and_documented`` is
+        the test that says so.
+      * model attribution (Q4): the node's own model when the record carries
+        one, else the session model. A Fusion/Adaptive session billed on a model
+        other than the selected one can therefore be priced at the selected
+        model, which is the documented limit until the capture shows the field.
+      * cost (Q2): pricing-DB only. Devin publishes no per-token rate card and
+        is sold as seats plus credits, so Cognition-hosted models (``swe-*``,
+        Fusion pairings) resolve to 0.00. The client does receive a vendor USD
+        estimate from the server; nothing of it is known to be persisted, and a
+        streamed number is not a local file, so none is read.
+      * reasoning: no bucket exists upstream, so it is 0 by construction rather
+        than an estimate.
+      * timestamp unit (Q7): not pinned by the capture either, so the reader is
+        tolerant rather than binary. Seconds, milliseconds, microseconds and
+        nanoseconds are each normalized to ms by magnitude. A seconds-or-ms test
+        alone would read a ``as_micros()`` store as milliseconds, put every row a
+        thousand years out, and report zero usage for the all-time window with
+        nothing in the log -- the worst possible failure this source can have.
+      * hidden helper sessions COUNT. A summarizer call spends real quota, and
+        it lives in its own session row, so it is not a copy of a counted parent
+        call. Q9 re-checks that.
+
+    Reads never write. _needs_snapshot() decides per store: a drvfs mount, a UNC
+    path or a live -wal/-shm sidecar means copy-first, because a WAL database can
+    need recovery or -shm creation, which a mode=ro open cannot do and which
+    connect_sqlite_readonly's read-write fallback WOULD do inside the user's
+    store. A local store with no sidecars is opened read-only, and if even that
+    fails the read is retried once through a copy before it is reported. A store
+    that cannot be read at all is logged and left out of the result without being
+    cached, so a transient failure never settles into a cached zero.
+
+    Reach is one-directional: a Tokdash running in WSL sees the Windows host
+    store, but a Tokdash running on Windows does not see a guest store behind
+    \\\\wsl.localhost\\<distro>\\... (see the note on clientpaths.devin_cli_roots).
+    DEVIN_CLI_DATA_DIRS with the UNC path is the escape hatch.
+    =======================================================================
+    """
+
+    source_name = "devin"
+    sync_capability = SourceSyncCapability(
+        mode="source_native_db",
+        session_store=False,
+        reason="Devin CLI keeps its history in one SQLite DB and supports SQL date windows.",
+    )
+    # Queried live; rows are never copied into usage_entries, so nothing is stored
+    # for a version to identify.
+    persistent_parser_version = None
+
+    # Per-query cache, same shape as OpenCodeParser: {(s_ms, u_ms): entries}.
+    # Redeclared here rather than inherited -- a subclass that inherits the base
+    # dict while assigning its own signature serves one source's rows to another.
+    _query_cache: ClassVar[Dict[tuple, List[Dict[str, Any]]]] = {}
+    _query_cache_sig: ClassVar[tuple] = ()
+    _QUERY_CACHE_MAX: ClassVar[int] = 32
+
+    # Timestamp unit floors, each one 1e8 seconds written in that unit, i.e.
+    # 1973-03-03: below every real epoch value in that unit, and above any
+    # plausible epoch in the next-coarser unit until the year 5138.
+    #
+    # Three tiers, not two, because a two-way test is silently catastrophic.
+    # A Rust CLI reaching for as_micros() or as_nanos() writes 1.7e15 or 1.7e18;
+    # a seconds-or-ms test reads that as milliseconds, lands it a thousand years
+    # in the future, and drops every row against the window ceiling -- zero
+    # usage, no failure, no log, even for the all-time window. A tolerant reader
+    # costs one comparison and cannot be wrong about a store that is already
+    # readable; the capture pins which unit this store actually uses (Q7), but
+    # nothing about the capture can make a µs store impossible tomorrow.
+    _TS_NS_FLOOR: ClassVar[int] = 100_000_000_000_000_000  # 1e17 ns  = 1973
+    _TS_US_FLOOR: ClassVar[int] = 100_000_000_000_000      # 1e14 us  = 1973
+    _TS_MS_FLOOR: ClassVar[int] = 1_000_000_000_000        # 1e12 ms  = 2001
+
+    _TOKEN_FIELDS: ClassVar[Tuple[str, ...]] = (
+        "input_tokens",
+        "output_tokens",
+        "cache_read_tokens",
+        "cache_creation_tokens",
+    )
+    # Where a usage object may sit inside a node's JSON, in precedence order.
+    # Explicit locations only: a recursive hunt would find usage echoed in
+    # tool output and bill it.
+    _USAGE_PATHS: ClassVar[Tuple[str, ...]] = (
+        "",
+        "usage",
+        "metrics",
+        "performance",
+        "telemetry",
+    )
+    _MODEL_FIELDS: ClassVar[Tuple[str, ...]] = (
+        "model",
+        "modelId",
+        "model_id",
+        "modelUid",
+        "model_uid",
+    )
+    @classmethod
+    def _ts_ms_sql(cls, column: str) -> str:
+        """`column` normalized to milliseconds, as a SQL expression.
+
+        SQLite's `/` between two integers is integer division, which is what the
+        ns and us tiers want. The floors are literals rather than bound
+        parameters on purpose: the expression appears twice per query, because
+        WHERE cannot see a SELECT alias, so placeholders would put eight values
+        in one tuple whose order is the entire risk and is invisible in the
+        query text.
+        """
+        return (
+            f"CASE WHEN {column} >= {cls._TS_NS_FLOOR} THEN {column} / 1000000 "
+            f"WHEN {column} >= {cls._TS_US_FLOOR} THEN {column} / 1000 "
+            f"WHEN {column} >= {cls._TS_MS_FLOOR} THEN {column} "
+            f"ELSE {column} * 1000 END"
+        )
+
+    def __init__(self, pricing_db: PricingDatabase):
+        super().__init__(pricing_db)
+        self.db_paths = clientpaths.devin_db_paths()
+
+    # -- reading ---------------------------------------------------------------
+
+    def _file_signatures(self) -> tuple:
+        # db + -wal + -shm, the ZCodeParser._file_signatures set. The -shm looks
+        # removable because the snapshot path excludes it, but that helper
+        # signatures what it COPIES; this one is the invalidation clock, and a
+        # WAL store's live rows move through -wal and -shm between checkpoints.
+        # Dropping either sidecar would serve stale usage while the CLI runs.
+        # Extra busts from reader traffic re-run a bounded query; missed busts
+        # are silent lag, which is the failure this source cannot afford.
+        out: List[Tuple[str, Optional[int], Optional[int]]] = []
+        for db in self.db_paths:
+            for candidate in (db, Path(str(db) + "-wal"), Path(str(db) + "-shm")):
+                try:
+                    st = candidate.stat()
+                    out.append((str(candidate), st.st_mtime_ns, st.st_size))
+                except (FileNotFoundError, OSError):
+                    out.append((str(candidate), None, None))
+        return tuple(out)
+
+    @staticmethod
+    def _needs_snapshot(db_path: Path) -> bool:
+        """True when opening this store in place is unsafe or impossible.
+
+        Three cases, decided on transport and on-disk state rather than on
+        where the path came from:
+
+        * a Windows drive seen through WSL's drvfs mount (``/mnt/<drive>/``);
+        * a UNC path (``\\\\wsl.localhost\\<distro>\\...``, ``\\\\wsl$\\...``, or any
+          other share). This is how a Windows-host Tokdash reaches a guest store, see
+          ``clientpaths.devin_cli_roots``; pathlib's drive parsing for UNC is
+          platform-dependent, so the string prefix is the test;
+        * any store with a live ``-wal`` or ``-shm`` sidecar.
+
+        The reason is the same in all three, and it is not only about read
+        integrity. A WAL database that needs recovery, or that has to create
+        its ``-shm``, cannot be opened ``mode=ro`` -- and
+        ``connect_sqlite_readonly`` answers that failure with a read-WRITE
+        connect. Tokdash would then run WAL recovery inside the user's store
+        and create sidecar files next to it. Over 9p the locking is unreliable
+        on top of that. Copying first is both safe and side-effect-free, which
+        is what ZCode already does for the same hazard.
+        """
+        if str(db_path).startswith("\\\\"):
+            return True
+        parts = db_path.parts
+        if len(parts) > 2 and parts[0] == "/" and parts[1] == "mnt" and len(parts[2]) == 1:
+            return True
+        for suffix in ("-wal", "-shm"):
+            try:
+                if Path(str(db_path) + suffix).exists():
+                    return True
+            except OSError:
+                # Cannot rule the sidecar out, so cannot rule recovery out.
+                return True
+        return False
+
+    def _read_via_snapshot(
+        self, db_path: Path, s_ms: int, u_ms: int
+    ) -> Tuple[List[tuple], Optional[str]]:
+        """Copy the store to a temp dir and read the copy. Never writes to the source."""
+        snap = None
+        try:
+            with zcode_snapshot(db_path) as snap:
+                try:
+                    rows = self._rows(snap.conn, s_ms, u_ms)
+                except sqlite3.Error as exc:
+                    return [], f"query failed: {exc}"
+        except ZCodeSnapshotError as exc:
+            return [], f"snapshot failed: {exc}"
+        # close_failed is only set once the snapshot has exited, so the check
+        # belongs after the with block. The rows are fine, but a snapshot that
+        # could not be closed is a failed read by ZCode's rule, reported so the
+        # caller skips the cache write.
+        if snap is not None and snap.close_failed:
+            return rows, "snapshot close failed"
+        return rows, None
+
+    def _read_store(
+        self, db_path: Path, s_ms: int, u_ms: int
+    ) -> Tuple[List[tuple], Optional[str]]:
+        """Read one store. Returns ``(rows, error)``, with error None on a clean read.
+
+        Failures are reported instead of swallowed. A store that could not be
+        copied, connected or queried yields no rows, and the caller must not
+        cache that: a hiccup usually leaves the file signatures alone, so a
+        cached empty result would read as "no Devin usage" until the next Devin
+        run busts the signature.
+        """
+        if self._needs_snapshot(db_path):
+            return self._read_via_snapshot(db_path, s_ms, u_ms)
+
+        try:
+            conn = connect_sqlite_readonly(db_path)
+        except Exception as exc:
+            # A connect can succeed on a file that is not a database at all; the
+            # first statement in _rows is where that surfaces, as sqlite3.Error.
+            return [], f"connect failed: {exc}"
+
+        error: Optional[str] = None
+        try:
+            return self._rows(conn, s_ms, u_ms), None
+        except sqlite3.OperationalError as exc:
+            error = f"query failed: {exc}"
+        except sqlite3.Error as exc:
+            # DatabaseError and friends mean "this is not a database", which no
+            # amount of copying fixes, so it is reported without a retry.
+            return [], f"query failed: {exc}"
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+        # OperationalError on a local store that looked fine is usually a WAL
+        # database that needs recovery or an -shm it was not allowed to create.
+        # Retrying through a copy is the safe direction, so try it before
+        # reporting a failure that would otherwise repeat every poll until the
+        # user happens to run Devin again.
+        snap_rows, snap_error = self._read_via_snapshot(db_path, s_ms, u_ms)
+        if snap_error is None:
+            return snap_rows, None
+        return [], f"{error} (snapshot retry: {snap_error})"
+
+    def _rows(self, conn: sqlite3.Connection, s_ms: int, u_ms: int) -> List[tuple]:
+        # sqlite3.Error propagates to _read_store, which turns it into a failed,
+        # uncached read. An absent table is a legitimate empty store and is safe
+        # to cache; a probe error is not, so the two must not be conflated here.
+        tables = {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+                " AND name IN ('message_nodes','sessions')"
+            )
+        }
+        if "message_nodes" not in tables:
+            # Not a Devin store, or a version whose forest table is named
+            # differently. Reading nothing is correct: a guess here invents usage.
+            return []
+        # Built once and reused for both the projection and the window: if the
+        # two copies ever disagreed, rows would be filtered on one unit and
+        # reported on another.
+        ts_ms = self._ts_ms_sql("n.created_at")
+        params: tuple = (s_ms, u_ms)
+        if "sessions" in tables:
+            query = (
+                "SELECT n.session_id, n.node_id, n.chat_message, "
+                f"{ts_ms} AS ts_ms, s.model "
+                "FROM message_nodes n LEFT JOIN sessions s ON s.id = n.session_id "
+                f"WHERE {ts_ms} >= ? AND {ts_ms} < ?"
+            )
+        else:
+            query = (
+                "SELECT n.session_id, n.node_id, n.chat_message, "
+                f"{ts_ms} AS ts_ms, NULL "
+                "FROM message_nodes n "
+                f"WHERE {ts_ms} >= ? AND {ts_ms} < ?"
+            )
+        # No try/except here: a schema this parser does not know, or a store that
+        # is not SQLite at all, must reach _read_store as sqlite3.Error so the
+        # caller can report it and skip the cache write. Swallowing it here would
+        # let a schema-drifted store read as a verified-empty one.
+        return list(conn.execute(query, params))
+
+    # -- record extraction -----------------------------------------------------
+
+    def _usage_container(self, node: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        for location in self._USAGE_PATHS:
+            container: Any = node if location == "" else node.get(location)
+            if not isinstance(container, dict):
+                continue
+            if any(field in container for field in self._TOKEN_FIELDS):
+                return container
+        return None
+
+    def _model_of(self, node: Dict[str, Any], usage: Dict[str, Any]) -> str:
+        for container in (node, usage):
+            for field in self._MODEL_FIELDS:
+                value = container.get(field)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+        return ""
+
+    def _build_entry(
+        self,
+        session_id: str,
+        node_id: Any,
+        node: Dict[str, Any],
+        session_model: Any,
+        ts_ms: int,
+    ) -> Optional[Dict[str, Any]]:
+        usage = self._usage_container(node)
+        if usage is None:
+            return None
+        input_t = self._i(usage.get("input_tokens"))
+        output_t = self._i(usage.get("output_tokens"))
+        cache_r = self._i(usage.get("cache_read_tokens"))
+        cache_w = self._i(usage.get("cache_creation_tokens"))
+        if input_t + output_t + cache_r + cache_w <= 0:
+            # A zero-usage record is not a billable call (a user row, a
+            # cancelled request). Skipping it is what keeps a replay out of the
+            # totals, and it is the same filter the other DB sources use.
+            return None
+
+        message_id = node.get("id")
+        entry_id = (
+            f"devin:{session_id}:{message_id}"
+            if isinstance(message_id, str) and message_id.strip()
+            else f"devin:{session_id}:{node_id}"
+        )
+        model = self._model_of(node, usage) or (str(session_model).strip() if session_model else "")
+        model = model or "unknown"
+        return {
+            "source": self.source_name,
+            "model": model,
+            "provider": "",
+            "input": input_t,
+            "output": output_t,
+            "cacheRead": cache_r,
+            "cacheWrite": cache_w,
+            # Devin persists no reasoning bucket, so this is zero by
+            # construction, not an omitted measurement.
+            "reasoning": 0,
+            "cost": self.pricing_db.get_cost(model, input_t, output_t, cache_r, cache_w),
+            "timestamp": int(ts_ms),
+            "entry_id": entry_id,
+        }
+
+    # -- collect ---------------------------------------------------------------
+
+    def _parse_all(self) -> List[Dict[str, Any]]:
+        return []  # collect() is overridden; this satisfies the ABC contract
+
+    def collect(self, since_date: Optional[datetime] = None, until_date: Optional[datetime] = None) -> List[Dict[str, Any]]:
+        """SQL-window read with per-query caching, as OpenCode and Kilo do.
+
+        The store holds full transcripts, so the date filter stays in SQL rather
+        than pulling every node into memory. Cached per (store signature, pricing
+        signature, window) and bounded, so a large history is parsed once.
+        """
+        sig = (
+            self._file_signatures(),
+            self._pricing_signature(),
+            self.runtime_config_signature(),
+        )
+        if sig != type(self)._query_cache_sig:
+            type(self)._query_cache.clear()
+            type(self)._query_cache_sig = sig
+
+        s_ms = int(self._to_utc(since_date).timestamp() * 1000) if since_date else 0
+        u_ms = int(self._to_utc(until_date).timestamp() * 1000) if until_date else 9999999999999
+        cache_key = (s_ms, u_ms)
+        cached = type(self)._query_cache.get(cache_key)
+        if cached is not None:
+            return list(cached)
+
+        rows: List[tuple] = []
+        failures: List[str] = []
+        for db_path in self.db_paths:
+            store_rows, error = self._read_store(db_path, s_ms, u_ms)
+            if error is not None:
+                # Loud on the log, quiet on the dashboard: a store that could not
+                # be read is not a store with zero usage in it.
+                logger.warning("tokdash devin: %s read failed, not cached (%s)", db_path, error)
+                failures.append(error)
+            rows.extend(store_rows)
+
+        # Oldest first, so a duplicated record is owned by its earliest copy --
+        # the same rule the usage store applies to forked transcripts.
+        rows.sort(key=lambda row: int(row[3] or 0))
+        out: List[Dict[str, Any]] = []
+        seen: set = set()
+        containerless = 0
+        for session_id, node_id, chat_message, ts_ms, session_model in rows:
+            try:
+                node = json.loads(chat_message)
+            except (TypeError, ValueError):
+                containerless += 1
+                continue
+            if not isinstance(node, dict):
+                containerless += 1
+                continue
+            entry = self._build_entry(
+                str(session_id), node_id, node, session_model, int(ts_ms or 0)
+            )
+            if entry is None:
+                # Two different nothings. A usage object that reported zero is a
+                # user row or a cancelled request, which is normal; a row with no
+                # usage object at any known location is the interesting one.
+                if self._usage_container(node) is None:
+                    containerless += 1
+                continue
+            if entry["entry_id"] in seen:
+                continue
+            seen.add(entry["entry_id"])
+            out.append(entry)
+
+        if rows and containerless == len(rows):
+            # Rows in the window, not one of them carrying a usage object. That
+            # is what a relocated usage layout looks like, and without this line
+            # it is indistinguishable from an idle week: the dashboard shows a
+            # clean zero and every assumption in _USAGE_PATHS stays untested.
+            logger.warning(
+                "tokdash devin: %d node(s) in the window and none carried a usage"
+                " container; check _USAGE_PATHS against the current store",
+                len(rows),
+            )
+
+        # Partial or failed reads are returned but not cached: the signatures
+        # that guard this cache may not have moved, so a cached zero would outlive
+        # the hiccup. Same rule the ZCode collectors follow.
+        if failures:
+            return out
+
+        if len(type(self)._query_cache) >= self._QUERY_CACHE_MAX:
+            type(self)._query_cache.clear()
+        type(self)._query_cache[cache_key] = out
+        return list(out)
+
+
 class CodingToolsUsageTracker:
     """Registry-driven tracker for coding clients."""
 
@@ -6913,6 +7385,7 @@ class CodingToolsUsageTracker:
             "zed": ZedParser(self.pricing_db),
             "qwen_code": QwenCodeParser(self.pricing_db),
             "crush": CrushParser(self.pricing_db),
+            "devin": DevinParser(self.pricing_db),
             # The public protocol exposes no durable estimate-source member,
             # so no provenance is invented for otherwise valid counters.
             "muse": MuseParser(self.pricing_db),

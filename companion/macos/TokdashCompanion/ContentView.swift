@@ -157,9 +157,13 @@ private struct HeroSection: View {
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
                     .tracking(0.5)
+                    .fixedSize()
                 Spacer()
                 // Today | Week | Month | Year - persisted selection, fires the fetch group
                 // via selectPeriod, and stays visible in EVERY state (loading too).
+                // Small control size: at the shipped 300pt width the regular-size
+                // 4-segment picker leaves the kicker column ~20pt and it collapses to
+                // one character per line (seen in the real-system evidence render).
                 Picker("", selection: Binding(get: { store.selectedPeriod },
                                               set: { store.selectPeriod($0) })) {
                     ForEach(UsagePeriod.allCases, id: \.self) { period in
@@ -167,6 +171,7 @@ private struct HeroSection: View {
                     }
                 }
                 .pickerStyle(.segmented)
+                .controlSize(.small)
                 .labelsHidden()
                 .fixedSize()
             }

@@ -226,7 +226,7 @@ final class ContractV11Tests: XCTestCase {
             // The ⚠ prefix in the pinned label is flyout decoration for Failed rows.
             let pinned = try XCTUnwrap(want["label"] as? String).replacingOccurrences(of: "⚠ ", with: "")
             XCTAssertEqual("\(row.provider) · \(row.displayBucketLabel)", pinned)
-            XCTAssertEqual(row.left, try XCTUnwrap(want["left"] as? Int), accuracy: 0.001)
+            XCTAssertEqual(row.left, try XCTUnwrap(want["left"] as? Double), accuracy: 0.001)
             XCTAssertEqual(row.estimated, want["estimated"] as? Bool)
         }
 
@@ -234,7 +234,7 @@ final class ContractV11Tests: XCTestCase {
         let wantGroups = try XCTUnwrap(all["groups"] as? [[String: Any]])
         // Provider dict order is not preserved by Swift dictionaries; compare as sets.
         XCTAssertEqual(Set(snap.allQuotaGroups.map(\.provider)),
-                       Set(wantGroups.map { try XCTUnwrap($0["provider"] as? String) }))
+                       Set(try wantGroups.map { try XCTUnwrap($0["provider"] as? String) }))
         for want in wantGroups {
             let name = try XCTUnwrap(want["provider"] as? String)
             let group = try XCTUnwrap(snap.allQuotaGroups.first { $0.provider == name })
@@ -247,7 +247,7 @@ final class ContractV11Tests: XCTestCase {
                 let row = group.rows[idx]
                 XCTAssertEqual(row.displayBucketLabel, try XCTUnwrap(wantRow["label"] as? String),
                                "\(name): row \(idx) label")
-                XCTAssertEqual(row.left, try XCTUnwrap(wantRow["left"] as? Int), accuracy: 0.001,
+                XCTAssertEqual(row.left, try XCTUnwrap(wantRow["left"] as? Double), accuracy: 0.001,
                                "\(name): row \(idx) left")
             }
         }
@@ -578,7 +578,7 @@ final class ContractV11Tests: XCTestCase {
         let rows = snap.lowQuotaRows
         XCTAssertEqual(rows.count, want.count)
         for (row, pin) in zip(rows, want) {
-            XCTAssertEqual(row.left, try XCTUnwrap(pin["left"] as? Int), accuracy: 0.001)
+            XCTAssertEqual(row.left, try XCTUnwrap(pin["left"] as? Double), accuracy: 0.001)
             XCTAssertEqual(row.failed, pin["failed"] as? Bool)
             // The ⚠ prefix in the pinned label is the view's doing (QuotaRowView adds
             // it for failed rows in the Low view); the data-side flag is pinned here.

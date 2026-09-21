@@ -277,6 +277,9 @@ struct ProviderQuota: Decodable, Sendable {
     // ~/.claude install beside a ~/.claude-<profile> sibling, MiniMax global + CN).
     // Absent for single-credential providers and for every pre-`accounts` server. Spec §7.
     let accounts: [AccountQuota]?
+    // Codex-only reset credits (contract §Reset credits): the quiet All-view row and
+    // its expiry notification. Absent on every other provider, and usually on Codex too.
+    let resetCredits: ResetCredits?
 
     // Explicit memberwise init (with defaults) so test construction with status/
     // statusDetail resolves; Decodable's init(from:) is still synthesized.

@@ -573,8 +573,13 @@ final class CompanionStore: NSObject, ObservableObject {
         // (contract §Full delta row).
         func combined(_ current: Double, _ prev: (Comparison) -> Double?) -> (prev: Double?, pct: Double?) {
             guard !rows.isEmpty else { return (nil, nil) }
-            let prevs = rows.compactMap { $0.comparison.map(prev) }
-            guard prevs.count == rows.count else { return (nil, nil) }
+            // A metric omits when ANY server omits its comparison OR its own *_prev
+            // value - both absence shapes must drop the metric, not just the first.
+            var prevs: [Double] = []
+            for row in rows {
+                guard let comparison = row.comparison, let value = prev(comparison) else { return (nil, nil) }
+                prevs.append(value)
+            }
             let sum = prevs.reduce(0, +)
             return (sum, sum > 0 ? (current - sum) / sum * 100 : nil)
         }
@@ -1385,7 +1390,7 @@ struct Snapshot {
 
     /// abs(round(pct)): -11.7 renders 12.
     nonisolated static func deltaValue(_ pct: Double) -> Int {
-        Int(pct.rounded()).magnitude
+        abs(Int(pct.rounded()))
     }
 
     private nonisolated static func deltaPiece(_ text: String, pct: Double) -> DeltaPiece {

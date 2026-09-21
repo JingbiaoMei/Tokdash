@@ -428,7 +428,7 @@ private enum GlancePalette {
     ]
 
     static func cellColor(intensity: Int, dark: Bool) -> Color {
-        let ramp = dark ? dark : light
+        let ramp = dark ? Self.dark : Self.light
         // intensity 4 (peak quartile server-side) clamps to the darkest shipped step.
         let c = ramp[min(max(intensity, 0), 3)]
         return Color(.sRGB, red: c.0, green: c.1, blue: c.2, opacity: c.3)

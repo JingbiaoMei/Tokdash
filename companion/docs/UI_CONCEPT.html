@@ -610,6 +610,75 @@ body {
 .review ul { margin: 6px 0 0; padding-left: 18px; }
 .review li { margin: 4px 0; }
 .review code { color: #C6CDD4; font-size: 12px; }
+/* ============================================================
+   Proposal: per-view period chips (see the proposal section)
+   ============================================================ */
+.pv-stage { display: flex; flex-wrap: wrap; gap: 28px; justify-content: center; margin-top: 18px; }
+/* The frame's only in-flow content is the absolutely-positioned pop, so the holder
+   (a flex item) must carry an explicit size or it shrink-wraps to its border. */
+.pv-holder { position: relative; width: 420px; height: 640px; }
+.pv-holder .os-frame { width: 100%; height: 100%; }
+.mac-pop.pv-pop {
+  position: absolute; inset: auto; right: auto; top: 16px; left: 50%;
+  transform: translateX(-50%); width: 300px;
+}
+.pv-kickerrow { display: flex; align-items: center; gap: 6px; margin: 0 0 6px; }
+.pv-kickerrow .kicker {
+  margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.05em;
+  text-transform: uppercase; color: rgba(60,60,67,0.62);
+}
+.mac-frame.dark .pv-kickerrow .kicker { color: rgba(235,235,245,0.55); }
+.pv-chipwrap { position: relative; margin-left: auto; }
+.pv-chip {
+  appearance: none; font: inherit; font-size: 10.5px; font-weight: 600; letter-spacing: 0.02em;
+  color: rgba(60,60,67,0.72); background: rgba(0,0,0,0.05); border: 0.5px solid rgba(0,0,0,0.10);
+  border-radius: 999px; padding: 1px 7px 2px; cursor: pointer; white-space: nowrap;
+}
+.pv-chip:hover { background: rgba(0,0,0,0.09); }
+.pv-chip.override { color: #0A6CFF; background: rgba(10,108,255,0.10); border-color: rgba(10,108,255,0.35); }
+.mac-frame.dark .pv-chip { color: rgba(235,235,245,0.65); background: rgba(255,255,255,0.10); border-color: rgba(255,255,255,0.14); }
+.mac-frame.dark .pv-chip:hover { background: rgba(255,255,255,0.16); }
+.mac-frame.dark .pv-chip.override { color: #0A84FF; background: rgba(10,132,255,0.16); border-color: rgba(10,132,255,0.42); }
+.pv-caret { font-size: 8px; opacity: 0.7; margin-left: 3px; }
+.pv-menu {
+  position: absolute; right: 0; top: calc(100% + 5px); z-index: 40; min-width: 128px; padding: 4px;
+  background: rgba(246,246,248,0.96); border: 0.5px solid rgba(0,0,0,0.14); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.22); backdrop-filter: blur(20px);
+}
+.mac-frame.dark .pv-menu { background: rgba(40,40,44,0.97); border-color: rgba(255,255,255,0.16); }
+.pv-menu button {
+  appearance: none; font: inherit; font-size: 12px; width: 100%; text-align: left; cursor: pointer;
+  background: transparent; border: 0; border-radius: 5px; padding: 4px 8px; color: inherit;
+  display: flex; align-items: center; gap: 6px;
+}
+.pv-menu button:hover { background: #0A6CFF; color: #fff; }
+.mac-frame.dark .pv-menu button:hover { background: #0A84FF; }
+.pv-menu button .check { width: 12px; display: inline-block; flex: none; }
+.pv-menu .sep { height: 1px; background: rgba(60,60,67,0.14); margin: 3px 6px; }
+.mac-frame.dark .pv-menu .sep { background: rgba(235,235,245,0.16); }
+.pv-seg { display: inline-flex; background: rgba(0,0,0,0.06); border-radius: 6px; padding: 1px; margin-left: auto; }
+.pv-seg button {
+  appearance: none; border: 0; background: transparent; font: inherit; font-size: 11px; font-weight: 600;
+  color: rgba(60,60,67,0.7); padding: 2px 9px 3px; border-radius: 5px; cursor: pointer;
+}
+.pv-seg button[aria-pressed="true"] { background: #fff; color: #1D1D1F; box-shadow: 0 0.5px 1.5px rgba(0,0,0,0.18); }
+.mac-frame.dark .pv-seg { background: rgba(255,255,255,0.12); }
+.mac-frame.dark .pv-seg button { color: rgba(235,235,245,0.6); }
+.mac-frame.dark .pv-seg button[aria-pressed="true"] { background: rgba(58,58,62,0.98); color: #F2F2F2; }
+.pv-rank { display: flex; align-items: baseline; gap: 8px; font-size: 12.5px; padding: 2px 0; }
+.pv-rank .rname { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pv-rank .rval { margin-left: auto; color: rgba(60,60,67,0.68); font-variant-numeric: tabular-nums; }
+.mac-frame.dark .pv-rank .rval { color: rgba(235,235,245,0.6); }
+.pv-bars { display: flex; align-items: flex-end; gap: 2px; height: 26px; }
+.pv-bars i { flex: 1; border-radius: 1px; background: #0A6CFF; min-height: 2px; }
+.pv-bars i.zero { background: transparent; }
+.mac-frame.dark .pv-bars i { background: #0A84FF; }
+.pv-axis { display: flex; gap: 2px; margin-top: 3px; }
+.pv-axis span { flex: 1; text-align: center; font-size: 8.5px; color: rgba(60,60,67,0.55); font-variant-numeric: tabular-nums; }
+.mac-frame.dark .pv-axis span { color: rgba(235,235,245,0.5); }
+.pv-cap { font-size: 11.5px; color: rgba(60,60,67,0.68); margin: 6px 0 0; }
+.mac-frame.dark .pv-cap { color: rgba(235,235,245,0.6); }
+.pv-note { font-size: 12px; color: var(--ink-muted, #6b6b70); margin: 10px 0 0; }
 </style>
 </head>
 <body>
@@ -793,6 +862,80 @@ body {
     <li>Should crossing a low-quota threshold produce an opt-in notification, or stay display-only in MVP (current plan: display-only)?</li>
     <li>Does the activity line survive user testing, or is it noise?</li>
     <li>Should the busy/offline banner replace the hero or sit above dimmed last-good data (currently: above, data dimmed)?</li>
+  </ul>
+</section>
+
+<section class="review" aria-label="Proposal: per-view period switching">
+  <h2>Proposal — per-view period (days) switching</h2>
+  <p>The shipped flyout has ONE period picker (the hero's Today/7d/30d segment) that drives the
+  hero, the top ranks, and the activity glance together. This proposal lets each view carry its
+  own period: the hero answers "what did I spend today" while the glance answers "show me this
+  week's shape" - without making the user flip the global picker twice per check-in. The mockups
+  below are interactive: press the hero segment or any period chip.</p>
+
+  <div class="pv-stage">
+    <div class="pv-holder">
+      <div class="os-frame mac-frame light" style="min-height:520px;padding:0">
+        <div class="mac-pop pv-pop" id="pv-pop-light" role="dialog" aria-label="Tokdash companion (period proposal, light)"></div>
+      </div>
+    </div>
+    <div class="pv-holder">
+      <div class="os-frame mac-frame dark" style="min-height:520px;padding:0">
+        <div class="mac-pop pv-pop" id="pv-pop-dark" role="dialog" aria-label="Tokdash companion (period proposal, dark)"></div>
+      </div>
+    </div>
+  </div>
+  <p class="pv-note">Shown state: hero on Today, ranks on Today (following), glance overridden to 7 days -
+  note the tinted glance chip. The quota section is omitted here; it is subscription-window based and
+  period-independent, so it is unaffected by this proposal.</p>
+
+  <h3>Interaction model</h3>
+  <ul>
+    <li><b>The hero segment stays the global default.</b> Changing it re-applies that period to every
+    view that is <i>following</i> (i.e. has not been individually overridden). It is "apply to all", not
+    just "hero's own".</li>
+    <li><b>Secondary views get a trailing chip in their kicker row</b> - <code>Today ▾</code> - opening a
+    menu of <i>Today / 7 days / 30 days / Follow hero</i>. The ranks kicker and the glance kicker each
+    carry one; top tools and top models share the ranks period (they are always read together).</li>
+    <li><b>A chip is tinted (accent) when its view diverges from the hero, neutral when following.</b>
+    State is legible at a glance: tinted chips mean "these numbers are not the same window as the big
+    number above them".</li>
+    <li><b>Chips are always visible, not hover-only.</b> The affordance must be discoverable in a
+    glanceable surface; a hidden control on a 300pt flyout will never be found.</li>
+    <li>No custom date ranges. The companion answers glance questions with the three canned windows;
+    arbitrary ranges stay the dashboard's job.</li>
+  </ul>
+
+  <h3>Why this shape (and not tabs or per-section segments)</h3>
+  <ul>
+    <li><b>Segments don't fit:</b> a second 3-way segment per section triples the row furniture at
+    300pt and visually competes with the hero segment - the hierarchy "one primary picker, quiet
+    overrides" is exactly what the chip/segment distinction encodes.</li>
+    <li><b>Tabs hide state:</b> period-per-tab would put two windows one tap away and make the flyout
+    a 3-page app; the current product is a single glanceable surface.</li>
+    <li><b>The chip costs one pill's width</b> on a row that has empty trailing space today, and the
+    accent-tint rule means the common (all-following) case looks almost identical to the shipped flyout.</li>
+  </ul>
+
+  <h3>Implementation notes (both platforms)</h3>
+  <ul>
+    <li><b>No server or contract change.</b> <code>GET /api/usage?period=</code> already takes the
+    period per request; the companion simply fetches the distinct set of periods in use (1-3) per
+    refresh cycle instead of one. Views sharing a period share one fetch, so the steady-state cost
+    when everything follows the hero is unchanged.</li>
+    <li><b>Settings gains two nullable keys</b> (e.g. <code>ranksPeriod</code>, <code>glancePeriod</code>;
+    null = follow hero). Absent = null, so old settings files decode to today's behavior - an
+    additive change in both the Swift <code>CompanionSettings</code> and the C# <code>CompanionSettings</code>.</li>
+    <li><b>The glance already re-faces by period</b> (hours bars today, weekday columns for 7 days,
+    the 90/180-day grid for longer windows), so per-view periods reuse the existing face logic -
+    the glance chip simply feeds it a different period than the hero uses.</li>
+    <li><b>Delta/comparison line follows the view's own period</b> ("vs yesterday" / "vs last week" /
+    "vs previous 30 days") - the API already returns the comparison for whichever period was requested.</li>
+    <li>Windows mirror: same chip in the kicker rows, native <code>MenuFlyout</code>, Segoe UI Variable
+    11px semibold; macOS mirror: <code>Menu</code>-backed <code>Button</code> capsule next to the kicker.</li>
+    <li>Open question for the round: whether the hero segment's "apply to all" reset should also
+    clear overrides that were manually set (proposed: yes - one predictable rule; the alternative,
+    preserving overrides silently, makes the global picker's effect depend on hidden state).</li>
   </ul>
 </section>
 
@@ -1185,6 +1328,122 @@ document.getElementById("mac-extra").addEventListener("click", () => {
     const gearMenu = document.getElementById("mac-menu");
     if (gearMenu) { gearMenu.hidden = false; document.getElementById("mac-gear").setAttribute("aria-expanded", "true"); }
   }
+})();
+</script>
+
+<script>
+/* ---------------- Proposal demo: per-view period chips ----------------
+   Self-contained; only reads ICON from the main script. null period = follow hero. */
+(() => {
+  "use strict";
+  const PV = { hero: "today", ranks: null, glance: "d7" };
+  const LBL = { today: "Today", d7: "7 days", d30: "30 days" };
+
+  const HERO = {
+    today: { cost: "$3.42", tokens: "18.7M", msgs: "248", dir: "down", cmp: "12% below yesterday" },
+    d7:    { cost: "$19.10", tokens: "104M", msgs: "1,412", dir: "up", cmp: "6% above last week" },
+    d30:   { cost: "$48.90", tokens: "281M", msgs: "3,877", dir: "up", cmp: "22% above June" },
+  };
+  const RANKS = {
+    today: { tools: [["Claude Code", "$1.86"], ["Codex", "$1.19"], ["OpenCode", "$0.37"]],
+             models: [["gpt-5.6", "$1.32"], ["claude-sonnet-5", "$1.05"], ["gpt-5.6-mini", "$0.61"]] },
+    d7:    { tools: [["Claude Code", "$11.20"], ["Codex", "$5.83"], ["OpenCode", "$2.07"]],
+             models: [["gpt-5.6", "$7.90"], ["claude-sonnet-5", "$6.10"], ["claude-opus-5", "$2.40"]] },
+    d30:   { tools: [["Claude Code", "$28.40"], ["Codex", "$14.10"], ["OpenCode", "$6.40"]],
+             models: [["gpt-5.6", "$19.60"], ["claude-sonnet-5", "$15.30"], ["claude-opus-5", "$6.70"]] },
+  };
+  const HOURS = [0,0,0,0,0,0,0,2,14,38,52,61,44,30,58,66,49,35,22,18,12,9,5,3];
+  const GLANCE = {
+    // Same hour-axis sparseness (0/6/12/18/23) as the shipped flyout histogram.
+    today: { bars: HOURS, axis: HOURS.map((_, i) => (i % 6 === 0 || i === 23) ? String(i) : ""), cap: "Peak 15:00" },
+    d7:    { bars: [12,42,58,66,71,33,25], axis: ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"], cap: "Busiest Fri" },
+    d30:   { bars: [58,71,64,88], axis: ["wk 1","wk 2","wk 3","wk 4"], cap: "Busiest: week 4" },
+  };
+
+  const eff = (v) => PV[v] ?? PV.hero;
+  const upIcon = () => `<span style="display:inline-block;transform:rotate(180deg)">${ICON.down}</span>`;
+  const barsHTML = (vals) => {
+    const m = Math.max(...vals);
+    return `<div class="pv-bars">${vals.map(v => v > 0
+      ? `<i style="height:${Math.max(2, Math.round(26 * v / m))}px"></i>` : `<i class="zero"></i>`).join("")}</div>`;
+  };
+  const axisHTML = (labels) => `<div class="pv-axis">${labels.map(l => `<span>${l}</span>`).join("")}</div>`;
+  const rankRows = (list) => list.map(([n, v]) =>
+    `<div class="pv-rank"><span class="rname">${n}</span><span class="rval">${v}</span></div>`).join("");
+
+  function chipHTML(view) {
+    const following = PV[view] === null, e = eff(view), tinted = !following && e !== PV.hero;
+    const item = (val, label) => {
+      const on = val === "follow" ? following : (!following && PV[view] === val);
+      return `<button type="button" role="menuitem" data-pick data-view="${view}" data-val="${val}">` +
+        `<span class="check">${on ? ICON.check : ""}</span>${label}</button>`;
+    };
+    return `<span class="pv-chipwrap">
+      <button type="button" class="pv-chip${tinted ? " override" : ""}" data-chip data-view="${view}"
+        aria-haspopup="menu" aria-expanded="false">${LBL[e]}<span class="pv-caret">&#9660;</span></button>
+      <div class="pv-menu" role="menu" hidden>${item("today", "Today")}${item("d7", "7 days")}${item("d30", "30 days")}
+        <div class="sep" role="separator"></div>${item("follow", "Follow hero")}</div>
+    </span>`;
+  }
+
+  function body() {
+    const h = PV.hero, r = PV.ranks ?? PV.hero, g = PV.glance ?? PV.hero;
+    const hero = HERO[h], rk = RANKS[r], gl = GLANCE[g];
+    return `
+    <div class="inner">
+      <section class="mac-head">
+        <span class="wordmark">${ICON.logo(14)} Tokdash</span>
+        <span class="conn"><span class="dot ok" aria-hidden="true"></span>Local &middot; Connected</span>
+      </section>
+      <section class="mac-hero hairline">
+        <div class="pv-kickerrow"><p class="kicker">Spend</p>
+          <div class="pv-seg" role="group" aria-label="Global period">
+            ${["today","d7","d30"].map(p => `<button type="button" data-seg="${p}" aria-pressed="${p === h}">${LBL[p]}</button>`).join("")}
+          </div></div>
+        <p class="big">${hero.cost}</p>
+        <p class="sub">${hero.tokens} tokens &middot; ${hero.msgs} messages</p>
+        <p class="cmp ${hero.dir}">${hero.dir === "down" ? ICON.down : upIcon()} ${hero.cmp}</p>
+      </section>
+      <section class="hairline">
+        <div class="pv-kickerrow"><p class="kicker">Top tools</p>${chipHTML("ranks")}</div>
+        ${rankRows(rk.tools)}
+        <div class="pv-kickerrow" style="margin-top:8px"><p class="kicker">Top models</p>${chipHTML("ranks")}</div>
+        ${rankRows(rk.models)}
+      </section>
+      <section class="hairline">
+        <div class="pv-kickerrow"><p class="kicker">Activity</p>${chipHTML("glance")}</div>
+        ${barsHTML(gl.bars)}${axisHTML(gl.axis)}
+        <p class="pv-cap">${gl.cap}</p>
+      </section>
+      <section class="mac-foot hairline"><span class="fresh">Updated 2 min ago</span></section>
+    </div>`;
+  }
+
+  const pops = () => [document.getElementById("pv-pop-light"), document.getElementById("pv-pop-dark")];
+  const render = () => pops().forEach(p => { p.innerHTML = body(); });
+
+  function closeMenus(except) {
+    document.querySelectorAll(".pv-menu:not([hidden])").forEach(m => {
+      if (m !== except) { m.hidden = true; m.previousElementSibling.setAttribute("aria-expanded", "false"); }
+    });
+  }
+
+  pops().forEach(pop => pop.addEventListener("click", (e) => {
+    const seg = e.target.closest("[data-seg]");
+    if (seg) { PV.hero = seg.dataset.seg; PV.ranks = null; PV.glance = null; render(); return; }  // apply-to-all
+    const chip = e.target.closest("[data-chip]");
+    if (chip) {
+      e.stopPropagation();
+      const menu = chip.nextElementSibling, open = menu.hidden;
+      closeMenus(null);
+      menu.hidden = !open; chip.setAttribute("aria-expanded", String(open));
+      return;
+    }
+    const pick = e.target.closest("[data-pick]");
+    if (pick) { PV[pick.dataset.view] = pick.dataset.val === "follow" ? null : pick.dataset.val; render(); }
+  }));
+  document.addEventListener("click", () => closeMenus(null));
+  render();
 })();
 </script>
 </body>

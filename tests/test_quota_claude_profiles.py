@@ -1445,6 +1445,77 @@ def test_redirecting_the_default_slot_does_not_retire_the_redirected_install(
     assert [b["account"] for b in provider["buckets"]] == ["academic", "default"]
 
 
+def test_signing_out_of_a_demoted_default_install_keeps_the_redirected_one(
+    monkeypatch, tmp_path
+):
+    """The sign-out rule retires under both of an install's names, and they are not its own.
+
+    A directory's intrinsic slug is a property of the directory; its assigned name is handed
+    out relative to `CLAUDE_CONFIG_DIR`. Point the variable at `~/.claude-academic` and the
+    plain `~/.claude` beside it is renamed `claude` while keeping the intrinsic slug
+    `default` -- which is now the REDIRECTED install's account. Sign out of `~/.claude` and
+    retiring everything it answers to blanks the subscription that is working, on the card
+    of the machine that still has it. Naming a directory twice is safe in `_known_names`,
+    where it can only keep rows; here it deletes them from the card, so a name another
+    pollable install answers to is not this one's to retire.
+    """
+    from tokdash.sources.quota import quota_state
+
+    home = _home(monkeypatch, tmp_path)
+    (home / ".claude").mkdir()  # present, and signed out: no `.credentials.json`
+    academic = _install(home, ".claude-academic", token="tok-academic")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(academic))
+    config.set_quota_consent({"credential_scan": True, "claude_api": True})
+    UsageEntryStore().insert_quota_snapshots(
+        [
+            # `~/.claude-academic` holds the default slot, so its rows are the `default` ones.
+            _snapshot("default", "session", "Session", 40.0, 1_782_907_200),
+            _snapshot("claude", "claude_session", "Session", 99.0, 1_780_315_200),
+        ]
+    )
+
+    assert claude.scan_profiles().signed_out == frozenset({"claude"})
+
+    provider = quota_state()["providers"]["claude"]
+
+    assert [b["account"] for b in provider["buckets"]] == ["default"]
+
+
+def test_signing_out_of_one_of_two_installs_sharing_a_slug_keeps_the_other(
+    monkeypatch, tmp_path
+):
+    """Two directories can want one slug, and the loser keeps the winner's name intrinsically.
+
+    `claude_profile_dirs` makes assigned names unique with a `-2` suffix, so a second
+    `.claude-academic` from somewhere else is assigned `claude-academic` while its intrinsic
+    slug stays `academic` -- the first one's account. Signing out of the copy must not retire
+    the original's windows.
+    """
+    from tokdash.sources.quota import quota_state
+
+    home = _home(monkeypatch, tmp_path)
+    _install(home, ".claude", token="tok-base")
+    live = _install(home, ".claude-academic", token="tok-academic")
+    elsewhere = tmp_path / "elsewhere" / ".claude-academic"
+    elsewhere.mkdir(parents=True)  # same intrinsic slug, and signed out
+    monkeypatch.setenv(
+        "TOKDASH_CLAUDE_PROFILES", os.pathsep.join([str(live), str(elsewhere)])
+    )
+    config.set_quota_consent({"credential_scan": True, "claude_api": True})
+    UsageEntryStore().insert_quota_snapshots(
+        [
+            _snapshot("default", "session", "Session", 40.0, 1_782_907_200),
+            _snapshot("academic", "academic_session", "Session", 20.0, 1_782_907_200),
+        ]
+    )
+
+    assert claude.scan_profiles().signed_out == frozenset({"claude-academic"})
+
+    provider = quota_state()["providers"]["claude"]
+
+    assert [b["account"] for b in provider["buckets"]] == ["academic", "default"]
+
+
 def test_a_home_naming_no_install_at_all_retires_nothing(monkeypatch, tmp_path):
     """An empty or opaque listing is not the news that every install was deleted.
 

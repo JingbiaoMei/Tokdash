@@ -301,16 +301,34 @@ def _signed_out_names(profiles: list[ClaudeProfile]) -> frozenset[str]:
     those rows also drive the consent and "not detected" card.
 
     Both the ASSIGNED and the INTRINSIC slug count, for the reason spelled out in
-    ``_known_names``: which name a directory carries depends on ``CLAUDE_CONFIG_DIR``.
+    ``_known_names``: which name a directory carries depends on ``CLAUDE_CONFIG_DIR``, so a
+    signed-out install has to be retired under either name it could have stored rows under.
+
+    But a name is only this install's to retire if no OTHER install answers to it, and that
+    is where this set parts company with ``_known_names``. There, naming a directory twice
+    can only ever KEEP rows, so a name that belongs to someone else costs nothing. Here it
+    retires them, and the two names are allocated by different rules: the intrinsic slug is
+    a property of the directory, while the assigned one is handed out relative to
+    ``CLAUDE_CONFIG_DIR`` and made unique with a ``-2`` suffix. They collide exactly when an
+    install is demoted out of a name another install now holds -- point the variable at
+    ``~/.claude-academic`` and the plain ``~/.claude`` beside it is renamed ``claude`` while
+    keeping the intrinsic slug ``default``, which is the live redirected install's account.
+    Sign out of that ``~/.claude`` and retiring ``default`` blanks the working subscription.
+    So a name any pollable install answers to is withheld, and only the remainder retires.
     """
-    names: set[str] = set()
+    claimed: set[str] = set()
+    candidates: set[str] = set()
     for profile in profiles:
-        if profile.is_default or profile.configured:
-            continue
-        if profile.credential_observably_absent:
-            names.add(profile.name)
-            names.add(clientpaths.claude_profile_slug(profile.config_dir))
-    return frozenset(names)
+        names = {profile.name, clientpaths.claude_profile_slug(profile.config_dir)}
+        if (
+            profile.is_default
+            or profile.configured
+            or not profile.credential_observably_absent
+        ):
+            claimed |= names
+        else:
+            candidates |= names
+    return frozenset(candidates - claimed)
 
 
 def _listable(path: Path) -> bool:

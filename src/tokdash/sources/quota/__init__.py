@@ -817,11 +817,11 @@ def quota_state(store: UsageEntryStore | None = None) -> dict[str, Any]:
     # `_retired_claude_accounts`): Claude is the one provider whose accounts ARE filesystem
     # objects, so it is the one provider where "is it gone" is a question with an answer.
     # Every other provider's account name comes out of a credential the poller read -- a
-    # MiniMax region, an Antigravity email, a
-    # Grok user id -- and several of them write their failure rows under a synthetic
-    # `default` account when there was no credential to name at all, so any provider-wide
-    # retirement rule would let one of those synthetic rows evict the real accounts'
-    # last-known data, which is exactly what the card is required to keep showing.
+    # MiniMax region, an Antigravity email, a Grok user id -- and several of them write
+    # their failure rows under a synthetic `default` account when there was no credential
+    # to name at all, so any provider-wide retirement rule would let one of those synthetic
+    # rows evict the real accounts' last-known data, which is exactly what the card is
+    # required to keep showing.
     retired_claude = _retired_claude_accounts(
         (
             str(row.get("account") or "default")

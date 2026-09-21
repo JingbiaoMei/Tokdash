@@ -1968,8 +1968,8 @@ struct CompanionSettings: Codable {
     var lowQuotaNotifications: Bool = false
     var thresholds: QuotaThresholds = .defaults
     var language: AppLanguage = .system
-    /// Update checking is opt-in: the companion contacts no third party until asked.
-    var automaticUpdateChecks: Bool = false
+    /// On by default - the Settings checkbox is the opt-out, not an opt-in.
+    var automaticUpdateChecks: Bool = true
     /// Last check ATTEMPT (success or failure) - the 24h throttle reads this.
     var lastUpdateCheckAt: Date? = nil
     /// Last version found newer than this build, and its validated release page. Persisted
@@ -2006,7 +2006,7 @@ struct CompanionSettings: Codable {
         lowQuotaNotifications: Bool = false,
         thresholds: QuotaThresholds = .defaults,
         language: AppLanguage = .system,
-        automaticUpdateChecks: Bool = false,
+        automaticUpdateChecks: Bool = true,
         lastUpdateCheckAt: Date? = nil,
         availableUpdateVersion: String? = nil,
         availableUpdateURL: String? = nil,
@@ -2045,7 +2045,7 @@ struct CompanionSettings: Codable {
         lowQuotaNotifications = try values.decodeIfPresent(Bool.self, forKey: .lowQuotaNotifications) ?? false
         thresholds = try values.decodeIfPresent(QuotaThresholds.self, forKey: .thresholds) ?? .defaults
         language = try values.decodeIfPresent(AppLanguage.self, forKey: .language) ?? .system
-        automaticUpdateChecks = try values.decodeIfPresent(Bool.self, forKey: .automaticUpdateChecks) ?? false
+        automaticUpdateChecks = try values.decodeIfPresent(Bool.self, forKey: .automaticUpdateChecks) ?? true
         lastUpdateCheckAt = try values.decodeIfPresent(Date.self, forKey: .lastUpdateCheckAt)
         availableUpdateVersion = try values.decodeIfPresent(String.self, forKey: .availableUpdateVersion)
         availableUpdateURL = try values.decodeIfPresent(String.self, forKey: .availableUpdateURL)

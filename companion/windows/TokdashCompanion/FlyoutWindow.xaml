@@ -241,7 +241,7 @@
              simply have no mark (never a placeholder). -->
         <DataTemplate x:Key="RankTemplate">
             <Border CornerRadius="4" Background="{DynamicResource SegIdleBg}" BorderBrush="{DynamicResource BtnBorder}"
-                    BorderThickness="0.5" Padding="7,3,7,4" Margin="0,0,6,0">
+                    BorderThickness="0.5" Padding="7,3,7,4" Margin="0,0,0,4">
                 <StackPanel Orientation="Horizontal">
                     <Image Source="{Binding Logo}" Width="13" Height="13" Margin="0,0,5,0" VerticalAlignment="Center"
                            Visibility="{Binding LogoVisibility}"/>
@@ -365,15 +365,17 @@
             <!-- Top ranks: three tools (with marks) + three models (text-only). -->
             <StackPanel x:Name="RanksPanel" Margin="{StaticResource SectionPad}" Visibility="Collapsed">
                 <TextBlock x:Name="ToolsKicker" Text="" FontSize="{StaticResource FontCaption}" FontWeight="SemiBold" Style="{StaticResource BodyText}" Foreground="{DynamicResource MutedBrush}"/>
+                <!-- Vertical: one rank per row (macOS parity); the pills are content-width,
+                     left-aligned, stacked top-down. -->
                 <ItemsControl x:Name="ToolsStrip" Margin="0,4,0,0" ItemTemplate="{StaticResource RankTemplate}">
                     <ItemsControl.ItemsPanel>
-                        <ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate>
+                        <ItemsPanelTemplate><StackPanel Orientation="Vertical"/></ItemsPanelTemplate>
                     </ItemsControl.ItemsPanel>
                 </ItemsControl>
                 <TextBlock x:Name="ModelsKicker" Text="" FontSize="{StaticResource FontCaption}" FontWeight="SemiBold" Style="{StaticResource BodyText}" Foreground="{DynamicResource MutedBrush}" Margin="0,10,0,0"/>
                 <ItemsControl x:Name="ModelsStrip" Margin="0,4,0,0" ItemTemplate="{StaticResource RankTemplate}">
                     <ItemsControl.ItemsPanel>
-                        <ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate>
+                        <ItemsPanelTemplate><StackPanel Orientation="Vertical"/></ItemsPanelTemplate>
                     </ItemsControl.ItemsPanel>
                 </ItemsControl>
             </StackPanel>
@@ -382,7 +384,11 @@
             <!-- Activity glance: one face at a time, built in code-behind (bars/columns/grid). -->
             <StackPanel x:Name="GlancePanel" Margin="{StaticResource SectionPad}" Visibility="Collapsed">
                 <TextBlock x:Name="GlanceKicker" Text="" FontSize="{StaticResource FontCaption}" FontWeight="SemiBold" Style="{StaticResource BodyText}" Foreground="{DynamicResource MutedBrush}"/>
-                <ContentControl x:Name="GlanceHost" Margin="0,6,0,0" Focusable="False"/>
+                <!-- Stretch is load-bearing: ContentControl defaults to Left, which measures
+                     the star-column bar grid unconstrained and collapses it to a narrow,
+                     left-aligned strip instead of the full flyout width. -->
+                <ContentControl x:Name="GlanceHost" Margin="0,6,0,0" Focusable="False"
+                                HorizontalContentAlignment="Stretch"/>
                 <TextBlock x:Name="GlanceCaption" Text="" FontSize="{StaticResource FontCaption}" Style="{StaticResource BodyText}" Foreground="{DynamicResource MutedBrush}" Margin="0,6,0,0"/>
             </StackPanel>
             <Border x:Name="SepGlance" Height="1" Background="{DynamicResource DividerBrush}" Visibility="Collapsed"/>

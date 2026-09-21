@@ -609,29 +609,23 @@ public partial class FlyoutWindow : Window
         switch (face.Kind)
         {
             case GlanceKind.Hours:
-                GlanceHost.Content = BarsVisual(face.Bars!, 24);
+            {
+                var panel = new StackPanel();
+                panel.Children.Add(BarsVisual(face.Bars!, 24));
+                // Hour axis: labeling all 24 columns can't fit at flyout width, so label
+                // every 6th hour plus the last column - the time is readable, the axis
+                // is anchored at both ends. Bare digits, no L10n needed.
+                panel.Children.Add(LabelAxis(24, i => i % 6 == 0 || i == 23 ? i.ToString() : null));
+                GlanceHost.Content = panel;
                 if (face.PeakHour is { } peak) GlanceCaption.Text = L10n.T("peak_caption", peak);
                 break;
+            }
             case GlanceKind.Days:
             {
                 var panel = new StackPanel();
                 panel.Children.Add(BarsVisual(face.DayTokens!, 7, spacing: 6));
-                var labels = new Grid { Margin = new Thickness(0, 3, 0, 0) };
                 string[] keys = ["wd_mon", "wd_tue", "wd_wed", "wd_thu", "wd_fri", "wd_sat", "wd_sun"];
-                for (int i = 0; i < 7; i++)
-                {
-                    labels.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                    var t = new TextBlock
-                    {
-                        Text = L10n.T(keys[i]),
-                        FontSize = FontRes("FontMicro"),
-                        Foreground = (Brush)FindResource("FaintBrush"),
-                        HorizontalAlignment = HorizontalAlignment.Center,
-                    };
-                    Grid.SetColumn(t, i);
-                    labels.Children.Add(t);
-                }
-                panel.Children.Add(labels);
+                panel.Children.Add(LabelAxis(7, i => L10n.T(keys[i])));
                 GlanceHost.Content = panel;
                 break;
             }
@@ -639,6 +633,30 @@ public partial class FlyoutWindow : Window
                 GlanceHost.Content = GridViewVisual(face);
                 break;
         }
+    }
+
+    /// <summary>
+    /// Axis labels under a BarsVisual: one star column per bar so each label sits under
+    /// its own column; a null label leaves that column blank (sparse hour axis).
+    /// </summary>
+    private Grid LabelAxis(int columns, Func<int, string?> label)
+    {
+        var grid = new Grid { Margin = new Thickness(0, 3, 0, 0) };
+        for (int i = 0; i < columns; i++)
+        {
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            if (label(i) is not { } text) continue;
+            var t = new TextBlock
+            {
+                Text = text,
+                FontSize = FontRes("FontMicro"),
+                Foreground = (Brush)FindResource("FaintBrush"),
+                HorizontalAlignment = HorizontalAlignment.Center,
+            };
+            Grid.SetColumn(t, i);
+            grid.Children.Add(t);
+        }
+        return grid;
     }
 
     /// <summary>

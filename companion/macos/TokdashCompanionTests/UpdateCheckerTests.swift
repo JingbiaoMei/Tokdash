@@ -350,9 +350,9 @@ final class UpdateCheckerTests: XCTestCase {
 
     // MARK: - Settings migration
 
-    func testSettingsFromBeforeUpdateCheckingDecodeWithTheFeatureOff() throws {
+    func testSettingsFromBeforeUpdateCheckingDecodeWithTheFeatureOn() throws {
         // A v0.1.4 settings file has none of the update fields. Decoding must preserve every
-        // existing preference and default update checking to OFF (it is opt-in).
+        // existing preference; absent update fields take the shipped default, which is ON.
         let data = Data("""
         {
           "baseURL": "https://wsl.example.test/tokdash",
@@ -366,7 +366,7 @@ final class UpdateCheckerTests: XCTestCase {
         XCTAssertEqual(settings.baseURL, "https://wsl.example.test/tokdash")
         XCTAssertTrue(settings.lowQuotaNotifications)
         XCTAssertEqual(settings.language, .zhHans)
-        XCTAssertFalse(settings.automaticUpdateChecks)
+        XCTAssertTrue(settings.automaticUpdateChecks)
         XCTAssertNil(settings.lastUpdateCheckAt)
         XCTAssertNil(settings.availableUpdateVersion)
         XCTAssertNil(settings.skippedUpdateVersion)
@@ -374,6 +374,6 @@ final class UpdateCheckerTests: XCTestCase {
         // Round-trips without losing anything.
         let again = try JSONDecoder().decode(CompanionSettings.self, from: JSONEncoder().encode(settings))
         XCTAssertEqual(again.baseURL, settings.baseURL)
-        XCTAssertFalse(again.automaticUpdateChecks)
+        XCTAssertTrue(again.automaticUpdateChecks)
     }
 }

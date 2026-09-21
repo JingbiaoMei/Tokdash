@@ -75,7 +75,8 @@ public sealed class CompanionSettings
     // preference intact.
 
     /// <summary>Update checking is opt-in: the companion contacts no third party until asked.</summary>
-    public bool AutomaticUpdateChecks { get; set; } = false;
+    /// <summary>On by default; the Settings checkbox is how you opt OUT.</summary>
+    public bool AutomaticUpdateChecks { get; set; } = true;
     /// <summary>Last check ATTEMPT (success or failure) - the 24h throttle reads this.</summary>
     public DateTimeOffset? LastUpdateCheckAt { get; set; }
     /// <summary>Last version found newer than this build, and its validated release page.

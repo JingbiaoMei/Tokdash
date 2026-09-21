@@ -345,6 +345,17 @@ private struct GlanceSection: View {
             switch face {
             case .hours(let bars, let peakHour):
                 barsView(values: bars)
+                // Hour axis: 24 columns can't each carry a label at flyout width, so
+                // label every 6th hour plus the last column - same sparse axis as the
+                // Windows flyout. Blank labels keep the column grid aligned under the bars.
+                HStack(spacing: 2) {
+                    ForEach(0..<24, id: \.self) { i in
+                        Text([0, 6, 12, 18, 23].contains(i) ? "\(i)" : "")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity)
+                    }
+                }
                 if let peak = peakHour {
                     Text(L10n.t("peak_caption", peak))
                         .font(.system(size: 10.5))

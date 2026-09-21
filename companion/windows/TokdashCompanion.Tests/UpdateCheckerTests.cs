@@ -498,7 +498,7 @@ public class UpdateCheckerTests
     public void Settings_From_Before_Update_Checking_Decode_With_The_Feature_Off()
     {
         // A v0.1.4 settings file has none of the update fields. Decoding must preserve every
-        // existing preference and default update checking to OFF (it is opt-in).
+        // existing preference; absent update fields take the shipped default, which is ON.
         const string json = """
         {
           "BaseURL": "https://wsl.example.test/tokdash",
@@ -512,7 +512,7 @@ public class UpdateCheckerTests
         Assert.AreEqual("https://wsl.example.test/tokdash", settings.BaseURL);
         Assert.IsTrue(settings.LowQuotaNotifications);
         Assert.AreEqual(AppLanguage.ZhHans, settings.Language);
-        Assert.IsFalse(settings.AutomaticUpdateChecks);
+        Assert.IsTrue(settings.AutomaticUpdateChecks);
         Assert.IsNull(settings.LastUpdateCheckAt);
         Assert.IsNull(settings.AvailableUpdateVersion);
         Assert.IsNull(settings.SkippedUpdateVersion);
@@ -520,7 +520,7 @@ public class UpdateCheckerTests
         // Round-trips without losing anything.
         var again = JsonSerializer.Deserialize<CompanionSettings>(JsonSerializer.Serialize(settings))!;
         Assert.AreEqual(settings.BaseURL, again.BaseURL);
-        Assert.IsFalse(again.AutomaticUpdateChecks);
+        Assert.IsTrue(again.AutomaticUpdateChecks);
     }
 
     [TestMethod]

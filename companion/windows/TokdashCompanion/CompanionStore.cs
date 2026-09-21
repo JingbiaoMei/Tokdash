@@ -1380,15 +1380,16 @@ public sealed class Snapshot
     // MARK: Reset credits (E2)
 
     /// <summary>
-    /// The quiet row under the provider group in the All view: rendered only when the
-    /// component is on, quota tracking is enabled, the provider is Codex, the group is not
-    /// in failure (last-known credit data is not a basis for an "expire in" row), and
-    /// available_count >= 1. The Low view never shows it (provider context, not a window).
+    /// The quiet row under the provider group in the All view: rendered when the component
+    /// is on, quota tracking is enabled, the provider is Codex, and available_count >= 1.
+    /// The Low view never shows it (provider context, not a window). A failed group does
+    /// NOT hide the row - contract §Reset credits gates rendering on those four conditions
+    /// only; last-known-data suppression is scoped to the expiry *notification* (see the
+    /// notification path), which is where the "expire in" warning actually fires.
     /// </summary>
     public string? CreditsNotice(QuotaGroup group)
     {
         if (!Components.ResetCreditsOn || !Quota.Enabled) return null;
-        if (group.Failed) return null;
         if (!group.CanonicalProvider.Equals("codex", StringComparison.OrdinalIgnoreCase)) return null;
         var credits = group.Entry?.ResetCredits;
         if (credits is null || (credits.AvailableCount ?? 0) < 1) return null;

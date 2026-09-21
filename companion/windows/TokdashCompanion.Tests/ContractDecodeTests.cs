@@ -53,8 +53,11 @@ public class ContractDecodeTests
     }
 
     [TestMethod]
-    public void Credits_Notice_Suppressed_When_Group_Failed()
+    public void Credits_Row_Persists_When_Group_Failed()
     {
+        // Contract §Reset credits gates the ROW on four conditions only (component, quota
+        // enabled, Codex, available_count >= 1). Group failure suppresses the expiry
+        // NOTIFICATION ("...not a basis for an 'expire in' warning"), not the row.
         var json = """
         {"enabled":true,"providers":{"codex":{"status":"error","status_detail":"boom","status_at":9,"buckets":[
             {"account":"a","bucket":"5h","remaining_percent":50.0,"resets_at":1,"captured_at":1}
@@ -64,7 +67,10 @@ public class ContractDecodeTests
         var snap = MakeSnap(q);
         var codex = snap.AllQuotaGroups.Single(g => g.CanonicalProvider == "codex");
         Assert.IsTrue(codex.Failed);
-        Assert.IsNull(snap.CreditsNotice(codex), "last-known credit data never backs an expire-in row");
+        // No plural special-case in the string ("1 reset credits"), and the floor from the
+        // frozen clock 2026-07-26T15:35:20Z to 2099-01-01T00:00:00Z is 26456 full days.
+        Assert.AreEqual("⚡ Codex · 1 reset credits · expire in 26456 d",
+            snap.CreditsNotice(codex), "the row follows the contract's four gates only");
     }
 
     [TestMethod]

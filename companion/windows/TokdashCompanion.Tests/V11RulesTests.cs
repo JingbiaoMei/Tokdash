@@ -130,17 +130,53 @@ public sealed class V11RulesTests
         Assert.AreEqual(0, storeLate.Count, "48 h + 1 s is still outside the window");
     }
 
+    [TestMethod]
+    public async Task Credits_Notification_Suppressed_While_Group_Failed()
+    {
+        // Contract §Low-quota notifications: "Suppressed while the Codex provider group
+        // failed (last-known credit data is not a basis for an 'expire in' warning)."
+        // The suppression is notification-scoped - the ROW still renders (see
+        // ContractDecodeTests.Credits_Row_Persists_When_Group_Failed).
+        var alerts = await NotifyWithCreditExpiryAsync(Frozen.AddHours(24), groupFailed: true);
+        Assert.AreEqual(0, alerts.Count, "failed group must not arm the expiry warning");
+    }
+
+    [TestMethod]
+    public async Task Credits_Notification_Dedups_By_Credit_Id()
+    {
+        // Same credit, two refresh cycles -> one alert. Dedup key is
+        // (provider, credits[].id, expires_at); a second read must not re-alert.
+        CompanionStore.ClockOverride = Frozen;
+        var client = new FakeClient { Quota = JsonSerializer.Deserialize<QuotaResponse>("""
+        {"enabled":true,"providers":{"codex":{"buckets":[
+          {"account":"a","bucket":"5h","bucket_label":"5-hour window","remaining_percent":50.0,
+           "resets_at":1785090000,"captured_at":1785080120}],
+          "reset_credits":{"available_count":1,"credits":[
+            {"id":"credit-dup","expires_at":"2026-07-27T15:35:20Z"}]}}}}
+        """, Opts)! };
+        var store = new CompanionStore(client);
+        L10n.Current = AppLanguage.English;
+        store.Settings.LowQuotaNotifications = true;
+        var alerts = new List<CompanionStore.CreditAlertItem>();
+        store.CreditExpiryAlert += items => alerts.AddRange(items);
+        await store.RefreshAsync();
+        await store.RefreshAsync();
+        CompanionStore.ClockOverride = null;
+        Assert.AreEqual(1, alerts.Count, "the same credit id never re-arms");
+    }
+
     private static async Task<List<CompanionStore.CreditAlertItem>> NotifyWithCreditExpiryAsync(
-        DateTimeOffset expiry)
+        DateTimeOffset expiry, bool groupFailed = false)
     {
         string expiryText = expiry.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture);
+        string status = groupFailed ? "\"status\":\"error\",\"status_detail\":\"boom\",\"status_at\":1785080000," : "";
         var json = """
-        {"enabled":true,"providers":{"codex":{"buckets":[
+        {"enabled":true,"providers":{"codex":{__STATUS__"buckets":[
           {"account":"a","bucket":"5h","bucket_label":"5-hour window","remaining_percent":50.0,
            "resets_at":1785090000,"captured_at":1785080120}],
           "reset_credits":{"available_count":2,"credits":[
             {"id":"credit-edge","expires_at":"__EXPIRY__"}]}}}}
-        """.Replace("__EXPIRY__", expiryText);
+        """.Replace("__STATUS__", status).Replace("__EXPIRY__", expiryText);
         CompanionStore.ClockOverride = Frozen;
         var client = new FakeClient { Quota = JsonSerializer.Deserialize<QuotaResponse>(json, Opts)! };
         var store = new CompanionStore(client);
@@ -244,6 +280,18 @@ public sealed class V11RulesTests
         Assert.AreEqual(7, face.DayTokens!.Length);
         Assert.AreEqual(0, face.DayTokens[1], "the fixture has no Tuesday: empty column, not a skipped one");
         Assert.IsTrue(face.DayTokens[0] > 0 && face.DayTokens[6] > 0);
+    }
+
+    [TestMethod]
+    public void DayFace_AnchorsToTheClocksWeek_NotThePayload()
+    {
+        // The face is Mon..TODAY (contract §Activity glance). A daily facet that lags
+        // into last week must not be presented as the current week's activity: the
+        // current week reads all-zero and the strip hides itself instead.
+        var ins = Fixture<InsightsResponse>("insights-week.json"); // ends Sun 2026-07-26
+        var face = CompanionStore.GlanceFaceFor(UsagePeriod.Week, ins, null,
+            new CompanionComponents(), new DateOnly(2026, 8, 1)); // next week
+        Assert.IsNull(face, "a stale payload must never be shown as this week's columns");
     }
 
     [TestMethod]

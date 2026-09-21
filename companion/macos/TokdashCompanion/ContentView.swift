@@ -350,9 +350,14 @@ private struct GlanceSection: View {
                 // Windows flyout. Blank labels keep the column grid aligned under the bars.
                 HStack(spacing: 2) {
                     ForEach(0..<24, id: \.self) { i in
+                        // lineLimit+fixedSize: a two-digit label is wider than one 24-way
+                        // column; without them SwiftUI compresses "12"/"18" to two wrapped
+                        // lines (caught in the real-window evidence capture).
                         Text([0, 6, 12, 18, 23].contains(i) ? "\(i)" : "")
                             .font(.system(size: 9))
                             .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .fixedSize()
                             .frame(maxWidth: .infinity)
                     }
                 }

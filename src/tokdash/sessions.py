@@ -36,8 +36,10 @@ from .sources.coding_tools import (
     QoderIdeParser,
     WorkBuddyParser,
     ZCodeSnapshotError,
+    _goose_ts_to_ms,
     _opencode_message_table,
     _opencode_model_identity,
+    _sqlite_db_signature,
     antigravity_db_signatures,
     claude_usage_supersedes,
     cline_message_file_signatures,
@@ -54,6 +56,8 @@ from .sources.coding_tools import (
     qoder_cli_runtime_signature,
     qwen_file_signatures,
     qwen_session_file,
+    roo_task_file_signatures,
+    roo_task_rows,
     search_dir_claim_key,
     workbuddy_file_signatures,
     zcode_snapshot,
@@ -76,7 +80,7 @@ from .usage_store import (
 )
 
 
-SESSION_TOOLS = ("codex", "claude", "opencode", "pi_agent", "omp", "mimo", "kimi", "dsh", "reasonix", "zcode", "kilocode", "grok", "hermes", "antigravity_cli", "cline", "workbuddy", "qoder", "qwen_code", "openclaw", "qoder_cli")
+SESSION_TOOLS = ("codex", "claude", "opencode", "pi_agent", "omp", "mimo", "kimi", "dsh", "reasonix", "zcode", "kilocode", "grok", "hermes", "antigravity_cli", "cline", "workbuddy", "qoder", "qwen_code", "openclaw", "qoder_cli", "goose", "roo_code")
 logger = logging.getLogger(__name__)
 TOOL_LABELS = {
     "codex": "Codex",
@@ -99,6 +103,8 @@ TOOL_LABELS = {
     "qwen_code": "Qwen Code",
     "openclaw": "OpenClaw",
     "qoder_cli": "Qoder CLI",
+    "goose": "Goose",
+    "roo_code": "Roo Code",
 }
 
 _PRICING_DB = PricingDatabase()
@@ -6089,6 +6095,591 @@ def _cline_sessions() -> Dict[str, Dict[str, Any]]:
     )
 
 
+# ---------------------------------------------------------------------------
+# Goose (one sessions.db; usage_ledger rows are the whole story)
+#
+# Same database, same snapshot helper and same one-entry-per-DB signature as
+# GooseParser, so Overview and Sessions cannot be reading different copies.
+# One usage_ledger row is one model request and becomes one turn here, with
+# the parser's own accounting (cache-inclusive input split, gross output,
+# pricing-DB cost), so the two surfaces cannot drift.
+# Read failures raise GooseReadError instead of returning {} (the ZCode
+# contract): no layer - warmer, response cache, /api/session 404s, active time
+# - may treat a broken read as an empty one. A database with no tables at all
+# IS a legitimate empty success, but a database carrying Goose's own sessions
+# table without usage_ledger raises, the same split GooseParser makes: an empty
+# result here would be cached and would look like "no Goose sessions".
+# ---------------------------------------------------------------------------
+
+
+class GooseReadError(RuntimeError):
+    """A Goose database this reader cannot account for, or a failed read."""
+
+
+# Max (window) entries kept in the loader result cache, mirroring ZCode.
+_GOOSE_SESSIONS_CACHE_MAX = 32
+
+_goose_sessions_cache: Dict[tuple, Dict[str, Dict[str, Any]]] = {}
+_goose_sessions_cache_sig: tuple = ()
+_goose_sessions_cache_lock = threading.Lock()
+
+# Goose's own default titles. Kept out of display_name so the panel shows the
+# project and short id instead of a row that reads "CLI Session" for every
+# session the CLI ever ran.
+_GOOSE_GENERIC_NAMES = frozenset({"", "cli session", "session", "new session"})
+
+
+def _goose_db_signature() -> tuple:
+    # The exact signature GooseParser._file_signatures builds: ONE entry per DB
+    # with the -wal/-shm sidecars folded in, not one entry per sidecar.
+    db_path = clientpaths.goose_sessions_db()
+    if db_path is None:
+        return ()
+    sig = _sqlite_db_signature(db_path)
+    return (sig,) if sig is not None else ()
+
+
+def _goose_json_obj(value: Any) -> Dict[str, Any]:
+    try:
+        doc = json.loads(value) if isinstance(value, str) else None
+    except ValueError:
+        return {}
+    return doc if isinstance(doc, dict) else {}
+
+
+def _goose_content_text(value: Any) -> str:
+    """First text block of a Goose content_json array, or ""."""
+    try:
+        blocks = json.loads(value) if isinstance(value, str) else None
+    except ValueError:
+        return ""
+    if not isinstance(blocks, list):
+        return ""
+    for block in blocks:
+        if isinstance(block, dict) and block.get("type") == "text":
+            text = str(block.get("text") or "").strip()
+            if text:
+                return text
+    return ""
+
+
+def _goose_elapsed_ms(cur, session_ids: list) -> Dict[str, list]:
+    """session_id -> request durations in ms, in request order.
+
+    Goose stamps the duration of each request on the assistant message that
+    answers it (metadata_json.usage.elapsedMs), already in milliseconds, which
+    is the unit `_work_ms` wants. There is no key from usage_ledger to
+    messages, so the pairing is ORDINAL: ledger row k of a session is the k-th
+    assistant message that carries a usage block. Both fixtures match 1:1
+    (Linux sessions 20260920_5 and _7, macOS three rows in one session), which
+    is why the rank in `_goose_load_sessions` is computed over the whole ledger
+    rather than over a window - a windowed rank would shift every row after the
+    first when the window opens mid-session.
+
+    Ordinal pairing is only sound while the two sequences are the same length,
+    so the caller checks that before trusting a position. A caller that skipped
+    the check would charge row 2 the duration of row 3 the moment one request
+    ended without a usage block, which is a wrong number rather than a missing
+    one.
+
+    Active time only. No token and no cost ever comes from a message row.
+    """
+    if not session_ids:
+        return {}
+    out: Dict[str, list] = {}
+    for start in range(0, len(session_ids), 400):
+        chunk = session_ids[start:start + 400]
+        marks = ", ".join("?" for _ in chunk)
+        cur.execute(
+            f"""
+            SELECT session_id, metadata_json
+            FROM messages
+            WHERE role = 'assistant'
+              AND metadata_json LIKE '%elapsedMs%'
+              AND session_id IN ({marks})
+            ORDER BY session_id, created_timestamp, id
+            """,
+            chunk,
+        )
+        for row in cur.fetchall():
+            usage = _goose_json_obj(row["metadata_json"]).get("usage")
+            if not isinstance(usage, dict) or "elapsedMs" not in usage:
+                continue
+            try:
+                elapsed = int(usage.get("elapsedMs") or 0)
+            except (TypeError, ValueError):
+                continue
+            if elapsed > 0:
+                out.setdefault(str(row["session_id"]), []).append(elapsed)
+    return out
+
+
+def _goose_load_sessions(
+    conn: sqlite3.Connection,
+    since_ms: Optional[int],
+    until_ms: Optional[int],
+) -> Dict[str, Dict[str, Any]]:
+    """One turn per in-window usage_ledger row, grouped under its session.
+
+    The half-open window lives HERE and only here. GooseParser._parse_all() is
+    contractually unwindowed (the persistent store replaces the whole corpus
+    for this source), so a windowed parse would persist a partial corpus.
+    """
+    # usage_ledger.created_timestamp is INTEGER epoch SECONDS, so the ms window
+    # is converted rather than compared. Ceil on both bounds keeps the half-open
+    # contract that _summarize_session re-applies in milliseconds exact: a row
+    # at second S lands at S * 1000, so S >= ceil(since/1000) and
+    # S < ceil(until/1000) is the same set of rows as
+    # since <= S * 1000 < until.
+    lo = 0 if since_ms is None else -(-int(since_ms) // 1000)
+    hi = 9999999999 if until_ms is None else -(-int(until_ms) // 1000)
+    cur = conn.cursor()
+
+    # session_type 'user' and parent_session_id IS NULL keep Goose's own
+    # internal sessions out of the listing. Neither column has a fixture that
+    # contradicts the filter, and neither has one that confirms it: both
+    # fixtures are session_type in {user, hidden} with parent_session_id null
+    # on every row, so the null half selects a shape nobody has observed yet.
+    # archived_at and schedule_id are deliberately not read - an archived
+    # session's tokens were still billed, and a scheduled recipe run lists as
+    # an ordinary session until a real one exists to group by.
+    cur.execute(
+        """
+        SELECT l.id, l.session_id, l.created_timestamp, l.model,
+               l.input_tokens, l.output_tokens,
+               l.cache_read_tokens, l.cache_write_tokens, l.is_compaction,
+               l.rn, l.ledger_rows,
+               s.name, s.working_dir
+        FROM (
+            SELECT id, session_id, created_timestamp, model,
+                   input_tokens, output_tokens, cache_read_tokens,
+                   cache_write_tokens, is_compaction,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY session_id ORDER BY id
+                   ) AS rn,
+                   COUNT(*) OVER (PARTITION BY session_id) AS ledger_rows
+            FROM usage_ledger
+            -- The parser's keep-guard, in SQL, so rn ranks the SAME rows the
+            -- turns below are built from. COALESCE because the Python guard
+            -- reads each column as `int(x or 0)`, and a plain `NULL + 1 > 0`
+            -- test would drop a row the parser keeps.
+            WHERE COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0)
+                  + COALESCE(cache_read_tokens, 0)
+                  + COALESCE(cache_write_tokens, 0) > 0
+        ) l
+        JOIN sessions s ON s.id = l.session_id
+        WHERE s.session_type = 'user'
+          AND s.parent_session_id IS NULL
+          AND l.created_timestamp >= ?
+          AND l.created_timestamp < ?
+        ORDER BY l.session_id, l.id
+        """,
+        (lo, hi),
+    )
+    ledger_rows = cur.fetchall()
+
+    elapsed_by_session = _goose_elapsed_ms(
+        cur, sorted({str(r["session_id"]) for r in ledger_rows})
+    )
+
+    # First user-visible prompt per session, for a session Goose left unnamed.
+    # Turn text is display only; it is never a token source.
+    prompt_by_session: Dict[str, str] = {}
+    for start in range(0, len(ledger_rows), 400):
+        chunk = sorted({str(r["session_id"]) for r in ledger_rows[start:start + 400]})
+        if not chunk:
+            continue
+        marks = ", ".join("?" for _ in chunk)
+        cur.execute(
+            f"""
+            SELECT session_id, content_json, metadata_json
+            FROM messages
+            WHERE role = 'user'
+              AND session_id IN ({marks})
+            ORDER BY session_id, created_timestamp, id
+            """,
+            chunk,
+        )
+        for row in cur.fetchall():
+            session_id = str(row["session_id"])
+            if session_id in prompt_by_session:
+                continue
+            if _goose_json_obj(row["metadata_json"]).get("userVisible") is not True:
+                continue
+            text = _goose_content_text(row["content_json"])
+            if text:
+                prompt_by_session[session_id] = text
+
+    sessions: Dict[str, Dict[str, Any]] = {}
+    for row in ledger_rows:
+        session_id = str(row["session_id"])
+        input_total = int(row["input_tokens"] or 0)
+        output_t = int(row["output_tokens"] or 0)
+        cache_r = int(row["cache_read_tokens"] or 0)
+        cache_w = int(row["cache_write_tokens"] or 0)
+        # The parser's keep-guard, so a zero-token row is not a turn here and
+        # is not an entry in Overview either. The same guard runs in the SQL
+        # above, where it matters for a second reason: the duration rank has to
+        # count exactly the rows this loop turns into turns.
+        if input_total + output_t + cache_r + cache_w <= 0:
+            continue
+        ts_ms = _goose_ts_to_ms(row["created_timestamp"])
+        if ts_ms is None:
+            continue
+        model = str(row["model"] or "").strip() or "unknown"
+        # Fresh input only, and the ledger's input_tokens already contains the
+        # cached slice. Shared with GooseParser._parse_db by rule, not by copy:
+        # get_cost(input, output, cache_read, cache_write) is the same
+        # expression the parser priced with.
+        input_t = max(0, input_total - cache_r)
+
+        raw = sessions.get(session_id)
+        if raw is None:
+            name = _clean_display_name(row["name"])
+            if name.lower() in _GOOSE_GENERIC_NAMES:
+                name = ""
+            display_name = name or _clean_display_name(prompt_by_session.get(session_id))
+            raw = {
+                "tool": "goose",
+                "session_id": session_id,
+                "display_name": display_name,
+                "project": _project_from_repo_or_path(None, row["working_dir"]),
+                "is_review_session": False,
+                "turns": [],
+                "_activity_events": [],
+            }
+            sessions[session_id] = raw
+        turn = _build_turn(
+            turn_index=len(raw["turns"]) + 1,
+            timestamp_ms=ts_ms,
+            model=model,
+            tokens_in=input_t + cache_w,
+            tokens_cache=cache_r,
+            tokens_out=output_t,
+            tokens_reasoning=0,
+            bill=_billing_record(
+                model,
+                "split-cache-write",
+                input_tokens=input_t,
+                output_tokens=output_t,
+                cache_read=cache_r,
+                cache_write=cache_w,
+            ),
+        )
+        # The parser's own entry id, so a turn here and the Overview entry that
+        # priced it are the same event on both surfaces.
+        turn["_event_key"] = (
+            f"goose:{session_id}:{row['id']}:{row['created_timestamp']}"
+        )
+        # Carried rather than hidden: a compaction request bills like any other,
+        # so it must be distinguishable from one. The v1 modal renders the
+        # standard token fields, so this is visible in the API response and in
+        # any drill-down that chooses to show it.
+        if int(row["is_compaction"] or 0):
+            turn["is_compaction"] = True
+        # Measured durations, positionally, but only for a session whose
+        # duration count equals its billed-row count. rn ranks the guarded
+        # ledger rows of the WHOLE session and the list holds the assistant
+        # messages that carried a usage block, so one request that ended
+        # without one - interrupted mid-response, or a compaction request in
+        # the shape V6 leaves unobserved - offsets every later row. Trusting
+        # the position then charges this turn a NEIGHBOUR'S duration and
+        # silently inflates the session; the honest answer is no measured
+        # duration, which lets `_summarize_session` fall back to the capped
+        # inter-event-gap contract the design already promises.
+        durations = elapsed_by_session.get(session_id) or ()
+        if int(row["ledger_rows"]) == len(durations):
+            index = int(row["rn"]) - 1
+            if 0 <= index < len(durations):
+                turn["_work_ms"] = int(durations[index])
+        raw["turns"].append(turn)
+
+    return sessions
+
+
+def _goose_sessions(
+    since_ms: Optional[int] = None,
+    until_ms: Optional[int] = None,
+) -> Dict[str, Dict[str, Any]]:
+    global _goose_sessions_cache_sig
+    sig = (_goose_db_signature(), _pricing_signature())
+    key = (since_ms, until_ms)
+    # Signature validation and the cache lookup are one critical section (the
+    # ZCode algorithm): a concurrent collector must not clear and repopulate
+    # the cache between them.
+    with _goose_sessions_cache_lock:
+        if sig != _goose_sessions_cache_sig:
+            _goose_sessions_cache.clear()
+            _goose_sessions_cache_sig = sig
+        cached = _goose_sessions_cache.get(key)
+    if cached is not None:
+        return cached
+
+    db_path = clientpaths.goose_sessions_db()
+    if db_path is None:
+        # Legitimate empty: no Goose database on this machine. Cached; the
+        # signature changes when the DB appears.
+        return _goose_store(sig, key, {})
+
+    raw_sessions: Dict[str, Dict[str, Any]]
+    try:
+        with zcode_snapshot(db_path) as snap:
+            conn = snap.conn
+            conn.row_factory = sqlite3.Row
+            names = {
+                str(r[0])
+                for r in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                )
+            }
+            if "usage_ledger" not in names:
+                if "sessions" in names:
+                    # GooseSchemaError in the parser. Same rule here: the
+                    # database claims to be Goose's but has no ledger, so this
+                    # reader cannot tell an empty history from a schema that
+                    # moved the table, and the difference must not be cached.
+                    raise GooseReadError(
+                        "Goose database has a sessions table but no usage_ledger; "
+                        "its schema is not one this reader can account for"
+                    )
+                raw_sessions = {}
+            else:
+                raw_sessions = _goose_load_sessions(conn, since_ms, until_ms)
+    except (ZCodeSnapshotError, sqlite3.Error) as error:
+        raise GooseReadError(f"Goose session read failed: {error}") from error
+
+    if snap.close_failed:
+        # The read completed but the snapshot could not be closed: return the
+        # data, never cache it.
+        return raw_sessions
+    return _goose_store(sig, key, raw_sessions)
+
+
+def _goose_store(
+    sig: tuple, key: tuple, raw_sessions: Dict[str, Dict[str, Any]]
+) -> Dict[str, Dict[str, Any]]:
+    global _goose_sessions_cache, _goose_sessions_cache_sig
+    with _goose_sessions_cache_lock:
+        if sig == _goose_sessions_cache_sig:
+            if len(_goose_sessions_cache) >= _GOOSE_SESSIONS_CACHE_MAX:
+                _goose_sessions_cache.clear()
+            _goose_sessions_cache[key] = raw_sessions
+    return raw_sessions
+
+
+# ---------------------------------------------------------------------------
+# Roo Code (one ui_messages.json per task, plus the sibling model tags)
+#
+# The rows come from roo_task_rows(), the single producer RooCodeParser uses
+# too. That is not a convenience: the tokens live in ui_messages.json and the
+# model lives in the sibling api_conversation_history.json, so a loader fed the
+# task file alone would label every turn "unknown" while Overview priced the
+# real model - moving the panel's model column and its per-model billing
+# grouping away from the dashboard's own totals.
+# One task directory is one session, including after a resume: Roo appends
+# resume_task and user_feedback into the same file rather than starting a new
+# directory. A directory whose history_item.json carries parentTaskId is a
+# delegated child; Roo bills it, so Overview counts it, but it is not a session
+# the user started, so it stays out of the listing. That is the one documented
+# place where the two surfaces are allowed to differ for Roo.
+# ---------------------------------------------------------------------------
+
+
+# The two sidecars a Roo session row is assembled from, beside its token file.
+_ROO_SIDECARS = ("history_item.json", "api_conversation_history.json")
+
+
+def _roo_sidecar_signatures(file_sigs: tuple) -> tuple:
+    """Sign the sidecar files beside each signed task file.
+
+    Derived from file_sigs rather than by re-globbing, so the loader and the
+    parser can never be looking at different task sets.
+
+    history_item.json carries the title and the workspace, so an edit there
+    must invalidate a cached view even when no token file changed.
+
+    api_conversation_history.json is the OTHER half of every turn: the model
+    comes from it, and Roo writes it on its own schedule, so a model switch or
+    a late-arriving record leaves the task file's signature alone. It rides in
+    this CACHE key while RooCodeParser._file_signatures deliberately keeps it
+    out of the SYNC signature - the store is unique on (source, entry_key) and
+    an entry-emitting second path would fight the first over the row. An
+    in-memory view has no such fight, and without it the panel would keep
+    pricing turns under a model Roo has since moved on from.
+    """
+    sigs: list = []
+    for path_str, _mtime_ns, _size in file_sigs:
+        for sidecar in _ROO_SIDECARS:
+            path = Path(path_str).parent / sidecar
+            try:
+                st = path.stat()
+            except OSError:
+                continue
+            sigs.append((str(path), st.st_mtime_ns, st.st_size))
+    return tuple(sorted(sigs))
+
+
+@_cached_session_parser()
+def _parse_roo_task_file_for_sessions(
+    path_str: str, _mtime_ns: int, _size: int, _pricing_sig: tuple,
+    _conversation_sig: tuple = (),
+) -> list:
+    """One ui_messages.json -> its request rows, with the model resolved.
+
+    A transient open failure raises _SessionFileUnavailable rather than
+    caching []: a finished task's signature never changes again, so a cached
+    empty parse would hide the task for the life of the process.
+
+    _conversation_sig is the sibling api_conversation_history.json signature,
+    unused in the body and load-bearing in the key. The model these rows carry
+    was read from THAT file, so a cache entry may not outlive it: Roo rewrites
+    the conversation record on its own schedule, and a key built from the task
+    file alone would keep serving a model Roo has since moved on from.
+    """
+    rows = roo_task_rows(Path(path_str), unavailable=_SessionFileUnavailable)
+    if not rows:
+        return []
+    task_id = Path(path_str).parent.name
+    return [
+        {
+            **row,
+            "_task_id": task_id,
+            "_task_dir": str(Path(path_str).parent),
+        }
+        for row in rows
+    ]
+
+
+@_cached_session_parser()
+def _read_roo_first_prompt(
+    path_str: str, _mtime_ns: int, _size: int, _pricing_sig: tuple
+) -> str:
+    """The task's own first prompt, the naming fallback of last resort.
+
+    say:"task" under the VS Code extension and say:"text" under @roo-code/cli,
+    so both are accepted: the same file shape names the same thing two ways
+    depending on which front end wrote it. Only read when history_item.json is
+    missing, which is the shape of a task that has not finished yet.
+    """
+    try:
+        with open(path_str, "r", encoding="utf-8") as handle:
+            doc = json.load(handle)
+    except (OSError, ValueError):
+        return ""
+    for message in doc if isinstance(doc, list) else []:
+        if not isinstance(message, dict) or message.get("type") != "say":
+            continue
+        if message.get("say") not in ("task", "text"):
+            continue
+        text = _clean_display_name(message.get("text"))
+        if text:
+            return text
+    return ""
+
+
+def _roo_history_item(task_dir: Path) -> Dict[str, Any]:
+    try:
+        with open(task_dir / "history_item.json", "r", encoding="utf-8") as handle:
+            doc = json.load(handle)
+    except (OSError, ValueError):
+        return {}
+    return doc if isinstance(doc, dict) else {}
+
+
+@_cached_session_aggregate()
+def _load_roo_code_sessions(
+    file_sigs: tuple, _history_sigs: tuple = (), _pricing_sig: tuple = ()
+) -> Dict[str, Dict[str, Any]]:
+    by_task: Dict[str, list] = {}
+    source_of_task: Dict[str, tuple] = {}
+    conversation_sig = dict(
+        (entry[0], (entry[1], entry[2]))
+        for entry in _history_sigs
+        if entry[0].endswith("api_conversation_history.json")
+    )
+    transient_miss = False
+    for path_str, mtime_ns, size in file_sigs:
+        sibling = str(Path(path_str).parent / "api_conversation_history.json")
+        try:
+            rows = _parse_session_file(
+                _parse_roo_task_file_for_sessions,
+                path_str,
+                mtime_ns,
+                size,
+                _pricing_sig,
+                conversation_sig.get(sibling, ()),
+            )
+        except _SessionFileUnavailable:
+            transient_miss = True
+            continue
+        if not rows:
+            continue
+        task_id = str(Path(path_str).parent.name)
+        by_task.setdefault(task_id, []).extend(rows)
+        source_of_task[task_id] = (path_str, mtime_ns, size)
+
+    sessions: Dict[str, Dict[str, Any]] = {}
+    for task_id, rows in sorted(by_task.items()):
+        history = _roo_history_item(Path(next(r["_task_dir"] for r in rows)))
+        if history.get("parentTaskId"):
+            continue  # a delegated child: billed, but not a session you started
+        rows.sort(key=lambda row: int(row["ts"]))
+
+        turns: list = []
+        for row in rows:
+            turn = _build_turn(
+                turn_index=len(turns) + 1,
+                timestamp_ms=int(row["ts"]),
+                model=str(row.get("model") or "unknown"),
+                tokens_in=int(row["input"]) + int(row["cacheWrite"]),
+                tokens_cache=int(row["cacheRead"]),
+                tokens_out=int(row["output"]),
+                tokens_reasoning=0,
+                bill=_billing_record(
+                    str(row.get("model") or "unknown"),
+                    "split-cache-write",
+                    input_tokens=int(row["input"]),
+                    output_tokens=int(row["output"]),
+                    cache_read=int(row["cacheRead"]),
+                    cache_write=int(row["cacheWrite"]),
+                ),
+            )
+            turn["_event_key"] = str(row["entry_id"])
+            turns.append(turn)
+        if not turns:
+            continue
+
+        title = _clean_display_name(history.get("task"))
+        if not title:
+            path_str, mtime_ns, size = source_of_task[task_id]
+            title = _parse_session_file(
+                _read_roo_first_prompt, path_str, mtime_ns, size, _pricing_sig
+            ) or ""
+        project = _project_from_repo_or_path(None, history.get("workspace"))
+        raw: Dict[str, Any] = {
+            "tool": "roo_code",
+            "session_id": task_id,
+            "project": project or "unknown",
+            "is_review_session": False,
+            "turns": turns,
+        }
+        if title:
+            raw["display_name"] = title
+            raw["_display_name_explicit"] = True
+        sessions[task_id] = raw
+
+    if transient_miss:
+        raise _PartialSessionView(sessions)
+    return sessions
+
+
+def _roo_code_sessions() -> Dict[str, Dict[str, Any]]:
+    file_sigs = roo_task_file_signatures()
+    return _load_roo_code_sessions(
+        file_sigs, _roo_sidecar_signatures(file_sigs), _pricing_signature()
+    )
+
+
 def _raw_sessions_for_tool(
     tool: str,
     since_ms: Optional[int] = None,
@@ -6150,6 +6741,10 @@ def _raw_sessions_for_tool(
             return _openclaw_sessions()
         if key == "qoder_cli":
             return _qoder_cli_sessions()
+        if key == "goose":
+            return _goose_sessions(since_ms=since_ms, until_ms=until_ms)
+        if key == "roo_code":
+            return _roo_code_sessions()
     except (OSError, sqlite3.Error):
         # A live-parse failure (locked dir, unreadable file, corrupt DB) degrades
         # to an empty view instead of erroring the whole tool's session endpoint.

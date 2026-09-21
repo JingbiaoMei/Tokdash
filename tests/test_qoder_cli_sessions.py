@@ -710,7 +710,7 @@ def test_frontend_session_registry_includes_qoder_cli():
     assert 'id="qoder_cliSessionsTable"' in html
     assert html.count("qoderCliSessions:") == 6  # six i18n dicts
     # the panel tail pins every tool key in load order
-    assert "qoder_cli: null, combined: null" in html
+    assert "qoder_cli: null, goose: null, roo_code: null, combined: null" in html
     # icon + label for qoder_cli already existed before this harness: verify
     # they were not duplicated (a repeated object key parses and silently
     # keeps the last value, which is how a wrong label ships).

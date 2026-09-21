@@ -36,6 +36,8 @@
   <a href="https://charm.land/crush" title="Crush"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/crush.png" alt="Crush" height="34"></a>
   <a href="https://dev.meta.ai/docs/muse-code" title="Muse Code"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/muse.png" alt="Muse Code" height="34"></a>
   <a href="https://github.com/MiniMax-AI/minimax-code" title="MiniMax Code"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/minimax.png" alt="MiniMax Code" height="34"></a>
+  <a href="https://github.com/aaif-goose/goose" title="Goose"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/goose.png" alt="Goose" height="34"></a>
+  <a href="https://github.com/RooCodeInc/Roo-Code" title="Roo Code"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/roo-code.png" alt="Roo Code" height="34"></a>
 </p>
 
 <p align="center">
@@ -118,6 +120,8 @@
 | **Crush** | ✅ | — |
 | **Muse Code** | ✅ | — |
 | **MiniMax Code** | ✅ | — |
+| **Goose** | ✅ | ✅ |
+| **Roo Code** | ✅ | ✅ |
 
 本地数据路径、覆盖变量与各来源的计费说明见[已支持客户端](docs/reference/SUPPORTED_CLIENTS.md)。
 
@@ -548,6 +552,10 @@ Zed 的用量从 Zed 各操作系统数据目录下的 `threads/threads.db` 本�
 Qwen Code 的用量从 `<base>/projects/*/chats/*.jsonl`（另含改名前的 `<base>/tmp/*/chats/*.jsonl`）本地读取，base 依次取 `$QWEN_RUNTIME_DIR`、`$QWEN_HOME`、`~/.qwen`——settings 级的 `runtime_base_dir` 覆盖项 Tokdash 无法感知，是文档中记载的盲区。文件为 append-only、每会话一个文件；每条 assistant 记录原样携带 provider 的 `usageMetadata`：`promptTokenCount` 含缓存部分，缓存份额单独分入缓存桶并按缓存价计费，`thoughtsTokenCount` 显示为 reasoning。每条记录的 `uuid` 是稳定的、跨文件全局的去重键：`/branch` 会把父会话的记录（uuid 不变）复制进 fork 的文件，因此用量存储以最早出现的时间戳拥有每个键，规范文件被删除时由幸存副本接管。子代理记录与主记录同文件，自动计入。成本按价格库计价；没有模型的记录按 `unknown` 计 token、成本 0.00。Sessions 标签页读取同一批 assistant 记录，每条记录一个 turn；fork 复制的历史归最早的一份所有。
 
 Crush 的用量从 `$CRUSH_DATA_DIR`（逗号分隔的数据目录列表，每个目录内含 `crush.db`）本地读取——必填，因为 Crush 默认的数据目录是工作目录旁的按项目 `.crush`，没有全局根目录可扫描。数据库为 WAL 模式，Tokdash 通过与 ZCode 相同的复制快照路径读取。每个 token 非零的会话按其 `prompt_tokens`/`completion_tokens` 贡献一条记录（含子 agent 会话）：Crush 只把 cost 汇总进父会话，从不汇总 token，因此若沿用其自身统计查询的顶层口径（`parent_session_id IS NULL`），子 agent 的用量会被整体丢弃。每条记录归因于所属会话最后一条非 summary 的 assistant 消息——混合模型的会话按最后一个模型计价。三处注意事项与来源并列记载：计数器按步赋值而非累加，因此只保留最后一次请求的上下文大小与最后一轮的输出，多步会话会偏低（针对 Crush v0.91.2 核实）；provider 报告零用量时 token 可能是字符数估算（数据库中无标记）；缓存/reasoning 拆分未被持久化。时间戳为秒；行按 `updated_at`（最后触碰时间）分桶，一个会话的整个生命周期总量落在同一天。`sessions.cost` 被忽略，成本只来自价格库。Crush 不出现在 Sessions 标签页。
+
+Goose 的用量从一个全局数据目录下的 `sessions/sessions.db` 本地读取——依次为 `$GOOSE_PATH_ROOT/data`、`$XDG_DATA_HOME/goose`、`~/.local/share/goose`（macOS 与 Linux 解析出同一个默认目录，因此没有按平台分支；Windows 位置未核实）。数据库为 WAL 模式，故通过与 ZCode 相同的复制快照路径读取。`usage_ledger` 是唯一的 token 来源：每次模型请求一行，模型就在该行上，因此混合模型的会话按请求逐条计价。`input_tokens` 已包含缓存命中部分，故新增部分按 input 计价、缓存部分按 cache 价计价；`output_tokens` 为总量，因为 Goose 在任何地方都没有持久化 reasoning 拆分。`cost`、`cost_source` 以及 `sessions.accumulated_*` / `total_tokens` 列全部忽略：accumulated 系列列只是账本求和的副本，而 `total_tokens` 只保存最后一次请求的快照，同时读取会把一次请求算两遍。成本只来自价格库，因此自建端点的模型计为 0.00。在 Goose 中删除会话确实会从这里移除其用量，因为账本行随会话一起离开数据库。Sessions 标签页只列出顶层会话，每个账本行一个轮次；活跃时间取自 Goose 写在自己 assistant 消息上的请求耗时，未命名的会话按其第一条 prompt 命名；定时 recipe 运行目前会作为普通会话列出。
+
+Roo Code 的用量从扩展的全局存储本地读取：机器上所有存在的 `<globalStorage>/rooveterinaryinc.roo-cline/tasks/<taskId>/`——含各配置文件的 VS Code、Code - Insiders 与 VSCodium 桌面树、WSL 会话写入的 `~/.vscode-server*` 根、WSL 下 `/mnt/c` 的 Windows 桌面树、Windows 的 `%APPDATA%`、macOS 的 `~/Library/Application Support`，以及 `@roo-code/cli` 写入的 `~/.vscode-mock/global-storage`。`TOKDASH_ROO_STORAGE_DIR` 是往该列表里追加迁移后的存储路径，而不是替换它。`ui_messages.json` 是 token 来源：每个完成的 `api_req_started` 请求一条记录，这正是 Roo 自身任务合计所累加的内容。`tokensIn` 含缓存，拆成 input / cacheRead / cacheWrite；`tokensOut` 为总量——Roo 会计算 reasoning token 却从不持久化；记录的 `cost` 被忽略，计价一律走价格库。未完成的请求只会留下一个没有任何 token 键的预检标记；rewind 会截短文件并追加删除标记，因此两者都不会被加回来。模型不在该文件里：它来自同目录 `api_conversation_history.json` 中 Roo 自己写的 `<model>` 标签，并按请求配对。`tasks/_index.json` 与 `history_item.json` 里的按任务合计从不读取——索引是防抖写入的，实测比进行中的任务落后四条请求。一处盲区是明说而非掩盖的：删除任务目录后，其用量仍会留在看板上，因为 Tokdash 会为消失的文件保留其记录。Sessions 标签页把一个任务目录当作一个会话（恢复之后同样如此），被委派的子任务会计价但不出现在列表里。
 
 `tokdash setup` 会提供一个可选的额度步骤（按服务商的网络授权，默认为否，以及轮询间隔），`tokdash doctor` 会报告额度状态：总开关、按服务商授权、终止开关、生效间隔及其来源、上次轮询时间，以及已保存的快照数量。
 

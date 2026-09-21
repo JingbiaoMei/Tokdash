@@ -943,6 +943,211 @@ def crush_data_dirs() -> List[Path]:
     return out
 
 
+# --- Goose -------------------------------------------------------------------
+
+
+def goose_sessions_db() -> Optional[Path]:
+    """Goose's one session database, or ``None`` when there is nothing to read.
+
+    Goose keeps every session in a single SQLite file and resolves it three
+    ways, all captured from ``goose info`` on v1.51.0 (evidence in
+    ``docs/local/20260920_goose_roo_support/evidence/goose_info_paths.txt``):
+
+      * ``GOOSE_PATH_ROOT=/tmp/gpr`` -> ``/tmp/gpr/data/sessions/sessions.db``
+        (note: ``data``, with no ``goose`` segment — the root replaces it);
+      * ``XDG_DATA_HOME=/tmp/xdgdata`` -> ``/tmp/xdgdata/goose/sessions/sessions.db``;
+      * neither -> ``~/.local/share/goose/sessions/sessions.db``.
+
+    macOS is not a branch. Verified on macOS 26.5.2 arm64 with the same build:
+    goose resolves the XDG default there too and never creates
+    ``~/Library/Application Support/goose``, so one code path serves both
+    platforms. The Windows data dir is the unobserved residual risk.
+
+    A RELATIVE ``XDG_DATA_HOME`` is invalid per the Base Directory spec and is
+    ignored, matching ``muse_sessions_root()``: resolving it against Tokdash's
+    working directory would miss the real history and read an unrelated
+    project-relative tree instead. ``GOOSE_PATH_ROOT`` has no such guard
+    because it is an explicit relocation of the whole root, and follows
+    ``zcode_home()`` in resolving a relative value.
+    """
+    root = os.environ.get("GOOSE_PATH_ROOT", "").strip()
+    if root:
+        base = Path(root).expanduser()
+        if not base.is_absolute():
+            base = base.resolve()
+        data_dir = base / "data"
+    else:
+        data_dir = None
+        explicit = os.environ.get("XDG_DATA_HOME", "").strip()
+        if explicit:
+            candidate = Path(explicit).expanduser()
+            if candidate.is_absolute():
+                data_dir = candidate / "goose"
+        if data_dir is None:
+            data_dir = Path.home() / ".local" / "share" / "goose"
+    path = data_dir / "sessions" / "sessions.db"
+    return path if path.is_file() else None
+
+
+# --- Roo Code ----------------------------------------------------------------
+
+# Roo Code's extension id, which is also the name of its globalStorage subdir.
+_ROO_EXTENSION_ID = "rooveterinaryinc.roo-cline"
+
+# VS Code products that carry a globalStorage dir. "Code - Insiders" and the
+# source builds start with "Code", so the glob is a prefix match here.
+_ROO_PRODUCT_NAMES = ("Code*", "VSCodium*")
+
+
+def _roo_product_storage_roots(base: Path) -> List[Path]:
+    """``<base>/<Product>/User[/profiles/<p>]/globalStorage/<extension id>``.
+
+    Profile storage is a real second tree: switching VS Code profiles leaves
+    both task trees on disk, and Tokdash reads whichever exist.
+    """
+    out: List[Path] = []
+    if not base.is_dir():
+        return out
+    for pattern in _ROO_PRODUCT_NAMES:
+        try:
+            products = sorted(base.glob(pattern))
+        except OSError:
+            continue
+        for product in products:
+            user = product / "User"
+            for storage in (
+                user / "globalStorage" / _ROO_EXTENSION_ID,
+                *sorted(user.glob(f"profiles/*/globalStorage/{_ROO_EXTENSION_ID}")),
+            ):
+                if storage.is_dir():
+                    out.append(storage)
+    return out
+
+
+def roo_storage_roots() -> List[Path]:
+    """Existing Roo Code storage roots, in scan order, deduplicated by path.
+
+    A root is a directory that holds the corpus directly under ``tasks/``, which
+    is the shape of both layouts Roo writes: the VS Code extension nests
+    ``tasks/`` inside ``<globalStorage>/rooveterinaryinc.roo-cline/``, and
+    ``@roo-code/cli`` writes it under ``~/.vscode-mock/global-storage/`` (the
+    mock storage root the CLI ships with, observed live). Anchoring on
+    ``tasks/`` in one place is also what stops the search from globbing a whole
+    home directory.
+
+    A UNION, not the single-winner ``if/elif`` of ``qoder_ide_db_path()``. That
+    shape is right for Qoder, which snapshots one DB whose row ids are content
+    ids, so a copied row would collide. Roo is the opposite case: a WSL user
+    with a remote-server install and a Windows desktop install has two real
+    task trees, and mutual exclusion would drop one of them from the dashboard.
+
+    Each candidate is existence-gated, and the set is gated on ``os_kind()``
+    first. On ``/mnt/c`` every stat is a Windows round trip, and widening the
+    trees a local-first tool reads is a privacy cost rather than only a latency
+    one, so a Linux process never enumerates a Windows user tree and a macOS
+    process never sees ``/mnt/c/Users`` at all.
+    """
+    roots: List[Path] = []
+
+    def add(path: Optional[Path]) -> None:
+        if path is None:
+            return
+        if path not in roots and path.is_dir():
+            roots.append(path)
+
+    # Tokdash-only relocation for a customStoragePath move. Additive rather
+    # than a replacement, following qoder_cli_roots(): moving the storage dir
+    # does not delete the tasks Roo wrote to the old one, and an override that
+    # hid those rows would quietly lower someone's history.
+    for raw in os.environ.get("TOKDASH_ROO_STORAGE_DIR", "").split(","):
+        raw = raw.strip()
+        if not raw:
+            continue
+        path = Path(raw).expanduser()
+        add(path if path.is_absolute() else path.resolve())
+
+    # The @roo-code/cli root, on every platform: it is a plain home-relative
+    # directory, not a platform app-data dir.
+    add(Path.home() / ".vscode-mock" / "global-storage")
+
+    kind = osinfo.os_kind()
+
+    # VS Code remote-server roots (also written by a server run on a headless
+    # Linux box), stable and Insiders alike.
+    if kind in ("linux", "wsl"):
+        try:
+            servers = sorted(Path.home().glob(".vscode-server*"))
+        except OSError:
+            servers = []
+        for server in servers:
+            add(server / "data" / "User" / "globalStorage" / _ROO_EXTENSION_ID)
+
+    if kind == "wsl":
+        # The Windows desktop tree, alongside the server roots above: this is
+        # the dual-tree case the union exists for.
+        for pattern in _ROO_PRODUCT_NAMES:
+            try:
+                found = sorted(
+                    _wsl_windows_root().glob(
+                        f"Users/*/AppData/Roaming/{pattern}/User/globalStorage/{_ROO_EXTENSION_ID}"
+                    )
+                )
+            except OSError:
+                found = []
+            for storage in found:
+                add(storage)
+
+    if kind == "windows":
+        appdata = os.environ.get("APPDATA", "").strip()
+        base = Path(appdata).expanduser() if appdata else Path.home() / "AppData" / "Roaming"
+        for storage in _roo_product_storage_roots(base):
+            add(storage)
+
+    if kind in ("linux", "wsl"):
+        xdg = os.environ.get("XDG_CONFIG_HOME", "").strip()
+        base = Path(xdg).expanduser() if xdg else Path.home() / ".config"
+        for storage in _roo_product_storage_roots(base):
+            add(storage)
+
+    if kind == "macos":
+        for storage in _roo_product_storage_roots(
+            Path.home() / "Library" / "Application Support"
+        ):
+            add(storage)
+
+    return roots
+
+
+def _roo_task_dirs() -> List[Path]:
+    """Every existing ``<root>/tasks/<taskId>`` directory, globbed not indexed.
+
+    ``tasks/_index.json`` is NOT the discovery path: a captured live run had a
+    task directory, a ``history_item.json`` and a request row with no index
+    entry at all, so index-driven discovery loses a task that still cost money.
+    """
+    out: List[Path] = []
+    for root in roo_storage_roots():
+        try:
+            found = sorted(p for p in (root / "tasks").glob("*") if p.is_dir())
+        except OSError:
+            continue
+        for task in found:
+            if task not in out:
+                out.append(task)
+    return out
+
+
+def roo_task_message_files() -> List[Path]:
+    """Every ``tasks/<taskId>/ui_messages.json``, the file the tokens live in."""
+    out: List[Path] = []
+    for task in _roo_task_dirs():
+        path = task / "ui_messages.json"
+        if path.is_file():
+            out.append(path)
+    return out
+
+
+
 # --- Muse (Meta Muse Code) ---------------------------------------------------------
 
 

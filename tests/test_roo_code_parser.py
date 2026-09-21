@@ -9,6 +9,7 @@ user prompts, and committed fixtures are not where those belong. Scratchpad is
 gitignored and no test may reach into it.
 """
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -20,6 +21,7 @@ from tokdash.sources.coding_tools import (
     RooCodeParser,
     _roo_model_cache,
     _roo_model_for,
+    _roo_roots_cache,
     _sig_cache,
     parse_roo_task_file,
     roo_task_rows,
@@ -100,13 +102,45 @@ def roo_home(monkeypatch, tmp_path):
     _sig_cache.clear()
     BaseParser._entry_cache.clear()
     _roo_model_cache.clear()
+    _roo_roots_cache.clear()
     return home
+
+
+def _desktop_global_storage(home: Path) -> Path:
+    """The desktop globalStorage root the CURRENT OS kind actually scans.
+
+    Built from the same three branches `clientpaths.roo_storage_roots()` uses,
+    because the layouts do not overlap: `%APPDATA%` on Windows,
+    `$XDG_CONFIG_HOME` (default `~/.config`) on Linux and WSL, and
+    `~/Library/Application Support` on macOS. A test that names one of them
+    passes on that platform and proves nothing on the other two, which CI
+    demonstrated by failing exactly this helper's two callers on Windows and
+    macOS while Ubuntu passed.
+    """
+    kind = clientpaths.osinfo.os_kind()
+    if kind == "windows":
+        base = Path(os.environ["APPDATA"])
+    elif kind == "macos":
+        base = Path.home() / "Library" / "Application Support"
+    else:
+        base = Path(os.environ.get("XDG_CONFIG_HOME") or (Path.home() / ".config"))
+    return base / "Code" / "User" / "globalStorage" / "rooveterinaryinc.roo-cline"
+
+
+def _other_platform_storage(home: Path) -> Path:
+    """A desktop tree this process must NOT walk, whatever the platform is."""
+    if clientpaths.osinfo.os_kind() == "macos":
+        base = Path(os.environ.get("XDG_CONFIG_HOME") or (home / ".config"))
+    else:
+        base = Path.home() / "Library" / "Application Support"
+    return base / "Code" / "User" / "globalStorage" / "rooveterinaryinc.roo-cline"
 
 
 def _parser(monkeypatch, storage):
     _sig_cache.clear()
     BaseParser._entry_cache.clear()
     _roo_model_cache.clear()
+    _roo_roots_cache.clear()
     monkeypatch.setenv("TOKDASH_ROO_STORAGE_DIR", str(storage))
     return RooCodeParser(PricingDatabase())
 
@@ -530,13 +564,21 @@ def test_roo_index_json_is_not_treated_as_a_task(monkeypatch, roo_home, tmp_path
 
 
 def test_roo_nested_extension_layout_is_found(monkeypatch, roo_home):
-    """The VS Code form nests tasks under the extension id."""
-    ext = roo_home / ".config" / "Code" / "User" / "globalStorage" / "rooveterinaryinc.roo-cline"
+    """The VS Code form nests tasks under the extension id.
+
+    The other platform's desktop tree is seeded too, and must stay unread: the
+    candidate list is gated on `os_kind()` before it is existence-gated, so a
+    Linux process never walks the macOS layout and a macOS process never walks
+    the Linux one.
+    """
     monkeypatch.delenv("TOKDASH_ROO_STORAGE_DIR", raising=False)
+    ext = _desktop_global_storage(roo_home)
+    other = _other_platform_storage(roo_home)
     _write_task(ext, "task-ext", [req(T0, 400, 20)], [env_user(T0 + 24, "gpt-5.2")])
+    _write_task(other, "task-other-platform", [req(T0, 400, 20)], [env_user(T0 + 24, "gpt-5.2")])
 
     entries = _entries(RooCodeParser(PricingDatabase()))
-    assert len(entries) == 1
+    assert [e["entry_id"].split(":")[1] for e in entries] == ["task-ext"]
 
 
 def test_roo_cli_storage_root_is_a_candidate(monkeypatch, roo_home):
@@ -579,7 +621,7 @@ def test_roo_windows_tree_is_never_enumerated_off_wsl(monkeypatch, roo_home, tmp
 
 def test_roo_storage_override_adds_to_the_defaults(monkeypatch, roo_home, tmp_path):
     """Relocating storage does not delete the tasks Roo wrote to the old root."""
-    default = roo_home / ".config" / "Code" / "User" / "globalStorage" / "rooveterinaryinc.roo-cline"
+    default = _desktop_global_storage(roo_home)
     _write_task(default, "task-default", [req(T0, 100, 10)], [env_user(T0 + 24, "m")])
     moved = tmp_path / "moved-storage"
     _write_task(moved, "task-moved", [req(T0 + 1, 200, 20)], [env_user(T0 + 25, "m")])

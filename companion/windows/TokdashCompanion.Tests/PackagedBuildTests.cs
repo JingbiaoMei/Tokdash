@@ -37,8 +37,24 @@ public class PackagedBuildTests
             Task.FromResult(new HealthResponse("ok", "tokdash", "1.5.8"));
         public Task<UsageResponse> UsageAsync(string period, CancellationToken ct = default) =>
             Task.FromResult(new UsageResponse());
+        public Task<UsageResponse> UsageRangeAsync(string from, string to, CancellationToken ct = default) =>
+            Task.FromResult(new UsageResponse());
+        public Task<ActiveTimeResponse> ActiveTimeAsync(string period, CancellationToken ct = default) =>
+            Task.FromResult(new ActiveTimeResponse());
+        public Task<ActiveTimeResponse> ActiveTimeRangeAsync(string from, string to, CancellationToken ct = default) =>
+            Task.FromResult(new ActiveTimeResponse());
+        public Task<InsightsResponse> InsightsHourlyTodayAsync(CancellationToken ct = default) =>
+            Task.FromResult(new InsightsResponse());
+        public Task<InsightsResponse> InsightsDailyAsync(string from, string to, CancellationToken ct = default) =>
+            Task.FromResult(new InsightsResponse());
+        public Task<StatsResponse> StatsAsync(CancellationToken ct = default) =>
+            Task.FromResult(new StatsResponse());
         public Task<QuotaResponse> QuotaAsync(CancellationToken ct = default) =>
             Task.FromResult(new QuotaResponse());
+        public Task<VersionResponse> VersionAsync(CancellationToken ct = default) =>
+            Task.FromResult(new VersionResponse());
+        public Task<ServerUpdateCheckResponse> ServerUpdateCheckAsync(CancellationToken ct = default) =>
+            Task.FromResult(new ServerUpdateCheckResponse());
         public void Dispose() { }
     }
 

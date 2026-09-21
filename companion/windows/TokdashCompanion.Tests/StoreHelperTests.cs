@@ -118,7 +118,7 @@ public class StoreHelperTests
             Assert.AreEqual("剩余 14%", L10n.T("percent_left", 14));
             Assert.AreEqual("wsl · 已连接", L10n.T("server_connected", "wsl"));
             Assert.AreEqual("本地", CompanionStore.ServerLabel("http://127.0.0.1:55423"));
-            Assert.AreEqual("低于昨日 12%", L10n.T("comparison_below", 12));
+            Assert.AreEqual("低于昨日 12%", L10n.T("comparison_below", 12, L10n.T("word_yesterday")));
             Assert.AreEqual("5 小时后重置", L10n.T("resets_in_hours", 5, ""));
             Assert.AreEqual("3 天后重置", L10n.T("resets_in_days", 3, ""));
             Assert.AreEqual("5 小时", ClaudeRow("session", "Session", 14).DisplayBucketLabel);
@@ -182,11 +182,48 @@ public class StoreHelperTests
     }
 
     [TestMethod]
+    public void Claude_DisplayLabel_Passes_Server_Wording_Through()
+    {
+        var saved = L10n.Current;
+        L10n.Current = AppLanguage.English;
+        try
+        {
+            // v1.1 rule: only Claude's own two names get the standard wording; everything
+            // else keeps the server's wording. The expected fixture pins the plain "weekly"
+            // bucket lower-case ("weekly", not a forced "Weekly").
+            Assert.AreEqual("weekly", ClaudeRow("weekly", "weekly", 8).DisplayBucketLabel);
+            Assert.AreEqual("5-hour", ClaudeRow("5h", "5-hour", 71).DisplayBucketLabel);
+            // Claude's own names normalize; the weekly_all id reaches the same via "weekly all".
+            Assert.AreEqual("5-hour", ClaudeRow("session", "Session", 14).DisplayBucketLabel);
+            Assert.AreEqual("Weekly", ClaudeRow("weekly_all", "Weekly All", 8).DisplayBucketLabel);
+            // Model-scoped windows keep the model name.
+            Assert.AreEqual("Opus", ClaudeRow("weekly_scoped_opus", "Opus", 8).DisplayBucketLabel);
+        }
+        finally { L10n.Current = saved; }
+    }
+
+    [TestMethod]
+    public void Rank_Helpers_Name_Display_And_Logo()
+    {
+        Assert.AreEqual("Codex", CompanionStore.ToolDisplayName("codex"));
+        Assert.AreEqual("OpenCode", CompanionStore.ToolDisplayName("opencode"));
+        Assert.AreEqual("OpenClaw", CompanionStore.ToolDisplayName("openclaw"));
+        Assert.AreEqual("Zed", CompanionStore.ToolDisplayName("zed"), "unknown ids capitalize, never blank");
+
+        Assert.AreEqual("codex", CompanionStore.LogoAssetName("codex"));
+        Assert.AreEqual("opencode", CompanionStore.LogoAssetName("opencode"));
+        Assert.IsNull(CompanionStore.LogoAssetName("zed"), "no shipped mark -> text-only row");
+
+        Assert.AreEqual("gpt-5.6-sol", CompanionStore.StripProviderPrefix("openai/gpt-5.6-sol"));
+        Assert.AreEqual("claude-opus-4-7", CompanionStore.StripProviderPrefix("claude-opus-4-7"), "no slash -> unchanged");
+    }
+
+    [TestMethod]
     public void AntigravityPools_Collapse_To_Two_Worst_Rows()
     {
         // One bucket per model floods the flyout; collapse to the two dashboard pools,
         // each showing the worst remaining. Pinned to the macOS antigravityPools cases.
-        var pooled = Snapshot.AntigravityPools(
+        var pooled = CompanionStore.AntigravityPools(
         [
             Row("gemini_3_pro", "Gemini 3 Pro", 62),
             Row("gemini_3_flash", "Gemini 3 Flash", 41),   // worst gemini
@@ -212,7 +249,7 @@ public class StoreHelperTests
             // A model matching neither pool must not silently vanish; it still gets a window
             // suffix (defaulting to 5-hour when it has no reset time).
             var rows = new List<QuotaRow> { Row("mystery_model", "Mystery Model", 30) };
-            var pooled = Snapshot.AntigravityPools(rows);
+            var pooled = CompanionStore.AntigravityPools(rows);
             Assert.AreEqual(1, pooled.Count);
             Assert.AreEqual("Mystery Model", pooled[0].BucketLabel, "falls back to the raw rows");
             Assert.AreEqual("Mystery Model · 5-hour", pooled[0].DisplayBucketLabel);
@@ -240,16 +277,16 @@ public class StoreHelperTests
                 DateTimeOffset.FromUnixTimeSeconds(captured + (3 * 24 + 22) * 3600L),
                 false, "default", true, false,
                 DateTimeOffset.FromUnixTimeSeconds(captured));
-            Assert.AreEqual("Gemini · Weekly", Snapshot.AntigravityPools(new List<QuotaRow> { weekly })[0].DisplayBucketLabel);
+            Assert.AreEqual("Gemini · Weekly", CompanionStore.AntigravityPools(new List<QuotaRow> { weekly })[0].DisplayBucketLabel);
 
             var fiveHour = new QuotaRow("Antigravity", "gemini_3_pro", "Gemini 3 Pro", 8,
                 DateTimeOffset.FromUnixTimeSeconds(captured + 3 * 3600L),
                 false, "default", true, false,
                 DateTimeOffset.FromUnixTimeSeconds(captured));
-            Assert.AreEqual("Gemini · 5-hour", Snapshot.AntigravityPools(new List<QuotaRow> { fiveHour })[0].DisplayBucketLabel);
+            Assert.AreEqual("Gemini · 5-hour", CompanionStore.AntigravityPools(new List<QuotaRow> { fiveHour })[0].DisplayBucketLabel);
 
             // No reset time (idle model) -> defaults to 5-hour, never "Weekly".
-            Assert.AreEqual("Gemini · 5-hour", Snapshot.AntigravityPools(new List<QuotaRow> { Row("gemini_3_pro", "Gemini 3 Pro", 8) })[0].DisplayBucketLabel);
+            Assert.AreEqual("Gemini · 5-hour", CompanionStore.AntigravityPools(new List<QuotaRow> { Row("gemini_3_pro", "Gemini 3 Pro", 8) })[0].DisplayBucketLabel);
         }
         finally { L10n.Current = saved; }
     }

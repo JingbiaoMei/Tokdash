@@ -355,15 +355,6 @@ public partial class FlyoutWindow : Window
         _ => _dark ? ColorFromHex("#6CCB5F") : ColorFromHex("#0F7B0F"),
     };
 
-    private Brush ComparisonBrush(double? costPct)
-    {
-        bool above = costPct is > 0;
-        Color c = above
-            ? (_dark ? ColorFromHex("#FF99A4") : ColorFromHex("#C42B1C"))
-            : (_dark ? ColorFromHex("#6CCB5F") : ColorFromHex("#0F7B0F"));
-        return new SolidColorBrush(c);
-    }
-
     [DllImport("user32.dll")]
     private static extern IntPtr MonitorFromPoint(POINT pt, uint dwFlags);
 
@@ -433,54 +424,64 @@ public partial class FlyoutWindow : Window
                 ? Visibility.Visible : Visibility.Collapsed;
         }
 
+        UpdatePeriodButtons();
+
         var snap = Store.Snapshot;
-        if (snap is null && Store.ConnectionState == ConnectionState.Connecting)
-        {
-            TodayCost.Text = "…";
-            return;
-        }
-        if (snap is null) return;
+        // Hero kicker follows the selection even before the first snapshot exists.
+        TodayHeader.Text = L10n.T((snap?.Period ?? Store.SelectedPeriod).KickerKey());
 
-        if (snap.Today.TotalTokens == 0)
+        // One skeleton for the whole usage side while the selected period's data has not
+        // landed (first load or a period switch). Quota lives in its own section (rule 2).
+        bool heroLoading = snap is null || snap.UsageLoading;
+        HeroSkeleton.Visibility = heroLoading ? Visibility.Visible : Visibility.Collapsed;
+        TodayCost.Visibility = heroLoading ? Visibility.Collapsed : Visibility.Visible;
+        TodaySub.Visibility = heroLoading ? Visibility.Collapsed : Visibility.Visible;
+        TodayCmp.Visibility = Visibility.Collapsed;
+        DeltaRow.Visibility = Visibility.Collapsed;
+        TodayCost.Text = "";
+        TodaySub.Text = "";
+
+        // Quota skeleton: only when no snapshot has ever been built (all endpoints pending).
+        QuotaSkeleton.Visibility = snap is null ? Visibility.Visible : Visibility.Collapsed;
+
+        if (snap is not null && !snap.UsageLoading)
         {
-            TodayCost.Text = L10n.T(snap.TodayFailed ? "today_unavailable" : "no_usage_today");
-            TodayCost.FontSize = FontRes("FontHeroEmpty");
-            TodaySub.Text = L10n.T(snap.TodayFailed ? "will_retry_shortly" : "tokdash_running");
-            TodayCmp.Text = "";
-        }
-        else
-        {
-            TodayCost.Text = snap.TodayCostText;
-            TodayCost.FontSize = FontRes("FontHero");
-            TodaySub.Text = snap.TodaySubLine;
-            TodayCmp.Text = snap.ComparisonText ?? "";
-            TodayCmp.Foreground = ComparisonBrush(snap.Today.Comparison?.CostPct);
+            if (snap.Usage is null || snap.IsEmptyUsage)
+            {
+                TodayCost.Text = snap.HeroTitle;
+                TodayCost.FontSize = FontRes("FontHeroEmpty");
+                TodaySub.Text = snap.HeroEmptySub;
+            }
+            else
+            {
+                TodayCost.Text = snap.CostText;
+                TodayCost.FontSize = FontRes("FontHero");
+                TodaySub.Text = snap.SubLine;
+                if (snap.DeltaPieces is { } pieces)
+                {
+                    DeltaRow.Inlines.Clear();
+                    for (int i = 0; i < pieces.Count; i++)
+                    {
+                        if (i > 0)
+                            DeltaRow.Inlines.Add(new Run(" · ") { Foreground = (Brush)FindResource("FaintBrush") });
+                        DeltaRow.Inlines.Add(new Run(pieces[i].Text) { Foreground = PieceBrush(pieces[i].Direction) });
+                    }
+                    DeltaRow.Inlines.Add(new Run(" " + snap.DeltaSentence) { Foreground = (Brush)FindResource("MutedBrush") });
+                    DeltaRow.Visibility = Visibility.Visible;
+                }
+                else if (snap.ComparisonLine is { Length: > 0 } line && snap.ComparisonDirection is { } dir)
+                {
+                    TodayCmp.Text = line;
+                    TodayCmp.Foreground = PieceBrush(dir);
+                    TodayCmp.Visibility = Visibility.Visible;
+                }
+            }
         }
 
-        MonthLabel.Text = snap.MonthLabel;
-        if (snap.MonthFailed && snap.Month.TotalTokens > 0)
-        {
-            // Keep last-good month visible with a retrying note (don't hide it as "-").
-            MonthCost.Text = snap.MonthCostText;
-            MonthTokens.Text = snap.MonthTokensRetrying;
-        }
-        else if (snap.MonthFailed)
-        {
-            MonthCost.Text = "–";
-            MonthTokens.Text = L10n.T("retrying");
-        }
-        else
-        {
-            MonthCost.Text = snap.MonthCostText;
-            MonthTokens.Text = snap.MonthTokensLine;
-        }
-
+        RenderRanks(snap);
+        RenderGlance(snap);
+        RenderPerServer(snap);
         RenderQuota(snap);
-
-        var activity = snap.ActivityText;
-        ActivityText.Visibility = activity is null ? Visibility.Collapsed : Visibility.Visible;
-        SepActivity.Visibility = activity is null ? Visibility.Collapsed : Visibility.Visible;
-        ActivityText.Text = activity ?? "";
 
         FreshnessText.Text = Store.FreshnessText;
 
@@ -488,6 +489,275 @@ public partial class FlyoutWindow : Window
         double opacity = (Store.ConnectionState == ConnectionState.Offline || Store.ConnectionState == ConnectionState.Busy) ? 0.45 : 1.0;
         HeroPanel.Opacity = opacity;
         QuotaPanel.Opacity = opacity;
+        RanksPanel.Opacity = opacity;
+        GlancePanel.Opacity = opacity;
+        PerServerPanel.Opacity = opacity;
+    }
+
+    private void UpdatePeriodButtons()
+    {
+        var buttons = new[] { Period0Btn, Period1Btn, Period2Btn, Period3Btn };
+        string selected = Store.SelectedPeriod.Token();
+        foreach (var b in buttons)
+        {
+            bool on = (string)b.Tag == selected;
+            b.SetResourceReference(BackgroundProperty, on ? "SegSelBg" : "SegIdleBg");
+            b.SetResourceReference(TextElement.ForegroundProperty, on ? "SegSelText" : "SegText");
+            b.FontWeight = on ? FontWeights.SemiBold : FontWeights.Normal;
+        }
+    }
+
+    private void Period_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: string token } btn) return;
+        UsagePeriod period = token switch
+        {
+            "week" => UsagePeriod.Week,
+            "month" => UsagePeriod.Month,
+            "year" => UsagePeriod.Year,
+            _ => UsagePeriod.Today,
+        };
+        if (period == Store.SelectedPeriod) return;
+        Store.SelectPeriod(period);
+    }
+
+    /// <summary>Delta line colors (mirrors macOS pieceColor): down green / up red / flat grey.</summary>
+    private Brush PieceBrush(int direction)
+    {
+        if (direction < 0) return new SolidColorBrush(_dark ? ColorFromHex("#6CCB5F") : ColorFromHex("#0F7B0F"));
+        if (direction > 0) return new SolidColorBrush(_dark ? ColorFromHex("#FF99A4") : ColorFromHex("#C42B1C"));
+        return (Brush)FindResource("MutedBrush");
+    }
+
+    // MARK: Top ranks
+
+    private void RenderRanks(Snapshot? snap)
+    {
+        var tools = snap?.TopTools ?? [];
+        var models = snap?.TopModels ?? [];
+        bool show = snap is not null && !snap.UsageLoading && snap.HasTopRanks && (tools.Count > 0 || models.Count > 0);
+        RanksPanel.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        SepRanks.Visibility = RanksPanel.Visibility;
+        if (!show) return;
+        ToolsKicker.Text = snap!.ToolsKickerText;
+        ModelsKicker.Text = snap.ModelsKickerText;
+        ToolsStrip.ItemsSource = tools.Select(MakeRankVM).ToList();
+        ModelsStrip.ItemsSource = models.Select(MakeRankVM).ToList();
+    }
+
+    private RankVM MakeRankVM(Snapshot.RankEntry entry)
+    {
+        var logo = LogoFor(entry.LogoAsset);
+        return new RankVM
+        {
+            Logo = logo,
+            LogoVisibility = logo is null ? Visibility.Collapsed : Visibility.Visible,
+            Label = entry.Label,
+            Value = entry.ValueText,
+        };
+    }
+
+    private static readonly Dictionary<string, ImageSource?> LogoCache = new();
+
+    /// <summary>
+    /// Load a harness mark from the packaged Assets\Agents resources. A missing asset
+    /// degrades to text-only (never a broken-image box). The Codex mark ships as a black
+    /// silhouette: the dark theme uses a pre-inverted copy, mirroring the web dashboard's
+    /// darkInvert rule - it's the only shipped mark that needs one.
+    /// </summary>
+    private ImageSource? LogoFor(string? asset)
+    {
+        if (string.IsNullOrEmpty(asset)) return null;
+        string name = asset == "codex" && _dark ? "codex-dark" : asset;
+        if (LogoCache.TryGetValue(name, out var cached)) return cached;
+        ImageSource? img = null;
+        try
+        {
+            var bmp = new System.Windows.Media.Imaging.BitmapImage();
+            bmp.BeginInit();
+            bmp.UriSource = new Uri($"pack://application:,,,/Assets/Agents/{name}.png");
+            bmp.DecodePixelWidth = 32;
+            bmp.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
+            bmp.EndInit();
+            bmp.Freeze();
+            img = bmp;
+        }
+        catch (Exception ex) { Diag.Log($"logo {name}: {ex.Message}"); }
+        LogoCache[name] = img;
+        return img;
+    }
+
+    // MARK: Activity glance
+
+    private void RenderGlance(Snapshot? snap)
+    {
+        var face = snap?.Glance;
+        bool show = snap is not null && !snap.UsageLoading && snap.Usage is { TotalTokens: > 0 } && snap.Components.ActivityGlanceOn && face is not null;
+        GlancePanel.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        SepGlance.Visibility = GlancePanel.Visibility;
+        GlanceHost.Content = null;
+        GlanceCaption.Text = "";
+        if (face is null || !show) return;
+
+        GlanceKicker.Text = face.Kind switch
+        {
+            GlanceKind.Hours => L10n.T("glance_kicker_hours"),
+            GlanceKind.Days => L10n.T("glance_kicker_days"),
+            _ => L10n.T(face.WindowDays == 90 ? "glance_kicker_90" : "glance_kicker_180"),
+        };
+
+        switch (face.Kind)
+        {
+            case GlanceKind.Hours:
+                GlanceHost.Content = BarsVisual(face.Bars!, 24);
+                if (face.PeakHour is { } peak) GlanceCaption.Text = L10n.T("peak_caption", peak);
+                break;
+            case GlanceKind.Days:
+            {
+                var panel = new StackPanel();
+                panel.Children.Add(BarsVisual(face.DayTokens!, 7, spacing: 6));
+                var labels = new Grid { Margin = new Thickness(0, 3, 0, 0) };
+                string[] keys = ["wd_mon", "wd_tue", "wd_wed", "wd_thu", "wd_fri", "wd_sat", "wd_sun"];
+                for (int i = 0; i < 7; i++)
+                {
+                    labels.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                    var t = new TextBlock
+                    {
+                        Text = L10n.T(keys[i]),
+                        FontSize = FontRes("FontMicro"),
+                        Foreground = (Brush)FindResource("FaintBrush"),
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                    };
+                    Grid.SetColumn(t, i);
+                    labels.Children.Add(t);
+                }
+                panel.Children.Add(labels);
+                GlanceHost.Content = panel;
+                break;
+            }
+            case GlanceKind.Grid:
+                GlanceHost.Content = GridViewVisual(face);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Histogram bars: proportional to the max, min 2px for non-zero, zero bars stay as
+    /// invisible stubs so gaps keep their position (mirrors macOS barsView).
+    /// </summary>
+    private FrameworkElement BarsVisual(long[] values, int columns, double spacing = 2)
+    {
+        double maxVal = Math.Max(values.Length == 0 ? 1 : values.Max(), 1);
+        var grid = new Grid { Height = 26 };
+        for (int i = 0; i < values.Length; i++)
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        for (int i = 0; i < values.Length; i++)
+        {
+            var bar = new Border
+            {
+                CornerRadius = new CornerRadius(1),
+                VerticalAlignment = VerticalAlignment.Bottom,
+                Height = values[i] > 0 ? Math.Max(2, 26.0 * values[i] / maxVal) : 2,
+                Background = values[i] > 0
+                    ? (Brush)FindResource("PrimaryBg")
+                    : System.Windows.Media.Brushes.Transparent,
+                Margin = new Thickness(i == 0 ? 0 : spacing / 2, 0, i == values.Length - 1 ? 0 : spacing / 2, 0),
+            };
+            Grid.SetColumn(bar, i);
+            grid.Children.Add(bar);
+        }
+        return grid;
+    }
+
+    private FrameworkElement GridViewVisual(GlanceFace face)
+    {
+        int windowDays = face.WindowDays;
+        double cell = windowDays == 90 ? 9 : 5;
+        double gap = windowDays == 90 ? 3 : 2;
+        double radius = windowDays == 90 ? 2 : 1;
+        var row = new StackPanel { Orientation = Orientation.Horizontal };
+        foreach (var column in face.GridColumns!)
+        {
+            var col = new StackPanel { Orientation = Orientation.Vertical };
+            for (int dow = 0; dow < 7; dow++)
+            {
+                int? v = column[dow];
+                col.Children.Add(new Border
+                {
+                    Width = cell,
+                    Height = cell,
+                    CornerRadius = new CornerRadius(radius),
+                    Margin = new Thickness(0, dow == 0 ? 0 : gap, 0, 0),
+                    Background = v is null
+                        ? System.Windows.Media.Brushes.Transparent
+                        : GridCellBrush(v.Value),
+                });
+            }
+            col.Margin = new Thickness(0, 0, gap, 0);
+            row.Children.Add(col);
+        }
+        return row;
+    }
+
+    // Grid intensity ramp from the approved mock (identical steps to macOS GlancePalette;
+    // intensity 4 clamps to the darkest shipped step).
+    private Brush GridCellBrush(int intensity)
+    {
+        int i = Math.Clamp(intensity, 0, 3);
+        Color c = _dark
+            ? i switch { 0 => ColorFromHex("#EBEBF5", 0.10), 1 => ColorFromHex("#4CAE68"), 2 => ColorFromHex("#30A74C"), _ => ColorFromHex("#32D74B") }
+            : i switch { 0 => ColorFromHex("#3C3C43", 0.08), 1 => ColorFromHex("#A6D8B0"), 2 => ColorFromHex("#5BB977"), _ => ColorFromHex("#166F37") };
+        return new SolidColorBrush(c);
+    }
+
+    private static Color ColorFromHex(string hex, double opacity)
+    {
+        var c = ColorFromHex(hex);
+        c.A = (byte)Math.Round(opacity * 255);
+        return c;
+    }
+
+    // MARK: Per-server rows
+
+    private void RenderPerServer(Snapshot? snap)
+    {
+        var rows = snap?.PerServerRowsView ?? [];
+        bool show = snap is not null && snap.ShowPerServerRows && rows.Count > 0 && !snap.UsageLoading;
+        PerServerPanel.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        SepPerServer.Visibility = PerServerPanel.Visibility;
+        PerServerRowsCtl.Items.Clear();
+        if (!show) return;
+
+        PerServerKicker.Text = snap!.PerServerKickerText;
+        PerServerFootnote.Text = Snapshot.PerServerFootnoteText;
+        foreach (var r in rows)
+        {
+            var grid = new Grid { Margin = new Thickness(0, 1, 0, 1) };
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var label = new TextBlock
+            {
+                Text = r.Label,
+                FontSize = FontRes("FontSecondary"),
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                Foreground = (Brush)FindResource("TextBrush"),
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            Grid.SetColumn(label, 0);
+            var value = new TextBlock
+            {
+                Text = r.ValueText,
+                FontSize = FontRes("FontSecondary"),
+                Foreground = (Brush)FindResource("MutedBrush"),
+                HorizontalAlignment = HorizontalAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(8, 0, 0, 0),
+            };
+            Grid.SetColumn(value, 1);
+            grid.Children.Add(label);
+            grid.Children.Add(value);
+            PerServerRowsCtl.Items.Add(grid);
+        }
     }
 
     /// <summary>Apply localized text to the static XAML literals. Called from UpdateView so a
@@ -496,7 +766,12 @@ public partial class FlyoutWindow : Window
     /// via the QuotaRowVM / QuotaGroupVM they're bound to, rebuilt in RenderQuota.</summary>
     private void ApplyStrings()
     {
-        TodayHeader.Text = L10n.T("today");
+        // The kicker (TodayHeader) follows the snapshot's period; UpdateView sets it.
+        // The segment buttons are static labels but still language-dependent.
+        Period0Btn.Content = L10n.T("period_today");
+        Period1Btn.Content = L10n.T("period_week");
+        Period2Btn.Content = L10n.T("period_month");
+        Period3Btn.Content = L10n.T("period_year");
         LowBtn.Content = L10n.T("low");
         AllBtn.Content = L10n.T("all");
         OpenDashboardBtn.Content = L10n.T("open_dashboard");
@@ -511,10 +786,13 @@ public partial class FlyoutWindow : Window
         System.Windows.Automation.AutomationProperties.SetName(GearBtn, Store.SettingsAccessibilityName);
     }
 
-    private void RenderQuota(Snapshot snap)
+    private void RenderQuota(Snapshot? snap)
     {
         QuotaRows.Items.Clear();
         UpdateToggleButtons();
+        // The All/High view can open before the first snapshot exists (loading case): the
+        // skeleton bars stand in, there is nothing to render here yet.
+        if (snap is null) { QuotaHeader.Text = L10n.T("subscription"); return; }
 
         if (snap.QuotaFailed)
         {
@@ -586,7 +864,7 @@ public partial class FlyoutWindow : Window
             var groups = new ItemsControl
             {
                 ItemTemplate = (DataTemplate)FindResource("QuotaGroupTemplate"),
-                ItemsSource = snap.AllQuotaGroups.Select(MakeQuotaGroupVM).ToList(),
+                ItemsSource = snap.AllQuotaGroups.Select(g => MakeQuotaGroupVM(snap, g)).ToList(),
             };
             scroll.Content = groups;
             QuotaRows.Items.Add(scroll);
@@ -619,7 +897,7 @@ public partial class FlyoutWindow : Window
     }
 
     /// <summary>Presentation shape for one provider group in the All view (QuotaGroupTemplate).</summary>
-    private QuotaGroupVM MakeQuotaGroupVM(QuotaGroup group) => new()
+    private QuotaGroupVM MakeQuotaGroupVM(Snapshot snap, QuotaGroup group) => new()
     {
         Provider = group.Provider,
         WarningText = L10n.T("couldnt_refresh"),
@@ -627,6 +905,13 @@ public partial class FlyoutWindow : Window
         // QuotaGroupTemplate rather than a separate MakeProviderWarning() element.
         WarningVisibility = group.Failed ? Visibility.Visible : Visibility.Collapsed,
         Rows = group.Rows.Select(r => MakeQuotaRowVM(r, showProvider: false)).ToList(),
+        // Reset-credits row: last inside the Codex group, All view only. Null (hidden)
+        // for every other provider, without credits, on a failed group, or component off.
+        CreditsText = snap.CreditsNotice(group) ?? "",
+        CreditsVisibility = snap.CreditsNotice(group) is null ? Visibility.Collapsed : Visibility.Visible,
+        // Static right-aligned decoration on the same row (mock design): outside the
+        // pinned row string, so CreditsNotice stays byte-identical.
+        CreditsUseOrLoseText = L10n.T("credits_use_or_lose"),
     };
 
     private void UpdateToggleButtons()
@@ -694,4 +979,21 @@ internal sealed class QuotaGroupVM
     public string WarningText { get; init; } = "";
     public Visibility WarningVisibility { get; init; }
     public List<QuotaRowVM> Rows { get; init; } = new();
+    /// <summary>Reset-credits row (⚡ …), shown only for Codex in the All view.</summary>
+    public string CreditsText { get; init; } = "";
+    public Visibility CreditsVisibility { get; init; } = Visibility.Collapsed;
+    /// <summary>Muted "use or lose" hint right-aligned on the credits row (static decoration).</summary>
+    public string CreditsUseOrLoseText { get; init; } = "";
+}
+
+/// <summary>
+/// Presentation shape for one top-rank pill. The logo is a pre-loaded ImageSource (null =
+/// no mark shipped / failed to load -> text-only, never a broken-image placeholder).
+/// </summary>
+internal sealed class RankVM
+{
+    public ImageSource? Logo { get; init; }
+    public Visibility LogoVisibility { get; init; } = Visibility.Collapsed;
+    public string Label { get; init; } = "";
+    public string Value { get; init; } = "";
 }

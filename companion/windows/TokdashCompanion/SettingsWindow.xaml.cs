@@ -52,6 +52,22 @@ public partial class SettingsWindow : Window
         WeeklySlider.Value = s.Thresholds.Weekly;
         OtherSlider.Value = s.Thresholds.Other;
         AutoUpdateBox.IsChecked = s.AutomaticUpdateChecks;
+        // Components (schema v3): resolved reads, so an absent v2 file renders all-on.
+        CompFullDeltaBox.IsChecked = s.Components.FullDeltaRowOn;
+        CompTopRanksBox.IsChecked = s.Components.TopRanksOn;
+        CompResetCreditsBox.IsChecked = s.Components.ResetCreditsOn;
+        CompActivityGlanceBox.IsChecked = s.Components.ActivityGlanceOn;
+        CompHistogramBox.IsChecked = s.Components.ActivityHistogramTodayWeekOn;
+        CompPerServerBox.IsChecked = s.Components.PerServerRowsOn;
+        // Components autosave on toggle (mirrors macOS onChange(of: components) -> save +
+        // apply), so a flip survives Cancel and takes effect in the open flyout without a
+        // refetch. Attached AFTER the initial IsChecked assignments above: the handler must
+        // not fire for state the user never changed.
+        foreach (var box in ComponentBoxes())
+        {
+            box.Checked += CompToggle_Changed;
+            box.Unchecked += CompToggle_Changed;
+        }
         // Store builds swap the whole Updates section for a read-only version line: the
         // Store owns update delivery, so every control in that section is redundant there.
         bool packaged = PackagedApp.IsPackaged;
@@ -64,12 +80,69 @@ public partial class SettingsWindow : Window
         Store.PropertyChanged += Store_PropertyChanged;
         Closed += (_, _) => Store.PropertyChanged -= Store_PropertyChanged;
         RenderUpdateSection();
+        RenderServerDiagnostics();
+        // Settings-open only (contract E7): GET /api/version, then /api/update-check when the
+        // server itself has consent. Never a schedule, never a POST, silent on failure.
+        _ = Store.FetchServerUpdateInfoAsync();
+    }
+
+    private IEnumerable<CheckBox> ComponentBoxes() => new[]
+    {
+        CompFullDeltaBox, CompTopRanksBox, CompResetCreditsBox,
+        CompActivityGlanceBox, CompHistogramBox, CompPerServerBox,
+    };
+
+    /// <summary>
+    /// A components toggle was flipped: persist immediately (schema v3, explicit resolved
+    /// booleans) and re-render the flyout from last-good data without a refetch. Writes all
+    /// six together so the file always carries the full explicit set once the user has
+    /// touched the section at all.
+    /// </summary>
+    private void CompToggle_Changed(object sender, RoutedEventArgs e)
+    {
+        if (Store is null) return;
+        Store.Settings.Components = new CompanionComponents
+        {
+            FullDeltaRow = CompFullDeltaBox.IsChecked == true,
+            TopRanks = CompTopRanksBox.IsChecked == true,
+            ResetCredits = CompResetCreditsBox.IsChecked == true,
+            ActivityGlance = CompActivityGlanceBox.IsChecked == true,
+            ActivityHistogramTodayWeek = CompHistogramBox.IsChecked == true,
+            PerServerRows = CompPerServerBox.IsChecked == true,
+        };
+        Store.Settings.Save();
+        Store.ApplyComponentsChange();
+    }
+
+    private void RenderServerDiagnostics()
+    {
+        if (ServerRuntimeText is null) return;
+        if (Store.ServerRuntimeVersion is { Length: > 0 } version)
+        {
+            ServerRuntimeText.Text = $"{L10n.T("server_runtime_row")} · {L10n.T("server_runtime_version", version)}";
+            ServerRuntimeText.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            ServerRuntimeText.Visibility = Visibility.Collapsed;
+        }
+        if (Store.ServerUpdateBadgeText is { Length: > 0 } badge)
+        {
+            ServerUpdateRow.Text = badge;
+            ServerUpdateRow.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            ServerUpdateRow.Visibility = Visibility.Collapsed;
+        }
     }
 
     private void Store_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
         if (e.PropertyName is nameof(CompanionStore.UpdateStatus) or nameof(CompanionStore.ShowsUpdateBadge))
             Dispatcher.BeginInvoke(RenderUpdateSection);
+        if (e.PropertyName is nameof(CompanionStore.ServerRuntimeVersion) or nameof(CompanionStore.ServerUpdateBadgeVersion))
+            Dispatcher.BeginInvoke(RenderServerDiagnostics);
     }
 
     /// <summary>
@@ -151,6 +224,19 @@ public partial class SettingsWindow : Window
         NotificationsLabel.Text = L10n.T("section_notifications");
         NotifyBox.Content = L10n.T("low_quota_notifications");
         NotifyHint.Text = L10n.T("low_quota_hint");
+        ComponentsLabel.Text = L10n.T("section_components");
+        CompFullDeltaBox.Content = L10n.T("comp_full_delta_row");
+        CompFullDeltaDesc.Text = L10n.T("comp_full_delta_row_desc");
+        CompTopRanksBox.Content = L10n.T("comp_top_ranks");
+        CompTopRanksDesc.Text = L10n.T("comp_top_ranks_desc");
+        CompResetCreditsBox.Content = L10n.T("comp_reset_credits");
+        CompResetCreditsDesc.Text = L10n.T("comp_reset_credits_desc");
+        CompActivityGlanceBox.Content = L10n.T("comp_activity_glance");
+        CompActivityGlanceDesc.Text = L10n.T("comp_activity_glance_desc");
+        CompHistogramBox.Content = L10n.T("comp_histogram_today_week");
+        CompHistogramDesc.Text = L10n.T("comp_histogram_today_week_desc");
+        CompPerServerBox.Content = L10n.T("comp_per_server_rows");
+        CompPerServerDesc.Text = L10n.T("comp_per_server_rows_desc");
         ThresholdsLabel.Text = L10n.T("section_thresholds");
         UpdatesLabel.Text = L10n.T("section_updates");
         CurrentVersionText.Text = L10n.T("update_current_version", UpdateChecker.CurrentVersion);
@@ -387,6 +473,17 @@ public partial class SettingsWindow : Window
 
         s.Servers = entries;
         s.LowQuotaNotifications = NotifyBox.IsChecked == true;
+        // Components: always persisted as explicit resolved booleans (schema v3), so a
+        // later file read never has to guess what an absent key meant for this build.
+        s.Components = new CompanionComponents
+        {
+            FullDeltaRow = CompFullDeltaBox.IsChecked == true,
+            TopRanks = CompTopRanksBox.IsChecked == true,
+            ResetCredits = CompResetCreditsBox.IsChecked == true,
+            ActivityGlance = CompActivityGlanceBox.IsChecked == true,
+            ActivityHistogramTodayWeek = CompHistogramBox.IsChecked == true,
+            PerServerRows = CompPerServerBox.IsChecked == true,
+        };
         s.Thresholds = new QuotaThresholds(
             (int)FiveHourSlider.Value,
             (int)WeeklySlider.Value,

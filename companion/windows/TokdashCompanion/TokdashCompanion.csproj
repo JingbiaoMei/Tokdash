@@ -29,6 +29,12 @@
     </Content>
   </ItemGroup>
 
+  <!-- Top-rank harness marks: embedded WPF resources, read via
+       pack://application:,,,/Assets/Agents/{name}.png at render time. -->
+  <ItemGroup>
+    <Resource Include="Assets\Agents\**\*.png" />
+  </ItemGroup>
+
   <ItemGroup>
     <InternalsVisibleTo Include="TokdashCompanion.Tests" />
   </ItemGroup>

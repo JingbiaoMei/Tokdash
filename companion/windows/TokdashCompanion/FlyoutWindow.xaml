@@ -216,7 +216,38 @@
                                Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center"/>
                 </StackPanel>
                 <ItemsControl ItemsSource="{Binding Rows}" ItemTemplate="{StaticResource QuotaRowTemplate}"/>
+                <!-- Reset-credits row: last inside its provider group, All view only.
+                     Quiet text row, not a bar - it has no percentage. The mock's design:
+                     2px amber left-accent bar, amber text (#FFB87A0D = macOS .72/.48/.05,
+                     the same on both themes), and a muted right-aligned "use or lose" hint
+                     on the same row. The hint is static decoration - never part of the
+                     pinned CreditsNotice string. -->
+                <Grid Visibility="{Binding CreditsVisibility}" Margin="0,0,0,8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <Border Grid.Column="0" Width="2" CornerRadius="1" Background="#FFB87A0D" Margin="0,1,8,1"/>
+                    <TextBlock Grid.Column="1" Text="{Binding CreditsText}" FontSize="{StaticResource FontCaption}"
+                               Foreground="#FFB87A0D" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="2" Text="{Binding CreditsUseOrLoseText}" FontSize="{StaticResource FontMicro}"
+                               Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                </Grid>
             </StackPanel>
+        </DataTemplate>
+
+        <!-- Top-rank pill: optional harness mark, display name, compact tokens. Model rows
+             simply have no mark (never a placeholder). -->
+        <DataTemplate x:Key="RankTemplate">
+            <Border CornerRadius="4" Background="{DynamicResource SegIdleBg}" BorderBrush="{DynamicResource BtnBorder}"
+                    BorderThickness="0.5" Padding="7,3,7,4" Margin="0,0,6,0">
+                <StackPanel Orientation="Horizontal">
+                    <Image Source="{Binding Logo}" Width="13" Height="13" Margin="0,0,5,0" VerticalAlignment="Center"
+                           Visibility="{Binding LogoVisibility}"/>
+                    <TextBlock VerticalAlignment="Center" FontSize="{StaticResource FontCaption}"><Run Text="{Binding Label}" FontWeight="Medium" Foreground="{DynamicResource TextBrush}"/><Run Text="  "/><Run Text="{Binding Value}" Foreground="{DynamicResource MutedBrush}"/></TextBlock>
+                </StackPanel>
+            </Border>
         </DataTemplate>
     </Window.Resources>
 
@@ -293,24 +324,76 @@
             </Grid>
             <Border x:Name="SepBanner" Height="1" Background="{DynamicResource DividerBrush}" Visibility="Collapsed"/>
 
-            <!-- Today hero -->
+            <!-- Hero (selected period). The kicker shares its row with the period segment;
+                 the segment is ALWAYS visible - even while every data section below is
+                 still loading, changing it is the one action that always works. The cost
+                 number doubles as the empty/failed title slot, like 1.0.2 - only the
+                 strings became period-aware. -->
             <StackPanel Margin="{StaticResource SectionPad}" x:Name="HeroPanel">
-                <TextBlock Text="TODAY" x:Name="TodayHeader" FontSize="{StaticResource FontCaption}" FontWeight="SemiBold" Style="{StaticResource BodyText}" Foreground="{DynamicResource MutedBrush}"/>
+                <Grid Margin="0,0,0,2">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="TODAY" x:Name="TodayHeader" FontSize="{StaticResource FontCaption}" FontWeight="SemiBold" Style="{StaticResource BodyText}" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center"/>
+                    <Border Grid.Column="1" CornerRadius="4" Padding="1" Background="{DynamicResource SegBg}">
+                        <StackPanel Orientation="Horizontal">
+                            <Button x:Name="Period0Btn" Click="Period_Click" Tag="today" Content="Today" Style="{StaticResource SegBtn}"/>
+                            <Button x:Name="Period1Btn" Click="Period_Click" Tag="week" Content="Week" Style="{StaticResource SegBtn}"/>
+                            <Button x:Name="Period2Btn" Click="Period_Click" Tag="month" Content="Month" Style="{StaticResource SegBtn}"/>
+                            <Button x:Name="Period3Btn" Click="Period_Click" Tag="year" Content="Year" Style="{StaticResource SegBtn}"/>
+                        </StackPanel>
+                    </Border>
+                </Grid>
+                <!-- Loading skeleton: gray bars in the cost/sub-line slots, never a
+                     full-screen spinner (contract loading case: has_full_screen_spinner false). -->
+                <StackPanel x:Name="HeroSkeleton" Visibility="Collapsed">
+                    <Border Height="26" Width="120" CornerRadius="4" Background="{DynamicResource BarTrack}" Margin="0,4,0,0"/>
+                    <Border Height="12" Width="220" CornerRadius="3" Background="{DynamicResource BarTrack}" Margin="0,8,0,0"/>
+                </StackPanel>
                 <TextBlock x:Name="TodayCost" Text="…" FontSize="{StaticResource FontHero}" FontWeight="SemiBold" Style="{StaticResource BodyText}"/>
                 <!-- TextWrapping: the empty-state sub-line is long enough to ellipsize at
                      flyout width, which reads as broken. Wrap it instead. -->
                 <TextBlock x:Name="TodaySub" Text="" FontSize="{StaticResource FontSecondary}" TextWrapping="Wrap" Style="{StaticResource BodyText}" Foreground="{DynamicResource MutedBrush}"/>
-                <TextBlock x:Name="TodayCmp" Text="" FontSize="{StaticResource FontSecondary}" Foreground="#0F7B0F" Style="{StaticResource BodyText}"/>
+                <!-- Cost-only worded comparison (fullDeltaRow off). -->
+                <TextBlock x:Name="TodayCmp" Text="" FontSize="{StaticResource FontSecondary}" Foreground="#0F7B0F" Style="{StaticResource BodyText}" Visibility="Collapsed"/>
+                <!-- Full delta row (fullDeltaRow on): colored runs built in code-behind. -->
+                <TextBlock x:Name="DeltaRow" TextWrapping="Wrap" FontSize="{StaticResource FontSecondary}" Style="{StaticResource BodyText}" Visibility="Collapsed"/>
             </StackPanel>
             <Border Height="1" Background="{DynamicResource DividerBrush}"/>
 
-            <!-- Month context -->
-            <StackPanel Margin="{StaticResource BandPad}" Orientation="Horizontal">
-                <TextBlock x:Name="MonthLabel" Text="" FontSize="{StaticResource FontCaption}" FontWeight="SemiBold" Style="{StaticResource BodyText}" Foreground="{DynamicResource MutedBrush}"/>
-                <TextBlock x:Name="MonthCost" Text="" FontSize="{StaticResource FontSecondary}" FontWeight="SemiBold" Margin="10,0,0,0" Style="{StaticResource BodyText}"/>
-                <TextBlock x:Name="MonthTokens" Text="" FontSize="{StaticResource FontSecondary}" Margin="10,0,0,0" Style="{StaticResource BodyText}" Foreground="{DynamicResource MutedBrush}"/>
+            <!-- Top ranks: three tools (with marks) + three models (text-only). -->
+            <StackPanel x:Name="RanksPanel" Margin="{StaticResource SectionPad}" Visibility="Collapsed">
+                <TextBlock x:Name="ToolsKicker" Text="" FontSize="{StaticResource FontCaption}" FontWeight="SemiBold" Style="{StaticResource BodyText}" Foreground="{DynamicResource MutedBrush}"/>
+                <ItemsControl x:Name="ToolsStrip" Margin="0,4,0,0" ItemTemplate="{StaticResource RankTemplate}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                </ItemsControl>
+                <TextBlock x:Name="ModelsKicker" Text="" FontSize="{StaticResource FontCaption}" FontWeight="SemiBold" Style="{StaticResource BodyText}" Foreground="{DynamicResource MutedBrush}" Margin="0,10,0,0"/>
+                <ItemsControl x:Name="ModelsStrip" Margin="0,4,0,0" ItemTemplate="{StaticResource RankTemplate}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                </ItemsControl>
             </StackPanel>
-            <Border Height="1" Background="{DynamicResource DividerBrush}"/>
+            <Border x:Name="SepRanks" Height="1" Background="{DynamicResource DividerBrush}" Visibility="Collapsed"/>
+
+            <!-- Activity glance: one face at a time, built in code-behind (bars/columns/grid). -->
+            <StackPanel x:Name="GlancePanel" Margin="{StaticResource SectionPad}" Visibility="Collapsed">
+                <TextBlock x:Name="GlanceKicker" Text="" FontSize="{StaticResource FontCaption}" FontWeight="SemiBold" Style="{StaticResource BodyText}" Foreground="{DynamicResource MutedBrush}"/>
+                <ContentControl x:Name="GlanceHost" Margin="0,6,0,0" Focusable="False"/>
+                <TextBlock x:Name="GlanceCaption" Text="" FontSize="{StaticResource FontCaption}" Style="{StaticResource BodyText}" Foreground="{DynamicResource MutedBrush}" Margin="0,6,0,0"/>
+            </StackPanel>
+            <Border x:Name="SepGlance" Height="1" Background="{DynamicResource DividerBrush}" Visibility="Collapsed"/>
+
+            <!-- Per-server rows: only with more than one enabled server; this cycle only. -->
+            <StackPanel x:Name="PerServerPanel" Margin="{StaticResource SectionPad}" Visibility="Collapsed">
+                <TextBlock x:Name="PerServerKicker" Text="" FontSize="{StaticResource FontCaption}" FontWeight="SemiBold" Style="{StaticResource BodyText}" Foreground="{DynamicResource MutedBrush}"/>
+                <ItemsControl x:Name="PerServerRowsCtl" Margin="0,4,0,0"/>
+                <TextBlock x:Name="PerServerFootnote" Text="" FontSize="{StaticResource FontMicro}" Style="{StaticResource BodyText}" Foreground="{DynamicResource FaintBrush}" Margin="0,4,0,0"/>
+            </StackPanel>
+            <Border x:Name="SepPerServer" Height="1" Background="{DynamicResource DividerBrush}" Visibility="Collapsed"/>
 
             <!-- Quota section -->
             <StackPanel Margin="{StaticResource SectionPad}" x:Name="QuotaPanel">
@@ -332,12 +415,13 @@
                      WPF hosts a UIElement item as-is and only applies the ItemTemplate to
                      non-visual items, so both share this one container. -->
                 <ItemsControl x:Name="QuotaRows" ItemTemplate="{StaticResource QuotaRowTemplate}"/>
+                <!-- Quota loading skeleton (loading case): bars, not a spinner. -->
+                <StackPanel x:Name="QuotaSkeleton" Visibility="Collapsed" Margin="0,2,0,0">
+                    <Border Height="12" CornerRadius="3" Background="{DynamicResource BarTrack}" Margin="0,0,0,8"/>
+                    <Border Height="12" Width="240" HorizontalAlignment="Left" CornerRadius="3" Background="{DynamicResource BarTrack}"/>
+                </StackPanel>
             </StackPanel>
             <Border Height="1" Background="{DynamicResource DividerBrush}"/>
-
-            <!-- Activity line -->
-            <TextBlock x:Name="ActivityText" Margin="{StaticResource BandPad}" FontSize="{StaticResource FontSecondary}" Visibility="Collapsed" Style="{StaticResource BodyText}" Foreground="{DynamicResource MutedBrush}"/>
-            <Border x:Name="SepActivity" Height="1" Background="{DynamicResource DividerBrush}" Visibility="Collapsed"/>
 
             <!-- Action row -->
             <StackPanel Margin="{StaticResource BandPad}" Orientation="Horizontal">

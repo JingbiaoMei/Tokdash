@@ -6,10 +6,23 @@ namespace TokdashCompanion;
 /// </summary>
 public static class Formatter
 {
+    /// <summary>
+    /// Token compact notation (contract §Token compact notation): >= 1M -> one decimal with
+    /// the trailing ".0" TRIMMED ("13M", "18.7M", "1243.5M" - no "B" tier even past 1000M);
+    /// >= 1k -> integer "k" ROUNDED (not floored) to the shown precision ("779k", "250k");
+    /// below that, the plain integer. The same rule renders hero, top-rank and per-server
+    /// tokens; exact values belong to accessibility text, not to this string.
+    /// </summary>
     public static string CompactTokens(long tokens)
     {
-        if (tokens >= 1_000_000) return $"{tokens / 1_000_000.0:F1}M";
-        if (tokens >= 1_000) return $"{tokens / 1000}k";
+        if (tokens >= 1_000_000)
+        {
+            string text = (tokens / 1_000_000.0).ToString("F1", System.Globalization.CultureInfo.InvariantCulture);
+            if (text.EndsWith(".0", StringComparison.Ordinal)) text = text[..^2];
+            return text + "M";
+        }
+        if (tokens >= 1_000)
+            return ((long)Math.Round(tokens / 1000.0, MidpointRounding.AwayFromZero)).ToString() + "k";
         return tokens.ToString();
     }
 
@@ -22,12 +35,40 @@ public static class Formatter
         _ => "fine",
     };
 
-public static string ComparisonText(double? costPct)
-{
-    if (costPct is null) return "";
-    double abs = Math.Abs(costPct.Value);
-    return costPct.Value <= 0 ? L10n.T("comparison_below", (int)abs) : L10n.T("comparison_above", (int)abs);
-}
+    /// <summary>
+    /// Active-time ladder (contract §Active time), input MILLISECONDS (every duration field
+    /// in the payload is ms; every epoch in the quota payload is seconds). Zero and absent
+    /// data render NO segment at all (the caller checks) - never "active 0 m". Each part
+    /// floors to its own unit.
+    /// </summary>
+    public static string ActiveText(long activeMs)
+    {
+        long seconds = activeMs / 1000;
+        if (seconds < 60) return L10n.T("active_label", L10n.T("dur_lt1m"));
+        if (seconds < 3600) return L10n.T("active_label", L10n.T("dur_m", seconds / 60));
+        if (seconds < 86_400) return L10n.T("active_label", L10n.T("dur_hm", seconds / 3600, (seconds % 3600) / 60));
+        return L10n.T("active_label", L10n.T("dur_dh", seconds / 86_400, (seconds % 86_400) / 3600));
+    }
+
+    /// <summary>Delta-row glyph: ▲ above, ▼ below, ± exactly flat.</summary>
+    public static string DeltaGlyph(double pct) => pct > 0 ? "▲" : (pct < 0 ? "▼" : "±");
+
+    /// <summary>Delta-row value: abs(round(pct)) - -11.7 renders 12.</summary>
+    public static long DeltaValue(double pct) => (long)Math.Round(Math.Abs(pct), MidpointRounding.AwayFromZero);
+
+    /// <summary>
+    /// The shipped single comparison line, cost-only and worded ("12% below yesterday") -
+    /// what the hero shows with the fullDeltaRow toggle off (1.0.2 behavior, except the
+    /// sentence now follows the selected segment like every other period string).
+    /// </summary>
+    public static string ComparisonText(double? costPct, UsagePeriod period)
+    {
+        if (costPct is null) return "";
+        // The worded line truncates (1.0.2 behavior); only the delta row's {pct} rounds.
+        int abs = (int)Math.Abs(costPct.Value);
+        string word = L10n.T(period.WordKey());
+        return costPct.Value <= 0 ? L10n.T("comparison_below", abs, word) : L10n.T("comparison_above", abs, word);
+    }
 }
 
 public sealed record QuotaThresholds(double FiveHour, double Weekly, double Other)
@@ -109,10 +150,12 @@ public sealed record QuotaRow(
     }
 
     /// <summary>
-    /// User-facing quota-window label. Claude's API calls its five-hour window "Session" and
-    /// its general weekly window "Weekly All"; normalize those to the standard 5-hour / Weekly
-    /// labels. Model-scoped weekly windows keep their descriptive label (for example, Fable).
-    /// Resolve at render time so a language change is live.
+    /// User-facing quota-window label. Claude names its five-hour window "Session" and its
+    /// general weekly window "Weekly All"; only those two get the standard 5-hour / Weekly
+    /// wording. Everything else passes through with the server's own wording - including a
+    /// plain "weekly" bucket, which the contract's expected fixture pins verbatim ("weekly",
+    /// not the forced "Weekly"). Model-scoped weekly windows keep their descriptive label
+    /// (for example, Fable). Resolve at render time so a language change is live.
     /// </summary>
     public string DisplayBucketLabel
     {
@@ -127,12 +170,13 @@ public sealed record QuotaRow(
             }
             if (!string.Equals(Provider, "claude", StringComparison.OrdinalIgnoreCase)) return BucketLabel;
             if (Bucket.StartsWith("weekly_scoped", StringComparison.OrdinalIgnoreCase)) return BucketLabel;
-            return CanonicalBucket switch
-            {
-                "5h" => L10n.T("window_5h"),
-                "weekly" => L10n.T("window_weekly"),
-                _ => BucketLabel,
-            };
+            string id = Bucket.ToLowerInvariant();
+            if (id.Contains("session") || id.Contains("five hour") || id.Contains("five_hour")
+                || id.Contains("5-hour") || id.Contains("5h"))
+                return L10n.T("window_5h");
+            if ($"{Bucket} {BucketLabel}".ToLowerInvariant().Replace('_', ' ').Contains("weekly all"))
+                return L10n.T("window_weekly");
+            return BucketLabel;
         }
     }
 

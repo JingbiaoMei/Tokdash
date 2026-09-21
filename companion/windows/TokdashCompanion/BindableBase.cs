@@ -26,7 +26,7 @@ public sealed class CompanionSettings
     public const string DefaultBaseURL = "http://127.0.0.1:55423";
 
     [JsonPropertyName("version")]
-    public int Version { get; set; } = 2;
+    public int Version { get; set; } = 3;
     [JsonPropertyName("servers")]
     public List<CompanionServerSettings> Servers { get; set; } =
         [CompanionServerSettings.Create(DefaultBaseURL)];
@@ -56,6 +56,19 @@ public sealed class CompanionSettings
     public bool LowQuotaNotifications { get; set; } = false;
     public QuotaThresholds Thresholds { get; set; } = QuotaThresholds.Defaults;
     public AppLanguage Language { get; set; } = AppLanguage.System;
+
+    /// <summary>
+    /// Schema v3: the six feature components (contract §Components and settings). A v2 file
+    /// has no "components" key: every toggle then reads as ON, so upgrading never silently
+    /// disables a shipped feature. Unknown keys are ignored in both directions.
+    /// </summary>
+    [JsonPropertyName("components")]
+    public CompanionComponents Components { get; set; } = new();
+
+    /// <summary>Schema v3: the persisted period-segment selection (default today). Stored on
+    /// its own - it is a preference, not a component toggle.</summary>
+    [JsonPropertyName("selectedPeriod")]
+    public UsagePeriod SelectedPeriod { get; set; } = UsagePeriod.Today;
 
     // Update checking. Every field is optional in the JSON, so a settings file written by
     // v0.1.4 (which predates all of this) decodes with the feature off and every existing
@@ -100,7 +113,10 @@ public sealed class CompanionSettings
                 {
                     settings.Servers = [CompanionServerSettings.Create(legacy.GetString() ?? DefaultBaseURL)];
                 }
-                settings.Version = 2;
+                // v1/v2 files migrate up: absent components = all defaults on (schema v3),
+                // and the version stamp is rewritten so the file is self-describing.
+                settings.Version = 3;
+                settings.Components ??= new CompanionComponents();
                 if (settings.Servers.Count == 0) settings.Servers.Add(CompanionServerSettings.Create(DefaultBaseURL));
                 return settings;
             }

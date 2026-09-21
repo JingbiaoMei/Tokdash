@@ -3,16 +3,31 @@ namespace TokdashCompanion;
 /// <summary>Read-only fan-out client used by the resident companion.</summary>
 public sealed class MultiServerTokdashClient : ITokdashClient
 {
-    private readonly List<(CompanionServerSettings Server, TokdashClient Client)> _clients;
+    private readonly List<(CompanionServerSettings Server, ITokdashClient Client)> _clients;
     private readonly object _failureLock = new();
     private List<CompanionServerSettings> _failedServers = [];
     public IReadOnlyList<CompanionServerSettings> FailedServers { get { lock (_failureLock) return _failedServers.ToList(); } }
     public IReadOnlyList<string> FailedServerIds => FailedServers.Select(s => s.Id).ToList();
     public IReadOnlyList<string> FailedServerLabels => FailedServers.Select(s => s.Label).ToList();
 
+    /// <summary>
+    /// Per-server hero values from the most recent successful usage fan-out, in settings
+    /// order (unreachable servers carry a null usage and render the "unreachable" tag).
+    /// Computed at usage time so a later quota/health failure on the same cycle never
+    /// re-labels a server whose usage actually answered. Empty before the first cycle.
+    /// </summary>
+    public IReadOnlyList<PerServerUsage> LastPerServerRows { get; private set; } = [];
+
     public MultiServerTokdashClient(IEnumerable<CompanionServerSettings> servers) =>
         _clients = servers.Where(s => s.Enabled)
-            .Select(s => (s, new TokdashClient(s.BaseUrl))).ToList();
+            .Select(s => (s, (ITokdashClient)new TokdashClient(s.BaseUrl))).ToList();
+
+    /// <summary>Test seam: inject per-server clients (a fake per enabled server).</summary>
+    internal MultiServerTokdashClient(
+        IEnumerable<CompanionServerSettings> servers,
+        Func<CompanionServerSettings, ITokdashClient> factory) =>
+        _clients = servers.Where(s => s.Enabled)
+            .Select(s => (s, factory(s))).ToList();
 
     public async Task<HealthResponse> HealthAsync(CancellationToken ct = default)
     {
@@ -24,11 +39,22 @@ public sealed class MultiServerTokdashClient : ITokdashClient
         return good[0].Value!;
     }
 
-    public async Task<UsageResponse> UsageAsync(string period, CancellationToken ct = default)
+    public Task<UsageResponse> UsageAsync(string period, CancellationToken ct = default) =>
+        FanOutUsage(c => c.UsageAsync(period, ct), ct);
+
+    public Task<UsageResponse> UsageRangeAsync(string from, string to, CancellationToken ct = default) =>
+        FanOutUsage(c => c.UsageRangeAsync(from, to, ct), ct);
+
+    private async Task<UsageResponse> FanOutUsage(Func<ITokdashClient, Task<UsageResponse>> fetch, CancellationToken ct)
     {
-        var settled = await Settle(c => c.UsageAsync(period, ct), ct);
-        var rows = settled.Where(r => r.Value is not null).Select(r => r.Value!).ToList();
+        var settled = await Settle(fetch, ct);
         AddFailures(settled.Where(r => r.Value is null).Select(r => r.Server));
+        // Per-server rows for this cycle, computed NOW (see LastPerServerRows).
+        LastPerServerRows = CompanionStore.PerServerRows(
+            _clients.Select(c => c.Server).ToList(),
+            settled.Select(r => r.Value).ToList(),
+            FailedServerIds.ToHashSet());
+        var rows = settled.Where(r => r.Value is not null).Select(r => r.Value!).ToList();
         if (rows.Count == 0) ThrowAggregateFailure(settled);
         return CombineUsage(rows);
     }
@@ -46,7 +72,128 @@ public sealed class MultiServerTokdashClient : ITokdashClient
         return new QuotaResponse { Enabled = good.Any(r => r.Value!.Enabled), Providers = providers };
     }
 
-    private async Task<List<Settled<T>>> Settle<T>(Func<TokdashClient, Task<T>> fetch, CancellationToken ct) where T : class
+    // MARK: - v1.1 optional endpoints (rule 6: never AddFailures for these)
+
+    /// <summary>
+    /// Fan out active-time and SUM <c>active_ms</c> across servers - but if any enabled
+    /// server failed the request or its payload omits <c>active_ms</c>, the combined value
+    /// is null: a known-partial sum would misreport the period (contract §Active time).
+    /// Optional section: per-server failures are silent (no AddFailures, no inline warning).
+    /// </summary>
+    public Task<ActiveTimeResponse> ActiveTimeAsync(string period, CancellationToken ct = default) =>
+        FanOutActiveTime(c => c.ActiveTimeAsync(period, ct), ct);
+
+    public Task<ActiveTimeResponse> ActiveTimeRangeAsync(string from, string to, CancellationToken ct = default) =>
+        FanOutActiveTime(c => c.ActiveTimeRangeAsync(from, to, ct), ct);
+
+    private async Task<ActiveTimeResponse> FanOutActiveTime(
+        Func<ITokdashClient, Task<ActiveTimeResponse>> fetch, CancellationToken ct)
+    {
+        var settled = await SettleSilent(fetch, ct);
+        long? combined = CompanionStore.CombinedActiveMs(
+            settled.Select(r => (r.Value?.ActiveMs, r.Value is null)).ToList());
+        // Timestamp: earliest present, mirroring CombineUsage.
+        return new ActiveTimeResponse
+        {
+            ActiveMs = combined,
+            Timestamp = settled.Select(r => r.Value?.Timestamp).Where(v => v is not null).Order().FirstOrDefault(),
+        };
+    }
+
+    /// <summary>
+    /// Insights/stats fan-out for completeness. The store never requests the glance in
+    /// multi-server mode (per-server hourly/daily series can't be honestly merged into
+    /// one shared strip), so these two only exist to keep the interface whole; they merge
+    /// by summing tokens per bucket/date. Silent failures like active-time.
+    /// </summary>
+    public async Task<InsightsResponse> InsightsHourlyTodayAsync(CancellationToken ct = default)
+    {
+        var settled = await SettleSilent(c => c.InsightsHourlyTodayAsync(ct), ct);
+        var bars = new long[24];
+        int? peak = null;
+        long best = 0;
+        foreach (var row in settled.Where(r => r.Value?.Hourly?.Buckets is not null))
+            foreach (var b in row.Value!.Hourly!.Buckets!)
+                if (b.Hour is { } h && h >= 0 && h <= 23) bars[h] += b.Tokens ?? 0;
+        if (settled.Any(r => r.Value?.Hourly is not null))
+        {
+            for (int i = 0; i < 24; i++) if (bars[i] > best) { best = bars[i]; peak = i; }
+        }
+        return new InsightsResponse
+        {
+            Hourly = settled.Any(r => r.Value?.Hourly is not null)
+                ? new HourlyFacet
+                {
+                    Buckets = Enumerable.Range(0, 24).Select(i => new HourBucket { Hour = i, Tokens = bars[i] }).ToList(),
+                    PeakHour = best > 0 ? peak : null,
+                }
+                : null,
+        };
+    }
+
+    public async Task<InsightsResponse> InsightsDailyAsync(string from, string to, CancellationToken ct = default)
+    {
+        var settled = await SettleSilent(c => c.InsightsDailyAsync(from, to, ct), ct);
+        if (!settled.Any(r => r.Value?.Daily is not null)) return new InsightsResponse();
+        var byDate = new Dictionary<string, long>();
+        foreach (var row in settled)
+            foreach (var p in row.Value?.Daily ?? [])
+                if (p.Date is { } d) byDate[d] = byDate.GetValueOrDefault(d) + (p.Tokens ?? 0);
+        return new InsightsResponse
+        {
+            Daily = byDate.OrderBy(kv => kv.Key, StringComparer.Ordinal)
+                .Select(kv => new DailyPoint { Date = kv.Key, Tokens = kv.Value }).ToList(),
+        };
+    }
+
+    public async Task<StatsResponse> StatsAsync(CancellationToken ct = default)
+    {
+        var settled = await SettleSilent(c => c.StatsAsync(ct), ct);
+        if (!settled.Any(r => r.Value?.Contributions is not null)) return new StatsResponse();
+        var byDate = new Dictionary<string, (long Tokens, int Intensity)>();
+        foreach (var row in settled)
+            foreach (var c in row.Value?.Contributions ?? [])
+                if (c.Date is { } d)
+                {
+                    var (tokens, intensity) = byDate.GetValueOrDefault(d);
+                    byDate[d] = (tokens + (c.Totals?.Tokens ?? 0), Math.Max(intensity, c.Intensity ?? 0));
+                }
+        return new StatsResponse
+        {
+            Contributions = byDate.OrderBy(kv => kv.Key, StringComparer.Ordinal)
+                .Select(kv => new Contribution
+                {
+                    Date = kv.Key,
+                    Totals = new ContributionTotals { Tokens = kv.Value.Tokens },
+                    Intensity = kv.Value.Intensity,
+                }).ToList(),
+        };
+    }
+
+    /// <summary>Settings-only diagnostics fan out to "the first server that answers":
+    /// a single Settings row shows one runtime version, and the update badge lights for
+    /// any server behind. Failures never mark a server unreachable (Settings-only).</summary>
+    public async Task<VersionResponse> VersionAsync(CancellationToken ct = default)
+    {
+        var settled = await SettleSilent(c => c.VersionAsync(ct), ct);
+        return settled.FirstOrDefault(r => r.Value is not null)?.Value
+            ?? ThrowFirst<VersionResponse>(settled);
+    }
+
+    public async Task<ServerUpdateCheckResponse> ServerUpdateCheckAsync(CancellationToken ct = default)
+    {
+        var settled = await SettleSilent(c => c.ServerUpdateCheckAsync(ct), ct);
+        return settled.FirstOrDefault(r => r.Value is not null)?.Value
+            ?? ThrowFirst<ServerUpdateCheckResponse>(settled);
+    }
+
+    private static T ThrowFirst<T>(IReadOnlyCollection<Settled<T>> settled) where T : class
+    {
+        throw settled.FirstOrDefault(r => r.Error is not null)?.Error
+            ?? new TokdashException(TokdashError.Offline);
+    }
+
+    private async Task<List<Settled<T>>> Settle<T>(Func<ITokdashClient, Task<T>> fetch, CancellationToken ct) where T : class
     {
         var tasks = _clients.Select(async item =>
         {
@@ -56,6 +203,12 @@ public sealed class MultiServerTokdashClient : ITokdashClient
         });
         return (await Task.WhenAll(tasks)).ToList();
     }
+
+    /// <summary>Same fan-out, but the section is optional: failures are NOT recorded as
+    /// server failures, so they never join the "servers unavailable" footer or the
+    /// per-server backoff (contract rule 6).</summary>
+    private Task<List<Settled<T>>> SettleSilent<T>(Func<ITokdashClient, Task<T>> fetch, CancellationToken ct) where T : class
+        => Settle(fetch, ct);
 
     private void AddFailures(IEnumerable<CompanionServerSettings> servers)
     {
@@ -87,8 +240,6 @@ public sealed class MultiServerTokdashClient : ITokdashClient
                 target.Tokens += item.Tokens; target.Cost += item.Cost;
             }
         }
-        bool hasPrevious = rows.All(r => r.Comparison?.CostPrev is not null);
-        double? previous = hasPrevious ? rows.Sum(r => r.Comparison!.CostPrev!.Value) : null;
         double totalCost = rows.Sum(r => r.TotalCost);
         // Mirror the server's own shape: CombinedModels is the full list ranked by
         // tokens, TopModels its first five, TopModelsByCost the five by cost. This
@@ -108,8 +259,41 @@ public sealed class MultiServerTokdashClient : ITokdashClient
             TopModels = byTokens.Take(5).ToList(),
             TopModelsByCost = byCost.Take(5).ToList(),
             Timestamp = rows.Select(r => r.Timestamp).Where(v => v is not null).Order().FirstOrDefault(),
-            Comparison = new Comparison { CostPrev = previous, CostPct = previous is > 0 ? (totalCost - previous.Value) / previous.Value * 100 : null },
+            // Full delta row across servers (contract §Full delta row): recompute each
+            // percentage from the SUMMED current and previous totals. A metric whose
+            // *_prev is omitted by ANY contributing server is omitted from the combined
+            // row entirely - never a percentage computed from a known-incomplete sum.
+            Comparison = new Comparison
+            {
+                CostPct = CombinedPct(rows, r => r.TotalCost, c => c.CostPrev, c => c.CostPct),
+                TokensPct = CombinedPct(rows, r => (double)r.TotalTokens, c => c.TokensPrev, c => c.TokensPct),
+                MessagesPct = CombinedPct(rows, r => (double)r.TotalMessages, c => c.MessagesPrev, c => c.MessagesPct),
+            },
         };
+    }
+
+    /// <summary>
+    /// <c>(sumCurrent - sumPrev) / sumPrev * 100</c>, or null when any server omits the
+    /// metric's <c>*_prev</c>, or when the summed previous total is not positive. The
+    /// server's own <c>*_pct</c> values are NOT averaged - percentages of different bases
+    /// don't average. The server's pct is only trusted when there's exactly one row.
+    /// </summary>
+    private static double? CombinedPct(
+        IReadOnlyList<UsageResponse> rows,
+        Func<UsageResponse, double> current,
+        Func<Comparison, double?> prev,
+        Func<Comparison, double?> ownPct)
+    {
+        if (rows.Count == 0) return null;
+        var comparisons = rows.Select(r => r.Comparison).ToList();
+        if (comparisons.Any(c => c is null)) return null;
+        if (rows.Count == 1) return ownPct(comparisons[0]!);
+        if (comparisons.Any(c => prev(c!) is null)) return null;
+        // Non-null by the guard above; the ?? 0 keeps the compiler happy, never taken.
+        double sumPrev = rows.Sum(r => prev(r.Comparison!) ?? 0);
+        if (sumPrev <= 0) return null;
+        double sumCurrent = rows.Sum(current);
+        return (sumCurrent - sumPrev) / sumPrev * 100;
     }
 
     public void Dispose() { foreach (var item in _clients) item.Client.Dispose(); }

@@ -494,8 +494,8 @@ final class ContractV11Tests: XCTestCase {
         XCTAssertEqual(rows.map(\.label), ["Local", "Second"], "settings order")
 
         // quota_all_server_order: merged groups run in SETTINGS order, and each
-        // server's providers keep their wire order (contract §Multi-server
-        // "server ordering" + §All view "provider order as detected").
+        // server's providers keep their wire order (pinned by this case file's
+        // quota_all_server_order + §All view "provider order as detected").
         let quota = try QuotaResponse.decode(from: try fixtureData("quota.json"))
         XCTAssertEqual(quota.providerWireOrder, ["codex", "claude", "kimi"], "wire order decode")
         let merged = CompanionStore.mergedQuota([("Local", quota), ("Second", quota)])
@@ -916,6 +916,53 @@ final class ContractV11Tests: XCTestCase {
         XCTAssertEqual(q.providers?.count, 3)
     }
 
+    func testWireProviderKeysUnescapesKeys() throws {
+        // Returned keys must EQUAL what JSONDecoder produced from the same bytes,
+        // or the merged lookup misses and the provider silently vanishes. Covers
+        // escaped backslash before the closing quote, quote/backslash/slash, the
+        // short escapes, \uXXXX, a surrogate pair, and raw non-ASCII.
+        // The é keys arrive as SIX-CHARACTER escape text and the emoji as a
+        // surrogate PAIR: the scanner must decode them to the same Swift
+        // strings JSONDecoder yields from the same bytes.
+        let json = #"{"providers":{"back\\":{"b":[{"bucket":"weekly"}]},"a\"b\\c\/d":{"b":[]},"caf\u00e9":{"b":[]},"cAf\u00e9":{"b":[]},"\ud83d\ude00":{"b":[]},"tab\tnew":{"b":[]}}"#
+        XCTAssertEqual(QuotaResponse.wireProviderKeys(in: Data(json.utf8)),
+                       [#"back\"#, #"a"b\c/d"#, "café", "cAfé", "😀", "tab\tnew"])
+    }
+
+    func testEscapedProviderKeySurvivesMerge() throws {
+        // The provider id arrives as six-character escape text: the merged lookup
+        // matches only if the scanner unescaped it to exactly what JSONDecoder
+        // decoded from the same bytes.
+        let json = "{\"enabled\":true,\"providers\":{\"caf\\u00e9\":{\"estimated\":false,\"buckets\":[{\"bucket\":\"weekly\"}]}}}"
+        let q = try QuotaResponse.decode(from: Data(json.utf8))
+        XCTAssertEqual(q.providerWireOrder, ["café"])
+        let snap = Snapshot(quota: CompanionStore.mergedQuota([("S", q)]), thresholds: .defaults)
+        XCTAssertEqual(snap.allQuotaGroups.map(\.provider), ["S · Café"],
+                       "an escaped key must not drop out of the merged All view")
+    }
+
+    func testDuplicateServerLabelsCollapseToOneGroup() throws {
+        // Two enabled servers both left at the default label: one group per
+        // provider, first position wins (the Windows Dictionary collapses the same
+        // way) - never the same group rendered twice.
+        let q = try QuotaResponse.decode(from: try fixtureData("quota.json"))
+        let merged = CompanionStore.mergedQuota([("Local", q), ("Local", q)])
+        XCTAssertEqual(merged.providerWireOrder, ["Local · codex", "Local · claude", "Local · kimi"])
+        let snap = Snapshot(quota: merged, thresholds: .defaults)
+        XCTAssertEqual(snap.allQuotaGroups.map(\.provider),
+                       ["Local · Codex", "Local · Claude", "Local · Kimi"])
+    }
+
+    func testAllQuotaGroupsDedupsRepeatedWireKeys() throws {
+        // A payload repeating a provider key: JSONDecoder keeps the last value,
+        // the scanner sees every occurrence; the view renders ONE group, once,
+        // at its first position.
+        var q = try QuotaResponse.decode(from: try fixtureData("quota.json"))
+        q.providerWireOrder = ["codex", "claude", "kimi", "codex"]
+        let snap = Snapshot(quota: q, thresholds: .defaults)
+        XCTAssertEqual(snap.allQuotaGroups.map(\.provider), ["Codex", "Claude", "Kimi"])
+    }
+
     // MARK: - Evidence render (skipped unless the sentinel file exists)
 
     /// Renders the REAL flyout UI (ContentView + real store) against the fixture
@@ -937,9 +984,9 @@ final class ContractV11Tests: XCTestCase {
         try """
         {"version":3,"servers":[{"id":"evidence","label":"Evidence","baseUrl":"http://127.0.0.1:8123","enabled":true}],"language":"english"}
         """.write(to: settingsURL, atomically: true, encoding: .utf8)
-        // Restore the process-global seams on every exit path: XCTest runs this
-        // test alphabetically BEFORE most of the class, and a leaked pathOverride
-        // would silently point later tests' stores at the evidence settings.
+        // Restore the process-global seams on every exit path: XCTest method order
+        // is not a guarantee to rely on, and a leaked pathOverride would silently
+        // point other tests' stores at the evidence settings file.
         let previousOverride = CompanionSettings.pathOverride
         let previousLanguage = L10n.current
         defer {

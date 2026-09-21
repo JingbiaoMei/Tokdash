@@ -62,7 +62,13 @@ actor TokdashClient {
         // Raw-data path: the All view pins "provider order as detected", and
         // Foundation's Dictionary decode loses JSON object key order - so the
         // wire order is captured from the same bytes (QuotaResponse.decode).
-        try await QuotaResponse.decode(from: getData("/api/quota", timeout: 20))
+        let data = try await getData("/api/quota", timeout: 20)
+        do {
+            return try QuotaResponse.decode(from: data)
+        } catch {
+            // Same error contract as get(): consumers pattern-match TokdashError.
+            throw TokdashError.decode(error)
+        }
     }
 
     /// Settings-only diagnostics (contract: never the flyout, never on a schedule).
@@ -277,7 +283,8 @@ struct QuotaResponse: Decodable, Sendable {
         case enabled, providers, timestamp
     }
 
-    /// Decode the quota payload and capture the provider key sequence in one pass.
+    /// Decode the quota payload and capture the provider key sequence from the
+    /// same bytes (two passes over the data: JSONDecoder, then the key scan).
     nonisolated static func decode(from data: Data) throws -> QuotaResponse {
         var resp = try JSONDecoder().decode(QuotaResponse.self, from: data)
         resp.providerWireOrder = wireProviderKeys(in: data)
@@ -299,13 +306,67 @@ struct QuotaResponse: Decodable, Sendable {
             }
         }
         // bytes[i] must be the opening quote; advances past the closing one.
+        // Fully UNESCAPES the text (\" \\ \/ b f n r t \uXXXX incl. surrogate
+        // pairs): returned provider keys must match the keys JSONDecoder produced
+        // from the same payload, or the merged lookup misses and the provider
+        // silently vanishes from the All view.
         func stringLit() -> String? {
             guard i < bytes.count, bytes[i] == 0x22 else { return nil }
             i += 1
             var out: [UInt8] = []
+            func hex4() -> UInt32? {
+                guard i + 4 <= bytes.count else { return nil }
+                var value: UInt32 = 0
+                for k in i..<(i + 4) {
+                    let c = bytes[k]
+                    let d: UInt32
+                    switch c {
+                    case 0x30...0x39: d = UInt32(c - 0x30)
+                    case 0x61...0x66: d = UInt32(c - 0x61 + 10)
+                    case 0x41...0x46: d = UInt32(c - 0x41 + 10)
+                    default: return nil
+                    }
+                    value = value * 16 + d
+                }
+                i += 4
+                return value
+            }
+            func appendScalar(_ scalar: UInt32) {
+                guard let s = Unicode.Scalar(scalar) else { return }
+                out.append(contentsOf: Array(String(s).utf8))
+            }
             while i < bytes.count {
                 let b = bytes[i]
-                if b == 0x5C { out.append(b); i += 1; if i < bytes.count { out.append(bytes[i]); i += 1 }; continue }
+                if b == 0x5C {
+                    i += 1
+                    guard i < bytes.count else { return nil }
+                    let e = bytes[i]; i += 1
+                    switch e {
+                    case 0x22: out.append(0x22)
+                    case 0x5C: out.append(0x5C)
+                    case 0x2F: out.append(0x2F)
+                    case 0x62: out.append(0x08)
+                    case 0x66: out.append(0x0C)
+                    case 0x6E: out.append(0x0A)
+                    case 0x72: out.append(0x0D)
+                    case 0x74: out.append(0x09)
+                    case 0x75:
+                        guard let u = hex4() else { return nil }
+                        if u >= 0xD800 && u <= 0xDBFF {
+                            // High surrogate: JSONDecoder requires the low half.
+                            guard i + 1 < bytes.count, bytes[i] == 0x5C, bytes[i + 1] == 0x75 else { return nil }
+                            i += 2
+                            guard let lo = hex4(), lo >= 0xDC00 && lo <= 0xDFFF else { return nil }
+                            appendScalar(0x1_0000 + (u - 0xD800) * 0x400 + (lo - 0xDC00))
+                        } else if u >= 0xDC00 && u <= 0xDFFF {
+                            return nil // lone low surrogate: JSONDecoder would reject it too
+                        } else {
+                            appendScalar(u)
+                        }
+                    default: return nil
+                    }
+                    continue
+                }
                 if b == 0x22 { i += 1; return String(decoding: out, as: UTF8.self) }
                 out.append(b); i += 1
             }

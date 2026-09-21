@@ -277,9 +277,11 @@ public sealed class MultiServerTokdashClient : ITokdashClient
     /// metric's <c>*_prev</c>, or when the summed previous total is not positive. The
     /// server's own <c>*_pct</c> values are NOT averaged - percentages of different bases
     /// don't average. This also governs a one-survivor fan-out: the contract drops a
-    /// metric whose only contributing server omits <c>*_prev</c> (a lone survivor's own
-    /// pct is not trusted past that - the recompute is identical when prev is present),
-    /// which matches the macOS twin exactly.
+    /// metric whose only contributing server omits <c>*_prev</c>; when that survivor
+    /// does carry <c>*_prev</c>, the single-row recompute reduces to its own
+    /// <c>(current-prev)/prev*100</c> (the Tokdash server's own pct formula, confirmed
+    /// against usage-today.json: -11.7 = (248-281)/281), so nothing is lost by not
+    /// trusting its precomputed pct.
     /// </summary>
     private static double? CombinedPct(
         IReadOnlyList<UsageResponse> rows,

@@ -500,8 +500,8 @@ final class CompanionStore: NSObject, ObservableObject {
         }
         let usage = Self.combineUsage(results.map(\.usage))
         // Merged display order must not follow task-group completion order: it is
-        // settings order x wire order (contract §Multi-server "server ordering" +
-        // §All view "provider order as detected").
+        // settings order x wire order (pins: expected/multi-server.json
+        // quota_all_server_order + §All view "provider order as detected").
         let quota = Self.mergedQuota(servers.compactMap { server in
             results.first { $0.server.id == server.id }.map { ($0.server.label, $0.quota) }
         })
@@ -558,8 +558,10 @@ final class CompanionStore: NSObject, ObservableObject {
     }
 
     /// Merge per-server quota payloads into the display model: keys get the server
-    /// label prefix, and the group order is settings order x wire order (contract
-    /// §Multi-server "server ordering" + §All view "provider order as detected").
+    /// label prefix, and the group order is settings order x wire order (pins:
+    /// expected/multi-server.json quota_all_server_order + §All view "provider
+    /// order as detected"; the COMPANION_API.md intro lists "server ordering" as
+    /// one of that case file's pins).
     nonisolated static func mergedQuota(_ results: [(label: String, quota: QuotaResponse)]) -> QuotaResponse {
         var providers: [String: ProviderQuota] = [:]
         var order: [String] = []
@@ -569,7 +571,10 @@ final class CompanionStore: NSObject, ObservableObject {
                 guard let value = result.quota.providers?[provider] else { continue }
                 let key = "\(result.label) · \(provider)"
                 providers[key] = value
-                order.append(key)
+                // Duplicate labels ("Local" left on two servers) keep ONE group at
+                // its first position with the last server's values - exactly what
+                // the Windows Dictionary collapses to.
+                if !order.contains(key) { order.append(key) }
             }
         }
         return QuotaResponse(enabled: results.contains(where: { $0.quota.enabled }),
@@ -1553,12 +1558,18 @@ struct Snapshot {
         let providers = quota.providers ?? [:]
         // Provider order as detected (contract §All view): Foundation dictionaries
         // carry no order, so the decode path supplies the wire key sequence and the
-        // fan-out merge supplies settings-order x wire-order. With neither, sort -
-        // arbitrary-per-launch beats arbitrary-per-launch.
+        // fan-out merge supplies settings-order x wire-order. With neither, sort:
+        // deterministic beats arbitrary-per-launch.
         let names: [String]
         if let wire = quota.providerWireOrder {
-            names = wire.filter { providers[$0] != nil }
-                + providers.keys.filter { !wire.contains($0) }.sorted()
+            // Dedup preserving first occurrence: duplicate server labels (two
+            // settings entries both labeled "Local") or duplicate provider keys
+            // would otherwise render the same group twice with the later dict
+            // value, where the pre-order dict silently collapsed them - and the
+            // Windows twin (plain Dictionary) still collapses them.
+            var seen = Set<String>()
+            names = wire.filter { providers[$0] != nil && seen.insert($0).inserted }
+                + providers.keys.filter { !seen.contains($0) }.sorted()
         } else {
             names = providers.keys.sorted()
         }

@@ -1,4 +1,6 @@
 import XCTest
+import SwiftUI
+import AppKit
 @testable import TokdashCompanion
 
 /// v1.1 contract loader + unit tests.
@@ -862,6 +864,88 @@ final class ContractV11Tests: XCTestCase {
         XCTAssertFalse(partial.fullDeltaRow)
         XCTAssertTrue(partial.activityGlance)
         XCTAssertTrue(partial.perServerRows)
+    }
+
+    // MARK: - Evidence render (skipped unless the sentinel file exists)
+
+    /// Renders the REAL flyout UI (ContentView + real store) against the fixture
+    /// HTTP server and writes a PNG - the macOS real-system evidence artifact.
+    /// Activation is a sentinel file containing the output path (xcodebuild
+    /// launches the test process with a clean environment, so shell env vars
+    /// never reach it). Off by default so normal suite runs never touch the
+    /// network or the screen.
+    @MainActor
+    func testEvidenceRenderFlyoutPNG() async throws {
+        let sentinel = URL(fileURLWithPath: "/tmp/tokdash-evidence-png.txt")
+        let outPath = (try? String(contentsOf: sentinel, encoding: .utf8))?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let outPath, !outPath.isEmpty else {
+            throw XCTSkip("evidence render disabled (write output path to \(sentinel.path))")
+        }
+        let settingsURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tokdash-evidence-settings.json")
+        try """
+        {"version":3,"servers":[{"id":"evidence","label":"Evidence","baseUrl":"http://127.0.0.1:8123","enabled":true}],"language":"english"}
+        """.write(to: settingsURL, atomically: true, encoding: .utf8)
+        CompanionSettings.pathOverride = settingsURL
+        L10n.current = .english
+
+        let store = CompanionStore()
+        store.refresh()
+        let deadline = Date().addingTimeInterval(12)
+        while (store.snapshot == nil || store.connectionState != .connected) && Date() < deadline {
+            try await Task.sleep(nanoseconds: 200_000_000)
+        }
+        let snap = try XCTUnwrap(store.snapshot, "fixture server never produced a snapshot")
+        XCTAssertEqual(store.connectionState, .connected, "fixture server must answer /health")
+        XCTAssertFalse(snap.usageLoading)
+
+        // The shipped root view at the shipped popover width, hosted in a real
+        // NSWindow like the NSPanel hosts it, then rasterized through AppKit's own
+        // cacheDisplay path. ImageRenderer is NOT used: it does not rasterize the
+        // AppKit-backed segmented Pickers (they come out as empty placeholders),
+        // while cacheDisplay draws the real control cells.
+        let root = ContentView()
+            .environmentObject(store)
+            .frame(width: 300)
+            .background(Color(NSColor.windowBackgroundColor))
+        let host = NSHostingView(rootView: root)
+        host.frame = NSRect(x: 0, y: 0, width: 300, height: 1)
+        host.layoutSubtreeIfNeeded()
+        let fitting = host.fittingSize
+        host.frame = NSRect(x: 0, y: 0, width: 300, height: max(fitting.height, 100))
+        let window = NSWindow(contentRect: host.frame, styleMask: [.borderless],
+                              backing: .buffered, defer: false)
+        window.contentView = host
+        window.orderFrontRegardless()
+        try await Task.sleep(nanoseconds: 600_000_000)  // one draw pass
+        guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else {
+            XCTFail("no bitmap rep for caching display")
+            return
+        }
+        host.cacheDisplay(in: host.bounds, to: rep)
+        let png = try XCTUnwrap(rep.representation(using: .png, properties: [:]))
+        try png.write(to: URL(fileURLWithPath: outPath))
+        NSLog("EVIDENCE-PNG \(outPath) \(rep.pixelsWide)x\(rep.pixelsHigh)")
+
+        // Second artifact: the All quota view, where the E2 reset-credits row lives
+        // (the Low view never shows it - provider context, not a window).
+        store.quotaView = .all
+        host.needsDisplay = true
+        try await Task.sleep(nanoseconds: 600_000_000)
+        let allPath = (outPath as NSString).deletingPathExtension + "-all." +
+            (outPath as NSString).pathExtension
+        host.frame = NSRect(x: 0, y: 0, width: 300, height: max(host.fittingSize.height, 100))
+        window.setFrame(host.frame, display: false)
+        guard let rep2 = host.bitmapImageRepForCachingDisplay(in: host.bounds) else {
+            XCTFail("no bitmap rep for caching display (all view)")
+            return
+        }
+        host.cacheDisplay(in: host.bounds, to: rep2)
+        let png2 = try XCTUnwrap(rep2.representation(using: .png, properties: [:]))
+        try png2.write(to: URL(fileURLWithPath: allPath))
+        window.orderOut(nil)
+        NSLog("EVIDENCE-PNG \(allPath) \(rep2.pixelsWide)x\(rep2.pixelsHigh)")
     }
 
     private func contractURL(_ relativePath: String) -> URL {

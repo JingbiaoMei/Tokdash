@@ -41,6 +41,15 @@ final class ContractV11Tests: XCTestCase {
         try! XCTUnwrap(CompanionStore.date(fromDayString: "2026-07-26", calendar: utcCalendar))
     }
 
+    /// The glance face for a loaded snapshot, pinned to the fixed UTC calendar.
+    /// Snapshot's production accessor uses the machine calendar (mirroring Windows,
+    /// whose live clock carries the user's offset); asserting through the pure
+    /// static here keeps the pinned faces CI-timezone-immune.
+    private func face(of snap: Snapshot) -> Snapshot.GlanceFace? {
+        CompanionStore.glanceFace(period: snap.period, insights: snap.insights, stats: snap.stats,
+                                  components: snap.components, calendar: utcCalendar, now: snap.now)
+    }
+
     private func expectedDocument(_ name: String) throws -> [String: Any] {
         let data = try Data(contentsOf: contractURL("expected/\(name).json"))
         return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
@@ -108,7 +117,11 @@ final class ContractV11Tests: XCTestCase {
         var stats: StatsResponse?
         if let name = slotName(doc, "stats") { stats = try decodeFixture(StatsResponse.self, name) }
         var quota: QuotaResponse = .empty
-        if let name = slotName(doc, "quota") { quota = try decodeFixture(QuotaResponse.self, name) }
+        if let name = slotName(doc, "quota") {
+            // Raw-bytes path: captures the provider wire order, which the All-view
+            // group order is pinned against (contract §All view).
+            quota = try QuotaResponse.decode(from: try fixtureData(name))
+        }
 
         // Frozen clock = quota payload timestamp (contract: "tests freeze it to the
         // payload timestamp"); quota-disabled/absent payloads fall back to a fixed date.
@@ -206,7 +219,7 @@ final class ContractV11Tests: XCTestCase {
         // Codex must render from the transparency-shipped mark; unknown ids get none.
         XCTAssertEqual(snap.topTools.first?.logoAsset, "AgentCodex")
 
-        guard case .hours(let bars, let peak) = try XCTUnwrap(snap.glanceFace) else {
+        guard case .hours(let bars, let peak) = try XCTUnwrap(face(of: snap)) else {
             return XCTFail("today must show the hour face")
         }
         XCTAssertEqual(bars.count, 24)
@@ -234,9 +247,12 @@ final class ContractV11Tests: XCTestCase {
 
         let all = try sub(expected, "quota_all")
         let wantGroups = try XCTUnwrap(all["groups"] as? [[String: Any]])
-        // Provider dict order is not preserved by Swift dictionaries; compare as sets.
-        XCTAssertEqual(Set(snap.allQuotaGroups.map(\.provider)),
-                       Set(try wantGroups.map { try XCTUnwrap($0["provider"] as? String) }))
+        // Ordered: the contract pins the group order to the wire's provider order
+        // ("provider order as detected"), the decode path carries that order
+        // (QuotaResponse.wireProviderKeys), and the Windows loader asserts the same
+        // sequence order-sensitively.
+        XCTAssertEqual(snap.allQuotaGroups.map(\.provider),
+                       try wantGroups.map { try XCTUnwrap($0["provider"] as? String) })
         for want in wantGroups {
             let name = try XCTUnwrap(want["provider"] as? String)
             let group = try XCTUnwrap(snap.allQuotaGroups.first { $0.provider == name })
@@ -287,7 +303,7 @@ final class ContractV11Tests: XCTestCase {
         let from = try XCTUnwrap(CompanionStore.date(fromDayString: "2026-07-20", calendar: utcCalendar))
         XCTAssertEqual(utcCalendar.component(.weekday, from: from), 2, "date_from_weekday must be Mon")
 
-        guard case .days(let tokens) = try XCTUnwrap(snap.glanceFace) else {
+        guard case .days(let tokens) = try XCTUnwrap(face(of: snap)) else {
             return XCTFail("week must show the day face")
         }
         let glance = try sub(expected, "glance")
@@ -314,7 +330,7 @@ final class ContractV11Tests: XCTestCase {
         XCTAssertEqual(snap.toolsKickerText, ranks["kicker_tools"] as? String)
 
         let glance = try sub(expected, "glance")
-        guard case .grid(let columns, let filled, let windowDays, let firstCell) = try XCTUnwrap(snap.glanceFace) else {
+        guard case .grid(let columns, let filled, let windowDays, let firstCell) = try XCTUnwrap(face(of: snap)) else {
             return XCTFail("month must show the grid face")
         }
         XCTAssertEqual(windowDays, try XCTUnwrap(glance["window_days"] as? Int))
@@ -341,7 +357,7 @@ final class ContractV11Tests: XCTestCase {
         XCTAssertEqual(snap.topTools.last?.logoAsset, "AgentOpenCode")
 
         let glance = try sub(expected, "glance")
-        guard case .grid(let columns, let filled, let windowDays, _) = try XCTUnwrap(snap.glanceFace) else {
+        guard case .grid(let columns, let filled, let windowDays, _) = try XCTUnwrap(face(of: snap)) else {
             return XCTFail("year must show the grid face")
         }
         XCTAssertEqual(windowDays, try XCTUnwrap(glance["window_days"] as? Int))
@@ -360,7 +376,7 @@ final class ContractV11Tests: XCTestCase {
         XCTAssertNil(snap.deltaRowText)
         XCTAssertTrue(snap.topTools.isEmpty)
         XCTAssertTrue(snap.topModels.isEmpty)
-        XCTAssertNil(snap.glanceFace, "all-zero source hides the glance strip")
+        XCTAssertNil(face(of: snap), "all-zero source hides the glance strip")
         XCTAssertNil(snap.activeSegmentText)
     }
 
@@ -402,7 +418,7 @@ final class ContractV11Tests: XCTestCase {
 
     private func assertGlanceOff(_ doc: [String: Any], _ expected: [String: Any]) throws {
         let snap = try snapshot(for: doc)
-        XCTAssertNil(snap.glanceFace)
+        XCTAssertNil(face(of: snap))
         // requests_absent: component-off => the source isn't even selected, so no request.
         let comps = try components(of: doc)
         for period in UsagePeriod.allCases {
@@ -421,7 +437,7 @@ final class ContractV11Tests: XCTestCase {
         XCTAssertEqual(CompanionStore.glanceSource(for: .month, components: comps, today: Date(), calendar: utcCalendar), .stats)
         XCTAssertEqual(CompanionStore.glanceSource(for: .year, components: comps, today: Date(), calendar: utcCalendar), .stats)
         let snap = try snapshot(for: doc)
-        XCTAssertNil(snap.glanceFace)
+        XCTAssertNil(face(of: snap))
     }
 
     private func server(_ id: String, _ label: String) -> CompanionServerSettings {
@@ -477,19 +493,24 @@ final class ContractV11Tests: XCTestCase {
                                                 failedIDs: [])
         XCTAssertEqual(rows.map(\.label), ["Local", "Second"], "settings order")
 
-        // quota_all_server_order: the group keys carry the server label (dictionary
-        // iteration order is NOT preserved by Swift, so membership is what's assertable).
-        let quota = try decodeFixture(QuotaResponse.self, "quota.json")
-        var providers: [String: ProviderQuota] = [:]
-        for label in ["Local", "Second"] {
-            for (provider, value) in quota.providers ?? [:] { providers["\(label) · \(provider)"] = value }
+        // quota_all_server_order: merged groups run in SETTINGS order, and each
+        // server's providers keep their wire order (contract §Multi-server
+        // "server ordering" + §All view "provider order as detected").
+        let quota = try QuotaResponse.decode(from: try fixtureData("quota.json"))
+        XCTAssertEqual(quota.providerWireOrder, ["codex", "claude", "kimi"], "wire order decode")
+        let merged = CompanionStore.mergedQuota([("Local", quota), ("Second", quota)])
+        let groupSnap = Snapshot(usage: combined, quota: merged, thresholds: .defaults)
+        XCTAssertEqual(groupSnap.allQuotaGroups.map(\.provider),
+                       ["Local · Codex", "Local · Claude", "Local · Kimi",
+                        "Second · Codex", "Second · Claude", "Second · Kimi"])
+        let serverOrder = try XCTUnwrap(expected["quota_all_server_order"] as? [String])
+        var seenLabels: [String] = []
+        for name in merged.providerWireOrder ?? [] {
+            let label = String(name.split(separator: " ·", maxSplits: 1,
+                                          omittingEmptySubsequences: false).first ?? "")
+            if seenLabels.last != label { seenLabels.append(label) }
         }
-        let groupSnap = Snapshot(usage: combined,
-                                 quota: QuotaResponse(enabled: true, providers: providers, timestamp: nil),
-                                 thresholds: .defaults)
-        let groupProviders = Set(groupSnap.allQuotaGroups.map(\.provider))
-        XCTAssertTrue(groupProviders.contains { $0.hasPrefix("Local") }, "\(groupProviders)")
-        XCTAssertTrue(groupProviders.contains { $0.hasPrefix("Second") }, "\(groupProviders)")
+        XCTAssertEqual(seenLabels, serverOrder, "pinned server order")
         XCTAssertTrue(groupSnap.lowQuotaRows.allSatisfy { !$0.provider.contains(" · ") },
                       "deduped Low labels omit the server prefix")
 
@@ -559,7 +580,7 @@ final class ContractV11Tests: XCTestCase {
         XCTAssertTrue(L10n.t("quota_unavailable").contains(try XCTUnwrap(expected["inline_warning_contains"] as? String)))
         // active-time and insights are OPTIONAL sections: silent nil, no warning of their own.
         XCTAssertNil(snap.activeSegmentText)
-        XCTAssertNil(snap.glanceFace)
+        XCTAssertNil(face(of: snap))
         XCTAssertFalse(snap.subLine.contains("retrying"), "usage itself succeeded")
     }
 
@@ -866,6 +887,35 @@ final class ContractV11Tests: XCTestCase {
         XCTAssertTrue(partial.perServerRows)
     }
 
+    // MARK: - Wire provider order (All-view group order source)
+
+    func testWireProviderKeysIsAStructuralScan() throws {
+        // The fixture's own document order.
+        XCTAssertEqual(QuotaResponse.wireProviderKeys(in: try fixtureData("quota.json")),
+                       ["codex", "claude", "kimi"])
+        // String VALUES are scanned as strings, never as structure: braces, colons,
+        // escaped quotes and even the word "providers" inside a value must not move
+        // the key scan.
+        let tricky = #"""
+        {"enabled":true,"status_detail":"failed parsing providers: {\"x\": 1} {",
+         "providers":{"zeta":{"buckets":[{"bucket":"5h","label":"5{h}: \"quoted\""}]},
+                      "alpha":{"provider":"alpha"}},
+         "timestamp":1}
+        """#
+        XCTAssertEqual(QuotaResponse.wireProviderKeys(in: Data(tricky.utf8)), ["zeta", "alpha"])
+        // Absent / null / non-object payloads yield nil - the view falls back to a
+        // sorted (deterministic) order instead of an arbitrary one.
+        XCTAssertNil(QuotaResponse.wireProviderKeys(in: Data(#"{"enabled":true,"timestamp":1}"#.utf8)))
+        XCTAssertNil(QuotaResponse.wireProviderKeys(in: Data(#"{"providers":null}"#.utf8)))
+        XCTAssertNil(QuotaResponse.wireProviderKeys(in: Data("[]".utf8)))
+    }
+
+    func testQuotaDecodeCarriesTheWireOrder() throws {
+        let q = try QuotaResponse.decode(from: try fixtureData("quota.json"))
+        XCTAssertEqual(q.providerWireOrder, ["codex", "claude", "kimi"])
+        XCTAssertEqual(q.providers?.count, 3)
+    }
+
     // MARK: - Evidence render (skipped unless the sentinel file exists)
 
     /// Renders the REAL flyout UI (ContentView + real store) against the fixture
@@ -887,6 +937,15 @@ final class ContractV11Tests: XCTestCase {
         try """
         {"version":3,"servers":[{"id":"evidence","label":"Evidence","baseUrl":"http://127.0.0.1:8123","enabled":true}],"language":"english"}
         """.write(to: settingsURL, atomically: true, encoding: .utf8)
+        // Restore the process-global seams on every exit path: XCTest runs this
+        // test alphabetically BEFORE most of the class, and a leaked pathOverride
+        // would silently point later tests' stores at the evidence settings.
+        let previousOverride = CompanionSettings.pathOverride
+        let previousLanguage = L10n.current
+        defer {
+            CompanionSettings.pathOverride = previousOverride
+            L10n.current = previousLanguage
+        }
         CompanionSettings.pathOverride = settingsURL
         L10n.current = .english
 
@@ -905,18 +964,22 @@ final class ContractV11Tests: XCTestCase {
         // cacheDisplay path. ImageRenderer is NOT used: it does not rasterize the
         // AppKit-backed segmented Pickers (they come out as empty placeholders),
         // while cacheDisplay draws the real control cells.
+        let width = CompanionLayout.popoverWidth
         let root = ContentView()
             .environmentObject(store)
-            .frame(width: 300)
+            .frame(width: width)
             .background(Color(NSColor.windowBackgroundColor))
         let host = NSHostingView(rootView: root)
-        host.frame = NSRect(x: 0, y: 0, width: 300, height: 1)
+        host.frame = NSRect(x: 0, y: 0, width: width, height: 1)
         host.layoutSubtreeIfNeeded()
         let fitting = host.fittingSize
-        host.frame = NSRect(x: 0, y: 0, width: 300, height: max(fitting.height, 100))
+        host.frame = NSRect(x: 0, y: 0, width: width, height: max(fitting.height, 100))
         let window = NSWindow(contentRect: host.frame, styleMask: [.borderless],
                               backing: .buffered, defer: false)
         window.contentView = host
+        // Close on every exit path - an assertion failure mid-capture must not
+        // leave a flyout window floating on the developer's screen.
+        defer { window.orderOut(nil) }
         window.orderFrontRegardless()
         try await Task.sleep(nanoseconds: 600_000_000)  // one draw pass
         guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else {
@@ -935,7 +998,7 @@ final class ContractV11Tests: XCTestCase {
         try await Task.sleep(nanoseconds: 600_000_000)
         let allPath = (outPath as NSString).deletingPathExtension + "-all." +
             (outPath as NSString).pathExtension
-        host.frame = NSRect(x: 0, y: 0, width: 300, height: max(host.fittingSize.height, 100))
+        host.frame = NSRect(x: 0, y: 0, width: width, height: max(host.fittingSize.height, 100))
         window.setFrame(host.frame, display: false)
         guard let rep2 = host.bitmapImageRepForCachingDisplay(in: host.bounds) else {
             XCTFail("no bitmap rep for caching display (all view)")
@@ -944,7 +1007,6 @@ final class ContractV11Tests: XCTestCase {
         host.cacheDisplay(in: host.bounds, to: rep2)
         let png2 = try XCTUnwrap(rep2.representation(using: .png, properties: [:]))
         try png2.write(to: URL(fileURLWithPath: allPath))
-        window.orderOut(nil)
         NSLog("EVIDENCE-PNG \(allPath) \(rep2.pixelsWide)x\(rep2.pixelsHigh)")
     }
 

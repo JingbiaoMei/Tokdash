@@ -33,6 +33,12 @@ final class ContractV11Tests: XCTestCase {
         return c
     }
 
+    /// Every case fixture ends Sun 2026-07-26; the week face anchors on the clock, so
+    /// tests freeze it to the fixture timestamp (the contract's clock convention).
+    private var frozenNow: Date {
+        try! XCTUnwrap(CompanionStore.date(fromDayString: "2026-07-26", calendar: utcCalendar))
+    }
+
     private func expectedDocument(_ name: String) throws -> [String: Any] {
         let data = try Data(contentsOf: contractURL("expected/\(name).json"))
         return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
@@ -56,8 +62,13 @@ final class ContractV11Tests: XCTestCase {
         return name
     }
 
+    /// A slot is FAILED for both "503" and JSON null - contract §Expected behavior
+    /// cases: "null means the endpoint returns nothing at all this cycle (treated as
+    /// a failure)". Mirrors the Windows loader (JSON null -> "fail").
     private func slotFailed(_ doc: [String: Any], _ key: String) -> Bool {
-        (doc["fixtures"] as? [String: Any])?[key] as? String == "503"
+        let raw = (doc["fixtures"] as? [String: Any])?[key]
+        if raw is NSNull { return true }
+        return raw as? String == "503"
     }
 
     private func period(of doc: [String: Any]) -> UsagePeriod {
@@ -209,10 +220,12 @@ final class ContractV11Tests: XCTestCase {
         let actual = snap.lowQuotaRows
         XCTAssertEqual(actual.count, lowRows.count)
         for (row, want) in zip(actual, lowRows) {
-            // Case-insensitive: the shipped UI capitalizes window names ("Weekly");
-            // the mock writes them lowercase. The pin carries the shape, not the casing.
-            XCTAssertEqual("\(row.provider) · \(row.displayBucketLabel)".lowercased(),
-                           (want["label"] as? String)?.lowercased())
+            // Byte-exact: the contract pins these strings ("Strings are pinned under
+            // the English locale"), casing included - the Windows suite asserts the
+            // same bytes. Any display-label drift must fail here, not silently pass.
+            // The ⚠ prefix in the pinned label is flyout decoration for Failed rows.
+            let pinned = try XCTUnwrap(want["label"] as? String).replacingOccurrences(of: "⚠ ", with: "")
+            XCTAssertEqual("\(row.provider) · \(row.displayBucketLabel)", pinned)
             XCTAssertEqual(row.left, try XCTUnwrap(want["left"] as? Int), accuracy: 0.001)
             XCTAssertEqual(row.estimated, want["estimated"] as? Bool)
         }
@@ -226,13 +239,16 @@ final class ContractV11Tests: XCTestCase {
             let name = try XCTUnwrap(want["provider"] as? String)
             let group = try XCTUnwrap(snap.allQuotaGroups.first { $0.provider == name })
             let wantRows = try XCTUnwrap(want["rows"] as? [[String: Any]])
-            XCTAssertEqual(group.rows.count, wantRows.count)
-            for wantRow in wantRows {
-                let label = try XCTUnwrap(wantRow["label"] as? String).lowercased()
-                let left = try XCTUnwrap(wantRow["left"] as? Int)
-                XCTAssertTrue(group.rows.contains {
-                    $0.displayBucketLabel.lowercased() == label && abs($0.left - Double(left)) < 0.001
-                }, "\(name): missing row \(label) \(left)")
+            XCTAssertEqual(group.rows.count, wantRows.count, "\(name): row count")
+            // Ordered and byte-exact: rows follow the server's `buckets` array on both
+            // platforms, so index i must carry the pinned label i - verbatim, casing
+            // included (Windows asserts the same bytes order-sensitively).
+            for (idx, wantRow) in wantRows.enumerated() {
+                let row = group.rows[idx]
+                XCTAssertEqual(row.displayBucketLabel, try XCTUnwrap(wantRow["label"] as? String),
+                               "\(name): row \(idx) label")
+                XCTAssertEqual(row.left, try XCTUnwrap(wantRow["left"] as? Int), accuracy: 0.001,
+                               "\(name): row \(idx) left")
             }
         }
 
@@ -701,16 +717,16 @@ final class ContractV11Tests: XCTestCase {
     func testGlanceFacesHideWhenAllZero() throws {
         let empty = try decodeFixture(InsightsResponse.self, "insights-empty.json")
         XCTAssertNil(CompanionStore.glanceFace(period: .today, insights: empty, stats: nil,
-                                               components: CompanionComponents(), calendar: utcCalendar))
+                                               components: CompanionComponents(), calendar: utcCalendar, now: frozenNow))
         XCTAssertNil(CompanionStore.glanceFace(period: .month, insights: nil, stats: nil,
-                                               components: CompanionComponents(), calendar: utcCalendar))
+                                               components: CompanionComponents(), calendar: utcCalendar, now: frozenNow))
         // histogram off means no face even with data present.
         var histOff = CompanionComponents(); histOff.activityHistogramTodayWeek = false
         let today = try decodeFixture(InsightsResponse.self, "insights-today.json")
         XCTAssertNil(CompanionStore.glanceFace(period: .today, insights: today, stats: nil,
-                                               components: histOff, calendar: utcCalendar))
+                                               components: histOff, calendar: utcCalendar, now: frozenNow))
         guard case .hours(let bars, let peak) = CompanionStore.glanceFace(period: .today, insights: today, stats: nil,
-                                                                          components: CompanionComponents(), calendar: utcCalendar) else {
+                                                                          components: CompanionComponents(), calendar: utcCalendar, now: frozenNow) else {
             return XCTFail("healthy today shows the hour face")
         }
         XCTAssertEqual(bars.count, 24)
@@ -721,7 +737,7 @@ final class ContractV11Tests: XCTestCase {
         let stats = try decodeFixture(StatsResponse.self, "stats-contributions.json")
         guard case .grid(let columns, let filled90, let days90, let first90) = try XCTUnwrap(
             CompanionStore.glanceFace(period: .month, insights: nil, stats: stats,
-                                      components: CompanionComponents(), calendar: utcCalendar)) else {
+                                      components: CompanionComponents(), calendar: utcCalendar, now: frozenNow)) else {
             return XCTFail("month grid")
         }
         XCTAssertEqual(days90, 90)
@@ -733,26 +749,34 @@ final class ContractV11Tests: XCTestCase {
 
         guard case .grid(_, let filled180, let days180, _) = try XCTUnwrap(
             CompanionStore.glanceFace(period: .year, insights: nil, stats: stats,
-                                      components: CompanionComponents(), calendar: utcCalendar)) else {
+                                      components: CompanionComponents(), calendar: utcCalendar, now: frozenNow)) else {
             return XCTFail("year grid")
         }
         XCTAssertEqual(days180, 180)
         XCTAssertEqual(filled180, 143)
     }
 
-    func testDayFaceAnchorsToPayloadWeek() throws {
+    func testDayFaceAnchorsToTheClocksWeek() throws {
         let weekly = try decodeFixture(InsightsResponse.self, "insights-week.json")
         guard case .days(let tokens) = try XCTUnwrap(
             CompanionStore.glanceFace(period: .week, insights: weekly, stats: nil,
-                                      components: CompanionComponents(), calendar: utcCalendar)) else {
+                                      components: CompanionComponents(), calendar: utcCalendar, now: frozenNow)) else {
             return XCTFail("week day face")
         }
         XCTAssertEqual(tokens.count, 7)
-        // Data misses 2026-07-21 = Tuesday (index 1). The week face is anchored to
-        // the payload, so the empty column's POSITION is deterministic.
+        // Data misses 2026-07-21 = Tuesday (index 1). Frozen clock Sun 2026-07-26 sits
+        // in the same Mon..today window the fixture was fetched for, so the empty
+        // column's POSITION is deterministic.
         XCTAssertEqual(tokens[0], 11_200_000)
         XCTAssertEqual(tokens[1], 0)
         XCTAssertEqual(tokens[2], 13_400_000)
+
+        // The face is Mon..TODAY (contract §Activity glance): a daily facet that lags
+        // into last week must not be presented as the current week's activity.
+        let stale = try XCTUnwrap(CompanionStore.date(fromDayString: "2026-08-02", calendar: utcCalendar))
+        XCTAssertNil(CompanionStore.glanceFace(period: .week, insights: weekly, stats: nil,
+                                               components: CompanionComponents(), calendar: utcCalendar, now: stale),
+                     "a stale payload reads all-zero for the current week and hides")
     }
 
     // MARK: - Unit: multi-server helpers and badges

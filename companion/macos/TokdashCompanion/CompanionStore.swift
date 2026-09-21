@@ -508,7 +508,13 @@ final class CompanionStore: NSObject, ObservableObject {
         let quota = QuotaResponse(enabled: results.contains(where: { $0.quota.enabled }), providers: providers, timestamp: nil)
         lastUsage = usage; lastQuota = quota
         lastInsights = nil; lastStats = nil
-        lastActiveMs = Self.combinedActiveMs(results.map { ($0.activeMs, failedServerIDs.contains($0.server.id)) })
+        // Every enabled server feeds the sum, not just the ones that answered: a server
+        // missing from `results` (failed/unreachable) must make `failed` true so a known-
+        // partial sum can never render (contract §Active time, "never a partial sum").
+        lastActiveMs = Self.combinedActiveMs(servers.map { server in
+            let result = results.first { $0.server.id == server.id }
+            return (result?.activeMs, result == nil)
+        })
         // Per-server rows in settings order, from this same fan-out - never an extra
         // request (contract §Per-server rows). Failed servers stay listed as "unreachable".
         lastPerServer = Self.perServerRows(servers: servers, results: results.map { ($0.server, $0.usage) },
@@ -941,11 +947,14 @@ final class CompanionStore: NSObject, ObservableObject {
 
     /// Pure face selection so the contract tests can pin every period/component combo
     /// without a live server. All-zero faces return nil (component hides itself).
-    /// Both week and grid anchor on the PAYLOAD's newest date, not the wall clock:
-    /// the server's window is the source of truth and frozen fixtures stay testable.
+    /// The WEEK face anchors on `now` (the snapshot clock) - contract §Activity glance
+    /// pins the face as "7 columns Mon..today"; a stale payload must not silently
+    /// present last week's columns, it renders the current week (all-zero -> hidden).
+    /// The GRID faces anchor on the payload's newest date, which the contract sanctions
+    /// for the trailing-90/180-day windows.
     nonisolated static func glanceFace(period: UsagePeriod, insights: InsightsResponse?, stats: StatsResponse?,
                                        components: CompanionComponents,
-                                       calendar: Calendar) -> Snapshot.GlanceFace? {
+                                       calendar: Calendar, now: Date) -> Snapshot.GlanceFace? {
         guard components.activityGlance else { return nil }
         switch period {
         case .today:
@@ -953,7 +962,7 @@ final class CompanionStore: NSObject, ObservableObject {
             return hourFace(insights)
         case .week:
             guard components.activityHistogramTodayWeek, let insights else { return nil }
-            return dayFace(daily: insights.daily, calendar: calendar)
+            return dayFace(daily: insights.daily, now: now, calendar: calendar)
         case .month, .year:
             return gridFace(stats: stats, windowDays: period == .month ? 90 : 180, calendar: calendar)
         }
@@ -972,18 +981,15 @@ final class CompanionStore: NSObject, ObservableObject {
         return .hours(bars: bars, peakHour: insights.hourly?.peakHour)
     }
 
-    /// Mon..Sun columns of the week containing the daily facet's newest date. The
-    /// facet is sparse (no entry = no usage), so missing days render as empty zero
-    /// columns, not skipped ones.
-    private nonisolated static func dayFace(daily: [DailyPoint]?,
+    /// Mon..Sun columns of the week containing `now` (the snapshot clock), with the
+    /// later days of the current week reading as empty until they happen. The facet is
+    /// sparse (no entry = no usage), so missing days render as empty zero columns, not
+    /// skipped ones. Anchoring on the clock - not the newest payload date - keeps the
+    /// face honest when the daily facet lags behind today.
+    private nonisolated static func dayFace(daily: [DailyPoint]?, now: Date,
                                             calendar: Calendar) -> Snapshot.GlanceFace? {
         guard let daily, !daily.isEmpty else { return nil }
-        let dates = daily.compactMap { point -> Date? in
-            guard let raw = point.date else { return nil }
-            return date(fromDayString: raw, calendar: calendar)
-        }
-        guard let newest = dates.max() else { return nil }
-        let monday = startOfWeekMonday(newest, calendar: calendar)
+        let monday = startOfWeekMonday(now, calendar: calendar)
         var tokens: [Int] = []
         for offset in 0..<7 {
             guard let day = calendar.date(byAdding: .day, value: offset, to: monday) else { tokens.append(0); continue }
@@ -1490,7 +1496,7 @@ struct Snapshot {
 
     var glanceFace: GlanceFace? {
         CompanionStore.glanceFace(period: period, insights: insights, stats: stats,
-                                  components: components, calendar: .current)
+                                  components: components, calendar: .current, now: now)
     }
 
     /// Windows below their low-quota threshold, sorted by remaining ascending.
@@ -1731,11 +1737,16 @@ struct QuotaRow: Identifiable {
         }
         guard p == "claude" else { return bucketLabel }
         if bucket.lowercased().hasPrefix("weekly_scoped") { return bucketLabel }
-        switch canonicalBucket {
-        case "5h": return L10n.t("window_5h")
-        case "weekly": return L10n.t("window_weekly")
-        default: return bucketLabel
+        // Byte-exact parity with the Windows formatter: only Claude's two special windows
+        // get the standardized wording. A plain "weekly" bucket passes through verbatim -
+        // the contract's expected fixtures pin it as "weekly", not the forced "Weekly".
+        let id = bucket.lowercased()
+        if id.contains("session") || id.contains("five hour") || id.contains("five_hour")
+            || id.contains("5-hour") || id.contains("5h") { return L10n.t("window_5h") }
+        if "\(bucket) \(bucketLabel)".lowercased().replacingOccurrences(of: "_", with: " ").contains("weekly all") {
+            return L10n.t("window_weekly")
         }
+        return bucketLabel
     }
 
     /// Antigravity's API returns a single window per model - whichever (5-hour or weekly)
@@ -2014,6 +2025,10 @@ struct CompanionSettings: Codable {
         try values.encodeIfPresent(availableUpdateVersion, forKey: .availableUpdateVersion)
         try values.encodeIfPresent(availableUpdateURL, forKey: .availableUpdateURL)
         try values.encodeIfPresent(skippedUpdateVersion, forKey: .skippedUpdateVersion)
+        // Schema v3: components and the selected hero segment must persist too -
+        // omitting them here silently resets every toggle and the segment on relaunch.
+        try values.encode(components, forKey: .components)
+        try values.encode(selectedPeriod.rawValue, forKey: .selectedPeriod)
     }
 
     /// Test seam: when set, settings are read and written here instead of the user's real

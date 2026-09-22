@@ -41,7 +41,8 @@ def test_gpt_5_6_family_pricing():
     db = PricingDatabase()
 
     expected = {
-        "gpt-5.6-sol": (5.0, 30.0, 0.5, 6.25),
+        "gpt-5.6-sol": (4.0, 20.0, 0.4, 5.0),
+        "gpt-5.6-sol-pro": (4.0, 20.0, 0.4, 5.0),
         "gpt-5.6-terra": (2.0, 12.0, 0.20, 2.50),
         "gpt-5.6-terra-pro": (2.0, 12.0, 0.20, 2.50),
         "gpt-5.6-luna": (0.20, 1.20, 0.02, 0.25),
@@ -78,6 +79,29 @@ def test_gpt_6_astra_pricing():
     ) / 1_000_000
     cost = db.get_cost("gpt-6-astra", 1000, 2000, 3000, 4000)
     assert abs(cost - expected_cost) < 1e-12, "gpt-6-astra pricing should match official table"
+
+
+def _cost(input_price, output_price, cache_read_price, cache_write_price):
+    return (
+        1000 * input_price
+        + 2000 * output_price
+        + 3000 * cache_read_price
+        + 4000 * cache_write_price
+    ) / 1_000_000
+
+
+def test_gpt_6_sol_and_luna_pricing():
+    """GPT-6 Sol and Luna (2026-09-22) must match OpenAI's standard short-context rates."""
+    db = PricingDatabase()
+
+    expected = {
+        "gpt-6-sol": (2.0, 10.0, 0.20, 2.50),
+        "gpt-6-luna": (0.10, 0.50, 0.01, 0.125),
+        "gpt-5.6-cyber": (12.5, 75.0, 1.25, 15.625),
+    }
+    for model, prices in expected.items():
+        cost = db.get_cost(model, 1000, 2000, 3000, 4000)
+        assert abs(cost - _cost(*prices)) < 1e-12, f"{model!r} pricing should match official table"
 
 
 def test_deepseek_v4_flash_0731_pricing():
@@ -322,6 +346,28 @@ def test_opus_5_matches_published_pricing():
     assert abs(cost - expected_cost) < 1e-12, "Opus 5 should match published pricing"
 
 
+def test_opus_5_5_pricing_and_aliases():
+    """Opus 5.5 must resolve at $4/$20 (cache $0.20/$5), fast mode at 2x, from raw log ids."""
+    db = PricingDatabase()
+
+    for model in ["claude-opus-5.5", "claude-opus-5-5", "opus-5.5", "anthropic/claude-opus-5.5"]:
+        cost = db.get_cost(model, 1000, 2000, 3000, 4000)
+        assert abs(cost - _cost(4.0, 20.0, 0.20, 5.0)) < 1e-12, f"{model!r} should resolve to Opus 5.5 pricing"
+    fast = db.get_cost("claude-opus-5-5-fast", 1000, 2000, 3000, 4000)
+    assert abs(fast - _cost(8.0, 40.0, 0.40, 10.0)) < 1e-12, "Opus 5.5 fast mode should be 2x standard"
+
+
+def test_mythos_5_1_matches_fable_5_1_pricing():
+    """Mythos 5.1 must price identically to Fable 5.1."""
+    db = PricingDatabase()
+
+    fable = db.get_cost("claude-fable-5.1", 1000, 2000, 3000, 4000)
+    assert abs(fable - _cost(10.0, 50.0, 0.25, 12.5)) < 1e-12
+    for model in ["claude-mythos-5.1", "claude-mythos-5-1", "mythos-5.1"]:
+        cost = db.get_cost(model, 1000, 2000, 3000, 4000)
+        assert abs(cost - fable) < 1e-12, f"{model!r} should match Fable 5.1 pricing"
+
+
 def test_fable_5_aliases_and_pricing():
     """Fable 5 aliases must resolve to the published input/output pricing."""
     db = PricingDatabase()
@@ -334,15 +380,15 @@ def test_fable_5_aliases_and_pricing():
         )
 
 
-def test_sonnet_5_aliases_and_introductory_pricing():
-    """Sonnet 5 aliases must resolve to Anthropic's introductory API pricing."""
+def test_sonnet_5_aliases_and_standard_pricing():
+    """Sonnet 5 aliases must resolve to $2/$10, which stayed the standard price after 2026-09-01."""
     db = PricingDatabase()
 
     expected_cost = (1000 * 2 + 2000 * 10 + 3000 * 0.20 + 4000 * 2.50) / 1_000_000
     for model in ["claude-sonnet-5", "sonnet-5", "sonnet5", "claude-sonnet-5-20260630"]:
         cost = db.get_cost(model, 1000, 2000, 3000, 4000)
         assert abs(cost - expected_cost) < 1e-12, (
-            f"{model!r} should resolve to Claude Sonnet 5 introductory pricing"
+            f"{model!r} should resolve to Claude Sonnet 5 standard pricing"
         )
 
 

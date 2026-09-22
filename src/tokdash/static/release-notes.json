@@ -1,6 +1,30 @@
 {
-  "current": "2.6.0",
+  "current": "2.6.1",
   "releases": [
+    {
+      "version": "2.6.1",
+      "date": "2026-09-22",
+      "sections": [
+        {
+          "type": "added",
+          "items": [
+            "Devin CLI usage tracking: per-call token usage from Devin's local SQLite store lands in Overview, the period filters and Stats."
+          ]
+        },
+        {
+          "type": "changed",
+          "items": [
+            "The pricing database was refreshed from the 2026-09-22 model scan: Claude Opus 5.5 is priced at $4.00 input / $20.00 output per MTok, and Claude Fable 5.1 now sits with the other Anthropic entries."
+          ]
+        },
+        {
+          "type": "fixed",
+          "items": [
+            "A signed-out Claude Code profile no longer shows quota windows it can never refresh."
+          ]
+        }
+      ]
+    },
     {
       "version": "2.6.0",
       "date": "2026-09-21",
@@ -95,7 +119,7 @@
           "type": "changed",
           "items": [
             "The Report tab is much faster to reopen: sessions are cached per session and shared across the week, month and year windows instead of being rebuilt three times. TOKDASH_SESSION_CACHE_TURNS bounds what the cache retains.",
-            "The Report tab swaps the quick-range presets for period chips — this and last week, named months, years — each stepping the window a whole period back.",
+            "The Report tab swaps the quick-range presets for period chips \u2014 this and last week, named months, years \u2014 each stepping the window a whole period back.",
             "Share cards follow the app theme, export at 1800x3200, and print tokens and cost together in the header, with cost on by default and the toggle as the opt-out. Month cards use smaller heat squares with empty boxes for days still ahead, week cards drop the heat row, and the project card ranks the top 3 projects.",
             "Durations render in unit words, two at most: 25 hours reads as 1 day 1 hour, 34 days as 1 month 4 days."
           ]
@@ -406,7 +430,7 @@
           "type": "fixed",
           "items": [
             "Changing the date range no longer leaves the previous range's Apps & Models and Combined Models tables under the new range's label.",
-            "The Agent Time card now shows that it is loading instead of a dash, which read as “no agent time” while its request was still in flight.",
+            "The Agent Time card now shows that it is loading instead of a dash, which read as \u201cno agent time\u201d while its request was still in flight.",
             "Restored DeepSeek Harness session loading when the persistent usage database is disabled or unreadable."
           ]
         }
@@ -419,7 +443,7 @@
         {
           "type": "fixed",
           "items": [
-            "Codex subagent and fork sessions no longer double-count the parent thread they replay — newer Codex writes forks in a shape the old check could not see.",
+            "Codex subagent and fork sessions no longer double-count the parent thread they replay \u2014 newer Codex writes forks in a shape the old check could not see.",
             "Codex usage is no longer attributed to gpt-5.3-codex when a rollout records no model; those rows now take the file's own model, or read as unknown at zero cost.",
             "Picking a date range no longer keeps a fork's replayed rows when the range excluded the parent session."
           ]
@@ -445,7 +469,7 @@
         {
           "type": "added",
           "items": [
-            "Added DeepSeek Harness (dsh) as a token, cost and session source — each step's early usage chunk folds into its finalized message, and a forked session's inherited prefix is skipped, so nothing is double-counted.",
+            "Added DeepSeek Harness (dsh) as a token, cost and session source \u2014 each step's early usage chunk folds into its finalized message, and a forked session's inherited prefix is skipped, so nothing is double-counted.",
             "DeepSeek Harness sessions appear in the Session Explorer with title, project and active time, and sync into the persistent store.",
             "Added GLM 5.3, DeepSeek V4 Pro and Grok 4.6 pricing, plus a DeepSeek Harness brand mark."
           ]

@@ -4,11 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## Unreleased
+## 2.6.1 - 2026-09-22
 
 ### Added
 
 - Devin CLI usage tracking. Devin (Cognition) keeps its whole history in one WAL-mode SQLite store, and Tokdash reads `message_nodes.chat_message` for the explicit `input_tokens`, `output_tokens`, `cache_read_tokens` and `cache_creation_tokens` each call persists, taking one entry per billable node with nothing copied into the usage store. The store resolves from `$DEVIN_CLI_DATA_DIRS` (added to the defaults, never replacing them), then `$XDG_DATA_HOME/devin/cli` or `~/.local/share/devin/cli` on Linux and macOS -- the layout Devin's own troubleshooting docs give for both, with `~/Library/Application Support/devin/cli` tried second on macOS in case the Rust build maps app data there -- `%APPDATA%\devin\cli` on Windows, and the Windows-host store under the drvfs mount when Tokdash runs in WSL; `sessions.db` wins over the pre-rename `cli_sessions.db` by precedence rather than union, so a migrated install is not counted twice and an unmigrated one is not dropped. A store behind that mount, behind a UNC path, or carrying a live `-wal`/`-shm` sidecar is copied and read from the copy, because a WAL database that needs recovery cannot be opened read-only and `connect_sqlite_readonly` answers that failure with a read-write connect -- which would replay the WAL inside the user's own store and leave sidecar files beside it. A plain local store still takes the cheap read-only path and is retried once through a copy before any failure is reported, and a failed read is never cached, so a hiccup cannot settle into a cached zero. Timestamps normalize seconds, milliseconds, microseconds and nanoseconds by magnitude, so the unit the CLI happens to write cannot land a year of usage a thousand years out and report a silent zero. Cost is pricing-DB only -- Devin sells seats plus credits and publishes no per-token rate card, so Cognition-hosted models resolve to 0.00 -- and reasoning is zero by construction, because no bucket is persisted. Hidden helper sessions (the summarizer) count as the real spend they are, cache reads are treated as a bucket separate from input, and a node's own model wins over the session's. Not yet verified against a populated store: the schema and record fields come from the shipped v3000.10.31 binary and its docs bundle, and every convention above is pinned by a test so a capture corrects it in one place. No Sessions tab. (#105)
+
+### Changed
+
+- Updated `src/tokdash/pricing_db.json` from pricing DB `2.0.26` to `2.0.28` (`lastUpdated: 2026-09-22T22:01:41Z`). This adds the model pricing entries from the 2026-09-22 pricing-updater scan, including Anthropic's `claude-opus-5.5` ($4.00 input / $20.00 output per MTok), and moves `claude-fable-5.1` into the Anthropic section where it belongs. (#107)
 
 ### Fixed
 

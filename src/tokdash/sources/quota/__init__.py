@@ -562,9 +562,11 @@ def _measured_accounts(
 
 
 def _retired_claude_accounts(
-    accounts: Iterable[str], known: frozenset[str] | None
+    accounts: Iterable[str],
+    known: frozenset[str] | None,
+    signed_out: frozenset[str] = frozenset(),
 ) -> set[str]:
-    """Claude installs whose stored windows should stop rendering: the directory is gone.
+    """Claude installs whose stored rows should stop rendering: gone, or signed out.
 
     A renamed or deleted ``~/.claude-<profile>`` leaves its window rows behind forever --
     nothing expires a stored (account, bucket) row -- so a subscription the user removed
@@ -583,6 +585,15 @@ def _retired_claude_accounts(
       not be trusted: no ``credential_scan`` consent, or an unavailable home / unmounted
       ``TOKDASH_CLAUDE_PROFILES`` volume. Absence has to be observed to count.
 
+    ``signed_out`` is how an install becomes unrefreshable with its directory sitting exactly
+    where it was: ``claude logout`` removes the credential file and keeps the directory, so
+    ``known`` retains the name while ``scan_profiles`` stops polling it. The rows can never
+    be refreshed and neither can the error last recorded against them. Retiring is safe
+    where the reverse is not because it hides rows rather than deleting them -- signing in
+    restores the windows on the next poll, while keeping them has no correction at all. See
+    ``claude._signed_out_names``, which is what distinguishes an absent file from one that
+    merely will not open right now.
+
     Deliberately not a function of row age. Retiring on a timestamp cannot tell "this install
     is gone" from "nothing has polled this provider lately" -- and since Claude API polling is
     consent-gated and off by default, the latter is the common case -- so an age rule either
@@ -591,7 +602,11 @@ def _retired_claude_accounts(
     """
     if known is None:
         return set()
-    return {account for account in accounts if account not in known}
+    return {
+        account
+        for account in accounts
+        if account not in known or account in signed_out
+    }
 
 
 def _account_entries(
@@ -798,14 +813,15 @@ def quota_state(store: UsageEntryStore | None = None) -> dict[str, Any]:
     # Rows of a Claude install that is observably gone are dropped before anything reads
     # them, so the card's buckets, its account list, its `updated_at` and its warning all
     # answer from the same set of installs. Only Claude retires accounts, and only on
-    # observed absence of the install's directory (see `_retired_claude_accounts`): Claude
-    # is the one provider whose accounts ARE filesystem objects, so it is the one provider
-    # where "is it gone" is a question with an answer. Every other provider's account name
-    # comes out of a credential the poller read -- a MiniMax region, an Antigravity email, a
-    # Grok user id -- and several of them write their failure rows under a synthetic
-    # `default` account when there was no credential to name at all, so any provider-wide
-    # retirement rule would let one of those synthetic rows evict the real accounts'
-    # last-known data, which is exactly what the card is required to keep showing.
+    # observed absence of the install's directory or of the sign-in inside it (see
+    # `_retired_claude_accounts`): Claude is the one provider whose accounts ARE filesystem
+    # objects, so it is the one provider where "is it gone" is a question with an answer.
+    # Every other provider's account name comes out of a credential the poller read -- a
+    # MiniMax region, an Antigravity email, a Grok user id -- and several of them write
+    # their failure rows under a synthetic `default` account when there was no credential
+    # to name at all, so any provider-wide retirement rule would let one of those synthetic
+    # rows evict the real accounts' last-known data, which is exactly what the card is
+    # required to keep showing.
     retired_claude = _retired_claude_accounts(
         (
             str(row.get("account") or "default")
@@ -813,6 +829,7 @@ def quota_state(store: UsageEntryStore | None = None) -> dict[str, Any]:
             if str(row.get("provider") or "") == "claude"
         ),
         claude_scan_result.known,
+        claude_scan_result.signed_out,
     )
     if retired_claude:
         latest = [

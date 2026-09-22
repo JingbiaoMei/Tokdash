@@ -53,7 +53,7 @@ def _install(
     tier: str = "default_claude_max_5x",
 ) -> Path:
     directory = home / name
-    directory.mkdir(parents=True)
+    directory.mkdir(parents=True, exist_ok=True)  # re-installing is signing in again
     (directory / ".credentials.json").write_text(
         json.dumps(
             {
@@ -102,8 +102,70 @@ def _expire(directory: Path) -> None:
     path.write_text(json.dumps(blob), encoding="utf-8")
 
 
+def _sign_out(directory: Path) -> None:
+    """``claude logout``: the credential file is gone and the directory stays.
+
+    Durable in a way a failed read is not -- nothing restores the file until the user signs
+    in again, and an admitted-only-on-its-credential sibling is not polled in the meantime.
+    """
+    (directory / ".credentials.json").unlink()
+
+
+def _replace_credential_with_a_directory(directory: Path) -> None:
+    """Something stands where the credential was, and it is not a file.
+
+    A dotfile manager's mishap, or an unpack that kept the wrong entry. ``configured``
+    demands ``is_file()``, so the install is not polled -- and the path DOES exist, so only
+    an absence test that means "nothing pollable here" can retire it. Answering only
+    ``ENOENT`` here would leave exactly the permanently frozen card this rule exists to end.
+    """
+    path = directory / ".credentials.json"
+    path.unlink()
+    path.mkdir()
+
+
 # --- discovery ----------------------------------------------------------------
 
+
+def test_a_missing_or_non_file_credential_is_absent_and_an_unreadable_one_is_not(
+    monkeypatch, tmp_path
+):
+    """What may read as "no sign-in here", and what may only read as "cannot tell".
+
+    This predicate decides whether an install's stored rows are retired, so it has to be
+    asked in `configured`'s terms: that one demands a regular file, so anything else at the
+    path stops the polling just as surely as nothing being there. A failed OPEN is the
+    opposite case -- the file is regular and gets polled again the moment it opens.
+    """
+    home = _home(monkeypatch, tmp_path)
+    directory = _install(home, ".claude-lab", token="tok-lab")
+    credential = directory / ".credentials.json"
+    profile = claude.ClaudeProfile("lab", directory, False)
+
+    assert profile.credential_observably_absent is False  # signed in
+
+    credential.chmod(0o000)
+    try:
+        assert profile.credential_observably_absent is False  # unreadable, and still a file
+    finally:
+        credential.chmod(0o0600)
+
+    directory.chmod(0o000)
+    try:
+        # An unsearchable directory cannot answer "where is the file" at all. A root test
+        # user reads through both of these, which is the same verdict either way.
+        assert profile.credential_observably_absent is False
+    finally:
+        directory.chmod(0o0755)
+
+    _replace_credential_with_a_directory(directory)
+    assert profile.credential_observably_absent is True  # there, but nothing to poll
+
+    credential.rmdir()
+    assert profile.credential_observably_absent is True  # observably gone
+
+    credential.symlink_to(directory / "nowhere")  # a dangling link is no file either
+    assert profile.credential_observably_absent is True
 
 def test_profile_dirs_name_every_install_by_its_directory(monkeypatch, tmp_path):
     home = _home(monkeypatch, tmp_path)
@@ -709,15 +771,16 @@ def test_a_removed_installs_expired_sign_in_stops_warning_the_card(monkeypatch, 
     assert provider["updated_at"] == 1_782_907_200  # not the deleted install's newer row
 
 
-def test_an_unreadable_install_keeps_the_windows_it_already_reported(monkeypatch, tmp_path):
-    """A credential that cannot be opened right now is not an install that has been removed.
+def test_a_signed_out_install_stops_quoting_its_last_known_windows(monkeypatch, tmp_path):
+    """`claude logout` leaves the directory in the listing, so directory presence is not enough.
 
-    A plain `claude logout`, an `EPERM` on the file, a dotfile manager mid-relink and a
-    credential caught mid-write all read as "this install is gone" to a file check, which is
-    why the file is never the oracle: the directory is still in the home listing, so the
-    install is still known. Its rows are far older than the default install's here, and that
-    is deliberate -- age is not part of the test, so no amount of it retires a subscription
-    that is still installed.
+    The install stops being polled the moment its credential goes, because a sibling is
+    admitted on that file. Nothing can then refresh its window rows, and nothing can
+    supersede the failure it last recorded -- whose whole message is "open Claude Code once
+    to refresh it", advice for a sign-in that is no longer there to refresh. A card that
+    keeps quoting both is showing numbers that can never be corrected, which is what this
+    retires. It hides the stored rows rather than deleting them, so signing in again puts
+    them back (see the test below).
     """
     from tokdash.sources.quota import quota_state
 
@@ -728,16 +791,184 @@ def test_an_unreadable_install_keeps_the_windows_it_already_reported(monkeypatch
     UsageEntryStore().insert_quota_snapshots(
         [
             _snapshot("default", "session", "Session", 40.0, 1_782_907_200),
-            # A month behind the default install, and still not retired.
-            _snapshot("academic", "academic_session", "Session", 20.0, 1_780_315_200),
+            _snapshot("academic", "academic_session", "Session", 20.0, 1_782_907_200),
+            _snapshot(
+                "academic", "api", "Claude API", None, 1_782_907_300, status="stale_token"
+            ),
         ]
     )
-    (academic / ".credentials.json").unlink()  # unreadable from here on
+    _sign_out(academic)
 
+    provider = quota_state()["providers"]["claude"]
+
+    assert [b["account"] for b in provider["buckets"]] == ["default"]
+    # One install left, so the payload stays as a single-install card always had it -- with
+    # the signed-out install's stale advice gone with it.
+    assert "accounts" not in provider
+    assert provider["status_detail"] is None
+    assert provider["updated_at"] == 1_782_907_200
+
+
+def test_a_signed_out_install_that_signs_in_again_comes_back_with_its_windows(
+    monkeypatch, tmp_path
+):
+    """The asymmetry that makes early retirement safe: it is a display decision, not a delete.
+
+    Nothing is written to `quota_snapshots` by retiring an account, so the same rows that
+    vanished from the card are still there when the credential returns. The reverse
+    decision -- keep the rows of an install nothing polls -- has no equivalent correction.
+    """
+    from tokdash.sources.quota import quota_state
+
+    home = _home(monkeypatch, tmp_path)
+    _install(home, ".claude", token="tok-base")
+    academic = _install(home, ".claude-academic", token="tok-academic")
+    config.set_quota_consent({"credential_scan": True, "claude_api": True})
+    UsageEntryStore().insert_quota_snapshots(
+        [
+            _snapshot("default", "session", "Session", 40.0, 1_782_907_200),
+            _snapshot("academic", "academic_session", "Session", 20.0, 1_782_907_200),
+        ]
+    )
+
+    _sign_out(academic)
+    assert [b["account"] for b in quota_state()["providers"]["claude"]["buckets"]] == [
+        "default"
+    ]
+
+    _install(home, ".claude-academic", token="tok-academic")  # signed in again
     provider = quota_state()["providers"]["claude"]
 
     assert [b["account"] for b in provider["buckets"]] == ["academic", "default"]
     assert [a["account"] for a in provider["accounts"]] == ["default", "academic"]
+
+
+def test_an_install_whose_credential_will_not_open_keeps_its_windows(monkeypatch, tmp_path):
+    """A credential that cannot be OPENED is not an install that has been signed out.
+
+    An `EACCES` on the file and an install directory that cannot be searched both fail the
+    read while leaving the predicate an answer to work with, and either can clear on its own
+    -- so the install keeps what it already reported. Its rows are a month behind the default
+    install's here on purpose: age is not part of the decision, so no amount of it retires an
+    install that could still be polled again.
+    """
+    from tokdash.sources.quota import quota_state
+
+    home = _home(monkeypatch, tmp_path)
+    _install(home, ".claude", token="tok-base")
+    academic = _install(home, ".claude-academic", token="tok-academic")
+    blocked = _install(home, ".claude-lab", token="tok-lab")
+    config.set_quota_consent({"credential_scan": True, "claude_api": True})
+    UsageEntryStore().insert_quota_snapshots(
+        [
+            _snapshot("default", "session", "Session", 40.0, 1_782_907_200),
+            # A month behind the default install, and still not retired.
+            _snapshot("academic", "academic_session", "Session", 20.0, 1_780_315_200),
+            _snapshot("lab", "lab_session", "Session", 60.0, 1_780_315_200),
+        ]
+    )
+    (academic / ".credentials.json").chmod(0o000)  # a file that will not open
+    blocked.chmod(0o000)  # cannot even be searched
+    try:
+        provider = quota_state()["providers"]["claude"]
+    finally:
+        blocked.chmod(0o0755)
+
+    assert [b["account"] for b in provider["buckets"]] == ["academic", "default", "lab"]
+
+
+def test_a_revoked_token_stays_and_a_removed_sign_in_does_not(monkeypatch, tmp_path):
+    """Where a Claude install's quota stops being reported: this machine, not the server.
+
+    Three installs, three states, one card. A sign-in we hold is a sign-in we report, even
+    when Anthropic has stopped accepting it -- the install is still polled, its error is
+    live, and its windows are the last thing it measured, which is the deal every other
+    provider's card already makes. Only a sign-in that is gone from THIS machine stops
+    being reported, because that is the one state that ends the polling and leaves the
+    numbers with no way back.
+    """
+    from tokdash.sources.quota import quota_state
+
+    home = _home(monkeypatch, tmp_path)
+    _install(home, ".claude", token="tok-base")
+    expired = _install(home, ".claude-expired", token="tok-expired")
+    gone = _install(home, ".claude-gone", token="tok-gone")
+    config.set_quota_consent({"credential_scan": True, "claude_api": True})
+    UsageEntryStore().insert_quota_snapshots(
+        [
+            _snapshot("default", "session", "Session", 10.0, 1_782_907_200),
+            _snapshot("expired", "expired_session", "Session", 30.0, 1_782_907_200),
+            _snapshot("expired", "api", "Claude API", None, 1_782_907_200, status="stale_token"),
+            _snapshot("gone", "gone_session", "Session", 50.0, 1_782_907_200),
+            _snapshot("gone", "api", "Claude API", None, 1_782_907_200, status="stale_token"),
+        ]
+    )
+
+    _expire(expired)  # expired locally / revoked upstream: the file is still here
+    _sign_out(gone)  # `claude logout`: the sign-in itself is off this machine
+
+    provider = quota_state()["providers"]["claude"]
+
+    assert [b["account"] for b in provider["buckets"]] == ["default", "expired"]
+    assert [a["account"] for a in provider["accounts"]] == ["default", "expired"]
+    by_account = {a["account"]: a for a in provider["accounts"]}
+    assert by_account["expired"]["status_detail"] == "stale_token"  # the card still says so
+    assert provider["status_account"] == "expired"  # and blames the install that owns it
+
+
+def test_an_install_with_no_credential_file_in_its_place_is_retired(monkeypatch, tmp_path):
+    """A directory where the credential was is as unpolllable as no credential at all.
+
+    `configured` demands a regular file, so the install stopped being polled the moment
+    something else took the path; an absence test answering only `ENOENT` would call this
+    "present" and leave the frozen bars on the card for good, which is the exact state the
+    sign-out rule exists to end.
+    """
+    from tokdash.sources.quota import quota_state
+
+    home = _home(monkeypatch, tmp_path)
+    _install(home, ".claude", token="tok-base")
+    academic = _install(home, ".claude-academic", token="tok-academic")
+    config.set_quota_consent({"credential_scan": True, "claude_api": True})
+    UsageEntryStore().insert_quota_snapshots(
+        [
+            _snapshot("default", "session", "Session", 40.0, 1_782_907_200),
+            _snapshot("academic", "academic_session", "Session", 20.0, 1_782_907_200),
+        ]
+    )
+
+    _replace_credential_with_a_directory(academic)
+
+    provider = quota_state()["providers"]["claude"]
+
+    assert [b["account"] for b in provider["buckets"]] == ["default"]
+
+
+def test_a_signed_out_default_install_keeps_its_rows(monkeypatch, tmp_path):
+    """The default install is exempt from the sign-out rule, on purpose.
+
+    It is polled whether or not it is configured, so its own `unavailable` row is what names
+    its state and keeps its error from going stale, and those rows are also what drive the
+    consent and "not detected" card. Retiring the account would take that explanation with
+    it and leave a blank card on the machine that most needs the reason. What the default
+    install does still keep, and the sibling no longer does, is its last-known windows:
+    fixing that needs a state the card can print in their place, which no surface speaks
+    yet.
+    """
+    from tokdash.sources.quota import quota_state
+
+    home = _home(monkeypatch, tmp_path)
+    default = _install(home, ".claude", token="tok-base")
+    config.set_quota_consent({"credential_scan": True, "claude_api": True})
+    UsageEntryStore().insert_quota_snapshots(
+        [_snapshot("default", "session", "Session", 40.0, 1_782_907_200)]
+    )
+
+    _sign_out(default)
+
+    provider = quota_state()["providers"]["claude"]
+
+    assert [b["account"] for b in provider["buckets"]] == ["default"]
 
 
 def test_a_home_that_cannot_be_listed_retires_nothing(monkeypatch, tmp_path):
@@ -1208,6 +1439,77 @@ def test_redirecting_the_default_slot_does_not_retire_the_redirected_install(
             _snapshot("academic", "academic_session", "Session", 20.0, 1_782_907_200),
         ]
     )
+
+    provider = quota_state()["providers"]["claude"]
+
+    assert [b["account"] for b in provider["buckets"]] == ["academic", "default"]
+
+
+def test_signing_out_of_a_demoted_default_install_keeps_the_redirected_one(
+    monkeypatch, tmp_path
+):
+    """The sign-out rule retires under both of an install's names, and they are not its own.
+
+    A directory's intrinsic slug is a property of the directory; its assigned name is handed
+    out relative to `CLAUDE_CONFIG_DIR`. Point the variable at `~/.claude-academic` and the
+    plain `~/.claude` beside it is renamed `claude` while keeping the intrinsic slug
+    `default` -- which is now the REDIRECTED install's account. Sign out of `~/.claude` and
+    retiring everything it answers to blanks the subscription that is working, on the card
+    of the machine that still has it. Naming a directory twice is safe in `_known_names`,
+    where it can only keep rows; here it deletes them from the card, so a name another
+    pollable install answers to is not this one's to retire.
+    """
+    from tokdash.sources.quota import quota_state
+
+    home = _home(monkeypatch, tmp_path)
+    (home / ".claude").mkdir()  # present, and signed out: no `.credentials.json`
+    academic = _install(home, ".claude-academic", token="tok-academic")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(academic))
+    config.set_quota_consent({"credential_scan": True, "claude_api": True})
+    UsageEntryStore().insert_quota_snapshots(
+        [
+            # `~/.claude-academic` holds the default slot, so its rows are the `default` ones.
+            _snapshot("default", "session", "Session", 40.0, 1_782_907_200),
+            _snapshot("claude", "claude_session", "Session", 99.0, 1_780_315_200),
+        ]
+    )
+
+    assert claude.scan_profiles().signed_out == frozenset({"claude"})
+
+    provider = quota_state()["providers"]["claude"]
+
+    assert [b["account"] for b in provider["buckets"]] == ["default"]
+
+
+def test_signing_out_of_one_of_two_installs_sharing_a_slug_keeps_the_other(
+    monkeypatch, tmp_path
+):
+    """Two directories can want one slug, and the loser keeps the winner's name intrinsically.
+
+    `claude_profile_dirs` makes assigned names unique with a `-2` suffix, so a second
+    `.claude-academic` from somewhere else is assigned `claude-academic` while its intrinsic
+    slug stays `academic` -- the first one's account. Signing out of the copy must not retire
+    the original's windows.
+    """
+    from tokdash.sources.quota import quota_state
+
+    home = _home(monkeypatch, tmp_path)
+    _install(home, ".claude", token="tok-base")
+    live = _install(home, ".claude-academic", token="tok-academic")
+    elsewhere = tmp_path / "elsewhere" / ".claude-academic"
+    elsewhere.mkdir(parents=True)  # same intrinsic slug, and signed out
+    monkeypatch.setenv(
+        "TOKDASH_CLAUDE_PROFILES", os.pathsep.join([str(live), str(elsewhere)])
+    )
+    config.set_quota_consent({"credential_scan": True, "claude_api": True})
+    UsageEntryStore().insert_quota_snapshots(
+        [
+            _snapshot("default", "session", "Session", 40.0, 1_782_907_200),
+            _snapshot("academic", "academic_session", "Session", 20.0, 1_782_907_200),
+        ]
+    )
+
+    assert claude.scan_profiles().signed_out == frozenset({"claude-academic"})
 
     provider = quota_state()["providers"]["claude"]
 

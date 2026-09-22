@@ -268,18 +268,45 @@ construction.
 default install where there is one and the measured install where there is not, so an existing
 consumer sees what it always did — the per-install plans are in `accounts[].plan`.
 
-A Claude install leaves both `buckets` and `accounts` when its config directory is **observed
-to be gone**, which is what retires a renamed or deleted install — a `~/.claude-<profile>`
-sibling, or `~/.claude` itself once the sign-in has moved to a sibling. Absence has to be
-observed: the test is whether the listing that names the installs (the home directory, or the
-paths in `TOKDASH_CLAUDE_PROFILES`) could be read, named at least one install, and did not
-name this one.
+A Claude install leaves both `buckets` and `accounts` when it can no longer be polled, which
+happens two ways.
 
-An install that is present but unreadable right now keeps its data — `claude logout`, a
-permissions error, a dotfile manager mid-relink, a credential file caught mid-write. So does
-every install whenever the answer is unavailable rather than negative: the listing could not be
-read, it named no install at all (an unmounted or still-locked home, which is not the news that
-every subscription was deleted), or `quota.credential_scan` consent is off.
+**Its config directory is observed to be gone** — a renamed or deleted install, a
+`~/.claude-<profile>` sibling or `~/.claude` itself once the sign-in has moved to a sibling.
+Absence has to be observed: the test is whether the listing that names the installs (the home
+directory, or the paths in `TOKDASH_CLAUDE_PROFILES`) could be read, named at least one
+install, and did not name this one.
+
+This is about what this machine holds, not whether the subscription still works. A sign-in
+whose token Anthropic has stopped accepting is still a sign-in we have: the install is
+polled, it keeps its windows and its `stale_token` warning, and the card says so. Only a
+sign-in that is no longer on this machine stops being reported.
+
+**Its sign-in is observed to be gone.** `claude logout` deletes a sibling's
+`.credentials.json` and leaves the directory, so the listing still names the install — but a
+sibling is only polled while it has that file, so from the logout on nothing refreshes its
+window rows and nothing supersedes the error it last recorded, `stale_token` included. A card
+that kept those rows would quote numbers that can never be corrected again, and give advice
+about refreshing a sign-in that is not there. The default install is exempt: it is polled
+whether or not it has a credential, so its own `unavailable` row is what names its state, and
+its rows are what drive the consent and "not detected" card.
+
+An install that is present and **merely unreadable right now** keeps its data — a permissions
+error on the file, an install directory that cannot be searched. Either can clear on its own,
+and the path still holds a file, so the install is still polled; only the two triggers above
+stop it. "No sign-in" is asked in the polling rule's own terms, which demand a regular file, so
+a directory left where `.credentials.json` was counts as absent: nothing could poll it either.
+What neither covers is a credential that vanishes and comes back — an unlink-then-relink, a
+dangling symlink, an atomic rename caught mid-flight — which reads as absent and blanks that
+install's bars for one poll cycle. Nothing is deleted, so the next cycle restores them.
+
+Nor is anything retired when the answer is unavailable rather than negative: the listing could
+not be read, it named no install at all (an unmounted or still-locked home, which is not the
+news that every subscription was deleted), or `quota.credential_scan` consent is off.
+
+Neither rule deletes anything. Retirement hides stored rows from the current card, so an
+install that signs in again, or reappears, has its windows back on the next poll; history is
+unaffected either way.
 
 What membership measures is directory presence, not the name a directory is given on this run.
 `CLAUDE_CONFIG_DIR` reassigns account names around whichever install it points at — aim it at

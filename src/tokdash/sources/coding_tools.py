@@ -7091,8 +7091,8 @@ class DevinParser(BaseParser):
         * a Windows drive seen through WSL's drvfs mount (``/mnt/<drive>/``);
         * a UNC path (``\\\\wsl.localhost\\<distro>\\...``, ``\\\\wsl$\\...``, or any
           other share). This is how a Windows-host Tokdash reaches a guest store, see
-          ``clientpaths.devin_cli_roots``; pathlib's drive parsing for UNC is
-          platform-dependent, so the string prefix is the test;
+          ``clientpaths.devin_cli_roots``; pathlib's parsing of both this and the
+          drvfs shape is platform-dependent, so both are decided on the path text;
         * any store with a live ``-wal`` or ``-shm`` sidecar.
 
         The reason is the same in all three, and it is not only about read
@@ -7104,10 +7104,17 @@ class DevinParser(BaseParser):
         on top of that. Copying first is both safe and side-effect-free, which
         is what ZCode already does for the same hazard.
         """
-        if str(db_path).startswith("\\\\"):
+        # Both tests read the path as text, never through the host's path
+        # flavour. A WindowsPath splits "/mnt/c/..." with a "\\" root and a UNC
+        # path into a "\\\\server\\share\\" drive, so a parts-based test answers
+        # by which OS is asking rather than by which store it was handed --
+        # and these two shapes exist precisely because a store is reached from
+        # the other side of a mount.
+        text = str(db_path).replace("\\", "/")
+        if text.startswith("//"):
             return True
-        parts = db_path.parts
-        if len(parts) > 2 and parts[0] == "/" and parts[1] == "mnt" and len(parts[2]) == 1:
+        parts = text.split("/")
+        if len(parts) > 2 and parts[0] == "" and parts[1] == "mnt" and len(parts[2]) == 1:
             return True
         for suffix in ("-wal", "-shm"):
             try:

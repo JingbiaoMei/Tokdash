@@ -11,7 +11,7 @@ import json
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from types import SimpleNamespace
 
 import pytest
@@ -771,14 +771,24 @@ def test_the_window_predicate_and_the_reported_timestamp_agree(tmp_path, monkeyp
 # --- read transport ----------------------------------------------------------
 
 
-def test_the_snapshot_decision_is_about_transport_not_origin():
-    """drvfs, UNC and a live sidecar all need a copy; a plain local store does not."""
-    assert DevinParser._needs_snapshot(Path("/mnt/c/Users/x/devin/cli/sessions.db")) is True
-    assert DevinParser._needs_snapshot(Path("\\\\wsl.localhost\\Ubuntu\\home\\x\\sessions.db")) is True
-    assert DevinParser._needs_snapshot(Path("\\\\wsl$\\Ubuntu\\home\\x\\sessions.db")) is True
-    assert DevinParser._needs_snapshot(Path("/home/x/.local/share/devin/cli/sessions.db")) is False
+@pytest.mark.parametrize("flavour", [PurePosixPath, PureWindowsPath], ids=["posix", "windows"])
+def test_the_snapshot_decision_is_about_transport_not_origin(flavour):
+    """drvfs, UNC and a live sidecar all need a copy; a plain local store does not.
+
+    Run under both path flavours because the answer must not depend on which OS
+    is asking. It did: a WindowsPath splits "/mnt/c/..." with a "\\" root, so the
+    parts-based drvfs test returned False on the Windows CI leg for the one
+    shape that exists only because a store is being read across a mount.
+    """
+    needs = DevinParser._needs_snapshot
+    assert needs(flavour("/mnt/c/Users/x/devin/cli/sessions.db")) is True
+    assert needs(flavour("\\\\wsl.localhost\\Ubuntu\\home\\x\\sessions.db")) is True
+    assert needs(flavour("\\\\wsl$\\Ubuntu\\home\\x\\sessions.db")) is True
+    assert needs(flavour("/home/x/.local/share/devin/cli/sessions.db")) is False
     # A path that merely contains mnt somewhere is not a 9p mount.
-    assert DevinParser._needs_snapshot(Path("/data/mnt/c/sessions.db")) is False
+    assert needs(flavour("/data/mnt/c/sessions.db")) is False
+    # /mnt/wsl is the WSL instance mount, not a Windows drive.
+    assert needs(flavour("/mnt/wsl/instances/x/sessions.db")) is False
 
 
 def test_a_live_wal_sidecar_sends_the_store_through_the_snapshot(tmp_path, monkeypatch):

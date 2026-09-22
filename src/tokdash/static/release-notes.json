@@ -1,6 +1,18 @@
 {
-  "current": "2.6.1",
+  "current": "2.6.2",
   "releases": [
+    {
+      "version": "2.6.2",
+      "date": "2026-09-23",
+      "sections": [
+        {
+          "type": "changed",
+          "items": [
+            "The pricing database was updated for the September releases: Claude Opus 5.5 Fast (2x the standard rate), Claude Mythos 5.1 and OpenAI's GPT-5.6 Cyber are priced, GPT-5.6 Sol and Sol Pro drop to $4.00 / $20.00 under OpenAI's promotional pricing, and Claude Sonnet 5's $2.00 / $10.00 is confirmed as the standard price."
+          ]
+        }
+      ]
+    },
     {
       "version": "2.6.1",
       "date": "2026-09-22",

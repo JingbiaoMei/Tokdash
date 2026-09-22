@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 2.6.2 - 2026-09-23
+
+### Changed
+
+- Updated `src/tokdash/pricing_db.json` from pricing DB `2.0.28` to `2.0.29` (`lastUpdated: 2026-09-23T00:00:00Z`) for the September releases from Anthropic and OpenAI. `claude-opus-5.5-fast` prices at 2x the standard Opus 5.5 rate ($8.00 input / $40.00 output, cache $0.40 read / $10.00 write), `claude-mythos-5.1` (Project Glasswing access only) prices the same as `claude-fable-5.1`, and OpenAI's approval-gated `gpt-5.6-cyber` joins at $12.50 / $75.00 (cache $1.25 / $15.625). `gpt-5.6-sol` and `gpt-5.6-sol-pro` drop from $5.00 / $30.00 to $4.00 / $20.00 (cache $0.40 / $5.00) — OpenAI lists the lower rate as promotional pricing from 2026-08-21, available at least through 2026-11-21 — and `claude-sonnet-5`'s $2.00 / $10.00 is confirmed as the standard price after the planned 2026-09-01 increase was cancelled. The new aliases `opus-5-5`, `mythos-5.1` and `mythos-5-1` resolve alongside the raw log ids. (#106, thanks @lushuyu)
+
 ## 2.6.1 - 2026-09-22
 
 ### Added

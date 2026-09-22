@@ -1,6 +1,6 @@
 {
-  "version": "2.0.28",
-  "lastUpdated": "2026-09-22T22:01:41Z",
+  "version": "2.0.29",
+  "lastUpdated": "2026-09-23T00:00:00Z",
   "note": "Comprehensive pricing database with all Moonshot, MiniMax, GLM, and OpenAI models from OpenRouter. Cache pricing estimated at 10% of input for cache_read, 100% of input for cache_write.",
   "aliases": {
     "Qwen/Qwen3.8-Flash-Next": "qwen3.8-flash",
@@ -48,9 +48,12 @@
     "moonshot-ai/kimi-k2.5": "kimi-k2.5",
     "moonshot-ai/kimi-k2.6": "kimi-k2.6",
     "moonshotai/k3-256k": "kimi-k3-256k",
+    "mythos-5-1": "claude-mythos-5.1",
+    "mythos-5.1": "claude-mythos-5.1",
     "opus-4.7": "claude-opus-4.7",
     "opus-4.8": "claude-opus-4.8",
     "opus-5": "claude-opus-5",
+    "opus-5-5": "claude-opus-5.5",
     "opus-5.5": "claude-opus-5.5",
     "qwen3.8-flash-next": "qwen3.8-flash",
     "qwen3.8max": "qwen3.8-max",
@@ -815,22 +818,23 @@
     },
     "gpt-5.6-sol": {
       "provider": "openai",
-      "input": 5.0,
-      "output": 30.0,
-      "cache_read": 0.5,
-      "cache_write": 6.25,
+      "input": 4.0,
+      "output": 20.0,
+      "cache_read": 0.4,
+      "cache_write": 5.0,
       "unit": "per_million_tokens",
       "source": "developers.openai.com/api/docs/pricing",
-      "note": "Official OpenAI standard short-context pricing, verified 2026-07-10"
+      "note": "Official OpenAI standard short-context pricing, verified 2026-09-23. Promotional price from 2026-08-21 (was $5/$30), available at least through 2026-11-21."
     },
     "gpt-5.6-sol-pro": {
       "provider": "openai",
-      "input": 5.0,
-      "output": 30.0,
-      "cache_read": 0.5,
-      "cache_write": 6.25,
+      "input": 4.0,
+      "output": 20.0,
+      "cache_read": 0.4,
+      "cache_write": 5.0,
       "unit": "per_million_tokens",
-      "source": "openrouter.ai/openai/gpt-5.6-sol-pro"
+      "source": "openrouter.ai/openai/gpt-5.6-sol-pro",
+      "note": "Official OpenAI standard short-context pricing, verified 2026-09-23. Promotional price from 2026-08-21 (was $5/$30), available at least through 2026-11-21. Same rates as gpt-5.6-sol."
     },
     "gpt-5.6-terra": {
       "provider": "openai",
@@ -1069,7 +1073,8 @@
       "cache_read": 0.01,
       "cache_write": 0.125,
       "unit": "per_million_tokens",
-      "source": "openrouter.ai/openai/gpt-6-luna"
+      "source": "openrouter.ai/openai/gpt-6-luna",
+      "note": "Official OpenAI standard short-context pricing, released 2026-09-22, verified 2026-09-23. Past 272K: 2x input/cache, 1.5x output; Batch and Flex halve these rates and Fast doubles them."
     },
     "gpt-6-luna-pro": {
       "provider": "openai",
@@ -1087,7 +1092,8 @@
       "cache_read": 0.2,
       "cache_write": 2.5,
       "unit": "per_million_tokens",
-      "source": "openrouter.ai/openai/gpt-6-sol"
+      "source": "openrouter.ai/openai/gpt-6-sol",
+      "note": "Official OpenAI standard short-context pricing, released 2026-09-22, verified 2026-09-23. Past 272K: 2x input/cache, 1.5x output; Batch and Flex halve these rates and Fast doubles them."
     },
     "gpt-6-sol-pro": {
       "provider": "openai",
@@ -1097,6 +1103,16 @@
       "cache_write": 2.5,
       "unit": "per_million_tokens",
       "source": "openrouter.ai/openai/gpt-6-sol-pro"
+    },
+    "gpt-5.6-cyber": {
+      "provider": "openai",
+      "input": 12.5,
+      "output": 75.0,
+      "cache_read": 1.25,
+      "cache_write": 15.625,
+      "unit": "per_million_tokens",
+      "source": "developers.openai.com/api/docs/pricing",
+      "note": "Official OpenAI standard pricing (approval-gated Daybreak Red model), verified 2026-09-23."
     },
     "_comment_anthropic": "=== Anthropic Claude Models ===",
     "claude-fable-5": {
@@ -1116,6 +1132,16 @@
       "cache_write": 12.5,
       "unit": "per_million_tokens",
       "source": "openrouter.ai/anthropic/claude-fable-5.1"
+    },
+    "claude-mythos-5.1": {
+      "provider": "anthropic",
+      "input": 10.0,
+      "output": 50.0,
+      "cache_read": 0.25,
+      "cache_write": 12.5,
+      "unit": "per_million_tokens",
+      "source": "platform.claude.com/docs/en/about-claude/pricing",
+      "note": "Project Glasswing access only. Same pricing as claude-fable-5.1."
     },
     "claude-3-haiku": {
       "provider": "anthropic",
@@ -1246,7 +1272,7 @@
       "cache_read": 0.2,
       "cache_write": 2.5,
       "unit": "per_million_tokens",
-      "note": "Introductory pricing through 2026-08-31; standard pricing starts 2026-09-01.",
+      "note": "The introductory $2/$10 price became the standard price; the planned 2026-09-01 increase to $3/$15 was cancelled.",
       "source": "platform.claude.com/docs/en/about-claude/pricing"
     },
     "claude-sonnet-4": {
@@ -1321,7 +1347,18 @@
       "cache_read": 0.2,
       "cache_write": 5.0,
       "unit": "per_million_tokens",
+      "note": "1M context. Successor to claude-opus-5 at a lower price.",
       "source": "openrouter.ai/anthropic/claude-opus-5.5"
+    },
+    "claude-opus-5.5-fast": {
+      "provider": "anthropic",
+      "input": 8.0,
+      "output": 40.0,
+      "cache_read": 0.4,
+      "cache_write": 10.0,
+      "unit": "per_million_tokens",
+      "note": "Fast mode (Claude API only), 2x standard claude-opus-5.5 rates.",
+      "source": "platform.claude.com/docs/en/about-claude/pricing"
     },
     "_comment_deepseek": "=== DeepSeek Models ===",
     "deepseek-chat": {

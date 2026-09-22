@@ -1016,6 +1016,130 @@ def muse_session_files() -> List[Path]:
     return out
 
 
+# --- Devin CLI ----------------------------------------------------------------
+
+
+# Both names appear in the shipped binary's string table; one store keeps one
+# live file, so the lookup order below is what stops a double read.
+_DEVIN_DB_NAMES = ("sessions.db", "cli_sessions.db")
+
+
+def devin_cli_roots() -> List[Path]:
+    """Existing Devin CLI data dirs, in scan order, deduplicated.
+
+    Devin CLI (Cognition) keeps its whole history in one SQLite store,
+    ``<data dir>/sessions.db``. Documented locations (its own troubleshooting
+    page, which names ``~/.local/share/devin/cli/logs/`` and
+    ``%APPDATA%\\devin\\cli\\logs\\``): macOS and Linux use the XDG data dir
+    with the CLI's ``devin/cli`` namespace, Windows uses Roaming AppData -- not
+    Local, unlike Hermes.
+
+    A union, not a platform switch, on purpose. One physical machine can hold
+    both a WSL-guest install and a Windows-host install, which are two stores
+    with disjoint session ids, and both are real usage. From WSL the host store
+    sits behind the drvfs mount, so it is globbed the same way
+    ``qoder_ide_db_path()`` globs it.
+
+    The reverse direction is NOT globbed. A Tokdash running on the Windows host
+    does not walk ``\\\\wsl.localhost\\<distro>\\home\\<user>\\.local\\share\\devin\\cli``,
+    because enumerating every distro means reading a registry-backed namespace
+    that a read-only path resolver has no business touching, and a dead WSL
+    instance makes the UNC path hang rather than fail. Same limit as
+    ``qoder_ide_db_path()``. A Windows-host dashboard pointed at a guest store
+    sets ``DEVIN_CLI_DATA_DIRS`` to that UNC path.
+
+    ``DEVIN_CLI_DATA_DIRS`` (Tokdash-only, comma-separated) is read FIRST and
+    ADDS to the defaults rather than replacing them: a store on a Windows drive
+    other than C: (this author's WSL has c through j mounted) or any relocated
+    dir must be reachable without losing the normal one. The CLI's own variables
+    are ``DEVIN_MODEL``, ``DEVIN_PERMISSION_MODE`` and ``DEVIN_SANDBOX``, none of
+    which relocates the store; this one is named differently on purpose so it is
+    never mistaken for a vendor variable.
+
+    A RELATIVE ``XDG_DATA_HOME`` is invalid per the Base Directory spec and is
+    ignored, matching ``muse_sessions_root()``. ``DEVIN_CLI_DATA_DIRS`` entries
+    are explicit relocations, so a relative one is resolved, matching
+    ``crush_data_dirs()``. Roots that contain neither database name are dropped:
+    an empty ``.../devin/cli`` is not usage.
+    """
+    candidates: List[Path] = []
+
+    for raw in os.environ.get("DEVIN_CLI_DATA_DIRS", "").split(","):
+        raw = raw.strip()
+        if raw:
+            candidates.append(Path(raw).expanduser())
+
+    kind = osinfo.os_kind()
+    if kind == "windows":
+        appdata = os.environ.get("APPDATA", "").strip()
+        base = Path(appdata).expanduser() if appdata else Path.home() / "AppData" / "Roaming"
+        candidates.append(base / "devin" / "cli")
+    else:
+        xdg = os.environ.get("XDG_DATA_HOME", "").strip()
+        if xdg and not Path(xdg).expanduser().is_absolute():
+            xdg = ""
+        base = Path(xdg).expanduser() if xdg else Path.home() / ".local" / "share"
+        candidates.append(base / "devin" / "cli")
+        if kind == "macos":
+            # The XDG path above is DOCUMENTED for macOS, not borrowed from
+            # Linux by omission: the CLI's own troubleshooting bundle gives
+            # macOS the same layout as Linux (logs under
+            # ``~/.local/share/devin/cli/logs/``, summaries under
+            # ``$XDG_DATA_HOME/devin/``, config under ``~/.config/devin``), and
+            # the ``/Library/Application Support/Devin/system.json`` in the same
+            # docs is system-wide enterprise policy, not user data. So this
+            # differs from qoder_ide_db_path() and zed's macOS branch, which
+            # really are app-bundle apps.
+            #
+            # Library is still tried, second, and only for cheap insurance: the
+            # binary is a Rust build and an app-data directory crate would map
+            # there instead. A candidate that does not exist costs one stat; a
+            # missing candidate costs a macOS user their whole history with no
+            # failure signal at all. Roots are kept only when the store file is
+            # in them, so both can be listed without a double read.
+            candidates.append(Path.home() / "Library" / "Application Support" / "devin" / "cli")
+
+    if kind == "wsl":
+        # The host install lives under the drvfs mount. glob() returns nothing
+        # when the mount is absent, so a bare-metal Linux host costs one stat.
+        candidates += sorted(_wsl_windows_root().glob("Users/*/AppData/Roaming/devin/cli"))
+
+    out: List[Path] = []
+    for path in candidates:
+        if not path.is_absolute():
+            path = path.resolve()
+        try:
+            key = path.resolve()
+        except OSError:
+            key = path
+        if key in out:
+            continue
+        if any((path / name).is_file() for name in _DEVIN_DB_NAMES):
+            out.append(key)
+    return out
+
+
+def devin_db_paths() -> List[Path]:
+    """The Devin databases to read: one per root, first existing name wins.
+
+    ``sessions.db`` is the live name and ``cli_sessions.db`` the older one; both
+    strings are compiled into v3000.10.31, and which one a given install writes
+    is capture-pending (Q1). Precedence rather than union: reading both in one
+    root would count the same history twice, which is the same rule Kilo applies
+    to its pre-rename ``opencode*.db``. A root holding only the legacy file is
+    still read, so an unmigrated install is not silently dropped.
+    """
+    out: List[Path] = []
+    for root in devin_cli_roots():
+        for name in _DEVIN_DB_NAMES:
+            candidate = root / name
+            if candidate.is_file():
+                if candidate not in out:
+                    out.append(candidate)
+                break
+    return out
+
+
 # --- Tokdash data dir / usage DB -------------------------------------------------
 #
 # Mirrors onboard/paths.py::data_dir() (kept as a separate, untouched copy there —

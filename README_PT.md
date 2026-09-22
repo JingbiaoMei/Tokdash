@@ -119,6 +119,7 @@
 | **Crush** | ✅ | — |
 | **Muse Code** | ✅ | — |
 | **MiniMax Code** | ✅ | — |
+| **Devin CLI** | ✅ | — |
 
 Veja [Clientes suportados](docs/reference/SUPPORTED_CLIENTS.md) para caminhos de dados locais, sobrescrituras e notas de contabilização por origem.
 

@@ -6968,11 +6968,20 @@ class DevinParser(BaseParser):
     _query_cache_sig: ClassVar[tuple] = ()
     _QUERY_CACHE_MAX: ClassVar[int] = 32
 
-    # Timestamp unit floors, each one 1e8 seconds written in that unit, i.e.
-    # 1973-03-03: below every real epoch value in that unit, and above any
-    # plausible epoch in the next-coarser unit until the year 5138.
+    # Timestamp unit floors. Each one sits below every real epoch value in its
+    # own unit and above every plausible value in the next-coarser unit, so the
+    # tier a value lands in is decided by magnitude alone.
     #
-    # Three tiers, not two, because a two-way test is silently catastrophic.
+    # The ns and us floors are 1e8 seconds written in that unit (1973-03-03).
+    # The ms floor is NOT: 1e12 ms is 1e9 seconds, i.e. 2001-09-09, a decade
+    # higher on purpose. Nothing writes an ms timestamp from before 2001, and
+    # putting the s/ms boundary at 1e12 rather than 1e11 leaves the seconds
+    # tier correct to the year 33658 instead of 5138. Upper ends: an ms store
+    # reads as ms until 1e14 ms and a us store as us until 1e17 us, both the
+    # year 5138.
+    #
+    # Three floors and a seconds fallthrough, not one floor, because a two-way
+    # test is silently catastrophic.
     # A Rust CLI reaching for as_micros() or as_nanos() writes 1.7e15 or 1.7e18;
     # a seconds-or-ms test reads that as milliseconds, lands it a thousand years
     # in the future, and drops every row against the window ceiling -- zero
@@ -6990,15 +6999,38 @@ class DevinParser(BaseParser):
         "cache_read_tokens",
         "cache_creation_tokens",
     )
-    # Where a usage object may sit inside a node's JSON, in precedence order.
-    # Explicit locations only: a recursive hunt would find usage echoed in
-    # tool output and bill it.
+    # Where a usage object may sit inside a node's JSON, in precedence order,
+    # dotted for a nested one. Explicit locations only, each bounded to the
+    # depth written here: a recursive hunt would find the usage echoed in tool
+    # output (``message.tool_result``) and bill it, which is why the list names
+    # every parent it will enter and ``tool_result`` is not among them.
+    #
+    # The root and the four single-word guesses are cheap insurance. The rest
+    # are not guesses: evidence/03 section 4 records the node JSON's own keys as
+    # ``id``, ``message``, ``parent_id``, ``summarized_from``,
+    # ``num_tokens_preceding`` and ``extensions``, and names the per-call struct
+    # ``PerformanceMetrics``. So ``message`` and ``extensions`` are the two
+    # documented places a nested container can sit, and
+    # ``performance_metrics``/``performanceMetrics`` are what serde writes for
+    # that struct under either rename convention. A miss costs one dict lookup;
+    # the wrong list costs every token this source would ever report, and only
+    # the tripwire in collect() would say so (Q3/Q4 settle it).
     _USAGE_PATHS: ClassVar[Tuple[str, ...]] = (
         "",
         "usage",
         "metrics",
         "performance",
+        "performance_metrics",
+        "performanceMetrics",
         "telemetry",
+        "message.usage",
+        "message.performance_metrics",
+        "message.performanceMetrics",
+        "message",
+        "extensions.usage",
+        "extensions.performance_metrics",
+        "extensions.performanceMetrics",
+        "extensions",
     )
     _MODEL_FIELDS: ClassVar[Tuple[str, ...]] = (
         "model",
@@ -7197,7 +7229,12 @@ class DevinParser(BaseParser):
 
     def _usage_container(self, node: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         for location in self._USAGE_PATHS:
-            container: Any = node if location == "" else node.get(location)
+            container: Any = node
+            for key in location.split(".") if location else ():
+                if not isinstance(container, dict):
+                    container = None
+                    break
+                container = container.get(key)
             if not isinstance(container, dict):
                 continue
             if any(field in container for field in self._TOKEN_FIELDS):

@@ -336,6 +336,77 @@ def test_usage_may_sit_at_the_root_of_the_record(tmp_path, monkeypatch):
     )
 
 
+@pytest.mark.parametrize(
+    "layout,payload",
+    [
+        (
+            "message.usage",
+            {
+                "id": "m1",
+                "message": {"content": "placeholder", "usage": {"input_tokens": 41, "output_tokens": 5}},
+            },
+        ),
+        (
+            "extensions.performance_metrics",
+            {
+                "id": "m1",
+                "extensions": {
+                    "performance_metrics": {"input_tokens": 41, "output_tokens": 5, "ttft_ms": 120}
+                },
+            },
+        ),
+        (
+            "performance_metrics",
+            {"id": "m1", "performance_metrics": {"input_tokens": 41, "output_tokens": 5}},
+        ),
+        (
+            "performanceMetrics",
+            {"id": "m1", "performanceMetrics": {"input_tokens": 41, "output_tokens": 5}},
+        ),
+    ],
+)
+def test_usage_nested_under_a_documented_node_key_is_found(
+    tmp_path, monkeypatch, layout, payload
+):
+    """The usage struct is not known to sit at the root, and probably does not.
+
+    evidence/03 section 4 gives the node JSON's own keys as id, message,
+    parent_id, summarized_from, num_tokens_preceding and extensions, and names
+    the per-call struct PerformanceMetrics -- so the container most likely sits
+    one level down under message or extensions, under the struct's serde name.
+    Each of these layouts read as zero usage before the paths were widened, and
+    a zero from this source is indistinguishable from an idle week except for
+    one log line.
+    """
+    parser = _parser(tmp_path, monkeypatch, [("s1", 1, payload, T0_MS)])
+    entries = parser.collect()
+    assert [(e["input"], e["output"]) for e in entries] == [(41, 5)], layout
+
+
+def test_a_node_whose_only_usage_shape_is_tool_output_is_not_billed(
+    tmp_path, monkeypatch, caplog
+):
+    """The reason _USAGE_PATHS names every parent it enters.
+
+    A tool result can carry another agent's usage numbers verbatim. message is
+    now walked for a nested container, so the guard that keeps tool output out
+    of the totals is that message.tool_result is not a listed path -- not the
+    depth limit. Such a node is containerless, so the drift tripwire fires; that
+    is correct, it IS a node with no usage Tokdash can bill.
+    """
+    node = {
+        "id": "m1",
+        "message": {
+            "content": "placeholder",
+            "tool_result": {"input_tokens": 999999, "output_tokens": 999999},
+        },
+    }
+    parser = _parser(tmp_path, monkeypatch, [("s1", 1, node, T0_MS)])
+    with caplog.at_level("WARNING"):
+        assert parser.collect() == []
+    assert "none carried a usage container" in caplog.text
+
+
 def test_hidden_helper_sessions_count(tmp_path, monkeypatch):
     """The summarizer is a real spend, in its own session row, so it is not a
     copy of a counted parent call. Q9 re-checks this in the capture."""
@@ -864,7 +935,7 @@ def test_the_shm_sidecar_is_part_of_the_invalidation_clock(tmp_path):
 # --- macOS path --------------------------------------------------------------
 
 
-def test_macos_keeps_the_documented_xdg_path_and_addes_library(tmp_path, monkeypatch):
+def test_macos_keeps_the_documented_xdg_path_and_adds_library(tmp_path, monkeypatch):
     """XDG is what the vendor's own macOS docs describe, so it stays first.
 
     Library/Application Support is tried as well because a Rust app-data crate

@@ -119,6 +119,7 @@
 | **Crush** | ✅ | — |
 | **Muse Code** | ✅ | — |
 | **MiniMax Code** | ✅ | — |
+| **Devin CLI** | ✅ | — |
 
 ローカルデータパス、オーバーライド、ソース固有の集計に関する注記については [対応クライアント](docs/reference/SUPPORTED_CLIENTS.md) を参照。
 

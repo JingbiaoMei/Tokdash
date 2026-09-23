@@ -61,6 +61,9 @@ def run_script(argv: list[str]) -> subprocess.CompletedProcess:
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
+        # The release body carries CJK once a version is translated; the Windows
+        # locale codec would mangle (or refuse) the child's UTF-8 output.
+        encoding="utf-8",
     )
 
 

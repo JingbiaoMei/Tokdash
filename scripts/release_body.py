@@ -95,6 +95,9 @@ def main() -> int:
 
     text = body(args.version)
     if args.stdout:
+        # The body carries CJK once a version is translated, and the Windows console
+        # defaults to cp1252 -- a Chinese link line would raise UnicodeEncodeError.
+        sys.stdout.reconfigure(encoding="utf-8")
         sys.stdout.write(text)
         return 0
     args.output.write_text(text, encoding="utf-8")

@@ -859,6 +859,14 @@ def get_tools_data_for_range(
                 if sync:
                     store, stored_sources = _sync_usage_store(tracker)
                 else:
+                    # No sync here, so nothing can have failed here: the list is
+                    # every stored source, including one the CURRENT window just
+                    # refused and dropped. The comparison period therefore reads
+                    # whatever the store still holds for a sick source while the
+                    # window beside it reports live or unavailable, which makes
+                    # that one delta briefly compare a fresh number to an old
+                    # one. It heals on the next request, which is why the
+                    # comparison read does not also carry the failure list.
                     store, stored_sources = UsageEntryStore(), _usage_store_sources(tracker)
                 store_data = store.aggregate_entries(sources=stored_sources, since=since, until=until)
                 live_entries = _collect_live_coding_entries(tracker, since, until, _usage_store_live_sources(tracker))

@@ -151,6 +151,36 @@ def _entries(parser):
 
 # --- what counts as a billable request ---------------------------------------
 
+def test_two_spellings_of_one_root_are_scanned_once(monkeypatch, roo_home, tmp_path):
+    """A root reached twice is a double count, never a duplicate row.
+
+    Roo scans a UNION of roots on purpose, so the dedupe has to be on the
+    resolved path. Two absolute spellings of one directory -- a
+    TOKDASH_ROO_STORAGE_DIR written with a ".." in it, or a symlinked
+    ~/.vscode-server beside the real one -- used to become two roots, which fed
+    one ui_messages.json to the parser twice. Roo's entry keys are task-scoped,
+    so the second copy carries the same id and the live path billed it again.
+    """
+    real = tmp_path / "real"
+    (tmp_path / "sub").mkdir()
+    _write_task(real, "t1", [env_user(T0, "model-a"), req(T0 + 1000, 1000, 20)])
+
+    alias = tmp_path / "sub" / ".." / "real"
+    assert alias.resolve() == real.resolve()
+    monkeypatch.setenv("TOKDASH_ROO_STORAGE_DIR", f"{real},{alias}")
+    _sig_cache.clear()
+    BaseParser._entry_cache.clear()
+    _roo_model_cache.clear()
+    _roo_roots_cache.clear()
+
+    roots = clientpaths.roo_storage_roots()
+    assert len(roots) == 1, f"one directory, one root: {roots}"
+    assert len(clientpaths.roo_task_message_files()) == 1
+
+    entries = RooCodeParser(PricingDatabase())._parse_all()
+    assert len(entries) == 1, [e["entry_id"] for e in entries]
+    assert entries[0]["input"] + entries[0]["output"] == 1020
+
 
 def test_roo_bills_completed_api_req_rows_only(monkeypatch, roo_home, tmp_path):
     storage = tmp_path / "storage"

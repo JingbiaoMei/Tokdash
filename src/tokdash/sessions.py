@@ -36,6 +36,7 @@ from .sources.coding_tools import (
     QoderIdeParser,
     WorkBuddyParser,
     ZCodeSnapshotError,
+    _GOOSE_MAX_EPOCH_SECONDS,
     _goose_ts_to_ms,
     _opencode_message_table,
     _opencode_model_identity,
@@ -6230,9 +6231,15 @@ def _goose_load_sessions(
     # contract that _summarize_session re-applies in milliseconds exact: a row
     # at second S lands at S * 1000, so S >= ceil(since/1000) and
     # S < ceil(until/1000) is the same set of rows as
-    # since <= S * 1000 < until.
+    # since <= S * 1000 < until. An unbounded read stops at the same ceiling
+    # _goose_ts_to_ms uses, so "listable here" and "priced in Overview" stay
+    # one statement about one column.
     lo = 0 if since_ms is None else -(-int(since_ms) // 1000)
-    hi = 9999999999 if until_ms is None else -(-int(until_ms) // 1000)
+    hi = (
+        _GOOSE_MAX_EPOCH_SECONDS
+        if until_ms is None
+        else -(-int(until_ms) // 1000)
+    )
     cur = conn.cursor()
 
     # session_type 'user' and parent_session_id IS NULL keep Goose's own
@@ -6257,7 +6264,20 @@ def _goose_load_sessions(
                    ROW_NUMBER() OVER (
                        PARTITION BY session_id ORDER BY id
                    ) AS rn,
-                   COUNT(*) OVER (PARTITION BY session_id) AS ledger_rows
+                   COUNT(*) OVER (PARTITION BY session_id) AS ledger_rows,
+                   -- edge_rank 1 is the earliest row AT OR PAST hi, which the
+                   -- outer WHERE lets through beside the in-window rows. The
+                   -- CASE sorts the past-hi rows ahead of the rest without
+                   -- dropping them, so rn stays the whole-session rank the
+                   -- duration list is indexed by. One scan, one set of window
+                   -- passes: usage_ledger has no index on created_timestamp,
+                   -- so a second query for this row would double the cold cost
+                   -- of every windowed read.
+                   ROW_NUMBER() OVER (
+                       PARTITION BY session_id
+                       ORDER BY CASE WHEN created_timestamp >= ?
+                                     THEN 0 ELSE 1 END, id
+                   ) AS edge_rank
             FROM usage_ledger
             -- The parser's keep-guard, in SQL, so rn ranks the SAME rows the
             -- turns below are built from. COALESCE because the Python guard
@@ -6270,23 +6290,47 @@ def _goose_load_sessions(
         JOIN sessions s ON s.id = l.session_id
         WHERE s.session_type = 'user'
           AND s.parent_session_id IS NULL
-          AND l.created_timestamp >= ?
-          AND l.created_timestamp < ?
+          AND (
+              (l.created_timestamp >= ? AND l.created_timestamp < ?)
+              OR (l.edge_rank = 1 AND l.created_timestamp >= ?)
+          )
         ORDER BY l.session_id, l.id
         """,
-        (lo, hi),
+        (hi, lo, hi, hi),
     )
-    ledger_rows = cur.fetchall()
+    all_rows = cur.fetchall()
+
+    # Split the windowed rows from the one boundary row per session. The
+    # boundary row is NOT a turn: it is the request that was still running when
+    # the window closed, kept only so its measured duration can be handed to
+    # _session_active_intervals. Sessions with nothing in the window never get
+    # a raw dict at all, so a boundary row alone never lists a session.
+    ledger_rows = [r for r in all_rows if int(r["created_timestamp"]) < hi]
+    edge_rows = {
+        str(r["session_id"]): r
+        for r in all_rows
+        if int(r["created_timestamp"]) >= hi
+    }
 
     elapsed_by_session = _goose_elapsed_ms(
         cur, sorted({str(r["session_id"]) for r in ledger_rows})
     )
 
     # First user-visible prompt per session, for a session Goose left unnamed.
-    # Turn text is display only; it is never a token source.
+    # Turn text is display only; it is never a token source. The IN-list is
+    # narrowed to the sessions whose own name is unusable, because the value is
+    # read only for those: asking for every in-window session materialises the
+    # content_json of every user message of a busy day to discard it again.
+    needs_name = sorted(
+        {
+            str(r["session_id"])
+            for r in ledger_rows
+            if _clean_display_name(r["name"]).lower() in _GOOSE_GENERIC_NAMES
+        }
+    )
     prompt_by_session: Dict[str, str] = {}
-    for start in range(0, len(ledger_rows), 400):
-        chunk = sorted({str(r["session_id"]) for r in ledger_rows[start:start + 400]})
+    for start in range(0, len(needs_name), 400):
+        chunk = needs_name[start:start + 400]
         if not chunk:
             continue
         marks = ", ".join("?" for _ in chunk)
@@ -6346,7 +6390,6 @@ def _goose_load_sessions(
                 "project": _project_from_repo_or_path(None, row["working_dir"]),
                 "is_review_session": False,
                 "turns": [],
-                "_activity_events": [],
             }
             sessions[session_id] = raw
         turn = _build_turn(
@@ -6393,6 +6436,32 @@ def _goose_load_sessions(
             if 0 <= index < len(durations):
                 turn["_work_ms"] = int(durations[index])
         raw["turns"].append(turn)
+
+    # Hand the collected window its closing edge, for the sessions that are
+    # actually listed. A request's work interval runs BACKWARDS from its
+    # completion instant (_measured_intervals places the duration before the
+    # stamp), so the first row past hi can cover minutes of work that happened
+    # INSIDE the window. Dropping it undercounts silently, which is exactly what
+    # the source-windowing contract asks a SQLite loader to hand back. Only the
+    # closing edge needs it: the interval of a row before lo ends before lo, so
+    # the clip discards it and there is nothing to recover.
+    for session_id, edge in edge_rows.items():
+        raw = sessions.get(session_id)
+        if raw is None:
+            continue
+        durations = elapsed_by_session.get(session_id) or ()
+        # The same count guard as the turns above, for the same reason. And
+        # never a bare boundary EVENT without a measured duration: a stamp with
+        # no work is charged the capped inter-event gap, which would bill idle
+        # time the source never measured.
+        index = int(edge["rn"]) - 1
+        edge_ts_ms = _goose_ts_to_ms(edge["created_timestamp"])
+        if int(edge["ledger_rows"]) != len(durations):
+            continue
+        if not 0 <= index < len(durations) or edge_ts_ms is None:
+            continue
+        raw["_next_event_ms"] = edge_ts_ms
+        raw["_next_work_ms"] = int(durations[index])
 
     return sessions
 

@@ -6691,17 +6691,31 @@ class GooseSchemaError(RuntimeError):
     ``usage_ledger``, so this reader cannot account for it."""
 
 
+# Upper bound for a plausible epoch-SECONDS stamp: 9999999999 s is 2286-09-13,
+# far outside any Goose clock. The Sessions window uses the SAME number for an
+# unbounded read (sessions._goose_load_sessions), and that is the point: the
+# parser counts a row this helper accepts and the panel lists a row below the
+# bound, so no request can be priced on one surface and invisible on the other.
+_GOOSE_MAX_EPOCH_SECONDS = 9_999_999_999
+
+
 def _goose_ts_to_ms(value: Any) -> Optional[int]:
-    """Goose's ``created_timestamp`` is an INTEGER epoch SECONDS column."""
+    """Goose's ``created_timestamp`` is an INTEGER epoch SECONDS column.
+
+    A value outside the seconds domain is refused, NOT reinterpreted as
+    milliseconds. An ms stamp (1.79e12) would put a request in Overview that the
+    panel's second-granularity window can never select, and a disagreement
+    between these two surfaces is the failure this whole reader is built to
+    avoid. Refusing keeps them provably equal: a row this rejects is a row the
+    window rejects, because both compare the same column to the same bound.
+    """
     try:
         seconds = int(value)
     except (TypeError, ValueError):
         return None
-    if seconds <= 0:
+    if seconds <= 0 or seconds > _GOOSE_MAX_EPOCH_SECONDS:
         return None
-    # Defensive only: a seconds clock cannot reach 1e11 before the year 5138,
-    # so a value above it was already written in ms.
-    return seconds if seconds > 100_000_000_000 else seconds * 1000
+    return seconds * 1000
 
 
 class GooseParser(BaseParser):
@@ -7255,9 +7269,10 @@ class RooCodeParser(BaseParser):
     #    file, epoch-ms timestamps kept as written, pricing-DB cost only.
     persistent_parser_version = 1
 
-    def __init__(self, pricing_db: PricingDatabase):
-        super().__init__(pricing_db)
-        self.roots = _roo_roots()
+    # No __init__ and no cached roots on purpose. _file_signatures re-derives
+    # the scan through the shared signer every call, which is what keeps a root
+    # created after construction visible; pinning a root list here would read as
+    # "this parser only ever sees these directories", which is not true.
 
     def _file_signatures(self) -> tuple:
         # The shared signer owns the TTL and the cache key, which is what keeps

@@ -1048,12 +1048,22 @@ def roo_storage_roots() -> List[Path]:
     process never sees ``/mnt/c/Users`` at all.
     """
     roots: List[Path] = []
+    seen: set = set()
 
     def add(path: Optional[Path]) -> None:
         if path is None:
             return
-        if path not in roots and path.is_dir():
-            roots.append(path)
+        # Dedupe on the RESOLVED path, not the spelling. Roo scans a union of
+        # roots on purpose (a WSL user really does have two task trees), so a
+        # home reached under two spellings -- a symlinked ~/.vscode-server, or a
+        # TOKDASH_ROO_STORAGE_DIR with ".." in it -- must not scan one tree
+        # twice. Roo's entry keys are task-scoped, so a second copy of one
+        # ui_messages.json is a double count, not a duplicate row.
+        key = _resolve(path) or str(path)
+        if key in seen or not path.is_dir():
+            return
+        seen.add(key)
+        roots.append(path)
 
     # Tokdash-only relocation for a customStoragePath move. Additive rather
     # than a replacement, following qoder_cli_roots(): moving the storage dir

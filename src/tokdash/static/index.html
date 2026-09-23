@@ -12262,6 +12262,9 @@
     function claudeProfileGroups(buckets, provider) {
       const entries = provider?.accounts || [];
       const accounts = claudeCardAccounts(buckets, provider);
+      // One install that answered with resets but no windows names no account anywhere
+      // else; its resets still need a group to be drawn in.
+      if (!accounts.length && provider?.reset_credits) accounts.push('default');
       const groups = accounts.map((account) => {
         const entry =
           entries.find((item) => String(item?.account || 'default') === account) || null;
@@ -12282,8 +12285,8 @@
           resetCredits,
         };
       });
-      // An install with neither windows nor a problem has nothing to say.
-      return groups.filter((group) => group.rows.length || group.notice);
+      // An install with no windows, no problem and no resets has nothing to say.
+      return groups.filter((group) => group.rows.length || group.notice || group.resetCredits);
     }
 
     // Group heading for one install: the profile name (the default install's own name is
@@ -12356,7 +12359,10 @@
         if (group.notice) {
           appendQuotaStatusNoticeFor(card, providerKey, group.notice, group.statusAt);
         }
-        if (group.resetCredits) {
+        // Several installs: each one's resets close its own group. One install: they wait for
+        // the card notice below, so the order is bars, notice, resets -- as on the Codex card
+        // -- and a warning never reads as being about the resets.
+        if (group.resetCredits && view.groups.length > 1) {
           renderResetCreditsSection(card, group.resetCredits);
         }
         rendered += 1;
@@ -12365,6 +12371,9 @@
       // error through the shared empty state, and twice would be twice.
       if (rendered && view.cardNotice && !noticeFirst) {
         appendQuotaStatusNoticeFor(card, providerKey, view.cardNotice.detail, view.cardNotice.statusAt);
+      }
+      if (view.groups.length === 1 && view.groups[0].resetCredits) {
+        renderResetCreditsSection(card, view.groups[0].resetCredits);
       }
       return rendered;
     }

@@ -885,3 +885,36 @@ def test_a_card_level_reset_is_not_copied_onto_a_sibling(tmp_path):
     )
 
     assert [child[0] for child in card["children"]] == ["heading", "bar", "resets", "heading", "bar"]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_one_installs_card_notice_sits_between_its_bars_and_its_resets(tmp_path):
+    """Bars, notice, resets -- the Codex card's order -- so a warning never reads as the resets'."""
+    src = INDEX_HTML.read_text(encoding="utf-8")
+    card = _card(
+        tmp_path,
+        src,
+        "one-install-notice-resets",
+        {
+            "buckets": [_window("default", "session")],
+            "status_detail": "stale_token",
+            "status_at": 1_782_907_200,
+            "reset_credits": _resets("Opus 5.5 launch reset", 1_792_684_800),
+        },
+    )
+
+    assert [child[0] for child in card["children"]] == ["bar", "notice", "resets"]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_resets_still_show_when_the_install_reported_no_windows(tmp_path):
+    src = INDEX_HTML.read_text(encoding="utf-8")
+    card = _card(
+        tmp_path,
+        src,
+        "resets-without-windows",
+        {"buckets": [], "reset_credits": _resets("Opus 5.5 launch reset", 1_792_684_800)},
+    )
+
+    assert card["rendered"] == 1
+    assert [child[0] for child in card["children"]] == ["resets"]

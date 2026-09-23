@@ -1644,6 +1644,20 @@ def test_summarize_limit_resets_counts_only_spendable_grants():
     assert [(c["id"], c["title"]) for c in summary["credits"]] == [("soon", None), ("late", None)]
 
 
+def test_an_absurd_reset_count_does_not_kill_the_poll(monkeypatch, tmp_path):
+    # `json.loads` builds a 400-digit integer happily; its float() is an OverflowError that
+    # would escape `collect_network_snapshots` and cost every provider the cycle.
+    _claude_install(tmp_path, monkeypatch)
+    block = {"eligible": True, "grants": [{"id": "junk", "resets_left": int("9" * 400)}, {"id": "ok", "resets_left": 1}]}
+
+    def opener(req, timeout=15):
+        return FakeResponse({**_CLAUDE_WINDOWS, "cedar_ember": block})
+
+    snapshots = claude.collect_claude_api_snapshots(opener=opener, now=_RESETS_NOW)
+
+    assert [(s.bucket, s.used_percent) for s in snapshots] == [("session", 6.0), ("reset_credits", 1.0)]
+
+
 @pytest.mark.parametrize("block", [None, "surface", ["grants"]])
 def test_summarize_limit_resets_ignores_non_blocks(block):
     assert claude.summarize_limit_resets(block, now=_RESETS_NOW) is None

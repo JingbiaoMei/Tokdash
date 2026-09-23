@@ -847,11 +847,8 @@ def quota_state(store: UsageEntryStore | None = None) -> dict[str, Any]:
     # Accounts with a row that MEASURES something, as opposed to only the synthetic `api`
     # row a failure writes. Used to spot a placeholder account (see `_measured_accounts`).
     usage_accounts: dict[str, set[str]] = {}
-    # Claude limit resets per install, re-read against the current time so a grant that
-    # expired since the last poll is not offered. Only installs holding at least one reset
-    # appear: an account outside the program writes a zero-count row, which shows nothing.
-    claude_resets: dict[str, dict[str, Any]] = {}
-    read_at = int(datetime.now(timezone.utc).timestamp())
+    # Each Claude install's newest reset row, judged once the loop has seen all its rows.
+    claude_reset_rows: dict[str, dict[str, Any]] = {}
     for row in latest:
         provider = str(row.get("provider") or "")
         if provider not in providers:
@@ -883,10 +880,25 @@ def quota_state(store: UsageEntryStore | None = None) -> dict[str, Any]:
                     "credits": reset_payload.get("credits") if isinstance(reset_payload.get("credits"), list) else [],
                 }
         if provider == "claude" and row.get("bucket") == "reset_credits":
-            raw = row.get("raw") if isinstance(row.get("raw"), dict) else {}
-            summary = summarize_limit_resets(raw.get("limit_resets"), now=read_at)
-            if summary and summary["available_count"] > 0:
-                claude_resets[account] = summary
+            claude_reset_rows[account] = row
+
+    # Claude limit resets per install, shown only while they are what that install's newest
+    # successful poll said. A poll whose response carried no reset block (the flag fell back
+    # to the plain URL, or Anthropic stopped honouring it) writes windows but no reset row,
+    # and a reset seen before then may since have been spent. The stored block is also
+    # re-read against the current time, so a grant that expired since the last poll is not
+    # offered. Only installs holding at least one reset appear: an account outside the
+    # program writes a zero-count row, which shows nothing.
+    claude_resets: dict[str, dict[str, Any]] = {}
+    read_at = int(datetime.now(timezone.utc).timestamp())
+    for account, row in claude_reset_rows.items():
+        newest_ok = int(account_views.get("claude", {}).get(account, {}).get("ok_at") or 0)
+        if int(row.get("captured_at") or 0) < newest_ok:
+            continue
+        raw = row.get("raw") if isinstance(row.get("raw"), dict) else {}
+        summary = summarize_limit_resets(raw.get("limit_resets"), now=read_at)
+        if summary and summary["available_count"] > 0:
+            claude_resets[account] = summary
 
     interval_seconds, interval_source = config.effective_poll_interval()
 

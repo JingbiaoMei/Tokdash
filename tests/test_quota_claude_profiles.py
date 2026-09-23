@@ -1849,6 +1849,24 @@ def test_a_reset_that_expired_since_the_last_poll_is_not_offered(monkeypatch, tm
     assert "reset_credits" not in quota_state()["providers"]["claude"]
 
 
+def test_a_newer_poll_without_the_reset_block_hides_the_old_count(monkeypatch, tmp_path):
+    """The flag fell back to the plain URL, or Anthropic stopped honouring it: that poll wrote
+    windows and no reset row, and the reset seen before it may since have been spent."""
+    from tokdash.sources.quota import quota_state
+
+    home = _home(monkeypatch, tmp_path)
+    _install(home, ".claude", token="tok-base")
+    config.set_quota_consent({"credential_scan": True, "claude_api": True})
+    UsageEntryStore().insert_quota_snapshots(
+        [
+            _reset_row("default", _grant()),  # captured 1_782_907_200
+            _snapshot("default", "session", "Session", 40.0, 1_782_907_200 + 1800),
+        ]
+    )
+
+    assert "reset_credits" not in quota_state()["providers"]["claude"]
+
+
 def test_a_siblings_resets_stay_under_that_install(monkeypatch, tmp_path):
     """A second subscription's reset must not read as the default install's."""
     from tokdash.sources.quota import quota_state

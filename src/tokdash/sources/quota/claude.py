@@ -39,6 +39,10 @@ CLAUDE_USAGE_USER_AGENT = f"claude-cli/{CLAUDE_CODE_UA_VERSION} (external, cli) 
 # on purpose: retrying a rate-limited endpoint doubles the traffic it just asked us to cut.
 _RESET_FLAG_REJECTED = frozenset({400, 404, 405, 422})
 RESET_CREDITS_BUCKET = "reset_credits"
+# A grant holds a handful of resets. Anything past this is junk, and rejecting it keeps the
+# total's `float()` from overflowing: `json.loads` builds arbitrarily long integers, and an
+# OverflowError here would escape the poller and cost every provider its cycle.
+_MAX_RESETS_PER_GRANT = 1_000_000
 CLAUDE_KEYCHAIN_SERVICE = "Claude Code-credentials"
 _KEYCHAIN_LABEL = f"macOS Keychain ({CLAUDE_KEYCHAIN_SERVICE})"
 # Installs are polled concurrently because each request may hold its full timeout open:
@@ -671,6 +675,8 @@ def summarize_limit_resets(block: Any, *, now: int) -> dict[str, Any] | None:
         try:
             left = int(grant.get("resets_left") or 0)
         except (TypeError, ValueError, OverflowError):
+            continue
+        if left > _MAX_RESETS_PER_GRANT:
             continue
         starts_at = _parse_time(grant.get("starts_at"))
         expires_at = _parse_time(grant.get("ends_at"))

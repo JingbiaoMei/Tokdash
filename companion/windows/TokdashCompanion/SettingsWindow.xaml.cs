@@ -68,6 +68,11 @@ public partial class SettingsWindow : Window
             box.Checked += CompToggle_Changed;
             box.Unchecked += CompToggle_Changed;
         }
+        // Rows per top-ranks list: same autosave live-edit as the toggles. The handler is
+        // attached AFTER the initial Value assignment so the load itself never round-trips
+        // through Save().
+        RankRowsSlider.Value = s.RankRows;
+        RankRowsSlider.ValueChanged += RankRowsSlider_Changed;
         // Store builds swap the whole Updates section for a read-only version line: the
         // Store owns update delivery, so every control in that section is redundant there.
         bool packaged = PackagedApp.IsPackaged;
@@ -110,6 +115,19 @@ public partial class SettingsWindow : Window
             ActivityHistogramTodayWeek = CompHistogramBox.IsChecked == true,
             PerServerRows = CompPerServerBox.IsChecked == true,
         };
+        Store.Settings.Save();
+        Store.ApplyComponentsChange();
+    }
+
+    /// <summary>The rank-rows slider moved: relabel, persist immediately (same live-edit
+    /// contract as the component toggles) and re-render the flyout from last-good data,
+    /// which rebuilds both rank lists with the new row count - the window grows to fit.</summary>
+    private void RankRowsSlider_Changed(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (Store is null || RankRowsLabel is null) return;
+        int rows = (int)RankRowsSlider.Value;   // slider range is 3..8, snap-to-tick
+        RankRowsLabel.Text = L10n.T("rank_rows", rows);
+        Store.Settings.RankRows = rows;
         Store.Settings.Save();
         Store.ApplyComponentsChange();
     }
@@ -229,6 +247,8 @@ public partial class SettingsWindow : Window
         CompFullDeltaDesc.Text = L10n.T("comp_full_delta_row_desc");
         CompTopRanksBox.Content = L10n.T("comp_top_ranks");
         CompTopRanksDesc.Text = L10n.T("comp_top_ranks_desc");
+        if (RankRowsLabel is not null)
+            RankRowsLabel.Text = L10n.T("rank_rows", (int)RankRowsSlider.Value);
         CompResetCreditsBox.Content = L10n.T("comp_reset_credits");
         CompResetCreditsDesc.Text = L10n.T("comp_reset_credits_desc");
         CompActivityGlanceBox.Content = L10n.T("comp_activity_glance");
@@ -484,6 +504,8 @@ public partial class SettingsWindow : Window
             ActivityHistogramTodayWeek = CompHistogramBox.IsChecked == true,
             PerServerRows = CompPerServerBox.IsChecked == true,
         };
+        // Set by the live slider handler too; written again here so Save is always complete.
+        s.RankRows = (int)RankRowsSlider.Value;
         s.Thresholds = new QuotaThresholds(
             (int)FiveHourSlider.Value,
             (int)WeeklySlider.Value,

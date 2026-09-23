@@ -494,6 +494,7 @@ public sealed class CompanionStore : BindableBase
                 Quota = current.Quota,
                 Thresholds = Settings.Thresholds,
                 Components = Settings.Components.Resolved(),
+                RankRows = Settings.RankRows,
                 Now = Now,
                 UsageFailed = false,
                 QuotaFailed = current.QuotaFailed,
@@ -601,6 +602,7 @@ public sealed class CompanionStore : BindableBase
             Quota = _lastQuota ?? new QuotaResponse(),
             Thresholds = Settings.Thresholds,
             Components = Settings.Components.Resolved(),
+            RankRows = Settings.RankRows,
             Now = Now,
             // Same seam as Now: the week histogram's columns and the week range belong to
             // the frozen clock's week in contract tests, not the wall clock's.
@@ -924,6 +926,26 @@ public sealed class CompanionStore : BindableBase
         "opencode" => "opencode",
         "gemini" => "gemini",
         "openclaw" => "openclaw",
+        _ => null,
+    };
+
+    /// <summary>
+    /// Packaged logo base name (Assets\Agents\{name}.png) for a quota provider id, shown on
+    /// the All-view group header. The asset set mirrors the web dashboard's brand map: Z.ai
+    /// ships as the Zcode badge, MiniMax as the mimo wordmark pill, opencode_go shares the
+    /// OpenCode mark. Providers without a shipped mark (commandcode) render text-only.
+    /// Mirrors macOS quotaLogoAssetName(for:).
+    /// </summary>
+    internal static string? QuotaLogoAssetName(string canonicalProvider) => canonicalProvider.ToLowerInvariant() switch
+    {
+        "codex" => "codex",
+        "claude" => "claude",
+        "kimi" => "kimi",
+        "grok" => "grok",
+        "zai" => "zcode",
+        "minimax" => "mimo",
+        "opencode" or "opencode_go" => "opencode",
+        "antigravity" => "antigravity",
         _ => null,
     };
 
@@ -1340,6 +1362,10 @@ public sealed class Snapshot
 
     // MARK: Top ranks (E3)
 
+    /// <summary>Rows per ranks list (settings.rankRows, clamped 3..8, default 3). Shared by
+    /// tools and models; the pinned contract fixtures all run at the default 3.</summary>
+    public int RankRows { get; init; } = 3;
+
     /// <summary>
     /// Fraction is the entry's share (0..1) of ALL tokens in its own list, and PctText is the
     /// same number as a rounded percent string - bar and label always agree. Rendered as the
@@ -1355,9 +1381,9 @@ public sealed class Snapshot
     }
 
     /// <summary>
-    /// by_tool sorted by tokens descending, top 3. Labels are display names, values compact
-    /// tokens; a tool id with no shipped mark gets NO logo (never a placeholder). The
-    /// percentage denominator is the FULL by_tool sum, so the top-3 shares need not add to 100.
+    /// by_tool sorted by tokens descending, top RankRows. Labels are display names, values
+    /// compact tokens; a tool id with no shipped mark gets NO logo (never a placeholder). The
+    /// percentage denominator is the FULL by_tool sum, so the shares need not add to 100.
     /// </summary>
     public List<RankEntry> TopTools
     {
@@ -1369,7 +1395,7 @@ public sealed class Snapshot
             return all
                 .OrderByDescending(kv => kv.Value.Tokens)
                 .ThenBy(kv => kv.Key, StringComparer.Ordinal)
-                .Take(3)
+                .Take(RankRows)
                 .Select(kv =>
                 {
                     var (frac, pct) = ShareOf(kv.Value.Tokens, total);
@@ -1381,7 +1407,7 @@ public sealed class Snapshot
     }
 
     /// <summary>
-    /// First three of combined_models (tokens-ranked) - never a cost sort - with the
+    /// First RankRows of combined_models (tokens-ranked) - never a cost sort - with the
     /// provider prefix stripped and no logos on model rows. Percentage denominator is the
     /// full combined_models sum.
     /// </summary>
@@ -1393,7 +1419,7 @@ public sealed class Snapshot
             var all = Usage.CombinedModels ?? Usage.TopModels ?? [];
             long total = all.Sum(m => m.Tokens);
             return all
-                .Take(3)
+                .Take(RankRows)
                 .Select(m =>
                 {
                     var (frac, pct) = ShareOf(m.Tokens, total);

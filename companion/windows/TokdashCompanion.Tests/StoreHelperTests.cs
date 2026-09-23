@@ -46,7 +46,9 @@ public class StoreHelperTests
     {
         // Pinned to the macOS displayLabel cases.
         Assert.AreEqual("5-hour", QuotaRow.DisplayLabel("5-hour window"));
-        Assert.AreEqual("7-day", QuotaRow.DisplayLabel("7-day window"));
+        // A bare 7-day window normalizes to "Weekly" (contract §Row anatomy): Codex
+        // sends "7-day window", MiniMax/Kimi/Grok send "Weekly" - one reading now.
+        Assert.AreEqual("Weekly", QuotaRow.DisplayLabel("7-day window"));
         Assert.AreEqual("weekly", QuotaRow.DisplayLabel("weekly window"));
         Assert.AreEqual("5-hour", QuotaRow.DisplayLabel("5-hour Window"), "case-insensitive");
         // Labels that never carried the word are untouched.
@@ -65,7 +67,9 @@ public class StoreHelperTests
         // "GPT-5.3-Codex-Spark · 5-hour" is far too wide for the flyout; the window must
         // survive the shortening. Pinned to the macOS displayLabel cases.
         Assert.AreEqual("Spark · 5-hour", QuotaRow.DisplayLabel("GPT-5.3-Codex-Spark · 5-hour"));
-        Assert.AreEqual("Spark · 7-day", QuotaRow.DisplayLabel("GPT-5.3-Codex-Spark · 7-day"));
+        // The feature name survives the shortening; the window token normalizes like
+        // a bare one ("7-day" -> "Weekly").
+        Assert.AreEqual("Spark · Weekly", QuotaRow.DisplayLabel("GPT-5.3-Codex-Spark · 7-day"));
         // A non-hyphenated name is left alone - only Codex's model naming is verbose.
         Assert.AreEqual("Video · Weekly", QuotaRow.DisplayLabel("Video · Weekly"));
         // A bare window contains a hyphen but no " · " separator; it must not be split.

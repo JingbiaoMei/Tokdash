@@ -81,7 +81,7 @@ Fields used by the companion:
 | `total_messages` | int | Hero secondary line |
 | `comparison.cost_pct` | float \| null | "12% below yesterday" / "8% above yesterday". Omit when `null`. |
 | `comparison.cost_prev` | float \| null | Previous-period cost used to recompute a combined percentage across reachable servers. Hide the comparison when any contributing server omits it. |
-| `comparison.tokens_pct`, `comparison.messages_pct` | float \| null | The other two metrics of the full delta row (see Hero display rules) |
+| `comparison.tokens_pct`, `comparison.messages_pct` | float \| null | `tokens_pct` completes the delta row; `messages_pct` is sent but not rendered (two-metric row, see Hero display rules) |
 | `comparison.tokens_prev`, `comparison.messages_prev` | float \| null | Their combining role, same as `cost_prev` |
 | `by_tool` | object | Top tools block (v1.1). Before v1.1 it fed the "Most used today" activity line, which is retired |
 | `top_models_by_cost` | array | (legacy) Leading model by cost for the retired activity line — take `[0]` |
@@ -315,6 +315,34 @@ order within a provider as returned by the API). Labels are bucket-only
 (`"{bucket}"`) under a provider header. Capped at four visible rows with the
 fifth peeking, then scrolls. Never stretches the surface.
 
+The provider header carries a 14 px provider mark before the name, mirroring the
+web brand map: claude, codex, kimi, grok and antigravity ship their own marks;
+`zai` uses the Zcode badge, `minimax` the mimo wordmark, `opencode_go` the
+OpenCode mark. `commandcode` and any unknown provider render text-only - never a
+placeholder. Dark-ink marks (codex, grok, zcode) have pre-inverted dark copies;
+every other mark renders as shipped in both themes.
+
+### Row anatomy (Low and All)
+
+- Line 1: label, then the window's reset text in secondary ink right after it,
+  with `{N}% left` pushed to the trailing edge. Line 2: the bar at full row
+  width, 4 px, fill sized to `remaining_percent`.
+- **Reset text is mixed.** Within 24 h of now: the relative countdown with the
+  established truncation ladder ("resets in 40 min" / "in 3 h" / "in 2 days").
+  Beyond 24 h: absolute local time, "resets Thu 02:00" - a day-resolution
+  countdown off a stale refresh carries no information. Weekday names follow the
+  app language (English/Chinese), not the OS locale.
+- **Weekly label normalization.** After the ` window` strip, a window token
+  that reads "7-day" / "7 day" / "7d" (case-insensitive) displays as **Weekly**,
+  so Codex reads the same as MiniMax/Kimi/Grok, which already send "Weekly".
+  The rule applies to the token alone ("7-day") and inside a compound feature
+  label ("Spark · 7-day" -> "Spark · Weekly"); no other label is touched.
+- **Bar ramp** (same tier boundaries on every surface): fine >= 50, mid >= 25,
+  low < 25 remaining. macOS uses fixed status colors in both themes:
+  `#30A74C` / `#FF9F0A` / `#FF453A`. Windows uses the native status ramp:
+  light `#0F7B0F` / `#CA5010` / `#C42B1C`, dark `#6CCB5F` / `#F7630C` /
+  `#FF99A4`.
+
 ### Disabled state
 
 When `enabled == false`, show one quiet row: "Subscription tracking is off" with
@@ -480,6 +508,12 @@ The period segment and the inline active-time figure are **not** settings -
 core hero furniture, always on. The selected period persists on its own as
 `selectedPeriod` (`today|week|month|year`, default `today`).
 
+The top-ranks row count persists on its own as `rankRows` (integer, default 3,
+valid range 3..8). It is **one shared count** for both the tools and the models
+list; the surface grows to fit. Absent (any pre-setting file) means 3; an
+out-of-range value is clamped into 3..8 on read and on write - never trusted
+verbatim. Changing it re-renders the strip from last-good data; no refetch.
+
 ## Hero display rules
 
 ### Period segment
@@ -509,17 +543,20 @@ absent with no warning - the v1.0 fallback.
 
 ### Full delta row
 
-With `fullDeltaRow` on, one line under the hero:
+With `fullDeltaRow` on, one line under the hero. **Two metrics** (cost +
+tokens): the line must hold one narrow flyout line in every language, and
+messages turned out to be the metric nobody acted on. The server still sends
+`comparison.messages_pct`; companions ignore it.
 
 ```
-{glyph} {pct}% cost · {glyph} {pct}% tokens · {glyph} {pct}% msgs {sentence}
+{glyph} {pct}% cost · {glyph} {pct}% tokens {sentence}
 ```
 
 - glyph `▲` for > 0, `▼` for < 0, `±` for exactly 0; `{pct}` is a non-negative
   integer (`abs(round(pct))`): `-11.7` renders `12`.
 - `{sentence}` by segment: "vs yesterday", "vs last week", "vs last month",
   "vs last year".
-- a metric whose `*_pct` is `null` is omitted from the line; if all three are
+- a metric whose `*_pct` is `null` is omitted from the line; if both are
   `null` the line is absent entirely (`healthy-year`).
 - multi-server: recompute each pct from summed current and previous totals;
   omit a metric when any contributing server omits its `*_prev`.
@@ -532,14 +569,16 @@ With the toggle off: the shipped single comparison line, cost-only and worded
 One strip as the last row of the hero card, two blocks:
 `Top tools · {today|this week|this month|this year}` and `Top models · ...`.
 
-- **Tools**: `by_tool` sorted by `tokens` descending, top 3. Label is the
-  display name (Codex, Claude, Kimi, OpenCode, ...), value compact tokens.
-  Each row is prefixed with the packaged harness logo; a tool id with no
-  shipped mark gets no logo - never a placeholder. Codex's black mark inverts
-  on dark, the same rule the web applies.
-- **Models**: first three of `combined_models` (tokens-ranked), provider
+- **Tools**: `by_tool` sorted by `tokens` descending, top `rankRows`
+  (default 3). Label is the display name (Codex, Claude, Kimi, OpenCode, ...),
+  value compact tokens. Each row is prefixed with the packaged harness logo;
+  a tool id with no shipped mark reserves the slot - never a placeholder
+  dropped mid-column. Codex's black mark inverts on dark, the same rule the
+  web applies.
+- **Models**: first `rankRows` of `combined_models` (tokens-ranked), provider
   prefix stripped (`openai/gpt-5.6-sol` -> `gpt-5.6-sol`), compact tokens,
-  **no logos on model rows**.
+  **no logos on model rows** - and no reserved logo slot either: model names
+  render flush left.
 - Both blocks absent when their source is empty. The 1.0 "Most used today"
   activity line is retired; top ranks replace it.
 
@@ -648,10 +687,10 @@ pinned under the English locale; both suites run cases in English.
 
 | Case | Period | Fixtures | Expected outcome |
 |---|---|---|---|
-| `healthy` | today | usage-today + active-time-today + insights-today + quota | Connected; hero $3.42 / 18.7M / 248 · active 3 h 12 m; delta row "▼ 12% cost · ▼ 12% tokens · ▼ 12% msgs vs yesterday"; top tools "Codex 13M…" + top models "gpt-5.6-sol 12.7M…"; 24-bar histogram "Peak 14:00"; Low shows Claude weekly (8%) + Codex 5h (14%); no credits row |
+| `healthy` | today | usage-today + active-time-today + insights-today + quota | Connected; hero $3.42 / 18.7M / 248 · active 3 h 12 m; delta row "▼ 12% cost · ▼ 12% tokens vs yesterday"; top tools "Codex 13M…" + top models "gpt-5.6-sol 12.7M…"; 24-bar histogram "Peak 14:00"; Low shows Claude weekly (8%) + Codex 5h (14%); no credits row |
 | `healthy-week` | week | usage-week + active-time-week + insights-week + quota | Week is a calendar window (`date_from` Mon..today, never `period=week`); hero $9.86 / 61.2M / 1043 · active 2 d 4 h; delta "…vs last week"; 7-column day histogram with an empty Tuesday column; kickers "this week" |
 | `healthy-month` | month | usage-month + active-time-month + stats + quota | hero $48.90 / 281M / 4218 · active 9 d 20 h; delta "…vs last month"; 90-day Mon..Sun grid, 68 filled cells |
-| `healthy-year` | year | usage-year + active-time-year + stats + quota | hero $312.40 / 1243.5M / 13204 · active 74 d 5 h; delta row **absent** (previous year is zero, all `*_pct` null); 180-day grid, 143 filled cells |
+| `healthy-year` | year | usage-year + active-time-year + stats + quota | hero $312.40 / 1.2B / 13204 · active 74 d 5 h; delta row **absent** (previous year is zero, all `*_pct` null); 180-day grid, 143 filled cells |
 | `empty` | today | usage-today-empty + active-time-zero + insights-empty + quota | hero "No usage recorded today"; no active segment; no delta row; no top ranks; glance hidden (all-zero source) |
 | `active-zero` | today | usage-today + active-time-zero + quota | active segment absent (never "active 0 m") |
 | `credits` | today | usage-today + quota-reset-credits | row "⚡ Codex · 2 reset credits · expire in 2 d" under the Codex group (All view only, frozen clock = fixture timestamp); credits-expiry notification armed (48 h window) |
@@ -684,14 +723,15 @@ Append " · cached" only when it helps explain why data has not changed (rare).
 ## Token compact notation
 
 ```
-tokens >= 1_000_000  -> "{value/1M}M"   (one decimal, trailing ".0" trimmed: "18.7M", "13M", "1243.5M")
+tokens >= 1_000_000_000 -> "{value/1B}B"  (one decimal, trailing ".0" trimmed: "1.2B", "75B")
+tokens >= 1_000_000  -> "{value/1M}M"   (one decimal, trailing ".0" trimmed: "18.7M", "13M")
 tokens >= 1_000      -> "{value/1k}k"   (no decimal: "779k")
 else                 -> str(value)
 ```
 
-One decimal is fixed even past 1000M - there is no "B" tier, so a year renders
-"1243.5M". Trailing ".0" is trimmed on all tiers: `12_982_308` -> "13M", not
-"13.0M". `round` (not floor) to the shown precision. Exact value in
+One decimal on the B and M tiers. Trailing ".0" is trimmed on all tiers:
+`12_982_308` -> "13M", `1_200_000_000` -> "1.2B", `75_000_000_000` -> "75B".
+`round` (not floor) to the shown precision. Exact value in
 accessibility text / tooltip. This same rule renders the Top-ranks values and
 per-server tokens.
 

@@ -191,7 +191,8 @@ final class CompanionStore: NSObject, ObservableObject {
                                      quota: current.quota, thresholds: current.thresholds,
                                      components: self.settings.components, now: Self.now,
                                      usageFailed: false, quotaFailed: current.quotaFailed,
-                                     perServer: [], showPerServerRows: current.showPerServerRows)
+                                     perServer: [], showPerServerRows: current.showPerServerRows,
+                                     rankRows: self.settings.rankRows)
         }
         refresh()
     }
@@ -245,7 +246,8 @@ final class CompanionStore: NSObject, ObservableObject {
                             insights: lastInsights, stats: lastStats, quota: q,
                             thresholds: settings.thresholds, components: settings.components,
                             now: Self.now,
-                            perServer: lastPerServer, showPerServerRows: showPerServerRows)
+                            perServer: lastPerServer, showPerServerRows: showPerServerRows,
+                            rankRows: settings.rankRows)
         if let cur = snapshot {
             snap.usageFailed = cur.usageFailed
             snap.quotaFailed = cur.quotaFailed
@@ -262,7 +264,8 @@ final class CompanionStore: NSObject, ObservableObject {
                             components: settings.components, now: Self.now,
                             usageFailed: snapshot?.usageFailed ?? false,
                             quotaFailed: snapshot?.quotaFailed ?? false,
-                            perServer: lastPerServer, showPerServerRows: showPerServerRows)
+                            perServer: lastPerServer, showPerServerRows: showPerServerRows,
+                            rankRows: settings.rankRows)
     }
 
     /// Manual / immediate refresh. Cancels any in-flight refresh and reschedules
@@ -447,7 +450,8 @@ final class CompanionStore: NSObject, ObservableObject {
                             quota: lastQuota ?? .empty, thresholds: settings.thresholds,
                             components: settings.components, now: Self.now,
                             usageFailed: usageFailed, quotaFailed: quotaFailed,
-                            perServer: lastPerServer, showPerServerRows: showPerServerRows)
+                            perServer: lastPerServer, showPerServerRows: showPerServerRows,
+                            rankRows: settings.rankRows)
         snapshot = snap
         return snap
     }
@@ -986,6 +990,24 @@ final class CompanionStore: NSObject, ObservableObject {
         }
     }
 
+    /// Asset-catalog image name for a quota provider id, shown on the All-view group header.
+    /// Mirrors the web dashboard's brand map: Z.ai ships as the Zcode badge, MiniMax as the
+    /// mimo wordmark pill, opencode_go shares the OpenCode mark. Providers without a shipped
+    /// mark (commandcode) render text-only. Mirrors Windows QuotaLogoAssetName.
+    nonisolated static func quotaLogoAssetName(for canonicalProvider: String) -> String? {
+        switch canonicalProvider.lowercased() {
+        case "codex": return "AgentCodex"
+        case "claude": return "AgentClaude"
+        case "kimi": return "AgentKimi"
+        case "grok": return "AgentGrok"
+        case "zai": return "AgentZai"
+        case "minimax": return "AgentMiniMax"
+        case "opencode", "opencode_go": return "AgentOpenCode"
+        case "antigravity": return "AgentAntigravity"
+        default: return nil
+        }
+    }
+
     /// "openai/gpt-5.6-sol" -> "gpt-5.6-sol". Model rows strip the provider prefix.
     nonisolated static func stripProviderPrefix(_ model: String) -> String {
         model.split(separator: "/").last.map(String.init) ?? model
@@ -1330,6 +1352,10 @@ struct Snapshot {
     var perServer: [PerServerUsage] = []
     var showPerServerRows: Bool = false
 
+    /// Rows per top-ranks list (settings.rankRows, clamped 3...8, default 3). Shared by
+    /// tools and models; the pinned contract fixtures all run at the default 3.
+    var rankRows: Int = 3
+
     init(period: UsagePeriod = .today,
          usage: UsageResponse? = nil,
          activeMs: Int? = nil,
@@ -1342,12 +1368,14 @@ struct Snapshot {
          usageFailed: Bool = false,
          quotaFailed: Bool = false,
          perServer: [PerServerUsage] = [],
-         showPerServerRows: Bool = false) {
+         showPerServerRows: Bool = false,
+         rankRows: Int = 3) {
         self.period = period; self.usage = usage; self.activeMs = activeMs
         self.insights = insights; self.stats = stats; self.quota = quota
         self.thresholds = thresholds; self.components = components; self.now = now
         self.usageFailed = usageFailed; self.quotaFailed = quotaFailed
         self.perServer = perServer; self.showPerServerRows = showPerServerRows
+        self.rankRows = min(8, max(3, rankRows))
     }
 
     /// True while the selected period's data has never landed and no failure has been
@@ -1380,6 +1408,11 @@ struct Snapshot {
     }
 
     static func compactTokens(_ value: Int) -> String {
+        if value >= 1_000_000_000 {
+            var text = String(format: "%.1f", Double(value) / 1_000_000_000)
+            if text.hasSuffix(".0") { text = String(text.dropLast(2)) }
+            return text + "B"
+        }
         if value >= 1_000_000 {
             var text = String(format: "%.1f", Double(value) / 1_000_000)
             if text.hasSuffix(".0") { text = String(text.dropLast(2)) }
@@ -1479,7 +1512,7 @@ struct Snapshot {
         return (frac, "\(Int((frac * 100).rounded()))%")
     }
 
-    /// by_tool sorted by tokens descending, top 3. Labels are display names, values
+    /// by_tool sorted by tokens descending, top `rankRows`. Labels are display names, values
     /// compact tokens; a tool id with no shipped mark gets NO logo (never a placeholder).
     var topTools: [RankEntry] {
         guard components.topRanks, let usage else { return [] }
@@ -1488,7 +1521,7 @@ struct Snapshot {
             return $0.key < $1.key
         }
         let total = (usage.byTool ?? [:]).values.reduce(0) { $0 + $1.tokens }
-        return sorted.prefix(3).map { entry in
+        return sorted.prefix(rankRows).map { entry in
             let (frac, pct) = Self.share(tokens: entry.value.tokens, total: total)
             return RankEntry(id: entry.key,
                              label: CompanionStore.toolDisplayName(for: entry.key),
@@ -1498,14 +1531,14 @@ struct Snapshot {
         }
     }
 
-    /// First three of combined_models (tokens-ranked) - never a cost sort - with the
+    /// First `rankRows` of combined_models (tokens-ranked) - never a cost sort - with the
     /// provider prefix stripped and no logos on model rows. Percentage denominator is
     /// the full combined_models list.
     var topModels: [RankEntry] {
         guard components.topRanks, let usage else { return [] }
         let list = usage.combinedModels ?? usage.topModels ?? []
         let total = list.reduce(0) { $0 + $1.tokens }
-        return list.prefix(3).map { model in
+        return list.prefix(rankRows).map { model in
             let (frac, pct) = Self.share(tokens: model.tokens, total: total)
             return RankEntry(id: model.name,
                              label: CompanionStore.stripProviderPrefix(model.name),
@@ -1732,9 +1765,21 @@ struct QuotaRow: Identifiable {
         let parts = s.components(separatedBy: " · ")
         if parts.count == 2, parts[0].contains("-"),
            let feature = parts[0].split(separator: "-").last.map(String.init), !feature.isEmpty {
-            s = "\(feature) · \(parts[1])"
+            return "\(feature) · \(normalizeWindow(parts[1]))"
         }
-        return s
+        return normalizeWindow(s)
+    }
+
+    /// The weekly window is named inconsistently across providers: Codex's 7d bucket label
+    /// is "7-day window" while MiniMax/Kimi/Grok already send "Weekly". Normalize the bare
+    /// "7-day"/"7 day"/"7d" token to "Weekly" so every weekly window reads alike. Mirrors
+    /// the Windows QuotaRow.NormalizeWindow.
+    static func normalizeWindow(_ token: String) -> String {
+        let t = token.trimmingCharacters(in: .whitespaces)
+        if t.lowercased() == "7-day" || t.lowercased() == "7 day" || t.lowercased() == "7d" {
+            return "Weekly"
+        }
+        return token
     }
 
     /// Copy with a new bucket id + label, used to present a pooled Antigravity row.
@@ -1852,9 +1897,25 @@ struct QuotaRow: Identifiable {
         remaining > 8 * 3600 ? L10n.t("window_weekly") : L10n.t("window_5h")
     }
 
+    /// Mixed reset text (per UI review): a window closing within ~24h gets the relative
+    /// countdown ("resets in 3 h" - actionable while it matters), a farther one gets the
+    /// absolute local time ("resets Thu 02:00" - "in 4 days" from a stale refresh is just
+    /// noise). Mirrors QuotaRow.ResetsText on Windows.
     var resetsText: String {
         guard let resetsAt else { return "" }
-        return Self.resetsText(forRemaining: resetsAt.timeIntervalSinceNow)
+        let remaining = resetsAt.timeIntervalSinceNow
+        return remaining < 86400
+            ? Self.resetsText(forRemaining: remaining)
+            : Self.resetsTextAbsolute(for: resetsAt)
+    }
+
+    /// Absolute form for far windows: local weekday + time in the app language
+    /// ("resets Thu 02:00" / "将于 周四 02:00 重置").
+    static func resetsTextAbsolute(for resetsAt: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = L10n.locale
+        formatter.dateFormat = "EEE HH:mm"
+        return L10n.t("resets_at", formatter.string(from: resetsAt))
     }
 
     /// Relative reset text from seconds-remaining, rounded down to the whole unit (matches
@@ -2013,6 +2074,9 @@ struct CompanionSettings: Codable {
     var components: CompanionComponents = CompanionComponents()
     /// v3: persisted separately from components - it's a preference, not a toggle.
     var selectedPeriod: UsagePeriod = .today
+    /// v3: rows per top-ranks list - tools and models share the count (contract §Top
+    /// ranks). Clamped to 3...8 wherever it is written; the flyout grows to fit.
+    var rankRows: Int = 3
 
     private enum CodingKeys: String, CodingKey {
         case version
@@ -2029,6 +2093,7 @@ struct CompanionSettings: Codable {
         case skippedUpdateVersion
         case components
         case selectedPeriod
+        case rankRows
     }
 
     init(
@@ -2043,11 +2108,13 @@ struct CompanionSettings: Codable {
         availableUpdateURL: String? = nil,
         skippedUpdateVersion: String? = nil,
         components: CompanionComponents = CompanionComponents(),
-        selectedPeriod: UsagePeriod = .today
+        selectedPeriod: UsagePeriod = .today,
+        rankRows: Int = 3
     ) {
         self.version = 3
         self.components = components
         self.selectedPeriod = selectedPeriod
+        self.rankRows = min(8, max(3, rankRows))
         self.servers = [.make(baseURL: baseURL)]
         self.launchAtLogin = launchAtLogin
         self.lowQuotaNotifications = lowQuotaNotifications
@@ -2088,6 +2155,9 @@ struct CompanionSettings: Codable {
         // segment) falls back to today instead of throwing away the whole settings file.
         let periodRaw = try values.decodeIfPresent(String.self, forKey: .selectedPeriod)
         selectedPeriod = periodRaw.flatMap(UsagePeriod.init(rawValue:)) ?? .today
+        // Absent (v2 / older v3 files) means the default 3; a hand-edited out-of-range
+        // value is clamped rather than trusted.
+        rankRows = min(8, max(3, try values.decodeIfPresent(Int.self, forKey: .rankRows) ?? 3))
     }
 
     func encode(to encoder: Encoder) throws {
@@ -2107,6 +2177,7 @@ struct CompanionSettings: Codable {
         // omitting them here silently resets every toggle and the segment on relaunch.
         try values.encode(components, forKey: .components)
         try values.encode(selectedPeriod.rawValue, forKey: .selectedPeriod)
+        try values.encode(rankRows, forKey: .rankRows)
     }
 
     /// Test seam: when set, settings are read and written here instead of the user's real

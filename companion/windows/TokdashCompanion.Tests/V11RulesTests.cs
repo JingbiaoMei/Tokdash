@@ -35,7 +35,7 @@ public sealed class V11RulesTests
 
     [DataTestMethod]
     [DataRow(12_982_308L, "13M")]        // trailing ".0" trimmed
-    [DataRow(1_243_500_000L, "1243.5M")] // no "B" tier even past 1000M
+    [DataRow(1_243_500_000L, "1.2B")]   // B tier past 1000M
     [DataRow(779_014L, "779k")]          // k tier rounds, no decimal
     [DataRow(249_669L, "250k")]          // 249.669 -> 250
     public void CompactTokens_Contract_Values(long value, string expected) =>

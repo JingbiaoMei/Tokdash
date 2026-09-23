@@ -111,7 +111,16 @@
             <CheckBox x:Name="CompFullDeltaBox" Content="Full delta row" Margin="0,0,0,0"/>
             <TextBlock x:Name="CompFullDeltaDesc" Style="{StaticResource CompDesc}" Text="cost + tokens + messages"/>
             <CheckBox x:Name="CompTopRanksBox" Content="Top tools &amp; models" Margin="0,0,0,0"/>
-            <TextBlock x:Name="CompTopRanksDesc" Style="{StaticResource CompDesc}" Text="three of each, under the hero"/>
+            <TextBlock x:Name="CompTopRanksDesc" Style="{StaticResource CompDesc}" Text="under the hero; rows set below"/>
+            <!-- Rows per top-ranks list (contract §Top ranks): one shared count for tools and
+                 models, 3..8. Autosaves like the toggles around it; the flyout grows to fit. -->
+            <DockPanel Margin="22,2,0,6">
+                <TextBlock x:Name="RankRowsLabel" DockPanel.Dock="Left" Text="Rows: 3"
+                           FontSize="{StaticResource FontMicro}" Foreground="{DynamicResource SettingsMuted}"
+                           VerticalAlignment="Center" Width="110"/>
+                <Slider x:Name="RankRowsSlider" Minimum="3" Maximum="8" TickFrequency="1"
+                        IsSnapToTickEnabled="True" Value="3"/>
+            </DockPanel>
             <CheckBox x:Name="CompResetCreditsBox" Content="Reset-credits row" Margin="0,0,0,0"/>
             <TextBlock x:Name="CompResetCreditsDesc" Style="{StaticResource CompDesc}" Text="under Codex quota, All view"/>
             <CheckBox x:Name="CompActivityGlanceBox" Content="Activity glance" Margin="0,0,0,0"/>

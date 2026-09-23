@@ -62,6 +62,13 @@ public static class L10n
     /// <summary>Plural suffix for the current language ("s" in English, "" in Chinese).</summary>
     public static string PluralS => Current == AppLanguage.ZhHans ? "" : "s";
 
+    private static readonly CultureInfo EnCulture = CultureInfo.GetCultureInfo("en");
+    private static readonly CultureInfo ZhCulture = CultureInfo.GetCultureInfo("zh-Hans");
+
+    /// <summary>Culture matching <see cref="Current"/>, for date/time formatting so weekday
+    /// names ("Thu" vs "周四") follow the app language rather than the OS UI culture.</summary>
+    public static CultureInfo Culture => Current == AppLanguage.ZhHans ? ZhCulture : EnCulture;
+
     // English (source of truth; identical to the original hardcoded strings).
 
     private static readonly Dictionary<string, string> En = new()
@@ -157,7 +164,8 @@ public static class L10n
         ["comp_full_delta_row"] = "Full delta row",
         ["comp_full_delta_row_desc"] = "cost + tokens + messages",
         ["comp_top_ranks"] = "Top tools & models",
-        ["comp_top_ranks_desc"] = "three of each, under the hero",
+        ["comp_top_ranks_desc"] = "under the hero; rows set below",
+        ["rank_rows"] = "Rows: {0}",
         ["comp_reset_credits"] = "Reset-credits row",
         ["comp_reset_credits_desc"] = "under Codex quota, All view",
         ["comp_activity_glance"] = "Activity glance",
@@ -248,6 +256,7 @@ public static class L10n
         ["resets_in_minutes"] = "resets in {0} minute{1}",
         ["resets_in_hours"] = "resets in {0} hour{1}",
         ["resets_in_days"] = "resets in {0} day{1}",
+        ["resets_at"] = "resets {0}",
         ["plural_s"] = "s",
 
         ["section_updates"] = "Updates",
@@ -367,7 +376,8 @@ public static class L10n
         ["comp_full_delta_row"] = "完整对比行",
         ["comp_full_delta_row_desc"] = "成本 + tokens + 消息",
         ["comp_top_ranks"] = "常用工具与模型",
-        ["comp_top_ranks_desc"] = "各取前三，位于概览下方",
+        ["comp_top_ranks_desc"] = "位于概览下方；下方可设置行数",
+        ["rank_rows"] = "行数：{0}",
         ["comp_reset_credits"] = "重置额度行",
         ["comp_reset_credits_desc"] = "显示在 Codex 订阅下（全部视图）",
         ["comp_activity_glance"] = "活动概览",
@@ -457,6 +467,7 @@ public static class L10n
         ["resets_in_minutes"] = "{0} 分钟后重置{1}",
         ["resets_in_hours"] = "{0} 小时后重置{1}",
         ["resets_in_days"] = "{0} 天后重置{1}",
+        ["resets_at"] = "将于 {0} 重置",
         ["plural_s"] = "",
 
         ["section_updates"] = "更新",

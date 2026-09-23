@@ -680,9 +680,10 @@ final class SnapshotTests: XCTestCase {
     }
 
     func testDisplayLabelShortensWindowsAndMeteredFeatures() {
-        // Pinned to the Windows DisplayLabel cases.
+        // Pinned to the Windows DisplayLabel cases. A bare 7-day window normalizes to
+        // "Weekly" (contract §Row anatomy) - Codex's reading joins MiniMax/Kimi/Grok.
         XCTAssertEqual(QuotaRow.displayLabel("5-hour window"), "5-hour")
-        XCTAssertEqual(QuotaRow.displayLabel("7-day window"), "7-day")
+        XCTAssertEqual(QuotaRow.displayLabel("7-day window"), "Weekly")
         XCTAssertEqual(QuotaRow.displayLabel("weekly window"), "weekly")
         XCTAssertEqual(QuotaRow.displayLabel("5-hour Window"), "5-hour", "case-insensitive")
         // Labels that never carried the word are untouched.
@@ -690,9 +691,10 @@ final class SnapshotTests: XCTestCase {
         XCTAssertEqual(QuotaRow.displayLabel("Weekly"), "Weekly")
         XCTAssertEqual(QuotaRow.displayLabel("Global 5-hour"), "Global 5-hour")
         XCTAssertEqual(QuotaRow.displayLabel("window"), "window", "would shorten to nothing")
-        // Codex metered features collapse to the feature, keeping the window.
+        // Codex metered features collapse to the feature; the window token normalizes
+        // like a bare one ("7-day" -> "Weekly").
         XCTAssertEqual(QuotaRow.displayLabel("GPT-5.3-Codex-Spark · 5-hour"), "Spark · 5-hour")
-        XCTAssertEqual(QuotaRow.displayLabel("GPT-5.3-Codex-Spark · 7-day"), "Spark · 7-day")
+        XCTAssertEqual(QuotaRow.displayLabel("GPT-5.3-Codex-Spark · 7-day"), "Spark · Weekly")
         XCTAssertEqual(QuotaRow.displayLabel("Video · Weekly"), "Video · Weekly", "plain names untouched")
     }
 

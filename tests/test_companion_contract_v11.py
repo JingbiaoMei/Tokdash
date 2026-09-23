@@ -39,6 +39,9 @@ def ex(name: str) -> dict:
 
 def compact(v: int) -> str:
     """`COMPANION_API.md` "Token compact notation"."""
+    if v >= 1_000_000_000:
+        s = f"{v / 1_000_000_000:.1f}"
+        return (s[:-2] if s.endswith(".0") else s) + "B"
     if v >= 1_000_000:
         s = f"{v / 1_000_000:.1f}"
         return (s[:-2] if s.endswith(".0") else s) + "M"
@@ -48,11 +51,15 @@ def compact(v: int) -> str:
 
 
 def delta_row(comparison: dict | None, sentence: str) -> str | None:
-    """`COMPANION_API.md` "Full delta row". Absent when every pct is null."""
+    """`COMPANION_API.md` "Full delta row". Absent when every pct is null.
+
+    Two metrics only (cost + tokens): the flyout is narrow and three metrics
+    overflowed one line at zh/week wording. ``messages_pct`` is still sent by
+    the server but no companion renders it."""
     if not comparison:
         return None
     parts = []
-    for key, label in (("cost_pct", "cost"), ("tokens_pct", "tokens"), ("messages_pct", "msgs")):
+    for key, label in (("cost_pct", "cost"), ("tokens_pct", "tokens")):
         pct = comparison.get(key)
         if pct is None:
             continue
@@ -175,13 +182,16 @@ def test_healthy_expected_strings_are_reproducible():
 
 
 def test_period_delta_sentences_and_rounding():
+    # Two metrics since v1.1 review: no msgs segment, even though the payload still
+    # carries messages_pct (it matches the expected/*.json pins byte-for-byte).
     assert delta_row(fx("usage-week.json")["comparison"], "vs last week") == \
-        "▼ 10% cost · ▼ 8% tokens · ▼ 5% msgs vs last week"
+        "▼ 10% cost · ▼ 8% tokens vs last week"
     assert delta_row(fx("usage-month.json")["comparison"], "vs last month") == \
-        "▼ 10% cost · ▼ 10% tokens · ▼ 12% msgs vs last month"
-    # -11.7 shows as 12, -10.1 as 10: abs(round(pct)), not truncation.
+        "▼ 10% cost · ▼ 10% tokens vs last month"
+    # -11.7 shows as 12, -10.1 as 10: abs(round(pct)), not truncation. messages_pct
+    # in the input is deliberately ignored.
     assert delta_row({"cost_pct": -11.7, "tokens_pct": 0.0, "messages_pct": 3.2}, "vs yesterday") == \
-        "▼ 12% cost · ± 0% tokens · ▲ 3% msgs vs yesterday"
+        "▼ 12% cost · ± 0% tokens vs yesterday"
 
 
 def test_year_delta_row_is_absent_not_empty():

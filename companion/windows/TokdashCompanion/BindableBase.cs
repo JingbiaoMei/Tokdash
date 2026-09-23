@@ -70,6 +70,16 @@ public sealed class CompanionSettings
     [JsonPropertyName("selectedPeriod")]
     public UsagePeriod SelectedPeriod { get; set; } = UsagePeriod.Today;
 
+    /// <summary>Schema v3: rows per top-ranks list - tools and models share the count
+    /// (contract §Top ranks). Clamped to 3..8 on every write; the flyout grows to fit.</summary>
+    [JsonPropertyName("rankRows")]
+    public int RankRows
+    {
+        get => rankRows;
+        set => rankRows = Math.Clamp(value, 3, 8);
+    }
+    private int rankRows = 3;
+
     // Update checking. Every field is optional in the JSON, so a settings file written by
     // v0.1.4 (which predates all of this) decodes with the feature off and every existing
     // preference intact.

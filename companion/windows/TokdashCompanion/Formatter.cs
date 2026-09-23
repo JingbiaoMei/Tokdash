@@ -7,14 +7,20 @@ namespace TokdashCompanion;
 public static class Formatter
 {
     /// <summary>
-    /// Token compact notation (contract §Token compact notation): >= 1M -> one decimal with
-    /// the trailing ".0" TRIMMED ("13M", "18.7M", "1243.5M" - no "B" tier even past 1000M);
+    /// Token compact notation (contract §Token compact notation): >= 1B -> one decimal with
+    /// the trailing ".0" TRIMMED ("1.2B", "75B"); >= 1M -> same rule with "M" ("13M", "18.7M");
     /// >= 1k -> integer "k" ROUNDED (not floored) to the shown precision ("779k", "250k");
     /// below that, the plain integer. The same rule renders hero, top-rank and per-server
     /// tokens; exact values belong to accessibility text, not to this string.
     /// </summary>
     public static string CompactTokens(long tokens)
     {
+        if (tokens >= 1_000_000_000)
+        {
+            string bText = (tokens / 1_000_000_000.0).ToString("F1", System.Globalization.CultureInfo.InvariantCulture);
+            if (bText.EndsWith(".0", StringComparison.Ordinal)) bText = bText[..^2];
+            return bText + "B";
+        }
         if (tokens >= 1_000_000)
         {
             string text = (tokens / 1_000_000.0).ToString("F1", System.Globalization.CultureInfo.InvariantCulture);
@@ -119,9 +125,26 @@ public sealed record QuotaRow(
         if (parts.Length == 2 && parts[0].Contains('-'))
         {
             string feature = parts[0].Split('-')[^1];
-            if (feature.Length > 0) s = $"{feature} · {parts[1]}";
+            if (feature.Length > 0) s = $"{feature} · {NormalizeWindow(parts[1])}";
+            return s;
         }
-        return s;
+        return NormalizeWindow(s);
+    }
+
+    /// <summary>
+    /// The weekly window is named inconsistently across providers: Codex's 7d bucket label
+    /// is "7-day window" while MiniMax/Kimi/Grok already send "Weekly". Normalize the bare
+    /// "7-day"/"7 day"/"7d" window token to "Weekly" so every weekly window reads the same
+    /// everywhere (contract §Low/All labels). Never touches compound feature labels.
+    /// </summary>
+    static string NormalizeWindow(string token)
+    {
+        string t = token.Trim();
+        if (t.Equals("7-day", StringComparison.OrdinalIgnoreCase)
+            || t.Equals("7 day", StringComparison.OrdinalIgnoreCase)
+            || t.Equals("7d", StringComparison.OrdinalIgnoreCase))
+            return "Weekly";
+        return token;
     }
 
     public bool IsLow(QuotaThresholds t) => HasPercent && Left <= t.ThresholdFor(CanonicalBucket);
@@ -207,13 +230,30 @@ public sealed record QuotaRow(
     public static string AntigravityWindowLabelForRemaining(double secondsRemaining) =>
         secondsRemaining > 8 * 3600 ? L10n.T("window_weekly") : L10n.T("window_5h");
 
+    /// <summary>
+    /// Mixed reset text (per UI review): a window closing within ~24h gets the relative
+    /// countdown ("resets in 3 h" - actionable while it matters), a farther one gets the
+    /// absolute local time ("resets Thu 02:00" - "in 4 days" from a stale refresh is just
+    /// noise). Mirrors macOS resetsText(for:).
+    /// </summary>
     public string ResetsText
     {
         get
         {
             if (ResetsAt is null) return "";
-            return ResetsTextForRemaining(ResetsAt.Value - DateTimeOffset.UtcNow);
+            var remaining = ResetsAt.Value - DateTimeOffset.UtcNow;
+            return remaining.TotalSeconds < 86400
+                ? ResetsTextForRemaining(remaining)
+                : ResetsTextAbsolute(ResetsAt.Value);
         }
+    }
+
+    /// <summary>Absolute form for far windows: local weekday + time in the app language
+    /// ("resets Thu 02:00" / "将于 周四 02:00 重置").</summary>
+    public static string ResetsTextAbsolute(DateTimeOffset resetsAt)
+    {
+        var local = resetsAt.ToLocalTime();
+        return L10n.T("resets_at", local.ToString("ddd HH:mm", L10n.Culture));
     }
 
     /// <summary>

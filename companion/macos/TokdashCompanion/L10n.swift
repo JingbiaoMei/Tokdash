@@ -181,7 +181,8 @@ enum L10n {
         "comp_full_delta_row": "Full delta row",
         "comp_full_delta_row_desc": "cost + tokens + messages",
         "comp_top_ranks": "Top tools & models",
-        "comp_top_ranks_desc": "three of each, under the hero",
+        "comp_top_ranks_desc": "under the hero; rows set below",
+        "rank_rows": "Rows: %d",
         "comp_reset_credits": "Reset-credits row",
         "comp_reset_credits_desc": "under Codex quota, All view",
         "comp_activity_glance": "Activity glance",
@@ -256,6 +257,7 @@ enum L10n {
         "resets_in_minutes": "resets in %d minute%@",
         "resets_in_hours": "resets in %d hour%@",
         "resets_in_days": "resets in %d day%@",
+        "resets_at": "resets %@",
         "plural_s": "s",
 
         "section_updates": "Updates",
@@ -403,7 +405,8 @@ enum L10n {
         "comp_full_delta_row": "完整对比行",
         "comp_full_delta_row_desc": "成本 + tokens + 消息",
         "comp_top_ranks": "常用工具与模型",
-        "comp_top_ranks_desc": "各取前三，位于概览下方",
+        "comp_top_ranks_desc": "位于概览下方；下方可设置行数",
+        "rank_rows": "行数：%d",
         "comp_reset_credits": "重置额度行",
         "comp_reset_credits_desc": "显示在 Codex 订阅下（全部视图）",
         "comp_activity_glance": "活动概览",
@@ -477,6 +480,7 @@ enum L10n {
         "resets_in_minutes": "%d 分钟后重置%@",
         "resets_in_hours": "%d 小时后重置%@",
         "resets_in_days": "%d 天后重置%@",
+        "resets_at": "将于 %@ 重置",
         "plural_s": "",
 
         "section_updates": "更新",
@@ -504,6 +508,11 @@ enum L10n {
 
     /// Plural suffix for the current language ("s" in English, "" in Chinese).
     static var pluralS: String { current == .zhHans ? "" : "s" }
+
+    /// Locale matching ``current``, for date/time formatting so weekday names ("Thu" vs
+    /// "周四") follow the app language rather than the system locale. Mirrors L10n.Culture
+    /// on Windows.
+    static var locale: Locale { current == .zhHans ? Locale(identifier: "zh-Hans") : Locale(identifier: "en") }
 
     /// Test-only: sorted keys present for a language, used to assert en/zh parity so a key can't
     /// silently ship without a Chinese translation.

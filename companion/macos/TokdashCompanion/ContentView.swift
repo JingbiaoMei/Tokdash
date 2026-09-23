@@ -212,7 +212,7 @@ private struct HeroSection: View {
                 if snap.components.topRanks && (!snap.topTools.isEmpty || !snap.topModels.isEmpty) {
                     VStack(alignment: .leading, spacing: 7) {
                         if !snap.topTools.isEmpty { RankBlock(kicker: snap.toolsKickerText, entries: snap.topTools) }
-                        if !snap.topModels.isEmpty { RankBlock(kicker: snap.modelsKickerText, entries: snap.topModels) }
+                        if !snap.topModels.isEmpty { RankBlock(kicker: snap.modelsKickerText, entries: snap.topModels, showLogo: false) }
                     }
                     .padding(.top, 8)
                 }
@@ -275,6 +275,11 @@ private struct HeroSection: View {
 private struct RankBlock: View {
     let kicker: String
     let entries: [Snapshot.RankEntry]
+    // Tools own the logo column; model rows have no marks at all and render flush to the
+    // leading edge (reserving a slot for a column the whole list never fills just leaves
+    // empty space on the left). A tool row that ships no mark still reserves the slot, so
+    // tool names stay aligned with each other.
+    var showLogo: Bool = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -293,15 +298,14 @@ private struct RankBlock: View {
     @ViewBuilder
     private func rankRow(_ entry: Snapshot.RankEntry) -> some View {
         HStack(spacing: 6) {
-            // The logo column is reserved even when absent: model rows never have
-            // marks, and without the reservation their names start left of the tool
-            // rows' names instead of aligned with them. (A frame on an EMPTY Group
-            // collapses - EmptyView ignores it - so the placeholder is a real view.)
-            if let asset = entry.logoAsset, let ns = NSImage(named: asset) {
-                // Missing assets degrade to text-only, never a broken-image box.
-                logo(asset: asset, ns: ns)
-            } else {
-                Color.clear.frame(width: 12, height: 12)
+            if showLogo {
+                if let asset = entry.logoAsset, let ns = NSImage(named: asset) {
+                    // Missing assets degrade to text-only, never a broken-image box.
+                    logo(asset: asset, ns: ns)
+                } else {
+                    // A frame on an EMPTY Group collapses, so the placeholder is a real view.
+                    Color.clear.frame(width: 12, height: 12)
+                }
             }
             Text(entry.label)
                 .font(.system(size: 11.5, weight: .medium))
@@ -315,8 +319,8 @@ private struct RankBlock: View {
                         .frame(width: geo.size.width * entry.fraction)
                 }
             }
-            // Year values are long ("21842.4M" - the compact notation has no B
-            // tier): the bar keeps a minimum width instead of being squeezed out.
+            // Year rows carry long values and long model names alike: the bar keeps a
+            // minimum width instead of being squeezed out by the trailing text.
             .frame(minWidth: 20)
             .frame(height: 3)
             Text(entry.valueText)
@@ -589,9 +593,16 @@ private struct QuotaSection: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(snap.allQuotaGroups, id: \.provider) { group in
-                        Text(group.provider)
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.secondary)
+                        // Mock design: 14px provider mark + name. Providers without a
+                        // shipped mark (commandcode) render text-only, never a placeholder.
+                        HStack(spacing: 6) {
+                            if let asset = CompanionStore.quotaLogoAssetName(for: group.canonicalProvider),
+                               let ns = NSImage(named: asset) {
+                                quotaLogo(asset: asset, ns: ns)
+                            }
+                            Text(group.provider)
+                                .font(.system(size: 12, weight: .semibold))
+                        }
                         // A failed provider shows an inline warning above its last-known
                         // rows, not a full-surface failure (spec §7).
                         if group.failed {
@@ -641,6 +652,27 @@ private struct QuotaSection: View {
             .frame(minHeight: CompanionLayout.quotaMinHeight, maxHeight: CompanionLayout.quotaMaxHeight)
         }
     }
+
+    /// Provider mark for the All-view group header, 14pt tall like the demo. Dark-ink marks
+    /// (codex, grok) render as templates so they follow the label color - the same rule the
+    /// web dashboard applies in dark; brand-colored marks keep their original pixels.
+    /// Mirrors RankBlock.logo at the All-view scale.
+    @ViewBuilder
+    private func quotaLogo(asset: String, ns: NSImage) -> some View {
+        if asset == "AgentCodex" || asset == "AgentGrok" {
+            Image(nsImage: ns)
+                .resizable()
+                .renderingMode(.template)
+                .aspectRatio(contentMode: .fit)
+                .frame(height: 14)
+                .foregroundStyle(.primary)
+        } else {
+            Image(nsImage: ns)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(height: 14)
+        }
+    }
 }
 
 private struct QuotaRowView: View {
@@ -649,9 +681,13 @@ private struct QuotaRowView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
+            // Mock layout: the reset time sits right after the name (it describes the
+            // window, not the bar), the percentage anchors the trailing edge.
             HStack(spacing: 8) {
                 Text(label)
                     .font(.system(size: 12.5, weight: .medium))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                 if row.estimated {
                     Text(L10n.t("estimated"))
                         .font(.system(size: 10.5))
@@ -659,15 +695,16 @@ private struct QuotaRowView: View {
                         .padding(.horizontal, 4)
                         .overlay(RoundedRectangle(cornerRadius: 4).stroke(.secondary.opacity(0.4)))
                 }
-                Spacer()
+                Text(row.resetsText)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
                 if row.hasPercent {
                     Text(L10n.t("percent_left", Int(row.left)))
                         .font(.system(size: 12.5, weight: .semibold))
                         .monospacedDigit()
                 }
-                Text(row.resetsText)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
             }
             // Buckets without a remaining_percent render without a bar.
             if row.hasPercent {
@@ -693,10 +730,13 @@ private struct QuotaRowView: View {
         return row.failed ? "⚠ \(base)" : base
     }
 
+    /// Fixed status ramp from the UI demo (identical in light and dark, so a red bar
+    /// means the same thing on every surface): fine #30A74C, mid #FF9F0A, low #FF453A.
+    /// Same tier boundaries as Formatter.QuotaBarClass / Windows QuotaBarColor.
     private var barColor: Color {
-        if row.left < 25 { return .red }
-        if row.left < 50 { return .orange }
-        return .green
+        if row.left < 25 { return Color(red: 255/255, green: 69/255, blue: 58/255) }
+        if row.left < 50 { return Color(red: 255/255, green: 159/255, blue: 10/255) }
+        return Color(red: 48/255, green: 167/255, blue: 76/255)
     }
 }
 

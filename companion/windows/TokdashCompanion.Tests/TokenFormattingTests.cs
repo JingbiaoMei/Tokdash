@@ -21,7 +21,9 @@ public class TokenFormattingTests
     [DataRow(12_982_308L, "13M")]
     [DataRow(18_700_000L, "18.7M")]
     [DataRow(281_000_000L, "281M")]
-    [DataRow(1_243_500_000L, "1243.5M")]
+    [DataRow(1_243_500_000L, "1.2B")]
+    [DataRow(75_000_000_000L, "75B")]
+    [DataRow(1_200_000_000L, "1.2B")]
     public void CompactTokens_Formats_Correctly(long tokens, string expected)
     {
         Assert.AreEqual(expected, Formatter.CompactTokens(tokens));

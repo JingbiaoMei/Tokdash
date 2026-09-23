@@ -652,7 +652,7 @@ final class ContractV11Tests: XCTestCase {
         XCTAssertEqual(Snapshot.compactTokens(779_000), "779k")
         XCTAssertEqual(Snapshot.compactTokens(12_982_308), "13M", "'.0' trims: 13.0M renders 13M")
         XCTAssertEqual(Snapshot.compactTokens(281_000_000), "281M")
-        XCTAssertEqual(Snapshot.compactTokens(1_243_500_000), "1243.5M")
+        XCTAssertEqual(Snapshot.compactTokens(1_243_500_000), "1.2B")
         XCTAssertEqual(Snapshot.compactTokens(18_700_000), "18.7M")
     }
 
@@ -988,17 +988,20 @@ final class ContractV11Tests: XCTestCase {
         let sentinel = URL(fileURLWithPath: "/tmp/tokdash-evidence-png.txt")
         // Line 1: output PNG path. Line 2 (optional): UsagePeriod token - xcodebuild's
         // test runner does not forward shell env vars, so the period knob is the file.
+        // Line 3 (optional): rankRows (3...8) to evidence the top-ranks growth layout.
         let sentinelLines = ((try? String(contentsOf: sentinel, encoding: .utf8)) ?? "")
             .split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         let outPath = sentinelLines.first?.trimmingCharacters(in: .whitespacesAndNewlines)
         let period = sentinelLines.count > 1 ? sentinelLines[1].trimmingCharacters(in: .whitespacesAndNewlines) : "today"
+        let rankRows = min(8, max(3, Int(sentinelLines.count > 2
+            ? (sentinelLines[2].trimmingCharacters(in: .whitespacesAndNewlines) ?? "") ?? "" : "") ?? 3))
         guard let outPath, !outPath.isEmpty else {
             throw XCTSkip("evidence render disabled (write output path to \(sentinel.path))")
         }
         let settingsURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("tokdash-evidence-settings.json")
         try """
-        {"version":3,"servers":[{"id":"evidence","label":"Evidence","baseUrl":"http://127.0.0.1:8123","enabled":true}],"language":"english","selectedPeriod":"\(period)"}
+        {"version":3,"servers":[{"id":"evidence","label":"Evidence","baseUrl":"http://127.0.0.1:8123","enabled":true}],"language":"english","selectedPeriod":"\(period)","rankRows":\(rankRows)}
         """.write(to: settingsURL, atomically: true, encoding: .utf8)
         // Restore the process-global seams on every exit path: XCTest method order
         // is not a guarantee to rely on, and a leaked pathOverride would silently

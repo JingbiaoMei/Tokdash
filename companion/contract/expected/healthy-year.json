@@ -14,7 +14,7 @@
     "period_segment": { "visible": true, "selected": "Year" },
     "today": {
       "cost": "$312.40",
-      "tokens_compact": "1243.5M",
+      "tokens_compact": "1.2B",
       "tokens_exact": "1243500000",
       "messages": "13204",
       "active": "active 74 d 5 h"

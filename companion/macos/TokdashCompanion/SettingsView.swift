@@ -11,6 +11,7 @@ struct SettingsView: View {
     @State private var language: AppLanguage = .system
     @State private var automaticUpdateChecks: Bool = false
     @State private var components: CompanionComponents = CompanionComponents()
+    @State private var rankRows: Int = 3
     @State private var serverSaveTasks: [String: Task<Void, Never>] = [:]
     @State private var testResults: [String: ConnectionTest] = [:]
     @State private var testTasks: [String: Task<Void, Never>] = [:]
@@ -69,6 +70,11 @@ struct SettingsView: View {
             Section(L10n.t("section_components")) {
                 componentToggle("comp_full_delta_row", desc: "comp_full_delta_row_desc", isOn: $components.fullDeltaRow)
                 componentToggle("comp_top_ranks", desc: "comp_top_ranks_desc", isOn: $components.topRanks)
+                // Rows per top-ranks list (contract §Top ranks): one shared count for tools
+                // and models, 3..8; the flyout grows to fit automatically.
+                Stepper(value: $rankRows, in: 3...8, step: 1) {
+                    Text(L10n.t("rank_rows", rankRows))
+                }
                 componentToggle("comp_reset_credits", desc: "comp_reset_credits_desc", isOn: $components.resetCredits)
                 componentToggle("comp_activity_glance", desc: "comp_activity_glance_desc", isOn: $components.activityGlance)
                 componentToggle("comp_histogram_today_week", desc: "comp_histogram_today_week_desc", isOn: $components.activityHistogramTodayWeek)
@@ -143,6 +149,10 @@ struct SettingsView: View {
         .onChange(of: components) { _, _ in
             saveSettings()
             store.applyComponentsChange() // toggled components appear without a refetch
+        }
+        .onChange(of: rankRows) { _, _ in
+            saveSettings()
+            store.applyComponentsChange() // both rank lists re-slice without a refetch
         }
         .onChange(of: lowQuotaNotifications) { _, _ in saveSettings() }
         .onChange(of: fiveHourThreshold) { _, _ in saveSettings() }
@@ -403,6 +413,7 @@ struct SettingsView: View {
         language = store.settings.language
         automaticUpdateChecks = store.settings.automaticUpdateChecks
         components = store.settings.components
+        rankRows = store.settings.rankRows
     }
 
     private func scheduleServerSave(_ id: String) {
@@ -432,6 +443,7 @@ struct SettingsView: View {
         store.settings.servers = validServers
         store.settings.lowQuotaNotifications = lowQuotaNotifications
         store.settings.components = components
+        store.settings.rankRows = rankRows
         let thresholds = QuotaThresholds(fiveHour: fiveHourThreshold, weekly: weeklyThreshold, other: otherThreshold)
         let thresholdsChanged = store.settings.thresholds != thresholds
         store.settings.thresholds = thresholds

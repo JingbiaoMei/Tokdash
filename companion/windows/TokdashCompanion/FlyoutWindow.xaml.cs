@@ -539,17 +539,20 @@ public partial class FlyoutWindow : Window
         if (!show) return;
         ToolsKicker.Text = snap!.ToolsKickerText;
         ModelsKicker.Text = snap.ModelsKickerText;
-        ToolsStrip.ItemsSource = tools.Select(MakeRankVM).ToList();
-        ModelsStrip.ItemsSource = models.Select(MakeRankVM).ToList();
+        ToolsStrip.ItemsSource = tools.Select(e => MakeRankVM(e, reserveLogo: true)).ToList();
+        // Model rows carry no marks at all: their logo column collapses so the names sit
+        // flush with the kicker instead of leaving empty space on the left.
+        ModelsStrip.ItemsSource = models.Select(e => MakeRankVM(e, reserveLogo: false)).ToList();
     }
 
-    private RankVM MakeRankVM(Snapshot.RankEntry entry)
+    private RankVM MakeRankVM(Snapshot.RankEntry entry, bool reserveLogo)
     {
         var logo = LogoFor(entry.LogoAsset);
         return new RankVM
         {
             Logo = logo,
             LogoVisibility = logo is null ? Visibility.Collapsed : Visibility.Visible,
+            LogoColWidth = reserveLogo ? new GridLength(19) : new GridLength(0),
             Label = entry.Label,
             Value = entry.ValueText,
             FillStar = new GridLength(entry.Fraction * 100, GridUnitType.Star),
@@ -560,16 +563,19 @@ public partial class FlyoutWindow : Window
 
     private static readonly Dictionary<string, ImageSource?> LogoCache = new();
 
+    /// <summary>Marks that ship as dark ink: the dark theme swaps in a pre-inverted
+    /// {name}-dark copy, mirroring the web dashboard's darkInvert rule.</summary>
+    private static readonly HashSet<string> DarkInvertAssets = new() { "codex", "grok", "zcode" };
+
     /// <summary>
     /// Load a harness mark from the packaged Assets\Agents resources. A missing asset
-    /// degrades to text-only (never a broken-image box). The Codex mark ships as a black
-    /// silhouette: the dark theme uses a pre-inverted copy, mirroring the web dashboard's
-    /// darkInvert rule - it's the only shipped mark that needs one.
+    /// degrades to text-only (never a broken-image box). Dark-ink marks (codex, grok, zcode)
+    /// swap to their pre-inverted copies when the flyout renders dark.
     /// </summary>
     private ImageSource? LogoFor(string? asset)
     {
         if (string.IsNullOrEmpty(asset)) return null;
-        string name = asset == "codex" && _dark ? "codex-dark" : asset;
+        string name = _dark && DarkInvertAssets.Contains(asset) ? asset + "-dark" : asset;
         if (LogoCache.TryGetValue(name, out var cached)) return cached;
         ImageSource? img = null;
         try
@@ -917,6 +923,7 @@ public partial class FlyoutWindow : Window
     private QuotaGroupVM MakeQuotaGroupVM(Snapshot snap, QuotaGroup group) => new()
     {
         Provider = group.Provider,
+        Logo = LogoFor(CompanionStore.QuotaLogoAssetName(group.CanonicalProvider)),
         WarningText = L10n.T("couldnt_refresh"),
         // GROUP failure drives the provider-header warning (spec §7); rendered inline by
         // QuotaGroupTemplate rather than a separate MakeProviderWarning() element.
@@ -993,6 +1000,9 @@ internal sealed class QuotaRowVM
 internal sealed class QuotaGroupVM
 {
     public string Provider { get; init; } = "";
+    /// <summary>Provider mark for the group header (mock design's 14px logo); null renders
+    /// text-only - never a placeholder (see CompanionStore.QuotaLogoAssetName).</summary>
+    public ImageSource? Logo { get; init; }
     public string WarningText { get; init; } = "";
     public Visibility WarningVisibility { get; init; }
     public List<QuotaRowVM> Rows { get; init; } = new();
@@ -1014,6 +1024,9 @@ internal sealed class RankVM
 {
     public ImageSource? Logo { get; init; }
     public Visibility LogoVisibility { get; init; } = Visibility.Collapsed;
+    /// <summary>Logo column width: 19 for tool rows (mark or reserved placeholder),
+    /// 0 for model rows, which never carry marks and sit flush to the leading edge.</summary>
+    public GridLength LogoColWidth { get; init; } = new(19);
     public string Label { get; init; } = "";
     public string Value { get; init; } = "";
     public GridLength FillStar { get; init; }

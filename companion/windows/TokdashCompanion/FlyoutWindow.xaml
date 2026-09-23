@@ -151,9 +151,10 @@
             </Setter>
         </Style>
 
-        <!-- Shared row shape: label and percentage on the first line, then the quota bar
-             and reset time below. The shared right column keeps percentage and reset text
-             aligned without taking the long provider label's horizontal space. -->
+        <!-- Shared row shape (UI demo layout): label, reset time and percentage share the
+             first line - reset text right after the name so "resets Thu 02:00" reads as
+             part of the window, percentage pushed to the trailing edge - and the bar spans
+             the FULL width below, instead of stopping short under a stacked right column. -->
         <DataTemplate x:Key="QuotaRowTemplate">
             <Grid Margin="0,0,0,12">
                 <Grid.RowDefinitions>
@@ -162,7 +163,8 @@
                 </Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto" MinWidth="84"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
 
                 <Grid Grid.Row="0" Grid.Column="0" Margin="0,0,8,0">
@@ -180,18 +182,18 @@
                     </Border>
                 </Grid>
 
-                <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding PercentText}" FontSize="{StaticResource FontSecondary}"
+                <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding ResetsText}" FontSize="{StaticResource FontCaption}"
+                           VerticalAlignment="Center" Margin="0,0,8,0"
+                           Foreground="{DynamicResource MutedBrush}"/>
+
+                <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding PercentText}" FontSize="{StaticResource FontSecondary}"
                            FontWeight="SemiBold" HorizontalAlignment="Right" VerticalAlignment="Center"
                            Foreground="{DynamicResource TextBrush}"/>
 
-                <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding ResetsText}" FontSize="{StaticResource FontCaption}"
-                           HorizontalAlignment="Right" VerticalAlignment="Center"
-                           Foreground="{DynamicResource MutedBrush}"/>
-
                 <!-- Coloured quota bar: light track with a coloured fill sized to the % left.
                      Buckets without a remaining_percent hide the bar but keep their reset time. -->
-                <Border Grid.Row="1" Grid.Column="0" Visibility="{Binding BarVisibility}"
-                        CornerRadius="2" Background="{DynamicResource BarTrack}" Height="4" Margin="0,6,0,0">
+                <Border Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3" Visibility="{Binding BarVisibility}"
+                        CornerRadius="2" Background="{DynamicResource BarTrack}" Height="4" Margin="0,5,0,0">
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="{Binding FillStar}"/>
@@ -207,8 +209,24 @@
              the same QuotaRowTemplate so Low and All render identically row-for-row. -->
         <DataTemplate x:Key="QuotaGroupTemplate">
             <StackPanel>
-                <TextBlock Text="{Binding Provider}" FontSize="{StaticResource FontCaption}" FontWeight="SemiBold"
-                           Foreground="{DynamicResource MutedBrush}" Margin="0,8,0,4"/>
+                <!-- Mock design: 14px provider mark + name on one line. A provider without a
+                     shipped mark renders text-only - the collapsed Image reserves nothing. -->
+                <StackPanel Orientation="Horizontal" Margin="0,8,0,4">
+                    <Image Source="{Binding Logo}" Height="14" MaxWidth="52" Stretch="Uniform"
+                           Margin="0,0,6,0" VerticalAlignment="Center">
+                        <Image.Style>
+                            <Style TargetType="Image">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Logo}" Value="{x:Null}">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Image.Style>
+                    </Image>
+                    <TextBlock Text="{Binding Provider}" FontSize="{StaticResource FontSecondary}" FontWeight="SemiBold"
+                               Foreground="{DynamicResource TextBrush}" VerticalAlignment="Center"/>
+                </StackPanel>
                 <StackPanel Orientation="Horizontal" Visibility="{Binding WarningVisibility}" Margin="0,0,0,4">
                     <TextBlock Text="⚠" FontSize="{StaticResource FontSecondary}" Foreground="#FF9F0A"
                                Margin="0,0,6,0" VerticalAlignment="Center"/>
@@ -245,7 +263,9 @@
         <DataTemplate x:Key="RankTemplate">
             <Grid Margin="0,3,0,3">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="19"/>
+                    <!-- Tools bind this to 19 (mark or placeholder); models bind 0 so the
+                         names sit flush left - they never have marks. -->
+                    <ColumnDefinition Width="{Binding LogoColWidth}"/>
                     <ColumnDefinition Width="96"/>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto" MinWidth="84"/>

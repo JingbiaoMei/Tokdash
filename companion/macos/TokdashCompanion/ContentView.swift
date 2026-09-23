@@ -699,11 +699,15 @@ private struct QuotaRowView: View {
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                    // Reset text wins the space fight: an absolute "resets Sat 19:25"
+                    // cut to "resets S…" is worse than a long window name ellipsizing.
+                    .layoutPriority(1)
                 Spacer(minLength: 8)
                 if row.hasPercent {
                     Text(L10n.t("percent_left", Int(row.left)))
                         .font(.system(size: 12.5, weight: .semibold))
                         .monospacedDigit()
+                        .layoutPriority(2)  // the number never truncates; the name does
                 }
             }
             // Buckets without a remaining_percent render without a bar.

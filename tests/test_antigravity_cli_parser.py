@@ -631,5 +631,5 @@ def test_antigravity_cli_signature_scan_only_stats_db_and_sidecars(monkeypatch, 
     # directories once per scan. Everything beyond that must be a conversation
     # DB or one of its sidecars: no per-file stat on legacy .pb or stray files,
     # however many the directory holds.
-    dir_probes = {"antigravity-cli", "antigravity-acp", "antigravity-ide", "conversations"}
+    dir_probes = {"antigravity-cli", "antigravity", "antigravity-acp", "antigravity-ide", "conversations"}
     assert set(stat_calls) - dir_probes == {"scan.db", "scan.db-wal", "scan.db-shm"}

@@ -204,6 +204,7 @@ def dense_usage(range_info: Mapping[str, Any], seed: int = 0) -> dict[str, Any]:
             "tokens_in": tokens_in,
             "tokens_out": tokens_out,
             "tokens_cache": tokens_cache,
+            "tokens_reasoning": sum(row.get("tokens_reasoning", 0) for row in models),
             "cost": round(sum(row["cost"] for row in models), 6),
             "messages": sum(row["messages"] for row in models),
             "models": models,

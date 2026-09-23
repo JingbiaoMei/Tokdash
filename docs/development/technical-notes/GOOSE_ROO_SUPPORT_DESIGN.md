@@ -226,7 +226,13 @@ Implementation notes (2026-09-21), where the build differed from the draft:
   `ceil(since/1000) <= t < ceil(until/1000)`, which selects exactly the rows
   whose `t * 1000` falls in the ms window. The predicate lives in the loader
   and only there; `GooseParser._parse_all()` stays unwindowed because
-  `source_replace` would otherwise persist a partial corpus.
+  `source_replace` would otherwise persist a partial corpus. An UNBOUNDED read
+  stops at `_GOOSE_MAX_EPOCH_SECONDS`, and that is the same ceiling
+  `_goose_ts_to_ms()` refuses above, on purpose: the parser counts a row the
+  helper accepts and the panel lists a row under the bound, so a millisecond
+  stamp on a seconds column is refused by both rather than priced by one and
+  invisible to the other. The helper used to reinterpret such a value, which is
+  a disagreement waiting for a Goose that writes one.
 - The ordinal for the `elapsedMs` match is `ROW_NUMBER() OVER (PARTITION BY
   session_id ORDER BY id)` computed over the **whole** ledger, not the window,
   so a window that opens mid-session still pairs each row with its own
@@ -239,6 +245,35 @@ Implementation notes (2026-09-21), where the build differed from the draft:
   when that count and the duration list differ in length, the loader writes no
   `_work_ms` at all for the session, because after a gap every position is
   off-by-one and a wrong active time is worse than an estimated one.
+  **Residual, documented rather than fixed:** the guard compares *counts*. One
+  ledger row with no duration plus one duration-bearing message with no ledger
+  row leaves the two sequences the same length and mispairs them again from that
+  point on. Both halves have to go missing at once, which is far narrower than
+  the single gap the guard closes, and the fallback for a session that really
+  has it is a number that looks measured.
+- A source-windowing loader owes the window its **closing** edge. A Goose
+  duration runs backwards from its completion stamp (`_measured_intervals` puts
+  the work before the event), so the first row past `until` can own minutes of
+  work that happened inside the window, and dropping it undercounts. The loader
+  passes that row back as `_next_event_ms` / `_next_work_ms`, the shape ZCode
+  already uses, and only when its own duration was measured - a bare event with
+  no work would be charged the capped inter-event gap, which bills idle time the
+  source never timed. The opening edge needs nothing and gets nothing: the
+  interval of a row before `since` ends before `since`, so the clip discards it
+  and there is no work to recover. The two edges are not symmetric and the
+  reason is the backwards interval, not an oversight. The row rides the SAME
+  scan as the turns rather than a query of its own: `usage_ledger` has no index
+  on `created_timestamp`, so a second windowed query would double the cold cost
+  of every panel read to fetch one row. Measured on a synthetic 900-row ledger,
+  2.45 ms for the combined query against 3.46 ms for two separate ones.
+- The prompt lookup asks for the sessions that need a name and no others. The
+  first user-visible prompt is a fallback title, read only when `sessions.name`
+  is empty or one of Goose's generic defaults, so querying every in-window
+  session materialises the `content_json` of every user message of a busy day to
+  discard it. Measured on a synthetic 120-session / 4,800-message store: 16.7 ms
+  for the unfiltered `IN` list, 2.8 ms narrowed to the three sessions that
+  needed it, twice per cold pass with the duration scan beside it, and the
+  dashboard warms several windows per start.
 - The label rule is `sessions.name` **unless** the name is one of Goose's own
   generic defaults (`CLI Session` and friends), in which case the first
   user-visible prompt names the session. Measured reason: six of the seven
@@ -404,11 +439,15 @@ parser mirrors it instead of inventing a model:
      tag sat 24 to 50 ms later in the same file. That is a systematic miss on
      the request that carries the prompt, not an edge case.
    - so pair on proximity instead: the tag nearest the row's `ts` wins when it
-     is within `_ROO_MODEL_TAG_WINDOW_MS` (2 s), which prices a mixed-model task
-     per request the way Goose does. The captured own-record offsets are 4, 6, 6,
-     7, 7, 7, 24, 31, 43, 50 and 59 ms - two orders of magnitude inside the
-     window - while the nearest *different* request's tag is 3.2 s away at the
-     tightest, so the window separates them without guessing.
+     is within `_ROO_MODEL_TAG_WINDOW_MS` (500 ms), which prices a mixed-model
+     task per request the way Goose does. The captured own-record offsets are 4,
+     6, 6, 7, 7, 7, 24, 31, 43, 50 and 59 ms - between one and two orders of
+     magnitude inside the window - while the nearest *different* request's tag is
+     3.2 s away at the tightest, more than six times the window, so the window
+     separates them without guessing. The value is 500 ms and not a generous
+     slack because the window is how far a request with no record of its own may
+     borrow a NEIGHBOUR'S model: widening it widens the misattribution rather
+     than the recovery.
    - when nothing is in the window, use the newest tag at or before the row: the
      model in force. Roo rewrites the tag per request, so a row whose own record
      never reached the file (one captured request's tool-result record only got
@@ -736,7 +775,13 @@ Mirror the existing per-tool pairs (`test_crush_parser.py`,
   conversion.
 - `tests/test_goose_sessions.py`: hidden and child sessions excluded from the
   panel and present in Overview; the ordinal `elapsedMs` match and its
-  fallback; compaction turns labelled.
+  fallback; compaction turns labelled; the closing-edge hand-back asserted
+  against the same session read unwindowed and clipped, so a future refactor
+  that drops it cannot pass; the opening edge asserted to hold nothing back, for
+  the same reason; a session whose durations cannot be matched earns no boundary
+  event rather than a gap-sized guess; and the narrowed prompt list checked both
+  ways (a fully named store never opens `messages` for a title, and a mix of
+  named and unnamed sessions still names both).
 - `tests/test_roo_code_parser.py`, seeded inline from
   `scratchpad/fixtures/roo/` (a real two-turn task: 3 requests, then a resume
   adding `resume_task` + `user_feedback` + 3 more): one entry per completed

@@ -401,6 +401,44 @@ For full onboarding details, including runtime choices, WSL/systemd behavior, ma
 Tailscale, bundling, update checks, and safe uninstall semantics, see
 **[`docs/guides/ONBOARDING.md`](docs/guides/ONBOARDING.md)**.
 
+### Terminal dashboard
+
+Prefer to stay in the terminal? Both terminal views work without a browser and reuse the
+same local usage index and cache as the web dashboard — one launched beside `tokdash serve`
+reads the shared on-disk database instead of reparsing logs.
+
+The interactive dashboard:
+
+```bash
+tokdash tui
+```
+
+It opens the same **Overview**, **Report** and **Quota** tabs as the web dashboard; a tab
+longer than one page scrolls with the mouse wheel. Keys:
+
+| Key | Action |
+|---|---|
+| `q` | Quit |
+| `r` | Refresh the current tab |
+| `1` / `2` / `3` | Switch to Overview / Report / Quota |
+| `t` `w` `m` `y` `a` | Jump to a period directly (both period tabs; `t`/`a` are Overview-only) |
+| `p` | Next time window (forward-only cycle) |
+| `[` / `]` | Pull the window's end date one day back / forward (never into the future) |
+| `0` | Back to today |
+| `u` | Poll quota (Quota tab only) |
+| `?` | Help overlay with all keys |
+
+For a one-shot report you can pipe or script:
+
+```bash
+tokdash report --period week
+```
+
+The period is a flag, not a positional argument — `tokdash report week` errors by design.
+Accepted values: `today` (the default), `week`, `month`, `year`, `all`, a number of days,
+or `Nd/Nw/Nm/Ny` shorthand; `week`, `month` and `year` are the same calendar-aligned
+windows the web Report tab shows. `tokdash report` also accepts `--json`, `--pretty` and
+`--output <file>`, following the same conventions as `tokdash export`.
 
 ### OpenClaw digest (scheduled reports)
 
@@ -507,6 +545,8 @@ For remote access through Tailscale Serve, SSH forwarding, or an explicit networ
 record the Tailscale Serve rule after you opt in.
 
 By default `tokdash serve` opens the dashboard in your browser once on startup. Pass `--no-open` to disable this (it is also skipped automatically in headless/SSH environments and in the background service templates).
+
+A bare `tokdash` with no command just prints the command help and exits — it no longer starts `tokdash serve` behind your back or opens a browser. Start the dashboard explicitly: `tokdash serve`.
 
 ## Privacy & security
 

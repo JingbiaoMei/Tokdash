@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Unreleased
+
+### Added
+
+- `tokdash tui` opens an interactive terminal dashboard — Overview, Report and Quota tabs over the same in-process compute and caches as the web dashboard, with no server needed. The Overview answers for the selected window only: a filled date header, KPI row, an adaptive local visual (day bars for the week, a heat grid for the month, a calendar heatmap for the year, no chart on today), a per-tool statistics table (Input, Output, Cache, Total, Hit, Cost, Msgs, Time) and a per-tool model list that never truncates. Tool names carry their display names (`claude` → Claude Code). `t/w/m/y/a` pick the period directly on both period tabs, `p` cycles forward, `[` / `]` / `0` pull the window's end date one day back and forth (never into the future), tabs longer than a page scroll with the mouse wheel, and `u` polls quota on demand — the only network path the pane takes. A spelled-out key legend sits at the top of each period tab, every statistics table (tools, models, and the tool/model detail) carries the same field set on one shared fixed-width column grid with right-aligned figures -- so the same column lines up across the three sections -- no table shows a selection cursor (the mouse wheel is the only scroll), and every reload clears its pane and shows a "computing…" notice before repainting, so a previous window's figures never sit on screen pretending to be current. The Quota tab lists one provider name per group rather than repeating it on every window row, with a blank line between providers, and its reset-credits section covers every provider that grants them -- Claude Code limit resets join the Codex card's -- each row naming the provider (and install) it belongs to, sorted by expiry. A TUI started beside `tokdash serve` shares the on-disk usage index instead of reparsing logs.
+- `tokdash report` prints a one-shot, ccusage-style activity report for a single window — `tokdash report --period week`; the period is a flag, never a positional argument, so `tokdash report week` errors by design. `--json`, `--pretty` and `--output` follow the `tokdash export` conventions, and piped or file output is always plain text.
+
+### Changed
+
+- A bare `tokdash` with no verb prints the command help and exits instead of silently starting `tokdash serve` and opening a browser. The old default surprised anyone who typed the command just to see what it does, and on a desktop that surprise included a browser window. Nothing unattended relied on it: the systemd unit, the launchd plist, and the Windows scheduler task all embed `serve` explicitly. `tokdash serve` itself is unchanged.
+
 ## 2.6.3 - 2026-09-23
 
 ### Added

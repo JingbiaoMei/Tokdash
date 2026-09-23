@@ -359,6 +359,38 @@ tokdash serve
 
 런타임 선택, WSL/systemd 동작, macOS launchd, Tailscale, 번들링, 업데이트 확인, 안전한 제거 동작을 포함한 온보딩 전체 상세는 **[`docs/guides/ONBOARDING.md`](docs/guides/ONBOARDING.md)**를 참조하세요.
 
+### 터미널 대시보드
+
+터미널에 그대로 남겠다면? 두 터미널 뷰 모두 브라우저 없이 동작하며 웹 대시보드와 동일한 로컬 사용량 인덱스와 캐시를 재사용합니다 — `tokdash serve` 옆에서 실행한 터미널 뷰는 로그를 다시 파싱하는 대신 디스크의 공유 데이터베이스를 읽습니다.
+
+인터랙티브 대시보드:
+
+```bash
+tokdash tui
+```
+
+웹 대시보드와 동일한 **Overview**, **Report**, **Quota** 탭을 엽니다. 탭이 한 화면을 넘으면 마우스 휠로 스크롤합니다. 키:
+
+| 키 | 동작 |
+|---|---|
+| `q` | 종료 |
+| `r` | 현재 탭 새로고침 |
+| `1` / `2` / `3` | Overview / Report / Quota으로 전환 |
+| `t` `w` `m` `y` `a` | 기간으로 바로 이동(두 기간 탭 공통; `t`/`a`는 Overview 전용) |
+| `p` | 다음 시간 윈도우(순환은 앞방향만) |
+| `[` / `]` | 윈도우 종료일을 하루 뒤 / 앞으로 이동(미래로는 이동하지 않음) |
+| `0` | 오늘로 복귀 |
+| `u` | 쿼터 폴링(Quota 탭 전용) |
+| `?` | 모든 키를 표시하는 도움말 패널 |
+
+파이프나 스크립트로 쓸 수 있는 일회성 리포트:
+
+```bash
+tokdash report --period week
+```
+
+기간은 플래그로만 지정합니다 — 위치 인자로 넘기면 설계상 오류입니다 (`tokdash report week` 오류). 허용 값: `today` (기본), `week`, `month`, `year`, `all`, 일수 숫자, 또는 `Nd/Nw/Nm/Ny` 축약형. `week`, `month`, `year`는 웹 Report 탭이 표시하는 달력 기준 윈도우와 동일합니다. `tokdash report`는 `tokdash export`와 동일한 규칙에 따라 `--json`, `--pretty`, `--output <file>`도 받습니다.
+
 ### OpenClaw 다이제스트 (정기 리포트)
 
 Tokdash는 로컬 API를 일정대로 쿼리하여 OpenClaw의 일일/주간/월간 사용량 리포트를 제공할 수 있습니다.
@@ -462,6 +494,8 @@ tokdash db watch --pretty
 Tailscale Serve, SSH 포워딩, 명시적 네트워크 바인딩을 통한 원격 접근은 [`docs/guides/REMOTE_ACCESS.md`](docs/guides/REMOTE_ACCESS.md)를 참조하세요. 대화형 `tokdash setup`은 옵트인 후 Tailscale Serve 규칙을 구성하고 기록할 수 있습니다.
 
 기본적으로 `tokdash serve`는 시작 시 브라우저에서 대시보드를 한 번 엽니다. 끄려면 `--no-open`을 넘기세요 (헤드리스/SSH 환경과 백그라운드 서비스 템플릿에서는 자동으로 건너뜀).
+
+명령어를 붙이지 않은 `tokdash`는 명령 헬프를 출력하고 종료하기만 합니다 — 더 이상 몰래 `tokdash serve`를 시작하거나 브라우저를 열지 않습니다. 대시보드는 명시적으로 `tokdash serve`로 여세요.
 
 ## 프라이버시 & 보안
 

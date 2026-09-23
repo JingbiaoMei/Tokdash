@@ -389,6 +389,37 @@ tokdash serve
 完整 onboarding 说明，包括运行时选择、WSL/systemd 行为、macOS launchd、Tailscale、bundle
 集成、更新检查和安全卸载语义，见 **[`docs/guides/ONBOARDING.md`](docs/guides/ONBOARDING.md)**。
 
+### 终端仪表盘
+
+更喜欢留在终端里？两个终端视图都无需浏览器即可工作，并复用与 Web 仪表盘相同的本地索引用量数据和缓存——与 `tokdash serve` 一同启动的终端视图会直接读取共享的磁盘数据库，而不是重新解析日志。
+
+交互式仪表盘：
+
+```bash
+tokdash tui
+```
+
+它打开与 Web 仪表盘相同的 **Overview**、**Report** 和 **Quota** 标签页；标签页超过一页时可用鼠标滚轮滚动。按键：
+
+| 按键 | 操作 |
+|---|---|
+| `q` | 退出 |
+| `r` | 刷新当前标签页 |
+| `1` / `2` / `3` | 切换到 Overview / Report / Quota |
+| `t` `w` `m` `y` `a` | 直接跳转到对应周期（两个周期标签页通用；`t`/`a` 仅 Overview） |
+| `p` | 下一个时间窗口（仅向前循环） |
+| `[` / `]` | 将窗口结束日期往前 / 往后挪一天（不会跳到未来） |
+| `0` | 回到今天 |
+| `u` | 轮询配额（仅 Quota 标签页） |
+| `?` | 显示所有按键的帮助面板 |
+
+用于可管道化或脚本化的一次性报表：
+
+```bash
+tokdash report --period week
+```
+
+周期只能作为参数（flag），不是位置参数——`tokdash report week` 会按设计报错。可接受的值：`today`（默认）、`week`、`month`、`year`、`all`、天数数字，或 `Nd/Nw/Nm/Ny` 简写；其中 `week`、`month`、`year` 与 Web Report 标签页显示的日历对齐窗口相同。`tokdash report` 还支持 `--json`、`--pretty` 和 `--output <file>`，遵循与 `tokdash export` 相同的约定。
 
 ### OpenClaw 摘要（定时报表）
 
@@ -495,6 +526,8 @@ tokdash db watch --pretty
 配置并记录 Tailscale Serve 规则。
 
 默认情况下，`tokdash serve` 会在启动时自动在浏览器中打开仪表盘一次。使用 `--no-open` 可禁用此行为（在无界面/SSH 环境以及后台服务模板中也会自动跳过）。
+
+不带子命令直接运行 `tokdash` 只会打印命令帮助然后退出——它不会再悄悄启动 `tokdash serve`，也不会打开浏览器。请显式启动仪表盘：`tokdash serve`。
 
 ## 隐私与安全
 

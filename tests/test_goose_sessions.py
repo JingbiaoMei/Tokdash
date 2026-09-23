@@ -13,6 +13,7 @@ describe one database shape (the captured v1.51.0 schema, version 16).
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from pathlib import Path
 
@@ -27,6 +28,7 @@ from tokdash.sessions import (
     TOOL_LABELS,
     GooseReadError,
     _goose_sessions,
+    _session_active_intervals,
     get_session_detail,
     get_sessions_data,
     reload_pricing_db,
@@ -37,6 +39,7 @@ from tokdash.sources.coding_tools import BaseParser, GooseParser, _sig_cache
 RATES = {"qwen-test": {"input": 2.0, "output": 4.0, "cache_read": 0.2, "cache_write": 2.0}}
 
 SECOND = 1_000
+MINUTE = 60_000
 
 
 @pytest.fixture(autouse=True)
@@ -406,6 +409,112 @@ def test_a_zero_token_row_costs_the_pairing_nothing(monkeypatch, tmp_path):
     turns = [t for s in _goose_sessions().values() for t in s["turns"]]
     assert [t["_work_ms"] for t in turns] == [1111, 2222]
 
+def test_a_request_spanning_the_closing_edge_keeps_its_in_window_work(monkeypatch, tmp_path):
+    """The row just past the bound can own work that happened INSIDE it.
+
+    A Goose duration runs BACKWARDS from its completion stamp, so the request
+    that finished at T0+200 covered [T0+80, T0+200] and a window ending at
+    T0+150 owes the 70 s before its own edge. The loader windows at the source,
+    so it has to hand that row back the way ZCode does; holding it silently was
+    an undercount, not a conservative choice. Reading the same session
+    unwindowed and clipping is the answer a non-windowing source would give, and
+    the two must now agree.
+    """
+    _setup(monkeypatch, tmp_path,
+           sessions=[_session("s1")],
+           ledger=[_ledger(1, "s1", 0), _ledger(2, "s1", 200)],
+           messages=[_assistant_usage("s1", 1, 5_000),
+                     _assistant_usage("s1", 201, 120_000)])
+    lo, hi = T0 * SECOND - 10_000, (T0 + 150) * SECOND
+
+    whole = next(iter(_goose_sessions().values()))
+    edge = next(iter(_goose_sessions(since_ms=lo, until_ms=hi).values()))
+    assert edge["_next_event_ms"] == (T0 + 200) * SECOND
+    assert edge["_next_work_ms"] == 120_000
+
+    def total(raw):
+        return sum(e - s for s, e in _session_active_intervals(raw, 30 * MINUTE, lo, hi))
+
+    assert total(edge) == total(whole) == 75_000
+
+
+def test_the_opening_edge_holds_back_nothing_worth_passing(monkeypatch, tmp_path):
+    """Why only the closing edge is passed back, and not symmetrically.
+
+    The interval of a row BEFORE the window ends at that row's own stamp, which
+    is before the window opened, so the clip discards it and there is no work to
+    recover. A _prior_event_ms here would only add an unmeasured stamp.
+    """
+    _setup(monkeypatch, tmp_path,
+           sessions=[_session("s1")],
+           ledger=[_ledger(1, "s1", 0), _ledger(2, "s1", 100)],
+           messages=[_assistant_usage("s1", 1, 60_000),
+                     _assistant_usage("s1", 101, 5_000)])
+    lo, hi = (T0 + 30) * SECOND, (T0 + 200) * SECOND
+    edge = next(iter(_goose_sessions(since_ms=lo, until_ms=hi).values()))
+    assert "_prior_event_ms" not in edge
+
+    whole = next(iter(_goose_sessions().values()))
+
+    def total(raw):
+        return sum(e - s for s, e in _session_active_intervals(raw, 30 * MINUTE, lo, hi))
+
+    assert total(edge) == total(whole)
+
+
+def test_an_unmeasured_boundary_request_is_not_charged_the_gap(monkeypatch, tmp_path):
+    """No elapsedMs for the row past the bound means no boundary event at all.
+
+    A stamp with no measured duration is charged the CAPPED GAP to the next
+    event, which bills idle time the source never measured. The count guard that
+    protects the in-window pairing protects this edge the same way.
+    """
+    _setup(monkeypatch, tmp_path,
+           sessions=[_session("s1")],
+           ledger=[_ledger(1, "s1", 0), _ledger(2, "s1", 200)],
+           # One duration for two billed rows: the second request ended without
+           # a usage block, so nothing here says how long it took.
+           messages=[_assistant_usage("s1", 1, 5_000)])
+    edge = next(iter(_goose_sessions(since_ms=T0 * SECOND,
+                                     until_ms=(T0 + 150) * SECOND).values()))
+    assert "_next_event_ms" not in edge
+    assert "_next_work_ms" not in edge
+    assert _listing()["sessions"][0]["active_ms"] > 0   # the fallback still runs
+
+
+def test_a_named_corpus_never_opens_the_messages_table_for_prompts(monkeypatch, tmp_path):
+    """Only the sessions Goose left unnamed may cost a prompt lookup.
+
+    Every in-window session otherwise drags the content_json of all its user
+    messages through the reader to produce a string the loader then throws away,
+    and the dashboard warms several windows per start. Counting the text
+    extractor is the cheap way to see the query never ran.
+    """
+    calls = []
+    real = sessions._goose_content_text
+    monkeypatch.setattr(sessions, "_goose_content_text",
+                        lambda value: calls.append(value) or real(value))
+    _setup(monkeypatch, tmp_path,
+           sessions=[_session("s1", name="Refactor the parser"),
+                     _session("s2", name="Fix the flaky test")],
+           ledger=[_ledger(1, "s1", 0), _ledger(2, "s2", 5)],
+           messages=[_user_prompt("s1", 2, "do it"), _user_prompt("s2", 7, "do that")])
+    rows = {row["display_name"] for row in _listing()["sessions"]}
+    assert rows == {"Refactor the parser", "Fix the flaky test"}
+    assert calls == []
+
+
+def test_a_mix_of_named_and_unnamed_sessions_still_names_both(monkeypatch, tmp_path):
+    """The narrowed prompt list must not lose the session that does need it."""
+    _setup(monkeypatch, tmp_path,
+           sessions=[_session("s1", name="Named by the user"),
+                     _session("s2", name="CLI Session")],
+           ledger=[_ledger(1, "s1", 0), _ledger(2, "s2", 5)],
+           messages=[_user_prompt("s1", 2, "ignored, it has a name"),
+                     _user_prompt("s2", 7, "the fallback title")])
+    rows = {row["display_name"] for row in _listing()["sessions"]}
+    assert rows == {"Named by the user", "the fallback title"}
+
 
 def test_a_compaction_request_is_billed_and_marked(monkeypatch, tmp_path):
     """Goose flags a compaction request; the flag survives to the API row.
@@ -524,6 +633,12 @@ def test_new_ledger_rows_reach_the_panel(monkeypatch, tmp_path):
     finally:
         conn.close()
     # The DB's own signature moved, so the cached view must not be reused.
+    # The signature is (mtime_ns, size) and this filesystem's mtime clock is
+    # coarse (measured ~4 ms), so a write this small does not always move it and
+    # the test would then pass by accident or fail by accident. Advance the
+    # clock by hand: what is under test is the cache rule, not the clock.
+    stat = db.stat()
+    os.utime(db, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
     assert _listing()["sessions"][0]["token_events"] == 2
 
 

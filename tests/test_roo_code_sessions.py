@@ -110,6 +110,26 @@ def _listing():
     return get_sessions_data("roo_code", "all")
 
 
+def test_a_task_seen_through_two_root_spellings_is_one_session(monkeypatch, tmp_path, roo_home):
+    """The panel double counts the same way Overview does, so pin it too.
+
+    The loader groups by task id and EXTENDS, so a task directory reached under
+    two spellings appends the same rows twice: two turns and double the tokens
+    for one request. Canonical root dedupe is what keeps this at one.
+    """
+    real = tmp_path / "real"
+    (tmp_path / "sub").mkdir()
+    _write(real, _task(TASK, requests=[req(T0 + 40, 100, 5)]))
+    _setup(monkeypatch, tmp_path, real)
+    monkeypatch.setenv("TOKDASH_ROO_STORAGE_DIR", f"{real},{tmp_path / 'sub' / '..' / 'real'}")
+    sessions._load_roo_code_sessions.cache_clear()
+
+    raw = _roo_code_sessions()
+    turns = [t for session in raw.values() for t in session["turns"]]
+    assert len(raw) == 1
+    assert len(turns) == 1, [t["tokens_in"] + t["tokens_out"] for t in turns]
+    assert turns[0]["tokens_in"] + turns[0]["tokens_out"] == 105
+
 # --- registry ----------------------------------------------------------------
 
 

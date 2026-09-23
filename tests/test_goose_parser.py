@@ -18,6 +18,7 @@ from tokdash.sources.coding_tools import (
     CodingToolsUsageTracker,
     GooseParser,
     GooseSchemaError,
+    _GOOSE_MAX_EPOCH_SECONDS,
     _goose_ts_to_ms,
     _sig_cache,
 )
@@ -495,7 +496,14 @@ def test_goose_signature_is_one_entry_per_db(monkeypatch, tmp_path):
 
 def test_goose_ts_to_ms_guards():
     assert _goose_ts_to_ms(T0) == T0 * 1000
-    assert _goose_ts_to_ms(T0 * 1000) == T0 * 1000  # already milliseconds
+    # A millisecond stamp is REFUSED, not reinterpreted. The Sessions window
+    # compares this column in seconds against the same ceiling, so a reader
+    # that guessed "this one was written in ms" would price a request in
+    # Overview that the panel can never list. Refusing keeps the two surfaces
+    # telling one story about one column.
+    assert _goose_ts_to_ms(T0 * 1000) is None
+    assert _goose_ts_to_ms(_GOOSE_MAX_EPOCH_SECONDS) == _GOOSE_MAX_EPOCH_SECONDS * 1000
+    assert _goose_ts_to_ms(_GOOSE_MAX_EPOCH_SECONDS + 1) is None
     assert _goose_ts_to_ms(0) is None
     assert _goose_ts_to_ms(-1) is None
     assert _goose_ts_to_ms(None) is None

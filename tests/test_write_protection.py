@@ -311,6 +311,36 @@ def test_default_cors_same_tailnet_preflight():
     assert headers["access-control-allow-origin"] == origin
 
 
+# --- /health identity does not widen who may read it (issue #108) ----------------
+#
+# /health now answers with instance_id, the value a dashboard uses to recognise one
+# daemon behind several URLs. That is a durable identifier for this user's machine, so
+# the origin policy on this route is the guard that keeps it private. These three cases
+# are the policy as it was before the field existed; they are here so widening it to
+# "make the merge work" fails a test rather than shipping.
+
+
+def test_health_instance_id_did_not_widen_cors():
+    allowed = (
+        # The dashboard opened on loopback, which the stock regex admits everywhere.
+        ("wsl.tail76535.ts.net", "http://127.0.0.1:55423"),
+        # A Serve dashboard reading a same-tailnet daemon.
+        ("macbook.tail76535.ts.net", "https://wsl.tail76535.ts.net"),
+    )
+    for host, origin in allowed:
+        headers = _asgi_response_headers("GET", "/health", {"host": host, "origin": origin})
+        assert headers["access-control-allow-origin"] == origin
+
+
+def test_health_instance_id_is_not_readable_from_a_foreign_origin():
+    headers = _asgi_response_headers(
+        "GET",
+        "/health",
+        {"host": "wsl.tail76535.ts.net", "origin": "https://any-website.example"},
+    )
+    assert "access-control-allow-origin" not in headers
+
+
 def test_same_tailnet_cors_does_not_open_remote_writes():
     assert _asgi_status(
         "POST",

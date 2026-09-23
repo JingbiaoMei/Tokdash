@@ -42,6 +42,7 @@ from .compute import (
 )
 from .dateutil import parse_date_range
 from .insights import UnknownFacetError, compute_insights
+from .instance_identity import get_instance_id
 from .usage_store import SCHEMA_VERSION as USAGE_DB_SCHEMA_VERSION
 from .usage_store import UsageDatabaseSchemaTooNewError
 from .sessions import (
@@ -614,6 +615,11 @@ async def _lifespan(_app: "FastAPI"):
         threading.Thread(target=_warm_caches, name="tokdash-warm", daemon=True).start()
     if not _dev_fixture_mode(_app) and os.environ.get("TOKDASH_DAILY_WARM", "1") != "0":
         threading.Thread(target=_daily_warm_loop, name="tokdash-daily-warm", daemon=True).start()
+    # Warm the daemon identity here rather than only at import so the first /health
+    # answer costs no file I/O. Lazy inside the accessor as well: a TestClient built
+    # without a context manager never runs this, and /health must not change shape
+    # because of it.
+    get_instance_id()
     yield
 
 
@@ -626,6 +632,11 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR), follow_symlink=True)
 app.add_middleware(NoCacheMiddleware)
 
 
+# GUARDRAIL (issue #108): /health carries ``instance_id``, the value the dashboard uses
+# to tell one daemon behind several URLs from two daemons. Do not widen this policy to
+# make that field readable from a page that cannot read it. An unauthenticated
+# Access-Control-Allow-Origin would hand any website a durable tracking identifier for
+# this user. A route the browser is not allowed to read is shown as blocked instead.
 cors_allow_origins = [o.strip() for o in os.environ.get("TOKDASH_ALLOW_ORIGINS", "").split(",") if o.strip()]
 cors_allow_origin_regex = os.environ.get("TOKDASH_ALLOW_ORIGIN_REGEX", "").strip() or None
 cors_allow_same_tailnet = not cors_allow_origins and cors_allow_origin_regex is None
@@ -2438,7 +2449,16 @@ async def health_check():
     # heavy compute — this is what makes an external /health watchdog reliable (P4).
     # The service/version fields are a distinctive fingerprint so a port probe can tell
     # "this is Tokdash" instead of trusting a generic {"status":"ok"} any app could return.
-    return {"status": "ok", "service": "tokdash", "version": __version__}
+    payload = {"status": "ok", "service": "tokdash", "version": __version__}
+    # instance_id lets a dashboard that reaches this daemon over two URLs recognise it as
+    # one host instead of counting its tokens twice. Omitted, never guessed, when the id
+    # cannot be read or written: a daemon on an unwritable state dir says nothing rather
+    # than claiming something wrong. Readers test ``service`` only, and both companions
+    # decode a fixed shape, so the extra key is additive.
+    instance_id = get_instance_id()
+    if instance_id:
+        payload["instance_id"] = instance_id
+    return payload
 
 
 def _read_install_manifest() -> Dict[str, Any]:

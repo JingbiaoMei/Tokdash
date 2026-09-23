@@ -95,9 +95,26 @@ the month is 1 day, not 30.
 Liveness check. Carries a distinctive `service`/`version` fingerprint so a port probe can
 tell "this is Tokdash" rather than trusting a generic `{"status":"ok"}` any app could return.
 
+`instance_id` identifies this daemon, so a dashboard that reaches one machine over
+several URLs (loopback, Serve name, SSH forward) can recognise it as one server instead
+of counting its tokens twice. It is a random UUID4 created on first start and kept in
+`<data_dir>/instance.json`: it survives a restart, two daemons sharing a data directory
+agree on it because they read the same session logs, and two daemons in two directories
+differ even on one machine. The field is omitted rather than guessed when the file can be
+neither written nor read.
+
+It is a durable identifier for this machine, so it is covered by the same origin policy as
+everything else on this route, and that policy must not be widened to make it readable
+from a page that cannot already read the daemon.
+
 **Response**
 ```json
-{ "status": "ok", "service": "tokdash", "version": "1.0.7" }
+{
+  "status": "ok",
+  "service": "tokdash",
+  "version": "1.0.7",
+  "instance_id": "6c1f2b0e-9a4d-4c37-8f1e-2d0b5a7c9e11"
+}
 ```
 
 ---

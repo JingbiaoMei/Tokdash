@@ -839,6 +839,31 @@ def _split_cline_cache_inclusive_input(
     return raw_input - cache_r - cache_w, cache_r, cache_w
 
 
+def split_goose_cache_inclusive_input(
+    input_total: int, cache_read: int, cache_write: int
+) -> Tuple[int, int, int]:
+    """Disjoint (fresh input, cacheRead, cacheWrite) from one Goose ledger row.
+
+    Goose's own Usage type documents ``input_tokens`` as "the total input
+    including cache read/write tokens; the cache fields are breakdown subsets
+    of it", and every writer honours that: the Anthropic/Bedrock/Vertex path
+    builds it with ``Usage::from_cache_exclusive_input``, which ADDS both cache
+    parts (upstream's test turns input 10 + read 5000 + write 1000 into 6010),
+    and the OpenAI-protocol path keeps ``prompt_tokens``, which already covers
+    ``prompt_tokens_details.cached_tokens`` and ``cache_write_tokens``.
+
+    So both parts come back out before the row is billed, because get_cost()
+    charges the four buckets additively. Subtracting only the read side bills
+    every cache write twice -- on the upstream vector that is 25,057 billed
+    against 15,057 real. Both cache columns arrive here as ``int(x or 0)``, so
+    an OpenAI-compatible ledger (where writes are NULL) costs nothing extra.
+
+    Same arithmetic as Cline's split, which is why it delegates: two tools
+    whose vendors both publish a cache-inclusive prompt total.
+    """
+    return _split_cline_cache_inclusive_input(input_total, cache_read, cache_write)
+
+
 def cline_message_file_signatures(data_dir: Path) -> tuple:
     """(path, mtime_ns, size) of every sessions/*/*.messages.json file.
 
@@ -6691,7 +6716,7 @@ class GooseSchemaError(RuntimeError):
     ``usage_ledger``, so this reader cannot account for it."""
 
 
-# Upper bound for a plausible epoch-SECONDS stamp: 9999999999 s is 2286-09-13,
+# Upper bound for a plausible epoch-SECONDS stamp: 9999999999 s is 2286-11-20,
 # far outside any Goose clock. The Sessions window uses the SAME number for an
 # unbounded read (sessions._goose_load_sessions), and that is the point: the
 # parser counts a row this helper accepts and the panel lists a row below the
@@ -6785,7 +6810,9 @@ class GooseParser(BaseParser):
     # 1: one entry per usage_ledger row, keyed on session + row id + the row's
     #    own second; cache-inclusive input split; gross output; pricing-DB
     #    cost only (ledger cost/cost_source ignored).
-    persistent_parser_version = 1
+    # 2: the input split takes BOTH cache parts back out (writes were billed
+    #    twice), and cost_source 'carried_forward' backfill rows are skipped.
+    persistent_parser_version = 2
 
     def __init__(self, pricing_db: PricingDatabase):
         super().__init__(pricing_db)
@@ -6833,6 +6860,16 @@ class GooseParser(BaseParser):
                    input_tokens, output_tokens,
                    cache_read_tokens, cache_write_tokens
             FROM usage_ledger
+            -- cost_source 'carried_forward' rows are Goose's own backfill, not
+            -- requests: record_usage_metrics writes one when a session's
+            -- accumulated totals exceed its ledger (a session resumed or
+            -- imported by a Goose that predates the ledger), with the whole
+            -- backlog stamped strftime('%s','now'). Billing it here would put
+            -- history on the day of the NEXT request, under a NULL model, and
+            -- for a session imported from Claude Code those tokens are already
+            -- counted under claude. The row still counts towards Goose's own
+            -- session totals, which is where it is meant to be read.
+            WHERE COALESCE(cost_source, '') <> 'carried_forward'
             ORDER BY session_id, id
             """
         ):
@@ -6850,9 +6887,12 @@ class GooseParser(BaseParser):
             if ts_ms is None:
                 continue
             model = str(row["model"] or "").strip() or "unknown"
-            # Fresh input only: input_tokens already contains the cached
-            # slice, and get_cost bills the buckets additively.
-            input_t = max(0, input_total - cache_r)
+            # Fresh input only, with BOTH cache parts taken back out: the
+            # ledger's input_tokens is the cache-inclusive total, and get_cost
+            # bills the buckets additively.
+            input_t, cache_r, cache_w = split_goose_cache_inclusive_input(
+                input_total, cache_r, cache_w
+            )
             row_id = row["id"]
             out.append({
                 "source": self.source_name,
@@ -6945,7 +6985,11 @@ def _roo_roots() -> List[Path]:
     key = (
         str(Path.home()),
         os.environ.get("TOKDASH_ROO_STORAGE_DIR", ""),
-        os.environ.get("XDG_DATA_HOME", ""),
+        # XDG_CONFIG_HOME, not XDG_DATA_HOME: roo_storage_roots() reads the
+        # first for the desktop roots on linux/wsl and never the second. Keying
+        # on the wrong variable would leave a relocated ~/.config serving a
+        # stale root list for the length of the TTL.
+        os.environ.get("XDG_CONFIG_HOME", ""),
         os.environ.get("APPDATA", ""),
     )
     now = _time.monotonic()
@@ -6990,8 +7034,11 @@ def _scan_roo_task_file_signatures() -> tuple:
     return tuple(sorted(sigs))
 
 
-def _roo_conversation_tags(conv_path: Path) -> List[Tuple[int, str]]:
+def _roo_conversation_tags(conv_path: Path) -> Optional[List[Tuple[int, str]]]:
     """[(ts, model)] from one api_conversation_history.json, oldest first.
+
+    None means "this read failed", which is not the same answer as the empty
+    list ("this task has no model tag"). See _roo_model_tags.
 
     Only user records carry the header: Roo builds the environment_details block
     for the role it sends to the model, and the captured corpus has the tag on 5
@@ -7003,7 +7050,7 @@ def _roo_conversation_tags(conv_path: Path) -> List[Tuple[int, str]]:
     try:
         doc = json.loads(conv_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return []
+        return None
     records = doc if isinstance(doc, list) else []
 
     out: List[Tuple[int, str]] = []
@@ -7045,6 +7092,8 @@ def _roo_model_tags(messages_path: Path) -> List[Tuple[int, str]]:
     try:
         st = conv.stat()
     except OSError:
+        # Genuinely absent: a task with no conversation record has no tag, and
+        # "unknown" is the honest answer rather than a failure to be raised.
         return []
     key = str(conv)
     sig = (st.st_mtime_ns, st.st_size)
@@ -7052,6 +7101,13 @@ def _roo_model_tags(messages_path: Path) -> List[Tuple[int, str]]:
     if cached is not None and cached[0] == sig:
         return cached[1]
     tags = _roo_conversation_tags(conv)
+    if tags is None:
+        # A read that failed is not a task without tags, and caching the empty
+        # answer would make it permanent: Roo rewrites this file in place, so a
+        # torn read is rare and self-healing, but a finished task's signature
+        # never moves again. Returning it uncached costs one re-read and keeps
+        # the model off the "unknown" scrapheap.
+        return []
     if len(_roo_model_cache) >= _ROO_MODEL_CACHE_MAX:
         _roo_model_cache.clear()
     _roo_model_cache[key] = (sig, tags)
@@ -7150,13 +7206,39 @@ def parse_roo_task_file(
         if "tokensIn" not in payload and "tokensOut" not in payload:
             continue  # pre-flight marker; the response rewrites this row
 
-        # tokensIn is cache-inclusive and Roo reports both slices, so the split
-        # is Cline's: bill the fresh part as input, the two cache parts apart.
-        input_t, cache_r, cache_w = _split_cline_cache_inclusive_input(
-            BaseParser._i(payload.get("tokensIn")),
-            BaseParser._i(payload.get("cacheReads")),
-            BaseParser._i(payload.get("cacheWrites")),
-        )
+        protocol = str(payload.get("apiProtocol") or "")
+        raw_in = BaseParser._i(payload.get("tokensIn"))
+        raw_read = BaseParser._i(payload.get("cacheReads"))
+        raw_write = BaseParser._i(payload.get("cacheWrites"))
+        if protocol == "anthropic" and raw_in < raw_read + raw_write:
+            # Roo changed what tokensIn MEANS in 3.29.5 (2025-11-01, upstream
+            # PR #8954). Before it, the row held the provider's own number, and
+            # for an Anthropic-protocol provider that number EXCLUDED the cache
+            # slices ("For Anthropic compliant usage, the input tokens count
+            # does NOT include the cached tokens" -- Roo's own comment). After
+            # it, tokensIn is totalInputTokens: fresh + writes + reads for
+            # anthropic, the reported prompt total for openai.
+            #
+            # So a row that cannot be arithmetically inclusive is a pre-fix
+            # row, and its four buckets are already disjoint. This is not an
+            # estimate: an inclusive reading of the same row would need a
+            # negative fresh input. And it cannot misfire on a modern row,
+            # because 3.29.5+ writes fresh + reads + writes, which is never
+            # below reads + writes.
+            #
+            # The residue is the other direction, and it is not reachable from
+            # the row: a pre-fix request whose fresh input EXCEEDS its cache
+            # slices looks inclusive and is billed as one. Roo is archived at
+            # 3.54.0 with no version written into the task file, so there is
+            # nothing else to consult. Blind spot, documented.
+            input_t, cache_r, cache_w = raw_in, raw_read, raw_write
+        else:
+            # tokensIn is cache-inclusive and Roo reports both slices, so the
+            # split is Cline's: bill the fresh part as input, the two cache
+            # parts apart.
+            input_t, cache_r, cache_w = _split_cline_cache_inclusive_input(
+                raw_in, raw_read, raw_write
+            )
         # tokensOut is gross: Roo computes reasoning tokens but never persists
         # them, so output is billed and displayed whole with no reasoning split.
         output_t = BaseParser._i(payload.get("tokensOut"))
@@ -7174,7 +7256,7 @@ def parse_roo_task_file(
             "ts": ts,
             # Roo persists the protocol per request; it is the only provider
             # evidence on the row, so it is what the provider field carries.
-            "provider": str(payload.get("apiProtocol") or ""),
+            "provider": protocol,
             "input": input_t,
             "output": output_t,
             "cacheRead": cache_r,
@@ -7267,7 +7349,9 @@ class RooCodeParser(BaseParser):
     # 1: one entry per completed api_req_started row, cache-inclusive tokensIn
     #    split, gross tokensOut, model paired from the sibling conversation
     #    file, epoch-ms timestamps kept as written, pricing-DB cost only.
-    persistent_parser_version = 1
+    # 2: anthropic-protocol rows whose tokensIn cannot include their cache
+    #    are pre-3.29.5 and keep their disjoint buckets (see parse_roo_task_file).
+    persistent_parser_version = 2
 
     # No __init__ and no cached roots on purpose. _file_signatures re-derives
     # the scan through the shared signer every call, which is what keeps a root
@@ -7327,7 +7411,14 @@ class RooCodeParser(BaseParser):
         )
 
     def _parse_all(self) -> List[Dict[str, Any]]:
-        out: List[Dict[str, Any]] = []
+        # Folded by entry_id the way ClineParser folds its message files. Roo's
+        # keys are roo_code:{taskId}:{ts}, so one task reached under two
+        # spellings -- a tasks/ symlinked into two roots, a task directory
+        # copied between profile trees -- would bill the same request twice
+        # HERE. The store absorbs that through its (source, entry_key) index,
+        # which is the reason for the fold rather than an excuse to skip it:
+        # live and stored totals have to be the same number.
+        by_id: Dict[str, Dict[str, Any]] = {}
         for file_sig in self._file_signatures():
             try:
                 rows = roo_task_rows(
@@ -7338,7 +7429,11 @@ class RooCodeParser(BaseParser):
                 # hand the tracker a source-level error, which would cost every
                 # other task its entries.
                 continue
-            out.extend(self._entries(rows))
+            for entry in self._entries(rows):
+                prev = by_id.get(entry["entry_id"])
+                if prev is None or int(entry["timestamp"]) < int(prev["timestamp"]):
+                    by_id[entry["entry_id"]] = entry
+        out = list(by_id.values())
         out.sort(key=lambda e: int(e.get("timestamp", 0) or 0))
         return out
 

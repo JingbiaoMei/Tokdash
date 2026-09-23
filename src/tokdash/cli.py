@@ -387,7 +387,38 @@ def _sync_usage_database() -> dict:
     get_sessions_data("kimi", "all")
     get_sessions_data("dsh", "all")
     get_sessions_data("reasonix", "all")
-    return UsageEntryStore().status()
+    status = UsageEntryStore().status()
+    # A source whose sync raised keeps its stored rows unread for the whole
+    # request (compute._sync_usage_store confines the failure to that source).
+    # For the dashboard that is the right trade: one sick parser costs one
+    # panel, not the store. For a rebuild it is not, because the database being
+    # written right now is missing that tool's ENTIRE history and would be
+    # swapped in as the fresh copy. Name the sources so both callers can act:
+    # `db resync` refuses the swap, `db sync` exits non-zero.
+    failures = sorted({str(name) for name in (getattr(tracker, "sync_failures", None) or ())})
+    if failures:
+        status["sync_failures"] = failures
+        status["sync_error"] = "sync failed for: " + ", ".join(failures)
+    return status
+
+
+def _discard_resync_attempt(tmp_path: Path) -> None:
+    """Best effort: drop a rejected rebuild instead of leaving it on disk.
+
+    Only ever called before the swap, so the live database is untouched and the
+    temp copy is pure litter. A failure to remove it is not worth an error: the
+    next resync writes under a new timestamp.
+    """
+    for leftover in (
+        tmp_path,
+        Path(str(tmp_path) + "-wal"),
+        Path(str(tmp_path) + "-shm"),
+        Path(str(tmp_path) + ".lock"),
+    ):
+        try:
+            leftover.unlink()
+        except OSError:
+            pass
 
 
 def _resync_usage_database() -> dict:
@@ -413,10 +444,26 @@ def _resync_usage_database() -> dict:
             tmp_store = UsageEntryStore(tmp_path)
             tmp_store.checkpoint()
             new_entries = int(status.get("usage_entries", 0) or 0)
+            failed_sources = list(status.get("sync_failures") or ())
+            if failed_sources:
+                # The empty-result guard below only catches a rebuild that lost
+                # EVERYTHING. A source that failed to sync loses its whole
+                # history while the entry count still looks healthy, so the
+                # swap has to be refused on the failure itself.
+                status["ok"] = False
+                status["error"] = (
+                    "refusing to replace the usage DB: these sources failed to sync "
+                    "and would be missing from the rebuilt copy: "
+                    + ", ".join(failed_sources)
+                )
+                status["old_usage_entries"] = old_entries
+                _discard_resync_attempt(tmp_path)
+                return status
             if old_entries > 0 and new_entries == 0:
                 status["ok"] = False
                 status["error"] = "refusing to replace populated DB with empty resync result"
                 status["old_usage_entries"] = old_entries
+                _discard_resync_attempt(tmp_path)
                 return status
         finally:
             if old_env is None:
@@ -888,8 +935,14 @@ def db_command(action: str, pretty: bool, output: str | None, verify_period: str
         _emit_json(UsageEntryStore().status(), pretty, output)
         return 0
     if action == "sync":
-        _emit_json(_sync_usage_database(), pretty, output)
-        return 0
+        status = _sync_usage_database()
+        _emit_json(status, pretty, output)
+        # Non-zero, not just a log line: a script that runs `tokdash db sync`
+        # and trusts the exit code must hear about a source that contributed
+        # nothing. `db watch` keeps looping on a failure instead, because its
+        # payload carries sync_failures every interval and one transient parser
+        # error should not end the watcher.
+        return 0 if not status.get("sync_failures") else 1
     if action == "resync":
         result = _resync_usage_database()
         _emit_json(result, pretty, output)

@@ -175,6 +175,29 @@ def _resolve(path: Path) -> str:
         return ""
 
 
+def _is_dir(path: Path) -> bool:
+    """``Path.is_dir()`` that reads an unreadable path as absent.
+
+    pathlib only forgives ENOENT/ENOTDIR/EBADF/ELOOP; an EACCES comes back out
+    of is_dir() as a PermissionError. Roo scans trees it does not own (another
+    user's AppData under /mnt/c, a 0700 dir on a shared box), and an exception
+    there would escape roo_storage_roots() and cost the ENTIRE Roo source, not
+    the one root that happened to be locked.
+    """
+    try:
+        return path.is_dir()
+    except OSError:
+        return False
+
+
+def _is_file(path: Path) -> bool:
+    """``Path.is_file()`` with the same EACCES-is-absent rule as _is_dir."""
+    try:
+        return path.is_file()
+    except OSError:
+        return False
+
+
 def _sanitize_profile_slug(text: str) -> str:
     return "".join(ch if ch.isalnum() or ch in "._-" else "-" for ch in text).strip("-.")
 
@@ -1006,7 +1029,7 @@ def _roo_product_storage_roots(base: Path) -> List[Path]:
     both task trees on disk, and Tokdash reads whichever exist.
     """
     out: List[Path] = []
-    if not base.is_dir():
+    if not _is_dir(base):
         return out
     for pattern in _ROO_PRODUCT_NAMES:
         try:
@@ -1019,7 +1042,7 @@ def _roo_product_storage_roots(base: Path) -> List[Path]:
                 user / "globalStorage" / _ROO_EXTENSION_ID,
                 *sorted(user.glob(f"profiles/*/globalStorage/{_ROO_EXTENSION_ID}")),
             ):
-                if storage.is_dir():
+                if _is_dir(storage):
                     out.append(storage)
     return out
 
@@ -1060,7 +1083,7 @@ def roo_storage_roots() -> List[Path]:
         # twice. Roo's entry keys are task-scoped, so a second copy of one
         # ui_messages.json is a double count, not a duplicate row.
         key = _resolve(path) or str(path)
-        if key in seen or not path.is_dir():
+        if key in seen or not _is_dir(path):
             return
         seen.add(key)
         roots.append(path)
@@ -1094,17 +1117,19 @@ def roo_storage_roots() -> List[Path]:
 
     if kind == "wsl":
         # The Windows desktop tree, alongside the server roots above: this is
-        # the dual-tree case the union exists for.
-        for pattern in _ROO_PRODUCT_NAMES:
-            try:
-                found = sorted(
-                    _wsl_windows_root().glob(
-                        f"Users/*/AppData/Roaming/{pattern}/User/globalStorage/{_ROO_EXTENSION_ID}"
-                    )
-                )
-            except OSError:
-                found = []
-            for storage in found:
+        # the dual-tree case the union exists for. Per-user Roaming dirs feed
+        # the SAME helper the native desktops use, so a Windows-side VS Code
+        # PROFILE is found here too -- the one-glob version of this branch saw
+        # only globalStorage/ and quietly skipped profiles/*/globalStorage/,
+        # which is where a profile-switched desktop install keeps its tasks.
+        try:
+            roaming = sorted(
+                (_wsl_windows_root() / "Users").glob("*/AppData/Roaming")
+            )
+        except OSError:
+            roaming = []
+        for base in roaming:
+            for storage in _roo_product_storage_roots(base):
                 add(storage)
 
     if kind == "windows":
@@ -1136,14 +1161,23 @@ def _roo_task_dirs() -> List[Path]:
     entry at all, so index-driven discovery loses a task that still cost money.
     """
     out: List[Path] = []
+    seen: set = set()
     for root in roo_storage_roots():
         try:
-            found = sorted(p for p in (root / "tasks").glob("*") if p.is_dir())
+            found = sorted(p for p in (root / "tasks").glob("*") if _is_dir(p))
         except OSError:
             continue
         for task in found:
-            if task not in out:
-                out.append(task)
+            # Resolved key, like add(): the roots themselves are already
+            # canonical, but one tasks/ symlinked or bind-mounted into two roots
+            # yields two spellings of the SAME task directory, and Roo's
+            # task-scoped entry keys turn that into a double count. A set keeps
+            # this linear; the corpus grows one directory per task forever.
+            key = _resolve(task) or str(task)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(task)
     return out
 
 
@@ -1152,7 +1186,7 @@ def roo_task_message_files() -> List[Path]:
     out: List[Path] = []
     for task in _roo_task_dirs():
         path = task / "ui_messages.json"
-        if path.is_file():
+        if _is_file(path):
             out.append(path)
     return out
 

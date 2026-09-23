@@ -338,40 +338,110 @@ def test_ordinal_work_match_survives_a_window_that_opens_mid_session(monkeypatch
     assert turns[0]["_work_ms"] == 333  # the THIRD request, not the first
 
 
+def test_a_carried_forward_row_is_not_a_turn(monkeypatch, tmp_path):
+    """The panel excludes Goose's own backfill for the same reason Overview does.
+
+    It also protects the duration pairing: a backfilled row has no assistant
+    message behind it at all, so ranking past it would displace the durations of
+    every request that follows.
+    """
+    db = _setup(monkeypatch, tmp_path,
+                sessions=[_session("s1")],
+                ledger=[_ledger(1, "s1", 0), _ledger(2, "s1", 60)],
+                messages=[_assistant_usage("s1", 1, 1111, input_tokens=1000,
+                                           output_tokens=20)])
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "UPDATE usage_ledger SET cost_source = 'carried_forward' WHERE id = 2"
+    )
+    conn.commit()
+    conn.close()
+    sessions._goose_sessions_cache.clear()
+    sessions._goose_sessions_cache_sig = ()
+
+    raw = _goose_sessions()
+    turns = [t for session in raw.values() for t in session["turns"]]
+    assert len(turns) == 1
+    assert turns[0]["_work_ms"] == 1111     # the other row's duration, unmatched
+
+
+def test_an_estimated_row_is_an_ordinary_turn(monkeypatch, tmp_path):
+    """The filter names one value; Goose's own 'estimated' rows are real requests."""
+    db = _setup(monkeypatch, tmp_path,
+                sessions=[_session("s1")],
+                ledger=[_ledger(1, "s1", 0), _ledger(2, "s1", 60)])
+    conn = sqlite3.connect(db)
+    conn.execute("UPDATE usage_ledger SET cost_source = 'estimated' WHERE id = 2")
+    conn.commit()
+    conn.close()
+    sessions._goose_sessions_cache.clear()
+    sessions._goose_sessions_cache_sig = ()
+
+    raw = _goose_sessions()
+    turns = [t for session in raw.values() for t in session["turns"]]
+    assert len(turns) == 2
+
 def test_active_time_uses_the_measured_durations(monkeypatch, tmp_path):
     _setup(monkeypatch, tmp_path,
            sessions=[_session("s1")],
-           ledger=[_ledger(1, "s1", 0), _ledger(2, "s1", 60)],
-           messages=[_assistant_usage("s1", 1, 5000), _assistant_usage("s1", 61, 4000)])
+           ledger=[_ledger(1, "s1", 0, inp=1000, out=20),
+                   _ledger(2, "s1", 60, inp=2000, out=30)],
+           messages=[_assistant_usage("s1", 1, 5000, input_tokens=1000, output_tokens=20),
+                     _assistant_usage("s1", 61, 4000, input_tokens=2000, output_tokens=30)])
     row = _listing()["sessions"][0]
     assert row["active_ms"] == 9000
 
 
 def test_a_missing_usage_block_earns_no_measured_duration(monkeypatch, tmp_path):
-    """An interrupted request used to shift every LATER duration by one.
+    """An interrupted request costs ITS OWN duration and nobody else's.
 
-    The rank runs over billed ledger rows; the durations come only from the
-    assistant messages that carry a usage block. Once one of those is missing
-    the two sequences are different lengths and position k is no longer row k:
-    the positional read charged row 2 the 3333 ms that belonged to row 3, a
-    wrong number rather than a missing one. A session whose counts disagree now
-    keeps the capped inter-event-gap contract the design already promises.
+    The durations come only from the assistant messages that carry a usage
+    block, so a session can easily hold three billed rows and two durations.
+    Pairing them by position charged row 2 the 3333 ms that belonged to row 3,
+    a wrong number rather than a missing one. Each row now looks up its own
+    token counts, so the two rows that were billed identically still get 1111
+    and 3333 in request order and the interrupted row gets nothing.
     """
     _setup(monkeypatch, tmp_path,
            sessions=[_session("s1")],
-           ledger=[_ledger(1, "s1", 0), _ledger(2, "s1", 10), _ledger(3, "s1", 20)],
+           ledger=[_ledger(1, "s1", 0, inp=1000, out=20),
+                   _ledger(2, "s1", 10, inp=700, out=9),
+                   _ledger(3, "s1", 20, inp=1500, out=30)],
            messages=[
                _assistant_usage("s1", 1, 1111, input_tokens=1000, output_tokens=20),
                _assistant_no_usage("s1", 11),
-               _assistant_usage("s1", 21, 3333, input_tokens=1000, output_tokens=20),
+               _assistant_usage("s1", 21, 3333, input_tokens=1500, output_tokens=30),
            ])
     turns = [t for s in _goose_sessions().values() for t in s["turns"]]
     assert len(turns) == 3
-    assert all("_work_ms" not in t for t in turns)
+    assert [t.get("_work_ms") for t in turns] == [1111, None, 3333]
 
     row = _listing()["sessions"][0]
-    assert row["active_ms"] > 0              # the fallback still measures work
-    assert row["active_ms"] != 1111 + 3333   # and never the mispaired sum
+    assert row["active_ms"] > 0              # the fallback covers the gap
+    assert row["active_ms"] != 1111 + 3333   # and never a mispaired sum
+
+
+def test_equal_counts_do_not_guarantee_the_same_request(monkeypatch, tmp_path):
+    """The narrower form of the same trap, which a count check cannot see.
+
+    A duration-bearing message with no billing row (an import's backfilled
+    usage answers no request of this session) and a billed row whose response
+    never arrived leave the two sequences the SAME LENGTH. The old length guard
+    waved that through and paired positionally: the first real request was
+    charged the orphan's 999 ms and read as a 999-second turn. Matching on
+    counts leaves the row unmeasured instead, which is a missing number.
+    """
+    _setup(monkeypatch, tmp_path,
+           sessions=[_session("s1")],
+           ledger=[_ledger(1, "s1", 0, inp=1000, out=20),
+                   _ledger(2, "s1", 10, inp=500, out=7)],
+           messages=[
+               # Nobody billed these counts: no ledger row owns them.
+               _assistant_usage("s1", 1, 999, input_tokens=9999, output_tokens=999),
+               _assistant_usage("s1", 11, 5000, input_tokens=500, output_tokens=7),
+           ])
+    turns = [t for s in _goose_sessions().values() for t in s["turns"]]
+    assert [t.get("_work_ms") for t in turns] == [None, 5000]
 
 
 def test_a_zero_token_row_does_not_shift_the_later_durations(monkeypatch, tmp_path):
@@ -388,7 +458,10 @@ def test_a_zero_token_row_does_not_shift_the_later_durations(monkeypatch, tmp_pa
            ])
     turns = [t for s in _goose_sessions().values() for t in s["turns"]]
     assert len(turns) == 2                               # the zero row is no turn
-    assert all("_work_ms" not in t for t in turns)       # three durations, two rows
+    # Two rows, three durations: the middle message answered the zero-token
+    # row, so its 2222 ms has no billing row to sit on. Matching on counts
+    # leaves it unclaimed and hands each real row its own.
+    assert [t.get("_work_ms") for t in turns] == [1111, 3333]
 
 
 def test_a_zero_token_row_costs_the_pairing_nothing(monkeypatch, tmp_path):
@@ -409,6 +482,38 @@ def test_a_zero_token_row_costs_the_pairing_nothing(monkeypatch, tmp_path):
     turns = [t for s in _goose_sessions().values() for t in s["turns"]]
     assert [t["_work_ms"] for t in turns] == [1111, 2222]
 
+def test_a_compaction_row_never_borrows_a_measured_duration(monkeypatch, tmp_path):
+    """Compaction turns go unmeasured, because nothing can prove the pairing.
+
+    Goose's compaction request answers like an ordinary one, and its answer
+    carries a usage block like an ordinary one -- but nothing on the MESSAGE side
+    says "this came from a compaction". So a count-only rule lets a compaction
+    row take the duration of whichever ordinary request billed the same counts.
+    Leaving the compaction row unmatched costs that one turn its measured number
+    and protects the real request beside it. V6 captured no is_compaction row at
+    all, so this is defensive rather than observed.
+    """
+    db = _setup(monkeypatch, tmp_path,
+                sessions=[_session("s1")],
+                ledger=[_ledger(1, "s1", 0, inp=1000, out=20),
+                        _ledger(2, "s1", 10, inp=2000, out=30)],
+                messages=[
+                    _assistant_usage("s1", 1, 999, input_tokens=1000, output_tokens=20),
+                    _assistant_usage("s1", 11, 1111, input_tokens=2000, output_tokens=30),
+                ])
+    conn = sqlite3.connect(db)
+    conn.execute("UPDATE usage_ledger SET is_compaction = 1 WHERE id = 1")
+    conn.commit()
+    conn.close()
+    sessions._goose_sessions_cache.clear()
+    sessions._goose_sessions_cache_sig = ()
+
+    turns = [t for s in _goose_sessions().values() for t in s["turns"]]
+
+    assert [t.get("is_compaction") for t in turns] == [True, None]
+    assert [t.get("_work_ms") for t in turns] == [None, 1111]
+
+
 def test_a_request_spanning_the_closing_edge_keeps_its_in_window_work(monkeypatch, tmp_path):
     """The row just past the bound can own work that happened INSIDE it.
 
@@ -422,9 +527,11 @@ def test_a_request_spanning_the_closing_edge_keeps_its_in_window_work(monkeypatc
     """
     _setup(monkeypatch, tmp_path,
            sessions=[_session("s1")],
-           ledger=[_ledger(1, "s1", 0), _ledger(2, "s1", 200)],
-           messages=[_assistant_usage("s1", 1, 5_000),
-                     _assistant_usage("s1", 201, 120_000)])
+           ledger=[_ledger(1, "s1", 0, inp=1000, out=20),
+                   _ledger(2, "s1", 200, inp=2000, out=30)],
+           messages=[_assistant_usage("s1", 1, 5_000, input_tokens=1000, output_tokens=20),
+                     _assistant_usage("s1", 201, 120_000, input_tokens=2000,
+                                      output_tokens=30)])
     lo, hi = T0 * SECOND - 10_000, (T0 + 150) * SECOND
 
     whole = next(iter(_goose_sessions().values()))
@@ -447,9 +554,11 @@ def test_the_opening_edge_holds_back_nothing_worth_passing(monkeypatch, tmp_path
     """
     _setup(monkeypatch, tmp_path,
            sessions=[_session("s1")],
-           ledger=[_ledger(1, "s1", 0), _ledger(2, "s1", 100)],
-           messages=[_assistant_usage("s1", 1, 60_000),
-                     _assistant_usage("s1", 101, 5_000)])
+           ledger=[_ledger(1, "s1", 0, inp=1000, out=20),
+                   _ledger(2, "s1", 100, inp=2000, out=30)],
+           messages=[_assistant_usage("s1", 1, 60_000, input_tokens=1000, output_tokens=20),
+                     _assistant_usage("s1", 101, 5_000, input_tokens=2000,
+                                      output_tokens=30)])
     lo, hi = (T0 + 30) * SECOND, (T0 + 200) * SECOND
     edge = next(iter(_goose_sessions(since_ms=lo, until_ms=hi).values()))
     assert "_prior_event_ms" not in edge
@@ -466,15 +575,19 @@ def test_an_unmeasured_boundary_request_is_not_charged_the_gap(monkeypatch, tmp_
     """No elapsedMs for the row past the bound means no boundary event at all.
 
     A stamp with no measured duration is charged the CAPPED GAP to the next
-    event, which bills idle time the source never measured. The count guard that
-    protects the in-window pairing protects this edge the same way.
+    event, which bills idle time the source never measured. So a boundary row
+    with no duration of its own is not handed over at all -- even when the
+    session measured the row BEFORE it, which is what the signature match makes
+    possible.
     """
     _setup(monkeypatch, tmp_path,
            sessions=[_session("s1")],
-           ledger=[_ledger(1, "s1", 0), _ledger(2, "s1", 200)],
-           # One duration for two billed rows: the second request ended without
-           # a usage block, so nothing here says how long it took.
-           messages=[_assistant_usage("s1", 1, 5_000)])
+           ledger=[_ledger(1, "s1", 0, inp=1000, out=20),
+                   _ledger(2, "s1", 200, inp=2000, out=30)],
+           # The in-window request measured; the one past the bound ended
+           # without a usage block, so nothing says how long IT took.
+           messages=[_assistant_usage("s1", 1, 5_000, input_tokens=1000,
+                                      output_tokens=20)])
     edge = next(iter(_goose_sessions(since_ms=T0 * SECOND,
                                      until_ms=(T0 + 150) * SECOND).values()))
     assert "_next_event_ms" not in edge

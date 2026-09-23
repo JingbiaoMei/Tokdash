@@ -13,7 +13,7 @@ from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache, wraps
 from pathlib import Path
-from typing import Any, Callable, Collection, Dict, Iterable, Optional
+from typing import Any, Callable, Collection, Dict, Iterable, Optional, Tuple
 from urllib.parse import unquote
 
 from . import clientpaths
@@ -60,6 +60,7 @@ from .sources.coding_tools import (
     roo_task_file_signatures,
     roo_task_rows,
     search_dir_claim_key,
+    split_goose_cache_inclusive_input,
     workbuddy_file_signatures,
     zcode_snapshot,
     zcode_snapshot_signatures,
@@ -6164,30 +6165,34 @@ def _goose_content_text(value: Any) -> str:
     return ""
 
 
-def _goose_elapsed_ms(cur, session_ids: list) -> Dict[str, list]:
-    """session_id -> request durations in ms, in request order.
+def _goose_elapsed_ms(cur, session_ids: list) -> Dict[str, Dict[Tuple[int, int], List[int]]]:
+    """session_id -> {(input, output): [durations in ms, in request order]}.
 
     Goose stamps the duration of each request on the assistant message that
     answers it (metadata_json.usage.elapsedMs), already in milliseconds, which
-    is the unit `_work_ms` wants. There is no key from usage_ledger to
-    messages, so the pairing is ORDINAL: ledger row k of a session is the k-th
-    assistant message that carries a usage block. Both fixtures match 1:1
-    (Linux sessions 20260920_5 and _7, macOS three rows in one session), which
-    is why the rank in `_goose_load_sessions` is computed over the whole ledger
-    rather than over a window - a windowed rank would shift every row after the
-    first when the window opens mid-session.
+    is the unit `_work_ms` wants. There is no key from usage_ledger to messages,
+    so the two are matched on the request's own token counts: the message's
+    usage block carries inputTokens/outputTokens, and in both fixtures they
+    equal the ledger row's input_tokens/output_tokens EXACTLY, row for row
+    (Linux sessions 20260920_5 and _7, macOS three rows in one session). The
+    caller supplies the ordinal within a repeated signature, so two identical
+    requests still pair in order.
 
-    Ordinal pairing is only sound while the two sequences are the same length,
-    so the caller checks that before trusting a position. A caller that skipped
-    the check would charge row 2 the duration of row 3 the moment one request
-    ended without a usage block, which is a wrong number rather than a missing
-    one.
+    Matching on counts rather than on position is what makes this survive a
+    ledger row with no message and a message with no ledger row -- a request
+    interrupted before its usage block landed, a compaction request, a
+    Goose-side backfill. Positional pairing shifts every duration after the
+    gap, which is a wrong number; a row that finds no match gets no measured
+    duration and falls back to the capped inter-event-gap contract, which is a
+    missing one. If a future Goose changes what the message's inputTokens
+    means, nothing matches and the whole tool loses measured durations rather
+    than gaining wrong ones.
 
     Active time only. No token and no cost ever comes from a message row.
     """
     if not session_ids:
         return {}
-    out: Dict[str, list] = {}
+    out: Dict[str, Dict[Tuple[int, int], List[int]]] = {}
     for start in range(0, len(session_ids), 400):
         chunk = session_ids[start:start + 400]
         marks = ", ".join("?" for _ in chunk)
@@ -6208,10 +6213,17 @@ def _goose_elapsed_ms(cur, session_ids: list) -> Dict[str, list]:
                 continue
             try:
                 elapsed = int(usage.get("elapsedMs") or 0)
-            except (TypeError, ValueError):
+                # Both counts or neither: a duration with no token signature
+                # cannot be attributed to a row, and defaulting to 0 would let
+                # it pair with a real row whose input happens to be 0.
+                tokens_in = int(usage["inputTokens"])
+                tokens_out = int(usage["outputTokens"])
+            except (KeyError, TypeError, ValueError):
                 continue
             if elapsed > 0:
-                out.setdefault(str(row["session_id"]), []).append(elapsed)
+                out.setdefault(str(row["session_id"]), {}).setdefault(
+                    (tokens_in, tokens_out), []
+                ).append(elapsed)
     return out
 
 
@@ -6255,37 +6267,48 @@ def _goose_load_sessions(
         SELECT l.id, l.session_id, l.created_timestamp, l.model,
                l.input_tokens, l.output_tokens,
                l.cache_read_tokens, l.cache_write_tokens, l.is_compaction,
-               l.rn, l.ledger_rows,
+               l.sig_rank,
                s.name, s.working_dir
         FROM (
             SELECT id, session_id, created_timestamp, model,
                    input_tokens, output_tokens, cache_read_tokens,
                    cache_write_tokens, is_compaction,
+                   -- One window pass, and it is the pairing key: rows that
+                   -- billed the same counts take their durations in id order.
+                   -- The whole session, never the window, so a window that
+                   -- opens mid-session cannot shift an ordinal.
                    ROW_NUMBER() OVER (
-                       PARTITION BY session_id ORDER BY id
-                   ) AS rn,
-                   COUNT(*) OVER (PARTITION BY session_id) AS ledger_rows,
+                       PARTITION BY session_id,
+                                    COALESCE(input_tokens, 0),
+                                    COALESCE(output_tokens, 0)
+                       ORDER BY id
+                   ) AS sig_rank,
                    -- edge_rank 1 is the earliest row AT OR PAST hi, which the
                    -- outer WHERE lets through beside the in-window rows. The
                    -- CASE sorts the past-hi rows ahead of the rest without
-                   -- dropping them, so rn stays the whole-session rank the
-                   -- duration list is indexed by. One scan, one set of window
-                   -- passes: usage_ledger has no index on created_timestamp,
-                   -- so a second query for this row would double the cold cost
-                   -- of every windowed read.
+                   -- dropping them, so the boundary row arrives carrying the
+                   -- same columns as the in-window ones. One scan, one set of
+                   -- window passes: usage_ledger has no index on
+                   -- created_timestamp, so a second query for this row would
+                   -- double the cold cost of every windowed read.
                    ROW_NUMBER() OVER (
                        PARTITION BY session_id
                        ORDER BY CASE WHEN created_timestamp >= ?
                                      THEN 0 ELSE 1 END, id
                    ) AS edge_rank
             FROM usage_ledger
-            -- The parser's keep-guard, in SQL, so rn ranks the SAME rows the
-            -- turns below are built from. COALESCE because the Python guard
+            -- The parser's keep-guard, in SQL, so the ranked set is exactly
+            -- the set the turns below are built from. COALESCE because the Python guard
             -- reads each column as `int(x or 0)`, and a plain `NULL + 1 > 0`
             -- test would drop a row the parser keeps.
             WHERE COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0)
                   + COALESCE(cache_read_tokens, 0)
                   + COALESCE(cache_write_tokens, 0) > 0
+              -- Goose's own backfill rows, excluded here for the same reason
+              -- GooseParser excludes them, and also because they carry no
+              -- assistant message: ranking past them would shift every
+              -- duration that follows. See GooseParser._parse_db.
+              AND COALESCE(cost_source, '') <> 'carried_forward'
         ) l
         JOIN sessions s ON s.id = l.session_id
         WHERE s.session_type = 'user'
@@ -6382,11 +6405,12 @@ def _goose_load_sessions(
         if ts_ms is None:
             continue
         model = str(row["model"] or "").strip() or "unknown"
-        # Fresh input only, and the ledger's input_tokens already contains the
-        # cached slice. Shared with GooseParser._parse_db by rule, not by copy:
-        # get_cost(input, output, cache_read, cache_write) is the same
-        # expression the parser priced with.
-        input_t = max(0, input_total - cache_r)
+        # Fresh input only, with BOTH cache parts taken back out. Same helper
+        # GooseParser._parse_db uses, so the panel and Overview cannot drift
+        # apart on a row's buckets.
+        input_t, cache_r, cache_w = split_goose_cache_inclusive_input(
+            input_total, cache_r, cache_w
+        )
 
         raw = sessions.get(session_id)
         if raw is None:
@@ -6431,20 +6455,27 @@ def _goose_load_sessions(
         # any drill-down that chooses to show it.
         if int(row["is_compaction"] or 0):
             turn["is_compaction"] = True
-        # Measured durations, positionally, but only for a session whose
-        # duration count equals its billed-row count. rn ranks the guarded
-        # ledger rows of the WHOLE session and the list holds the assistant
-        # messages that carried a usage block, so one request that ended
-        # without one - interrupted mid-response, or a compaction request in
-        # the shape V6 leaves unobserved - offsets every later row. Trusting
-        # the position then charges this turn a NEIGHBOUR'S duration and
-        # silently inflates the session; the honest answer is no measured
-        # duration, which lets `_summarize_session` fall back to the capped
-        # inter-event-gap contract the design already promises.
-        durations = elapsed_by_session.get(session_id) or ()
-        if int(row["ledger_rows"]) == len(durations):
-            index = int(row["rn"]) - 1
-            if 0 <= index < len(durations):
+        # Measured duration, matched on THIS row's own token counts rather than
+        # on its position in the session (see _goose_elapsed_ms). sig_rank ranks
+        # the whole session rather than the window, so a window that opens
+        # mid-session shifts nothing; it is the ordinal among rows that billed
+        # the same counts, which is the only remaining ambiguity and is resolved
+        # in request order. A row with no match simply gets no _work_ms, so
+        # `_summarize_session` falls back to the capped inter-event-gap contract
+        # the design already promises.
+        #
+        # Compaction rows are skipped on purpose. Nothing on an assistant
+        # message says "this answer came from a compaction request", so a
+        # compaction row that billed the same counts as a real request would
+        # take that request's duration; leaving it unmatched costs THIS turn a
+        # measured number, which is the smaller error. Both fixtures are Goose
+        # v6 captures with no is_compaction row at all, so this is defensive.
+        if not int(row["is_compaction"] or 0):
+            durations = (elapsed_by_session.get(session_id) or {}).get(
+                (int(row["input_tokens"] or 0), int(row["output_tokens"] or 0))
+            )
+            index = int(row["sig_rank"]) - 1
+            if durations is not None and 0 <= index < len(durations):
                 turn["_work_ms"] = int(durations[index])
         raw["turns"].append(turn)
 
@@ -6460,16 +6491,24 @@ def _goose_load_sessions(
         raw = sessions.get(session_id)
         if raw is None:
             continue
-        durations = elapsed_by_session.get(session_id) or ()
-        # The same count guard as the turns above, for the same reason. And
-        # never a bare boundary EVENT without a measured duration: a stamp with
-        # no work is charged the capped inter-event gap, which would bill idle
-        # time the source never measured.
-        index = int(edge["rn"]) - 1
-        edge_ts_ms = _goose_ts_to_ms(edge["created_timestamp"])
-        if int(edge["ledger_rows"]) != len(durations):
+        # The same signature match as the turns above, so a session with an
+        # unpaired row somewhere earlier still hands over its measured edge.
+        # And still never a bare boundary EVENT without a measured duration: a
+        # stamp with no work is charged the capped inter-event gap, which would
+        # bill idle time the source never measured. A compaction row is not
+        # matched here either, for the reason in the turns loop; a session whose
+        # boundary row happens to be one loses that edge, which is an
+        # undercount on one session's active time and not a wrong number.
+        if int(edge["is_compaction"] or 0):
             continue
-        if not 0 <= index < len(durations) or edge_ts_ms is None:
+        durations = (elapsed_by_session.get(session_id) or {}).get(
+            (int(edge["input_tokens"] or 0), int(edge["output_tokens"] or 0))
+        )
+        index = int(edge["sig_rank"]) - 1
+        edge_ts_ms = _goose_ts_to_ms(edge["created_timestamp"])
+        if durations is None or not 0 <= index < len(durations):
+            continue
+        if edge_ts_ms is None:
             continue
         raw["_next_event_ms"] = edge_ts_ms
         raw["_next_work_ms"] = int(durations[index])
@@ -6695,6 +6734,12 @@ def _load_roo_code_sessions(
         if not rows:
             continue
         task_id = str(Path(path_str).parent.name)
+        held = source_of_task.get(task_id)
+        if held is not None and held[0] != path_str:
+            # A second directory carrying the same task id is a copy, not a
+            # second task: Roo's entry keys are task-scoped, so its rows are
+            # the rows already collected. Extending would double the panel.
+            continue
         by_task.setdefault(task_id, []).extend(rows)
         source_of_task[task_id] = (path_str, mtime_ns, size)
 

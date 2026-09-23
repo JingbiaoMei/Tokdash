@@ -130,6 +130,29 @@ def test_a_task_seen_through_two_root_spellings_is_one_session(monkeypatch, tmp_
     assert len(turns) == 1, [t["tokens_in"] + t["tokens_out"] for t in turns]
     assert turns[0]["tokens_in"] + turns[0]["tokens_out"] == 105
 
+def test_a_copied_task_directory_does_not_double_the_panel(monkeypatch, tmp_path, roo_home):
+    """Two directories, one task id: the loader may not extend twice.
+
+    Roo copies a task directory when a workspace moves, and the copy keeps its
+    id and its request stamps. Overview folds the duplicate entry ids; the
+    loader groups by task id and EXTENDS, so without the same fold the panel
+    shows four turns and double the tokens for a two-request task.
+    """
+    first = tmp_path / "storage-a"
+    second = tmp_path / "storage-b"
+    spec = _task(TASK, requests=[req(T0 + 40, 100, 5), req(T0 + 90, 60, 4)])
+    _write(first, spec)
+    _write(second, spec)
+    _setup(monkeypatch, tmp_path, first)
+    monkeypatch.setenv("TOKDASH_ROO_STORAGE_DIR", f"{first},{second}")
+    sessions._load_roo_code_sessions.cache_clear()
+
+    raw = _roo_code_sessions()
+    turns = [t for session in raw.values() for t in session["turns"]]
+    assert len(raw) == 1
+    assert len(turns) == 2, f"two turns, not four: {turns}"
+    assert sum(t["tokens_in"] + t["tokens_out"] for t in turns) == 169
+
 # --- registry ----------------------------------------------------------------
 
 

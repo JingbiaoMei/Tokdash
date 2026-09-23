@@ -24,6 +24,7 @@ from pathlib import Path
 import pytest
 
 import tokdash
+import tokdash.cli as cli
 import tokdash.compute as compute
 import tokdash.usage_store as usage_store_module
 from tokdash.pricing import PricingDatabase
@@ -38,6 +39,7 @@ from tokdash.sources.coding_tools import (
 )
 from tokdash.usage_store import (
     UsageEntryStore,
+    usage_db_path,
     build_source_signature,
     usage_billing_fixed,
     usage_billing_pricing,
@@ -1659,6 +1661,75 @@ def test_a_source_that_fails_to_sync_is_dropped_rather_than_fatal(
     assert [row["source"] for row in store.query_entries(sources=stored)] == ["codex"]
     # ...and the failed one is answered by the live parsers for this request.
     assert "goose" in compute._usage_store_live_sources(tracker)
+
+
+# --- db resync: one sick source may not swap in a partial database ---------
+#
+# The confinement above is right for a request and wrong for a rebuild: the
+# database being written during a resync has no rows for a source whose sync
+# raised, and swapping it in would delete that tool's whole history while the
+# entry count still looked healthy.
+
+
+def test_db_sync_names_the_sources_that_failed(_isolated_home, monkeypatch):
+    _write_codex(_isolated_home, "c1")
+    _write_pricing(_rates())
+    _break_goose_discovery(monkeypatch)
+
+    status = cli._sync_usage_database()
+
+    assert status["sync_failures"] == ["goose"]
+    assert "goose" in status["sync_error"]
+
+
+def test_db_sync_is_clean_when_nothing_failed(_isolated_home):
+    _write_codex(_isolated_home, "c1")
+    _write_pricing(_rates())
+
+    status = cli._sync_usage_database()
+
+    assert "sync_failures" not in status
+    assert "sync_error" not in status
+
+
+def test_db_resync_refuses_a_partial_rebuild(_isolated_home, monkeypatch):
+    """The empty-result guard cannot see this: the count says "healthy"."""
+    _write_codex(_isolated_home, "c1")
+    _write_pricing(_rates())
+    store, _stored = _sync()
+    assert [r["source"] for r in store.query_entries()] == ["codex"]
+
+    _break_goose_discovery(monkeypatch)
+    status = cli._resync_usage_database()
+
+    assert status["ok"] is False
+    assert "goose" in status["error"]
+    assert status["old_usage_entries"] == 1
+    # The live database is the one that was there before, not the partial one.
+    intact = UsageEntryStore(usage_db_path())
+    assert [r["source"] for r in intact.query_entries()] == ["codex"]
+    # And it was not renamed to a .bak on the way out, nor left as a temp file.
+    data_dir = usage_db_path().parent
+    assert not list(data_dir.glob("*.bak.*"))
+    assert not list(data_dir.glob("*.tmp.*"))
+
+
+def test_db_sync_exits_nonzero_when_a_source_failed(_isolated_home, monkeypatch, capsys):
+    """A script that trusts the exit code must hear about a missing tool."""
+    _write_codex(_isolated_home, "c1")
+    _write_pricing(_rates())
+    _break_goose_discovery(monkeypatch)
+
+    assert cli.db_command("sync", False, None, "all") == 1
+    assert json.loads(capsys.readouterr().out)["sync_failures"] == ["goose"]
+
+
+def test_db_sync_exits_zero_on_a_clean_sync(_isolated_home, capsys):
+    _write_codex(_isolated_home, "c1")
+    _write_pricing(_rates())
+
+    assert cli.db_command("sync", False, None, "all") == 0
+    capsys.readouterr()
 
 
 def test_one_sick_source_does_not_push_the_overview_off_the_store(

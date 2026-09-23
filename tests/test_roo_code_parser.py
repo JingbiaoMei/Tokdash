@@ -31,14 +31,15 @@ from tokdash.usage_store import UsageFileVanished
 T0 = 1_789_932_971_243  # epoch ms, the unit Roo stamps
 
 
-def req(ts, tokens_in, tokens_out, cache_reads=0, cache_writes=0, cost=0):
+def req(ts, tokens_in, tokens_out, cache_reads=0, cache_writes=0, cost=0,
+        protocol="openai"):
     """One completed api_req_started message, as Roo writes it."""
     return {
         "type": "say",
         "say": "api_req_started",
         "ts": ts,
         "text": json.dumps({
-            "apiProtocol": "openai",
+            "apiProtocol": protocol,
             "tokensIn": tokens_in,
             "tokensOut": tokens_out,
             "cacheWrites": cache_writes,
@@ -182,6 +183,87 @@ def test_two_spellings_of_one_root_are_scanned_once(monkeypatch, roo_home, tmp_p
     assert entries[0]["input"] + entries[0]["output"] == 1020
 
 
+def test_roo_wsl_also_finds_windows_profile_storage(monkeypatch, roo_home, tmp_path):
+    """A Windows-side VS Code PROFILE is a second tree, not a curiosity.
+
+    Switching profiles leaves both task trees on disk, and the native desktop
+    branches have always read both. The WSL branch used its own one-glob
+    pattern, which saw globalStorage/ and skipped profiles/*/globalStorage/ --
+    so the docs promised profile coverage that the WSL scan did not deliver.
+    """
+    monkeypatch.delenv("TOKDASH_ROO_STORAGE_DIR", raising=False)
+    monkeypatch.setattr(clientpaths.osinfo, "os_kind", lambda: "wsl")
+    roaming = tmp_path / "mnt-c" / "Users" / "someone" / "AppData" / "Roaming"
+    plain = roaming / "Code" / "User" / "globalStorage" / "rooveterinaryinc.roo-cline"
+    profile = (
+        roaming / "Code" / "User" / "profiles" / "Work" / "globalStorage"
+        / "rooveterinaryinc.roo-cline"
+    )
+    _write_task(plain, "task-plain", [req(T0, 100, 10)], [env_user(T0 + 24, "m")])
+    _write_task(profile, "task-profile", [req(T0 + 1, 200, 20)], [env_user(T0 + 25, "m")])
+
+    task_ids = sorted(Path(f).parent.name for f in clientpaths.roo_task_message_files())
+    assert task_ids == ["task-plain", "task-profile"]
+
+
+@pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0,
+                    reason="needs a POSIX EACCES that root cannot create")
+def test_one_unreadable_root_costs_only_that_root(monkeypatch, roo_home, tmp_path):
+    """pathlib re-raises EACCES out of is_dir(), and Roo scans trees it does not own.
+
+    Another user's AppData under /mnt/c, a 0700 dir on a shared box: the probe
+    used to escape roo_storage_roots() and take the WHOLE Roo source with it,
+    so one locked directory meant no Roo usage anywhere on the dashboard. An
+    unreadable candidate is absent, and the readable neighbours still count.
+    """
+    locked = tmp_path / "locked"
+    healthy = tmp_path / "healthy"
+    _write_task(healthy, "task-ok", [req(T0, 1000, 20)], [env_user(T0 + 20, "m")])
+    hidden = locked / "storage"
+    _write_task(hidden, "task-inaccessible", [req(T0, 5, 5)], [env_user(T0 + 20, "m")])
+    locked.chmod(0o000)
+    try:
+        monkeypatch.setenv("TOKDASH_ROO_STORAGE_DIR", f"{hidden},{healthy}")
+        _sig_cache.clear()
+        BaseParser._entry_cache.clear()
+        _roo_roots_cache.clear()
+
+        files = clientpaths.roo_task_message_files()
+        assert [Path(f).parent.name for f in files] == ["task-ok"]
+        entries = RooCodeParser(PricingDatabase())._parse_all()
+        assert [e["entry_id"] for e in entries] == [f"roo_code:task-ok:{T0}"]
+    finally:
+        locked.chmod(0o755)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlink semantics are POSIX here")
+def test_one_tasks_directory_under_two_spellings_is_counted_once(
+    monkeypatch, roo_home, tmp_path
+):
+    """The roots are canonical; the tasks/ INSIDE them was not.
+
+    A tasks/ symlinked or bind-mounted into a second root yields two directory
+    spellings for one task, and Roo's task-scoped entry keys make the second
+    copy a double count on the live path. The store's unique index absorbs it,
+    which is exactly the disagreement between the two totals this pins.
+    """
+    real_root = tmp_path / "real"
+    other_root = tmp_path / "other"
+    _write_task(real_root, "task-1", [req(T0, 1000, 20)], [env_user(T0 + 20, "m")])
+    other_root.mkdir()
+    (other_root / "tasks").symlink_to(real_root / "tasks", target_is_directory=True)
+
+    monkeypatch.setenv("TOKDASH_ROO_STORAGE_DIR", f"{real_root},{other_root}")
+    _sig_cache.clear()
+    BaseParser._entry_cache.clear()
+    _roo_roots_cache.clear()
+
+    assert len(clientpaths.roo_task_message_files()) == 1
+    entries = RooCodeParser(PricingDatabase())._parse_all()
+    assert len(entries) == 1, [e["entry_id"] for e in entries]
+    assert entries[0]["input"] + entries[0]["output"] == 1020
+
+
 def test_roo_bills_completed_api_req_rows_only(monkeypatch, roo_home, tmp_path):
     storage = tmp_path / "storage"
     _write_task(
@@ -297,6 +379,98 @@ def test_roo_splits_cache_inclusive_tokens_in(monkeypatch, roo_home, tmp_path):
         "claude-sonnet-4-5", 300, 200, 600, 100
     )
     assert entry["_billing"]["cache_read"] == 600
+
+
+def test_roo_anthropic_rows_before_3_29_5_keep_their_fresh_input(
+    monkeypatch, roo_home, tmp_path
+):
+    """Roo changed the MEANING of tokensIn in 3.29.5, and the rows differ.
+
+    Upstream PR #8954 (merged 2025-10-31, released in 3.29.5 on 2025-11-01)
+    replaced `tokensIn: inputTokens` with `tokensIn: costResult.totalInputTokens`
+    and made that choice per protocol. Before it, an anthropic-protocol row held
+    the provider's own number, and Roo's comment on calculateApiCostAnthropic
+    says that number "does NOT include the cached tokens". So on a pre-fix row
+    the four fields are already disjoint, and subtracting the cache from an
+    input that never contained it bills a 49,912-token request as a 412-token
+    one -- an undercount of two orders of magnitude, silently.
+
+    The test is arithmetic, not a version guess. Here the inclusive reading
+    would have to bill 412 fresh tokens to a prompt that reported 49,500 cached
+    ones, which is impossible: the row's own numbers say 412 is the fresh part
+    and the cache sits alongside it. Under the old reading this row was 1,023
+    tokens; it is 50,523.
+    """
+    storage = tmp_path / "storage"
+    _write_task(
+        storage,
+        "task-old",
+        [req(T0, 412, 611, cache_reads=49_500, protocol="anthropic")],
+        [env_user(T0 + 20, "claude-sonnet-4-5")],
+    )
+    entry = _entries(_parser(monkeypatch, storage))[0]
+
+    assert (entry["input"], entry["cacheRead"], entry["cacheWrite"], entry["output"]) == (
+        412,
+        49_500,
+        0,
+        611,
+    )
+    # The clamp is what makes the old reading silent rather than merely wrong:
+    # cacheRead is capped at tokensIn, so the row's own cache mostly vanished.
+    assert entry["_billing"]["input"] == 412
+
+
+def test_roo_modern_anthropic_rows_are_still_cache_inclusive(
+    monkeypatch, roo_home, tmp_path
+):
+    """The other half of the rule: 3.29.5+ never trips the pre-fix reading.
+
+    A modern anthropic row is fresh + reads + writes by construction, so it is
+    never below reads + writes and the discriminant cannot misfire on it. Same
+    numbers as the openai case above, different protocol.
+    """
+    storage = tmp_path / "storage"
+    _write_task(
+        storage,
+        "task-new",
+        [req(T0, 1000, 200, cache_reads=600, cache_writes=100, protocol="anthropic")],
+        [env_user(T0 + 20, "claude-sonnet-4-5")],
+    )
+    entry = _entries(_parser(monkeypatch, storage))[0]
+
+    assert (entry["input"], entry["cacheRead"], entry["cacheWrite"], entry["output"]) == (
+        300,
+        600,
+        100,
+        200,
+    )
+
+
+def test_roo_anthropic_row_that_fits_both_readings_stays_inclusive(
+    monkeypatch, roo_home, tmp_path
+):
+    """The residue, pinned rather than papered over.
+
+    A pre-fix row whose fresh input is NOT below its cache -- 49,912 fresh
+    against 49,500 cached, say -- is arithmetically indistinguishable from a
+    modern inclusive row, and Roo is archived at 3.54.0 with no version written
+    into the task file. Guessing the other way there would ADD tokens to a row
+    whose numbers already add up, so the inclusive reading stands and the row
+    can still read low. A cutoff date would separate them, but it is evidence
+    about the install rather than about the row, and it misfires on a machine
+    that simply did not upgrade. Documented blind spot, in SUPPORTED_CLIENTS.
+    """
+    storage = tmp_path / "storage"
+    _write_task(
+        storage,
+        "task-ambiguous",
+        [req(T0, 49_912, 611, cache_reads=49_500, protocol="anthropic")],
+        [env_user(T0 + 20, "claude-sonnet-4-5")],
+    )
+    entry = _entries(_parser(monkeypatch, storage))[0]
+
+    assert (entry["input"], entry["cacheRead"]) == (412, 49_500)
 
 
 def test_roo_priced_cost_is_tokdash_not_roos(monkeypatch, roo_home, tmp_path):
@@ -734,6 +908,35 @@ def test_roo_model_cache_is_bounded(monkeypatch, roo_home, tmp_path):
     assert len(_roo_model_cache) <= _ROO_MODEL_CACHE_MAX
 
 
+def test_a_torn_conversation_read_is_not_cached_as_no_model(
+    monkeypatch, roo_home, tmp_path
+):
+    """A read that failed is not an answer about the task.
+
+    Roo rewrites api_conversation_history.json in place, so a read can land on a
+    half-written file. Caching the empty tag list against that file's signature
+    would make "unknown" permanent for a finished task, because its signature
+    never moves again -- while Overview stored the same unknown in the usage
+    rows it priced. The model is still unknown for THIS read; it just is not
+    remembered as the task's answer.
+    """
+    storage = tmp_path / "storage"
+    task = _write_task(
+        storage,
+        "task-torn",
+        [req(T0, 1000, 20)],
+        [{"role": "user", "ts": T0, "content": "not json at all"},
+    ]
+    )
+    # Not JSON is not enough: the file has to parse as a list and still carry no
+    # tag, which is the shape a torn write leaves.
+    (task / "api_conversation_history.json").write_text('{"trunca', encoding="utf-8")
+
+    rows = roo_task_rows(task / "ui_messages.json")
+
+    assert [r["model"] for r in rows] == ["unknown"]
+    assert not _roo_model_cache, "a failed read must not be remembered"
+
 def test_roo_registered_as_file_replace():
     from tokdash.sources.coding_tools import CodingToolsUsageTracker
 
@@ -742,5 +945,5 @@ def test_roo_registered_as_file_replace():
     assert isinstance(parser, RooCodeParser)
     assert parser.sync_capability.mode == "file_replace"
     assert parser.sync_capability.cross_file_stable_keys is False
-    assert parser.persistent_parser_version == 1
+    assert parser.persistent_parser_version == 2
     assert parser.runtime_config_signature() is None

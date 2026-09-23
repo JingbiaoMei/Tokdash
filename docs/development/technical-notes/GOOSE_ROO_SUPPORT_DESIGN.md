@@ -88,11 +88,19 @@ is_compaction         0 / 1 - context-compaction request flag
    session). That is the Crush trap in a new costume: summing session rows
    instead of ledger rows undercounts every multi-request session, and summing
    both double-counts the last one. Tokdash reads ledger rows only.
-2. **The cached slice is subtracted once.** `cache_read_tokens` is a subset of
-   `input_tokens` (fixture: 8320 cache-read inside 8527 input), so the entry
-   carries `input = max(0, input_tokens - cache_read_tokens)` and
-   `cacheRead = cache_read_tokens`, matching the ZCode, WorkBuddy and Qwen Code
-   parsers. `cache_write_tokens` is a separate bucket, added only when non-null.
+2. **Both cache slices are subtracted.** `input_tokens` is the gross prompt.
+   The Anthropic/Bedrock/Vertex path builds it with
+   `Usage::from_cache_exclusive_input`, which ADDS both cache parts (upstream's
+   own case turns input 10 + read 5000 + write 1000 into 6010), and the
+   OpenAI-protocol path keeps `prompt_tokens`, which already covers
+   `prompt_tokens_details.cached_tokens` and the write tokens. `get_cost()`
+   bills the four buckets additively, so the entry carries
+   `input = max(0, input_tokens - cache_read_tokens - cache_write_tokens)` with
+   both cache buckets passed through - the shape the ZCode, WorkBuddy, Qwen Code
+   and Cline parsers already use. Taking only the read side back out billed
+   every cache write twice: 25,057 tokens against 15,057 real on the upstream
+   vector. Both fixtures are OpenAI-compatible captures with a NULL write column,
+   which is why the corpus never showed the error and upstream's case did.
 3. **Reasoning is not persisted, so it is not invented.** Goose has no
    reasoning column and no reasoning field in `messages.metadata_json.usage`.
    `output_tokens` is gross, so it is billed and displayed whole with
@@ -103,9 +111,18 @@ is_compaction         0 / 1 - context-compaction request flag
    fixture's 403 session wrote an assistant error message and no ledger row)
    simply have no row, so no status filter is needed - and none is added,
    because there is no status column here.
-5. **`cost`/`cost_source` are ignored.** Pricing comes from
+5. **`cost`/`cost_source` are ignored for pricing.** Pricing comes from
    `pricing_db.json`; `qwen3.8-flash-next` is absent from the database, so a
-   self-hosted endpoint costs 0.00, which is the project convention.
+   self-hosted endpoint costs 0.00, which is the project convention. One
+   `cost_source` value IS read, and not for money: a row stamped
+   `carried_forward` is Goose's own backfill, written by `record_usage_metrics`
+   when a session's accumulated totals pass what its ledger holds - which
+   happens on a session resumed or imported by a Goose that predates the ledger.
+   It is not a request: it arrives stamped `strftime('%s','now')` under a NULL
+   model, so billing it would put a month of history on the day of the next
+   prompt, and for a session imported from Claude Code those tokens are already
+   counted under `claude`. It is filtered out of Overview and Sessions alike,
+   and out of the ranked set behind active time.
 6. **Entry id.** `f"goose:{session_id}:{id}:{created_timestamp}"`. The id is
    stable within one database: both fixtures declare
    `id INTEGER PRIMARY KEY AUTOINCREMENT` and carry
@@ -176,23 +193,28 @@ directory and parent link.
 - Session label = `sessions.name` (Goose renames sessions from the first
   prompt; the fixture shows both `"CLI Session"` and `"hello.txt file test"`),
   project = `working_dir`, both read directly.
-- Active time uses the measured `messages.metadata_json.usage.elapsedMs` where
-  a ledger row can be matched to a usage-bearing assistant message by ordinal
-  position inside its session (both are append-only, and in the fixture the
-  counts match 1:1). The fallback is **per session, not per row**: one billed
-  row whose message carries no usage block makes the two sequences different
-  lengths, and from that point position k is no longer row k, so the whole
-  session keeps the existing capped inter-event-gap contract rather than
-  charging its turns a neighbour's duration; `timeToFirstTokenMs` is metadata
-  only.
-  Seconds-granularity message stamps make window-based attribution lossy,
-  which is why ordinal matching (or no match) is used instead.
-  **Observed, not assumed.** Every session carrying ledger rows matches exactly
-  in both fixtures - Linux 1:1 and 2:2, macOS 3:3 - counting messages whose
-  `metadata_json` has a `usage` object. Sessions with no ledger rows trivially
-  match at zero. That is every session in both captures, so the ordinal
-  alignment holds across the whole corpus rather than in one lucky example.
-  It says nothing about compaction turns, which is what V6 still asks.
+- Active time uses the measured `messages.metadata_json.usage.elapsedMs`,
+  matched to its billing row by **that request's own token counts** rather than
+  by position. The answering message's `usage` block carries
+  `inputTokens`/`outputTokens`, and in both captures they equal the ledger row's
+  `input_tokens`/`output_tokens` exactly, row for row; the ordinal inside a
+  repeated count pair is taken in `id` order. Position came first and is unsound:
+  the two sequences are filtered differently, so one billed row whose answer
+  never carried a usage block - a request interrupted mid-response, a
+  compaction, a Goose-side backfill - charges every later row its neighbour's
+  duration. A row that matches nothing keeps the existing capped
+  inter-event-gap contract, which is a missing number rather than a wrong one;
+  `timeToFirstTokenMs` is metadata only. Seconds-granularity message stamps make
+  window-based attribution lossy, which is why a measured match (or no match) is
+  used instead.
+  **Observed, not assumed.** The count match is exact across both captures:
+  Linux sessions 20260920_5 (one row) and 20260920_7 (two), macOS three rows in
+  one session. Sessions with no ledger rows match at zero trivially.
+  It says nothing about compaction turns, which is what V6 still asks, and that
+  is precisely why they are excluded from the match: nothing on a message says
+  which answer came back from a compaction, so a compaction row that billed an
+  ordinary request's counts would take that request's duration. The cost is one
+  turn on the capped estimate; the alternative is a misattributed measurement.
 - Top-level, non-hidden sessions only: rows with `parent_session_id` set or
   `session_type != 'user'` stay out of the panel, exactly as ZCode's subagent
   rule works, so Sessions is a subset of Overview whenever subagents or hidden
@@ -233,24 +255,27 @@ Implementation notes (2026-09-21), where the build differed from the draft:
   stamp on a seconds column is refused by both rather than priced by one and
   invisible to the other. The helper used to reinterpret such a value, which is
   a disagreement waiting for a Goose that writes one.
-- The ordinal for the `elapsedMs` match is `ROW_NUMBER() OVER (PARTITION BY
-  session_id ORDER BY id)` computed over the **whole** ledger, not the window,
-  so a window that opens mid-session still pairs each row with its own
-  duration. Both fixtures match 1:1 (Linux 1 and 2 rows, macOS 3). It buys
-  active time and nothing else: no token or cost is ever read from `messages`.
-  Two rules keep the rank honest, both learned from a repro rather than from
-  the fixture. It ranks the **guarded** rows, so the keep-filter for an
-  all-zero row that both surfaces skip does not hand its slot to the next
-  request. And `COUNT(*) OVER (PARTITION BY session_id)` ships alongside it:
-  when that count and the duration list differ in length, the loader writes no
-  `_work_ms` at all for the session, because after a gap every position is
-  off-by-one and a wrong active time is worse than an estimated one.
-  **Residual, documented rather than fixed:** the guard compares *counts*. One
-  ledger row with no duration plus one duration-bearing message with no ledger
-  row leaves the two sequences the same length and mispairs them again from that
-  point on. Both halves have to go missing at once, which is far narrower than
-  the single gap the guard closes, and the fallback for a session that really
-  has it is a number that looks measured.
+- The rank behind the `elapsedMs` match is `ROW_NUMBER() OVER (PARTITION BY
+  session_id, input_tokens, output_tokens ORDER BY id)` computed over the
+  **whole guarded** ledger, never the window, so a window that opens
+  mid-session still pairs each row with its own duration and two rows that
+  billed identical counts still take their durations in request order. Both
+  fixtures match 1:1 (Linux 1 and 2 rows, macOS 3). It buys active time and
+  nothing else: no token or cost is ever read from `messages`. `carried_forward`
+  rows leave the ranked set on the way in, both for the reason in rule 5 and
+  because they own no assistant message. Two rules keep the match honest, both
+  learned from a repro rather than from the fixture: it ranks the **guarded**
+  rows, so the keep-filter for an all-zero row that both surfaces skip does not
+  hand its slot to the next request; and compaction rows ask for no duration at
+  all, for the reason above. A length check between the two sequences is
+  deliberately gone - equal counts were never evidence of the same request.
+  **Residual, documented rather than fixed:** the match is a lookup, so an
+  unmeasured ledger row beside a duration-bearing message that no ledger row
+  owns can still collide when both billed the same counts. Getting there takes a
+  backfilled import, a later request with the same figures, and it lands on one
+  session's active time - never on a token count or a cost. Storing
+  `elapsedMs` on the ledger row itself would close the question, and Goose does
+  not do that.
 - A source-windowing loader owes the window its **closing** edge. A Goose
   duration runs backwards from its completion stamp (`_measured_intervals` puts
   the work before the event), so the first row past `until` can own minutes of
@@ -258,7 +283,9 @@ Implementation notes (2026-09-21), where the build differed from the draft:
   passes that row back as `_next_event_ms` / `_next_work_ms`, the shape ZCode
   already uses, and only when its own duration was measured - a bare event with
   no work would be charged the capped inter-event gap, which bills idle time the
-  source never timed. The opening edge needs nothing and gets nothing: the
+  source never timed. A compaction row is not matched here either, so a session
+  whose boundary row happens to be one loses that edge: an undercount on one
+  session's active time rather than a borrowed duration. The opening edge needs nothing and gets nothing: the
   interval of a row before `since` ends before `since`, so the clip discards it
   and there is no work to recover. The two edges are not symmetric and the
   reason is the backwards interval, not an oversight. The row rides the SAME
@@ -358,7 +385,7 @@ parser mirrors it instead of inventing a model:
    corpus, with a token-presence guard: a row whose JSON carries no numeric
    `tokensIn`/`tokensOut` is in flight or failed and is skipped, which is
    exactly the shape a mid-flight read sees.
-2. **`tokensIn` is cache-inclusive.** Both cost helpers return
+2. **`tokensIn` has been cache-inclusive since Roo 3.29.5.** Both cost helpers return
    `totalInputTokens` as the gross prompt: `H1()` (openai and
    openai-compatible) takes gross input and bills
    `max(0, input - cacheWrite - cacheRead)`; `BU()` (anthropic) builds
@@ -370,6 +397,21 @@ parser mirrors it instead of inventing a model:
    `cacheWrite` passed to `get_cost` separately.
    `_split_cline_cache_inclusive_input()` is the existing helper for this
    shape.
+   **Before 3.29.5 (2025-11-01, upstream PR #8954) it meant something else on
+   the Anthropic path.** Roo passed the provider's own number straight through,
+   and its comment said what that was: "For Anthropic compliant usage, the input
+   tokens count does NOT include the cached tokens." So an
+   `apiProtocol == "anthropic"` row whose `tokensIn` is BELOW its own
+   `cacheReads + cacheWrites` cannot be read inclusively without a negative
+   fresh input, and is billed with its four buckets as written. That is a proof
+   about the row, not an estimate of Roo's version, and it cannot misfire on a
+   modern row: 3.29.5+ writes fresh + reads + writes, which is never below reads
+   + writes. Without the branch a 49,912-token request bills as 412, and the
+   archived repo means most users' history predates the change. The residue runs
+   the other way and is unreachable from the row - a pre-3.29.5 request whose
+   fresh input EXCEEDS its cache slices is indistinguishable from a modern one
+   and still reads low. Roo is archived at 3.54.0 and writes no version into the
+   task file, so nothing else on the row separates the two.
 3. **`tokensOut` is gross of reasoning.** Roo maps
    `completion_tokens_details.reasoning_tokens` into
    `outputTokens: {total, text: total - reasoning, reasoning}` and persists
@@ -658,7 +700,12 @@ Feasible: the per-task file is one session's whole transcript, and
 - Delegated children (`parentTaskId` set) stay out of the panel while their
   rows count in Overview, mirroring Goose and ZCode. Roo's history UI folds a
   parent's cost with `aggregateTaskCostsRecursive()` over `childIds`; Tokdash
-  lists the rows separately and sums nothing on the user's behalf.
+  lists the rows separately and sums nothing on the user's behalf. The
+  consequence is stated rather than smoothed over: on a machine that uses
+  Orchestrator mode, the Roo row in Sessions totals below the same period in
+  Overview by exactly the subtask spend. That is the intended reading of a panel
+  of sessions you started yourself, and it is the one asymmetry between the two
+  surfaces for this tool.
 - Active time keeps the existing capped inter-event-gap contract: Roo persists
   no per-request duration.
 
@@ -694,6 +741,8 @@ Implementation notes (2026-09-21):
 | Goose session totals plus ledger | ledger only; `accumulated_*` and the last-request snapshot columns are never read for tokens |
 | Goose id reuse after a recreate | entry id carries `session_id` and `created_timestamp`; `AUTOINCREMENT` protects a live DB, a recreated one restarts the sequence |
 | Goose WAL double read | one snapshot per collect, shared by parser and session loader |
+| Goose backfill plus the ledger | `cost_source = 'carried_forward'` rows are Goose replaying pre-ledger history onto the day of the next request, under no model; not billed here, and for an import from another tool those tokens are already counted there |
+| Goose cache write | both cache slices come back out of `input_tokens` before the row is billed, because `get_cost()` adds the buckets; one shared helper for Overview and Sessions |
 | Roo per-task totals plus messages | `ui_messages.json` only; `history_item.json`, `_index.json` and the legacy `global-state.json` `taskHistory` copy are label-only, and the last two are known to lag |
 | Roo rewind markers | `api_req_deleted` ignored, matching Roo's own aggregator |
 | Roo retry markers | `api_req_retry_delayed` skipped; Roo rewrites the original `api_req_started` row when a retry lands, so a retry is never a second row |
@@ -705,7 +754,11 @@ Implementation notes (2026-09-21):
 
 - **Goose**: reasoning tokens are not persisted; `cache_write_tokens` is NULL
   on OpenAI-compatible providers; `cost`/`cost_source` are NULL for
-  self-hosted endpoints; deleting a session in Goose removes its usage from
+  self-hosted endpoints; `carried_forward` backfill rows are not billed, so on a
+  session imported from a Goose that predates the ledger Tokdash reads less than
+  Goose's own session total - the difference is history whose date Goose no
+  longer knows; a compaction turn gets the capped gap estimate rather than a
+  borrowed duration; deleting a session in Goose removes its usage from
   Tokdash at the next sync - whole-source replacement has no missing-file state
   to preserve, so that holds even with the durable usage store on, which is the
   opposite of Roo Code below; pre-SQLite Goose installs (JSON session files) are
@@ -733,6 +786,14 @@ Implementation notes (2026-09-21):
   `.../globalStorage/rooveterinaryinc.roo-cline/` sees no CLI sessions.
   Deleting a task directory in Roo does **not** remove its usage here, and that
   asymmetry with Goose is structural rather than a setting anyone can change.
+  The one Roo path that DOES erode already-indexed spend is a rewind inside a
+  task that survives: `performRewind` truncates `ui_messages.json` in place, the
+  re-read is shorter, and the rows for the rewound requests leave the index with
+  it. Durable retention cannot help, because the file is present.
+  History written before Roo 3.29.5 is the other read-low risk: an
+  Anthropic-protocol row whose fresh input exceeded its cache slices is
+  indistinguishable from a modern cache-inclusive row and bills as one (rule 2
+  above), and no version marker exists to separate them.
   Roo is read per file, and the default durable usage store
   (`TOKDASH_USAGE_DB_DURABLE`) only flags a vanished file - `UPDATE file_state
   SET missing = 1` - and keeps its rows, exactly as it does for every other
@@ -774,8 +835,10 @@ Mirror the existing per-tool pairs (`test_crush_parser.py`,
   `usage_ledger` raises rather than serving stale rows; seconds-to-ms
   conversion.
 - `tests/test_goose_sessions.py`: hidden and child sessions excluded from the
-  panel and present in Overview; the ordinal `elapsedMs` match and its
-  fallback; compaction turns labelled; the closing-edge hand-back asserted
+  panel and present in Overview; the count-matched `elapsedMs` pairing,
+  including the two repros position could not survive (a billed row with no
+  usage block, and equal-length sequences that answer different requests);
+  compaction turns labelled and excluded from the match; the closing-edge hand-back asserted
   against the same session read unwindowed and clipped, so a future refactor
   that drops it cannot pass; the opening edge asserted to hold nothing back, for
   the same reason; a session whose durations cannot be matched earns no boundary

@@ -246,10 +246,106 @@ def test_goose_displayed_total_equals_billed_total(monkeypatch, tmp_path):
     )
     entry = _parser(monkeypatch, root=root).collect(None, None)[0]
 
-    # The ledger total is gross input + output; splitting the cache read out of
-    # input keeps it: 207 + 8320 + 132 = 8659.
-    assert entry["input"] + entry["cacheRead"] + entry["output"] == 8659
+    # The ledger total is gross input + output, and BOTH cache slices live
+    # inside input_tokens, so taking both out keeps it: 196 + 8320 + 11 + 132.
+    assert (
+        entry["input"] + entry["cacheRead"] + entry["cacheWrite"] + entry["output"]
+        == 8659
+    )
+    assert entry["input"] == 196
     assert entry["cacheWrite"] == 11
+
+
+def test_goose_cache_write_is_not_billed_twice(monkeypatch, tmp_path):
+    """Upstream's own vector: input 6010 is 10 fresh + 5000 read + 1000 write.
+
+    goose_providers Usage documents input_tokens as the total INCLUDING cache,
+    and the Anthropic/Bedrock/Vertex path builds it with
+    Usage::from_cache_exclusive_input, whose upstream test asserts exactly these
+    numbers. get_cost() bills the four buckets additively, so a row that only
+    gives back the read side charges every cache write twice -- 25,057 tokens
+    against 15,057 real here, and about 75% more cost on a cached Anthropic
+    session. The OpenAI-compatible rows in the captured fixtures have a NULL
+    write column, which is why this needed upstream's case rather than ours.
+    """
+    root = tmp_path / "gpr"
+    _make_db(
+        root / "data" / "sessions" / "sessions.db",
+        sessions=[("s1", "n", "user", "/w", None, None, None, None, None, None)],
+        ledger=[(1, "s1", T0, "claude-sonnet-4", 6010, 50, None, 5000, 1000, None, 0)],
+    )
+    entry = _parser(monkeypatch, root=root).collect(None, None)[0]
+
+    assert (entry["input"], entry["cacheRead"], entry["cacheWrite"], entry["output"]) == (
+        10, 5000, 1000, 50,
+    )
+    assert entry["_billing"]["input"] == 10
+    assert entry["_billing"]["cache_write"] == 1000
+
+
+def test_goose_cache_slices_cannot_exceed_the_prompt(monkeypatch, tmp_path):
+    """A malformed row clamps instead of billing a negative input."""
+    root = tmp_path / "gpr"
+    _make_db(
+        root / "data" / "sessions" / "sessions.db",
+        sessions=[("s1", "n", "user", "/w", None, None, None, None, None, None)],
+        ledger=[(1, "s1", T0, "m", 100, 20, 120, 90, 90, None, 0)],
+    )
+    entry = _parser(monkeypatch, root=root).collect(None, None)[0]
+
+    assert entry["input"] == 0
+    assert entry["cacheRead"] == 90
+    assert entry["cacheWrite"] == 10          # clamped to what the prompt leaves
+
+
+def test_goose_carried_forward_backfill_is_not_billed(monkeypatch, tmp_path):
+    """cost_source 'carried_forward' is Goose's own backfill, not a request.
+
+    record_usage_metrics writes one when a session's accumulated totals pass its
+    ledger -- a session resumed or imported by a Goose that predates the ledger
+    -- with the whole backlog stamped strftime('%s','now'). Billing it would put
+    that history on the day of the NEXT request under a NULL model, and for an
+    import from Claude Code the same tokens are already counted under claude.
+    """
+    db = tmp_path / "gpr" / "data" / "sessions" / "sessions.db"
+    _make_db(
+        db,
+        sessions=[("s1", "n", "user", "/w", None, None, None, None, None, None)],
+        ledger=[
+            (1, "s1", T0, "m", 5000, 500, 5500, 0, None, None, 0),
+            (2, "s1", T0 + 1, None, 90000, 9000, 99000, 0, None, None, 0),
+        ],
+    )
+    conn = sqlite3.connect(db)
+    conn.execute("UPDATE usage_ledger SET cost_source = 'carried_forward' WHERE id = 2")
+    conn.commit()
+    conn.close()
+
+    entries = _parser(monkeypatch, root=tmp_path / "gpr").collect(None, None)
+
+    assert [e["entry_id"] for e in entries] == [f"goose:s1:1:{T0}"]
+    assert entries[0]["input"] == 5000
+
+
+def test_goose_null_cost_source_is_an_ordinary_request(monkeypatch, tmp_path):
+    """The filter names one value; a NULL or an Estimated row is still a request."""
+    db = tmp_path / "gpr" / "data" / "sessions" / "sessions.db"
+    _make_db(
+        db,
+        sessions=[("s1", "n", "user", "/w", None, None, None, None, None, None)],
+        ledger=[
+            (1, "s1", T0, "m", 100, 20, 120, 0, None, None, 0),
+            (2, "s1", T0 + 1, "m", 200, 30, 230, 0, None, None, 0),
+        ],
+    )
+    conn = sqlite3.connect(db)
+    conn.execute("UPDATE usage_ledger SET cost_source = 'estimated' WHERE id = 2")
+    conn.commit()
+    conn.close()
+
+    entries = _parser(monkeypatch, root=tmp_path / "gpr").collect(None, None)
+
+    assert [e["entry_id"] for e in entries] == [f"goose:s1:1:{T0}", f"goose:s1:2:{T0 + 1}"]
 
 
 def test_goose_session_aggregates_are_never_read(monkeypatch, tmp_path):
@@ -515,4 +611,4 @@ def test_goose_registered_as_source_replace():
 
     assert isinstance(parser, GooseParser)
     assert parser.sync_capability.mode == "source_replace"
-    assert parser.persistent_parser_version == 1
+    assert parser.persistent_parser_version == 2

@@ -97,15 +97,20 @@ def _local_day_hour(timestamp_ms: Any) -> Optional[tuple[str, int]]:
 
 
 def _live_insight_rows(
-    since: Optional[datetime], until: Optional[datetime]
+    since: Optional[datetime], until: Optional[datetime], tracker: CodingToolsUsageTracker
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """Rows for sources that keep their own database and never reach usage_entries.
 
     Without these the facets would quietly omit whole tools -- on a machine with
     OpenCode installed that is tens of thousands of entries -- while still
     reporting a total that looks complete.
+
+    Takes the CALLER's tracker rather than building a second one. A source whose
+    store sync raised is answered from the live parsers, and that verdict lives
+    on the tracker that synced. A fresh tracker reports no failures, so a sick
+    source would be skipped by the store AND never collected live: tokens missing
+    from the facets with nothing saying so.
     """
-    tracker = CodingToolsUsageTracker()
     live_sources = _usage_store_live_sources(tracker)
     if not live_sources:
         return [], []
@@ -299,11 +304,12 @@ def compute_insights(
     rows: list[dict[str, Any]] = []
     store: Optional[UsageEntryStore] = None
     stored_sources: list[str] = []
+    tracker = CodingToolsUsageTracker()
     if persistent_usage_db_enabled():
-        store, stored_sources = _sync_usage_store(CodingToolsUsageTracker())
+        store, stored_sources = _sync_usage_store(tracker)
         rows.extend(store.insight_rows(since=since, until=until))
 
-    live_rows, live_sources = _live_insight_rows(since, until)
+    live_rows, live_sources = _live_insight_rows(since, until, tracker)
     rows.extend(live_rows)
 
     result: Dict[str, Any] = {

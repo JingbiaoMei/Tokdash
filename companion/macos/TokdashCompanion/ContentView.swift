@@ -270,8 +270,8 @@ private struct HeroSection: View {
     }
 }
 
-/// Top-3 list under the hero (E3): optional 12px mark, name, share bar, compact value.
-/// Model rows never carry logos; a tool without a shipped mark renders text-only.
+/// Top-3 list under the hero (E3): optional 12px mark, name, share bar, compact value +
+/// percent. Model rows never carry logos; a tool without a shipped mark renders text-only.
 private struct RankBlock: View {
     let kicker: String
     let entries: [Snapshot.RankEntry]
@@ -296,7 +296,7 @@ private struct RankBlock: View {
                         ZStack(alignment: .leading) {
                             Capsule().fill(Color.secondary.opacity(0.14))
                             Capsule().fill(Color.accentColor)
-                                .frame(width: max(2, geo.size.width * entry.fraction))
+                                .frame(width: geo.size.width * entry.fraction)
                         }
                     }
                     .frame(height: 3)
@@ -304,6 +304,11 @@ private struct RankBlock: View {
                         .font(.system(size: 11.5))
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
+                    Text(entry.pctText)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(.tertiary)
+                        .monospacedDigit()
+                        .frame(width: 34, alignment: .trailing)
                 }
             }
         }

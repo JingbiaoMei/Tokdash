@@ -13,6 +13,9 @@ public sealed class CompanionStore : BindableBase
 {
     private ITokdashClient _client;
     private CancellationTokenSource? _cts;
+    /// <summary>Bumps every SelectPeriod; a pending delayed-skeleton callback checks it so a
+    /// superseded switch can never publish after the newer one.</summary>
+    private int _usageGen;
     private DateTimeOffset? _lastFetchAt;
     // Data generation time from the API (usage.timestamp), used for freshness. Falls
     // back to the local fetch time when the API omits a timestamp.
@@ -452,9 +455,10 @@ public sealed class CompanionStore : BindableBase
     /// <summary>
     /// Select a hero period. The choice persists, and selecting a different segment fires
     /// the whole fetch group for the new window immediately. While that is in flight the
-    /// hero/delta/rank blocks and the glance show their loading skeleton (the usage-side
-    /// last-good is dropped); quota and connectivity stay exactly as they were
-    /// (contract rule 2).
+    /// previous period's data stays on screen (anti-flash); only if the fetch is still in
+    /// flight after ~150 ms do the hero/delta/rank blocks and the glance drop to their
+    /// loading skeleton - the usage-side last-good is then dropped. Quota and connectivity
+    /// stay exactly as they were (contract rule 2, delayed-skeleton clause).
     /// </summary>
     public void SelectPeriod(UsagePeriod period)
     {
@@ -467,9 +471,19 @@ public sealed class CompanionStore : BindableBase
         _lastInsights = null;
         _lastStats = null;
         _lastPerServer = [];
-        if (Snapshot is { } current)
+        // Delayed skeleton: the current snapshot keeps the previous period's data while the
+        // new period is in flight, so a fast fetch never visibly collapses the sections.
+        // The skeleton goes up only if the fetch is STILL in flight after 150 ms.
+        // Generation guard: a superseded switch must never touch the newer switch's UI.
+        int gen = ++_usageGen;
+        _ = Task.Delay(150).ContinueWith(_ => UIDispatcher?.Invoke(() =>
         {
-            // Skeleton: usage-side sections empty, quota/connectivity untouched.
+            if (gen != _usageGen) return;
+            if (Snapshot is not { } current) return;
+            // Once the new period's result has published - success OR failure - the fetch is
+            // done as far as the UI is concerned. Only a snapshot still stamped with the
+            // PREVIOUS period means the fetch is truly in flight: show the skeleton now.
+            if (current.Period == period) return;
             Snapshot = new Snapshot
             {
                 Period = period,
@@ -486,7 +500,7 @@ public sealed class CompanionStore : BindableBase
                 PerServer = [],
                 ShowPerServerRows = current.ShowPerServerRows,
             };
-        }
+        }), TaskScheduler.Default);
         _ = RefreshAsync();
     }
 
@@ -909,6 +923,7 @@ public sealed class CompanionStore : BindableBase
         "kimi" => "kimi",
         "opencode" => "opencode",
         "gemini" => "gemini",
+        "openclaw" => "openclaw",
         _ => null,
     };
 
@@ -1324,40 +1339,66 @@ public sealed class Snapshot
 
     // MARK: Top ranks (E3)
 
-    public sealed record RankEntry(string Id, string Label, string ValueText, string? LogoAsset);
+    /// <summary>
+    /// Fraction is the entry's share (0..1) of ALL tokens in its own list, and PctText is the
+    /// same number as a rounded percent string - bar and label always agree. Rendered as the
+    /// token amount + a percentage bar (E3).
+    /// </summary>
+    public sealed record RankEntry(string Id, string Label, string ValueText, string? LogoAsset, double Fraction, string PctText);
+
+    /// <summary>Share helper: zero-sum lists render an empty bar and "0%", never NaN.</summary>
+    private static (double Fraction, string PctText) ShareOf(long tokens, long total)
+    {
+        double frac = total > 0 ? (double)tokens / total : 0;
+        return (frac, $"{Math.Round(frac * 100, MidpointRounding.AwayFromZero):0}%");
+    }
 
     /// <summary>
     /// by_tool sorted by tokens descending, top 3. Labels are display names, values compact
-    /// tokens; a tool id with no shipped mark gets NO logo (never a placeholder).
+    /// tokens; a tool id with no shipped mark gets NO logo (never a placeholder). The
+    /// percentage denominator is the FULL by_tool sum, so the top-3 shares need not add to 100.
     /// </summary>
     public List<RankEntry> TopTools
     {
         get
         {
             if (!Components.TopRanksOn || Usage is null) return [];
-            return (Usage.ByTool ?? [])
+            var all = Usage.ByTool ?? [];
+            long total = all.Sum(kv => kv.Value.Tokens);
+            return all
                 .OrderByDescending(kv => kv.Value.Tokens)
                 .ThenBy(kv => kv.Key, StringComparer.Ordinal)
                 .Take(3)
-                .Select(kv => new RankEntry(kv.Key, CompanionStore.ToolDisplayName(kv.Key),
-                    Formatter.CompactTokens(kv.Value.Tokens), CompanionStore.LogoAssetName(kv.Key)))
+                .Select(kv =>
+                {
+                    var (frac, pct) = ShareOf(kv.Value.Tokens, total);
+                    return new RankEntry(kv.Key, CompanionStore.ToolDisplayName(kv.Key),
+                        Formatter.CompactTokens(kv.Value.Tokens), CompanionStore.LogoAssetName(kv.Key), frac, pct);
+                })
                 .ToList();
         }
     }
 
     /// <summary>
     /// First three of combined_models (tokens-ranked) - never a cost sort - with the
-    /// provider prefix stripped and no logos on model rows.
+    /// provider prefix stripped and no logos on model rows. Percentage denominator is the
+    /// full combined_models sum.
     /// </summary>
     public List<RankEntry> TopModels
     {
         get
         {
             if (!Components.TopRanksOn || Usage is null) return [];
-            return (Usage.CombinedModels ?? Usage.TopModels ?? [])
+            var all = Usage.CombinedModels ?? Usage.TopModels ?? [];
+            long total = all.Sum(m => m.Tokens);
+            return all
                 .Take(3)
-                .Select(m => new RankEntry(m.Name, CompanionStore.StripProviderPrefix(m.Name),
-                    Formatter.CompactTokens(m.Tokens), null))
+                .Select(m =>
+                {
+                    var (frac, pct) = ShareOf(m.Tokens, total);
+                    return new RankEntry(m.Name, CompanionStore.StripProviderPrefix(m.Name),
+                        Formatter.CompactTokens(m.Tokens), null, frac, pct);
+                })
                 .ToList();
         }
     }

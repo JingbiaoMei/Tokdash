@@ -411,7 +411,6 @@ public partial class FlyoutWindow : Window
 
         bool showBanner = Store.ShowsBanner;
         Banner.Visibility = showBanner ? Visibility.Visible : Visibility.Collapsed;
-        SepBanner.Visibility = showBanner ? Visibility.Visible : Visibility.Collapsed;
         if (showBanner)
         {
             BannerIcon.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(
@@ -537,7 +536,6 @@ public partial class FlyoutWindow : Window
         var models = snap?.TopModels ?? [];
         bool show = snap is not null && !snap.UsageLoading && snap.HasTopRanks && (tools.Count > 0 || models.Count > 0);
         RanksPanel.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
-        SepRanks.Visibility = RanksPanel.Visibility;
         if (!show) return;
         ToolsKicker.Text = snap!.ToolsKickerText;
         ModelsKicker.Text = snap.ModelsKickerText;
@@ -554,6 +552,8 @@ public partial class FlyoutWindow : Window
             LogoVisibility = logo is null ? Visibility.Collapsed : Visibility.Visible,
             Label = entry.Label,
             Value = entry.ValueText,
+            BarPct = entry.Fraction * 100,
+            Pct = entry.PctText,
         };
     }
 
@@ -594,7 +594,6 @@ public partial class FlyoutWindow : Window
         var face = snap?.Glance;
         bool show = snap is not null && !snap.UsageLoading && snap.Usage is { TotalTokens: > 0 } && snap.Components.ActivityGlanceOn && face is not null;
         GlancePanel.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
-        SepGlance.Visibility = GlancePanel.Visibility;
         GlanceHost.Content = null;
         GlanceCaption.Text = "";
         if (face is null || !show) return;
@@ -742,7 +741,6 @@ public partial class FlyoutWindow : Window
         var rows = snap?.PerServerRowsView ?? [];
         bool show = snap is not null && snap.ShowPerServerRows && rows.Count > 0 && !snap.UsageLoading;
         PerServerPanel.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
-        SepPerServer.Visibility = PerServerPanel.Visibility;
         PerServerRowsCtl.Items.Clear();
         if (!show) return;
 
@@ -1005,8 +1003,10 @@ internal sealed class QuotaGroupVM
 }
 
 /// <summary>
-/// Presentation shape for one top-rank pill. The logo is a pre-loaded ImageSource (null =
-/// no mark shipped / failed to load -> text-only, never a broken-image placeholder).
+/// Presentation shape for one top-rank row: logo + name + share bar + token amount + percent.
+/// The logo is a pre-loaded ImageSource (null = no mark shipped / failed to load -> text-only,
+/// never a broken-image placeholder). BarPct is 0..100 of all tokens in the list; Pct is the
+/// same number rounded, so bar and label always agree.
 /// </summary>
 internal sealed class RankVM
 {
@@ -1014,4 +1014,6 @@ internal sealed class RankVM
     public Visibility LogoVisibility { get; init; } = Visibility.Collapsed;
     public string Label { get; init; } = "";
     public string Value { get; init; } = "";
+    public double BarPct { get; init; }
+    public string Pct { get; init; } = "";
 }

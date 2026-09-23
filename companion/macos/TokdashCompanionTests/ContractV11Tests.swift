@@ -827,9 +827,21 @@ final class ContractV11Tests: XCTestCase {
         XCTAssertEqual(CompanionStore.toolDisplayName(for: "opencode"), "OpenCode")
         XCTAssertEqual(CompanionStore.toolDisplayName(for: "mystery_tool"), "Mystery_tool")
         XCTAssertEqual(CompanionStore.logoAssetName(for: "codex"), "AgentCodex")
+        XCTAssertEqual(CompanionStore.logoAssetName(for: "openclaw"), "AgentOpenClaw")
         XCTAssertEqual(CompanionStore.logoAssetName(for: "mystery_tool"), nil)
         XCTAssertEqual(CompanionStore.stripProviderPrefix("openai/gpt-5.6-sol"), "gpt-5.6-sol")
         XCTAssertEqual(CompanionStore.stripProviderPrefix("gpt-5.6-sol"), "gpt-5.6-sol")
+    }
+
+    /// Rank shares are percent of the FULL list; rounding is away-from-zero on both
+    /// platforms (mirrors Windows ShareOf), and a zero-sum list never yields NaN.
+    func testRankShareHelperMirrorsWindows() {
+        XCTAssertEqual(Snapshot.share(tokens: 550, total: 1000).1, "55%")
+        XCTAssertEqual(Snapshot.share(tokens: 2, total: 3).1, "67%")
+        XCTAssertEqual(Snapshot.share(tokens: 1, total: 3).1, "33%")
+        let zero = Snapshot.share(tokens: 0, total: 0)
+        XCTAssertEqual(zero.0, 0.0)
+        XCTAssertEqual(zero.1, "0%")
     }
 
     // MARK: - Unit: settings schema v3

@@ -153,11 +153,17 @@ final class CompanionStore: NSObject, ObservableObject {
     /// ``selectPeriod(_:)``.
     var selectedPeriod: UsagePeriod { settings.selectedPeriod }
 
+    /// Generation counter for the delayed skeleton in ``selectPeriod(_:)``: a superseded
+    /// switch's pending timer must never collapse the newer switch's sections.
+    private var usageGen = 0
+
     /// Select a hero period. The choice persists, and selecting a different segment
     /// fires the whole fetch group for the new window immediately. While it is in
-    /// flight the hero/delta/rank blocks and the glance show their loading skeleton
-    /// (the usage-side last-good is dropped); quota and connectivity stay exactly as
-    /// they were (contract rule 2).
+    /// flight the previous period's data stays on screen (anti-flash); only if the fetch
+    /// is still in flight after ~150 ms do the hero/delta/rank blocks and the glance
+    /// drop to their loading skeleton (the usage-side last-good is then dropped). Quota
+    /// and connectivity stay exactly as they were (contract rule 2, delayed-skeleton
+    /// clause).
     func selectPeriod(_ period: UsagePeriod) {
         guard settings.selectedPeriod != period else { return }
         settings.selectedPeriod = period
@@ -167,13 +173,25 @@ final class CompanionStore: NSObject, ObservableObject {
         lastInsights = nil
         lastStats = nil
         lastPerServer = []
-        if let current = snapshot {
-            snapshot = Snapshot(period: period, usage: nil, activeMs: nil,
-                                insights: nil, stats: nil,
-                                quota: current.quota, thresholds: current.thresholds,
-                                components: settings.components, now: Self.now,
-                                usageFailed: false, quotaFailed: current.quotaFailed,
-                                perServer: [], showPerServerRows: current.showPerServerRows)
+        // Delayed skeleton: the current snapshot keeps the previous period's data while
+        // the new period is in flight, so a fast fetch never visibly collapses the
+        // sections. The skeleton goes up only if the fetch is STILL in flight after
+        // 150 ms - the guard below re-reads the snapshot once the delay elapses.
+        usageGen += 1
+        let gen = usageGen
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            guard let self, gen == self.usageGen else { return }
+            // Once the new period's result has published - success OR failure - the fetch
+            // is done as far as the UI is concerned. Only a snapshot still stamped with
+            // the PREVIOUS period means the fetch is truly in flight: show the skeleton.
+            guard let current = self.snapshot, current.period != period else { return }
+            self.snapshot = Snapshot(period: period, usage: nil, activeMs: nil,
+                                     insights: nil, stats: nil,
+                                     quota: current.quota, thresholds: current.thresholds,
+                                     components: self.settings.components, now: Self.now,
+                                     usageFailed: false, quotaFailed: current.quotaFailed,
+                                     perServer: [], showPerServerRows: current.showPerServerRows)
         }
         refresh()
     }
@@ -963,6 +981,7 @@ final class CompanionStore: NSObject, ObservableObject {
         case "kimi": return "AgentKimi"
         case "opencode": return "AgentOpenCode"
         case "gemini": return "AgentGemini"
+        case "openclaw": return "AgentOpenClaw"
         default: return nil
         }
     }
@@ -1445,8 +1464,20 @@ struct Snapshot {
         let label: String
         let valueText: String
         let logoAsset: String?
-        /// Bar width 0...1 relative to the biggest entry of the SAME list (mock §ranks).
+        /// Share 0...1 of ALL tokens in the SAME list (mock §ranks); the bar width and
+        /// `pctText` are the same number, so bar and label always agree. Top-3 shares
+        /// need not add up to 100% - the denominator is the full list.
         let fraction: Double
+        /// `fraction` as a rounded percent string ("62%"); "0%" for zero-sum lists.
+        let pctText: String
+    }
+
+    /// Share helper mirroring Windows `ShareOf`: zero-sum lists render an empty bar and
+    /// "0%", never NaN. Rounding is away-from-zero on both platforms, so the two apps
+    /// print the same percent for the same data.
+    nonisolated static func share(tokens: Int, total: Int) -> (Double, String) {
+        let frac = total > 0 ? Double(tokens) / Double(total) : 0
+        return (frac, "\(Int((frac * 100).rounded()))%")
     }
 
     /// by_tool sorted by tokens descending, top 3. Labels are display names, values
@@ -1457,30 +1488,31 @@ struct Snapshot {
             if $0.value.tokens != $1.value.tokens { return $0.value.tokens > $1.value.tokens }
             return $0.key < $1.key
         }
-        let shown = sorted.prefix(3)
-        let maxTokens = max(shown.map { $0.value.tokens }.max() ?? 0, 1)
-        return shown.map { entry in
-            RankEntry(id: entry.key,
-                      label: CompanionStore.toolDisplayName(for: entry.key),
-                      valueText: Self.compactTokens(entry.value.tokens),
-                      logoAsset: CompanionStore.logoAssetName(for: entry.key),
-                      fraction: Double(entry.value.tokens) / Double(maxTokens))
+        let total = (usage.byTool ?? [:]).values.reduce(0) { $0 + $1.tokens }
+        return sorted.prefix(3).map { entry in
+            let (frac, pct) = Self.share(tokens: entry.value.tokens, total: total)
+            return RankEntry(id: entry.key,
+                             label: CompanionStore.toolDisplayName(for: entry.key),
+                             valueText: Self.compactTokens(entry.value.tokens),
+                             logoAsset: CompanionStore.logoAssetName(for: entry.key),
+                             fraction: frac, pctText: pct)
         }
     }
 
     /// First three of combined_models (tokens-ranked) - never a cost sort - with the
-    /// provider prefix stripped and no logos on model rows.
+    /// provider prefix stripped and no logos on model rows. Percentage denominator is
+    /// the full combined_models list.
     var topModels: [RankEntry] {
         guard components.topRanks, let usage else { return [] }
         let list = usage.combinedModels ?? usage.topModels ?? []
-        let shown = Array(list.prefix(3))
-        let maxTokens = max(shown.map(\.tokens).max() ?? 0, 1)
-        return shown.map { model in
-            RankEntry(id: model.name,
-                      label: CompanionStore.stripProviderPrefix(model.name),
-                      valueText: Self.compactTokens(model.tokens),
-                      logoAsset: nil,
-                      fraction: Double(model.tokens) / Double(maxTokens))
+        let total = list.reduce(0) { $0 + $1.tokens }
+        return list.prefix(3).map { model in
+            let (frac, pct) = Self.share(tokens: model.tokens, total: total)
+            return RankEntry(id: model.name,
+                             label: CompanionStore.stripProviderPrefix(model.name),
+                             valueText: Self.compactTokens(model.tokens),
+                             logoAsset: nil,
+                             fraction: frac, pctText: pct)
         }
     }
 

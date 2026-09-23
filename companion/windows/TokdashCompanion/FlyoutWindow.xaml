@@ -239,15 +239,37 @@
 
         <!-- Top-rank pill: optional harness mark, display name, compact tokens. Model rows
              simply have no mark (never a placeholder). -->
+        <!-- One top-rank row: logo, name, share bar, token amount + percent. No card/border -
+             rows sit on the section background, matching macOS. The bar is a 3px rounded
+             ProgressBar whose PART_Indicator is auto-widthed by Value (0..100 share). -->
         <DataTemplate x:Key="RankTemplate">
-            <Border CornerRadius="4" Background="{DynamicResource SegIdleBg}" BorderBrush="{DynamicResource BtnBorder}"
-                    BorderThickness="0.5" Padding="7,3,7,4" Margin="0,0,0,4">
-                <StackPanel Orientation="Horizontal">
-                    <Image Source="{Binding Logo}" Width="13" Height="13" Margin="0,0,5,0" VerticalAlignment="Center"
-                           Visibility="{Binding LogoVisibility}"/>
-                    <TextBlock VerticalAlignment="Center" FontSize="{StaticResource FontCaption}"><Run Text="{Binding Label}" FontWeight="Medium" Foreground="{DynamicResource TextBrush}"/><Run Text="  "/><Run Text="{Binding Value}" Foreground="{DynamicResource MutedBrush}"/></TextBlock>
-                </StackPanel>
-            </Border>
+            <Grid Margin="0,3,0,3">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="96"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <Image Grid.Column="0" Source="{Binding Logo}" Width="13" Height="13" Margin="0,0,6,0"
+                       VerticalAlignment="Center" Visibility="{Binding LogoVisibility}"/>
+                <TextBlock Grid.Column="1" Text="{Binding Label}" ToolTip="{Binding Label}" TextTrimming="CharacterEllipsis"
+                           VerticalAlignment="Center" FontSize="{StaticResource FontCaption}" Style="{StaticResource BodyText}"
+                           Foreground="{DynamicResource TextBrush}"/>
+                <ProgressBar Grid.Column="2" Height="3" Minimum="0" Maximum="100" Value="{Binding BarPct}"
+                             VerticalAlignment="Center" Margin="8,0,8,0" Background="{DynamicResource BarTrack}"
+                             Foreground="{DynamicResource PrimaryBg}" BorderThickness="0">
+                    <ProgressBar.Template>
+                        <ControlTemplate TargetType="ProgressBar">
+                            <Grid>
+                                <Border CornerRadius="1.5" Background="{TemplateBinding Background}"/>
+                                <Border x:Name="PART_Indicator" CornerRadius="1.5" Background="{TemplateBinding Foreground}"
+                                        HorizontalAlignment="Left"/>
+                            </Grid>
+                        </ControlTemplate>
+                    </ProgressBar.Template>
+                </ProgressBar>
+                <TextBlock Grid.Column="3" VerticalAlignment="Center" FontSize="{StaticResource FontCaption}" Style="{StaticResource BodyText}"><Run Text="{Binding Value}" Foreground="{DynamicResource MutedBrush}"/><Run Text="  "/><Run Text="{Binding Pct}" Foreground="{DynamicResource FaintBrush}"/></TextBlock>
+            </Grid>
         </DataTemplate>
     </Window.Resources>
 
@@ -302,8 +324,6 @@
                              Margin="0,5,4,0" Visibility="Collapsed" IsHitTestVisible="False"/>
                 </Grid>
             </Grid>
-            <Border x:Name="Sep1" Height="1" Background="{DynamicResource DividerBrush}"/>
-
             <!-- Banner (offline/busy/wrong-service). A Grid (not a horizontal StackPanel) so
                  the text column is genuinely *-sized and TextWrapping works without a magic
                  MaxWidth - a StackPanel gives its children infinite width during measure. -->
@@ -322,8 +342,6 @@
                     </StackPanel>
                 </StackPanel>
             </Grid>
-            <Border x:Name="SepBanner" Height="1" Background="{DynamicResource DividerBrush}" Visibility="Collapsed"/>
-
             <!-- Hero (selected period). The kicker shares its row with the period segment;
                  the segment is ALWAYS visible - even while every data section below is
                  still loading, changing it is the one action that always works. The cost
@@ -360,8 +378,6 @@
                 <!-- Full delta row (fullDeltaRow on): colored runs built in code-behind. -->
                 <TextBlock x:Name="DeltaRow" TextWrapping="Wrap" FontSize="{StaticResource FontSecondary}" Style="{StaticResource BodyText}" Visibility="Collapsed"/>
             </StackPanel>
-            <Border Height="1" Background="{DynamicResource DividerBrush}"/>
-
             <!-- Top ranks: three tools (with marks) + three models (text-only). -->
             <StackPanel x:Name="RanksPanel" Margin="{StaticResource SectionPad}" Visibility="Collapsed">
                 <TextBlock x:Name="ToolsKicker" Text="" FontSize="{StaticResource FontCaption}" FontWeight="SemiBold" Style="{StaticResource BodyText}" Foreground="{DynamicResource MutedBrush}"/>
@@ -379,8 +395,6 @@
                     </ItemsControl.ItemsPanel>
                 </ItemsControl>
             </StackPanel>
-            <Border x:Name="SepRanks" Height="1" Background="{DynamicResource DividerBrush}" Visibility="Collapsed"/>
-
             <!-- Activity glance: one face at a time, built in code-behind (bars/columns/grid). -->
             <StackPanel x:Name="GlancePanel" Margin="{StaticResource SectionPad}" Visibility="Collapsed">
                 <TextBlock x:Name="GlanceKicker" Text="" FontSize="{StaticResource FontCaption}" FontWeight="SemiBold" Style="{StaticResource BodyText}" Foreground="{DynamicResource MutedBrush}"/>
@@ -391,16 +405,12 @@
                                 HorizontalContentAlignment="Stretch"/>
                 <TextBlock x:Name="GlanceCaption" Text="" FontSize="{StaticResource FontCaption}" Style="{StaticResource BodyText}" Foreground="{DynamicResource MutedBrush}" Margin="0,6,0,0"/>
             </StackPanel>
-            <Border x:Name="SepGlance" Height="1" Background="{DynamicResource DividerBrush}" Visibility="Collapsed"/>
-
             <!-- Per-server rows: only with more than one enabled server; this cycle only. -->
             <StackPanel x:Name="PerServerPanel" Margin="{StaticResource SectionPad}" Visibility="Collapsed">
                 <TextBlock x:Name="PerServerKicker" Text="" FontSize="{StaticResource FontCaption}" FontWeight="SemiBold" Style="{StaticResource BodyText}" Foreground="{DynamicResource MutedBrush}"/>
                 <ItemsControl x:Name="PerServerRowsCtl" Margin="0,4,0,0"/>
                 <TextBlock x:Name="PerServerFootnote" Text="" FontSize="{StaticResource FontMicro}" Style="{StaticResource BodyText}" Foreground="{DynamicResource FaintBrush}" Margin="0,4,0,0"/>
             </StackPanel>
-            <Border x:Name="SepPerServer" Height="1" Background="{DynamicResource DividerBrush}" Visibility="Collapsed"/>
-
             <!-- Quota section -->
             <StackPanel Margin="{StaticResource SectionPad}" x:Name="QuotaPanel">
                 <Grid Margin="0,0,0,8">
@@ -427,15 +437,13 @@
                     <Border Height="12" Width="240" HorizontalAlignment="Left" CornerRadius="3" Background="{DynamicResource BarTrack}"/>
                 </StackPanel>
             </StackPanel>
-            <Border Height="1" Background="{DynamicResource DividerBrush}"/>
-
             <!-- Action row -->
             <StackPanel Margin="{StaticResource BandPad}" Orientation="Horizontal">
                 <Button Click="OpenDashboard_Click" x:Name="OpenDashboardBtn" Content="Open Dashboard" Padding="14,5,14,6" Style="{StaticResource PrimaryBtn}"/>
             </StackPanel>
 
             <!-- Footer band -->
-            <Border Background="{DynamicResource FooterBg}" BorderBrush="{DynamicResource FooterBorder}" BorderThickness="0,1,0,0" CornerRadius="0,0,8,8" Padding="{StaticResource FooterPad}">
+            <Border Background="{DynamicResource FooterBg}" CornerRadius="0,0,8,8" Padding="{StaticResource FooterPad}">
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>

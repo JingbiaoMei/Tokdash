@@ -212,10 +212,61 @@ public class StoreHelperTests
 
         Assert.AreEqual("codex", CompanionStore.LogoAssetName("codex"));
         Assert.AreEqual("opencode", CompanionStore.LogoAssetName("opencode"));
+        Assert.AreEqual("openclaw", CompanionStore.LogoAssetName("openclaw"), "OpenClaw ships a mark now");
         Assert.IsNull(CompanionStore.LogoAssetName("zed"), "no shipped mark -> text-only row");
 
         Assert.AreEqual("gpt-5.6-sol", CompanionStore.StripProviderPrefix("openai/gpt-5.6-sol"));
         Assert.AreEqual("claude-opus-4-7", CompanionStore.StripProviderPrefix("claude-opus-4-7"), "no slash -> unchanged");
+    }
+
+    [TestMethod]
+    public void Rank_Shares_Are_Percent_Of_Full_List_And_Never_NaN()
+    {
+        // Denominators are the FULL by_tool sum / the FULL combined_models list, so the
+        // top-3 shares need not add to 100 and the bar always matches the printed percent.
+        var usage = new UsageResponse
+        {
+            TotalTokens = 1000,
+            ByTool = new()
+            {
+                ["codex"] = new ToolAgg { Tokens = 550 },
+                ["claude"] = new ToolAgg { Tokens = 250 },
+                ["kimi"] = new ToolAgg { Tokens = 100 },
+                ["zed"] = new ToolAgg { Tokens = 100 },
+            },
+            CombinedModels = new()
+            {
+                new ModelAgg { Name = "openai/gpt-5.6", Tokens = 700 },
+                new ModelAgg { Name = "anthropic/claude-x", Tokens = 200 },
+                new ModelAgg { Name = "x/y", Tokens = 50 },
+                new ModelAgg { Name = "z/w", Tokens = 50 },
+            },
+        };
+        var snap = new Snapshot
+        {
+            Period = UsagePeriod.Today, Usage = usage, Quota = new QuotaResponse(),
+            Thresholds = QuotaThresholds.Defaults, Components = new CompanionComponents(),
+            Now = DateTimeOffset.FromUnixTimeSeconds(1785080120),
+        };
+        var tools = snap.TopTools;
+        Assert.AreEqual(3, tools.Count);
+        CollectionAssert.AreEqual(new[] { "55%", "25%", "10%" }, tools.Select(t => t.PctText).ToList(),
+            "shares of the full 1000-token by_tool sum; the omitted zed row keeps the top-3 under 100%");
+        CollectionAssert.AreEqual(new[] { 0.55, 0.25, 0.10 }, tools.Select(t => t.Fraction).ToList());
+        var models = snap.TopModels;
+        CollectionAssert.AreEqual(new[] { "70%", "20%", "5%" }, models.Select(m => m.PctText).ToList());
+
+        // Zero-sum lists: empty bar and "0%", never NaN.
+        var zero = new Snapshot
+        {
+            Period = UsagePeriod.Today,
+            Usage = new UsageResponse { TotalTokens = 0, ByTool = new(), CombinedModels = new() },
+            Quota = new QuotaResponse(), Thresholds = QuotaThresholds.Defaults,
+            Components = new CompanionComponents(),
+            Now = DateTimeOffset.FromUnixTimeSeconds(1785080120),
+        };
+        CollectionAssert.AreEqual(new string[0], zero.TopTools.Select(t => t.PctText).ToList());
+        CollectionAssert.AreEqual(new string[0], zero.TopModels.Select(m => m.PctText).ToList());
     }
 
     [TestMethod]

@@ -245,7 +245,11 @@ valid URL.
    overlapping refreshes. Selecting a different segment fires the same group
    for the new window immediately; while it is in flight the hero, delta row,
    rank blocks and glance show their loading skeleton, and quota/connectivity
-   stay exactly as they were. A component whose toggle is off must not fetch
+   stay exactly as they were. **Delayed-skeleton clause:** on a period switch
+   the previous period's data stays on screen while the new one is in flight,
+   and the skeleton is only shown if the fetch is still pending after ~150 ms
+   (so a fast round-trip never visibly collapses the sections). First loads -
+   when no previous period's data exists - show skeletons immediately. A component whose toggle is off must not fetch
    its source at all (a glance-off cycle contains no `/api/insights` or
    `/api/stats` request).
 
@@ -658,7 +662,7 @@ pinned under the English locale; both suites run cases in English.
 | `offline` | - | (timeout/connection refused) | "Tokdash is not reachable"; Retry + Settings; last-good dimmed; footer "· stale" |
 | `busy` | today | usage/active/insights/quota all 503 | "Tokdash is busy - retrying"; last-good dimmed; back off |
 | `partial` | today | usage-today ok; active/insights/quota 503 | hero normal; **quota** shows inline "will retry shortly"; active segment and glance vanish **silently** (rule 6) |
-| `loading` | today | all pending | "Connecting…"; skeletons; segment stays visible; no spinner |
+| `loading` | today | all pending | "Connecting…"; skeletons (on a period switch: only after ~150 ms in flight, previous data held until then); segment stays visible; no spinner |
 | `provider-error` | today | usage-today + quota-provider-error | All view: "Couldn't refresh - showing last known" under the failed provider, rows still visible; Low prefixes ⚠ on its low row; no credits row (quota fixture has none) |
 | `partial-failure` | today | usage-today + quota-partial-failure | MiniMax header warns; row ⚠ only on `cn_general_5h`; notifications fire for `global_general_5h`, suppressed for `cn_general_5h` |
 

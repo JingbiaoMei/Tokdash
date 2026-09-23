@@ -666,3 +666,25 @@ def test_frontend_session_registry_includes_goose():
     assert 'id="gooseActiveAgent"' in source
     assert source.count('data-panel="goose"') == 1
     assert (index.parent / "icons" / "agents" / "goose.svg").is_file()
+
+
+def test_a_junk_timestamp_costs_one_row_not_the_panel(monkeypatch, tmp_path):
+    """The row split runs BEFORE the loop that tolerates a junk stamp.
+
+    Goose's DDL says NOT NULL, so NULL is not the realistic junk; a text stamp
+    is (SQLite keeps it as TEXT under INTEGER affinity), and
+    `_goose_ts_to_ms` is written to refuse that rather than propagate it. The
+    split into window rows and boundary rows must not be the one place that
+    raises, because raising here costs the whole panel, not the bad row.
+    """
+    db = _setup(monkeypatch, tmp_path,
+                sessions=[_session("s1")],
+                ledger=[_ledger(1, "s1", 0), _ledger(2, "s1", 60)])
+    conn = sqlite3.connect(db)
+    conn.execute("UPDATE usage_ledger SET created_timestamp = 'not a time' WHERE id = 2")
+    conn.commit()
+    conn.close()
+    sessions._goose_sessions_cache.clear()
+
+    turns = [t for raw in _goose_sessions().values() for t in raw["turns"]]
+    assert [t["timestamp_ms"] for t in turns] == [T0 * SECOND]   # the good row lists

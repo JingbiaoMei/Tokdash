@@ -6305,11 +6305,22 @@ def _goose_load_sessions(
     # the window closed, kept only so its measured duration can be handed to
     # _session_active_intervals. Sessions with nothing in the window never get
     # a raw dict at all, so a boundary row alone never lists a session.
-    ledger_rows = [r for r in all_rows if int(r["created_timestamp"]) < hi]
+    def _stamp_seconds(row) -> Optional[int]:
+        # The column is NOT NULL in Goose's own DDL, but the loop below reads it
+        # through _goose_ts_to_ms, which tolerates junk. Splitting the rows first
+        # must not be the one place that refuses to: an int() here would raise
+        # and cost the whole panel its data.
+        try:
+            return int(row["created_timestamp"])
+        except (TypeError, ValueError):
+            return None
+
+    stamped = [(row, _stamp_seconds(row)) for row in all_rows]
+    ledger_rows = [row for row, sec in stamped if sec is not None and sec < hi]
     edge_rows = {
-        str(r["session_id"]): r
-        for r in all_rows
-        if int(r["created_timestamp"]) >= hi
+        str(row["session_id"]): row
+        for row, sec in stamped
+        if sec is not None and sec >= hi
     }
 
     elapsed_by_session = _goose_elapsed_ms(

@@ -1762,3 +1762,156 @@ def test_a_single_account_card_carries_no_status_account(monkeypatch, tmp_path):
 
     assert "accounts" not in provider
     assert "status_account" not in provider
+
+
+# --- limit resets -------------------------------------------------------------------------
+
+# Far-future expiry: `quota_state` re-reads a stored block against the real clock, so a
+# near-future date here would turn these tests into a time bomb.
+_RESET_ENDS_AT = "2099-01-01T00:00:00+00:00"
+_RESET_ENDS_AT_EPOCH = 4_070_908_800
+
+
+def _grant(label: str = "Opus launch reset", *, ends_at: str = _RESET_ENDS_AT, left: int = 1) -> dict:
+    return {"id": label.lower().replace(" ", "-"), "label": label, "resets_left": left, "ends_at": ends_at}
+
+
+def _reset_row(account: str, *grants: dict) -> QuotaSnapshot:
+    block = {"eligible": bool(grants), "ineligible_reason": None if grants else "surface", "grants": list(grants)}
+    count = float(sum(grant["resets_left"] for grant in grants))
+    return QuotaSnapshot(
+        "claude", account, "reset_credits", "Reset credits", count, None, "team", 1_782_907_200,
+        "claude_api", "ok", {"limit_resets": block},
+    )
+
+
+def _credits(label: str = "Opus launch reset", left: int = 1) -> dict:
+    return {
+        "available_count": left,
+        "credits": [
+            {
+                "id": label.lower().replace(" ", "-"),
+                "title": label,
+                "expires_at": _RESET_ENDS_AT_EPOCH,
+                "resets_left": left,
+                "clears": [],
+                "status": "available",
+            }
+        ],
+    }
+
+
+def test_a_single_install_card_carries_its_limit_resets(monkeypatch, tmp_path):
+    from tokdash.sources.quota import quota_state
+
+    home = _home(monkeypatch, tmp_path)
+    _install(home, ".claude", token="tok-base")
+    config.set_quota_consent({"credential_scan": True, "claude_api": True})
+    UsageEntryStore().insert_quota_snapshots(
+        [_snapshot("default", "session", "Session", 40.0, 1_782_907_200), _reset_row("default", _grant())]
+    )
+
+    provider = quota_state()["providers"]["claude"]
+
+    assert provider["reset_credits"] == _credits()
+    # An inventory row is never a window bar, and it does not open an `accounts` list.
+    assert [b["bucket"] for b in provider["buckets"]] == ["session"]
+    assert "accounts" not in provider
+    assert provider["status_detail"] is None
+
+
+def test_an_account_outside_the_reset_program_shows_no_reset_block(monkeypatch, tmp_path):
+    from tokdash.sources.quota import quota_state
+
+    home = _home(monkeypatch, tmp_path)
+    _install(home, ".claude", token="tok-base")
+    config.set_quota_consent({"credential_scan": True, "claude_api": True})
+    UsageEntryStore().insert_quota_snapshots(
+        [_snapshot("default", "session", "Session", 40.0, 1_782_907_200), _reset_row("default")]
+    )
+
+    assert "reset_credits" not in quota_state()["providers"]["claude"]
+
+
+def test_a_reset_that_expired_since_the_last_poll_is_not_offered(monkeypatch, tmp_path):
+    from tokdash.sources.quota import quota_state
+
+    home = _home(monkeypatch, tmp_path)
+    _install(home, ".claude", token="tok-base")
+    config.set_quota_consent({"credential_scan": True, "claude_api": True})
+    UsageEntryStore().insert_quota_snapshots(
+        [
+            _snapshot("default", "session", "Session", 40.0, 1_782_907_200),
+            _reset_row("default", _grant(ends_at="2026-01-01T00:00:00+00:00")),
+        ]
+    )
+
+    assert "reset_credits" not in quota_state()["providers"]["claude"]
+
+
+def test_a_siblings_resets_stay_under_that_install(monkeypatch, tmp_path):
+    """A second subscription's reset must not read as the default install's."""
+    from tokdash.sources.quota import quota_state
+
+    home = _home(monkeypatch, tmp_path)
+    _install(home, ".claude", token="tok-base")
+    _install(home, ".claude-academic", token="tok-academic")
+    config.set_quota_consent({"credential_scan": True, "claude_api": True})
+    UsageEntryStore().insert_quota_snapshots(
+        [
+            _snapshot("default", "session", "Session", 40.0, 1_782_907_200),
+            _snapshot("academic", "academic_session", "Session", 20.0, 1_782_907_200),
+            _reset_row("default"),
+            _reset_row("academic", _grant("Team reset", left=2)),
+        ]
+    )
+
+    provider = quota_state()["providers"]["claude"]
+
+    assert "reset_credits" not in provider
+    accounts = {a["account"]: a for a in provider["accounts"]}
+    assert accounts["academic"]["reset_credits"] == _credits("Team reset", left=2)
+    # Absent, not null: an account with no resets keeps the payload it always had.
+    assert "reset_credits" not in accounts["default"]
+
+
+def test_the_default_installs_resets_are_also_the_cards_own(monkeypatch, tmp_path):
+    from tokdash.sources.quota import quota_state
+
+    home = _home(monkeypatch, tmp_path)
+    _install(home, ".claude", token="tok-base")
+    _install(home, ".claude-academic", token="tok-academic")
+    config.set_quota_consent({"credential_scan": True, "claude_api": True})
+    UsageEntryStore().insert_quota_snapshots(
+        [
+            _snapshot("default", "session", "Session", 40.0, 1_782_907_200),
+            _snapshot("academic", "academic_session", "Session", 20.0, 1_782_907_200),
+            _reset_row("default", _grant()),
+        ]
+    )
+
+    provider = quota_state()["providers"]["claude"]
+
+    assert provider["reset_credits"] == _credits()
+    accounts = {a["account"]: a for a in provider["accounts"]}
+    assert accounts["default"]["reset_credits"] == _credits()
+    assert "reset_credits" not in accounts["academic"]
+
+
+def test_a_sibling_only_card_carries_that_siblings_resets(monkeypatch, tmp_path):
+    from tokdash.sources.quota import quota_state
+
+    home = _home(monkeypatch, tmp_path)
+    _install(home, ".claude-academic", token="tok-academic")
+    config.set_quota_consent({"credential_scan": True, "claude_api": True})
+    UsageEntryStore().insert_quota_snapshots(
+        [
+            _snapshot("academic", "academic_session", "Session", 20.0, 1_782_907_200),
+            _reset_row("academic", _grant()),
+        ]
+    )
+
+    provider = quota_state()["providers"]["claude"]
+
+    assert "accounts" not in provider
+    assert provider["reset_credits"] == _credits()

@@ -917,7 +917,7 @@ def test_claude_api_parses_limits_shape(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(claude_dir))
 
     def opener(req, timeout=15):
-        assert req.full_url == "https://api.anthropic.com/api/oauth/usage"
+        assert req.full_url == "https://api.anthropic.com/api/oauth/usage?cedar_ember=1"
         return FakeResponse(
             {
                 "limits": [
@@ -1532,6 +1532,211 @@ def test_claude_api_tolerates_non_dict_scope(monkeypatch, tmp_path):
     snapshots = claude.collect_claude_api_snapshots(opener=opener, now=1_782_907_200)
 
     assert [(s.bucket, s.used_percent) for s in snapshots] == [("session", 60.0), ("weekly", 20.0)]
+
+
+# 2026-09-23T12:00Z: inside the captured grant's window (starts 09-22 16:00Z, ends 10-22 16:00Z).
+_RESETS_NOW = 1_790_164_800
+_RESETS_ENDS_AT = 1_792_684_800
+_CLAUDE_WINDOWS = {"limits": [{"kind": "session", "percent": 6, "resets_at": "2026-09-23T15:40:00Z"}]}
+
+
+def _claude_install(tmp_path, monkeypatch, name: str = ".claude"):
+    claude_dir = tmp_path / name
+    claude_dir.mkdir()
+    (claude_dir / ".credentials.json").write_text(
+        json.dumps(
+            {
+                "claudeAiOauth": {
+                    "accessToken": "token",
+                    "expiresAt": 4_000_000_000_000,
+                    "subscriptionType": "team",
+                    "rateLimitTier": "default_claude_max_5x",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(claude_dir))
+    return claude_dir
+
+
+def test_claude_api_requests_limit_resets_as_the_cli_surface(monkeypatch, tmp_path):
+    # Anthropic keys the reset program's surface on the User-Agent: Python's default one is
+    # answered `ineligible_reason: "surface"` with no grants. The request has to carry the
+    # CLI's prefix, and still names tokdash after it.
+    _claude_install(tmp_path, monkeypatch)
+    seen = []
+
+    def opener(req, timeout=15):
+        seen.append(req)
+        return FakeResponse(_CLAUDE_WINDOWS)
+
+    claude.collect_claude_api_snapshots(opener=opener, now=_RESETS_NOW)
+
+    assert [req.full_url for req in seen] == ["https://api.anthropic.com/api/oauth/usage?cedar_ember=1"]
+    user_agent = _header(seen[0], "User-Agent")
+    assert user_agent.startswith("claude-cli/")
+    assert "(external, cli)" in user_agent
+    assert "tokdash/" in user_agent
+    assert "skip_spend" not in seen[0].full_url
+
+
+def test_claude_api_stores_captured_limit_resets_block(monkeypatch, tmp_path):
+    block = _load_quota_fixture("claude_limit_resets.json")
+    _claude_install(tmp_path, monkeypatch)
+
+    def opener(req, timeout=15):
+        return FakeResponse({**_CLAUDE_WINDOWS, "cedar_ember": block})
+
+    snapshots = claude.collect_claude_api_snapshots(opener=opener, now=_RESETS_NOW)
+
+    assert [s.bucket for s in snapshots] == ["session", "reset_credits"]
+    reset = snapshots[-1]
+    assert (reset.provider, reset.account, reset.source, reset.status) == ("claude", "default", "claude_api", "ok")
+    assert reset.used_percent == 1.0  # a COUNT of resets, the Codex convention
+    assert reset.resets_at is None
+    assert reset.plan == "team/default_claude_max_5x"
+    assert reset.raw == {"limit_resets": block}
+
+
+def test_summarize_limit_resets_maps_the_captured_grant():
+    block = _load_quota_fixture("claude_limit_resets.json")
+
+    assert claude.summarize_limit_resets(block, now=_RESETS_NOW) == {
+        "available_count": 1,
+        "credits": [
+            {
+                "id": "<redacted>",
+                "title": "Claude Opus 5.5 launch: one usage-limit reset for Team members",
+                "expires_at": _RESETS_ENDS_AT,
+                "resets_left": 1,
+                "clears": ["five_hour", "seven_day", "seven_day_overage_included"],
+                "status": "available",
+            }
+        ],
+    }
+    # Past `ends_at` the grant is no longer offered, even from a stored row.
+    assert claude.summarize_limit_resets(block, now=_RESETS_ENDS_AT) == {"available_count": 0, "credits": []}
+
+
+def test_summarize_limit_resets_counts_only_spendable_grants():
+    def grant(grant_id, **fields):
+        return {"id": grant_id, "label": "", "resets_left": 1, **fields}
+
+    block = {
+        "eligible": True,
+        "grants": [
+            grant("late", resets_left=2, ends_at="2026-10-30T00:00:00Z"),
+            grant("soon", ends_at="2026-09-30T00:00:00Z"),
+            grant("paused", paused=True),
+            grant("spent", resets_left=0),
+            grant("future", starts_at="2026-10-01T00:00:00Z"),
+            grant("expired", ends_at="2026-09-01T00:00:00Z"),
+            grant("junk", resets_left="many"),
+            "not-a-grant",
+        ],
+    }
+
+    summary = claude.summarize_limit_resets(block, now=_RESETS_NOW)
+
+    assert summary["available_count"] == 3
+    # Soonest expiry first; an empty label is left for the renderer's own fallback.
+    assert [(c["id"], c["title"]) for c in summary["credits"]] == [("soon", None), ("late", None)]
+
+
+@pytest.mark.parametrize("block", [None, "surface", ["grants"]])
+def test_summarize_limit_resets_ignores_non_blocks(block):
+    assert claude.summarize_limit_resets(block, now=_RESETS_NOW) is None
+
+
+@pytest.mark.parametrize("extra", [{}, {"cedar_ember": None}])
+def test_claude_api_writes_no_reset_row_without_a_block(monkeypatch, tmp_path, extra):
+    _claude_install(tmp_path, monkeypatch)
+
+    def opener(req, timeout=15):
+        return FakeResponse({**_CLAUDE_WINDOWS, **extra})
+
+    snapshots = claude.collect_claude_api_snapshots(opener=opener, now=_RESETS_NOW)
+
+    assert [s.bucket for s in snapshots] == ["session"]
+
+
+def test_claude_api_writes_zero_reset_row_for_an_ineligible_account(monkeypatch, tmp_path):
+    # The block most installs get. Its zero-count row is how a withdrawn batch stops
+    # looking current; `quota_state` shows nothing for it.
+    _claude_install(tmp_path, monkeypatch)
+    block = {"eligible": False, "ineligible_reason": "surface", "grants": [], "event_props": None}
+
+    def opener(req, timeout=15):
+        return FakeResponse({**_CLAUDE_WINDOWS, "cedar_ember": block})
+
+    snapshots = claude.collect_claude_api_snapshots(opener=opener, now=_RESETS_NOW)
+
+    reset = next(s for s in snapshots if s.bucket == "reset_credits")
+    assert reset.used_percent == 0.0
+
+
+def test_claude_api_keeps_no_limits_status_beside_the_reset_row(monkeypatch, tmp_path):
+    _claude_install(tmp_path, monkeypatch)
+    block = _load_quota_fixture("claude_limit_resets.json")
+
+    def opener(req, timeout=15):
+        return FakeResponse({"cedar_ember": block})
+
+    snapshots = claude.collect_claude_api_snapshots(opener=opener, now=_RESETS_NOW)
+
+    assert [(s.bucket, s.status) for s in snapshots] == [("api", "unavailable"), ("reset_credits", "ok")]
+
+
+def test_claude_api_retries_plain_url_once_when_the_flag_is_rejected(monkeypatch, tmp_path):
+    _claude_install(tmp_path, monkeypatch)
+    urls = []
+
+    def opener(req, timeout=15):
+        urls.append(req.full_url)
+        if "cedar_ember" in req.full_url:
+            raise HTTPError(req.full_url, 400, "Bad Request", {}, None)
+        return FakeResponse(_CLAUDE_WINDOWS)
+
+    snapshots = claude.collect_claude_api_snapshots(opener=opener, now=_RESETS_NOW)
+
+    assert urls == [claude.CLAUDE_USAGE_URL_WITH_RESETS, claude.CLAUDE_USAGE_URL]
+    assert [(s.bucket, s.status) for s in snapshots] == [("session", "ok")]
+
+
+@pytest.mark.parametrize(("code", "status"), [(401, "stale_token"), (403, "stale_token"), (429, "fetch_error")])
+def test_claude_api_does_not_retry_plain_url_for_auth_or_rate_limit(monkeypatch, tmp_path, code, status):
+    # 401/403 are the sign-in, not the flag. 429 is Anthropic asking for less traffic, so a
+    # second request would be exactly the wrong answer.
+    _claude_install(tmp_path, monkeypatch)
+    urls = []
+
+    def opener(req, timeout=15):
+        urls.append(req.full_url)
+        raise HTTPError(req.full_url, code, "nope", {}, None)
+
+    snapshots = claude.collect_claude_api_snapshots(opener=opener, now=_RESETS_NOW)
+
+    assert urls == [claude.CLAUDE_USAGE_URL_WITH_RESETS]
+    assert [(s.bucket, s.status) for s in snapshots] == [("api", status)]
+
+
+def test_claude_api_reset_row_is_unprefixed_for_a_sibling_install(monkeypatch, tmp_path):
+    # Windows are prefixed per install so two subscriptions never share a chart series; an
+    # inventory row is in no series, and the `reset_credits` guards match that exact id.
+    sibling = _claude_install(tmp_path, monkeypatch, ".claude-academic")
+    block = _load_quota_fixture("claude_limit_resets.json")
+
+    def opener(req, timeout=15):
+        return FakeResponse({**_CLAUDE_WINDOWS, "cedar_ember": block})
+
+    profile = claude.ClaudeProfile("academic", sibling)
+    snapshots = claude.collect_claude_api_snapshots(opener=opener, now=_RESETS_NOW, profiles=[profile])
+
+    assert [(s.account, s.bucket) for s in snapshots] == [
+        ("academic", "academic_session"),
+        ("academic", "reset_credits"),
+    ]
 
 
 def test_codex_api_keeps_windows_when_reset_credits_fails(monkeypatch, tmp_path):

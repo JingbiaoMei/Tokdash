@@ -1,6 +1,18 @@
 {
-  "current": "2.6.2",
+  "current": "2.6.3",
   "releases": [
+    {
+      "version": "2.6.3",
+      "date": "2026-09-23",
+      "sections": [
+        {
+          "type": "added",
+          "items": [
+            "Claude Code limit resets now show on the Quota tab, in the same Reset Credits block the Codex card uses. Each reset lists its expiry under the install that holds it, and Tokdash only reads them: spending one still happens in Claude Code."
+          ]
+        }
+      ]
+    },
     {
       "version": "2.6.2",
       "date": "2026-09-23",

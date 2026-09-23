@@ -22,6 +22,7 @@
 ## development/ — maintainer workflows, release history, and design notes
 
 - [Changelog](development/CHANGELOG.md) — notable changes to the project, release by release.
+- [更新日志](development/CHANGELOG_CN.md) — 简体中文更新日志，由 `scripts/changelog_cn.py` 从应用内条目生成。
 - [Releasing](development/RELEASING.md) — checklist for manual PyPI/Git tag/GitHub Releases publishing.
 - [Roadmap](development/ROADMAP.md) — notes on planned and deferred work.
 - [Companion release guide](../companion/docs/RELEASE.md) — tagging the menu-bar/tray app, the unsigned GitHub binaries, and the Microsoft Store (MSIX) track.

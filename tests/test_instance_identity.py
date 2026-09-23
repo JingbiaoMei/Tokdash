@@ -6,9 +6,9 @@ two daemons over one data dir agree on it, two over two dirs do not, and a state
 cannot hold it leaves the field out instead of substituting a guess.
 """
 import json
-import os
 import threading
 import uuid
+from pathlib import Path
 
 import pytest
 
@@ -39,10 +39,6 @@ def _write_identity(payload: str):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(payload, encoding="utf-8")
     return path
-
-
-def _as_root() -> bool:
-    return hasattr(os, "geteuid") and os.geteuid() == 0
 
 
 # --- what /health answers --------------------------------------------------------
@@ -164,13 +160,20 @@ def test_id_is_never_derived_from_the_data_dir_path(monkeypatch, tmp_path):
 # --- unreadable state: omit, never guess -----------------------------------------
 
 
+def _unwritable_dir(tmp_path) -> Path:
+    """A directory that cannot be created, on POSIX and on Windows alike.
+
+    ``chmod`` is not the probe: NTFS answers mode bits with ACLs the owner ignores, so a
+    ``0o500`` directory stays writable there and CI would test nothing. A parent that is
+    a regular file fails the ``mkdir`` on both, which is the case worth pinning.
+    """
+    blocker = tmp_path / "not-a-directory"
+    blocker.write_text("still a file", encoding="utf-8")
+    return blocker / "data-dir"
+
+
 def test_unwritable_data_dir_omits_the_field(monkeypatch, tmp_path):
-    if _as_root():
-        pytest.skip("running as root: file modes are not enforced")
-    locked = tmp_path / "locked"
-    locked.mkdir()
-    locked.chmod(0o500)
-    monkeypatch.setenv("TOKDASH_DATA_DIR", str(locked))
+    monkeypatch.setenv("TOKDASH_DATA_DIR", str(_unwritable_dir(tmp_path)))
 
     assert instance_identity.get_instance_id() is None
     body = TestClient(api.app).get("/health").json()
@@ -211,17 +214,13 @@ def test_stored_id_is_canonicalised():
 
 def test_failed_identity_is_retried_after_the_backoff(monkeypatch, tmp_path):
     """A full disk at boot must not cost identity for the life of the process."""
-    if _as_root():
-        pytest.skip("running as root: file modes are not enforced")
-    flaky = tmp_path / "flaky"
-    flaky.mkdir()
-    flaky.chmod(0o500)
-    monkeypatch.setenv("TOKDASH_DATA_DIR", str(flaky))
-
+    monkeypatch.setenv("TOKDASH_DATA_DIR", str(_unwritable_dir(tmp_path)))
     assert instance_identity.get_instance_id() is None
     # Still inside the backoff: no fresh attempt, so no fresh writes to a bad dir.
     assert instance_identity.get_instance_id() is None
 
-    flaky.chmod(0o700)
+    # Once the backoff is over the next attempt gets an id, so a state dir that recovers
+    # is not permanently stuck reporting "identity unknown".
+    monkeypatch.setenv("TOKDASH_DATA_DIR", str(tmp_path / "recovered"))
     instance_identity._NEXT_TRY.clear()
     assert uuid.UUID(instance_identity.get_instance_id())

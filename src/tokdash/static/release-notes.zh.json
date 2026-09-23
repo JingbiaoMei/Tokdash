@@ -3,6 +3,11 @@
   "source": "release-notes.json",
   "comment": "简体中文更新日志。项与 release-notes.json 按下标一一对齐；未翻译的版本回落英文。",
   "releases": {
+    "2.6.3": {
+      "added": [
+        "Claude Code 的额度重置现在显示在 Quota 页，与 Codex 卡片所用的 Reset Credits 区块同处一处。每次重置列在持有它的安装下并标注到期时间，而 Tokdash 只读取不消耗：使用额度仍然要在 Claude Code 里完成。"
+      ]
+    },
     "2.6.2": {
       "changed": [
         "定价数据库跟随 9 月的模型更新：Claude Opus 5.5 Fast 按标准费率的 2 倍计价，Claude Mythos 5.1 与 OpenAI 的 GPT-5.6 Cyber 完成定价，GPT-5.6 Sol 与 Sol Pro 在 OpenAI 促销价下降至 $4.00 / $20.00，Claude Sonnet 5 的 $2.00 / $10.00 确认为标准价格。"

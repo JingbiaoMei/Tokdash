@@ -55,7 +55,7 @@ Every entry ends with the PR that made the change, after the final period:
 
 ## Changelog languages
 
-Two languages ship today: English, which is canonical, and Chinese, which is the only
+Two languages ship today: English, which is canonical, and Simplified Chinese, which is the only
 translation. Every other dashboard locale reads the English record. That is a deliberate limit --
 this project releases several times a week, and a changelog translated into six languages is a
 debt that gets paid on every one of them.
@@ -80,6 +80,10 @@ Rules worth keeping:
   `tests/test_changelog_localization.py`); backfill older ones when there is time.
 - Never hand-edit `docs/development/CHANGELOG_CN.md`. It is generated from the sidecar plus the PR
   refs pulled out of the English section, so the app and the page cannot drift.
+- `zh` means Simplified for every Chinese reader. `detectBrowserLang()` matches on prefix, so
+  `zh-CN`, `zh-TW` and `zh-HK` all resolve to `zh` and read Simplified today. A Traditional
+  translation needs a dashboard locale of its own first -- a sidecar file alone cannot reach
+  those readers, because nothing would select it.
 - Adding a third language is a standing obligation, not a filename: add the locale's sidecar to
   `RELEASE_NOTES_SIDECARS` in `src/tokdash/static/index.html`, widen `SUPPORTED_SIDECAR_LANGS` in
   the test, and extend this section.

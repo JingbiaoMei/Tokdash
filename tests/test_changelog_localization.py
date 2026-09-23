@@ -11,6 +11,7 @@ Chinese view lie about the newest release, which is what these catch.
 """
 from __future__ import annotations
 
+import importlib.util
 import json
 import re
 import subprocess
@@ -43,6 +44,15 @@ def english_payload() -> dict:
 
 def chinese_entries() -> dict:
     return read_json(RELEASE_NOTES_ZH)["releases"]
+
+
+def load_script(name: str):
+    """Import a file from scripts/ the way the release checklist runs it."""
+    path = REPO_ROOT / "scripts" / f"{name}.py"
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def run_script(argv: list[str]) -> subprocess.CompletedProcess:
@@ -125,7 +135,18 @@ def test_untranslated_entries_fall_back_to_english_in_the_dashboard() -> None:
     loader = loader[:loader.index("\n    async function openReleaseNotes")]
     assert "cache: 'no-store'" in loader
     # A failed sidecar fetch must not surface an error: the English payload already shows.
-    assert "return {};" in loader
+    assert "return null;" in loader
+    # ...and must not be cached as an empty map, which would read as "translated" and skip
+    # every later retry, stranding the locale in English until a page reload.
+    assert "releaseNotesTranslationsByLang.set(lang, {})" not in loader
+    assert loader.count("releaseNotesTranslationsByLang.set(lang,") == 1
+
+    # The English payload paints as soon as it lands, so a sidecar that arrives second has
+    # to repaint the drawer that is already open. Awaiting both is not enough on its own.
+    opener = source[source.index("async function openReleaseNotes() {"):]
+    opener = opener[:opener.index("\n    function closeReleaseNotes")]
+    assert "Promise.all([loadReleaseNotes(), loadReleaseNotesTranslation()])" in opener
+    assert "if (releaseNotesPayload) renderReleaseNotes(releaseNotesPayload);" in opener
 
     # The footer's full-changelog link follows the same language rule as the entries.
     assert "CHANGELOG_DOCS_URLS" in source
@@ -149,6 +170,36 @@ def test_chinese_docs_page_covers_exactly_the_translated_versions() -> None:
         assert dates.get(version) == date, f"{version}: date differs from the English changelog"
 
 
+def test_release_body_carries_one_release_section_only() -> None:
+    # A body that pasted the whole history shipped once: the scan stopped at the next
+    # `## ` heading but the slice did not, so every release under the current one came
+    # along. The heading count is the cheapest check that catches the whole class.
+    section_for = load_script("release_body").section_for
+    changelog = CHANGELOG_EN.read_text(encoding="utf-8")
+    releases = english_payload()["releases"]
+
+    for entry in releases[:3]:
+        version = entry["version"]
+        older = next(r["version"] for r in releases if r["version"] != version)
+        body = section_for(version, changelog)
+        headings = [line for line in body.splitlines() if line.startswith("## ")]
+        assert len(headings) == 1, f"{version}: body carries {len(headings)} release sections"
+        assert headings[0].startswith(f"## {version} - ")
+        assert f"## {older} - " not in body, f"{version}: body leaked the {older} section"
+
+
+def test_pr_refs_names_prs_and_not_issues() -> None:
+    # `closes #41` is an issue and a `#42` in prose is not a ref; labeling either
+    # 相关 PR on the Chinese page is a small lie that outlives the release.
+    pr_refs = load_script("changelog_cn").pr_refs
+    assert pr_refs("- Cline falls back to the session record. (#40)") == ["40"]
+    assert pr_refs("- Opt-in Z.ai tracking. (#48, thanks @Werkaninchen)") == ["48"]
+    assert pr_refs("- Retirement keyed on the directory. (#42, closes #41, thanks @handle)") == ["42"]
+    assert pr_refs("- Two commits did it. (#98, #99)") == ["98", "99"]
+    assert pr_refs("- Noted in #12 upstream, no trailing group") == []
+    assert pr_refs("- Plain prose about the quota card") == []
+
+
 def test_release_body_links_the_chinese_section_for_the_current_version() -> None:
     version = english_payload()["current"]
     result = run_script(["scripts/release_body.py", "--version", version, "--stdout"])
@@ -156,6 +207,9 @@ def test_release_body_links_the_chinese_section_for_the_current_version() -> Non
 
     body = result.stdout
     assert body.startswith("**简体中文：** [查看本版本的中文更新日志]("), body[:120]
+    assert [line for line in body.splitlines() if line.startswith("## ")] == [
+        next(line for line in body.splitlines() if line.startswith("## "))
+    ], "release body must hold exactly one section"
     link = re.search(r"\]\(([^)]+)\)", body.splitlines()[0]).group(1)
     page_url, _, anchor = link.partition("#")
     assert page_url.endswith("docs/development/CHANGELOG_CN.md")

@@ -26,19 +26,24 @@ CHANGELOG_CN_URL = "https://github.com/JingbiaoMei/Tokdash/blob/main/docs/develo
 DEFAULT_OUTPUT = Path("/tmp/tokdash-release-notes.md")
 
 
-def section(version: str) -> str:
-    lines = CHANGELOG_EN.read_text(encoding="utf-8").splitlines(keepends=True)
-    start = None
+def section_for(version: str, text: str) -> str:
+    """One release section: the heading through the line before the next ``## ``.
+
+    The end bound matters. Stopping the search at the next heading is not the same as
+    slicing there, and an unbounded slice pastes every older release into the GitHub
+    Release body.
+    """
+    lines = text.splitlines(keepends=True)
     pattern = re.compile(rf"^## {re.escape(version)} - \d{{4}}-\d{{2}}-\d{{2}}\s*$")
-    for index, line in enumerate(lines):
-        if start is None and pattern.match(line):
-            start = index
-            continue
-        if start is not None and line.startswith("## "):
-            break
+    start = next((i for i, line in enumerate(lines) if pattern.match(line)), None)
     if start is None:
-        raise SystemExit(f"{CHANGELOG_EN}: no section for {version} -- write the entry first")
-    return "".join(lines[start:]).rstrip() + "\n"
+        raise SystemExit(f"no section for {version} -- write the entry first")
+    end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
+    return "".join(lines[start:end]).rstrip() + "\n"
+
+
+def section(version: str) -> str:
+    return section_for(version, CHANGELOG_EN.read_text(encoding="utf-8"))
 
 
 def anchor(version: str, date: str) -> str:

@@ -19089,8 +19089,9 @@
     }
 
     // Fetch a locale's changelog sidecar. Resolves null when the locale ships no
-    // translation, and an empty map when the fetch fails: either way the English
-    // payload already on screen stands, so a missing file is never an error state.
+    // translation and when the fetch fails -- either way the English payload already on
+    // screen stands, so a missing file is never an error state -- and the translated map
+    // on success, which is the only outcome worth caching.
     function loadReleaseNotesTranslation(lang = currentLang) {
       const path = RELEASE_NOTES_SIDECARS[lang];
       if (!path) return Promise.resolve(null);
@@ -19110,9 +19111,12 @@
           return releases;
         })
         .catch(() => {
-          releaseNotesTranslationsByLang.set(lang, {});
+          // Deliberately not cached. An empty map in the cache reads as "translated", so
+          // every later open would skip the retry and strand a Chinese reader in English
+          // for the rest of the session. null means "stay in English, try again later",
+          // which both callers already handle.
           releaseNotesTranslationPromises.delete(lang);
-          return {};
+          return null;
         });
       releaseNotesTranslationPromises.set(lang, promise);
       return promise;
@@ -19125,6 +19129,11 @@
       toggle.setAttribute('aria-expanded', 'true');
       if (!dialog.open) dialog.showModal();
       await Promise.all([loadReleaseNotes(), loadReleaseNotesTranslation()]);
+      // The English payload renders the moment it resolves, so an await on both is not
+      // enough: when the sidecar loses the race the drawer is already painted, and without
+      // this repaint the first open shows English bullets under Chinese labels and dates
+      // until the reader closes and reopens. Re-rendering English with English is free.
+      if (releaseNotesPayload) renderReleaseNotes(releaseNotesPayload);
     }
 
     function closeReleaseNotes() {

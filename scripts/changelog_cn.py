@@ -36,8 +36,15 @@ CHANGELOG_EN = Path("docs/development/CHANGELOG.md")
 CHANGELOG_CN = Path("docs/development/CHANGELOG_CN.md")
 
 SECTION_LABELS = {"added": "新增", "changed": "调整", "fixed": "修复"}
-REF_PATTERN = re.compile(r"#(\d+)")
 HEADING_PATTERN = re.compile(r"^## (\d+\.\d+\.\d+) - (\d{4}-\d{2}-\d{2})\s*$")
+
+# A changelog bullet ends with its refs: `(#40)`, `(#48, thanks @handle)`, or
+# `(#42, closes #41, thanks @handle)`. Only the bare `#N` tokens in that trailing group
+# name PRs: `closes #41` names an issue, and a `#42` inside prose is not a ref at all.
+# Labeling an issue 相关 PR on the Chinese page is a small lie, so the parse is strict.
+REF_GROUP = re.compile(r"\(([^()]*(?:#\d+)[^()]*)\)\s*$")
+NON_PR_KEYWORD = re.compile(r"^(?:closes?|fix(?:e[sd])?|resolve[sd]?|reported|via|see)\b", re.IGNORECASE)
+BARE_REF = re.compile(r"^#(\d+)$")
 ENGLISH_LINK = "https://github.com/JingbiaoMei/Tokdash/blob/main/docs/development/CHANGELOG.md"
 
 HEADER = """\
@@ -52,6 +59,22 @@ HEADER = """\
 """.format(english_link=ENGLISH_LINK)
 
 
+def pr_refs(line: str) -> "list[str]":
+    """PR numbers from one bullet's trailing ref group, empty when it has none."""
+    group = REF_GROUP.search(line.strip())
+    if not group:
+        return []
+    refs = []
+    for part in group.group(1).split(","):
+        part = part.strip()
+        if NON_PR_KEYWORD.match(part):
+            continue
+        bare = BARE_REF.match(part)
+        if bare and bare.group(1) not in refs:
+            refs.append(bare.group(1))
+    return refs
+
+
 def english_metadata() -> "OrderedDict[str, dict]":
     """Release date and PR refs per version, read from the English changelog."""
     meta: "OrderedDict[str, dict]" = OrderedDict()
@@ -63,7 +86,7 @@ def english_metadata() -> "OrderedDict[str, dict]":
             meta[current] = {"date": heading.group(2), "refs": []}
             continue
         if current:
-            for ref in REF_PATTERN.findall(line):
+            for ref in pr_refs(line):
                 if ref not in meta[current]["refs"]:
                     meta[current]["refs"].append(ref)
     return meta

@@ -31,10 +31,13 @@ const LABELS = {
   quotaNoData: 'No quota snapshots yet.', quotaProviderIssue: '{status} at {time}',
   quotaStaleToken: '{app} sign-in expired', quotaRegionChina: 'China',
   quotaRegionGlobal: 'Global', na: 'n/a',
+  resetCredits: 'Reset Credits', available: 'available', expires: 'expires',
 };
 function t(key) { return LABELS[key] || key; }
 function quotaProviderLabel(key) { return key === 'claude' ? 'Claude Code' : key; }
 function formatRelativeAgo() { return '3 minutes ago'; }
+function formatNumber(value) { return String(value); }
+function formatEpochSeconds(value) { return `@${value}`; }
 function makeEl(tag) {
   return { tag, children: [], className: '', style: {}, textContent: '',
            appendChild(child) { this.children.push(child); return child; } };
@@ -43,11 +46,16 @@ const document = { createElement: makeEl };
 function renderQuotaBucketRow(bucket) {
   return { tag: 'bar', textContent: bucket.bucket, children: [] };
 }
-// Headings are the only uppercase elements and notices the only rounded ones, which is
-// enough for the render assertions to tell the three kinds of child apart.
+// Headings are the only uppercase elements, notices the only rounded ones and a reset block
+// the only one with a top rule, which is enough for the render assertions to tell the kinds
+// of child apart. A reset block reads back as its lines, each line's parts joined by " | ".
 const kind = (el) => (/uppercase/.test(el.className || '') ? 'heading'
-  : /rounded/.test(el.className || '') ? 'notice' : el.tag);
-const shape = (card) => card.children.map((el) => [kind(el), el.textContent]);
+  : /rounded/.test(el.className || '') ? 'notice'
+  : el.style && el.style.borderTop ? 'resets' : el.tag);
+const text = (el) => (kind(el) === 'resets'
+  ? el.children.map((line) => line.children.map((part) => part.textContent).join(' | ')).join(' / ')
+  : el.textContent);
+const shape = (card) => card.children.map((el) => [kind(el), text(el)]);
 """
 
 # Everything the card's view is built from, in dependency order.
@@ -65,6 +73,7 @@ VIEW_FUNCTIONS = [
     "function quotaProviderCardLabel(providerKey, provider, claudeView) {",
     "function quotaSubtitleEl(text, tight) {",
     "function appendQuotaStatusNoticeFor(card, providerKey, detail, statusAt) {",
+    "function renderResetCreditsSection(card, reset) {",
     "function renderClaudeBuckets(card, view, providerKey) {",
 ]
 
@@ -800,3 +809,112 @@ def test_the_servers_tally_does_not_fault_a_working_subscription(tmp_path):
 
     assert result["each"] == [True, False, False, False, False, True, False, False]
     assert result["tally"] == {"ok": 2, "bad": 6}
+
+
+# --- limit resets -------------------------------------------------------------------------
+
+
+def _resets(title, expires_at, count=1):
+    return {
+        "available_count": count,
+        "credits": [{"id": "grant-a", "title": title, "expires_at": expires_at, "status": "available"}],
+    }
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_one_install_shows_its_resets_under_its_bars(tmp_path):
+    """The Codex "Reset Credits" block, fed from Claude's own reset inventory."""
+    src = INDEX_HTML.read_text(encoding="utf-8")
+    card = _card(
+        tmp_path,
+        src,
+        "one-install-resets",
+        {
+            "buckets": [_window("default", "session")],
+            "reset_credits": _resets("Opus 5.5 launch reset", 1_792_684_800),
+        },
+    )
+
+    assert card["children"] == [
+        ["bar", "session"],
+        ["resets", "Reset Credits | 1 available / Opus 5.5 launch reset | expires @1792684800"],
+    ]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_each_install_shows_only_its_own_resets(tmp_path):
+    src = INDEX_HTML.read_text(encoding="utf-8")
+    card = _card(
+        tmp_path,
+        src,
+        "two-installs-resets",
+        {
+            "buckets": [_window("academic", "academic_session", 20.0), _window("default", "session")],
+            "accounts": [
+                {"account": "default", "plan": "Max 5x"},
+                {"account": "academic", "plan": "Pro", "reset_credits": _resets("Team reset", 1_792_684_800, 2)},
+            ],
+        },
+    )
+
+    assert card["children"] == [
+        ["heading", "Default · Max 5x"],
+        ["bar", "session"],
+        ["heading", "academic · Pro"],
+        ["bar", "academic_session"],
+        ["resets", "Reset Credits | 2 available / Team reset | expires @1792684800"],
+    ]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_a_card_level_reset_is_not_copied_onto_a_sibling(tmp_path):
+    """With an `accounts` list, only an install's own entry can put resets under it."""
+    src = INDEX_HTML.read_text(encoding="utf-8")
+    card = _card(
+        tmp_path,
+        src,
+        "provider-level-resets",
+        {
+            "buckets": [_window("academic", "academic_session", 20.0), _window("default", "session")],
+            "reset_credits": _resets("Opus 5.5 launch reset", 1_792_684_800),
+            "accounts": [
+                {"account": "default", "plan": "Max 5x", "reset_credits": _resets("Opus 5.5 launch reset", 1_792_684_800)},
+                {"account": "academic", "plan": "Pro"},
+            ],
+        },
+    )
+
+    assert [child[0] for child in card["children"]] == ["heading", "bar", "resets", "heading", "bar"]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_one_installs_card_notice_sits_between_its_bars_and_its_resets(tmp_path):
+    """Bars, notice, resets -- the Codex card's order -- so a warning never reads as the resets'."""
+    src = INDEX_HTML.read_text(encoding="utf-8")
+    card = _card(
+        tmp_path,
+        src,
+        "one-install-notice-resets",
+        {
+            "buckets": [_window("default", "session")],
+            "status_detail": "stale_token",
+            "status_at": 1_782_907_200,
+            "reset_credits": _resets("Opus 5.5 launch reset", 1_792_684_800),
+        },
+    )
+
+    assert [child[0] for child in card["children"]] == ["bar", "notice", "resets"]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_resets_still_show_when_the_install_reported_no_windows(tmp_path):
+    src = INDEX_HTML.read_text(encoding="utf-8")
+    card = _card(
+        tmp_path,
+        src,
+        "resets-without-windows",
+        {"buckets": [], "reset_credits": _resets("Opus 5.5 launch reset", 1_792_684_800)},
+    )
+
+    assert card["rendered"] == 1
+    assert [child[0] for child in card["children"]] == ["resets"]

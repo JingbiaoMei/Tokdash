@@ -268,6 +268,20 @@ construction.
 default install where there is one and the measured install where there is not, so an existing
 consumer sees what it always did — the per-install plans are in `accounts[].plan`.
 
+**`reset_credits`** is the reset inventory, in one shape for both providers that have it:
+`{"available_count": 1, "credits": [{"id": "...", "title": "...", "expires_at": ...}]}`.
+Codex's comes from `wham/rate-limit-reset-credits` and passes its credits through as the
+server sent them (`expires_at` an ISO string). Claude Code's limit resets come from the same
+usage request as its windows (`?cedar_ember=1`). Each credit there is a grant that can be
+spent now, with `expires_at` in epoch seconds, `resets_left`, `clears` (the limit types it
+refills) and `status: "available"`, soonest expiry first. A Claude account appears only while
+it holds at least one reset, and only while those resets came from its newest successful poll:
+a poll that answered without the reset block hides them rather than leaving an old count up.
+`providers.claude.reset_credits` belongs to the card's primary install (the default install, or
+the first install when there is no default), and never falls back to another install's the way
+`plan` can. Each install's own copy is on its `accounts[]` entry. That key is absent, not null,
+on an install without resets.
+
 A Claude install leaves both `buckets` and `accounts` when it can no longer be polled, which
 happens two ways.
 

@@ -15,12 +15,34 @@ from urllib.error import HTTPError
 import urllib.request
 import time
 
-from ... import clientpaths
+from ... import __version__, clientpaths
 from . import config as quota_config
 from .codex import _normalize_percent, _parse_time
 from .types import QuotaSnapshot
 
 CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
+# `cedar_ember=1` asks Anthropic to include Claude Code's limit-reset block (the vouchers
+# `/limit-reset` spends) in the same usage response, so reading them costs no extra request.
+# The CLI also sends `skip_spend=1`; we do not, because it nulls `spend`/`extra_usage` in
+# the same body.
+CLAUDE_USAGE_URL_WITH_RESETS = f"{CLAUDE_USAGE_URL}?cedar_ember=1"
+# Anthropic decides which surface a reset grant is offered on from the User-Agent: with
+# Python's default one the block answers `ineligible_reason: "surface"` and lists no grants,
+# while the Claude Code CLI's own prefix gets the grants that CLI sign-in actually holds. The
+# token polled here IS a Claude Code CLI sign-in, so the request carries the CLI's prefix and
+# then names tokdash, which the server accepts (measured 2026-09-23). The version is the CLI
+# release that shape was measured against; it gates nothing tokdash reads.
+CLAUDE_CODE_UA_VERSION = "2.1.280"
+CLAUDE_USAGE_USER_AGENT = f"claude-cli/{CLAUDE_CODE_UA_VERSION} (external, cli) tokdash/{__version__}"
+# A proxy or server that does not know the reset flag answers from this family. The windows
+# are still worth having, so those statuses get one retry at the plain URL. 429 is kept out
+# on purpose: retrying a rate-limited endpoint doubles the traffic it just asked us to cut.
+_RESET_FLAG_REJECTED = frozenset({400, 404, 405, 422})
+RESET_CREDITS_BUCKET = "reset_credits"
+# A grant holds a handful of resets. Anything past this is junk, and rejecting it keeps the
+# total's `float()` from overflowing: `json.loads` builds arbitrarily long integers, and an
+# OverflowError here would escape the poller and cost every provider its cycle.
+_MAX_RESETS_PER_GRANT = 1_000_000
 CLAUDE_KEYCHAIN_SERVICE = "Claude Code-credentials"
 _KEYCHAIN_LABEL = f"macOS Keychain ({CLAUDE_KEYCHAIN_SERVICE})"
 # Installs are polled concurrently because each request may hold its full timeout open:
@@ -627,6 +649,119 @@ def _label_for_limit(limit: dict[str, Any]) -> tuple[str, str]:
     return kind, kind.replace("_", " ").title()
 
 
+def summarize_limit_resets(block: Any, *, now: int) -> dict[str, Any] | None:
+    """Claude Code's limit-reset block, in the shape the Quota tab draws for Codex credits.
+
+    ``block`` is ``usage.cedar_ember`` verbatim. Returns ``None`` when it is not a block at
+    all, and otherwise ``{"available_count", "credits"}``, where ``credits`` lists only the
+    grants that can still be spent -- not paused, not yet expired, already started, with a
+    reset left -- and ``available_count`` is the resets those grants hold between them. An
+    account outside the program gets a block with no grants, which comes back as a count of
+    0 and an empty list.
+
+    Shared by the poller, which stores the count, and ``quota_state``, which re-reads the
+    stored block against the current time, so a grant that expired since the last poll stops
+    being offered without waiting for the next one. Never raises: one odd payload must not
+    cost the install its window rows.
+    """
+    if not isinstance(block, dict):
+        return None
+    grants = block.get("grants") if isinstance(block.get("grants"), list) else []
+    credits: list[dict[str, Any]] = []
+    available = 0
+    for grant in grants:
+        if not isinstance(grant, dict) or grant.get("paused") is True:
+            continue
+        try:
+            left = int(grant.get("resets_left") or 0)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if left > _MAX_RESETS_PER_GRANT:
+            continue
+        starts_at = _parse_time(grant.get("starts_at"))
+        expires_at = _parse_time(grant.get("ends_at"))
+        if left <= 0 or (starts_at and starts_at > now) or (expires_at and expires_at <= now):
+            continue
+        available += left
+        clears = grant.get("clears") if isinstance(grant.get("clears"), list) else []
+        credits.append(
+            {
+                "id": str(grant.get("id") or "") or None,
+                "title": str(grant.get("label") or "").strip() or None,
+                "expires_at": expires_at,
+                "resets_left": left,
+                "clears": [str(item) for item in clears],
+                "status": "available",
+            }
+        )
+    credits.sort(key=lambda credit: credit["expires_at"] or float("inf"))
+    return {"available_count": available, "credits": credits}
+
+
+def _limit_reset_snapshots(
+    block: Any, *, profile: ClaudeProfile, plan: Any, captured_at: int
+) -> list[QuotaSnapshot]:
+    """The install's reset inventory as one ``reset_credits`` row, or none without a block.
+
+    Written even when the count is 0: that is how an exhausted or withdrawn batch stops
+    looking current. The bucket id is the one Codex uses and stays unprefixed for every
+    install, because ``quota_state`` and ``quota_history`` exclude it by that exact id, and
+    rows are already unique per account. ``raw`` keeps the block verbatim so a field read
+    wrongly today can be re-read from stored data rather than only from future polls.
+    """
+    summary = summarize_limit_resets(block, now=captured_at)
+    if summary is None:
+        return []
+    return [
+        QuotaSnapshot(
+            "claude",
+            profile.name,
+            RESET_CREDITS_BUCKET,
+            "Reset credits",
+            float(summary["available_count"]),
+            None,
+            plan,
+            captured_at,
+            "claude_api",
+            "ok",
+            {"limit_resets": block},
+        )
+    ]
+
+
+def _fetch_usage(token: str, *, opener, timeout: float) -> dict[str, Any]:
+    """GET the usage body with the reset flag, falling back once to the plain URL.
+
+    5xx keeps its retry-once-after-200ms rule at each URL; anything else propagates for
+    the caller to map (``401``/``403`` to ``stale_token``, the rest to ``fetch_error``).
+    """
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "anthropic-beta": "oauth-2025-04-20",
+        "Accept": "application/json",
+        "User-Agent": CLAUDE_USAGE_USER_AGENT,
+    }
+
+    def get(url: str) -> dict[str, Any]:
+        req = urllib.request.Request(url, headers=headers)
+        for attempt in range(2):
+            try:
+                with opener(req, timeout=timeout) as resp:
+                    return json.loads(resp.read().decode("utf-8"))
+            except HTTPError as exc:
+                if exc.code not in {500, 502, 503, 504} or attempt == 1:
+                    raise
+                time.sleep(0.2)
+        raise AssertionError("unreachable: the second attempt returns or raises")
+
+    try:
+        return get(CLAUDE_USAGE_URL_WITH_RESETS)
+    except HTTPError as exc:
+        if exc.code not in _RESET_FLAG_REJECTED:
+            raise
+    return get(CLAUDE_USAGE_URL)
+
+
 def _profile_snapshots(
     profile: ClaudeProfile,
     token: str | None,
@@ -655,28 +790,26 @@ def _profile_snapshots(
             return [_status_snapshot("stale_token", captured_at, meta, profile)]
     except Exception:
         pass
-    req = urllib.request.Request(
-        CLAUDE_USAGE_URL,
-        headers={"Authorization": f"Bearer {token}", "anthropic-beta": "oauth-2025-04-20", "Accept": "application/json"},
-    )
-    payload: dict[str, Any] | None = None
     try:
-        for attempt in range(2):
-            try:
-                with opener(req, timeout=timeout) as resp:
-                    payload = json.loads(resp.read().decode("utf-8"))
-                break
-            except HTTPError as exc:
-                if exc.code not in {500, 502, 503, 504} or attempt == 1:
-                    raise
-                time.sleep(0.2)
+        payload = _fetch_usage(token, opener=opener, timeout=timeout)
     except HTTPError as exc:
         status = "stale_token" if exc.code in {401, 403} else "fetch_error"
         return [_status_snapshot(status, captured_at, {**meta, "error": f"HTTP {exc.code}: {exc.reason}"}, profile)]
     except Exception as exc:
         return [_status_snapshot("fetch_error", captured_at, {**meta, "error": str(exc)}, profile)]
-    if payload is None:
+    if not isinstance(payload, dict):
         return [_status_snapshot("fetch_error", captured_at, {**meta, "error": "empty_response"}, profile)]
+    windows = _window_snapshots(payload, profile=profile, meta=meta, captured_at=captured_at)
+    resets = _limit_reset_snapshots(
+        payload.get("cedar_ember"), profile=profile, plan=meta.get("plan"), captured_at=captured_at
+    )
+    return windows + resets
+
+
+def _window_snapshots(
+    payload: dict[str, Any], *, profile: ClaudeProfile, meta: dict[str, Any], captured_at: int
+) -> list[QuotaSnapshot]:
+    """The usage windows of one response, or the install's ``no_limits`` status row."""
     limits = payload.get("limits") if isinstance(payload.get("limits"), list) else []
     out: list[QuotaSnapshot] = []
     for limit in limits:

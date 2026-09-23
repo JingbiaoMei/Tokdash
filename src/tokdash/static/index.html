@@ -12261,20 +12261,32 @@
 
     function claudeProfileGroups(buckets, provider) {
       const entries = provider?.accounts || [];
-      const groups = claudeCardAccounts(buckets, provider).map((account) => {
+      const accounts = claudeCardAccounts(buckets, provider);
+      // One install that answered with resets but no windows names no account anywhere
+      // else; its resets still need a group to be drawn in.
+      if (!accounts.length && provider?.reset_credits) accounts.push('default');
+      const groups = accounts.map((account) => {
         const entry =
           entries.find((item) => String(item?.account || 'default') === account) || null;
         const failure = quotaAccountNotice(provider, account);
+        // Each install's resets come off its own `accounts[]` entry. A payload with no
+        // accounts list is one install (or unattributed rows), and the provider-level value
+        // belongs to the card's own install: the only group, or else `default`.
+        const ownsProviderResets = accounts.length === 1 || account === 'default';
+        const resetCredits = entries.length
+          ? entry?.reset_credits || null
+          : (ownsProviderResets ? provider?.reset_credits || null : null);
         return {
           account,
           plan: entry?.plan || '',
           rows: buckets.filter((bucket) => String(bucket.account || 'default') === account),
           notice: failure ? failure.detail : '',
           statusAt: failure ? failure.statusAt : null,
+          resetCredits,
         };
       });
-      // An install with neither windows nor a problem has nothing to say.
-      return groups.filter((group) => group.rows.length || group.notice);
+      // An install with no windows, no problem and no resets has nothing to say.
+      return groups.filter((group) => group.rows.length || group.notice || group.resetCredits);
     }
 
     // Group heading for one install: the profile name (the default install's own name is
@@ -12347,12 +12359,21 @@
         if (group.notice) {
           appendQuotaStatusNoticeFor(card, providerKey, group.notice, group.statusAt);
         }
+        // Several installs: each one's resets close its own group. One install: they wait for
+        // the card notice below, so the order is bars, notice, resets -- as on the Codex card
+        // -- and a warning never reads as being about the resets.
+        if (group.resetCredits && view.groups.length > 1) {
+          renderResetCreditsSection(card, group.resetCredits);
+        }
         rendered += 1;
       });
       // Only when something actually rendered: an empty card already prints this same
       // error through the shared empty state, and twice would be twice.
       if (rendered && view.cardNotice && !noticeFirst) {
         appendQuotaStatusNoticeFor(card, providerKey, view.cardNotice.detail, view.cardNotice.statusAt);
+      }
+      if (view.groups.length === 1 && view.groups[0].resetCredits) {
+        renderResetCreditsSection(card, view.groups[0].resetCredits);
       }
       return rendered;
     }
@@ -12512,6 +12533,41 @@
       card.appendChild(box);
     }
 
+    // "Reset Credits" block: the count of resets a subscription holds, then up to five of
+    // them with their expiry. Codex draws it from `provider.reset_credits`; Claude draws one
+    // per install from the same shape (see `claudeProfileGroups`).
+    function renderResetCreditsSection(card, reset) {
+      const section = document.createElement('div');
+      section.className = 'mt-4 pt-4';
+      section.style.borderTop = '1px solid var(--color-border)';
+      const titleLine = document.createElement('div');
+      titleLine.className = 'flex items-center justify-between gap-3 mb-2';
+      const title = document.createElement('div');
+      title.className = 'text-sm font-extrabold mono';
+      title.textContent = t('resetCredits');
+      const count = document.createElement('div');
+      count.className = 'text-sm font-semibold';
+      count.style.color = 'var(--color-primary)';
+      count.textContent = `${formatNumber(reset.available_count || 0)} ${t('available')}`;
+      titleLine.appendChild(title);
+      titleLine.appendChild(count);
+      section.appendChild(titleLine);
+      const credits = Array.isArray(reset.credits) ? reset.credits : [];
+      credits.slice(0, 5).forEach((credit) => {
+        const row = document.createElement('div');
+        row.className = 'text-xs flex items-center justify-between gap-3 py-1';
+        row.style.color = 'var(--color-muted)';
+        const name = document.createElement('span');
+        name.textContent = credit.title || credit.id || 'credit';
+        const expiry = document.createElement('span');
+        expiry.textContent = `${t('expires')} ${formatEpochSeconds(credit.expires_at)}`;
+        row.appendChild(name);
+        row.appendChild(expiry);
+        section.appendChild(row);
+      });
+      card.appendChild(section);
+    }
+
     function renderQuotaProviderCards(payload, containerOverride = null, ownerServer = LOCAL_SERVER) {
       const container = containerOverride || document.getElementById('quotaProviderCards');
       if (!container) return;
@@ -12617,36 +12673,7 @@
           appendQuotaStatusNotice(card, providerKey, provider);
         }
         if (providerKey === 'codex' && provider.reset_credits) {
-          const reset = provider.reset_credits || {};
-          const section = document.createElement('div');
-          section.className = 'mt-4 pt-4';
-          section.style.borderTop = '1px solid var(--color-border)';
-          const titleLine = document.createElement('div');
-          titleLine.className = 'flex items-center justify-between gap-3 mb-2';
-          const title = document.createElement('div');
-          title.className = 'text-sm font-extrabold mono';
-          title.textContent = t('resetCredits');
-          const count = document.createElement('div');
-          count.className = 'text-sm font-semibold';
-          count.style.color = 'var(--color-primary)';
-          count.textContent = `${formatNumber(reset.available_count || 0)} ${t('available')}`;
-          titleLine.appendChild(title);
-          titleLine.appendChild(count);
-          section.appendChild(titleLine);
-          const credits = Array.isArray(reset.credits) ? reset.credits : [];
-          credits.slice(0, 5).forEach((credit) => {
-            const row = document.createElement('div');
-            row.className = 'text-xs flex items-center justify-between gap-3 py-1';
-            row.style.color = 'var(--color-muted)';
-            const name = document.createElement('span');
-            name.textContent = credit.title || credit.id || 'credit';
-            const expiry = document.createElement('span');
-            expiry.textContent = `${t('expires')} ${formatEpochSeconds(credit.expires_at)}`;
-            row.appendChild(name);
-            row.appendChild(expiry);
-            section.appendChild(row);
-          });
-          card.appendChild(section);
+          renderResetCreditsSection(card, provider.reset_credits);
         }
         const consent = payload?.consent || {};
         const consentMeta = quotaConsentMeta(providerKey);

@@ -18,6 +18,7 @@ from .claude import ClaudeProfile
 from .claude import read_claude_profiles
 from .claude import scan_profiles
 from .claude import collect_claude_api_snapshots
+from .claude import summarize_limit_resets
 from .commandcode import collect_commandcode_api_snapshots
 from .codex import collect_codex_session_snapshots
 from .codex import collect_codex_session_snapshots_incremental
@@ -846,6 +847,8 @@ def quota_state(store: UsageEntryStore | None = None) -> dict[str, Any]:
     # Accounts with a row that MEASURES something, as opposed to only the synthetic `api`
     # row a failure writes. Used to spot a placeholder account (see `_measured_accounts`).
     usage_accounts: dict[str, set[str]] = {}
+    # Each Claude install's newest reset row, judged once the loop has seen all its rows.
+    claude_reset_rows: dict[str, dict[str, Any]] = {}
     for row in latest:
         provider = str(row.get("provider") or "")
         if provider not in providers:
@@ -876,6 +879,26 @@ def quota_state(store: UsageEntryStore | None = None) -> dict[str, Any]:
                     "available_count": reset_payload.get("available_count", row.get("used_percent")),
                     "credits": reset_payload.get("credits") if isinstance(reset_payload.get("credits"), list) else [],
                 }
+        if provider == "claude" and row.get("bucket") == "reset_credits":
+            claude_reset_rows[account] = row
+
+    # Claude limit resets per install, shown only while they are what that install's newest
+    # successful poll said. A poll whose response carried no reset block (the flag fell back
+    # to the plain URL, or Anthropic stopped honouring it) writes windows but no reset row,
+    # and a reset seen before then may since have been spent. The stored block is also
+    # re-read against the current time, so a grant that expired since the last poll is not
+    # offered. Only installs holding at least one reset appear: an account outside the
+    # program writes a zero-count row, which shows nothing.
+    claude_resets: dict[str, dict[str, Any]] = {}
+    read_at = int(datetime.now(timezone.utc).timestamp())
+    for account, row in claude_reset_rows.items():
+        newest_ok = int(account_views.get("claude", {}).get(account, {}).get("ok_at") or 0)
+        if int(row.get("captured_at") or 0) < newest_ok:
+            continue
+        raw = row.get("raw") if isinstance(row.get("raw"), dict) else {}
+        summary = summarize_limit_resets(raw.get("limit_resets"), now=read_at)
+        if summary and summary["available_count"] > 0:
+            claude_resets[account] = summary
 
     interval_seconds, interval_source = config.effective_poll_interval()
 
@@ -964,6 +987,7 @@ def quota_state(store: UsageEntryStore | None = None) -> dict[str, Any]:
     # polling is off; claude/antigravity have no session source and are never estimated.
     providers["codex"]["estimated"] = "codex" not in network_only
 
+    claude_primary = clientpaths.CLAUDE_DEFAULT_PROFILE
     if claude_scan:
         # `plan`, `tier` and `credential_path` describe the DEFAULT install, unchanged from
         # before profiles existed, so the dashboard and both companion apps keep reading
@@ -989,6 +1013,12 @@ def quota_state(store: UsageEntryStore | None = None) -> dict[str, Any]:
             providers["claude"]["detected"] = True
         providers["claude"]["credential_path"] = (primary or {}).get("credential_path")
         providers["claude"]["tier"] = (primary or {}).get("tier")
+        claude_primary = str((primary or {}).get("account") or claude_primary)
+    # Like `plan`, the provider-level reset inventory is the card's own install's. A second
+    # install's resets travel on its own `accounts[]` entry below, so they are drawn under
+    # that install's heading instead of reading as the default subscription's.
+    if claude_primary in claude_resets:
+        providers["claude"]["reset_credits"] = claude_resets[claude_primary]
 
     # Per-account rows, for the cards that carry more than one account: `~/.claude` beside a
     # `~/.claude-<profile>` sibling, or a MiniMax global and China Token Plan. A card needs
@@ -1028,6 +1058,12 @@ def quota_state(store: UsageEntryStore | None = None) -> dict[str, Any]:
                     "status": install.get("status"),
                 }
         entries = _account_entries(name, views, extra)
+        if name == "claude":
+            # Present only on an install that holds a reset, so an account payload with none
+            # stays exactly as it was (the companion contract fixture compares it field by field).
+            for entry in entries:
+                if entry["account"] in claude_resets:
+                    entry["reset_credits"] = claude_resets[entry["account"]]
         if len(entries) > 1:
             ref["accounts"] = entries
             # Whose error the card is reporting, or null when it belongs to no account

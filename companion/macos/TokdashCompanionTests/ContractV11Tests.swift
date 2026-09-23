@@ -986,15 +986,19 @@ final class ContractV11Tests: XCTestCase {
     @MainActor
     func testEvidenceRenderFlyoutPNG() async throws {
         let sentinel = URL(fileURLWithPath: "/tmp/tokdash-evidence-png.txt")
-        let outPath = (try? String(contentsOf: sentinel, encoding: .utf8))?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        // Line 1: output PNG path. Line 2 (optional): UsagePeriod token - xcodebuild's
+        // test runner does not forward shell env vars, so the period knob is the file.
+        let sentinelLines = ((try? String(contentsOf: sentinel, encoding: .utf8)) ?? "")
+            .split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        let outPath = sentinelLines.first?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let period = sentinelLines.count > 1 ? sentinelLines[1].trimmingCharacters(in: .whitespacesAndNewlines) : "today"
         guard let outPath, !outPath.isEmpty else {
             throw XCTSkip("evidence render disabled (write output path to \(sentinel.path))")
         }
         let settingsURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("tokdash-evidence-settings.json")
         try """
-        {"version":3,"servers":[{"id":"evidence","label":"Evidence","baseUrl":"http://127.0.0.1:8123","enabled":true}],"language":"english"}
+        {"version":3,"servers":[{"id":"evidence","label":"Evidence","baseUrl":"http://127.0.0.1:8123","enabled":true}],"language":"english","selectedPeriod":"\(period)"}
         """.write(to: settingsURL, atomically: true, encoding: .utf8)
         // Restore the process-global seams on every exit path: XCTest method order
         // is not a guarantee to rely on, and a leaked pathOverride would silently

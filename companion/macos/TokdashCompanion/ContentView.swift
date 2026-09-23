@@ -227,29 +227,29 @@ private struct HeroSection: View {
     @ViewBuilder
     private func deltaLine(_ snap: Snapshot) -> some View {
         if let pieces = snap.deltaPieces {
-            // Full delta row (E1): per-metric spans, down green / up red / flat grey,
-            // period sentence after. A null metric is omitted; all-null hides the row.
-            HStack(spacing: 0) {
-                ForEach(pieces.indices, id: \.self) { i in
-                    if i > 0 {
-                        Text(" · ").font(.system(size: 12)).foregroundStyle(.tertiary)
-                    }
-                    Text(pieces[i].text)
-                        .font(.system(size: 12))
-                        .monospacedDigit()
-                        .foregroundStyle(Self.pieceColor(pieces[i].direction))
-                }
-                Text(" " + snap.deltaSentence)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-            }
-            .fixedSize(horizontal: false, vertical: true)
+            // Full delta row (E1): down green / up red / flat grey, period sentence after.
+            // A null metric is omitted; all-null hides the row. ONE concatenated Text, not an
+            // HStack: segments keep their own colors, and the line re-wraps as a single
+            // paragraph (week/month rows must wrap to a second line, not overflow).
+            Self.deltaText(pieces: pieces, sentence: snap.deltaSentence)
+                .font(.system(size: 12))
+                .monospacedDigit()
+                .fixedSize(horizontal: false, vertical: true)
         } else if let line = snap.comparisonLine, let direction = snap.comparisonDirection {
             // fullDeltaRow off: the shipped cost-only line, now period-following.
             Text(line)
                 .font(.system(size: 12.5))
                 .foregroundStyle(Self.pieceColor(direction))
         }
+    }
+
+    private static func deltaText(pieces: [Snapshot.DeltaPiece], sentence: String) -> Text {
+        var line = Text("")
+        for (i, piece) in pieces.enumerated() {
+            if i > 0 { line = line + Text(" · ").foregroundColor(.secondary) }
+            line = line + Text(piece.text).foregroundColor(pieceColor(piece.direction))
+        }
+        return line + Text(" " + sentence).foregroundColor(.secondary)
     }
 
     private var skeleton: some View {
@@ -283,34 +283,54 @@ private struct RankBlock: View {
                 .foregroundStyle(.secondary)
                 .tracking(0.4)
             ForEach(entries) { entry in
-                HStack(spacing: 6) {
-                    if let asset = entry.logoAsset, let ns = NSImage(named: asset) {
-                        // Missing assets degrade to text-only, never a broken-image box.
-                        logo(asset: asset, ns: ns)
-                    }
-                    Text(entry.label)
-                        .font(.system(size: 11.5, weight: .medium))
-                        .lineLimit(1)
-                        .frame(width: 96, alignment: .leading)
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            Capsule().fill(Color.secondary.opacity(0.14))
-                            Capsule().fill(Color.accentColor)
-                                .frame(width: geo.size.width * entry.fraction)
-                        }
-                    }
-                    .frame(height: 3)
-                    Text(entry.valueText)
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                    Text(entry.pctText)
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(.tertiary)
-                        .monospacedDigit()
-                        .frame(width: 34, alignment: .trailing)
+                rankRow(entry)
+            }
+        }
+    }
+
+    // One row, its own function: the full builder inlined in ForEach overruns the
+    // type-checker (C-annotated overload error on the whole list).
+    @ViewBuilder
+    private func rankRow(_ entry: Snapshot.RankEntry) -> some View {
+        HStack(spacing: 6) {
+            // The logo column is reserved even when absent: model rows never have
+            // marks, and without the reservation their names start left of the tool
+            // rows' names instead of aligned with them. (A frame on an EMPTY Group
+            // collapses - EmptyView ignores it - so the placeholder is a real view.)
+            if let asset = entry.logoAsset, let ns = NSImage(named: asset) {
+                // Missing assets degrade to text-only, never a broken-image box.
+                logo(asset: asset, ns: ns)
+            } else {
+                Color.clear.frame(width: 12, height: 12)
+            }
+            Text(entry.label)
+                .font(.system(size: 11.5, weight: .medium))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(width: 96, alignment: .leading)
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.secondary.opacity(0.14))
+                    Capsule().fill(Color.accentColor)
+                        .frame(width: geo.size.width * entry.fraction)
                 }
             }
+            // Year values are long ("21842.4M" - the compact notation has no B
+            // tier): the bar keeps a minimum width instead of being squeezed out.
+            .frame(minWidth: 20)
+            .frame(height: 3)
+            Text(entry.valueText)
+                .font(.system(size: 11.5))
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(maxWidth: 64, alignment: .trailing)
+            Text(entry.pctText)
+                .font(.system(size: 11.5))
+                .foregroundStyle(.tertiary)
+                .monospacedDigit()
+                .frame(width: 34, alignment: .trailing)
         }
     }
 

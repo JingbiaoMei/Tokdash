@@ -85,7 +85,7 @@ public sealed class V11RulesTests
     public void Delta_Row_Today_Matches_Pinned_String()
     {
         var usage = Fixture<UsageResponse>("usage-today.json");
-        Assert.AreEqual("▼ 12% cost · ▼ 12% tokens · ▼ 12% msgs vs yesterday",
+        Assert.AreEqual("▼ 12% cost · ▼ 12% tokens vs yesterday",
             MakeSnap(usage: usage).DeltaRowText);
     }
 

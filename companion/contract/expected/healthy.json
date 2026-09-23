@@ -19,7 +19,7 @@
       "messages": "248",
       "active": "active 3 h 12 m"
     },
-    "delta_row": "▼ 12% cost · ▼ 12% tokens · ▼ 12% msgs vs yesterday",
+    "delta_row": "▼ 12% cost · ▼ 12% tokens vs yesterday",
     "top_ranks": {
       "kicker_tools": "Top tools · today",
       "kicker_models": "Top models · today",

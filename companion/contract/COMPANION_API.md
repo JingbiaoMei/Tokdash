@@ -253,8 +253,11 @@ valid URL.
    its source at all (a glance-off cycle contains no `/api/insights` or
    `/api/stats` request).
 
-3. **Timeouts.** Short timeout (3-5s) for `/health`; longer (15-30s) for usage
-   requests which can trigger a cold parse.
+3. **Timeouts.** Short timeout (3-5s) for `/health`; long for data requests
+   (~90s): cold parses of long windows genuinely run tens of seconds (server warm
+   docs: year ~15 s, month ~25 s + a ~22 s base), and a shorter ceiling reads as a
+   client failure - the year view would show "unavailable" while the server is
+   merely still working.
 
 4. **Empty is not error.** A 2xx usage response with zero totals is the empty
    state.
@@ -461,7 +464,7 @@ ignored in both directions.
 
 | Key | Default | Gates |
 |---|---|---|
-| `fullDeltaRow` | on | the cost+tokens+msgs delta line vs the shipped cost-only comparison line |
+| `fullDeltaRow` | on | the cost+tokens delta line vs the shipped cost-only comparison line |
 | `topRanks` | on | the Top tools / Top models strip |
 | `resetCredits` | on | the Codex reset-credits row **and** its expiry notification |
 | `activityGlance` | on | the Activity glance component (and its endpoint reads) |

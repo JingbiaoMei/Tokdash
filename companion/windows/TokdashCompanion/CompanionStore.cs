@@ -1296,8 +1296,10 @@ public sealed class Snapshot
     public sealed record DeltaPiece(string Text, int Direction);
 
     /// <summary>
-    /// <c>{glyph} {pct}% cost · {glyph} {pct}% tokens · {glyph} {pct}% msgs {sentence}</c>.
-    /// A null metric is omitted; all three null hides the row entirely (healthy-year).
+    /// <c>{glyph} {pct}% cost · {glyph} {pct}% tokens {sentence}</c>. The msgs comparison is
+    /// deliberately NOT part of the row: it pushed the line past the flyout width on
+    /// week/month (the contract's two-metric row). A null metric is omitted; both null hide
+    /// the row entirely (healthy-year).
     /// </summary>
     public List<DeltaPiece>? DeltaPieces
     {
@@ -1307,7 +1309,6 @@ public sealed class Snapshot
             var pieces = new List<DeltaPiece>();
             AddDeltaPiece(pieces, "delta_cost", comparison.CostPct);
             AddDeltaPiece(pieces, "delta_tokens", comparison.TokensPct);
-            AddDeltaPiece(pieces, "delta_msgs", comparison.MessagesPct);
             return pieces.Count == 0 ? null : pieces;
         }
     }

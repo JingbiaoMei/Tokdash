@@ -245,30 +245,29 @@
         <DataTemplate x:Key="RankTemplate">
             <Grid Margin="0,3,0,3">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="19"/>
                     <ColumnDefinition Width="96"/>
                     <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto" MinWidth="84"/>
                 </Grid.ColumnDefinitions>
                 <Image Grid.Column="0" Source="{Binding Logo}" Width="13" Height="13" Margin="0,0,6,0"
-                       VerticalAlignment="Center" Visibility="{Binding LogoVisibility}"/>
+                       HorizontalAlignment="Left" VerticalAlignment="Center" Visibility="{Binding LogoVisibility}"/>
                 <TextBlock Grid.Column="1" Text="{Binding Label}" ToolTip="{Binding Label}" TextTrimming="CharacterEllipsis"
                            VerticalAlignment="Center" FontSize="{StaticResource FontCaption}" Style="{StaticResource BodyText}"
                            Foreground="{DynamicResource TextBrush}"/>
-                <ProgressBar Grid.Column="2" Height="3" Minimum="0" Maximum="100" Value="{Binding BarPct}"
-                             VerticalAlignment="Center" Margin="8,0,8,0" Background="{DynamicResource BarTrack}"
-                             Foreground="{DynamicResource PrimaryBg}" BorderThickness="0">
-                    <ProgressBar.Template>
-                        <ControlTemplate TargetType="ProgressBar">
-                            <Grid>
-                                <Border CornerRadius="1.5" Background="{TemplateBinding Background}"/>
-                                <Border x:Name="PART_Indicator" CornerRadius="1.5" Background="{TemplateBinding Foreground}"
-                                        HorizontalAlignment="Left"/>
-                            </Grid>
-                        </ControlTemplate>
-                    </ProgressBar.Template>
-                </ProgressBar>
-                <TextBlock Grid.Column="3" VerticalAlignment="Center" FontSize="{StaticResource FontCaption}" Style="{StaticResource BodyText}"><Run Text="{Binding Value}" Foreground="{DynamicResource MutedBrush}"/><Run Text="  "/><Run Text="{Binding Pct}" Foreground="{DynamicResource FaintBrush}"/></TextBlock>
+                <!-- Share bar: same star-fill construction as the quota bar (QuotaRowTemplate);
+                     FillStar + RestStar = 100*, so the fill is exactly the printed percent. -->
+                <Border Grid.Column="2" Height="3" Margin="8,0,8,0" CornerRadius="1.5"
+                        Background="{DynamicResource BarTrack}" VerticalAlignment="Center">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="{Binding FillStar}"/>
+                            <ColumnDefinition Width="{Binding RestStar}"/>
+                        </Grid.ColumnDefinitions>
+                        <Border Grid.Column="0" CornerRadius="1.5" Background="{DynamicResource PrimaryBg}"/>
+                    </Grid>
+                </Border>
+                <TextBlock Grid.Column="3" HorizontalAlignment="Right" VerticalAlignment="Center" FontSize="{StaticResource FontCaption}" Style="{StaticResource BodyText}"><Run Text="{Binding Value}" Foreground="{DynamicResource MutedBrush}"/><Run Text="  "/><Run Text="{Binding Pct}" Foreground="{DynamicResource FaintBrush}"/></TextBlock>
             </Grid>
         </DataTemplate>
     </Window.Resources>

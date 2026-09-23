@@ -552,7 +552,8 @@ public partial class FlyoutWindow : Window
             LogoVisibility = logo is null ? Visibility.Collapsed : Visibility.Visible,
             Label = entry.Label,
             Value = entry.ValueText,
-            BarPct = entry.Fraction * 100,
+            FillStar = new GridLength(entry.Fraction * 100, GridUnitType.Star),
+            RestStar = new GridLength(100 - entry.Fraction * 100, GridUnitType.Star),
             Pct = entry.PctText,
         };
     }
@@ -1005,8 +1006,9 @@ internal sealed class QuotaGroupVM
 /// <summary>
 /// Presentation shape for one top-rank row: logo + name + share bar + token amount + percent.
 /// The logo is a pre-loaded ImageSource (null = no mark shipped / failed to load -> text-only,
-/// never a broken-image placeholder). BarPct is 0..100 of all tokens in the list; Pct is the
-/// same number rounded, so bar and label always agree.
+/// never a broken-image placeholder). FillStar/RestStar are the quota bar's star-column pair
+/// summing to 100*, so the fill width is exactly the printed percent (Pct) of all tokens in
+/// the list - bar and label always agree.
 /// </summary>
 internal sealed class RankVM
 {
@@ -1014,6 +1016,7 @@ internal sealed class RankVM
     public Visibility LogoVisibility { get; init; } = Visibility.Collapsed;
     public string Label { get; init; } = "";
     public string Value { get; init; } = "";
-    public double BarPct { get; init; }
+    public GridLength FillStar { get; init; }
+    public GridLength RestStar { get; init; }
     public string Pct { get; init; } = "";
 }

@@ -14,7 +14,7 @@
       "active": "active 6 h 24 m",
       "active_comment": "union of two servers, each 3 h 12 m - the hero sums active_ms across reachable servers"
     },
-    "delta_row": "▼ 12% cost · ▼ 12% tokens · ▼ 12% msgs vs yesterday",
+    "delta_row": "▼ 12% cost · ▼ 12% tokens vs yesterday",
     "per_server_rows": [
       { "label": "Local", "cost": "$3.42", "tokens_compact": "18.7M" },
       { "label": "Second", "cost": "$3.42", "tokens_compact": "18.7M" }

@@ -13,7 +13,10 @@ actor TokdashClient {
         self.baseURL = baseURL
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 15
-        config.timeoutIntervalForResource = 30
+        // Cold month/year scans server-side run tens of seconds (warm docs: year ~15 s,
+        // month ~25 s + base). The per-call ceilings below need this headroom: 30 s used
+        // to cut long windows off mid-parse and the view showed "unavailable".
+        config.timeoutIntervalForResource = 120
         config.waitsForConnectivity = false
         self.session = URLSession(configuration: config)
     }
@@ -23,46 +26,50 @@ actor TokdashClient {
     }
 
     // MARK: - Endpoints
+    //
+    // 90 s on the data endpoints: cold month/year scans server-side run tens of
+    // seconds (warm docs: year ~15 s, month ~25 s + base), and a 20 s ceiling cut
+    // them off mid-parse - the year view then read "unavailable" every cycle.
 
     func health() async throws -> HealthResponse {
         try await get("/health", timeout: 5)
     }
 
     func usage(period: String) async throws -> UsageResponse {
-        try await get("/api/usage?period=\(period)", timeout: 20)
+        try await get("/api/usage?period=\(period)", timeout: 90)
     }
 
     /// Calendar-week window: `date_from`/`date_to` (local Monday .. today). `period=week`
     /// is a rolling 7-day window and must never be used for the segment. Contract §Period windows.
     func usageRange(from: String, to: String) async throws -> UsageResponse {
-        try await get("/api/usage?date_from=\(from)&date_to=\(to)", timeout: 20)
+        try await get("/api/usage?date_from=\(from)&date_to=\(to)", timeout: 90)
     }
 
     func activeTime(period: String) async throws -> ActiveTimeResponse {
-        try await get("/api/active-time?period=\(period)", timeout: 20)
+        try await get("/api/active-time?period=\(period)", timeout: 90)
     }
 
     func activeTimeRange(from: String, to: String) async throws -> ActiveTimeResponse {
-        try await get("/api/active-time?date_from=\(from)&date_to=\(to)", timeout: 20)
+        try await get("/api/active-time?date_from=\(from)&date_to=\(to)", timeout: 90)
     }
 
     func insightsHourlyToday() async throws -> InsightsResponse {
-        try await get("/api/insights?facets=hourly&period=today", timeout: 20)
+        try await get("/api/insights?facets=hourly&period=today", timeout: 90)
     }
 
     func insightsDaily(from: String, to: String) async throws -> InsightsResponse {
-        try await get("/api/insights?facets=daily&date_from=\(from)&date_to=\(to)", timeout: 20)
+        try await get("/api/insights?facets=daily&date_from=\(from)&date_to=\(to)", timeout: 90)
     }
 
     func stats() async throws -> StatsResponse {
-        try await get("/api/stats", timeout: 20)
+        try await get("/api/stats", timeout: 90)
     }
 
     func quota() async throws -> QuotaResponse {
         // Raw-data path: the All view pins "provider order as detected", and
         // Foundation's Dictionary decode loses JSON object key order - so the
         // wire order is captured from the same bytes (QuotaResponse.decode).
-        let data = try await getData("/api/quota", timeout: 20)
+        let data = try await getData("/api/quota", timeout: 90)
         do {
             return try QuotaResponse.decode(from: data)
         } catch {

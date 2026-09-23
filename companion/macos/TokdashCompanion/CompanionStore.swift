@@ -1403,8 +1403,10 @@ struct Snapshot {
 
     var deltaSentence: String { L10n.t(period.vsKey) }
 
-    /// `{glyph} {pct}% cost · {glyph} {pct}% tokens · {glyph} {pct}% msgs {sentence}`.
-    /// A null metric is omitted; all three null hides the row entirely (healthy-year).
+    /// `{glyph} {pct}% cost · {glyph} {pct}% tokens {sentence}`. The msgs comparison is
+    /// deliberately NOT part of the row: it pushed the line past the flyout width on
+    /// week/month (the contract's two-metric row). A null metric is omitted; both null
+    /// hides the row entirely (healthy-year).
     var deltaPieces: [DeltaPiece]? {
         guard components.fullDeltaRow, let comparison = usage?.comparison else { return nil }
         var pieces: [DeltaPiece] = []
@@ -1413,9 +1415,6 @@ struct Snapshot {
         }
         if let pct = comparison.tokensPct {
             pieces.append(Self.deltaPiece(L10n.t("delta_tokens", Self.deltaGlyph(pct), Self.deltaValue(pct)), pct: pct))
-        }
-        if let pct = comparison.messagesPct {
-            pieces.append(Self.deltaPiece(L10n.t("delta_msgs", Self.deltaGlyph(pct), Self.deltaValue(pct)), pct: pct))
         }
         return pieces.isEmpty ? nil : pieces
     }

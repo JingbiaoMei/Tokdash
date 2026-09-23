@@ -41,7 +41,10 @@ public sealed class TokdashClient : ITokdashClient
     {
         _baseUri = NormalizeBase(new Uri(baseUrl));
         _healthClient = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
-        _dataClient = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
+        // Cold month/year scans server-side run tens of seconds (warm docs: year ~15 s,
+        // month ~25 s + base). 20 s cut them off mid-parse and the year view showed
+        // "unavailable" on every cycle - long windows need a long ceiling.
+        _dataClient = new HttpClient { Timeout = TimeSpan.FromSeconds(90) };
         _versionClient = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
     }
 

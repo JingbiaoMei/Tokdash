@@ -311,6 +311,58 @@ def test_default_cors_same_tailnet_preflight():
     assert headers["access-control-allow-origin"] == origin
 
 
+# --- /health identity does not widen who may read it (issue #108) ----------------
+#
+# /health now answers with instance_id, the value a dashboard uses to recognise one
+# daemon behind several URLs. That is a durable identifier for this user's machine, so
+# the origin policy on this route is the guard that keeps it private. These cases are the
+# policy as it was before the field existed; they are here so widening it to "make the
+# merge work" fails a test rather than shipping.
+#
+# The blocked pairs matter more than the allowed ones. Issue #108 wants one daemon seen
+# as one server across its loopback and Serve addresses, and the tempting fix is to let a
+# Serve page read the loopback address of the machine it is served from. That is the same
+# hole as letting any website read it: the answer never leaves the tailnet, but the id
+# becomes a durable tracking identifier any page can pick up.
+
+
+def test_health_instance_id_did_not_widen_cors():
+    allowed = (
+        # The dashboard opened on loopback, which the stock regex admits everywhere.
+        ("wsl.tail76535.ts.net", "http://127.0.0.1:55423"),
+        # A Serve dashboard reading a same-tailnet daemon.
+        ("macbook.tail76535.ts.net", "https://wsl.tail76535.ts.net"),
+    )
+    for host, origin in allowed:
+        headers = _asgi_response_headers("GET", "/health", {"host": host, "origin": origin})
+        assert headers["access-control-allow-origin"] == origin
+
+
+def test_health_instance_id_is_not_readable_from_a_foreign_origin():
+    headers = _asgi_response_headers(
+        "GET",
+        "/health",
+        {"host": "wsl.tail76535.ts.net", "origin": "https://any-website.example"},
+    )
+    assert "access-control-allow-origin" not in headers
+
+
+def test_health_instance_id_is_not_readable_by_a_serve_page_on_loopback():
+    """The one opening someone would actually be tempted to make.
+
+    The dashboard at ``https://wsl.tail76535.ts.net`` cannot read the same daemon's own
+    ``http://127.0.0.1:55423``, which is why its two routes stay two rows when the page is
+    opened that way. Granting it would look like a same-machine convenience and would
+    grant every https page on tailnet the same read of every local daemon.
+    """
+    headers = _asgi_response_headers(
+        "GET",
+        "/health",
+        {"host": "127.0.0.1:55423", "origin": "https://wsl.tail76535.ts.net"},
+    )
+    assert "access-control-allow-origin" not in headers
+
+
 def test_same_tailnet_cors_does_not_open_remote_writes():
     assert _asgi_status(
         "POST",

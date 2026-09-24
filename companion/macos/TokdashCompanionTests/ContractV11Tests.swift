@@ -693,6 +693,42 @@ final class ContractV11Tests: XCTestCase {
         }
     }
 
+    func testClaudeResetCreditsEpochIntExpiresAt() throws {
+        // LIVE SHAPE: claude encodes expires_at as EPOCH SECONDS where codex encodes an
+        // ISO string. While the DTO typed it `String?`, this single int failed the whole
+        // quota decode - both platforms showed "quota data not available". The custom
+        // ResetCredit decoder takes both shapes, and the extra server keys (tier,
+        // credential_path, title, resets_left, clears, status) decode-ignore, not reject.
+        let json = """
+        {"enabled":true,"providers":{
+          "claude":{"estimated":true,"tier":"max","credential_path":"/home/u/.claude","buckets":[
+            {"account":"default","bucket":"5h","bucket_label":"5-hour window","remaining_percent":71.0,"resets_at":1782919500}],
+            "reset_credits":{"available_count":1,"credits":[
+              {"id":"r1","title":"Weekly limit reset","resets_left":1,"clears":false,"status":"active",
+               "expires_at":1785252920}]}},
+          "codex":{"buckets":[
+            {"account":"a","bucket":"5h","remaining_percent":50.0,"resets_at":1}],
+            "reset_credits":{"available_count":1,"credits":[
+              {"id":"c","expires_at":"2026-07-28T15:35:20Z"}]}}
+        },"timestamp":1785080120}
+        """
+        let q = try QuotaResponse.decode(from: Data(json.utf8))
+        let claudeCredit = try XCTUnwrap(q.providers?["claude"]?.resetCredits?.credits?.first)
+        let codexCredit = try XCTUnwrap(q.providers?["codex"]?.resetCredits?.credits?.first)
+        XCTAssertEqual(codexCredit.expiresAt, "2026-07-28T15:35:20Z", "ISO passes through")
+        XCTAssertEqual(claudeCredit.expiresAt, "2026-07-28T15:35:20Z",
+                       "epoch int (1785252920) normalizes to the very instant the codex ISO names")
+
+        // The whole payload survived, and the row renders under claude - credits are no
+        // longer codex-only. Frozen clock 2026-07-26T15:35:20Z puts the expiry 2 days out.
+        let snap = Snapshot(quota: q, now: Date(timeIntervalSince1970: 1_785_080_120))
+        testEnglishLocale {
+            XCTAssertEqual(snap.creditsNotice(providerDisplay: "Claude", canonicalProvider: "claude",
+                                              resetCredits: q.providers?["claude"]?.resetCredits),
+                           "⚡ Claude · 1 reset credits · expire in 2 d")
+        }
+    }
+
     // MARK: - Unit: week math and request paths
 
     func testWeekMondayMathAndRequestPath() throws {

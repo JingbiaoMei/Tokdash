@@ -73,6 +73,10 @@ struct TokdashCompanionApp: App {
             SettingsView()
                 .environmentObject(store)
         }
+        // Without this the Settings window clamps to the content's fixed frame and the
+        // user can't drag it larger than its opening size. .contentMinSize lets it grow
+        // freely from the content's minimum (the grouped Form scrolls as it shrinks).
+        .windowResizability(.contentMinSize)
     }
 }
 

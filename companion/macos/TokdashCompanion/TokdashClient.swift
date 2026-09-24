@@ -480,8 +480,8 @@ struct ProviderQuota: Decodable, Sendable {
     }
 }
 
-/// `providers.codex.reset_credits` (contract §Reset credits). `expires_at` is an
-/// ISO 8601 *string* - unlike the epoch numbers everywhere else in the quota payload.
+/// `providers.<provider>.reset_credits` (contract §Reset credits). Sent by Codex and -
+/// since server v2.6.3 - by Claude Code too.
 struct ResetCredits: Decodable, Sendable, Equatable {
     let availableCount: Int?
     let credits: [ResetCredit]?
@@ -499,6 +499,24 @@ struct ResetCredit: Decodable, Sendable, Equatable {
     enum CodingKeys: String, CodingKey {
         case id
         case expiresAt = "expires_at"
+    }
+
+    /// `expires_at` has shipped in two wire shapes: Codex's credits carry an ISO 8601
+    /// *string*, Claude Code's limit resets (server v2.6.3) carry epoch *seconds*.
+    /// Both normalize to an ISO string here so `parseTimestamp` stays single-format -
+    /// and an unexpected shape degrades to nil instead of taking the whole quota payload
+    /// down with it (one credit line must never blank the whole quota section).
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(String.self, forKey: .id)
+        if let raw = try? container.decodeIfPresent(String.self, forKey: .expiresAt) {
+            expiresAt = raw
+        } else if let seconds = try? container.decodeIfPresent(Int.self, forKey: .expiresAt) {
+            let formatter = ISO8601DateFormatter()
+            expiresAt = formatter.string(from: Date(timeIntervalSince1970: TimeInterval(seconds)))
+        } else {
+            expiresAt = nil
+        }
     }
 }
 

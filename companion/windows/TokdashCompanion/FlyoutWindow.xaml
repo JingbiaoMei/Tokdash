@@ -48,7 +48,9 @@
              rhythm (Thickness has no TypeConverter from a bare double, so the GapX
              resources below can't be used for Margin/Padding directly - only for
              double-typed properties like FontSize). -->
-        <Thickness x:Key="SectionPad">16,12,16,12</Thickness>
+        <!-- Section gaps stack (previous bottom + next top), so 12+12 read as a large
+             margin before each section. Halved: reclaimed height goes to the quota list. -->
+        <Thickness x:Key="SectionPad">16,6,16,6</Thickness>
         <Thickness x:Key="BandPad">16,10,16,10</Thickness>
         <Thickness x:Key="FooterPad">16,8,16,8</Thickness>
         <sys:Double x:Key="GapXS">4</sys:Double>
@@ -263,21 +265,24 @@
         <DataTemplate x:Key="RankTemplate">
             <Grid Margin="0,3,0,3">
                 <Grid.ColumnDefinitions>
-                    <!-- Tools bind this to 19 (mark or placeholder); models bind 0 so the
-                         names sit flush left - they never have marks. -->
-                    <ColumnDefinition Width="{Binding LogoColWidth}"/>
-                    <ColumnDefinition Width="96"/>
+                    <ColumnDefinition Width="112"/>
+                    <!-- Same column start for tools and models: the mark lives INSIDE the
+                         name cell, so a collapsed mark costs nothing and model names sit
+                         flush left while both strips' bars stay aligned. (A per-row
+                         leading-column width proved unreliable in the shipped build.) -->
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto" MinWidth="84"/>
                 </Grid.ColumnDefinitions>
-                <Image Grid.Column="0" Source="{Binding Logo}" Width="13" Height="13" Margin="0,0,6,0"
-                       HorizontalAlignment="Left" VerticalAlignment="Center" Visibility="{Binding LogoVisibility}"/>
-                <TextBlock Grid.Column="1" Text="{Binding Label}" ToolTip="{Binding Label}" TextTrimming="CharacterEllipsis"
-                           VerticalAlignment="Center" FontSize="{StaticResource FontCaption}" Style="{StaticResource BodyText}"
-                           Foreground="{DynamicResource TextBrush}"/>
+                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Image Source="{Binding Logo}" Width="13" Height="13" Margin="0,0,6,0"
+                           HorizontalAlignment="Left" VerticalAlignment="Center" Visibility="{Binding LogoVisibility}"/>
+                    <TextBlock Text="{Binding Label}" ToolTip="{Binding Label}" TextTrimming="CharacterEllipsis"
+                               VerticalAlignment="Center" FontSize="{StaticResource FontCaption}" Style="{StaticResource BodyText}"
+                               Foreground="{DynamicResource TextBrush}"/>
+                </StackPanel>
                 <!-- Share bar: same star-fill construction as the quota bar (QuotaRowTemplate);
                      FillStar + RestStar = 100*, so the fill is exactly the printed percent. -->
-                <Border Grid.Column="2" Height="3" Margin="8,0,8,0" CornerRadius="1.5"
+                <Border Grid.Column="1" Height="3" Margin="8,0,8,0" CornerRadius="1.5"
                         Background="{DynamicResource BarTrack}" VerticalAlignment="Center">
                     <Grid>
                         <Grid.ColumnDefinitions>
@@ -287,7 +292,8 @@
                         <Border Grid.Column="0" CornerRadius="1.5" Background="{DynamicResource PrimaryBg}"/>
                     </Grid>
                 </Border>
-                <TextBlock Grid.Column="3" HorizontalAlignment="Right" VerticalAlignment="Center" FontSize="{StaticResource FontCaption}" Style="{StaticResource BodyText}"><Run Text="{Binding Value}" Foreground="{DynamicResource MutedBrush}"/><Run Text="  "/><Run Text="{Binding Pct}" Foreground="{DynamicResource FaintBrush}"/></TextBlock>
+                <!-- Pct first (glances with the bar it follows), tokens after. -->
+                <TextBlock Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Center" FontSize="{StaticResource FontCaption}" Style="{StaticResource BodyText}"><Run Text="{Binding Pct}" Foreground="{DynamicResource MutedBrush}"/><Run Text="  "/><Run Text="{Binding Value}" Foreground="{DynamicResource FaintBrush}"/></TextBlock>
             </Grid>
         </DataTemplate>
     </Window.Resources>

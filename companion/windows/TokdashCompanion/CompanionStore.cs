@@ -1132,7 +1132,8 @@ public sealed class CompanionStore : BindableBase
         foreach (var group in snap.AllQuotaGroups)
         {
             if (group.Failed) continue;
-            if (!group.CanonicalProvider.Equals("codex", StringComparison.OrdinalIgnoreCase)) continue;
+            // Any provider may carry credits (codex always has; claude since server
+            // v2.6.3 limit resets). The dedup key is provider-scoped, so no cross-talk.
             var credits = group.Entry?.ResetCredits;
             if (credits is null || (credits.AvailableCount ?? 0) < 1) continue;
             foreach (var credit in credits.Credits ?? [])
@@ -1449,16 +1450,17 @@ public sealed class Snapshot
 
     /// <summary>
     /// The quiet row under the provider group in the All view: rendered when the component
-    /// is on, quota tracking is enabled, the provider is Codex, and available_count >= 1.
+    /// is on, quota tracking is enabled, the group's provider carries credits, and
+    /// available_count >= 1. Codex has shipped these since 1.1; Claude Code's limit resets
+    /// (server v2.6.3) ride the same field and get the same row - nothing here is codex-specific.
     /// The Low view never shows it (provider context, not a window). A failed group does
-    /// NOT hide the row - contract §Reset credits gates rendering on those four conditions
+    /// NOT hide the row - contract §Reset credits gates rendering on those conditions
     /// only; last-known-data suppression is scoped to the expiry *notification* (see the
     /// notification path), which is where the "expire in" warning actually fires.
     /// </summary>
     public string? CreditsNotice(QuotaGroup group)
     {
         if (!Components.ResetCreditsOn || !Quota.Enabled) return null;
-        if (!group.CanonicalProvider.Equals("codex", StringComparison.OrdinalIgnoreCase)) return null;
         var credits = group.Entry?.ResetCredits;
         if (credits is null || (credits.AvailableCount ?? 0) < 1) return null;
         return CreditsRowText(group.Provider, credits, Now);

@@ -859,8 +859,9 @@ final class CompanionStore: NSObject, ObservableObject {
         for group in snap.allQuotaGroups {
             guard let prov = group.providerEntry, !group.failed,
                   let credits = prov.resetCredits, (credits.availableCount ?? 0) >= 1 else { continue }
+            // Any provider may carry credits (codex always has; claude since server
+            // v2.6.3 limit resets). The dedup key below is provider-scoped, so no cross-talk.
             let canonical = group.canonicalProvider.lowercased()
-            guard canonical == "codex" else { continue }
             for credit in credits.credits ?? [] {
                 guard let raw = credit.expiresAt, let expiry = Self.parseTimestamp(raw),
                       expiry > snap.now,
@@ -1554,12 +1555,13 @@ struct Snapshot {
     // MARK: Reset credits (E2)
 
     /// The quiet row under the provider group in the All view: rendered only when the
-    /// component is on, quota tracking is enabled, the provider is Codex, and
-    /// available_count >= 1. The Low view never shows it (provider context, not a window).
+    /// component is on, quota tracking is enabled, the group's provider carries credits,
+    /// and available_count >= 1. Codex has shipped these since 1.1; Claude Code's limit
+    /// resets (server v2.6.3) ride the same field and get the same row - nothing here is
+    /// codex-specific. The Low view never shows it (provider context, not a window).
     func creditsNotice(providerDisplay: String, canonicalProvider: String,
                        resetCredits: ResetCredits?) -> String? {
         guard components.resetCredits, quota.enabled,
-              canonicalProvider.lowercased() == "codex",
               let resetCredits, (resetCredits.availableCount ?? 0) >= 1 else { return nil }
         return Self.creditsRowText(provider: providerDisplay, reset: resetCredits, now: now)
     }

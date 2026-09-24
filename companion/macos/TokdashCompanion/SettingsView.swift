@@ -137,7 +137,12 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
         .padding(20)
-        .frame(width: 480)
+        // A grouped Form is a ScrollView: with only a fixed width its ideal height is
+        // tiny, which is what made the window open small and (without
+        // .windowResizability) impossible to drag larger. This gives a real default and
+        // a draggable range; the Form scrolls when the window is short.
+        .frame(minWidth: 480, idealWidth: 480, maxWidth: 680,
+               minHeight: 420, idealHeight: 640, maxHeight: .infinity)
         // Match the clean white content surface used by standard settings windows in
         // light mode while retaining a readable system-managed surface in dark mode.
         .background(Color(nsColor: .textBackgroundColor).ignoresSafeArea())

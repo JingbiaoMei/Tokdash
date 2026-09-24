@@ -157,9 +157,10 @@ Fields used:
 | `buckets[].resets_at` | int \| null | Epoch seconds; humanize to user locale/TZ |
 | `buckets[].account` | string | Part of the notification dedup key |
 | `buckets[].captured_at` | int \| null | Epoch seconds this window was observed; see Provider failures |
-| `providers.codex.reset_credits` | object \| absent | Codex-only reset-credits row and its expiry notification (see Reset credits). Absent on every other provider, and usually on Codex too |
+| `providers.codex.reset_credits` | object \| absent | Codex reset-credits row and its expiry notification (see Reset credits). Usually absent on Codex too (only when credits exist) |
+| `providers.claude.reset_credits` | object \| absent | Claude Code limit resets, same shape and same row/notification as Codex (server v2.6.3+) |
 | `reset_credits.available_count` | int | The row's count |
-| `reset_credits.credits[]` | array of `{id, expires_at}` | Soonest future `expires_at` (ISO 8601 **string**, unlike the epoch numbers elsewhere) dates the row and arms the notification |
+| `reset_credits.credits[]` | array of `{id, expires_at, ...}` | Soonest future `expires_at` dates the row and arms the notification. **Two shapes:** Codex sends an ISO 8601 **string**, Claude sends epoch **seconds** (int) - accept both. Extra keys (`title`, `resets_left`, `clears`, `status`) are dashboard-only; ignore them |
 
 Buckets with `remaining_percent == null` are rendered without a percentage and
 without a bar fill; they are not candidates for the Low view.
@@ -494,7 +495,7 @@ ignored in both directions.
 |---|---|---|
 | `fullDeltaRow` | on | the cost+tokens delta line vs the shipped cost-only comparison line |
 | `topRanks` | on | the Top tools / Top models strip |
-| `resetCredits` | on | the Codex reset-credits row **and** its expiry notification |
+| `resetCredits` | on | any provider's reset-credits row (Codex, Claude Code) **and** its expiry notification |
 | `activityGlance` | on | the Activity glance component (and its endpoint reads) |
 | `activityHistogramTodayWeek` | on | histogram faces on today/week; off means no strip there; month/year grids are unaffected |
 | `perServerRows` | on | per-server rows when more than one server is enabled |
@@ -622,10 +623,16 @@ history, same as the rest of the companion.
 
 ### Reset credits
 
-`providers.codex.reset_credits` exists on Codex only, and only when credits
-exist. With `resetCredits` on, quota tracking enabled, and
-`available_count >= 1`, render one quiet left-accent row **under the Codex
-group in the All view**:
+`providers.<provider>.reset_credits` appears on any provider that has
+credits: Codex since 1.0, and Claude Code limit resets since server v2.6.3
+(`GET /api/quota` -> `providers.claude.reset_credits`). Decode it per provider
+and render the row under that provider's group - the display rule is not
+codex-specific. One decode trap: **`expires_at` has two wire shapes** - Codex
+credits carry an ISO 8601 string, Claude's limit resets carry epoch seconds.
+Accept both (normalize epoch -> ISO) and never let one malformed credit fail
+the whole quota decode. With `resetCredits` on, quota tracking enabled, and
+`available_count >= 1`, render one quiet left-accent row **under the
+credentialed provider's group in the All view**:
 
 ```
 ⚡ {Provider} · {available_count} reset credits · expire {clause}

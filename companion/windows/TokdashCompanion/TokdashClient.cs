@@ -219,9 +219,9 @@ public sealed class ProviderQuota
 }
 
 /// <summary>
-/// <c>providers.codex.reset_credits</c> (contract §Reset credits). <c>ExpiresAt</c> is an
-/// ISO 8601 <em>string</em> - unlike the epoch numbers everywhere else in the quota payload.
-/// The soonest future <c>expires_at</c> dates the row and arms the expiry notification.
+/// <c>providers.&lt;provider&gt;.reset_credits</c> (contract §Reset credits). Sent by Codex
+/// and - since server v2.6.3 - by Claude Code too. The soonest future <c>expires_at</c>
+/// dates the row and arms the expiry notification.
 /// </summary>
 public sealed class ResetCredits
 {
@@ -232,7 +232,40 @@ public sealed class ResetCredits
 public sealed class ResetCredit
 {
     public string? Id { get; set; }
-    [JsonPropertyName("expires_at")] public string? ExpiresAt { get; set; }
+    [JsonPropertyName("expires_at")]
+    [JsonConverter(typeof(ExpiresAtConverter))]
+    public string? ExpiresAt { get; set; }
+
+    /// <summary>
+    /// <c>expires_at</c> has shipped in two wire shapes: Codex's credits carry an ISO 8601
+    /// <em>string</em>, Claude Code's limit resets (server v2.6.3) carry epoch <em>seconds</em>.
+    /// Both normalize to an ISO string here so the timestamp parser stays single-format -
+    /// and an unexpected shape degrades to null instead of taking the whole quota payload
+    /// down with it (a single credit line must never blank the whole quota section).
+    /// </summary>
+    public sealed class ExpiresAtConverter : JsonConverter<string?>
+    {
+        public override string? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            switch (reader.TokenType)
+            {
+                case JsonTokenType.Null: return null;
+                case JsonTokenType.String: return reader.GetString();
+                case JsonTokenType.Number when reader.TryGetInt64(out var epoch):
+                    return DateTimeOffset.FromUnixTimeSeconds(epoch).ToString("o");
+                case JsonTokenType.Number when reader.TryGetDouble(out var sec):
+                    return DateTimeOffset.FromUnixTimeSeconds((long)sec).ToString("o");
+                default:
+                    // Unknown shape: consume the value (an unconsumed token would corrupt
+                    // the rest of the parse) and degrade this one credit to "no expiry".
+                    using (JsonDocument.ParseValue(ref reader)) { }
+                    return null;
+            }
+        }
+
+        public override void Write(Utf8JsonWriter writer, string? value, JsonSerializerOptions options) =>
+            writer.WriteStringValue(value);
+    }
 }
 
 /// <summary>

@@ -123,6 +123,9 @@ private struct BannerSection: View {
             }
             Spacer()
         }
+        // Hard width: long offline/wrong-service banner text (any locale) wraps instead
+        // of driving the flyout's fitting width past the popover.
+        .frame(width: CompanionLayout.popoverWidth - 32, alignment: .leading)
     }
 
     private var bannerTitle: String {
@@ -144,6 +147,45 @@ private struct BannerSection: View {
     }
 }
 
+/// Compact period switch (Today | Week | Month | Year), styled after the Windows
+/// flyout's SegBtn track: label-sized pill buttons, ~2/3 the width of the native
+/// segmented control, so the row fits the fixed 268pt content width next to the
+/// period kicker. Selection is carried by weight + fill + an accessibility trait,
+/// never by color alone.
+private struct PeriodSwitch: View {
+    @Binding var selection: UsagePeriod
+
+    var body: some View {
+        HStack(spacing: 1) {
+            ForEach(UsagePeriod.allCases, id: \.self) { period in
+                Button { selection = period } label: {
+                    pillLabel(period)
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(period == selection ? .isSelected : [])
+            }
+        }
+        .padding(2)
+        .background(RoundedRectangle(cornerRadius: 7).fill(Color.secondary.opacity(0.12)))
+    }
+
+    // Its own function: the whole builder inlined into the ForEach overran the
+    // type-checker (same C-annotated overload error the rank rows hit once before).
+    @ViewBuilder
+    private func pillLabel(_ period: UsagePeriod) -> some View {
+        let selected = period == selection
+        let ink: AnyShapeStyle = selected ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary)
+        let fill: Color = selected ? Color(nsColor: .textBackgroundColor) : .clear
+        Text(L10n.t(period.segmentKey))
+            .font(.system(size: 11, weight: selected ? .semibold : .regular))
+            .foregroundStyle(ink)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(fill, in: RoundedRectangle(cornerRadius: 5))
+            .contentShape(Rectangle())
+    }
+}
+
 /// Period segment (always visible) + hero + delta row + top ranks + activity glance.
 /// The whole usage side shows one skeleton while the selected period's first fetch is
 /// in flight; quota and connectivity live in their own sections, untouched (rule 2).
@@ -154,26 +196,21 @@ private struct HeroSection: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
                 Text(L10n.t(store.selectedPeriod.kickerKey))
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(.secondary)
-                    .tracking(0.5)
+                    .tracking(0.4)
                     .fixedSize()
                 Spacer()
                 // Today | Week | Month | Year - persisted selection, fires the fetch group
                 // via selectPeriod, and stays visible in EVERY state (loading too).
-                // Small control size: at the shipped 300pt width the regular-size
-                // 4-segment picker leaves the kicker column ~20pt and it collapses to
-                // one character per line (seen in the real-system evidence render).
-                Picker("", selection: Binding(get: { store.selectedPeriod },
-                                              set: { store.selectPeriod($0) })) {
-                    ForEach(UsagePeriod.allCases, id: \.self) { period in
-                        Text(L10n.t(period.segmentKey)).tag(period)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .controlSize(.small)
-                .labelsHidden()
-                .fixedSize()
+                // Custom compact switch (Windows-flyout parity): the native small
+                // segmented control measures ~215pt on its own, and with the kicker
+                // ("THIS MONTH" + picker ~301pt) it exceeded the 268pt content width -
+                // that overflow is exactly what widened the whole flyout and clipped
+                // every section at both borders in the week/month views.
+                PeriodSwitch(selection: Binding(get: { store.selectedPeriod },
+                                                set: { store.selectPeriod($0) }))
+                    .fixedSize()
             }
             if let snap = store.snapshot {
                 heroBody(snap)
@@ -181,7 +218,14 @@ private struct HeroSection: View {
                 skeleton
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        // Hard width, not maxWidth: the hero contains GeometryReader rows (share bars),
+        // which report a tiny ideal size and let unbounded one-line text ideals (sub-line,
+        // delta row) drive the flyout's fitting width instead of the popover width -
+        // long week/month rows measured wider than 300pt and the whole body rendered
+        // offset inside the panel, text clipped at both borders (user-visible d/w/m/y bug).
+        // A concrete width forces every child to lay out at the popover's real content
+        // width in EVERY layout pass, so the texts wrap and the bars size from real space.
+        .frame(width: CompanionLayout.popoverWidth - 32, alignment: .leading)
         .opacity((store.connectionState == .offline || store.connectionState == .busy) ? 0.45 : 1)
     }
 
@@ -208,6 +252,12 @@ private struct HeroSection: View {
                 Text(snap.subLine)
                     .font(.system(size: 12.5))
                     .foregroundStyle(.secondary)
+                    // One line, slightly scaled if long: a wrap that splits "3 h 12 m"
+                    // across lines read as broken; the flyout is fixed-width so the
+                    // scale range is bounded in practice.
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                    .fixedSize(horizontal: false, vertical: true)
                 deltaLine(snap)
                 if snap.components.topRanks && (!snap.topTools.isEmpty || !snap.topModels.isEmpty) {
                     VStack(alignment: .leading, spacing: 7) {
@@ -270,15 +320,16 @@ private struct HeroSection: View {
     }
 }
 
-/// Top-3 list under the hero (E3): optional 12px mark, name, share bar, compact value +
-/// percent. Model rows never carry logos; a tool without a shipped mark renders text-only.
+/// Top-3 list under the hero (E3): fixed name cell (optional 12px mark lives INSIDE it),
+/// share bar, then percent directly after the bar and the compact token amount trailing.
+/// Model rows never carry logos and sit flush; the fixed cell gives both strips the same
+/// bar start, so tools and models bars line up with each other.
 private struct RankBlock: View {
     let kicker: String
     let entries: [Snapshot.RankEntry]
-    // Tools own the logo column; model rows have no marks at all and render flush to the
-    // leading edge (reserving a slot for a column the whole list never fills just leaves
-    // empty space on the left). A tool row that ships no mark still reserves the slot, so
-    // tool names stay aligned with each other.
+    // Tools own the marks; model rows have none and render flush to the leading edge.
+    // A tool row that ships no mark still reserves the slot inside the cell, so tool
+    // names stay aligned with each other.
     var showLogo: Bool = true
 
     var body: some View {
@@ -298,20 +349,25 @@ private struct RankBlock: View {
     @ViewBuilder
     private func rankRow(_ entry: Snapshot.RankEntry) -> some View {
         HStack(spacing: 6) {
-            if showLogo {
-                if let asset = entry.logoAsset, let ns = NSImage(named: asset) {
-                    // Missing assets degrade to text-only, never a broken-image box.
-                    logo(asset: asset, ns: ns)
-                } else {
-                    // A frame on an EMPTY Group collapses, so the placeholder is a real view.
-                    Color.clear.frame(width: 12, height: 12)
+            // Fixed name cell WITH the mark inside: a collapsed mark costs no column, so
+            // the bar's leading edge is identical in the tools and models strips and
+            // model names sit flush at the section's left edge.
+            HStack(spacing: 6) {
+                if showLogo {
+                    if let asset = entry.logoAsset, let ns = NSImage(named: asset) {
+                        // Missing assets degrade to text-only, never a broken-image box.
+                        logo(asset: asset, ns: ns)
+                    } else {
+                        // A frame on an EMPTY Group collapses, so the placeholder is a real view.
+                        Color.clear.frame(width: 12, height: 12)
+                    }
                 }
+                Text(entry.label)
+                    .font(.system(size: 11.5, weight: .medium))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
-            Text(entry.label)
-                .font(.system(size: 11.5, weight: .medium))
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .frame(width: 96, alignment: .leading)
+            .frame(width: 100, alignment: .leading)
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     Capsule().fill(Color.secondary.opacity(0.14))
@@ -323,18 +379,20 @@ private struct RankBlock: View {
             // minimum width instead of being squeezed out by the trailing text.
             .frame(minWidth: 20)
             .frame(height: 3)
-            Text(entry.valueText)
+            // Pct rides the bar's end; the token amount trails. Fixed widths (narrower
+            // than before - bar got the difference) keep every bar the same length.
+            Text(entry.pctText)
                 .font(.system(size: 11.5))
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .frame(maxWidth: 64, alignment: .trailing)
-            Text(entry.pctText)
+                .frame(width: 30, alignment: .trailing)
+            Text(entry.valueText)
                 .font(.system(size: 11.5))
                 .foregroundStyle(.tertiary)
                 .monospacedDigit()
-                .frame(width: 34, alignment: .trailing)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(width: 52, alignment: .trailing)
         }
     }
 
@@ -515,7 +573,8 @@ private struct PerServerSection: View {
                 .font(.system(size: 10.5))
                 .foregroundStyle(.tertiary)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        // Hard width: a long server label must never widen the flyout past the popover.
+        .frame(width: CompanionLayout.popoverWidth - 32, alignment: .leading)
         .opacity((store.connectionState == .offline || store.connectionState == .busy) ? 0.45 : 1)
     }
 }
@@ -573,7 +632,9 @@ private struct QuotaSection: View {
                     .foregroundStyle(.tertiary)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        // Hard width for the same reason as HeroSection: one unbounded row ideal must
+        // never widen the whole flyout past the popover.
+        .frame(width: CompanionLayout.popoverWidth - 32, alignment: .leading)
         .opacity((store.connectionState == .offline || store.connectionState == .busy) ? 0.45 : 1)
     }
 
@@ -618,10 +679,11 @@ private struct QuotaSection: View {
                         ForEach(group.rows) { row in
                             QuotaRowView(row: row, showProvider: false)
                         }
-                        // Reset credits (E2): the quiet amber row lives under the Codex
-                        // group in the All view only - the Low view is a window context,
-                        // not a provider context. Gated inside creditsNotice (component,
-                        // quota.enabled, codex, available_count >= 1).
+                        // Reset credits (E2): the quiet amber row lives under its
+                        // provider group (Codex, Claude Code) in the All view only - the
+                        // Low view is a window context, not a provider context. Gated
+                        // inside creditsNotice (component, quota.enabled, credits
+                        // present, available_count >= 1).
                         if let note = snap.creditsNotice(providerDisplay: group.provider,
                                                          canonicalProvider: group.canonicalProvider,
                                                          resetCredits: group.providerEntry?.resetCredits) {
@@ -694,6 +756,10 @@ private struct QuotaRowView: View {
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 4)
                         .overlay(RoundedRectangle(cornerRadius: 4).stroke(.secondary.opacity(0.4)))
+                        // Never wrap the pill ("Estima / ted"): it keeps its intrinsic
+                        // width and the row name yields the space instead.
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
                 }
                 Text(row.resetsText)
                     .font(.system(size: 12))

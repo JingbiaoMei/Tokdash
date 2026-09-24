@@ -539,20 +539,19 @@ public partial class FlyoutWindow : Window
         if (!show) return;
         ToolsKicker.Text = snap!.ToolsKickerText;
         ModelsKicker.Text = snap.ModelsKickerText;
-        ToolsStrip.ItemsSource = tools.Select(e => MakeRankVM(e, reserveLogo: true)).ToList();
-        // Model rows carry no marks at all: their logo column collapses so the names sit
-        // flush with the kicker instead of leaving empty space on the left.
-        ModelsStrip.ItemsSource = models.Select(e => MakeRankVM(e, reserveLogo: false)).ToList();
+        ToolsStrip.ItemsSource = tools.Select(MakeRankVM).ToList();
+        // Model rows carry no marks at all: the mark sits inside the name cell, so its
+        // absence collapses and the names sit flush with the kicker (RankTemplate).
+        ModelsStrip.ItemsSource = models.Select(MakeRankVM).ToList();
     }
 
-    private RankVM MakeRankVM(Snapshot.RankEntry entry, bool reserveLogo)
+    private RankVM MakeRankVM(Snapshot.RankEntry entry)
     {
         var logo = LogoFor(entry.LogoAsset);
         return new RankVM
         {
             Logo = logo,
             LogoVisibility = logo is null ? Visibility.Collapsed : Visibility.Visible,
-            LogoColWidth = reserveLogo ? new GridLength(19) : new GridLength(0),
             Label = entry.Label,
             Value = entry.ValueText,
             FillStar = new GridLength(entry.Fraction * 100, GridUnitType.Star),
@@ -836,9 +835,24 @@ public partial class FlyoutWindow : Window
                 Foreground = (Brush)FindResource("MutedBrush"),
                 VerticalAlignment = VerticalAlignment.Center,
             });
-            var retryBtn = new Button { Content = L10n.T("retry_now"), Margin = new Thickness(8, 0, 0, 0), Style = (Style)FindResource("WinBtn") };
+            var retryBtn = new Button
+            {
+                Content = L10n.T("retry_now"),
+                Margin = new Thickness(8, 0, 0, 0),
+                Style = (Style)FindResource("WinBtn"),
+                // A plain horizontal StackPanel stretched the button to the row's height
+                // and it read "out of line" with the warning text. Grid + center keeps
+                // both on the same line, the button at the trailing edge.
+                HorizontalAlignment = HorizontalAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
             retryBtn.Click += (s, e) => _ = Store.RefreshAsync();
-            var row = new StackPanel { Orientation = Orientation.Horizontal };
+            var row = new Grid();
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            Grid.SetColumn(warn, 0);
+            warn.VerticalAlignment = VerticalAlignment.Center;
+            Grid.SetColumn(retryBtn, 1);
             row.Children.Add(warn);
             row.Children.Add(retryBtn);
             QuotaRows.Items.Add(row);
@@ -883,7 +897,9 @@ public partial class FlyoutWindow : Window
         }
         else
         {
-            var scroll = new ScrollViewer { MaxHeight = 172, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+            // Height budget follows the section gaps (SectionPad halved this round): the
+            // ~40 px reclaimed above goes to the quota list - more rows before it scrolls.
+            var scroll = new ScrollViewer { MaxHeight = 212, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
             var groups = new ItemsControl
             {
                 ItemTemplate = (DataTemplate)FindResource("QuotaGroupTemplate"),
@@ -929,8 +945,9 @@ public partial class FlyoutWindow : Window
         // QuotaGroupTemplate rather than a separate MakeProviderWarning() element.
         WarningVisibility = group.Failed ? Visibility.Visible : Visibility.Collapsed,
         Rows = group.Rows.Select(r => MakeQuotaRowVM(r, showProvider: false)).ToList(),
-        // Reset-credits row: last inside the Codex group, All view only. Null (hidden)
-        // for every other provider, without credits, on a failed group, or component off.
+        // Reset-credits row: last inside its provider group (Codex, Claude Code), All
+        // view only. Null (hidden) for providers without credits, on a failed group, or
+        // component off.
         CreditsText = snap.CreditsNotice(group) ?? "",
         CreditsVisibility = snap.CreditsNotice(group) is null ? Visibility.Collapsed : Visibility.Visible,
         // Static right-aligned decoration on the same row (mock design): outside the
@@ -1006,7 +1023,8 @@ internal sealed class QuotaGroupVM
     public string WarningText { get; init; } = "";
     public Visibility WarningVisibility { get; init; }
     public List<QuotaRowVM> Rows { get; init; } = new();
-    /// <summary>Reset-credits row (⚡ …), shown only for Codex in the All view.</summary>
+    /// <summary>Reset-credits row (⚡ …), Any provider that ships reset_credits
+    /// (Codex, Claude Code), All view only.</summary>
     public string CreditsText { get; init; } = "";
     public Visibility CreditsVisibility { get; init; } = Visibility.Collapsed;
     /// <summary>Muted "use or lose" hint right-aligned on the credits row (static decoration).</summary>
@@ -1024,9 +1042,6 @@ internal sealed class RankVM
 {
     public ImageSource? Logo { get; init; }
     public Visibility LogoVisibility { get; init; } = Visibility.Collapsed;
-    /// <summary>Logo column width: 19 for tool rows (mark or reserved placeholder),
-    /// 0 for model rows, which never carry marks and sit flush to the leading edge.</summary>
-    public GridLength LogoColWidth { get; init; } = new(19);
     public string Label { get; init; } = "";
     public string Value { get; init; } = "";
     public GridLength FillStar { get; init; }

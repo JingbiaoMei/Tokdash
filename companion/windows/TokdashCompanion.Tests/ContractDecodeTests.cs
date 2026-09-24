@@ -53,6 +53,47 @@ public class ContractDecodeTests
     }
 
     [TestMethod]
+    public void Quota_Claude_Reset_Credits_Epoch_Int_Expires_At_Decodes()
+    {
+        // LIVE SHAPE: claude encodes expires_at as EPOCH SECONDS where codex encodes an
+        // ISO string. While the DTO typed it `string?`, this single int failed the whole
+        // quota decode - both platforms showed "quota data not available". The converter
+        // normalizes both shapes, and the extra server keys (tier, credential_path,
+        // title, resets_left, clears, status) must decode-ignore, not reject.
+        var json = """
+        {"enabled":true,"providers":{
+          "claude":{"estimated":true,"tier":"max","credential_path":"/home/u/.claude","buckets":[
+            {"account":"default","bucket":"5h","bucket_label":"5-hour window","remaining_percent":71.0,"resets_at":1782919500}],
+            "reset_credits":{"available_count":1,"credits":[
+              {"id":"r1","title":"Weekly limit reset","resets_left":1,"clears":false,"status":"active",
+               "expires_at":1785252920}]}},
+          "codex":{"buckets":[
+            {"account":"a","bucket":"5h","remaining_percent":50.0,"resets_at":1}],
+            "reset_credits":{"available_count":1,"credits":[
+              {"id":"c","expires_at":"2026-07-28T15:35:20Z"}]}}
+        },"timestamp":1785080120}
+        """;
+        var q = JsonSerializer.Deserialize<QuotaResponse>(json, Opts)!;
+
+        // 1785252920 == 2026-07-28T15:35:20Z - the very instant the codex ISO string
+        // names. The int must normalize to the same moment, never null, never an error.
+        var claudeCredit = q.Providers!["claude"].ResetCredits!.Credits![0];
+        var codexCredit = q.Providers["codex"].ResetCredits!.Credits![0];
+        Assert.AreEqual("2026-07-28T15:35:20Z", codexCredit.ExpiresAt, "ISO passes through");
+        Assert.IsNotNull(claudeCredit.ExpiresAt, "epoch int must normalize, not drop");
+        Assert.AreEqual(
+            DateTimeOffset.Parse(codexCredit.ExpiresAt!),
+            DateTimeOffset.Parse(claudeCredit.ExpiresAt!));
+
+        // The whole payload survived (the codex sibling decoded too), and the row renders
+        // under claude - credits are no longer codex-only. Frozen clock 2026-07-26T15:35:20Z
+        // puts the expiry exactly 2 days out.
+        var snap = MakeSnap(q);
+        var claude = snap.AllQuotaGroups.Single(g => g.CanonicalProvider == "claude");
+        Assert.AreEqual("⚡ Claude · 1 reset credits · expire in 2 d", snap.CreditsNotice(claude));
+    }
+
+    [TestMethod]
     public void Credits_Row_Persists_When_Group_Failed()
     {
         // Contract §Reset credits gates the ROW on four conditions only (component, quota

@@ -598,6 +598,41 @@ def _parser_file_content_hash(path: Path, stat_result: os.stat_result) -> str:
     return digest
 
 
+def code_object_signature(*objects: Any, label: str = "") -> dict[str, Any]:
+    """Content signature for named objects, not for the module that holds them.
+
+    ``parser_code_signature`` below hashes an entire module, which is the right
+    identity only where the module genuinely IS the implementation. It is too
+    wide for a dependency inside a shared module: every coding-tool parser lives
+    in ``sources/coding_tools.py``, so a hash of that file entered the stored
+    identity of unrelated tools and reparsed their whole corpus on any release
+    that touched any parser. This hashes exactly the objects named, so
+    invalidation stays automatic and stays the size of the change.
+
+    A function contributes its own source text; anything else contributes its
+    serialized value. Neither puts an installed path in the signature, so a
+    reinstall or an mtime restamp changes nothing.
+    """
+    parts: list[str] = []
+    derived = label
+    try:
+        for obj in objects:
+            obj = getattr(obj, "__wrapped__", obj)
+            if inspect.isfunction(obj) or inspect.isclass(obj):
+                if not derived:
+                    derived = f"{obj.__module__}.{obj.__qualname__}"
+                parts.append(f"{type(obj).__name__} {obj.__qualname__}\n{inspect.getsource(obj)}")
+            else:
+                parts.append(stable_json(obj))
+        if not derived:
+            derived = ",".join(sorted({type(obj).__name__ for obj in objects})) or "none"
+        return {"object": derived, "content_sha1": hashlib.sha1("\n".join(parts).encode("utf-8")).hexdigest()}
+    except (OSError, TypeError, ValueError):
+        # No source available (compiled install) or an unserializable value:
+        # degrade to a name-only identity, exactly as parser_code_signature does.
+        return {"object": label or ",".join(sorted({type(obj).__name__ for obj in objects})) or "unknown"}
+
+
 def parser_code_signature(obj: Any) -> dict[str, Any]:
     """Return a cheap content signature for an implementation module.
 

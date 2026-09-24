@@ -263,12 +263,38 @@ never trigger a global parse again.
 | `PricingDatabase` implementation change | no | yes |
 | The pricing file changing after a database loaded it | no | yes, once that database reloads |
 
+## The session cache keeps the same rule
+
+`session_records` is a second cache with its own signatures. It carried the same
+defect: the Codex and Kimi session identities each held a
+`parser_code_signature()` of an object living inside `sources/coding_tools.py` —
+the Codex event key and Kimi's wire-model map — so a hash of every coding-tool
+parser's shared home entered both, and adding one parser reparsed both corpora.
+
+Both are signed on their own object now, by `code_object_signature()`: a named
+function contributes its own source, a named constant its own value. The bust
+stays automatic — nothing to remember to bump — and stays the size of the change.
+One whole-module hash remains in the Codex identity, for `activity_insights.py`,
+because that module writes the stored activity record and reads it and is shared
+with no other tool: there a module genuinely is the identity, which is the
+exception the helper's docstring points at.
+
+| Change | Session rows that reparse |
+| --- | --- |
+| Edit to any parser in `sources/coding_tools.py` | none |
+| Edit to `codex_token_event_key()`, or to `activity_insights.py` | codex |
+| Edit to Kimi's `_WIRE_MODEL_MAP` or its two resolvers | kimi |
+| A `_SESSION_FILE_PARSER_VERSIONS` bump | that parser's rows |
+
 ## Tests
 
 `tests/test_usage_cache_identity.py` holds this contract, including mutation
 checks that install the forbidden defect and assert the symptom it causes:
 pricing back in the parse signature, a skipped repricing pass, a repriced fixed
 cost, a module-hash parser identity, and a pricing identity committed before its
-rows. `tests/test_session_cache_pricing.py` is the equivalent for the session
-cache, which reached the same place from the other direction — it prices on read
-rather than rewriting rows, because its costs are not aggregated in SQL.
+rows — including the session-cache case, where the assertion is that the hash of
+`coding_tools.py` appears nowhere in the stored identity of a tool that merely
+keeps one helper in that file. `tests/test_session_cache_pricing.py` is the
+equivalent for the session cache's pricing, which reached the same place from
+the other direction — it prices on read rather than rewriting rows, because its
+costs are not aggregated in SQL.

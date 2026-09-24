@@ -15,6 +15,7 @@ See docs/development/technical-notes/USAGE_CACHE_IDENTITY.md.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sqlite3
@@ -26,6 +27,7 @@ import pytest
 import tokdash
 import tokdash.cli as cli
 import tokdash.compute as compute
+import tokdash.sessions as sessions
 import tokdash.usage_store as usage_store_module
 from tokdash.pricing import PricingDatabase
 from tokdash.sources import coding_tools
@@ -34,6 +36,7 @@ from tokdash.sources.coding_tools import (
     ClaudeParser,
     CodexParser,
     CodingToolsUsageTracker,
+    KimiParser,
     PiAgentParser,
     _sig_cache,
 )
@@ -1873,3 +1876,60 @@ def test_one_sick_source_does_not_push_the_overview_off_the_store(
     # themselves, which is not what this is measuring.
     assert [entry["source"] for entry in entries if entry["source"] == "codex"] == ["codex"]
     assert parse_counts["codex"] == 0
+
+
+def test_the_session_identity_does_not_hash_the_shared_parser_module():
+    """The stored-session identity keeps the same distance from coding_tools.py.
+
+    ``sessions.py`` keeps its own contract, but the defect this note is about
+    reached it too: the Codex and Kimi session identities each carried a hash of
+    ``coding_tools.py``, so any release that touched any coding-tool parser --
+    this repo's usual kind of release -- invalidated every stored row of both
+    corpora and reparsed them on upgrade. Each of those rows now carries its own
+    dependency instead, narrow enough that the bust is the size of the change.
+    """
+    module_hash = hashlib.sha1(Path(coding_tools.__file__).read_bytes()).hexdigest()
+
+    codex = sessions._codex_session_parser_signature()
+    kimi = sessions._kimi_session_parser_signature()
+    assert module_hash not in json.dumps(codex)
+    assert module_hash not in json.dumps(kimi)
+
+    # Narrow, but still watching: the map decides which model a stored Kimi turn
+    # bills under, so an edit to it must still invalidate.
+    original_map = dict(KimiParser._WIRE_MODEL_MAP)
+    try:
+        KimiParser._WIRE_MODEL_MAP["k3"] = "a-different-pricing-key"
+        assert sessions._kimi_session_parser_signature() != kimi
+    finally:
+        KimiParser._WIRE_MODEL_MAP.clear()
+        KimiParser._WIRE_MODEL_MAP.update(original_map)
+    assert sessions._kimi_session_parser_signature() == kimi
+
+    # And an edit elsewhere in the same class is not a model-map change.
+    original_version = KimiParser.persistent_parser_version
+    try:
+        KimiParser.persistent_parser_version = original_version + 1
+        assert sessions._kimi_session_parser_signature() == kimi
+    finally:
+        KimiParser.persistent_parser_version = original_version
+
+
+def test_the_codex_event_key_identity_watches_the_key_itself(monkeypatch):
+    """Narrowing must not mean a version someone has to remember to bump.
+
+    The Codex event key decides the dedup identity of a stored token event, so a
+    change to it has to invalidate. It is signed by its own source, which
+    invalidates without any human step, and stays put when the rest of
+    ``coding_tools.py`` moves.
+    """
+    before = sessions._codex_session_parser_signature()["event_key"]
+    assert before["object"] == "tokdash.sources.coding_tools.codex_token_event_key"
+
+    monkeypatch.setattr(
+        sessions,
+        "codex_token_event_key",
+        lambda session_id, info: f"rewritten:{session_id}",
+    )
+    after = sessions._codex_session_parser_signature()["event_key"]
+    assert after["content_sha1"] != before["content_sha1"]

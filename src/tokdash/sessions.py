@@ -89,6 +89,7 @@ from .sources.dsh_log import (
 from .usage_store import (
     UsageDatabaseSchemaTooNewError,
     UsageEntryStore,
+    code_object_signature,
     parser_code_signature,
     persistent_usage_db_enabled,
     raise_if_usage_db_incompatible,
@@ -1984,7 +1985,15 @@ def _load_codex_activity_records(
 def _codex_session_parser_signature() -> dict[str, Any]:
     return {
         "parser": _session_file_parser_signature("_parse_codex_session_file"),
-        "event_key": parser_code_signature(codex_token_event_key),
+        # The event key lives in the shared parser module, so a whole-module hash
+        # here made every release that touched any coding-tool parser reparse the
+        # whole Codex session corpus. The function is self-contained, so its own
+        # source is the identity.
+        "event_key": code_object_signature(codex_token_event_key),
+        # activity_insights.py IS this dependency -- the writers of the stored
+        # activity record and the reader of it are the whole module, shared with
+        # no other tool -- so the module hash stays, alongside the schema version
+        # the record itself carries.
         "activity": parser_code_signature(build_activity_insights),
         "activity_schema": ACTIVITY_SCHEMA_VERSION,
         # Deliberately no pricing: see _SESSION_COST_BASIS.
@@ -3762,9 +3771,16 @@ def _load_kimi_sessions(signature: tuple[tuple[str, int, int], ...], pricing_sig
 def _kimi_session_parser_signature() -> dict[str, Any]:
     return {
         "parser": _session_file_parser_signature("_parse_kimi_session_file"),
-        # KimiParser carries the wire-model map that decides each turn's model;
-        # its module hash busts cached rows when that map changes.
-        "model_map": parser_code_signature(KimiParser),
+        # KimiParser carries the wire-model map that decides each turn's model.
+        # The map and the two functions that resolve it are all a stored row
+        # depends on, so those are what get signed; hashing the class meant
+        # hashing coding_tools.py, which every other parser edit busts.
+        "model_map": code_object_signature(
+            KimiParser._WIRE_MODEL_MAP,
+            KimiParser._model_for_wire_name,
+            KimiParser._default_model_for_timestamp,
+            label="tokdash.sources.coding_tools.KimiParser.model_identity",
+        ),
         "cost_basis": _SESSION_COST_BASIS,
     }
 

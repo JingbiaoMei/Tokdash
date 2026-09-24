@@ -19,7 +19,7 @@ BASE_URL = "https://daily-cloudcode-pa.googleapis.com"
 _USER_AGENT = f"antigravity/1.0.0 {platform.system().lower()}/{platform.machine().lower()}"
 
 
-_TOKEN_KEYS = {"access_token", "refresh_token", "id_token", "token"}
+_SAFE_TOKEN_META_KEYS = ("email", "auth_method", "expiry", "expires_at", "expiry_date")
 # agy CLI (Go) stores the oauth blob via zalando/go-keyring. Observed 2026-09-24:
 # service ``gemini``, account ``antigravity``, payload ``go-keyring-base64:`` + JSON.
 KEYCHAIN_SERVICE = "gemini"
@@ -47,17 +47,19 @@ def _jwt_payload(token: Any) -> dict[str, Any]:
 
 def _safe_token_meta(data: dict[str, Any], path: str) -> dict[str, Any]:
     meta: dict[str, Any] = {"path": path}
-    for key, value in data.items():
-        # _TOKEN_KEYS already covers "token" (and access/refresh/id_token); only copy
-        # non-token scalar fields through.
-        if key in _TOKEN_KEYS:
+    # An OAuth blob may gain new credential fields. Copy only the account and
+    # expiry fields we deliberately expose in failure snapshots.
+    for key in _SAFE_TOKEN_META_KEYS:
+        if key not in data:
             continue
+        value = data[key]
         if isinstance(value, (str, int, float, bool)) or value is None:
             meta[key] = value
     token_obj = data.get("token") if isinstance(data.get("token"), dict) else {}
     for key in ("expiry", "expires_at", "expiry_date"):
-        if key in token_obj:
-            meta[key] = token_obj.get(key)
+        value = token_obj.get(key)
+        if key in token_obj and (isinstance(value, (str, int, float)) or value is None):
+            meta[key] = value
     if not meta.get("email"):
         email = _jwt_payload(data.get("id_token")).get("email")
         if isinstance(email, str) and email:

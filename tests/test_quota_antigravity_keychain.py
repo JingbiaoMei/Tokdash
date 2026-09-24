@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import subprocess
+from urllib.error import HTTPError
 
 from tokdash.sources.quota import antigravity
 
@@ -165,6 +166,34 @@ def test_collect_uses_keychain_token_without_leaking_secrets(monkeypatch, tmp_pa
     assert snapshots[0].status == "ok"
     assert snapshots[0].used_percent == 20.0
     raw = json.dumps(snapshots[0].raw)
+    assert "secret-refresh" not in raw
+    assert "ya29.token" not in raw
+
+
+def test_keychain_failure_snapshot_excludes_unrecognized_secrets(monkeypatch, tmp_path):
+    _isolate_files(monkeypatch, tmp_path)
+    monkeypatch.setattr(antigravity, "_is_macos", lambda: True)
+    blob = _oauth_blob()
+    blob["client_secret"] = "secret-client"
+    blob["api_key"] = "secret-api-key"
+    monkeypatch.setattr(
+        antigravity.subprocess,
+        "run",
+        lambda cmd, **kwargs: subprocess.CompletedProcess(
+            cmd, 0, stdout=_go_keyring_payload(blob) + "\n", stderr=""
+        ),
+    )
+
+    def unauthorized(req, timeout=15):
+        raise HTTPError(req.full_url, 401, "Unauthorized", {}, None)
+
+    snapshots = antigravity.collect_antigravity_api_snapshots(opener=unauthorized, now=1_790_237_091)
+
+    assert snapshots[0].status == "stale_token"
+    assert snapshots[0].account == "h@example.com"
+    raw = json.dumps(snapshots[0].raw)
+    assert "secret-client" not in raw
+    assert "secret-api-key" not in raw
     assert "secret-refresh" not in raw
     assert "ya29.token" not in raw
 

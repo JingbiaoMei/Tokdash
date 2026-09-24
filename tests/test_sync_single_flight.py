@@ -260,6 +260,54 @@ def test_concurrent_sync_session_files_parse_once(_isolated_home):
     assert parses == [str(path)]
 
 
+def test_concurrent_sync_source_parses_once(_isolated_home):
+    """A source_replace parse is a whole-corpus read, so it may run once.
+
+    Goose is the case this exists for: the parse opens a snapshot COPY of
+    sessions.db, and eight concurrent dashboard requests used to copy a
+    multi-gigabyte database eight times over for one set of rows.
+    """
+    parse_started = threading.Event()
+    release = threading.Event()
+    parses: list[str] = []
+
+    def call_sync(sig: str):
+        def parse_entries():
+            parses.append(sig)
+            parse_started.set()
+            assert release.wait(5)
+            return [
+                {
+                    "source": "goose",
+                    "model": "gpt-5",
+                    "provider": "",
+                    "input": 10,
+                    "output": 1,
+                    "cacheRead": 0,
+                    "cacheWrite": 0,
+                    "reasoning": 0,
+                    "cost": 0.0,
+                    "timestamp": 1_779_278_400_000,
+                    "entry_id": f"goose:s1:{len(parses)}",
+                }
+            ]
+
+        return UsageEntryStore().sync_source("goose", sig, parse_entries)
+
+    results = _race(
+        lambda: call_sync("sig-1"), lambda: call_sync("sig-2"), parse_started, release
+    )
+    assert parses == ["sig-1"], "the waiter re-read a corpus the holder had just synced"
+    assert results["first"] is True
+    assert results["second"] is False
+
+    # Sequentially, the newer signature still syncs: the gate only collapses
+    # callers that overlapped in time.
+    parses.clear()
+    assert call_sync("sig-2") is True
+    assert parses == ["sig-2"]
+
+
 def test_single_flight_does_not_skip_after_the_holder_failed(_isolated_home):
     """A waiter whose holder raised must sync itself, or its rows go missing."""
     path = _write_codex(_isolated_home, "s1")

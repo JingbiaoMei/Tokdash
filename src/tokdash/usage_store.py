@@ -1426,6 +1426,32 @@ class UsageEntryStore:
         *,
         pricing_identity: Any = None,
     ) -> bool:
+        """:meth:`_sync_source_now`, one in flight per source (see ``_single_flight_sync``).
+
+        The gate matters more here than anywhere else: a source_replace parse
+        re-reads the WHOLE corpus, and for Goose that means a fresh snapshot copy
+        of its database. Eight concurrent dashboard requests used to make eight
+        copies of a 1.46 GB sessions.db at the same moment.
+        """
+        if self.source_signature(source) == signature:
+            return False
+        return _single_flight_sync(
+            self.path,
+            "source",
+            source,
+            lambda: self._sync_source_now(
+                source, signature, parse_entries, pricing_identity=pricing_identity
+            ),
+        )
+
+    def _sync_source_now(
+        self,
+        source: str,
+        signature: str,
+        parse_entries: Callable[[], Iterable[dict[str, Any]]],
+        *,
+        pricing_identity: Any = None,
+    ) -> bool:
         """Sync one source if its signature changed.
 
         Returns True when rows were replaced, False when the stored source was

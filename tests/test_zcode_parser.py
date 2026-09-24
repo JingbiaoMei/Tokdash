@@ -592,6 +592,53 @@ def test_zcode_snapshot_retries_when_source_changes_mid_copy(monkeypatch, tmp_pa
     assert len(entries) == 2
     assert {e["entry_id"] for e in entries} == {"zcode:mu-1", "zcode:mu-2"}
 
+def test_zcode_snapshot_coherence_retries_are_spaced(monkeypatch, tmp_path):
+    """A busy client is retried on a pause, not three times inside one write burst.
+
+    The coherence check fails whenever the client writes DURING a copy, and a
+    large database makes every copy long enough to be raced. Retrying the copies
+    back to back then burns the whole budget inside the same burst and reports
+    the tool unavailable, so the wait between attempts is the fix and this pins
+    that it exists and widens. Timing is asserted on the sleep calls, not on a
+    wall clock, which a loaded CI runner would fail for reasons that have
+    nothing to do with this code.
+    """
+    import tokdash.sources.coding_tools as ct
+
+    home = tmp_path / ".zcode"
+    db_path = home / "cli" / "db" / "db.sqlite"
+    db_path.parent.mkdir(parents=True)
+    _create_db(db_path, [_row()])
+    monkeypatch.setenv("ZCODE_HOME", str(home))
+
+    slept: list[int] = []
+    monkeypatch.setattr(
+        ct, "_snapshot_retry_pause", lambda attempt: slept.append(attempt)
+    )
+
+    real_copy2 = ct.shutil.copy2
+    races = {"left": 2}
+
+    def racing_copy2(src, dst, *args, **kwargs):
+        result = real_copy2(src, dst, *args, **kwargs)
+        # Two generations land mid-copy, then the client goes quiet.
+        if races["left"] and Path(dst).name == "db.sqlite":
+            races["left"] -= 1
+            db_path.unlink()
+            _create_db(db_path, [_row(), _row(row_id=f"mu-{races['left']}", logical=f"lr-{races['left']}")])
+        return result
+
+    monkeypatch.setattr(ct.shutil, "copy2", racing_copy2)
+    entries = ZCodeParser(PricingDatabase()).collect(None, None)
+
+    # The read completes on the third attempt with ONE whole generation,
+    # not a mix of two: the base row plus the last writer's row.
+    assert len(entries) == 2, "a client that writes twice must not cost the whole read"
+    assert len(slept) == 2, f"expected one pause per raced attempt, got {slept}"
+    assert slept == [0, 1], "the pause widens per attempt rather than staying flat"
+    assert slept[1] > slept[0], "the retry budget widens, it does not stay flat"
+
+
 def test_zcode_snapshot_retries_checkpoint_race_on_wal_copy(monkeypatch, tmp_path):
     """A checkpoint that lands between the -wal exists() check and its
     copy (rows fold into the db, the -wal is deleted) used to surface as

@@ -20,6 +20,7 @@ from tokdash.sources.coding_tools import (
     BaseParser,
     RooCodeParser,
     _roo_model_cache,
+    _ROO_MODEL_TAG_WINDOW_MS,
     _roo_model_for,
     _roo_roots,
     _roo_roots_cache,
@@ -784,6 +785,94 @@ def test_roo_model_pairing_rules_directly():
     assert _roo_model_for(tags, 600) == "a"  # a tag inside the window ahead
     # Past the window with nothing at or before the row, nothing is invented.
     assert _roo_model_for([(5_000, "a")], 1_000) == "unknown"
+
+
+def _roo_model_for_linear(tags, ts):
+    """The pre-binary-search scan, kept as the oracle for the tests below.
+
+    The binary search is only worth having if it answers identically, and the
+    interesting cases are the ones it could get wrong: a stamp that is an exact
+    hit, one exactly at the window edge, a tie between the tag before and the
+    tag after, and a conversation file with two tags in the same millisecond.
+    """
+    if not tags:
+        return "unknown"
+    best_delta = None
+    best_model = ""
+    newest_before = ""
+    for tag_ts, model in tags:
+        delta = abs(tag_ts - ts)
+        if best_delta is None or delta < best_delta:
+            best_delta, best_model = delta, model
+        if tag_ts <= ts:
+            newest_before = model
+    if best_delta is not None and best_delta <= _ROO_MODEL_TAG_WINDOW_MS:
+        return best_model
+    return newest_before or "unknown"
+
+
+@pytest.mark.parametrize("seed", [0, 1, 2, 7, 43])
+def test_roo_model_binary_search_matches_the_scan_it_replaced(seed):
+    import random
+
+    rng = random.Random(seed)
+    window = _ROO_MODEL_TAG_WINDOW_MS
+    for _ in range(400):
+        n = rng.randint(0, 40)
+        stamps = sorted(
+            rng.randrange(1, 60_000) for _ in range(n)
+        )  # deliberately allows duplicate stamps
+        tags = [(t, f"m{t % 5}") for t in stamps]
+        # Probe every stamp, both window edges of every stamp, and random gaps.
+        probes = {0, 1, 60_000}
+        for t in stamps:
+            probes.update({t, t - 1, t + 1, t - window, t + window,
+                           t - window - 1, t + window + 1})
+        for _ in range(20):
+            probes.add(rng.randrange(-5_000, 65_000))
+        for ts in sorted(probes):
+            assert _roo_model_for(tags, ts) == _roo_model_for_linear(tags, ts), (
+                f"seed={seed} ts={ts} tags={tags}"
+            )
+
+
+def test_roo_model_pairing_prefers_first_duplicate_nearest_last_in_force():
+    """Same millisecond, two models: nearest is the first, in-force the last.
+
+    Not a shape any fixture shows, but the scan had a definite answer for it and
+    a bisect landing on the wrong end of the duplicate run is exactly the
+    regression a rewrite of this loop would introduce.
+    """
+    tags = [(1_000, "a"), (5_000, "first"), (5_000, "last"), (20_000, "c")]
+
+    # Nearest is the FIRST tag stamped 5000 (strict < kept the earliest).
+    assert _roo_model_for(tags, 5_400) == "first"
+    # Past the window, the model in force is the LAST one at or before the row.
+    assert _roo_model_for(tags, 12_000) == "last"
+
+
+def test_roo_model_lookup_scales_logarithmically_not_with_task_length():
+    """Wall-clock-free scaling proof: count the tags the lookup may touch.
+
+    A long Roo session rewrites one conversation file for its whole life, so a
+    scan of that list once per billed request is quadratic in the length of the
+    longest task. The count is asserted rather than timed, because a timing
+    assertion on a shared machine is a flake with extra steps.
+    """
+    class Counting(list):
+        def __init__(self, items):
+            super().__init__(items)
+            self.touched = 0
+
+        def __getitem__(self, index):
+            self.touched += 1
+            return list.__getitem__(self, index)
+
+    n = 10_000
+    tags = Counting([(i * 10, f"m{i}") for i in range(n)])
+    # Mid-list is the worst case for the scan and the best case for the bisect.
+    assert _roo_model_for(tags, n * 5) == f"m{n // 2}"
+    assert tags.touched < 64, f"touched {tags.touched} of {n} tags"
 
 
 def test_roo_reads_both_conversation_content_shapes(monkeypatch, roo_home, tmp_path):

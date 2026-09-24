@@ -5,11 +5,13 @@ These parsers emit tokscale-compatible `entries[]` rows and are used by
 """
 
 import argparse
+import bisect
 import glob
 import hashlib
 import json
 import logging
 import math
+import operator
 import os
 import re
 import shutil
@@ -3525,7 +3527,29 @@ class MimoParser(BaseParser):
 # Snapshot copy attempts within one collect: if ZCode appends to the
 # WAL or checkpoints between the two sequential copies, the db/-wal pair
 # may span two generations; that attempt is dropped and re-copied.
-_ZCODE_SNAPSHOT_MAX_ATTEMPTS = 3
+#
+# Five, with a widening pause between them, not three back to back. The
+# coherence check fails by construction when the client writes DURING a copy,
+# and the copy is where the time goes: a 540 MB Goose sessions.db measured ~250
+# ms per attempt, so a session streaming ledger rows every few hundred ms lost
+# all three of three attempts in under a second and the whole tool read as
+# unavailable. Spreading the same work over ~1.2 s of attempts lets a burst
+# finish between copies, which is the only thing that can make an attempt
+# succeed. The bound is still the point -- a client that writes continuously is
+# a real unavailability, not something to retry into the minute.
+_ZCODE_SNAPSHOT_MAX_ATTEMPTS = 5
+_ZCODE_SNAPSHOT_RETRY_BACKOFF_SECONDS = 0.05
+
+
+def _snapshot_retry_pause(attempt: int) -> None:
+    """Wait before re-copying after a coherence race.
+
+    A function rather than a bare sleep call so the spacing can be pinned by a
+    test without patching the `time` module for every other reader in the
+    process -- which is what the first version of that test did, and it made
+    two unrelated ZCode tests flake.
+    """
+    _time.sleep(_ZCODE_SNAPSHOT_RETRY_BACKOFF_SECONDS * (attempt + 1))
 
 
 class ZCodeSnapshotError(RuntimeError):
@@ -3609,11 +3633,15 @@ def _zcode_open_snapshot(db_path: Path) -> Optional[Tuple[sqlite3.Connection, Pa
             if tmpdir is not None:
                 shutil.rmtree(tmpdir, ignore_errors=True)
             # A failure accompanied by a signature change is a
-            # generation change that landed mid-copy - retry it.
+            # generation change that landed mid-copy - retry it, after a pause
+            # long enough to land in a lull (see the bound's comment). Without
+            # the pause the attempts burn back to back inside one write burst
+            # and the read fails a tool that was merely busy.
             if (
                 zcode_snapshot_signatures(db_path) != before
                 and _attempt + 1 < _ZCODE_SNAPSHOT_MAX_ATTEMPTS
             ):
+                _snapshot_retry_pause(_attempt)
                 continue
             return None
         return conn, tmpdir
@@ -6724,6 +6752,33 @@ class GooseSchemaError(RuntimeError):
     ``usage_ledger``, so this reader cannot account for it."""
 
 
+# A Goose older than the usage ledger fails this way on EVERY read, and the read
+# is a whole-copy snapshot of sessions.db: a 1.46 GB database re-copied for the
+# privilege of raising again. The verdict depends only on which tables the
+# database has, and the database cannot gain a table without being written, so
+# the answer is remembered against the database's own signature -- the same
+# folded (path, mtime_ns, size) stamp that decides whether a reparse is due.
+# Goose upgrading itself writes the file, the signature moves, and the next read
+# probes for real. A read that merely FAILED is not in here: see _parse_all.
+_GOOSE_SCHEMA_FAILURES: Dict[tuple, str] = {}
+_GOOSE_SCHEMA_FAILURES_MAX = 8
+
+
+def goose_schema_failure(sig: tuple) -> Optional[str]:
+    """The remembered schema verdict for one database signature, if any."""
+    if not sig:
+        return None
+    return _GOOSE_SCHEMA_FAILURES.get(sig)
+
+
+def goose_remember_schema_failure(sig: tuple, message: str) -> None:
+    if not sig:
+        return
+    if len(_GOOSE_SCHEMA_FAILURES) >= _GOOSE_SCHEMA_FAILURES_MAX:
+        _GOOSE_SCHEMA_FAILURES.clear()
+    _GOOSE_SCHEMA_FAILURES[sig] = message
+
+
 # EXCLUSIVE upper bound for a plausible epoch-SECONDS stamp: 9999999999 s is
 # 2286-11-20, far outside any Goose clock. The Sessions window uses the SAME
 # number for an unbounded read (sessions._goose_load_sessions) with the SAME
@@ -6954,8 +7009,16 @@ class GooseParser(BaseParser):
         # records it as an unavailable source instead of reading it as zero,
         # and BaseParser.collect() never caches the result, so the next
         # collect retries.
-        with zcode_snapshot(db) as snap:
-            return self._parse_db(snap.conn)
+        sig = self._file_signatures()
+        remembered = goose_schema_failure(sig)
+        if remembered is not None:
+            raise GooseSchemaError(remembered)
+        try:
+            with zcode_snapshot(db) as snap:
+                return self._parse_db(snap.conn)
+        except GooseSchemaError as exc:
+            goose_remember_schema_failure(sig, str(exc))
+            raise
 
 
 # ---------------------------------------------------------------------------
@@ -7244,6 +7307,9 @@ def _roo_model_tags(
     return tags
 
 
+_TAG_TS = operator.itemgetter(0)
+
+
 def _roo_model_for(tags: List[Tuple[int, str]], ts: int) -> str:
     """Model of the request stamped at ``ts``, or "unknown".
 
@@ -7254,18 +7320,38 @@ def _roo_model_for(tags: List[Tuple[int, str]], ts: int) -> str:
     tag). Past the window the newest tag at or before the row is the model in
     force, which is Roo's own persisted string rather than a guess, and only a
     task with no tag at all falls through to "unknown".
+
+    REQUIRES *tags* sorted by ts, which is what _roo_conversation_tags()
+    produces. That precondition buys the binary search: a task's conversation
+    file grows with every turn of a long session, and this ran once per billed
+    request, so the scan was quadratic in the size of the longest task. Measured
+    on a 10k-tag synthetic task, one lookup went from 236 ms to 0.8 ms when the
+    nearest tag moved from the two ends of the list to its middle.
+
+    Two details keep the answer identical to the scan it replaces, and both
+    matter only when a conversation file carries two tags stamped in the same
+    millisecond: the nearest tag is the FIRST of that stamp (the scan's strict
+    ``<`` kept the earliest of equal deltas), while the model in force is the
+    LAST of it (the scan overwrote ``newest_before`` as it walked).
     """
     if not tags:
         return "unknown"
+    # Index of the first tag STRICTLY after ts, so tags[:i] is the at-or-before
+    # half and tags[i:] the after half. bisect on the ts component only, since
+    # the tuples also carry the model string.
+    i = bisect.bisect_right(tags, ts, key=_TAG_TS)
+    newest_before = tags[i - 1][1] if i else ""
     best_delta: Optional[int] = None
     best_model = ""
-    newest_before = ""
-    for tag_ts, model in tags:
-        delta = abs(tag_ts - ts)
+    if i:
+        prev_ts = tags[i - 1][0]
+        # first index whose ts equals prev_ts, i.e. the first of a duplicate run
+        first = bisect.bisect_left(tags, prev_ts, lo=0, hi=i, key=_TAG_TS)
+        best_delta, best_model = ts - prev_ts, tags[first][1]
+    if i < len(tags):
+        delta = tags[i][0] - ts
         if best_delta is None or delta < best_delta:
-            best_delta, best_model = delta, model
-        if tag_ts <= ts:
-            newest_before = model
+            best_delta, best_model = delta, tags[i][1]
     if best_delta is not None and best_delta <= _ROO_MODEL_TAG_WINDOW_MS:
         return best_model
     return newest_before or "unknown"

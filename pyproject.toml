@@ -34,6 +34,9 @@ dependencies = [
   "packaging>=21.0",
   # DeepSeek Harness session logs are concatenated zstd frames (sources/dsh_log.py).
   "zstandard>=0.23",
+  # Terminal dashboard (`tokdash tui`); floor-only, no upper bound — Textual 8.x
+  # worker API is what src/tokdash/tui/app.py is written against.
+  "textual>=8.0.0",
 ]
 
 [project.urls]

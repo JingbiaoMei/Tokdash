@@ -359,6 +359,38 @@ Abre `http://127.0.0.1:55423`. Usa `tokdash serve --port <puerto>` si el puerto 
 
 Para todos los detalles de la iniciación, incluidas opciones de runtime, comportamiento de WSL/systemd, launchd de macOS, Tailscale, empaquetado, comprobaciones de actualización y la semántica de desinstalación segura, consulta **[`docs/guides/ONBOARDING.md`](docs/guides/ONBOARDING.md)**.
 
+### Panel de terminal
+
+¿Prefieres quedarte en la terminal? Las dos vistas de terminal funcionan sin navegador y reutilizan el mismo índice de uso local y caché del panel web: una lanzada junto a `tokdash serve` lee la base de datos compartida en disco en lugar de reparsear registros.
+
+El panel interactivo:
+
+```bash
+tokdash tui
+```
+
+Abre las mismas pestañas **Overview**, **Report** y **Quota** que el panel web; una pestaña más larga que una pantalla se desplaza con la rueda del ratón. Teclas:
+
+| Tecla | Acción |
+|---|---|
+| `q` | Salir |
+| `r` | Actualizar la pestaña actual |
+| `1` / `2` / `3` | Cambiar a Overview / Report / Quota |
+| `t` `w` `m` `y` `a` | Saltar directamente al período (ambas pestañas de período; `t`/`a` solo en Overview) |
+| `p` | Ventana de tiempo siguiente (ciclo solo hacia adelante) |
+| `[` / `]` | Mover la fecha final de la ventana un día atrás / adelante (nunca al futuro) |
+| `0` | Volver a hoy |
+| `u` | Sondear la cuota (solo pestaña Quota) |
+| `?` | Panel de ayuda con todas las teclas |
+
+Para un informe de un solo disparo que puedas redirigir o scriptar:
+
+```bash
+tokdash report --period week
+```
+
+El periodo es un flag, no un argumento posicional — `tokdash report week` falla por diseño. Valores aceptados: `today` (por defecto), `week`, `month`, `year`, `all`, un número de días o el atajo `Nd/Nw/Nm/Ny`; `week`, `month` y `year` son las mismas ventanas alineadas al calendario que muestra la pestaña Report del panel web. `tokdash report` también acepta `--json`, `--pretty` y `--output <file>`, siguiendo las mismas convenciones que `tokdash export`.
+
 ### Digest de OpenClaw (informes programados)
 
 Tokdash puede alimentar informes de uso de OpenClaw diarios/semanales/mensuales consultando la API local según un calendario.
@@ -464,6 +496,8 @@ Para acceso remoto a través de Tailscale Serve, reenvío SSH o vinculación de 
 registrar la regla de Tailscale Serve tras tu opt-in.
 
 Por defecto `tokdash serve` abre el panel en tu navegador una vez al arrancar. Pasa `--no-open` para desactivarlo (también se omite automáticamente en entornos headless/SSH y en las plantillas de servicio de fondo).
+
+Un `tokdash` sin subcomando simplemente muestra la ayuda de comandos y sale: ya no inicia `tokdash serve` a tus espaldas ni abre un navegador. Inicia el panel explícitamente: `tokdash serve`.
 
 ## Privacidad y seguridad
 

@@ -81,9 +81,9 @@ def build_parser(prog: str) -> argparse.ArgumentParser:
     parser.add_argument(
         "command",
         nargs="?",
-        default="serve",
-        choices=["serve", "export", "db", "quota", "version", "setup", "doctor", "update", "uninstall"],
-        help="Command (default: serve)",
+        default=None,
+        choices=["serve", "export", "db", "quota", "tui", "report", "version", "setup", "doctor", "update", "uninstall"],
+        help="Command (default: show help)",
     )
     parser.add_argument(
         "db_action",
@@ -998,6 +998,16 @@ def cli(argv: list[str] | None = None, prog: str = "tokdash") -> int:
     parser = build_parser(prog=prog)
     args = parser.parse_args(argv)
 
+    # A bare `tokdash` is a no-op that shows help, not a surprise server: it used
+    # to default to `serve` and open a browser. No autostart path rides on that
+    # default -- every service writer embeds "serve" explicitly (systemd, launchd,
+    # the Windows scheduler task) -- so dropping it breaks nothing that runs
+    # unattended. Global flags alone land here too: flags with no verb are still
+    # no verb.
+    if args.command is None:
+        parser.print_help()
+        return 0
+
     # Checked before any command dispatch, not inside the serve branch. These live
     # on the flat top-level parser, so `tokdash export --dev-fixture dense` parses
     # cleanly -- and used to export the user's REAL usage while looking like it had
@@ -1009,6 +1019,19 @@ def cli(argv: list[str] | None = None, prog: str = "tokdash") -> int:
             parser.error(f"--dev-seed is only supported by `serve`, not `{args.command}`")
     elif args.dev_seed is not None and not args.dev_fixture:
         parser.error("--dev-seed requires --dev-fixture")
+
+    if args.command == "tui" and (args.json or args.output or args.pretty):
+        parser.error("--json/--pretty/--output belong to `report`/`export`; `tui` is interactive only")
+
+    # Kill the silent all-time fallback at the parse edge for the two new verbs.
+    # `export` keeps its historical permissive --period behavior untouched.
+    if args.command in {"tui", "report"}:
+        from .compute import period_is_recognized
+        if not period_is_recognized(args.period):
+            parser.error(
+                f"Unknown period {args.period!r}; use today, week, month, year, all, "
+                "an integer number of days, or Nd/Nw/Nm/Ny shorthand"
+            )
 
     if args.command == "version":
         print(f"tokdash {__version__}")
@@ -1051,6 +1074,14 @@ def cli(argv: list[str] | None = None, prog: str = "tokdash") -> int:
 
     if args.command == "quota":
         return quota_command(args)
+
+    if args.command == "report":
+        from .tui.report import run_report
+        return run_report(args)
+
+    if args.command == "tui":
+        from .tui.app import run_tui
+        return run_tui(args)
 
     parser.error(f"Unknown command: {args.command}")
     return 2

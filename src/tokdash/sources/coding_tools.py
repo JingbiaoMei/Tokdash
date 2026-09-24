@@ -6981,9 +6981,19 @@ _ROO_MODEL_TAG_WINDOW_MS = 500
 
 # Eviction bound for the per-conversation-file model maps. Roo's corpus grows
 # one directory per task forever, so an unbounded dict here is a slow leak with
-# a year clock. Same cap as _OPENCODE_QUERY_CACHE_MAX above and
-# _ZCODE_SESSIONS_CACHE_MAX in sessions.py; a miss only costs a re-read.
-_ROO_MODEL_CACHE_MAX = 32
+# a year clock.
+#
+# Corpus-sized, like _ROO_SESSION_FILE_CACHE_MAX in sessions.py, and for the same
+# reason: one task is one entry, so a bound BELOW the task count buys no reuse
+# rather than less of it. The map exists to be SHARED between the two surfaces,
+# Overview reading a task's conversation file and the Sessions panel reading that
+# same file minutes later. Measured on a 300-task corpus on a Windows-mounted
+# drive, the previous 32-entry bound re-read all 300 files on the panel's first
+# pass after a sync -- 2.2 s for the all window where a warm map costs 1.2 s, and
+# 3.5 s where it costs 2.2 s -- and left the cache holding a dozen entries at the
+# end of every pass, which is to say nothing carried over. Each entry is one
+# short list of (ts, model) tuples, so the bound itself costs little.
+_ROO_MODEL_CACHE_MAX = 1024
 _roo_model_cache: Dict[str, Tuple[tuple, List[Tuple[int, str]]]] = {}
 
 
@@ -7226,7 +7236,10 @@ def _roo_model_tags(
         # the model off the "unknown" scrapheap.
         return []
     if len(_roo_model_cache) >= _ROO_MODEL_CACHE_MAX:
-        _roo_model_cache.clear()
+        # Oldest out, not everything out. A wholesale clear is what turned a
+        # corpus over the bound into zero sharing, and it is the eviction the
+        # Zed decode cache above already avoids for the same reason.
+        _roo_model_cache.pop(next(iter(_roo_model_cache)), None)
     _roo_model_cache[key] = (sig, tags)
     return tags
 

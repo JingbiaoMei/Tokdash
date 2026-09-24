@@ -112,6 +112,54 @@ def _listing():
     return get_sessions_data("roo_code", "all")
 
 
+def test_the_panel_reuses_the_model_maps_overview_built(monkeypatch, tmp_path, roo_home):
+    """One conversation-file read per task, not one per surface.
+
+    The model map keys on api_conversation_history.json, a file neither surface
+    reads for tokens: Overview reads it during a sync, and the panel reads the
+    SAME file for the SAME task moments later. Sharing is the cache's whole
+    purpose, and a bound under the task count means it never happens. Measured
+    on a 300-task corpus on a Windows-mounted drive, the previous 32-entry bound
+    re-read all 300 files on the panel's first pass after a sync (2.2 s for the
+    all window, 3.5 s for a week window, against 1.2 s and 2.2 s warm), and the
+    map held a dozen entries at the end of every pass.
+    """
+    storage = tmp_path / "storage"
+    ids = [f"task-{i:03d}" for i in range(40)]   # more than the old bound
+    for i, task_id in enumerate(ids):
+        _write(storage, _task(task_id, requests=[req(T0 + 40 + i, 100 + i, 5)]))
+    _setup(monkeypatch, tmp_path, storage)
+
+    entries = RooCodeParser(PricingDatabase()).collect(None, None)
+    assert len(entries) >= len(ids)
+    built = len(_roo_model_cache)
+    assert built == len(ids), (
+        f"Overview left {built} of {len(ids)} model maps behind; a bound under "
+        "the task count shares nothing with the panel")
+
+    reads: list[str] = []
+    monkeypatch.setattr(
+        "tokdash.sources.coding_tools._roo_conversation_tags",
+        lambda path: reads.append(str(path)) or [],
+    )
+    # A cold panel, one TTL later: the scans run again, the maps do not.
+    _sig_cache.clear()
+    sessions._parse_roo_task_file_for_sessions.cache_clear()
+    sessions._read_roo_first_prompt.cache_clear()
+    sessions._load_roo_code_sessions.cache_clear()
+
+    raw = _roo_code_sessions()
+
+    assert len(raw) == len(ids)
+    assert reads == [], (
+        f"the panel re-read {len(reads)} conversation files Overview had already "
+        "parsed; the model map must outlive one surface's caches")
+
+    # And the models still resolve, so the reuse is real and not a silent miss.
+    models = {t["model"] for s in raw.values() for t in s["turns"]}
+    assert models == {MODEL_A}, models
+
+
 def test_a_task_seen_through_two_root_spellings_is_one_session(monkeypatch, tmp_path, roo_home):
     """The panel double counts the same way Overview does, so pin it too.
 

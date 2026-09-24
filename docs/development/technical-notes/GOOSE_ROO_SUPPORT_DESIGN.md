@@ -757,6 +757,19 @@ rewritten:
    accessor in the same request, which is how one Sessions refresh came to scan
    twice. Entries are now stamped when the scan finishes, and the loader that
    needs both halves takes the pair from one call.
+6. **An eviction bound under the corpus size is not a cache, and clearing the
+   whole map at that bound is worse than not caching.** Both apply to the model
+   map, whose bound was the 32 borrowed from `ZCode`, whose entry is one DATE
+   RANGE. A Roo entry is one TASK, so 32 entries cannot hold a 300-task corpus:
+   the wholesale clear ran about nine times a pass, the map held a dozen entries
+   at the end of each, and the panel re-read every `api_conversation_history.json`
+   that Overview had just read. Measured on the Windows-mounted corpus at 600
+   tasks, that cost 2.7 s on a cold `all` read and 2.4 s on a cold `week` read -
+   4.3 s and 2.4 s after the fix, 7.0 s and 4.8 s before it - and 35 ms of every
+   steady-state refresh of a panel whose real cost is 9 ms. The bound is now
+   corpus-sized like `_ROO_SESSION_FILE_CACHE_MAX`, and eviction takes the oldest
+   entry, so an over-cap corpus degrades to the oldest tasks rather than to no
+   sharing at all.
 
 The rule that made the scan cheap applies to anything read per task, and the last
 place it was still being broken was the model map: it keys its cache on
@@ -768,6 +781,18 @@ detection over a corpus of one-file-per-task, plus one read per task whose stamp
 actually moved. `_ROO_SESSION_FILE_CACHE_MAX` is corpus-sized rather than the
 shared 512 because a 600-task corpus recorded zero hits at that bound: every file
 the panel needed had been evicted by the files scanned before it.
+
+That floor is worth quoting rather than gesturing at, because it is what a
+polling dashboard pays repeatedly and it is a property of the mount, not of this
+code. On the same 600-task corpus with every cache warm and only the signature
+TTL expired - the state of a dashboard whose corpus has not changed - one pass
+costs 6.2 s on the Windows-mounted drive, with zero corpus file opens: 600
+directory reads at the roughly 10 ms each that 9p charges. The same corpus on a
+local filesystem pays about 30 ms for the same walk. Nothing in this reader can
+reduce that further, because a rewrite of a task's message file does not touch
+its directory's mtime, so there is no cheaper signal that sees it; `TOKDASH_SIG_TTL`
+is the knob that trades walk frequency for freshness, and it is one number for
+every source rather than one this reader sets for itself.
 
 Goose has the opposite shape, one SQLite file rather than one directory per task,
 so its cost is per row rather than per path operation. Measured on a database

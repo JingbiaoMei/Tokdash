@@ -1081,7 +1081,12 @@ def test_roo_model_cache_is_bounded(monkeypatch, roo_home, tmp_path):
     parser = _parser(monkeypatch, storage)
     parser._parse_all()
 
-    assert len(_roo_model_cache) <= _ROO_MODEL_CACHE_MAX
+    # Overflow evicts the OLDEST entry. A wholesale clear at this bound is what
+    # made a corpus over the bound share nothing, and a bare upper bound would
+    # pass on either: clearing leaves 8 entries here, evicting leaves the bound.
+    assert len(_roo_model_cache) == _ROO_MODEL_CACHE_MAX, (
+        f"overflow left {len(_roo_model_cache)} of {_ROO_MODEL_CACHE_MAX} entries: "
+        "the map must evict its oldest entry, not itself")
 
 
 def test_a_torn_conversation_read_is_not_cached_as_no_model(

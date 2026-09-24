@@ -62,8 +62,15 @@ logger = logging.getLogger(__name__)
 # File-signature caching – avoids repeated rglob / glob.glob + stat() calls
 # when multiple API requests arrive within a short window.
 # ---------------------------------------------------------------------------
-_sig_cache: Dict[str, Tuple[float, tuple]] = {}
+_sig_cache: Dict[str, Tuple[float, float, tuple]] = {}
 _SIG_TTL = float(os.environ.get("TOKDASH_SIG_TTL", "5.0"))  # seconds; 0 to disable
+# How much of a slow scan's cost the resulting memo is worth: one scan's own
+# time is not enough, because the surface that ran it keeps parsing after the
+# scan returns. See _sig_lifetime.
+_SIG_TTL_SCAN_COVERAGE = 2.0
+# ... and the ceiling on that, as a multiple of the configured TTL, so a corpus
+# that got unreasonably slow delays the dashboard instead of pinning it.
+_SIG_TTL_SCAN_HONOUR = 4.0
 _OPENCODE_QUERY_CACHE_MAX = 32  # max date-range entries before eviction
 
 
@@ -108,6 +115,33 @@ def _iter_jsonl_lines(path: Path) -> Iterator[str]:
         yield from handle
 
 
+def _sig_lifetime(scan_seconds: float) -> float:
+    """How long a scan result stays trusted, given what the scan cost.
+
+    A flat TTL is the wrong bound for a corpus whose scan costs MORE than the
+    TTL: the memo expires before the next reader arrives, so it can never be
+    read twice, and every surface pays a full scan. Measured on a 600-task Roo
+    corpus on a Windows-mounted drive -- 6.3 s to scan against a 5.0 s TTL --
+    Overview and the Sessions panel each walked the tree inside one refresh and
+    a warm dashboard had no warm path at all. Honouring one scan's cost makes
+    the memo worth having, and the bound stays proportional: at most
+    ``_SIG_TTL_SCAN_HONOUR`` times the configured TTL, so a corpus that got
+    unreasonably slow delays Overview rather than pinning it to a stale view.
+
+    Covering the scan twice, rather than once, is what makes it useful: the
+    surface that ran the scan spends the rest of its request parsing what the
+    scan found, so a memo worth exactly one scan is often already spent by the
+    time the second surface arrives. ``TOKDASH_SIG_TTL=0`` still means "never
+    reuse".
+    """
+    if _SIG_TTL <= 0:
+        return 0.0
+    return min(
+        _SIG_TTL * _SIG_TTL_SCAN_HONOUR,
+        max(_SIG_TTL, _SIG_TTL_SCAN_COVERAGE * scan_seconds),
+    )
+
+
 def _timed_sigs(cache_key: str, scan_fn) -> tuple:
     """Return file signatures from *scan_fn*, reusing a cached value within TTL.
 
@@ -118,12 +152,18 @@ def _timed_sigs(cache_key: str, scan_fn) -> tuple:
     full walk. Measured on a 600-task Roo corpus on a Windows-mounted drive,
     where one walk costs about 6.5 s against a 5 s TTL: every Sessions request
     scanned twice, 13.3 s for a refresh in which nothing had changed.
+
+    The lifetime comes from :func:`_sig_lifetime`, so a scan slower than the TTL
+    is honoured long enough for the next surface of the same refresh to use it.
     """
-    cached = _sig_cache.get(cache_key)
-    if cached and (_time.monotonic() - cached[0]) < _SIG_TTL:
-        return cached[1]
+    if _SIG_TTL > 0:  # TOKDASH_SIG_TTL=0 means "never reuse", checked at the read
+        cached = _sig_cache.get(cache_key)
+        if cached is not None and (_time.monotonic() - cached[0]) < cached[1]:
+            return cached[2]
+    started = _time.monotonic()
     result = scan_fn()
-    _sig_cache[cache_key] = (_time.monotonic(), result)
+    cost = _time.monotonic() - started
+    _sig_cache[cache_key] = (_time.monotonic(), _sig_lifetime(cost), result)
     return result
 
 
@@ -6781,7 +6821,7 @@ def goose_remember_schema_failure(sig: tuple, message: str) -> None:
 
 # EXCLUSIVE upper bound for a plausible epoch-SECONDS stamp: 9999999999 s is
 # 2286-11-20, far outside any Goose clock. The Sessions window uses the SAME
-# number for an unbounded read (sessions._goose_load_sessions) with the SAME
+# number for an unbounded read (sessions._goose_window_sessions) with the SAME
 # comparison, `created_timestamp < bound`, and that is the point: a row this
 # helper accepts is a row the panel lists, to the second, so no request can be
 # priced on one surface and invisible on the other. Exclusive on purpose - a
@@ -7060,7 +7100,7 @@ _ROO_MODEL_CACHE_MAX = 1024
 _roo_model_cache: Dict[str, Tuple[tuple, List[Tuple[int, str]]]] = {}
 
 
-_roo_roots_cache: Dict[tuple, Tuple[float, List[Path]]] = {}
+_roo_roots_cache: Dict[tuple, Tuple[float, float, List[Path]]] = {}
 
 
 def _roo_roots() -> List[Path]:
@@ -7084,12 +7124,14 @@ def _roo_roots() -> List[Path]:
         os.environ.get("XDG_CONFIG_HOME", ""),
         os.environ.get("APPDATA", ""),
     )
-    now = _time.monotonic()
-    hit = _roo_roots_cache.get(key)
-    if hit is not None and (now - hit[0]) < _SIG_TTL:
-        return list(hit[1])
+    started = _time.monotonic()
+    if _SIG_TTL > 0:  # as in _timed_sigs: the off switch is honoured at the read
+        hit = _roo_roots_cache.get(key)
+        if hit is not None and (started - hit[0]) < hit[1]:
+            return list(hit[2])
     roots = clientpaths.roo_storage_roots()
-    _roo_roots_cache[key] = (now, list(roots))
+    cost = _time.monotonic() - started
+    _roo_roots_cache[key] = (_time.monotonic(), _sig_lifetime(cost), list(roots))
     return roots
 
 

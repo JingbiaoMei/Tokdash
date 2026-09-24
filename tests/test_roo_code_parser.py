@@ -16,6 +16,7 @@ import pytest
 
 from tokdash import clientpaths
 from tokdash.pricing import PricingDatabase
+from tokdash.sources import coding_tools as ct
 from tokdash.sources.coding_tools import (
     BaseParser,
     RooCodeParser,
@@ -648,6 +649,85 @@ def test_the_roots_cache_keys_on_the_variables_the_roots_read(
     second = [str(p) for p in _roo_roots()]        # same TTL, different key
     assert any("/config-b/" in p for p in second)
     assert not any("/config-a/" in p for p in second)
+
+
+class _SteppedClock:
+    """A monotonic clock the test advances, so a slow scan costs no wall time."""
+
+    def __init__(self) -> None:
+        self.now = 1_000.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:  # pragma: no cover - not used here
+        self.now += seconds
+
+
+def test_a_scan_that_costs_more_than_the_ttl_is_still_reused(monkeypatch, tmp_path):
+    """The memo has to outlive the scan that filled it, or nothing reads it.
+
+    ``_SIG_TTL`` is a flat five seconds, which presumes a cheap scan. On a
+    600-task Roo corpus mounted on a Windows filesystem one scan measured 6.3 s,
+    so the entry was stale before Overview finished parsing what the scan had
+    just found, and the Sessions panel -- the second surface of the same refresh
+    -- always walked the tree again. Honouring the cost of one scan is what
+    makes a slow corpus warm at all; the cap keeps a corpus that got
+    unreasonably slow from pinning the dashboard to a stale view.
+    """
+    clock = _SteppedClock()
+    monkeypatch.setattr(ct, "_time", clock)
+    monkeypatch.setattr(ct, "_SIG_TTL", 5.0)
+    ct._sig_cache.clear()
+
+    scans = 0
+
+    def slow_scan():
+        nonlocal scans
+        scans += 1
+        clock.now += 6.3  # one Windows-mounted walk
+        return (("p", 1, 1),)
+
+    first = ct._timed_sigs("corpus", slow_scan)
+    assert scans == 1
+
+    clock.now += 1.0  # Overview parses the corpus the scan just found
+    assert ct._timed_sigs("corpus", slow_scan) == first
+    assert scans == 1, "a memo worth less than the refresh cannot be used"
+
+    clock.now += 5.0  # the Sessions panel of that same refresh arrives
+    assert ct._timed_sigs("corpus", slow_scan) == first
+    assert scans == 1, "the second surface of one refresh must reuse the scan"
+
+    clock.now += 7.0  # past two scans' worth of cost
+    assert ct._timed_sigs("corpus", slow_scan) == first
+    assert scans == 2, "the honoured window is bounded, not indefinite"
+
+    # The cap: a scan far slower than the TTL delays Overview, it does not
+    # freeze it.
+    scans = 0
+
+    def pathological():
+        nonlocal scans
+        scans += 1
+        clock.now += 60.0
+        return (("q", 2, 2),)
+
+    assert ct._timed_sigs("huge", pathological) == (("q", 2, 2),)
+    clock.now += 19.0
+    assert ct._timed_sigs("huge", pathological) == (("q", 2, 2),)
+    assert scans == 1
+    clock.now += 2.0
+    assert ct._timed_sigs("huge", pathological) == (("q", 2, 2),)
+    assert scans == 2
+
+    # And the documented off switch still means "never reuse".
+    monkeypatch.setattr(ct, "_SIG_TTL", 0.0)
+    before = scans
+    ct._timed_sigs("huge", pathological)
+    ct._timed_sigs("huge", pathological)
+    assert scans == before + 2
+    ct._sig_cache.clear()
 
 
 def test_roo_priced_cost_is_tokdash_not_roos(monkeypatch, roo_home, tmp_path):

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import ipaddress
 import json
@@ -21,7 +22,7 @@ from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -50,6 +51,7 @@ from .sessions import (
     get_codex_activity_insights,
     get_codex_session_detail,
     get_codex_sessions_data,
+    get_hermes_analytics,
     get_session_detail,
     get_sessions_data,
     reload_pricing_db,
@@ -2251,6 +2253,117 @@ def get_session(tool: str, session_id: str) -> Dict[str, Any]:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/hermes/analytics")
+def hermes_analytics_endpoint() -> Dict[str, Any]:
+    try:
+        return get_hermes_analytics()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/export/csv")
+def export_csv_endpoint(period: str = "today", tool: str = "all", date_from: Optional[str] = None, date_to: Optional[str] = None) -> Response:
+    import csv, io
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "session_id", "tool", "project", "model", "tokens_in", "tokens_cache",
+        "tokens_out", "tokens_reasoning", "total_tokens", "cost", "cache_hit_rate",
+        "started_at", "display_name"
+    ])
+    
+    tools_to_fetch = [tool] if tool != "all" else ["hermes", "antigravity_cli", "codex", "claude"]
+    for t in tools_to_fetch:
+        try:
+            data = get_sessions_data(t, period=period, date_from=date_from, date_to=date_to)
+            for s in data.get("sessions", []):
+                writer.writerow([
+                    s.get("session_id", ""),
+                    s.get("tool", t),
+                    s.get("project", ""),
+                    s.get("model", ""),
+                    s.get("tokens_in", 0),
+                    s.get("tokens_cache", 0),
+                    s.get("tokens_out", 0),
+                    s.get("tokens_reasoning", 0),
+                    s.get("tokens", 0),
+                    s.get("cost", 0.0),
+                    s.get("cache_hit_rate", 0.0),
+                    s.get("started_at", ""),
+                    s.get("display_name", ""),
+                ])
+        except Exception:
+            continue
+            
+    content = output.getvalue()
+    return Response(
+        content=content,
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=tokdash-export-{period}.csv"}
+    )
+
+
+@app.get("/api/export/markdown")
+def export_markdown_endpoint(period: str = "today", tool: str = "all", date_from: Optional[str] = None, date_to: Optional[str] = None) -> Response:
+    lines = [
+        f"# Tokdash Usage Summary ({period})",
+        "",
+        f"Generated at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        "",
+        "| Session | Tool | Project | Model | Tokens | Cost | Started |",
+        "| :--- | :--- | :--- | :--- | :--- | :--- | :--- |",
+    ]
+    tools_to_fetch = [tool] if tool != "all" else ["hermes", "codex", "claude"]
+    total_tok = 0
+    total_c = 0.0
+    for t in tools_to_fetch:
+        try:
+            data = get_sessions_data(t, period=period, date_from=date_from, date_to=date_to)
+            for s in data.get("sessions", []):
+                tok = s.get("tokens", 0)
+                cost = s.get("cost", 0.0)
+                total_tok += tok
+                total_c += cost
+                title = (s.get("display_name") or s.get("session_id", ""))[:40].replace("|", "-")
+                lines.append(
+                    f"| {title} | {s.get('tool', t)} | {s.get('project', '')} | {s.get('model', '')} | {tok:,} | ${cost:.4f} | {s.get('started_at', '')[:19]} |"
+                )
+        except Exception:
+            continue
+
+    lines.extend([
+        "",
+        f"**Total Tokens:** {total_tok:,}  ",
+        f"**Total Cost:** ${total_c:.4f}  ",
+    ])
+    return Response(
+        content="\n".join(lines),
+        media_type="text/markdown",
+        headers={"Content-Disposition": f"attachment; filename=tokdash-summary-{period}.md"}
+    )
+
+
+@app.get("/api/stream")
+async def sse_stream_endpoint(request: Request):
+    async def event_generator():
+        yield "event: ping\ndata: {\"status\": \"connected\"}\n\n"
+        while True:
+            if await request.is_disconnected():
+                break
+            await asyncio.sleep(15)
+            yield "event: ping\ndata: {\"status\": \"alive\"}\n\n"
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        }
+    )
+
 
 
 # NOTE: the handlers below are intentionally ``async def`` so they run on the event

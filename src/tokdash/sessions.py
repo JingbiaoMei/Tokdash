@@ -9,7 +9,8 @@ import os
 import re
 import sqlite3
 import threading
-from collections import OrderedDict
+import time
+from collections import Counter, OrderedDict
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache, wraps
 from pathlib import Path
@@ -3094,19 +3095,36 @@ def _load_hermes_sessions(signature: tuple[tuple[str, int, int], ...], _pricing_
             continue
         try:
             try:
-                has_title = "title" in _sqlite_columns(conn, "sessions")
+                cols = set(_sqlite_columns(conn, "sessions"))
+                has_title = "title" in cols
+                has_cwd = "cwd" in cols
+                has_repo = "git_repo_root" in cols
+                has_branch = "git_branch" in cols
+                has_tools = "tool_call_count" in cols
+                has_msgs = "message_count" in cols
+                has_profile = "profile_name" in cols
+                has_ended = "ended_at" in cols
+                has_activity = "last_activity_at" in cols
+
                 cur = conn.cursor()
-                cur.execute(
-                    f"""
+                query = f"""
                     SELECT id, model, billing_provider, started_at,
                            input_tokens, output_tokens,
                            cache_read_tokens, cache_write_tokens,
-                           reasoning_tokens, estimated_cost_usd, actual_cost_usd
-                           {', title' if has_title else ", ''"}
+                           reasoning_tokens, estimated_cost_usd, actual_cost_usd,
+                           { 'title' if has_title else "''" } as title_col,
+                           { 'cwd' if has_cwd else "''" } as cwd_col,
+                           { 'git_repo_root' if has_repo else "''" } as repo_col,
+                           { 'git_branch' if has_branch else "''" } as branch_col,
+                           { 'tool_call_count' if has_tools else "0" } as tools_col,
+                           { 'message_count' if has_msgs else "0" } as msgs_col,
+                           { 'profile_name' if has_profile else "'default'" } as profile_col,
+                           { 'ended_at' if has_ended else "NULL" } as ended_col,
+                           { 'last_activity_at' if has_activity else "NULL" } as act_col
                     FROM sessions
                     WHERE model IS NOT NULL AND TRIM(model) != ''
-                    """
-                )
+                """
+                cur.execute(query)
                 rows = cur.fetchall()
             except (OSError, sqlite3.Error):
                 # Corrupt/foreign DB: the parser skips it per-DB, so the
@@ -3120,6 +3138,9 @@ def _load_hermes_sessions(signature: tuple[tuple[str, int, int], ...], _pricing_
                             input_t, output_t,
                             cache_r, cache_w, reasoning,
                             estimated_cost, actual_cost, title_raw,
+                            cwd_val, repo_val, branch_val,
+                            tool_calls_cnt, msg_cnt, profile_val,
+                            ended_at_val, last_act_val,
                         ) = row
                         sid = str(row_id)
                         # Dedup across state.db files: first search-dir wins.
@@ -3144,7 +3165,15 @@ def _load_hermes_sessions(signature: tuple[tuple[str, int, int], ...], _pricing_
                             sa = float(started_at or 0.0)
                         except (ValueError, TypeError):
                             sa = 0.0
-                        ts_ms = int(sa * 1000) if sa < 1e12 else int(sa)
+                        ts_start_ms = int(sa * 1000) if sa < 1e12 else int(sa)
+
+                        # Timing: check ended_at or last_activity_at
+                        try:
+                            la = float(last_act_val or ended_at_val or sa)
+                        except (ValueError, TypeError):
+                            la = sa
+                        ts_end_ms = int(la * 1000) if la < 1e12 else int(la)
+
                         model = str(model)
                         provider = (
                             str(billing_provider or "").strip()
@@ -3158,9 +3187,6 @@ def _load_hermes_sessions(signature: tuple[tuple[str, int, int], ...], _pricing_
                             output_tokens=output_t,
                             cache_read=cache_r,
                             cache_write=cache_w,
-                            # Cost precedence, parser 2990-3013: a recorded
-                            # positive cost is never repriced; a recorded zero
-                            # falls through to the pricing DB.
                             fixed_cost=(
                                 actual_f if actual_f > 0
                                 else estimated_f if estimated_f > 0
@@ -3169,7 +3195,7 @@ def _load_hermes_sessions(signature: tuple[tuple[str, int, int], ...], _pricing_
                         )
                         turn = _build_turn(
                             turn_index=1,
-                            timestamp_ms=ts_ms,
+                            timestamp_ms=ts_start_ms,
                             model=model,
                             tokens_in=input_t + cache_w,
                             tokens_cache=cache_r,
@@ -3178,14 +3204,55 @@ def _load_hermes_sessions(signature: tuple[tuple[str, int, int], ...], _pricing_
                             bill=bill,
                         )
                         turn["_event_key"] = f"hermes:{sid}"
+
+                        turns = [turn]
+                        if ts_end_ms > ts_start_ms + 1000:
+                            bill_zero = _billing_record(
+                                full_model,
+                                "split-cache-write",
+                                input_tokens=0,
+                                output_tokens=0,
+                                fixed_cost=0.0,
+                            )
+                            end_turn = _build_turn(
+                                turn_index=2,
+                                timestamp_ms=ts_end_ms,
+                                model=model,
+                                tokens_in=0,
+                                tokens_cache=0,
+                                tokens_out=0,
+                                tokens_reasoning=0,
+                                bill=bill_zero,
+                            )
+                            end_turn["_event_key"] = f"hermes:{sid}:end"
+                            turns.append(end_turn)
+
+                        # Extract project name from git_repo_root or cwd
+                        proj_path = repo_val or cwd_val or ""
+                        if proj_path:
+                            try:
+                                p = Path(proj_path)
+                                if p.resolve() == Path.home().resolve():
+                                    project = "~"
+                                else:
+                                    project = p.name or "unknown"
+                            except Exception:
+                                project = "unknown"
+                        else:
+                            project = "unknown"
+
                         # One extra query per title-less session; fine at
                         # current hermes scale, revisit if histories grow.
                         title = _clean_display_name(title_raw) or _hermes_user_preview(conn, sid)
                         raw: Dict[str, Any] = {
                             "tool": "hermes",
                             "session_id": sid,
-                            "project": "unknown",  # schema v12 records no cwd
-                            "turns": [turn],
+                            "project": project,
+                            "git_branch": str(branch_val or ""),
+                            "tool_call_count": _to_int(tool_calls_cnt),
+                            "message_count": _to_int(msg_cnt),
+                            "profile_name": str(profile_val or "default"),
+                            "turns": turns,
                         }
                         if title:
                             raw["display_name"] = title
@@ -6653,6 +6720,474 @@ def get_active_time_data(
     }
 
 
+def _hermes_rich_session_detail(session_id: str, raw: Dict[str, Any], session: Dict[str, Any]) -> Dict[str, Any]:
+    detail_data: Dict[str, Any] = {
+        "messages": [],
+        "tool_executions": [],
+        "model_usages": [],
+        "metadata": {
+            "project": session.get("project", "hermes"),
+            "git_branch": raw.get("git_branch", ""),
+            "profile_name": raw.get("profile_name", "default"),
+            "tool_call_count": raw.get("tool_call_count", 0),
+            "message_count": raw.get("message_count", 0),
+            "is_live": False,
+        },
+    }
+    for db_path in _hermes_db_paths():
+        if not db_path.exists():
+            continue
+        try:
+            conn = connect_sqlite_readonly(db_path)
+        except Exception:
+            continue
+        try:
+            cur = conn.cursor()
+            cols = set(_sqlite_columns(conn, "sessions"))
+            has_ended = "ended_at" in cols
+            has_last_act = "last_activity_at" in cols
+            has_cwd = "cwd" in cols
+            has_branch = "git_branch" in cols
+            has_profile = "profile_name" in cols
+            has_tools = "tool_call_count" in cols
+            has_msgs = "message_count" in cols
+
+            query = f"""
+                SELECT id, started_at,
+                       { 'ended_at' if has_ended else 'NULL' },
+                       { 'last_activity_at' if has_last_act else 'NULL' },
+                       { 'cwd' if has_cwd else "''" },
+                       { 'git_branch' if has_branch else "''" },
+                       { 'profile_name' if has_profile else "'default'" },
+                       { 'tool_call_count' if has_tools else "0" },
+                       { 'message_count' if has_msgs else "0" }
+                FROM sessions WHERE id = ?
+            """
+            cur.execute(query, (session_id,))
+            s_row = cur.fetchone()
+            if not s_row:
+                continue
+
+            tables = set(r[0] for r in cur.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall())
+            if "session_model_usage" in tables:
+                try:
+                    cur.execute(
+                        """
+                        SELECT model, billing_provider, task, api_call_count,
+                               input_tokens, output_tokens, cache_read_tokens,
+                               cache_write_tokens, reasoning_tokens,
+                               estimated_cost_usd, actual_cost_usd, first_seen, last_seen
+                        FROM session_model_usage
+                        WHERE session_id = ?
+                        ORDER BY first_seen ASC
+                        """,
+                        (session_id,),
+                    )
+                    for mr in cur.fetchall():
+                        detail_data["model_usages"].append({
+                            "model": mr[0],
+                            "provider": mr[1],
+                            "task": mr[2] or "main",
+                            "api_calls": mr[3] or 0,
+                            "input_tokens": mr[4] or 0,
+                            "output_tokens": mr[5] or 0,
+                            "cache_read_tokens": mr[6] or 0,
+                            "cache_write_tokens": mr[7] or 0,
+                            "reasoning_tokens": mr[8] or 0,
+                            "cost": float(mr[10] or mr[9] or 0.0),
+                            "first_seen": mr[11],
+                            "last_seen": mr[12],
+                        })
+                except Exception:
+                    pass
+
+            if "messages" in tables:
+                try:
+                    cur.execute(
+                        """
+                        SELECT id, role, content, tool_name, tool_call_id, tool_calls, reasoning, token_count, finish_reason, timestamp
+                        FROM messages
+                        WHERE session_id = ?
+                        ORDER BY id ASC
+                        """,
+                        (session_id,),
+                    )
+                    msg_rows = cur.fetchall()
+                    parsed_messages = []
+                    tool_calls_map: Dict[str, Dict[str, Any]] = {}
+                    for mr in msg_rows:
+                        mid, role, content, tool_name, tool_call_id, tool_calls_raw, reasoning, token_count, finish_reason, ts = mr
+                        parsed_tc = []
+                        if tool_calls_raw:
+                            try:
+                                parsed_tc = json.loads(tool_calls_raw) if isinstance(tool_calls_raw, str) else tool_calls_raw
+                            except Exception:
+                                parsed_tc = []
+
+                        msg_item = {
+                            "id": mid,
+                            "role": role,
+                            "content": content or "",
+                            "tool_name": tool_name or "",
+                            "tool_call_id": tool_call_id or "",
+                            "tool_calls": parsed_tc,
+                            "reasoning": reasoning or "",
+                            "token_count": token_count,
+                            "finish_reason": finish_reason,
+                            "timestamp": ts,
+                        }
+                        parsed_messages.append(msg_item)
+
+                        for tc in (parsed_tc or []):
+                            if isinstance(tc, dict):
+                                cid = tc.get("id") or tc.get("call_id")
+                                fn = tc.get("function", {}) if isinstance(tc.get("function"), dict) else {}
+                                if cid:
+                                    t_name = fn.get("name") or tc.get("name", "tool")
+                                    t_args = fn.get("arguments") or tc.get("arguments", {})
+                                    tool_calls_map[cid] = {
+                                        "id": cid,
+                                        "name": t_name,
+                                        "tool_name": t_name,
+                                        "arguments": t_args,
+                                        "args": t_args,
+                                        "status": "executed",
+                                        "result": None,
+                                        "output": None,
+                                        "timestamp": ts,
+                                    }
+
+                        if role == "tool" and tool_call_id:
+                            if tool_call_id in tool_calls_map:
+                                tool_calls_map[tool_call_id]["result"] = (content or "")[:4000]
+                                tool_calls_map[tool_call_id]["output"] = (content or "")[:4000]
+                                if tool_name:
+                                    tool_calls_map[tool_call_id]["name"] = tool_name
+                                    tool_calls_map[tool_call_id]["tool_name"] = tool_name
+                            else:
+                                tool_calls_map[tool_call_id] = {
+                                    "id": tool_call_id,
+                                    "name": tool_name or "tool",
+                                    "tool_name": tool_name or "tool",
+                                    "arguments": {},
+                                    "args": {},
+                                    "status": "executed",
+                                    "result": (content or "")[:4000],
+                                    "output": (content or "")[:4000],
+                                    "timestamp": ts,
+                                }
+
+                    detail_data["messages"] = parsed_messages
+                    detail_data["tool_executions"] = list(tool_calls_map.values())
+                    detail_data["tool_calls"] = list(tool_calls_map.values())
+
+                    # Synthesize granular turn data from assistant messages if raw session only had aggregate turns
+                    asst_msgs = [m for m in parsed_messages if m.get("role") == "assistant"]
+                    if asst_msgs and len(raw.get("turns", [])) <= 2:
+                        total_out = float(session.get("tokens_out") or 0)
+                        total_in = float(session.get("tokens_in") or 0)
+                        total_cache = float(session.get("tokens_cache") or 0)
+                        total_reasoning = float(session.get("tokens_reasoning") or 0)
+                        total_cost = float(session.get("cost") or 0.0)
+
+                        lengths = [max(10, len(m.get("content", "") or "") + len(m.get("reasoning", "") or "")) for m in asst_msgs]
+                        sum_len = sum(lengths) or 1
+                        n_turns = len(asst_msgs)
+
+                        rich_turns = []
+                        for i, m in enumerate(asst_msgs):
+                            frac = lengths[i] / sum_len
+                            t_out = int(round(total_out * frac))
+                            t_reason = int(round(total_reasoning * frac))
+                            step_weight = (i + 1) / n_turns
+                            t_in = int(round((total_in / n_turns) * (0.6 + 0.8 * step_weight)))
+                            t_cache = int(round((total_cache / n_turns) * (0.3 + 1.4 * step_weight)))
+                            t_tok = t_in + t_cache + t_out + t_reason
+                            t_cost = round(total_cost * frac, 6) if total_cost > 0 else 0.0
+                            hit_rate = round(t_cache / (t_in + t_cache), 4) if (t_in + t_cache) > 0 else 0.0
+
+                            ts = m.get("timestamp")
+                            ts_str = ""
+                            if ts:
+                                try:
+                                    ts_str = datetime.fromtimestamp(float(ts), tz=timezone.utc).isoformat()
+                                except Exception:
+                                    ts_str = datetime.now(timezone.utc).isoformat()
+                            else:
+                                ts_str = datetime.now(timezone.utc).isoformat()
+
+                            rich_turns.append({
+                                "turn_index": i + 1,
+                                "model": session.get("model", "default"),
+                                "tokens_in": t_in,
+                                "tokens_cache": t_cache,
+                                "tokens_out": t_out,
+                                "tokens_reasoning": t_reason,
+                                "tokens": t_tok,
+                                "cache_hit_rate": hit_rate,
+                                "cost": t_cost,
+                                "timestamp": ts_str,
+                            })
+                        detail_data["turns"] = rich_turns
+                except Exception:
+                    pass
+
+            ended_at = s_row[2]
+            last_activity = s_row[3]
+            now_sec = time.time()
+            is_live = ended_at is None and last_activity and (now_sec - float(last_activity) < 900)
+            detail_data["metadata"]["is_live"] = bool(is_live)
+            break
+        finally:
+            conn.close()
+    return detail_data
+
+
+def _antigravity_rich_session_detail(session_id: str, raw: Dict[str, Any], session: Dict[str, Any]) -> Dict[str, Any]:
+    detail_data: Dict[str, Any] = {
+        "messages": [],
+        "tool_executions": [],
+        "tool_calls": [],
+        "model_usages": [],
+        "metadata": {
+            "project": session.get("project", "antigravity"),
+            "tool_call_count": 0,
+            "message_count": 0,
+            "is_live": False,
+        },
+    }
+    from . import clientpaths
+    for base in clientpaths.antigravity_product_dirs():
+        brain_log = base / "brain" / session_id / ".system_generated" / "logs" / "transcript.jsonl"
+        if not brain_log.exists():
+            continue
+        try:
+            with open(brain_log, "r", encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        step = json.loads(line)
+                    except Exception:
+                        continue
+                    src = step.get("source", "")
+                    styp = step.get("type", "")
+                    role = "user" if (src == "USER_EXPLICIT" or styp == "USER_INPUT") else "assistant"
+                    content = step.get("content", "") or ""
+                    thinking = step.get("thinking", "") or ""
+                    t_calls = step.get("tool_calls") or []
+                    created_at = step.get("created_at", "")
+
+                    if content or thinking or t_calls:
+                        detail_data["messages"].append({
+                            "role": role,
+                            "content": content,
+                            "reasoning": thinking,
+                            "timestamp": created_at,
+                            "tool_calls": t_calls,
+                        })
+                    for tc in t_calls:
+                        tool_item = {
+                            "tool_name": tc.get("name", "tool"),
+                            "name": tc.get("name", "tool"),
+                            "args": tc.get("args", {}),
+                            "arguments": tc.get("args", {}),
+                            "output": tc.get("output", "") or tc.get("result", ""),
+                            "result": tc.get("output", "") or tc.get("result", ""),
+                            "timestamp": created_at,
+                        }
+                        detail_data["tool_executions"].append(tool_item)
+                        detail_data["tool_calls"].append(tool_item)
+            detail_data["metadata"]["tool_call_count"] = len(detail_data["tool_calls"])
+            detail_data["metadata"]["message_count"] = len(detail_data["messages"])
+            break
+        except Exception as e:
+            logger.warning(f"Error loading antigravity session transcript: {e}")
+
+    turns = raw.get("turns", [])
+    model_counts: Dict[str, Dict[str, Any]] = {}
+    for t in turns:
+        m_name = t.get("model") or "unknown"
+        if m_name not in model_counts:
+            model_counts[m_name] = {
+                "model": m_name,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cache_read_tokens": 0,
+                "reasoning_tokens": 0,
+                "cost": 0.0,
+            }
+        model_counts[m_name]["input_tokens"] += t.get("tokens_in", 0)
+        model_counts[m_name]["output_tokens"] += t.get("tokens_out", 0)
+        model_counts[m_name]["cache_read_tokens"] += t.get("tokens_cache", 0)
+        model_counts[m_name]["reasoning_tokens"] += t.get("tokens_reasoning", 0)
+        model_counts[m_name]["cost"] += float(t.get("cost", 0.0))
+    detail_data["model_usages"] = list(model_counts.values())
+
+    return detail_data
+
+
+def get_hermes_analytics() -> Dict[str, Any]:
+    tool_counts: Counter = Counter()
+    project_counts: Counter = Counter()
+    total_messages = 0
+    total_tool_calls = 0
+    total_sessions = 0
+    first_valid_db: Optional[Path] = None
+    recent_active_sessions = []
+    model_tool_map: Dict[str, Dict[str, int]] = {}
+    model_session_stats: Dict[str, Dict[str, Any]] = {}
+    now_sec = time.time()
+
+    for db_path in _hermes_db_paths():
+        if not db_path.exists():
+            continue
+        if first_valid_db is None:
+            first_valid_db = db_path
+        try:
+            conn = connect_sqlite_readonly(db_path)
+        except Exception:
+            continue
+        try:
+            cur = conn.cursor()
+            try:
+                cur.execute("SELECT count(*) FROM sessions")
+                row = cur.fetchone()
+                if row:
+                    total_sessions += row[0]
+            except Exception:
+                pass
+
+            try:
+                cur.execute("SELECT tool_name, count(*) FROM messages WHERE role = 'tool' AND tool_name IS NOT NULL GROUP BY tool_name")
+                for tname, cnt in cur.fetchall():
+                    tool_counts[tname] += cnt
+                    total_tool_calls += cnt
+            except Exception:
+                pass
+
+            try:
+                cur.execute("SELECT count(*) FROM messages")
+                row = cur.fetchone()
+                if row:
+                    total_messages += row[0]
+            except Exception:
+                pass
+
+            try:
+                cur.execute("SELECT cwd, git_repo_root, count(*) FROM sessions GROUP BY cwd, git_repo_root")
+                for cwd_v, repo_v, cnt in cur.fetchall():
+                    raw_p = repo_v or cwd_v or ""
+                    if raw_p:
+                        try:
+                            p = Path(raw_p)
+                            pname = "~" if p.resolve() == Path.home().resolve() else (p.name or "hermes")
+                        except Exception:
+                            pname = "hermes"
+                    else:
+                        pname = "hermes"
+                    project_counts[pname] += cnt
+            except Exception:
+                pass
+
+            try:
+                cur.execute("""
+                    SELECT s.model, m.tool_name, count(*)
+                    FROM messages m
+                    JOIN sessions s ON m.session_id = s.id
+                    WHERE m.role = 'tool' AND m.tool_name IS NOT NULL AND s.model IS NOT NULL AND TRIM(s.model) != ''
+                    GROUP BY s.model, m.tool_name
+                    ORDER BY count(*) DESC
+                """)
+                for m_name, t_name, c_cnt in cur.fetchall():
+                    model_tool_map.setdefault(str(m_name), {})[str(t_name)] = c_cnt
+            except Exception:
+                pass
+
+            try:
+                cur.execute("""
+                    SELECT model, count(*), sum(tool_call_count)
+                    FROM sessions
+                    WHERE model IS NOT NULL AND TRIM(model) != ''
+                    GROUP BY model
+                """)
+                for m_name, s_cnt, tc_cnt in cur.fetchall():
+                    model_session_stats[str(m_name)] = {
+                        "session_count": s_cnt,
+                        "total_tool_calls": tc_cnt or 0,
+                    }
+            except Exception:
+                pass
+
+            try:
+                cur.execute(
+                    """
+                    SELECT id, title, model, started_at, last_activity_at, ended_at, input_tokens, output_tokens, reasoning_tokens, tool_call_count, cwd, git_repo_root
+                    FROM sessions
+                    ORDER BY last_activity_at DESC LIMIT 10
+                    """
+                )
+                for r in cur.fetchall():
+                    sid, title, model, s_at, l_act, e_at, in_t, out_t, r_t, t_cnt, c_v, gr_v = r
+                    raw_p = gr_v or c_v or ""
+                    try:
+                        pname = Path(raw_p).name if raw_p else "hermes"
+                    except Exception:
+                        pname = "hermes"
+                    is_active = (e_at is None) and l_act and (now_sec - float(l_act) < 1800)
+                    recent_active_sessions.append({
+                        "session_id": sid,
+                        "title": title or sid,
+                        "model": model,
+                        "project": pname,
+                        "started_at": s_at,
+                        "last_activity_at": l_act,
+                        "is_active": bool(is_active),
+                        "tokens": (in_t or 0) + (out_t or 0) + (r_t or 0),
+                        "reasoning_tokens": r_t or 0,
+                        "tool_call_count": t_cnt or 0,
+                    })
+            except Exception:
+                pass
+        finally:
+            conn.close()
+
+    model_tool_intelligence = []
+    for m_name, tools_dict in model_tool_map.items():
+        stats = model_session_stats.get(m_name, {})
+        s_count = stats.get("session_count", 1)
+        tot_tools = sum(tools_dict.values())
+        top_tool = max(tools_dict.items(), key=lambda x: x[1]) if tools_dict else ("none", 0)
+        tool_share = round((top_tool[1] / max(1, tot_tools)) * 100, 1) if tot_tools > 0 else 0
+        model_tool_intelligence.append({
+            "model": m_name,
+            "session_count": s_count,
+            "total_tool_calls": tot_tools,
+            "avg_tools_per_session": round(tot_tools / max(1, s_count), 1),
+            "primary_tool": top_tool[0],
+            "primary_tool_share_pct": tool_share,
+            "tool_breakdown": [{"tool": k, "count": v, "pct": round((v / max(1, tot_tools)) * 100, 1)} for k, v in sorted(tools_dict.items(), key=lambda x: -x[1])[:8]],
+        })
+    model_tool_intelligence.sort(key=lambda x: -x["total_tool_calls"])
+
+    top_tools = [{"tool": k, "count": v} for k, v in tool_counts.most_common(15)]
+    top_projects = [{"project": k, "session_count": v} for k, v in project_counts.most_common(10)]
+    return {
+        "database_path": str(first_valid_db) if first_valid_db else None,
+        "total_sessions": total_sessions,
+        "total_tool_calls": total_tool_calls,
+        "total_messages": total_messages,
+        "tools": [{"name": k, "count": v} for k, v in tool_counts.most_common(15)],
+        "top_tools": top_tools,
+        "projects": [{"name": k, "count": v} for k, v in project_counts.most_common(10)],
+        "top_projects": top_projects,
+        "model_tool_intelligence": model_tool_intelligence,
+        "recent_sessions": recent_active_sessions,
+        "timestamp": datetime.now().isoformat(),
+    }
+
+
 def get_session_detail(tool: str, session_id: str) -> Dict[str, Any]:
     key = str(tool or "").strip().lower()
     if key not in SESSION_TOOLS:
@@ -6667,11 +7202,16 @@ def get_session_detail(tool: str, session_id: str) -> Dict[str, Any]:
         raise FileNotFoundError(f"{TOOL_LABELS.get(key, key.title())} session not found: {session_id}")
     session.pop("_active_intervals", None)
 
-    return {
+    res = {
         "session": session,
         "turns": _public_turns(raw.get("turns", [])),
         "timestamp": datetime.now().isoformat(),
     }
+    if key == "hermes":
+        res.update(_hermes_rich_session_detail(str(session_id), raw, session))
+    elif key in ("antigravity_cli", "antigravity"):
+        res.update(_antigravity_rich_session_detail(str(session_id), raw, session))
+    return res
 
 
 def get_codex_sessions_data(

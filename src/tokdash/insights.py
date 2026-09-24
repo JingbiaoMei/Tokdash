@@ -307,7 +307,20 @@ def compute_insights(
     tracker = CodingToolsUsageTracker()
     if persistent_usage_db_enabled():
         store, stored_sources = _sync_usage_store(tracker)
-        rows.extend(store.insight_rows(since=since, until=until))
+        # sources= is not decoration. _sync_usage_store drops a source whose
+        # sync raised from stored_sources AND _usage_store_live_sources adds it
+        # back for the live read, so reading the store unfiltered would count
+        # that source's stale rows beside the fresh live ones. Every other
+        # surface in compute passes the same list (query_entries,
+        # aggregate_entries, contribution_days); this is the same rule.
+        # An empty list means nothing synced, and an empty IN-list is "no
+        # filter" in _where(), so the store read is skipped rather than opened.
+        if stored_sources:
+            rows.extend(
+                store.insight_rows(
+                    sources=stored_sources, since=since, until=until
+                )
+            )
 
     live_rows, live_sources = _live_insight_rows(since, until, tracker)
     rows.extend(live_rows)

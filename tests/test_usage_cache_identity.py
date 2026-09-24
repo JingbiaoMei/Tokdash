@@ -1692,6 +1692,15 @@ def test_db_sync_is_clean_when_nothing_failed(_isolated_home):
     assert "sync_error" not in status
 
 
+def _break_codex_sync(monkeypatch) -> None:
+    """Codex raises on every read, and the store already holds its rows."""
+
+    def boom(self):  # pragma: no cover - the body is the point
+        raise RuntimeError("read failed")
+
+    monkeypatch.setattr(coding_tools.CodexParser, "_file_signatures", boom)
+
+
 def test_db_resync_refuses_a_partial_rebuild(_isolated_home, monkeypatch):
     """The empty-result guard cannot see this: the count says "healthy"."""
     _write_codex(_isolated_home, "c1")
@@ -1699,11 +1708,12 @@ def test_db_resync_refuses_a_partial_rebuild(_isolated_home, monkeypatch):
     store, _stored = _sync()
     assert [r["source"] for r in store.query_entries()] == ["codex"]
 
-    _break_goose_discovery(monkeypatch)
+    _break_codex_sync(monkeypatch)
     status = cli._resync_usage_database()
 
     assert status["ok"] is False
-    assert "goose" in status["error"]
+    assert "codex" in status["error"]
+    assert status["endangered_sources"] == ["codex"]
     assert status["old_usage_entries"] == 1
     # The live database is the one that was there before, not the partial one.
     intact = UsageEntryStore(usage_db_path())
@@ -1712,6 +1722,113 @@ def test_db_resync_refuses_a_partial_rebuild(_isolated_home, monkeypatch):
     data_dir = usage_db_path().parent
     assert not list(data_dir.glob("*.bak.*"))
     assert not list(data_dir.glob("*.tmp.*"))
+
+
+def test_db_resync_runs_when_a_failed_source_holds_nothing(_isolated_home, monkeypatch):
+    """The refusal must not become a lockout.
+
+    A Goose older than usage_ledger raises on EVERY sync, by design, and holds
+    no goose rows to lose. Refusing on any failure would mean that machine can
+    never rebuild its usage DB - including the corrupt-DB case where resync IS
+    the documented repair. The guard asks whether the current DB has rows for
+    the failed source, and only then refuses.
+    """
+    _write_codex(_isolated_home, "c1")
+    _write_pricing(_rates())
+    _sync()
+
+    _break_goose_discovery(monkeypatch)
+    status = cli._resync_usage_database()
+
+    assert status["ok"] is True
+    assert status["rebuilt_without_sources"] == ["goose"]
+    assert "endangered_sources" not in status
+    assert [r["source"] for r in UsageEntryStore(usage_db_path()).query_entries()] == ["codex"]
+
+
+def test_db_resync_force_overrides_the_refusal(_isolated_home, monkeypatch):
+    """--force: the operator knows better, and the swap still backs up."""
+    # Claude rides along so the rebuild has SOMETHING to rebuild. With codex as
+    # the only source, a forced run would land on the empty-result guard
+    # instead, which refuses for a different and equally good reason - and this
+    # test would be about that guard rather than about --force.
+    _write_codex(_isolated_home, "c1")
+    _write_claude(_isolated_home, "t1")
+    _write_pricing(_rates())
+    _sync()
+
+    _break_codex_sync(monkeypatch)
+    refused = cli._resync_usage_database()
+    assert refused["ok"] is False
+
+    forced = cli._resync_usage_database(force=True)
+
+    assert forced["ok"] is True
+    assert forced["forced_despite_sync_failures"] == ["codex"]
+    assert forced["sync_failures"] == ["codex"]     # survives the swap, in the report
+    data_dir = usage_db_path().parent
+    assert list(data_dir.glob("*.bak.*")), "the previous DB must still be recoverable"
+
+
+def test_db_resync_still_repairs_a_corrupt_database_with_a_sick_source(
+    _isolated_home, monkeypatch
+):
+    """Unreadable old DB = nothing to lose, even for a source that raises.
+
+    This is the combination the guard would have made fatal: the repair path
+    itself, on a machine whose Goose also happens to fail.
+    """
+    _write_codex(_isolated_home, "c1")
+    _write_pricing(_rates())
+    _sync()
+    path = usage_db_path()
+    path.write_bytes(b"not a sqlite file at all")
+
+    _break_goose_discovery(monkeypatch)
+    status = cli._resync_usage_database()
+
+    assert status["ok"] is True
+    assert [r["source"] for r in UsageEntryStore(path).query_entries()] == ["codex"]
+
+
+def test_insights_do_not_count_a_failed_source_twice(_isolated_home, monkeypatch):
+    """Stale stored rows beside a live read is a double count, not a fallback.
+
+    A source whose sync raised is dropped from stored_sources and answered from
+    the live parsers instead - which is right, and which only works if the store
+    read is filtered by the same list. insight_rows() took a sources= argument
+    and compute_insights() was not passing it, so the failed source's OLD rows
+    were added to whatever the live read produced. Overview moved; insights did
+    not, because the stale rows had nowhere to go.
+    """
+    from tokdash.insights import compute_insights
+
+    _write_codex(_isolated_home, "c1", turns=3)
+    _write_pricing(_rates())
+    compute.run_local_coding_tools_json([])          # warms the store
+    store = UsageEntryStore(usage_db_path())
+    assert int(store.status()["usage_entries"]) > 0, "needs stored rows to double count"
+
+    def tokens(rows):
+        return sum(
+            int(r["input"] or 0) + int(r["cacheRead"] or 0)
+            + int(r["cacheWrite"] or 0) + int(r["output"] or 0)
+            for r in rows
+        )
+
+    stale = tokens(store.query_entries(sources=["codex"]))
+    assert stale > 0, "needs rows that could be counted twice"
+
+    _break_codex_sync(monkeypatch)
+    overview = compute.run_local_coding_tools_json([])
+    insights = compute_insights(period="all", facets="tools")
+
+    # The live read raises too, so the healthy answer for codex is "nothing",
+    # on both surfaces. Before the filter, insights showed the stale total here
+    # while Overview showed the source as unavailable.
+    assert [e for e in overview["entries"] if e["source"] == "codex"] == []
+    tools = {row["tool"]: int(row["tokens"]) for row in insights["tools"]["ranked"]}
+    assert tools.get("codex", 0) == 0, f"insights carried {tools.get('codex')} stale tokens"
 
 
 def test_db_sync_exits_nonzero_when_a_source_failed(_isolated_home, monkeypatch, capsys):

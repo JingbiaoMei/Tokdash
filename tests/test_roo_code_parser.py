@@ -21,9 +21,11 @@ from tokdash.sources.coding_tools import (
     RooCodeParser,
     _roo_model_cache,
     _roo_model_for,
+    _roo_roots,
     _roo_roots_cache,
     _sig_cache,
     parse_roo_task_file,
+    roo_task_file_signatures,
     roo_task_rows,
 )
 from tokdash.usage_store import UsageFileVanished
@@ -33,19 +35,25 @@ T0 = 1_789_932_971_243  # epoch ms, the unit Roo stamps
 
 def req(ts, tokens_in, tokens_out, cache_reads=0, cache_writes=0, cost=0,
         protocol="openai"):
-    """One completed api_req_started message, as Roo writes it."""
+    """One completed api_req_started message, as Roo writes it.
+
+    protocol=None omits apiProtocol altogether, which is the shape of a row
+    from before the field existed.
+    """
+    payload = {
+        "tokensIn": tokens_in,
+        "tokensOut": tokens_out,
+        "cacheWrites": cache_writes,
+        "cacheReads": cache_reads,
+        "cost": cost,
+    }
+    if protocol is not None:
+        payload["apiProtocol"] = protocol
     return {
         "type": "say",
         "say": "api_req_started",
         "ts": ts,
-        "text": json.dumps({
-            "apiProtocol": protocol,
-            "tokensIn": tokens_in,
-            "tokensOut": tokens_out,
-            "cacheWrites": cache_writes,
-            "cacheReads": cache_reads,
-            "cost": cost,
-        }),
+        "text": json.dumps(payload),
     }
 
 
@@ -471,6 +479,174 @@ def test_roo_anthropic_row_that_fits_both_readings_stays_inclusive(
     entry = _entries(_parser(monkeypatch, storage))[0]
 
     assert (entry["input"], entry["cacheRead"]) == (412, 49_500)
+
+
+def test_a_row_with_no_protocol_stamp_is_still_read_the_old_way(
+    monkeypatch, roo_home, tmp_path
+):
+    """Rows from before the apiProtocol field exist cannot opt out of the fix.
+
+    The discriminant is about the numbers, not about Roo's own label, so a row
+    with no apiProtocol key at all is still recognised as pre-3.29.5 when its
+    tokensIn cannot contain its cache. Gating on the stamp would silently clamp
+    exactly these rows back to 1,023 tokens.
+    """
+    storage = tmp_path / "storage"
+    _write_task(
+        storage,
+        "task-noprotocol",
+        [req(T0, 412, 611, cache_reads=49_500, protocol=None)],
+        [env_user(T0 + 20, "claude-sonnet-4-5")],
+    )
+    entry = _entries(_parser(monkeypatch, storage))[0]
+
+    assert (entry["input"], entry["cacheRead"], entry["cacheWrite"], entry["output"]) == (
+        412, 49_500, 0, 611,
+    )
+
+
+def test_a_bedrock_row_stamped_openai_is_read_the_old_way(
+    monkeypatch, roo_home, tmp_path
+):
+    """Roo's own protocol label is wrong in the direction that matters.
+
+    Bedrock and Vertex-Claude requests were stamped "openai" until upstream PR
+    #6019, so a row that says openai can still be an Anthropic-family row whose
+    tokensIn excludes the cache. This is the second reason the rule does not
+    consult the stamp: trusting it would re-clamp precisely the rows this fix
+    exists for.
+    """
+    storage = tmp_path / "storage"
+    _write_task(
+        storage,
+        "task-bedrock",
+        [req(T0, 412, 611, cache_reads=49_500, cache_writes=1_000, protocol="openai")],
+        [env_user(T0 + 20, "claude-sonnet-4-5")],
+    )
+    entry = _entries(_parser(monkeypatch, storage))[0]
+
+    assert (entry["input"], entry["cacheRead"], entry["cacheWrite"], entry["output"]) == (
+        412, 49_500, 1_000, 611,
+    )
+
+
+def test_the_task_signature_folds_in_its_model_sibling(monkeypatch, roo_home, tmp_path):
+    """A late <model> tag must re-price the row that needed it.
+
+    The model lives in api_conversation_history.json and Roo writes that file on
+    its own schedule, so a task can gain its first tag AFTER its last request.
+    ui_messages.json never changes again once a task is finished, so a signature
+    over the token file alone would leave the stored row at "unknown" and 0.00
+    for the life of the index. The sibling is therefore FOLDED into the task's
+    one signature entry - max mtime, summed size, the _sqlite_db_signature shape
+    for sidecars - rather than becoming an entry of its own, which would fight
+    the task's task-scoped entry keys over the same stored row.
+    """
+    storage = tmp_path / "storage"
+    task = _write_task(
+        storage,
+        "task-late-tag",
+        [req(T0, 1000, 200, cache_reads=600)],
+        None,
+    )
+    monkeypatch.setenv("TOKDASH_ROO_STORAGE_DIR", str(storage))
+    _sig_cache.clear()
+    before = roo_task_file_signatures()
+    assert len(before) == 1
+
+    (task / "api_conversation_history.json").write_text(
+        json.dumps([env_user(T0 + 20, "claude-sonnet-4-5")]), encoding="utf-8"
+    )
+    _sig_cache.clear()
+    after = roo_task_file_signatures()
+
+    assert len(after) == 1                      # still ONE entry per task
+    assert after[0][0] == before[0][0]          # same path: the token file
+    assert after[0][1:] != before[0][1:]        # but the stamp moved
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlink semantics are POSIX here")
+def test_one_task_under_two_spellings_is_discovered_once(monkeypatch, roo_home, tmp_path):
+    """Two roots, one tasks/ tree: one task, one entry.
+
+    The second root is a symlinked tasks/, which is how a relocated
+    customStoragePath or a bind mount actually looks. Discovery canonicalises the
+    tasks/ TREE once rather than resolving every task directory, so this costs
+    one realpath call per root and still catches all of it.
+    """
+    real = tmp_path / "real"
+    _write_task(real, "task-x", [req(T0, 1000, 200, cache_reads=600)],
+                [env_user(T0 + 20, "m")])
+    alias = tmp_path / "alias"
+    alias.mkdir()
+    (alias / "tasks").symlink_to(real / "tasks", target_is_directory=True)
+
+    parser = _parser(monkeypatch, real)              # one root, for the caches
+    # ... then both spellings of the same tree. The override is set after the
+    # parser was built because the thing under test is the enumeration, which
+    # happens on the first scan, not at construction.
+    monkeypatch.setenv("TOKDASH_ROO_STORAGE_DIR", f"{real},{alias}")
+    _sig_cache.clear()
+    _roo_roots_cache.clear()
+    entries = _entries(parser)
+
+    assert len(entries) == 1
+    assert entries[0]["input"] == 400
+
+
+def test_parse_all_folds_two_emissions_of_one_entry_id(monkeypatch, roo_home, tmp_path):
+    """The last line of defence, pinned directly.
+
+    Roo's entry keys are roo_code:{taskId}:{ts}, so any path that hands the
+    parser one task twice bills the same request twice on the live surface. The
+    store absorbs it through its unique index, and that asymmetry is the reason
+    this fold exists: live and stored totals have to be one number. Discovery
+    already dedupes by task id, so this is defence in depth - hence the doubled
+    signature list rather than a contrived filesystem.
+    """
+    storage = tmp_path / "storage"
+    _write_task(storage, "task-fold", [req(T0, 1000, 200, cache_reads=600)],
+                [env_user(T0 + 20, "m")])
+    monkeypatch.setenv("TOKDASH_ROO_STORAGE_DIR", str(storage))
+    parser = _parser(monkeypatch, storage)
+    sigs = parser._file_signatures()
+    assert len(sigs) == 1
+    monkeypatch.setattr(parser, "_file_signatures", lambda: tuple(list(sigs) * 2))
+
+    entries = parser._parse_all()
+
+    assert len(entries) == 1
+    assert entries[0]["input"] == 400
+
+
+def test_the_roots_cache_keys_on_the_variables_the_roots_read(
+    monkeypatch, roo_home, tmp_path
+):
+    """A relocated ~/.config must not inherit the previous root list.
+
+    _roo_roots() memoises the enumeration for the same short TTL the signature
+    scan uses, because on WSL the fan-out is a Windows round trip per candidate.
+    The key has to name what actually decides the set: the roots read
+    XDG_CONFIG_HOME for the desktop trees, and keying on XDG_DATA_HOME instead
+    would serve a stale list for the whole TTL after a relocation.
+    """
+    a = tmp_path / "config-a"
+    b = tmp_path / "config-b"
+    for base in (a, b):
+        storage = base / "Code" / "User" / "globalStorage" / clientpaths._ROO_EXTENSION_ID
+        _write_task(storage / "tasks", "task-x", [req(T0, 100, 5)],
+                    [env_user(T0 + 20, "m")])
+
+    monkeypatch.delenv("TOKDASH_ROO_STORAGE_DIR", raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(a))
+    _roo_roots_cache.clear()
+    first = [str(p) for p in _roo_roots()]
+    assert any("/config-a/" in p for p in first)
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(b))
+    second = [str(p) for p in _roo_roots()]        # same TTL, different key
+    assert any("/config-b/" in p for p in second)
+    assert not any("/config-a/" in p for p in second)
 
 
 def test_roo_priced_cost_is_tokdash_not_roos(monkeypatch, roo_home, tmp_path):

@@ -31,6 +31,7 @@ from .pricing import PricingDatabase
 from .sources.coding_tools import (
     CODEX_DEFAULT_MODEL,
     AntigravityCLIParser,
+    BaseParser,
     HermesParser,
     KimiParser,
     QoderIdeParser,
@@ -57,7 +58,7 @@ from .sources.coding_tools import (
     qoder_cli_runtime_signature,
     qwen_file_signatures,
     qwen_session_file,
-    roo_task_file_signatures,
+    roo_signature_scan,
     roo_task_rows,
     search_dir_claim_key,
     split_goose_cache_inclusive_input,
@@ -6391,10 +6392,16 @@ def _goose_load_sessions(
     sessions: Dict[str, Dict[str, Any]] = {}
     for row in ledger_rows:
         session_id = str(row["session_id"])
-        input_total = int(row["input_tokens"] or 0)
-        output_t = int(row["output_tokens"] or 0)
-        cache_r = int(row["cache_read_tokens"] or 0)
-        cache_w = int(row["cache_write_tokens"] or 0)
+        # BaseParser._i, not int(): a column holding anything non-numeric (a
+        # TEXT token count from a Goose bug or a half-finished migration) reads
+        # as 0 here exactly as it does in GooseParser._parse_db, and exactly as
+        # SQLite's own arithmetic reads it in the keep-guard above. A bare int()
+        # raised out of the loader, and the raise cost the WHOLE Goose panel -
+        # one junk value in one row is a missing number, not a missing tool.
+        input_total = BaseParser._i(row["input_tokens"])
+        output_t = BaseParser._i(row["output_tokens"])
+        cache_r = BaseParser._i(row["cache_read_tokens"])
+        cache_w = BaseParser._i(row["cache_write_tokens"])
         # The parser's keep-guard, so a zero-token row is not a turn here and
         # is not an entry in Overview either. The same guard runs in the SQL
         # above, where it matters for a second reason: the duration rank has to
@@ -6472,7 +6479,7 @@ def _goose_load_sessions(
         # v6 captures with no is_compaction row at all, so this is defensive.
         if not int(row["is_compaction"] or 0):
             durations = (elapsed_by_session.get(session_id) or {}).get(
-                (int(row["input_tokens"] or 0), int(row["output_tokens"] or 0))
+                (BaseParser._i(row["input_tokens"]), BaseParser._i(row["output_tokens"]))
             )
             index = int(row["sig_rank"]) - 1
             if durations is not None and 0 <= index < len(durations):
@@ -6491,27 +6498,27 @@ def _goose_load_sessions(
         raw = sessions.get(session_id)
         if raw is None:
             continue
-        # The same signature match as the turns above, so a session with an
-        # unpaired row somewhere earlier still hands over its measured edge.
-        # And still never a bare boundary EVENT without a measured duration: a
-        # stamp with no work is charged the capped inter-event gap, which would
-        # bill idle time the source never measured. A compaction row is not
-        # matched here either, for the reason in the turns loop; a session whose
-        # boundary row happens to be one loses that edge, which is an
-        # undercount on one session's active time and not a wrong number.
+        # A source-windowing loader owes the window its closing edge, measured
+        # or not. Requiring a matched duration was the first cut and it was
+        # wrong in the worst place: the fallback path, the one most likely to
+        # hold an unmatched row, became the one path that could not report a
+        # session still running when the window closed. An unmatched stamp is
+        # charged the SAME capped inter-event gap the fallback gives every
+        # in-window turn - that is the contract - and ZCode hands its edge over
+        # in exactly this shape, event always and work only when measured.
+        # Compaction rows still get nothing, for the reason in the turns loop.
         if int(edge["is_compaction"] or 0):
             continue
-        durations = (elapsed_by_session.get(session_id) or {}).get(
-            (int(edge["input_tokens"] or 0), int(edge["output_tokens"] or 0))
-        )
-        index = int(edge["sig_rank"]) - 1
         edge_ts_ms = _goose_ts_to_ms(edge["created_timestamp"])
-        if durations is None or not 0 <= index < len(durations):
-            continue
         if edge_ts_ms is None:
             continue
         raw["_next_event_ms"] = edge_ts_ms
-        raw["_next_work_ms"] = int(durations[index])
+        durations = (elapsed_by_session.get(session_id) or {}).get(
+            (BaseParser._i(edge["input_tokens"]), BaseParser._i(edge["output_tokens"]))
+        )
+        index = int(edge["sig_rank"]) - 1
+        if durations is not None and 0 <= index < len(durations):
+            raw["_next_work_ms"] = int(durations[index])
 
     return sessions
 
@@ -6604,41 +6611,27 @@ def _goose_store(
 # ---------------------------------------------------------------------------
 
 
-# The two sidecars a Roo session row is assembled from, beside its token file.
-_ROO_SIDECARS = ("history_item.json", "api_conversation_history.json")
+# The sidecar stamps the Roo cache key needs come from roo_sidecar_file_signatures()
+# in coding_tools, produced by the SAME scan as the task signatures below. That is
+# deliberate: history_item.json carries the title and workspace and
+# api_conversation_history.json carries the model, so both must invalidate this
+# view, but stat-ing them per task per request to do it cost two Windows round
+# trips per task on a WSL /mnt/c corpus. One readdir per task answers both
+# surfaces at once, and the two lists can no more disagree about the task set than
+# they can run on different invalidation clocks.
 
 
-def _roo_sidecar_signatures(file_sigs: tuple) -> tuple:
-    """Sign the sidecar files beside each signed task file.
-
-    Derived from file_sigs rather than by re-globbing, so the loader and the
-    parser can never be looking at different task sets.
-
-    history_item.json carries the title and the workspace, so an edit there
-    must invalidate a cached view even when no token file changed.
-
-    api_conversation_history.json is the OTHER half of every turn: the model
-    comes from it, and Roo writes it on its own schedule, so a model switch or
-    a late-arriving record leaves the task file's signature alone. It rides in
-    this CACHE key while RooCodeParser._file_signatures deliberately keeps it
-    out of the SYNC signature - the store is unique on (source, entry_key) and
-    an entry-emitting second path would fight the first over the row. An
-    in-memory view has no such fight, and without it the panel would keep
-    pricing turns under a model Roo has since moved on from.
-    """
-    sigs: list = []
-    for path_str, _mtime_ns, _size in file_sigs:
-        for sidecar in _ROO_SIDECARS:
-            path = Path(path_str).parent / sidecar
-            try:
-                st = path.stat()
-            except OSError:
-                continue
-            sigs.append((str(path), st.st_mtime_ns, st.st_size))
-    return tuple(sorted(sigs))
+# Corpus-sized, not the shared 512, and measured rather than guessed: one Roo
+# task is one file, so the bound has to exceed the number of tasks or the panel
+# gets no reuse at all. At the default bound a 600-task corpus recorded ZERO
+# hits across a whole rebuild - every file it needed had been evicted by the
+# files scanned before it - and one request cost 3.4 s on a Windows-mounted
+# drive where the same request with a working cache costs milliseconds. Rows per
+# task are a handful of dicts, so the bound costs little.
+_ROO_SESSION_FILE_CACHE_MAX = 1024
 
 
-@_cached_session_parser()
+@_cached_session_parser(maxsize=_ROO_SESSION_FILE_CACHE_MAX)
 def _parse_roo_task_file_for_sessions(
     path_str: str, _mtime_ns: int, _size: int, _pricing_sig: tuple,
     _conversation_sig: tuple = (),
@@ -6650,12 +6643,19 @@ def _parse_roo_task_file_for_sessions(
     empty parse would hide the task for the life of the process.
 
     _conversation_sig is the sibling api_conversation_history.json signature,
-    unused in the body and load-bearing in the key. The model these rows carry
-    was read from THAT file, so a cache entry may not outlive it: Roo rewrites
-    the conversation record on its own schedule, and a key built from the task
-    file alone would keep serving a model Roo has since moved on from.
+    load-bearing twice over. In the key: the model these rows carry was read
+    from THAT file, so a cache entry may not outlive it, because Roo rewrites
+    the conversation record on its own schedule and a key built from the task
+    file alone would keep serving a model Roo has since moved on from. In the
+    body: it is the stamp the model map caches itself on, handed over rather
+    than re-probed, which is one Windows round trip per task not paid per
+    rebuild. See _roo_sibling_stamp.
     """
-    rows = roo_task_rows(Path(path_str), unavailable=_SessionFileUnavailable)
+    rows = roo_task_rows(
+        Path(path_str),
+        unavailable=_SessionFileUnavailable,
+        conversation_sig=tuple(_conversation_sig) or None,
+    )
     if not rows:
         return []
     task_id = Path(path_str).parent.name
@@ -6669,7 +6669,7 @@ def _parse_roo_task_file_for_sessions(
     ]
 
 
-@_cached_session_parser()
+@_cached_session_parser(maxsize=_ROO_SESSION_FILE_CACHE_MAX)
 def _read_roo_first_prompt(
     path_str: str, _mtime_ns: int, _size: int, _pricing_sig: tuple
 ) -> str:
@@ -6696,12 +6696,29 @@ def _read_roo_first_prompt(
     return ""
 
 
-def _roo_history_item(task_dir: Path) -> Dict[str, Any]:
+@_cached_session_parser(maxsize=_ROO_SESSION_FILE_CACHE_MAX)
+def _read_roo_history_item(
+    path_str: str, _mtime_ns: int, _size: int, _pricing_sig: tuple
+) -> Dict[str, Any]:
+    """One history_item.json: the task's title, workspace and parent link.
+
+    Cached on the file's own signature, which the shared Roo scan already
+    collected, because every session in the panel needs this file and the panel
+    rebuilds whenever ANY task in the corpus changes. Read straight off disk
+    that is one open per session per rebuild; on a Windows-mounted corpus the
+    rebuild that changed one task cost 15.4 s, and reading every task's label
+    was the larger part of it.
+
+    A failed read raises rather than caching an empty dict, for the same reason
+    the token file does: a finished task's signature never moves again, so a
+    cached empty title would stay empty for the life of the process. The caller
+    treats the miss as "no title", which is what an absent file already means.
+    """
     try:
-        with open(task_dir / "history_item.json", "r", encoding="utf-8") as handle:
+        with open(path_str, "r", encoding="utf-8") as handle:
             doc = json.load(handle)
-    except (OSError, ValueError):
-        return {}
+    except (OSError, ValueError) as exc:
+        raise _SessionFileUnavailable(path_str) from exc
     return doc if isinstance(doc, dict) else {}
 
 
@@ -6711,11 +6728,15 @@ def _load_roo_code_sessions(
 ) -> Dict[str, Dict[str, Any]]:
     by_task: Dict[str, list] = {}
     source_of_task: Dict[str, tuple] = {}
-    conversation_sig = dict(
-        (entry[0], (entry[1], entry[2]))
-        for entry in _history_sigs
-        if entry[0].endswith("api_conversation_history.json")
-    )
+    # Both sidecar stamps come from the shared scan's signature tuple, so the
+    # two files that are not the token file still invalidate this view, and
+    # neither is opened again unless its own stamp moved.
+    sidecar_sig = {entry[0]: (entry[1], entry[2]) for entry in _history_sigs}
+    conversation_sig = {
+        path: stamp
+        for path, stamp in sidecar_sig.items()
+        if path.endswith("api_conversation_history.json")
+    }
     transient_miss = False
     for path_str, mtime_ns, size in file_sigs:
         sibling = str(Path(path_str).parent / "api_conversation_history.json")
@@ -6745,7 +6766,14 @@ def _load_roo_code_sessions(
 
     sessions: Dict[str, Dict[str, Any]] = {}
     for task_id, rows in sorted(by_task.items()):
-        history = _roo_history_item(Path(next(r["_task_dir"] for r in rows)))
+        label_path = str(Path(next(r["_task_dir"] for r in rows)) / "history_item.json")
+        stamp = sidecar_sig.get(label_path)
+        history = (
+            _parse_session_file(
+                _read_roo_history_item, label_path, stamp[0], stamp[1], _pricing_sig
+            )
+            or {}
+        ) if stamp else {}
         if history.get("parentTaskId"):
             continue  # a delegated child: billed, but not a session you started
         rows.sort(key=lambda row: int(row["ts"]))
@@ -6799,10 +6827,13 @@ def _load_roo_code_sessions(
 
 
 def _roo_code_sessions() -> Dict[str, Dict[str, Any]]:
-    file_sigs = roo_task_file_signatures()
-    return _load_roo_code_sessions(
-        file_sigs, _roo_sidecar_signatures(file_sigs), _pricing_signature()
-    )
+    # ONE scan, unpacked. Asking for the task signatures and the sidecar
+    # signatures as two calls reads the same cache entry twice, which is free
+    # only while the entry is warm: a corpus whose walk exceeds the TTL re-walks
+    # it on the second call, and this did exactly that (two 6.5 s walks for one
+    # request that needed the data once).
+    task_sigs, sidecar_sigs = roo_signature_scan()
+    return _load_roo_code_sessions(task_sigs, sidecar_sigs, _pricing_signature())
 
 
 def _raw_sessions_for_tool(

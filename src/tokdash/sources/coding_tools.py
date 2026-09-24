@@ -107,13 +107,21 @@ def _iter_jsonl_lines(path: Path) -> Iterator[str]:
 
 
 def _timed_sigs(cache_key: str, scan_fn) -> tuple:
-    """Return file signatures from *scan_fn*, reusing a cached value within TTL."""
-    now = _time.monotonic()
+    """Return file signatures from *scan_fn*, reusing a cached value within TTL.
+
+    The clock runs from the END of the scan. Timing it from the start meant a
+    scan slower than the TTL was born expired: the next caller found a stamp
+    already older than _SIG_TTL and scanned again, so a slow corpus never got
+    served from cache at all, and two surfaces asking in one request each paid a
+    full walk. Measured on a 600-task Roo corpus on a Windows-mounted drive,
+    where one walk costs about 6.5 s against a 5 s TTL: every Sessions request
+    scanned twice, 13.3 s for a refresh in which nothing had changed.
+    """
     cached = _sig_cache.get(cache_key)
-    if cached and (now - cached[0]) < _SIG_TTL:
+    if cached and (_time.monotonic() - cached[0]) < _SIG_TTL:
         return cached[1]
     result = scan_fn()
-    _sig_cache[cache_key] = (now, result)
+    _sig_cache[cache_key] = (_time.monotonic(), result)
     return result
 
 
@@ -6716,11 +6724,14 @@ class GooseSchemaError(RuntimeError):
     ``usage_ledger``, so this reader cannot account for it."""
 
 
-# Upper bound for a plausible epoch-SECONDS stamp: 9999999999 s is 2286-11-20,
-# far outside any Goose clock. The Sessions window uses the SAME number for an
-# unbounded read (sessions._goose_load_sessions), and that is the point: the
-# parser counts a row this helper accepts and the panel lists a row below the
-# bound, so no request can be priced on one surface and invisible on the other.
+# EXCLUSIVE upper bound for a plausible epoch-SECONDS stamp: 9999999999 s is
+# 2286-11-20, far outside any Goose clock. The Sessions window uses the SAME
+# number for an unbounded read (sessions._goose_load_sessions) with the SAME
+# comparison, `created_timestamp < bound`, and that is the point: a row this
+# helper accepts is a row the panel lists, to the second, so no request can be
+# priced on one surface and invisible on the other. Exclusive on purpose - a
+# `<=` here against a `<` there is an off-by-one that leaves exactly one
+# timestamp (this one) on one surface only.
 _GOOSE_MAX_EPOCH_SECONDS = 9_999_999_999
 
 
@@ -6738,7 +6749,7 @@ def _goose_ts_to_ms(value: Any) -> Optional[int]:
         seconds = int(value)
     except (TypeError, ValueError):
         return None
-    if seconds <= 0 or seconds > _GOOSE_MAX_EPOCH_SECONDS:
+    if seconds <= 0 or seconds >= _GOOSE_MAX_EPOCH_SECONDS:
         return None
     return seconds * 1000
 
@@ -6765,8 +6776,16 @@ class GooseParser(BaseParser):
     Table: usage_ledger — one row per model request, model on the row, so a
     mixed-model session prices per request. Accounting rules (see
     docs/development/technical-notes/GOOSE_ROO_SUPPORT_DESIGN.md):
-      - input_tokens is INCLUSIVE of the cached slice, so the entry bills
-        max(0, input - cache_read) as fresh input and cacheRead separately.
+      - input_tokens is INCLUSIVE of BOTH cache slices - the Anthropic path
+        adds them in Usage::from_cache_exclusive_input and the OpenAI path keeps
+        prompt_tokens - so the entry bills
+        max(0, input - cache_read - cache_write) as fresh input and passes
+        cacheRead and cacheWrite through as their own buckets. Subtracting only
+        the read side billed every cache write twice.
+      - rows whose cost_source is 'carried_forward' are Goose's own backfill of
+        pre-ledger history, stamped with the time of the NEXT request under no
+        model; they are not billed here, and on an imported session those tokens
+        already belong to the tool that produced them.
       - output_tokens is gross. Goose persists no reasoning split anywhere
         (no column, and no reasoning field in messages.metadata_json.usage),
         so reasoning stays 0 and output is billed whole rather than guessed.
@@ -7008,30 +7027,118 @@ def roo_task_file_signatures() -> tuple:
     two can never see different task sets or run on different invalidation
     clocks, the way cline_message_file_signatures() serves Cline's two callers.
 
-    Only ui_messages.json appears here. api_conversation_history.json is read
-    for the model tag and must stay out: usage_entries is unique on
-    (source, entry_key) and Roo's keys are task-scoped, so a second signature
-    path emitting the same keys would fight the first over one stored row, and
-    deleting either file would erase the other's usage.
+    One entry per task, keyed on ui_messages.json. api_conversation_history.json
+    is folded INTO that entry's stamp (max mtime, summed size, the
+    _sqlite_db_signature shape for sidecars) rather than appearing as an entry of
+    its own: usage_entries is unique on (source, entry_key) and Roo's keys are
+    task-scoped, so a second entry-emitting path would fight the first over one
+    stored row, and deleting either file would erase the other's usage. Folding
+    keeps the invalidation without the fight, which is what makes a model tag
+    that arrives after its task's last request reach Overview on the next sync
+    instead of sitting at "unknown" for the life of the row.
+
+    Also the Sessions loader's sidecar signatures, from the SAME scan: see
+    roo_sidecar_file_signatures() and roo_signature_scan().
 
     Cached under a key naming the roots, so Overview and Sessions share one
     scan and one invalidation clock rather than each paying the full tree walk.
+    The memoised root list is passed INTO the scan as well: taking it only for
+    the key and then re-enumerating the trees inside the walk made one refresh
+    pay the /mnt/c fan-out twice.
     """
+    return roo_signature_scan()[0]
+
+
+def roo_sidecar_file_signatures() -> tuple:
+    """(path, mtime_ns, size) of each task's two sidecars, for the Sessions key.
+
+    history_item.json carries the title and the workspace, and
+    api_conversation_history.json carries the model, so either moving must
+    invalidate a cached Sessions view even when no token file changed. Without
+    them the panel keeps a task's old title, and its old model, after Roo has
+    rewritten those files.
+
+    Produced by the same scan as the task signatures above, which is what makes
+    a warm Sessions request cheap: the sidecar stamps come out of the one readdir
+    per task that found ui_messages.json, so a request inside the signature TTL
+    touches no filesystem at all. Spelled per file (stat the token file, stat
+    each sidecar) this was two Windows round trips per task per REQUEST on a
+    drvfs mount, because the panel's cache key was built outside the TTL cache --
+    ~1.2 s per 600 tasks on the /mnt/c cost measured here.
+
+    The trade is stated plainly: a title or model edit now reaches the panel on
+    the same <= _SIG_TTL clock Overview runs on, instead of at the next request.
+    One scan, one clock, for both surfaces.
+    """
+    return roo_signature_scan()[1]
+
+
+# The sidecar list above as a path lookup, rebuilt once per scan rather than
+# once per task: it is checked against the memo's own tuple by identity.
+_roo_sibling_lookup: Tuple[Optional[tuple], Dict[str, Tuple[int, int]]] = (None, {})
+
+
+def _roo_sibling_stamp(path: Path) -> Optional[Tuple[int, int]]:
+    """``(mtime_ns, size)`` for *path* as the shared scan saw it, else None.
+
+    The model map belongs to api_conversation_history.json but is read while
+    parsing ui_messages.json, so it needs the sibling's signature to key its
+    cache. Asking the filesystem costs one Windows round trip per task on a WSL
+    corpus -- 600 of them per cold Overview pass here, measured against the
+    601 readdirs of the walk that found the tasks in the first place -- and that
+    walk already stamped this exact file. A miss means the scan never saw the
+    path (it is absent, or the caller is outside a scan) and the caller
+    stat-s, which is the old behavior and still correct.
+    """
+    global _roo_sibling_lookup
+    sigs = roo_sidecar_file_signatures()
+    if _roo_sibling_lookup[0] is not sigs:
+        _roo_sibling_lookup = (sigs, {p: (m, s) for p, m, s in sigs})
+    return _roo_sibling_lookup[1].get(str(path))
+
+
+def roo_signature_scan() -> Tuple[tuple, tuple]:
+    """(task signatures, sidecar signatures) from one scan, behind one TTL.
+
+    Split so a caller that needs only the task signatures does not build the
+    sidecar list, and shared so a caller that needs both - the Sessions loader -
+    can take the pair from ONE call rather than asking twice and re-walking on
+    the second ask. See _timed_sigs on why the second ask used to be the
+    expensive one.
+    """
+    roots = _roo_roots()
     return _timed_sigs(
-        "roo_code:" + ",".join(str(r) for r in _roo_roots()),
-        _scan_roo_task_file_signatures,
+        "roo_code:" + ",".join(str(r) for r in roots),
+        lambda: _scan_roo_task_file_signatures(roots),
     )
 
 
-def _scan_roo_task_file_signatures() -> tuple:
-    sigs: List[Tuple[str, int, int]] = []
-    for path in clientpaths.roo_task_message_files():
-        try:
-            s = path.stat()
-        except OSError:
-            continue
-        sigs.append((str(path), s.st_mtime_ns, s.st_size))
-    return tuple(sorted(sigs))
+def _scan_roo_task_file_signatures(roots: List[Path]) -> Tuple[tuple, tuple]:
+    task_sigs: List[Tuple[str, int, int]] = []
+    sidecar_sigs: List[Tuple[str, int, int]] = []
+    # roo_task_files() is one readdir per task dir; every stamp here comes out of
+    # it, so neither surface pays a per-file stat pass.
+    for task, files in clientpaths.roo_task_files(roots):
+        mtime_ns, size = files["ui_messages.json"]
+        for name, stamp in sorted(files.items()):
+            if name == "ui_messages.json":
+                continue
+            sidecar_sigs.append((str(task / name), stamp[0], stamp[1]))
+            if name != "api_conversation_history.json":
+                continue
+            # Fold the model sibling into this task's one stamp. Roo writes
+            # api_conversation_history.json on its own schedule, so a task can
+            # gain its first <model> tag AFTER the request row that needs it;
+            # with only the token file in the signature the row kept pricing at
+            # "unknown" forever, because a finished task's ui_messages.json never
+            # changes again. It cannot become an entry of its own either: the
+            # store is unique on (source, entry_key) and Roo's keys are
+            # task-scoped, so a second entry-emitting path would fight the first
+            # over one row and deleting either file would erase the other's usage.
+            mtime_ns = max(mtime_ns, stamp[0])
+            size += stamp[1]
+        task_sigs.append((str(task / "ui_messages.json"), mtime_ns, size))
+    return tuple(sorted(task_sigs)), tuple(sorted(sidecar_sigs))
 
 
 def _roo_conversation_tags(conv_path: Path) -> Optional[List[Tuple[int, str]]]:
@@ -7082,21 +7189,31 @@ def _roo_conversation_tags(conv_path: Path) -> Optional[List[Tuple[int, str]]]:
     return out
 
 
-def _roo_model_tags(messages_path: Path) -> List[Tuple[int, str]]:
+def _roo_model_tags(
+    messages_path: Path, conversation_sig: Optional[Tuple[int, int]] = None
+) -> List[Tuple[int, str]]:
     """The task's model tags, cached on the CONVERSATION file's own signature.
 
     The task file is what syncs, but the map belongs to its sibling, so the
     cache key and signature are the sibling's. Bounded, see _ROO_MODEL_CACHE_MAX.
+
+    *conversation_sig* is that sibling's ``(mtime_ns, size)``, for a caller that
+    already holds it -- which is both of them: the Sessions loader takes it from
+    the scan it just made, and so does the shared-scan lookup below. Without it
+    this would stat the sibling once per task, and on a /mnt/c corpus that is one
+    Windows round trip per task per cold pass, for a stamp the scan already had.
     """
     conv = messages_path.parent / "api_conversation_history.json"
-    try:
-        st = conv.stat()
-    except OSError:
-        # Genuinely absent: a task with no conversation record has no tag, and
-        # "unknown" is the honest answer rather than a failure to be raised.
-        return []
     key = str(conv)
-    sig = (st.st_mtime_ns, st.st_size)
+    sig = conversation_sig or _roo_sibling_stamp(conv)
+    if not sig:
+        try:
+            st = conv.stat()
+        except OSError:
+            # Genuinely absent: a task with no conversation record has no tag,
+            # and "unknown" is the honest answer rather than a failure to raise.
+            return []
+        sig = (st.st_mtime_ns, st.st_size)
     cached = _roo_model_cache.get(key)
     if cached is not None and cached[0] == sig:
         return cached[1]
@@ -7210,21 +7327,26 @@ def parse_roo_task_file(
         raw_in = BaseParser._i(payload.get("tokensIn"))
         raw_read = BaseParser._i(payload.get("cacheReads"))
         raw_write = BaseParser._i(payload.get("cacheWrites"))
-        if protocol == "anthropic" and raw_in < raw_read + raw_write:
+        if raw_in < raw_read + raw_write:
             # Roo changed what tokensIn MEANS in 3.29.5 (2025-11-01, upstream
             # PR #8954). Before it, the row held the provider's own number, and
-            # for an Anthropic-protocol provider that number EXCLUDED the cache
+            # for an Anthropic-family provider that number EXCLUDED the cache
             # slices ("For Anthropic compliant usage, the input tokens count
             # does NOT include the cached tokens" -- Roo's own comment). After
-            # it, tokensIn is totalInputTokens: fresh + writes + reads for
-            # anthropic, the reported prompt total for openai.
+            # it, tokensIn is totalInputTokens: fresh + writes + reads.
             #
-            # So a row that cannot be arithmetically inclusive is a pre-fix
-            # row, and its four buckets are already disjoint. This is not an
-            # estimate: an inclusive reading of the same row would need a
-            # negative fresh input. And it cannot misfire on a modern row,
-            # because 3.29.5+ writes fresh + reads + writes, which is never
-            # below reads + writes.
+            # A row whose tokensIn cannot arithmetically CONTAIN its own cache
+            # is therefore a pre-fix row, and its four buckets are already
+            # disjoint. Note there is no protocol test here, deliberately: the
+            # proof is about the numbers, and Roo's own label for the row is
+            # unreliable in exactly the two directions that matter. Rows from
+            # before the field existed carry no apiProtocol at all, and
+            # Bedrock / Vertex-Claude requests were stamped "openai" until
+            # upstream PR #6019. Gating on the stamp would hand both of those
+            # back to the clamp, which is the bug this branch exists to fix.
+            #
+            # It cannot misfire on a modern row: 3.29.5+ writes fresh + reads +
+            # writes, which is never below reads + writes.
             #
             # The residue is the other direction, and it is not reachable from
             # the row: a pre-fix request whose fresh input EXCEEDS its cache
@@ -7266,7 +7388,9 @@ def parse_roo_task_file(
 
 
 def roo_task_rows(
-    messages_path: Path, unavailable: Optional[type[Exception]] = None
+    messages_path: Path,
+    unavailable: Optional[type[Exception]] = None,
+    conversation_sig: Optional[Tuple[int, int]] = None,
 ) -> List[Dict[str, Any]]:
     """One task's request rows with the model resolved: the single producer.
 
@@ -7277,12 +7401,15 @@ def roo_task_rows(
     parse_roo_task_file() alone would show "unknown" on every turn while
     Overview priced the real model, which moves the panel's model column AND
     its per-model _bills grouping apart from the dashboard's own totals.
+
+    *conversation_sig* is the sibling's ``(mtime_ns, size)`` for callers that
+    took it from the same scan that found the task; see _roo_model_tags.
     """
     path = Path(messages_path)
     rows = parse_roo_task_file(str(path), unavailable=unavailable)
     if not rows:
         return []
-    tags = _roo_model_tags(path)
+    tags = _roo_model_tags(path, conversation_sig)
     for row in rows:
         row["model"] = _roo_model_for(tags, int(row["ts"]))
     return rows

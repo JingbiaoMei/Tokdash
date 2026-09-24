@@ -400,18 +400,24 @@ parser mirrors it instead of inventing a model:
    **Before 3.29.5 (2025-11-01, upstream PR #8954) it meant something else on
    the Anthropic path.** Roo passed the provider's own number straight through,
    and its comment said what that was: "For Anthropic compliant usage, the input
-   tokens count does NOT include the cached tokens." So an
-   `apiProtocol == "anthropic"` row whose `tokensIn` is BELOW its own
-   `cacheReads + cacheWrites` cannot be read inclusively without a negative
-   fresh input, and is billed with its four buckets as written. That is a proof
-   about the row, not an estimate of Roo's version, and it cannot misfire on a
-   modern row: 3.29.5+ writes fresh + reads + writes, which is never below reads
-   + writes. Without the branch a 49,912-token request bills as 412, and the
-   archived repo means most users' history predates the change. The residue runs
-   the other way and is unreachable from the row - a pre-3.29.5 request whose
-   fresh input EXCEEDS its cache slices is indistinguishable from a modern one
-   and still reads low. Roo is archived at 3.54.0 and writes no version into the
-   task file, so nothing else on the row separates the two.
+   tokens count does NOT include the cached tokens." So a row whose `tokensIn` is
+   BELOW its own `cacheReads + cacheWrites` cannot be read inclusively without a
+   negative fresh input, and is billed with its four buckets as written. That is
+   a proof about the row, not an estimate of Roo's version, and it cannot misfire
+   on a modern row: 3.29.5+ writes fresh + reads + writes, which is never below
+   reads + writes. Without the branch a 49,912-token request bills as 412, and
+   the archived repo means most users' history predates the change.
+
+   **The test is on the numbers, not on `apiProtocol`, deliberately.** The
+   argument that makes the clamp wrong holds for any protocol label, and Roo's
+   own label is unreliable in exactly the two directions that matter: rows from
+   before the field existed carry no `apiProtocol` at all, and Bedrock /
+   Vertex-Claude requests were stamped `"openai"` until upstream PR #6019. Both
+   would fall back into the clamp if the rule were gated on the stamp. The
+   residue runs the other way and is unreachable from the row - a pre-3.29.5
+   request whose fresh input EXCEEDS its cache slices is indistinguishable from a
+   modern one and still reads low. Roo is archived at 3.54.0 and writes no
+   version into the task file, so nothing else on the row separates the two.
 3. **`tokensOut` is gross of reasoning.** Roo maps
    `completion_tokens_details.reasoning_tokens` into
    `outputTokens: {total, text: total - reasoning, reasoning}` and persists
@@ -572,9 +578,13 @@ parser mirrors it instead of inventing a model:
 
 `RooCodeParser` in `coding_tools.py`, structured on `ClineParser`:
 
-- Paths: `clientpaths.roo_task_message_files()` returns the per-task
-  `ui_messages.json` files, deduped by resolved path the way
-  `qwen_chat_files()` dedupes its two trees.
+- Paths: `clientpaths.roo_task_files()` returns one entry per task,
+  `(task dir, {file name: (mtime_ns, size)})`, from a single `os.scandir` of the
+  task directory; `roo_task_message_files()` is a thin list over it. Dedupe is
+  by resolved `tasks/` **tree** plus task **id**, not by resolved task path:
+  canonicalising 600 task paths measured 3.3-4.7x the cost of the whole rest of
+  discovery on a `drvfs` mount, and a copied task directory is the case path
+  identity cannot catch while an id can.
 - Discovery globs `tasks/*/ui_messages.json`; it does **not** list `_index.json`
   entries. Rule 12 is the reason: a task dir existed with real rows and had no
   index entry at all, so index-driven discovery would under-count.
@@ -583,10 +593,12 @@ parser mirrors it instead of inventing a model:
   dir holds are found from it, so nothing can disagree about which install is
   being read. The roots are then memoized in `coding_tools._roo_roots()` for
   the same `_SIG_TTL` as the signature scan, because on WSL each `/mnt/c`
-  candidate is a Windows round trip and a full fan-out measures 44-51 ms on
-  this machine - paid once per TTL now rather than once per read, which
-  includes the Sessions loader. Gating is by existence, and `osinfo.os_kind()`
-  decides which roots are even candidates. Two cautions on copying the Qoder precedent for this.
+  candidate is a Windows round trip and a full fan-out measured 52.9 ms before
+  the `os.scandir` rewrite and 26.2 ms after it. The memoized list is passed
+  *into* the scan as well as used for its cache key: taking it only for the key
+  and re-enumerating inside the walk made one refresh pay the fan-out twice.
+  Gating is by existence, and `osinfo.os_kind()` decides which roots are even
+  candidates. Two cautions on copying the Qoder precedent for this.
   **First, `os_kind()` returns `wsl`, never `linux`, on this machine** - the
   `is_wsl()` check runs before the `linux` fallback - so a
   `if kind == "linux"` branch silently never fires on the primary supported
@@ -623,14 +635,22 @@ parser mirrors it instead of inventing a model:
   signature (bounded by `_ROO_MODEL_CACHE_MAX`), so `file_replace` still
   re-parses only the task that is running.
 
-  They stay **out of `_file_signatures()`**, and this is a correctness rule, not
-  an optimisation. `usage_entries` is unique on `(source, entry_key)` with an
-  upsert, and Roo's keys are task-scoped. If a signature entry for
-  `api_conversation_history.json` emitted rows carrying the same
-  `roo_code:<taskId>:<ts>` keys as its sibling `ui_messages.json`, two paths
+  It never becomes an **entry of its own** in `_file_signatures()`, and that is a
+  correctness rule, not an optimisation. `usage_entries` is unique on
+  `(source, entry_key)` with an upsert, and Roo's keys are task-scoped. If a
+  signature entry for `api_conversation_history.json` emitted rows carrying the
+  same `roo_code:<taskId>:<ts>` keys as its sibling `ui_messages.json`, two paths
   would fight over one stored row, and deleting either file would erase the
   other's usage. Conversation files are an input to pricing, read through a
   per-signature cache, never a source of entries.
+
+  Its **stamp** is folded into the task's one entry instead, max of mtimes and
+  summed size, the `_sqlite_db_signature()` shape for sidecars. Without that a
+  task could gain its first `<model>` tag after the request row that needs it -
+  Roo writes the two files on different schedules - and because a finished
+  task's `ui_messages.json` never changes again, that row would price at
+  `unknown` for the life of the store. Folding keeps the invalidation without
+  the fight.
   That cache must be bounded, not a plain dict. Roo's corpus grows one
   directory per task forever, so an unbounded map keyed on file signature is a
   quiet memory leak with a slow clock. Two precedents set the shape and the
@@ -650,10 +670,15 @@ parser mirrors it instead of inventing a model:
   and keeps the rows. `_parse_all()` stays the source-wide path for the
   DB-off live route, where one vanished file must not cost every other file its
   entries.
-- `_file_signatures()` delegates to one module-level
-  `roo_task_file_signatures(root)`, the way `ClineParser._file_signatures()`
-  delegates to `cline_message_file_signatures()`, so the Sessions loader and the
-  parser cannot drift onto different invalidation clocks.
+- `_file_signatures()` delegates to one module-level `roo_signature_scan()`,
+  the way `ClineParser._file_signatures()` delegates to
+  `cline_message_file_signatures()`, so the Sessions loader and the parser cannot
+  drift onto different invalidation clocks. That one scan returns **both** lists
+  the two surfaces need - the task signatures and the sidecar stamps - behind one
+  `_timed_sigs()` entry, and a caller that needs both takes the pair from one
+  call. Asking for them as two calls reads the same cache entry twice, which is
+  free only while the entry is warm: a corpus whose walk outlives the TTL re-walks
+  it on the second ask, which is exactly what one Sessions refresh used to do.
 - **One producer feeds both surfaces**, and it has to be one function rather
   than two callers of the same parser. `parse_roo_task_file(path)` on its own
   cannot supply the model: the token figures live in `ui_messages.json`, the
@@ -677,6 +702,81 @@ parser mirrors it instead of inventing a model:
 - No `api_req_finished` handling: 3.54 does not write it, and the completion
   rewrite already carries the numbers. Confirmed against the live task, whose
   15 rows contain none.
+
+#### Read cost, measured rather than estimated
+
+The Roo corpus is one directory per task, growing one per task forever, and the
+primary platform for a VS Code extension is WSL reading a Windows drive, where
+each path operation is a Windows round trip over 9p. Every number below came
+from this machine, from the two source trees run back to back over one corpus,
+and the raw output is in `docs/local/20260920_goose_roo_support/evidence/`
+(`bench_round10_endtoend.txt`, reproduced by `bench_round10_roo.py`).
+
+600 task directories in the captured shape, on a Windows-mounted drive:
+
+| Operation, cold unless stated | before | after |
+| --- | --- | --- |
+| Enumerate the root fan-out | 52.9 ms | 26.2 ms |
+| Whole signature scan | 9854 ms | 6559 ms |
+| `Overview` collect | 24734 ms | 10799 ms |
+| `Overview` collect, memo warm | 9042 ms | 0.0 ms |
+| Sessions read | 20787 ms | 10955 ms |
+| Sessions panel, memo warm | 13245 ms | 6.5 ms |
+
+The syscall counts are the part that does not move with disk temperature. A cold
+`Overview` pass went from 16,230 `os.stat` plus 10,812 `lstat` calls to 1,803
+`os.scandir` and 15 stats; a warm one went from 12,025 stats to touching the
+filesystem not at all. The same corpus on a local filesystem, where the same
+code runs and a call costs microseconds: signature scan 132 ms to 35 ms,
+`Overview` collect 158 ms to 61 ms, a warm Sessions panel 14.6 ms with 6,000
+stats to 5.5 ms with none.
+
+Five rules came out of that, and they are the part to keep if the code is
+rewritten:
+
+1. **`os.scandir`, not `Path.glob` + `Path.is_dir()`, for the Roo trees.** A
+   `DirEntry` carries the file type readdir returned, so the type test is free;
+   behind a glob it is one round trip per entry. This is the single biggest
+   multiple here, and it is entirely a filesystem-API choice.
+2. **One readdir per task dir answers existence for every file in it.** The
+   signature needs mtimes anyway, and `DirEntry.stat()` is a lookup under a
+   directory already in hand rather than a path resolution.
+3. **Canonicalise trees, not tasks.** `Path.resolve()` measured 3.3-4.7x an
+   `is_dir()` on a `drvfs` mount, so resolving each task to catch one task under
+   two spellings cost more than the whole rest of discovery. Dedupe on the task
+   id instead, which also catches a copied task that path identity cannot.
+4. **Never build a cache key with a per-request stat pass.** The Sessions
+   aggregate key needs both sidecars of every task; taking them at request time
+   meant 6 stats and 3 resolves per task on a request that otherwise does no I/O
+   at all. Two surfaces reading one scan under one TTL is both cheaper and more
+   coherent: before, a deleted task could leave the panel while Overview still
+   billed it.
+5. **A cache whose entry is stamped when the scan STARTS is no cache at all once
+   the scan outlives the TTL.** `_timed_sigs()` did that, so a corpus whose walk
+   costs more than `_SIG_TTL` re-walked on every caller, including the second
+   accessor in the same request, which is how one Sessions refresh came to scan
+   twice. Entries are now stamped when the scan finishes, and the loader that
+   needs both halves takes the pair from one call.
+
+The rule that made the scan cheap applies to anything read per task, and the last
+place it was still being broken was the model map: it keys its cache on
+`api_conversation_history.json`, so it stat-ed that sibling once per task
+although the scan that decided which tasks to parse had already stamped it.
+Handing it the stamp took a cold `Overview` pass from 1,815 stats to 15. What is
+left is one readdir per task per `_SIG_TTL` window, which is the floor for change
+detection over a corpus of one-file-per-task, plus one read per task whose stamp
+actually moved. `_ROO_SESSION_FILE_CACHE_MAX` is corpus-sized rather than the
+shared 512 because a 600-task corpus recorded zero hits at that bound: every file
+the panel needed had been evicted by the files scanned before it.
+
+Goose has the opposite shape, one SQLite file rather than one directory per task,
+so its cost is per row rather than per path operation. Measured on a database
+built from the fixture's own DDL and a live capture's own shapes, 3,000 sessions
+over a year, 27,124 messages, 21,124 ledger rows: `Overview` collect 107 ms, and
+the Sessions panel 47 ms for a week, 56 ms for a month, 353 ms for the whole
+history cold, 82 ms warm. Nothing there wants a cache policy beyond the per-window
+memo it already has, and Goose's share of the merged active-time read is that same
+loader, memoised per window.
 
 ### Sessions tab
 
@@ -717,15 +817,20 @@ Implementation notes (2026-09-21):
   loader fed `parse_roo_task_file()` alone gets every token right and calls
   every turn `unknown`, which moves the model column and the per-model billing
   grouping away from the numbers shown beside it.
-- **The model's own file belongs in the Sessions cache key.**
-  `api_conversation_history.json` is not in
+- **The model's own file belongs in the Sessions cache key, and its stamp is
+  handed to the model map rather than re-probed.**
+  `api_conversation_history.json` is never its own entry in
   `RooCodeParser._file_signatures`, deliberately, because the store is unique on
-  `(source, entry_key)` and Roo's keys are task-scoped. Both Sessions caches
-  inherit that file's freshness instead: the aggregate key, and - less
-  obviously - the per-task parse cache, whose key is the task file's signature
-  while its cached value carries the model. Without the sibling's signature a
-  late or edited conversation record keeps serving the previous model. The
-  parser's sync signature is unchanged, and the code says why.
+  `(source, entry_key)` and Roo's keys are task-scoped; its stamp is folded into
+  the task's entry, so the sync signature does see it. Both Sessions caches
+  inherit that file's freshness as well: the aggregate key, and - less obviously
+  - the per-task parse cache, whose key is the task file's signature while its
+  cached value carries the model. Without the sibling's signature a late or
+  edited conversation record keeps serving the previous model. The same stamp
+  then goes into `roo_task_rows()` as an argument, because the model map caches
+  on it and the scan that found the task had already stamped that exact file:
+  stat-ing it per task cost one Windows round trip per task per cold pass, 600
+  of them here, for a number already in hand.
 - Turns arrive unwindowed, like Cline and every other file corpus;
   `_summarize_session()` applies the window per turn.
 - `(mtime_ns, size)` is the signature, and two writes inside one clock tick

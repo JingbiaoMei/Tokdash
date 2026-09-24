@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from . import osinfo
 
@@ -196,6 +196,44 @@ def _is_file(path: Path) -> bool:
         return path.is_file()
     except OSError:
         return False
+
+
+def _scandir(directory: Path) -> list:
+    """The entries of *directory*, or [] when it cannot be opened.
+
+    ``os.scandir`` rather than ``Path.glob`` for the Roo trees, which is a
+    measured choice and not a style one. On a drvfs mount (WSL reading a Windows
+    drive) each ``Path.is_dir()`` behind a glob is its own Windows round trip,
+    while a ``DirEntry`` already carries the file type the readdir returned:
+    listing 600 real task directories cost 1318 ms that way and 3.9 ms here,
+    2.20 ms per directory against 0.006 ms. A Roo corpus is one directory per
+    task, listed on every Overview refresh, so the multiplier is the task count.
+
+    An unopenable directory reads as empty, matching _is_dir's rule for a
+    locked path: a stranger's AppData must cost one candidate root, never the
+    whole source.
+    """
+    try:
+        return list(os.scandir(directory))
+    except OSError:
+        return []
+
+
+def _entry_is_dir(entry: "os.DirEntry") -> bool:
+    """``DirEntry.is_dir()`` with the EACCES-is-absent rule of _is_dir."""
+    try:
+        return entry.is_dir()
+    except OSError:
+        return False
+
+
+def _entry_stamp(entry: "os.DirEntry") -> Optional[Tuple[int, int]]:
+    """(mtime_ns, size) for a directory entry, None when the fs says no."""
+    try:
+        st = entry.stat()
+    except OSError:
+        return None
+    return int(st.st_mtime_ns), int(st.st_size)
 
 
 def _sanitize_profile_slug(text: str) -> str:
@@ -1018,8 +1056,10 @@ def goose_sessions_db() -> Optional[Path]:
 _ROO_EXTENSION_ID = "rooveterinaryinc.roo-cline"
 
 # VS Code products that carry a globalStorage dir. "Code - Insiders" and the
-# source builds start with "Code", so the glob is a prefix match here.
-_ROO_PRODUCT_NAMES = ("Code*", "VSCodium*")
+# source builds start with "Code", so these are prefixes, and they are matched
+# case-insensitively because the desktop trees live on a filesystem that is.
+# A stray "CodeSomething" dir costs one existence check and nothing else.
+_ROO_PRODUCT_PREFIXES = ("code", "vscodium")
 
 
 def _roo_product_storage_roots(base: Path) -> List[Path]:
@@ -1029,21 +1069,22 @@ def _roo_product_storage_roots(base: Path) -> List[Path]:
     both task trees on disk, and Tokdash reads whichever exist.
     """
     out: List[Path] = []
-    if not _is_dir(base):
-        return out
-    for pattern in _ROO_PRODUCT_NAMES:
-        try:
-            products = sorted(base.glob(pattern))
-        except OSError:
+    for entry in sorted(_scandir(base), key=lambda e: e.name):
+        if not entry.name.lower().startswith(_ROO_PRODUCT_PREFIXES):
             continue
-        for product in products:
-            user = product / "User"
-            for storage in (
-                user / "globalStorage" / _ROO_EXTENSION_ID,
-                *sorted(user.glob(f"profiles/*/globalStorage/{_ROO_EXTENSION_ID}")),
-            ):
-                if _is_dir(storage):
-                    out.append(storage)
+        user = Path(entry.path) / "User"
+        storage = user / "globalStorage" / _ROO_EXTENSION_ID
+        if _is_dir(storage):
+            out.append(storage)
+        # One readdir for the profile list, then one existence check each. The
+        # equivalent glob ("profiles/*/globalStorage/<id>") walks three levels
+        # and stats every candidate, which on /mnt/c is the expensive part.
+        for profile in sorted(_scandir(user / "profiles"), key=lambda e: e.name):
+            if not _entry_is_dir(profile):
+                continue
+            storage = Path(profile.path) / "globalStorage" / _ROO_EXTENSION_ID
+            if _is_dir(storage):
+                out.append(storage)
     return out
 
 
@@ -1076,6 +1117,12 @@ def roo_storage_roots() -> List[Path]:
     def add(path: Optional[Path]) -> None:
         if path is None:
             return
+        # Existence first, canonicalise second: resolve() is the pricier half on
+        # a network mount (measured ~3.4x an is_dir() on /mnt/c), and most
+        # candidates -- every product that has no Roo installed, every locked
+        # profile -- stop here.
+        if not _is_dir(path):
+            return
         # Dedupe on the RESOLVED path, not the spelling. Roo scans a union of
         # roots on purpose (a WSL user really does have two task trees), so a
         # home reached under two spellings -- a symlinked ~/.vscode-server, or a
@@ -1083,7 +1130,7 @@ def roo_storage_roots() -> List[Path]:
         # twice. Roo's entry keys are task-scoped, so a second copy of one
         # ui_messages.json is a double count, not a duplicate row.
         key = _resolve(path) or str(path)
-        if key in seen or not _is_dir(path):
+        if key in seen:
             return
         seen.add(key)
         roots.append(path)
@@ -1108,12 +1155,16 @@ def roo_storage_roots() -> List[Path]:
     # VS Code remote-server roots (also written by a server run on a headless
     # Linux box), stable and Insiders alike.
     if kind in ("linux", "wsl"):
-        try:
-            servers = sorted(Path.home().glob(".vscode-server*"))
-        except OSError:
-            servers = []
-        for server in servers:
-            add(server / "data" / "User" / "globalStorage" / _ROO_EXTENSION_ID)
+        for server in sorted(_scandir(Path.home()), key=lambda e: e.name):
+            if not server.name.startswith(".vscode-server"):
+                continue
+            add(
+                Path(server.path)
+                / "data"
+                / "User"
+                / "globalStorage"
+                / _ROO_EXTENSION_ID
+            )
 
     if kind == "wsl":
         # The Windows desktop tree, alongside the server roots above: this is
@@ -1122,13 +1173,11 @@ def roo_storage_roots() -> List[Path]:
         # PROFILE is found here too -- the one-glob version of this branch saw
         # only globalStorage/ and quietly skipped profiles/*/globalStorage/,
         # which is where a profile-switched desktop install keeps its tasks.
-        try:
-            roaming = sorted(
-                (_wsl_windows_root() / "Users").glob("*/AppData/Roaming")
-            )
-        except OSError:
-            roaming = []
-        for base in roaming:
+        for user in sorted(_scandir(_wsl_windows_root() / "Users"), key=lambda e: e.name):
+            # Two levels of fixed name under each profile dir, so two joins
+            # rather than a glob: on a drvfs mount the glob's per-level stats
+            # are what this walk used to pay a Windows round trip for.
+            base = Path(user.path) / "AppData" / "Roaming"
             for storage in _roo_product_storage_roots(base):
                 add(storage)
 
@@ -1153,43 +1202,95 @@ def roo_storage_roots() -> List[Path]:
     return roots
 
 
-def _roo_task_dirs() -> List[Path]:
+def _roo_task_dirs(roots: Optional[List[Path]] = None) -> List[Path]:
     """Every existing ``<root>/tasks/<taskId>`` directory, globbed not indexed.
 
     ``tasks/_index.json`` is NOT the discovery path: a captured live run had a
     task directory, a ``history_item.json`` and a request row with no index
     entry at all, so index-driven discovery loses a task that still cost money.
+
+    *roots* lets a caller that already resolved the root list hand it over.
+    Without it every walk re-enumerates the roots, which on WSL means the
+    ``/mnt/c`` fan-out again (~60 ms here) for a second time in one refresh.
     """
     out: List[Path] = []
-    seen: set = set()
-    for root in roo_storage_roots():
-        try:
-            found = sorted(p for p in (root / "tasks").glob("*") if _is_dir(p))
-        except OSError:
+    seen_trees: set = set()
+    seen_ids: set = set()
+    for root in roo_storage_roots() if roots is None else roots:
+        tasks = root / "tasks"
+        # One resolve() per tasks/ TREE, not one per task. A tasks/ symlinked or
+        # bind-mounted into a second root makes every task under it reachable
+        # twice, and the tree-level canonical path catches all of them in one
+        # call. resolve() measured 3.3-4.7x an is_dir() on a drvfs mount, so
+        # per-task canonicalisation cost more than the whole rest of discovery
+        # and bought nothing beyond what this one call already guarantees.
+        tree = _resolve(tasks) or str(tasks)
+        if tree in seen_trees:
             continue
+        seen_trees.add(tree)
+        found = [
+            Path(entry.path)
+            for entry in sorted(_scandir(tasks), key=lambda e: e.name)
+            if _entry_is_dir(entry)
+        ]
         for task in found:
-            # Resolved key, like add(): the roots themselves are already
-            # canonical, but one tasks/ symlinked or bind-mounted into two roots
-            # yields two spellings of the SAME task directory, and Roo's
-            # task-scoped entry keys turn that into a double count. A set keeps
-            # this linear; the corpus grows one directory per task forever.
-            key = _resolve(task) or str(task)
-            if key in seen:
+            # The task id is the key, because it IS Roo's entry key prefix. Two
+            # directories carrying one id can only be the same task under two
+            # spellings or a copied task directory, and Roo's task-scoped keys
+            # would bill either twice. Keying by name rather than by path is
+            # what makes that true across trees, and it also matches what the
+            # Sessions loader already does (it groups by task id).
+            if task.name in seen_ids:
                 continue
-            seen.add(key)
+            seen_ids.add(task.name)
             out.append(task)
     return out
 
 
-def roo_task_message_files() -> List[Path]:
-    """Every ``tasks/<taskId>/ui_messages.json``, the file the tokens live in."""
-    out: List[Path] = []
-    for task in _roo_task_dirs():
-        path = task / "ui_messages.json"
-        if _is_file(path):
-            out.append(path)
+# The files a Roo task is read from, and the only ones worth a stamp:
+# ui_messages.json holds the requests, api_conversation_history.json the model
+# that prices them, and history_item.json the title and workspace the Sessions
+# panel shows. Dropping the third from the scan saves 0.25 ms per task on a
+# drvfs mount and would push the panel back to stat-ing it per request, so it
+# stays; a task dir holds others (task_metadata.json and the like) that nothing
+# here reads, so they stay out.
+_ROO_TASK_FILES = ("ui_messages.json", "api_conversation_history.json", "history_item.json")
+
+
+def roo_task_files(
+    roots: Optional[List[Path]] = None,
+) -> List[Tuple[Path, Dict[str, Tuple[int, int]]]]:
+    """``(task dir, {file name: (mtime_ns, size)})`` for every task with tokens.
+
+    One ``os.scandir`` per task directory instead of a stat per file, which is
+    the measured choice, not a stylistic one. The per-file spelling --
+    ``is_file()`` for the token file, ``stat()`` for it, then ``stat()`` for
+    each sibling the two surfaces want -- was timed against this over 600 real
+    task directories on a drvfs mount, alternating runs: 10.9 ms per task
+    against 5.3 ms. The readdir answers all three existences and its entries
+    answer for the stamps, so one round trip replaces the existence probes and
+    the lookups that remain are relative to a directory already in hand.
+    """
+    wanted = frozenset(_ROO_TASK_FILES)
+    out: List[Tuple[Path, Dict[str, Tuple[int, int]]]] = []
+    for task in _roo_task_dirs(roots):
+        files: Dict[str, Tuple[int, int]] = {}
+        for entry in _scandir(task):
+            if entry.name not in wanted:
+                continue
+            stamp = _entry_stamp(entry)
+            if stamp is not None:
+                files[entry.name] = stamp
+        if "ui_messages.json" in files:
+            out.append((task, files))
     return out
 
+
+def roo_task_message_files(
+    roots: Optional[List[Path]] = None,
+) -> List[Path]:
+    """Every ``tasks/<taskId>/ui_messages.json``, the file the tokens live in."""
+    return [task / "ui_messages.json" for task, _ in roo_task_files(roots)]
 
 
 # --- Muse (Meta Muse Code) ---------------------------------------------------------

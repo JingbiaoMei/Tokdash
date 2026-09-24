@@ -13,6 +13,8 @@ store. All prompt text is placeholder prose.
 from __future__ import annotations
 
 import json
+import os
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -336,6 +338,10 @@ def test_a_title_edit_alone_reaches_the_panel(monkeypatch, tmp_path, roo_home):
     # signature-based reader in this codebase can see.
     doc["task"] = "renamed by the user to something clearly longer"
     history.write_text(json.dumps(doc), encoding="utf-8")
+    # One signature scan for both surfaces, so the panel moves on the same TTL
+    # clock Overview does (see test_a_resume_is_not_a_second_session). Stepping
+    # over it is what a real edit minutes after the task would already have done.
+    _sig_cache.clear()
     assert _listing()["sessions"][0]["display_name"] == (
         "renamed by the user to something clearly longer"
     )
@@ -358,6 +364,7 @@ def test_a_late_conversation_record_reprices_the_model(monkeypatch, tmp_path, ro
         json.dumps([env_user(T0 + 30, MODEL_B, "Count the files in this repository")]),
         encoding="utf-8",
     )
+    _sig_cache.clear()  # the shared signature TTL, as above
     turns = [t for s in _roo_code_sessions().values() for t in s["turns"]]
     assert turns[0]["model"] == MODEL_B
 
@@ -372,7 +379,74 @@ def test_a_deleted_task_removes_its_session(monkeypatch, tmp_path, roo_home):
     assert _listing()["summary"]["session_count"] == 2
 
     shutil.rmtree(storage / "tasks" / TASK)
+    # A deletion now leaves the panel on the same scan as the Overview, so the
+    # two surfaces go stale together and, more to the point, come back together.
+    # Before they shared one scan the panel could drop a task while the dashboard
+    # still billed it.
+    _sig_cache.clear()
     assert {row["session_id"] for row in _listing()["sessions"]} == {"task-two"}
+
+
+@contextmanager
+def _count_corpus_calls(root: str):
+    """Count os.scandir / os.stat calls whose path is under *root*.
+
+    Counting the syscalls is the point: the corpus can sit behind a Windows
+    round trip per call, so the number of calls per request is the thing that
+    decides whether a panel refresh is 20 ms or two seconds.
+    """
+    counts = {"scandir": 0, "stat": 0}
+    real_scandir, real_stat = os.scandir, os.stat
+
+    def scandir(path, *args, **kwargs):
+        if str(path).startswith(root):
+            counts["scandir"] += 1
+        return real_scandir(path, *args, **kwargs)
+
+    def stat(path, *args, **kwargs):
+        if str(path).startswith(root):
+            counts["stat"] += 1
+        return real_stat(path, *args, **kwargs)
+
+    os.scandir, os.stat = scandir, stat
+    try:
+        yield counts
+    finally:
+        os.scandir, os.stat = real_scandir, real_stat
+
+
+def test_a_warm_panel_refresh_walks_the_corpus_no_more(monkeypatch, tmp_path, roo_home):
+    """One readdir per task on a cold pass; nothing at all on a warm one.
+
+    Roo's two sidecars have to invalidate the panel's cache even when no token
+    moved, and reading that literally cost a stat per sidecar PER REQUEST --
+    the signatures the parser uses sit behind a TTL cache, the sidecars did not.
+    On a /mnt/c corpus that is two Windows round trips per task per refresh
+    (measured ~1.2 ms each), so a 600-task history spent about a second of
+    syscalls on every Sessions request and every warmer pass, for a dashboard
+    that polls. The stamps now come out of the same scan, which makes this
+    assertion, not a comment.
+    """
+    storage = roo_home / "storage"
+    for i in range(6):
+        _write(storage, _task(f"task-{i}", requests=[req(T0 + 40 + i * 1000, 100, 5)]))
+    _setup(monkeypatch, tmp_path, storage)
+
+    with _count_corpus_calls(str(storage)) as cold:
+        assert _listing()["summary"]["session_count"] == 6
+    # One listing of tasks/ plus one readdir per task dir. That per-task readdir
+    # is both the existence proof and the source of the stamp, which is the
+    # point: the signature used to cost a stat per file on top of a stat per
+    # directory, and the model map used to stat its own sibling once more per
+    # task on top of THAT. The only stats left belong to root discovery -- one
+    # existence proof and two canonicalisations -- so the budget is a constant,
+    # and a corpus-sized pass would read 3 + n here.
+    assert cold["scandir"] == 7, cold
+    assert cold["stat"] <= 3, cold
+
+    with _count_corpus_calls(str(storage)) as warm:
+        assert _listing()["summary"]["session_count"] == 6
+    assert warm == {"scandir": 0, "stat": 0}, warm
 
 
 def test_the_window_filters_turns_within_a_task(monkeypatch, tmp_path, roo_home):

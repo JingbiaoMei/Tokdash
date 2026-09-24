@@ -571,14 +571,17 @@ def test_the_opening_edge_holds_back_nothing_worth_passing(monkeypatch, tmp_path
     assert total(edge) == total(whole)
 
 
-def test_an_unmeasured_boundary_request_is_not_charged_the_gap(monkeypatch, tmp_path):
-    """No elapsedMs for the row past the bound means no boundary event at all.
+def test_an_unmeasured_boundary_request_still_hands_over_its_edge(monkeypatch, tmp_path):
+    """The closing edge is owed to the window whether or not it was measured.
 
-    A stamp with no measured duration is charged the CAPPED GAP to the next
-    event, which bills idle time the source never measured. So a boundary row
-    with no duration of its own is not handed over at all -- even when the
-    session measured the row BEFORE it, which is what the signature match makes
-    possible.
+    Holding it back until the duration matched looked conservative and was not:
+    the fallback path is exactly the path most likely to hold an unmatched row,
+    so that was the one path that could not report a session still running when
+    the window closed. An unmatched stamp is charged the same CAPPED inter-event
+    gap the fallback gives any in-window turn, which is the contract the panel
+    already applies - and the test that proves it is the honest one: the same
+    session read whole and clipped has no edge to hand over, so the two must
+    land on one number.
     """
     _setup(monkeypatch, tmp_path,
            sessions=[_session("s1")],
@@ -588,11 +591,52 @@ def test_an_unmeasured_boundary_request_is_not_charged_the_gap(monkeypatch, tmp_
            # without a usage block, so nothing says how long IT took.
            messages=[_assistant_usage("s1", 1, 5_000, input_tokens=1000,
                                       output_tokens=20)])
-    edge = next(iter(_goose_sessions(since_ms=T0 * SECOND,
-                                     until_ms=(T0 + 150) * SECOND).values()))
-    assert "_next_event_ms" not in edge
-    assert "_next_work_ms" not in edge
-    assert _listing()["sessions"][0]["active_ms"] > 0   # the fallback still runs
+    lo, hi = T0 * SECOND - 10_000, (T0 + 150) * SECOND
+
+    edge = next(iter(_goose_sessions(since_ms=lo, until_ms=hi).values()))
+    assert edge["_next_event_ms"] == (T0 + 200) * SECOND
+    assert "_next_work_ms" not in edge          # no duration to hand over
+
+    whole = next(iter(_goose_sessions().values()))
+
+    def total(raw):
+        return sum(e - s for s, e in _session_active_intervals(raw, 30 * MINUTE, lo, hi))
+
+    # The windowed read may not know how long the boundary request took, but it
+    # must not come to a different number than a source that never windowed.
+    assert total(edge) > 0
+    assert total(edge) <= hi - lo
+    assert total(edge) == total(whole)
+
+
+def test_a_junk_token_value_costs_one_number_not_the_whole_panel(monkeypatch, tmp_path):
+    """A TEXT token count reads 0 here, as it does in Overview and in SQL.
+
+    int() on the column raised, the raise escaped the loader, and every Goose
+    session in the database went with it - the whole panel for one bad cell in
+    one row. GooseParser._i already answers 0 for a value it cannot read, and
+    so does SQLite's own arithmetic in the keep-guard, so the loader has to
+    answer the same way or the two surfaces disagree about the same row.
+    """
+    db = _setup(monkeypatch, tmp_path,
+                sessions=[_session("s1"), _session("s2")],
+                ledger=[_ledger(1, "s1", 0, inp=1000, out=20),
+                        _ledger(2, "s2", 60, inp=1000, out=20)])
+    conn = sqlite3.connect(db)
+    conn.execute("UPDATE usage_ledger SET output_tokens = 'not-a-number' WHERE id = 2")
+    conn.commit()
+    conn.close()
+    sessions._goose_sessions_cache.clear()
+    sessions._goose_sessions_cache_sig = ()
+
+    raw = _goose_sessions()                      # must not raise
+    turns = sorted((t for s in raw.values() for t in s["turns"]),
+                   key=lambda t: t["timestamp_ms"])
+
+    assert len(turns) == 2                       # both sessions still listed
+    assert turns[0]["tokens_out"] == 20
+    assert turns[1]["tokens_out"] == 0           # the junk cell, read as 0
+    assert turns[1]["tokens_in"] == 1000         # and the rest of it still billed
 
 
 def test_a_named_corpus_never_opens_the_messages_table_for_prompts(monkeypatch, tmp_path):

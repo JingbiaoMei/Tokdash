@@ -237,7 +237,8 @@ def build_parser(prog: str) -> argparse.ArgumentParser:
         dest="force",
         action="store_true",
         help="setup: replace a pre-existing unmarked tokdash.service; "
-        "uninstall: remove a unit that is unmarked or no longer carries setup's marker",
+        "uninstall: remove a unit that is unmarked or no longer carries setup's marker; "
+        "db resync: rebuild even when a source failed to sync while the current DB holds its rows",
     )
 
     return parser
@@ -421,7 +422,31 @@ def _discard_resync_attempt(tmp_path: Path) -> None:
             pass
 
 
-def _resync_usage_database() -> dict:
+def _stored_rows_per_source(old_status: dict) -> dict:
+    """source -> rows currently in the old DB, from its two derived counters.
+
+    The resync guard needs to know whether a source whose sync raised has
+    anything to LOSE. usage_entries is not queryable here without a new store
+    method or a full read, and status() already carries two independent
+    per-source counts taken in the same call - source_state.entry_count, which
+    sync maintains beside the rows, and file_state's SUM(entry_count). Both
+    would have to read zero while real rows sit there for this to under-protect,
+    which is the physical-corruption case `--force` and `db repair` are for.
+    """
+    counts: dict = {}
+    for key in ("sources", "files"):
+        for row in old_status.get(key) or ():
+            try:
+                name = str(row.get("source") or "")
+                held = int(row.get("entry_count") or row.get("entries") or 0)
+            except (TypeError, ValueError):
+                continue
+            if name:
+                counts[name] = max(counts.get(name, 0), held)
+    return counts
+
+
+def _resync_usage_database(*, force: bool = False) -> dict:
     from .usage_store import UsageEntryStore, usage_db_path, usage_db_process_lock
 
     path = usage_db_path()
@@ -434,8 +459,14 @@ def _resync_usage_database() -> dict:
             old_status = {"usage_entries": 0}
             old_status_error = str(exc)
         old_entries = int(old_status.get("usage_entries", 0) or 0)
+        held_by_source = _stored_rows_per_source(old_status)
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
         tmp_path = path.with_name(f"{path.name}.tmp.{timestamp}")
+        # What the rebuild must still be able to say AFTER it succeeds. The
+        # final status is read back off the swapped-in database, which knows
+        # nothing about which sources were missing while it was written, so the
+        # notes are collected here and merged at the end.
+        notes: dict = {}
 
         old_env = os.environ.get("TOKDASH_USAGE_DB_PATH")
         try:
@@ -445,20 +476,38 @@ def _resync_usage_database() -> dict:
             tmp_store.checkpoint()
             new_entries = int(status.get("usage_entries", 0) or 0)
             failed_sources = list(status.get("sync_failures") or ())
+            # Refuse on the failure, but only where the rebuild actually costs
+            # something. A source that failed and holds no stored rows has
+            # nothing to lose, and refusing that would lock the command for a
+            # machine whose Goose predates usage_ledger: Goose raises on every
+            # sync BY DESIGN there, so a corrupt DB - the documented reason to
+            # run resync at all - could never be repaired. --force covers the
+            # remaining case, where the operator knows the stored rows are
+            # staler than a fresh read of everything else.
+            endangered = sorted(
+                name for name in failed_sources if held_by_source.get(name, 0) > 0
+            )
+            if endangered:
+                if not force:
+                    status["ok"] = False
+                    status["error"] = (
+                        "refusing to replace the usage DB: these sources failed to "
+                        "sync and the current DB holds rows for them, so the rebuild "
+                        "would drop that history: " + ", ".join(endangered)
+                        + ". Fix the source, or re-run with --force to rebuild anyway."
+                    )
+                    status["endangered_sources"] = endangered
+                    status["old_usage_entries"] = old_entries
+                    _discard_resync_attempt(tmp_path)
+                    return status
+                notes["forced_despite_sync_failures"] = endangered
+            elif failed_sources:
+                # Honest, not silent: the rebuild is happening and these sources
+                # contribute nothing to it. Their rows were never in the store,
+                # so nothing is lost, but the entry count reflects that.
+                notes["rebuilt_without_sources"] = sorted(failed_sources)
             if failed_sources:
-                # The empty-result guard below only catches a rebuild that lost
-                # EVERYTHING. A source that failed to sync loses its whole
-                # history while the entry count still looks healthy, so the
-                # swap has to be refused on the failure itself.
-                status["ok"] = False
-                status["error"] = (
-                    "refusing to replace the usage DB: these sources failed to sync "
-                    "and would be missing from the rebuilt copy: "
-                    + ", ".join(failed_sources)
-                )
-                status["old_usage_entries"] = old_entries
-                _discard_resync_attempt(tmp_path)
-                return status
+                notes["sync_failures"] = sorted(failed_sources)
             if old_entries > 0 and new_entries == 0:
                 status["ok"] = False
                 status["error"] = "refusing to replace populated DB with empty resync result"
@@ -557,6 +606,7 @@ def _resync_usage_database() -> dict:
         status["ok"] = True
         status["backups"] = backup_paths
         status["resync_mode"] = "temp-db-atomic-replace"
+        status.update(notes)
         if old_status_error:
             status["old_status_error"] = old_status_error
         return status
@@ -923,7 +973,14 @@ def _watch_usage_database(pretty: bool, output: str | None) -> int:
         return 0
 
 
-def db_command(action: str, pretty: bool, output: str | None, verify_period: str, dry_run: bool = False) -> int:
+def db_command(
+    action: str,
+    pretty: bool,
+    output: str | None,
+    verify_period: str,
+    dry_run: bool = False,
+    force: bool = False,
+) -> int:
     from .usage_store import UsageEntryStore
 
     # `--dry-run` only previews `db repair`. For the mutating/looping actions it would
@@ -944,7 +1001,7 @@ def db_command(action: str, pretty: bool, output: str | None, verify_period: str
         # error should not end the watcher.
         return 0 if not status.get("sync_failures") else 1
     if action == "resync":
-        result = _resync_usage_database()
+        result = _resync_usage_database(force=force)
         _emit_json(result, pretty, output)
         return 0 if result.get("ok") else 1
     if action == "verify":
@@ -1100,7 +1157,9 @@ def cli(argv: list[str] | None = None, prog: str = "tokdash") -> int:
         return 0
 
     if args.command == "db":
-        return db_command(args.db_action, args.pretty, args.output, args.verify_period, args.dry_run)
+        return db_command(
+            args.db_action, args.pretty, args.output, args.verify_period, args.dry_run, args.force
+        )
 
     if args.command == "quota":
         return quota_command(args)

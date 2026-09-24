@@ -598,12 +598,39 @@ def test_goose_ts_to_ms_guards():
     # Overview that the panel can never list. Refusing keeps the two surfaces
     # telling one story about one column.
     assert _goose_ts_to_ms(T0 * 1000) is None
-    assert _goose_ts_to_ms(_GOOSE_MAX_EPOCH_SECONDS) == _GOOSE_MAX_EPOCH_SECONDS * 1000
+    # The bound is EXCLUSIVE, and that is the whole point of writing it this
+    # way: the Sessions window reads `created_timestamp < _GOOSE_MAX_EPOCH_SECONDS`
+    # for an unbounded read, so a `<=` here left exactly one timestamp - this
+    # one - priced in Overview and unlistable in the panel.
+    assert _goose_ts_to_ms(_GOOSE_MAX_EPOCH_SECONDS - 1) == (_GOOSE_MAX_EPOCH_SECONDS - 1) * 1000
+    assert _goose_ts_to_ms(_GOOSE_MAX_EPOCH_SECONDS) is None
     assert _goose_ts_to_ms(_GOOSE_MAX_EPOCH_SECONDS + 1) is None
     assert _goose_ts_to_ms(0) is None
     assert _goose_ts_to_ms(-1) is None
     assert _goose_ts_to_ms(None) is None
     assert _goose_ts_to_ms("nope") is None
+
+
+def test_the_seconds_ceiling_rejects_the_same_row_on_both_surfaces(monkeypatch, tmp_path):
+    """One row at the bound must be invisible to Overview AND to the panel.
+
+    The parser and the Sessions window are meant to be one statement about one
+    column, and an off-by-one between a `<=` and a `<` breaks that for exactly
+    one timestamp rather than for none of them.
+    """
+    at_bound = _GOOSE_MAX_EPOCH_SECONDS
+    root = tmp_path / "gpr"
+    _make_db(
+        root / "data" / "sessions" / "sessions.db",
+        sessions=[("s1", "n", "user", "/w", None, None, None, None, None, None)],
+        ledger=[(1, "s1", at_bound, "m", 500, 50, 550, 0, None, None, 0)],
+    )
+
+    assert _parser(monkeypatch, root=root).collect(None, None) == []
+
+    from tokdash.sessions import _goose_sessions   # same column, same bound
+
+    assert _goose_sessions() == {}
 
 
 def test_goose_registered_as_source_replace():

@@ -470,7 +470,10 @@ def test_reload_clears_painted_data_and_shows_computing(monkeypatch):
         assert await wait_for(app, pilot, lambda: detail.row_count > 0)
         assert "2026-09-14 → 2026-09-20" in static_text(app, "ov-range")
         assert "computing…" not in static_text(app, "ov-range")
-        assert app.query_one("#ov-chart").display is True
+        # The week chart is repainted LAST (by the STATS payload's tail, after
+        # usage refilled the tables) — wait for the real postcondition instead
+        # of assuming it already landed: CI runners proved that window real.
+        assert await wait_for(app, pilot, lambda: app.query_one("#ov-chart").display is True)
 
     drive(app, steps)
 

@@ -2714,7 +2714,7 @@
         <div>
           <div class="flex items-center gap-1.5">
             <span class="font-extrabold text-sm tracking-tight text-white font-mono">Tokdash</span>
-            <span class="text-[9px] font-bold px-1.5 py-0.2 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">v3.12</span>
+            <span class="text-[9px] font-bold px-1.5 py-0.2 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">v2.6.2</span>
           </div>
           <span class="text-[10px] text-slate-500">Agent Observability</span>
         </div>
@@ -2735,7 +2735,7 @@
       </div>
       <div class="text-[10px] text-slate-400 mt-1.5 flex items-center justify-between font-mono">
         <span>Active Telemetry</span>
-        <span class="text-indigo-400 font-bold" id="sidebarSessionCount">219 sess</span>
+        <span class="text-indigo-400 font-bold" id="sidebarSessionCount">—</span>
       </div>
     </div>
 
@@ -2815,7 +2815,7 @@
       <button class="sidebar-nav-item w-full !text-left" type="button" onclick="openReleaseNotesModal()" title="View what's new and release notes">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-indigo-400"><path d="M6.5 4.5h11a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2Z"/><path d="M8 9h8M8 12h8M8 15h5"/></svg>
         <span>What's New</span>
-        <span class="ml-auto text-[10px] mono text-indigo-400 font-bold">v3.12</span>
+        <span class="ml-auto text-[10px] mono text-indigo-400 font-bold">v2.6.2</span>
       </button>
       <button class="sidebar-nav-item w-full !text-left" type="button" onclick="toggleSidebarExportMenu(event)" title="Export session data or markdown report">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-emerald-400"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
@@ -2835,7 +2835,7 @@
           <span>Hermes DB</span>
           <span class="text-emerald-400 font-bold">Connected</span>
         </div>
-        <div class="text-slate-500 text-[10px] truncate" title="AppData/Local/hermes/state.db">state.db (219 sess)</div>
+        <div class="text-slate-500 text-[10px] truncate" title="AppData/Local/hermes/state.db">state.db</div>
       </div>
     </div>
   </aside>
@@ -2855,13 +2855,13 @@
             <div class="flex flex-wrap items-center gap-2.5">
               <div class="flex items-center gap-2">
                 <h1 class="text-xl sm:text-2xl font-extrabold tracking-tight mono text-slate-900 dark:text-white">Tokdash</h1>
-                <span class="text-[9px] font-bold px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-500 dark:text-indigo-300 border border-indigo-500/30 font-mono">v3.12</span>
+                <span class="text-[9px] font-bold px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-500 dark:text-indigo-300 border border-indigo-500/30 font-mono">v2.6.2</span>
               </div>
               <div id="hermesHeaderBadge" class="hermes-header-pill" title="Click to view Telemetry Hub" onclick="activateDashboardTab('hermes')" style="display:none;">
                 <span class="hermes-live-dot"></span>
                 <span class="hermes-pill-title">Telemetry Live</span>
                 <span class="hermes-pill-sep">·</span>
-                <span id="hermesHeaderBadgeCount">242 sessions</span>
+                <span id="hermesHeaderBadgeCount">—</span>
                 <span class="hermes-pill-sep">·</span>
                 <span class="text-emerald-500 dark:text-emerald-400 font-bold font-mono">Hermes & Antigravity</span>
               </div>
@@ -3380,30 +3380,6 @@
             </div>
             <div id="toolChartLegend" class="tool-chart-legend" role="list" aria-label="Tool chart legend"></div>
           </div>
-          <!-- Ranked Tool Consumption Breakdown (Langfuse/Helicone pattern) -->
-          <div class="mt-4 pt-3 border-t border-white/5 space-y-2.5" id="rankedToolBreakdown">
-            <div class="flex items-center justify-between text-xs font-mono text-slate-400">
-              <span class="font-bold text-slate-300">#1 read_file</span>
-              <span class="text-slate-400">4,032 calls · 43% · 42ms</span>
-            </div>
-            <div class="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
-              <div class="h-full bg-indigo-500 rounded-full" style="width: 43%;"></div>
-            </div>
-            <div class="flex items-center justify-between text-xs font-mono text-slate-400">
-              <span class="font-bold text-slate-300">#2 terminal</span>
-              <span class="text-slate-400">2,183 calls · 23% · 84ms</span>
-            </div>
-            <div class="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
-              <div class="h-full bg-purple-500 rounded-full" style="width: 23%;"></div>
-            </div>
-            <div class="flex items-center justify-between text-xs font-mono text-slate-400">
-              <span class="font-bold text-slate-300">#3 search_files</span>
-              <span class="text-slate-400">832 calls · 9% · 120ms</span>
-            </div>
-            <div class="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
-              <div class="h-full bg-sky-500 rounded-full" style="width: 9%;"></div>
-            </div>
-          </div>
         </div>
 
         <div class="surface p-5">
@@ -3411,25 +3387,8 @@
             <h2 class="text-base font-extrabold mono" data-i18n="topModelsByCost">Top Models by Cost</h2>
             <div class="text-xs" style="color: var(--color-muted);" data-i18n="usd">USD</div>
           </div>
-          <div class="h-[240px]">
+          <div class="h-[280px]">
             <canvas id="modelChart" aria-label="Top models by cost chart" role="img"></canvas>
-          </div>
-          <!-- Model Cost & Inference Profile (Helicone pattern) -->
-          <div class="mt-4 pt-3 border-t border-white/5 space-y-2.5" id="rankedModelBreakdown">
-            <div class="flex items-center justify-between text-xs font-mono text-slate-400">
-              <span class="font-bold text-slate-300 truncate max-w-[180px]">longcat-2.0:free</span>
-              <span class="text-emerald-400 font-semibold">32.6M tok · 92% cache</span>
-            </div>
-            <div class="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
-              <div class="h-full bg-emerald-500 rounded-full" style="width: 78%;"></div>
-            </div>
-            <div class="flex items-center justify-between text-xs font-mono text-slate-400">
-              <span class="font-bold text-slate-300 truncate max-w-[180px]">solar-pro4:free</span>
-              <span class="text-purple-400 font-semibold">18.3M tok · 88% cache</span>
-            </div>
-            <div class="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
-              <div class="h-full bg-purple-500 rounded-full" style="width: 44%;"></div>
-            </div>
           </div>
         </div>
       </section>
@@ -5836,7 +5795,7 @@
       </section>
 
       <!-- Cost Savings & Frontier Benchmark Widget -->
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
         <div class="surface p-4 border-l-4 border-l-emerald-500">
           <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Money Saved vs Frontier Rates</div>
           <div id="modelsMoneySavedKpi" class="text-2xl font-extrabold mt-1.5 font-mono text-emerald-400">+$0.00</div>
@@ -5846,11 +5805,6 @@
           <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Prompt Caching Value</div>
           <div id="modelsCacheSavingsKpi" class="text-2xl font-extrabold mt-1.5 font-mono text-teal-400">+$0.00</div>
           <div class="text-xs text-slate-500 mt-1 font-mono">Cost reduced through cached input tokens</div>
-        </div>
-        <div class="surface p-4 border-l-4 border-l-indigo-500">
-          <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Subagent Delegations</div>
-          <div id="modelsSubagentsKpi" class="text-2xl font-extrabold mt-1.5 font-mono text-indigo-400">23 Delegations</div>
-          <div class="text-xs text-slate-500 mt-1 font-mono">Antigravity & Hermes subagents spawned</div>
         </div>
       </div>
 
@@ -6319,12 +6273,12 @@
     const TOKDASH_BASE_PATH = window.TOKDASH_BASE_PATH || "";
     const appPath = window.tokdashPath || ((path) => `${TOKDASH_BASE_PATH}${path}`);
     const appAssetWithBase = window.tokdashAssetWithBase || ((path) => appPath(path));
-    // Dashboard v3.12.0 - sessions tab + i18n + dark mode
+    // Dashboard v2.6.2 - sessions tab + i18n + dark mode
     // - "Streak" label (not "Current Streak")
     // - Month/Year: streak within that view period
     // - 3D/All-time: current ongoing streak from today
     // - "Longest Streak" always shows longest ever across all data
-    console.log('📊 Token Dashboard v3.12.0 - sessions tab + i18n + dark mode');
+    console.log('📊 Token Dashboard v2.6.2 - sessions tab + i18n + dark mode');
 
     let toolChart = null;
     let modelChart = null;
@@ -18864,13 +18818,9 @@
                   <span class="text-2xl font-extrabold mono text-slate-100">${formatNumber(count)}</span>
                   <span class="text-xs font-mono font-bold text-violet-400">${pct}% share</span>
                 </div>
-                <div class="h-1.5 w-full rounded-full bg-slate-800 overflow-hidden mb-3">
+                <div class="h-1.5 w-full rounded-full bg-slate-800 overflow-hidden">
                   <div class="h-full bg-gradient-to-r from-violet-500 to-indigo-500 rounded-full" style="width: ${pct}%"></div>
                 </div>
-              </div>
-              <div class="pt-2.5 border-t border-white/5 flex items-center justify-between text-[11px] font-mono text-slate-500">
-                <span>Reliability: 99.8%</span>
-                <span class="text-emerald-400 font-semibold">Active</span>
               </div>
             </div>
           `;

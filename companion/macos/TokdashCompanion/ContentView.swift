@@ -8,33 +8,29 @@ struct ContentView: View {
     @EnvironmentObject var store: CompanionStore
 
     var body: some View {
+        // No section dividers (review round: flat rows, whitespace only) - the
+        // section paddings keep the groups legible without hairlines.
         VStack(spacing: 0) {
             HeaderSection()
-            Divider().opacity(0.4)
             if showsBanner {
                 BannerSection()
                     .padding(.horizontal, 16)
                     .padding(.vertical, 10)
-                Divider().opacity(0.4)
             }
             HeroSection()
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
-            Divider().opacity(0.4)
             QuotaSection()
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
             if let snap = store.snapshot, snap.showPerServerRows, !snap.perServer.isEmpty {
-                Divider().opacity(0.4)
                 PerServerSection(snap: snap)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 10)
             }
-            Divider().opacity(0.4)
             ActionBarSection()
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
-            Divider().opacity(0.4)
             FreshnessFooter()
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
@@ -653,15 +649,27 @@ private struct QuotaSection: View {
         } else {
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
-                    ForEach(snap.allQuotaGroups, id: \.provider) { group in
+                    // Multi-server payloads sectionize by server (contract §All view):
+                    // one muted header per server, bare provider groups under it.
+                    // Single-server = one header-less section - looks exactly as before.
+                    ForEach(snap.allQuotaServerSections, id: \.server) { section in
+                        if !section.server.isEmpty {
+                            Text(section.server.uppercased())
+                                .font(.system(size: 10, weight: .semibold))
+                                .tracking(0.4)
+                                .foregroundStyle(.secondary)
+                        }
+                        ForEach(section.groups, id: \.provider) { group in
                         // Mock design: 14px provider mark + name. Providers without a
                         // shipped mark (commandcode) render text-only, never a placeholder.
+                        let bare = group.serverLabel.isEmpty ? group.provider
+                            : (group.provider.components(separatedBy: " · ").last ?? group.provider)
                         HStack(spacing: 6) {
                             if let asset = CompanionStore.quotaLogoAssetName(for: group.canonicalProvider),
                                let ns = NSImage(named: asset) {
                                 quotaLogo(asset: asset, ns: ns)
                             }
-                            Text(group.provider)
+                            Text(bare)
                                 .font(.system(size: 12, weight: .semibold))
                         }
                         // A failed provider shows an inline warning above its last-known
@@ -684,7 +692,7 @@ private struct QuotaSection: View {
                         // Low view is a window context, not a provider context. Gated
                         // inside creditsNotice (component, quota.enabled, credits
                         // present, available_count >= 1).
-                        if let note = snap.creditsNotice(providerDisplay: group.provider,
+                        if let note = snap.creditsNotice(providerDisplay: bare,
                                                          canonicalProvider: group.canonicalProvider,
                                                          resetCredits: group.providerEntry?.resetCredits) {
                             HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -708,7 +716,8 @@ private struct QuotaSection: View {
                             }
                             .fixedSize(horizontal: false, vertical: true)
                         }
-                    }
+                        }   // ForEach(section.groups) - group content kept at one indent step for a smaller diff
+                    }       // ForEach(allQuotaServerSections)
                 }
             }
             .frame(minHeight: CompanionLayout.quotaMinHeight, maxHeight: CompanionLayout.quotaMaxHeight)

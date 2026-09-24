@@ -59,6 +59,38 @@ public class MultiServerContractTests
     }
 
     [TestMethod]
+    public void All_View_Sectionizes_By_Server_With_Bare_Provider_Groups()
+    {
+        // Contract §All view (multi-server): provider groups nest under one header per
+        // server, in first-seen order; under a header the group renders BARE ("Codex",
+        // never "Workstation · Codex"). Single-server stays header-less.
+        var codex = Decode<QuotaResponse>("quota.json").Providers!["codex"];
+        var snap = MakeSnap(new UsageResponse(), new QuotaResponse
+        {
+            Enabled = true,
+            Providers = new()
+            {
+                ["wsl · codex"] = codex,
+                ["wsl · kimi"] = codex,     // second provider under the same server
+                ["laptop · codex"] = codex, // same provider on a second server
+            },
+        });
+        var sections = snap.AllQuotaServerSections;
+        CollectionAssert.AreEqual(new[] { "wsl", "laptop" }, sections.Select(s => s.Server).ToList(), "first-seen order");
+        CollectionAssert.AreEqual(new[] { 2, 1 }, sections.Select(s => s.Groups.Count).ToList());
+        Assert.AreEqual("wsl", sections[0].Groups[0].ServerLabel);
+        Assert.AreEqual("wsl · Codex", sections[0].Groups[0].Provider,
+            "the compound stays on the model (Low view needs it); the flyout renders bare via ServerLabel");
+
+        var single = MakeSnap(new UsageResponse(), new QuotaResponse
+        {
+            Enabled = true, Providers = new() { ["codex"] = codex },
+        }).AllQuotaServerSections.Single();
+        Assert.AreEqual("", single.Server, "single-server: no server header at all");
+        Assert.AreEqual("Codex", single.Groups[0].Provider, "and nothing to strip from the name");
+    }
+
+    [TestMethod]
     public void Combine_Three_Metric_Omits_Metric_When_Any_Server_Omits_Prev()
     {
         // Contract §Full delta row: a metric whose *_prev is omitted by ANY contributing

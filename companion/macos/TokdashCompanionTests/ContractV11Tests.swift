@@ -869,6 +869,37 @@ final class ContractV11Tests: XCTestCase {
         XCTAssertEqual(CompanionStore.stripProviderPrefix("gpt-5.6-sol"), "gpt-5.6-sol")
     }
 
+    /// The quota All-view header marks, pinned against the web brand map. Regression:
+    /// MiniMax once wore the MiMo wordmark - MiMo is a separate provider and must never
+    /// stand in. Mirrors Windows QuotaLogo_Mark_Map_Matches_The_Web_Brand_Map.
+    func testQuotaLogoMarkMap() {
+        XCTAssertEqual(CompanionStore.quotaLogoAssetName(for: "minimax"), "AgentMiniMax")
+        XCTAssertNil(CompanionStore.quotaLogoAssetName(for: "mimo"), "no mimo quota provider exists; never borrow its wordmark")
+        XCTAssertEqual(CompanionStore.quotaLogoAssetName(for: "codex"), "AgentCodex")
+        XCTAssertEqual(CompanionStore.quotaLogoAssetName(for: "claude"), "AgentClaude")
+        XCTAssertEqual(CompanionStore.quotaLogoAssetName(for: "kimi"), "AgentKimi")
+        XCTAssertEqual(CompanionStore.quotaLogoAssetName(for: "grok"), "AgentGrok")
+        XCTAssertEqual(CompanionStore.quotaLogoAssetName(for: "zai"), "AgentZai")
+        XCTAssertEqual(CompanionStore.quotaLogoAssetName(for: "opencode_go"), "AgentOpenCode")
+        XCTAssertEqual(CompanionStore.quotaLogoAssetName(for: "antigravity"), "AgentAntigravity")
+        XCTAssertNil(CompanionStore.quotaLogoAssetName(for: "commandcode"))
+
+        // Every returned mark must exist in the asset catalog source - the map and the
+        // packaged marks cannot drift apart.
+        let assets = #filePath.split(separator: "/").dropLast(2).joined(separator: "/")
+            + "/TokdashCompanion/Assets.xcassets"
+        let fm = FileManager.default
+        for mark in ["AgentCodex", "AgentClaude", "AgentKimi", "AgentGrok", "AgentZai",
+                     "AgentMiniMax", "AgentOpenCode", "AgentAntigravity"] {
+            XCTAssertTrue(fm.fileExists(atPath: "\(assets)/\(mark).imageset"), "\(mark).imageset missing")
+        }
+        // The MiniMax imageset must carry minimax.png itself: it used to bundle a file
+        // literally named mimo.png - that is the exact regression this pins.
+        XCTAssertTrue(fm.fileExists(atPath: "\(assets)/AgentMiniMax.imageset/minimax.png"))
+        XCTAssertFalse(fm.fileExists(atPath: "\(assets)/AgentMiniMax.imageset/mimo.png"),
+                       "AgentMiniMax must not bundle the MiMo wordmark")
+    }
+
     /// Rank shares are percent of the FULL list; rounding is away-from-zero on both
     /// platforms (mirrors Windows ShareOf), and a zero-sum list never yields NaN.
     func testRankShareHelperMirrorsWindows() {

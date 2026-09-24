@@ -992,9 +992,10 @@ final class CompanionStore: NSObject, ObservableObject {
     }
 
     /// Asset-catalog image name for a quota provider id, shown on the All-view group header.
-    /// Mirrors the web dashboard's brand map: Z.ai ships as the Zcode badge, MiniMax as the
-    /// mimo wordmark pill, opencode_go shares the OpenCode mark. Providers without a shipped
-    /// mark (commandcode) render text-only. Mirrors Windows QuotaLogoAssetName.
+    /// Mirrors the web dashboard's brand map: Z.ai ships as the Zcode badge, MiniMax its own
+    /// pink mark (MiMo is a separate provider - never borrow its wordmark), opencode_go
+    /// shares the OpenCode mark. Providers without a shipped mark (commandcode) render
+    /// text-only. Mirrors Windows QuotaLogoAssetName.
     nonisolated static func quotaLogoAssetName(for canonicalProvider: String) -> String? {
         switch canonicalProvider.lowercased() {
         case "codex": return "AgentCodex"
@@ -1618,8 +1619,13 @@ struct Snapshot {
     /// (spec §7), not a full-surface failure. GROUP failure = status != "ok" OR a non-empty
     /// status_detail (e.g. stale_token, even when status is "ok"); a provider with several
     /// credentials reports the detail for the whole provider, so this stays broad.
-    var allQuotaGroups: [(provider: String, canonicalProvider: String, rows: [QuotaRow], failed: Bool,
-                          providerEntry: ProviderQuota?)] {
+    /// One provider group in the All view. serverLabel carries the server half of a
+    /// multi-server "Server · provider" payload key ("" in single-server setups);
+    /// provider is the display label (compound in multi-server).
+    typealias QuotaGroup = (provider: String, canonicalProvider: String, serverLabel: String,
+                            rows: [QuotaRow], failed: Bool, providerEntry: ProviderQuota?)
+
+    var allQuotaGroups: [QuotaGroup] {
         guard quota.enabled else { return [] }
         let providers = quota.providers ?? [:]
         // Provider order as detected (contract §All view): Foundation dictionaries
@@ -1639,10 +1645,13 @@ struct Snapshot {
         } else {
             names = providers.keys.sorted()
         }
-        return names.compactMap { name -> (provider: String, canonicalProvider: String, rows: [QuotaRow], failed: Bool, providerEntry: ProviderQuota?)? in
+        return names.compactMap { name -> QuotaGroup? in
             guard let prov = providers[name] else { return nil }
             let nameParts = name.components(separatedBy: " · ")
             let canonicalProvider = nameParts.last ?? name
+            // Multi-server merge prefixes "Server · " onto the provider key; keep the
+            // server half for All-view sectioning (contract §All view).
+            let serverLabel = nameParts.count > 1 ? nameParts.dropLast().joined(separator: " · ") : ""
             let display = nameParts.count == 1
                 ? canonicalProvider.capitalized
                 : nameParts.dropLast().joined(separator: " · ") + " · " + canonicalProvider.capitalized
@@ -1654,8 +1663,24 @@ struct Snapshot {
             }
             if canonicalProvider.lowercased() == "antigravity" { rows = Self.antigravityPools(rows) }
             guard !rows.isEmpty else { return nil }
-            return (display, canonicalProvider, rows, failed, prov)
+            return (display, canonicalProvider, serverLabel, rows, failed, prov)
         }
+    }
+
+    /// All-view server sections (contract §All view): multi-server payloads nest their
+    /// provider groups under one muted header per server, first-seen order; single-server
+    /// payloads return a single header-less section, so the All view is unchanged there.
+    /// The bare provider name is the view's job (see allQuotaServerSections usage in
+    /// ContentView - "Codex" under "WORKSTATION", never "Workstation · Codex").
+    var allQuotaServerSections: [(server: String, groups: [QuotaGroup])] {
+        let groups = allQuotaGroups
+        var seen = Set<String>()
+        var servers: [String] = []
+        for g in groups where !seen.contains(g.serverLabel) {
+            seen.insert(g.serverLabel)
+            servers.append(g.serverLabel)
+        }
+        return servers.map { s in (s, groups.filter { $0.serverLabel == s }) }
     }
 
     // "ok" or absent (older servers) is healthy; any other value means that quota

@@ -932,8 +932,9 @@ public sealed class CompanionStore : BindableBase
     /// <summary>
     /// Packaged logo base name (Assets\Agents\{name}.png) for a quota provider id, shown on
     /// the All-view group header. The asset set mirrors the web dashboard's brand map: Z.ai
-    /// ships as the Zcode badge, MiniMax as the mimo wordmark pill, opencode_go shares the
-    /// OpenCode mark. Providers without a shipped mark (commandcode) render text-only.
+    /// ships as the Zcode badge, MiniMax its own pink mark (MiMo is a separate provider -
+    /// never borrow its wordmark), opencode_go shares the OpenCode mark. Providers without
+    /// a shipped mark (commandcode) render text-only.
     /// Mirrors macOS quotaLogoAssetName(for:).
     /// </summary>
     internal static string? QuotaLogoAssetName(string canonicalProvider) => canonicalProvider.ToLowerInvariant() switch
@@ -943,7 +944,7 @@ public sealed class CompanionStore : BindableBase
         "kimi" => "kimi",
         "grok" => "grok",
         "zai" => "zcode",
-        "minimax" => "mimo",
+        "minimax" => "minimax",
         "opencode" or "opencode_go" => "opencode",
         "antigravity" => "antigravity",
         _ => null,
@@ -1463,7 +1464,10 @@ public sealed class Snapshot
         if (!Components.ResetCreditsOn || !Quota.Enabled) return null;
         var credits = group.Entry?.ResetCredits;
         if (credits is null || (credits.AvailableCount ?? 0) < 1) return null;
-        return CreditsRowText(group.Provider, credits, Now);
+        // The credits row lives INSIDE its (sectioned) provider group, so the pinned
+        // "⚡ {Provider} ..." name is always bare - never "Workstation · Codex" under
+        // the Workstation header (contract §All view + §Reset credits).
+        return CreditsRowText(group.Provider.Split(" · ")[^1], credits, Now);
     }
 
     /// <summary>
@@ -1521,7 +1525,12 @@ public sealed class Snapshot
                 .Where(kv => kv.Value.Buckets is { Count: > 0 })
                 .Select(kv =>
                 {
-                    string canonicalProvider = kv.Key.Split(" · ").Last();
+                    var keyParts = kv.Key.Split(" · ");
+                    string canonicalProvider = keyParts.Last();
+                    // Multi-server merge prefixes "Server · " onto the provider key
+                    // (MultiServerTokdashClient); keep the server half for All-view
+                    // sectioning (contract §All view).
+                    string serverLabel = keyParts.Length > 1 ? string.Join(" · ", keyParts[..^1]) : "";
                     // GROUP failure drives the provider-header warning: status != "ok" OR a
                     // non-empty status_detail (e.g. stale_token, even when status is "ok").
                     // A provider with several credentials reports the detail for the whole
@@ -1538,9 +1547,27 @@ public sealed class Snapshot
                         b.CapturedAt is null ? null : DateTimeOffset.FromUnixTimeSeconds(b.CapturedAt.Value))).ToList();
                     if (canonicalProvider.Equals("antigravity", StringComparison.OrdinalIgnoreCase))
                         rows = CompanionStore.AntigravityPools(rows);
-                    return new QuotaGroup(Capitalize(kv.Key), canonicalProvider, rows, failed, kv.Value);
+                    return new QuotaGroup(Capitalize(kv.Key), canonicalProvider, rows, failed, kv.Value) { ServerLabel = serverLabel };
                 })
                 .ToList();
+        }
+    }
+
+    /// <summary>All-view server sections (contract §All view): multi-server payloads group
+    /// their provider groups under one muted header per server, in first-seen order;
+    /// single-server payloads return a single header-less section, so the All view is
+    /// unchanged there. Bare provider names are the flyout's job (QuotaGroupVM).</summary>
+    public List<QuotaServerSection> AllQuotaServerSections
+    {
+        get
+        {
+            var groups = AllQuotaGroups;
+            if (groups.All(g => g.ServerLabel.Length == 0))
+                return [new QuotaServerSection("", groups)];
+            var order = new List<string>();
+            foreach (var g in groups)
+                if (!order.Contains(g.ServerLabel)) order.Add(g.ServerLabel);
+            return order.Select(s => new QuotaServerSection(s, groups.Where(g => g.ServerLabel == s).ToList())).ToList();
         }
     }
 
@@ -1618,4 +1645,15 @@ public sealed record QuotaGroup(
     string CanonicalProvider,
     List<QuotaRow> Rows,
     bool Failed,
-    ProviderQuota? Entry);
+    ProviderQuota? Entry)
+{
+    /// <summary>Multi-server: the server half of the "Server · provider" payload key
+    /// ("Workstation"); empty in single-server setups. The All view sections by it and
+    /// then renders bare provider names (contract §All view).</summary>
+    public string ServerLabel { get; init; } = "";
+}
+
+/// <summary>One server's slice of the All view (contract §All view): a muted server
+/// header over its provider groups. Server is "" for single-server payloads, which
+/// render no header at all.</summary>
+public sealed record QuotaServerSection(string Server, List<QuotaGroup> Groups);

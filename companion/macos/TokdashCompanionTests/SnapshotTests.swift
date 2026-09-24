@@ -281,6 +281,35 @@ final class SnapshotTests: XCTestCase {
         ]), 30)
     }
 
+    /// Contract §All view (multi-server): provider groups nest under one header per
+    /// server in first-seen order, and groups under a header render BARE - never
+    /// "Workstation · Codex". Single-server payloads stay header-less. Mirrors Windows
+    /// All_View_Sectionizes_By_Server_With_Bare_Provider_Groups.
+    func testAllViewSectionizesByServer() throws {
+        let quotaData = try Data(contentsOf: contractURL("fixtures/quota.json"))
+        let codex = try XCTUnwrap(try JSONDecoder().decode(QuotaResponse.self, from: quotaData).providers?["codex"])
+        let snap = Snapshot(
+            quota: QuotaResponse(enabled: true, providers: [
+                "wsl · codex": codex,
+                "wsl · kimi": codex,     // second provider under the same server
+                "laptop · codex": codex, // same provider on a second server
+            ], timestamp: nil),
+            thresholds: .defaults)
+        let sections = snap.allQuotaServerSections
+        // The dict path (no wire order) sorts provider keys, so "laptop" is first-seen.
+        XCTAssertEqual(sections.map(\.server), ["laptop", "wsl"])
+        XCTAssertEqual(sections.map { $0.groups.count }, [1, 2])
+        XCTAssertEqual(sections[1].groups[0].serverLabel, "wsl")
+        XCTAssertEqual(sections[1].groups[0].provider, "wsl · Codex",
+                       "the compound stays on the model (Low view needs it); the view strips it under the header")
+
+        let single = try XCTUnwrap(Snapshot(
+            quota: QuotaResponse(enabled: true, providers: ["codex": codex], timestamp: nil),
+            thresholds: .defaults).allQuotaServerSections.first)
+        XCTAssertEqual(single.server, "", "single-server: no server header at all")
+        XCTAssertEqual(single.groups.first?.provider, "Codex")
+    }
+
     func testSharedFixturePinsModelRankingAndCostPodium() throws {
         let usageData = try Data(contentsOf: contractURL("fixtures/usage-today.json"))
         let today = try JSONDecoder().decode(UsageResponse.self, from: usageData)

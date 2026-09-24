@@ -7,9 +7,10 @@ import SwiftUI
 enum CompanionLayout {
     static let popoverWidth: CGFloat = 300
     /// The quota list scrolls; this keeps it tall enough to show several windows at once
-    /// while still leaving room for the Today hero above it.
+    /// while still leaving room for the Today hero above it. Raised to 340 per review so
+    /// the All view shows noticeably more subscription rows before scrolling.
     static let quotaMinHeight: CGFloat = 150
-    static let quotaMaxHeight: CGFloat = 260
+    static let quotaMaxHeight: CGFloat = 340
 }
 
 /// `MenuBarExtra` reads an AppKit image's intrinsic canvas when it creates the status

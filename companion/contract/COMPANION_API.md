@@ -316,10 +316,20 @@ order within a provider as returned by the API). Labels are bucket-only
 (`"{bucket}"`) under a provider header. Capped at four visible rows with the
 fifth peeking, then scrolls. Never stretches the surface.
 
+When the payload spans more than one server (multi-server fan-out), rows are first
+**sectioned by server**: a muted server-label header per server, sections in
+first-seen order, and the usual provider groups nested under their server - with
+**bare provider names**, never a `"Server · Provider"` compound (the compound label
+survives only in the Low view, where rows are cross-provider and need it inline).
+A single-server payload shows no server headers at all - the All view is unchanged
+there. The same window detected on two servers appears under each of its server's
+groups; Low-view dedup is unaffected.
+
 The provider header carries a 14 px provider mark before the name, mirroring the
 web brand map: claude, codex, kimi, grok and antigravity ship their own marks;
-`zai` uses the Zcode badge, `minimax` the mimo wordmark, `opencode_go` the
-OpenCode mark. `commandcode` and any unknown provider render text-only - never a
+`zai` uses the Zcode badge, `minimax` its own mark (MiMo is a distinct provider -
+its wordmark is never borrowed), `opencode_go` the OpenCode mark. `commandcode`
+and any unknown provider render text-only - never a
 placeholder. Dark-ink marks (codex, grok, zcode) have pre-inverted dark copies;
 every other mark renders as shipped in both themes.
 

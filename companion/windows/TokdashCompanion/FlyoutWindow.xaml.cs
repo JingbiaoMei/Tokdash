@@ -897,15 +897,32 @@ public partial class FlyoutWindow : Window
         }
         else
         {
-            // Height budget follows the section gaps (SectionPad halved this round): the
-            // ~40 px reclaimed above goes to the quota list - more rows before it scrolls.
-            var scroll = new ScrollViewer { MaxHeight = 212, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
-            var groups = new ItemsControl
+            // Height budget follows the section gaps (SectionPad halved in a prior round):
+            // 212 -> 280 per review so the All view shows more subscription rows before it
+            // scrolls (macOS mirror: CompanionLayout.quotaMaxHeight 340).
+            var scroll = new ScrollViewer { MaxHeight = 280, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+            // Multi-server payloads sectionize the All view: one muted server header over
+            // its provider groups (contract §All view). Single-server yields one
+            // header-less section - the All view looks exactly as before.
+            var stack = new StackPanel();
+            foreach (var section in snap.AllQuotaServerSections)
             {
-                ItemTemplate = (DataTemplate)FindResource("QuotaGroupTemplate"),
-                ItemsSource = snap.AllQuotaGroups.Select(g => MakeQuotaGroupVM(snap, g)).ToList(),
-            };
-            scroll.Content = groups;
+                if (section.Server.Length > 0)
+                    stack.Children.Add(new TextBlock
+                    {
+                        Text = section.Server.ToUpperInvariant(),
+                        FontSize = FontRes("FontCaption"),
+                        FontWeight = FontWeights.SemiBold,
+                        Foreground = (Brush)FindResource("MutedBrush"),
+                        Margin = new Thickness(0, 8, 0, 0),
+                    });
+                stack.Children.Add(new ItemsControl
+                {
+                    ItemTemplate = (DataTemplate)FindResource("QuotaGroupTemplate"),
+                    ItemsSource = section.Groups.Select(g => MakeQuotaGroupVM(snap, g)).ToList(),
+                });
+            }
+            scroll.Content = stack;
             QuotaRows.Items.Add(scroll);
         }
     }
@@ -938,7 +955,10 @@ public partial class FlyoutWindow : Window
     /// <summary>Presentation shape for one provider group in the All view (QuotaGroupTemplate).</summary>
     private QuotaGroupVM MakeQuotaGroupVM(Snapshot snap, QuotaGroup group) => new()
     {
-        Provider = group.Provider,
+        // Under a server section the provider reads bare - "Codex", never the
+        // "Workstation · Codex" compound (contract §All view). Single-server groups
+        // carry no prefix to strip.
+        Provider = group.ServerLabel.Length > 0 ? group.Provider.Split(" · ")[^1] : group.Provider,
         Logo = LogoFor(CompanionStore.QuotaLogoAssetName(group.CanonicalProvider)),
         WarningText = L10n.T("couldnt_refresh"),
         // GROUP failure drives the provider-header warning (spec §7); rendered inline by

@@ -1,3 +1,5 @@
+using System.IO;
+using System.Runtime.CompilerServices;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace TokdashCompanion.Tests;
@@ -222,6 +224,34 @@ public class StoreHelperTests
         Assert.AreEqual("gpt-5.6-sol", CompanionStore.StripProviderPrefix("openai/gpt-5.6-sol"));
         Assert.AreEqual("claude-opus-4-7", CompanionStore.StripProviderPrefix("claude-opus-4-7"), "no slash -> unchanged");
     }
+
+    [TestMethod]
+    public void QuotaLogo_Mark_Map_Matches_The_Web_Brand_Map()
+    {
+        // The minimax regression: MiniMax wears its OWN pink mark. MiMo is a separate
+        // provider - its wordmark must never stand in for MiniMax, and the server never
+        // emits a "mimo" quota provider, so mimo stays unmapped (text-only header).
+        Assert.AreEqual("minimax", CompanionStore.QuotaLogoAssetName("minimax"));
+        Assert.IsNull(CompanionStore.QuotaLogoAssetName("mimo"), "no mimo quota provider exists; never borrow its wordmark");
+
+        Assert.AreEqual("codex", CompanionStore.QuotaLogoAssetName("codex"));
+        Assert.AreEqual("claude", CompanionStore.QuotaLogoAssetName("claude"));
+        Assert.AreEqual("kimi", CompanionStore.QuotaLogoAssetName("kimi"));
+        Assert.AreEqual("grok", CompanionStore.QuotaLogoAssetName("grok"));
+        Assert.AreEqual("zcode", CompanionStore.QuotaLogoAssetName("zai"), "Z.ai rows wear the Zcode badge");
+        Assert.AreEqual("opencode", CompanionStore.QuotaLogoAssetName("opencode_go"), "OpenCode Go shares the OpenCode mark");
+        Assert.AreEqual("antigravity", CompanionStore.QuotaLogoAssetName("antigravity"));
+        Assert.IsNull(CompanionStore.QuotaLogoAssetName("commandcode"), "no shipped mark -> text-only header");
+
+        // Every mark the map returns must exist under Assets\Agents\ (the csproj glob
+        // packages them) - the map and the packaged asset set must not drift apart.
+        var agents = AgentsDir();
+        foreach (var name in new[] { "codex", "claude", "kimi", "grok", "zcode", "minimax", "opencode", "antigravity" })
+            Assert.IsTrue(File.Exists(Path.Combine(agents, $"{name}.png")), $"Assets/Agents/{name}.png missing");
+    }
+
+    private static string AgentsDir([CallerFilePath] string source = "") =>
+        Path.GetFullPath(Path.Combine(Path.GetDirectoryName(source)!, "..", "TokdashCompanion", "Assets", "Agents"));
 
     [TestMethod]
     public void Rank_Shares_Are_Percent_Of_Full_List_And_Never_NaN()

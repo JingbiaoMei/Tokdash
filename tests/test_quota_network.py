@@ -941,6 +941,56 @@ def test_claude_api_parses_limits_shape(monkeypatch, tmp_path):
     assert all(s.plan == "max/default_claude_max_5x" for s in snapshots)
 
 
+def test_claude_api_integer_percent_one_is_one_percent_not_exhausted(monkeypatch, tmp_path):
+    # Live oauth/usage (2026-09-24): session.percent is the integer 1 with severity
+    # "normal". Scaling the closed unit interval turned that into 100% used / 0 remaining.
+    claude_dir = tmp_path / ".claude"
+    claude_dir.mkdir()
+    (claude_dir / ".credentials.json").write_text(
+        json.dumps(
+            {
+                "claudeAiOauth": {
+                    "accessToken": "token",
+                    "expiresAt": 4_000_000_000_000,
+                    "subscriptionType": "max",
+                    "rateLimitTier": "default_claude_max_20x",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(claude_dir))
+
+    def opener(req, timeout=15):
+        return FakeResponse(
+            {
+                "limits": [
+                    {
+                        "kind": "session",
+                        "percent": 1,
+                        "group": "session",
+                        "is_active": True,
+                        "severity": "normal",
+                        "resets_at": "2026-09-24T11:50:00.295678+00:00",
+                    },
+                    {
+                        "kind": "weekly_all",
+                        "percent": 0,
+                        "group": "weekly",
+                        "is_active": True,
+                        "severity": "normal",
+                        "resets_at": "2026-09-28T18:00:00.295700+00:00",
+                    },
+                ]
+            }
+        )
+
+    snapshots = claude.collect_claude_api_snapshots(opener=opener, now=1_790_237_408)
+    by_bucket = {s.bucket: s.used_percent for s in snapshots if s.status == "ok"}
+    assert by_bucket["session"] == 1.0
+    assert by_bucket["weekly_all"] == 0.0
+
+
 def test_antigravity_api_normalizes_model_quota(monkeypatch, tmp_path):
     ag_dir = tmp_path / ".gemini" / "antigravity-cli"
     ag_dir.mkdir(parents=True)

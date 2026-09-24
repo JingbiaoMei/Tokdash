@@ -101,7 +101,8 @@ of counting its tokens twice. It is a random UUID4 created on first start and ke
 `<data_dir>/instance.json`: it survives a restart, two daemons sharing a data directory
 agree on it because they read the same session logs, and two daemons in two directories
 differ even on one machine. The field is omitted rather than guessed when the file can be
-neither written nor read.
+neither written nor read, and the daemon logs one warning naming that file. A file it
+cannot parse is left exactly as it is -- delete it to have Tokdash write a new one.
 
 It is a durable identifier for this machine, so it is covered by the same origin policy as
 everything else on this route, and that policy must not be widened to make it readable

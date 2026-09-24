@@ -42,7 +42,7 @@ from .compute import (
 )
 from .dateutil import parse_date_range
 from .insights import UnknownFacetError, compute_insights
-from .instance_identity import get_instance_id
+from .instance_identity import get_instance_id_async
 from .usage_store import SCHEMA_VERSION as USAGE_DB_SCHEMA_VERSION
 from .usage_store import UsageDatabaseSchemaTooNewError
 from .sessions import (
@@ -616,10 +616,11 @@ async def _lifespan(_app: "FastAPI"):
     if not _dev_fixture_mode(_app) and os.environ.get("TOKDASH_DAILY_WARM", "1") != "0":
         threading.Thread(target=_daily_warm_loop, name="tokdash-daily-warm", daemon=True).start()
     # Warm the daemon identity here rather than only at import so the first /health
-    # answer costs no file I/O. Lazy inside the accessor as well: a TestClient built
-    # without a context manager never runs this, and /health must not change shape
-    # because of it.
-    get_instance_id()
+    # answer costs no file I/O, and via the async accessor so a cold data dir does not
+    # spend the startup path in mkdir/fsync/link. Lazy inside the accessor as well: a
+    # TestClient built without a context manager never runs this, and /health must not
+    # change shape because of it.
+    await get_instance_id_async()
     yield
 
 
@@ -2455,7 +2456,12 @@ async def health_check():
     # cannot be read or written: a daemon on an unwritable state dir says nothing rather
     # than claiming something wrong. Readers test ``service`` only, and both companions
     # decode a fixed shape, so the extra key is additive.
-    instance_id = get_instance_id()
+    #
+    # The async accessor is what keeps this handler's promise: a settled answer comes
+    # back inline, and the first uncached lookup -- mkdir, write, fsync, link, and up to
+    # two retries on a file a sibling is still filling -- runs in a worker thread instead
+    # of stalling the loop this route exists to keep free.
+    instance_id = await get_instance_id_async()
     if instance_id:
         payload["instance_id"] = instance_id
     return payload

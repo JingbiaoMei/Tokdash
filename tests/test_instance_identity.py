@@ -93,6 +93,22 @@ def _warnings(caplog) -> list:
     return [r for r in caplog.records if r.levelno >= logging.WARNING]
 
 
+def _wait_for_instance_id(client, timeout: float = 5.0) -> dict:
+    """Poll ``/health`` until it carries an id, and fail loudly if it never does.
+
+    The warm-up runs in the background so that startup cannot queue behind the data
+    directory, which means the first answer after startup may legitimately not have the
+    field yet. Every reader of it -- P1's probing included -- has to keep asking.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        body = client.get("/health").json()
+        if "instance_id" in body:
+            return body
+        time.sleep(0.02)
+    raise AssertionError(f"/health never reported an instance_id within {timeout} s: {body}")
+
+
 class _ThreadHops:
     """Stand-in for ``asyncio`` that counts worker-thread handoffs.
 
@@ -121,9 +137,10 @@ def test_health_reports_uuid_shaped_instance_id():
 
 
 def test_health_answers_through_a_lifespan_run_too():
+    """The warm-up the lifespan starts in the background has to actually deliver an id."""
     with TestClient(api.app) as client:
-        body = client.get("/health").json()
-    assert uuid.UUID(body["instance_id"])
+        body = _wait_for_instance_id(client)
+    assert uuid.UUID(body["instance_id"]).version == 4
 
 
 def test_instance_id_is_persisted_and_stable_across_clients():
@@ -353,7 +370,10 @@ def test_malformed_file_is_given_up_on_rather_than_retried_forever(
     assert len(warned) == 1
     message = warned[0].getMessage()
     assert str(instance_identity.instance_json_path()) in message
+    # Given up on for the life of the process, so "delete it" alone sends the user off to
+    # do something that cannot take effect until they happen to restart.
     assert "delete" in message.lower()
+    assert "restart" in message.lower()
 
 
 def test_a_broken_data_dir_warns_once_and_still_retries(
@@ -402,6 +422,67 @@ def test_stored_id_is_canonicalised():
         "instance_id": "{00000000-0000-4000-8000-000000000000}",
     }))
     assert instance_identity.get_instance_id() == "00000000-0000-4000-8000-000000000000"
+
+
+def test_a_data_dir_that_is_not_a_directory_is_not_reported_as_absent(monkeypatch, tmp_path):
+    """``FileExistsError`` from ``mkdir(exist_ok=True)`` means the path is not a directory.
+
+    It is not a publish race, and it is not the id being merely absent: on Windows a path
+    under a regular file answers exactly this, so treating it as a race would have the
+    daemon describe a permanently unusable location as one it will look at again shortly.
+    """
+    target = tmp_path / "instance.json"
+    monkeypatch.setattr(
+        Path, "mkdir", lambda *args, **kwargs: (_ for _ in ()).throw(FileExistsError("nope"))
+    )
+
+    result = instance_identity._create(target)
+
+    assert result.outcome is instance_identity._Outcome.UNREADABLE
+    assert "nope" in result.detail
+
+
+def test_startup_does_not_wait_for_the_identity_lookup(monkeypatch, tmp_path):
+    """Serving must not queue behind the data directory.
+
+    The warm-up belongs with the other warm-ups, which run in the background. Awaiting it
+    in the lifespan made startup take exactly as long as the lookup did -- five seconds on
+    a slow disk, forever on a hung NFS mount -- and a supervisor with Restart=on-failure
+    cannot help, because the process is alive and merely never serves.
+    """
+    started = threading.Event()
+    release = threading.Event()
+
+    def hang(target):
+        started.set()
+        # Long against the 2 s assertion below, short enough that a failure reports in
+        # seconds rather than after a long wait.
+        release.wait(8)
+        return instance_identity._Result(instance_identity._Outcome.OK, str(uuid.uuid4()))
+
+    monkeypatch.setattr(instance_identity, "_resolve", hang)
+    monkeypatch.setenv("TOKDASH_WARM_ON_START", "0")
+    monkeypatch.setenv("TOKDASH_DAILY_WARM", "0")
+
+    client = TestClient(api.app)
+    began = time.monotonic()
+    try:
+        client.__enter__()  # runs the lifespan, which is where the await used to be
+        startup_s = time.monotonic() - began
+        assert started.wait(5), "the warm-up never started, so this proves nothing"
+        assert startup_s < 2.0, f"startup waited {startup_s:.1f} s on the data dir"
+
+        release.set()
+        warm = api.app.state.identity_warm
+        assert warm is not None, "the lifespan never queued the warm-up"
+        for _ in range(500):
+            if warm.done():
+                break
+            time.sleep(0.02)
+        assert warm.done(), "the background lookup never finished"
+    finally:
+        release.set()
+        client.__exit__(None, None, None)
 
 
 def test_failed_identity_is_retried_after_the_backoff(
@@ -469,13 +550,17 @@ def test_settled_lookup_stays_on_the_calling_thread(resolves, monkeypatch):
     assert len(resolves) == 1
 
 
-def test_only_one_lookup_per_path_is_ever_in_flight(monkeypatch):
-    """A lookup that cannot finish must cost one waiting caller, not one per probe.
+def test_a_probe_during_someone_elses_lookup_answers_at_once_without_the_id(monkeypatch):
+    """The contract P1 reads: no id in this answer, ask again.
 
-    The obvious non-blocking version is ``await asyncio.to_thread(...)`` for every cold
-    caller, which on a directory stuck in ``mkdir`` leaves a fresh thread wedged behind
-    the accessor's lock on every health probe the daemon survives. The second caller gets
-    no id for that one response instead, which is what an unsettled answer already means.
+    One lookup per path at a time. The caller that asked first waits for it -- it has to,
+    there is no other answer -- and a caller that arrives behind it answers immediately
+    without the field rather than starting a thread that would only queue behind the first.
+    On a directory stuck in ``mkdir`` that is the difference between one wedged thread for
+    the life of the daemon and a fresh one on every probe.
+
+    Losing the field for one response is safe; guessing at an identity is not. Absence
+    already means "identity unknown" everywhere it is read.
     """
     started = threading.Event()
     release = threading.Event()
@@ -503,8 +588,8 @@ def test_only_one_lookup_per_path_is_ever_in_flight(monkeypatch):
     first, second = asyncio.run(probe_while_busy())
 
     assert first == published
-    assert second is None
-    assert hops.hops == 1
+    assert second is None, "a caller behind a lookup must answer at once, without a guess"
+    assert hops.hops == 1, "every probe started a lookup of its own"
 
 
 def test_a_broken_data_dir_answers_inline_after_the_first_try(

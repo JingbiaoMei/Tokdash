@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import ipaddress
 import json
@@ -606,22 +607,44 @@ def _daily_warm_loop() -> None:
             logger.debug("tokdash daily report warm failed", exc_info=True)
 
 
+async def _warm_instance_identity() -> None:
+    """Background identity warm-up, swallowing nothing it could do anything about.
+
+    ``get_instance_id_async`` already never raises for any data-dir problem and answers
+    ``None`` instead, so the only thing this has to absorb is a cancellation at shutdown,
+    which is normal and must not become a traceback on stderr.
+    """
+    try:
+        await get_instance_id_async()
+    except asyncio.CancelledError:  # pragma: no cover - shutdown race
+        raise
+    except Exception:  # pragma: no cover - defensive, the accessor swallows OSError
+        logger.warning("tokdash identity warm-up failed", exc_info=True)
+
+
 @asynccontextmanager
-async def _lifespan(_app: "FastAPI"):
+async def _lifespan(app: "FastAPI"):
     # Fixture mode renders synthetic API payloads and must never start work against
     # real history in the background. Production behavior is unchanged unless the
     # explicit CLI switch set app.state.dev_fixture before uvicorn starts.
-    if not _dev_fixture_mode(_app) and os.environ.get("TOKDASH_WARM_ON_START", "1") != "0":
+    if not _dev_fixture_mode(app) and os.environ.get("TOKDASH_WARM_ON_START", "1") != "0":
         threading.Thread(target=_warm_caches, name="tokdash-warm", daemon=True).start()
-    if not _dev_fixture_mode(_app) and os.environ.get("TOKDASH_DAILY_WARM", "1") != "0":
+    if not _dev_fixture_mode(app) and os.environ.get("TOKDASH_DAILY_WARM", "1") != "0":
         threading.Thread(target=_daily_warm_loop, name="tokdash-daily-warm", daemon=True).start()
-    # Warm the daemon identity here rather than only at import so the first /health
-    # answer costs no file I/O, and via the async accessor so a cold data dir does not
-    # spend the startup path in mkdir/fsync/link. Lazy inside the accessor as well: a
-    # TestClient built without a context manager never runs this, and /health must not
-    # change shape because of it.
-    await get_instance_id_async()
-    yield
+    # Warm the daemon identity alongside the other warm-ups, which is to say in the
+    # background and never in front of the first request. Awaiting it here was a bug: it
+    # made serving wait on the data directory, five seconds on a slow disk and forever on
+    # a hung mount, with the process alive the whole time so a supervisor with
+    # Restart=on-failure sees nothing wrong. Freeing the event loop is no help when there
+    # is nothing yet for it to serve. The task is kept on the app so it cannot be
+    # garbage-collected out from under itself, and cancelled on the way out so a daemon
+    # shutting down in the first seconds of its life does not close the loop under it.
+    app.state.identity_warm = asyncio.create_task(_warm_instance_identity())
+    try:
+        yield
+    finally:
+        if not app.state.identity_warm.done():
+            app.state.identity_warm.cancel()
 
 
 app = FastAPI(title="Tokdash", lifespan=_lifespan)

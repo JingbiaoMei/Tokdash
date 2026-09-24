@@ -147,8 +147,11 @@ async def get_instance_id_async(path: Optional[Path] = None) -> Optional[str]:
     ``os.link``, plus up to two sleeps on an empty file. On a slow or broken state dir
     that would stall the whole server once a minute, which is the opposite of the point,
     so the settled answer is returned inline and anything that might touch the disk goes
-    to a worker thread. One per path at most: a lookup that cannot finish should cost one
-    caller a missing id, and not a fresh stuck thread on every probe.
+    to a worker thread. One lookup per path at a time, so the caller that arrives while
+    one is already running gets no id in that answer rather than a second thread that can
+    only queue behind the first: on a hung data dir the first caller waits as long as the
+    directory takes, and every caller after it answers at once without the field. Neither
+    of them loses the daemon, and neither of them costs another stuck thread.
     """
     target = _target(path)
     if _is_settled(target):
@@ -220,10 +223,10 @@ def _warn_once(target: Path, result: _Result) -> None:
     detail = f" ({result.detail})" if result.detail else ""
     if result.outcome is _Outcome.MALFORMED:
         logger.warning(
-            "tokdash could not read its identity from %s%s. It is never overwritten, so "
-            "delete the file to let Tokdash write a new one; until then this daemon "
-            "reports no identity and a dashboard reaching it over several URLs cannot "
-            "tell that they are one server.",
+            "tokdash could not read its identity from %s%s. It is never overwritten, and "
+            "this process does not try again, so delete the file AND restart tokdash to "
+            "get a new one; until then this daemon reports no identity, and a dashboard "
+            "reaching it over several URLs cannot tell that they are one server.",
             target,
             detail,
         )
@@ -317,10 +320,13 @@ def _create(target: Path) -> _Result:
     tmp = target.with_name(f".{target.name}.{os.getpid()}.{threading.get_ident()}.tmp")
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
-    except FileExistsError:
-        # Someone else created it between the read and here, empty at that instant.
-        return _read(target)
     except OSError as exc:
+        # One branch, because ``exist_ok=True`` leaves ``FileExistsError`` exactly one
+        # meaning: the data-dir path is already there and is not a directory. That is how
+        # the unwritable-directory test reaches here on Windows, where a path under a file
+        # answers ``FileExistsError`` rather than the ``NotADirectoryError`` Linux gives.
+        # It is not a publish race, and reading through it as one would report the id as
+        # merely absent when the answer is that this path cannot hold one.
         logger.debug("tokdash data dir cannot hold instance identity: %s", exc)
         return _Result(_Outcome.UNREADABLE, detail=str(exc))
 

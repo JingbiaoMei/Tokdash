@@ -7021,56 +7021,6 @@ def _hermes_rich_session_detail(session_id: str, raw: Dict[str, Any], session: D
                     detail_data["messages"] = parsed_messages
                     detail_data["tool_executions"] = list(tool_calls_map.values())
                     detail_data["tool_calls"] = list(tool_calls_map.values())
-
-                    # Synthesize granular turn data from assistant messages only if there is at most 1 model breakdown and session only had aggregate turns (<= 2)
-                    asst_msgs = [m for m in parsed_messages if m.get("role") == "assistant"]
-                    if len(detail_data.get("model_usages", [])) <= 1 and asst_msgs and len(raw.get("turns", [])) <= 2:
-                        total_out = float(session.get("tokens_out") or 0)
-                        total_in = float(session.get("tokens_in") or 0)
-                        total_cache = float(session.get("tokens_cache") or 0)
-                        total_reasoning = float(session.get("tokens_reasoning") or 0)
-                        total_cost = float(session.get("cost") or 0.0)
-
-                        lengths = [max(10, len(m.get("content", "") or "") + len(m.get("reasoning", "") or "")) for m in asst_msgs]
-                        sum_len = sum(lengths) or 1
-                        n_turns = len(asst_msgs)
-
-                        m_model = (detail_data.get("model_usages") and detail_data["model_usages"][0].get("model")) or session.get("model", "default")
-                        rich_turns = []
-                        for i, m in enumerate(asst_msgs):
-                            frac = lengths[i] / sum_len
-                            t_out = int(round(total_out * frac))
-                            t_reason = int(round(total_reasoning * frac))
-                            step_weight = (i + 1) / n_turns
-                            t_in = int(round((total_in / n_turns) * (0.6 + 0.8 * step_weight)))
-                            t_cache = int(round((total_cache / n_turns) * (0.3 + 1.4 * step_weight)))
-                            t_tok = t_in + t_cache + t_out + t_reason
-                            t_cost = round(total_cost * frac, 6) if total_cost > 0 else 0.0
-                            hit_rate = round(t_cache / (t_in + t_cache), 4) if (t_in + t_cache) > 0 else 0.0
-
-                            ts = m.get("timestamp")
-                            ts_str = ""
-                            if ts:
-                                try:
-                                    ts_str = datetime.fromtimestamp(float(ts), tz=timezone.utc).isoformat()
-                                except Exception:
-                                    ts_str = datetime.now(timezone.utc).isoformat()
-                            else:
-                                ts_str = datetime.now(timezone.utc).isoformat()
-
-                            rich_turns.append({
-                                "turn_index": i + 1,
-                                "model": m_model,
-                                "tokens_in": t_in,
-                                "tokens_cache": t_cache,
-                                "tokens_out": t_out,
-                                "tokens_reasoning": t_reason,
-                                "tokens": t_tok,
-                                "cache_hit_rate": hit_rate,
-                                "cost": t_cost,
-                                "timestamp": ts_str,
-                            })
-                        detail_data["turns"] = rich_turns
                 except Exception:
                     pass
 

@@ -171,7 +171,7 @@ is_compaction         0 / 1 - context-compaction request flag
   install that is right and cheap; for a table that disappeared under a Goose
   upgrade it is a silently stale reading, which is the one failure mode a
   dashboard must not have. The half-open
-  `created_timestamp >= ? AND < ?` window belongs to `_goose_load_sessions()`,
+  `created_timestamp >= ? AND < ?` window belongs to the Sessions reader,
   which is the only caller that has a window.
 - Timestamps convert seconds -> ms at the boundary (`* 1000`), so a day bucket
   is the request's own UTC second.
@@ -182,10 +182,12 @@ Feasible and in scope: `usage_ledger` rows carry `session_id`, `model`,
 per-request tokens and a timestamp, and `sessions` supplies the title, working
 directory and parent link.
 
-- `_goose_load_sessions()` in `sessions.py`; `"goose"` joins `SESSION_TOOLS`
-  and `SESSION_TOOL_KEYS` in `static/index.html`, and both surfaces read the
-  same snapshot helper, so Overview and Sessions cannot disagree about which
-  rows exist.
+- `_goose_corpus()` and `_goose_window_sessions()` in `sessions.py`; `"goose"`
+  joins `SESSION_TOOLS` and `SESSION_TOOL_KEYS` in `static/index.html`, and both
+  surfaces read the same snapshot helper, so Overview and Sessions cannot
+  disagree about which rows exist. The corpus is read once per database
+  signature and each window is arithmetic over that one read, because the panel
+  asks for several windows per refresh: see the read budget below.
 - One turn per ledger row, attributed by its own `created_timestamp`. Turn text
   is cosmetic: the nearest preceding `messages` row with `role='user'` and
   `metadata_json.userVisible = true` (Goose writes a second, hidden
@@ -248,7 +250,10 @@ Implementation notes (2026-09-21), where the build differed from the draft:
   `ceil(since/1000) <= t < ceil(until/1000)`, which selects exactly the rows
   whose `t * 1000` falls in the ms window. The predicate lives in the loader
   and only there; `GooseParser._parse_all()` stays unwindowed because
-  `source_replace` would otherwise persist a partial corpus. An UNBOUNDED read
+  `source_replace` would otherwise persist a partial corpus. The window is
+  applied to the loaded corpus in memory (`_goose_window_sessions()`), on the
+  same converted bounds, so the loader is unwindowed in the SQL sense and
+  windowed in the reporting sense. An UNBOUNDED read
   stops at `_GOOSE_MAX_EPOCH_SECONDS`, and that is the same ceiling
   `_goose_ts_to_ms()` refuses above, on purpose: the parser counts a row the
   helper accepts and the panel lists a row under the bound, so a millisecond
@@ -300,7 +305,12 @@ Implementation notes (2026-09-21), where the build differed from the draft:
   discard it. Measured on a synthetic 120-session / 4,800-message store: 16.7 ms
   for the unfiltered `IN` list, 2.8 ms narrowed to the three sessions that
   needed it, twice per cold pass with the duration scan beside it, and the
-  dashboard warms several windows per start.
+  dashboard warms several windows per start. It is two passes for the same
+  reason: the first finds each unnamed session's first visible user message from
+  `metadata_json` alone (no `content_json` in the result set), and only those
+  winners are materialised, because the columns that decide which message to
+  show and the column that has to be displayed are the same size only by
+  accident -- a busy session's `content_json` carries whole tool outputs.
 - The label rule is `sessions.name` **unless** the name is one of Goose's own
   generic defaults (`CLI Session` and friends), in which case the first
   user-visible prompt names the session. Measured reason: six of the seven
@@ -311,6 +321,48 @@ Implementation notes (2026-09-21), where the build differed from the draft:
   `usage_ledger` raises `GooseReadError`, mirroring the parser's
   `GooseSchemaError`, because an empty result here would be cached and would
   read as "no Goose sessions" for the life of the signature.
+- **Read budget: one snapshot per database signature, per process.** The panel
+  issues several reads per refresh -- two windows for active time, six for the
+  Report periods -- and each one used to take its own copy of the database,
+  because the window was a SQL predicate and so had to be asked for. It is now
+  asked for once: `_goose_load_corpus()` reads the unwindowed ledger, the
+  duration map and the prompts from a single snapshot, `_goose_window_sessions()`
+  derives each window by arithmetic, and `_goose_corpus()` memoises that corpus
+  against the database signature. Measured against the same tree one commit
+  earlier, on databases built from the fixture's own DDL: a 548 MB / 8,000-row
+  store went seven copies and 5,864 ms per refresh to one copy and 729 ms, and a
+  33.6 MB / 40,000-row store -- where the row count, not the copy, is the cost
+  -- went 5,759 ms to 2,220 ms. The corpus holds 26 MB at 40,000 ledger rows
+  (30 MB peak, measured with `tracemalloc`), and the memo holds one corpus, so
+  the eight-window refresh costs 26 MB rather than eight window views.
+- A refused schema is remembered, so an old Goose stops costing every request.
+  A Goose build with no `usage_ledger` table raises on every read by design, and
+  raising was the right rule -- but the read sits behind a snapshot copy, so
+  each request copied the whole database to discover the same missing table, and
+  the dashboard asked twice per refresh per window. The refusal is now memoised
+  against the database signature (`goose_remember_schema_failure()`), which is
+  safe in a way caching a read is not: a missing table is a property of the
+  schema, not of the moment. A database that changes signature is probed again,
+  so a Goose upgrade is picked up by the next read; a failed READ of a database
+  that has the table is still never cached.
+- **One in flight per source, at the store too.** `sync_source()` now goes
+  through the same single-flight gate `sync_files()` uses, and for no other
+  reason than cost: a `source_replace` parse re-reads the whole corpus, and for
+  Goose that means a fresh snapshot copy of `sessions.db`. Eight concurrent
+  dashboard requests copied a 1.46 GB database eight times at the same moment.
+- **Known ceiling, measured: the store's whole-source write.** The corpus is
+  read once per signature now, but a signature that DID change still rebuilds
+  every stored row for the source, because `source_replace` is what lets a
+  deleted session's rows leave. Measured on a 100,000-row ledger: 608 ms to
+  parse and 1.3 s to write, so a changed database costs about 2 s of sync, once
+  per signature window rather than once per request. At the corpora the fixtures
+  resemble -- thousands of rows, not a hundred thousand -- the same path costs
+  tens of milliseconds. Raising that ceiling means an incremental mode
+  (upsert by ledger id, full replace only when a row below the high-water mark
+  disappeared), which changes what `source_replace` promises and lands on every
+  other replace-mode source; it is deliberately not attempted here. The number
+  to re-measure is "seconds of sync per Goose write", and it is bounded by the
+  signature TTL, not by the request rate.
 
 ## Roo Code
 
@@ -785,14 +837,25 @@ the panel needed had been evicted by the files scanned before it.
 That floor is worth quoting rather than gesturing at, because it is what a
 polling dashboard pays repeatedly and it is a property of the mount, not of this
 code. On the same 600-task corpus with every cache warm and only the signature
-TTL expired - the state of a dashboard whose corpus has not changed - one pass
-costs 6.2 s on the Windows-mounted drive, with zero corpus file opens: 600
+window expired - the state of a dashboard whose corpus has not changed - one
+walk costs 6.2 s on the Windows-mounted drive, with zero corpus file opens: 600
 directory reads at the roughly 10 ms each that 9p charges. The same corpus on a
 local filesystem pays about 30 ms for the same walk. Nothing in this reader can
-reduce that further, because a rewrite of a task's message file does not touch
-its directory's mtime, so there is no cheaper signal that sees it; `TOKDASH_SIG_TTL`
-is the knob that trades walk frequency for freshness, and it is one number for
-every source rather than one this reader sets for itself.
+reduce the walk itself, because a rewrite of a task's message file does not touch
+its directory's mtime, so there is no cheaper signal that sees it.
+
+What the reader can decide is how often it pays. A flat `TOKDASH_SIG_TTL`
+presumes a scan cheaper than the TTL, and on this corpus the scan costs *more*
+than it: the memo holding a 6.3 s walk was stale before the request that ran it
+had finished parsing, so the second surface of one refresh always walked again.
+The memo's lifetime now honours what the scan cost, bounded at four times the
+configured TTL so a corpus that got unreasonably slow delays the dashboard
+instead of pinning it to a stale view. Measured on the 600-task Windows-mounted
+corpus, an `Overview` refresh followed by the Sessions tab six seconds later --
+not a stress test, someone reading the page before they click -- was 6.9 s plus
+7.1 s, two full walks, and is 7.0 s plus 40 ms, one walk. `TOKDASH_SIG_TTL`
+remains the knob for every source; this only stops a source from being rewalked
+because its own scan is slow.
 
 Goose has the opposite shape, one SQLite file rather than one directory per task,
 so its cost is per row rather than per path operation. Measured on a database
@@ -1005,7 +1068,7 @@ Phase 1 (Overview and Stats): `GooseParser` and `RooCodeParser`, brand wiring
 `SUPPORTED_CLIENTS.md` and the five translated READMEs in the same PR.
 
 Phase 2 (Sessions): `goose` and `roo_code` join `SESSION_TOOLS` and
-`SESSION_TOOL_KEYS`, with `_goose_load_sessions()` and
+`SESSION_TOOL_KEYS`, with `_goose_corpus()` and
 `_roo_code_load_sessions()`. Both keep `session_store=False` and stay
 live-queried, like ZCode and Qoder IDE.
 

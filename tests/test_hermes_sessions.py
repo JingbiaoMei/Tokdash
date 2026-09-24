@@ -19,6 +19,7 @@ from tokdash.pricing import PricingDatabase
 from tokdash.sessions import (
     SESSION_TOOLS,
     _hermes_sessions,
+    get_hermes_analytics,
     get_session_detail,
     get_sessions_data,
     reload_pricing_db,
@@ -420,6 +421,7 @@ def test_hermes_session_model_usage_parity_and_today(monkeypatch, tmp_path):
             last_activity_at REAL,
             ended_at REAL,
             message_count INTEGER,
+            tool_call_count INTEGER,
             input_tokens INTEGER,
             output_tokens INTEGER,
             cache_read_tokens INTEGER,
@@ -473,8 +475,8 @@ def test_hermes_session_model_usage_parity_and_today(monkeypatch, tmp_path):
     conn.execute(
         """
         INSERT INTO sessions (id, model, billing_provider, started_at, last_activity_at,
-                              message_count, input_tokens, output_tokens, title)
-        VALUES ('sess-multi', 'meituan/longcat-2.0', 'nous', ?, ?, 10, 250000, 6000, 'Multi-day Active Session')
+                              message_count, tool_call_count, input_tokens, output_tokens, title)
+        VALUES ('sess-multi', 'meituan/longcat-2.0', 'nous', ?, ?, 42, 15, 250000, 6000, 'Multi-day Active Session')
         """,
         (t_yest, t_today2),
     )
@@ -534,4 +536,13 @@ def test_hermes_session_model_usage_parity_and_today(monkeypatch, tmp_path):
     assert s["tokens_out"] == 5000
     assert s["tokens"] == 200100 + 5000 + 500
     assert s["display_name"] == "Multi-day Active Session"
+    assert s["tool_call_count"] == 15
+    assert s["message_count"] == 42
+
+    # Verify get_hermes_analytics() aggregates multi-model session_model_usage tokens accurately
+    analytics = get_hermes_analytics()
+    assert len(analytics["recent_sessions"]) >= 1
+    rec = next(r for r in analytics["recent_sessions"] if r["session_id"] == "sess-multi")
+    assert rec["tokens"] == 256600
+    assert rec["tool_call_count"] == 15
 

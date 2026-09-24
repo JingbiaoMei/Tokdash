@@ -2315,7 +2315,7 @@ def export_markdown_endpoint(period: str = "today", tool: str = "all", date_from
         "| Session | Tool | Project | Model | Tokens | Cost | Started |",
         "| :--- | :--- | :--- | :--- | :--- | :--- | :--- |",
     ]
-    tools_to_fetch = [tool] if tool != "all" else ["hermes", "codex", "claude"]
+    tools_to_fetch = [tool] if tool != "all" else ["hermes", "antigravity_cli", "codex", "claude"]
     total_tok = 0
     total_c = 0.0
     for t in tools_to_fetch:

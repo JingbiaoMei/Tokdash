@@ -9823,6 +9823,20 @@
       return !!el && el.classList.contains('active');
     }
 
+    function isHermesActive() {
+      const el = typeof document !== 'undefined' && typeof document.getElementById === 'function'
+        ? document.getElementById('hermes-content')
+        : null;
+      return !!el && el.classList && el.classList.contains('active');
+    }
+
+    function isTracesActive() {
+      const el = typeof document !== 'undefined' && typeof document.getElementById === 'function'
+        ? document.getElementById('traces-content')
+        : null;
+      return !!el && el.classList && el.classList.contains('active');
+    }
+
     function scheduleIdle(fn, timeoutMs = 750) {
       if (typeof requestIdleCallback === 'function') {
         requestIdleCallback(() => fn(), { timeout: timeoutMs });
@@ -12203,6 +12217,8 @@
         if (isOverviewActive()) renderOverviewTab(lastUsageResponse);
         if (isSessionsActive()) renderSessionsTab();
         if (isServersActive()) renderServersTab();
+        if (typeof isHermesActive === 'function' && isHermesActive() && typeof loadHermesHub === 'function') loadHermesHub();
+        if (typeof isTracesActive === 'function' && isTracesActive() && typeof renderTracesTab === 'function') renderTracesTab();
       } catch (error) {
         console.error('Error fetching data:', error);
         // Superseded: the user is waiting on another range, so this failure is
@@ -18497,13 +18513,18 @@
       if (!container) return;
 
       try {
+        const dateFrom = currentStartDate ? formatLocalDateYmd(currentStartDate) : null;
+        const dateTo = currentEndDate ? formatLocalDateYmd(currentEndDate) : null;
+        const tracesUrl = sessionUrlForTool('hermes', null, dateFrom, dateTo);
+
         let sessions = hermesSessionsCache;
-        if (!sessions || !sessions.length) {
-          const res = await fetch(appPath('/api/sessions?tool=hermes'));
+        if (!sessions || !sessions.length || hermesSessionsCacheUrl !== tracesUrl) {
+          const res = await fetch(appPath(tracesUrl));
           if (res.ok) {
             const data = await res.json();
             sessions = data.sessions || [];
             hermesSessionsCache = sessions;
+            hermesSessionsCacheUrl = tracesUrl;
           }
         }
         if (countLabel) countLabel.textContent = `${sessions.length} sessions streaming`;
@@ -18514,7 +18535,8 @@
         }
 
         container.innerHTML = sessions.slice(0, 30).map(s => {
-          const timeStr = s.last_seen ? new Date(s.last_seen * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'recently';
+          const tsVal = s.last_seen_at || s.last_activity_at || (s.last_seen ? s.last_seen * 1000 : null);
+          const timeStr = tsVal ? new Date(tsVal).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'recently';
           const toolCount = s.tool_call_count || (s.turns ? s.turns.length : 0);
           const tokens = s.tokens || (s.total_tokens || 0);
           return `
@@ -19245,6 +19267,7 @@
     // ==========================================
     let hermesAnalyticsCache = null;
     let hermesSessionsCache = [];
+    let hermesSessionsCacheUrl = '';
 
     async function fetchHermesHeaderStats() {
       try {
@@ -19255,6 +19278,14 @@
         const badgeCount = document.getElementById('hermesHeaderBadgeCount');
         if (badgeCount && data.total_sessions) {
           badgeCount.textContent = `${formatNumber(data.total_sessions)} Sessions`;
+        }
+        const badgeEl = document.getElementById('hermesHeaderBadge');
+        if (badgeEl && data.total_sessions > 0) {
+          badgeEl.style.display = 'inline-flex';
+        }
+        const tabBtn = document.querySelector('button.tab-btn[data-tab="hermes"]');
+        if (tabBtn && data.total_sessions > 0) {
+          tabBtn.style.display = 'inline-flex';
         }
         const sidebarSessions = document.getElementById('sidebarSessionCount');
         if (sidebarSessions && data.total_sessions) {
@@ -19278,10 +19309,14 @@
       const toolsContainer = document.getElementById('hermesToolsDistribution');
       const projectsContainer = document.getElementById('hermesProjectsList');
 
+      const dateFrom = currentStartDate ? formatLocalDateYmd(currentStartDate) : null;
+      const dateTo = currentEndDate ? formatLocalDateYmd(currentEndDate) : null;
+      const sessionsUrl = sessionUrlForTool('hermes', null, dateFrom, dateTo);
+
       try {
         const [analyticsRes, sessionsRes] = await Promise.all([
           fetch(appPath('/api/hermes/analytics')),
-          fetch(appPath('/api/sessions?tool=hermes')),
+          fetch(appPath(sessionsUrl)),
         ]);
 
         if (analyticsRes.ok) {
@@ -19340,6 +19375,7 @@
           const sessionsData = await sessionsRes.json();
           const sessions = sessionsData.sessions || [];
           hermesSessionsCache = sessions;
+          hermesSessionsCacheUrl = sessionsUrl;
           renderHermesHubSessions(sessions);
         }
       } catch (err) {

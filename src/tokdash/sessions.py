@@ -1014,7 +1014,7 @@ def _summarize_session(
     last_seen_at_ms = int(turns[-1].get("timestamp_ms", 0) or 0)
     intervals = _session_active_intervals(raw, active_gap_cap_ms(), since_ms, until_ms)
 
-    return {
+    res = {
         "tool": raw.get("tool", "unknown"),
         "session_id": raw.get("session_id", "unknown"),
         "display_name": raw.get("display_name")
@@ -1045,6 +1045,15 @@ def _summarize_session(
         "active_ms_sum": sum(end - start for start, end in intervals),
         "_active_intervals": intervals,
     }
+    if "tool_call_count" in raw:
+        res["tool_call_count"] = raw["tool_call_count"]
+    if "message_count" in raw:
+        res["message_count"] = raw["message_count"]
+    if "git_branch" in raw:
+        res["git_branch"] = raw["git_branch"]
+    if "profile_name" in raw:
+        res["profile_name"] = raw["profile_name"]
+    return res
 
 
 def _public_turns(turns: Iterable[Dict[str, Any]]) -> list[Dict[str, Any]]:
@@ -7013,9 +7022,9 @@ def _hermes_rich_session_detail(session_id: str, raw: Dict[str, Any], session: D
                     detail_data["tool_executions"] = list(tool_calls_map.values())
                     detail_data["tool_calls"] = list(tool_calls_map.values())
 
-                    # Synthesize granular turn data from assistant messages if raw session only had aggregate turns
+                    # Synthesize granular turn data from assistant messages only if there is at most 1 model breakdown and session only had aggregate turns (<= 2)
                     asst_msgs = [m for m in parsed_messages if m.get("role") == "assistant"]
-                    if asst_msgs and len(raw.get("turns", [])) <= 2:
+                    if len(detail_data.get("model_usages", [])) <= 1 and asst_msgs and len(raw.get("turns", [])) <= 2:
                         total_out = float(session.get("tokens_out") or 0)
                         total_in = float(session.get("tokens_in") or 0)
                         total_cache = float(session.get("tokens_cache") or 0)
@@ -7026,6 +7035,7 @@ def _hermes_rich_session_detail(session_id: str, raw: Dict[str, Any], session: D
                         sum_len = sum(lengths) or 1
                         n_turns = len(asst_msgs)
 
+                        m_model = (detail_data.get("model_usages") and detail_data["model_usages"][0].get("model")) or session.get("model", "default")
                         rich_turns = []
                         for i, m in enumerate(asst_msgs):
                             frac = lengths[i] / sum_len
@@ -7050,7 +7060,7 @@ def _hermes_rich_session_detail(session_id: str, raw: Dict[str, Any], session: D
 
                             rich_turns.append({
                                 "turn_index": i + 1,
-                                "model": session.get("model", "default"),
+                                "model": m_model,
                                 "tokens_in": t_in,
                                 "tokens_cache": t_cache,
                                 "tokens_out": t_out,
@@ -7207,21 +7217,32 @@ def get_hermes_analytics() -> Dict[str, Any]:
             except Exception:
                 pass
 
-            try:
-                cur.execute("SELECT cwd, git_repo_root, count(*) FROM sessions GROUP BY cwd, git_repo_root")
-                for cwd_v, repo_v, cnt in cur.fetchall():
-                    raw_p = repo_v or cwd_v or ""
-                    if raw_p:
-                        try:
-                            p = Path(raw_p)
-                            pname = "~" if p.resolve() == Path.home().resolve() else (p.name or "hermes")
-                        except Exception:
+            cols = set(_sqlite_columns(conn, "sessions"))
+            has_title = "title" in cols
+            has_cwd = "cwd" in cols
+            has_repo = "git_repo_root" in cols
+            has_tools = "tool_call_count" in cols
+            has_ended = "ended_at" in cols
+            has_activity = "last_activity_at" in cols
+
+            if has_cwd or has_repo:
+                try:
+                    q_cwd = "cwd" if has_cwd else "''"
+                    q_repo = "git_repo_root" if has_repo else "''"
+                    cur.execute(f"SELECT {q_cwd}, {q_repo}, count(*) FROM sessions GROUP BY {q_cwd}, {q_repo}")
+                    for cwd_v, repo_v, cnt in cur.fetchall():
+                        raw_p = repo_v or cwd_v or ""
+                        if raw_p:
+                            try:
+                                p = Path(raw_p)
+                                pname = "~" if p.resolve() == Path.home().resolve() else (p.name or "hermes")
+                            except Exception:
+                                pname = "hermes"
+                        else:
                             pname = "hermes"
-                    else:
-                        pname = "hermes"
-                    project_counts[pname] += cnt
-            except Exception:
-                pass
+                        project_counts[pname] += cnt
+                except Exception:
+                    pass
 
             try:
                 cur.execute("""
@@ -7237,9 +7258,29 @@ def get_hermes_analytics() -> Dict[str, Any]:
             except Exception:
                 pass
 
+            tables = set(r[0] for r in cur.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall())
+            has_smu = "session_model_usage" in tables
+            smu_tokens_by_session: Dict[str, int] = {}
+            smu_reasoning_by_session: Dict[str, int] = {}
+            if has_smu:
+                try:
+                    cur.execute("""
+                        SELECT session_id,
+                               sum(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens + reasoning_tokens),
+                               sum(reasoning_tokens)
+                        FROM session_model_usage
+                        GROUP BY session_id
+                    """)
+                    for s_id, tok_sum, reas_sum in cur.fetchall():
+                        smu_tokens_by_session[str(s_id)] = int(tok_sum or 0)
+                        smu_reasoning_by_session[str(s_id)] = int(reas_sum or 0)
+                except Exception:
+                    pass
+
             try:
-                cur.execute("""
-                    SELECT model, count(*), sum(tool_call_count)
+                tc_expr = "sum(tool_call_count)" if has_tools else "0"
+                cur.execute(f"""
+                    SELECT model, count(*), {tc_expr}
                     FROM sessions
                     WHERE model IS NOT NULL AND TRIM(model) != ''
                     GROUP BY model
@@ -7252,12 +7293,41 @@ def get_hermes_analytics() -> Dict[str, Any]:
             except Exception:
                 pass
 
+            if has_smu:
+                try:
+                    cur.execute("""
+                        SELECT model, count(DISTINCT session_id)
+                        FROM session_model_usage
+                        WHERE model IS NOT NULL AND TRIM(model) != ''
+                        GROUP BY model
+                    """)
+                    for m_name, s_cnt in cur.fetchall():
+                        m_str = str(m_name)
+                        if m_str in model_session_stats:
+                            model_session_stats[m_str]["session_count"] = max(model_session_stats[m_str]["session_count"], s_cnt)
+                        else:
+                            model_session_stats[m_str] = {
+                                "session_count": s_cnt,
+                                "total_tool_calls": 0,
+                            }
+                except Exception:
+                    pass
+
             try:
+                q_title = "title" if has_title else "''"
+                q_act = "last_activity_at" if has_activity else "NULL"
+                q_end = "ended_at" if has_ended else "NULL"
+                q_tools = "tool_call_count" if has_tools else "0"
+                q_cwd = "cwd" if has_cwd else "''"
+                q_repo = "git_repo_root" if has_repo else "''"
+                order_expr = f"COALESCE({q_act}, {q_end}, started_at, 0)"
                 cur.execute(
-                    """
-                    SELECT id, title, model, started_at, last_activity_at, ended_at, input_tokens, output_tokens, reasoning_tokens, tool_call_count, cwd, git_repo_root
+                    f"""
+                    SELECT id, {q_title}, model, started_at, {q_act}, {q_end},
+                           input_tokens, output_tokens, reasoning_tokens,
+                           {q_tools}, {q_cwd}, {q_repo}
                     FROM sessions
-                    ORDER BY last_activity_at DESC LIMIT 10
+                    ORDER BY {order_expr} DESC LIMIT 10
                     """
                 )
                 for r in cur.fetchall():
@@ -7268,6 +7338,13 @@ def get_hermes_analytics() -> Dict[str, Any]:
                     except Exception:
                         pname = "hermes"
                     is_active = (e_at is None) and l_act and (now_sec - float(l_act) < 1800)
+                    sid_str = str(sid)
+                    total_tokens = smu_tokens_by_session.get(sid_str)
+                    if total_tokens is None:
+                        total_tokens = (in_t or 0) + (out_t or 0) + (r_t or 0)
+                    total_reasoning = smu_reasoning_by_session.get(sid_str)
+                    if total_reasoning is None:
+                        total_reasoning = r_t or 0
                     recent_active_sessions.append({
                         "session_id": sid,
                         "title": title or sid,
@@ -7276,8 +7353,8 @@ def get_hermes_analytics() -> Dict[str, Any]:
                         "started_at": s_at,
                         "last_activity_at": l_act,
                         "is_active": bool(is_active),
-                        "tokens": (in_t or 0) + (out_t or 0) + (r_t or 0),
-                        "reasoning_tokens": r_t or 0,
+                        "tokens": total_tokens,
+                        "reasoning_tokens": total_reasoning,
                         "tool_call_count": t_cnt or 0,
                     })
             except Exception:

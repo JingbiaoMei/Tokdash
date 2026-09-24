@@ -12,8 +12,8 @@ This note records the storage layout, the token-accounting rules, the session
 decisions, the blind spots, and what is out of scope. Field-level evidence:
   `docs/local/20260920_goose_roo_support/evidence/` (Goose fixture probe,
   `goose info` captures, Roo bundle analysis, and a live Roo task and resume)
-  and the fixtures `scratchpad/fixtures/goose/gsnap.db` and
-  `scratchpad/fixtures/roo/`.
+  and the fixtures `docs/local/20260920_goose_roo_support/fixtures/goose/gsnap.db` and
+  `docs/local/20260920_goose_roo_support/fixtures/roo/`.
 
 ## Goose
 
@@ -951,7 +951,8 @@ Implementation notes (2026-09-21):
 Mirror the existing per-tool pairs (`test_crush_parser.py`,
 `test_zcode_sessions.py`):
 
-- `tests/test_goose_parser.py`, fixture `scratchpad/fixtures/goose/gsnap.db`
+- `tests/test_goose_parser.py`, fixture
+  `docs/local/20260920_goose_roo_support/fixtures/goose/gsnap.db`
   rebuilt the way `tests/test_crush_parser.py` builds its database, from
   inline `CREATE TABLE` DDL seeded with the verified fixture rows (no binary
   `.db` in `tests/fixtures/`): one entry per ledger row; `total == in + out`;
@@ -976,8 +977,9 @@ Mirror the existing per-tool pairs (`test_crush_parser.py`,
   ways (a fully named store never opens `messages` for a title, and a mix of
   named and unnamed sessions still names both).
 - `tests/test_roo_code_parser.py`, seeded inline from
-  `scratchpad/fixtures/roo/` (a real two-turn task: 3 requests, then a resume
-  adding `resume_task` + `user_feedback` + 3 more): one entry per completed
+  `docs/local/20260920_goose_roo_support/fixtures/roo/` (a real two-turn task:
+  3 requests, then a resume adding `resume_task` + `user_feedback` + 3 more):
+  one entry per completed
   `api_req_started`; the six rows sum to 56126/670 and to nothing else;
   in-flight (`apiProtocol` only), all-zero failed, `partial`, `resume_task` and
   `api_req_retry_delayed` rows all skipped; `api_req_deleted` not subtracted;
@@ -1012,12 +1014,14 @@ synced settings, and any quota card for either tool.
 
 ## Live-verification items
 
-Goose's facts are verified against `scratchpad/fixtures/goose/gsnap.db` (Linux)
-and `scratchpad/fixtures/goose/gmac-sessions.db` (macOS), and V7's macOS half,
-except for V6. V1-V3 were settled on 2026-09-20 by a real Roo task and a real
-resume driven through `@roo-code/cli` against this machine's vLLM endpoint; the
-fixture is `scratchpad/fixtures/roo/` and the transcript of both runs plus the
-before/after counters is
+Goose's facts are verified against
+`docs/local/20260920_goose_roo_support/fixtures/goose/gsnap.db` (Linux) and
+`docs/local/20260920_goose_roo_support/fixtures/goose/gmac-sessions.db`
+(macOS), and V7's macOS half, except for V6. V1-V3 were settled on 2026-09-20 by
+a real Roo task and a real resume driven through `@roo-code/cli` against this
+machine's vLLM endpoint; the fixture is
+`docs/local/20260920_goose_roo_support/fixtures/roo/` and the transcript of
+both runs plus the before/after counters is
 `docs/local/20260920_goose_roo_support/evidence/roo_live_run.md`. Everything
 else about Roo is still read off the shipped bundle
 (`evidence/roo_static_analysis.txt`).
@@ -1034,10 +1038,12 @@ else about Roo is still read off the shipped bundle
 | V7 | Goose on macOS or Windows | data-dir layout for `clientpaths` | **Done for macOS** (v1.51.0, macOS 26.5.2 arm64). `goose info` reports `~/.local/share/goose/sessions/sessions.db`, the same XDG default as Linux, and a real session created it there with WAL sidecars and an identical schema. `~/Library/Application Support/goose` is never created, so **no Apple-convention branch belongs in `clientpaths`**. Windows is still unobserved |
 | V8 | Roo fork (`number: 2`) | whether a fork copies `api_req_started` rows into the new task dir, which would break task-scoped entry ids | **Closed: no fork feature exists in 3.54.0.** Zero case-sensitive `Fork` occurrences in the 14.8 MB bundle, no fork handler, and no fork string anywhere in the webview bundle, `package.nls.json` or the release changelog. The Cline fork-copy risk this item was written against has no counterpart here, so `cross_file_stable_keys = False` is safe. 3.54.0 is the current marketplace release as at 2026-09-20, so this is not a stale-version reading; a future version that adds fork would need a re-check |
 
-After V4, V5 or V8 run `python3 scratchpad/probe_roo_storage.py <root>`; after
-V6 run `python3 scratchpad/probe_goose_fixture.py <sessions.db>`. Both print
-redacted, paste-ready evidence. V4, V5 and V8 all need the VS Code extension,
-not the CLI.
+The probes print redacted, paste-ready evidence:
+
+- V4, V5, V8: `python3 docs/local/20260920_goose_roo_support/probes/probe_roo_storage.py <root>`
+- V6: `python3 docs/local/20260920_goose_roo_support/probes/probe_goose_fixture.py <sessions.db>`
+
+V4, V5 and V8 all need the VS Code extension, not the CLI.
 
 ## SUPPORTED_CLIENTS.md paragraphs (landed 2026-09-21)
 

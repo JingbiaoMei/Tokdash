@@ -287,6 +287,110 @@ def test_a_child_of_another_session_stays_out(monkeypatch, tmp_path):
     assert len(GooseParser(PricingDatabase())._parse_all()) == 2
 
 
+# --- the read budget ---------------------------------------------------------
+
+
+def _counting_snapshot(monkeypatch, calls):
+    """Wrap the shared snapshot helper so copies of the DB are countable."""
+    real = sessions.zcode_snapshot
+
+    def counting(db_path):
+        calls.append(str(db_path))
+        return real(db_path)
+
+    monkeypatch.setattr(sessions, "zcode_snapshot", counting)
+    return calls
+
+
+def test_one_snapshot_serves_every_window(monkeypatch, tmp_path):
+    """A Report tab asks for six periods and active time for two more.
+
+    Each of those used to be a whole-copy snapshot of sessions.db, so one
+    database change cost eight copies of a file that can pass a gigabyte. The
+    corpus is read once and the windows are arithmetic.
+    """
+    _setup(monkeypatch, tmp_path,
+           sessions=[_session("s1"), _session("s2")],
+           ledger=[_ledger(1, "s1", 0), _ledger(2, "s2", 5)],
+           messages=[_assistant_usage("s1", 1, 1200, input_tokens=1000, output_tokens=20)])
+    calls = _counting_snapshot(monkeypatch, [])
+
+    windows = [
+        (None, None),
+        (T0 * SECOND, (T0 + 60) * SECOND),
+        ((T0 - 3600) * SECOND, (T0 + 1) * SECOND),
+        ((T0 - 86400) * SECOND, (T0 + 86400) * SECOND),
+        (0, (T0 - 1) * SECOND),
+        (None, (T0 + 30) * SECOND),
+    ]
+    listed = [len(_goose_sessions(since_ms=lo, until_ms=hi)) for lo, hi in windows]
+
+    assert len(calls) == 1, f"{len(calls)} copies of sessions.db for one signature"
+    # And every window still answers, which is the part that must not regress
+    # for the saving: the windows disagree about both sessions, on purpose.
+    assert listed == [2, 2, 1, 2, 0, 2], listed
+    # A repeat asks nothing of the filesystem at all.
+    calls.clear()
+    assert len(_goose_sessions()) == 2
+    assert calls == []
+
+
+def test_a_database_change_costs_one_more_read(monkeypatch, tmp_path):
+    """The corpus is not a permanent cache: a new signature must re-read it."""
+    db = _setup(monkeypatch, tmp_path,
+                sessions=[_session("s1")], ledger=[_ledger(1, "s1", 0)])
+    calls = _counting_snapshot(monkeypatch, [])
+    assert len(_goose_sessions()) == 1
+    assert len(calls) == 1
+
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "INSERT INTO usage_ledger (id, session_id, created_timestamp, model, "
+        "input_tokens, output_tokens, total_tokens, cache_read_tokens, "
+        "cache_write_tokens, cost, is_compaction) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        _ledger(88, "s1", 300),
+    )
+    conn.commit()
+    conn.close()
+    # Coarse mtime clocks make this a test of the rule rather than the clock.
+    stat = db.stat()
+    os.utime(db, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+
+    sessions._goose_sessions_cache.clear()
+    sessions._goose_sessions_cache_sig = ()
+    assert len(_goose_sessions()) == 1
+    assert len(calls) == 2
+    turns = [t for raw in _goose_sessions().values() for t in raw["turns"]]
+    assert len(turns) == 2, "the second read must carry the row the first one missed"
+
+
+def test_an_unreadable_schema_is_not_re_copied_for_every_request(tmp_path, monkeypatch):
+    """A Goose older than usage_ledger failed on every read, and re-COPIED the
+    whole database to discover the same thing each time: for usage, for
+    sessions, for insights. The verdict belongs to the file, so it is remembered
+    against the file's signature -- and only against that signature.
+    """
+    db = tmp_path / "xdg" / "goose" / "sessions" / "sessions.db"
+    _make_db(db, with_ledger=False, sessions=[_session("s1")], ledger=[])
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("TOKDASH_DATA_DIR", str(tmp_path / "data-home"))
+    _parser(monkeypatch, xdg=tmp_path / "xdg")
+    calls = _counting_snapshot(monkeypatch, [])
+
+    for _ in range(4):
+        with pytest.raises(GooseReadError):
+            _goose_sessions()
+    assert len(calls) == 1, "the schema verdict was re-derived by copying the file"
+
+    # Upgrading Goose writes the database, the signature moves, and the next
+    # read probes for real instead of trusting the memo.
+    db.unlink()
+    _make_db(db, sessions=[_session("s2")], ledger=[_ledger(9, "s2", 0)])
+    sessions._goose_sessions_cache.clear()
+    sessions._goose_sessions_cache_sig = ()
+    assert {row["session_id"] for row in _listing()["sessions"]} == {"s2"}
+
+
 # --- windowing ---------------------------------------------------------------
 
 

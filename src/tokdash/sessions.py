@@ -13,7 +13,17 @@ from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache, wraps
 from pathlib import Path
-from typing import Any, Callable, Collection, Dict, Iterable, Optional, Tuple
+from typing import (
+    Any,
+    Callable,
+    Collection,
+    Dict,
+    Iterable,
+    List,
+    NamedTuple,
+    Optional,
+    Tuple,
+)
 from urllib.parse import unquote
 
 from . import clientpaths
@@ -49,6 +59,8 @@ from .sources.coding_tools import (
     codex_replay_key_session_id,
     codex_token_event_key,
     connect_sqlite_readonly,
+    goose_remember_schema_failure,
+    goose_schema_failure,
     iter_grok_usage_rows,
     parse_cline_message_file,
     qoder_cli_effective_rate,
@@ -6119,12 +6131,42 @@ class GooseReadError(RuntimeError):
     """A Goose database this reader cannot account for, or a failed read."""
 
 
-# Max (window) entries kept in the loader result cache, mirroring ZCode.
-_GOOSE_SESSIONS_CACHE_MAX = 32
+# Max (window) entries kept in the loader result cache. Windows are now cheap
+# arithmetic over one corpus, so this only bounds how many finished views are
+# held; the dashboard warms two active-time windows and six Report periods, and
+# eight of them plus a little slack is the whole working set.
+_GOOSE_SESSIONS_CACHE_MAX = 16
 
 _goose_sessions_cache: Dict[tuple, Dict[str, Dict[str, Any]]] = {}
 _goose_sessions_cache_sig: tuple = ()
 _goose_sessions_cache_lock = threading.Lock()
+
+# ONE corpus of the whole ledger, for one database signature. The corpus is the
+# expensive object (it is the whole history), so it is not an LRU: a signature
+# change drops it, and nothing else is kept.
+_goose_corpus_cache: Optional[Dict[str, Any]] = None
+_goose_corpus_cache_sig: tuple = ()
+_goose_corpus_lock = threading.Lock()
+
+
+class _GooseLedgerRow(NamedTuple):
+    """One kept usage_ledger row, as the windowing pass needs it.
+
+    A NamedTuple rather than the sqlite3.Row, because the row outlives the
+    cursor: the corpus is read once and windowed many times, and a Row keeps its
+    statement's column map alive for every window that walks it.
+    """
+
+    row_id: Any
+    stamp: Any
+    seconds: int
+    model: str
+    input_total: int
+    output: int
+    cache_read: int
+    cache_write: int
+    is_compaction: int
+    sig_rank: int
 
 # Goose's own default titles. Kept out of display_name so the panel shows the
 # project and short id instead of a row that reads "CLI Session" for every
@@ -6228,16 +6270,213 @@ def _goose_elapsed_ms(cur, session_ids: list) -> Dict[str, Dict[Tuple[int, int],
     return out
 
 
-def _goose_load_sessions(
-    conn: sqlite3.Connection,
+def _goose_load_corpus(conn: sqlite3.Connection) -> Dict[str, Any]:
+    """The whole billable Goose history, read ONCE per database signature.
+
+    Every row usage_ledger holds, for the sessions this reader lists, plus the
+    two things the messages table can say: each request's measured duration and
+    the first visible prompt of the sessions Goose left unnamed. Windowing
+    happens afterwards, in memory (see _goose_window_sessions).
+
+    That order is the whole point. A window used to be one whole-copy snapshot
+    of sessions.db, and a Report tab asks for six of them (two for active time,
+    six for the periods), so one database change cost eight copies of a
+    multi-gigabyte file for rows that had already been read. The corpus is
+    bounded to one per signature and the windows cost nothing.
+    """
+    cur = conn.cursor()
+
+    # session_type 'user' and parent_session_id IS NULL keep Goose's own
+    # internal sessions out of the listing. Neither column has a fixture that
+    # contradicts the filter, and neither has one that confirms it: both
+    # fixtures are session_type in {user, hidden} with parent_session_id null
+    # on every row, so the null half selects a shape nobody has observed yet.
+    # archived_at and schedule_id are deliberately not read - an archived
+    # session's tokens were still billed, and a scheduled recipe run lists as
+    # an ordinary session until a real one exists to group by.
+    #
+    # No window predicate, so the corpus answers every window. The two ranked
+    # columns the windowed query needed are gone with it: sig_rank ranks rows
+    # that billed the same counts in id order over the WHOLE session (unchanged
+    # below, because it was never windowed), and the closing-edge row is now
+    # picked in memory, where a junk stamp can no longer displace the real one.
+    cur.execute(
+        """
+        SELECT l.session_id, l.id, l.created_timestamp, l.model,
+               l.input_tokens, l.output_tokens,
+               l.cache_read_tokens, l.cache_write_tokens, l.is_compaction,
+               l.sig_rank, s.name, s.working_dir
+        FROM (
+            SELECT session_id, id, created_timestamp, model,
+                   input_tokens, output_tokens, cache_read_tokens,
+                   cache_write_tokens, is_compaction,
+                   -- The pairing key for _goose_elapsed_ms: rows that billed
+                   -- the same counts take their durations in id order. The
+                   -- whole session, never a window.
+                   ROW_NUMBER() OVER (
+                       PARTITION BY session_id,
+                                    COALESCE(input_tokens, 0),
+                                    COALESCE(output_tokens, 0)
+                       ORDER BY id
+                   ) AS sig_rank
+            FROM usage_ledger
+            -- The parser's keep-guard, in SQL, so the ranked set is exactly
+            -- the set the turns are built from. COALESCE because the Python
+            -- guard reads each column as `int(x or 0)`, and a plain
+            -- `NULL + 1 > 0` test would drop a row the parser keeps.
+            WHERE COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0)
+                  + COALESCE(cache_read_tokens, 0)
+                  + COALESCE(cache_write_tokens, 0) > 0
+              -- Goose's own backfill rows, excluded here for the same reason
+              -- GooseParser excludes them, and also because they carry no
+              -- assistant message: ranking past them would shift every
+              -- duration that follows. See GooseParser._parse_db.
+              AND COALESCE(cost_source, '') <> 'carried_forward'
+        ) l
+        JOIN sessions s ON s.id = l.session_id
+        WHERE s.session_type = 'user'
+          AND s.parent_session_id IS NULL
+        ORDER BY l.session_id, l.id
+        """
+    )
+
+    sessions: Dict[str, Dict[str, Any]] = {}
+    for row in cur.fetchall():
+        session_id = str(row["session_id"])
+        # BaseParser._i, not int(): a column holding anything non-numeric (a
+        # TEXT token count from a Goose bug or a half-finished migration) reads
+        # as 0 here exactly as it does in GooseParser._parse_db, and exactly as
+        # SQLite's own arithmetic read it in the keep-guard above. A bare int()
+        # raised out of the loader, and the raise cost the WHOLE Goose panel -
+        # one junk value in one row is a missing number, not a missing tool.
+        input_total = BaseParser._i(row["input_tokens"])
+        output_t = BaseParser._i(row["output_tokens"])
+        cache_r = BaseParser._i(row["cache_read_tokens"])
+        cache_w = BaseParser._i(row["cache_write_tokens"])
+        if input_total + output_t + cache_r + cache_w <= 0:
+            continue
+        ts_ms = _goose_ts_to_ms(row["created_timestamp"])
+        if ts_ms is None:
+            # Not a row Overview prices either (_parse_all skips it for the
+            # same reason), so it is not a turn, not an edge, and not worth
+            # carrying. A TEXT stamp in an INTEGER column is the realistic
+            # junk here, not NULL, which the DDL forbids.
+            continue
+        held = sessions.get(session_id)
+        if held is None:
+            held = sessions[session_id] = {
+                "name": _clean_display_name(row["name"]),
+                "project": _project_from_repo_or_path(None, row["working_dir"]),
+                "rows": [],
+            }
+        held["rows"].append(
+            _GooseLedgerRow(
+                row_id=row["id"],
+                # The raw column, because the parser's entry id embeds THAT and
+                # not the normalised ms: a REAL stamp would otherwise key the
+                # turn away from the Overview entry that priced it.
+                stamp=row["created_timestamp"],
+                seconds=ts_ms // 1000,
+                model=str(row["model"] or "").strip() or "unknown",
+                input_total=input_total,
+                output=output_t,
+                cache_read=cache_r,
+                cache_write=cache_w,
+                is_compaction=int(row["is_compaction"] or 0),
+                sig_rank=int(row["sig_rank"]),
+            )
+        )
+
+    session_ids = sorted(sessions)
+    elapsed = _goose_elapsed_ms(cur, session_ids)
+    prompts = _goose_first_prompts(cur, [
+        sid for sid in session_ids
+        if sessions[sid]["name"].lower() in _GOOSE_GENERIC_NAMES
+    ])
+    return {"sessions": sessions, "elapsed": elapsed, "prompts": prompts}
+
+
+def _goose_first_prompts(cur, session_ids: list) -> Dict[str, str]:
+    """First user-visible prompt of each session Goose left unnamed.
+
+    Turn text is display only; it is never a token source. Two queries rather
+    than one because the answer is one string per session while a session's
+    user messages are the biggest text in the database: the first pass reads
+    the small metadata column to find each session's first VISIBLE message, and
+    only the winners' content_json is materialised. Reading content for every
+    user message of every unnamed session was a full corpus of prompt text
+    pulled through the reader to keep a handful of strings, and the corpus read
+    now runs on every database change.
+
+    Sessions whose first visible message carries no text go round again for
+    their next one, so the answer is exactly what the one-query version gave.
+    """
+    out: Dict[str, str] = {}
+    pending: Dict[str, list] = {}
+    for start in range(0, len(session_ids), 400):
+        chunk = session_ids[start:start + 400]
+        marks = ", ".join("?" for _ in chunk)
+        cur.execute(
+            f"""
+            SELECT session_id, id, metadata_json
+            FROM messages
+            WHERE role = 'user'
+              AND session_id IN ({marks})
+            ORDER BY session_id, created_timestamp, id
+            """,
+            chunk,
+        )
+        for row in cur.fetchall():
+            if _goose_json_obj(row["metadata_json"]).get("userVisible") is not True:
+                continue
+            pending.setdefault(str(row["session_id"]), []).append(int(row["id"]))
+
+    while pending:
+        # One round asks each still-unnamed session's NEXT candidate message.
+        # Terminating is not optional here: a session leaves pending either by
+        # answering or by running out of candidates, and a round always removes
+        # at least the head of every list it asked about.
+        wanted: Dict[int, str] = {}
+        for sid, ids in pending.items():
+            wanted[ids[0]] = sid
+        answers: Dict[int, str] = {}
+        ids = list(wanted)
+        for start in range(0, len(ids), 400):
+            chunk = ids[start:start + 400]
+            marks = ", ".join("?" for _ in chunk)
+            cur.execute(
+                f"SELECT id, content_json FROM messages WHERE id IN ({marks})",
+                chunk,
+            )
+            for row in cur.fetchall():
+                answers[int(row["id"])] = _goose_content_text(row["content_json"])
+        still: Dict[str, list] = {}
+        for sid, ids in pending.items():
+            text = answers.get(ids[0], "")
+            if text:
+                out[sid] = text
+            elif len(ids) > 1:
+                still[sid] = ids[1:]
+        if len(still) == len(pending):
+            # Nothing resolved and nothing dropped: the candidate rows are gone
+            # from the table under us. Stop rather than ask the same question.
+            break
+        pending = still
+
+    return out
+
+
+def _goose_window_sessions(
+    corpus: Dict[str, Any],
     since_ms: Optional[int],
     until_ms: Optional[int],
 ) -> Dict[str, Dict[str, Any]]:
     """One turn per in-window usage_ledger row, grouped under its session.
 
-    The half-open window lives HERE and only here. GooseParser._parse_all() is
-    contractually unwindowed (the persistent store replaces the whole corpus
-    for this source), so a windowed parse would persist a partial corpus.
+    The half-open window lives HERE and only here, and it is pure arithmetic on
+    the corpus. GooseParser._parse_all() is contractually unwindowed (the
+    persistent store replaces the whole corpus for this source), so a windowed
+    parse would persist a partial corpus.
     """
     # usage_ledger.created_timestamp is INTEGER epoch SECONDS, so the ms window
     # is converted rather than compared. Ceil on both bounds keeps the half-open
@@ -6253,250 +6492,112 @@ def _goose_load_sessions(
         if until_ms is None
         else -(-int(until_ms) // 1000)
     )
-    cur = conn.cursor()
-
-    # session_type 'user' and parent_session_id IS NULL keep Goose's own
-    # internal sessions out of the listing. Neither column has a fixture that
-    # contradicts the filter, and neither has one that confirms it: both
-    # fixtures are session_type in {user, hidden} with parent_session_id null
-    # on every row, so the null half selects a shape nobody has observed yet.
-    # archived_at and schedule_id are deliberately not read - an archived
-    # session's tokens were still billed, and a scheduled recipe run lists as
-    # an ordinary session until a real one exists to group by.
-    cur.execute(
-        """
-        SELECT l.id, l.session_id, l.created_timestamp, l.model,
-               l.input_tokens, l.output_tokens,
-               l.cache_read_tokens, l.cache_write_tokens, l.is_compaction,
-               l.sig_rank,
-               s.name, s.working_dir
-        FROM (
-            SELECT id, session_id, created_timestamp, model,
-                   input_tokens, output_tokens, cache_read_tokens,
-                   cache_write_tokens, is_compaction,
-                   -- One window pass, and it is the pairing key: rows that
-                   -- billed the same counts take their durations in id order.
-                   -- The whole session, never the window, so a window that
-                   -- opens mid-session cannot shift an ordinal.
-                   ROW_NUMBER() OVER (
-                       PARTITION BY session_id,
-                                    COALESCE(input_tokens, 0),
-                                    COALESCE(output_tokens, 0)
-                       ORDER BY id
-                   ) AS sig_rank,
-                   -- edge_rank 1 is the earliest row AT OR PAST hi, which the
-                   -- outer WHERE lets through beside the in-window rows. The
-                   -- CASE sorts the past-hi rows ahead of the rest without
-                   -- dropping them, so the boundary row arrives carrying the
-                   -- same columns as the in-window ones. One scan, one set of
-                   -- window passes: usage_ledger has no index on
-                   -- created_timestamp, so a second query for this row would
-                   -- double the cold cost of every windowed read.
-                   ROW_NUMBER() OVER (
-                       PARTITION BY session_id
-                       ORDER BY CASE WHEN created_timestamp >= ?
-                                     THEN 0 ELSE 1 END, id
-                   ) AS edge_rank
-            FROM usage_ledger
-            -- The parser's keep-guard, in SQL, so the ranked set is exactly
-            -- the set the turns below are built from. COALESCE because the Python guard
-            -- reads each column as `int(x or 0)`, and a plain `NULL + 1 > 0`
-            -- test would drop a row the parser keeps.
-            WHERE COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0)
-                  + COALESCE(cache_read_tokens, 0)
-                  + COALESCE(cache_write_tokens, 0) > 0
-              -- Goose's own backfill rows, excluded here for the same reason
-              -- GooseParser excludes them, and also because they carry no
-              -- assistant message: ranking past them would shift every
-              -- duration that follows. See GooseParser._parse_db.
-              AND COALESCE(cost_source, '') <> 'carried_forward'
-        ) l
-        JOIN sessions s ON s.id = l.session_id
-        WHERE s.session_type = 'user'
-          AND s.parent_session_id IS NULL
-          AND (
-              (l.created_timestamp >= ? AND l.created_timestamp < ?)
-              OR (l.edge_rank = 1 AND l.created_timestamp >= ?)
-          )
-        ORDER BY l.session_id, l.id
-        """,
-        (hi, lo, hi, hi),
-    )
-    all_rows = cur.fetchall()
-
-    # Split the windowed rows from the one boundary row per session. The
-    # boundary row is NOT a turn: it is the request that was still running when
-    # the window closed, kept only so its measured duration can be handed to
-    # _session_active_intervals. Sessions with nothing in the window never get
-    # a raw dict at all, so a boundary row alone never lists a session.
-    def _stamp_seconds(row) -> Optional[int]:
-        # The column is NOT NULL in Goose's own DDL, but the loop below reads it
-        # through _goose_ts_to_ms, which tolerates junk. Splitting the rows first
-        # must not be the one place that refuses to: an int() here would raise
-        # and cost the whole panel its data.
-        try:
-            return int(row["created_timestamp"])
-        except (TypeError, ValueError):
-            return None
-
-    stamped = [(row, _stamp_seconds(row)) for row in all_rows]
-    ledger_rows = [row for row, sec in stamped if sec is not None and sec < hi]
-    edge_rows = {
-        str(row["session_id"]): row
-        for row, sec in stamped
-        if sec is not None and sec >= hi
-    }
-
-    elapsed_by_session = _goose_elapsed_ms(
-        cur, sorted({str(r["session_id"]) for r in ledger_rows})
-    )
-
-    # First user-visible prompt per session, for a session Goose left unnamed.
-    # Turn text is display only; it is never a token source. The IN-list is
-    # narrowed to the sessions whose own name is unusable, because the value is
-    # read only for those: asking for every in-window session materialises the
-    # content_json of every user message of a busy day to discard it again.
-    needs_name = sorted(
-        {
-            str(r["session_id"])
-            for r in ledger_rows
-            if _clean_display_name(r["name"]).lower() in _GOOSE_GENERIC_NAMES
-        }
-    )
-    prompt_by_session: Dict[str, str] = {}
-    for start in range(0, len(needs_name), 400):
-        chunk = needs_name[start:start + 400]
-        if not chunk:
-            continue
-        marks = ", ".join("?" for _ in chunk)
-        cur.execute(
-            f"""
-            SELECT session_id, content_json, metadata_json
-            FROM messages
-            WHERE role = 'user'
-              AND session_id IN ({marks})
-            ORDER BY session_id, created_timestamp, id
-            """,
-            chunk,
-        )
-        for row in cur.fetchall():
-            session_id = str(row["session_id"])
-            if session_id in prompt_by_session:
-                continue
-            if _goose_json_obj(row["metadata_json"]).get("userVisible") is not True:
-                continue
-            text = _goose_content_text(row["content_json"])
-            if text:
-                prompt_by_session[session_id] = text
+    elapsed_by_session = corpus["elapsed"]
+    prompts = corpus["prompts"]
 
     sessions: Dict[str, Dict[str, Any]] = {}
-    for row in ledger_rows:
-        session_id = str(row["session_id"])
-        # BaseParser._i, not int(): a column holding anything non-numeric (a
-        # TEXT token count from a Goose bug or a half-finished migration) reads
-        # as 0 here exactly as it does in GooseParser._parse_db, and exactly as
-        # SQLite's own arithmetic reads it in the keep-guard above. A bare int()
-        # raised out of the loader, and the raise cost the WHOLE Goose panel -
-        # one junk value in one row is a missing number, not a missing tool.
-        input_total = BaseParser._i(row["input_tokens"])
-        output_t = BaseParser._i(row["output_tokens"])
-        cache_r = BaseParser._i(row["cache_read_tokens"])
-        cache_w = BaseParser._i(row["cache_write_tokens"])
-        # The parser's keep-guard, so a zero-token row is not a turn here and
-        # is not an entry in Overview either. The same guard runs in the SQL
-        # above, where it matters for a second reason: the duration rank has to
-        # count exactly the rows this loop turns into turns.
-        if input_total + output_t + cache_r + cache_w <= 0:
+    for session_id, meta in corpus["sessions"].items():
+        rows = meta["rows"]
+        in_window = [row for row in rows if lo <= row.seconds < hi]
+        if not in_window:
+            # A session with no in-window rows is not listed, even when it has
+            # a row past the closing edge: the boundary row exists to hand that
+            # window its still-running request, never to introduce a session.
             continue
-        ts_ms = _goose_ts_to_ms(row["created_timestamp"])
-        if ts_ms is None:
-            continue
-        model = str(row["model"] or "").strip() or "unknown"
-        # Fresh input only, with BOTH cache parts taken back out. Same helper
-        # GooseParser._parse_db uses, so the panel and Overview cannot drift
-        # apart on a row's buckets.
-        input_t, cache_r, cache_w = split_goose_cache_inclusive_input(
-            input_total, cache_r, cache_w
-        )
 
-        raw = sessions.get(session_id)
-        if raw is None:
-            name = _clean_display_name(row["name"])
-            if name.lower() in _GOOSE_GENERIC_NAMES:
-                name = ""
-            display_name = name or _clean_display_name(prompt_by_session.get(session_id))
-            raw = {
-                "tool": "goose",
-                "session_id": session_id,
-                "display_name": display_name,
-                "project": _project_from_repo_or_path(None, row["working_dir"]),
-                "is_review_session": False,
-                "turns": [],
-            }
-            sessions[session_id] = raw
-        turn = _build_turn(
-            turn_index=len(raw["turns"]) + 1,
-            timestamp_ms=ts_ms,
-            model=model,
-            tokens_in=input_t + cache_w,
-            tokens_cache=cache_r,
-            tokens_out=output_t,
-            tokens_reasoning=0,
-            bill=_billing_record(
-                model,
-                "split-cache-write",
-                input_tokens=input_t,
-                output_tokens=output_t,
-                cache_read=cache_r,
-                cache_write=cache_w,
-            ),
-        )
-        # The parser's own entry id, so a turn here and the Overview entry that
-        # priced it are the same event on both surfaces.
-        turn["_event_key"] = (
-            f"goose:{session_id}:{row['id']}:{row['created_timestamp']}"
-        )
-        # Carried rather than hidden: a compaction request bills like any other,
-        # so it must be distinguishable from one. The v1 modal renders the
-        # standard token fields, so this is visible in the API response and in
-        # any drill-down that chooses to show it.
-        if int(row["is_compaction"] or 0):
-            turn["is_compaction"] = True
-        # Measured duration, matched on THIS row's own token counts rather than
-        # on its position in the session (see _goose_elapsed_ms). sig_rank ranks
-        # the whole session rather than the window, so a window that opens
-        # mid-session shifts nothing; it is the ordinal among rows that billed
-        # the same counts, which is the only remaining ambiguity and is resolved
-        # in request order. A row with no match simply gets no _work_ms, so
-        # `_summarize_session` falls back to the capped inter-event-gap contract
-        # the design already promises.
-        #
-        # Compaction rows are skipped on purpose. Nothing on an assistant
-        # message says "this answer came from a compaction request", so a
-        # compaction row that billed the same counts as a real request would
-        # take that request's duration; leaving it unmatched costs THIS turn a
-        # measured number, which is the smaller error. Both fixtures are Goose
-        # v6 captures with no is_compaction row at all, so this is defensive.
-        if not int(row["is_compaction"] or 0):
-            durations = (elapsed_by_session.get(session_id) or {}).get(
-                (BaseParser._i(row["input_tokens"]), BaseParser._i(row["output_tokens"]))
+        display_name = meta["name"]
+        if display_name.lower() in _GOOSE_GENERIC_NAMES:
+            display_name = _clean_display_name(prompts.get(session_id))
+        raw: Dict[str, Any] = {
+            "tool": "goose",
+            "session_id": session_id,
+            "display_name": display_name,
+            "project": meta["project"],
+            "is_review_session": False,
+            "turns": [],
+        }
+        sessions[session_id] = raw
+
+        for row in in_window:
+            model = row.model
+            # Fresh input only, with BOTH cache parts taken back out. Same
+            # helper GooseParser._parse_db uses, so the panel and Overview
+            # cannot drift apart on a row's buckets.
+            input_t, cache_r, cache_w = split_goose_cache_inclusive_input(
+                row.input_total, row.cache_read, row.cache_write
             )
-            index = int(row["sig_rank"]) - 1
-            if durations is not None and 0 <= index < len(durations):
-                turn["_work_ms"] = int(durations[index])
-        raw["turns"].append(turn)
+            turn = _build_turn(
+                turn_index=len(raw["turns"]) + 1,
+                timestamp_ms=row.seconds * 1000,
+                model=model,
+                tokens_in=input_t + cache_w,
+                tokens_cache=cache_r,
+                tokens_out=row.output,
+                tokens_reasoning=0,
+                bill=_billing_record(
+                    model,
+                    "split-cache-write",
+                    input_tokens=input_t,
+                    output_tokens=row.output,
+                    cache_read=cache_r,
+                    cache_write=cache_w,
+                ),
+            )
+            # The parser's own entry id, so a turn here and the Overview entry
+            # that priced it are the same event on both surfaces.
+            turn["_event_key"] = (
+                f"goose:{session_id}:{row.row_id}:{row.stamp}"
+            )
+            # Carried rather than hidden: a compaction request bills like any
+            # other, so it must be distinguishable from one. The v1 modal
+            # renders the standard token fields, so this is visible in the API
+            # response and in any drill-down that chooses to show it.
+            if row.is_compaction:
+                turn["is_compaction"] = True
+            # Measured duration, matched on THIS row's own token counts rather
+            # than on its position in the session (see _goose_elapsed_ms).
+            # sig_rank ranks the whole session rather than the window, so a
+            # window that opens mid-session shifts nothing; it is the ordinal
+            # among rows that billed the same counts, which is the only
+            # remaining ambiguity and is resolved in request order. A row with
+            # no match simply gets no _work_ms, so `_summarize_session` falls
+            # back to the capped inter-event-gap contract the design already
+            # promises.
+            #
+            # Compaction rows are skipped on purpose. Nothing on an assistant
+            # message says "this answer came from a compaction request", so a
+            # compaction row that billed the same counts as a real request
+            # would take that request's duration; leaving it unmatched costs
+            # THIS turn a measured number, which is the smaller error. Both
+            # fixtures are Goose v6 captures with no is_compaction row at all,
+            # so this is defensive.
+            if not row.is_compaction:
+                durations = (elapsed_by_session.get(session_id) or {}).get(
+                    (row.input_total, row.output)
+                )
+                index = row.sig_rank - 1
+                if durations is not None and 0 <= index < len(durations):
+                    turn["_work_ms"] = int(durations[index])
+            raw["turns"].append(turn)
 
-    # Hand the collected window its closing edge, for the sessions that are
-    # actually listed. A request's work interval runs BACKWARDS from its
-    # completion instant (_measured_intervals places the duration before the
-    # stamp), so the first row past hi can cover minutes of work that happened
-    # INSIDE the window. Dropping it undercounts silently, which is exactly what
-    # the source-windowing contract asks a SQLite loader to hand back. Only the
-    # closing edge needs it: the interval of a row before lo ends before lo, so
-    # the clip discards it and there is nothing to recover.
-    for session_id, edge in edge_rows.items():
-        raw = sessions.get(session_id)
-        if raw is None:
+        # Hand the collected window its closing edge. A request's work interval
+        # runs BACKWARDS from its completion instant (_measured_intervals
+        # places the duration before the stamp), so the first row past hi can
+        # cover minutes of work that happened INSIDE the window. Dropping it
+        # undercounts silently, which is exactly what the source-windowing
+        # contract asks a SQLite loader to hand back. Only the closing edge
+        # needs it: the interval of a row before lo ends before lo, so the clip
+        # discards it and there is nothing to recover.
+        #
+        # The candidate is the earliest row at or past hi in id order, which is
+        # what the SQL's edge_rank selected; junk stamps are already out of the
+        # corpus, so a bad row can no longer win the slot and leave the window
+        # with no edge at all.
+        edge = None
+        for row in rows:
+            if row.seconds >= hi and (edge is None or row.row_id < edge.row_id):
+                edge = row
+        if edge is None or edge.is_compaction:
             continue
         # A source-windowing loader owes the window its closing edge, measured
         # or not. Requiring a matched duration was the first cut and it was
@@ -6506,21 +6607,90 @@ def _goose_load_sessions(
         # charged the SAME capped inter-event gap the fallback gives every
         # in-window turn - that is the contract - and ZCode hands its edge over
         # in exactly this shape, event always and work only when measured.
-        # Compaction rows still get nothing, for the reason in the turns loop.
-        if int(edge["is_compaction"] or 0):
-            continue
-        edge_ts_ms = _goose_ts_to_ms(edge["created_timestamp"])
-        if edge_ts_ms is None:
-            continue
-        raw["_next_event_ms"] = edge_ts_ms
+        raw["_next_event_ms"] = edge.seconds * 1000
         durations = (elapsed_by_session.get(session_id) or {}).get(
-            (BaseParser._i(edge["input_tokens"]), BaseParser._i(edge["output_tokens"]))
+            (edge.input_total, edge.output)
         )
-        index = int(edge["sig_rank"]) - 1
+        index = edge.sig_rank - 1
         if durations is not None and 0 <= index < len(durations):
             raw["_next_work_ms"] = int(durations[index])
 
     return sessions
+
+
+def _goose_corpus() -> Optional[Dict[str, Any]]:
+    """The corpus for the current database signature, built at most once.
+
+    None when there is no Goose database at all, which is a legitimate empty
+    success rather than a read to retry. A database that cannot be accounted
+    for raises GooseReadError, and a database whose ledger table has vanished
+    under a Goose upgrade raises with the failure MEMOISED against its
+    signature: without the memo, a pre-usage_ledger Goose was re-copied in
+    full, and failed, on every request for usage and for insights.
+
+    The lock is the single-flight. Eight concurrent dashboard requests used to
+    copy the database eight times; now one of them reads and the rest wait on
+    it, which is cheaper than eight readers discovering the same rows.
+    """
+    global _goose_corpus_cache, _goose_corpus_cache_sig
+    db_path = clientpaths.goose_sessions_db()
+    if db_path is None:
+        return None
+    sig = _goose_db_signature()
+    if not sig:
+        return None
+
+    with _goose_corpus_lock:
+        if sig == _goose_corpus_cache_sig and _goose_corpus_cache is not None:
+            return _goose_corpus_cache
+
+        remembered = goose_schema_failure(sig)
+        if remembered is not None:
+            raise GooseReadError(remembered)
+
+        try:
+            with zcode_snapshot(db_path) as snap:
+                conn = snap.conn
+                conn.row_factory = sqlite3.Row
+                names = {
+                    str(r[0])
+                    for r in conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type = 'table'"
+                    )
+                }
+                if "usage_ledger" not in names:
+                    if "sessions" in names:
+                        # GooseSchemaError in the parser. Same rule here: the
+                        # database claims to be Goose's but has no ledger, so
+                        # this reader cannot tell an empty history from a
+                        # schema that moved the table. Memoised, because the
+                        # answer is a property of this file and this file only,
+                        # and re-deriving it costs a whole copy.
+                        message = (
+                            "Goose database has a sessions table but no usage_ledger; "
+                            "its schema is not one this reader can account for"
+                        )
+                        goose_remember_schema_failure(sig, message)
+                        raise GooseReadError(message)
+                    corpus = {"sessions": {}, "elapsed": {}, "prompts": {}}
+                else:
+                    corpus = _goose_load_corpus(conn)
+        except (ZCodeSnapshotError, sqlite3.Error) as error:
+            # A read that failed is not a corpus, and memoising it would make a
+            # torn write permanent. Only the schema verdict is remembered.
+            raise GooseReadError(f"Goose session read failed: {error}") from error
+
+        if snap.close_failed:
+            # The read completed but the snapshot could not be closed: return
+            # the data, never cache it (the shared close-failure contract).
+            return corpus
+
+        # Only the current signature is held: one corpus of a large history is
+        # already the biggest object this module keeps, and a stale one is
+        # worthless.
+        _goose_corpus_cache = corpus
+        _goose_corpus_cache_sig = sig
+        return corpus
 
 
 def _goose_sessions(
@@ -6541,43 +6711,13 @@ def _goose_sessions(
     if cached is not None:
         return cached
 
-    db_path = clientpaths.goose_sessions_db()
-    if db_path is None:
+    corpus = _goose_corpus()
+    if corpus is None:
         # Legitimate empty: no Goose database on this machine. Cached; the
         # signature changes when the DB appears.
         return _goose_store(sig, key, {})
 
-    raw_sessions: Dict[str, Dict[str, Any]]
-    try:
-        with zcode_snapshot(db_path) as snap:
-            conn = snap.conn
-            conn.row_factory = sqlite3.Row
-            names = {
-                str(r[0])
-                for r in conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type = 'table'"
-                )
-            }
-            if "usage_ledger" not in names:
-                if "sessions" in names:
-                    # GooseSchemaError in the parser. Same rule here: the
-                    # database claims to be Goose's but has no ledger, so this
-                    # reader cannot tell an empty history from a schema that
-                    # moved the table, and the difference must not be cached.
-                    raise GooseReadError(
-                        "Goose database has a sessions table but no usage_ledger; "
-                        "its schema is not one this reader can account for"
-                    )
-                raw_sessions = {}
-            else:
-                raw_sessions = _goose_load_sessions(conn, since_ms, until_ms)
-    except (ZCodeSnapshotError, sqlite3.Error) as error:
-        raise GooseReadError(f"Goose session read failed: {error}") from error
-
-    if snap.close_failed:
-        # The read completed but the snapshot could not be closed: return the
-        # data, never cache it.
-        return raw_sessions
+    raw_sessions = _goose_window_sessions(corpus, since_ms, until_ms)
     return _goose_store(sig, key, raw_sessions)
 
 
@@ -6722,7 +6862,13 @@ def _read_roo_history_item(
     return doc if isinstance(doc, dict) else {}
 
 
-@_cached_session_aggregate()
+# TWO whole-corpus views, not the default eight. This loader is keyed on the
+# signature of EVERY task file, so each entry is the entire Roo history assembled
+# into sessions and turns, and a corpus of 3,000 tasks measured about 117 MB per
+# view. Eight slots is eight copies of a corpus that only one reader wants at a
+# time: one current answer plus the one a request that scanned a moment earlier
+# is still holding. Same reasoning (and the same bound) as _load_openclaw_sessions.
+@_cached_session_aggregate(maxsize=2)
 def _load_roo_code_sessions(
     file_sigs: tuple, _history_sigs: tuple = (), _pricing_sig: tuple = ()
 ) -> Dict[str, Dict[str, Any]]:

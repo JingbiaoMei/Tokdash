@@ -9,7 +9,7 @@ always "unknown": schema v12 records no cwd.
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -402,3 +402,136 @@ def test_api_endpoints(monkeypatch, tmp_path):
     assert "_bill" not in turn and "_event_key" not in turn
     with pytest.raises(ValueError):
         get_sessions_data("not_a_tool", "all")
+
+
+def test_hermes_session_model_usage_parity_and_today(monkeypatch, tmp_path):
+    """Hermes session_model_usage properly attributes usage across multiple days
+    and models, and maintains full parity between HermesParser and _load_hermes_sessions."""
+    home = _home(tmp_path)
+    db_path = home / "state.db"
+    conn = sqlite3.connect(str(db_path))
+    conn.executescript(
+        """
+        CREATE TABLE sessions (
+            id TEXT PRIMARY KEY,
+            model TEXT,
+            billing_provider TEXT,
+            started_at REAL,
+            last_activity_at REAL,
+            ended_at REAL,
+            message_count INTEGER,
+            input_tokens INTEGER,
+            output_tokens INTEGER,
+            cache_read_tokens INTEGER,
+            cache_write_tokens INTEGER,
+            reasoning_tokens INTEGER,
+            estimated_cost_usd REAL,
+            actual_cost_usd REAL,
+            title TEXT
+        );
+        CREATE TABLE messages (
+            id INTEGER PRIMARY KEY,
+            session_id TEXT,
+            role TEXT,
+            content TEXT,
+            timestamp REAL
+        );
+        CREATE TABLE session_model_usage (
+            session_id TEXT NOT NULL,
+            model TEXT NOT NULL,
+            billing_provider TEXT NOT NULL DEFAULT '',
+            billing_base_url TEXT NOT NULL DEFAULT '',
+            billing_mode TEXT NOT NULL DEFAULT '',
+            task TEXT NOT NULL DEFAULT '',
+            api_call_count INTEGER NOT NULL DEFAULT 0,
+            input_tokens INTEGER NOT NULL DEFAULT 0,
+            output_tokens INTEGER NOT NULL DEFAULT 0,
+            cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+            cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+            reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+            estimated_cost_usd REAL NOT NULL DEFAULT 0,
+            actual_cost_usd REAL NOT NULL DEFAULT 0,
+            first_seen REAL,
+            last_seen REAL,
+            PRIMARY KEY (session_id, model, billing_provider, billing_base_url, billing_mode, task)
+        );
+        """
+    )
+
+    local_tz = datetime.now().astimezone().tzinfo
+    now = datetime.now(local_tz)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    yesterday_noon = today_start - timedelta(hours=12)
+    today_10am = today_start + timedelta(hours=10)
+    today_2pm = today_start + timedelta(hours=14)
+
+    t_yest = yesterday_noon.timestamp()
+    t_today1 = today_10am.timestamp()
+    t_today2 = today_2pm.timestamp()
+
+    # Session started yesterday, active today
+    conn.execute(
+        """
+        INSERT INTO sessions (id, model, billing_provider, started_at, last_activity_at,
+                              message_count, input_tokens, output_tokens, title)
+        VALUES ('sess-multi', 'meituan/longcat-2.0', 'nous', ?, ?, 10, 250000, 6000, 'Multi-day Active Session')
+        """,
+        (t_yest, t_today2),
+    )
+
+    # 3 usage segments in session_model_usage: 1 yesterday, 2 today
+    conn.executemany(
+        """
+        INSERT INTO session_model_usage (
+            session_id, model, billing_provider, billing_base_url, billing_mode, task,
+            api_call_count, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+            reasoning_tokens, estimated_cost_usd, actual_cost_usd, first_seen, last_seen
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            ("sess-multi", "upstage/solar-pro4", "nous", "https://api.nous.com", "", "",
+             2, 50000, 1000, 0, 0, 0, 0.0, 0.005, t_yest, t_yest + 300),
+            ("sess-multi", "nvidia/nemotron", "nous", "https://api.nous.com", "", "",
+             5, 80000, 2000, 500, 100, 0, 0.0, 0.008, t_today1 - 100, t_today1),
+            ("sess-multi", "meituan/longcat-2.0", "nous", "https://api.nous.com", "", "approval",
+             3, 120000, 3000, 0, 0, 0, 0.0, 0.012, t_today2 - 100, t_today2),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    _patch_env(monkeypatch, home)
+
+    # Test full window parity
+    p_all = _entry_sums(_parser_entries(home))
+    h_all = _turn_sums(_hermes_sessions())
+    assert h_all["in"] == p_all["in"] == 250100  # 50k + (80k+100cw) + 120k
+    assert h_all["out"] == p_all["out"] == 6000
+    assert h_all["cache"] == p_all["cache"] == 500
+    assert abs(h_all["cost"] - 0.025) < 1e-9
+    assert abs(p_all["cost"] - 0.025) < 1e-9
+
+    # Test today's window: only today's segments are included!
+    since_today_ms = int(today_start.timestamp() * 1000)
+    until_tomorrow_ms = int((today_start + timedelta(days=1)).timestamp() * 1000)
+
+    p_today = _entry_sums(_parser_entries(home, since_today_ms, until_tomorrow_ms))
+    h_today = _turn_sums(_hermes_sessions(), since_today_ms, until_tomorrow_ms)
+
+    assert p_today["in"] == (80000 + 100) + 120000 == 200100
+    assert h_today["in"] == 200100
+    assert p_today["out"] == 2000 + 3000 == 5000
+    assert h_today["out"] == 5000
+    assert abs(p_today["cost"] - 0.020) < 1e-9
+    assert abs(h_today["cost"] - 0.020) < 1e-9
+
+    # get_sessions_data for "today" properly returns the session with today's tokens
+    today_sessions = get_sessions_data("hermes", "today")
+    assert len(today_sessions["sessions"]) == 1
+    s = today_sessions["sessions"][0]
+    assert s["session_id"] == "sess-multi"
+    assert s["tokens_in"] == 200100
+    assert s["tokens_out"] == 5000
+    assert s["tokens"] == 200100 + 5000 + 500
+    assert s["display_name"] == "Multi-day Active Session"
+

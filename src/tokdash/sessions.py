@@ -3107,6 +3107,39 @@ def _load_hermes_sessions(signature: tuple[tuple[str, int, int], ...], _pricing_
                 has_activity = "last_activity_at" in cols
 
                 cur = conn.cursor()
+
+                # Check if session_model_usage table exists for multi-turn / multi-model / accurate timestamps
+                has_smu = False
+                try:
+                    cur.execute(
+                        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='session_model_usage'"
+                    )
+                    has_smu = cur.fetchone() is not None
+                except Exception:
+                    has_smu = False
+
+                smu_by_session: Dict[str, list] = {}
+                if has_smu:
+                    try:
+                        cur.execute(
+                            """
+                            SELECT session_id, model, billing_provider, billing_base_url,
+                                   billing_mode, task, api_call_count, input_tokens,
+                                   output_tokens, cache_read_tokens, cache_write_tokens,
+                                   reasoning_tokens, estimated_cost_usd, actual_cost_usd,
+                                   first_seen, last_seen
+                            FROM session_model_usage
+                            WHERE (input_tokens + output_tokens + cache_read_tokens + cache_write_tokens + reasoning_tokens) > 0
+                               OR actual_cost_usd > 0 OR estimated_cost_usd > 0
+                            ORDER BY COALESCE(last_seen, first_seen, 0)
+                            """
+                        )
+                        for smu_row in cur.fetchall():
+                            smu_sid = str(smu_row[0] or "")
+                            smu_by_session.setdefault(smu_sid, []).append(smu_row)
+                    except (OSError, sqlite3.Error):
+                        smu_by_session = {}
+
                 query = f"""
                     SELECT id, model, billing_provider, started_at,
                            input_tokens, output_tokens,
@@ -3147,19 +3180,7 @@ def _load_hermes_sessions(signature: tuple[tuple[str, int, int], ...], _pricing_
                         if sid in claimed:
                             continue
                         claimed.add(sid)
-                        input_t = _to_int(input_t)
-                        output_t = _to_int(output_t)
-                        cache_r = _to_int(cache_r)
-                        cache_w = _to_int(cache_w)
-                        reasoning = _to_int(reasoning)
-                        actual_f = float(actual_cost or 0.0)
-                        estimated_f = float(estimated_cost or 0.0)
-                        # The parser keeps exactly the rows with tokens or a
-                        # positive recorded cost.
-                        if (input_t + output_t + cache_r + cache_w + reasoning) <= 0 and not (
-                            actual_f > 0 or estimated_f > 0
-                        ):
-                            continue
+
                         # Verbatim parser expression: seconds, or ms if > 1e12.
                         try:
                             sa = float(started_at or 0.0)
@@ -3174,58 +3195,169 @@ def _load_hermes_sessions(signature: tuple[tuple[str, int, int], ...], _pricing_
                             la = sa
                         ts_end_ms = int(la * 1000) if la < 1e12 else int(la)
 
-                        model = str(model)
-                        provider = (
-                            str(billing_provider or "").strip()
-                            or HermesParser._infer_provider(model)
-                        )
-                        full_model = f"{provider}/{model}" if provider else model
-                        bill = _billing_record(
-                            full_model,
-                            "split-cache-write",
-                            input_tokens=input_t,
-                            output_tokens=output_t,
-                            cache_read=cache_r,
-                            cache_write=cache_w,
-                            fixed_cost=(
-                                actual_f if actual_f > 0
-                                else estimated_f if estimated_f > 0
-                                else None
-                            ),
-                        )
-                        turn = _build_turn(
-                            turn_index=1,
-                            timestamp_ms=ts_start_ms,
-                            model=model,
-                            tokens_in=input_t + cache_w,
-                            tokens_cache=cache_r,
-                            tokens_out=output_t,
-                            tokens_reasoning=reasoning,
-                            bill=bill,
-                        )
-                        turn["_event_key"] = f"hermes:{sid}"
+                        if sid in smu_by_session:
+                            turns = []
+                            for turn_idx, smu_row in enumerate(smu_by_session[sid], start=1):
+                                (
+                                    _sid, smu_model, smu_bprov, smu_burl, smu_bmode, smu_task,
+                                    smu_apicnt, smu_inp, smu_out, smu_cr, smu_cw, smu_reas,
+                                    smu_est, smu_act, smu_fseen, smu_lseen,
+                                ) = smu_row
 
-                        turns = [turn]
-                        if ts_end_ms > ts_start_ms + 1000:
-                            bill_zero = _billing_record(
+                                m_name = str(smu_model or "")
+                                if not m_name:
+                                    continue
+                                b_prov = str(smu_bprov or "")
+                                b_url = str(smu_burl or "")
+                                b_mode = str(smu_bmode or "")
+                                task_name = str(smu_task or "")
+
+                                s_inp = _to_int(smu_inp)
+                                s_out = _to_int(smu_out)
+                                s_cr = _to_int(smu_cr)
+                                s_cw = _to_int(smu_cw)
+                                s_reas = _to_int(smu_reas)
+                                s_act_f = float(smu_act or 0.0)
+                                s_est_f = float(smu_est or 0.0)
+
+                                has_s_tokens = (s_inp + s_out + s_cr + s_cw + s_reas) > 0
+                                has_s_cost = s_act_f > 0 or s_est_f > 0
+                                if not has_s_tokens and not has_s_cost:
+                                    continue
+
+                                try:
+                                    ts_val = float(smu_lseen if smu_lseen else (smu_fseen if smu_fseen else sa))
+                                except (ValueError, TypeError):
+                                    ts_val = sa
+                                turn_ts_ms = int(ts_val * 1000) if ts_val < 1e12 else int(ts_val)
+
+                                prov = b_prov.strip() or HermesParser._infer_provider(m_name)
+                                full_m = f"{prov}/{m_name}" if prov else m_name
+                                bill = _billing_record(
+                                    full_m,
+                                    "split-cache-write",
+                                    input_tokens=s_inp,
+                                    output_tokens=s_out,
+                                    cache_read=s_cr,
+                                    cache_write=s_cw,
+                                    fixed_cost=(
+                                        s_act_f if s_act_f > 0
+                                        else s_est_f if s_est_f > 0
+                                        else None
+                                    ),
+                                )
+                                turn = _build_turn(
+                                    turn_index=turn_idx,
+                                    timestamp_ms=turn_ts_ms,
+                                    model=m_name,
+                                    tokens_in=s_inp + s_cw,
+                                    tokens_cache=s_cr,
+                                    tokens_out=s_out,
+                                    tokens_reasoning=s_reas,
+                                    bill=bill,
+                                )
+                                smu_key_basis = f"{sid}|{m_name}|{b_prov}|{b_url}|{b_mode}|{task_name}"
+                                smu_hash = hashlib.sha1(smu_key_basis.encode("utf-8")).hexdigest()[:12]
+                                turn["_event_key"] = f"hermes:{sid}:{smu_hash}"
+                                turns.append(turn)
+
+                            if not turns:
+                                continue
+
+                            max_turn_ts = max(t["timestamp_ms"] for t in turns)
+                            if ts_end_ms > max_turn_ts + 1000:
+                                last_model = turns[-1]["model"]
+                                last_prov = (
+                                    str(billing_provider or "").strip()
+                                    or HermesParser._infer_provider(last_model)
+                                )
+                                end_full_model = f"{last_prov}/{last_model}" if last_prov else last_model
+                                bill_zero = _billing_record(
+                                    end_full_model,
+                                    "split-cache-write",
+                                    input_tokens=0,
+                                    output_tokens=0,
+                                    fixed_cost=0.0,
+                                )
+                                end_turn = _build_turn(
+                                    turn_index=len(turns) + 1,
+                                    timestamp_ms=ts_end_ms,
+                                    model=last_model,
+                                    tokens_in=0,
+                                    tokens_cache=0,
+                                    tokens_out=0,
+                                    tokens_reasoning=0,
+                                    bill=bill_zero,
+                                )
+                                end_turn["_event_key"] = f"hermes:{sid}:end"
+                                turns.append(end_turn)
+                        else:
+                            input_t = _to_int(input_t)
+                            output_t = _to_int(output_t)
+                            cache_r = _to_int(cache_r)
+                            cache_w = _to_int(cache_w)
+                            reasoning = _to_int(reasoning)
+                            actual_f = float(actual_cost or 0.0)
+                            estimated_f = float(estimated_cost or 0.0)
+                            # The parser keeps exactly the rows with tokens or a
+                            # positive recorded cost.
+                            if (input_t + output_t + cache_r + cache_w + reasoning) <= 0 and not (
+                                actual_f > 0 or estimated_f > 0
+                            ):
+                                continue
+
+                            model = str(model)
+                            provider = (
+                                str(billing_provider or "").strip()
+                                or HermesParser._infer_provider(model)
+                            )
+                            full_model = f"{provider}/{model}" if provider else model
+                            bill = _billing_record(
                                 full_model,
                                 "split-cache-write",
-                                input_tokens=0,
-                                output_tokens=0,
-                                fixed_cost=0.0,
+                                input_tokens=input_t,
+                                output_tokens=output_t,
+                                cache_read=cache_r,
+                                cache_write=cache_w,
+                                fixed_cost=(
+                                    actual_f if actual_f > 0
+                                    else estimated_f if estimated_f > 0
+                                    else None
+                                ),
                             )
-                            end_turn = _build_turn(
-                                turn_index=2,
-                                timestamp_ms=ts_end_ms,
+                            turn = _build_turn(
+                                turn_index=1,
+                                timestamp_ms=ts_start_ms,
                                 model=model,
-                                tokens_in=0,
-                                tokens_cache=0,
-                                tokens_out=0,
-                                tokens_reasoning=0,
-                                bill=bill_zero,
+                                tokens_in=input_t + cache_w,
+                                tokens_cache=cache_r,
+                                tokens_out=output_t,
+                                tokens_reasoning=reasoning,
+                                bill=bill,
                             )
-                            end_turn["_event_key"] = f"hermes:{sid}:end"
-                            turns.append(end_turn)
+                            turn["_event_key"] = f"hermes:{sid}"
+
+                            turns = [turn]
+                            if ts_end_ms > ts_start_ms + 1000:
+                                bill_zero = _billing_record(
+                                    full_model,
+                                    "split-cache-write",
+                                    input_tokens=0,
+                                    output_tokens=0,
+                                    fixed_cost=0.0,
+                                )
+                                end_turn = _build_turn(
+                                    turn_index=2,
+                                    timestamp_ms=ts_end_ms,
+                                    model=model,
+                                    tokens_in=0,
+                                    tokens_cache=0,
+                                    tokens_out=0,
+                                    tokens_reasoning=0,
+                                    bill=bill_zero,
+                                )
+                                end_turn["_event_key"] = f"hermes:{sid}:end"
+                                turns.append(end_turn)
 
                         # Extract project name from git_repo_root or cwd
                         proj_path = repo_val or cwd_val or ""

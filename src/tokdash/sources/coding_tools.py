@@ -3157,9 +3157,8 @@ class HermesParser(BaseParser):
         mode="source_replace",
         reason="Hermes is DB-backed; current safe cache unit is the whole source until DB-native incremental sync is added.",
     )
-    # 1: session-level rows keyed on the Hermes row id, actual/estimated cost
-    #    kept as fixed, otherwise priced provider-qualified then bare.
-    persistent_parser_version = 1
+    # 2: session_model_usage support with accurate last_seen timestamps and multi-model segments.
+    persistent_parser_version = 2
 
     def __init__(self, pricing_db: PricingDatabase):
         super().__init__(pricing_db)
@@ -3192,11 +3191,9 @@ class HermesParser(BaseParser):
         def scan() -> tuple:
             sigs: List[Tuple[str, int, int]] = []
             for p in self._db_paths():
-                try:
-                    s = p.stat()
-                    sigs.append((str(p), s.st_mtime_ns, s.st_size))
-                except (FileNotFoundError, OSError):
-                    pass
+                sig = _sqlite_db_signature(p)
+                if sig is not None:
+                    sigs.append(sig)
             return tuple(sorted(sigs))
 
         cache_key = f"hermes:{','.join(str(d) for d in self.search_dirs)}"
@@ -3210,6 +3207,126 @@ class HermesParser(BaseParser):
             try:
                 conn = connect_sqlite_readonly(db_path)
                 cur = conn.cursor()
+
+                # Check if session_model_usage table exists for granular per-model usage & timestamps
+                has_smu = False
+                try:
+                    cur.execute(
+                        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='session_model_usage'"
+                    )
+                    has_smu = cur.fetchone() is not None
+                except Exception:
+                    has_smu = False
+
+                smu_sessions: set = set()
+                if has_smu:
+                    try:
+                        cur.execute(
+                            """
+                            SELECT session_id, model, billing_provider, billing_base_url,
+                                   billing_mode, task, api_call_count, input_tokens,
+                                   output_tokens, cache_read_tokens, cache_write_tokens,
+                                   reasoning_tokens, estimated_cost_usd, actual_cost_usd,
+                                   first_seen, last_seen
+                            FROM session_model_usage
+                            WHERE (input_tokens + output_tokens + cache_read_tokens + cache_write_tokens + reasoning_tokens) > 0
+                               OR actual_cost_usd > 0 OR estimated_cost_usd > 0
+                            """
+                        )
+                        smu_rows = cur.fetchall()
+                    except Exception:
+                        smu_rows = []
+
+                    for smu_row in smu_rows:
+                        try:
+                            (
+                                session_id, model, billing_provider, billing_base_url,
+                                billing_mode, task, api_call_count, input_t,
+                                output_t, cache_r, cache_w, reasoning,
+                                estimated_cost, actual_cost, first_seen, last_seen,
+                            ) = smu_row
+
+                            sid = str(session_id or "")
+                            m_name = str(model or "")
+                            if not m_name:
+                                continue
+                            b_prov = str(billing_provider or "")
+                            b_url = str(billing_base_url or "")
+                            b_mode = str(billing_mode or "")
+                            task_name = str(task or "")
+
+                            smu_key_basis = f"{sid}|{m_name}|{b_prov}|{b_url}|{b_mode}|{task_name}"
+                            smu_hash = hashlib.sha1(smu_key_basis.encode("utf-8")).hexdigest()[:12]
+                            entry_id = f"hermes:{sid}:{smu_hash}"
+
+                            if entry_id in seen_ids:
+                                continue
+                            seen_ids.add(entry_id)
+                            smu_sessions.add(sid)
+
+                            input_t = self._i(input_t)
+                            output_t = self._i(output_t)
+                            cache_r = self._i(cache_r)
+                            cache_w = self._i(cache_w)
+                            reasoning = self._i(reasoning)
+
+                            actual_cost_f = float(actual_cost or 0.0)
+                            estimated_cost_f = float(estimated_cost or 0.0)
+
+                            has_tokens = (input_t + output_t + cache_r + cache_w + reasoning) > 0
+                            has_cost = actual_cost_f > 0 or estimated_cost_f > 0
+                            if not has_tokens and not has_cost:
+                                continue
+
+                            try:
+                                ts_val = float(last_seen if last_seen else (first_seen if first_seen else 0.0))
+                            except (ValueError, TypeError):
+                                ts_val = 0.0
+                            ts_ms = int(ts_val * 1000) if ts_val < 1e12 else int(ts_val)
+
+                            provider = b_prov.strip() or self._infer_provider(m_name)
+                            if actual_cost_f > 0:
+                                cost = actual_cost_f
+                                billing = usage_billing_fixed(actual_cost_f)
+                            elif estimated_cost_f > 0:
+                                cost = estimated_cost_f
+                                billing = usage_billing_fixed(estimated_cost_f)
+                            else:
+                                provider_model = f"{provider}/{m_name}" if provider else m_name
+                                cost = self.pricing_db.get_cost(provider_model, input_t, output_t, cache_r, cache_w)
+                                if cost == 0.0 and provider:
+                                    cost = self.pricing_db.get_cost(m_name, input_t, output_t, cache_r, cache_w)
+                                billing = usage_billing_pricing(
+                                    [provider_model] + ([m_name] if provider else []),
+                                    input_tokens=input_t,
+                                    output_tokens=output_t,
+                                    cache_read=cache_r,
+                                    cache_write=cache_w,
+                                )
+
+                            msg_cnt = int(self._i(api_call_count))
+                            if msg_cnt <= 0:
+                                msg_cnt = 1
+
+                            out.append({
+                                "source": self.source_name,
+                                "model": m_name or "unknown",
+                                "provider": provider,
+                                "input": input_t,
+                                "output": output_t,
+                                "cacheRead": cache_r,
+                                "cacheWrite": cache_w,
+                                "reasoning": reasoning,
+                                "cost": cost,
+                                "timestamp": ts_ms,
+                                "messageCount": msg_cnt,
+                                "entry_id": entry_id,
+                                "_billing": billing,
+                            })
+                        except Exception:
+                            continue
+
+                # Fallback to sessions table for any session not covered by session_model_usage
                 try:
                     cur.execute(
                         """
@@ -3236,10 +3353,16 @@ class HermesParser(BaseParser):
                             estimated_cost, actual_cost,
                         ) = row
 
-                        # Dedup across multiple state.db files
-                        if row_id in seen_ids:
+                        sid = str(row_id or "")
+                        if sid in smu_sessions:
                             continue
-                        seen_ids.add(row_id)
+
+                        # Dedup across multiple state.db files
+                        entry_id = f"hermes:{sid}"
+                        if entry_id in seen_ids or sid in seen_ids:
+                            continue
+                        seen_ids.add(entry_id)
+                        seen_ids.add(sid)
 
                         input_t = self._i(input_t)
                         output_t = self._i(output_t)
@@ -3305,7 +3428,7 @@ class HermesParser(BaseParser):
                             # so compute.py credits sessions correctly instead
                             # of treating each row as a single message.
                             "messageCount": int(self._i(message_count)),
-                            "entry_id": f"hermes:{row_id}",
+                            "entry_id": entry_id,
                             "_billing": billing,
                         })
                     except Exception:

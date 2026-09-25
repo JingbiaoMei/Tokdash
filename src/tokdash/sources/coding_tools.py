@@ -7086,7 +7086,7 @@ _ROO_MODEL_TAG_WINDOW_MS = 500
 # one directory per task forever, so an unbounded dict here is a slow leak with
 # a year clock.
 #
-# Corpus-sized, like _ROO_SESSION_FILE_CACHE_MAX in sessions.py, and for the same
+# Corpus-sized, like the per-file memos in sessions.py, and for the same
 # reason: one task is one entry, so a bound BELOW the task count buys no reuse
 # rather than less of it. The map exists to be SHARED between the two surfaces,
 # Overview reading a task's conversation file and the Sessions panel reading that

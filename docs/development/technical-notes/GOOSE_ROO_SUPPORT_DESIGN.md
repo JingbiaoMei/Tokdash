@@ -333,8 +333,24 @@ Implementation notes (2026-09-21), where the build differed from the draft:
   store went seven copies and 5,864 ms per refresh to one copy and 729 ms, and a
   33.6 MB / 40,000-row store -- where the row count, not the copy, is the cost
   -- went 5,759 ms to 2,220 ms. The corpus holds 26 MB at 40,000 ledger rows
-  (30 MB peak, measured with `tracemalloc`), and the memo holds one corpus, so
-  the eight-window refresh costs 26 MB rather than eight window views.
+  (30 MB peak, measured with `tracemalloc`), and the memo holds one corpus.
+  What it does NOT make free is the windows: `_goose_window_sessions()` builds
+  each window's turn dicts from the corpus rows rather than borrowing them, so a
+  held window is a second copy of that slice of history, which is the next bullet.
+- **Held windows are bounded by the turns they carry, not by how many there
+  are.** The cache bounded itself by window COUNT (16), which bounds nothing
+  that matters when a window is the whole history sliced by time. Measured on a
+  200,000-row ledger, the eleven windows one sweep asked for were all kept and
+  cost 1,377 MB on top of the 292 MB corpus, peaking at 1,404 MB. The budget is
+  now turns, set to three times the largest window held -- a fixed ceiling gets
+  both cases wrong, thrashing overlapping windows below the corpus size and
+  evicting the widest one at it -- stopped by an absolute ceiling for a history
+  whose windows do not nest, least recently asked first, one window always kept.
+  The same sweep keeps two windows for 544 MB (786 MB peak). The trade is
+  re-windowing: about four seconds of arithmetic over the corpus already in
+  hand, never a second copy of the database, per sweep of a history that large,
+  and nothing below it -- the floor keeps every window under 250,000 turns, so a
+  20,000-row corpus still holds all eleven at 139 MB and repeats for free.
 - A refused schema is remembered, so an old Goose stops costing every request.
   A Goose build with no `usage_ledger` table raises on every read by design, and
   raising was the right rule -- but the read sits behind a snapshot copy, so
@@ -684,8 +700,9 @@ parser mirrors it instead of inventing a model:
   (5.2 KB against `ui_messages.json`'s 3.2 KB here, and they carry the whole
   prompt). The parser does not tokenise them, only regex-extracts
   `<model>...</model>` plus each record's `ts`, and it caches per file
-  signature (bounded by `_ROO_MODEL_CACHE_MAX`), so `file_replace` still
-  re-parses only the task that is running.
+  signature, bounded by the corpus size rather than a fixed number (see the
+  eviction rule below), so `file_replace` still re-parses only the task that is
+  running.
 
   It never becomes an **entry of its own** in `_file_signatures()`, and that is a
   correctness rule, not an optimisation. `usage_entries` is unique on
@@ -705,10 +722,13 @@ parser mirrors it instead of inventing a model:
   the fight.
   That cache must be bounded, not a plain dict. Roo's corpus grows one
   directory per task forever, so an unbounded map keyed on file signature is a
-  quiet memory leak with a slow clock. Two precedents set the shape and the
-  number: `_OPENCODE_QUERY_CACHE_MAX = 32` (`coding_tools.py:65`) and
-  `_ZCODE_SESSIONS_CACHE_MAX = 32` (`sessions.py:5175`). A cap of 32 costs
-  nothing semantically - a miss is just a re-read.
+  quiet memory leak with a slow clock. The bound is the corpus size, between
+  `_ROO_MODEL_CACHE_FLOOR` and `_ROO_MODEL_CACHE_CEILING`, re-bound by
+  `note_roo_corpus_size()`, and eviction takes the least recently used entry.
+  A small fixed cap does not work here and the first number borrowed for it is
+  the one that proved it: 32, taken from `_ZCODE_SESSIONS_CACHE_MAX`
+  (`sessions.py:5175`), whose cache entry is one DATE RANGE while a Roo entry is
+  one TASK. See item 6 of the cost list below for what that cost measured.
 - Whole-file JSON rewritten in place: `mode="file_replace"`,
   `persistent_parser_version = 1`, `_file_signatures()` over the message files
   behind `_timed_sigs()`, so only the running task's file re-parses. A torn or
@@ -819,9 +839,10 @@ rewritten:
    tasks, that cost 2.7 s on a cold `all` read and 2.4 s on a cold `week` read -
    4.3 s and 2.4 s after the fix, 7.0 s and 4.8 s before it - and 35 ms of every
    steady-state refresh of a panel whose real cost is 9 ms. The bound is now
-   corpus-sized like `_ROO_SESSION_FILE_CACHE_MAX`, and eviction takes the oldest
-   entry, so an over-cap corpus degrades to the oldest tasks rather than to no
-   sharing at all.
+   corpus-sized like the per-file memos (`_ROO_FILE_CACHE_FLOOR` up to
+   `_ROO_FILE_CACHE_CEILING`), and eviction takes the oldest entry, so an
+   over-cap corpus degrades to the oldest tasks rather than to no sharing at
+   all.
 
 The rule that made the scan cheap applies to anything read per task, and the last
 place it was still being broken was the model map: it keys its cache on
@@ -830,9 +851,10 @@ although the scan that decided which tasks to parse had already stamped it.
 Handing it the stamp took a cold `Overview` pass from 1,815 stats to 15. What is
 left is one readdir per task per `_SIG_TTL` window, which is the floor for change
 detection over a corpus of one-file-per-task, plus one read per task whose stamp
-actually moved. `_ROO_SESSION_FILE_CACHE_MAX` is corpus-sized rather than the
-shared 512 because a 600-task corpus recorded zero hits at that bound: every file
-the panel needed had been evicted by the files scanned before it.
+actually moved. The per-file memos (`_CorpusFileMemo`) size themselves from
+`_ROO_FILE_CACHE_FLOOR` up to the corpus instead of sitting at the shared 512,
+because a 600-task corpus recorded zero hits at that bound: every file the panel
+needed had been evicted by the files scanned before it.
 
 That floor is worth quoting rather than gesturing at, because it is what a
 polling dashboard pays repeatedly and it is a property of the mount, not of this

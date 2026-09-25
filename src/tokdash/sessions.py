@@ -200,8 +200,8 @@ def _parse_session_file(parser, path_str: str, mtime_ns: int, size: int, pricing
     existed. Degraded, not broken.
 
     ``*extra`` carries parser-specific key material past the shared four-argument
-    contract (qoder_cli forwards its context window); it must be in BOTH call
-    branches or a patched plain callable silently loses it.
+    contract (qoder_cli forwards its context window and its window table); it
+    must be in BOTH call branches or a patched plain callable loses it.
     """
     raising = getattr(parser, "raising", None)
     if raising is None:
@@ -4990,7 +4990,12 @@ def _openclaw_sessions() -> Dict[str, Dict[str, Any]]:
 
 @_cached_session_parser()
 def _parse_qoder_cli_session_file(
-    path_str: str, _mtime_ns: int, _size: int, _pricing_sig: tuple, window: Optional[int]
+    path_str: str,
+    _mtime_ns: int,
+    _size: int,
+    _pricing_sig: tuple,
+    window: Optional[int],
+    windows_sig: tuple = (),
 ) -> Optional[list[Dict[str, Any]]]:
     """One stream file -> its candidate list, through the shared builder.
 
@@ -4998,7 +5003,10 @@ def _parse_qoder_cli_session_file(
     QODER_CLI_CONTEXT_WINDOW changes the candidate buckets themselves
     (context_usage_ratio recovers zero input at it), and an aggregate-only
     invalidation would serve pre-change candidates from the per-file cache
-    until someone flipped the env on a warm process. Candidates carry no
+    until someone flipped the env on a warm process. ``windows_sig`` is the
+    same story for run-log evidence: it keys the per-file cache as a sorted
+    tuple and is turned back into a dict here, so Overview and this loader
+    resolve a model's window identically or not at all. Candidates carry no
     cost — pricing happens at merge time in the aggregate — so this parser
     is the pricing-independent one; its reload_pricing_db clear is memory
     and consistency, not staleness. OSError is translated to
@@ -5006,7 +5014,7 @@ def _parse_qoder_cli_session_file(
     source (whose _parse_all must keep aborting whole-source).
     """
     try:
-        return qoder_cli_file_candidates(Path(path_str), window)
+        return qoder_cli_file_candidates(Path(path_str), window, dict(windows_sig))
     except OSError as exc:
         raise _SessionFileUnavailable(path_str) from exc
 
@@ -5022,7 +5030,7 @@ def _load_qoder_cli_sessions(
     #     depends on). One winner per rid per candidate type across ALL
     #     roots, exactly as _parse_all does it; a per-session or per-root
     #     dedupe would change which candidate wins and the tokens.
-    rate_override, window = runtime_sig
+    rate_override, window, windows_sig = runtime_sig
     effective_rate = qoder_cli_effective_rate(rate_override)
     transcript_cands: Dict[str, Dict[str, Any]] = {}
     segment_cands: Dict[str, Dict[str, Any]] = {}
@@ -5037,7 +5045,7 @@ def _load_qoder_cli_sessions(
             # callable must degrade to the ordinary call, not crash the view.
             cands = _parse_session_file(
                 _parse_qoder_cli_session_file, path_str, mtime_ns, size,
-                pricing_sig, window,
+                pricing_sig, window, windows_sig,
             )
         except _SessionFileUnavailable:
             transient_miss = True
@@ -5143,9 +5151,10 @@ def _load_qoder_cli_sessions(
 
 
 def _qoder_cli_sessions() -> Dict[str, Dict[str, Any]]:
+    roots = clientpaths.qoder_cli_roots()
     return _load_qoder_cli_sessions(
-        qoder_cli_file_signatures(clientpaths.qoder_cli_roots()),
-        qoder_cli_runtime_signature(),
+        qoder_cli_file_signatures(roots),
+        qoder_cli_runtime_signature(roots),
         _pricing_signature(),
     )
 

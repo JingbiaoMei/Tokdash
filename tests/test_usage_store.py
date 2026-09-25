@@ -4096,8 +4096,10 @@ def test_qoder_cli_persistent_signature_tracks_runtime_config(monkeypatch, tmp_p
 
     sync()
     unset_sig = store.source_signature("qoder_cli")
-    assert json.loads(unset_sig)["extra"] == {"usd_per_credit": None, "context_window": None}
-    # Pinned model without a window: the ratio is unusable, so no entry.
+    assert json.loads(unset_sig)["extra"] == {
+        # JSON round-trip: the nested window tuple lands as a list.
+        "usd_per_credit": None, "context_window": None, "context_windows": []}
+    # Pinned model with no window evidence anywhere: the ratio is unusable.
     assert store.query_entries(sources=["qoder_cli"]) == []
 
     monkeypatch.setenv("QODER_CLI_CONTEXT_WINDOW", "200000")
@@ -4108,6 +4110,30 @@ def test_qoder_cli_persistent_signature_tracks_runtime_config(monkeypatch, tmp_p
     rows = store.query_entries(sources=["qoder_cli"])
     assert len(rows) == 1
     assert rows[0]["input"] == 10000  # 0.05 * 200000
+
+    # A run log is an override-free route to the same result, and must
+    # invalidate the store on its own: this is how a pinned model becomes
+    # countable for a user who never sets an environment variable.
+    # Back to no evidence. The durable-store guard keeps the last known rows
+    # rather than wiping the corpus on an empty parse, so the row stays; what
+    # matters is that the next evidence-bearing sync replaces it.
+    monkeypatch.delenv("QODER_CLI_CONTEXT_WINDOW")
+    store.sync_source("qoder_cli", build_source_signature(
+        files=parser._file_signatures(),
+        parser=parser.persistent_parser_signature(),
+        extra=parser.runtime_config_signature(),
+    ), lambda: parser.collect(None, None))
+
+    log = root / "logs" / "runs" / "2026-09-24T17-29-24-649+01-00-a-p1" / "qodercli.log"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text(
+        "INFO [QoderInferRequest details] model_config="
+        '{"key":"qwen3.8-max","display_name":"Qwen3.8-Max","max_input_tokens":180000}\n', encoding="utf-8")
+    sync()
+    assert store.source_signature("qoder_cli") != explicit_sig
+    rows = store.query_entries(sources=["qoder_cli"])
+    assert len(rows) == 1
+    assert rows[0]["input"] == 9000  # 0.05 * 180000, from Qoder's own number
 
 
 def test_qoder_cli_in_memory_key_includes_runtime_config(monkeypatch, tmp_path):

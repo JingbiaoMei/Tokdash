@@ -547,12 +547,15 @@ def test_free_request_on_every_read_path(monkeypatch, tmp_path):
 
 def test_runtime_signature_unset_vs_explicit(monkeypatch, tmp_path):
     parser = _parser(monkeypatch, tmp_path, [])
-    assert parser.runtime_config_signature() == {"usd_per_credit": None, "context_window": None}
+    assert parser.runtime_config_signature() == {
+        "usd_per_credit": None, "context_window": None, "context_windows": ()}
     # explicit 180000 != unset: the override applies to every model
     monkeypatch.setenv("QODER_CLI_CONTEXT_WINDOW", "180000")
-    assert parser.runtime_config_signature() == {"usd_per_credit": None, "context_window": 180000}
+    assert parser.runtime_config_signature() == {
+        "usd_per_credit": None, "context_window": 180000, "context_windows": ()}
     monkeypatch.setenv("QODER_USD_PER_CREDIT", "0.02")
-    assert parser.runtime_config_signature() == {"usd_per_credit": 0.02, "context_window": 180000}
+    assert parser.runtime_config_signature() == {
+        "usd_per_credit": 0.02, "context_window": 180000, "context_windows": ()}
 
 
 @pytest.mark.parametrize("rate", ["abc", "nan", "-5", "0", "1e999"])
@@ -562,7 +565,8 @@ def test_invalid_rate_falls_back_to_default(monkeypatch, tmp_path, rate):
                  [_t_line("X", "2026-08-21T12:00:00.000Z", credits=1.0, ratio=1000 / 180000)])
     monkeypatch.setenv("QODER_USD_PER_CREDIT", rate)
     parser = _parser(monkeypatch, tmp_path, [root])
-    assert parser.runtime_config_signature() == {"usd_per_credit": None, "context_window": None}
+    assert parser.runtime_config_signature() == {
+        "usd_per_credit": None, "context_window": None, "context_windows": ()}
     entries = parser.collect(None, None)
     assert abs(entries[0]["cost"] - 1.0 * RATE) < 1e-15  # default still applies
 
@@ -574,7 +578,8 @@ def test_invalid_window_falls_back_to_unset(monkeypatch, tmp_path, window):
                  [_t_line("X", "2026-08-21T12:00:00.000Z", ratio=0.05)])
     monkeypatch.setenv("QODER_CLI_CONTEXT_WINDOW", window)
     parser = _parser(monkeypatch, tmp_path, [root])
-    assert parser.runtime_config_signature() == {"usd_per_credit": None, "context_window": None}
+    assert parser.runtime_config_signature() == {
+        "usd_per_credit": None, "context_window": None, "context_windows": ()}
     entries = parser.collect(None, None)
     assert len(entries) == 1
     assert entries[0]["input"] == 9000  # auto-only default window still applies
@@ -588,10 +593,10 @@ def test_cli_parser_identity(monkeypatch, tmp_path):
     from tokdash.usage_store import USAGE_ENTRY_FORMAT_VERSION
 
     parser = _parser(monkeypatch, tmp_path, [])
-    assert parser.persistent_parser_version == 1
+    assert parser.persistent_parser_version == 2
     sig = parser.persistent_parser_signature()
     assert sig["object"].endswith("QoderCliParser")
-    assert sig["version"] == 1
+    assert sig["version"] == 2
     assert sig["entry_format"] == USAGE_ENTRY_FORMAT_VERSION
     # the IDE parser stays None: source_native_db, live only
     assert QoderIdeParser.persistent_parser_version is None
@@ -606,7 +611,7 @@ def test_tracker_registers_qoder_sources():
     tracker = CodingToolsUsageTracker()
     assert isinstance(tracker.parsers["qoder"], QoderIdeParser)
     assert isinstance(tracker.parsers["qoder_cli"], QoderCliParser)
-    assert tracker.parsers["qoder_cli"].persistent_parser_version == 1
+    assert tracker.parsers["qoder_cli"].persistent_parser_version == 2
     assert tracker.parsers["qoder"].persistent_parser_version is None
 
 
@@ -617,3 +622,239 @@ def test_qoder_frontend_source_labels_distinguish_ide_and_cli():
 
     assert "qoder: 'Qoder IDE'" in source
     assert "qoder_cli: 'Qoder CLI'" in source
+
+
+# ------------------------------------------------- per-model context windows
+#
+# Shapes below are captured from Qoder CLI 1.1.28 and 1.1.63 on Linux/WSL.
+# The run-log line is faithful in shape (shortened to the fields the parser
+# reads): one session reported qfmodel @ 180000 and lite @ 200000. The
+# qfmodel ratio 0.11495555555555556 below is a real captured value, and
+# 0.11495555555555556 * 180000 is exactly 20692.
+
+
+def _run_log(root: Path, run_id: str, text: str) -> Path:
+    path = Path(root) / "logs" / "runs" / run_id / "qodercli.log"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def _cfg_line(key, window, display="x"):
+    return (
+        "2026-09-24T17:31:58.738+01:00 INFO  debug.message "
+        "[QoderInferRequest details] model_config="
+        '{"key":"%s","display_name":"%s","format":"openai",'
+        '"api_key":"[redacted]","max_input_tokens":%d}' % (key, display, window)
+    )
+
+
+def test_window_table_reads_qoder_run_logs(monkeypatch, tmp_path):
+    from tokdash.sources.coding_tools import qoder_cli_window_table
+
+    root = tmp_path / "root"
+    _run_log(root, "2026-09-24T17-29-24-649+01-00-a-p1",
+             _cfg_line("qfmodel", 180000, "Qwen3.8-Flash") + "\n"
+             + _cfg_line("lite", 200000) + "\n")
+    assert qoder_cli_window_table([root]) == {"qfmodel": 180000, "lite": 200000}
+
+
+def test_pinned_model_recovers_from_run_log_evidence(monkeypatch, tmp_path):
+    """The reported bug: a pinned model zero-fills every token field, bills in
+    credits, and is not `auto`, so it used to vanish from the dashboard."""
+    root = tmp_path / "root"
+    _write_lines(root / "projects" / "p" / "aaaaaaaa-bbbb.jsonl", [
+        _t_line("X", "2026-09-24T16:32:31.195Z", model="qfmodel",
+                credits=0.18696785714285713, ratio=0.11495555555555556),
+    ])
+    _run_log(root, "2026-09-24T17-29-24-649+01-00-a-p1",
+             _cfg_line("qfmodel", 180000, "Qwen3.8-Flash") + "\n")
+
+    parser = _parser(monkeypatch, tmp_path, [root])
+    entries = parser.collect(None, None)
+    assert len(entries) == 1
+    assert entries[0]["input"] == 20692  # 0.114955... * 180000, exact
+    assert entries[0]["model"] == "qfmodel"
+    assert entries[0]["costAuthoritative"] is True
+
+
+def test_env_override_wins_over_run_log(monkeypatch, tmp_path):
+    root = tmp_path / "root"
+    _write_lines(root / "projects" / "p" / "aaaaaaaa-bbbb.jsonl",
+                 [_t_line("X", "2026-09-24T16:32:31.195Z", model="qfmodel",
+                          credits=1.0, ratio=0.10)])
+    _run_log(root, "2026-09-24T17-29-24-649+01-00-a-p1", _cfg_line("qfmodel", 180000) + "\n")
+    parser = _parser(monkeypatch, tmp_path, [root])
+    monkeypatch.setenv("QODER_CLI_CONTEXT_WINDOW", "100000")
+    entries = parser.collect(None, None)
+    assert entries[0]["input"] == 10000
+
+
+def test_auto_falls_back_without_any_run_log(monkeypatch, tmp_path):
+    """No evidence anywhere: `auto` keeps its documented 180k, nothing else guesses."""
+    root = tmp_path / "root"
+    _write_lines(root / "projects" / "p" / "aaaaaaaa-bbbb.jsonl", [
+        _t_line("A", "2026-08-21T12:00:00.000Z", model="auto", credits=1.0, ratio=0.05),
+        _t_line("B", "2026-08-21T12:00:01.000Z", model="qmodel_38max", credits=1.0, ratio=0.05),
+    ])
+    entries = _parser(monkeypatch, tmp_path, [root]).collect(None, None)
+    assert [e["model"] for e in entries] == ["auto"]
+    assert entries[0]["input"] == 9000
+
+
+def test_unattributed_billed_model_is_named(monkeypatch, tmp_path, caplog):
+    """A billed model that has to be dropped must say which one it dropped."""
+    import logging
+    root = tmp_path / "root"
+    _write_lines(root / "projects" / "p" / "aaaaaaaa-bbbb.jsonl",
+                 [_t_line("X", "2026-08-21T12:00:00.000Z", model="qmodel_38max",
+                          credits=2.0, ratio=0.05)])
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="tokdash.sources.coding_tools"):
+        assert _parser(monkeypatch, tmp_path, [root]).collect(None, None) == []
+    assert "qmodel_38max" in caplog.text
+
+
+def test_free_records_do_not_raise_the_warning(monkeypatch, tmp_path, caplog):
+    """credits: 0 / billable: false is a free request, not a lost one."""
+    import logging
+    root = tmp_path / "root"
+    _write_lines(root / "projects" / "p" / "aaaaaaaa-bbbb.jsonl",
+                 [_t_line("X", "2026-08-21T12:00:00.000Z", model="qmodel_38max",
+                          credits=0.0, billable=False, ratio=0.05)])
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="tokdash.sources.coding_tools"):
+        _parser(monkeypatch, tmp_path, [root]).collect(None, None)
+    assert "no attributable tokens" not in caplog.text
+
+
+def test_malformed_run_logs_are_ignored(monkeypatch, tmp_path):
+    from tokdash.sources.coding_tools import qoder_cli_window_table
+
+    root = tmp_path / "root"
+    _run_log(root, "2026-09-24T17-29-24-649+01-00-a-p1",
+             "no model_config here\n"
+             'model_config={"key":"broken"\n'                       # truncated
+             'model_config={"key":"zero","max_input_tokens":0}\n'   # not positive
+             'model_config={"max_input_tokens":180000}\n'           # no key
+             'model_config={"key":"ok","max_input_tokens":131072}\n')
+    assert qoder_cli_window_table([root]) == {"ok": 131072}
+
+
+def test_latest_run_wins(monkeypatch, tmp_path):
+    from tokdash.sources.coding_tools import qoder_cli_window_table
+
+    root = tmp_path / "root"
+    _run_log(root, "2026-09-24T17-29-24-649+01-00-a-p1", _cfg_line("qfmodel", 180000) + "\n")
+    _run_log(root, "2026-09-25T15-05-54-438+01-00-b-p2", _cfg_line("qfmodel", 262144) + "\n")
+    assert qoder_cli_window_table([root]) == {"qfmodel": 262144}
+
+
+def test_run_logs_are_never_usage_files(monkeypatch, tmp_path):
+    """The run log feeds the window table only; it must never reach the
+    candidate builders, which read JSONL."""
+    from tokdash.sources.coding_tools import qoder_cli_discovered_files
+
+    root = tmp_path / "root"
+    log = _run_log(root, "2026-09-24T17-29-24-649+01-00-a-p1", _cfg_line("qfmodel", 180000) + "\n")
+    _write_lines(root / "projects" / "p" / "aaaaaaaa-bbbb.jsonl",
+                 [_t_line("X", "2026-08-21T12:00:00.000Z", credits=1.0, in_t=5)])
+    found = qoder_cli_discovered_files([root])
+    assert log not in found
+    assert [f.name for f in found] == ["aaaaaaaa-bbbb.jsonl"]
+
+
+def test_window_table_changes_the_cache_identity(monkeypatch, tmp_path):
+    """A run log that appears must invalidate the stored rows, like the override."""
+    root = tmp_path / "root"
+    _write_lines(root / "projects" / "p" / "aaaaaaaa-bbbb.jsonl",
+                 [_t_line("X", "2026-08-21T12:00:00.000Z", model="qfmodel",
+                          credits=1.0, ratio=0.05)])
+    parser = _parser(monkeypatch, tmp_path, [root])
+    assert parser.runtime_config_signature()["context_windows"] == ()
+    _run_log(root, "2026-09-24T17-29-24-649+01-00-a-p1", _cfg_line("qfmodel", 180000) + "\n")
+    parser.roots = [root]
+    assert parser.runtime_config_signature()["context_windows"] == (("qfmodel", 180000),)
+
+
+# -------------------------------------------- session-declared context window
+#
+# `--context-window <size>` reaches disk as a runtime-config record in the
+# transcript, and the captured ratio follows it: 20783 input tokens at ratio
+# 0.15856170654296875 is exactly 131072. An unset window arrives as null.
+
+
+def _rc_line(window, model="vllm-hpc/qwen3.8-flash-next", ts="2026-09-25T14:10:00.000Z"):
+    return {"type": "runtime-config", "sessionId": "s1", "model": model,
+            "reasoningEffort": None, "contextWindow": window, "timestamp": ts}
+
+
+# input/ratio pair captured from a real custom-provider request
+_REAL_IN = 20783
+_REAL_RATIO_AT_131072 = 0.15856170654296875
+
+
+def test_session_declared_window_wins_over_run_log(monkeypatch, tmp_path):
+    """A window the session declared itself outranks the run-log table."""
+    root = tmp_path / "root"
+    _write_lines(root / "projects" / "p" / "aaaaaaaa-bbbb.jsonl", [
+        _rc_line(131072),
+        _t_line("X", "2026-09-25T14:10:01.000Z", model="qfmodel",
+                credits=1.0, ratio=_REAL_RATIO_AT_131072),
+    ])
+    _run_log(root, "2026-09-25T15-05-54-438+01-00-b-p2", _cfg_line("qfmodel", 180000) + "\n")
+    entries = _parser(monkeypatch, tmp_path, [root]).collect(None, None)
+    assert len(entries) == 1
+    assert entries[0]["input"] == _REAL_IN  # exactly, at the declared 131072
+
+
+def test_null_session_window_falls_through_to_the_table(monkeypatch, tmp_path):
+    """contextWindow: null means the model's own window, not a zero window."""
+    root = tmp_path / "root"
+    _write_lines(root / "projects" / "p" / "aaaaaaaa-bbbb.jsonl", [
+        _rc_line(None, model="qfmodel"),
+        _t_line("X", "2026-09-24T16:32:31.195Z", model="qfmodel",
+                credits=1.0, ratio=0.11495555555555556),
+    ])
+    _run_log(root, "2026-09-24T17-29-24-649+01-00-a-p1", _cfg_line("qfmodel", 180000) + "\n")
+    entries = _parser(monkeypatch, tmp_path, [root]).collect(None, None)
+    assert entries[0]["input"] == 20692
+
+
+def test_session_window_tracks_the_file(monkeypatch, tmp_path):
+    """A mid-file window change applies to the requests after it, not before."""
+    root = tmp_path / "root"
+    _write_lines(root / "projects" / "p" / "aaaaaaaa-bbbb.jsonl", [
+        _rc_line(None, model="qfmodel"),
+        _t_line("A", "2026-09-24T16:00:00.000Z", model="qfmodel",
+                credits=1.0, ratio=0.11495555555555556),   # table: 180000 -> 20692
+        _rc_line(131072, model="qfmodel"),
+        _t_line("B", "2026-09-24T16:00:01.000Z", model="qfmodel",
+                credits=1.0, ratio=_REAL_RATIO_AT_131072),  # declared: -> 20783
+    ])
+    _run_log(root, "2026-09-24T17-29-24-649+01-00-a-p1", _cfg_line("qfmodel", 180000) + "\n")
+    entries = {e["entry_id"]: e["input"] for e in
+               _parser(monkeypatch, tmp_path, [root]).collect(None, None)}
+    assert entries == {"qoder-cli:A": 20692, "qoder-cli:B": 20783}
+
+
+def test_env_override_still_beats_a_declared_window(monkeypatch, tmp_path):
+    root = tmp_path / "root"
+    _write_lines(root / "projects" / "p" / "aaaaaaaa-bbbb.jsonl", [
+        _rc_line(131072),
+        _t_line("X", "2026-09-25T14:10:01.000Z", model="qfmodel", credits=1.0, ratio=0.5),
+    ])
+    parser = _parser(monkeypatch, tmp_path, [root])
+    monkeypatch.setenv("QODER_CLI_CONTEXT_WINDOW", "100000")
+    assert parser.collect(None, None)[0]["input"] == 50000
+
+
+def test_declared_window_needs_no_run_log_at_all(monkeypatch, tmp_path):
+    """Qoder prunes run logs; the transcript survives, so does the accounting."""
+    root = tmp_path / "root"
+    _write_lines(root / "projects" / "p" / "aaaaaaaa-bbbb.jsonl", [
+        _rc_line(262144, model="qfmodel"),
+        _t_line("X", "2026-09-25T14:10:01.000Z", model="qfmodel",
+                credits=1.0, ratio=0.25),
+    ])
+    assert _parser(monkeypatch, tmp_path, [root]).collect(None, None)[0]["input"] == 65536

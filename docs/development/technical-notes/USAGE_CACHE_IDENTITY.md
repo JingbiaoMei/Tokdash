@@ -287,10 +287,17 @@ parsing against a real store, on the first request after the upgrade.
 `_retire_module_hashed_dependency()` recognises that stored shape and resigns it
 instead: an event key, or a model map, recorded as a hash of
 `sources/coding_tools.py` whose hash is one the file actually shipped with
-between v1.7.0 and v2.6.4 came from code whose key derivation and model map
-match today's byte for byte. The accepted hashes are frozen released history, so
-a future build cannot vouch for a release nobody checked, and anything
-unrecognised reparses exactly as it did before.
+between v1.7.0 and v2.6.4, and whose key derivation and model map match today's
+byte for byte. Both halves are checked, and the second is the one that binds. A
+stored module hash is evidence about the release that wrote it, not about the
+build reading it: gated on the past alone, the first release to edit either
+object would stamp rows written by the old derivation with the new object hash,
+after which they never reparse and the corpus has no way to reveal that two
+derivations produced it. So each accepted hash carries the object signature that
+release implied, and a semantic change to either object declines, falls through
+and reparses. The accepted hashes are frozen released history, so a future build
+cannot vouch for a release nobody checked, and anything unrecognised reparses
+exactly as it did before.
 
 | Change | Session rows that reparse |
 | --- | --- |

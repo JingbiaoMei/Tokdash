@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
+from stat import S_ISREG
 from typing import Any, ClassVar, Dict, Iterator, List, Optional, Tuple
 
 import zstandard
@@ -4178,7 +4179,7 @@ _QODER_RUN_ID_RE = re.compile(
 )
 
 
-def _qoder_cli_run_epoch(path: Path) -> float:
+def _qoder_cli_run_epoch(path: Path, fallback_mtime: Optional[float] = None) -> float:
     """Epoch seconds of one run, read out of its <run-id> directory name.
 
     The id embeds a LOCAL time with the offset that applied at the time, so a
@@ -4217,35 +4218,56 @@ def _qoder_cli_run_epoch(path: Path) -> float:
             pass  # impossible date (month 13): fall through to mtime
         else:
             return moment.timestamp()
+    if fallback_mtime is not None:
+        return fallback_mtime  # the caller already stat'd it
     try:
         return path.stat().st_mtime
     except OSError:
         return 0.0
 
 
-def qoder_cli_run_log_files(roots: List[Path]) -> List[Path]:
-    """Qoder run logs, oldest run first.
+def _qoder_cli_run_log_entries(roots: List[Path]) -> List[Tuple[Path, os.stat_result]]:
+    """Every readable run log with its stat, oldest run first.
 
     <root>/logs/runs/<run-id>/qodercli.log, where <run-id> is an ISO-like
     timestamp prefix carrying its UTC offset. The same <run-id> names the
-    segment file <session>/segments/<run-id>.jsonl, so this source needs no
-    new path logic and no new join key.
+    segment file <session>/segments/<run-id>.jsonl, so this source needs no new
+    path logic and no new join key.
 
-    Ordered by the instant that prefix decodes to -- not by the string, which
-    a DST fall-back reorders -- across ALL roots rather than per root: a
-    per-root sort keeps each root contiguous and loses the cross-root order,
-    which would make "latest wins" mean "whatever root came first".
+    Ordered by the instant that prefix decodes to -- not by the string, which a
+    DST fall-back reorders -- across ALL roots rather than per root: a per-root
+    sort keeps each root contiguous and loses the cross-root order, which would
+    make "latest wins" mean "whatever root came first".
+
+    The walk stats each file ONCE and hands the result to both callers: the
+    file list and the signature tuple used to walk and stat the same directory
+    twice per refresh, and the mtime fallback in the sort key a third time.
+    Dropping a log that cannot be stat'd is the same rule as the old
+    `is_file()` pre-check, so a vanished log is missing from the signature and
+    the list together rather than half-present in one.
     """
     seen = set()
-    found: List[Path] = []
+    found: List[Tuple[Path, os.stat_result]] = []
     for root in roots:
         for path in root.glob("logs/runs/*/qodercli.log"):
             key = str(path)
-            if key in seen or not path.is_file():
+            if key in seen:
                 continue
             seen.add(key)
-            found.append(path)
-    return sorted(found, key=lambda path: (_qoder_cli_run_epoch(path), str(path)))
+            try:
+                st = path.stat()
+            except OSError:
+                continue
+            if not S_ISREG(st.st_mode):
+                continue  # a directory named qodercli.log is not a log
+            found.append((path, st))
+    return sorted(found, key=lambda item: (_qoder_cli_run_epoch(item[0], item[1].st_mtime),
+                                           str(item[0])))
+
+
+def qoder_cli_run_log_files(roots: List[Path]) -> List[Path]:
+    """Qoder run logs in run order; see _qoder_cli_run_log_entries for the rules."""
+    return [path for path, _st in _qoder_cli_run_log_entries(roots)]
 
 
 # path -> (mtime_ns, size, sorted window items), maintained by
@@ -4347,15 +4369,13 @@ def _qoder_cli_window_items(file_sig: tuple) -> tuple:
 
 
 def qoder_cli_run_log_signatures(roots: List[Path]) -> tuple:
-    """(path, mtime_ns, size) per run log, in run order; unreadable ones drop out."""
-    out = []
-    for path in qoder_cli_run_log_files(roots):
-        try:
-            st = path.stat()
-        except OSError:
-            continue
-        out.append((str(path), st.st_mtime_ns, st.st_size))
-    return tuple(out)
+    """(path, mtime_ns, size) per run log, in run order; unreadable ones drop out.
+
+    Same walk and the same stat results as qoder_cli_run_log_files(), so the
+    signature cannot describe an ordering the parse will not see.
+    """
+    return tuple((str(path), st.st_mtime_ns, st.st_size)
+                 for path, st in _qoder_cli_run_log_entries(roots))
 
 
 def qoder_cli_window_table(roots: List[Path]) -> Dict[str, int]:

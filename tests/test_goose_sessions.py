@@ -42,16 +42,26 @@ SECOND = 1_000
 MINUTE = 60_000
 
 
-@pytest.fixture(autouse=True)
-def _clean_caches():
+def _reset_goose_reads():
+    # One corpus per signature per honoured window, held in the module: leaving
+    # it between tests would let one test answer for another.
     sessions._goose_sessions_cache.clear()
     sessions._goose_sessions_cache_sig = ()
+    sessions._goose_corpus_cache = None
+    sessions._goose_corpus_cache_sig = ()
+    sessions._goose_corpus_cache_path = ""
+    sessions._goose_corpus_cache_at = 0.0
+    sessions._goose_corpus_cache_life = 0.0
+
+
+@pytest.fixture(autouse=True)
+def _clean_caches():
+    _reset_goose_reads()
     _sig_cache.clear()
     BaseParser._entry_cache.clear()
     reload_pricing_db()
     yield
-    sessions._goose_sessions_cache.clear()
-    sessions._goose_sessions_cache_sig = ()
+    _reset_goose_reads()
     _sig_cache.clear()
     BaseParser._entry_cache.clear()
     reload_pricing_db()
@@ -335,11 +345,19 @@ def test_one_snapshot_serves_every_window(monkeypatch, tmp_path):
     assert calls == []
 
 
-def test_a_database_change_costs_one_more_read(monkeypatch, tmp_path):
-    """The corpus is not a permanent cache: a new signature must re-read it."""
+def test_a_database_change_costs_one_more_read_once_the_window_closes(
+    monkeypatch, tmp_path
+):
+    """The corpus is not a permanent cache: a moved database does re-read.
+
+    The bound is TOKDASH_SIG_TTL, the same window every other source gets, so
+    this closes it rather than waiting on it. What is under test is that a
+    change reaches the reader, not how long the reader is allowed to take.
+    """
     db = _setup(monkeypatch, tmp_path,
                 sessions=[_session("s1")], ledger=[_ledger(1, "s1", 0)])
     calls = _counting_snapshot(monkeypatch, [])
+    monkeypatch.setattr(sessions, "_sig_lifetime", lambda cost: 0.0)
     assert len(_goose_sessions()) == 1
     assert len(calls) == 1
 
@@ -900,7 +918,73 @@ def test_new_ledger_rows_reach_the_panel(monkeypatch, tmp_path):
     # clock by hand: what is under test is the cache rule, not the clock.
     stat = db.stat()
     os.utime(db, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+    sessions._goose_corpus_cache_life = 0.0  # the window closed
     assert _listing()["sessions"][0]["token_events"] == 2
+
+
+def test_a_live_database_is_read_once_per_window_not_per_commit(monkeypatch, tmp_path):
+    """A Goose that is merely running moves the signature with every request.
+
+    One refresh asks for eight windows. Trusting the signature absolutely
+    re-copies a database that can pass a gigabyte for each of them to pick up
+    rows a fraction of a second apart, which is the active-Goose regression:
+    the panel got slower the busier Goose was.
+    """
+    db = _setup(monkeypatch, tmp_path,
+                sessions=[_session("s1")], ledger=[_ledger(1, "s1", 0)])
+    monkeypatch.setattr(sessions, "_sig_lifetime", lambda cost: 600.0)
+    calls = _counting_snapshot(monkeypatch, [])
+    assert len(_goose_sessions()) == 1
+    assert len(calls) == 1
+
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "INSERT INTO usage_ledger (id, session_id, created_timestamp, model, "
+        "input_tokens, output_tokens, total_tokens, cache_read_tokens, "
+        "cache_write_tokens, cost, is_compaction) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        _ledger(55, "s1", 300),
+    )
+    conn.commit()
+    conn.close()
+    stat = db.stat()
+    os.utime(db, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+
+    # A later window of the same refresh, asked after that commit: answered from
+    # the corpus already in hand, with no second copy of the file.
+    sessions._goose_sessions_cache.clear()
+    sessions._goose_sessions_cache_sig = ()
+    assert len(_goose_sessions()) == 1
+    assert len(calls) == 1, "a live Goose re-copied the database for one window"
+
+    # The new row is held, not lost: it lands as soon as the window closes.
+    sessions._goose_corpus_cache_life = 0.0
+    assert len(_goose_sessions()) == 1
+    assert len(calls) == 2
+    turns = [t for raw in _goose_sessions().values() for t in raw["turns"]]
+    assert len(turns) == 2, "the honoured window outlived the row it was holding"
+
+
+def test_the_honoured_window_never_covers_a_different_database(monkeypatch, tmp_path):
+    """A second Goose root is a different corpus, not a stale one.
+
+    The window excuses re-reading a file that moved. It cannot excuse answering
+    for a file nobody has read, which is what a signature-blind cache would do
+    the moment a second root appears.
+    """
+    first = _setup(monkeypatch, tmp_path,
+                   sessions=[_session("s1")], ledger=[_ledger(1, "s1", 0)])
+    monkeypatch.setattr(sessions, "_sig_lifetime", lambda cost: 600.0)
+    calls = _counting_snapshot(monkeypatch, [])
+    assert {r["session_id"] for r in _listing()["sessions"]} == {"s1"}
+
+    root2 = tmp_path / "xdg2"
+    other = root2 / "goose" / "sessions" / "sessions.db"
+    _make_db(other, sessions=[_session("s2")], ledger=[_ledger(2, "s2", 0)])
+    monkeypatch.setenv("XDG_DATA_HOME", str(root2))
+    assert str(other) != str(first)
+
+    assert {r["session_id"] for r in _listing()["sessions"]} == {"s2"}
+    assert len(calls) == 2, "one database was answered from another one s corpus"
 
 
 def test_frontend_session_registry_includes_goose():

@@ -9,6 +9,7 @@ import os
 import re
 import sqlite3
 import threading
+import time as _time
 from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache, wraps
@@ -51,6 +52,7 @@ from .sources.coding_tools import (
     _goose_ts_to_ms,
     _opencode_message_table,
     _opencode_model_identity,
+    _sig_lifetime,
     _sqlite_db_signature,
     antigravity_db_signatures,
     claude_usage_supersedes,
@@ -6271,8 +6273,17 @@ _goose_sessions_cache_lock = threading.Lock()
 # ONE corpus of the whole ledger, for one database signature. The corpus is the
 # expensive object (it is the whole history), so it is not an LRU: a signature
 # change drops it, and nothing else is kept.
+#
+# _at and _life bound how long that one read stays trusted AFTER the file moved.
+# A Goose that is merely running moves the signature on every request it bills,
+# and without the bound every window of every refresh copied and re-read the
+# whole database -- which is the same defect the signature window exists for
+# everywhere else, in the one place a change is not a rare event.
 _goose_corpus_cache: Optional[Dict[str, Any]] = None
 _goose_corpus_cache_sig: tuple = ()
+_goose_corpus_cache_path: str = ""
+_goose_corpus_cache_at: float = 0.0
+_goose_corpus_cache_life: float = 0.0
 _goose_corpus_lock = threading.Lock()
 
 
@@ -6758,18 +6769,45 @@ def _goose_corpus() -> Optional[Dict[str, Any]]:
     The lock is the single-flight. Eight concurrent dashboard requests used to
     copy the database eight times; now one of them reads and the rest wait on
     it, which is cheaper than eight readers discovering the same rows.
+
+    Returns the signature the corpus was read under alongside it, because the
+    window cache has to key on THAT and not on the live file stamp, and holds a
+    read that is merely past its signature but still inside its honoured
+    lifetime -- see the module state above for why a live database needs that.
     """
     global _goose_corpus_cache, _goose_corpus_cache_sig
+    global _goose_corpus_cache_at, _goose_corpus_cache_life
+    global _goose_corpus_cache_path
     db_path = clientpaths.goose_sessions_db()
     if db_path is None:
-        return None
+        return (), None
+    started = _time.monotonic()
     sig = _goose_db_signature()
     if not sig:
-        return None
+        return (), None
 
     with _goose_corpus_lock:
         if sig == _goose_corpus_cache_sig and _goose_corpus_cache is not None:
-            return _goose_corpus_cache
+            return _goose_corpus_cache_sig, _goose_corpus_cache
+
+        if (
+            _goose_corpus_cache is not None
+            # BOUND THIS TO THE FILE. The honoured lifetime excuses a re-read of
+            # a database that MOVED, not of a different database: a second Goose
+            # root appearing, a relocated data dir, or a test that built its own
+            # store would otherwise be served the previous corpus, which is
+            # wrong rather than merely recent. The signature cannot carry this
+            # comparison -- it changes for exactly the reason the branch exists.
+            and _goose_corpus_cache_path == str(db_path)
+            and (_time.monotonic() - _goose_corpus_cache_at) < _goose_corpus_cache_life
+        ):
+            # The file moved since the last read, and reading it again costs a
+            # whole copy of it. A live Goose moves it on every billed request,
+            # so without this the panel pays a full re-read per window per
+            # refresh for a corpus whose newest row is a fraction of a second
+            # newer. The bound is the shared signature window, so Goose is as
+            # fresh as every other source and no fresher.
+            return _goose_corpus_cache_sig, _goose_corpus_cache
 
         remembered = goose_schema_failure(sig)
         if remembered is not None:
@@ -6810,14 +6848,20 @@ def _goose_corpus() -> Optional[Dict[str, Any]]:
         if snap.close_failed:
             # The read completed but the snapshot could not be closed: return
             # the data, never cache it (the shared close-failure contract).
-            return corpus
+            return sig, corpus
 
         # Only the current signature is held: one corpus of a large history is
         # already the biggest object this module keeps, and a stale one is
-        # worthless.
+        # worthless. The lifetime is stamped AFTER the read for the same reason
+        # the signature window is: a copy that cost two seconds is already spent
+        # by the time the next window asks, so a memo worth one read covers none
+        # of the refresh that ran it.
         _goose_corpus_cache = corpus
         _goose_corpus_cache_sig = sig
-        return corpus
+        _goose_corpus_cache_path = str(db_path)
+        _goose_corpus_cache_at = _time.monotonic()
+        _goose_corpus_cache_life = _sig_lifetime(_goose_corpus_cache_at - started)
+        return sig, corpus
 
 
 def _goose_sessions(
@@ -6825,7 +6869,13 @@ def _goose_sessions(
     until_ms: Optional[int] = None,
 ) -> Dict[str, Dict[str, Any]]:
     global _goose_sessions_cache_sig
-    sig = (_goose_db_signature(), _pricing_signature())
+    # The key is the signature the corpus was actually read under, not the live
+    # file stamp. The dashboard asks for eight windows per refresh, and a Goose
+    # that is merely running bills a request somewhere in the middle of that;
+    # keying on the live stamp cleared every window the refresh had already
+    # built and made it pay the whole read a second time.
+    pinned, corpus = _goose_corpus()
+    sig = (pinned, _pricing_signature())
     key = (since_ms, until_ms)
     # Signature validation and the cache lookup are one critical section (the
     # ZCode algorithm): a concurrent collector must not clear and repopulate
@@ -6838,7 +6888,6 @@ def _goose_sessions(
     if cached is not None:
         return cached
 
-    corpus = _goose_corpus()
     if corpus is None:
         # Legitimate empty: no Goose database on this machine. Cached; the
         # signature changes when the DB appears.

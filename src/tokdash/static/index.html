@@ -9224,6 +9224,7 @@
       crush: { icon: '/static/icons/agents/crush.png', color: '#6B50FF', fallback: 'C' },
       muse: { icon: null, color: '#0668E1', fallback: 'M' },
       minimax: { icon: '/static/icons/agents/minimax.png', color: '#E11580', fallback: 'M' },
+      commandcode: { icon: '/static/icons/agents/commandcode.png', color: '#111111', fallback: 'C' },
       devin: { icon: null, color: '#3F4756', fallback: 'D' },
     });
     const toolBrandIconPromises = new Map();
@@ -11870,9 +11871,11 @@
 
     // Quota cards name a vendor rather than a Tokdash source key, so the brand mark
     // is picked by hand. `antigravity` would resolve through the shared alias table
-    // on its own, `opencode_go` is OpenCode's own subscription, and Z.ai and Command
-    // Code have no mark in the local asset set: those two land on the same letter
-    // tile as any other unidentified source, which is what `toolBrandMeta` gives.
+    // on its own, `opencode_go` is OpenCode's own subscription, and `commandcode` is
+    // a quota-only provider: it never reaches the Overview, so this table is the only
+    // place its mark is resolved. Z.ai has no mark in the local asset set, so it lands
+    // on the same letter tile as any other unidentified source, which is what
+    // `toolBrandMeta` gives -- the one entry worth checking when a card looks plain.
     const QUOTA_PROVIDER_BRAND_KEYS = Object.freeze({
       codex: 'codex',
       claude: 'claude',
@@ -11881,6 +11884,7 @@
       kimi: 'kimi',
       grok: 'grok',
       opencode_go: 'opencode',
+      commandcode: 'commandcode',
     });
 
     // The mark comes from the Overview's identity system; the name stays the card's

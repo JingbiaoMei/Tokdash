@@ -8,6 +8,7 @@ came from a real Devin session, because no real store exists yet; the
 assumptions that still need a capture are named in the test that holds them.
 """
 import json
+import os
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -579,6 +580,14 @@ def test_collect_is_cached_until_the_store_changes(tmp_path, monkeypatch):
     first = parser.collect()
     assert len(first) == 1
     store = Path(parser.db_paths[0]).parent
+    db = Path(parser.db_paths[0])
+    # The two stores are the same size -- SQLite rounds both to the same pages --
+    # so the mtime is the only thing that separates them, and a coarse ext4 clock
+    # can leave it untouched when both writes land in one tick. Under a loaded
+    # suite run that is a cache that is CORRECT and a test that is reading the
+    # clock, so the generations get a stamp a reader can see. (Same reason the
+    # ZCode rewrite tests stamp their later writes.)
+    stamp_ns = db.stat().st_mtime_ns + 1_000_000_000
     make_store(
         store,
         sessions=[("s1", "sonnet", 0)],
@@ -587,6 +596,7 @@ def test_collect_is_cached_until_the_store_changes(tmp_path, monkeypatch):
             ("s1", 2, node_json("m2", usage={"input_tokens": 1, "output_tokens": 1}), T0_MS + 5),
         ],
     )
+    os.utime(db, ns=(db.stat().st_atime_ns, stamp_ns))
     parser = DevinParser(PricingDatabase())  # re-resolves signatures
     assert len(parser.collect()) == 2
 

@@ -1,4 +1,5 @@
 """Tests for ZCodeParser (temp-dir snapshot reads of a WAL-mode source DB)."""
+import os
 import shutil
 import sqlite3
 from contextlib import contextmanager
@@ -70,6 +71,33 @@ def _create_db(db_path: Path, rows: list) -> None:
     conn.commit()
     conn.close()
 
+
+
+class _Rewrites:
+    """Replace the source database the way a live ZCode client would, and make
+    sure a reader can tell one generation from the next.
+
+    ZCode's coherence check compares (mtime_ns, size), and that comparison is
+    the ONLY way these tests can say "a write landed mid-copy". Both halves are
+    easy to lose: a one-row and a two-row database of this schema are both
+    12,288 bytes, so the size never moves, and the filesystem under the temp
+    dirs on this machine timestamps in ~10 ms ticks, so two writes microseconds
+    apart can share an mtime as well. When neither half moves, the race is
+    invisible, the retry path these tests exist to pin never runs, and the
+    failure lands on whatever code changed last -- 50 ms of unrelated
+    import-time work anywhere in the package was measured flipping it. Each
+    generation therefore gets a stamp strictly ahead of the last.
+    """
+
+    def __init__(self, db_path: Path):
+        self.db_path = db_path
+        self.stamp = db_path.stat().st_mtime_ns
+
+    def write(self, rows: list) -> None:
+        self.db_path.unlink()
+        _create_db(self.db_path, rows)
+        self.stamp = max(self.stamp, self.db_path.stat().st_mtime_ns) + 1_000_000_000
+        os.utime(self.db_path, ns=(self.stamp, self.stamp))
 
 @pytest.fixture(autouse=True)
 def _clean_query_cache():
@@ -530,6 +558,7 @@ def test_zcode_stale_read_not_stored_after_signature_change(monkeypatch, tmp_pat
     parser = ZCodeParser(PricingDatabase())
 
     real_snapshot = ct.zcode_snapshot
+    rewrites = _Rewrites(db_path)
     state = {"intercepted": False}
 
     @contextmanager
@@ -543,8 +572,8 @@ def test_zcode_stale_read_not_stored_after_signature_change(monkeypatch, tmp_pat
                 # collect runs to completion, advancing _query_cache_sig
                 # and caching the fresh data, while A's (stale) snapshot
                 # is still open.
-                db_path.unlink()
-                _create_db(db_path, [_row(), _row(row_id="mu-2", logical="lr-2", attempt=1)])
+                rewrites.write([
+                    _row(), _row(row_id="mu-2", logical="lr-2", attempt=1)])
                 assert len(parser.collect(None, None)) == 2
             yield snap
         finally:
@@ -573,6 +602,7 @@ def test_zcode_snapshot_retries_when_source_changes_mid_copy(monkeypatch, tmp_pa
     monkeypatch.setenv("ZCODE_HOME", str(home))
 
     real_copy2 = ct.shutil.copy2
+    rewrites = _Rewrites(db_path)
     state = {"fired": False}
 
     def sneaky_copy2(src, dst, *args, **kwargs):
@@ -581,8 +611,8 @@ def test_zcode_snapshot_retries_when_source_changes_mid_copy(monkeypatch, tmp_pa
             state["fired"] = True
             # The source is replaced mid-copy: the copied db is an older
             # generation than the signature taken after the copy.
-            db_path.unlink()
-            _create_db(db_path, [_row(), _row(row_id="mu-2", logical="lr-2", attempt=1)])
+            rewrites.write([
+                _row(), _row(row_id="mu-2", logical="lr-2", attempt=1)])
         return result
 
     monkeypatch.setattr(ct.shutil, "copy2", sneaky_copy2)
@@ -617,23 +647,48 @@ def test_zcode_snapshot_coherence_retries_are_spaced(monkeypatch, tmp_path):
     )
 
     real_copy2 = ct.shutil.copy2
-    races = {"left": 2}
+
+    # The client writes twice while the reader is copying, then goes quiet. The
+    # read has to come back on the LAST complete generation -- not on a mix of
+    # two, and not on nothing, which is what an unbounded retry loop produces.
+    #
+    # The later generations carry more rows than the earlier ones, so the read
+    # cannot come back short and still match, and each rewrite goes through
+    # _Rewrites so a reader can tell the generations apart at all.
+    def _generation(count: int) -> list:
+        # Ids of their own: the generations used to reuse the base row's default
+        # id, so the first rewrite died on a UNIQUE constraint inside the copy
+        # hook and left an empty table behind -- a third failure mode, usually
+        # masked because a later attempt read past it.
+        return [
+            _row(row_id=f"mu-{i}", logical=f"lr-{i}", session=f"sess-{i}",
+                 started_at=1787161506933 + i)
+            for i in range(1, count + 1)
+        ]
+
+    generations = iter([_generation(2), _generation(12)])
+    rewrites = _Rewrites(db_path)
+    expected_rows = 12
 
     def racing_copy2(src, dst, *args, **kwargs):
         result = real_copy2(src, dst, *args, **kwargs)
-        # Two generations land mid-copy, then the client goes quiet.
-        if races["left"] and Path(dst).name == "db.sqlite":
-            races["left"] -= 1
-            db_path.unlink()
-            _create_db(db_path, [_row(), _row(row_id=f"mu-{races['left']}", logical=f"lr-{races['left']}")])
+        if Path(dst).name != "db.sqlite":
+            return result
+        try:
+            rows = next(generations)
+        except StopIteration:
+            return result  # the client has gone quiet
+        rewrites.write(rows)
         return result
 
     monkeypatch.setattr(ct.shutil, "copy2", racing_copy2)
     entries = ZCodeParser(PricingDatabase()).collect(None, None)
 
-    # The read completes on the third attempt with ONE whole generation,
-    # not a mix of two: the base row plus the last writer's row.
-    assert len(entries) == 2, "a client that writes twice must not cost the whole read"
+    # The read completes with ONE whole generation -- the last one, read at
+    # full width rather than a mix of two or a truncation of either.
+    assert len(entries) == expected_rows, (
+        f"a client that writes twice cost the read: {len(entries)} of "
+        f"{expected_rows} rows came back")
     assert len(slept) == 2, f"expected one pause per raced attempt, got {slept}"
     assert slept == [0, 1], "the pause widens per attempt rather than staying flat"
     assert slept[1] > slept[0], "the retry budget widens, it does not stay flat"
@@ -772,6 +827,7 @@ def test_zcode_cache_lookup_under_signature_lock(monkeypatch, tmp_path):
 
     since = datetime(2026, 1, 1, tzinfo=timezone.utc)
     until = datetime(2027, 1, 1, tzinfo=timezone.utc)
+    rewrites = _Rewrites(db_path)
     state = {"fired": False, "b_entries": None}
 
     def nested_to_utc(dt):
@@ -779,8 +835,8 @@ def test_zcode_cache_lookup_under_signature_lock(monkeypatch, tmp_path):
             state["fired"] = True
             # B: the source gains a row (new signature) and a full
             # collect runs to completion, repopulating the cache.
-            db_path.unlink()
-            _create_db(db_path, [_row(), _row(row_id="mu-2", logical="lr-2", attempt=1)])
+            rewrites.write([
+                _row(), _row(row_id="mu-2", logical="lr-2", attempt=1)])
             state["b_entries"] = parser.collect(since, until)
             assert len(state["b_entries"]) == 2
         return real_to_utc(dt)

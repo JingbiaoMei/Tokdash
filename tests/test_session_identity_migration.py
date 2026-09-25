@@ -86,7 +86,7 @@ def test_the_frozen_module_hashes_are_frozen_history():
     # names from code identical to the shipped one -- only ever true of releases
     # already out. The file this build ships is deliberately absent: a row
     # cannot vouch for itself.
-    accepted = sessions._LEGACY_CODING_TOOLS_HASHES
+    accepted = set(sessions._LEGACY_CODING_TOOLS_OBJECTS)
 
     assert len(accepted) == 16
     assert all(
@@ -98,14 +98,18 @@ def test_the_frozen_module_hashes_are_frozen_history():
     assert module_hash not in accepted
 
 
-def test_the_accepted_set_cannot_drift_from_the_pinned_objects():
-    """One list of releases, not two that someone has to keep in step."""
-    assert set(sessions._LEGACY_CODING_TOOLS_OBJECTS) == set(
-        sessions._LEGACY_CODING_TOOLS_HASHES
-    )
+def test_every_accepted_release_pins_both_objects():
+    """A release in the map with a component missing is a release not pinned.
+
+    The map's key set IS the accepted set -- there is no second list to keep in
+    step -- so an entry that names a module hash without pinning both objects
+    would let that row resign on the strength of a hash that vouches for only
+    one of them.
+    """
     assert all(
         set(components) == {"event_key", "model_map"} and all(
-            len(value) == 40 for value in components.values()
+            len(value) == 40 and all(ch in "0123456789abcdef" for ch in value)
+            for value in components.values()
         )
         for components in sessions._LEGACY_CODING_TOOLS_OBJECTS.values()
     )

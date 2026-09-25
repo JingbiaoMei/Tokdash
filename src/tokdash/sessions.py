@@ -387,8 +387,6 @@ _LEGACY_CODING_TOOLS_OBJECTS: Dict[str, Dict[str, str]] = {
     )
 }
 
-# Derived, never retyped: the accepted set IS the map's key set.
-_LEGACY_CODING_TOOLS_HASHES = frozenset(_LEGACY_CODING_TOOLS_OBJECTS)
 
 # tool -> (component, the object label parser_code_signature() recorded for it).
 # Both used to resolve to a hash of the module that holds them.

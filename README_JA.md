@@ -359,6 +359,38 @@ tokdash serve
 
 ランタイムの選択肢、WSL/systemd の動作、macOS の launchd、Tailscale、バンドリング、アップデートチェック、安全なアンインストールの挙動を含む、オンボーディングの全詳細については **[`docs/guides/ONBOARDING.md`](docs/guides/ONBOARDING.md)** を参照してください。
 
+### ターミナルダッシュボード
+
+ターミナルのまま使いたい場合: 両方のターミナルビューはブラウザなしで動作し、Web ダッシュボードと同じローカルの使用量インデックスとキャッシュを再利用します — `tokdash serve` と並行して起動したターミナルビューは、ログを再パースする代わりに共有ディスク上のデータベースを読み込みます。
+
+対話型ダッシュボード:
+
+```bash
+tokdash tui
+```
+
+Web ダッシュボードと同じ **Overview**、**Report**、**Quota** タブを開きます。タブが 1 画面を超える場合はマウスホイールでスクロールします。キー:
+
+| キー | 操作 |
+|---|---|
+| `q` | 終了 |
+| `r` | 現在のタブを更新 |
+| `1` / `2` / `3` | Overview / Report / Quota に切り替え |
+| `t` `w` `m` `y` `a` | 期間に直接移動(両方の期間タブで共通。`t`/`a` は Overview のみ) |
+| `p` | 次の時間ウィンドウ(前方循環のみ) |
+| `[` / `]` | ウィンドウの終了日を 1 日前 / 後にずらす(未来には移動しません) |
+| `0` | 今日に戻る |
+| `u` | クォータのポーリング(Quota タブのみ) |
+| `?` | すべてのキーを表示するヘルプパネル |
+
+パイプやスクリプトで使える一度きりのレポート:
+
+```bash
+tokdash report --period week
+```
+
+期間はフラグで指定します — 位置引数として渡す `tokdash report week` は設計上エラーになります。指定できる値: `today`（デフォルト）、`week`、`month`、`year`、`all`、日数の数字、または `Nd/Nw/Nm/Ny` の短縮形。`week`、`month`、`year` は Web の Report タブが表示するカレンダー基準のウィンドウと同じです。`tokdash report` は `tokdash export` と同じ慣例に従い、`--json`、`--pretty`、`--output <file>` も受け付けます。
+
 ### OpenClaw ダイジェスト（定期レポート）
 
 Tokdash はローカル API を定期照会することで、OpenClaw の日次 / 週次 / 月次使用量レポートを支えることができます。
@@ -463,6 +495,8 @@ Tailscale Serve、SSH フォーワード、明示的なネットワークバイ�
 
 デフォルトで `tokdash serve` は起動時に一度だけブラウザでダッシュボードを開きます。無効にするには `--no-open` を付けてください（ヘッドレス / SSH 環境やバックグラウンドサービスのテンプレートでは自動的にスキップされます）。
 
+コマンドを付けずに `tokdash` を実行すると、ヘルプを表示して終了するだけです -- もう勝手に `tokdash serve` を起動したり、ブラウザーを開いたりすることはありません。ダッシュボードは明示的に `tokdash serve` で起動してください。
+
 ## プライバシーとセキュリティ
 
 - **テレメトリなし**: Tokdash はあなたのデータを意図的にどこにも送信しません。
@@ -495,6 +529,8 @@ tokdash quota show
 固定リセットのクォータウィンドウでは、ポーラーはリセット境界付近でもサンプリングし、履歴がリセット直前的高値とリセット直後のベースラインを捕捉できるようにします。境界サンプリングはデフォルトで有効で、ウィンドウがトリガーしたプロバイダーのみを呼び出し、 近いプロバイダー境界をまとめ、デーモンポーリングサイクル間に最低 300 秒を保持します。`TOKDASH_QUOTA_BOUNDARY_POLL=0` で無効化、`TOKDASH_QUOTA_BOUNDARY_POST=0` でリセット後サンプルのみの無効化、デフォルトの 120 秒リードは `TOKDASH_QUOTA_BOUNDARY_PRE_SECONDS` と `TOKDASH_QUOTA_BOUNDARY_POST_SECONDS` で調整できます。
 
 **複数の Claude Code インストール。** Claude Code は設定ディレクトリごとに 1 つのサブスクリプションを保持するため、`CLAUDE_CONFIG_DIR=~/.claude-academic claude` として実行する 2 つ目のサインインは、独自のウィンドウを持つ別のサブスクリプションです。認証情報スキャンに同意すると、Tokdash は `$CLAUDE_CONFIG_DIR` に加えて独自の `.credentials.json` を持つすべての `~/.claude*` ディレクトリを読み取り、それぞれを個別にポーリングして、そのディレクトリが設定されたプロファイル名（`academic`）で Claude Code カード内にグループ化します。履歴でも区別され、`Claude-academic 5-hour` は `Claude 5-hour` と並ぶ独立した系列になります。サインインが期限切れのインストールは、正常なインストールの数値を隠すのではなく自身の通知を表示し、同じサインインを保持する 2 つのディレクトリは 1 回だけカウントされます。ホームディレクトリの外にあるインストールについては、`TOKDASH_CLAUDE_PROFILES` にパス区切り文字で区切ったディレクトリのリストを設定してください。使用量の集計には変更が不要でした: すべての `~/.claude*` インストール配下のセッションログは以前から集計されています。
+
+**Claude Code の制限リセット。** Anthropic があなたのアカウントに制限リセット（Claude Code の `/limit-reset` が消費するもの）を付与している場合、Claude Code カードは Codex カードと同じ **クレジットをリセット** ブロックに、それぞれの有効期限とともに、そのリセットを持つインストールの下に表示します。リセットは同じ使用量リクエストに `?cedar_ember=1` を加えて取得されます。Anthropic は Claude Code 自身のサーフェスにしかリセットを返さないため、このリクエストの User-Agent は Claude Code の `claude-cli/…` で始まり、続けて `tokdash/<version>` を名乗ります。Tokdash はリセットを読み取るだけで、使用は引き続き Claude Code で行います。
 
 ライブポーリングは 2 つの別々の決定を要求します: `quota.credential_scan` は開示済みのローカル認証情報ストアへの読み取り専用アクセスを許可し、その後各 `<provider>_api` キーがそのプロバイダーのネットワークリクエストを許可します。Tokdash はネイティブ CLI の認証 / 設定ファイル、OpenCode の `auth.json` とグローバルプロバイダー設定、アクティブな Claude 設定、CC Switch の `providers` テーブルを読み取り専用の SQLite 接続で読み取ります。プロバイダーのログ、シェルプロファイル、任意の `{file:...}` 参照は決してスキャンしません。MiniMax は `mmx` サインインまたは Token Plan Subscription Key（`MINIMAX_TOKEN_PLAN_GLOBAL_KEY` / `MINIMAX_TOKEN_PLAN_CN_KEY`）を受け付けます。通常の従量課金キーに Token Plan クォータがあるとは限りません。Kimi は Kimi Code サインイン / キー（`KIMI_API_KEY`）を受け付け、Moonshot Open Platform の従量課金キーは受け付けません。SuperGrok/Grok Build のクォータには `$GROK_HOME/auth.json` の xAI OAuth サインインが必要です。通常の xAI API キーではコンシューマー課金にアクセスできません。macOS では Claude Code が 1 回だけの読み取り専用 Keychain 承認を要求することがあります。Tokdash はプロバイダーの認証情報を更新も書き込みもしません。`TOKDASH_QUOTA_POLL=0` は全クォータ追跡のハードキルスイッチです。`tokdash export` はデフォルトでクォータデータを除外します。JSON に含めたいときには意図的に `--include-quota` を使用してください。
 

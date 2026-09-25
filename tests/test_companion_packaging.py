@@ -11,8 +11,6 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("build")
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 

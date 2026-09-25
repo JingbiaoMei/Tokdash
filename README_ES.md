@@ -359,6 +359,38 @@ Abre `http://127.0.0.1:55423`. Usa `tokdash serve --port <puerto>` si el puerto 
 
 Para todos los detalles de la iniciación, incluidas opciones de runtime, comportamiento de WSL/systemd, launchd de macOS, Tailscale, empaquetado, comprobaciones de actualización y la semántica de desinstalación segura, consulta **[`docs/guides/ONBOARDING.md`](docs/guides/ONBOARDING.md)**.
 
+### Panel de terminal
+
+¿Prefieres quedarte en la terminal? Las dos vistas de terminal funcionan sin navegador y reutilizan el mismo índice de uso local y caché del panel web: una lanzada junto a `tokdash serve` lee la base de datos compartida en disco en lugar de reparsear registros.
+
+El panel interactivo:
+
+```bash
+tokdash tui
+```
+
+Abre las mismas pestañas **Overview**, **Report** y **Quota** que el panel web; una pestaña más larga que una pantalla se desplaza con la rueda del ratón. Teclas:
+
+| Tecla | Acción |
+|---|---|
+| `q` | Salir |
+| `r` | Actualizar la pestaña actual |
+| `1` / `2` / `3` | Cambiar a Overview / Report / Quota |
+| `t` `w` `m` `y` `a` | Saltar directamente al período (ambas pestañas de período; `t`/`a` solo en Overview) |
+| `p` | Ventana de tiempo siguiente (ciclo solo hacia adelante) |
+| `[` / `]` | Mover la fecha final de la ventana un día atrás / adelante (nunca al futuro) |
+| `0` | Volver a hoy |
+| `u` | Sondear la cuota (solo pestaña Quota) |
+| `?` | Panel de ayuda con todas las teclas |
+
+Para un informe de un solo disparo que puedas redirigir o scriptar:
+
+```bash
+tokdash report --period week
+```
+
+El periodo es un flag, no un argumento posicional — `tokdash report week` falla por diseño. Valores aceptados: `today` (por defecto), `week`, `month`, `year`, `all`, un número de días o el atajo `Nd/Nw/Nm/Ny`; `week`, `month` y `year` son las mismas ventanas alineadas al calendario que muestra la pestaña Report del panel web. `tokdash report` también acepta `--json`, `--pretty` y `--output <file>`, siguiendo las mismas convenciones que `tokdash export`.
+
 ### Digest de OpenClaw (informes programados)
 
 Tokdash puede alimentar informes de uso de OpenClaw diarios/semanales/mensuales consultando la API local según un calendario.
@@ -465,6 +497,8 @@ registrar la regla de Tailscale Serve tras tu opt-in.
 
 Por defecto `tokdash serve` abre el panel en tu navegador una vez al arrancar. Pasa `--no-open` para desactivarlo (también se omite automáticamente en entornos headless/SSH y en las plantillas de servicio de fondo).
 
+Un `tokdash` sin subcomando simplemente muestra la ayuda de comandos y sale: ya no inicia `tokdash serve` a tus espaldas ni abre un navegador. Inicia el panel explícitamente: `tokdash serve`.
+
 ## Privacidad y seguridad
 
 - **Sin telemetría**: Tokdash no envía tus datos a ningún sitio intencionadamente.
@@ -497,6 +531,8 @@ tokdash quota show
 Para ventanas de cuota con reinicio fijo, el consultor también muestrea cerca del límite de reinicio para que el historial capture el máximo previo al reinicio y la línea de base posterior. El muestreo de límites está activado por defecto, solo llama al proveedor cuya ventana lo disparó, agrupa límites cercanos de proveedores y mantiene al menos 300 segundos entre ciclos de consulta del demonio. Fija `TOKDASH_QUOTA_BOUNDARY_POLL=0` para desactivarlo, `TOKDASH_QUOTA_BOUNDARY_POST=0` para desactivar solo las muestras posteriores al reinicio, o ajusta los adelantos de 120 segundos por defecto con `TOKDASH_QUOTA_BOUNDARY_PRE_SECONDS` y `TOKDASH_QUOTA_BOUNDARY_POST_SECONDS`.
 
 **Múltiples instalaciones de Claude Code.** Claude Code mantiene una suscripción por directorio de configuración, así que un segundo inicio de sesión que ejecutes como `CLAUDE_CONFIG_DIR=~/.claude-academic claude` es una segunda suscripción con sus propias ventanas. Con el escaneo de credenciales consentido, Tokdash lee `$CLAUDE_CONFIG_DIR` más cada directorio `~/.claude*` que tenga su propio `.credentials.json`, consulta cada uno por separado y los agrupa dentro de la tarjeta de Claude Code bajo el nombre de perfil con el que se configuró el directorio (`academic`). El historial también los mantiene separados: `Claude-academic 5-hour` es su propia serie junto a `Claude 5-hour`. Una instalación con el inicio de sesión caducado muestra su propio aviso en lugar de ocultar los números de una instalación que sí funciona, y dos directorios que contienen el mismo inicio de sesión cuentan una sola vez. Define `TOKDASH_CLAUDE_PROFILES` con una lista de directorios separada por el separador de rutas del sistema para instalaciones que vivan fuera de tu directorio personal. Los totales de uso no necesitaron nada: los registros de sesión bajo cada instalación `~/.claude*` se cuentan desde hace tiempo.
+
+**Reinicios de límite de Claude Code.** Cuando Anthropic da a tu cuenta reinicios de límite (los que gasta `/limit-reset` de Claude Code), la tarjeta de Claude Code los muestra en el mismo bloque **Reiniciar créditos** que usa la tarjeta de Codex, con la caducidad de cada uno, bajo la instalación que los tiene. Llegan en la misma petición de uso, con `?cedar_ember=1` añadido. Anthropic solo los lista para la propia superficie de Claude Code, así que el User-Agent de esa petición empieza con el `claude-cli/…` de Claude Code y después nombra `tokdash/<version>`. Tokdash solo lee los reinicios; gastar uno sigue haciéndose en Claude Code.
 
 La consulta en vivo requiere dos decisiones separadas: `quota.credential_scan` permite el acceso de solo lectura a los almacenes de credenciales locales divulgados, y luego cada clave `<provider>_api` permite la petición de red de ese proveedor. Tokdash lee archivos de autenticación/configuración de CLIs nativos, `auth.json` de OpenCode más la configuración global de proveedores, los ajustes activos de Claude y la tabla `providers` de CC Switch a través de una conexión SQLite de solo lectura. Nunca explora logs de proveedores, perfiles de shell ni referencias arbitrarias de `{file:...}`. MiniMax acepta un inicio de sesión `mmx` o una Token Plan Subscription Key (`MINIMAX_TOKEN_PLAN_GLOBAL_KEY` / `MINIMAX_TOKEN_PLAN_CN_KEY`); una clave normal de pago por uso no está garantizada de tener cuota de Token Plan. Kimi acepta un inicio de sesión/clave de Kimi Code (`KIMI_API_KEY`), no una clave de pago por uso de Moonshot Open Platform. La cuota de SuperGrok/Grok Build requiere el inicio de sesión OAuth de xAI en `$GROK_HOME/auth.json`; una clave de API de xAI normal no puede acceder a la facturación de consumo. En macOS, Claude Code puede requerir un permiso de solo lectura de Keychain de una sola vez. Tokdash nunca actualiza ni escribe credenciales de proveedor. `TOKDASH_QUOTA_POLL=0` es un interruptor de emergencia duro para todo el seguimiento de cuota. `tokdash export` excluye datos de cuota por defecto; usa `--include-quota` solo cuando quieras incluirlos intencionadamente en el JSON.
 

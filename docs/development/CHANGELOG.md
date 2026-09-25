@@ -4,6 +4,56 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Unreleased
+
+### Added
+- Session Explorer "View Chat" timeline with metadata-only rendering (roles, token counts, timestamps, tool names)
+- Session detail metadata: cwd, git branch, tool call count, message count, profile name
+- `tokens_reasoning` plumbing across usage_store, compute, and dev_fixtures
+- Multi-model attribution via `session_model_usage` table
+- 17 style themes restored in Settings (was 4), with Paper as default
+- Theme toggle button in header now functional
+
+### Changed
+- Light theme: removed hardcoded dark backgrounds, now uses theme tokens
+- Theme toggle button in header now works (inline `toggleThemeQuick` defined)
+- Sticky sidebar fixed: `overflow-x: clip` instead of `hidden`
+- Header Settings and What's New buttons accessible on all viewports
+- Sidebar theming uses tokens instead of hardcoded colors
+- Navigation renamed: "MCP & Servers" → "Servers"
+- Theme picker restored to full 17 themes (was 4 curated)
+- Removed: Hermes sidebar card, Hermes DB card, Hermes Hub tab
+- Removed: Live Traces, Model Intelligence, Agent Capabilities, Achievements tabs
+- Removed: Currency selector, CO2 footprint, Price Saved estimates
+- Removed: CSV/Markdown export endpoints and UI
+- Removed: SSE endpoint (`/api/stream`)
+- Removed: unpinned `unpkg.com/lucide@latest` import
+- `previous_period_range("month")` restored to local-midnight logic
+- `/api/session` returns metadata-only (no prompts, reasoning, tool args/outputs)
+- Removed ~9k lines of dead JS/CSS from wheel
+- `tokdash` script execute bit restored
+- `test_companion_packaging.py` importorskip removed
+- README restored to upstream (removed fork rebrand)
+- Tests un-gamed: i18n tests no longer skip on fork README
+
+### Removed
+- ~9,000 lines of never-loaded JS/CSS from wheel (main.js, router.js, api.js, search.js, keyboard.js, charts.js, insights.js, tabs/*, css/*)
+- Dead `js/main.js` (was source of broken `toggleThemeQuick`)
+- `test_hermes_deep_features.py` (pinned removed endpoints)
+
+### Fixed
+- `previous_period_range("month")` now uses local midnight (was UTC-derived)
+- Sticky sidebar broken by `overflow-x: hidden` on html/body
+- Theme toggle button `ReferenceError` (handler now defined inline)
+- Settings/What's New unreachable on mobile
+- Sidebar/main theme drift (hardcoded colors → tokens)
+- Transcript content no longer exposed over `/api/session` (privacy)
+- Timestamps escaped in innerHTML
+- `unpkg.com/lucide@latest` unpinned import removed
+- `/api/stream` SSE endpoint removed (held connections, sent only pings)
+- `tokdash` script execute bit restored
+- `test_companion_packaging.py` importorskip removed
+
 ## 2.6.2 - 2026-09-23
 
 ### Changed

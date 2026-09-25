@@ -359,6 +359,38 @@ tokdash serve
 
 런타임 선택, WSL/systemd 동작, macOS launchd, Tailscale, 번들링, 업데이트 확인, 안전한 제거 동작을 포함한 온보딩 전체 상세는 **[`docs/guides/ONBOARDING.md`](docs/guides/ONBOARDING.md)**를 참조하세요.
 
+### 터미널 대시보드
+
+터미널에 그대로 남겠다면? 두 터미널 뷰 모두 브라우저 없이 동작하며 웹 대시보드와 동일한 로컬 사용량 인덱스와 캐시를 재사용합니다 — `tokdash serve` 옆에서 실행한 터미널 뷰는 로그를 다시 파싱하는 대신 디스크의 공유 데이터베이스를 읽습니다.
+
+인터랙티브 대시보드:
+
+```bash
+tokdash tui
+```
+
+웹 대시보드와 동일한 **Overview**, **Report**, **Quota** 탭을 엽니다. 탭이 한 화면을 넘으면 마우스 휠로 스크롤합니다. 키:
+
+| 키 | 동작 |
+|---|---|
+| `q` | 종료 |
+| `r` | 현재 탭 새로고침 |
+| `1` / `2` / `3` | Overview / Report / Quota으로 전환 |
+| `t` `w` `m` `y` `a` | 기간으로 바로 이동(두 기간 탭 공통; `t`/`a`는 Overview 전용) |
+| `p` | 다음 시간 윈도우(순환은 앞방향만) |
+| `[` / `]` | 윈도우 종료일을 하루 뒤 / 앞으로 이동(미래로는 이동하지 않음) |
+| `0` | 오늘로 복귀 |
+| `u` | 쿼터 폴링(Quota 탭 전용) |
+| `?` | 모든 키를 표시하는 도움말 패널 |
+
+파이프나 스크립트로 쓸 수 있는 일회성 리포트:
+
+```bash
+tokdash report --period week
+```
+
+기간은 플래그로만 지정합니다 — 위치 인자로 넘기면 설계상 오류입니다 (`tokdash report week` 오류). 허용 값: `today` (기본), `week`, `month`, `year`, `all`, 일수 숫자, 또는 `Nd/Nw/Nm/Ny` 축약형. `week`, `month`, `year`는 웹 Report 탭이 표시하는 달력 기준 윈도우와 동일합니다. `tokdash report`는 `tokdash export`와 동일한 규칙에 따라 `--json`, `--pretty`, `--output <file>`도 받습니다.
+
 ### OpenClaw 다이제스트 (정기 리포트)
 
 Tokdash는 로컬 API를 일정대로 쿼리하여 OpenClaw의 일일/주간/월간 사용량 리포트를 제공할 수 있습니다.
@@ -463,6 +495,8 @@ Tailscale Serve, SSH 포워딩, 명시적 네트워크 바인딩을 통한 원�
 
 기본적으로 `tokdash serve`는 시작 시 브라우저에서 대시보드를 한 번 엽니다. 끄려면 `--no-open`을 넘기세요 (헤드리스/SSH 환경과 백그라운드 서비스 템플릿에서는 자동으로 건너뜀).
 
+명령어를 붙이지 않은 `tokdash`는 명령 헬프를 출력하고 종료하기만 합니다 — 더 이상 몰래 `tokdash serve`를 시작하거나 브라우저를 열지 않습니다. 대시보드는 명시적으로 `tokdash serve`로 여세요.
+
 ## 프라이버시 & 보안
 
 - **텔레메트리 없음**: Tokdash는 데이터를 의도적으로 어디로도 보내지 않습니다.
@@ -495,6 +529,8 @@ tokdash quota show
 고정 리셋 쿼터 윈도우의 경우 폴러는 리셋 경계 근처에서도 샘플링해, 히스토리가 리셋 직전 고값과 리셋 직후 베이스라인을 확보하도록 합니다. 경계 샘플링은 기본적으로 켜져 있으며, 윈도우가 트리거한 제공자만 호출하고, 가까운 제공자 경계를 통합하며, 데몬 폴링 주기 사이 최소 300초를 유지합니다. `TOKDASH_QUOTA_BOUNDARY_POLL=0`으로 비활성화, `TOKDASH_QUOTA_BOUNDARY_POST=0`으로 리셋 후 샘플만 비활성화, 기본 120초 리드는 `TOKDASH_QUOTA_BOUNDARY_PRE_SECONDS`와 `TOKDASH_QUOTA_BOUNDARY_POST_SECONDS`로 조정할 수 있습니다.
 
 **여러 Claude Code 설치.** Claude Code는 설정 디렉터리마다 구독을 하나씩 유지하므로, `CLAUDE_CONFIG_DIR=~/.claude-academic claude`로 실행하는 두 번째 로그인은 자체 창을 가진 별도의 구독입니다. 자격 증명 스캔에 동의하면 Tokdash는 `$CLAUDE_CONFIG_DIR`과 자체 `.credentials.json`을 가진 모든 `~/.claude*` 디렉터리를 읽고 각각 따로 폴링한 뒤, 해당 디렉터리가 설정된 프로필 이름(`academic`)으로 Claude Code 카드 안에 묶어 보여줍니다. 기록도 서로 구분되어 `Claude-academic 5-hour`는 `Claude 5-hour` 옆의 독립된 계열이 됩니다. 로그인이 만료된 설치는 정상 설치의 수치를 가리는 대신 자체 알림을 표시하며, 같은 로그인을 담은 두 디렉터리는 한 번만 계산됩니다. 홈 디렉터리 밖에 있는 설치는 `TOKDASH_CLAUDE_PROFILES`에 경로 구분자로 구분한 디렉터리 목록을 지정하세요. 사용량 합계는 손댈 필요가 없었습니다: 모든 `~/.claude*` 설치의 세션 로그는 이전부터 집계되어 왔습니다.
+
+**Claude Code 한도 리셋.** Anthropic이 계정에 한도 리셋(Claude Code의 `/limit-reset`이 사용하는 것)을 제공하면, Claude Code 카드는 Codex 카드와 같은 **크레딧 리셋** 블록에 각 리셋의 만료일과 함께, 그 리셋을 가진 설치 아래에 표시합니다. 리셋은 같은 사용량 요청에 `?cedar_ember=1`을 더해 받아옵니다. Anthropic은 Claude Code 자체 서피스에만 리셋을 보여주므로, 이 요청의 User-Agent는 Claude Code의 `claude-cli/…`로 시작하고 이어서 `tokdash/<version>`을 밝힙니다. Tokdash는 리셋을 읽기만 하며, 사용은 여전히 Claude Code에서 합니다.
 
 라이브 폴링은 두 가지 독립적 결정을 요구합니다: `quota.credential_scan`은 공개된 로컬 자격 증명 스토어에 대한 읽기 전용 접근을 허용하고, 이어 각 `<provider>_api` 키가 해당 제공자의 네트워크 요청을 허용합니다. Tokdash는 네이티브 CLI 인증/설정 파일, OpenCode의 `auth.json`과 전역 제공자 설정, 활성 Claude 설정, CC Switch의 `providers` 테이블을 읽기 전용 SQLite 연결로 읽습니다. 제공자 로그, 셸 프로필, 임의의 `{file:...}` 참조는 절대 스캔하지 않습니다. MiniMax는 `mmx` 로그인 또는 Token Plan Subscription Key(`MINIMAX_TOKEN_PLAN_GLOBAL_KEY` / `MINIMAX_TOKEN_PLAN_CN_KEY`)를 받습니다. 일반 후불 키에는 Token Plan 쿼터가 보장되지 않습니다. Kimi는 Kimi Code 로그인/키(`KIMI_API_KEY`)를 받고, Moonshot Open Platform 후불 키는 받지 않습니다. SuperGrok/Grok Build 쿼터에는 `$GROK_HOME/auth.json`의 xAI OAuth 로그인이 필요합니다. 일반 xAI API 키로는 소비자 과금에 접근할 수 없습니다. macOS에서 Claude Code는 일회성 읽기 전용 키체인 승인을 요구할 수 있습니다. Tokdash는 제공자 자격 증명을 갱신하거나 쓰지 않습니다. `TOKDASH_QUOTA_POLL=0`은 모든 쿼터 추적을 위한 하드 킬 스위치입니다. `tokdash export`는 기본적으로 쿼터 데이터를 제외합니다. JSON에 포함하려면 의도적으로 `--include-quota`를 사용하세요.
 

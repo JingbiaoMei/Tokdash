@@ -389,6 +389,37 @@ tokdash serve
 完整 onboarding 说明，包括运行时选择、WSL/systemd 行为、macOS launchd、Tailscale、bundle
 集成、更新检查和安全卸载语义，见 **[`docs/guides/ONBOARDING.md`](docs/guides/ONBOARDING.md)**。
 
+### 终端仪表盘
+
+更喜欢留在终端里？两个终端视图都无需浏览器即可工作，并复用与 Web 仪表盘相同的本地索引用量数据和缓存——与 `tokdash serve` 一同启动的终端视图会直接读取共享的磁盘数据库，而不是重新解析日志。
+
+交互式仪表盘：
+
+```bash
+tokdash tui
+```
+
+它打开与 Web 仪表盘相同的 **Overview**、**Report** 和 **Quota** 标签页；标签页超过一页时可用鼠标滚轮滚动。按键：
+
+| 按键 | 操作 |
+|---|---|
+| `q` | 退出 |
+| `r` | 刷新当前标签页 |
+| `1` / `2` / `3` | 切换到 Overview / Report / Quota |
+| `t` `w` `m` `y` `a` | 直接跳转到对应周期（两个周期标签页通用；`t`/`a` 仅 Overview） |
+| `p` | 下一个时间窗口（仅向前循环） |
+| `[` / `]` | 将窗口结束日期往前 / 往后挪一天（不会跳到未来） |
+| `0` | 回到今天 |
+| `u` | 轮询配额（仅 Quota 标签页） |
+| `?` | 显示所有按键的帮助面板 |
+
+用于可管道化或脚本化的一次性报表：
+
+```bash
+tokdash report --period week
+```
+
+周期只能作为参数（flag），不是位置参数——`tokdash report week` 会按设计报错。可接受的值：`today`（默认）、`week`、`month`、`year`、`all`、天数数字，或 `Nd/Nw/Nm/Ny` 简写；其中 `week`、`month`、`year` 与 Web Report 标签页显示的日历对齐窗口相同。`tokdash report` 还支持 `--json`、`--pretty` 和 `--output <file>`，遵循与 `tokdash export` 相同的约定。
 
 ### OpenClaw 摘要（定时报表）
 
@@ -496,6 +527,8 @@ tokdash db watch --pretty
 
 默认情况下，`tokdash serve` 会在启动时自动在浏览器中打开仪表盘一次。使用 `--no-open` 可禁用此行为（在无界面/SSH 环境以及后台服务模板中也会自动跳过）。
 
+不带子命令直接运行 `tokdash` 只会打印命令帮助然后退出——它不会再悄悄启动 `tokdash serve`，也不会打开浏览器。请显式启动仪表盘：`tokdash serve`。
+
 ## 隐私与安全
 
 - **无遥测**：Tokdash 不会主动把你的数据发送到任何地方。
@@ -526,6 +559,8 @@ tokdash quota show
 对于固定重置时间的额度窗口，轮询器还会在重置边界附近采样，以便历史记录捕获重置前的峰值和重置后的基线。边界采样默认开启，只调用触发边界的服务商接口，合并时间相近的多个服务商边界，并保证后台轮询周期之间至少间隔 300 秒。设置 `TOKDASH_QUOTA_BOUNDARY_POLL=0` 可关闭边界采样；设置 `TOKDASH_QUOTA_BOUNDARY_POST=0` 可只关闭重置后采样；还可通过 `TOKDASH_QUOTA_BOUNDARY_PRE_SECONDS` 和 `TOKDASH_QUOTA_BOUNDARY_POST_SECONDS` 调整默认 120 秒的提前量与延后量。
 
 **多个 Claude Code 安装。** Claude Code 每个配置目录对应一个订阅，因此以 `CLAUDE_CONFIG_DIR=~/.claude-academic claude` 运行的第二份登录就是另一个订阅，拥有自己的额度窗口。在授予凭据扫描许可后，Tokdash 会读取 `$CLAUDE_CONFIG_DIR` 以及每个自带 `.credentials.json` 的 `~/.claude*` 目录，分别轮询，并在 Claude Code 卡片内按目录所用的 profile 名称（例如 `academic`）分组展示。历史记录同样区分两者：`Claude-academic 5-hour` 是与 `Claude 5-hour` 并列的独立序列。登录过期的那份安装只在自己的分组里提示，不会掩盖正常安装的数据；持有同一份登录的两个目录只计算一次。若安装位于主目录之外，可用 `TOKDASH_CLAUDE_PROFILES` 指定以系统路径分隔符分隔的目录列表。用量统计无需改动：每个 `~/.claude*` 安装下的会话日志早已被计入。
+
+**Claude Code 额度重置。** 当 Anthropic 为你的账户提供额度重置（即 Claude Code 的 `/limit-reset` 所消耗的重置）时，Claude Code 卡片会在与 Codex 卡片相同的 **重置额度** 区块中列出它们及各自的到期时间，并显示在持有它们的那份安装之下。它们来自同一个用量请求，只是加上了 `?cedar_ember=1`。Anthropic 只向 Claude Code 自身的客户端列出重置，因此该请求的 User-Agent 以 Claude Code 的 `claude-cli/…` 开头，随后注明 `tokdash/<version>`。Tokdash 只读取重置；使用重置仍需在 Claude Code 中进行。
 
 实时轮询需要两层独立授权：`quota.credential_scan` 允许只读访问已披露的本地凭据存储，然后每个 `<provider>_api` 键允许向该服务商发起网络请求。Tokdash 只读取原生 CLI 认证/配置文件、OpenCode 的 `auth.json` 与全局供应商配置、当前 Claude 设置，以及通过只读 SQLite 连接读取 CC Switch 的 `providers` 表；不会扫描服务商日志、shell 配置或任意 `{file:...}` 引用。MiniMax 可使用 `mmx` 登录或 Token Plan Subscription Key（`MINIMAX_TOKEN_PLAN_GLOBAL_KEY` / `MINIMAX_TOKEN_PLAN_CN_KEY`）；普通按量 API key 不保证能读取 Token Plan。Kimi 需要 Kimi Code 登录或 key（`KIMI_API_KEY`），Moonshot Open Platform 的按量 key 不适用。SuperGrok/Grok Build 需要 `$GROK_HOME/auth.json` 中的 xAI OAuth 登录，普通 xAI API key 无法读取消费者账单额度。Z.ai 可读取 `$ZCODE_HOME/v2/config.json`、受支持工具配置、`ZAI_API_KEY` 或 `Z_AI_API_KEY` 中的 Coding Plan key，并查询 5 小时 / 每周额度及旧版 MCP 限额。Tokdash 从不刷新或写入服务商凭据。`TOKDASH_QUOTA_POLL=0` 是关闭全部额度跟踪的硬终止开关。`tokdash export` 默认排除额度数据；只有当你确实想把它写入 JSON 时才使用 `--include-quota`。
 

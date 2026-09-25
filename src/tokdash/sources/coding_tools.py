@@ -4114,8 +4114,63 @@ def qoder_cli_effective_rate(rate: Optional[float]) -> float:
 # Verified against cli_version 1.1.28 (international, token fields zero-filled)
 # and 1.1.63 (same, plus custom OpenAI-compatible providers).
 _QODER_MODEL_CONFIG_MARKER = "model_config="
-_QODER_MODEL_CONFIG_KEY_RE = re.compile(r'"key"\s*:\s*"([^"]+)"')
-_QODER_MODEL_CONFIG_WINDOW_RE = re.compile(r'"max_input_tokens"\s*:\s*([0-9]+)')
+
+
+# One shared decoder: raw_decode stops at the end of the first JSON value,
+# which is exactly the bound the window scan needs.
+_QODER_RUN_LOG_DECODER = json.JSONDecoder()
+
+
+def _qoder_cli_model_config_payload(text: str) -> Optional[Dict[str, Any]]:
+    """The object that follows model_config=, or None when it cannot be read.
+
+    The rest of the line is NOT the config. A real line reads::
+
+        ... model_config={"key":"qfmodel",...,"max_input_tokens":180000}, custom_model=null
+
+    and the surrounding log line carries prompt text. Searching past the object
+    would let a prompt that QUOTES "max_input_tokens" become the context window,
+    and a fabricated window fabricates every token count divided by it -- the
+    exact failure this source exists to prevent. raw_decode is used rather than
+    a slice or a brace count because it ends where the JSON ends: string-aware,
+    so a display name like "a{b}c" cannot close the object early, and the
+    trailing payload is never scanned at all.
+
+    A payload that is not JSON yields None, and so does a truncated one. That is
+    a deliberate undercount: it surfaces as the named "no window is evidenced"
+    warning, whereas a fabricated window looks like a measurement. Losing
+    evidence is recoverable; a wrong number is not.
+    """
+    start = text.find("{")
+    if start < 0:
+        return None
+    try:
+        payload, _end = _QODER_RUN_LOG_DECODER.raw_decode(text, start)
+    except ValueError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _qoder_cli_model_config_pair(payload: Dict[str, Any]) -> Optional[Tuple[str, int]]:
+    """The (model key, window) a model_config object evidences, else None.
+
+    These two fields and nothing else, in the types the CLI writes them: a
+    non-empty string key and a positive JSON number. A quoted or negative
+    max_input_tokens is not evidence, which also means a stray one reached
+    inside a string cannot become a window. The decoded object is discarded by
+    the caller; only the pair is kept.
+    """
+    key = payload.get("key")
+    window = payload.get("max_input_tokens")
+    if not isinstance(key, str) or not key:
+        return None
+    if isinstance(window, bool) or not isinstance(window, (int, float)):
+        return None
+    if not math.isfinite(window) or int(window) <= 0:
+        return None
+    return key, int(window)
+
+
 # 2026-09-24T17-29-24-649+01-00-a-p1: local time, milliseconds, and the UTC
 # offset the CLI was running under.
 _QODER_RUN_ID_RE = re.compile(
@@ -4137,6 +4192,14 @@ def _qoder_cli_run_epoch(path: Path) -> float:
     string sort: both are the same scale, so a future id format lands in the
     right order instead of an arbitrary one. A stat failure sorts oldest, which
     keeps "latest wins" on the side of the logs that did resolve.
+
+    The two scales are not identical and the mix is known: a decoded id is the
+    run's START, an mtime is its last write. While every id parses -- which is
+    the only state observed in the wild -- the order is exact. Should Qoder ever
+    change the id format, a long run under the old format can outrank a short
+    one under the new, and the window table would resolve to the longer run.
+    That is a transition-only skew across two formats, not a reordering within
+    one, and it is preferred to guessing at a format not yet seen.
     """
     match = _QODER_RUN_ID_RE.match(path.parent.name)
     if match is not None:
@@ -4185,20 +4248,33 @@ def qoder_cli_run_log_files(roots: List[Path]) -> List[Path]:
     return sorted(found, key=lambda path: (_qoder_cli_run_epoch(path), str(path)))
 
 
-@lru_cache(maxsize=256)
-def _qoder_cli_run_log_windows_cached(path_str: str, mtime_ns: int, size: int) -> tuple:
-    """The window pairs ONE run log evidences, as sorted items.
+# path -> (mtime_ns, size, sorted window items), maintained by
+# _qoder_cli_run_log_windows() below. Bounded by the number of run logs on
+# disk because it holds ONE entry per file, not one entry per file version.
+_QODER_RUN_LOG_WINDOW_MEMO: Dict[str, tuple] = {}
+# tokdash serve and tokdash tui can share a process, and the warmers run on
+# their own threads, so the memo is written concurrently. lru_cache brings its
+# own lock and a plain dict does not; the lock covers the lookups and the prune
+# only -- the file read happens outside it, where a racing duplicate parse is
+# merely wasted work rather than a blocked refresh.
+_QODER_RUN_LOG_WINDOW_LOCK = threading.Lock()
 
-    Memoised per file, not per corpus. A run log is megabyte-scale, every
-    collect() needs the map, and Qoder appends to the CURRENT run's log while
-    a session is live: signing the whole corpus would make every dashboard
-    poll a new key and re-read every retained log to reuse all but one entry.
-    Per file, an unchanged log is read once however often the source refreshes,
-    and a touched log is still a different key, so a stale table stays
-    impossible.
 
-    Within the file the last line wins, so the merge below only has to settle
-    the order BETWEEN runs to keep "latest run wins".
+def qoder_cli_run_log_window_memo_clear() -> None:
+    """Drop every memoised run-log window map.
+
+    For tests and for a roots change; leaving it alone only ever costs a
+    re-read, never a stale table, since every hit re-checks mtime and size.
+    """
+    with _QODER_RUN_LOG_WINDOW_LOCK:
+        _QODER_RUN_LOG_WINDOW_MEMO.clear()
+
+
+def _qoder_cli_scan_run_log_windows(path_str: str) -> tuple:
+    """Read one run log's model_config lines into sorted window items.
+
+    Within the file the last line wins, so the merge only has to settle the
+    order BETWEEN runs to keep "latest run wins".
     """
     table: Dict[str, int] = {}
     try:
@@ -4207,17 +4283,44 @@ def _qoder_cli_run_log_windows_cached(path_str: str, mtime_ns: int, size: int) -
                 at = line.find(_QODER_MODEL_CONFIG_MARKER)
                 if at < 0:
                     continue
-                blob = line[at + len(_QODER_MODEL_CONFIG_MARKER):]
-                key = _QODER_MODEL_CONFIG_KEY_RE.search(blob)
-                window = _QODER_MODEL_CONFIG_WINDOW_RE.search(blob)
-                if key is None or window is None:
+                payload = _qoder_cli_model_config_payload(
+                    line[at + len(_QODER_MODEL_CONFIG_MARKER):])
+                if payload is None:
                     continue
-                value = int(window.group(1))
-                if value > 0:
-                    table[key.group(1)] = value
+                pair = _qoder_cli_model_config_pair(payload)
+                if pair is None:
+                    continue
+                table[pair[0]] = pair[1]
     except OSError:
         return ()  # unreadable: contributes nothing, same as a missing log
     return tuple(sorted(table.items()))
+
+
+def _qoder_cli_run_log_windows(path_str: str, mtime_ns: int, size: int) -> tuple:
+    """The window pairs ONE run log evidences, memoised on its own signature.
+
+    A run log is megabyte-scale, every collect() needs the map, and Qoder
+    appends to the CURRENT run's log while a session is live: signing the whole
+    corpus would make every dashboard poll a new key and re-read every retained
+    log to reuse all but one entry.
+
+    Keyed by PATH with the signature checked inside, rather than by an
+    lru_cache over (path, mtime_ns, size). A bounded LRU over signatures is the
+    obvious shape and the wrong one: a live session produces a NEW signature
+    for the same path on every poll, so those generations compete for the same
+    slots and, past the cap, evict the historical logs the merge has not
+    reached yet -- a full re-read of every log per poll, which is the cost this
+    memo exists to remove. One entry per file cannot thrash, cannot grow past
+    the corpus, and still invalidates on any real change.
+    """
+    with _QODER_RUN_LOG_WINDOW_LOCK:
+        memo = _QODER_RUN_LOG_WINDOW_MEMO.get(path_str)
+    if memo is not None and memo[0] == mtime_ns and memo[1] == size:
+        return memo[2]
+    items = _qoder_cli_scan_run_log_windows(path_str)  # outside the lock: file IO
+    with _QODER_RUN_LOG_WINDOW_LOCK:
+        _QODER_RUN_LOG_WINDOW_MEMO[path_str] = (mtime_ns, size, items)
+    return items
 
 
 def _qoder_cli_window_items(file_sig: tuple) -> tuple:
@@ -4225,12 +4328,21 @@ def _qoder_cli_window_items(file_sig: tuple) -> tuple:
 
     file_sig comes from qoder_cli_run_log_signatures(), which is run order,
     oldest first, so a later run's model_config overwrites an earlier one's.
-    Reading the files one at a time and merging is equivalent to the old
-    single pass: same order, same last-write-wins, one fewer full re-read.
+    Reading the files one at a time and merging is equivalent to the old single
+    pass: same order, same last-write-wins, one fewer full re-read.
+
+    Entries for logs Qoder has since pruned are dropped here, which is what
+    keeps the memo the size of the corpus rather than the size of the history.
     """
     merged: Dict[str, int] = {}
+    live = set()
     for path_str, mtime_ns, size in file_sig:
-        merged.update(_qoder_cli_run_log_windows_cached(path_str, mtime_ns, size))
+        live.add(path_str)
+        merged.update(_qoder_cli_run_log_windows(path_str, mtime_ns, size))
+    with _QODER_RUN_LOG_WINDOW_LOCK:
+        if len(_QODER_RUN_LOG_WINDOW_MEMO) > len(live):
+            for stale in [p for p in _QODER_RUN_LOG_WINDOW_MEMO if p not in live]:
+                _QODER_RUN_LOG_WINDOW_MEMO.pop(stale, None)
     return tuple(sorted(merged.items()))
 
 
@@ -4255,8 +4367,9 @@ def qoder_cli_window_table(roots: List[Path]) -> Dict[str, int]:
     source, not a dependency, and losing it must degrade to the pre-existing
     behaviour rather than blank the source.
 
-    Only the two fields are ever read. The rest of the line can contain prompt
-    text, so nothing else is parsed, retained or returned.
+    The object is decoded per line and only those two fields are kept, because
+    the rest of the line can contain prompt text: it is read for the window and
+    discarded, never retained or returned.
     """
     return dict(_qoder_cli_window_items(qoder_cli_run_log_signatures(roots)))
 
@@ -4339,13 +4452,20 @@ def qoder_cli_transcript_candidate(
     # Skip records where nothing is attributable (see class docstring). A
     # credit-bearing one is reported to `unattributed` so the parse can name
     # the model it had to drop instead of losing it in silence. The reason
-    # rides along because the two causes need different advice: a model with
-    # no evidenced window is fixed by QODER_CLI_CONTEXT_WINDOW, a record with
-    # no ratio is fixed by nothing we control, and telling that reader to set
-    # the variable sends them changing a setting that cannot help.
+    # rides along because the two causes need different advice: a model with no
+    # evidenced window is fixed by QODER_CLI_CONTEXT_WINDOW, a record with no
+    # ratio is fixed by nothing we control, and telling that reader to set the
+    # variable sends them changing a setting that cannot help.
     if in_t == 0 and out_t == 0 and cache_r == 0 and cache_w == 0 and not ratio_usable:
         if has_credits and credits > 0 and unattributed is not None:
-            unattributed.add((model, "window" if win is None else "ratio"))
+            # The RATIO decides, not the window. Without a numeric ratio there
+            # is nothing to multiply, so an override rescues the record even
+            # when no window is evidenced either -- and a record missing both
+            # filed under "window" would send the reader to that variable, see
+            # the record still missing, and conclude the setting is broken.
+            # "window" therefore means "settable", nothing else.
+            has_ratio = QoderCliParser._is_number(ratio)
+            unattributed.add((model, "window" if has_ratio else "ratio"))
         return None
     return str(rid), {
         "has_credits": has_credits,
@@ -4471,18 +4591,22 @@ def qoder_cli_file_candidates(
         if not isinstance(d, dict):
             continue
         if not is_segment and d.get("type") == "runtime-config":
-            # Key PRESENCE is the declaration. An absent key means this record
-            # says nothing about the window (an older emitter, or a mid-session
-            # model switch that only carries the model), so the previous value
-            # stands; only an explicit JSON null says "no window is set", which
-            # hands the model back to the run-log table.
+            # Three states, and only the middle one is a declaration. ABSENT
+            # means this record says nothing about the window (an older emitter,
+            # or a mid-session model switch carrying only the model), so the
+            # value already standing stays; JSON null is the CLI saying "no
+            # window is set", which hands the model back to the run-log table;
+            # and a value that is neither -- contextWindow: "131072", or 0, or a
+            # list -- is a value we cannot read, not a claim that no window
+            # applies. Clearing on it loses a declared --context-window for the
+            # rest of the file, which is the same failure the absent case above
+            # was fixed for, arrived at from the other direction.
             if "contextWindow" in d:
                 declared = d["contextWindow"]
-                session_window = (
-                    int(declared)
-                    if QoderCliParser._is_number(declared) and int(declared) > 0
-                    else None
-                )
+                if declared is None:
+                    session_window = None
+                elif QoderCliParser._is_number(declared) and int(declared) > 0:
+                    session_window = int(declared)
             continue
         cand = (
             qoder_cli_segment_candidate(d)

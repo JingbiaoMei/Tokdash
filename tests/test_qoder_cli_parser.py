@@ -912,12 +912,31 @@ def test_unreadable_run_id_falls_back_to_mtime(monkeypatch, tmp_path):
     ]
 
 
+def _counting_scans(monkeypatch, ct):
+    """Wrap the run-log reader so tests count ACTUAL re-reads, not cache hits.
+
+    The reader is looked up through the module on every call, which is what
+    makes this patch visible to the memo -- and the memo is cleared first so
+    each test starts from a cold, own-corpus state.
+    """
+    scans: list = []
+    real = ct._qoder_cli_scan_run_log_windows
+
+    def counting(path_str):
+        scans.append(Path(path_str).parent.name)
+        return real(path_str)
+
+    monkeypatch.setattr(ct, "_qoder_cli_scan_run_log_windows", counting)
+    ct.qoder_cli_run_log_window_memo_clear()
+    return scans
+
+
 def test_unchanged_run_logs_are_not_re_read(monkeypatch, tmp_path):
     """A live session grows ONE log; the others must not be re-scanned.
 
-    The old table was memoised on the whole file set, so every refresh while
+    The table used to be memoised on the whole file set, so every refresh while
     Qoder was running re-read every retained log. Per-file memoisation is the
-    fix, and cache_info() is the direct evidence of it.
+    fix, and the scan counter is the direct evidence of it.
     """
     import os
     from tokdash.sources import coding_tools as ct
@@ -927,16 +946,15 @@ def test_unchanged_run_logs_are_not_re_read(monkeypatch, tmp_path):
                     _cfg_line("qfmodel", 180000) + "\n")
     _run_log(root, "2026-09-25T15-05-54-438+01-00-b-p2",
              _cfg_line("lite", 200000) + "\n")
-    ct._qoder_cli_run_log_windows_cached.cache_clear()
+    scans = _counting_scans(monkeypatch, ct)
 
     assert ct.qoder_cli_window_table([root]) == {"qfmodel": 180000, "lite": 200000}
-    cold = ct._qoder_cli_run_log_windows_cached.cache_info()
-    assert (cold.misses, cold.hits) == (2, 0)
+    assert sorted(scans) == ["2026-09-24T17-29-24-649+01-00-a-p1",
+                             "2026-09-25T15-05-54-438+01-00-b-p2"]
 
+    scans.clear()
     assert ct.qoder_cli_window_table([root]) == {"qfmodel": 180000, "lite": 200000}
-    warm = ct._qoder_cli_run_log_windows_cached.cache_info()
-    assert warm.misses == 2, "an unchanged log must not be re-read"
-    assert warm.hits == cold.hits + 2
+    assert scans == [], "an unchanged log must not be re-read"
 
     with live.open("a", encoding="utf-8") as handle:
         handle.write(_cfg_line("qmodel_38max", 180000) + "\n")
@@ -945,8 +963,117 @@ def test_unchanged_run_logs_are_not_re_read(monkeypatch, tmp_path):
     assert ct.qoder_cli_window_table([root]) == {
         "qfmodel": 180000, "lite": 200000, "qmodel_38max": 180000,
     }
-    grew = ct._qoder_cli_run_log_windows_cached.cache_info()
-    assert grew.misses == 3, "only the log that changed is re-read"
+    assert scans == ["2026-09-24T17-29-24-649+01-00-a-p1"], "only the log that changed"
+
+
+def test_a_large_log_corpus_does_not_thrash_the_memo(monkeypatch, tmp_path):
+    """Past any cap, a live log must still cost ONE re-read per refresh.
+
+    The memo was an lru_cache(maxsize=256) over (path, mtime_ns, size), and a
+    growing log produces a new signature for the SAME path on every poll. With
+    more retained logs than the cap, those generations evicted the logs the
+    merge had not reached yet, so one touch of one log re-read all 300 -- the
+    per-poll full re-scan this memo exists to remove, resurrected by corpus
+    size. 300 is above the old cap; the promise is about ANY count.
+    """
+    import os
+    from tokdash.sources import coding_tools as ct
+
+    root = tmp_path / "big"
+    for i in range(300):
+        _run_log(root, "2026-01-%02dT10-00-00-000+00-00-p%03d" % (i % 28 + 1, i),
+                 _cfg_line("model_%03d" % i, 180000) + "\n")
+    scans = _counting_scans(monkeypatch, ct)
+
+    table = ct.qoder_cli_window_table([root])
+    assert len(table) == 300
+    assert len(scans) == 300, "cold read is one per file"
+
+    live = sorted((root / "logs" / "runs").glob("*/qodercli.log"))[-1]
+    for i in range(5):
+        with live.open("a", encoding="utf-8") as handle:
+            handle.write(_cfg_line("qfmodel", 180000) + "\n")
+        st = live.stat()
+        os.utime(live, ns=(st.st_atime_ns, st.st_mtime_ns + 10_000_000 * (i + 1)))
+        scans.clear()
+        table = ct.qoder_cli_window_table([root])
+        assert table["qfmodel"] == 180000
+        assert len(scans) == 1, "one changed log must cost one re-read, not 300"
+
+
+def test_pruned_run_logs_leave_the_memo(monkeypatch, tmp_path):
+    """Qoder prunes run logs; the memo cannot outgrow the corpus it mirrors."""
+    from tokdash.sources import coding_tools as ct
+
+    root = tmp_path / "root"
+    kept = _run_log(root, "2026-09-24T17-29-24-649+01-00-a-p1",
+                    _cfg_line("qfmodel", 180000) + "\n")
+    pruned = _run_log(root, "2026-09-25T15-05-54-438+01-00-b-p2",
+                      _cfg_line("lite", 200000) + "\n")
+    _counting_scans(monkeypatch, ct)
+    assert len(ct.qoder_cli_window_table([root])) == 2
+    assert len(ct._QODER_RUN_LOG_WINDOW_MEMO) == 2
+
+    pruned.unlink()
+    pruned.parent.rmdir()
+    assert ct.qoder_cli_window_table([root]) == {"qfmodel": 180000}
+    assert list(ct._QODER_RUN_LOG_WINDOW_MEMO) == [str(kept)]
+
+
+def test_prompt_text_cannot_become_a_context_window(monkeypatch, tmp_path):
+    """The scan stops at the config object, never at end of line.
+
+    A real line ends `...}, custom_model=null` and the surrounding log line
+    carries prompt text, so a search past the object could read a prompt that
+    quotes "max_input_tokens" as the window -- and every token count divided by
+    that window would look like a measurement.
+    """
+    from tokdash.sources.coding_tools import qoder_cli_window_table
+
+    root = tmp_path / "root"
+    _run_log(root, "2026-09-24T17-29-24-649+01-00-a-p1",
+             # no max_input_tokens in the config; the payload quotes one
+             '2026-09-24T17:31:58.738+01:00 INFO debug.message [QoderInferRequest '
+             'details] model_config={"key":"qfmodel","display_name":"Qwen3.8-Flash"}, '
+             'prompt="the docs say \"max_input_tokens\": 999999 here", custom_model=null\n'
+             # a brace inside a string must not end the object early
+             + _cfg_line("lite", 200000, display="a{b}c") + ", custom_model=null\n"
+             # truncated payload: no close, so no evidence, so nothing
+             + 'model_config={"key":"truncated","max_input_tokens":12345\n')
+    assert qoder_cli_window_table([root]) == {"lite": 200000}
+
+
+def test_unreadable_context_window_value_keeps_the_declaration(monkeypatch, tmp_path):
+    """contextWindow: "131072" is an unreadable value, not a claim of "unset".
+
+    A present-but-unparseable value used to read as an explicit null and clear
+    the --context-window declared earlier in the file, dropping the recovered
+    input to the run-log window or to nothing. That is the same lost
+    declaration the absent-key case was fixed for.
+    """
+    root = tmp_path / "root"
+    typed = {"type": "runtime-config", "sessionId": "s1", "model": "qfmodel",
+             "contextWindow": "131072", "timestamp": "2026-09-25T14:10:00.500Z"}
+    _write_lines(root / "projects" / "p" / "aaaaaaaa-bbbb.jsonl", [
+        _rc_line(131072, model="qfmodel"),
+        _t_line("A", "2026-09-25T14:10:01.000Z", model="qfmodel",
+                credits=1.0, ratio=_REAL_RATIO_AT_131072),
+        typed,
+        _t_line("B", "2026-09-25T14:10:02.000Z", model="qfmodel",
+                credits=1.0, ratio=_REAL_RATIO_AT_131072),
+        # a real null still means "no window is set", straight to the table
+        _rc_line(None, model="qfmodel"),
+        _t_line("C", "2026-09-25T14:10:03.000Z", model="qfmodel",
+                credits=1.0, ratio=0.11495555555555556),
+    ])
+    _run_log(root, "2026-09-25T15-05-54-438+01-00-b-p2", _cfg_line("qfmodel", 180000) + "\n")
+    entries = {e["entry_id"]: e["input"] for e in
+               _parser(monkeypatch, tmp_path, [root]).collect(None, None)}
+    assert entries == {
+        "qoder-cli:A": _REAL_IN,      # declared 131072
+        "qoder-cli:B": _REAL_IN,      # the typed value did not clear it
+        "qoder-cli:C": 20692,         # the null did: table window 180000
+    }
 
 
 def test_absent_context_window_key_keeps_the_declared_window(monkeypatch, tmp_path):
@@ -984,9 +1111,13 @@ def test_no_ratio_record_is_not_advised_the_window_override(monkeypatch, tmp_pat
         _t_line("A", "2026-09-24T16:32:31.195Z", model="qfmodel", credits=1.0),
         _t_line("B", "2026-09-24T16:32:32.195Z", model="unheard-of-model",
                 credits=1.0, ratio=0.05),
+        _t_line("C", "2026-09-24T16:32:33.195Z", model="missing-both-model",
+                credits=1.0),
     ])
     # qfmodel HAS an evidenced window, so its drop is the no-ratio kind; the
-    # other model has a ratio and no window, so it stays the settable kind.
+    # second model has a ratio and no window, so it stays the settable kind; the
+    # third is missing BOTH and must file under the ratio kind, because an
+    # override supplies a multiplier to a record that has nothing to multiply.
     _run_log(root, "2026-09-24T17-29-24-649+01-00-a-p1", _cfg_line("qfmodel", 180000) + "\n")
     caplog.clear()
     with caplog.at_level(logging.WARNING, logger="tokdash.sources.coding_tools"):
@@ -996,6 +1127,15 @@ def test_no_ratio_record_is_not_advised_the_window_override(monkeypatch, tmp_pat
     assert "qfmodel" in text and "context_usage_ratio" in text
     # exactly one line offers the env var: the two causes split, they merge
     assert text.count("Pass QODER_CLI_CONTEXT_WINDOW=<size> to recover them.") == 1
+    # and the compound drop is NOT in it -- setting the variable would change
+    # the reason and not the outcome, which reads as a broken setting
+    assert "missing-both-model" in text
+    window_line = [r.getMessage() for r in caplog.records
+                   if "QODER_CLI_CONTEXT_WINDOW=<size>" in r.getMessage()][0]
+    assert "missing-both-model" not in window_line
+    ratio_line = [r.getMessage() for r in caplog.records
+                  if "context_usage_ratio" in r.getMessage()][0]
+    assert "missing-both-model" in ratio_line and "qfmodel" in ratio_line
 
 
 def test_invalid_window_warning_does_not_claim_auto_only_recovery(monkeypatch, tmp_path, caplog):

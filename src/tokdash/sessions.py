@@ -337,38 +337,58 @@ def _legacy_pricing_signature_matches_content(legacy: Any, content: Any) -> bool
     return False
 
 
-# ``sources/coding_tools.py`` as shipped by every release whose copy of the
-# Codex event key and the Kimi wire-model map was byte-identical to the one
-# shipping now: v1.7.0 through v2.6.4, distinct by file content. Derived from
-# the tags themselves (each object normalised through ``ast`` before hashing, so
-# comment and blank-line churn counts as unchanged) rather than transcribed.
+# The per-object signature each released copy of ``sources/coding_tools.py``
+# implied for the two dependencies that used to be identified by that file's
+# hash. Each value is what ``code_object_signature()`` returns for the object --
+# its type name, its qualified name and its own source -- measured by importing
+# each release tag's own tree and calling the shipped helper the same way this
+# build does, not reconstructed from a checkout. Reconstruction has to match the
+# helper byte for byte to mean anything, and it does not obviously: the Kimi
+# unit is three objects under one label, and its type name is ``ABCMeta``.
 #
-# Frozen history -- this set never grows. It exists for the one release that
+# Both objects have hashed the same in every release since v1.7.0, which is what
+# makes the stored rows safe to resign. It is also an empirical claim about
+# twenty-six releases, so it is recorded per release rather than asserted once:
+# the migration consults the value the stored hash implies, and today's object
+# has to equal it.
+#
+# Frozen history -- this map never grows. It exists for the one release that
 # stopped hashing the shared module, and it is the only way a stored row can
 # prove which code wrote its keys: the row records a hash of the whole file, and
-# a file hash says nothing about the two objects in it unless the release is
+# a file hash says nothing about the objects inside it unless the release is
 # known. Rows older than v1.7.0 reparse here, exactly as they reparsed on every
-# upgrade before it.
-_LEGACY_CODING_TOOLS_HASHES = frozenset(
-    {
-        "651b65d3de65af2374a2301f6fbaf398b5cc3f4a",
-        "6c509a46926b9f0093995719c0f860b7ab658088",
-        "3256c95bd00ed9ac698d5765d4f4bf33d63c48e0",
-        "002ecdc03694a6a10a9c13ad351429a8f77df52e",
-        "9f71d43fbcab25993afc7e8f6fc1f2ce205cc211",
-        "03e6c2dd1c922fcd3e091c20ce48cf38c48aaca5",
-        "9c782b04c0131577b8baec50751ee64330c5df44",
-        "21401c88115461c281ba47a273775104ad617a89",
-        "6778fdd29995507871301be038714789920a2436",
-        "608fb79216bff6cc69a5c5bff268053ce7c2e2aa",
-        "bfc4281fc5b16277b5d1b2ac8bb93a49994b9f5c",
-        "403c681787fd2339d40f1b96545632da9ed304d8",
-        "0a4479352881ed97dbc88c66c04e40b0799662fa",
-        "f259f13097660a1d37361f501a817058a1c5b7da",
-        "5c37e86ae75367d6f6e6b1b3dade2182f0b4f459",
-        "a623b0ca956c1d7787483cd7dcaaddcf5b6da2c5",
+# upgrade before it. Tags that shipped an identical file share a hash, so
+# sixteen entries cover the twenty-six releases v1.7.0 through v2.6.4.
+_CODEX_EVENT_KEY_SHA1 = "8e8083ecfe5b1c19db480dd01184c6a1e80f183b"
+_KIMI_MODEL_MAP_SHA1 = "8fdf447ea4c9bccdd87f46e9d0e1be5ac043313a"
+
+_LEGACY_CODING_TOOLS_OBJECTS: Dict[str, Dict[str, str]] = {
+    module_hash: {
+        "event_key": _CODEX_EVENT_KEY_SHA1,
+        "model_map": _KIMI_MODEL_MAP_SHA1,
     }
-)
+    for module_hash in (
+        "651b65d3de65af2374a2301f6fbaf398b5cc3f4a",  # v1.7.0
+        "6c509a46926b9f0093995719c0f860b7ab658088",  # v1.8.0
+        "3256c95bd00ed9ac698d5765d4f4bf33d63c48e0",  # v1.8.1
+        "002ecdc03694a6a10a9c13ad351429a8f77df52e",  # v1.9.0
+        "9f71d43fbcab25993afc7e8f6fc1f2ce205cc211",  # v2.0.0
+        "03e6c2dd1c922fcd3e091c20ce48cf38c48aaca5",  # v2.1.0
+        "9c782b04c0131577b8baec50751ee64330c5df44",  # v2.2.0
+        "21401c88115461c281ba47a273775104ad617a89",  # v2.3.0-v2.4.2
+        "6778fdd29995507871301be038714789920a2436",  # v2.4.3
+        "608fb79216bff6cc69a5c5bff268053ce7c2e2aa",  # v2.5.0
+        "bfc4281fc5b16277b5d1b2ac8bb93a49994b9f5c",  # v2.5.1-v2.5.2
+        "403c681787fd2339d40f1b96545632da9ed304d8",  # v2.5.3-v2.5.4
+        "0a4479352881ed97dbc88c66c04e40b0799662fa",  # v2.5.5
+        "f259f13097660a1d37361f501a817058a1c5b7da",  # v2.5.6-v2.5.7
+        "5c37e86ae75367d6f6e6b1b3dade2182f0b4f459",  # v2.6.0
+        "a623b0ca956c1d7787483cd7dcaaddcf5b6da2c5",  # v2.6.1-v2.6.4
+    )
+}
+
+# Derived, never retyped: the accepted set IS the map's key set.
+_LEGACY_CODING_TOOLS_HASHES = frozenset(_LEGACY_CODING_TOOLS_OBJECTS)
 
 # tool -> (component, the object label parser_code_signature() recorded for it).
 # Both used to resolve to a hash of the module that holds them.
@@ -386,16 +406,19 @@ def _retire_module_hashed_dependency(
     Rows written before this release recorded the Codex event key and the Kimi
     wire-model map as a hash of the WHOLE ``sources/coding_tools.py``, because
     that is what ``parser_code_signature()`` returns for anything living in a
-    shared module. Those rows are current -- the two objects have matched
-    today's byte for byte since v1.7.0 -- so they move onto the new identity by
-    UPDATE instead of a reparse. For a median Codex history that is the whole
-    difference between a quiet upgrade and half a minute of CPU on the first
-    request after it.
+    shared module. Where the release behind that hash shipped an object identical
+    to today's, the row moves onto the new identity by UPDATE instead of a
+    reparse. For a median Codex history that is the whole difference between a
+    quiet upgrade and half a minute of CPU on the first request after it.
 
-    Conservative by construction: the rewrite needs the stored component to be
-    exactly the shape ``parser_code_signature()`` produced, to name the object it
-    named, and to carry one of the released module hashes above. Anything else
-    falls through untouched and reparses.
+    Conservative by construction, in both directions. The rewrite needs the
+    stored component to be exactly the shape ``parser_code_signature()``
+    produced, to name the object it named, to carry one of the released module
+    hashes above, and -- the part that actually binds -- today's object has to
+    equal the hash that release implies. Both objects do today, which is the
+    whole reason the rows can move at all. A semantic change to either one
+    declines here and reparses, so a row can never be stamped with an identity
+    that did not write it, and the corpus keeps its ability to correct itself.
 
     Codex sheds ``activity`` too, whose value was a hash of
     ``activity_insights.py``. That module aggregates the stored rows at read time
@@ -422,11 +445,22 @@ def _retire_module_hashed_dependency(
         return old_signature
     if stored.get("object") != label:
         return old_signature
-    if str(stored.get("content_sha1")) not in _LEGACY_CODING_TOOLS_HASHES:
+    released = _LEGACY_CODING_TOOLS_OBJECTS.get(str(stored.get("content_sha1")))
+    if released is None:
+        return old_signature
+    # The stored file hash only vouches for that release's copy of the object, so
+    # today's signature has to equal the one that release actually implied.
+    # Without this check a row would resign onto whatever the object became in a
+    # later release, which stamps the corpus with an identity that never wrote it
+    # and leaves no way for the corpus to ever correct itself.
+    current = new_identity.get(component)
+    if not isinstance(current, dict):
+        return old_signature
+    if current.get("content_sha1") != released[component]:
         return old_signature
 
     updated: Dict[str, Any] = dict(old_identity)
-    updated[component] = new_identity.get(component)
+    updated[component] = current
     if "activity" in updated and "activity" not in new_identity:
         updated.pop("activity")
     old["parser"] = updated

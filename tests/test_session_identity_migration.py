@@ -98,6 +98,80 @@ def test_the_frozen_module_hashes_are_frozen_history():
     assert module_hash not in accepted
 
 
+def test_the_accepted_set_cannot_drift_from_the_pinned_objects():
+    """One list of releases, not two that someone has to keep in step."""
+    assert set(sessions._LEGACY_CODING_TOOLS_OBJECTS) == set(
+        sessions._LEGACY_CODING_TOOLS_HASHES
+    )
+    assert all(
+        set(components) == {"event_key", "model_map"} and all(
+            len(value) == 40 for value in components.values()
+        )
+        for components in sessions._LEGACY_CODING_TOOLS_OBJECTS.values()
+    )
+
+
+def test_the_pin_holds_today_side_of_the_migration():
+    """The migration asserts a fact about twenty-six releases, so check it.
+
+    A stored module hash vouches for what the object was when that release
+    shipped. That only excuses today's object if today's object is the same one,
+    so the pinned value and the live signature have to be the same number. If
+    this fails, the release is not a no-op upgrade: it is a reparse, and the
+    accepted set is lying about the rows it lets keep their data.
+    """
+    live = {
+        "event_key": _current_identity("codex")["event_key"]["content_sha1"],
+        "model_map": _current_identity("kimi")["model_map"]["content_sha1"],
+    }
+
+    assert live == {
+        "event_key": sessions._CODEX_EVENT_KEY_SHA1,
+        "model_map": sessions._KIMI_MODEL_MAP_SHA1,
+    }
+    assert all(components == live for components in
+               sessions._LEGACY_CODING_TOOLS_OBJECTS.values())
+
+
+@pytest.mark.parametrize(
+    "tool, predicate",
+    [
+        ("codex", sessions._codex_session_signature_compatible),
+        ("kimi", sessions._kimi_session_signature_compatible),
+    ],
+)
+def test_editing_the_object_stops_old_rows_resigning(tool, predicate, tmp_path):
+    """The gate that makes the migration honest, not just fast.
+
+    A recognised legacy module hash says what the object used to be. If this
+    build's object has since changed, resigning would stamp every old row with
+    an identity that never produced it, and nothing could ever detect that the
+    corpus was written by two different derivations. So the row declines the
+    rewrite and reparses -- which is the slow answer, and the correct one.
+
+    Without this gate the first release to touch either object silently freezes
+    a wrong corpus in place: the rows look current, and they are not.
+    """
+    path = str(tmp_path / (tool + "-rollout.jsonl"))
+    component = sessions._LEGACY_MODULE_HASH_COMPONENTS[tool][0]
+
+    stored = _session_file_signature(_module_hashed_identity(tool), path)
+    changed = dict(_current_identity(tool))
+    changed[component] = {
+        # This build's own label, which for Kimi names the three-object map
+        # rather than the class the old build named. The bytes changed too,
+        # and that is what the gate is for.
+        "object": changed[component]["object"],
+        "content_sha1": "9" * 40,
+    }
+
+    assert predicate(stored, _session_file_signature(changed, path)) is False
+
+    # And the same stored row does move while the object is still the one the
+    # release shipped, so the decline is about the change and not about shape.
+    assert predicate(stored, _session_file_signature(_current_identity(tool), path)) is True
+
+
 @pytest.mark.parametrize(
     "tool, predicate",
     [

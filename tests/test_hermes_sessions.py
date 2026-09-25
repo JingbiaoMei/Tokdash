@@ -19,7 +19,6 @@ from tokdash.pricing import PricingDatabase
 from tokdash.sessions import (
     SESSION_TOOLS,
     _hermes_sessions,
-    get_hermes_analytics,
     get_session_detail,
     get_sessions_data,
     reload_pricing_db,
@@ -47,6 +46,12 @@ CREATE TABLE messages (
     session_id TEXT,
     role TEXT,
     content TEXT,
+    tool_name TEXT,
+    tool_call_id TEXT,
+    tool_calls TEXT,
+    reasoning TEXT,
+    token_count INTEGER,
+    finish_reason TEXT,
     timestamp REAL
 );
 """
@@ -436,6 +441,12 @@ def test_hermes_session_model_usage_parity_and_today(monkeypatch, tmp_path):
             session_id TEXT,
             role TEXT,
             content TEXT,
+            tool_name TEXT,
+            tool_call_id TEXT,
+            tool_calls TEXT,
+            reasoning TEXT,
+            token_count INTEGER,
+            finish_reason TEXT,
             timestamp REAL
         );
         CREATE TABLE session_model_usage (
@@ -539,10 +550,40 @@ def test_hermes_session_model_usage_parity_and_today(monkeypatch, tmp_path):
     assert s["tool_call_count"] == 15
     assert s["message_count"] == 42
 
-    # Verify get_hermes_analytics() aggregates multi-model session_model_usage tokens accurately
-    analytics = get_hermes_analytics()
-    assert len(analytics["recent_sessions"]) >= 1
-    rec = next(r for r in analytics["recent_sessions"] if r["session_id"] == "sess-multi")
-    assert rec["tokens"] == 256600
-    assert rec["tool_call_count"] == 15
+
+def test_session_detail_exposes_no_transcripts(monkeypatch, tmp_path):
+    """Privacy regression: /api/session detail must carry per-message metadata
+    (roles, sizes, token counts, timestamps) but never transcript text,
+    reasoning text, tool arguments, or tool outputs."""
+    home = _home(tmp_path)
+    _write_db(
+        home,
+        [
+            _row("h-priv", "deepseek-chat", "deepseek", 1779395293.0,
+                 100, 10, 5, 1, title="Privacy session"),
+        ],
+        messages=[
+            (1, "h-priv", "user", "SECRET user prompt text", 1779395294.0),
+            (2, "h-priv", "assistant", "SECRET assistant reply text", 1779395295.0),
+        ],
+    )
+    _patch_env(monkeypatch, home)
+
+    detail = get_session_detail("hermes", "h-priv")
+
+    for msg in detail.get("messages", []):
+        assert "content" not in msg, "message transcript text leaked"
+        assert "reasoning" not in msg, "reasoning text leaked"
+        assert "tool_calls" not in msg, "raw tool call payloads leaked"
+    for tc in detail.get("tool_executions", []) + detail.get("tool_calls", []):
+        assert "arguments" not in tc, "tool arguments leaked"
+        assert "args" not in tc, "tool arguments leaked"
+        assert "result" not in tc, "tool results leaked"
+        assert "output" not in tc, "tool outputs leaked"
+
+    # The metadata the View Chat timeline needs is still present.
+    assert detail["messages"], "expected at least one message row"
+    assert detail["messages"][0]["role"] == "user"
+    assert detail["messages"][0]["content_chars"] == len("SECRET user prompt text")
+    assert detail["metadata"]["message_count"] >= 1
 

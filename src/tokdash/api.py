@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import ipaddress
 import json
@@ -22,7 +21,7 @@ from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -51,7 +50,6 @@ from .sessions import (
     get_codex_activity_insights,
     get_codex_session_detail,
     get_codex_sessions_data,
-    get_hermes_analytics,
     get_session_detail,
     get_sessions_data,
     reload_pricing_db,
@@ -2255,14 +2253,6 @@ def get_session(tool: str, session_id: str) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/hermes/analytics")
-def hermes_analytics_endpoint() -> Dict[str, Any]:
-    try:
-        return get_hermes_analytics()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 @app.get("/api/export/csv")
 def export_csv_endpoint(period: str = "today", tool: str = "all", date_from: Optional[str] = None, date_to: Optional[str] = None) -> Response:
     import csv, io
@@ -2345,24 +2335,6 @@ def export_markdown_endpoint(period: str = "today", tool: str = "all", date_from
     )
 
 
-@app.get("/api/stream")
-async def sse_stream_endpoint(request: Request):
-    async def event_generator():
-        yield "event: ping\ndata: {\"status\": \"connected\"}\n\n"
-        while True:
-            if await request.is_disconnected():
-                break
-            await asyncio.sleep(15)
-            yield "event: ping\ndata: {\"status\": \"alive\"}\n\n"
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        }
-    )
 
 
 

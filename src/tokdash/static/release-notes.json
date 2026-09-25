@@ -1,6 +1,33 @@
 {
-  "current": "2.6.3",
+  "current": "2.6.4",
   "releases": [
+    {
+      "version": "2.6.4",
+      "date": "2026-09-25",
+      "sections": [
+        {
+          "type": "added",
+          "items": [
+            "The changelog localizes: in the Chinese dashboard locale, What's New now overlays Simplified Chinese on the English record, and the footer links the generated Chinese changelog page. Locales without a translation, and untranslated releases, fall back to the English record.",
+            "tokdash tui opens an interactive terminal dashboard with Overview, Report and Quota tabs over the same compute and caches as the web dashboard. No server needed.",
+            "tokdash report prints a one-shot activity report for a single window; --json, --pretty and --output follow the tokdash export conventions."
+          ]
+        },
+        {
+          "type": "changed",
+          "items": [
+            "A bare tokdash with no verb prints the command help and exits instead of starting tokdash serve and opening a browser."
+          ]
+        },
+        {
+          "type": "fixed",
+          "items": [
+            "Claude Code quota no longer reads a usage percent of 1 as 100% used: the live API's 0-100 integer percents stay on that scale.",
+            "Antigravity quota now finds its sign-in on macOS when the agy CLI keeps the OAuth token in the login Keychain instead of a file, and failure snapshots redact unrecognized token metadata."
+          ]
+        }
+      ]
+    },
     {
       "version": "2.6.3",
       "date": "2026-09-23",

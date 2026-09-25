@@ -7,6 +7,25 @@
   [CHANGELOG.md](https://github.com/JingbiaoMei/Tokdash/blob/main/docs/development/CHANGELOG.md)，本页面在每节末尾附上对应的 PR。
 - 未收录的版本表示尚未翻译，应用内同样回落英文。
 
+## 2.6.4 - 2026-09-25
+
+### 新增
+
+- 更新日志支持本地化：中文语言的仪表盘下，What's New 会在英文条目上叠加简体中文，页脚链接指向生成的中文更新日志页面；未翻译的语言与版本回落英文。
+- tokdash tui 打开交互式终端仪表盘，包含 Overview、Report 与 Quota 标签页，与网页仪表盘共用同一套计算与缓存，无需启动服务器。
+- tokdash report 一次性打印单个时间窗口的活动报告；--json、--pretty 与 --output 遵循 tokdash export 的约定。
+
+### 调整
+
+- 不带子命令直接运行 tokdash 现在只打印命令帮助并退出，不再静默启动 tokdash serve 并打开浏览器。
+
+### 修复
+
+- Claude Code 配额不再把用量百分比 1 误读为 100% 已用：线上 API 的 0-100 整数值保持该量程。
+- 当 agy CLI 把 OAuth token 存到 macOS 登录钥匙串而非文件时，Antigravity 配额现在能找到登录状态；失败快照会对无法识别的 token 元数据脱敏。
+
+相关 PR：#111、#115、#113、#114
+
 ## 2.6.3 - 2026-09-23
 
 ### 新增

@@ -3,6 +3,20 @@
   "source": "release-notes.json",
   "comment": "简体中文更新日志。项与 release-notes.json 按下标一一对齐；未翻译的版本回落英文。",
   "releases": {
+    "2.6.4": {
+      "added": [
+        "更新日志支持本地化：中文语言的仪表盘下，What's New 会在英文条目上叠加简体中文，页脚链接指向生成的中文更新日志页面；未翻译的语言与版本回落英文。",
+        "tokdash tui 打开交互式终端仪表盘，包含 Overview、Report 与 Quota 标签页，与网页仪表盘共用同一套计算与缓存，无需启动服务器。",
+        "tokdash report 一次性打印单个时间窗口的活动报告；--json、--pretty 与 --output 遵循 tokdash export 的约定。"
+      ],
+      "changed": [
+        "不带子命令直接运行 tokdash 现在只打印命令帮助并退出，不再静默启动 tokdash serve 并打开浏览器。"
+      ],
+      "fixed": [
+        "Claude Code 配额不再把用量百分比 1 误读为 100% 已用：线上 API 的 0-100 整数值保持该量程。",
+        "当 agy CLI 把 OAuth token 存到 macOS 登录钥匙串而非文件时，Antigravity 配额现在能找到登录状态；失败快照会对无法识别的 token 元数据脱敏。"
+      ]
+    },
     "2.6.3": {
       "added": [
         "Claude Code 的额度重置现在显示在 Quota 页，与 Codex 卡片所用的 Reset Credits 区块同处一处。每次重置列在持有它的安装下并标注到期时间，而 Tokdash 只读取不消耗：使用额度仍然要在 Claude Code 里完成。"

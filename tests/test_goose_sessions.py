@@ -45,7 +45,7 @@ MINUTE = 60_000
 def _reset_goose_reads():
     # One corpus per signature per honoured window, held in the module: leaving
     # it between tests would let one test answer for another.
-    sessions._goose_sessions_cache.clear()
+    sessions._clear_goose_windows()
     sessions._goose_sessions_cache_sig = ()
     sessions._goose_corpus_cache = None
     sessions._goose_corpus_cache_sig = ()
@@ -290,7 +290,7 @@ def test_a_child_of_another_session_stays_out(monkeypatch, tmp_path):
         conn.commit()
     finally:
         conn.close()
-    sessions._goose_sessions_cache.clear()
+    sessions._clear_goose_windows()
     sessions._goose_sessions_cache_sig = ()
     assert {row["session_id"] for row in _listing()["sessions"]} == {"p1"}
     # Billed either way: the subagent's tokens were spent, so Overview keeps them.
@@ -374,7 +374,7 @@ def test_a_database_change_costs_one_more_read_once_the_window_closes(
     stat = db.stat()
     os.utime(db, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
 
-    sessions._goose_sessions_cache.clear()
+    sessions._clear_goose_windows()
     sessions._goose_sessions_cache_sig = ()
     assert len(_goose_sessions()) == 1
     assert len(calls) == 2
@@ -404,7 +404,7 @@ def test_an_unreadable_schema_is_not_re_copied_for_every_request(tmp_path, monke
     # read probes for real instead of trusting the memo.
     db.unlink()
     _make_db(db, sessions=[_session("s2")], ledger=[_ledger(9, "s2", 0)])
-    sessions._goose_sessions_cache.clear()
+    sessions._clear_goose_windows()
     sessions._goose_sessions_cache_sig = ()
     assert {row["session_id"] for row in _listing()["sessions"]} == {"s2"}
 
@@ -478,7 +478,7 @@ def test_a_carried_forward_row_is_not_a_turn(monkeypatch, tmp_path):
     )
     conn.commit()
     conn.close()
-    sessions._goose_sessions_cache.clear()
+    sessions._clear_goose_windows()
     sessions._goose_sessions_cache_sig = ()
 
     raw = _goose_sessions()
@@ -496,7 +496,7 @@ def test_an_estimated_row_is_an_ordinary_turn(monkeypatch, tmp_path):
     conn.execute("UPDATE usage_ledger SET cost_source = 'estimated' WHERE id = 2")
     conn.commit()
     conn.close()
-    sessions._goose_sessions_cache.clear()
+    sessions._clear_goose_windows()
     sessions._goose_sessions_cache_sig = ()
 
     raw = _goose_sessions()
@@ -627,7 +627,7 @@ def test_a_compaction_row_never_borrows_a_measured_duration(monkeypatch, tmp_pat
     conn.execute("UPDATE usage_ledger SET is_compaction = 1 WHERE id = 1")
     conn.commit()
     conn.close()
-    sessions._goose_sessions_cache.clear()
+    sessions._clear_goose_windows()
     sessions._goose_sessions_cache_sig = ()
 
     turns = [t for s in _goose_sessions().values() for t in s["turns"]]
@@ -748,7 +748,7 @@ def test_a_junk_token_value_costs_one_number_not_the_whole_panel(monkeypatch, tm
     conn.execute("UPDATE usage_ledger SET output_tokens = 'not-a-number' WHERE id = 2")
     conn.commit()
     conn.close()
-    sessions._goose_sessions_cache.clear()
+    sessions._clear_goose_windows()
     sessions._goose_sessions_cache_sig = ()
 
     raw = _goose_sessions()                      # must not raise
@@ -951,7 +951,7 @@ def test_a_live_database_is_read_once_per_window_not_per_commit(monkeypatch, tmp
 
     # A later window of the same refresh, asked after that commit: answered from
     # the corpus already in hand, with no second copy of the file.
-    sessions._goose_sessions_cache.clear()
+    sessions._clear_goose_windows()
     sessions._goose_sessions_cache_sig = ()
     assert len(_goose_sessions()) == 1
     assert len(calls) == 1, "a live Goose re-copied the database for one window"
@@ -1029,7 +1029,117 @@ def test_a_junk_timestamp_costs_one_row_not_the_panel(monkeypatch, tmp_path):
     conn.execute("UPDATE usage_ledger SET created_timestamp = 'not a time' WHERE id = 2")
     conn.commit()
     conn.close()
-    sessions._goose_sessions_cache.clear()
+    sessions._clear_goose_windows()
 
     turns = [t for raw in _goose_sessions().values() for t in raw["turns"]]
     assert [t["timestamp_ms"] for t in turns] == [T0 * SECOND]   # the good row lists
+
+
+# ---------------------------------------------------------------------------
+# Bounds on the held windows
+#
+# A window is the whole history sliced by time, so bounding the cache by window
+# COUNT bounds nothing that matters: over a large history, the dashboard's own
+# working set is several copies of it. Measured on a 200,000-row ledger, an
+# eleven-window sweep was kept in full at 1,377 MB over the corpus, 1,404 MB peak.
+# ---------------------------------------------------------------------------
+
+
+def test_a_held_window_counts_its_turns_not_just_itself(monkeypatch, tmp_path):
+    """Two windows over a big history are two copies of it, and the cache knows."""
+    _setup(monkeypatch, tmp_path,
+           sessions=[_session("s1")],
+           ledger=[_ledger(i, "s1", i * 10) for i in range(1, 11)])
+
+    sessions._goose_sessions_cache.clear()
+    sessions._goose_store(("sig",), (None, None), {
+        "s1": {"turns": [{"i": i} for i in range(40)]},
+    })
+    assert sessions._goose_sessions_cache_turns == 40
+    # Overlapping windows of one history are the normal case -- the Report tab
+    # asks for day inside week inside month inside year -- so the budget is
+    # scaled to the largest of them rather than fixed, and the wide view that
+    # cost the most to build is not the one thrown away.
+    sessions._goose_store(("sig",), (0, 1), {
+        "s1": {"turns": [{"i": i} for i in range(39)]},
+    })
+    assert len(sessions._goose_sessions_cache) == 2
+    assert sessions._goose_sessions_cache_turns == 79
+
+
+def test_the_window_cache_stops_multiplying_the_history(monkeypatch, tmp_path):
+    """Past the ceiling the oldest window goes; the cache is not a second corpus."""
+    sessions._clear_goose_windows()
+    width = sessions._GOOSE_SESSIONS_TURN_CEILING // 2 + 1
+    for i in range(4):
+        sessions._goose_store(("sig",), (i, i + 1), {
+            "s1": {"turns": [{"i": j} for j in range(width)]},
+        })
+    assert len(sessions._goose_sessions_cache) < 4, (
+        "four windows each holding half the ceiling were all kept: the ceiling "
+        "must stop the cache holding several copies of one history")
+    # The most recent survives, and the accounting went with what was dropped.
+    assert (3, 4) in sessions._goose_sessions_cache
+    held = sum(len(session["turns"])
+               for window in sessions._goose_sessions_cache.values()
+               for session in window.values())
+    assert sessions._goose_sessions_cache_turns == held, (
+        "the turn accounting no longer matches what is held, so the next budget "
+        "decision is made against a history that is not in the cache")
+
+
+def test_one_window_bigger_than_the_ceiling_is_still_held(monkeypatch, tmp_path):
+    """Dropping the view the user is looking at to save nothing is no bound at all."""
+    sessions._clear_goose_windows()
+    width = sessions._GOOSE_SESSIONS_TURN_CEILING * 2
+    sessions._goose_store(("sig",), (None, None), {
+        "s1": {"turns": [{"i": i} for i in range(width)]},
+    })
+    assert len(sessions._goose_sessions_cache) == 1
+    assert sessions._goose_sessions_cache_turns == width
+
+
+def test_a_new_corpus_clears_the_turn_accounting_with_the_windows(monkeypatch, tmp_path):
+    """The counts live beside the windows, so a signature change must take them."""
+    sessions._clear_goose_windows()
+    sessions._goose_store(("old-signature",), (None, None), {
+        "s1": {"turns": [{"i": i} for i in range(100)]},
+    })
+    assert sessions._goose_sessions_cache_turns == 100
+
+    sessions._goose_store(("new-signature",), (None, None), {
+        "s1": {"turns": [{"i": 0}]},
+    })
+    assert sessions._goose_sessions_cache_turns == 1, (
+        "the new corpus is being judged against a budget spent on the old one")
+
+
+def test_a_moved_database_resets_the_window_accounting(monkeypatch, tmp_path):
+    """A signature change inside the loader must take the counts with it.
+
+    The turn counts cannot be derived from the windows they price, so the path
+    that clears the windows on a moved database has to clear them too: a clear
+    that leaves them behind judges the new history against a budget spent on the
+    one it replaced, which is a bound that evicts at the wrong moment in both
+    directions.
+    """
+    db = _setup(monkeypatch, tmp_path,
+                sessions=[_session("s1")],
+                ledger=[_ledger(i, "s1", i * 10) for i in range(1, 4)])
+    monkeypatch.setattr(sessions, "_sig_lifetime", lambda cost: 0.0)
+    assert len(_goose_sessions()) == 1
+    assert sessions._goose_sessions_cache_turns == 3
+
+    conn = sqlite3.connect(db)
+    conn.execute("DELETE FROM usage_ledger WHERE id = 3")
+    conn.commit()
+    conn.close()
+    stat = db.stat()
+    os.utime(db, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+
+    assert len(_goose_sessions()) == 1
+    held = sum(len(session["turns"])
+               for window in sessions._goose_sessions_cache.values()
+               for session in window.values())
+    assert (held, sessions._goose_sessions_cache_turns) == (2, 2), (
+        "the accounting survived the signature change that dropped its windows")

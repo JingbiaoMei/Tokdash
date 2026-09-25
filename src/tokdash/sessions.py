@@ -6267,7 +6267,39 @@ class GooseReadError(RuntimeError):
 # eight of them plus a little slack is the whole working set.
 _GOOSE_SESSIONS_CACHE_MAX = 16
 
-_goose_sessions_cache: Dict[tuple, Dict[str, Dict[str, Any]]] = {}
+# ...and a turns budget bounds how much history those views can carry, which the
+# window count cannot: a window is the whole corpus sliced by time, so several of
+# them over a large history is several copies of it. Measured on a 200,000-row
+# ledger, the eleven windows one bench sweep asked for were all kept and cost
+# 1,377 MB on top of the corpus they were cut from, peaking at 1,404 MB.
+#
+# The budget is THREE TIMES the largest window rather than a fixed number, and
+# that is what makes it evict the right one. A refresh asks for overlapping
+# windows -- day inside week inside month inside year, and "all" beside them --
+# so the turns across all of them are a few times the corpus, and any fixed
+# ceiling either does not bind at all or binds on the largest window and throws
+# away the one view that was expensive to build. Counting against the largest
+# window held keeps that view and drops the narrow ones, which is the correct
+# thing to rebuild: a day slice is arithmetic over a corpus still in hand.
+# The floor keeps a small history from churning at all.
+_GOOSE_SESSIONS_TURN_FLOOR = 250_000
+_GOOSE_SESSIONS_TURN_WINDOW_MULTIPLIER = 3
+# ...and an absolute stop, because the relative rule alone still scales with the
+# corpus, and a history whose windows do NOT nest -- a tool whose sessions all
+# land on one day, measured here -- makes "three times the largest" three copies
+# of everything. 500,000 turns is roughly a quarter of a gigabyte of view, and
+# the most recent window is always kept whatever it weighs: rebuilding it is
+# arithmetic over a corpus that is still in hand, which is cheaper than holding a
+# second one.
+_GOOSE_SESSIONS_TURN_CEILING = 500_000
+
+# Insertion-ordered, and a hit moves its window to the end, so the eviction
+# below drops the window nobody asked for lately rather than the first one built
+# and a wholesale clear takes the whole working set with it.
+_goose_sessions_cache: "OrderedDict[tuple, Dict[str, Dict[str, Any]]]" = OrderedDict()
+# Turns per window, so the budget arithmetic never walks a window to count.
+_goose_sessions_window_turns: Dict[tuple, int] = {}
+_goose_sessions_cache_turns = 0
 _goose_sessions_cache_sig: tuple = ()
 _goose_sessions_cache_lock = threading.Lock()
 
@@ -6883,9 +6915,9 @@ def _goose_sessions(
     # the cache between them.
     with _goose_sessions_cache_lock:
         if sig != _goose_sessions_cache_sig:
-            _goose_sessions_cache.clear()
+            _clear_goose_windows()
             _goose_sessions_cache_sig = sig
-        cached = _goose_sessions_cache.get(key)
+        cached = _goose_window_hit(key)
     if cached is not None:
         return cached
 
@@ -6902,12 +6934,74 @@ def _goose_store(
     sig: tuple, key: tuple, raw_sessions: Dict[str, Dict[str, Any]]
 ) -> Dict[str, Dict[str, Any]]:
     global _goose_sessions_cache, _goose_sessions_cache_sig
+    global _goose_sessions_cache_turns
+    turns = sum(len(session.get("turns") or ()) for session in raw_sessions.values())
     with _goose_sessions_cache_lock:
-        if sig == _goose_sessions_cache_sig:
-            if len(_goose_sessions_cache) >= _GOOSE_SESSIONS_CACHE_MAX:
-                _goose_sessions_cache.clear()
-            _goose_sessions_cache[key] = raw_sessions
+        if sig != _goose_sessions_cache_sig:
+            # A different corpus, so every held window describes a history that
+            # no longer exists. This one is not gradual staleness.
+            _clear_goose_windows()
+            _goose_sessions_cache_sig = sig
+        _goose_sessions_cache.pop(key, None)
+        _goose_sessions_cache[key] = raw_sessions
+        _goose_sessions_window_turns[key] = turns
+        _goose_sessions_cache_turns += turns
+        # Sized to the largest window held, so a refresh that asks for five
+        # overlapping slices of one history keeps all five instead of thrashing
+        # them, and stopped by the ceiling so a history whose windows do not
+        # nest cannot hold four copies of itself. The "more than one" below is
+        # what guarantees a window survives even when one window is bigger than
+        # the ceiling: rebuilding it is arithmetic over a corpus already in
+        # hand, which is cheaper than the alternative of holding nothing.
+        largest = max(_goose_sessions_window_turns.values())
+        budget = max(
+            _GOOSE_SESSIONS_TURN_FLOOR,
+            min(
+                _GOOSE_SESSIONS_TURN_WINDOW_MULTIPLIER * largest,
+                _GOOSE_SESSIONS_TURN_CEILING,
+            ),
+        )
+        while len(_goose_sessions_cache) > _GOOSE_SESSIONS_CACHE_MAX or (
+            _goose_sessions_cache_turns > budget and len(_goose_sessions_cache) > 1
+        ):
+            _drop_oldest_goose_window()
     return raw_sessions
+
+
+def _drop_oldest_goose_window() -> None:
+    # Caller holds the lock. Least recently asked, because that is the view
+    # nobody is waiting on -- and because evicting by size instead would drop
+    # the narrow windows first under a fixed budget and the wide one under a
+    # relative one, which is the wrong view to make expensive to rebuild.
+    global _goose_sessions_cache_turns
+    gone = next(iter(_goose_sessions_cache), None)
+    if gone is None:
+        return
+    window = _goose_sessions_cache.pop(gone)
+    _goose_sessions_cache_turns -= _goose_sessions_window_turns.pop(gone, 0) or sum(
+        len(session.get("turns") or ()) for session in window.values())
+
+
+def _clear_goose_windows() -> None:
+    """Drop every held window and the turn accounting with it.
+
+    The counts live beside the windows because the budget arithmetic must not
+    walk a window to count it, which means they cannot be derived afterwards: a
+    caller that cleared the cache without clearing these would leave the next
+    corpus being judged against a budget spent on the last one.
+    """
+    global _goose_sessions_cache_turns
+    _goose_sessions_cache.clear()
+    _goose_sessions_window_turns.clear()
+    _goose_sessions_cache_turns = 0
+
+
+def _goose_window_hit(key: tuple):
+    """The window cached for *key*, and a hit counts as the most recent use."""
+    window = _goose_sessions_cache.get(key)
+    if window is not None:
+        _goose_sessions_cache.move_to_end(key)
+    return window
 
 
 # ---------------------------------------------------------------------------

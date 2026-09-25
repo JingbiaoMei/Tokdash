@@ -1237,8 +1237,9 @@ def test_roo_live_path_survives_a_vanished_task(monkeypatch, roo_home, tmp_path)
 
 def test_roo_model_cache_is_bounded(monkeypatch, roo_home, tmp_path):
     """The corpus grows one task directory forever, so the map cache cannot."""
-    from tokdash.sources.coding_tools import _ROO_MODEL_CACHE_MAX
+    from tokdash.sources.coding_tools import _ROO_MODEL_CACHE_FLOOR
 
+    _ROO_MODEL_CACHE_MAX = _ROO_MODEL_CACHE_FLOOR
     storage = tmp_path / "storage"
     for i in range(_ROO_MODEL_CACHE_MAX + 8):
         _write_task(
@@ -1256,6 +1257,40 @@ def test_roo_model_cache_is_bounded(monkeypatch, roo_home, tmp_path):
     assert len(_roo_model_cache) == _ROO_MODEL_CACHE_MAX, (
         f"overflow left {len(_roo_model_cache)} of {_ROO_MODEL_CACHE_MAX} entries: "
         "the map must evict its oldest entry, not itself")
+
+
+def test_the_model_map_grows_with_the_corpus_it_serves(
+    monkeypatch, roo_home, tmp_path
+):
+    """A bound under the task count buys no sharing, which is the whole point.
+
+    Overview reads a task's tags during a sync and the Sessions panel reads the
+    SAME file moments later. Measured on a Windows-mounted corpus at the old
+    32-entry bound, the panel re-read every one of 300 conversation files on its
+    first pass after a sync -- 2.2 s where a warm map costs 1.2 s -- and the map
+    held a dozen entries at the end of every pass. So the bound follows the
+    corpus, and a corpus that shrinks takes its map down with it.
+    """
+    from tokdash.sources.coding_tools import (
+        _ROO_MODEL_CACHE_CEILING,
+        _ROO_MODEL_CACHE_FLOOR,
+        note_roo_corpus_size,
+    )
+
+    try:
+        note_roo_corpus_size(4_000)
+        assert len(_roo_model_cache) <= 4_000
+        # Held above the floor by the floor, not by the task count: a corpus of
+        # ten tasks still keeps a thousand maps, because a map costs little and
+        # the next corpus may be larger.
+        note_roo_corpus_size(10)
+        assert len(_roo_model_cache) <= _ROO_MODEL_CACHE_FLOOR
+        # And the ceiling holds against a corpus that could ask for more than
+        # the heap should spend.
+        note_roo_corpus_size(_ROO_MODEL_CACHE_CEILING * 4)
+        assert len(_roo_model_cache) <= _ROO_MODEL_CACHE_CEILING
+    finally:
+        note_roo_corpus_size(_ROO_MODEL_CACHE_FLOOR)
 
 
 def test_a_torn_conversation_read_is_not_cached_as_no_model(

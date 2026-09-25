@@ -10,7 +10,7 @@ import re
 import sqlite3
 import threading
 import time as _time
-from collections import OrderedDict
+from collections import OrderedDict, namedtuple
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache, wraps
 from pathlib import Path
@@ -72,6 +72,7 @@ from .sources.coding_tools import (
     qoder_cli_runtime_signature,
     qwen_file_signatures,
     qwen_session_file,
+    note_roo_corpus_size,
     roo_signature_scan,
     roo_task_rows,
     search_dir_claim_key,
@@ -6937,17 +6938,162 @@ def _goose_store(
 # they can run on different invalidation clocks.
 
 
-# Corpus-sized, not the shared 512, and measured rather than guessed: one Roo
-# task is one file, so the bound has to exceed the number of tasks or the panel
-# gets no reuse at all. At the default bound a 600-task corpus recorded ZERO
-# hits across a whole rebuild - every file it needed had been evicted by the
-# files scanned before it - and one request cost 3.4 s on a Windows-mounted
-# drive where the same request with a working cache costs milliseconds. Rows per
-# task are a handful of dicts, so the bound costs little.
-_ROO_SESSION_FILE_CACHE_MAX = 1024
+# A Roo corpus is bounded by nothing but the user's patience: Roo never prunes a
+# task directory, so the file count this cache must hold is the number of tasks
+# the user has ever run. A fixed bound cannot be right at both ends. 1,024 was
+# chosen against a 600-task corpus and recorded ZERO hits at 3,000 -- every
+# entry a rebuild needed had been evicted by the entries it had already read --
+# and one rebuild that touched ONE task re-read 3,000 files, 0.62 s here and
+# 6.98 s measured on a Windows-mounted drive, where the panel is served in
+# milliseconds when the memo works.
+#
+# So the bound follows the corpus: one entry per file, keyed on the path with
+# that file's signature as the validity stamp, and the loader tells the memo how
+# large the corpus is and which paths are still alive. A corpus of 3,000 tasks
+# gets 3,000 entries and a rebuild that touched one file re-reads one file; a
+# corpus that shrinks stops holding the files that left it, which is what keeps
+# this from becoming a second copy of the corpus.
+_ROO_FILE_CACHE_FLOOR = 1024
+# Past this, an entry-per-file memo costs more to hold than the re-read it
+# saves, and a corpus of that size is rare enough to deserve the re-scan.
+_ROO_FILE_CACHE_CEILING = 20_000
 
 
-@_cached_session_parser(maxsize=_ROO_SESSION_FILE_CACHE_MAX)
+class _CorpusFileMemo:
+    """One entry per file, sized to the corpus those files belong to.
+
+    Not the same thing as ``lru_cache`` keyed on (path, mtime_ns, size), which
+    is what this replaced. Under that key a changed file ADDS an entry rather
+    than replacing its own, so the bound has to cover the file count times every
+    change since the process started, and the eviction that follows is of files
+    that have not changed at all. Here the path is the key and the signature
+    lives in the value: the bound is the file count, and a corpus that churns
+    cannot push the working set out of its own cache.
+    """
+
+    def __init__(self, func, floor=_ROO_FILE_CACHE_FLOOR,
+                 ceiling=_ROO_FILE_CACHE_CEILING, row_budget=0):
+        self._func = func
+        self._floor = floor
+        self._ceiling = ceiling
+        # A row budget, not just a file count. Holding one entry per task means
+        # the retained volume is tasks x requests, and it is the requests that
+        # make a corpus heavy: 20,000 tasks of four requests and 2,000 tasks of
+        # forty are the same file count and a very different pile of dicts. So
+        # the file bound decides how many tasks can be held and this decides how
+        # many requests, and whichever bites first evicts least-recently-used.
+        self._row_budget = row_budget
+        self._rows = 0
+        self._data: "OrderedDict[str, tuple]" = OrderedDict()
+        self._bound = floor
+        self._hits = 0
+        self._misses = 0
+
+    def note_corpus(self, live_paths) -> None:
+        """Re-bind to the corpus the loader is about to walk, and forget the rest."""
+        self._bound = min(self._ceiling, max(self._floor, len(live_paths)))
+        self._evict()
+        for gone in [key for key in self._data if key not in live_paths]:
+            self._forget(gone)
+
+    def _forget(self, key) -> None:
+        entry = self._data.pop(key, None)
+        if entry is not None and self._row_budget:
+            self._rows -= _roo_entry_rows(entry[1])
+
+    def _evict(self) -> None:
+        while len(self._data) > self._bound:
+            self._forget(next(iter(self._data)))
+        if self._row_budget:
+            while self._rows > self._row_budget and len(self._data) > 1:
+                self._forget(next(iter(self._data)))
+
+    def _load(self, path_str, mtime_ns, size, pricing_sig, *extra):
+        stamp = (mtime_ns, size, pricing_sig, extra)
+        hit = self._data.get(path_str)
+        if hit is not None and hit[0] == stamp:
+            self._hits += 1
+            self._data.move_to_end(path_str)
+            return hit[1]
+        self._misses += 1
+        # Raises _SessionFileUnavailable instead of recording it: the stamp is
+        # the file's own signature, which for a finished task never moves again,
+        # so a stored failure would outlive the lock that caused it.
+        value = self._func(path_str, mtime_ns, size, pricing_sig, *extra)
+        self._forget(path_str)
+        self._data[path_str] = (stamp, value)
+        if self._row_budget:
+            self._rows += _roo_entry_rows(value)
+        self._evict()
+        return value
+
+    def __call__(self, path_str, mtime_ns, size, pricing_sig, *extra):
+        try:
+            return self._load(path_str, mtime_ns, size, pricing_sig, *extra)
+        except _SessionFileUnavailable:
+            return None
+
+    def cache_clear(self) -> None:
+        self._data.clear()
+        self._rows = 0
+        self._hits = self._misses = 0
+
+    def cache_info(self):
+        return _CacheInfo(hits=self._hits, misses=self._misses,
+                         maxsize=self._bound, currsize=len(self._data))
+
+    @property
+    def raising(self):
+        # The contract _parse_session_file reaches for: the same call that still
+        # raises _SessionFileUnavailable rather than answering None.
+        return self._load
+
+
+# Field-for-field the shape lru_cache reports, so a cache_info() here compares
+# equal to one from a decorated parser and reads the same in a test.
+_CacheInfo = namedtuple("CacheInfo", "hits misses maxsize currsize")
+
+# Requests retained across the whole corpus, in rows. Traced here rather than
+# estimated: one retained row costs 0.61 KB of dict, entry id and integers, so
+# 60,000 of them is ~36 MB whatever the shape of the corpus. A 3,000-task
+# corpus of four requests (12,000 rows) fits entirely; past the budget the memo
+# keeps the tasks it was asked about last and re-reads the ones it was not,
+# which costs a file rather than the corpus, and stops the panel holding a
+# second copy of a history the aggregate view already keeps.
+_ROO_FILE_CACHE_ROW_BUDGET = 60_000
+
+
+def _roo_entry_rows(value) -> int:
+    if isinstance(value, list):
+        return len(value)
+    return 1 if value else 0
+
+
+_roo_file_memos: list = []
+
+
+def _corpus_file_memo(func, row_budget=_ROO_FILE_CACHE_ROW_BUDGET):
+    memo = _CorpusFileMemo(func, row_budget=row_budget)
+    _roo_file_memos.append(memo)
+    return memo
+
+
+def _note_roo_corpus(file_sigs: tuple, sidecar_sigs: tuple) -> None:
+    """Size the Roo per-file memos to the corpus and drop the tasks that left it.
+
+    Called by the loader, the only reader that sees the whole corpus at once, and
+    only on a real rebuild: an aggregate cache hit read no file and needs neither
+    a new bound nor a prune.
+    """
+    live = {entry[0] for entry in file_sigs} | {entry[0] for entry in sidecar_sigs}
+    for memo in _roo_file_memos:
+        memo.note_corpus(live)
+    # The model map lives in the parser module because Overview needs it too, and
+    # it is bounded by the same argument: one entry per task's conversation file.
+    note_roo_corpus_size(sum(1 for path in live if path.endswith("ui_messages.json")))
+
+
+@_corpus_file_memo
 def _parse_roo_task_file_for_sessions(
     path_str: str, _mtime_ns: int, _size: int, _pricing_sig: tuple,
     _conversation_sig: tuple = (),
@@ -6974,18 +7120,21 @@ def _parse_roo_task_file_for_sessions(
     )
     if not rows:
         return []
-    task_id = Path(path_str).parent.name
+    # One path object for the whole file, not one per row: every row of a task
+    # names the same directory, and a 100-character copy of it in each of a
+    # corpus's requests is the cheapest megabyte in this cache to give back.
+    task_dir = str(Path(path_str).parent)
     return [
         {
             **row,
-            "_task_id": task_id,
-            "_task_dir": str(Path(path_str).parent),
+            "_task_id": Path(path_str).parent.name,
+            "_task_dir": task_dir,
         }
         for row in rows
     ]
 
 
-@_cached_session_parser(maxsize=_ROO_SESSION_FILE_CACHE_MAX)
+@_corpus_file_memo
 def _read_roo_first_prompt(
     path_str: str, _mtime_ns: int, _size: int, _pricing_sig: tuple
 ) -> str:
@@ -7012,7 +7161,7 @@ def _read_roo_first_prompt(
     return ""
 
 
-@_cached_session_parser(maxsize=_ROO_SESSION_FILE_CACHE_MAX)
+@_corpus_file_memo
 def _read_roo_history_item(
     path_str: str, _mtime_ns: int, _size: int, _pricing_sig: tuple
 ) -> Dict[str, Any]:
@@ -7048,6 +7197,9 @@ def _read_roo_history_item(
 def _load_roo_code_sessions(
     file_sigs: tuple, _history_sigs: tuple = (), _pricing_sig: tuple = ()
 ) -> Dict[str, Dict[str, Any]]:
+    # The memos below are sized to this corpus and pruned to its live paths; see
+    # _note_roo_corpus for why a rebuild is the only place that can say either.
+    _note_roo_corpus(file_sigs, _history_sigs)
     by_task: Dict[str, list] = {}
     source_of_task: Dict[str, tuple] = {}
     # Both sidecar stamps come from the shared scan's signature tuple, so the

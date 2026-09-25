@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -587,3 +588,130 @@ def test_frontend_session_registry_includes_roo_code():
     assert "rooCodeSessionsTable" not in source
     assert 'id="rooCodeSessionsTable"' not in source
     assert (index.parent / "icons" / "agents" / "roo_code.svg").is_file()
+
+
+# ---------------------------------------------------------------------------
+# The per-file memo: one entry per task, sized to the corpus
+#
+# A Roo corpus grows by one task directory forever and Roo never prunes one, so
+# a fixed bound cannot be right at both ends. 1,024 was picked against a 600-task
+# corpus; at 3,000 tasks it recorded zero hits across a whole rebuild, because
+# lru_cache keys on (path, mtime, size) and a changed file ADDS an entry rather
+# than replacing its own, so the entries a rebuild needed had been evicted by the
+# entries it had already read. Measured on a Windows-mounted drive: a rebuild
+# that touched ONE task re-read all 3,000 files, 6.98 s.
+# ---------------------------------------------------------------------------
+
+
+def _memo_cold_reads(monkeypatch, tmp_path, storage, n_tasks):
+    """Cold-build the panel over a corpus, then report the re-reads of a rebuild."""
+    _setup(monkeypatch, tmp_path, storage)
+    ids = [f"task-{i:04d}" for i in range(n_tasks)]
+    for i, task_id in enumerate(ids):
+        _write(storage, _task(task_id, requests=[req(T0 + 40 + i, 100 + i, 5)]))
+    reads: list[str] = []
+    real = sessions._parse_roo_task_file_for_sessions._func
+
+    def counting(path_str, *rest):
+        reads.append(path_str)
+        return real(path_str, *rest)
+
+    monkeypatch.setattr(
+        sessions._parse_roo_task_file_for_sessions, "_func", counting)
+    return ids, reads
+
+
+def test_one_changed_task_re_reads_one_task(monkeypatch, tmp_path, roo_home):
+    """The corpus-sized memo is what makes a rebuild proportional to the change."""
+    storage = tmp_path / "storage"
+    ids, reads = _memo_cold_reads(monkeypatch, tmp_path, storage, 40)
+    assert len(_listing()["sessions"]) == len(ids)
+    assert len(reads) == len(ids), "the first pass did not read every task"
+
+    del reads[:]
+    target = storage / "tasks" / ids[7] / "ui_messages.json"
+    stat = target.stat()
+    os.utime(target, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+    _sig_cache.clear()
+    sessions._load_roo_code_sessions.cache_clear()
+    assert len(_listing()["sessions"]) == len(ids)
+
+    re_read = [path for path in reads if str(target) == path]
+    assert len(re_read) == 1, (
+        f"a one-task change re-read {len(reads)} of {len(ids)} task files; the "
+        "memo must replace a changed file's own entry, not evict its neighbours")
+
+
+def test_the_memo_holds_one_entry_per_task_not_per_version():
+    """A task edited a hundred times is one entry, not a hundred.
+
+    That is the whole difference from the lru_cache this replaced, and it is what
+    lets the bound be the task count: under the old key, churn alone pushed the
+    working set out of its own cache.
+    """
+    memo = sessions._parse_roo_task_file_for_sessions
+    memo.cache_clear()
+    calls: list[str] = []
+
+    def reader(path_str, _mtime_ns, _size, _pricing_sig, *extra):
+        calls.append(path_str)
+        return [{"n": len(calls)}]
+
+    original = memo._func
+    memo._func = reader
+    try:
+        for version in range(50):
+            memo("/tmp/one/ui_messages.json", version, 10, ())
+        assert len(calls) == 50, "each version should re-read once"
+        assert len(memo._data) == 1, (
+            f"50 versions of one file left {len(memo._data)} entries")
+        assert memo.cache_info().currsize == 1
+    finally:
+        memo._func = original
+        memo.cache_clear()
+
+
+def test_the_memo_follows_the_corpus_and_forgets_the_tasks_that_left(
+    monkeypatch, tmp_path, roo_home
+):
+    """A bound under the task count shares nothing; an unbounded one never shrinks."""
+    storage = tmp_path / "storage"
+    ids, _reads = _memo_cold_reads(monkeypatch, tmp_path, storage, 30)
+    assert len(_listing()["sessions"]) == len(ids)
+    memo = sessions._parse_roo_task_file_for_sessions
+    # Three files per task are live, and the bound covers them all.
+    assert memo.cache_info().maxsize >= len(ids)
+    assert memo.cache_info().currsize == len(ids)
+
+    # Delete a task and rebuild: its entry must go with it, or the memo is a
+    # second corpus that only ever grows.
+    shutil.rmtree(storage / "tasks" / ids[3])
+    _sig_cache.clear()
+    sessions._load_roo_code_sessions.cache_clear()
+    assert len(_listing()["sessions"]) == len(ids) - 1
+    gone = str(storage / "tasks" / ids[3] / "ui_messages.json")
+    assert gone not in memo._data, "a deleted task is still held by the memo"
+
+
+def test_the_memo_is_bounded_by_requests_as_well_as_by_files():
+    """20,000 tasks of four requests and 2,000 of forty are not the same heap."""
+    memo = sessions._parse_roo_task_file_for_sessions
+    memo.cache_clear()
+    width = 200
+    original = memo._func
+    memo._func = lambda path_str, mtime_ns, _size, _pricing_sig, *extra: [
+        {"n": i} for i in range(width)
+    ]
+    try:
+        memo.note_corpus({f"/tmp/{i}" for i in range(5_000)})
+        for i in range(5_000):
+            memo(f"/tmp/{i}", i, 1, ())
+        rows = sum(len(entry[1]) for entry in memo._data.values())
+        assert rows <= sessions._ROO_FILE_CACHE_ROW_BUDGET, (
+            f"the memo retained {rows} rows against a budget of "
+            f"{sessions._ROO_FILE_CACHE_ROW_BUDGET}")
+        # And it kept the most RECENT tasks, which is the reuse worth keeping.
+        assert "/tmp/4999" in memo._data
+    finally:
+        memo._func = original
+        memo.cache_clear()

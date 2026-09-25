@@ -7096,8 +7096,38 @@ _ROO_MODEL_TAG_WINDOW_MS = 500
 # 3.5 s where it costs 2.2 s -- and left the cache holding a dozen entries at the
 # end of every pass, which is to say nothing carried over. Each entry is one
 # short list of (ts, model) tuples, so the bound itself costs little.
-_ROO_MODEL_CACHE_MAX = 1024
+# Same shape as the Roo per-file memo in sessions.py: the bound follows the
+# corpus rather than being a fixed number that a real corpus walks straight
+# past. One task is one conversation file, and the whole point of this map is
+# that OVERVIEW reads a task's tags during a sync and the Sessions panel reads
+# the SAME file minutes later -- so a bound under the task count means the panel
+# finds nothing left to reuse. Measured on a 300-task corpus on a
+# Windows-mounted drive with the old 32-entry bound: all 300 files re-read on
+# the panel's first pass after a sync, 2.2 s for the all window where a warm map
+# costs 1.2 s. Each entry is one short list of (ts, model) tuples, so holding
+# one per task costs little.
+_ROO_MODEL_CACHE_FLOOR = 1024
+_ROO_MODEL_CACHE_CEILING = 20_000
+# Insertion-ordered, and a hit re-inserts at the end, so "oldest out" is the
+# map nobody has asked for lately rather than the first one loaded.
 _roo_model_cache: Dict[str, Tuple[tuple, List[Tuple[int, str]]]] = {}
+# A one-element list so note_roo_corpus_size() can retune it without a global
+# statement at every reader.
+_roo_model_cache_bound = [_ROO_MODEL_CACHE_FLOOR]
+
+
+def note_roo_corpus_size(task_count: int) -> None:
+    """Re-bind the model map to a corpus of *task_count* tasks.
+
+    Called by the Sessions loader, which is the only reader that knows how many
+    tasks there are, and mirrors what it does to the per-file memos there. A
+    corpus that shrinks also shrinks its map.
+    """
+    _roo_model_cache_bound[0] = min(
+        _ROO_MODEL_CACHE_CEILING, max(_ROO_MODEL_CACHE_FLOOR, task_count)
+    )
+    while len(_roo_model_cache) > _roo_model_cache_bound[0]:
+        _roo_model_cache.pop(next(iter(_roo_model_cache)), None)
 
 
 _roo_roots_cache: Dict[tuple, Tuple[float, float, List[Path]]] = {}
@@ -7310,7 +7340,7 @@ def _roo_model_tags(
     """The task's model tags, cached on the CONVERSATION file's own signature.
 
     The task file is what syncs, but the map belongs to its sibling, so the
-    cache key and signature are the sibling's. Bounded, see _ROO_MODEL_CACHE_MAX.
+    cache key and signature are the sibling's. Bounded, see note_roo_corpus_size.
 
     *conversation_sig* is that sibling's ``(mtime_ns, size)``, for a caller that
     already holds it -- which is both of them: the Sessions loader takes it from
@@ -7340,12 +7370,15 @@ def _roo_model_tags(
         # never moves again. Returning it uncached costs one re-read and keeps
         # the model off the "unknown" scrapheap.
         return []
-    if len(_roo_model_cache) >= _ROO_MODEL_CACHE_MAX:
+    # Re-insert at the end, which is what makes the eviction below least-recently
+    # -used rather than first-loaded-first-dropped.
+    _roo_model_cache.pop(key, None)
+    _roo_model_cache[key] = (sig, tags)
+    while len(_roo_model_cache) > _roo_model_cache_bound[0]:
         # Oldest out, not everything out. A wholesale clear is what turned a
         # corpus over the bound into zero sharing, and it is the eviction the
         # Zed decode cache above already avoids for the same reason.
         _roo_model_cache.pop(next(iter(_roo_model_cache)), None)
-    _roo_model_cache[key] = (sig, tags)
     return tags
 
 

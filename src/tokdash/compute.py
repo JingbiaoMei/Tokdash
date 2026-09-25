@@ -1040,11 +1040,10 @@ def previous_period_range(period: str) -> tuple[datetime, datetime]:
     current_since, current_until = _current_period_range(period)
     if period == "month":
         prev_until = current_since
-        tz = current_since.tzinfo or timezone.utc
-        prev_until_tz = prev_until.astimezone(tz)
-        prev_month_anchor = prev_until_tz - timedelta(days=1)
-        prev_since = prev_month_anchor.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        return prev_since.astimezone(tz), prev_until
+        prev_until_local = prev_until.astimezone()
+        prev_month_anchor = prev_until_local - timedelta(days=1)
+        prev_since_local = prev_month_anchor.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        return prev_since_local.astimezone(timezone.utc), prev_until
 
     if period_to_days(period) == 1:
         prev_since = current_since - timedelta(days=1)

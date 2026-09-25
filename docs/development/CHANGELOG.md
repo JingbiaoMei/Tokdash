@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Unreleased
+
+### Fixed
+
+- On the TUI period views, `[` / `]` / `0` step by WHOLE calendar periods in the tab's own unit instead of pulling the window's end date one day back and forth. Previously `[` on the month view walked `9.1 → 9.24` into `9.1 → 9.23` -- the same month one day shorter -- instead of onto the previous month. Now one `[` on the month view shows the entire previous month (`8.1 → 8.31`, full extent, never clamped to today), the week view steps the full previous Mon→Sun week, and the year view the full previous calendar year; the "today" view keeps its day-by-day walk because its period *is* a day. The Report pane shares the same counter and steps its own week/month/year windows the same way. The per-load anchor is the resolved window END, so a shifted year's heatmap and today-marker follow that year; the status marker and the date-line suffix count in the pane's unit (`· -1m`, `(viewing 1m back · 0 = today)`). Shift 0 delegates to the unshifted window computation exactly, so today's warm cache keys stay byte-identical. Three same-key fixes ride along: a step is fully inert when nothing is date-pinned (a windowless Overview with Report never started no longer bumps the generation counter and wedges the visible pane's in-flight load on "computing…" with no successor), a stranded load whose pane is the active one is re-issued the moment its superseding load finishes (pressing `p` during a quota fetch no longer wedges the visible Quota pane), and every reload drops the previous window's late-payload slots at load start so a mid-reload repaint can't mix the old window's figures into the one being computed.
+
+- Three follow-ups from the TUI review: `textual` is pinned `>=8.0,<9` because the app is written against verified Textual 8 facts and a major bump must be deliberate; the quota disabled-poll note rides the markup emitter so it paints yellow instead of a literal `[warn]` tag; and the status-bar/report db footer read (which opens and counts the SQLite files) moved off the event loop into a worker thread behind a `db status pending…` placeholder, so a slow db no longer stalls key handling and a late result can't repaint the previous window's body over a loading clear.
+
 ## 2.6.4 - 2026-09-25
 
 ### Added

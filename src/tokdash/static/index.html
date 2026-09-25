@@ -760,6 +760,21 @@
       .server-health-dot[data-state="testing"] { animation: none; }
     }
 
+    /* A brand mark inside a quota card title. The shared tool identity sizes its label
+       to ellipsize inside a table cell, and at three cards per row a long name -- the
+       install in `Claude Code (work-laptop-01)`, a MiniMax region -- has nowhere to
+       ellipsize TO. A card title is the provider's name, so it wraps instead. The title
+       flows as running text rather than as a flex row: a flex identity shrinks to fill
+       the line and strands the plan suffix out at the card edge. */
+    .quota-card-title .tool-brand-label {
+      overflow: visible;
+      text-overflow: clip;
+      white-space: normal;
+    }
+    .quota-card-title .quota-card-plan {
+      white-space: nowrap;
+    }
+
     /* Provider-visibility dropdown on the Quota tab (show/hide Codex/Claude/Antigravity). */
     .quota-visibility-wrap {
       position: relative;
@@ -1818,10 +1833,6 @@
     .usage-report-agents tbody tr { border-bottom: 1px solid color-mix(in srgb, var(--color-border) 55%, transparent); }
     .usage-report-agents tbody tr:hover { background: color-mix(in srgb, var(--color-secondary) 7%, transparent); }
     .usage-report-agents .usage-report-qual { color: var(--color-label); font-weight: 700; font-size: 9px; display: block; text-transform: none; letter-spacing: 0; }
-    .usage-report-other-row td { color: var(--color-muted); font-weight: 700; font-size: 12px; }
-    .usage-report-disclosure { background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; }
-    .usage-report-disclosure:hover { color: var(--color-text); }
-    .usage-report-sub-row td { color: var(--color-muted); font-size: 12px; }
 
 
     /* Share cards. Each tier shows both PNGs side by side because every export
@@ -5339,8 +5350,6 @@
         usageReportColCost: 'Cost',
         usageReportColCostQual: 'API list price',
         usageReportColActive: 'Active',
-        usageReportOtherTools: 'Other tools on {machine} · {n}',
-        usageReportToolCount: 'tools',
         usageReportFooterDays: 'Days begin at {machine}’s local midnight.',
         usageReportFooterCost: 'Cost figures are API list-price equivalents, not billed spend.',
         usageReportFooterActive: 'Active time is estimated from recorded event gaps (cap {cap}).',
@@ -5844,8 +5853,6 @@
         usageReportColCost: '费用',
         usageReportColCostQual: '目录价',
         usageReportColActive: '活跃时长',
-        usageReportOtherTools: '{machine}上的其他工具 · {n}',
-        usageReportToolCount: '个工具',
         usageReportFooterDays: '每日按{machine}的本地零点划分。',
         usageReportFooterCost: '费用为 API 目录价估算，非实际账单。',
         usageReportFooterActive: '活跃时长按记录的事件间隔估算（上限 {cap}）。',
@@ -6350,8 +6357,6 @@
         usageReportColCost: 'コスト',
         usageReportColCostQual: 'API 公称価格',
         usageReportColActive: '稼働時間',
-        usageReportOtherTools: '{machine}上の他のツール · {n}',
-        usageReportToolCount: 'ツール',
         usageReportFooterDays: '1 日の区切りは{machine}の現地時刻の午前 0 時です。',
         usageReportFooterCost: 'コストは API 公称価格換算で、実際の請求額ではありません。',
         usageReportFooterActive: '稼働時間は記録されたイベント間隔から推定しています（上限 {cap}）。',
@@ -6856,8 +6861,6 @@
         usageReportColCost: '비용',
         usageReportColCostQual: 'API 정가',
         usageReportColActive: '활동',
-        usageReportOtherTools: '{machine}의 다른 툴 · {n}',
-        usageReportToolCount: '개의 툴',
         usageReportFooterDays: '하루는 {machine}의 현지 자정을 기준으로 구분합니다.',
         usageReportFooterCost: '비용은 API 정가 환산액이며 실제 청구액이 아닙니다.',
         usageReportFooterActive: '활동 시간은 기록된 이벤트 간격으로 추정합니다(상한 {cap}).',
@@ -7362,8 +7365,6 @@
         usageReportColCost: 'Coste',
         usageReportColCostQual: 'Precio de lista API',
         usageReportColActive: 'Activo',
-        usageReportOtherTools: 'Otras herramientas de {machine} · {n}',
-        usageReportToolCount: 'herramientas',
         usageReportFooterDays: 'Los días empiezan a la medianoche local de {machine}.',
         usageReportFooterCost: 'El coste equivale a los precios de lista de la API, no al importe facturado.',
         usageReportFooterActive: 'El tiempo activo se estima con los intervalos registrados (tope {cap}).',
@@ -7868,8 +7869,6 @@
         usageReportColCost: 'Custo',
         usageReportColCostQual: 'Preço de lista da API',
         usageReportColActive: 'Ativo',
-        usageReportOtherTools: 'Outras ferramentas · {machine} · {n}',
-        usageReportToolCount: 'ferramentas',
         usageReportFooterDays: 'Os dias começam à meia-noite local marcada por {machine}.',
         usageReportFooterCost: 'Os valores de custo equivalem aos preços de lista da API, não à fatura.',
         usageReportFooterActive: 'O tempo ativo é estimado pelos intervalos registrados (limite {cap}).',
@@ -11869,6 +11868,42 @@
         : 'MiniMax';
     }
 
+    // Quota cards name a vendor rather than a Tokdash source key, so the brand mark
+    // is picked by hand. `antigravity` would resolve through the shared alias table
+    // on its own, `opencode_go` is OpenCode's own subscription, and Z.ai and Command
+    // Code have no mark in the local asset set: those two land on the same letter
+    // tile as any other unidentified source, which is what `toolBrandMeta` gives.
+    const QUOTA_PROVIDER_BRAND_KEYS = Object.freeze({
+      codex: 'codex',
+      claude: 'claude',
+      antigravity: 'antigravity_cli',
+      minimax: 'minimax',
+      kimi: 'kimi',
+      grok: 'grok',
+      opencode_go: 'opencode',
+    });
+
+    // The mark comes from the Overview's identity system; the name stays the card's
+    // own, because the tool-name map says "Kimi CLI" where the card says "Kimi Code"
+    // and knows nothing at all about a MiniMax region or a Claude install.
+    function createQuotaProviderIdentity(providerKey, label) {
+      const brandKey = QUOTA_PROVIDER_BRAND_KEYS[providerKey] || providerKey;
+      const meta = toolBrandMeta(brandKey);
+      const identity = document.createElement('span');
+      identity.className = 'tool-identity';
+      identity.dataset.logoKind = meta.logoKind || 'mark';
+      identity.dataset.darkInvert = String(Boolean(meta.darkInvert));
+      identity.style.setProperty('--tool-brand', meta.color);
+      const name = document.createElement('span');
+      name.className = 'tool-brand-label';
+      name.textContent = label;
+      // Only the mark is decorative -- `createToolBrandIcon` hides the icon itself.
+      // The wrapper stays readable because the card's one accessible name lives
+      // inside it, unlike `createToolIdentity`'s icon-only branch.
+      identity.append(createToolBrandIcon(brandKey, meta), name);
+      return identity;
+    }
+
     function quotaConsentMeta(provider) {
       if (provider === 'codex') return { key: 'codex_api', endpoint: 'chatgpt.com/backend-api/wham/*', path: '$CODEX_HOME/auth.json' };
       if (provider === 'claude') return { key: 'claude_api', endpoint: 'api.anthropic.com/api/oauth/usage', path: '$CLAUDE_CONFIG_DIR/.credentials.json (and each ~/.claude-* profile)' };
@@ -12611,15 +12646,18 @@
         header.className = 'flex items-start justify-between gap-3 mb-4';
         const titleWrap = document.createElement('div');
         const title = document.createElement('h3');
-        title.className = 'text-base font-extrabold mono';
-        title.textContent = quotaProviderCardLabel(providerKey, provider, claudeView);
+        title.className = 'text-base font-extrabold mono quota-card-title';
+        title.append(createQuotaProviderIdentity(
+          providerKey,
+          quotaProviderCardLabel(providerKey, provider, claudeView),
+        ));
         // Plan label (Pro Lite / Max 5x …) sits INLINE after the provider name as a muted
         // suffix instead of on its own line, so the card reads "Codex · Pro Lite" and the
         // window bars start higher. Antigravity has no plan line.
         const plan = quotaProviderPlanLabel(providerKey, provider, claudeView?.plan);
         if (plan) {
           const planSuffix = document.createElement('span');
-          planSuffix.className = 'text-xs font-semibold ml-2';
+          planSuffix.className = 'text-xs font-semibold ml-2 quota-card-plan';
           planSuffix.style.color = 'var(--color-muted)';
           planSuffix.textContent = `· ${plan}`;
           title.appendChild(planSuffix);
@@ -14158,7 +14196,6 @@
       wired: false,
       model: null,
       error: null,
-      othersOpen: false,
       // The footer line and the card stamp name the build of the server the
       // report was read from, so this is resolved per server rather than once
       // per page: a remote report carrying the local version is a wrong claim.
@@ -14716,15 +14753,9 @@
           activeMs: activity ? Number(activity.active_ms_sum) || 0 : null,
         };
       });
-      // Tools with no recorded session have no runtime to print, so they wait in
-      // the expandable row instead of headlining a table full of em dashes. When
-      // active time itself did not answer, no row has one and that rule would
-      // fold the whole table into the disclosure: the ranking then stands on the
-      // token columns it still has.
-      const ranked = activeTimeMissing ? agentRows : agentRows.filter((row) => row.sessions !== null);
-      const agentPrimary = ranked.slice(0, 10);
-      const primaryKeys = new Set(agentPrimary.map((row) => row.tool));
-      const agentOthers = agentRows.filter((row) => !primaryKeys.has(row.tool));
+      // The table prints every tool the facet ranked, in that order. A tool with no
+      // recorded session has no runtime to print and shows em dashes in those two
+      // columns; it still gets its row rather than a folded tail.
       const elapsedWeekdays = new Set(windowDays.map((day) => (parseDateKey(day).getDay() + 6) % 7));
       const sourceErrors = (!usageMissing && Array.isArray(usage.source_errors) ? usage.source_errors : [])
         .map((entry) => (typeof entry === 'string' ? entry : entry && entry.source) || '')
@@ -14753,7 +14784,7 @@
         projectCount: (projectsBlock && Number(projectsBlock.attributed_project_count)) || 0,
         facetTotal,
         unattrShare, gapShare,
-        agentRows, agentPrimary, agentOthers,
+        agentRows,
         elapsedWeekdays,
         atByTool: byTool,
         coverage: (ins && ins.coverage) || null,
@@ -15420,9 +15451,8 @@
       host.append(hours, side);
     }
 
-    function usageReportAgentRow(row, rowClass) {
+    function usageReportAgentRow(row) {
       const tr = document.createElement('tr');
-      if (rowClass) tr.className = rowClass;
       const name = document.createElement('td');
       name.append(createToolIdentity(row.tool));
       tr.append(name);
@@ -15462,35 +15492,9 @@
       }
 
       const fragment = document.createDocumentFragment();
-      model.agentPrimary.forEach((row) => fragment.append(usageReportAgentRow(row)));
+      model.agentRows.forEach((row) => fragment.append(usageReportAgentRow(row)));
 
-      if (model.agentOthers.length) {
-        const sessions = model.agentOthers.reduce((sum, row) => sum + (row.sessions || 0), 0);
-        const tally = sessions
-          ? `${formatNumber(sessions)} ${t('usageReportColSessions').toLowerCase()}`
-          : `${formatNumber(model.agentOthers.length)} ${t('usageReportToolCount')}`;
-        const tr = document.createElement('tr');
-        tr.className = 'usage-report-other-row';
-        const cell = document.createElement('td');
-        cell.colSpan = 8;
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = 'usage-report-disclosure';
-        button.setAttribute('aria-expanded', String(usageReportState.othersOpen));
-        button.textContent = `${usageReportState.othersOpen ? '\u25be' : '\u25b8'} ${t('usageReportOtherTools', { n: tally, machine: usageReportMachineName() })}`;
-        button.addEventListener('click', () => {
-          usageReportState.othersOpen = !usageReportState.othersOpen;
-          if (usageReportState.model) usageReportRenderAgents(usageReportState.model);
-        });
-        cell.append(button);
-        tr.append(cell);
-        fragment.append(tr);
-        if (usageReportState.othersOpen) {
-          model.agentOthers.forEach((row) => fragment.append(usageReportAgentRow(row, 'usage-report-sub-row')));
-        }
-      }
-
-      if (!model.agentPrimary.length && !model.agentOthers.length) {
+      if (!model.agentRows.length) {
         const tr = document.createElement('tr');
         const cell = document.createElement('td');
         cell.colSpan = 8;

@@ -7087,6 +7087,38 @@ _ROO_FILE_CACHE_FLOOR = 1024
 _ROO_FILE_CACHE_CEILING = 20_000
 
 
+# Requests the per-file memos may retain, counted in rows rather than files,
+# because it is the requests that make a corpus heavy: 20,000 tasks of four
+# requests and 2,000 tasks of forty are the same file count and a different
+# heap. Measured here, not estimated: a retained request row costs ~300 B of
+# dict, entry id and integers (270-340 B across widths of 20 and 80 rows per
+# task), so the byte budget below is what actually bounds this.
+#
+# The budget FOLLOWS THE CORPUS and this is the part that was wrong before. A
+# flat 60,000-row budget is smaller than a real corpus: at 3,001 tasks of ~44
+# requests (132,936 rows) the loader walks the corpus in order, so the budget
+# evicted the tasks the scan had already passed to make room for the ones it
+# had not reached yet, and the entries the rebuild was about to ask for were
+# precisely the ones gone. Measured against that corpus: hits 0, misses 3,001,
+# one changed task re-read all 3,000 files in 3.6 s, and peak RSS 434 MB --
+# MORE than the 383 MB of holding the lot, because a re-parse allocates the
+# rows a second time. A budget that cannot cover the corpus does not bound the
+# cost of a miss, it guarantees one on every file.
+#
+# So the floor is where a small corpus keeps everything it asked for and the
+# ceiling is where the retained rows stop being cheap next to the aggregate
+# view, which holds the same corpus as sessions and turns. Past the ceiling the
+# claim inverts, and honestly so: a changed task re-reads the corpus, not a
+# file. That crossing is ~160,000 requests, roughly four thousand tasks of
+# real transcripts, and it is stated in the docs rather than hidden here.
+_ROO_FILE_CACHE_ROW_FLOOR = 60_000
+_ROO_FILE_CACHE_ROW_BYTES = 64 * 1024 * 1024
+_ROO_FILE_CACHE_ROW_BYTES_PER_ROW = 400
+_ROO_FILE_CACHE_ROW_CEILING = _ROO_FILE_CACHE_ROW_BYTES // _ROO_FILE_CACHE_ROW_BYTES_PER_ROW
+# Kept as the historical name for callers and tests that refer to the floor.
+_ROO_FILE_CACHE_ROW_BUDGET = _ROO_FILE_CACHE_ROW_FLOOR
+
+
 class _CorpusFileMemo:
     """One entry per file, sized to the corpus those files belong to.
 
@@ -7100,18 +7132,23 @@ class _CorpusFileMemo:
     """
 
     def __init__(self, func, floor=_ROO_FILE_CACHE_FLOOR,
-                 ceiling=_ROO_FILE_CACHE_CEILING, row_budget=0):
+                 ceiling=_ROO_FILE_CACHE_CEILING, row_budget=0,
+                 row_ceiling=_ROO_FILE_CACHE_ROW_CEILING):
         self._func = func
         self._floor = floor
         self._ceiling = ceiling
-        # A row budget, not just a file count. Holding one entry per task means
-        # the retained volume is tasks x requests, and it is the requests that
-        # make a corpus heavy: 20,000 tasks of four requests and 2,000 tasks of
-        # forty are the same file count and a very different pile of dicts. So
-        # the file bound decides how many tasks can be held and this decides how
-        # many requests, and whichever bites first evicts least-recently-used.
+        # A row budget, not just a file count: the file bound decides how many
+        # tasks can be held and this decides how many requests. It is a FLOOR
+        # that the memo raises toward what the corpus actually asked for, capped
+        # by row_ceiling -- see the note above on why a flat budget below the
+        # corpus size is worse than no budget at all.
+        self._row_floor = row_budget
+        self._row_ceiling = row_ceiling
         self._row_budget = row_budget
         self._rows = 0
+        # Rows this corpus asked for on the last walk, hits included: the number
+        # a fully-retaining memo would need. Read at the next walk's start.
+        self._rows_asked = 0
         self._data: "OrderedDict[str, tuple]" = OrderedDict()
         self._bound = floor
         self._hits = 0
@@ -7120,18 +7157,32 @@ class _CorpusFileMemo:
     def note_corpus(self, live_paths) -> None:
         """Re-bind to the corpus the loader is about to walk, and forget the rest."""
         self._bound = min(self._ceiling, max(self._floor, len(live_paths)))
+        # Size the row budget to the corpus that was just walked, so a rebuild
+        # is bounded by the history it belongs to rather than by a constant
+        # chosen against a smaller one. Learned rather than guessed: request
+        # count per task is not visible from a directory listing.
+        if self._row_floor:
+            self._row_budget = min(
+                self._row_ceiling, max(self._row_floor, self._rows_asked)
+            )
+        self._rows_asked = 0
         self._evict()
         for gone in [key for key in self._data if key not in live_paths]:
             self._forget(gone)
 
     def _forget(self, key) -> None:
         entry = self._data.pop(key, None)
-        if entry is not None and self._row_budget:
+        if entry is not None and self._row_floor:
             self._rows -= _roo_entry_rows(entry[1])
 
     def _evict(self) -> None:
         while len(self._data) > self._bound:
             self._forget(next(iter(self._data)))
+        # Trimmed against the live budget, which note_corpus has already raised
+        # to cover the corpus this walk belongs to. Trimming only bites past the
+        # ceiling, where a bounded heap is worth more than full reuse; below it
+        # the budget is the corpus, so nothing here is evicted that the same
+        # walk is about to ask for again.
         if self._row_budget:
             while self._rows > self._row_budget and len(self._data) > 1:
                 self._forget(next(iter(self._data)))
@@ -7141,6 +7192,8 @@ class _CorpusFileMemo:
         hit = self._data.get(path_str)
         if hit is not None and hit[0] == stamp:
             self._hits += 1
+            if self._row_floor:
+                self._rows_asked += _roo_entry_rows(hit[1])
             self._data.move_to_end(path_str)
             return hit[1]
         self._misses += 1
@@ -7150,8 +7203,20 @@ class _CorpusFileMemo:
         value = self._func(path_str, mtime_ns, size, pricing_sig, *extra)
         self._forget(path_str)
         self._data[path_str] = (stamp, value)
-        if self._row_budget:
-            self._rows += _roo_entry_rows(value)
+        if self._row_floor:
+            rows = _roo_entry_rows(value)
+            self._rows += rows
+            self._rows_asked += rows
+            # GROW toward the corpus inside the walk rather than only at its
+            # start. A budget that learns only on the next walk spent the whole
+            # first walk trimming to the floor, so the first rebuild after a
+            # cold read re-read 1,634 of 3,001 files to refill what that trim
+            # had dropped. Capped here as well, so this can never exceed the
+            # heap the ceiling exists to bound.
+            if self._rows > self._row_budget:
+                self._row_budget = min(
+                    self._row_ceiling, max(self._row_budget, self._rows)
+                )
         self._evict()
         return value
 
@@ -7164,6 +7229,8 @@ class _CorpusFileMemo:
     def cache_clear(self) -> None:
         self._data.clear()
         self._rows = 0
+        self._rows_asked = 0
+        self._row_budget = self._row_floor
         self._hits = self._misses = 0
 
     def cache_info(self):
@@ -7181,14 +7248,6 @@ class _CorpusFileMemo:
 # equal to one from a decorated parser and reads the same in a test.
 _CacheInfo = namedtuple("CacheInfo", "hits misses maxsize currsize")
 
-# Requests retained across the whole corpus, in rows. Traced here rather than
-# estimated: one retained row costs 0.61 KB of dict, entry id and integers, so
-# 60,000 of them is ~36 MB whatever the shape of the corpus. A 3,000-task
-# corpus of four requests (12,000 rows) fits entirely; past the budget the memo
-# keeps the tasks it was asked about last and re-reads the ones it was not,
-# which costs a file rather than the corpus, and stops the panel holding a
-# second copy of a history the aggregate view already keeps.
-_ROO_FILE_CACHE_ROW_BUDGET = 60_000
 
 
 def _roo_entry_rows(value) -> int:

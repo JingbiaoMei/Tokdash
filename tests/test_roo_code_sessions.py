@@ -698,20 +698,117 @@ def test_the_memo_is_bounded_by_requests_as_well_as_by_files():
     memo = sessions._parse_roo_task_file_for_sessions
     memo.cache_clear()
     width = 200
+    tasks = 5_000
     original = memo._func
     memo._func = lambda path_str, mtime_ns, _size, _pricing_sig, *extra: [
         {"n": i} for i in range(width)
     ]
     try:
-        memo.note_corpus({f"/tmp/{i}" for i in range(5_000)})
-        for i in range(5_000):
+        memo.note_corpus({f"/tmp/{i}" for i in range(tasks)})
+        for i in range(tasks):
             memo(f"/tmp/{i}", i, 1, ())
         rows = sum(len(entry[1]) for entry in memo._data.values())
-        assert rows <= sessions._ROO_FILE_CACHE_ROW_BUDGET, (
-            f"the memo retained {rows} rows against a budget of "
-            f"{sessions._ROO_FILE_CACHE_ROW_BUDGET}")
+        asked = tasks * width
+        # The budget grows to the corpus and stops at the ceiling, so the test
+        # corpus is deliberately built to ask for several times what the heap is
+        # allowed to hold. Remove the row bound and this is a plain retained
+        # heap of a million request rows.
+        assert asked > 4 * sessions._ROO_FILE_CACHE_ROW_CEILING, (
+            f"the corpus asks for {asked} rows, too small to outgrow the ceiling")
+        assert rows <= sessions._ROO_FILE_CACHE_ROW_CEILING, (
+            f"the memo retained {rows} rows against a ceiling of "
+            f"{sessions._ROO_FILE_CACHE_ROW_CEILING}")
+        assert rows < asked, "a corpus this size must be trimmed, not held whole"
         # And it kept the most RECENT tasks, which is the reuse worth keeping.
         assert "/tmp/4999" in memo._data
+    finally:
+        memo._func = original
+        memo.cache_clear()
+
+
+def test_a_corpus_past_the_row_floor_still_re_reads_one_task():
+    """The row budget must follow the corpus, or it guarantees a miss per file.
+
+    A flat row budget below the corpus size reads like a memory guard and is the
+    opposite. The loader walks the corpus in order, so trimming to the budget
+    evicts the tasks the scan has already passed to make room for the ones it
+    has not reached -- which are exactly the ones the NEXT rebuild asks for.
+    Measured on 3,001 tasks of ~44 requests against a flat 60,000-row budget:
+    hits 0, misses 3,001, one changed task re-read all 3,000 files in 3.6 s, at
+    a peak 51 MB ABOVE the heap that held the whole corpus, because a re-parse
+    allocates the rows a second time.
+
+    Deliberately sized past the floor (600 tasks x 200 requests = 120,000 rows)
+    so the old flat budget would thrash here and the learned one must not. The
+    40-task test above cannot see this: its corpus is under every budget.
+    """
+    memo = sessions._parse_roo_task_file_for_sessions
+    memo.cache_clear()
+    tasks, width = 600, 200
+    assert tasks * width > sessions._ROO_FILE_CACHE_ROW_FLOOR, "corpus must cross the floor"
+    assert tasks * width <= sessions._ROO_FILE_CACHE_ROW_CEILING, "must sit under the ceiling"
+
+    paths = sorted(f"/tmp/roo-task-{i}/ui_messages.json" for i in range(tasks))
+    original = memo._func
+    memo._func = lambda path_str, mtime_ns, _size, _pricing_sig, *extra: [
+        {"n": i} for i in range(width)
+    ]
+    try:
+        # Walk one learns how many rows this corpus asks for and the budget
+        # moves at the start of the next, so walk two refills what the floor
+        # evicted and walk three is the first steady-state rebuild. Two walks of
+        # ramp is cheap: the first is cold whatever the budget says, and the
+        # second only re-reads what a budget that had already been learned would
+        # never have dropped.
+        memo.note_corpus(set(paths))
+        for path in paths:
+            memo(path, 1, 1, ())
+
+        memo.note_corpus(set(paths))
+        assert memo._row_budget >= tasks * width, (
+            f"the budget stayed at {memo._row_budget} against a corpus asking for "
+            f"{tasks * width} rows")
+        for path in paths:
+            memo(path, 1, 1, ())
+
+        memo.note_corpus(set(paths))
+        before = memo.cache_info()
+        changed = paths[tasks // 2]
+        for path in paths:
+            memo(path, 2 if path == changed else 1, 1, ())
+        after = memo.cache_info()
+
+        assert after.misses - before.misses == 1, (
+            f"a one-task change re-read {after.misses - before.misses} of {tasks} "
+            "files; the budget is evicting the walk it belongs to")
+        assert after.hits - before.hits == tasks - 1
+        assert sum(len(e[1]) for e in memo._data.values()) <= (
+            sessions._ROO_FILE_CACHE_ROW_CEILING)
+    finally:
+        memo._func = original
+        memo.cache_clear()
+
+
+def test_the_row_heap_stays_capped_when_the_corpus_outruns_it():
+    """Past the ceiling the heap wins, and the re-read is a documented cost."""
+    memo = sessions._parse_roo_task_file_for_sessions
+    memo.cache_clear()
+    tasks, width = 2_000, 200  # 400,000 rows, well past the ceiling
+    assert tasks * width > sessions._ROO_FILE_CACHE_ROW_CEILING
+
+    original = memo._func
+    memo._func = lambda path_str, mtime_ns, _size, _pricing_sig, *extra: [
+        {"n": i} for i in range(width)
+    ]
+    try:
+        for walk in range(2):
+            memo.note_corpus({f"/tmp/{i}" for i in range(tasks)})
+            for i in range(tasks):
+                memo(f"/tmp/{i}", 1, 1, ())
+        # It asked for 400,000 rows and got refused: the ceiling is the ceiling.
+        assert memo._row_budget == sessions._ROO_FILE_CACHE_ROW_CEILING
+        assert sum(len(e[1]) for e in memo._data.values()) <= (
+            sessions._ROO_FILE_CACHE_ROW_CEILING)
     finally:
         memo._func = original
         memo.cache_clear()

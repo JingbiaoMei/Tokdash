@@ -2,13 +2,18 @@
 import builtins
 import json
 import os
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 
 from tokdash.pricing import PricingDatabase
-from tokdash.sources.coding_tools import BaseParser, QoderCliParser
+from tokdash.sources.coding_tools import (
+    BaseParser,
+    QoderCliParser,
+    qoder_cli_unattributed_warning_reset,
+)
 from tokdash.usage_store import (
     UsageEntryStore,
     build_source_signature,
@@ -23,9 +28,14 @@ RATE = 0.01  # default QODER_USD_PER_CREDIT estimate
 
 @pytest.fixture(autouse=True)
 def _clear_qoder_cli_caches():
+    # The unattributed warning speaks once per (model, reason) per process, so
+    # a fixture that does not re-arm it makes the second warning test in the
+    # session pass for the wrong reason.
     BaseParser._entry_cache.clear()
+    qoder_cli_unattributed_warning_reset()
     yield
     BaseParser._entry_cache.clear()
+    qoder_cli_unattributed_warning_reset()
 
 
 def _parser(monkeypatch, tmp_path, roots: list):
@@ -1173,3 +1183,191 @@ def test_in_class_aliases_forward_every_parameter(monkeypatch, tmp_path):
     unattributed.clear()
     assert parser._transcript_candidate(line, None, {}, unattributed, None) is None
     assert unattributed == {("qfmodel", "window")}
+
+
+# --------------------------------- evidence that refuses rather than breaks
+# A field the CLI should never have written has two ways to do damage: it can
+# become a number the dashboard reports, or it can raise its way out of the
+# source. These cover both, plus the shared gate the three window sources pass.
+
+
+def test_absent_config_cannot_borrow_a_window_from_the_prompt(monkeypatch, tmp_path):
+    """model_config=null leaves no object to read, so nothing downstream is one.
+
+    The anchor is the whole difference. A search for the NEXT brace lands on
+    JSON the user pasted into the chat, which hands a model a window it never
+    had -- and every later zero-filled record for that model key recovers
+    ratio x that borrowed number, which reads as a measurement.
+    """
+    from tokdash.sources.coding_tools import qoder_cli_window_table
+
+    root = tmp_path / "root"
+    _run_log(root, "2026-09-24T17-29-24-649+01-00-a-p1",
+             '2026-09-24T17:31:58.738+01:00 INFO debug.message [QoderInferRequest '
+             'details] model_config=null, prompt="user pasted '
+             '{"key":"qwen","max_input_tokens":8192}", custom_model=null\n')
+    assert qoder_cli_window_table([root]) == {}
+
+    # End to end: the borrowed 8192 would have recovered 0.05 x 8192 = 410
+    # input tokens for a model that has no evidenced window at all.
+    _write_lines(root / "projects" / "p" / "aaaaaaaa-bbbb.jsonl",
+                 [_t_line("X", "2026-09-24T16:32:31.195Z", model="qwen",
+                          credits=1.0, ratio=0.05)])
+    assert _parser(monkeypatch, tmp_path, [root]).collect(None, None) == []
+
+
+def test_config_object_after_a_space_is_still_evidence(monkeypatch, tmp_path):
+    """Anchoring the payload must not lose a real log that spaced the marker.
+
+    raw_decode does not skip leading whitespace the way json.loads does, so
+    decoding has to start at the brace rather than at the gap before it.
+    """
+    from tokdash.sources.coding_tools import qoder_cli_window_table
+
+    root = tmp_path / "root"
+    _run_log(root, "2026-09-24T17-29-24-649+01-00-a-p1",
+             'INFO [QoderInferRequest details] model_config= '
+             '{"key":"qfmodel","max_input_tokens":180000}, custom_model=null\n')
+    assert qoder_cli_window_table([root]) == {"qfmodel": 180000}
+
+
+def test_hostile_payloads_cost_their_line_not_the_file(monkeypatch, tmp_path):
+    """One unreadable line must not silence the run's other evidence.
+
+    A 400-digit max_input_tokens overflows the float conversion (OverflowError,
+    not ValueError), and a payload nested a few thousand deep overflows the
+    decoder itself (RecursionError). Either one used to be raised out of the
+    scan, through the cache signature and into the dashboard request, which is
+    the opposite of the contract on qoder_cli_window_table().
+    """
+    from tokdash.sources.coding_tools import qoder_cli_window_table
+
+    root = tmp_path / "root"
+    _run_log(root, "2026-09-24T17-29-24-649+01-00-a-p1",
+             'model_config={"key":"huge","max_input_tokens":%s}\n' % ("9" * 400)
+             + 'model_config={"key":"deep","meta":{"a":' + "[" * 6000 + "}}\n"
+             + _cfg_line("lite", 200000) + "\n")
+    assert qoder_cli_window_table([root]) == {"lite": 200000}
+    # ...and the ordering must not matter: the good line is kept whether the
+    # hostile one came before or after it.
+    other = tmp_path / "other"
+    _run_log(other, "2026-09-24T17-29-24-649+01-00-a-p1",
+             _cfg_line("lite", 200000) + "\n"
+             + 'model_config={"key":"huge","max_input_tokens":%s}\n' % ("9" * 400))
+    assert qoder_cli_window_table([other]) == {"lite": 200000}
+
+
+def test_absurd_windows_are_not_evidence_from_any_source(monkeypatch, tmp_path):
+    """The ceiling is shared by the run log, the env var and the transcript.
+
+    ratio x window is the recovery, so an unbounded window turns an ordinary
+    ratio into a token count no endpoint could have billed: 0.05 x 1e30 is
+    5e28 "input tokens". Refusing it costs the record the named warning;
+    trusting it costs the dashboard its numbers.
+    """
+    from tokdash.sources.coding_tools import (
+        qoder_cli_runtime_config,
+        qoder_cli_window_table,
+    )
+
+    root = tmp_path / "root"
+    _run_log(root, "2026-09-24T17-29-24-649+01-00-a-p1",
+             'model_config={"key":"sentinel","max_input_tokens":1e30}\n'
+             + 'model_config={"key":"overflow","max_input_tokens":1e400}\n'
+             + 'model_config={"key":"big_but_real","max_input_tokens":1000000}\n')
+    assert qoder_cli_window_table([root]) == {"big_but_real": 1000000}
+
+    # The override is gated too: it is the one path a user can set by hand, and
+    # an absurd value there multiplies EVERY model.
+    monkeypatch.setenv("QODER_CLI_CONTEXT_WINDOW", "20000000")
+    assert qoder_cli_runtime_config()[1] is None
+    monkeypatch.setenv("QODER_CLI_CONTEXT_WINDOW", "256000")
+    assert qoder_cli_runtime_config()[1] == 256000
+
+    # A declared window past the ceiling is an unreadable value, so it neither
+    # adopts the sentinel nor clears what the file already declared.
+    root2 = tmp_path / "root2"
+    _run_log(root2, "2026-09-24T17-29-24-649+01-00-a-p1", _cfg_line("qfmodel", 180000) + "\n")
+    _write_lines(root2 / "projects" / "p" / "aaaaaaaa-bbbb.jsonl", [
+        _rc_line(131072),
+        _rc_line(1e30),
+        _t_line("X", "2026-09-24T16:32:31.195Z", model="qfmodel",
+                credits=1.0, ratio=_REAL_RATIO_AT_131072),
+    ])
+    entries = _parser(monkeypatch, tmp_path, [root2]).collect(None, None)
+    assert [e["input"] for e in entries] == [_REAL_IN]  # still the declared 131072
+
+
+def test_absurd_ratio_is_dropped_rather_than_crashing(monkeypatch, tmp_path):
+    """context_usage_ratio: 10**400 is a valid JSON int and not a usable number.
+
+    math.isfinite(10 ** 400) raises rather than returning False, and the
+    recovery multiplies as a float, so the value had to be refused upstream: a
+    field the CLI should never have written must cost that record, not the
+    source.
+    """
+    root = tmp_path / "root"
+    _run_log(root, "2026-09-24T17-29-24-649+01-00-a-p1", _cfg_line("qfmodel", 180000) + "\n")
+    _write_lines(root / "projects" / "p" / "aaaaaaaa-bbbb.jsonl", [
+        _t_line("X", "2026-09-24T16:32:31.195Z", model="qfmodel",
+                credits=1.0, ratio=int("9" * 400)),
+    ])
+    assert _parser(monkeypatch, tmp_path, [root]).collect(None, None) == []
+
+
+def test_unattributed_warning_speaks_once_per_cause(monkeypatch, tmp_path, caplog):
+    """A live session re-parses every poll; the advice must not scroll away.
+
+    _parse_all runs on every cache miss, and a session in progress changes a
+    transcript mtime between polls, so an ungoverned warning is the same block
+    again every few seconds for as long as the run lasts -- to the one reader
+    it was written for.
+    """
+    import logging
+    import time
+
+    root = tmp_path / "root"
+    path = _write_lines(root / "projects" / "p" / "aaaaaaaa-bbbb.jsonl",
+                        [_t_line("X", "2026-08-21T12:00:00.000Z", model="qmodel_38max",
+                                 credits=2.0, ratio=0.05)])
+    parser = _parser(monkeypatch, tmp_path, [root])
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="tokdash.sources.coding_tools"):
+        for _ in range(4):
+            assert parser.collect(None, None) == []
+            os.utime(path, ns=(time.time_ns() + 10 ** 9, time.time_ns() + 10 ** 9))
+    assert caplog.text.count("Pass QODER_CLI_CONTEXT_WINDOW=<size> to recover them.") == 1
+
+
+def test_merged_window_table_is_read_under_the_lock(monkeypatch, tmp_path):
+    """A warm hit reads the merged table as one value, while holding the lock.
+
+    The slot is a (signature, table) tuple in a module global, and serve and
+    the TUI warmers run on their own threads and clear it. Checking element 0
+    and returning element 1 as two separate global reads can straddle a clear
+    and hand back an empty table for a signature the caller just vouched for,
+    so a hit that acquires the lock zero times is reading it unguarded.
+    """
+    from tokdash.sources import coding_tools
+    from tokdash.sources.coding_tools import qoder_cli_window_table
+
+    root = tmp_path / "root"
+    _run_log(root, "2026-09-24T17-29-24-649+01-00-a-p1", _cfg_line("qfmodel", 180000) + "\n")
+    assert qoder_cli_window_table([root]) == {"qfmodel": 180000}  # warm the merge
+
+    acquires = []
+    real = threading.Lock()
+
+    class _Probe:
+        def __enter__(self):
+            real.acquire()
+            acquires.append(1)
+            return self
+
+        def __exit__(self, *exc):
+            real.release()
+            return False
+
+    monkeypatch.setattr(coding_tools, "_QODER_RUN_LOG_WINDOW_LOCK", _Probe())
+    assert qoder_cli_window_table([root]) == {"qfmodel": 180000}
+    assert len(acquires) == 1

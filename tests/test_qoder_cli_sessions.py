@@ -144,6 +144,7 @@ def _clear_caches():
     # This harness has more caches than any other: per-file parser, aggregate,
     # the shared signature TTL cache and the parser's own entry cache. An
     # under-cleared fixture produces a pass that says nothing.
+    coding_tools.qoder_cli_unattributed_warning_reset()
     sessions._parse_qoder_cli_session_file.cache_clear()
     sessions._load_qoder_cli_sessions.cache_clear()
     _sig_cache.clear()

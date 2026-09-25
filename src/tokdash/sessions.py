@@ -7115,8 +7115,6 @@ _ROO_FILE_CACHE_ROW_FLOOR = 60_000
 _ROO_FILE_CACHE_ROW_BYTES = 64 * 1024 * 1024
 _ROO_FILE_CACHE_ROW_BYTES_PER_ROW = 400
 _ROO_FILE_CACHE_ROW_CEILING = _ROO_FILE_CACHE_ROW_BYTES // _ROO_FILE_CACHE_ROW_BYTES_PER_ROW
-# Kept as the historical name for callers and tests that refer to the floor.
-_ROO_FILE_CACHE_ROW_BUDGET = _ROO_FILE_CACHE_ROW_FLOOR
 
 
 class _CorpusFileMemo:
@@ -7259,7 +7257,7 @@ def _roo_entry_rows(value) -> int:
 _roo_file_memos: list = []
 
 
-def _corpus_file_memo(func, row_budget=_ROO_FILE_CACHE_ROW_BUDGET):
+def _corpus_file_memo(func, row_budget=_ROO_FILE_CACHE_ROW_FLOOR):
     memo = _CorpusFileMemo(func, row_budget=row_budget)
     _roo_file_memos.append(memo)
     return memo

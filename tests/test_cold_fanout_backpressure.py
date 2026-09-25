@@ -303,8 +303,13 @@ def test_a_background_stale_refresh_never_waits(monkeypatch):
     assert api._compute_semaphore.acquire(blocking=False)
     try:
         started = time.monotonic()
-        assert api._acquire_compute_slot(wait=False) is False
+        # A refusal hands back None rather than a bare False so the caller can
+        # only release the semaphore it actually took. It must also leave the
+        # permit alone: taking one while reporting a refusal would leak a slot.
+        assert api._acquire_compute_slot(wait=False) is None
         assert time.monotonic() - started < 1.0
+        assert not api._compute_semaphore.acquire(blocking=False), (
+            "a refused slot still took the semaphore")
     finally:
         api._compute_semaphore.release()
 

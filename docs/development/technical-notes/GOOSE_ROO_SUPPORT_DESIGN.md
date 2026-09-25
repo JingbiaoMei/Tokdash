@@ -844,6 +844,30 @@ rewritten:
    over-cap corpus degrades to the oldest tasks rather than to no sharing at
    all.
 
+7. **A retention bound below the corpus size is not a bound, it is a guaranteed
+   miss.** The per-file memos also cap the *requests* they retain, so that
+   2,000 tasks of forty requests do not cost what 20,000 tasks of four cost. At
+   a flat 60,000 rows against 3,001 tasks of real transcripts (132,936 rows)
+   that cap was smaller than the thing it bounded, and because the loader walks
+   the corpus in order, trimming to it evicted the tasks the walk had already
+   passed to free room for the ones it had not reached -- which are exactly the
+   tasks the next rebuild asks for. One changed task re-read all 3,000 files in
+   3.5 s with hits at zero, and cost a peak 51 MB MORE than holding the whole
+   corpus, because a re-parse allocates the rows a second time. The budget now
+   follows the corpus, learned from the walk that needs it, under a byte ceiling
+   (~400 B a row, measured at 270-340 B across 20 and 80 rows per task):
+   1 file and 1.1-1.3 s at 383 MB on the same corpus, 159 ms at 601 tasks.
+
+   Worth stating as a cliff rather than a slope, because it is one. Drop the
+   ceiling to 32 MB, just under what that corpus needs, and the 3.5 s thrash
+   returns in full: below the corpus the memo buys nothing at any cap. Past the
+   ceiling the claim inverts honestly -- a change re-reads the corpus, not a
+   file -- and the only thing that removes the cliff is persisting Roo's task
+   rows the way Codex and Kimi persist theirs, so a rebuild has stored rows to
+   fall back to instead of a transcript to re-parse. That is a change to the
+   store and its deletion semantics, not a cache constant, so it is left as a
+   decision rather than made here.
+
 The rule that made the scan cheap applies to anything read per task, and the last
 place it was still being broken was the model map: it keys its cache on
 `api_conversation_history.json`, so it stat-ed that sibling once per task

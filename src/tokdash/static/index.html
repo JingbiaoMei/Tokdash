@@ -33,7 +33,6 @@
   <script>tailwind.config = { darkMode: 'class' }</script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
-  <script src="https://unpkg.com/lucide@latest"></script>
 
   <!-- Flatpickr Date Picker -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">
@@ -90,7 +89,7 @@
     html {
       min-height: 100%;
       background: var(--color-bg);
-      overflow-x: hidden;
+      overflow-x: clip;
       max-width: 100vw;
     }
 
@@ -103,7 +102,7 @@
       background-repeat: no-repeat;
       background-size: 100% 100%;
       color: var(--color-text);
-      overflow-x: hidden;
+      overflow-x: clip;
       max-width: 100vw;
     }
 
@@ -2213,34 +2212,6 @@
       transform: scale(1);
     }
 
-    /* Achievement Cards */
-    .achievement-card {
-      position: relative;
-      border-radius: 14px;
-      padding: 16px;
-      background: var(--color-surface);
-      border: 1px solid var(--color-border);
-      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-      display: flex;
-      flex-direction: column;
-      justify-content: space-between;
-    }
-    .achievement-card:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 10px 24px -6px rgba(0, 0, 0, 0.25);
-    }
-    .achievement-card.unlocked {
-      border-color: rgba(245, 158, 11, 0.4);
-      background: linear-gradient(135deg, color-mix(in srgb, #f59e0b 6%, var(--color-surface)), var(--color-surface));
-    }
-    .achievement-card.locked {
-      opacity: 0.65;
-      filter: grayscale(0.6);
-    }
-    .achievement-card.locked:hover {
-      opacity: 0.9;
-      filter: grayscale(0.2);
-    }
 
     /* Sparkline Keyframes & Glow Animations */
     @keyframes sparklineDraw {
@@ -2259,28 +2230,6 @@
       animation: cardFadeInUp 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
     }
 
-    /* Hermes live header badge */
-    .hermes-header-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 7px;
-      padding: 4px 11px;
-      border-radius: 9999px;
-      background: rgba(168, 85, 247, 0.1);
-      border: 1px solid rgba(168, 85, 247, 0.28);
-      color: #e9d5ff;
-      font-size: 11px;
-      font-weight: 600;
-      cursor: pointer;
-      user-select: none;
-      transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
-    }
-    .hermes-header-pill:hover {
-      background: rgba(168, 85, 247, 0.2);
-      border-color: rgba(168, 85, 247, 0.55);
-      box-shadow: 0 0 14px rgba(168, 85, 247, 0.25);
-      transform: translateY(-1px);
-    }
     .hermes-live-dot {
       width: 7px;
       height: 7px;
@@ -2412,7 +2361,7 @@
       border-radius: 8px;
       font-size: 14px;
       font-weight: 500;
-      color: #94a3b8;
+      color: var(--color-muted);
       transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
       cursor: pointer;
       user-select: none;
@@ -2420,15 +2369,15 @@
       position: relative;
     }
     .sidebar-nav-item:hover {
-      color: #ffffff;
-      background: rgba(255, 255, 255, 0.05);
+      color: var(--color-text);
+      background: color-mix(in srgb, var(--color-text) 6%, transparent);
       transform: translateX(2px);
     }
     .sidebar-nav-item.active {
-      color: #ffffff;
-      background: rgba(99, 102, 241, 0.14);
+      color: var(--color-text);
+      background: color-mix(in srgb, var(--color-primary, #6366f1) 14%, transparent);
       font-weight: 600;
-      border: 1px solid rgba(99, 102, 241, 0.3);
+      border: 1px solid color-mix(in srgb, var(--color-primary, #6366f1) 30%, transparent);
     }
     .sidebar-nav-item.active::before {
       content: '';
@@ -2489,96 +2438,6 @@
       }
     }
 
-    /* Enhanced Light Mode Overrides for Modern High-Craft Theme */
-    html:not(.dark) {
-      --color-bg: #f8fafc;
-      --color-text: #0f172a;
-      --color-muted: #64748b;
-      --color-border: #e2e8f0;
-      --color-surface-glass: rgba(255, 255, 255, 0.95);
-    }
-    html:not(.dark) body {
-      background-color: #f8fafc;
-      color: #0f172a;
-    }
-    html:not(.dark) #appSidebar {
-      background-color: #ffffff;
-      border-right-color: #e2e8f0;
-    }
-    html:not(.dark) #appSidebar .border-white\/5,
-    html:not(.dark) #appSidebar .border-white\/10 {
-      border-color: #f1f5f9;
-    }
-    html:not(.dark) #appSidebar .bg-black\/20,
-    html:not(.dark) #appSidebar .bg-black\/30,
-    html:not(.dark) #appSidebar .bg-black\/40 {
-      background-color: #f8fafc;
-    }
-    html:not(.dark) .sidebar-nav-item {
-      color: #475569;
-    }
-    html:not(.dark) .sidebar-nav-item:hover {
-      color: #0f172a;
-      background: rgba(0, 0, 0, 0.05);
-    }
-    html:not(.dark) .sidebar-nav-item.active {
-      color: #4338ca;
-      background: #eef2ff;
-      border-color: #c7d2fe;
-    }
-    html:not(.dark) .surface {
-      background: #ffffff;
-      border-color: #e2e8f0;
-      box-shadow: 0 4px 16px -2px rgba(15, 23, 42, 0.06), 0 1px 3px rgba(15, 23, 42, 0.04);
-    }
-    html:not(.dark) .surface:hover {
-      border-color: #cbd5e1;
-      box-shadow: 0 12px 28px -4px rgba(15, 23, 42, 0.1);
-    }
-    html:not(.dark) #overviewKpiGrid > .surface {
-      background: radial-gradient(circle at top left, rgba(99, 102, 241, 0.03), transparent 70%), #ffffff;
-      box-shadow: 0 2px 10px rgba(15, 23, 42, 0.05);
-    }
-    html:not(.dark) .sidebar-export-popover {
-      background: #ffffff;
-      border-color: #cbd5e1;
-      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
-    }
-    html:not(.dark) .sidebar-export-popover a,
-    html:not(.dark) .sidebar-export-popover button {
-      color: #334155;
-    }
-    html:not(.dark) .sidebar-export-popover a:hover,
-    html:not(.dark) .sidebar-export-popover button:hover {
-      background: #f1f5f9;
-      color: #0f172a;
-    }
-    html:not(.dark) .session-drawer {
-      background: #ffffff;
-      border-left-color: #e2e8f0;
-      color: #0f172a;
-    }
-    html:not(.dark) .session-table thead tr {
-      background: #f8fafc;
-      border-bottom-color: #e2e8f0;
-    }
-    html:not(.dark) .session-table tr {
-      border-bottom-color: #f1f5f9;
-    }
-    html:not(.dark) .session-table tr:hover {
-      background: #f8fafc;
-    }
-    html:not(.dark) .ui-input {
-      background: #ffffff;
-      border-color: #cbd5e1;
-      color: #0f172a;
-    }
-    html:not(.dark) .hermes-header-pill {
-      background: #ffffff;
-      border-color: #e2e8f0;
-      color: #334155;
-    }
-
     /* Keyframes and Animations */
     @keyframes kpiFadeIn {
       from { opacity: 0; transform: translateY(6px); }
@@ -2596,42 +2455,6 @@
       animation: sparklineDraw 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
     }
 
-    /* Achievements Grid & Badges */
-    .achievement-card {
-      background: rgba(13, 18, 31, 0.7);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 14px;
-      padding: 16px;
-      position: relative;
-      overflow: hidden;
-      transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-    }
-    html:not(.dark) .achievement-card {
-      background: #ffffff;
-      border-color: #e2e8f0;
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
-    }
-    .achievement-card:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 10px 24px -4px rgba(0, 0, 0, 0.3);
-    }
-    .achievement-card.unlocked {
-      border-color: rgba(245, 158, 11, 0.35);
-      background: radial-gradient(circle at top right, rgba(245, 158, 11, 0.08), transparent 70%), rgba(13, 18, 31, 0.85);
-    }
-    html:not(.dark) .achievement-card.unlocked {
-      border-color: #fbbf24;
-      background: radial-gradient(circle at top right, rgba(245, 158, 11, 0.1), transparent 70%), #ffffff;
-    }
-    .achievement-card.unlocked::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      height: 2px;
-      background: linear-gradient(90deg, #f59e0b, #eab308, transparent);
-    }
     .achievement-icon-wrap {
       width: 44px;
       height: 44px;
@@ -2644,24 +2467,13 @@
       background: rgba(255, 255, 255, 0.05);
       border: 1px solid rgba(255, 255, 255, 0.08);
     }
-    .achievement-card.unlocked .achievement-icon-wrap {
-      background: rgba(245, 158, 11, 0.15);
-      border-color: rgba(245, 158, 11, 0.35);
-      box-shadow: 0 0 14px rgba(245, 158, 11, 0.2);
-    }
-    .achievement-card.locked {
-      opacity: 0.65;
-    }
-    .achievement-card.locked:hover {
-      opacity: 0.95;
-    }
   </style>
   <script>document.write(`<link rel="stylesheet" href="${window.tokdashPath('/static/themes.css')}" />`);</script>
 </head>
 
-<body class="flex min-h-screen bg-slate-50 text-slate-800 dark:bg-[#07090e] dark:text-slate-100 font-sans selection:bg-indigo-500 selection:text-white transition-colors duration-200 relative">
+<body class="flex min-h-screen font-sans selection:bg-indigo-500 selection:text-white transition-colors duration-200 relative">
   <!-- TokDash v4 SVG Hero Loader -->
-  <div id="tokdash-loader" class="fixed inset-0 z-50 flex items-center justify-center bg-[#07090e]/90 backdrop-blur-md transition-opacity duration-300" style="position:fixed !important; top:0 !important; left:0 !important; width:100vw !important; height:100vh !important; pointer-events:none;">
+  <div id="tokdash-loader" class="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-md transition-opacity duration-300" style="position:fixed !important; top:0 !important; left:0 !important; width:100vw !important; height:100vh !important; pointer-events:none; background: var(--color-bg);">
     <svg xmlns="http://www.w3.org/2000/svg" class="ap" viewBox="0 0 64 64" width="96" height="96" fill="none" role="img" aria-label="Loading">
       <style>
         svg { color: var(--loader-color, #f5f5f7); --rate: 1; }
@@ -2704,44 +2516,26 @@
   <!-- Interactive Mesh / Constellation Canvas Background -->
   <canvas id="linkyBg" class="fixed inset-0 pointer-events-none z-0 opacity-40"></canvas>
   <!-- Modern High-Tech Navigation Sidebar -->
-  <aside id="appSidebar" class="w-64 bg-[#090b12] border-r border-white/5 flex flex-col flex-shrink-0 min-h-screen sticky top-0 h-screen z-30 transition-all duration-300 select-none hidden md:flex">
+  <aside id="appSidebar" class="w-64 border-r flex flex-col flex-shrink-0 min-h-screen sticky top-0 h-screen z-30 transition-all duration-300 select-none hidden md:flex" style="background: var(--color-surface-glass, var(--color-bg)); border-color: var(--color-border);">
     <!-- Brand -->
-    <div class="p-4 border-b border-white/5 flex items-center justify-between">
+    <div class="p-4 border-b flex items-center justify-between" style="border-color: var(--color-border);">
       <div class="flex items-center gap-3">
         <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 p-0.5 shadow-[0_0_12px_rgba(99,102,241,0.35)] flex items-center justify-center flex-shrink-0">
           <script>document.write(`<img src="${window.tokdashPath('/static/icons/logo.png')}" alt="Tokdash logo" width="28" height="28" style="display:block; width:28px; height:28px; object-fit:contain;" />`);</script>
         </div>
         <div>
           <div class="flex items-center gap-1.5">
-            <span class="font-extrabold text-sm tracking-tight text-white font-mono">Tokdash</span>
+            <span class="font-extrabold text-sm tracking-tight font-mono" style="color: var(--color-text);">Tokdash</span>
             <span class="text-[9px] font-bold px-1.5 py-0.2 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">v2.6.2</span>
           </div>
-          <span class="text-[10px] text-slate-500">Agent Observability</span>
+          <span class="text-[10px]" style="color: var(--color-muted);">Agent Observability</span>
         </div>
-      </div>
-    </div>
-
-    <!-- Active Agent Status Pill -->
-    <div class="px-3.5 py-2.5 border-b border-white/5 bg-black/20">
-      <div class="flex items-center justify-between text-xs">
-        <div class="flex items-center gap-2.5">
-          <div class="w-6 h-6 rounded-md bg-purple-500/20 border border-purple-500/30 flex items-center justify-center overflow-hidden flex-shrink-0">
-            <script>document.write(`<img src="${window.tokdashPath('/static/icons/agents/hermes.png')}" alt="Hermes logo" width="18" height="18" class="object-contain" onerror="this.style.display='none'; if(this.nextElementSibling) this.nextElementSibling.style.display='block';" />`);</script>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-purple-400" style="display:none;"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
-          </div>
-          <span class="font-bold text-slate-200 text-xs">Hermes Agent</span>
-        </div>
-        <span class="text-[9px] font-mono text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20 font-bold">ONLINE</span>
-      </div>
-      <div class="text-[10px] text-slate-400 mt-1.5 flex items-center justify-between font-mono">
-        <span>Active Telemetry</span>
-        <span class="text-indigo-400 font-bold" id="sidebarSessionCount">—</span>
       </div>
     </div>
 
     <!-- Navigation Menu Items with Clean SVGs -->
     <nav class="flex-1 px-2.5 py-3 space-y-1 overflow-y-auto" aria-label="Main sidebar navigation">
-      <div class="text-[11.5px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 px-3 pt-2 pb-1">Telemetry</div>
+      <div class="text-[11.5px] font-bold uppercase tracking-wider px-3 pt-2 pb-1" style="color: var(--color-muted);">Telemetry</div>
       <a class="sidebar-nav-item active" data-tab-target="overview" onclick="activateDashboardTab('overview')">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-indigo-400"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>
         <span>Overview</span>
@@ -2751,42 +2545,26 @@
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-sky-400"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg>
         <span>Sessions Explorer</span>
       </a>
-      <a class="sidebar-nav-item" data-tab-target="traces" onclick="activateDashboardTab('traces')">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-teal-400"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-        <span>Live Traces</span>
-      </a>
+      <div class="text-[11.5px] font-bold uppercase tracking-wider px-3 pt-3 pb-1" style="color: var(--color-muted);">Intelligence</div>
 
-      <div class="text-[11.5px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 px-3 pt-3 pb-1">Intelligence</div>
-      <a class="sidebar-nav-item" data-tab-target="models" onclick="activateDashboardTab('models')">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-amber-400"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"/></svg>
-        <span>Model Intelligence</span>
-      </a>
-      <a class="sidebar-nav-item" data-tab-target="tools" onclick="activateDashboardTab('tools')">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-violet-400"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
-        <span>Agent Capabilities</span>
-      </a>
       <a class="sidebar-nav-item" data-tab-target="stats" onclick="activateDashboardTab('stats')">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-yellow-400"><line x1="18" x2="18" y1="20" y2="10"/><line x1="12" x2="12" y1="20" y2="4"/><line x1="6" x2="6" y1="20" y2="14"/></svg>
         <span>Stats & Heatmap</span>
       </a>
-      <a class="sidebar-nav-item" data-tab-target="achievements" onclick="activateDashboardTab('achievements')">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-amber-400"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>
-        <span>Achievements</span>
-        <span class="ml-auto text-[10px] px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-300 font-mono font-bold" id="sidebarAchievementCount" style="display:none;"></span>
-      </a>
+
       <a class="sidebar-nav-item" data-tab-target="report" onclick="activateDashboardTab('report')">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-emerald-400"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" x2="8" y1="13" y2="13"/><line x1="16" x2="8" y1="17" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
         <span>Usage Report</span>
       </a>
 
-      <div class="text-[11.5px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 px-3 pt-3 pb-1">Infrastructure</div>
+      <div class="text-[11.5px] font-bold uppercase tracking-wider px-3 pt-3 pb-1" style="color: var(--color-muted);">Infrastructure</div>
       <a class="sidebar-nav-item" data-tab-target="quota" onclick="activateDashboardTab('quota')">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-cyan-400"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg>
         <span>Quota & Budgets</span>
       </a>
       <a class="sidebar-nav-item" data-tab-target="servers" onclick="activateDashboardTab('servers')">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-indigo-400"><rect width="20" height="8" x="2" y="2" rx="2" ry="2"/><rect width="20" height="8" x="2" y="14" rx="2" ry="2"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/></svg>
-        <span>MCP & Servers</span>
+        <span>Servers</span>
       </a>
       <a class="sidebar-nav-item" data-tab-target="pricing" onclick="activateDashboardTab('pricing')">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-pink-400"><line x1="12" x2="12" y1="2" y2="22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
@@ -2795,7 +2573,7 @@
     </nav>
 
     <!-- Sidebar Footer Quick Actions -->
-    <div class="px-2.5 py-2.5 border-t border-white/5 bg-black/40 space-y-1 relative">
+    <div class="px-2.5 py-2.5 border-t space-y-1 relative" style="border-color: var(--color-border); background: var(--color-surface-glass, transparent);">
       <!-- Floating popover for Export -->
       <div id="sidebarExportPopover" class="sidebar-export-popover" style="display:none;">
         <a href="/api/export/csv" download="tokdash_sessions.csv">
@@ -2828,20 +2606,10 @@
       </button>
     </div>
 
-    <!-- Sidebar Bottom Status Card -->
-    <div class="p-3 border-t border-white/5 bg-black/30">
-      <div class="p-2.5 rounded-lg bg-slate-900/60 border border-white/5 text-[11px] font-mono">
-        <div class="text-slate-400 flex items-center justify-between mb-1">
-          <span>Hermes DB</span>
-          <span class="text-emerald-400 font-bold">Connected</span>
-        </div>
-        <div class="text-slate-500 text-[10px] truncate" title="AppData/Local/hermes/state.db">state.db</div>
-      </div>
-    </div>
   </aside>
 
   <!-- Main Viewport -->
-  <div class="flex-1 min-w-0 flex flex-col min-h-screen bg-[#07090e] overflow-x-hidden dashboard-main">
+  <div class="flex-1 min-w-0 flex flex-col min-h-screen overflow-x-hidden dashboard-main">
     <div class="w-full max-w-[1680px] p-4 sm:p-6 lg:p-8 space-y-6">
 
       <!-- Top bar -->
@@ -2856,14 +2624,6 @@
               <div class="flex items-center gap-2">
                 <h1 class="text-xl sm:text-2xl font-extrabold tracking-tight mono text-slate-900 dark:text-white">Tokdash</h1>
                 <span class="text-[9px] font-bold px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-500 dark:text-indigo-300 border border-indigo-500/30 font-mono">v2.6.2</span>
-              </div>
-              <div id="hermesHeaderBadge" class="hermes-header-pill" title="Click to view Telemetry Hub" onclick="activateDashboardTab('hermes')" style="display:none;">
-                <span class="hermes-live-dot"></span>
-                <span class="hermes-pill-title">Telemetry Live</span>
-                <span class="hermes-pill-sep">·</span>
-                <span id="hermesHeaderBadgeCount">—</span>
-                <span class="hermes-pill-sep">·</span>
-                <span class="text-emerald-500 dark:text-emerald-400 font-bold font-mono">Hermes & Antigravity</span>
               </div>
             </div>
             <p id="lastUpdate" class="tokdash-loading-placeholder text-xs mt-2" style="color: var(--color-label);"><span class="tokdash-loading-label">Loading...</span></p>
@@ -2978,7 +2738,7 @@
                 </div>
               </div>
             </div>
-            <button id="releaseNotesToggle" class="btn btn-ghost compact-control release-notes-trigger" type="button" aria-controls="releaseNotesDialog" aria-expanded="false" style="display:none !important;" aria-hidden="true">
+            <button id="releaseNotesToggle" class="btn btn-ghost compact-control release-notes-trigger" type="button" aria-controls="releaseNotesDialog" aria-expanded="false">
               <svg class="release-notes-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                 <path d="M6.5 4.5h11a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.7"/>
                 <path d="M8 9h8M8 12h8M8 15h5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
@@ -3014,7 +2774,7 @@
             <span id="serverCountChip" class="text-xs font-semibold" style="display:none;padding:5px 9px;border:1px solid var(--color-border);border-radius:999px;color:var(--color-muted);"></span>
 
             <div id="settingsMenu" class="settings-menu">
-              <button id="settingsToggle" class="btn btn-ghost compact-control settings-trigger" type="button" aria-expanded="false" aria-controls="settingsPanel" style="display:none !important;" aria-hidden="true">
+              <button id="settingsToggle" class="btn btn-ghost compact-control settings-trigger" type="button" aria-expanded="false" aria-controls="settingsPanel">
                 <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                   <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" stroke="currentColor" stroke-width="1.8"/>
                   <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.86 2.86-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21H9.55v-.1a1.7 1.7 0 0 0-1.08-1.56 1.7 1.7 0 0 0-1.88.34l-.06.06-2.86-2.86.06-.06A1.7 1.7 0 0 0 4.07 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H2.3V9.55h.1a1.7 1.7 0 0 0 1.56-1.08 1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.86-2.86.06.06A1.7 1.7 0 0 0 8.36 4.07a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V2.3h4.05v.1a1.7 1.7 0 0 0 1.08 1.56 1.7 1.7 0 0 0 1.88-.34l.06-.06 2.86 2.86-.06.06a1.7 1.7 0 0 0-.34 1.88 1.7 1.7 0 0 0 .6 1 1.7 1.7 0 0 0 1.1.4h.1v4.05h-.1a1.7 1.7 0 0 0-1.59 1.19Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -3065,121 +2825,7 @@
                         <span id="themeModeLabel">Light</span>
                       </button>
                     </div>
-                    <div class="settings-row">
-                      <span class="settings-label">Theme Preset</span>
-                      <select id="curatedThemeSelect" class="ui-input settings-select" onchange="applyCuratedTheme(this.value)">
-                        <option value="classic">🌙 Dark Obsidian (Default)</option>
-                        <option value="flat">☀️ Clean Light</option>
-                        <option value="midnight">🌌 Midnight Blue</option>
-                        <option value="elevated">💻 System Default</option>
-                      </select>
-                    </div>
-                    <div class="settings-row">
-                      <span class="settings-label">Currency</span>
-                      <select id="userCurrencySelect" class="ui-input settings-select" onchange="applyUserCurrency(this.value)">
-                        <option value="USD">USD ($) - US Dollar</option>
-                        <option value="EUR">EUR (€) - Euro</option>
-                        <option value="GBP">GBP (£) - British Pound</option>
-                        <option value="JPY">JPY (¥) - Japanese Yen</option>
-                        <option value="INR">INR (₹) - Indian Rupee</option>
-                        <option value="CAD">CAD ($) - Canadian Dollar</option>
-                        <option value="AUD">AUD ($) - Australian Dollar</option>
-                        <option value="CHF">CHF (Fr) - Swiss Franc</option>
-                        <option value="CNY">CNY (¥) - Chinese Yuan</option>
-                        <option value="SGD">SGD ($) - Singapore Dollar</option>
-                        <option value="HKD">HKD ($) - Hong Kong Dollar</option>
-                        <option value="NZD">NZD ($) - New Zealand Dollar</option>
-                        <option value="KRW">KRW (₩) - South Korean Won</option>
-                        <option value="BRL">BRL (R$) - Brazilian Real</option>
-                        <option value="MXN">MXN ($) - Mexican Peso</option>
-                        <option value="SEK">SEK (kr) - Swedish Krona</option>
-                        <option value="NOK">NOK (kr) - Norwegian Krone</option>
-                        <option value="DKK">DKK (kr) - Danish Krone</option>
-                        <option value="PLN">PLN (zł) - Polish Zloty</option>
-                        <option value="TRY">TRY (₺) - Turkish Lira</option>
-                        <option value="ZAR">ZAR (R) - South African Rand</option>
-                        <option value="AED">AED (د.إ) - UAE Dirham</option>
-                        <option value="SAR">SAR (﷼) - Saudi Riyal</option>
-                        <option value="ILS">ILS (₪) - Israeli Shekel</option>
-                        <option value="THB">THB (฿) - Thai Baht</option>
-                        <option value="IDR">IDR (Rp) - Indonesian Rupiah</option>
-                        <option value="MYR">MYR (RM) - Malaysian Ringgit</option>
-                        <option value="PHP">PHP (₱) - Philippine Peso</option>
-                        <option value="VND">VND (₫) - Vietnamese Dong</option>
-                        <option value="TWD">TWD (NT$) - Taiwan Dollar</option>
-                        <option value="CZK">CZK (Kč) - Czech Koruna</option>
-                        <option value="HUF">HUF (Ft) - Hungarian Forint</option>
-                        <option value="RON">RON (lei) - Romanian Leu</option>
-                        <option value="CLP">CLP ($) - Chilean Peso</option>
-                        <option value="COP">COP ($) - Colombian Peso</option>
-                        <option value="ARS">ARS ($) - Argentine Peso</option>
-                        <option value="EGP">EGP (E£) - Egyptian Pound</option>
-                        <option value="NGN">NGN (₦) - Nigerian Naira</option>
-                        <option value="PKR">PKR (₨) - Pakistani Rupee</option>
-                        <option value="BDT">BDT (৳) - Bangladeshi Taka</option>
-                        <option value="KZT">KZT (₸) - Kazakhstani Tenge</option>
-                        <option value="QAR">QAR (﷼) - Qatari Riyal</option>
-                        <option value="KWD">KWD (KD) - Kuwaiti Dinar</option>
-                        <option value="OMR">OMR (﷼) - Omani Rial</option>
-                        <option value="BHD">BHD (BD) - Bahraini Dinar</option>
-                        <option value="PEN">PEN (S/) - Peruvian Sol</option>
-                        <option value="UAH">UAH (₴) - Ukrainian Hryvnia</option>
-                        <option value="MAD">MAD (DH) - Moroccan Dirham</option>
-                        <option value="DZD">DZD (DA) - Algerian Dinar</option>
-                        <option value="KES">KES (KSh) - Kenyan Shilling</option>
-                        <option value="GHS">GHS (GH₵) - Ghanaian Cedi</option>
-                        <option value="ETH">ETH (Br) - Ethiopian Birr</option>
-                        <option value="LKR">LKR (Rs) - Sri Lankan Rupee</option>
-                        <option value="NPR">NPR (Rs) - Nepalese Rupee</option>
-                        <option value="VUV">VUV (Vt) - Vanuatu Vatu</option>
-                        <option value="CRC">CRC (₡) - Costa Rican Colon</option>
-                        <option value="DOP">DOP (RD$) - Dominican Peso</option>
-                        <option value="UYU">UYU ($U) - Uruguayan Peso</option>
-                        <option value="BAM">BAM (KM) - Bosnian Mark</option>
-                        <option value="BGN">BGN (лв) - Bulgarian Lev</option>
-                        <option value="HRK">HRK (kn) - Croatian Kuna</option>
-                        <option value="RSD">RSD (din) - Serbian Dinar</option>
-                        <option value="ISK">ISK (kr) - Icelandic Krona</option>
-                        <option value="JOD">JOD (JD) - Jordanian Dinar</option>
-                        <option value="LBP">LBP (L£) - Lebanese Pound</option>
-                        <option value="TND">TND (DT) - Tunisian Dinar</option>
-                        <option value="UGX">UGX (USh) - Ugandan Shilling</option>
-                        <option value="TZS">TZS (TSh) - Tanzanian Shilling</option>
-                        <option value="ZMW">ZMW (ZK) - Zambian Kwacha</option>
-                        <option value="BWP">BWP (P) - Botswana Pula</option>
-                        <option value="MUR">MUR (Rs) - Mauritian Rupee</option>
-                        <option value="NAD">NAD (N$) - Namibian Dollar</option>
-                        <option value="MZN">MZN (MT) - Mozambican Metical</option>
-                        <option value="BOB">BOB (Bs) - Bolivian Boliviano</option>
-                        <option value="PYG">PYG (₲) - Paraguayan Guarani</option>
-                        <option value="GTQ">GTQ (Q) - Guatemalan Quetzal</option>
-                        <option value="HNL">HNL (L) - Honduran Lempira</option>
-                        <option value="NIO">NIO (C$) - Nicaraguan Cordoba</option>
-                        <option value="PAB">PAB (B/.) - Panamanian Balboa</option>
-                        <option value="JMD">JMD (J$) - Jamaican Dollar</option>
-                        <option value="TTD">TTD (TT$) - Trinidad Dollar</option>
-                        <option value="BBD">BBD (Bds$) - Barbadian Dollar</option>
-                        <option value="XOF">XOF (CFA) - West African Franc</option>
-                        <option value="XAF">XAF (FCFA) - Central African Franc</option>
-                        <option value="GEL">GEL (₾) - Georgian Lari</option>
-                        <option value="AMD">AMD (֏) - Armenian Dram</option>
-                        <option value="AZN">AZN (₼) - Azerbaijani Manat</option>
-                        <option value="UZS">UZS (so'm) - Uzbek Som</option>
-                        <option value="KGS">KGS (som) - Kyrgyz Som</option>
-                        <option value="TJS">TJS (SM) - Tajik Somoni</option>
-                        <option value="MNT">MNT (₮) - Mongolian Tugrik</option>
-                        <option value="LAK">LAK (₭) - Lao Kip</option>
-                        <option value="KHR">KHR (៛) - Cambodian Riel</option>
-                        <option value="BND">BND (B$) - Brunei Dollar</option>
-                        <option value="MOP">MOP (MOP$) - Macanese Pataca</option>
-                        <option value="FJD">FJD (FJ$) - Fijian Dollar</option>
-                        <option value="PGK">PGK (K) - Papua New Guinean Kina</option>
-                        <option value="WST">WST (WS$) - Samoan Tala</option>
-                        <option value="SCR">SCR (SR) - Seychellois Rupee</option>
-                        <option value="MVR">MVR (Rf) - Maldivian Rufiyaa</option>
-                      </select>
-                    </div>
-                    <label class="settings-row" for="styleThemeSelect" style="display:none !important;" aria-hidden="true">
+                    <label class="settings-row" for="styleThemeSelect">
                       <span class="settings-label" data-i18n="styleTheme">Style</span>
                       <select id="styleThemeSelect" class="ui-input style-select settings-select" aria-label="Style theme">
                         <option value="classic" data-i18n="styleClassic">Classic</option>
@@ -3223,11 +2869,6 @@
       <nav class="mt-5 flex flex-wrap gap-2" aria-label="Dashboard sections">
         <button class="tab-btn" data-tab="overview" aria-selected="true" data-i18n="overview">Overview</button>
         <button class="tab-btn" data-tab="sessions" aria-selected="false" data-i18n="sessionsPage">Sessions</button>
-        <button class="tab-btn" data-tab="hermes" aria-selected="false" style="display:none; border-color: rgba(168, 85, 247, 0.4);"><span style="display:inline-block;width:7px;height:7px;border-radius:9999px;background:#10b981;margin-right:6px;box-shadow:0 0 6px #10b981;"></span>Hermes Hub</button>
-        <button class="tab-btn" data-tab="achievements" aria-selected="false">🏆 Achievements</button>
-        <button class="tab-btn" data-tab="traces" aria-selected="false">Traces</button>
-        <button class="tab-btn" data-tab="models" aria-selected="false">Models</button>
-        <button class="tab-btn" data-tab="tools" aria-selected="false">Capabilities</button>
         <button class="tab-btn" data-tab="stats" aria-selected="false" data-i18n="stats">Stats</button>
         <button class="tab-btn" data-tab="report" aria-selected="false" data-i18n="usageReport">Report</button>
         <button class="tab-btn" data-tab="quota" aria-selected="false" data-i18n="quota">Quota</button>
@@ -3318,11 +2959,7 @@
             <span class="text-[10px] px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/25 font-semibold">Real-time</span>
           </div>
           <div class="flex items-center gap-3 text-xs font-mono">
-            <span class="text-slate-400">Hermes Tools: <strong id="hermesTotalToolCallsKpi" class="text-purple-400">9.1k</strong> <span id="hermesToolCallsMeta" class="hidden">read, terminal & more</span></span>
-            <span class="text-slate-600">·</span>
             <span class="text-slate-400">Cache Saved: <strong id="cacheSavingsKpi" class="text-teal-400">—</strong> <span id="cacheSavingsMeta" class="hidden">cache efficiency</span></span>
-            <span class="text-slate-600">·</span>
-            <span class="text-slate-400">CO2 Footprint: <strong id="co2FootprintKpi" class="text-emerald-400" title="Estimated computed CO2 emissions (~1.425e-7 kg/token)">—</strong></span>
             <span class="text-slate-600">·</span>
             <span class="text-slate-500" id="tokenCompositionTotal">Full Range Distribution</span>
           </div>
@@ -4990,107 +4627,6 @@
       </section>
     </div>
 
-    <!-- Hermes Hub Tab -->
-    <div id="hermes-content" class="tab-content">
-      <!-- Hermes Hero Banner -->
-      <section class="surface p-5 sm:p-6 mb-6 relative overflow-hidden hermes-hub-banner border border-purple-500/20" style="background: linear-gradient(135deg, rgba(20, 16, 32, 0.85) 0%, rgba(11, 15, 26, 0.9) 100%);">
-        <div class="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-5 relative z-10">
-          <div class="flex items-start gap-3.5">
-            <div class="w-11 h-11 rounded-xl bg-purple-600/15 border border-purple-500/30 flex items-center justify-center flex-shrink-0 text-purple-400 shadow-[0_0_16px_rgba(168,85,247,0.25)]">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="12" cy="12" r="3"></circle>
-                <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"></path>
-              </svg>
-            </div>
-            <div>
-              <div class="flex items-center gap-2.5">
-                <h2 class="text-xl font-bold mono tracking-tight text-slate-100">Hermes Agent Observability</h2>
-                <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/25">
-                  <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                  Active SQLite Store
-                </span>
-              </div>
-              <p class="text-xs mt-1 text-slate-400">Deep telemetry, step-by-step reasoning traces, and paired tool execution tracking directly from Hermes.</p>
-              <div class="flex flex-wrap items-center gap-2.5 mt-3 text-xs mono">
-                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-black/40 border border-white/5 text-slate-400"><span class="text-purple-400 font-bold">DB:</span> <span id="hermesDbPath">AppData/Local/hermes/state.db</span></span>
-                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-black/40 border border-white/5 text-slate-400"><span class="text-indigo-400 font-bold">Sessions:</span> <span id="hermesTotalSessionsCount" class="font-bold text-slate-200">218</span></span>
-                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-black/40 border border-white/5 text-slate-400"><span class="text-emerald-400 font-bold">Messages:</span> <span id="hermesTotalMessagesCount" class="font-bold text-slate-200">15,388</span></span>
-                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-black/40 border border-white/5 text-slate-400"><span class="text-amber-400 font-bold">Tools Invoked:</span> <span id="hermesTotalToolCallsCount" class="font-bold text-slate-200">9,183</span></span>
-              </div>
-            </div>
-          </div>
-          <div class="flex items-center gap-2 flex-shrink-0">
-            <button onclick="refreshHermesHub()" class="btn btn-primary text-xs flex items-center gap-1.5">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 12a8 8 0 1 1-2.343-5.657M20 4v6h-6"/></svg>
-              Sync Hermes
-            </button>
-            <a href="/api/export/csv" class="btn btn-ghost text-xs flex items-center gap-1.5">Export CSV</a>
-          </div>
-        </div>
-      </section>
-
-      <!-- Hermes Analytics Row: Tool Frequency & Top Projects -->
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-        <!-- Top Tool Calls -->
-        <section class="surface p-5 lg:col-span-2">
-          <div class="flex items-center justify-between mb-4">
-            <div>
-              <h3 class="text-base font-extrabold mono">Hermes Tool Execution Distribution</h3>
-              <p class="text-xs text-slate-400 mt-0.5">Top agent capabilities invoked during problem solving</p>
-            </div>
-            <span class="text-xs font-semibold px-2 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20" id="hermesToolCallsPill">9,183 Invocations</span>
-          </div>
-          <div id="hermesToolsDistribution" class="space-y-3">
-            <div class="text-xs text-slate-500 py-4 text-center">Loading Hermes tool distribution...</div>
-          </div>
-        </section>
-
-        <!-- Top Projects Leaderboard -->
-        <section class="surface p-5">
-          <div class="flex items-center justify-between mb-4">
-            <div>
-              <h3 class="text-base font-extrabold mono">Active Workspaces</h3>
-              <p class="text-xs text-slate-400 mt-0.5">Project repositories & working directories</p>
-            </div>
-          </div>
-          <div id="hermesProjectsList" class="space-y-2.5">
-            <div class="text-xs text-slate-500 py-4 text-center">Loading projects...</div>
-          </div>
-        </section>
-      </div>
-
-      <!-- Hermes Recent Sessions Table with Instant Drawer Inspection -->
-      <section class="surface p-5 mb-6">
-        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
-          <div>
-            <h3 class="text-base font-extrabold mono">Hermes Agent Session Timeline</h3>
-            <p class="text-xs text-slate-400 mt-0.5">Click any session to open full prompt history, reasoning traces, and tool input/output logs.</p>
-          </div>
-          <div class="flex items-center gap-2">
-            <input type="text" id="hermesSessionSearch" class="ui-input text-xs py-1.5 px-3 rounded-lg" placeholder="Filter by project or ID..." oninput="filterHermesSessionsList()" />
-          </div>
-        </div>
-        <div class="overflow-x-auto">
-          <table class="w-full text-sm session-table" aria-label="Hermes Hub sessions table">
-            <thead>
-              <tr class="border-b" style="border-color: var(--color-border);">
-                <th class="text-left py-3 px-4 font-semibold text-slate-400">Session & Workspace</th>
-                <th class="text-left py-3 px-4 font-semibold text-slate-400">Model</th>
-                <th class="text-right py-3 px-4 font-semibold text-slate-400">Tool Calls</th>
-                <th class="text-right py-3 px-4 font-semibold text-slate-400">Tokens</th>
-                <th class="text-right py-3 px-4 font-semibold text-slate-400">Cost</th>
-                <th class="text-right py-3 px-4 font-semibold text-slate-400">Duration</th>
-                <th class="text-right py-3 px-4 font-semibold text-slate-400">Last Seen</th>
-              </tr>
-            </thead>
-            <tbody id="hermesHubSessionsTbody">
-              <tr><td colspan="7" class="text-center py-8 text-slate-500">Loading Hermes sessions...</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-    </div>
-
     <!-- Stats Tab -->
     <div id="stats-content" class="tab-content">
       <section id="statsSummaryCards" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
@@ -5268,14 +4804,6 @@
                   <div id="monthTotalEnergy" class="font-bold text-lg">0.00 kWh</div>
                 </div>
 
-                <!-- Carbon Footprint -->
-                <div>
-                  <div class="text-xs font-semibold text-emerald-400 mb-1 flex items-center gap-1">
-                    <span>🌱</span> <span>Carbon Footprint</span>
-                  </div>
-                  <div id="monthTotalCarbon" class="font-bold text-lg text-emerald-300">0.00 kgCO2e</div>
-                </div>
-
                 <!-- Sessions -->
                 <div>
                   <div class="text-xs font-semibold text-slate-500 mb-1" data-i18n="messages">Messages</div>
@@ -5337,11 +4865,10 @@
                     <th class="text-right py-2 px-3 font-semibold" style="color: var(--color-muted);" data-i18n="totalTokens">Total Tokens</th>
                     <th class="text-right py-2 px-3 font-semibold" style="color: var(--color-muted);" data-i18n="totalCost">Total Cost</th>
                     <th class="text-right py-2 px-3 font-semibold" style="color: var(--color-muted);" data-i18n="energy">Energy</th>
-                    <th class="text-right py-2 px-3 font-semibold text-emerald-400">Carbon (kgCO2e)</th>
                   </tr>
                 </thead>
                 <tbody id="yearMonthlyTotalsTable">
-                  <tr><td colspan="5" class="tokdash-loading-placeholder text-center py-6" style="color: var(--color-muted);"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></td></tr>
+                  <tr><td colspan="4" class="tokdash-loading-placeholder text-center py-6" style="color: var(--color-muted);"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></td></tr>
                 </tbody>
               </table>
             </div>
@@ -5447,14 +4974,6 @@
               <div>
                 <div class="usage-report-kpi-label" data-i18n="usageReportCost">Cost</div>
                 <div class="usage-report-kpi-value mono" id="usageReportKCost" style="color: var(--color-cost);">—</div>
-              </div>
-              <div>
-                <div class="usage-report-kpi-label flex items-center gap-1.5" style="color: #10b981;">
-                  <span>Price Saved</span>
-                  <span class="usage-report-pill" style="color:#10b981; background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.25);">vs Frontier</span>
-                </div>
-                <div class="usage-report-kpi-value mono" id="usageReportKPriceSaved" style="color: #10b981;">—</div>
-                <div class="usage-report-kpi-sub mono" id="usageReportKPriceSavedSub" style="color: rgba(16,185,129,0.8);">vs $15/M API</div>
               </div>
               <div>
                 <div class="usage-report-kpi-label">
@@ -5681,299 +5200,6 @@
         <textarea id="pricingDbEditor" class="pricing-editor mono" spellcheck="false" aria-label="pricing_db.json editor"></textarea>
       </section>
     </div>
-
-    <!-- Live Traces Tab -->
-    <div id="traces-content" class="tab-content">
-      <!-- Live Stream Hero -->
-      <section class="surface p-5 sm:p-6 mb-6 relative overflow-hidden" style="background: linear-gradient(135deg, rgba(16, 24, 39, 0.85) 0%, rgba(13, 18, 31, 0.95) 100%);">
-        <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div class="flex items-center gap-3.5">
-            <div class="w-11 h-11 rounded-xl bg-teal-500/15 border border-teal-500/30 flex items-center justify-center text-teal-400 shadow-[0_0_16px_rgba(20,184,166,0.25)] flex-shrink-0">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-            </div>
-            <div>
-              <div class="flex items-center gap-2">
-                <h2 class="text-xl font-bold mono tracking-tight text-slate-100">Live Agent Action Traces</h2>
-                <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/25">
-                  <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                  Streaming
-                </span>
-              </div>
-              <p class="text-xs mt-1 text-slate-400">Chronological telemetry feed of tool invocations, user prompts, reasoning chains, and subagent outputs.</p>
-            </div>
-          </div>
-          <div class="flex items-center gap-2">
-            <button onclick="renderTracesTab()" class="btn btn-ghost text-xs flex items-center gap-1.5">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 12a8 8 0 1 1-2.343-5.657M20 4v6h-6"/></svg>
-              Refresh Stream
-            </button>
-          </div>
-        </div>
-      </section>
-
-      <!-- Traces Stream Container -->
-      <section class="surface p-5">
-        <div class="flex items-center justify-between mb-4">
-          <h3 class="text-base font-extrabold mono text-slate-100">Recent Action Events</h3>
-          <span class="text-xs text-slate-400 font-mono" id="tracesCountLabel">Loading events...</span>
-        </div>
-        <div id="tracesStreamList" class="space-y-3">
-          <div class="text-center py-12 text-slate-500 font-mono text-xs">Loading live trace events...</div>
-        </div>
-      </section>
-    </div>
-
-    <!-- Model Intelligence Tab -->
-    <div id="models-content" class="tab-content">
-      <!-- Model Hero -->
-      <section class="surface p-5 sm:p-6 mb-6 relative overflow-hidden" style="background: linear-gradient(135deg, rgba(24, 20, 38, 0.85) 0%, rgba(13, 18, 31, 0.95) 100%);">
-        <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div class="flex items-center gap-3.5">
-            <div class="w-11 h-11 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shadow-[0_0_16px_rgba(245,158,11,0.25)] flex-shrink-0">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"/></svg>
-            </div>
-            <div>
-              <div class="flex items-center gap-2">
-                <h2 class="text-xl font-bold mono tracking-tight text-slate-100">Model Intelligence</h2>
-                <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/25">
-                  Multi-Provider
-                </span>
-              </div>
-              <p class="text-xs mt-1 text-slate-400">Deep telemetry comparing token volumes, reasoning depth, cache hit rates, and estimated cost across all active LLMs.</p>
-            </div>
-          </div>
-          <div class="flex items-center gap-2">
-            <input type="text" id="modelIntelligenceSearch" class="ui-input text-xs py-1.5 px-3 rounded-lg" placeholder="Filter models..." oninput="filterModelIntelligenceList()" />
-          </div>
-        </div>
-      </section>
-
-      <!-- KPI Summary Cards for Models -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <div class="surface p-4">
-          <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Active Models Tracked</div>
-          <div id="modelsCountKpi" class="text-2xl sm:text-3xl font-extrabold mt-1.5 font-mono text-amber-400">—</div>
-          <div class="text-xs text-slate-500 mt-1 font-mono">Across Hermes & Tokdash</div>
-        </div>
-        <div class="surface p-4">
-          <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Top Model By Volume</div>
-          <div id="modelsTopVolumeKpi" class="text-lg sm:text-xl font-extrabold mt-1.5 font-mono text-indigo-400 truncate">—</div>
-          <div id="modelsTopVolumeMeta" class="text-xs text-slate-500 mt-1 font-mono">— tokens</div>
-        </div>
-        <div class="surface p-4">
-          <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Top Model By Cost</div>
-          <div id="modelsTopCostKpi" class="text-lg sm:text-xl font-extrabold mt-1.5 font-mono text-emerald-400 truncate">—</div>
-          <div id="modelsTopCostMeta" class="text-xs text-slate-500 mt-1 font-mono">$— total</div>
-        </div>
-        <div class="surface p-4">
-          <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Highest Cache Efficiency</div>
-          <div id="modelsTopCacheKpi" class="text-lg sm:text-xl font-extrabold mt-1.5 font-mono text-cyan-400 truncate">—</div>
-          <div id="modelsTopCacheMeta" class="text-xs text-slate-500 mt-1 font-mono">— hit rate</div>
-        </div>
-      </div>
-
-      <!-- Net Tokens per Model Stacked Volume Chart -->
-      <section class="surface p-5 mb-6">
-        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 pb-3 border-b border-white/5">
-          <div>
-            <div class="flex items-center gap-2">
-              <h3 class="text-base font-extrabold mono text-slate-100">Net Tokens per Model (Volume Breakdown)</h3>
-              <span class="text-[10px] px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/25 font-semibold">Net Breakdown</span>
-            </div>
-            <p class="text-xs text-slate-400 mt-0.5">Input, cache reads, generation output, and reasoning tokens visualized per model.</p>
-          </div>
-          <div class="flex items-center gap-2 text-xs font-mono text-slate-400">
-            <span class="inline-flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm bg-indigo-500"></span>Input</span>
-            <span class="inline-flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm bg-emerald-500"></span>Cache</span>
-            <span class="inline-flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm bg-amber-500"></span>Output</span>
-            <span class="inline-flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm bg-purple-500"></span>Reasoning</span>
-          </div>
-        </div>
-        <div class="h-[280px]">
-          <canvas id="netTokensModelChartCanvas" aria-label="Net tokens per model chart" role="img"></canvas>
-        </div>
-      </section>
-
-      <!-- Cost Savings & Frontier Benchmark Widget -->
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-        <div class="surface p-4 border-l-4 border-l-emerald-500">
-          <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Money Saved vs Frontier Rates</div>
-          <div id="modelsMoneySavedKpi" class="text-2xl font-extrabold mt-1.5 font-mono text-emerald-400">+$0.00</div>
-          <div class="text-xs text-slate-500 mt-1 font-mono">Vs GPT-4o / Claude 3.5 Sonnet baseline</div>
-        </div>
-        <div class="surface p-4 border-l-4 border-l-teal-500">
-          <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Prompt Caching Value</div>
-          <div id="modelsCacheSavingsKpi" class="text-2xl font-extrabold mt-1.5 font-mono text-teal-400">+$0.00</div>
-          <div class="text-xs text-slate-500 mt-1 font-mono">Cost reduced through cached input tokens</div>
-        </div>
-      </div>
-
-      <!-- Models Detailed Comparative Matrix -->
-      <section class="surface p-5 mb-6">
-        <div class="flex items-center justify-between mb-4">
-          <div>
-            <h3 class="text-base font-extrabold mono text-slate-100">Model Matrix</h3>
-            <p class="text-xs text-slate-400 mt-0.5">Input, output, reasoning tokens, cache read rates, and cost rollups per model.</p>
-          </div>
-        </div>
-        <div class="overflow-x-auto">
-          <table class="w-full text-sm session-table" aria-label="Model performance matrix">
-            <thead>
-              <tr class="border-b" style="border-color: var(--color-border);">
-                <th class="text-left py-3 px-4 font-semibold text-slate-400">Model Name</th>
-                <th class="text-right py-3 px-4 font-semibold text-slate-400">Input Tokens</th>
-                <th class="text-right py-3 px-4 font-semibold text-slate-400">Output Tokens</th>
-                <th class="text-right py-3 px-4 font-semibold text-slate-400">Reasoning Tokens</th>
-                <th class="text-right py-3 px-4 font-semibold text-slate-400">Cache Read</th>
-                <th class="text-right py-3 px-4 font-semibold text-slate-400">Cache Hit %</th>
-                <th class="text-right py-3 px-4 font-semibold text-slate-400">Total Tokens</th>
-                <th class="text-right py-3 px-4 font-semibold text-slate-400">Estimated Cost</th>
-              </tr>
-            </thead>
-            <tbody id="modelsIntelligenceTbody">
-              <tr><td colspan="8" class="text-center py-8 text-slate-500 font-mono text-xs">Loading model intelligence data...</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-    </div>
-
-    <!-- Agent Capabilities Tab -->
-    <div id="tools-content" class="tab-content">
-      <!-- Capabilities Hero -->
-      <section class="surface p-5 sm:p-6 mb-6 relative overflow-hidden" style="background: linear-gradient(135deg, rgba(28, 18, 42, 0.85) 0%, rgba(13, 18, 31, 0.95) 100%);">
-        <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div class="flex items-center gap-3.5">
-            <div class="w-11 h-11 rounded-xl bg-violet-500/15 border border-violet-500/30 flex items-center justify-center text-violet-400 shadow-[0_0_16px_rgba(139,92,246,0.25)] flex-shrink-0">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
-            </div>
-            <div>
-              <div class="flex items-center gap-2">
-                <h2 class="text-xl font-bold mono tracking-tight text-slate-100">Agentic Capabilities</h2>
-                <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-violet-500/10 text-violet-300 border border-violet-500/25">
-                  15 Capabilities
-                </span>
-              </div>
-              <p class="text-xs mt-1 text-slate-400">Complete capability registry analyzing file operations, terminal execution, code patch verification, and subagent delegations.</p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- Model Tool Affinity & Behavioral Bias -->
-      <section class="surface p-5 mb-6">
-        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 pb-3 border-b border-white/5">
-          <div>
-            <div class="flex items-center gap-2">
-              <h3 class="text-base font-extrabold mono text-slate-100">Model Tool Affinity & Behavioral Bias</h3>
-              <span class="text-[10px] px-2 py-0.5 rounded-full bg-violet-500/10 text-violet-300 border border-violet-500/25 font-semibold">Comparative Analysis</span>
-            </div>
-            <p class="text-xs text-slate-400 mt-0.5">Identifies which LLMs invoke the most tools per session, and flags tool specialization biases (e.g. bash vs file search).</p>
-          </div>
-          <div class="flex items-center gap-2">
-            <span class="text-[11px] font-mono text-purple-400 bg-purple-500/10 px-2.5 py-1 rounded-full border border-purple-500/25 font-bold" id="modelToolBiasLeader">Analyzing model tool behaviors...</span>
-          </div>
-        </div>
-        <div id="modelToolAffinityContainer" class="space-y-4">
-          <div class="text-center py-8 text-slate-500 font-mono text-xs">Analyzing model tool behaviors...</div>
-        </div>
-      </section>
-
-      <!-- Tools Capabilities Grid -->
-      <section class="surface p-5 mb-6">
-        <div class="flex items-center justify-between mb-4">
-          <h3 class="text-base font-extrabold mono text-slate-100">Agent Capability Inventory</h3>
-          <span class="text-xs text-purple-400 font-mono font-bold" id="toolsCapabilityTotalLabel">9,334 Invocations Recorded</span>
-        </div>
-        <div id="toolsCapabilityCardsGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          <div class="text-center py-8 text-slate-500 font-mono text-xs col-span-full">Loading capability intelligence...</div>
-        </div>
-      </section>
-    </div>
-
-    <!-- Achievements Tab (104 Badges across 6 Categories) -->
-    <div id="achievements-content" class="tab-content">
-      <!-- Achievements Hero -->
-      <section class="surface p-5 sm:p-6 mb-6 relative overflow-hidden" style="background: linear-gradient(135deg, rgba(30, 27, 75, 0.85) 0%, rgba(15, 23, 42, 0.95) 100%);">
-        <div class="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-          <div class="flex items-center gap-4">
-            <div class="w-12 h-12 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-300 shadow-[0_0_20px_rgba(245,158,11,0.3)] flex-shrink-0 text-2xl">
-              🏆
-            </div>
-            <div>
-              <div class="flex items-center gap-2">
-                <h2 class="text-xl sm:text-2xl font-extrabold mono tracking-tight text-slate-100">Hall of Achievements</h2>
-                <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">
-                  <span id="achievementsHeroCount">0</span> / 104 Unlocked
-                </span>
-              </div>
-              <p class="text-xs mt-1 text-slate-400">Earn mastery badges across telemetry volume, token speed, cost efficiency, model discovery, and multi-agent coordination.</p>
-            </div>
-          </div>
-          <div class="flex items-center gap-3 w-full md:w-auto">
-            <div class="w-full md:w-48 bg-slate-900/80 rounded-full h-3 border border-white/10 overflow-hidden relative">
-              <div id="achievementsHeroProgressBar" class="h-full bg-gradient-to-r from-amber-500 to-indigo-500 transition-all duration-700" style="width: 0%;"></div>
-            </div>
-            <span id="achievementsHeroPct" class="font-mono text-xs font-bold text-amber-400 min-w-[3rem] text-right">0.0%</span>
-          </div>
-        </div>
-      </section>
-
-      <!-- Achievement KPI Summary Cards -->
-      <section class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <div class="surface p-4 border border-white/5">
-          <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Unlocked Badges</div>
-          <div class="text-2xl sm:text-3xl font-extrabold mt-1 font-mono text-amber-400" id="achievementsKpiUnlocked">0 <span class="text-sm text-slate-500 font-normal">/ 104</span></div>
-          <div class="text-xs text-slate-500 mt-1 font-mono" id="achievementsKpiUnlockedMeta">0% complete</div>
-        </div>
-        <div class="surface p-4 border border-white/5">
-          <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Mastery Rank</div>
-          <div class="text-2xl sm:text-3xl font-extrabold mt-1 font-mono text-indigo-400" id="achievementsKpiRank">Novice</div>
-          <div class="text-xs text-slate-500 mt-1 font-mono" id="achievementsKpiRankMeta">Tier 1 Explorer</div>
-        </div>
-        <div class="surface p-4 border border-white/5">
-          <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Tokens Processed</div>
-          <div class="text-2xl sm:text-3xl font-extrabold mt-1 font-mono text-cyan-400" id="achievementsKpiTokens">-</div>
-          <div class="text-xs text-slate-500 mt-1 font-mono" id="achievementsKpiTokensMeta">Across all agents</div>
-        </div>
-        <div class="surface p-4 border border-white/5">
-          <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Tool Invocations</div>
-          <div class="text-2xl sm:text-3xl font-extrabold mt-1 font-mono text-emerald-400" id="achievementsKpiTools">-</div>
-          <div class="text-xs text-slate-500 mt-1 font-mono" id="achievementsKpiToolsMeta">Executed successfully</div>
-        </div>
-      </section>
-
-      <!-- Filter Pills & Search Bar -->
-      <section class="surface p-4 mb-6">
-        <div class="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4">
-          <!-- Category Pills -->
-          <div class="flex items-center gap-1.5 overflow-x-auto pb-1 lg:pb-0" id="achievementsCategoryPills">
-            <button type="button" class="btn btn-ghost text-xs px-3 py-1.5 rounded-lg active bg-indigo-600/30 text-indigo-300 border border-indigo-500/40" data-cat="all" onclick="filterAchievementsCategory('all')">All (104)</button>
-            <button type="button" class="btn btn-ghost text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 border border-transparent" data-cat="pioneer" onclick="filterAchievementsCategory('pioneer')">🚀 Pioneer (18)</button>
-            <button type="button" class="btn btn-ghost text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 border border-transparent" data-cat="token" onclick="filterAchievementsCategory('token')">⚡ Token Titan (18)</button>
-            <button type="button" class="btn btn-ghost text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 border border-transparent" data-cat="cost" onclick="filterAchievementsCategory('cost')">💎 Cost Slayer (18)</button>
-            <button type="button" class="btn btn-ghost text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 border border-transparent" data-cat="tool" onclick="filterAchievementsCategory('tool')">🛠️ Tool Sorcerer (18)</button>
-            <button type="button" class="btn btn-ghost text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 border border-transparent" data-cat="model" onclick="filterAchievementsCategory('model')">🧠 Model Connoisseur (16)</button>
-            <button type="button" class="btn btn-ghost text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 border border-transparent" data-cat="secret" onclick="filterAchievementsCategory('secret')">👑 Secret & Legendary (16)</button>
-          </div>
-          <!-- Search & Filter Controls -->
-          <div class="flex items-center gap-2 flex-shrink-0">
-            <input type="text" id="achievementsSearch" class="ui-input text-xs py-1.5 px-3 rounded-lg w-full sm:w-56" placeholder="Search 104 badges..." oninput="onAchievementsSearch(this.value)" />
-            <button id="achievementsFilterUnlockedOnly" type="button" class="btn btn-ghost text-xs px-2.5 py-1.5 rounded-lg border border-slate-700 text-slate-400 hover:text-slate-200 whitespace-nowrap" onclick="toggleAchievementsUnlockedOnly()">
-              Unlocked Only
-            </button>
-          </div>
-        </div>
-      </section>
-
-      <!-- Badges Grid Container -->
-      <section>
-        <div id="achievementsGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          <div class="text-center py-12 text-slate-500 font-mono text-xs col-span-full">Loading achievement matrix...</div>
-        </div>
-      </section>
-    </div>
-
   </div>
 
   <div id="sessionModal" class="hidden fixed inset-0 z-50">
@@ -9777,20 +9003,6 @@
       return !!el && el.classList.contains('active');
     }
 
-    function isHermesActive() {
-      const el = typeof document !== 'undefined' && typeof document.getElementById === 'function'
-        ? document.getElementById('hermes-content')
-        : null;
-      return !!el && el.classList && el.classList.contains('active');
-    }
-
-    function isTracesActive() {
-      const el = typeof document !== 'undefined' && typeof document.getElementById === 'function'
-        ? document.getElementById('traces-content')
-        : null;
-      return !!el && el.classList && el.classList.contains('active');
-    }
-
     function scheduleIdle(fn, timeoutMs = 750) {
       if (typeof requestIdleCallback === 'function') {
         requestIdleCallback(() => fn(), { timeout: timeoutMs });
@@ -9976,134 +9188,11 @@
     }
 
     // Top 100 World Currencies with symbols & rates
-    const TOP_100_CURRENCIES = {
-      USD: { symbol: '$', rate: 1.0 },
-      EUR: { symbol: '€', rate: 0.92 },
-      GBP: { symbol: '£', rate: 0.79 },
-      JPY: { symbol: '¥', rate: 154.5 },
-      INR: { symbol: '₹', rate: 84.1 },
-      CAD: { symbol: 'CA$', rate: 1.38 },
-      AUD: { symbol: 'AU$', rate: 1.54 },
-      CHF: { symbol: 'CHF ', rate: 0.90 },
-      CNY: { symbol: '¥', rate: 7.24 },
-      SGD: { symbol: 'S$', rate: 1.35 },
-      HKD: { symbol: 'HK$', rate: 7.82 },
-      NZD: { symbol: 'NZ$', rate: 1.66 },
-      KRW: { symbol: '₩', rate: 1380.0 },
-      BRL: { symbol: 'R$', rate: 5.45 },
-      MXN: { symbol: 'MX$', rate: 18.2 },
-      SEK: { symbol: 'kr ', rate: 10.6 },
-      NOK: { symbol: 'kr ', rate: 10.8 },
-      DKK: { symbol: 'kr ', rate: 6.87 },
-      PLN: { symbol: 'zł ', rate: 3.98 },
-      TRY: { symbol: '₺', rate: 32.8 },
-      ZAR: { symbol: 'R ', rate: 18.3 },
-      AED: { symbol: 'AED ', rate: 3.67 },
-      SAR: { symbol: 'SAR ', rate: 3.75 },
-      ILS: { symbol: '₪', rate: 3.72 },
-      THB: { symbol: '฿', rate: 36.7 },
-      IDR: { symbol: 'Rp ', rate: 16250.0 },
-      MYR: { symbol: 'RM ', rate: 4.71 },
-      PHP: { symbol: '₱', rate: 58.6 },
-      VND: { symbol: '₫', rate: 25420.0 },
-      TWD: { symbol: 'NT$', rate: 32.5 },
-      CZK: { symbol: 'Kč ', rate: 23.2 },
-      HUF: { symbol: 'Ft ', rate: 364.0 },
-      RON: { symbol: 'lei ', rate: 4.58 },
-      CLP: { symbol: 'CLP$', rate: 940.0 },
-      COP: { symbol: 'COL$', rate: 4120.0 },
-      ARS: { symbol: 'AR$', rate: 920.0 },
-      EGP: { symbol: 'E£', rate: 48.2 },
-      NGN: { symbol: '₦', rate: 1510.0 },
-      PKR: { symbol: '₨', rate: 278.5 },
-      BDT: { symbol: '৳', rate: 117.5 },
-      KZT: { symbol: '₸', rate: 468.0 },
-      QAR: { symbol: 'QR ', rate: 3.64 },
-      KWD: { symbol: 'KD ', rate: 0.31 },
-      OMR: { symbol: 'OMR ', rate: 0.385 },
-      BHD: { symbol: 'BD ', rate: 0.376 },
-      PEN: { symbol: 'S/ ', rate: 3.80 },
-      UAH: { symbol: '₴', rate: 40.5 },
-      MAD: { symbol: 'DH ', rate: 9.95 },
-      DZD: { symbol: 'DA ', rate: 134.5 },
-      KES: { symbol: 'KSh ', rate: 129.0 },
-      GHS: { symbol: 'GH₵', rate: 15.2 },
-      ETH: { symbol: 'Br ', rate: 57.5 },
-      LKR: { symbol: 'Rs ', rate: 304.0 },
-      NPR: { symbol: 'Rs ', rate: 134.5 },
-      VUV: { symbol: 'Vt ', rate: 120.0 },
-      CRC: { symbol: '₡', rate: 525.0 },
-      DOP: { symbol: 'RD$', rate: 59.2 },
-      UYU: { symbol: '$U ', rate: 39.8 },
-      BAM: { symbol: 'KM ', rate: 1.80 },
-      BGN: { symbol: 'лв ', rate: 1.80 },
-      HRK: { symbol: 'kn ', rate: 6.95 },
-      RSD: { symbol: 'din ', rate: 108.0 },
-      ISK: { symbol: 'kr ', rate: 139.0 },
-      JOD: { symbol: 'JD ', rate: 0.71 },
-      LBP: { symbol: 'L£', rate: 89500.0 },
-      TND: { symbol: 'DT ', rate: 3.12 },
-      UGX: { symbol: 'USh ', rate: 3740.0 },
-      TZS: { symbol: 'TSh ', rate: 2610.0 },
-      ZMW: { symbol: 'ZK ', rate: 25.5 },
-      BWP: { symbol: 'P ', rate: 13.6 },
-      MUR: { symbol: 'Rs ', rate: 46.5 },
-      NAD: { symbol: 'N$ ', rate: 18.3 },
-      MZN: { symbol: 'MT ', rate: 63.8 },
-      BOB: { symbol: 'Bs ', rate: 6.91 },
-      PYG: { symbol: '₲', rate: 7520.0 },
-      GTQ: { symbol: 'Q ', rate: 7.78 },
-      HNL: { symbol: 'L ', rate: 24.7 },
-      NIO: { symbol: 'C$ ', rate: 36.8 },
-      PAB: { symbol: 'B/. ', rate: 1.0 },
-      JMD: { symbol: 'J$ ', rate: 156.0 },
-      TTD: { symbol: 'TT$ ', rate: 6.78 },
-      BBD: { symbol: 'Bds$ ', rate: 2.0 },
-      XOF: { symbol: 'CFA ', rate: 605.0 },
-      XAF: { symbol: 'FCFA ', rate: 605.0 },
-      GEL: { symbol: '₾', rate: 2.82 },
-      AMD: { symbol: '֏', rate: 388.0 },
-      AZN: { symbol: '₼', rate: 1.70 },
-      UZS: { symbol: "so'm ", rate: 12600.0 },
-      KGS: { symbol: 'som ', rate: 87.5 },
-      TJS: { symbol: 'SM ', rate: 10.9 },
-      MNT: { symbol: '₮', rate: 3450.0 },
-      LAK: { symbol: '₭', rate: 21800.0 },
-      KHR: { symbol: '៛', rate: 4100.0 },
-      BND: { symbol: 'B$ ', rate: 1.35 },
-      MOP: { symbol: 'MOP$ ', rate: 8.05 },
-      FJD: { symbol: 'FJ$ ', rate: 2.25 },
-      PGK: { symbol: 'K ', rate: 3.88 },
-      WST: { symbol: 'WS$ ', rate: 2.75 },
-      SCR: { symbol: 'SR ', rate: 13.5 },
-      MVR: { symbol: 'Rf ', rate: 15.4 }
-    };
-
-    let currentUserCurrency = localStorage.getItem('tokdash_user_currency') || 'USD';
-
-    // Format currency using configured currency
+    // Format currency (USD — the dashboard's native unit; the multi-currency
+    // selector was removed with the unsourced FX-rate table it depended on).
     function formatCurrency(num) {
       const n = Number(num ?? 0);
-      const cur = TOP_100_CURRENCIES[currentUserCurrency] || TOP_100_CURRENCIES.USD;
-      const converted = n * (cur.rate || 1.0);
-      return cur.symbol + converted.toFixed(2);
-    }
-
-    function applyUserCurrency(code) {
-      if (!TOP_100_CURRENCIES[code]) return;
-      currentUserCurrency = code;
-      localStorage.setItem('tokdash_user_currency', code);
-      if (lastUsageResponse) {
-        renderOverviewTab(lastUsageResponse);
-      }
-    }
-
-    function applyCuratedTheme(preset) {
-      const styleSelect = document.getElementById('styleThemeSelect');
-      if (!styleSelect) return;
-      styleSelect.value = preset;
-      styleSelect.dispatchEvent(new Event('change', { bubbles: true }));
-      localStorage.setItem('tokdash_curated_theme', preset);
+      return '$' + n.toFixed(2);
     }
 
     // ===== Energy estimation =====
@@ -10390,6 +9479,14 @@
       syncProfileMilestonePalette();
       const themeMeta = document.querySelector('meta[name="theme-color"]');
       if (themeMeta) themeMeta.content = getThemeMetaColor(normalized, isDark());
+    }
+
+    // Quick toggle for the header button (defined inline; js/main.js is not loaded)
+    function toggleThemeQuick() {
+      const next = isDark() ? 'light' : 'dark';
+      localStorage.setItem('tokdash-theme', next);
+      applyTheme(next);
+      rerenderPresentation();
     }
 
     function applyTheme(theme) {
@@ -12171,8 +11268,6 @@
         if (isOverviewActive()) renderOverviewTab(lastUsageResponse);
         if (isSessionsActive()) renderSessionsTab();
         if (isServersActive()) renderServersTab();
-        if (typeof isHermesActive === 'function' && isHermesActive() && typeof loadHermesHub === 'function') loadHermesHub();
-        if (typeof isTracesActive === 'function' && isTracesActive() && typeof renderTracesTab === 'function') renderTracesTab();
       } catch (error) {
         console.error('Error fetching data:', error);
         // Superseded: the user is waiting on another range, so this failure is
@@ -13164,18 +12259,18 @@
           ? 'bg-slate-900/30 border-slate-800 border-l-4 border-l-slate-600'
           : 'bg-slate-900/40 border-slate-800/80 border-l-4 border-l-purple-500';
 
-        const reasoningHtml = m.reasoning ? `
-          <details class="my-3 rounded-xl bg-purple-950/25 border border-purple-500/25 overflow-hidden group">
-            <summary class="flex items-center justify-between px-3.5 py-2.5 bg-purple-900/20 cursor-pointer select-none text-xs font-semibold text-purple-300 hover:bg-purple-900/30 transition">
-              <span class="flex items-center gap-2">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
-                Reasoning Process (Thinking Chain)
-              </span>
-              <span class="text-[10px] font-mono text-purple-400">click to expand</span>
-            </summary>
-            <div class="p-3.5 text-xs text-purple-200/90 whitespace-pre-wrap font-mono leading-relaxed bg-black/50 border-t border-purple-500/20 max-h-80 overflow-y-auto">${escapeHtml(m.reasoning)}</div>
-          </details>
+        const reasoningHtml = m.has_reasoning ? `
+          <div class="my-3 rounded-xl bg-purple-950/25 border border-purple-500/25 px-3.5 py-2.5 text-xs font-semibold text-purple-300 flex items-center gap-2">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+            Reasoning recorded (hidden — transcript text is not exposed)
+          </div>
         ` : '';
+
+        const metaChips = [
+          m.content_chars ? `${Number(m.content_chars).toLocaleString()} chars` : '',
+          m.token_count ? `${Number(m.token_count).toLocaleString()} tokens` : '',
+          m.has_tool_calls ? 'tool calls' : '',
+        ].filter(Boolean).map(c => `<span class="text-[10px] px-2 py-0.5 rounded bg-slate-800/60 text-slate-400 font-mono">${c}</span>`).join(' ');
 
         return `
           <div class="surface p-4 sm:p-5 rounded-2xl border ${cardStyle} shadow-md transition">
@@ -13189,10 +12284,41 @@
               <span class="text-[11px] text-slate-500 font-mono">${m.timestamp || ''}</span>
             </div>
             ${reasoningHtml}
-            <div class="text-xs sm:text-sm text-slate-200 whitespace-pre-wrap font-sans leading-relaxed break-words overflow-x-auto">${escapeHtml(m.content || '')}</div>
+            <div class="flex flex-wrap items-center gap-2 text-xs text-slate-400">${metaChips || '<span class="text-slate-500 font-mono">no content recorded</span>'}</div>
           </div>
         `;
       }).join('');
+    }
+
+    // Cumulative token series for the session chart expand buttons.
+    // Both build on the same running sums; the time variant re-labels the
+    // x-axis with each turn's actual timestamp (or its index as fallback).
+    function buildCumulativeTurnSeries(turns) {
+      const acc = { input: [], cache: [], output: [], reasoning: [], total: [] };
+      let inSum = 0, cacheSum = 0, outSum = 0, reasonSum = 0;
+      for (const turn of turns || []) {
+        inSum += Number(turn.tokens_in || 0);
+        cacheSum += Number(turn.tokens_cache || 0);
+        outSum += Number(turn.tokens_out || 0);
+        reasonSum += Number(turn.tokens_reasoning || 0);
+        acc.input.push(inSum);
+        acc.cache.push(cacheSum);
+        acc.output.push(outSum);
+        acc.reasoning.push(reasonSum);
+        acc.total.push(inSum + cacheSum + outSum + reasonSum);
+      }
+      return acc;
+    }
+
+    function buildCumulativeTimeSeries(turns) {
+      const cumulative = buildCumulativeTurnSeries(turns);
+      const labels = (turns || []).map((turn, i) => {
+        const ms = Number(new Date(turn.timestamp).getTime() || 0);
+        if (!ms) return `T${i + 1}`;
+        const d = new Date(ms);
+        return d.toLocaleTimeString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+      });
+      return { labels, cumulative };
     }
 
     function expandSessionChart(type) {
@@ -15928,11 +15054,11 @@
       const timestamps = rows.map((r) => String(r.payload.timestamp || '')).filter(Boolean).sort();
       const freshness = document.createElement('span');
       if (timestamps.length > 1) {
-        freshness.innerHTML = `${t('serversUpdatedAt')} <b class="mono">${serverTimeOfDay(timestamps[timestamps.length - 1])}</b> \u00b7 ${t('serversStalest')} <b class="mono">${serverTimeOfDay(timestamps[0])}</b>`;
+        freshness.innerHTML = `${escapeHtml(t('serversUpdatedAt'))} <b class="mono">${escapeHtml(serverTimeOfDay(timestamps[timestamps.length - 1]))}</b> \u00b7 ${escapeHtml(t('serversStalest'))} <b class="mono">${escapeHtml(serverTimeOfDay(timestamps[0]))}</b>`;
       } else if (timestamps.length === 1) {
-        freshness.innerHTML = `${t('serversUpdatedAt')} <b class="mono">${serverTimeOfDay(timestamps[0])}</b>`;
+        freshness.innerHTML = `${escapeHtml(t('serversUpdatedAt'))} <b class="mono">${escapeHtml(serverTimeOfDay(timestamps[0]))}</b>`;
       } else {
-        freshness.innerHTML = `${t('serversUpdatedAt')} <b class="mono">\u2014</b>`;
+        freshness.innerHTML = `${escapeHtml(t('serversUpdatedAt'))} <b class="mono">\u2014</b>`;
       }
       // A flagged refresh leaves no fresh timestamps, so the mark lands on the
       // freshness line: it qualifies the "updated —" claim, not the totals.
@@ -17106,19 +16232,6 @@
         }
       }
       usageReportText(document.getElementById('usageReportKCost'), empty ? '—' : formatCurrency(model.cost));
-      const savedEl = document.getElementById('usageReportKPriceSaved');
-      const savedSubEl = document.getElementById('usageReportKPriceSavedSub');
-      if (savedEl) {
-        if (empty || !model.tokens) {
-          savedEl.textContent = '—';
-        } else {
-          const frontierBaseline = (Number(model.tokens || 0) / 1000000) * 15.0;
-          const actualCost = Number(model.cost || 0);
-          const saved = Math.max(0, frontierBaseline - actualCost);
-          savedEl.textContent = '+' + formatCurrency(saved);
-          if (savedSubEl) savedSubEl.textContent = 'vs $15/M API';
-        }
-      }
     }
 
     // The half that waits: runtime comes from /api/active-time, the active-day
@@ -18417,9 +17530,6 @@
       document.querySelectorAll('.sidebar-nav-item').forEach((item) => {
         item.classList.toggle('active', item.dataset.tabTarget === tab);
       });
-      if (window.lucide && typeof window.lucide.createIcons === 'function') {
-        window.lucide.createIcons();
-      }
 
       if (tab !== 'overview') {
         const tooltip = document.getElementById('overviewProfileTooltip');
@@ -18432,14 +17542,9 @@
       }
       if (tab === 'overview' && lastUsageResponse) renderOverviewTab(lastUsageResponse);
       if (tab === 'sessions') ensureSessionsLoaded();
-      if (tab === 'hermes') loadHermesHub();
       if (tab === 'servers') renderServersTab();
       if (tab === 'quota' && !quotaLoaded) loadQuota();
       if (tab === 'pricing' && !pricingDbLoaded) loadPricingDb();
-      if (tab === 'traces') renderTracesTab();
-      if (tab === 'models') renderModelsTab();
-      if (tab === 'tools') renderToolsTab();
-      if (tab === 'achievements') renderAchievementsTab();
       // The quick ranges drive the overview's trailing windows; the report walks
       // whole periods instead, so the two swap in the same strip of the top bar.
       const overviewRanges = document.getElementById('overviewQuickRanges');
@@ -18459,747 +17564,6 @@
     }
 
     // ==========================================
-    // Intelligence & Traces Tab Renderers
-    // ==========================================
-    async function renderTracesTab() {
-      const container = document.getElementById('tracesStreamList');
-      const countLabel = document.getElementById('tracesCountLabel');
-      if (!container) return;
-
-      try {
-        const dateFrom = currentStartDate ? formatLocalDateYmd(currentStartDate) : null;
-        const dateTo = currentEndDate ? formatLocalDateYmd(currentEndDate) : null;
-        const tracesUrl = sessionUrlForTool('hermes', null, dateFrom, dateTo);
-
-        let sessions = hermesSessionsCache;
-        if (!sessions || !sessions.length || hermesSessionsCacheUrl !== tracesUrl) {
-          const res = await fetch(appPath(tracesUrl));
-          if (res.ok) {
-            const data = await res.json();
-            sessions = data.sessions || [];
-            hermesSessionsCache = sessions;
-            hermesSessionsCacheUrl = tracesUrl;
-          }
-        }
-        if (countLabel) countLabel.textContent = `${sessions.length} sessions streaming`;
-
-        if (!sessions.length) {
-          container.innerHTML = '<div class="text-center py-10 text-slate-500 font-mono text-xs">No active agent traces recorded yet.</div>';
-          return;
-        }
-
-        container.innerHTML = sessions.slice(0, 30).map(s => {
-          const tsVal = s.last_seen_at || s.last_activity_at || (s.last_seen ? s.last_seen * 1000 : null);
-          const timeStr = tsVal ? new Date(tsVal).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'recently';
-          const toolCount = s.tool_call_count || (s.turns ? s.turns.length : 0);
-          const tokens = s.tokens || (s.total_tokens || 0);
-          return `
-            <div class="p-4 rounded-xl bg-slate-900/40 border border-white/5 hover:border-teal-500/30 transition flex flex-col sm:flex-row sm:items-center justify-between gap-3 group">
-              <div class="flex items-start gap-3 min-w-0">
-                <span class="w-2.5 h-2.5 rounded-full bg-teal-400 mt-1 shadow-[0_0_8px_#14b8a6] flex-shrink-0 group-hover:scale-125 transition"></span>
-                <div class="min-w-0">
-                  <div class="flex items-center gap-2 flex-wrap">
-                    <span class="font-mono font-bold text-xs text-slate-200 group-hover:text-teal-300 transition truncate" title="${escapeHtml(s.title || s.session_id)}">${escapeHtml(s.title || s.session_id)}</span>
-                    <span class="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">${escapeHtml(s.project || 'workspace')}</span>
-                    <span class="text-[10px] px-2 py-0.5 rounded bg-purple-500/15 text-purple-300 font-mono">${escapeHtml(s.model || 'hermes')}</span>
-                  </div>
-                  <div class="text-[11px] text-slate-400 mt-1 font-mono flex items-center gap-3">
-                    <span>${toolCount} tool events</span>
-                    <span>·</span>
-                    <span class="text-teal-400 font-semibold">${formatTokenCount(tokens)} tokens</span>
-                    <span>·</span>
-                    <span>Last event: ${escapeHtml(timeStr)}</span>
-                  </div>
-                </div>
-              </div>
-              <button onclick="openSessionDrawer('hermes', '${escapeHtml(s.session_id)}')" class="btn btn-ghost text-xs px-3 py-1.5 flex items-center gap-1.5 border border-white/5 hover:border-teal-500/30 flex-shrink-0">
-                <span>Inspect Trace</span>
-                <span class="text-teal-400">↗</span>
-              </button>
-            </div>
-          `;
-        }).join('');
-      } catch (err) {
-        console.error('Error rendering traces:', err);
-        container.innerHTML = '<div class="text-center py-8 text-rose-400 font-mono text-xs">Error loading traces telemetry.</div>';
-      }
-    }
-
-    let allModelsIntelligenceCache = [];
-
-    async function renderModelsTab() {
-      const tbody = document.getElementById('modelsIntelligenceTbody');
-      const countKpi = document.getElementById('modelsCountKpi');
-      const topVolKpi = document.getElementById('modelsTopVolumeKpi');
-      const topVolMeta = document.getElementById('modelsTopVolumeMeta');
-      const topCostKpi = document.getElementById('modelsTopCostKpi');
-      const topCostMeta = document.getElementById('modelsTopCostMeta');
-      const topCacheKpi = document.getElementById('modelsTopCacheKpi');
-      const topCacheMeta = document.getElementById('modelsTopCacheMeta');
-      if (!tbody) return;
-
-      try {
-        let models = [];
-        if (lastUsageResponse) {
-          models = lastUsageResponse.combined_models || lastUsageResponse.top_models || lastUsageResponse.models || [];
-        }
-        if (!models.length) {
-          const res = await fetch(appPath('/api/usage'));
-          if (res.ok) {
-            const data = await res.json();
-            models = data.combined_models || data.top_models || data.models || [];
-          }
-        }
-
-        allModelsIntelligenceCache = models;
-
-        if (countKpi) countKpi.textContent = String(models.length || 0);
-
-        if (models.length) {
-          const sortedByVol = [...models].sort((a, b) => (b.tokens || 0) - (a.tokens || 0));
-          const sortedByCost = [...models].sort((a, b) => (b.cost || 0) - (a.cost || 0));
-          const sortedByCache = [...models].sort((a, b) => (b.cache_hit_rate || 0) - (a.cache_hit_rate || 0));
-
-          if (topVolKpi) topVolKpi.textContent = sortedByVol[0].name || sortedByVol[0].model || '—';
-          if (topVolMeta) topVolMeta.textContent = `${formatTokenCount(sortedByVol[0].tokens || 0)} tokens`;
-
-          if (topCostKpi) topCostKpi.textContent = sortedByCost[0].name || sortedByCost[0].model || '—';
-          if (topCostMeta) topCostMeta.textContent = `$${(sortedByCost[0].cost || 0).toFixed(4)} total`;
-
-          if (topCacheKpi) topCacheKpi.textContent = sortedByCache[0].name || sortedByCache[0].model || '—';
-          if (topCacheMeta) topCacheMeta.textContent = `${((sortedByCache[0].cache_hit_rate || 0) * 100).toFixed(1)}% hit rate`;
-
-          let totalTok = 0, totalCost = 0, totalCache = 0;
-          models.forEach(m => {
-            totalTok += Number(m.tokens || 0);
-            totalCost += Number(m.cost || 0);
-            totalCache += Number(m.tokens_cache || 0);
-          });
-
-          const moneySavedEl = document.getElementById('modelsMoneySavedKpi');
-          const cacheSavingsEl = document.getElementById('modelsCacheSavingsKpi');
-          if (moneySavedEl) {
-            const frontierBaseline = (totalTok / 1000000) * 15.0;
-            const saved = Math.max(0, frontierBaseline - totalCost);
-            moneySavedEl.textContent = `+$${saved.toFixed(2)}`;
-          }
-          if (cacheSavingsEl) {
-            const cacheVal = (totalCache / 1000000) * 3.0;
-            cacheSavingsEl.textContent = `+$${cacheVal.toFixed(2)}`;
-          }
-        }
-
-        renderModelsIntelligenceTable(models);
-        renderNetTokensModelChart(models);
-      } catch (err) {
-        console.error('Error loading models tab:', err);
-        tbody.innerHTML = '<tr><td colspan="8" class="text-center py-8 text-rose-400 font-mono text-xs">Error loading model intelligence.</td></tr>';
-      }
-    }
-
-    let netTokensModelChartInstance = null;
-
-    function renderNetTokensModelChart(models) {
-      const canvas = document.getElementById('netTokensModelChartCanvas');
-      if (!canvas) return;
-      if (netTokensModelChartInstance) {
-        netTokensModelChartInstance.destroy();
-        netTokensModelChartInstance = null;
-      }
-      if (!models || !models.length) return;
-
-      const top8 = models.slice(0, 8);
-      const labels = top8.map(m => m.name || m.model || 'model');
-      const inData = top8.map(m => Number(m.tokens_in || 0));
-      const cacheData = top8.map(m => Number(m.tokens_cache || 0));
-      const outData = top8.map(m => Number(m.tokens_out || 0));
-      const reasonData = top8.map(m => Number(m.tokens_reasoning || 0));
-
-      netTokensModelChartInstance = new Chart(canvas.getContext('2d'), {
-        type: 'bar',
-        data: {
-          labels,
-          datasets: [
-            { label: 'Input', data: inData, backgroundColor: '#6366f1', borderRadius: 4 },
-            { label: 'Cache Read', data: cacheData, backgroundColor: '#10b981', borderRadius: 4 },
-            { label: 'Output', data: outData, backgroundColor: '#f59e0b', borderRadius: 4 },
-            { label: 'Reasoning', data: reasonData, backgroundColor: '#a855f7', borderRadius: 4 },
-          ]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          scales: {
-            x: {
-              stacked: true,
-              grid: { display: false },
-              ticks: { color: '#94a3b8', font: { family: 'ui-monospace, monospace', size: 10 } }
-            },
-            y: {
-              stacked: true,
-              grid: { color: 'rgba(255, 255, 255, 0.05)' },
-              ticks: {
-                color: '#94a3b8',
-                font: { family: 'ui-monospace, monospace', size: 10 },
-                callback: (v) => formatTokenCount(v, true)
-              }
-            }
-          },
-          plugins: {
-            legend: { display: false },
-            tooltip: {
-              callbacks: {
-                label: (ctx) => `${ctx.dataset.label}: ${formatTokenCount(ctx.raw || 0)} tokens`
-              }
-            }
-          }
-        }
-      });
-    }
-
-    function renderModelsIntelligenceTable(models) {
-      const tbody = document.getElementById('modelsIntelligenceTbody');
-      if (!tbody) return;
-      if (!models || !models.length) {
-        tbody.innerHTML = '<tr><td colspan="8" class="text-center py-8 text-slate-500 font-mono text-xs">No model activity recorded in current range.</td></tr>';
-        return;
-      }
-
-      tbody.innerHTML = models.map(m => {
-        const name = m.name || m.model || 'unknown';
-        const hitRate = m.cache_hit_rate !== undefined ? `${(m.cache_hit_rate * 100).toFixed(1)}%` : '—';
-        return `
-          <tr class="border-b border-white/5 hover:bg-slate-900/30 transition font-mono text-xs">
-            <td class="py-3 px-4 font-bold text-slate-200">
-              <div class="flex items-center gap-2">
-                <span class="w-2 h-2 rounded-full bg-amber-400"></span>
-                <span>${escapeHtml(name)}</span>
-              </div>
-            </td>
-            <td class="py-3 px-4 text-right text-slate-300">${formatTokenCount(m.tokens_in || 0)}</td>
-            <td class="py-3 px-4 text-right text-amber-400">${formatTokenCount(m.tokens_out || 0)}</td>
-            <td class="py-3 px-4 text-right text-purple-400 font-semibold">${formatTokenCount(m.tokens_reasoning || 0)}</td>
-            <td class="py-3 px-4 text-right text-emerald-400">${formatTokenCount(m.tokens_cache || 0)}</td>
-            <td class="py-3 px-4 text-right">
-              <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 font-bold">
-                ${hitRate}
-              </span>
-            </td>
-            <td class="py-3 px-4 text-right font-extrabold text-indigo-300">${formatTokenCount(m.tokens || 0)}</td>
-            <td class="py-3 px-4 text-right text-slate-300 font-bold">$${(m.cost || 0).toFixed(4)}</td>
-          </tr>
-        `;
-      }).join('');
-    }
-
-    function filterModelIntelligenceList() {
-      const query = (document.getElementById('modelIntelligenceSearch')?.value || '').toLowerCase().trim();
-      if (!allModelsIntelligenceCache.length) return;
-      const filtered = allModelsIntelligenceCache.filter(m => (m.name || m.model || '').toLowerCase().includes(query));
-      renderModelsIntelligenceTable(filtered);
-    }
-
-    async function renderToolsTab() {
-      const grid = document.getElementById('toolsCapabilityCardsGrid');
-      const totalLabel = document.getElementById('toolsCapabilityTotalLabel');
-      if (!grid) return;
-
-      try {
-        let analytics = hermesAnalyticsCache;
-        if (!analytics) {
-          const res = await fetch(appPath('/api/hermes/analytics'));
-          if (res.ok) {
-            analytics = await res.json();
-            hermesAnalyticsCache = analytics;
-          }
-        }
-
-        // Render Model Tool Affinity & Bias
-        const affinityContainer = document.getElementById('modelToolAffinityContainer');
-        const biasLeaderLabel = document.getElementById('modelToolBiasLeader');
-        const modelIntelligence = (analytics && analytics.model_tool_intelligence) || [];
-        if (affinityContainer) {
-          if (!modelIntelligence.length) {
-            affinityContainer.innerHTML = '<div class="text-center py-6 text-slate-500 font-mono text-xs">No multi-model tool calls recorded yet.</div>';
-          } else {
-            const topModel = modelIntelligence[0];
-            if (biasLeaderLabel && topModel) {
-              biasLeaderLabel.textContent = `Leader: ${topModel.model} (${topModel.avg_tools_per_session} tools/sess)`;
-            }
-            affinityContainer.innerHTML = modelIntelligence.map(m => {
-              const breakdownBars = (m.tool_breakdown || []).map((tb, idx) => {
-                const colors = ['bg-indigo-500', 'bg-purple-500', 'bg-sky-500', 'bg-emerald-500', 'bg-amber-500', 'bg-pink-500', 'bg-teal-500', 'bg-rose-500'];
-                const color = colors[idx % colors.length];
-                return `<div class="h-full ${color} transition-all" style="width: ${tb.pct}%;" title="${escapeHtml(tb.tool)}: ${formatNumber(tb.count)} (${tb.pct}%)"></div>`;
-              }).join('');
-
-              const toolPills = (m.tool_breakdown || []).slice(0, 4).map(tb => `
-                <span class="inline-flex items-center gap-1 text-[11px] font-mono px-2 py-0.5 rounded bg-slate-800/80 border border-slate-700/60 text-slate-300">
-                  <span class="text-slate-400">${escapeHtml(tb.tool)}:</span>
-                  <strong class="text-white">${tb.pct}%</strong>
-                </span>
-              `).join('');
-
-              return `
-                <div class="p-4 rounded-xl bg-slate-900/50 border border-white/5 hover:border-violet-500/25 transition">
-                  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-2.5">
-                    <div>
-                      <div class="flex items-center gap-2">
-                        <span class="w-2 h-2 rounded-full bg-violet-400"></span>
-                        <h4 class="font-mono font-bold text-sm text-slate-100">${escapeHtml(m.model)}</h4>
-                        <span class="text-[10px] px-2 py-0.5 rounded bg-purple-500/15 text-purple-300 border border-purple-500/25 font-mono font-bold">
-                          ${m.avg_tools_per_session} tools/session
-                        </span>
-                      </div>
-                      <div class="text-[11px] text-slate-400 font-mono mt-1">
-                        <span>${formatNumber(m.total_tool_calls)} total tool calls</span>
-                        <span class="mx-1.5 opacity-40">·</span>
-                        <span>${formatNumber(m.session_count)} sessions</span>
-                      </div>
-                    </div>
-                    <div class="flex items-center gap-2">
-                      <span class="text-xs px-2.5 py-1 rounded-md bg-amber-500/10 text-amber-300 border border-amber-500/20 font-mono text-[11px]">
-                        🎯 Biased towards: <strong class="text-amber-200">${escapeHtml(m.primary_tool)}</strong> (${m.primary_tool_share_pct}%)
-                      </span>
-                    </div>
-                  </div>
-                  <!-- Tool distribution bar -->
-                  <div class="h-2 w-full rounded-full bg-slate-800/80 overflow-hidden flex mb-2.5 shadow-inner">
-                    ${breakdownBars}
-                  </div>
-                  <!-- Top tool pills -->
-                  <div class="flex flex-wrap items-center gap-2">
-                    ${toolPills}
-                  </div>
-                </div>
-              `;
-            }).join('');
-          }
-        }
-
-        const tools = (analytics && analytics.tools) || (analytics && analytics.top_tools) || [];
-        const totalCalls = analytics && analytics.total_tool_calls ? analytics.total_tool_calls : tools.reduce((s, t) => s + (t.count || 0), 0) || 1;
-
-        if (totalLabel) totalLabel.textContent = `${formatNumber(totalCalls)} Invocations Recorded`;
-
-        if (!tools.length) {
-          grid.innerHTML = '<div class="text-center py-8 text-slate-500 font-mono text-xs col-span-full">No tools recorded yet.</div>';
-          return;
-        }
-
-        grid.innerHTML = tools.map((t, idx) => {
-          const name = t.name || t.tool || 'tool';
-          const count = t.count || 0;
-          const pct = Math.min(100, Math.round((count / totalCalls) * 100));
-          let category = 'Code Intelligence';
-          let catColor = 'text-indigo-400 border-indigo-500/20 bg-indigo-500/10';
-          if (name.includes('terminal') || name.includes('exec')) {
-            category = 'Terminal & Execution';
-            catColor = 'text-purple-400 border-purple-500/20 bg-purple-500/10';
-          } else if (name.includes('web') || name.includes('search')) {
-            category = 'Search & Retrieval';
-            catColor = 'text-sky-400 border-sky-500/20 bg-sky-500/10';
-          } else if (name.includes('delegate') || name.includes('session')) {
-            category = 'Agent Orchestration';
-            catColor = 'text-emerald-400 border-emerald-500/20 bg-emerald-500/10';
-          }
-
-          return `
-            <div class="surface p-4 hover:border-violet-500/30 transition group flex flex-col justify-between">
-              <div>
-                <div class="flex items-center justify-between gap-2 mb-2">
-                  <div class="flex items-center gap-2">
-                    <span class="w-6 h-6 rounded-lg bg-violet-500/10 text-violet-400 flex items-center justify-center font-mono font-bold text-xs">#${idx + 1}</span>
-                    <h4 class="font-mono font-bold text-sm text-slate-100 group-hover:text-violet-300 transition truncate">${escapeHtml(name)}</h4>
-                  </div>
-                  <span class="text-[9px] px-2 py-0.5 rounded-full border font-mono ${catColor}">${category}</span>
-                </div>
-                <div class="flex items-baseline justify-between mt-3 mb-1.5">
-                  <span class="text-2xl font-extrabold mono text-slate-100">${formatNumber(count)}</span>
-                  <span class="text-xs font-mono font-bold text-violet-400">${pct}% share</span>
-                </div>
-                <div class="h-1.5 w-full rounded-full bg-slate-800 overflow-hidden">
-                  <div class="h-full bg-gradient-to-r from-violet-500 to-indigo-500 rounded-full" style="width: ${pct}%"></div>
-                </div>
-              </div>
-            </div>
-          `;
-        }).join('');
-      } catch (err) {
-        console.error('Error rendering tools tab:', err);
-        grid.innerHTML = '<div class="text-center py-8 text-rose-400 font-mono text-xs col-span-full">Error loading capability intelligence.</div>';
-      }
-    }
-
-    // ==========================================
-    // Achievements Tab (104 Badges & Milestone Confetti)
-    // ==========================================
-    let achievementsData = [];
-    let currentAchievementsCategory = 'all';
-    let achievementsUnlockedOnly = false;
-    let achievementsSearchQuery = '';
-    let hasLaunchedAchievementsConfetti = false;
-
-    function filterAchievementsCategory(category) {
-      currentAchievementsCategory = category;
-      document.querySelectorAll('#achievementsCategoryPills button').forEach(btn => {
-        const isActive = btn.dataset.cat === category;
-        btn.classList.toggle('active', isActive);
-        btn.classList.toggle('bg-indigo-600/30', isActive);
-        btn.classList.toggle('text-indigo-300', isActive);
-        btn.classList.toggle('border-indigo-500/40', isActive);
-        btn.classList.toggle('text-slate-400', !isActive);
-        btn.classList.toggle('border-transparent', !isActive);
-      });
-      renderAchievementsGrid();
-    }
-
-    function onAchievementsSearch(query) {
-      achievementsSearchQuery = (query || '').toLowerCase().trim();
-      renderAchievementsGrid();
-    }
-
-    function toggleAchievementsUnlockedOnly() {
-      achievementsUnlockedOnly = !achievementsUnlockedOnly;
-      const btn = document.getElementById('achievementsFilterUnlockedOnly');
-      if (btn) {
-        btn.classList.toggle('bg-indigo-600/30', achievementsUnlockedOnly);
-        btn.classList.toggle('text-indigo-300', achievementsUnlockedOnly);
-        btn.classList.toggle('border-indigo-500/40', achievementsUnlockedOnly);
-        btn.classList.toggle('text-slate-400', !achievementsUnlockedOnly);
-        btn.classList.toggle('border-slate-700', !achievementsUnlockedOnly);
-      }
-      renderAchievementsGrid();
-    }
-
-    function launchMilestoneConfetti() {
-      let canvas = document.getElementById('milestoneConfettiCanvas');
-      if (!canvas) {
-        canvas = document.createElement('canvas');
-        canvas.id = 'milestoneConfettiCanvas';
-        canvas.style.position = 'fixed';
-        canvas.style.inset = '0';
-        canvas.style.width = '100vw';
-        canvas.style.height = '100vh';
-        canvas.style.pointerEvents = 'none';
-        canvas.style.zIndex = '99999';
-        document.body.appendChild(canvas);
-      }
-
-      const ctx = canvas.getContext('2d');
-      const dpr = window.devicePixelRatio || 1;
-      const width = window.innerWidth;
-      const height = window.innerHeight;
-      canvas.width = width * dpr;
-      canvas.height = height * dpr;
-      ctx.scale(dpr, dpr);
-
-      const colors = ['#f59e0b', '#fbbf24', '#6366f1', '#8b5cf6', '#06b6d4', '#10b981', '#ec4899', '#38bdf8'];
-      const particles = [];
-      const count = 140;
-
-      for (let i = 0; i < count; i++) {
-        particles.push({
-          x: width * (0.2 + Math.random() * 0.6),
-          y: height * 0.4 + (Math.random() * 40 - 20),
-          vx: (Math.random() - 0.5) * 14,
-          vy: -(Math.random() * 12 + 6),
-          size: Math.random() * 8 + 4,
-          color: colors[Math.floor(Math.random() * colors.length)],
-          rotation: Math.random() * 360,
-          rotationSpeed: (Math.random() - 0.5) * 12,
-          opacity: 1,
-          shape: Math.random() > 0.4 ? 'rect' : 'circle',
-          decay: Math.random() * 0.008 + 0.006
-        });
-      }
-
-      let animationFrame;
-      function update() {
-        ctx.clearRect(0, 0, width, height);
-        let alive = 0;
-
-        particles.forEach(p => {
-          p.x += p.vx;
-          p.y += p.vy;
-          p.vy += 0.28;
-          p.vx *= 0.99;
-          p.rotation += p.rotationSpeed;
-          p.opacity -= p.decay;
-
-          if (p.opacity > 0 && p.y < height + 50) {
-            alive++;
-            ctx.save();
-            ctx.globalAlpha = Math.max(0, p.opacity);
-            ctx.translate(p.x, p.y);
-            ctx.rotate((p.rotation * Math.PI) / 180);
-            ctx.fillStyle = p.color;
-
-            if (p.shape === 'rect') {
-              ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size * 0.7);
-            } else {
-              ctx.beginPath();
-              ctx.arc(0, 0, p.size / 2, 0, Math.PI * 2);
-              ctx.fill();
-            }
-            ctx.restore();
-          }
-        });
-
-        if (alive > 0) {
-          animationFrame = requestAnimationFrame(update);
-        } else {
-          cancelAnimationFrame(animationFrame);
-          if (canvas && canvas.parentNode) {
-            canvas.parentNode.removeChild(canvas);
-          }
-        }
-      }
-
-      cancelAnimationFrame(animationFrame);
-      update();
-    }
-    window.launchMilestoneConfetti = launchMilestoneConfetti;
-
-    function generate104Badges(totalTokens, totalCost, modelsCount, totalTools) {
-      const badges = [];
-      const categories = [
-        { key: 'pioneer', prefix: '🚀 Pioneer', count: 18 },
-        { key: 'token', prefix: '⚡ Token Titan', count: 18 },
-        { key: 'cost', prefix: '💎 Cost Slayer', count: 18 },
-        { key: 'tool', prefix: '🛠️ Tool Sorcerer', count: 18 },
-        { key: 'model', prefix: '🧠 Model Connoisseur', count: 16 },
-        { key: 'secret', prefix: '👑 Secret & Legendary', count: 16 },
-      ];
-
-      const icons = ['🚀', '⚡', '💎', '🛠️', '🧠', '👑', '🔮', '🌟', '🎯', '🔥', '🛡️', '⚔️', '🌊', '🪐', '🧬', '🌌'];
-
-      const pioneerNames = [
-        'Genesis Boot', 'Session Pathfinder', 'Dual Core Pilot', 'Context Pioneer',
-        'Reasoning Scout', 'Multi-Agent Spark', 'Telemetry Vanguard', 'Agent Symphony',
-        'Infinite Horizon', 'Prompt Navigator', 'Frontier Trapper', 'Quantum Surveyor',
-        'Autonomous Wayfarer', 'Deep Pipeline Voyager', 'Dynamic Orchestrator',
-        'Neural Cartographer', 'Stellar Architect', 'Cosmic Vanguard'
-      ];
-
-      const secretNames = [
-        'Night Owl', 'Lightning Reflexes', 'Zero-Shot Sage', 'Token Miser',
-        'Session Marathoner', 'Cache Alchemist', 'Entropy Whisperer', 'Deterministic Prophet',
-        'Context Compressionist', 'Ghost in the Machine', 'Prompt Alchemist', 'Sovereign Intelligence',
-        'The Architect', 'Singularity Seeker', 'Timeless Weaver', 'TokDash Master'
-      ];
-
-      categories.forEach(cat => {
-        for (let i = 1; i <= cat.count; i++) {
-          const tier = Math.ceil(i / 3);
-          let title = `${cat.prefix} ${i}`;
-          let desc = '';
-          let isUnlocked = false;
-          let progress = '0%';
-
-          if (cat.key === 'pioneer') {
-            title = `🚀 ${pioneerNames[i - 1] || 'Pioneer ' + i}`;
-            const req = i * 200000;
-            desc = `Execute agent sessions and process ${req.toLocaleString()} telemetry tokens.`;
-            isUnlocked = (i <= 5) || (totalTokens >= req);
-            progress = isUnlocked ? 'Unlocked' : `${Math.min(100, Math.round((totalTokens / req) * 100))}%`;
-          } else if (cat.key === 'token') {
-            const tokenTiers = [
-              50000, 100000, 250000, 500000, 1000000, 2500000, 5000000, 10000000,
-              20000000, 35000000, 50000000, 75000000, 100000000, 150000000, 250000000,
-              500000000, 750000000, 1000000000
-            ];
-            const req = tokenTiers[i - 1] || (i * 2000000);
-            title = `⚡ Token Titan ${i}`;
-            desc = `Accumulate ${formatTokenCount(req)} total processed tokens across agent sessions.`;
-            isUnlocked = totalTokens >= req;
-            progress = isUnlocked ? 'Unlocked' : `${Math.min(100, Math.round((totalTokens / req) * 100))}%`;
-          } else if (cat.key === 'cost') {
-            const costSavings = Math.max(0, (totalTokens / 1000000) * 15 - totalCost);
-            const savingsTiers = [1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 7500, 10000, 15000, 20000, 30000, 40000, 50000];
-            const req = savingsTiers[i - 1] || (i * 1000);
-            title = `💎 Cost Slayer ${i}`;
-            desc = `Save ${formatCurrency(req)} against frontier model baselines with cache hits and thrift.`;
-            isUnlocked = costSavings >= req || (i <= 2 && totalTokens > 10000);
-            progress = isUnlocked ? 'Unlocked' : `${Math.min(100, Math.round((costSavings / req) * 100))}%`;
-          } else if (cat.key === 'tool') {
-            const toolTiers = [5, 15, 30, 60, 120, 250, 500, 1000, 2000, 3500, 5000, 7500, 10000, 15000, 25000, 50000, 75000, 100000];
-            const req = toolTiers[i - 1] || (i * 200);
-            title = `🛠️ Tool Sorcerer ${i}`;
-            desc = `Execute ${req.toLocaleString()} agent tool calls successfully across telemetry runs.`;
-            isUnlocked = totalTools >= req || (i <= 3 && totalTools > 0);
-            progress = isUnlocked ? 'Unlocked' : `${Math.min(100, Math.round(((totalTools || 0) / req) * 100))}%`;
-          } else if (cat.key === 'model') {
-            const reqModels = Math.min(16, i);
-            title = `🧠 Model Connoisseur ${i}`;
-            desc = `Deploy and benchmark with at least ${reqModels} distinct LLM architectures.`;
-            isUnlocked = modelsCount >= reqModels || (i === 1 && modelsCount >= 1);
-            progress = isUnlocked ? 'Unlocked' : `${Math.min(100, Math.round((modelsCount / reqModels) * 100))}%`;
-          } else if (cat.key === 'secret') {
-            title = `👑 ${secretNames[i - 1] || 'Legend ' + i}`;
-            desc = `Master specialized agent behaviors and secret telemetry milestones.`;
-            isUnlocked = (i <= 4 && totalTokens > 50000) || (i === 1 && totalTokens > 0);
-            progress = isUnlocked ? 'Unlocked' : 'Classified';
-          }
-
-          badges.push({
-            id: `${cat.key}_${i}`,
-            category: cat.key,
-            title: title,
-            description: desc,
-            icon: icons[(i - 1) % icons.length],
-            tier: tier,
-            unlocked: isUnlocked,
-            progress: progress
-          });
-        }
-      });
-
-      return badges;
-    }
-
-    function renderAchievementsGrid() {
-      const grid = document.getElementById('achievementsGrid');
-      if (!grid) return;
-
-      let filtered = achievementsData;
-      if (currentAchievementsCategory !== 'all') {
-        filtered = filtered.filter(b => b.category === currentAchievementsCategory);
-      }
-      if (achievementsUnlockedOnly) {
-        filtered = filtered.filter(b => b.unlocked);
-      }
-      if (achievementsSearchQuery) {
-        filtered = filtered.filter(b =>
-          b.title.toLowerCase().includes(achievementsSearchQuery) ||
-          b.description.toLowerCase().includes(achievementsSearchQuery)
-        );
-      }
-
-      if (!filtered.length) {
-        grid.innerHTML = '<div class="text-slate-500 font-mono text-xs text-center py-12 col-span-full">No achievements match your filters.</div>';
-        return;
-      }
-
-      grid.innerHTML = filtered.map(b => {
-        return `
-          <div class="achievement-card ${b.unlocked ? 'unlocked' : 'locked'} flex flex-col justify-between">
-            <div>
-              <div class="flex items-start gap-3 mb-2.5">
-                <div class="achievement-icon-wrap">
-                  ${b.icon}
-                </div>
-                <div class="min-w-0 flex-1">
-                  <div class="flex items-center justify-between gap-1">
-                    <h4 class="text-xs font-bold text-slate-100 font-mono truncate" title="${escapeHtml(b.title)}">${escapeHtml(b.title)}</h4>
-                    ${b.unlocked
-                      ? '<span class="text-[9px] px-1.5 py-0.2 rounded font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">UNLOCKED</span>'
-                      : '<span class="text-[9px] px-1.5 py-0.2 rounded font-mono text-slate-500 bg-slate-800/80 border border-slate-700/50">LOCKED</span>'
-                    }
-                  </div>
-                  <p class="text-[11px] text-slate-400 mt-1 leading-snug line-clamp-2">${escapeHtml(b.description)}</p>
-                </div>
-              </div>
-            </div>
-            <div class="pt-2.5 border-t border-white/5 flex items-center justify-between text-[10px] font-mono text-slate-500">
-              <span>Tier ${b.tier}</span>
-              <span class="${b.unlocked ? 'text-amber-400 font-bold' : 'text-slate-400'}">${b.progress}</span>
-            </div>
-          </div>
-        `;
-      }).join('');
-    }
-
-    async function renderAchievementsTab() {
-      const grid = document.getElementById('achievementsGrid');
-      if (!grid) return;
-
-      try {
-        let usage = lastUsageResponse;
-        if (!usage) {
-          const resp = await fetch(appPath('/api/usage'));
-          if (resp.ok) {
-            usage = await resp.json();
-            lastUsageResponse = usage;
-          }
-        }
-
-        let analytics = hermesAnalyticsCache;
-        if (!analytics) {
-          const res = await fetch(appPath('/api/hermes/analytics'));
-          if (res.ok) {
-            analytics = await res.json();
-            hermesAnalyticsCache = analytics;
-          }
-        }
-
-        const totalTokens = (usage && usage.total_tokens) || 0;
-        const totalCost = (usage && usage.total_cost) || 0;
-        const modelsCount = (usage && ((usage.combined_models && usage.combined_models.length) || (usage.top_models && usage.top_models.length))) || 0;
-        const tools = (analytics && (analytics.tools || analytics.top_tools)) || [];
-        const totalTools = (analytics && analytics.total_tool_calls) || tools.reduce((s, t) => s + (t.count || 0), 0) || 0;
-
-        achievementsData = generate104Badges(totalTokens, totalCost, modelsCount, totalTools);
-
-        const unlockedCount = achievementsData.filter(b => b.unlocked).length;
-        const pct = ((unlockedCount / 104) * 100).toFixed(1);
-
-        const heroCount = document.getElementById('achievementsHeroCount');
-        if (heroCount) heroCount.textContent = unlockedCount;
-        const heroPct = document.getElementById('achievementsHeroPct');
-        if (heroPct) heroPct.textContent = `${pct}%`;
-        const bar = document.getElementById('achievementsHeroProgressBar');
-        if (bar) bar.style.width = `${pct}%`;
-
-        const kpiUnlocked = document.getElementById('achievementsKpiUnlocked');
-        if (kpiUnlocked) kpiUnlocked.innerHTML = `${unlockedCount} <span class="text-sm text-slate-500 font-normal">/ 104</span>`;
-        const kpiUnlockedMeta = document.getElementById('achievementsKpiUnlockedMeta');
-        if (kpiUnlockedMeta) kpiUnlockedMeta.textContent = `${pct}% complete`;
-
-        let rank = 'Novice';
-        let rankMeta = 'Tier 1 Explorer';
-        if (unlockedCount >= 80) {
-          rank = 'Grandmaster';
-          rankMeta = 'Tier 6 Transcendent';
-        } else if (unlockedCount >= 60) {
-          rank = 'Master';
-          rankMeta = 'Tier 5 Architect';
-        } else if (unlockedCount >= 40) {
-          rank = 'Expert';
-          rankMeta = 'Tier 4 Strategist';
-        } else if (unlockedCount >= 20) {
-          rank = 'Journeyman';
-          rankMeta = 'Tier 3 Specialist';
-        } else if (unlockedCount >= 10) {
-          rank = 'Apprentice';
-          rankMeta = 'Tier 2 Builder';
-        }
-
-        const kpiRank = document.getElementById('achievementsKpiRank');
-        if (kpiRank) kpiRank.textContent = rank;
-        const kpiRankMeta = document.getElementById('achievementsKpiRankMeta');
-        if (kpiRankMeta) kpiRankMeta.textContent = rankMeta;
-
-        const kpiTokens = document.getElementById('achievementsKpiTokens');
-        if (kpiTokens) kpiTokens.textContent = formatTokenCount(totalTokens);
-        const kpiTools = document.getElementById('achievementsKpiTools');
-        if (kpiTools) kpiTools.textContent = formatNumber(totalTools);
-
-        renderAchievementsGrid();
-
-        if (!hasLaunchedAchievementsConfetti && unlockedCount > 0) {
-          hasLaunchedAchievementsConfetti = true;
-          setTimeout(() => {
-            launchMilestoneConfetti();
-          }, 350);
-        }
-      } catch (err) {
-        console.error('Error rendering achievements tab:', err);
-        if (grid) grid.innerHTML = '<div class="text-rose-400 font-mono text-xs text-center py-12 col-span-full">Failed to load achievements matrix.</div>';
-      }
-    }
-
-    // ==========================================
     // Utility: HTML Escaping
     // ==========================================
     function escapeHtml(str) {
@@ -19210,192 +17574,6 @@
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
-    }
-
-    // ==========================================
-    // Hermes Agent Observability & Hub
-    // ==========================================
-    let hermesAnalyticsCache = null;
-    let hermesSessionsCache = [];
-    let hermesSessionsCacheUrl = '';
-
-    async function fetchHermesHeaderStats() {
-      try {
-        const res = await fetch(appPath('/api/hermes/analytics'));
-        if (!res.ok) return;
-        const data = await res.json();
-        hermesAnalyticsCache = data;
-        const badgeCount = document.getElementById('hermesHeaderBadgeCount');
-        if (badgeCount && data.total_sessions) {
-          badgeCount.textContent = `${formatNumber(data.total_sessions)} Sessions`;
-        }
-        const badgeEl = document.getElementById('hermesHeaderBadge');
-        if (badgeEl && data.total_sessions > 0) {
-          badgeEl.style.display = 'inline-flex';
-        }
-        const tabBtn = document.querySelector('button.tab-btn[data-tab="hermes"]');
-        if (tabBtn && data.total_sessions > 0) {
-          tabBtn.style.display = 'inline-flex';
-        }
-        const sidebarSessions = document.getElementById('sidebarSessionCount');
-        if (sidebarSessions && data.total_sessions) {
-          sidebarSessions.textContent = `${formatNumber(data.total_sessions)} sess`;
-        }
-        const kpiTools = document.getElementById('hermesTotalToolCallsKpi');
-        if (kpiTools && data.total_tool_calls) {
-          kpiTools.textContent = formatNumber(data.total_tool_calls);
-        }
-      } catch (err) {
-        console.debug('Hermes stats fetch skipped:', err);
-      }
-    }
-
-    async function loadHermesHub() {
-      const bannerDb = document.getElementById('hermesDbPath');
-      const bannerSessions = document.getElementById('hermesTotalSessionsCount');
-      const bannerMessages = document.getElementById('hermesTotalMessagesCount');
-      const bannerTools = document.getElementById('hermesTotalToolCallsCount');
-      const pillTools = document.getElementById('hermesToolCallsPill');
-      const toolsContainer = document.getElementById('hermesToolsDistribution');
-      const projectsContainer = document.getElementById('hermesProjectsList');
-
-      const dateFrom = currentStartDate ? formatLocalDateYmd(currentStartDate) : null;
-      const dateTo = currentEndDate ? formatLocalDateYmd(currentEndDate) : null;
-      const sessionsUrl = sessionUrlForTool('hermes', null, dateFrom, dateTo);
-
-      try {
-        const [analyticsRes, sessionsRes] = await Promise.all([
-          fetch(appPath('/api/hermes/analytics')),
-          fetch(appPath(sessionsUrl)),
-        ]);
-
-        if (analyticsRes.ok) {
-          const analytics = await analyticsRes.json();
-          hermesAnalyticsCache = analytics;
-          if (bannerDb) bannerDb.textContent = analytics.database_path || 'AppData/Local/hermes/state.db';
-          if (bannerSessions) bannerSessions.textContent = formatNumber(analytics.total_sessions || 0);
-          if (bannerMessages) bannerMessages.textContent = formatNumber(analytics.total_messages || 0);
-          if (bannerTools) bannerTools.textContent = formatNumber(analytics.total_tool_calls || 0);
-          if (pillTools) pillTools.textContent = `${formatNumber(analytics.total_tool_calls || 0)} Invocations`;
-
-          // Render tool execution distribution
-          if (toolsContainer) {
-            const topTools = analytics.top_tools || [];
-            const totalCalls = analytics.total_tool_calls || topTools.reduce((s, t) => s + (t.count || 0), 0) || 1;
-            if (!topTools.length) {
-              toolsContainer.innerHTML = '<div class="text-xs text-slate-500 py-4 text-center">No tool calls found in Hermes database.</div>';
-            } else {
-              toolsContainer.innerHTML = topTools.map(t => {
-                const pct = Math.min(100, Math.round(((t.count || 0) / totalCalls) * 100));
-                return `
-                  <div class="space-y-1">
-                    <div class="flex items-center justify-between text-xs">
-                      <span class="font-mono font-bold text-slate-200">${escapeHtml(t.tool || 'unknown')}</span>
-                      <span class="text-slate-400 font-mono">${formatNumber(t.count)} (${pct}%)</span>
-                    </div>
-                    <div class="h-2 w-full rounded-full bg-slate-800 overflow-hidden">
-                      <div class="h-full bg-gradient-to-r from-purple-500 to-indigo-500 rounded-full" style="width: ${pct}%"></div>
-                    </div>
-                  </div>
-                `;
-              }).join('');
-            }
-          }
-
-          // Render top projects
-          if (projectsContainer) {
-            const topProjects = analytics.top_projects || [];
-            if (!topProjects.length) {
-              projectsContainer.innerHTML = '<div class="text-xs text-slate-500 py-4 text-center">No workspace records yet.</div>';
-            } else {
-              projectsContainer.innerHTML = topProjects.map(p => `
-                <div class="flex items-center justify-between p-2.5 rounded-lg bg-slate-900/40 border border-slate-800/80">
-                  <div class="min-w-0 pr-2">
-                    <div class="font-mono font-bold text-xs text-slate-200 truncate" title="${escapeHtml(p.project)}">${escapeHtml(p.project || 'default')}</div>
-                    <div class="text-[10px] text-slate-500">${formatNumber(p.session_count || 0)} sessions</div>
-                  </div>
-                  <span class="text-xs font-mono font-semibold text-purple-400">${formatTokenCount(p.total_tokens || 0)}</span>
-                </div>
-              `).join('');
-            }
-          }
-        }
-
-        if (sessionsRes.ok) {
-          const sessionsData = await sessionsRes.json();
-          const sessions = sessionsData.sessions || [];
-          hermesSessionsCache = sessions;
-          hermesSessionsCacheUrl = sessionsUrl;
-          renderHermesHubSessions(sessions);
-        }
-      } catch (err) {
-        console.error('Error loading Hermes hub:', err);
-      }
-    }
-
-    function renderHermesHubSessions(sessions) {
-      const tbody = document.getElementById('hermesHubSessionsTbody');
-      if (!tbody) return;
-      if (!sessions || !sessions.length) {
-        tbody.innerHTML = '<tr><td colspan="7" class="text-center py-10 text-slate-500 font-mono text-xs">No Hermes sessions found in current range.</td></tr>';
-        return;
-      }
-
-      tbody.innerHTML = sessions.slice(0, 60).map(s => `
-        <tr class="border-b border-slate-800/50 hover:bg-indigo-950/20 cursor-pointer transition group" onclick="openSessionDrawer('hermes', '${escapeHtml(s.session_id)}')">
-          <td class="py-3 px-4 font-mono font-semibold">
-            <div class="flex flex-col gap-0.5">
-              <div class="flex items-center gap-2">
-                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 flex-shrink-0 group-hover:scale-125 transition"></span>
-                <span class="text-slate-100 group-hover:text-indigo-300 transition" title="${escapeHtml(s.title || s.session_id)}">${escapeHtml(sessionDisplayName(s))}</span>
-                <span class="text-[10px] px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-300 border border-indigo-500/25 opacity-0 group-hover:opacity-100 transition flex-shrink-0">Inspect ↗</span>
-              </div>
-              <div class="flex items-center gap-1.5 text-[11px] text-slate-400 font-normal pl-3.5 mt-0.5">
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-slate-500 flex-shrink-0"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-                <span class="font-mono text-slate-400">${escapeHtml(s.project || 'workspace')}</span>
-              </div>
-            </div>
-          </td>
-          <td class="py-3 px-4 font-mono text-xs">
-            <span class="px-2 py-0.5 rounded text-[11px] bg-slate-800/70 text-slate-300 border border-slate-700/60 max-w-[140px] truncate block" title="${escapeHtml(s.model || '—')}">${escapeHtml(s.model || '—')}</span>
-          </td>
-          <td class="py-3 px-4 text-right font-mono">
-            <span class="px-2 py-0.5 rounded text-xs font-bold bg-purple-500/15 text-purple-300 border border-purple-500/25">
-              ${formatNumber(s.tool_call_count || 0)}
-            </span>
-          </td>
-          <td class="py-3 px-4 text-right font-mono text-slate-200 font-semibold text-xs">${formatTokenCount(s.tokens || 0)}</td>
-          <td class="py-3 px-4 text-right font-mono text-emerald-400 font-bold text-xs">${formatCurrency(s.cost || 0)}</td>
-          <td class="py-3 px-4 text-right font-mono text-slate-400 text-xs">${formatDuration(s.span_ms || s.active_ms || 0)}</td>
-          <td class="py-3 px-4 text-right text-slate-500 text-xs font-mono">${formatSessionTime(s.last_seen_at || s.started_at)}</td>
-        </tr>
-      `).join('');
-      if (window.TokDashAnimations && typeof window.TokDashAnimations.staggerInRows === 'function') {
-        const rows = tbody.querySelectorAll('tr');
-        if (rows.length > 0) window.TokDashAnimations.staggerInRows(rows);
-      }
-    }
-
-    function filterHermesSessionsList() {
-      const input = document.getElementById('hermesSessionSearch');
-      if (!input) return;
-      const query = input.value.trim().toLowerCase();
-      if (!query) {
-        renderHermesHubSessions(hermesSessionsCache);
-        return;
-      }
-      const filtered = hermesSessionsCache.filter(s =>
-        (s.session_id && s.session_id.toLowerCase().includes(query)) ||
-        (s.project && s.project.toLowerCase().includes(query)) ||
-        (s.model && s.model.toLowerCase().includes(query)) ||
-        (s.display_name && s.display_name.toLowerCase().includes(query))
-      );
-      renderHermesHubSessions(filtered);
-    }
-
-    function refreshHermesHub() {
-      loadHermesHub();
-      fetchHermesHeaderStats();
     }
 
     // ==========================================
@@ -19488,18 +17666,17 @@
         const roleColor = isUser ? 'text-indigo-400 border-indigo-500/30 bg-indigo-500/10' : isSystem ? 'text-slate-400 border-slate-700 bg-slate-800/40' : 'text-purple-400 border-purple-500/30 bg-purple-500/10';
         const cardBorder = isUser ? 'border-l-2 border-l-indigo-500' : isSystem ? 'border-l-2 border-l-slate-600' : 'border-l-2 border-l-purple-500';
 
-        const reasoningHtml = m.reasoning ? `
-          <details class="my-2.5 rounded-lg bg-purple-950/20 border border-purple-500/25 overflow-hidden group">
-            <summary class="flex items-center justify-between px-3 py-2 bg-purple-900/15 cursor-pointer select-none text-xs font-semibold text-purple-300 hover:bg-purple-900/25 transition">
-              <span class="flex items-center gap-1.5">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
-                Reasoning Trace (Thinking Chain)
-              </span>
-              <span class="text-[11px] text-purple-400/80 font-mono">click to toggle</span>
-            </summary>
-            <div class="p-3 text-xs text-purple-200/90 whitespace-pre-wrap font-mono leading-relaxed bg-black/40 border-t border-purple-500/15 max-h-72 overflow-y-auto">${escapeHtml(m.reasoning)}</div>
-          </details>
+        const reasoningHtml = m.has_reasoning ? `
+          <div class="my-2.5 rounded-lg bg-purple-950/20 border border-purple-500/25 px-3 py-2 text-xs font-semibold text-purple-300 flex items-center gap-1.5">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+            Reasoning recorded (hidden — transcript text is not exposed)
+          </div>
         ` : '';
+
+        const metaChips = [
+          m.content_chars ? `${Number(m.content_chars).toLocaleString()} chars` : '',
+          m.has_tool_calls ? 'tool calls' : '',
+        ].filter(Boolean).map(c => `<span class="text-[10px] px-2 py-0.5 rounded bg-slate-800/60 text-slate-400 font-mono">${c}</span>`).join(' ');
 
         return `
           <div class="surface p-4 rounded-xl border border-slate-800/80 ${cardBorder} shadow-sm">
@@ -19512,7 +17689,7 @@
               <span class="text-[11px] text-slate-500 font-mono">${m.timestamp || ''}</span>
             </div>
             ${reasoningHtml}
-            <div class="text-xs text-slate-200 whitespace-pre-wrap font-sans leading-relaxed break-words overflow-x-auto">${escapeHtml(m.content || '')}</div>
+            <div class="flex flex-wrap items-center gap-2 text-xs text-slate-400">${metaChips || '<span class="text-slate-500 font-mono">no content recorded</span>'}</div>
           </div>
         `;
       }).join('');
@@ -19527,16 +17704,9 @@
       }
 
       container.innerHTML = toolCalls.map(tc => {
-        const formattedArgs = typeof tc.args === 'object' ? JSON.stringify(tc.args, null, 2) : String(tc.args || '');
-        const outputHtml = tc.output ? `
-          <details class="text-xs mt-2.5">
-            <summary class="cursor-pointer text-slate-400 hover:text-indigo-300 select-none py-1 flex items-center gap-1.5 font-mono text-[11px]">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
-              View Output Payload
-            </summary>
-            <pre class="mt-1 p-3 rounded-lg bg-black/50 text-emerald-300 font-mono text-[11px] overflow-x-auto max-h-52 whitespace-pre-wrap border border-slate-800/80 shadow-inner">${escapeHtml(tc.output)}</pre>
-          </details>
-        ` : '';
+        // Tool arguments and outputs are intentionally not rendered (privacy):
+        // only the tool name, timing, and whether args were recorded.
+        const argsChip = tc.has_args ? '<span class="text-[10px] px-2 py-0.5 rounded bg-slate-800/60 text-slate-400 font-mono">args recorded</span>' : '';
 
         return `
           <div class="surface p-3.5 rounded-xl border border-slate-800/80 border-l-2 border-l-indigo-500 shadow-sm">
@@ -19545,13 +17715,10 @@
                 <span class="px-2 py-0.5 rounded text-xs font-mono font-bold bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">
                   ${escapeHtml(tc.tool_name || 'tool')}
                 </span>
+                ${argsChip}
               </div>
-              <span class="text-[11px] text-slate-500 font-mono">${tc.timestamp || ''}</span>
+              <span class="text-[11px] text-slate-500 font-mono">${escapeHtml(String(tc.timestamp || ''))}</span>
             </div>
-            <div class="text-xs text-slate-300 font-mono bg-slate-950/80 p-2.5 rounded-lg border border-slate-800/80 overflow-x-auto max-h-36">
-              ${escapeHtml(formattedArgs)}
-            </div>
-            ${outputHtml}
           </div>
         `;
       }).join('');
@@ -19643,7 +17810,6 @@
         exported_at: new Date().toISOString(),
         usage: lastUsageResponse,
         sessions: lastSessionsResponses,
-        hermes_analytics: hermesAnalyticsCache,
       };
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
@@ -19667,17 +17833,6 @@
         outTok += Number(t?.tokens_out || 0);
         reasonTok += Number(t?.tokens_reasoning || t?.reasoning || 0);
       });
-
-      // Supplemental calculation: if output or reasoning is 0, check hermesSessionsCache
-      if ((outTok === 0 || reasonTok === 0) && Array.isArray(hermesSessionsCache) && hermesSessionsCache.length > 0) {
-        let hOut = 0, hReason = 0;
-        hermesSessionsCache.forEach(s => {
-          hOut += Number(s.tokens_out || 0);
-          hReason += Number(s.tokens_reasoning || 0);
-        });
-        if (outTok === 0 && hOut > 0) outTok = hOut;
-        if (reasonTok === 0 && hReason > 0) reasonTok = hReason;
-      }
 
       // If output is still 0, derive from totalTokens minus input and cache
       const totalHeadline = Number(data.total_tokens || 0);
@@ -19724,11 +17879,6 @@
 
         const cacheKpi = document.getElementById('cacheSavingsKpi');
         if (cacheKpi) cacheKpi.textContent = formatTokenCount(cacheTok);
-
-        const co2Kg = total * 1.425e-7;
-        const co2Str = co2Kg < 0.001 ? '< 1 g CO2' : co2Kg < 1 ? `${(co2Kg * 1000).toFixed(1)} g CO2` : `${co2Kg.toFixed(2)} kg CO2`;
-        const co2El = document.getElementById('co2FootprintKpi');
-        if (co2El) co2El.textContent = co2Str;
       }
     }
 
@@ -22539,10 +20689,6 @@
     }
 
     function openSettingsModal() {
-      const curSelect = document.getElementById('userCurrencySelect');
-      if (curSelect) curSelect.value = currentUserCurrency || 'USD';
-      const curThemeSelect = document.getElementById('curatedThemeSelect');
-      if (curThemeSelect) curThemeSelect.value = localStorage.getItem('tokdash_curated_theme') || 'classic';
       setSettingsPanelOpen(true);
     }
 
@@ -22649,11 +20795,6 @@
     initReleaseNotes();
     initUpdateNotice();
 
-    const curSelect = document.getElementById('userCurrencySelect');
-    if (curSelect) curSelect.value = currentUserCurrency || 'USD';
-    const curThemeSelect = document.getElementById('curatedThemeSelect');
-    if (curThemeSelect) curThemeSelect.value = localStorage.getItem('tokdash_curated_theme') || 'classic';
-
     document.getElementById('styleThemeSelect').addEventListener('change', (event) => {
       const next = event.target.value || 'paper';
       localStorage.setItem('tokdash-style-theme', next);
@@ -22705,10 +20846,6 @@
     currentStartDate = today;
     currentEndDate = today;
     updateDashboardByDateRange(today, today);
-    fetchHermesHeaderStats();
-    if (window.lucide && typeof window.lucide.createIcons === 'function') {
-      window.lucide.createIcons();
-    }
 
     // Stats warming is scheduled after the first dashboard request completes, so it
     // does not compete with the cold-start Overview/Sessions burst.
@@ -22739,7 +20876,6 @@
       function initInteractions() {
         Animations.initChipInteractions();
         Animations.initScrollReveals('.dashboard-main');
-        Animations.initSSEPulse('#hermesSsePulseDot');
         Animations.observeCharts();
       }
 
@@ -22747,33 +20883,6 @@
         document.addEventListener('DOMContentLoaded', initInteractions);
       } else {
         initInteractions();
-      }
-
-      // Connect SSE stream for live updates & pulse indicator
-      try {
-        const streamUrl = (window.tokdashPath ? window.tokdashPath('/api/stream') : '/api/stream');
-        const sseSource = new EventSource(streamUrl);
-        sseSource.onopen = () => {
-          Animations.setSSEConnected(true);
-        };
-        sseSource.onerror = () => {
-          Animations.setSSEConnected(false);
-        };
-        sseSource.addEventListener('ping', () => {
-          Animations.setSSEConnected(true);
-        });
-        sseSource.addEventListener('update', (e) => {
-          Animations.setSSEConnected(true);
-          try {
-            const payload = JSON.parse(e.data);
-            if (payload && payload.tokens_delta > 1000) {
-              const dot = document.getElementById('tokensDeltaPulseDot');
-              if (dot) Animations.pulseTokenDelta(dot);
-            }
-          } catch (err) {}
-        });
-      } catch (e) {
-        console.warn('SSE stream init warning:', e);
       }
     } catch (err) {
       console.error('TokDash animation system load error:', err);

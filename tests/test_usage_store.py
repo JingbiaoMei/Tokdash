@@ -1204,7 +1204,7 @@ def test_session_file_parser_signatures_are_explicit_and_v159_compatible(monkeyp
     # that module hash.
     monkeypatch.setattr(
         sessions_module,
-        "parser_code_signature",
+        "code_object_signature",
         lambda _obj: {"object": "changed", "content_sha1": "changed"},
     )
     assert sessions_module._session_file_parser_signature(

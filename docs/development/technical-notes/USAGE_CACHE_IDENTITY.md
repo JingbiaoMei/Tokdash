@@ -274,17 +274,31 @@ parser's shared home entered both, and adding one parser reparsed both corpora.
 Both are signed on their own object now, by `code_object_signature()`: a named
 function contributes its own source, a named constant its own value. The bust
 stays automatic — nothing to remember to bump — and stays the size of the change.
-One whole-module hash remains in the Codex identity, for `activity_insights.py`,
-because that module writes the stored activity record and reads it and is shared
-with no other tool: there a module genuinely is the identity, which is the
-exception the helper's docstring points at.
+`activity_insights.py` left the Codex identity with it. That module aggregates
+the stored rows at read time and writes none of them, so signing it meant an
+edit to an aggregator reparsing a corpus it cannot change: what a row carries is
+the activity record the session-file parser put there, and the parser's own
+version token plus the record's own schema version already cover that.
+
+Narrowing an identity is only half a migration. Every row already in a database
+was signed with the whole-module shape, so a build that simply stopped hashing
+the module would reparse all of them once — measured at 162 s of Codex session
+parsing against a real store, on the first request after the upgrade.
+`_retire_module_hashed_dependency()` recognises that stored shape and resigns it
+instead: an event key, or a model map, recorded as a hash of
+`sources/coding_tools.py` whose hash is one the file actually shipped with
+between v1.7.0 and v2.6.4 came from code whose key derivation and model map
+match today's byte for byte. The accepted hashes are frozen released history, so
+a future build cannot vouch for a release nobody checked, and anything
+unrecognised reparses exactly as it did before.
 
 | Change | Session rows that reparse |
 | --- | --- |
 | Edit to any parser in `sources/coding_tools.py` | none |
-| Edit to `codex_token_event_key()`, or to `activity_insights.py` | codex |
+| Edit to `codex_token_event_key()` | codex |
 | Edit to Kimi's `_WIRE_MODEL_MAP` or its two resolvers | kimi |
 | A `_SESSION_FILE_PARSER_VERSIONS` bump | that parser's rows |
+| Upgrade from a build that hashed the shared module | none: those rows resign |
 
 ## Tests
 

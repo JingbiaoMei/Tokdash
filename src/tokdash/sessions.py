@@ -90,7 +90,6 @@ from .usage_store import (
     UsageDatabaseSchemaTooNewError,
     UsageEntryStore,
     code_object_signature,
-    parser_code_signature,
     persistent_usage_db_enabled,
     raise_if_usage_db_incompatible,
 )
@@ -335,6 +334,102 @@ def _legacy_pricing_signature_matches_content(legacy: Any, content: Any) -> bool
     return False
 
 
+# ``sources/coding_tools.py`` as shipped by every release whose copy of the
+# Codex event key and the Kimi wire-model map was byte-identical to the one
+# shipping now: v1.7.0 through v2.6.4, distinct by file content. Derived from
+# the tags themselves (each object normalised through ``ast`` before hashing, so
+# comment and blank-line churn counts as unchanged) rather than transcribed.
+#
+# Frozen history -- this set never grows. It exists for the one release that
+# stopped hashing the shared module, and it is the only way a stored row can
+# prove which code wrote its keys: the row records a hash of the whole file, and
+# a file hash says nothing about the two objects in it unless the release is
+# known. Rows older than v1.7.0 reparse here, exactly as they reparsed on every
+# upgrade before it.
+_LEGACY_CODING_TOOLS_HASHES = frozenset(
+    {
+        "651b65d3de65af2374a2301f6fbaf398b5cc3f4a",
+        "6c509a46926b9f0093995719c0f860b7ab658088",
+        "3256c95bd00ed9ac698d5765d4f4bf33d63c48e0",
+        "002ecdc03694a6a10a9c13ad351429a8f77df52e",
+        "9f71d43fbcab25993afc7e8f6fc1f2ce205cc211",
+        "03e6c2dd1c922fcd3e091c20ce48cf38c48aaca5",
+        "9c782b04c0131577b8baec50751ee64330c5df44",
+        "21401c88115461c281ba47a273775104ad617a89",
+        "6778fdd29995507871301be038714789920a2436",
+        "608fb79216bff6cc69a5c5bff268053ce7c2e2aa",
+        "bfc4281fc5b16277b5d1b2ac8bb93a49994b9f5c",
+        "403c681787fd2339d40f1b96545632da9ed304d8",
+        "0a4479352881ed97dbc88c66c04e40b0799662fa",
+        "f259f13097660a1d37361f501a817058a1c5b7da",
+        "5c37e86ae75367d6f6e6b1b3dade2182f0b4f459",
+        "a623b0ca956c1d7787483cd7dcaaddcf5b6da2c5",
+    }
+)
+
+# tool -> (component, the object label parser_code_signature() recorded for it).
+# Both used to resolve to a hash of the module that holds them.
+_LEGACY_MODULE_HASH_COMPONENTS = {
+    "codex": ("event_key", "tokdash.sources.coding_tools.codex_token_event_key"),
+    "kimi": ("model_map", "tokdash.sources.coding_tools.KimiParser"),
+}
+
+
+def _retire_module_hashed_dependency(
+    tool: str, old_signature: str, new_signature: str
+) -> str:
+    """Rewrite a stored session identity that predates per-object signatures.
+
+    Rows written before this release recorded the Codex event key and the Kimi
+    wire-model map as a hash of the WHOLE ``sources/coding_tools.py``, because
+    that is what ``parser_code_signature()`` returns for anything living in a
+    shared module. Those rows are current -- the two objects have matched
+    today's byte for byte since v1.7.0 -- so they move onto the new identity by
+    UPDATE instead of a reparse. For a median Codex history that is the whole
+    difference between a quiet upgrade and half a minute of CPU on the first
+    request after it.
+
+    Conservative by construction: the rewrite needs the stored component to be
+    exactly the shape ``parser_code_signature()`` produced, to name the object it
+    named, and to carry one of the released module hashes above. Anything else
+    falls through untouched and reparses.
+
+    Codex sheds ``activity`` too, whose value was a hash of
+    ``activity_insights.py``. That module aggregates the stored rows at read time
+    and writes none of them; what a row carries comes from the session-file
+    parser, whose version token and whose activity schema version both stay in
+    the comparison. Editing the aggregator must not reparse a corpus it cannot
+    change.
+    """
+    component, label = _LEGACY_MODULE_HASH_COMPONENTS.get(tool, (None, None))
+    if component is None:
+        return old_signature
+    try:
+        old = json.loads(old_signature)
+        new = json.loads(new_signature)
+    except (TypeError, ValueError):
+        return old_signature
+    if not isinstance(old, dict) or not isinstance(new, dict):
+        return old_signature
+    old_identity, new_identity = old.get("parser"), new.get("parser")
+    if not isinstance(old_identity, dict) or not isinstance(new_identity, dict):
+        return old_signature
+    stored = old_identity.get(component)
+    if not isinstance(stored, dict) or set(stored) != {"object", "content_sha1"}:
+        return old_signature
+    if stored.get("object") != label:
+        return old_signature
+    if str(stored.get("content_sha1")) not in _LEGACY_CODING_TOOLS_HASHES:
+        return old_signature
+
+    updated: Dict[str, Any] = dict(old_identity)
+    updated[component] = new_identity.get(component)
+    if "activity" in updated and "activity" not in new_identity:
+        updated.pop("activity")
+    old["parser"] = updated
+    return json.dumps(old, sort_keys=True, separators=(",", ":"))
+
+
 def _session_signature_compatible(
     old_signature: str,
     new_signature: str,
@@ -407,7 +502,9 @@ def _codex_session_signature_compatible(old_signature: str, new_signature: str) 
     keeps the bare-name limitation (see docs/reference/API.md).
     """
     return _session_signature_compatible(
-        old_signature, new_signature, allow_legacy_migration=False
+        _retire_module_hashed_dependency("codex", old_signature, new_signature),
+        new_signature,
+        allow_legacy_migration=False,
     )
 
 # Signature of the pricing files the singleton was last loaded from. Sessions cost is computed
@@ -1990,11 +2087,12 @@ def _codex_session_parser_signature() -> dict[str, Any]:
         # whole Codex session corpus. The function is self-contained, so its own
         # source is the identity.
         "event_key": code_object_signature(codex_token_event_key),
-        # activity_insights.py IS this dependency -- the writers of the stored
-        # activity record and the reader of it are the whole module, shared with
-        # no other tool -- so the module hash stays, alongside the schema version
-        # the record itself carries.
-        "activity": parser_code_signature(build_activity_insights),
+        # Deliberately NOT a signature of activity_insights.py: that module
+        # aggregates the stored rows at read time and writes none of them, so
+        # editing it changes nothing a row depends on. What a row carries is the
+        # activity record the session-file parser put there, covered by the
+        # parser's own version token plus the schema version the record carries,
+        # which the reader also checks before trusting a record it did not write.
         "activity_schema": ACTIVITY_SCHEMA_VERSION,
         # Deliberately no pricing: see _SESSION_COST_BASIS.
         "cost_basis": _codex_cost_basis(),
@@ -3783,6 +3881,19 @@ def _kimi_session_parser_signature() -> dict[str, Any]:
         ),
         "cost_basis": _SESSION_COST_BASIS,
     }
+
+
+def _kimi_session_signature_compatible(old_signature: str, new_signature: str) -> bool:
+    """Kimi rows move onto the per-object model-map identity without a reparse.
+
+    Same rule as Codex and for the same reason -- see
+    :func:`_retire_module_hashed_dependency`. Kimi keeps the free migration onto
+    priced-on-read that Codex withholds, so only the identity rewrite differs.
+    """
+    return _session_signature_compatible(
+        _retire_module_hashed_dependency("kimi", old_signature, new_signature),
+        new_signature,
+    )
 
 
 def _claude_session_parser_signature() -> dict[str, Any]:
@@ -7288,7 +7399,7 @@ def _stored_sessions_for_tool(
             parse_file_session=lambda file_sig: _parse_kimi_session_file(
                 *file_sig, pricing_sig
             ),
-            signature_compatible=_session_signature_compatible,
+            signature_compatible=_kimi_session_signature_compatible,
         )
     elif tool == "dsh":
         signatures = _dsh_session_signatures()

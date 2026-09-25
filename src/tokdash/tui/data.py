@@ -24,7 +24,7 @@ import random
 import threading
 import time
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from typing import Any, Callable
 
 from ..api import (
@@ -192,8 +192,35 @@ def ensure_usage_db_compatible() -> None:
         raise_if_usage_db_incompatible()
 
 
+def _stepped_calendar_window(token: str, day: date, shift: int) -> tuple[date, date]:
+    """The FULL calendar window ``shift`` periods before the one ``day`` lives in.
+
+    Date-shift stepping (``[`` / ``]``): from any day of September, one month
+    step back is Aug 1 -> Aug 31 — the whole previous month, NOT Sep 1 pulled
+    one day shorter. Likewise one week step back is the full Monday-Sunday week
+    and one year step back the full calendar year. Past periods are returned at
+    their FULL extent (never clamped to "today"); only the current window is
+    today-clamped, and that one comes from ``_report_windows`` at shift 0.
+    Endpoints are computed per unit (never by subtracting months from a
+    day-of-month, which would clamp Mar 31 to a nonexistent Feb 31).
+    """
+    if token == "month":
+        total = day.year * 12 + day.month - 1 - shift
+        year, month0 = divmod(total, 12)
+        start = date(year, month0 + 1, 1)
+        end = (start + timedelta(days=32)).replace(day=1) - timedelta(days=1)
+        return start, end
+    if token == "week":
+        start = day - timedelta(days=day.weekday() + 7 * shift)
+        return start, start + timedelta(days=6)
+    # "year" — endpoints built from the year NUMBER, so a Feb-29 "today" shifting
+    # into a common year cannot explode.
+    year = day.year - shift
+    return date(year, 1, 1), date(year, 12, 31)
+
+
 def resolve_report_period(
-    period: str, *, today: date | None = None
+    period: str, *, today: date | None = None, shift: int = 0
 ) -> tuple[str, str | None, str | None]:
     """Map a user period token to the (period, date_from, date_to) triple the
     report / TUI-Report surfaces fetch with — the exact shape
@@ -205,9 +232,17 @@ def resolve_report_period(
     route-period becomes "today" for those, matching the warmer. Everything else
     that compute recognizes passes through untouched. The cli.py parse-time
     guard normally fires before the ValueError can.
+
+    ``shift`` steps WHOLE CALENDAR PERIODS back (see
+    ``_stepped_calendar_window``); shift 0 returns exactly the unshifted triple,
+    so today's warm keys never change. Non-week/month/year tokens ignore the
+    shift (nothing date-pinned to step).
     """
     token = str(period or "").strip().lower()
     if token in REPORT_PERIODS:
+        if shift:
+            start, end = _stepped_calendar_window(token, today or _local_today(), shift)
+            return ("today", start.isoformat(), end.isoformat())
         date_from, date_to = _report_windows(today or _local_today())[REPORT_PERIODS.index(token)]
         return ("today", date_from, date_to)
     if period_is_recognized(token):
@@ -219,7 +254,7 @@ def resolve_report_period(
 
 
 def resolve_overview_period(
-    token: str, *, today: date | None = None
+    token: str, *, today: date | None = None, shift: int = 0
 ) -> tuple[str, str | None, str | None]:
     """Map an Overview period token to the (period, date_from, date_to) triple it
     fetches with — the pairs are EQUAL to the warmer's inputs, on purpose.
@@ -232,12 +267,21 @@ def resolve_overview_period(
     same day-pinned key round 1 used (in-process), never a key nobody warmed.
     Everything else ("all", "Nd", "7d", ints) passes through: (token, None, None),
     computed as the rolling period it names.
+
+    ``shift`` counts WHOLE PERIODS back, in the token's own unit — "month"
+    steps month by month (one back from September = Aug 1 -> Aug 31, full),
+    "today" steps day by day. Shift 0 is the exact unshifted triple (warm-key
+    parity), and "all"/rolling tokens are inert (nothing to step).
     """
     token = str(token or "").strip().lower()
     day = today or _local_today()
     if token == "today":
-        return ("today", day.isoformat(), day.isoformat())
+        d = day - timedelta(days=shift)
+        return ("today", d.isoformat(), d.isoformat())
     if token in REPORT_PERIODS:
+        if shift:
+            start, end = _stepped_calendar_window(token, day, shift)
+            return ("today", start.isoformat(), end.isoformat())
         date_from, date_to = _report_windows(day)[REPORT_PERIODS.index(token)]
         return ("today", date_from, date_to)
     return (token, None, None)

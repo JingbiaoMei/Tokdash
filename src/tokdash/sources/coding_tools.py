@@ -4071,7 +4071,8 @@ def qoder_cli_runtime_config() -> Tuple[Optional[float], Optional[int]]:
         if value is None or value <= 0:
             logger.warning(
                 "tokdash qoder_cli: invalid QODER_CLI_CONTEXT_WINDOW %r; "
-                "window stays unset (auto-only ratio recovery)",
+                "the override is ignored and each model resolves at its own "
+                "evidenced window",
                 raw,
             )
         else:
@@ -4115,19 +4116,62 @@ def qoder_cli_effective_rate(rate: Optional[float]) -> float:
 _QODER_MODEL_CONFIG_MARKER = "model_config="
 _QODER_MODEL_CONFIG_KEY_RE = re.compile(r'"key"\s*:\s*"([^"]+)"')
 _QODER_MODEL_CONFIG_WINDOW_RE = re.compile(r'"max_input_tokens"\s*:\s*([0-9]+)')
+# 2026-09-24T17-29-24-649+01-00-a-p1: local time, milliseconds, and the UTC
+# offset the CLI was running under.
+_QODER_RUN_ID_RE = re.compile(
+    r"^(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})([+-])(\d{2})-(\d{2})"
+)
+
+
+def _qoder_cli_run_epoch(path: Path) -> float:
+    """Epoch seconds of one run, read out of its <run-id> directory name.
+
+    The id embeds a LOCAL time with the offset that applied at the time, so a
+    lexicographic sort of the ids is chronological only while that offset
+    holds. Over a fall-back DST transition ...T02-30-00+02-00 (00:30Z) sorts
+    after the later ...T02-30-00+01-00 (01:30Z), which would hand "latest run
+    wins" to the stale window and divide every recovered input at it. Applying
+    the embedded offset turns the id into a real instant.
+
+    An id that does not parse falls back to the file's mtime rather than to a
+    string sort: both are the same scale, so a future id format lands in the
+    right order instead of an arbitrary one. A stat failure sorts oldest, which
+    keeps "latest wins" on the side of the logs that did resolve.
+    """
+    match = _QODER_RUN_ID_RE.match(path.parent.name)
+    if match is not None:
+        year, month, day, hour, minute, sec, milli, sign, off_h, off_m = match.groups()
+        try:
+            offset = timedelta(hours=int(off_h), minutes=int(off_m))
+            if sign == "-":
+                offset = -offset
+            moment = datetime(
+                int(year), int(month), int(day),
+                int(hour), int(minute), int(sec), int(milli) * 1000,
+                tzinfo=timezone(offset),
+            )
+        except ValueError:
+            pass  # impossible date (month 13): fall through to mtime
+        else:
+            return moment.timestamp()
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
 
 
 def qoder_cli_run_log_files(roots: List[Path]) -> List[Path]:
     """Qoder run logs, oldest run first.
 
     <root>/logs/runs/<run-id>/qodercli.log, where <run-id> is an ISO-like
-    timestamp prefix, so a lexicographic sort is also chronological. The same
-    <run-id> names the segment file <session>/segments/<run-id>.jsonl, so this
-    source needs no new path logic and no new join key.
+    timestamp prefix carrying its UTC offset. The same <run-id> names the
+    segment file <session>/segments/<run-id>.jsonl, so this source needs no
+    new path logic and no new join key.
 
-    Sorted by run id across ALL roots rather than per root: a per-root sort
-    keeps each root contiguous and loses the cross-root order, which would
-    make "latest wins" mean "whatever root came first".
+    Ordered by the instant that prefix decodes to -- not by the string, which
+    a DST fall-back reorders -- across ALL roots rather than per root: a
+    per-root sort keeps each root contiguous and loses the cross-root order,
+    which would make "latest wins" mean "whatever root came first".
     """
     seen = set()
     found: List[Path] = []
@@ -4138,39 +4182,56 @@ def qoder_cli_run_log_files(roots: List[Path]) -> List[Path]:
                 continue
             seen.add(key)
             found.append(path)
-    return sorted(found, key=lambda path: (path.parent.name, str(path)))
+    return sorted(found, key=lambda path: (_qoder_cli_run_epoch(path), str(path)))
 
 
-@lru_cache(maxsize=8)
-def _qoder_cli_window_table_cached(file_sig: tuple) -> tuple:
-    """Parse the window table, memoised on (path, mtime_ns, size).
+@lru_cache(maxsize=256)
+def _qoder_cli_run_log_windows_cached(path_str: str, mtime_ns: int, size: int) -> tuple:
+    """The window pairs ONE run log evidences, as sorted items.
 
-    A run log is megabyte-scale and every collect() needs this map, so reading
-    it per call is the difference between a scan and a stall. The key is the
-    file signature rather than the roots, which is also what makes a stale
-    table impossible: a touched log is a different key.
+    Memoised per file, not per corpus. A run log is megabyte-scale, every
+    collect() needs the map, and Qoder appends to the CURRENT run's log while
+    a session is live: signing the whole corpus would make every dashboard
+    poll a new key and re-read every retained log to reuse all but one entry.
+    Per file, an unchanged log is read once however often the source refreshes,
+    and a touched log is still a different key, so a stale table stays
+    impossible.
 
-    Returns sorted items so the cached value is hashable and shareable.
+    Within the file the last line wins, so the merge below only has to settle
+    the order BETWEEN runs to keep "latest run wins".
     """
     table: Dict[str, int] = {}
-    for path_str, _mtime_ns, _size in file_sig:
-        try:
-            with open(path_str, "r", encoding="utf-8", errors="replace") as handle:
-                for line in handle:
-                    at = line.find(_QODER_MODEL_CONFIG_MARKER)
-                    if at < 0:
-                        continue
-                    blob = line[at + len(_QODER_MODEL_CONFIG_MARKER):]
-                    key = _QODER_MODEL_CONFIG_KEY_RE.search(blob)
-                    window = _QODER_MODEL_CONFIG_WINDOW_RE.search(blob)
-                    if key is None or window is None:
-                        continue
-                    value = int(window.group(1))
-                    if value > 0:
-                        table[key.group(1)] = value
-        except OSError:
-            continue
+    try:
+        with open(path_str, "r", encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                at = line.find(_QODER_MODEL_CONFIG_MARKER)
+                if at < 0:
+                    continue
+                blob = line[at + len(_QODER_MODEL_CONFIG_MARKER):]
+                key = _QODER_MODEL_CONFIG_KEY_RE.search(blob)
+                window = _QODER_MODEL_CONFIG_WINDOW_RE.search(blob)
+                if key is None or window is None:
+                    continue
+                value = int(window.group(1))
+                if value > 0:
+                    table[key.group(1)] = value
+    except OSError:
+        return ()  # unreadable: contributes nothing, same as a missing log
     return tuple(sorted(table.items()))
+
+
+def _qoder_cli_window_items(file_sig: tuple) -> tuple:
+    """Merge the per-file window maps, in the order file_sig already carries.
+
+    file_sig comes from qoder_cli_run_log_signatures(), which is run order,
+    oldest first, so a later run's model_config overwrites an earlier one's.
+    Reading the files one at a time and merging is equivalent to the old
+    single pass: same order, same last-write-wins, one fewer full re-read.
+    """
+    merged: Dict[str, int] = {}
+    for path_str, mtime_ns, size in file_sig:
+        merged.update(_qoder_cli_run_log_windows_cached(path_str, mtime_ns, size))
+    return tuple(sorted(merged.items()))
 
 
 def qoder_cli_run_log_signatures(roots: List[Path]) -> tuple:
@@ -4197,7 +4258,7 @@ def qoder_cli_window_table(roots: List[Path]) -> Dict[str, int]:
     Only the two fields are ever read. The rest of the line can contain prompt
     text, so nothing else is parsed, retained or returned.
     """
-    return dict(_qoder_cli_window_table_cached(qoder_cli_run_log_signatures(roots)))
+    return dict(_qoder_cli_window_items(qoder_cli_run_log_signatures(roots)))
 
 
 def qoder_cli_window_table_signature(roots: List[Path]) -> tuple:
@@ -4207,7 +4268,7 @@ def qoder_cli_window_table_signature(roots: List[Path]) -> tuple:
     to change when the resolved windows change, and a later run re-reporting
     the same window must not invalidate a warm cache.
     """
-    return _qoder_cli_window_table_cached(qoder_cli_run_log_signatures(roots))
+    return _qoder_cli_window_items(qoder_cli_run_log_signatures(roots))
 
 
 def qoder_cli_window_for(
@@ -4277,10 +4338,14 @@ def qoder_cli_transcript_candidate(
         in_t = max(0, int(round(float(ratio) * win)))
     # Skip records where nothing is attributable (see class docstring). A
     # credit-bearing one is reported to `unattributed` so the parse can name
-    # the model it had to drop instead of losing it in silence.
+    # the model it had to drop instead of losing it in silence. The reason
+    # rides along because the two causes need different advice: a model with
+    # no evidenced window is fixed by QODER_CLI_CONTEXT_WINDOW, a record with
+    # no ratio is fixed by nothing we control, and telling that reader to set
+    # the variable sends them changing a setting that cannot help.
     if in_t == 0 and out_t == 0 and cache_r == 0 and cache_w == 0 and not ratio_usable:
         if has_credits and credits > 0 and unattributed is not None:
-            unattributed.add(model)
+            unattributed.add((model, "window" if win is None else "ratio"))
         return None
     return str(rid), {
         "has_credits": has_credits,
@@ -4406,12 +4471,18 @@ def qoder_cli_file_candidates(
         if not isinstance(d, dict):
             continue
         if not is_segment and d.get("type") == "runtime-config":
-            declared = d.get("contextWindow")
-            session_window = (
-                int(declared)
-                if QoderCliParser._is_number(declared) and int(declared) > 0
-                else None
-            )
+            # Key PRESENCE is the declaration. An absent key means this record
+            # says nothing about the window (an older emitter, or a mid-session
+            # model switch that only carries the model), so the previous value
+            # stands; only an explicit JSON null says "no window is set", which
+            # hands the model back to the run-log table.
+            if "contextWindow" in d:
+                declared = d["contextWindow"]
+                session_window = (
+                    int(declared)
+                    if QoderCliParser._is_number(declared) and int(declared) > 0
+                    else None
+                )
             continue
         cand = (
             qoder_cli_segment_candidate(d)
@@ -4538,8 +4609,11 @@ class QoderCliParser(BaseParser):
         usable ratio) is skipped even when credits > 0: the aggregator
         drops zero-token rows before reading their cost, so it could
         never be displayed (documented under-count edge). Each model hit
-        this way is named once in a warning line, because a silently
-        missing model is indistinguishable from an unused one.
+        this way is named in a warning line, because a silently missing
+        model is indistinguishable from an unused one. The warning names
+        the cause too: a model with no evidenced window (settable, see
+        above) reads differently from a record that carries no ratio at
+        all (not settable -- nothing in Tokdash recovers those).
     =======================================================================
     """
 
@@ -4610,8 +4684,9 @@ class QoderCliParser(BaseParser):
         model: str,
         override: Optional[int],
         windows: Optional[Dict[str, int]] = None,
+        session_window: Optional[int] = None,
     ) -> Optional[int]:
-        return qoder_cli_window_for(model, override, windows)
+        return qoder_cli_window_for(model, override, windows, session_window)
 
     @staticmethod
     def _is_number(value: Any) -> bool:
@@ -4622,8 +4697,12 @@ class QoderCliParser(BaseParser):
         d: Dict[str, Any],
         window: Optional[int],
         windows: Optional[Dict[str, int]] = None,
+        unattributed: Optional[set] = None,
+        session_window: Optional[int] = None,
     ) -> Optional[Tuple[str, Dict[str, Any]]]:
-        return qoder_cli_transcript_candidate(d, window, windows)
+        return qoder_cli_transcript_candidate(
+            d, window, windows, unattributed, session_window
+        )
 
     def _segment_candidate(
         self, d: Dict[str, Any]
@@ -4683,12 +4762,25 @@ class QoderCliParser(BaseParser):
                 entries.append(entry)
         entries.sort(key=lambda e: e["timestamp"])
         if unattributed:
-            logger.warning(
-                "tokdash qoder_cli: skipped billed records with no attributable "
-                "tokens for model(s) %s; no context window is evidenced for "
-                "them. Pass QODER_CLI_CONTEXT_WINDOW=<size> to recover them.",
-                ", ".join(sorted(unattributed)),
-            )
+            # Two causes, two pieces of advice. Only the missing window is
+            # something the reader can supply.
+            no_window = sorted({m for m, reason in unattributed if reason == "window"})
+            no_ratio = sorted({m for m, reason in unattributed if reason == "ratio"})
+            if no_window:
+                logger.warning(
+                    "tokdash qoder_cli: skipped billed records with no attributable "
+                    "tokens for model(s) %s; no context window is evidenced for "
+                    "them. Pass QODER_CLI_CONTEXT_WINDOW=<size> to recover them.",
+                    ", ".join(no_window),
+                )
+            if no_ratio:
+                logger.warning(
+                    "tokdash qoder_cli: skipped billed records for model(s) %s "
+                    "that carry no context_usage_ratio; the token fields are "
+                    "empty and there is no ratio to recover them from, so no "
+                    "Tokdash setting can attribute them.",
+                    ", ".join(no_ratio),
+                )
         return entries
 
 

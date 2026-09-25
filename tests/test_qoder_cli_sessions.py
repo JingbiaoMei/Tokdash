@@ -546,6 +546,23 @@ def test_loader_without_raising_attribute(monkeypatch, tmp_path):
     assert calls and len(calls[0]) == 6
 
 
+def test_run_log_window_table_is_a_required_key(monkeypatch, tmp_path):
+    """The window table has no default, because an omitted one is not neutral.
+
+    It used to default to (), so a caller that forgot it cached the resulting
+    empty-window candidates -- dropped pinned-model records -- against a key
+    that implied the table had been read. `window` has always been required for
+    exactly that reason; this keeps the two honest for the same reason.
+    """
+    import inspect
+
+    params = inspect.signature(
+        sessions._parse_qoder_cli_session_file
+    ).parameters
+    assert params["windows_sig"].default is inspect.Parameter.empty
+    assert params["window"].default is inspect.Parameter.empty
+
+
 def test_merged_entry_carries_source_name(monkeypatch, tmp_path):
     db = sessions._PRICING_DB
     tcand = {

@@ -4995,7 +4995,7 @@ def _parse_qoder_cli_session_file(
     _size: int,
     _pricing_sig: tuple,
     window: Optional[int],
-    windows_sig: tuple = (),
+    windows_sig: tuple,
 ) -> Optional[list[Dict[str, Any]]]:
     """One stream file -> its candidate list, through the shared builder.
 
@@ -5006,7 +5006,10 @@ def _parse_qoder_cli_session_file(
     until someone flipped the env on a warm process. ``windows_sig`` is the
     same story for run-log evidence: it keys the per-file cache as a sorted
     tuple and is turned back into a dict here, so Overview and this loader
-    resolve a model's window identically or not at all. Candidates carry no
+    resolve a model's window identically or not at all. It carries no
+    default: an omitted table is a real behavior change (every per-model
+    window unread), so a caller that forgets it must fail loudly rather than
+    cache empty candidates under a key that claims the table was consulted. Candidates carry no
     cost — pricing happens at merge time in the aggregate — so this parser
     is the pricing-independent one; its reload_pricing_db clear is memory
     and consistency, not staleness. OSError is translated to

@@ -4286,10 +4286,13 @@ def qoder_cli_run_log_window_memo_clear() -> None:
     """Drop every memoised run-log window map.
 
     For tests and for a roots change; leaving it alone only ever costs a
-    re-read, never a stale table, since every hit re-checks mtime and size.
+    re-read, never a stale table, since every hit re-checks mtime and size. The
+    merged-table slot goes with it, since its key is a corpus signature.
     """
+    global _QODER_WINDOW_MERGE_MEMO
     with _QODER_RUN_LOG_WINDOW_LOCK:
         _QODER_RUN_LOG_WINDOW_MEMO.clear()
+        _QODER_WINDOW_MERGE_MEMO = (None, ())
 
 
 def _qoder_cli_scan_run_log_windows(path_str: str) -> tuple:
@@ -4345,6 +4348,13 @@ def _qoder_cli_run_log_windows(path_str: str, mtime_ns: int, size: int) -> tuple
     return items
 
 
+# ONE merged table, keyed on the exact file signature it was built from: see
+# _qoder_cli_window_items(). A slot rather than a cache, because the signature
+# changes on every poll of a live session and a multi-entry table keyed on it
+# would be the corpus-wide cache this code already rejects.
+_QODER_WINDOW_MERGE_MEMO: tuple = (None, ())
+
+
 def _qoder_cli_window_items(file_sig: tuple) -> tuple:
     """Merge the per-file window maps, in the order file_sig already carries.
 
@@ -4353,19 +4363,31 @@ def _qoder_cli_window_items(file_sig: tuple) -> tuple:
     Reading the files one at a time and merging is equivalent to the old single
     pass: same order, same last-write-wins, one fewer full re-read.
 
-    Entries for logs Qoder has since pruned are dropped here, which is what
-    keeps the memo the size of the corpus rather than the size of the history.
+    The merge is memoed against that signature because ONE refresh asks for it
+    several times -- the parse, the collect signature, the persistent-store
+    signature and the Sessions loader -- and on a large corpus the merge itself
+    is the cost, not the reads the per-file memo already covers. The key is the
+    signature rather than a timestamp, so a hit is as current as a recompute;
+    a live session simply misses each poll and pays the merge once.
+
+    Entries for logs Qoder has since pruned are dropped here too, which is what
+    keeps the per-file memo the size of the corpus rather than the history.
     """
+    global _QODER_WINDOW_MERGE_MEMO
+    if _QODER_WINDOW_MERGE_MEMO[0] == file_sig:
+        return _QODER_WINDOW_MERGE_MEMO[1]
     merged: Dict[str, int] = {}
     live = set()
     for path_str, mtime_ns, size in file_sig:
         live.add(path_str)
         merged.update(_qoder_cli_run_log_windows(path_str, mtime_ns, size))
+    items = tuple(sorted(merged.items()))
     with _QODER_RUN_LOG_WINDOW_LOCK:
         if len(_QODER_RUN_LOG_WINDOW_MEMO) > len(live):
             for stale in [p for p in _QODER_RUN_LOG_WINDOW_MEMO if p not in live]:
                 _QODER_RUN_LOG_WINDOW_MEMO.pop(stale, None)
-    return tuple(sorted(merged.items()))
+    _QODER_WINDOW_MERGE_MEMO = (file_sig, items)
+    return items
 
 
 def qoder_cli_run_log_signatures(roots: List[Path]) -> tuple:

@@ -9768,7 +9768,15 @@
         markRouteFailure(route.id, route.url, error);
         const next = pickRoute(host, [route.id]);
         if (!next) throw error;
-        return await fetchJson(viaRoute(host, next), path, options);
+        try {
+          return await fetchJson(viaRoute(host, next), path, options);
+        } catch (nextError) {
+          // Both addresses are down. Leaving the second one `ok` would have every later read
+          // pick it again, with no backoff and no clue for the user, because nothing ever
+          // recorded that it failed too.
+          if (routeLevelError(nextError)) markRouteFailure(next.id, next.url, nextError);
+          throw nextError;
+        }
       }
     }
 
@@ -10199,32 +10207,40 @@
       saveServerRegistry(); renderServerSettings(); refreshCurrentView();
     }
 
-    // Judge an address before it reaches the registry. Probing under the candidate's own
-    // route id means a pass leaves a usable sample behind rather than a row that has to wait
-    // for the next tick to show a latency.
+    // Judge an address before it reaches the registry, under a probe-only id. The result is
+    // handed back rather than left in place: a validation that ran under a stored route's id
+    // would leave that route holding another address's latency or verdict, and a cancelled
+    // edit has to be able to change nothing at all. `state` is what the commit copies onto the
+    // route, so a passing probe shows a latency at once instead of waiting for the next tick.
     //
-    // A confirmed difference in identity is a refusal whether or not that daemon is listed.
-    // An address belonging to a listed host used to be waved through on the theory that the
-    // identity merge would move it along, but the merge joins hosts whose own ids match, so
-    // the route stayed put and nothing noticed until the next probe stamped it `Not this
-    // Tokdash` a minute after the row looked like it had been added. Naming the owner at the
-    // keyboard is the honest answer. A host with no identity of its own has nothing to
-    // disagree with, so an unknown-provenance host is still judged on reachability alone.
-    async function validateRouteAddress(host, candidate) {
+    // Adding is held to proof of belonging: the address has to answer as this host's own
+    // daemon. A host with no identity of its own cannot supply any, so nothing can be added to
+    // it -- an unknown id cannot prove two addresses are the same machine, and reading some
+    // other daemon's usage through a row named after this one is the error the whole identity
+    // rule exists to prevent. Editing is looser, because the route already belongs to this
+    // host and repointing someone's only address defines it rather than merging anything, so
+    // only a proven mismatch stops it. A confirmed difference in identity is a refusal whether
+    // or not that daemon is listed; naming the owner is the honest answer.
+    async function validateRouteAddress(host, url, { requireProof = false } = {}) {
+      const candidate = { id: newId('probe'), url, kind: 'probe' };
       const probe = await probeRoute(candidate, { bypassBackoff: true, samples: 1 });
-      if (probe.kind === 'blocked') return { error: `${t('serverRouteBlocked')}: ${blockedRuleText(probe.blockedRule)}`, probe };
-      if (probe.kind === 'fingerprint') return { error: t('serverTestFingerprintError'), probe };
-      if (!probe.ok && probe.kind !== 'backoff') return { error: t('serverTestNetworkError'), probe };
+      const state = routeRuntime[candidate.id] || null;
+      delete routeRuntime[candidate.id];   // a rejected address leaves nothing behind
+      const fail = (error) => ({ error, probe: null, state: null });
+      if (probe.kind === 'blocked') return fail(`${t('serverRouteBlocked')}: ${blockedRuleText(probe.blockedRule)}`);
+      if (probe.kind === 'fingerprint') return fail(t('serverTestFingerprintError'));
+      if (!probe.ok && probe.kind !== 'backoff') return fail(t('serverTestNetworkError'));
       const reported = String(probe.instanceId || '');
       if (reported && host.instanceId && reported !== host.instanceId) {
         const owner = hosts.find((item) => item !== host && item.instanceId === reported) || null;
-        return {
-          error: owner ? t('serverRouteAlreadyOn').replace('{name}', owner.label)
-            : `${t('serverRouteWrongDaemon')}: ${t('serverRouteWrongDaemonTip')}`,
-          probe,
-        };
+        return fail(owner ? t('serverRouteAlreadyOn').replace('{name}', owner.label)
+          : `${t('serverRouteWrongDaemon')}: ${t('serverRouteWrongDaemonTip')}`);
       }
-      return { error: null, probe };
+      if (requireProof) {
+        if (!host.instanceId) return fail(t('serverIdentityUnknownNote'));
+        if (!reported) return fail(t('serverIdentityUnavailable'));
+      }
+      return { error: null, probe, state };
     }
 
     // Editing the address of a route proves the new one first, so a typo cannot silently take
@@ -10237,19 +10253,13 @@
         if (route.kind === 'origin') return t('serverRouteIsThisPage');
         if (pageRouteMatches(canonical)) return t('serverRouteIsThisPage');
         if (hostRoutes(host).some((item) => item.id !== route.id && item.url === canonical)) return t('serverRouteDuplicate');
-        const { error } = await validateRouteAddress(host, { ...route, url: canonical });
-        if (error) {
-          // The samples belong to an address that is not settled either way, so they go; the
-          // next round re-probes whatever URL the route actually keeps.
-          delete routeRuntime[route.id];
-          return error;
-        }
+        const { error, state } = await validateRouteAddress(host, canonical);
+        if (error) return error;   // the route keeps the probe state its own address earned
         return {
           apply: () => {
             route.url = canonical;
+            if (state) setRouteState(route.id, state); else delete routeRuntime[route.id];
             hostActiveRouteId.delete(host.id);
-            // The probe ran under this route's own id, so its sample is already there and the
-            // row shows a latency without waiting for the next tick.
           },
         };
       }, { hostId: host.id, routeId: route.id });
@@ -10264,14 +10274,15 @@
           return existing.host.id === host.id ? t('serverRouteDuplicate') : t('serverRouteAlreadyOn').replace('{name}', existing.host.label);
         }
         const route = { id: newId('route'), url: canonical, kind: 'added', addedAt: Date.now() };
-        const { error, probe } = await validateRouteAddress(host, route);
-        if (error) { delete routeRuntime[route.id]; return error; }
+        const { error, probe, state } = await validateRouteAddress(host, canonical, { requireProof: true });
+        if (error) return error;
         return {
           apply: () => {
             host.routes = [...hostRoutes(host), route];
-            // The route may have just named a host that was still waiting on an identity,
-            // which is the merge-on-add case: it joins the host with that identity.
+            if (state) setRouteState(route.id, state);
             applyProbeIdentity(host, route, probe);
+            // The probe may have named a host that was still waiting on an identity, which is
+            // the merge-on-add case: it joins the host with that identity.
             mergeStoredHostsByIdentity();
           },
         };

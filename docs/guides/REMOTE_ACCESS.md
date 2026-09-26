@@ -432,9 +432,11 @@ before the numbers look wrong:
   one on the machine serving that page. A `127.0.0.1` row left on a Serve page is therefore
   not a slow route but an unreadable one; the dashboard marks it **Blocked from this page**
   with the rule that blocks it and a remove button, and never merges it.
-- An address is proved before it is stored. Adding one that does not answer, or that answers
-  as a different Tokdash, is refused where you typed it, naming the machine that owns that
-  address, so a wrong address never reaches the list to be discovered a minute later.
+- An address added to a server that is already listed is proved first. One that does not
+  answer, or that answers as a different Tokdash, is refused where you typed it, naming the
+  machine that owns that address. Adding a whole new server stays advisory: registering a
+  machine that is offline right now is legitimate, so it is stored and marked unreachable
+  until it answers.
 
 If a second address does land in two separate rows, they are two daemons even when one
 machine runs both, which is what two `TOKDASH_DATA_DIR`s give you, and their tokens really

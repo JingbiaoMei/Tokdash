@@ -1352,6 +1352,44 @@ def _probing_source(source: str) -> list[str]:
     ]
 
 
+def _fetching_source(source: str) -> list[str]:
+    """The probe code plus the read path, so failover can be driven end to end."""
+    return _probing_source(source) + [
+        _js_binding(source, "ROUTE_FLAP_MARGIN_MS"),
+        _js_binding(source, "ROUTE_FLAP_MARGIN_RATIO"),
+        # The harness has no location, so same-origin paths are passed through.
+        "const appPath = (path) => path;",
+        "const hostActiveRouteId = new Map();",
+        _extract_js_function(source, "function beatsIncumbent(challengerMs, incumbentMs) {"),
+        _extract_js_function_with_params(source, "function rankRoutes("),
+        _extract_js_function(source, "function hostRouteById(server, routeId) {"),
+        _extract_js_function(source, "function activeRouteIdFor(host, runtime = routeRuntime) {"),
+        _extract_js_function(source, "function activeRouteFor(host) {"),
+        _extract_js_function(source, "function serverPath(server, path) {"),
+        _extract_js_function(source, "function viaRoute(server, route) {"),
+        _extract_js_function_with_params(source, "async function fetchJson("),
+        _extract_js_function_with_params(source, "function pickRoute("),
+        _extract_js_function_with_params(source, "async function fetchFromHost("),
+    ]
+
+
+def _run_fetching(tmp_path: Path, name: str, body: str, value=None):
+    source = INDEX_HTML.read_text(encoding="utf-8")
+    harness = tmp_path / f"{name}.js"
+    harness.write_text(
+        "\n".join(_fetching_source(source))
+        + "\nconst input = JSON.parse(process.argv[2]);\nObject.assign(globalThis, input);\n"
+        + "const main = async () => " + body + ";\n"
+        + "main().then((result) => process.stdout.write(JSON.stringify(result)));\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        ["node", str(harness), json.dumps(value if value is not None else {})],
+        check=True, capture_output=True, encoding="utf-8",
+    )
+    return json.loads(result.stdout)
+
+
 def _run_probing(tmp_path: Path, name: str, body: str, value=None):
     """Run an async body against the real probe code and read the JSON it returns."""
     source = INDEX_HTML.read_text(encoding="utf-8")
@@ -1368,12 +1406,6 @@ def _run_probing(tmp_path: Path, name: str, body: str, value=None):
         check=True, capture_output=True, encoding="utf-8",
     )
     return json.loads(result.stdout)
-
-
-_HEALTH_OK = (
-    "() => ({ ok: true, status: 200,"
-    " json: async () => ({ service: 'tokdash', instance_id: reported, version: '2.6.4' }) })"
-)
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
@@ -1462,39 +1494,122 @@ def test_a_route_that_goes_quiet_mid_probe_is_not_left_healthy(tmp_path):
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
 def test_an_address_is_judged_before_it_is_stored(tmp_path):
-    """No confirmed stranger reaches storage, whether or not that daemon is listed.
+    """Adding an address has to prove it belongs; editing only has to not clash.
 
-    A listed owner used to be waved through on the theory that the identity merge would move
-    the route to the right host. It never could -- the merge joins hosts whose own ids match --
-    so the row just sat on the wrong host until the next probe said so.
+    An unknown id cannot prove two addresses are the same machine, so a host that reports no
+    identity of its own takes no new addresses at all, and an address that reports none cannot
+    join a host that has one. Editing is looser on purpose: the route already belongs here, and
+    repointing someone's only address defines that host rather than merging anything.
     """
     body = """{
       globalThis.fetch = async () => (typeof reply === 'function' ? reply()
         : { ok: true, status: 200, json: async () => ({ service: 'tokdash', instance_id: reply, version: '2.6.4' }) });
       const host = { id: 'ws', instanceId: 'WS', routes: [{ id: 'r', url: 'http://ws', kind: 'added' }] };
-      const candidate = { id: 'c1', url: 'http://candidate', kind: 'added' };
+      const unidentified = { id: 'old', instanceId: '', routes: [{ id: 'o', url: 'http://old', kind: 'added' }] };
       const results = {};
+      const add = (h, url) => validateRouteAddress(h, url, { requireProof: true });
+      const edit = (h, url) => validateRouteAddress(h, url);
+
       reply = () => { throw new TypeError('Failed to fetch'); };
-      results.unreachable = (await validateRouteAddress(host, { ...candidate, id: 'u' })).error;
+      results.unreachableOnAdd = (await add(host, 'http://c')).error;
+      results.unreachableOnEdit = (await edit(host, 'http://c')).error;
+
       reply = 'WS';
-      results.sameDaemon = (await validateRouteAddress(host, { ...candidate, id: 's' })).error;
+      results.ownDaemonOnAdd = (await add(host, 'http://c')).error;
+
       reply = 'LAPTOP';
-      results.stranger = (await validateRouteAddress(host, { ...candidate, id: 'x' })).error;
-      hosts = [host, { id: 'lap', label: 'laptop', instanceId: 'LAPTOP', routes: [{ id: 'q', url: 'http://lap', kind: 'added' }] }];
-      results.listedOwner = (await validateRouteAddress(host, { ...candidate, id: 't' })).error;
-      // A host that has no identity of its own -- an old daemon, or one whose id has not
-      // arrived -- has nothing to disagree with, so reachability is all a probe can prove.
+      results.strangerOnAdd = (await add(host, 'http://c')).error;
+      results.strangerOnEdit = (await edit(host, 'http://c')).error;
+      hosts = [host, { id: 'lap', label: 'laptop', instanceId: 'LAPTOP', routes: [{ id: 'q', url: 'http://lap' }] }];
+      results.listedOwnerOnAdd = (await add(host, 'http://c')).error;
+
       hosts = [host];
-      const unknown = { id: 'old', instanceId: '', routes: [{ id: 'o', url: 'http://old', kind: 'added' }] };
-      results.hostWithoutIdentity = (await validateRouteAddress(unknown, { id: 'o2', url: 'http://o2', kind: 'added' })).error;
+      reply = '';
+      results.noIdentityOnAdd = (await add(host, 'http://c')).error;
+      results.noIdentityOnEdit = (await edit(host, 'http://c')).error;
+
+      reply = 'WHOEVER';
+      results.hostWithoutIdentityOnAdd = (await add(unidentified, 'http://c')).error;
+      results.hostWithoutIdentityOnEdit = (await edit(unidentified, 'http://c')).error;
       return results;
     }"""
     out = _run_probing(tmp_path, "validate", body, {"hosts": [], "reply": ""})
-    assert out["unreachable"] == "serverTestNetworkError"
-    assert out["sameDaemon"] is None, "the host's own daemon is fine"
-    assert str(out["stranger"]).startswith("serverRouteWrongDaemon"), "an unlisted daemon is refused"
-    assert out["listedOwner"] == "serverRouteAlreadyOn", "a listed daemon is refused too, by name"
-    assert out["hostWithoutIdentity"] is None, "nothing to disagree with on an unidentified host"
+    assert out["unreachableOnAdd"] == out["unreachableOnEdit"] == "serverTestNetworkError"
+    assert out["ownDaemonOnAdd"] is None, "an address that answers as this host's daemon is fine"
+    assert str(out["strangerOnAdd"]).startswith("serverRouteWrongDaemon"), "an unlisted daemon is refused"
+    assert str(out["strangerOnEdit"]).startswith("serverRouteWrongDaemon"), "on an edit too"
+    assert out["listedOwnerOnAdd"] == "serverRouteAlreadyOn", "a listed daemon is refused by name"
+    assert out["noIdentityOnAdd"] == "serverIdentityUnavailable", "an address with no id proves nothing"
+    assert out["noIdentityOnEdit"] is None, "but a route may still be repointed by its owner"
+    assert out["hostWithoutIdentityOnAdd"] == "serverIdentityUnknownNote", "an unidentified host takes no address"
+    assert out["hostWithoutIdentityOnEdit"] is None, "an old daemon can still be repointed"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_a_rejected_address_leaves_no_trace_in_the_live_state(tmp_path):
+    """Validation probes under a probe-only id.
+
+    Probing under a stored route's id would leave that route holding the candidate's latency
+    or verdict, and Escape mid-probe could not give any of it back.
+    """
+    body = """{
+      const seen = [];
+      globalThis.fetch = async (url) => { seen.push(String(url)); throw new TypeError('Failed to fetch'); };
+      const host = { id: 'ws', instanceId: 'WS', routes: [{ id: 'stored', url: 'http://ws', kind: 'added' }] };
+      const { error } = await validateRouteAddress(host, 'http://candidate', { requireProof: true });
+      return { error, keys: Object.keys(routeRuntime),
+               storedInFile: seen.some((u) => u.includes('stored')) };
+    }"""
+    out = _run_probing(tmp_path, "no_trace", body)
+    assert out["error"] == "serverTestNetworkError"
+    assert out["keys"] == [], "a rejected probe leaves no runtime behind"
+    assert out["storedInFile"] is False, "the stored route's id never reaches the network"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_a_failover_target_that_also_fails_is_demoted_too(tmp_path):
+    """The retry has to record its own failure.
+
+    Both addresses are down here, and a route left `ok` after a request that failed on it
+    would be chosen again by every later read, with no backoff and no reason shown.
+    """
+    body = """{
+      globalThis.fetch = async () => { throw new TypeError('Failed to fetch'); };
+      const host = { id: 'ws', instanceId: 'WS', choice: 'auto',
+        routes: [{ id: 'a', url: 'http://a', kind: 'added' }, { id: 'b', url: 'http://b', kind: 'added' }] };
+      setRouteState('a', { state: 'ok', samples: [10], reportedInstanceId: 'WS' });
+      setRouteState('b', { state: 'ok', samples: [20], reportedInstanceId: 'WS' });
+      let threw = null;
+      try { await fetchFromHost(host, '/api/usage'); } catch (error) { threw = String(error); }
+      return { threw, a: routeRuntime.a.state, b: routeRuntime.b.state,
+               bBackoff: routeRuntime.b.backoffMs > 0 };
+    }"""
+    out = _run_fetching(tmp_path, "failover_both", body)
+    assert "Failed to fetch" in out["threw"], "the caller still sees the failure"
+    assert out["a"] == "fail" and out["b"] == "fail", "both addresses are demoted"
+    assert out["bBackoff"], "and the second one is off the rotation for a while"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_a_read_moves_to_the_next_route_within_the_same_call(tmp_path):
+    body = """{
+      let hits = [];
+      globalThis.fetch = async (url) => {
+        hits.push(String(url));
+        if (String(url).includes('http://a')) throw new TypeError('Failed to fetch');
+        return { ok: true, status: 200, json: async () => ({ total_tokens: 7 }) };
+      };
+      const host = { id: 'ws', instanceId: 'WS', choice: 'auto',
+        routes: [{ id: 'a', url: 'http://a', kind: 'added' }, { id: 'b', url: 'http://b', kind: 'added' }] };
+      setRouteState('a', { state: 'ok', samples: [10], reportedInstanceId: 'WS' });
+      setRouteState('b', { state: 'ok', samples: [20], reportedInstanceId: 'WS' });
+      const payload = await fetchFromHost(host, '/api/usage');
+      return { tokens: payload.total_tokens, a: routeRuntime.a.state, b: routeRuntime.b.state, hits };
+    }"""
+    out = _run_fetching(tmp_path, "failover_ok", body)
+    assert out["tokens"] == 7, "the host reads through its next address"
+    assert out["a"] == "fail" and out["b"] == "ok", "only the address that failed is demoted"
+    assert len(out["hits"]) == 2
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not available")

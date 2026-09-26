@@ -226,7 +226,7 @@ struct ScrollingLine: View {
             }
         }
         .frame(height: height)
-        .onChange(of: text) { _ in startedAt = Date() }
+        .onChange(of: text) { startedAt = Date() }
         .help(text)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(text)

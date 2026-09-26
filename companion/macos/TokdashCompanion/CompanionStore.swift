@@ -314,7 +314,7 @@ final class CompanionStore: NSObject, ObservableObject {
                                                 calendar: calendar) else { continue }
                 _ = try? await self.client.usageRange(from: w.from, to: w.to)
                 _ = try? await self.client.activeTimeRange(from: w.from, to: w.to)
-                _ = try? await Self.fetchGlance(self.client, source: glanceSource, period: period, offset: step)
+                _ = await Self.fetchGlance(self.client, source: glanceSource, period: period, offset: step)
                 // Marked only on completion: a cancelled chain re-warms on the next
                 // settle, never silently skips.
                 self.warmDone.insert(self.warmKey(period, step, day))

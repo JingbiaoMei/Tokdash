@@ -1333,9 +1333,9 @@ final class ContractV11Tests: XCTestCase {
         let outPath = sentinelLines.first?.trimmingCharacters(in: .whitespacesAndNewlines)
         let period = sentinelLines.count > 1 ? sentinelLines[1].trimmingCharacters(in: .whitespacesAndNewlines) : "today"
         let rankRows = min(8, max(3, Int(sentinelLines.count > 2
-            ? (sentinelLines[2].trimmingCharacters(in: .whitespacesAndNewlines) ?? "") ?? "" : "") ?? 3))
+            ? sentinelLines[2].trimmingCharacters(in: .whitespacesAndNewlines) : "") ?? 3))
         let stepOffset = sentinelLines.count > 3
-            ? max(0, Int(sentinelLines[3].trimmingCharacters(in: .whitespacesAndNewlines) ?? "") ?? 0) : 0
+            ? max(0, Int(sentinelLines[3].trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0) : 0
         guard let outPath, !outPath.isEmpty else {
             throw XCTSkip("evidence render disabled (write output path to \(sentinel.path))")
         }

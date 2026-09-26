@@ -701,8 +701,8 @@
     .servers-master-toggle { display: inline-flex; align-items: center; gap: 7px; min-height: 36px; color: var(--color-text); font-size: 11px; font-weight: 700; cursor: pointer; }
     .servers-master-toggle input,
     .server-select { width: 17px; height: 17px; margin: 0; accent-color: var(--color-primary); cursor: pointer; }
-    .server-settings-list { overflow: hidden; border: 1px solid color-mix(in srgb,var(--color-primary) 14%,var(--color-border)); border-radius: 11px; background: color-mix(in srgb,var(--color-surface-glass) 82%,transparent); box-shadow: inset 0 1px 0 color-mix(in srgb,#fff 56%,transparent); }
-    .server-setting-row { display: grid; grid-template-columns: 10px minmax(0,1fr) 18px 34px; align-items: center; gap: 9px; min-height: 44px; padding: 0 8px 0 11px; }
+    .server-settings-list { display: grid; gap: 14px; }
+    .server-setting-row { display: grid; grid-template-columns: 10px minmax(0,1fr) auto; align-items: center; gap: 9px; min-height: 44px; padding: 0 8px 0 11px; }
     .server-setting-row + .server-setting-row { border-top: 1px solid color-mix(in srgb,var(--color-border) 70%,transparent); }
     .server-health-dot { width: 10px; height: 10px; border: 1.5px solid color-mix(in srgb,var(--color-muted) 42%,transparent); border-radius: 50%; background: transparent; box-sizing: border-box; }
     .server-health-dot[data-state="ok"] { border-color: #2F9E5B; background: #2F9E5B; box-shadow: 0 0 0 3px color-mix(in srgb,#2F9E5B 13%,transparent); }
@@ -713,18 +713,15 @@
     .server-row-name { flex: 0 0 auto; max-width: 42%; overflow: hidden; color: var(--color-text); font-size: 12px; font-weight: 750; text-overflow: ellipsis; white-space: nowrap; }
     .server-row-separator { flex: 0 0 auto; color: var(--color-muted); font-size: 10px; }
     .server-row-host { min-width: 0; overflow: hidden; color: var(--color-muted); font-family: "Fira Code",ui-monospace,monospace; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-    .server-remove,
-    .server-remove-placeholder { width: 34px; height: 34px; }
+    .server-remove { width: 34px; height: 34px; }
     .server-remove { display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 1px solid transparent; border-radius: 8px; color: var(--color-muted); background: transparent; cursor: pointer; transition: color var(--t-fast) ease,background var(--t-fast) ease,border-color var(--t-fast) ease; }
     .server-remove:is(:hover,:focus-visible) { outline: none; border-color: color-mix(in srgb,#D94848 25%,var(--color-border)); background: color-mix(in srgb,#D94848 8%,transparent); color: #C93636; }
     /* Host header plus one row per route: the host is what the user manages, the route is
        what the network reaches, and the two need to read as different things. */
-    .server-host-block + .server-host-block { border-top: 1px solid color-mix(in srgb,var(--color-border) 70%,transparent); }
-    /* Four cells now: dot, name, the host's own actions, remove. The actions need their own
-       track, or the pencil and the checkbox get squeezed into one and overlap. */
-    .server-setting-row { grid-template-columns: 10px minmax(0,1fr) auto 34px; }
+    .server-host-block { min-width: 0; }
+    /* Keep host actions on a separate track and addresses aligned with the name. */
     .server-route-list { display: grid; gap: 2px; margin: 0 8px 8px 30px; }
-    .server-route-row { display: grid; grid-template-columns: minmax(0,1fr) auto auto auto auto; align-items: center; gap: 7px; min-height: 30px; }
+    .server-route-row { display: grid; grid-template-columns: minmax(0,1fr) auto auto auto; align-items: center; gap: 7px; min-height: 30px; }
     .server-route-url { min-width: 0; overflow: hidden; color: var(--color-muted); font-family: "Fira Code",ui-monospace,monospace; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
     .server-route-url[data-invalid="true"] { color: #D12F2F; }
     .server-route-ms { color: var(--color-text); font-family: "Fira Code",ui-monospace,monospace; font-size: 10px; font-variant-numeric: tabular-nums; }
@@ -736,8 +733,10 @@
     .server-route-badge[data-badge="error"] { border-color: color-mix(in srgb,#D94848 40%,transparent); background: color-mix(in srgb,#D94848 8%,transparent); color: #C93636; }
     .server-route-actions { display: inline-flex; align-items: center; gap: 2px; }
     .server-route-actions .server-remove { width: 26px; height: 26px; }
-    .server-route-add { display: inline-flex; align-items: center; gap: 5px; margin: 3px 0 0 30px; padding: 3px 8px; border: 1px dashed color-mix(in srgb,var(--color-border) 85%,transparent); border-radius: 8px; color: var(--color-muted); background: transparent; font-size: 10px; font-weight: 700; cursor: pointer; }
-    .server-route-add:hover { color: var(--color-primary); border-color: color-mix(in srgb,var(--color-primary) 40%,transparent); }
+    .server-editable { padding: 0; border: 0; background: transparent; text-align: left; cursor: pointer; }
+    .server-editable:hover { color: var(--color-primary); text-decoration: underline; text-underline-offset: 3px; }
+    .server-editable:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 3px; border-radius: 3px; }
+    .server-row-name.server-editable { max-width: 100%; }
     .server-route-note { margin: 2px 0 0; color: var(--color-muted); font-size: 10px; font-weight: 650; line-height: 1.4; }
     .server-route-note[data-tone="warn"], .server-route-note[data-tone="error"] { color: #D12F2F; }
     .server-inline-editor { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 4px 0 6px; }
@@ -2046,7 +2045,7 @@
                     <div id="serverSettingsList" class="server-settings-list"></div>
                     <div class="server-add-form">
                       <p class="server-add-title" data-i18n="addAServer">Add a server</p>
-                      <input id="serverUrlInput" class="ui-input" type="url" data-i18n-placeholder="serverUrl" placeholder="https://host:55423/tokdash" aria-describedby="serverFormStatus">
+                      <input id="serverUrlInput" class="ui-input" type="text" data-i18n-placeholder="serverUrl" placeholder="host:55423/tokdash" aria-describedby="serverFormStatus">
                       <input id="serverLabelInput" class="ui-input" type="text" data-i18n-placeholder="serverLabelOptional" placeholder="Name (optional)">
                       <div class="server-form-actions">
                         <button id="testServerBtn" class="btn btn-ghost" type="button" data-i18n="testServer">Test</button>
@@ -4551,6 +4550,26 @@
       return `${url.protocol}//${url.host}${url.pathname.replace(/\/+$/, '')}`;
     }
 
+    // Protocol discovery is only for new user input, never for persisted route identities.
+    async function resolveRouteInput(value) {
+      const raw = String(value || '').trim();
+      const explicit = normalizeRouteUrl(raw);
+      if (explicit) return { url: explicit };
+      if (!raw || /[\s@\\]/.test(raw) || raw.includes('://') || /^(?:javascript|data|file|mailto):/i.test(raw)) {
+        return { error: t('serverInvalidUrl') };
+      }
+      const address = raw.replace(/^\/\//, '');
+      const candidates = ['https:', 'http:'].map((scheme) => normalizeRouteUrl(`${scheme}//${address}`));
+      if (candidates.some((url) => !url)) return { error: t('serverInvalidUrl') };
+      let error;
+      for (const url of candidates) {
+        try { await probeServer(url); return { url }; }
+        catch (failure) { error = failure; }
+      }
+      // Do not persist a guessed protocol when neither endpoint could be verified.
+      return { error: error?.message || t('serverTestNetworkError') };
+    }
+
     // Kept as the name every existing caller uses; it is now the canonicalising one.
     function normalizeServerBaseUrl(value) { return normalizeRouteUrl(value); }
 
@@ -5369,7 +5388,7 @@
         servers: 'Servers',
         allServers: 'Use all',
         addAServer: 'Add a server',
-        serverUrl: 'https://host:55423/tokdash',
+        serverUrl: 'host:55423/tokdash',
         serverLabelOptional: 'Name (optional)',
         serversThisHost: 'this host',
         serversReachable: '{ok} / {n} reachable',
@@ -5447,7 +5466,7 @@
         serverMergeNotice: 'Merged {b} into {a}. Both routes are kept.',
         serverMergeNoticeDismiss: 'Dismiss',
         serverTestFingerprintError: 'This address is reachable, but it is not a Tokdash server.',
-        serverInvalidUrl: 'Enter a full http(s) URL, e.g. https://host:55423',
+        serverInvalidUrl: 'Enter a host address, e.g. host:55423 or https://host/tokdash',
         serverAdded: 'Added {name}.',
         serverStatusIdle: 'Not checked',
         serverStatusOk: 'Reachable',
@@ -5911,7 +5930,7 @@
         servers: '服务器',
         allServers: '全部启用',
         addAServer: '添加服务器',
-        serverUrl: 'https://主机:55423/tokdash',
+        serverUrl: '主机:55423/tokdash',
         serverLabelOptional: '名称（可选）',
         serversThisHost: '本机',
         serversReachable: '{ok} / {n} 台在线',
@@ -5989,7 +6008,7 @@
         serverMergeNotice: '已将 {b} 合并到 {a}，两个地址都保留。',
         serverMergeNoticeDismiss: '忽略',
         serverTestFingerprintError: '此地址可以访问，但不是 Tokdash 服务器。',
-        serverInvalidUrl: '请输入完整的 http(s) 地址，例如 https://主机:55423',
+        serverInvalidUrl: '请输入主机地址，例如 主机:55423 或 https://主机/tokdash',
         serverAdded: '已添加 {name}。',
         serverStatusIdle: '尚未检查',
         serverStatusOk: '可访问',
@@ -6454,7 +6473,7 @@
         servers: 'サーバー',
         allServers: 'すべて使用',
         addAServer: 'サーバーを追加',
-        serverUrl: 'https://host:55423/tokdash',
+        serverUrl: 'host:55423/tokdash',
         serverLabelOptional: '名前（省略可）',
         serversThisHost: 'このホスト',
         serversReachable: '{ok} / {n} 台接続可能',
@@ -6532,7 +6551,7 @@
         serverMergeNotice: '{b} を {a} に統合しました。両方の経路を残しています。',
         serverMergeNoticeDismiss: '閉じる',
         serverTestFingerprintError: 'このアドレスには接続できますが、Tokdash サーバーではありません。',
-        serverInvalidUrl: '完全な http(s) URL を入力してください。例: https://host:55423',
+        serverInvalidUrl: 'ホストのアドレスを入力してください。例: host:55423 または https://host/tokdash',
         serverAdded: '{name} を追加しました。',
         serverStatusIdle: '未確認',
         serverStatusOk: '接続可能',
@@ -6997,7 +7016,7 @@
         servers: '서버',
         allServers: '모두 사용',
         addAServer: '서버 추가',
-        serverUrl: 'https://host:55423/tokdash',
+        serverUrl: 'host:55423/tokdash',
         serverLabelOptional: '이름 (선택)',
         serversThisHost: '이 호스트',
         serversReachable: '{ok} / {n} 접속 가능',
@@ -7075,7 +7094,7 @@
         serverMergeNotice: '{b}을(를) {a}에 병합했습니다. 두 경로를 모두 유지합니다.',
         serverMergeNoticeDismiss: '닫기',
         serverTestFingerprintError: '이 주소에는 접속할 수 있지만 Tokdash 서버가 아닙니다.',
-        serverInvalidUrl: '완전한 http(s) URL을 입력하세요. 예: https://host:55423',
+        serverInvalidUrl: '호스트 주소를 입력하세요. 예: host:55423 또는 https://host/tokdash',
         serverAdded: '{name} 추가됨.',
         serverStatusIdle: '미확인',
         serverStatusOk: '접속 가능',
@@ -7540,7 +7559,7 @@
         servers: 'Servidores',
         allServers: 'Usar todos',
         addAServer: 'Añadir un servidor',
-        serverUrl: 'https://host:55423/tokdash',
+        serverUrl: 'host:55423/tokdash',
         serverLabelOptional: 'Nombre (opcional)',
         serversThisHost: 'este host',
         serversReachable: '{ok} / {n} accesibles',
@@ -7618,7 +7637,7 @@
         serverMergeNotice: '{b} se combinó con {a}. Se conservan ambas rutas.',
         serverMergeNoticeDismiss: 'Descartar',
         serverTestFingerprintError: 'Esta dirección es accesible, pero no es un servidor de Tokdash.',
-        serverInvalidUrl: 'Introduce una URL http(s) completa, p. ej. https://host:55423',
+        serverInvalidUrl: 'Introduce una dirección, p. ej. host:55423 o https://host/tokdash',
         serverAdded: 'Se añadió {name}.',
         serverStatusIdle: 'Sin comprobar',
         serverStatusOk: 'Accesible',
@@ -8083,7 +8102,7 @@
         servers: 'Servidores',
         allServers: 'Usar todos',
         addAServer: 'Adicionar um servidor',
-        serverUrl: 'https://host:55423/tokdash',
+        serverUrl: 'host:55423/tokdash',
         serverLabelOptional: 'Nome (opcional)',
         serversThisHost: 'este host',
         serversReachable: '{ok} / {n} acessíveis',
@@ -8161,7 +8180,7 @@
         serverMergeNotice: '{b} foi mesclado em {a}. As duas rotas foram mantidas.',
         serverMergeNoticeDismiss: 'Dispensar',
         serverTestFingerprintError: 'Este endereço é acessível, mas não é um servidor Tokdash.',
-        serverInvalidUrl: 'Insira uma URL http(s) completa, ex.: https://host:55423',
+        serverInvalidUrl: 'Insira um endereço, ex.: host:55423 ou https://host/tokdash',
         serverAdded: 'Adicionado {name}.',
         serverStatusIdle: 'Não verificado',
         serverStatusOk: 'Acessível',
@@ -9855,7 +9874,9 @@
       });
 
       const text = document.createElement('span'); text.className = 'server-row-copy';
-      const name = document.createElement('span'); name.className = 'server-row-name'; name.textContent = host.label;
+      const name = document.createElement('button'); name.type = 'button'; name.className = 'server-row-name server-editable'; name.textContent = host.label;
+      name.title = t('serverRename'); name.setAttribute('aria-label', `${t('serverRename')}: ${host.label}`);
+      name.addEventListener('click', () => renameHost(host));
       text.append(name);
       if (!multiHost) {
         const separator = document.createElement('span'); separator.className = 'server-row-separator'; separator.textContent = '·';
@@ -9867,35 +9888,21 @@
       row.append(status, text);
 
       const actions = document.createElement('span'); actions.className = 'server-host-actions';
-      actions.appendChild(iconButton('serverRename', 'pencil', () => renameHost(host)));
+      actions.appendChild(renderAddRouteButton(host));
       actions.appendChild(checkbox);
       row.append(actions);
-      if (host.id === LOCAL_HOST_ID) {
-        // The page's own daemon cannot be removed, and with no added routes there is
-        // nothing to remove at all, which is the placeholder the old single-row UI showed.
-        const placeholder = document.createElement('span');
-        placeholder.className = 'server-remove-placeholder';
-        placeholder.setAttribute('aria-hidden', 'true');
-        row.appendChild(placeholder);
-      } else {
-        const remove = document.createElement('button');
-        remove.type = 'button'; remove.className = 'server-remove';
-        remove.title = `${t('serverRemove')} ${host.label}`;
-        remove.setAttribute('aria-label', remove.title);
-        remove.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
-        remove.addEventListener('click', () => removeHost(host));
-        row.appendChild(remove);
-      }
       block.appendChild(row);
 
       const showRoutes = multiHost || hostRoutes(host).length > 1;
+      const routeList = document.createElement('div'); routeList.className = 'server-route-list';
       if (showRoutes) hostRoutes(host).forEach((route) => {
         if (inlineEditor && inlineEditor.key === 'serverRouteEdit' && editingRouteId === route.id) {
-          block.appendChild(buildInlineEditor());
+          routeList.appendChild(buildInlineEditor());
           return;
         }
-        block.appendChild(renderRouteRow(host, route));
+        routeList.appendChild(renderRouteRow(host, route));
       });
+      if (showRoutes) block.appendChild(routeList);
       const note = hostIdentityNote(host);
       if (note) {
         const noteEl = document.createElement('div');
@@ -9904,12 +9911,8 @@
         noteEl.textContent = note;
         block.appendChild(noteEl);
       }
-      if (showRoutes) {
-        if (inlineEditor && inlineEditor.key === 'serverAddRoute' && editingHostId === host.id) {
-          block.appendChild(buildInlineEditor());
-        } else {
-          block.appendChild(renderAddRouteButton(host));
-        }
+      if (inlineEditor && inlineEditor.key === 'serverAddRoute' && editingHostId === host.id) {
+        block.appendChild(buildInlineEditor());
       }
       if (inlineEditor && inlineEditor.key === 'serverRename' && editingHostId === host.id) {
         block.insertBefore(buildInlineEditor(), block.children[1] || null);
@@ -9940,7 +9943,7 @@
       const title = t(titleKey);
       button.title = title; button.setAttribute('aria-label', title);
       const glyphs = {
-        pencil: '<path d="M4 20h4L20 8l-4-4L4 16v4Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>',
+        plus: '<path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>',
         pin: '<path d="M12 4v10m0 0-3-3m3 3 3-3M6 20h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>',
         test: '<path d="M20 12a8 8 0 1 1-3.1-6.3M20 4v5h-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>',
         cross: '<path d="m7 7 10 10M17 7 7 17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
@@ -9966,8 +9969,13 @@
     function renderRouteRow(host, route) {
       const row = document.createElement('div');
       row.className = 'server-route-row';
-      const url = document.createElement('span');
+      const url = document.createElement(route.kind === 'origin' ? 'span' : 'button');
       url.className = 'server-route-url';
+      if (route.kind !== 'origin') {
+        url.type = 'button'; url.classList.add('server-editable');
+        url.setAttribute('aria-label', `${t('serverRouteEdit')}: ${route.url}`);
+        url.addEventListener('click', () => editRoute(host, route));
+      }
       url.textContent = routeShortUrl(route);
       url.title = route.url;
 
@@ -10007,7 +10015,6 @@
           hostActiveRouteId.set(host.id, route.id);
           saveServerRegistry(); renderServerSettings(); refreshCurrentView();
         }));
-        actions.appendChild(iconButton('serverRouteEdit', 'pencil', () => editRoute(host, route)));
         actions.appendChild(iconButton('serverRouteRemove', 'cross', () => removeRoute(host, route)));
       }
       // An origin row carries no controls. Its address is where this page was served from
@@ -10096,11 +10103,7 @@
     }
 
     function renderAddRouteButton(host) {
-      const button = document.createElement('button');
-      button.type = 'button'; button.className = 'server-route-add';
-      button.textContent = t('serverAddRoute');
-      button.addEventListener('click', () => addRouteToHost(host));
-      return button;
+      return iconButton('serverAddRoute', 'plus', () => addRouteToHost(host));
     }
 
     // Inline editors instead of window.prompt: the settings panel is a form, and a browser
@@ -10200,6 +10203,7 @@
 
     function removeHost(host) {
       if (host.id !== LOCAL_HOST_ID && !window.confirm(`${t('serverRemove')} ${host.label}?`)) return;
+      hostRoutes(host).forEach((route) => { delete routeRuntime[route.id]; });
       hosts = hosts.filter((item) => item.id !== host.id);
       if (host.id === LOCAL_HOST_ID) hosts.unshift(localHostFrom(null));
       serverRuntimeStatus.delete(host.id);
@@ -10214,11 +10218,13 @@
     }
 
     function removeRoute(host, route) {
+      if (route.kind === 'origin') return;
+      // Confirm removal of the final address before changing the host or its route state.
+      if (host.id !== LOCAL_HOST_ID && hostRoutes(host).length === 1) { removeHost(host); return; }
       host.routes = hostRoutes(host).filter((item) => item.id !== route.id);
       if (host.choice === route.id) host.choice = 'auto';
       delete routeRuntime[route.id];
       hostActiveRouteId.delete(host.id);
-      if (!hostRoutes(host).length && host.id !== LOCAL_HOST_ID) { removeHost(host); return; }
       saveServerRegistry(); renderServerSettings(); refreshCurrentView();
     }
 
@@ -10269,8 +10275,8 @@
     // which is what storing it before the probe did.
     function editRoute(host, route) {
       openInlineEditor('serverRouteEdit', route.url, async (value) => {
-        const canonical = normalizeRouteUrl(value);
-        if (!canonical) return t('serverInvalidUrl');
+        const { url: canonical, error: inputError } = await resolveRouteInput(value);
+        if (inputError) return inputError;
         if (route.kind === 'origin') return t('serverRouteIsThisPage');
         if (pageRouteMatches(canonical)) return t('serverRouteIsThisPage');
         if (hostRoutes(host).some((item) => item.id !== route.id && item.url === canonical)) return t('serverRouteDuplicate');
@@ -10287,9 +10293,9 @@
     }
 
     function addRouteToHost(host) {
-      openInlineEditor('serverAddRoute', 'http://', async (value) => {
-        const canonical = normalizeRouteUrl(value);
-        if (!canonical) return t('serverInvalidUrl');
+      openInlineEditor('serverAddRoute', '', async (value) => {
+        const { url: canonical, error: inputError } = await resolveRouteInput(value);
+        if (inputError) return inputError;
         const existing = storedRouteUrlExists(canonical);
         if (existing.route) {
           return existing.host.id === host.id ? t('serverRouteDuplicate') : t('serverRouteAlreadyOn').replace('{name}', existing.host.label);
@@ -10343,10 +10349,33 @@
       input.dataset.invalid = invalid ? 'true' : 'false';
       input.setAttribute('aria-invalid', String(!!invalid));
     }
-    async function testServerForm() {
+    function setServerFormStatusMessage(message) {
+      setServerFormStatus('serverTestNetworkError', 'error');
+      const status = document.getElementById('serverFormStatus');
+      if (status) status.textContent = message;
+    }
+    let serverFormBusy = false;
+    async function runServerFormAction(action) {
+      if (serverFormBusy) return false;
+      serverFormBusy = true;
+      const buttons = ['testServerBtn', 'addServerBtn'].map((id) => document.getElementById(id)).filter(Boolean);
+      buttons.forEach((button) => { button.disabled = true; button.setAttribute('aria-busy', 'true'); });
+      try { return await action(); }
+      finally {
+        serverFormBusy = false;
+        buttons.forEach((button) => { button.disabled = false; button.removeAttribute('aria-busy'); });
+      }
+    }
+    async function testServerForm() { return runServerFormAction(testServerFormInput); }
+    async function storeServerFromForm() { return runServerFormAction(storeServerFormInput); }
+    async function testServerFormInput() {
       const input = document.getElementById('serverUrlInput');
-      const baseUrl = normalizeServerBaseUrl(input?.value);
-      if (!baseUrl) { setServerUrlInvalid(true); setServerFormStatus('serverInvalidUrl', 'error'); return false; }
+      const entered = input?.value;
+      setServerFormStatus('serverTestTesting', 'testing');
+      const { url: baseUrl, error: inputError } = await resolveRouteInput(entered);
+      if (input?.value !== entered) return false;
+      if (inputError) { setServerUrlInvalid(inputError === t('serverInvalidUrl')); setServerFormStatusMessage(inputError); return false; }
+      input.value = baseUrl;
       setServerUrlInvalid(false);
       const button = document.getElementById('testServerBtn');
       const startedAt = performance.now();
@@ -10372,11 +10401,15 @@
     // Add stays advisory: a syntactically valid URL can always be stored, because registering
     // a machine that is offline right now is legitimate. What a successful probe buys is a
     // merge, and a merge the user did not ask for has to be named in the status line.
-    async function storeServerFromForm() {
+    async function storeServerFormInput() {
       const urlInput = document.getElementById('serverUrlInput');
       const labelInput = document.getElementById('serverLabelInput');
-      const baseUrl = normalizeServerBaseUrl(urlInput?.value);
-      if (!baseUrl) { setServerUrlInvalid(true); setServerFormStatus('serverInvalidUrl', 'error'); return false; }
+      const entered = urlInput?.value;
+      setServerFormStatus('serverTestTesting', 'testing');
+      const { url: baseUrl, error: inputError } = await resolveRouteInput(entered);
+      if (urlInput?.value !== entered) return false;
+      if (inputError) { setServerUrlInvalid(inputError === t('serverInvalidUrl')); setServerFormStatusMessage(inputError); return false; }
+      urlInput.value = baseUrl;
       setServerUrlInvalid(false);
       if (pageRouteMatches(baseUrl)) {
         setServerFormStatus('serverRouteIsThisPage', 'error');
@@ -20414,6 +20447,7 @@
     // Keep 3D view responsive on window resize.
     let _resize3DTimer = null;
     window.addEventListener('resize', () => {
+      if (!document.getElementById('settingsPanel')?.hidden) setSettingsPanelOpen(true);
       fitOverviewKpis();
       if (calendarState.view === 'year') {
         const grid = document.getElementById('yearGrid');

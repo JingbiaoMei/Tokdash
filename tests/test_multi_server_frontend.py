@@ -1737,3 +1737,56 @@ def test_session_detail_reads_through_the_route_system() -> None:
     body = _extract_js_function(source, "async function openSessionModal(tool, sessionId, ownerServer")
     assert "fetchFromHost(" in body, "the modal has to read through the route system"
     assert "await fetch(" not in body, "a fixed-address fetch cannot fail over to the next route"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@pytest.mark.parametrize("address,available,expected,hits", [
+    ("box.ts.net/tokdash/", ["https://box.ts.net/tokdash"], "https://box.ts.net/tokdash", 1),
+    ("127.0.0.1:55423", ["http://127.0.0.1:55423"], "http://127.0.0.1:55423", 2),
+    ("[::1]:55423/base", ["http://[::1]:55423/base"], "http://[::1]:55423/base", 2),
+    ("http://offline:55423", [], "http://offline:55423", 0),
+    ("https://offline/base", [], "https://offline/base", 0),
+    ("box:55423", [], None, 2),
+    ("ftp://box", [], None, 0),
+    ("not a host", [], None, 0),
+    ("javascript:alert(1)", [], None, 0),
+])
+def test_user_address_protocol_discovery(tmp_path, address, available, expected, hits):
+    source = INDEX_HTML.read_text(encoding="utf-8")
+    harness = tmp_path / "protocol.js"
+    harness.write_text("\n".join([
+        _extract_js_function(source, "function normalizeRouteUrl(value) {"),
+        _extract_js_function(source, "async function resolveRouteInput(value) {"),
+        "const t = key => key; const calls = [];",
+        f"const available = {json.dumps(available)};",
+        "async function probeServer(url) { calls.push(url); if (!available.includes(url)) throw new Error('unreachable'); }",
+        f"resolveRouteInput({json.dumps(address)}).then(result => console.log(JSON.stringify({{result,calls}})));",
+    ]), encoding="utf-8")
+    out = json.loads(subprocess.run(["node", str(harness)], capture_output=True, text=True, check=True).stdout)
+    assert out["result"].get("url") == expected
+    assert len(out["calls"]) == hits
+    if expected is None:
+        assert out["result"]["error"]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@pytest.mark.parametrize("confirm", [False, True])
+def test_last_route_removal_preserves_host_when_cancelled(tmp_path, confirm):
+    source = INDEX_HTML.read_text(encoding="utf-8")
+    functions = [
+        "const LOCAL_HOST_ID = 'local'; const t = key => key;",
+        "const route = {id: 'route', kind: 'added', url: 'http://box'};",
+        "const host = {id: 'box', label: 'Box', routes: [route], choice: 'route'}; let hosts = [host];",
+        "const hostRoutes = host => host.routes; const routeRuntime = {route: {state: 'ok'}};",
+        "const serverRuntimeStatus = new Map(); const csrfTokensByServer = new Map(); const hostActiveRouteId = new Map();",
+        "let serverSelection = {mode: 'custom', custom: ['box']}; let saves = 0;",
+        "const saveServerRegistry = () => saves++; const saveServerSelection = () => {};",
+        "const renderServerSettings = () => {}; const refreshCurrentView = () => {};",
+        f"const window = {{confirm: () => {str(confirm).lower()}}};",
+        _extract_js_function(source, "function removeHost(host) {"),
+        _extract_js_function(source, "function removeRoute(host, route) {"),
+    ]
+    out = _run(tmp_path, "remove_last_route", functions,
+               "(() => { removeRoute(host, route); return {count: hosts.length, routes: host.routes.length, state: !!routeRuntime.route, saves, selection: serverSelection.mode}; })()", None)
+    assert out == {"count": 0 if confirm else 1, "routes": 1, "state": not confirm,
+                   "saves": 1 if confirm else 0, "selection": "all" if confirm else "custom"}

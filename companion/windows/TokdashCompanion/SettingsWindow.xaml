@@ -16,6 +16,10 @@
     TextOptions.TextRenderingMode="ClearType"
     SnapsToDevicePixels="True">
     <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="SlimScrollBars.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
         <SolidColorBrush x:Key="SettingsBg" Color="#F2F4F7"/>
         <SolidColorBrush x:Key="SettingsText" Color="#1B1B1B"/>
         <SolidColorBrush x:Key="SettingsMuted" Color="#616161"/>
@@ -56,8 +60,14 @@
             <Setter Property="FontFamily" Value="Segoe UI Variable Text"/>
             <Setter Property="Foreground" Value="{DynamicResource SettingsText}"/>
         </Style>
+        </ResourceDictionary>
     </Window.Resources>
-    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+    <ScrollViewer x:Name="SettingsScrollViewer" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <ScrollViewer.Resources>
+            <Style TargetType="ScrollBar" BasedOn="{StaticResource SlimVerticalScrollBar}">
+                <Setter Property="Foreground" Value="{DynamicResource SettingsMuted}"/>
+            </Style>
+        </ScrollViewer.Resources>
     <StackPanel Margin="20">
         <StackPanel.Resources>
             <Style TargetType="TextBlock">

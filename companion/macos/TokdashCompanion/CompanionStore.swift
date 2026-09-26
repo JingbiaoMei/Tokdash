@@ -27,6 +27,7 @@ final class CompanionStore: NSObject, ObservableObject {
             .compactMap { activeRoutes[$0.id] }.first ?? settings.baseURL
     }
     private let client: TokdashClient
+    private let clientFactory: @Sendable (CompanionServerSettings) -> TokdashClient
     private var refreshTask: Task<Void, Never>?
     private var lastFetchAt: Date?
     // Data generation time from the API (Today.timestamp), used for freshness.
@@ -68,7 +69,13 @@ final class CompanionStore: NSObject, ObservableObject {
     // Supersedes an older in-flight check rather than letting both write state back.
     private var updateCheckGeneration = 0
 
-    override init() {
+    override convenience init() {
+        self.init(clientFactory: { TokdashClient(server: $0) })
+    }
+
+    /// Inject the real client with a controlled transport in store-level tests.
+    init(clientFactory: @escaping @Sendable (CompanionServerSettings) -> TokdashClient) {
+        self.clientFactory = clientFactory
         var loaded = CompanionSettings.load()
         // Repair a blank/malformed base URL saved by an earlier build so the client can't
         // point at nothing, and persist the fix so it isn't re-applied every launch.
@@ -81,7 +88,7 @@ final class CompanionStore: NSObject, ObservableObject {
         // the right language (the store owns this so a later change can republish and re-render).
         L10n.current = L10n.resolve(loaded.language)
         self.settings = loaded
-        self.client = TokdashClient(server: loaded.servers.first(where: \.enabled) ?? .make(baseURL: url.absoluteString))
+        self.client = clientFactory(loaded.servers.first(where: \.enabled) ?? .make(baseURL: url.absoluteString))
         super.init()
         restorePendingUpdate()
     }
@@ -761,16 +768,17 @@ final class CompanionStore: NSObject, ObservableObject {
         settings.components.perServerRows && settings.servers.filter(\.enabled).count > 1
     }
 
-    private func runMultiServerRefresh(_ servers: [CompanionServerSettings]) async {
+    private func runMultiServerRefresh(_ configuredServers: [CompanionServerSettings]) async {
         typealias ServerResult = (server: CompanionServerSettings, usage: UsageResponse, activeMs: Int?, quota: QuotaResponse, insights: InsightsResponse?, stats: StatsResponse?)
         let period = settings.selectedPeriod
         let offset = periodOffset
         let source = Self.glanceSource(for: period, components: settings.components,
                                        today: Self.now, calendar: .current)
+        let makeClient = clientFactory
         let resolved = await withTaskGroup(of: (String, TokdashClient, Result<HealthResponse, Error>).self) { group in
-            for server in servers {
+            for server in configuredServers {
                 group.addTask {
-                    let client = TokdashClient(server: server)
+                    let client = makeClient(server)
                     do { return (server.id, client, .success(try await client.health())) }
                     catch { return (server.id, client, .failure(error)) }
                 }
@@ -789,7 +797,7 @@ final class CompanionStore: NSObject, ObservableObject {
         }
         if learnedIdentity { settings.save() }
         var identities = Set<String>()
-        let servers = servers.filter { server in
+        let servers = configuredServers.filter { server in
             guard let health = try? resolved[server.id]?.1.get(), health.service == "tokdash",
                   let identity = health.instanceId, !identity.isEmpty else { return true }
             return identities.insert(identity).inserted

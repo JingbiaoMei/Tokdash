@@ -25,6 +25,24 @@ public class ServerSettingsRenderTests
                 ]);
                 window.Show();
                 Pump();
+                window.UpdateLayout();
+                var scroller = (ScrollViewer)window.FindName("SettingsScrollViewer");
+                Assert.IsTrue(scroller.ScrollableHeight > 0);
+                var bar = (System.Windows.Controls.Primitives.ScrollBar)scroller.Template.FindName("PART_VerticalScrollBar", scroller);
+                bar.ApplyTemplate(); bar.UpdateLayout();
+                Assert.AreEqual(12.0, bar.Width);
+                var track = (System.Windows.Controls.Primitives.Track)bar.Template.FindName("PART_Track", bar);
+                Assert.IsNotNull(track);
+                track.Thumb.ApplyTemplate();
+                window.UpdateLayout();
+                Pump();
+                var handle = (Border)track.Thumb.Template.FindName("Handle", track.Thumb);
+                Assert.IsTrue(handle.ActualWidth > 0 && handle.ActualWidth <= 6.1,
+                    $"Expected a painted 6px thumb; handle={handle.ActualWidth}, thumb={track.Thumb.ActualWidth}, track={track.ActualWidth}, bar={bar.ActualWidth}");
+                scroller.ScrollToVerticalOffset(100);
+                window.UpdateLayout();
+                Assert.IsTrue(scroller.VerticalOffset > 0, "Settings must remain scrollable");
+                scroller.ScrollToTop(); window.UpdateLayout();
                 var panel = (StackPanel)window.FindName("ServersPanel");
                 var editors = Descendants<TextBox>(panel).ToList();
                 Assert.AreEqual(5, editors.Count); // two names, three addresses

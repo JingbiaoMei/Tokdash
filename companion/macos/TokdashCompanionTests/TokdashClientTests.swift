@@ -2,6 +2,68 @@ import XCTest
 @testable import TokdashCompanion
 
 final class TokdashClientTests: XCTestCase {
+    override class func setUp() {
+        super.setUp()
+        TestSettings.install()
+    }
+
+    @MainActor
+    func testMultiServerRefreshActuallyFetchesAndCombinesConfiguredHosts() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MultiServerURLProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let store = CompanionStore(clientFactory: { TokdashClient(server: $0, session: session) })
+        store.settings.servers = [.make(baseURL: "https://one.test"), .make(baseURL: "https://two.test")]
+        store.settings.automaticUpdateChecks = false
+        store.refresh()
+        let deadline = Date().addingTimeInterval(3)
+        while store.connectionState == .connecting && Date() < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(store.connectionState, .connected)
+        XCTAssertEqual(store.snapshot?.usage?.totalTokens, 84)
+        XCTAssertEqual(store.snapshot?.perServer.count, 2)
+    }
+
+    /// Opt-in smoke probe. Reads real settings only when explicitly requested, never
+    /// saves them, and exercises the shipped decoder as well as network reachability.
+    @MainActor
+    func testLiveConfiguredServers() async throws {
+        guard let path = ProcessInfo.processInfo.environment["TOKDASH_LIVE_SETTINGS"] else {
+            throw XCTSkip("Set TOKDASH_LIVE_SETTINGS for an explicit read-only live probe")
+        }
+        let settings = try JSONDecoder().decode(CompanionSettings.self, from: Data(contentsOf: URL(fileURLWithPath: path)))
+        // All store writes remain redirected to the test suite's isolated settings file.
+        let store = CompanionStore()
+        store.settings = settings
+        store.settings.automaticUpdateChecks = false
+        store.refresh()
+        let deadline = Date().addingTimeInterval(15)
+        while store.connectionState == .connecting && Date() < deadline {
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        XCTAssertEqual(store.connectionState, .connected, "Live multi-server store: \(String(describing: store.lastError))")
+        NSLog("LIVE store state %@", String(describing: store.connectionState))
+
+        for server in settings.servers where server.enabled {
+            let client = TokdashClient(server: server)
+            do {
+                let health = try await client.health()
+                XCTAssertEqual(health.service, "tokdash")
+                NSLog("LIVE %@ health OK", server.label)
+            } catch { XCTFail("\(server.label) health: \(error)"); continue }
+            do {
+                let (from, to) = CompanionStore.weekRange(today: Date(), calendar: .current)
+                _ = try await client.usageRange(from: from, to: to)
+                NSLog("LIVE %@ usage OK", server.label)
+            } catch { XCTFail("\(server.label) usage: \(error)") }
+            do {
+                _ = try await client.quota()
+                NSLog("LIVE %@ quota OK", server.label)
+            } catch { XCTFail("\(server.label) quota: \(error)") }
+        }
+    }
 
     func testRoutesSelectFastestPinAndRejectAnotherDaemon() throws {
         var server = CompanionServerSettings(id: "host", label: "Work", baseURL: "https://lan.test/tokdash", enabled: true,
@@ -138,6 +200,28 @@ private final class RouteURLProtocol: URLProtocol, @unchecked Sendable {
             json = #"{"period":"today","total_tokens":42,"total_cost":1,"total_messages":1}"#
         } else {
             client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse)); return
+        }
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(json.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+private final class MultiServerURLProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let url = request.url!
+        let json: String
+        switch url.path {
+        case "/health":
+            json = "{\"status\":\"ok\",\"service\":\"tokdash\",\"version\":\"1\",\"instance_id\":\"\(url.host!)\"}"
+        case "/api/usage":
+            json = #"{"period":"today","total_tokens":42,"total_cost":1,"total_messages":1}"#
+        case "/api/quota":
+            json = #"{"enabled":false,"providers":{}}"#
+        default: json = "{}"
         }
         client?.urlProtocol(self, didReceive: HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(json.utf8))

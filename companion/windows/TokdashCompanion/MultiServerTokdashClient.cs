@@ -101,10 +101,8 @@ public sealed class MultiServerTokdashClient : ITokdashClient
     }
 
     /// <summary>
-    /// Insights/stats fan-out for completeness. The store never requests the glance in
-    /// multi-server mode (per-server hourly/daily series can't be honestly merged into
-    /// one shared strip), so these two only exist to keep the interface whole; they merge
-    /// by summing tokens per bucket/date. Silent failures like active-time.
+    /// Combine responding servers by summing histogram buckets and date totals.
+    /// Optional endpoint failures remain silent, as in single-server mode.
     /// </summary>
     public Task<InsightsResponse> InsightsHourlyTodayAsync(CancellationToken ct = default) =>
         FanOutHourly(c => c.InsightsHourlyTodayAsync(ct), ct);

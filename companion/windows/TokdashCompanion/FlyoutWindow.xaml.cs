@@ -434,6 +434,11 @@ public partial class FlyoutWindow : Window
         // landed (first load or a period switch). Quota lives in its own section (rule 2).
         bool heroLoading = snap is null || snap.UsageLoading;
         HeroSkeleton.Visibility = heroLoading ? Visibility.Visible : Visibility.Collapsed;
+        var components = Store.Settings.Components;
+        RanksSkeleton.Visibility = components.TopRanksOn ? Visibility.Visible : Visibility.Collapsed;
+        GlanceSkeleton.Visibility = components.ActivityGlanceOn &&
+            (Store.SelectedPeriod is UsagePeriod.Month or UsagePeriod.Year || components.ActivityHistogramTodayWeekOn)
+            ? Visibility.Visible : Visibility.Collapsed;
         TodayCost.Visibility = heroLoading ? Visibility.Collapsed : Visibility.Visible;
         TodaySub.Visibility = heroLoading ? Visibility.Collapsed : Visibility.Visible;
         TodayCmp.Visibility = Visibility.Collapsed;

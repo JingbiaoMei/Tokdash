@@ -919,10 +919,10 @@ final class ContractV11Tests: XCTestCase {
         XCTAssertFalse(store.canStepLater)
         XCTAssertTrue(store.canStepEarlier)
         // Walk the day past its 13-step limit and back.
-        for _ in 0..<20 { store.stepPeriod(1) }
+        for _ in 0..<20 { store.stepPeriod(-1) }
         XCTAssertEqual(store.periodOffset, 13, "clamped at the walk-back limit")
         XCTAssertFalse(store.canStepEarlier, "‹ inert at the limit")
-        store.stepPeriod(-1)
+        store.stepPeriod(1)
         XCTAssertEqual(store.periodOffset, 12)
         XCTAssertEqual(store.currentKickerText, "SEP 12")
         // Selecting a segment re-anchors to the present - even the SAME segment.
@@ -932,9 +932,45 @@ final class ContractV11Tests: XCTestCase {
         XCTAssertEqual(store.currentKickerText, "TODAY")
         // Stepped year kicker through the store-level surface.
         store.selectPeriod(.year)
-        store.stepPeriod(2)
+        store.stepPeriod(-2)
         XCTAssertEqual(store.periodOffset, 2)
         XCTAssertEqual(store.currentKickerText, "2024")
+    }
+
+    @MainActor
+    func testArrowDirectionsPublishLoadingSynchronously() throws {
+        let store = CompanionStore()
+        store.selectPeriod(.today)
+        store.applyComponentsChange()
+        store.stepPeriod(-1) // left button
+        XCTAssertEqual(store.periodOffset, 1)
+        XCTAssertEqual(store.snapshot?.kickerText, "YESTERDAY")
+        XCTAssertEqual(store.snapshot?.usageLoading, true)
+        XCTAssertNil(store.snapshot?.insights)
+        store.stepPeriod(1) // right button, before the request completes
+        XCTAssertEqual(store.periodOffset, 0)
+        XCTAssertEqual(store.snapshot?.kickerText, "TODAY")
+        XCTAssertEqual(store.snapshot?.usageLoading, true)
+        XCTAssertFalse(store.canStepLater)
+    }
+
+    func testMultiServerChartsCombineBucketsAndKeepMissingFacetsAbsent() throws {
+        let hourly = try decodeFixture(InsightsResponse.self, "insights-today.json")
+        let merged = try XCTUnwrap(CompanionStore.combineInsights([hourly, hourly]))
+        for bucket in hourly.hourly?.buckets ?? [] {
+            XCTAssertEqual(merged.hourly?.buckets?.first { $0.hour == bucket.hour }?.tokens,
+                           (bucket.tokens ?? 0) * 2)
+        }
+        XCTAssertNil(merged.daily)
+        let daily = InsightsResponse(hourly: nil, daily: [DailyPoint(date: "2026-09-24", tokens: 12, intensity: nil)])
+        XCTAssertEqual(CompanionStore.combineInsights([daily, daily])?.daily?.first?.tokens, 24)
+        XCTAssertNil(CompanionStore.combineInsights([]))
+        let stats = StatsResponse(contributions: [Contribution(date: "2026-09-24",
+            totals: ContributionTotals(tokens: 12), intensity: 3)])
+        let grid = try XCTUnwrap(CompanionStore.combineStats([stats, stats]))
+        XCTAssertEqual(grid.contributions?.first?.totals?.tokens, 24)
+        XCTAssertEqual(grid.contributions?.first?.intensity, 3)
+        XCTAssertNil(CompanionStore.combineStats([]))
     }
 
     func testE12WarmupPlanTwoUpSkipsVisitedStopsAtLimit() {
@@ -1335,7 +1371,7 @@ final class ContractV11Tests: XCTestCase {
         // every window with the same payload - this render evidences the UI delta; the
         // window math itself is pinned by the suite's stepped-path tests.
         if stepOffset > 0 {
-            store.stepPeriod(stepOffset)
+            store.stepPeriod(-stepOffset)
             let stepDeadline = Date().addingTimeInterval(12)
             while (store.snapshot?.instanceOffset != stepOffset || store.snapshot?.usageLoading == true)
                 && Date() < stepDeadline {

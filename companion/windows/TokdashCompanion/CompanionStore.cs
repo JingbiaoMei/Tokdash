@@ -489,19 +489,19 @@ public sealed class CompanionStore : BindableBase
     /// </summary>
     public void StepPeriod(int delta)
     {
-        int next = Math.Clamp(_periodOffset + delta, 0, EarlierLimit(SelectedPeriod));
+        int next = Math.Clamp(_periodOffset - delta, 0, EarlierLimit(SelectedPeriod));
         if (next == _periodOffset) return;
         _periodOffset = next;
         OnPropertyChanged(nameof(PeriodOffset));
         OnPropertyChanged(nameof(CanStepEarlier));
         OnPropertyChanged(nameof(CanStepLater));
-        StartUsageSideTransition(SelectedPeriod, next);
+        StartUsageSideTransition(SelectedPeriod, next, immediate: true);
     }
 
     /// <summary>Shared usage-side transition for a period or instance change: drop the
     /// usage-side last-goods, arm the delayed skeleton (generation-guarded), and fire the
     /// fetch group. Quota and connectivity are untouched.</summary>
-    private void StartUsageSideTransition(UsagePeriod period, int offset)
+    private void StartUsageSideTransition(UsagePeriod period, int offset, bool immediate = false)
     {
         _cts?.Cancel();
         _warmCts?.Cancel(); // a fresh user action always outranks in-flight warm-up
@@ -510,12 +510,10 @@ public sealed class CompanionStore : BindableBase
         _lastInsights = null;
         _lastStats = null;
         _lastPerServer = [];
-        // Delayed skeleton: the current snapshot keeps the previous instance's data while the
-        // new one is in flight, so a fast fetch never visibly collapses the sections.
-        // The skeleton goes up only if the fetch is STILL in flight after 150 ms.
-        // Generation guard: a superseded switch must never touch the newer switch's UI.
+        // Arrow clicks acknowledge the new date immediately; segment changes retain
+        // the 150 ms anti-flash delay. A superseded transition cannot replace newer data.
         int gen = ++_usageGen;
-        _ = Task.Delay(150).ContinueWith(_ => UIDispatcher?.Invoke(() =>
+        void ShowLoading()
         {
             if (gen != _usageGen) return;
             if (Snapshot is not { } current) return;
@@ -541,7 +539,9 @@ public sealed class CompanionStore : BindableBase
                 PerServer = [],
                 ShowPerServerRows = current.ShowPerServerRows,
             };
-        }), TaskScheduler.Default);
+        }
+        if (immediate) ShowLoading();
+        else _ = Task.Delay(150).ContinueWith(_ => UIDispatcher?.Invoke(ShowLoading), TaskScheduler.Default);
         _ = RefreshAsync();
     }
 
@@ -957,25 +957,28 @@ public sealed class CompanionStore : BindableBase
             // The E12 instance selected when this cycle began (a stepper click mid-flight
             // supersedes this cycle via _cts; the newer cycle re-reads the offset).
             var offset = _periodOffset;
-            // Multi-server mode has no combined glance (per-server insights would need
-            // merging the server doesn't share); mirror the macOS drop for fan-out cycles.
-            var glanceSource = _client is MultiServerTokdashClient
-                ? GlanceSource.None
-                : GlanceSourceFor(period, Settings.Components);
+            var glanceSource = GlanceSourceFor(period, Settings.Components);
             var usageTask = FetchUsageAsync(_client, period, today, offset, ct);
             var quotaTask = _client.QuotaAsync(ct);
             var activeTask = ActiveTimeOptionalAsync(_client, period, today, offset, ct);
             var glanceTask = FetchGlanceAsync(_client, glanceSource, period, today, offset, ct);
 
             bool usageFailed = false, usageBusy = false, quotaFailed = false, quotaBusy = false;
-            try { _lastUsage = await usageTask; }
+            UsageResponse? usage = null;
+            QuotaResponse? quota = null;
+            try { usage = await usageTask; }
             catch (TokdashException ex) { usageFailed = true; usageBusy = ex.Error == TokdashError.Busy; }
             catch { usageFailed = true; }
-            try { _lastQuota = await quotaTask; }
+            try { quota = await quotaTask; }
             catch (TokdashException ex) { quotaFailed = true; quotaBusy = ex.Error == TokdashError.Busy; }
             catch { quotaFailed = true; }
-            _lastActiveMs = await activeTask;
+            var activeMs = await activeTask;
             var glance = await glanceTask;
+            // A superseded request must not mutate the new instance's last-good data.
+            if (ct.IsCancellationRequested) return;
+            if (!usageFailed) _lastUsage = usage;
+            if (!quotaFailed) _lastQuota = quota;
+            _lastActiveMs = activeMs;
             _lastInsights = glance.Insights;
             _lastStats = glance.Stats;
             // Per-server rows from this cycle's fan-out (empty for a single server; this

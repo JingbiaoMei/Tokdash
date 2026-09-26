@@ -656,10 +656,10 @@ public class StoreHelperTests
             Assert.IsTrue(store.CanStepEarlier);
 
             // Walk the day past its 13-step limit and back.
-            for (int i = 0; i < 20; i++) store.StepPeriod(1);
+            for (int i = 0; i < 20; i++) store.StepPeriod(-1);
             Assert.AreEqual(13, store.PeriodOffset, "clamped at the walk-back limit");
             Assert.IsFalse(store.CanStepEarlier, "‹ inert at the limit");
-            store.StepPeriod(-1);
+            store.StepPeriod(1);
             Assert.AreEqual(12, store.PeriodOffset);
 
             // Selecting a segment re-anchors to the present, even the SAME segment.
@@ -668,7 +668,7 @@ public class StoreHelperTests
             Assert.IsFalse(store.CanStepLater);
 
             // Stepped day: fetch group used ranged hourly + explicit usage window.
-            store.StepPeriod(1);
+            store.StepPeriod(-1);
             await store.RefreshAsync();
             CollectionAssert.Contains(client.Requests.ToList(), "/api/usage?date_from=2026-09-23&date_to=2026-09-23");
             CollectionAssert.Contains(client.Requests.ToList(), "/api/insights?facets=hourly&date_from=2026-09-23&date_to=2026-09-23");
@@ -678,7 +678,7 @@ public class StoreHelperTests
 
             // Stepped year: snapshot stamp, kicker, explicit window on both endpoints.
             store.SelectPeriod(UsagePeriod.Year);
-            store.StepPeriod(2);
+            store.StepPeriod(-2);
             await store.RefreshAsync();
             snap = store.Snapshot!;
             Assert.AreEqual(UsagePeriod.Year, snap.Period);
@@ -688,6 +688,75 @@ public class StoreHelperTests
             CollectionAssert.Contains(client.Requests.ToList(), "/api/active-time?date_from=2024-01-01&date_to=2024-12-31");
         }
         finally { CompanionStore.ClockOverride = null; }
+    }
+
+    [TestMethod]
+    public async Task Stepper_ArrowDirections_PublishLoadingBeforePendingFetch()
+    {
+        var client = new FakeClient();
+        var store = new CompanionStore(client);
+        store.SelectPeriod(UsagePeriod.Today);
+        await store.RefreshAsync();
+        var quota = store.Snapshot!.Quota;
+        client.UsageRange = "pending";
+        store.StepPeriod(-1); // same delta as the left button
+        Assert.AreEqual(1, store.PeriodOffset);
+        Assert.AreEqual("YESTERDAY", store.Snapshot!.KickerText);
+        Assert.IsTrue(store.Snapshot.UsageLoading);
+        Assert.IsNull(store.Snapshot.Insights);
+        Assert.AreSame(quota, store.Snapshot.Quota);
+        client.Usage = "pending";
+        store.StepPeriod(1); // same delta as the right button
+        Assert.AreEqual(0, store.PeriodOffset);
+        Assert.AreEqual("TODAY", store.Snapshot!.KickerText);
+        Assert.IsTrue(store.Snapshot.UsageLoading);
+        Assert.IsFalse(store.CanStepLater);
+    }
+
+    [TestMethod]
+    public async Task SupersededRefreshCannotEraseNewHistogramOnComponentRebuild()
+    {
+        var stale = new TaskCompletionSource<InsightsResponse>();
+        var client = new FakeClient { Insights = stale.Task };
+        var store = new CompanionStore(client);
+        var first = store.RefreshAsync();
+        var fresh = new InsightsResponse { Hourly = new HourlyFacet {
+            Buckets = [new HourBucket { Hour = 10, Tokens = 456 }]
+        } };
+        client.Insights = fresh;
+        await store.RefreshAsync();
+        stale.SetResult(new InsightsResponse());
+        await first;
+        store.ApplyComponentsChange();
+        Assert.AreSame(fresh, store.Snapshot!.Insights);
+    }
+
+    [TestMethod]
+    public async Task MultiServer_RefreshFetchesAndCombinesHistogram()
+    {
+        var servers = new[] {
+            new CompanionServerSettings { Id = "a", Label = "A", Enabled = true },
+            new CompanionServerSettings { Id = "b", Label = "B", Enabled = true }
+        };
+        var clients = servers.ToDictionary(s => s.Id, s => new FakeClient {
+            Insights = new InsightsResponse { Hourly = new HourlyFacet {
+                Buckets = [new HourBucket { Hour = 10, Tokens = 123 }], PeakHour = 10
+            } }
+        });
+        var store = new CompanionStore(new MultiServerTokdashClient(servers, s => clients[s.Id]));
+        store.SelectPeriod(UsagePeriod.Today);
+        await store.RefreshAsync();
+        Assert.AreEqual(246L, store.Snapshot!.Insights!.Hourly!.Buckets!.Single(b => b.Hour == 10).Tokens);
+        foreach (var client in clients.Values)
+            CollectionAssert.Contains(client.Requests.ToList(), "/api/insights?facets=hourly&period=today");
+        store.StepPeriod(-1);
+        await store.RefreshAsync();
+        Assert.AreEqual(1, store.Snapshot!.InstanceOffset);
+        Assert.IsNotNull(store.Snapshot.Insights!.Hourly);
+        store.Settings.Components.ActivityGlance = false;
+        var before = clients.Values.Sum(c => c.Requests.Count(r => r.StartsWith("/api/insights")));
+        await store.RefreshAsync();
+        Assert.AreEqual(before, clients.Values.Sum(c => c.Requests.Count(r => r.StartsWith("/api/insights"))));
     }
 
     [TestMethod]
@@ -728,7 +797,7 @@ public class StoreHelperTests
             CollectionAssert.Contains(reqs, "/api/insights?facets=hourly&date_from=2026-09-22&date_to=2026-09-22");
 
             // Visiting offset 1 re-arms from there: 3 warms next, already-warmed 2 skips.
-            store.StepPeriod(1);
+            store.StepPeriod(-1);
             await store.RefreshAsync();
             await Until(() => client.Requests.Contains("/api/usage?date_from=2026-09-21&date_to=2026-09-21"));
             Assert.AreEqual(1, client.Requests.Count(r => r == "/api/usage?date_from=2026-09-22&date_to=2026-09-22"),

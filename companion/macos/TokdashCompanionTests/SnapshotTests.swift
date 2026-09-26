@@ -17,6 +17,17 @@ final class SnapshotTests: XCTestCase {
         XCTAssertTrue(CompanionMenuBarIcon.image.isTemplate)
     }
 
+    @MainActor
+    func testKickerMarqueePausesRevealsFullLabelAndReturns() {
+        // A 36-point overflow travels in two seconds, with pauses at both ends.
+        XCTAssertEqual(ScrollingLine.offset(elapsed: 1, overflow: 36), 0)
+        XCTAssertEqual(ScrollingLine.offset(elapsed: 2.4, overflow: 36), -18, accuracy: 0.001)
+        XCTAssertEqual(ScrollingLine.offset(elapsed: 4, overflow: 36), -36)
+        XCTAssertEqual(ScrollingLine.offset(elapsed: 5.8, overflow: 36), -18, accuracy: 0.001)
+        XCTAssertEqual(ScrollingLine.offset(elapsed: 7, overflow: 36), 0)
+        XCTAssertEqual(ScrollingLine.offset(elapsed: 20, overflow: 0), 0)
+    }
+
     func testCompactTokens() {
         XCTAssertEqual(Snapshot.compactTokens(0), "0")
         XCTAssertEqual(Snapshot.compactTokens(999), "999")

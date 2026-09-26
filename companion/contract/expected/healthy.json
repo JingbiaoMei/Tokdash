@@ -11,7 +11,7 @@
   "expected": {
     "connection": "Local · Connected",
     "dot": "ok",
-    "period_segment": { "visible": true, "selected": "Today", "labels": ["Today", "Week", "Month", "Year"] },
+    "period_segment": { "visible": true, "selected": "Day", "labels": ["Day", "Week", "Month", "Year"] },
     "today": {
       "cost": "$3.42",
       "tokens_compact": "18.7M",

@@ -2,7 +2,7 @@ import SwiftUI
 
 /// The combined spend-first surface: period segment + hero (cost, delta row, top
 /// ranks, activity glance), quota section (with inline Low/All selector and the
-/// reset-credits row), per-server rows, action row, freshness footer.
+/// reset-credits row), per-server rows, and action row.
 /// One surface, no view switching. Matches the approved UI_DEMO.html.
 struct ContentView: View {
     @EnvironmentObject var store: CompanionStore
@@ -19,23 +19,24 @@ struct ContentView: View {
             }
             HeroSection()
                 .padding(.horizontal, 16)
-                .padding(.vertical, 12)
+                .padding(.top, 4)
+                .padding(.bottom, 6)
             QuotaSection()
                 .padding(.horizontal, 16)
-                .padding(.vertical, 12)
+                .padding(.vertical, 6)
             if let snap = store.snapshot, snap.showPerServerRows, !snap.perServer.isEmpty {
                 PerServerSection(snap: snap)
                     .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
+                    .padding(.vertical, 6)
             }
             ActionBarSection()
                 .padding(.horizontal, 16)
-                .padding(.vertical, 10)
-            FreshnessFooter()
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
+                .padding(.vertical, 6)
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 2)
+        .contextMenu {
+            Button(L10n.t("quit")) { NSApplication.shared.terminate(nil) }
+        }
     }
 
     private var showsBanner: Bool {
@@ -85,7 +86,7 @@ private struct HeaderSection: View {
             .accessibilityLabel(store.settingsAccessibilityLabel)
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .padding(.vertical, 6)
     }
 }
 
@@ -143,7 +144,7 @@ private struct BannerSection: View {
     }
 }
 
-/// Compact period switch (Today | Week | Month | Year), styled after the Windows
+/// Compact period switch (Day | Week | Month | Year), styled after the Windows
 /// flyout's SegBtn track: label-sized pill buttons, ~2/3 the width of the native
 /// segmented control, so the row fits the fixed 268pt content width next to the
 /// period kicker. Selection is carried by weight + fill + an accessibility trait,
@@ -175,10 +176,71 @@ private struct PeriodSwitch: View {
         Text(L10n.t(period.segmentKey))
             .font(.system(size: 11, weight: selected ? .semibold : .regular))
             .foregroundStyle(ink)
-            .padding(.horizontal, 6)
+            .lineLimit(1)
+            .minimumScaleFactor(0.9)
+            .padding(.horizontal, 3)
+            .frame(maxWidth: .infinity)
             .padding(.vertical, 3)
             .background(fill, in: RoundedRectangle(cornerRadius: 5))
             .contentShape(Rectangle())
+    }
+}
+
+/// A clipped date viewport keeps long month/week labels from displacing the controls.
+/// Only overflowing labels move: pause at each end, then scroll back at a readable pace.
+struct ScrollingKicker: View {
+    let text: String
+    var body: some View {
+        ScrollingLine(text: text, font: .systemFont(ofSize: 10, weight: .semibold),
+                      color: .secondary, tracking: 0.4, height: 14)
+            .frame(width: 63)
+    }
+}
+
+/// One-line viewport shared by date labels and reset-credit notices.
+struct ScrollingLine: View {
+    let text: String
+    let font: NSFont
+    let color: Color
+    var tracking: CGFloat = 0
+    var height: CGFloat = 16
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var startedAt = Date()
+
+    var body: some View {
+        GeometryReader { geometry in
+            let measured = NSAttributedString(string: text, attributes: [
+                .font: font, .kern: tracking
+            ]).size().width
+            let overflow = max(0, ceil(measured) - geometry.size.width)
+            TimelineView(.animation(minimumInterval: 1.0 / 30, paused: overflow == 0 || reduceMotion)) { context in
+                Text(text)
+                    .font(Font(font))
+                    .foregroundStyle(color)
+                    .tracking(tracking)
+                    .fixedSize()
+                    .offset(x: reduceMotion ? 0 : Self.offset(
+                        elapsed: context.date.timeIntervalSince(startedAt), overflow: overflow))
+                    .frame(width: geometry.size.width, height: height, alignment: .leading)
+                    .clipped()
+            }
+        }
+        .frame(height: height)
+        .onChange(of: text) { _ in startedAt = Date() }
+        .help(text)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(text)
+    }
+
+    static func offset(elapsed: TimeInterval, overflow: CGFloat) -> CGFloat {
+        guard overflow > 0 else { return 0 }
+        let pause = 1.4
+        let travel = Double(overflow) / 18
+        let phase = max(0, elapsed).truncatingRemainder(dividingBy: 2 * (pause + travel))
+        if phase < pause { return 0 }
+        if phase < pause + travel { return -CGFloat((phase - pause) * 18) }
+        if phase < 2 * pause + travel { return -overflow }
+        return -overflow + CGFloat((phase - 2 * pause - travel) * 18)
     }
 }
 
@@ -229,28 +291,14 @@ private struct HeroSection: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
                 HStack(spacing: 5) {
-                    // Kicker follows the selected INSTANCE (E12): present or stepped.
-                    Text(store.snapshot?.kickerText ?? store.currentKickerText)
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .tracking(0.4)
-                        .fixedSize()
-                    // E12 instance stepper merged into the kicker row; the segment on
-                    // the right is untouched by it (rev 4 design, contract §Instance
-                    // stepper).
+                    ScrollingKicker(text: store.snapshot?.kickerText ?? store.currentKickerText)
                     KickerStepper()
                 }
-                Spacer()
-                // Today | Week | Month | Year - persisted selection, fires the fetch group
-                // via selectPeriod, and stays visible in EVERY state (loading too).
-                // Custom compact switch (Windows-flyout parity): the native small
-                // segmented control measures ~215pt on its own, and with the kicker
-                // ("THIS MONTH" + picker ~301pt) it exceeded the 268pt content width -
-                // that overflow is exactly what widened the whole flyout and clipped
-                // every section at both borders in the week/month views.
+                .frame(width: 94, alignment: .leading)
+                // Reserve the switch's width independently of the date and selection.
                 PeriodSwitch(selection: Binding(get: { store.selectedPeriod },
                                                 set: { store.selectPeriod($0) }))
-                    .fixedSize()
+                    .frame(width: 166)
             }
             if let snap = store.snapshot {
                 heroBody(snap)
@@ -274,6 +322,20 @@ private struct HeroSection: View {
         VStack(alignment: .leading, spacing: 2) {
             if snap.usageLoading {
                 skeleton
+                if snap.components.topRanks {
+                    VStack(alignment: .leading, spacing: 7) {
+                        ForEach(0..<3) { _ in
+                            RoundedRectangle(cornerRadius: 3)
+                                .fill(.quaternary).frame(height: 12)
+                        }
+                    }.padding(.top, 8).accessibilityHidden(true)
+                }
+                if snap.components.activityGlance &&
+                    (snap.period == .month || snap.period == .year || snap.components.activityHistogramTodayWeek) {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(.quaternary).frame(height: 48)
+                        .padding(.top, 8).accessibilityHidden(true)
+                }
             } else if snap.usage == nil || snap.isEmptyUsage {
                 // No data at all this period: failure title or the quiet empty state.
                 Text(snap.usageFailed
@@ -739,15 +801,15 @@ private struct QuotaSection: View {
                         if let note = snap.creditsNotice(providerDisplay: bare,
                                                          canonicalProvider: group.canonicalProvider,
                                                          resetCredits: group.providerEntry?.resetCredits) {
-                            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                Text(note)
-                                    .font(.system(size: 11.5))
-                                Spacer(minLength: 8)
+                            HStack(alignment: .center, spacing: 8) {
+                                ScrollingLine(text: note, font: .systemFont(ofSize: 11.5),
+                                              color: Color(red: 0.72, green: 0.48, blue: 0.05))
                                 // Static decoration, not part of the pinned row string
                                 // (COMPANION_API.md "Reset credits").
                                 Text(L10n.t("credits_use_or_lose"))
                                     .font(.system(size: 10))
                                     .foregroundStyle(.secondary)
+                                    .fixedSize()
                             }
                             .foregroundStyle(Color(red: 0.72, green: 0.48, blue: 0.05))
                             .padding(.leading, 7)
@@ -882,25 +944,6 @@ private struct ActionBarSection: View {
             }
             .buttonStyle(.bordered)
             .help(L10n.t("refresh"))
-        }
-    }
-}
-
-private struct FreshnessFooter: View {
-    @EnvironmentObject var store: CompanionStore
-
-    var body: some View {
-        HStack {
-            Text(store.freshnessText)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-            Spacer()
-            Button(L10n.t("quit")) {
-                NSApplication.shared.terminate(nil)
-            }
-            .buttonStyle(.plain)
-            .font(.system(size: 11))
-            .foregroundStyle(.secondary)
         }
     }
 }

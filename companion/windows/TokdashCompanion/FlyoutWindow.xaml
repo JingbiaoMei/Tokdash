@@ -2,6 +2,7 @@
     x:Class="TokdashCompanion.FlyoutWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="clr-namespace:TokdashCompanion"
     xmlns:sys="clr-namespace:System;assembly=System.Runtime"
     Title="Tokdash"
     Width="340"
@@ -276,8 +277,8 @@
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
                     <Border Grid.Column="0" Width="2" CornerRadius="1" Background="#FFB87A0D" Margin="0,1,8,1"/>
-                    <TextBlock Grid.Column="1" Text="{Binding CreditsText}" FontSize="{StaticResource FontCaption}"
-                               Foreground="#FFB87A0D" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                    <local:MarqueeText Grid.Column="1" Text="{Binding CreditsText}" FontSize="{StaticResource FontCaption}"
+                                       Foreground="#FFB87A0D" VerticalAlignment="Center"/>
                     <TextBlock Grid.Column="2" Text="{Binding CreditsUseOrLoseText}" FontSize="{StaticResource FontMicro}"
                                Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center" Margin="8,0,0,0"/>
                 </Grid>
@@ -416,7 +417,7 @@
                     </StackPanel>
                     <Border Grid.Column="1" CornerRadius="4" Padding="1" Background="{DynamicResource SegBg}">
                         <StackPanel Orientation="Horizontal">
-                            <Button x:Name="Period0Btn" Click="Period_Click" Tag="today" Content="Today" Style="{StaticResource SegBtn}"/>
+                            <Button x:Name="Period0Btn" Click="Period_Click" Tag="today" Content="Day" Style="{StaticResource SegBtn}"/>
                             <Button x:Name="Period1Btn" Click="Period_Click" Tag="week" Content="Week" Style="{StaticResource SegBtn}"/>
                             <Button x:Name="Period2Btn" Click="Period_Click" Tag="month" Content="Month" Style="{StaticResource SegBtn}"/>
                             <Button x:Name="Period3Btn" Click="Period_Click" Tag="year" Content="Year" Style="{StaticResource SegBtn}"/>
@@ -428,6 +429,12 @@
                 <StackPanel x:Name="HeroSkeleton" Visibility="Collapsed">
                     <Border Height="26" Width="120" CornerRadius="4" Background="{DynamicResource BarTrack}" Margin="0,4,0,0"/>
                     <Border Height="12" Width="220" CornerRadius="3" Background="{DynamicResource BarTrack}" Margin="0,8,0,0"/>
+                    <StackPanel x:Name="RanksSkeleton" Margin="0,12,0,0">
+                        <Border Height="12" CornerRadius="3" Background="{DynamicResource BarTrack}"/>
+                        <Border Height="12" CornerRadius="3" Background="{DynamicResource BarTrack}" Margin="0,7,0,0"/>
+                        <Border Height="12" CornerRadius="3" Background="{DynamicResource BarTrack}" Margin="0,7,0,0"/>
+                    </StackPanel>
+                    <Border x:Name="GlanceSkeleton" Height="48" CornerRadius="4" Background="{DynamicResource BarTrack}" Margin="0,12,0,0"/>
                 </StackPanel>
                 <TextBlock x:Name="TodayCost" Text="…" FontSize="{StaticResource FontHero}" FontWeight="SemiBold" Style="{StaticResource BodyText}"/>
                 <!-- TextWrapping: the empty-state sub-line is long enough to ellipsize at

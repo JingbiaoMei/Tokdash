@@ -61,7 +61,7 @@ public static class UsagePeriodExtensions
     /// <summary>Failure hero title: "Today's data unavailable" / "This week's data unavailable" / ...</summary>
     public static string UnavailableKey(this UsagePeriod period) => "unavailable_" + period.Token();
 
-    /// <summary>Segment label: Today / Week / Month / Year.</summary>
+    /// <summary>Segment label: Day / Week / Month / Year.</summary>
     public static string SegmentKey(this UsagePeriod period) => "period_" + period.Token();
 }
 

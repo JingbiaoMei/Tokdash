@@ -108,7 +108,7 @@ public static class L10n
         ["retrying"] = "retrying",
 
         // v1.1 period segment, ranks, glance, credits (mirrors L10n.swift).
-        ["period_today"] = "Today",
+        ["period_today"] = "Day",
         ["period_week"] = "Week",
         ["period_month"] = "Month",
         ["period_year"] = "Year",
@@ -325,7 +325,7 @@ public static class L10n
         ["today_retrying_suffix"] = " · 重试中",
         ["retrying"] = "重试中",
 
-        ["period_today"] = "今天",
+        ["period_today"] = "日",
         ["period_week"] = "本周",
         ["period_month"] = "本月",
         ["period_year"] = "本年",

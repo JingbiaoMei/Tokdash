@@ -111,7 +111,7 @@ version ranked the same both ways, and no client could fail it.
 
 ### Period windows
 
-The hero segment (Today / Week / Month / Year) maps to requests like this:
+The hero segment (Day / Week / Month / Year) maps to requests like this:
 
 | Segment | Request | Comparison sentence |
 |---|---|---|
@@ -177,6 +177,9 @@ month limits). Where it does not (any stepped year), hide the glance section
 silently - same rule as a stats failure.
 
 **Button states and refresh.**
+- Arrow actions publish the selected instance's kicker and usage loading state
+  immediately, before the fetch completes. The 150 ms anti-flash delay applies
+  only to period segment changes; quota/connectivity remain visible.
 - `›` is disabled at `offset = 0` (present); `‹` is disabled at the
   granularity's walk-back limit.
 - Changing the period segment re-anchors to `offset = 0`.
@@ -610,7 +613,11 @@ verbatim. Changing it re-renders the strip from last-good data; no refetch.
 
 ### Period segment
 
-Always visible above the hero: `Today | Week | Month | Year`. The selection
+Always visible above the hero: `Day | Week | Month | Year` (the Day segment
+still uses the `today` wire token). On macOS, the date/arrow area and the period
+switch have fixed widths. Overflowing date labels scroll within a clipped viewport,
+pausing at each end; arrows remain stationary. Reduced Motion disables scrolling;
+the full label remains available to accessibility and as a tooltip. The selection
 drives the hero number, sub-line, delta row, rank kickers and the glance face.
 It is a core panel element, never a Settings option. The kicker text sits on
 the same row (left), the segment on the right; immediately after the kicker
@@ -684,6 +691,14 @@ One strip as the last row of the hero card, two blocks:
 
 ### Activity glance
 
+With multiple enabled servers, fetch the selected glance source from each server
+and sum tokens by hour/date across responding servers. Hour labels retain the
+server's local-hour meaning; dates retain the server's calendar labels. Recompute
+the hourly peak from the summed buckets. For contribution grids, sum date totals
+and retain the maximum reported intensity (server-relative quartiles are not
+additive). Missing optional sources contribute no data; if none respond, hide
+the chart. Component toggles suppress these requests on every server.
+
 One component, four faces, by selected period:
 
 | Period | Face | Source | Geometry |
@@ -721,6 +736,11 @@ per-server values within the current refresh cycle only - no persistent
 history, same as the rest of the companion.
 
 ### Reset credits
+
+Credit notices stay on one line on both platforms. Overflowing text scrolls in
+its bounded viewport, pausing at each end, while the amber accent and “use or lose”
+hint stay still. Short notices do not move. Reduced-motion settings disable the
+animation; the full notice remains available as a tooltip and accessibility label.
 
 `providers.<provider>.reset_credits` appears on any provider that has
 credits: Codex since 1.0, and Claude Code limit resets since server v2.6.3
@@ -815,6 +835,12 @@ pinned under the English locale; both suites run cases in English.
 | `partial-failure` | today | usage-today + quota-partial-failure | MiniMax header warns; row ⚠ only on `cn_general_5h`; notifications fire for `global_general_5h`, suppressed for `cn_general_5h` |
 
 ## Freshness text
+
+The Windows flyout shows this footer. The compact macOS flyout ends at the
+Open Dashboard/refresh actions and omits the freshness/Quit footer; Quit remains
+available from the flyout's right-click menu. Both stores retain freshness state
+for scheduling and diagnostics. On macOS, section gaps are deliberately tighter
+between the header, period switch, subscriptions, per-server rows, and actions.
 
 ```
 age < 60s    -> "Updated just now"

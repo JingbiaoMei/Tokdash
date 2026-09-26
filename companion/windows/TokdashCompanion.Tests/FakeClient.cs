@@ -49,6 +49,7 @@ internal sealed class FakeClient : ITokdashClient
         {
             null => Task.FromResult(fallback),
             T value => Task.FromResult(value),
+            Task<T> task => task,
             "503" => Task.FromException<T>(new TokdashException(TokdashError.Busy)),
             "fail" or "timeout" => Task.FromException<T>(new TokdashException(TokdashError.Offline)),
             "pending" => Pending<T>(),

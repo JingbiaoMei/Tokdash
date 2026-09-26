@@ -113,7 +113,7 @@ enum L10n {
         "comparison_above": "%1$d%% above %2$@",
 
         // Period segment (always visible above the hero) and every period-following string.
-        "period_today": "Today",
+        "period_today": "Day",
         "period_week": "Week",
         "period_month": "Month",
         "period_year": "Year",
@@ -347,7 +347,7 @@ enum L10n {
         "comparison_below": "低于%2$@ %1$d%%",
         "comparison_above": "高于%2$@ %1$d%%",
 
-        "period_today": "今天",
+        "period_today": "日",
         "period_week": "本周",
         "period_month": "本月",
         "period_year": "本年",

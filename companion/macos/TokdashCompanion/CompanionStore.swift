@@ -5,10 +5,9 @@ import ServiceManagement
 @preconcurrency import UserNotifications
 
 private enum MultiServerAttempt: Sendable {
-    /// One server's fetch group for the selected period: usage, optional active-time
-    /// (nil = the endpoint failed/404 this cycle), and quota. The glance sources are not
-    /// fetched per-server in v1.1 (no combined multi-server face exists in the contract).
-    case success(CompanionServerSettings, usage: UsageResponse, activeMs: Int?, quota: QuotaResponse)
+    /// One server's fetch group; optional decorations fail independently.
+    case success(CompanionServerSettings, usage: UsageResponse, activeMs: Int?, quota: QuotaResponse,
+                 insights: InsightsResponse?, stats: StatsResponse?)
     case failure(CompanionServerSettings, busy: Bool, wrongService: Bool)
 }
 
@@ -192,29 +191,26 @@ final class CompanionStore: NSObject, ObservableObject {
     /// steps toward the present (clamped at the present, where › is inert). Never
     /// persisted; polling and refresh act on the selected instance.
     func stepPeriod(_ delta: Int) {
-        let next = min(max(periodOffset + delta, 0), Self.earlierLimit(for: selectedPeriod))
+        let next = min(max(periodOffset - delta, 0), Self.earlierLimit(for: selectedPeriod))
         guard next != periodOffset else { return }
         periodOffset = next
-        startUsageSideTransition(period: selectedPeriod, offset: next)
+        startUsageSideTransition(period: selectedPeriod, offset: next, immediate: true)
     }
 
     /// Shared usage-side transition for a period or instance change: drop the usage-side
     /// last-goods, arm the delayed skeleton (generation-guarded), and fire the fetch
     /// group. Quota and connectivity are untouched.
-    private func startUsageSideTransition(period: UsagePeriod, offset: Int) {
+    private func startUsageSideTransition(period: UsagePeriod, offset: Int, immediate: Bool = false) {
         lastUsage = nil
         lastActiveMs = nil
         lastInsights = nil
         lastStats = nil
         lastPerServer = []
-        // Delayed skeleton: the current snapshot keeps the previous instance's data while
-        // the new one is in flight, so a fast fetch never visibly collapses the
-        // sections. The skeleton goes up only if the fetch is STILL in flight after
-        // 150 ms - the guard below re-reads the snapshot once the delay elapses.
+        // Arrow clicks acknowledge the new date immediately; segment changes retain
+        // the 150 ms anti-flash delay. A superseded transition cannot replace newer data.
         usageGen += 1
         let gen = usageGen
-        Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 150_000_000)
+        let showLoading = { [weak self] in
             guard let self, gen == self.usageGen else { return }
             // Once the new instance's result has published - success OR failure - the
             // fetch is done as far as the UI is concerned. Only a snapshot still stamped
@@ -229,6 +225,14 @@ final class CompanionStore: NSObject, ObservableObject {
                                      usageFailed: false, quotaFailed: current.quotaFailed,
                                      perServer: [], showPerServerRows: current.showPerServerRows,
                                      rankRows: self.settings.rankRows, instanceOffset: offset)
+        }
+        if immediate {
+            showLoading()
+        } else {
+            Task {
+                try? await Task.sleep(nanoseconds: 150_000_000)
+                showLoading()
+            }
         }
         refresh()
     }
@@ -567,14 +571,18 @@ final class CompanionStore: NSObject, ObservableObject {
             async let glanceAttempt = Self.fetchGlance(client, source: glanceSource, period: period, offset: offset)
 
             var usageFailed = false, usageBusy = false, quotaFailed = false, quotaBusy = false
-            do { lastUsage = try await usageAttempt } catch let e as TokdashError { usageFailed = true; if case .busy = e { usageBusy = true } } catch { usageFailed = true }
-            do { lastQuota = try await quotaAttempt } catch let e as TokdashError { quotaFailed = true; if case .busy = e { quotaBusy = true } } catch { quotaFailed = true }
-            lastActiveMs = await activeAttempt
+            var usage: UsageResponse?, quota: QuotaResponse?
+            do { usage = try await usageAttempt } catch let e as TokdashError { usageFailed = true; if case .busy = e { usageBusy = true } } catch { usageFailed = true }
+            do { quota = try await quotaAttempt } catch let e as TokdashError { quotaFailed = true; if case .busy = e { quotaBusy = true } } catch { quotaFailed = true }
+            let activeMs = await activeAttempt
             let glance = await glanceAttempt
+            // A superseded request must not mutate the new instance's last-good data.
+            if Task.isCancelled { return }
+            if !usageFailed { lastUsage = usage }
+            if !quotaFailed { lastQuota = quota }
+            lastActiveMs = activeMs
             lastInsights = glance.insights
             lastStats = glance.stats
-
-            if Task.isCancelled { return }
 
             let snap = rebuildSnapshot(usageFailed: usageFailed, quotaFailed: quotaFailed)
             self.lastError = nil
@@ -741,9 +749,11 @@ final class CompanionStore: NSObject, ObservableObject {
     }
 
     private func runMultiServerRefresh(_ servers: [CompanionServerSettings]) async {
-        typealias ServerResult = (server: CompanionServerSettings, usage: UsageResponse, activeMs: Int?, quota: QuotaResponse)
+        typealias ServerResult = (server: CompanionServerSettings, usage: UsageResponse, activeMs: Int?, quota: QuotaResponse, insights: InsightsResponse?, stats: StatsResponse?)
         let period = settings.selectedPeriod
         let offset = periodOffset
+        let source = Self.glanceSource(for: period, components: settings.components,
+                                       today: Self.now, calendar: .current)
         let attempts: [MultiServerAttempt] = await withTaskGroup(of: MultiServerAttempt.self) { group in
             for server in servers {
                 group.addTask {
@@ -757,8 +767,10 @@ final class CompanionStore: NSObject, ObservableObject {
                         // Active time is an optional decoration (rule 6): a failed read
                         // yields nil and the combined hero drops the segment.
                         async let active = Self.activeTimeOptional(client, period: period, offset: offset)
-                        let values = try await (usage, quota, active)
-                        return .success(server, usage: values.0, activeMs: values.2, quota: values.1)
+                        async let glance = Self.fetchGlance(client, source: source, period: period, offset: offset)
+                        let values = try await (usage, quota, active, glance)
+                        return .success(server, usage: values.0, activeMs: values.2, quota: values.1,
+                                        insights: values.3.insights, stats: values.3.stats)
                     } catch let error as TokdashError {
                         if case .busy = error { return .failure(server, busy: true, wrongService: false) }
                         return .failure(server, busy: false, wrongService: false)
@@ -773,8 +785,8 @@ final class CompanionStore: NSObject, ObservableObject {
         }
         if Task.isCancelled { return }
         let results: [ServerResult] = attempts.compactMap { attempt in
-            guard case let .success(server, usage, activeMs, quota) = attempt else { return nil }
-            return (server, usage, activeMs, quota)
+            guard case let .success(server, usage, activeMs, quota, insights, stats) = attempt else { return nil }
+            return (server, usage, activeMs, quota, insights, stats)
         }
         failedServerIDs = Set(attempts.compactMap { attempt in
             guard case let .failure(server, _, _) = attempt else { return nil }
@@ -807,7 +819,8 @@ final class CompanionStore: NSObject, ObservableObject {
             results.first { $0.server.id == server.id }.map { ($0.server.label, $0.quota) }
         })
         lastUsage = usage; lastQuota = quota
-        lastInsights = nil; lastStats = nil
+        lastInsights = Self.combineInsights(results.compactMap(\.insights))
+        lastStats = Self.combineStats(results.compactMap(\.stats))
         // Every enabled server feeds the sum, not just the ones that answered: a server
         // missing from `results` (failed/unreachable) must make `failed` true so a known-
         // partial sum can never render (contract §Active time, "never a partial sum").
@@ -828,6 +841,47 @@ final class CompanionStore: NSObject, ObservableObject {
         let fresh = evaluateLowQuotaNotifications(snap)
         if !fresh.isEmpty { postLowQuotaNotification(fresh) }
         postCreditExpiryNotificationsIfNeeded(snap)
+    }
+
+    /// Sum histogram buckets across responding servers, preserving absent facets.
+    nonisolated static func combineInsights(_ values: [InsightsResponse]) -> InsightsResponse? {
+        let hourly = values.compactMap(\.hourly)
+        let daily = values.compactMap(\.daily)
+        guard !hourly.isEmpty || !daily.isEmpty else { return nil }
+        var bars = Array(repeating: 0, count: 24)
+        for facet in hourly {
+            for bucket in facet.buckets ?? [] {
+                if let hour = bucket.hour, (0..<24).contains(hour) { bars[hour] += bucket.tokens ?? 0 }
+            }
+        }
+        let peak = bars.indices.max { bars[$0] < bars[$1] }
+        var days: [String: Int] = [:]
+        for point in daily.flatMap({ $0 }) {
+            if let date = point.date { days[date, default: 0] += point.tokens ?? 0 }
+        }
+        return InsightsResponse(
+            hourly: hourly.isEmpty ? nil : HourlyFacet(
+                buckets: bars.indices.map { HourBucket(hour: $0, tokens: bars[$0]) },
+                peakHour: peak.flatMap { bars[$0] > 0 ? $0 : nil }),
+            daily: daily.isEmpty ? nil : days.keys.sorted().map {
+                DailyPoint(date: $0, tokens: days[$0], intensity: nil)
+            })
+    }
+
+    /// Match Windows: sum date totals and retain the strongest server intensity.
+    nonisolated static func combineStats(_ values: [StatsResponse]) -> StatsResponse? {
+        let series = values.compactMap(\.contributions)
+        guard !series.isEmpty else { return nil }
+        var days: [String: (tokens: Int, intensity: Int)] = [:]
+        for point in series.flatMap({ $0 }) {
+            guard let date = point.date else { continue }
+            let prior = days[date] ?? (0, 0)
+            days[date] = (prior.tokens + (point.totals?.tokens ?? 0), max(prior.intensity, point.intensity ?? 0))
+        }
+        return StatsResponse(contributions: days.keys.sorted().map {
+            Contribution(date: $0, totals: ContributionTotals(tokens: days[$0]!.tokens),
+                         intensity: days[$0]!.intensity)
+        })
     }
 
     /// Multi-server active-time sum (contract §Active time): sum `active_ms` across

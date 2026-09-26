@@ -36,22 +36,73 @@ public sealed class TokdashClient : ITokdashClient
     private readonly HttpClient _healthClient;
     private readonly HttpClient _dataClient;
     private readonly HttpClient _versionClient;
-    private readonly Uri _baseUri;
+    private Uri _baseUri;
+    private CompanionServerSettings? _server;
+    private readonly HttpMessageHandler? _handler;
+    private List<Uri> _verifiedRoutes = [];
+    public string ActiveBaseUrl => _baseUri.AbsoluteUri.TrimEnd('/');
+    public List<RouteProbe> RouteStatus { get; private set; } = [];
 
-    public TokdashClient(string baseUrl)
+    public TokdashClient(CompanionServerSettings server, HttpMessageHandler? handler = null) : this(server.BaseUrl, handler) { _server = server; }
+
+    public static async Task<RouteProbe> ProbeAsync(string address, CancellationToken ct = default, HttpMessageHandler? handler = null)
     {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            using var probe = new TokdashClient(address, handler);
+            var health = await probe.HealthAsync(ct);
+            return new(address, health.Service == "tokdash" ? health : null,
+                clock.Elapsed.TotalMilliseconds, health.Service == "tokdash" ? null : L10n.T("test_not_tokdash"));
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (TokdashException ex) { return new(address, null, 0, ex.Message, ex.Error); }
+        catch (Exception ex) { return new(address, null, 0, ex.Message); }
+    }
+
+    public TokdashClient(string baseUrl, HttpMessageHandler? handler = null)
+    {
+        _handler = handler;
         _baseUri = NormalizeBase(new Uri(baseUrl));
-        _healthClient = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+        _healthClient = MakeClient(handler, 5);
         // Cold month/year scans server-side run tens of seconds (warm docs: year ~15 s,
         // month ~25 s + base). 20 s cut them off mid-parse and the year view showed
         // "unavailable" on every cycle - long windows need a long ceiling.
-        _dataClient = new HttpClient { Timeout = TimeSpan.FromSeconds(90) };
-        _versionClient = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+        _dataClient = MakeClient(handler, 90);
+        _versionClient = MakeClient(handler, 10);
+    }
+
+    private static HttpClient MakeClient(HttpMessageHandler? handler, int timeout)
+    {
+        var client = handler is null ? new HttpClient() : new HttpClient(handler, disposeHandler: false);
+        client.Timeout = TimeSpan.FromSeconds(timeout);
+        return client;
     }
 
     public async Task<HealthResponse> HealthAsync(CancellationToken ct = default)
     {
-        return await GetAsync<HealthResponse>(_healthClient, "/health", ct);
+        if (_server is null || (_server.Addresses.Count == 1 && string.IsNullOrEmpty(_server.InstanceId)))
+            return await GetAsync<HealthResponse>(_healthClient, "/health", ct);
+        RouteStatus = (await Task.WhenAll(_server.Addresses.Select(a => ProbeAsync(a, ct, _handler)))).ToList();
+        var good = SelectRoutes(_server, RouteStatus);
+        if (good.Count == 0) throw new TokdashException(RouteStatus.Count > 0 && RouteStatus.All(r => r.Failure == TokdashError.Busy)
+            ? TokdashError.Busy : TokdashError.Offline);
+        _server.InstanceId ??= good[0].Health?.InstanceId;
+        _verifiedRoutes = good.Select(r => NormalizeBase(new Uri(r.Address))).ToList();
+        _baseUri = _verifiedRoutes[0];
+        return good[0].Health!;
+    }
+
+    internal static List<RouteProbe> SelectRoutes(CompanionServerSettings server, IEnumerable<RouteProbe> probes)
+    {
+        var rows = probes.ToList();
+        // Configuration order establishes identity, never the fastest unknown responder.
+        var identity = server.InstanceId;
+        if (string.IsNullOrEmpty(identity))
+            identity = rows.FirstOrDefault(r => r.Address == server.Addresses.FirstOrDefault())?.Health?.InstanceId;
+        return rows.Where(r => r.Health?.Service == "tokdash" &&
+                (!string.IsNullOrEmpty(identity) ? r.Health.InstanceId == identity : r.Address == server.Addresses.FirstOrDefault()))
+            .OrderBy(r => r.Address == server.PreferredRoute ? 0 : 1).ThenBy(r => r.Milliseconds).ToList();
     }
 
     public async Task<UsageResponse> UsageAsync(string period, CancellationToken ct = default)
@@ -118,7 +169,24 @@ public sealed class TokdashClient : ITokdashClient
 
     private async Task<T> GetAsync<T>(HttpClient client, string path, CancellationToken ct)
     {
-        Uri url = new(_baseUri, path.TrimStart('/'));
+        var candidates = new[] { _baseUri }.Concat(_verifiedRoutes).Distinct().ToList();
+        for (int i = 0; i < candidates.Count; i++)
+        {
+            try
+            {
+                var value = await GetAtAsync<T>(client, candidates[i], path, ct);
+                _baseUri = candidates[i];
+                return value;
+            }
+            catch (Exception ex) when (i + 1 < candidates.Count && !ct.IsCancellationRequested &&
+                (ex is HttpRequestException || ex is TokdashException { Error: TokdashError.Offline or TokdashError.Timeout })) { }
+        }
+        throw new TokdashException(TokdashError.Offline);
+    }
+
+    private static async Task<T> GetAtAsync<T>(HttpClient client, Uri baseUri, string path, CancellationToken ct)
+    {
+        Uri url = new(baseUri, path.TrimStart('/'));
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
         // Native client: never send a browser Origin header.
         try
@@ -165,7 +233,9 @@ public sealed class TokdashException : Exception
     public TokdashException(TokdashError e, int? statusCode = null) : base(e.ToString()) { Error = e; StatusCode = statusCode; }
 }
 
-public sealed record HealthResponse(string Status, string Service, string Version);
+public sealed record HealthResponse(string Status, string Service, string Version,
+    [property: JsonPropertyName("instance_id")] string? InstanceId = null);
+public sealed record RouteProbe(string Address, HealthResponse? Health, double Milliseconds, string? Error, TokdashError? Failure = null);
 
 public sealed class UsageResponse
 {

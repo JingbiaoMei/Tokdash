@@ -323,7 +323,7 @@ public sealed class CompanionStore : BindableBase
         }
         return settings.Servers.Count(s => s.Enabled) > 1
             ? new MultiServerTokdashClient(settings.Servers)
-            : new TokdashClient(settings.BaseURL);
+            : new TokdashClient(settings.Servers.First(s => s.Enabled));
     }
 
     public CompanionStore(ITokdashClient client)
@@ -337,6 +337,18 @@ public sealed class CompanionStore : BindableBase
     }
 
     public CompanionSettings Settings { get; }
+    public string DashboardBaseUrl => _client switch
+    {
+        TokdashClient client => client.ActiveBaseUrl,
+        MultiServerTokdashClient multi => multi.DashboardBaseUrl ?? Settings.BaseURL,
+        _ => Settings.BaseURL,
+    };
+    public string? ActiveRouteFor(string serverId) => _client switch
+    {
+        TokdashClient client when Settings.Servers.FirstOrDefault(s => s.Enabled)?.Id == serverId => client.ActiveBaseUrl,
+        MultiServerTokdashClient multi => multi.ActiveRouteFor(serverId),
+        _ => null,
+    };
 
     /// <summary>Apply a new language setting: update the global <see cref="L10n.Current"/>,
     /// persist, and raise a property change so the flyout re-renders its localized strings.</summary>
@@ -361,7 +373,7 @@ public sealed class CompanionStore : BindableBase
         _serverFailureCounts.Clear();
         _client = Settings.Servers.Count(s => s.Enabled) > 1
             ? new MultiServerTokdashClient(Settings.Servers)
-            : new TokdashClient(url.Trim());
+            : new TokdashClient(Settings.Servers.First(s => s.Enabled));
         old.Dispose();
         // ConnectionLabel embeds the server name, so it has to re-render on a URL change.
         OnPropertyChanged(nameof(ServerName));

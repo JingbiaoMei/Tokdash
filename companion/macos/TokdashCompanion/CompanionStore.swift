@@ -11,6 +11,14 @@ private enum MultiServerAttempt: Sendable {
     case failure(CompanionServerSettings, busy: Bool, wrongService: Bool)
 }
 
+// Keep the task-group payload nominal: the optimized Swift build on newer macOS
+// toolchains lost the health results when this payload was an anonymous tuple.
+private struct ResolvedServer: Sendable {
+    let id: String
+    let client: TokdashClient
+    let health: Result<HealthResponse, Error>
+}
+
 /// Companion store: holds connection state, the decoded snapshot, the refresh
 /// scheduler, and settings. All mutations happen on the main actor.
 @MainActor
@@ -21,7 +29,13 @@ final class CompanionStore: NSObject, ObservableObject {
     @Published var settings: CompanionSettings
     @Published var quotaView: QuotaView = .low
 
+    @Published private(set) var activeRoutes: [String: String] = [:]
+    var dashboardBaseURL: String {
+        settings.servers.filter { $0.enabled && !failedServerIDs.contains($0.id) }
+            .compactMap { activeRoutes[$0.id] }.first ?? settings.baseURL
+    }
     private let client: TokdashClient
+    private let clientFactory: @Sendable (CompanionServerSettings) -> TokdashClient
     private var refreshTask: Task<Void, Never>?
     private var lastFetchAt: Date?
     // Data generation time from the API (Today.timestamp), used for freshness.
@@ -63,7 +77,13 @@ final class CompanionStore: NSObject, ObservableObject {
     // Supersedes an older in-flight check rather than letting both write state back.
     private var updateCheckGeneration = 0
 
-    override init() {
+    override convenience init() {
+        self.init(clientFactory: { TokdashClient(server: $0) })
+    }
+
+    /// Inject the real client with a controlled transport in store-level tests.
+    init(clientFactory: @escaping @Sendable (CompanionServerSettings) -> TokdashClient) {
+        self.clientFactory = clientFactory
         var loaded = CompanionSettings.load()
         // Repair a blank/malformed base URL saved by an earlier build so the client can't
         // point at nothing, and persist the fix so it isn't re-applied every launch.
@@ -76,7 +96,7 @@ final class CompanionStore: NSObject, ObservableObject {
         // the right language (the store owns this so a later change can republish and re-render).
         L10n.current = L10n.resolve(loaded.language)
         self.settings = loaded
-        self.client = TokdashClient(baseURL: url)
+        self.client = clientFactory(loaded.servers.first(where: \.enabled) ?? .make(baseURL: url.absoluteString))
         super.init()
         restorePendingUpdate()
     }
@@ -140,7 +160,7 @@ final class CompanionStore: NSObject, ObservableObject {
         let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard Self.isValidBaseURL(trimmed), let url = URL(string: trimmed) else { return }
         Task {
-            await client.updateBaseURL(url)
+            await client.configure(settings.servers.first(where: \.enabled) ?? .make(baseURL: url.absoluteString))
             refresh()
         }
     }
@@ -544,6 +564,7 @@ final class CompanionStore: NSObject, ObservableObject {
         failedServerIDs = []
         serverFailureCounts = [:]
         do {
+            if let server = enabledServers.first { await client.configure(server) }
             let health = try await client.health()
             guard health.service == "tokdash" else {
                 // Wrong service: back off so an open flyout doesn't tight-loop the address.
@@ -552,6 +573,12 @@ final class CompanionStore: NSObject, ObservableObject {
                 connectionState = .wrongService
                 return
             }
+            if let index = settings.servers.firstIndex(where: \.enabled), settings.servers[index].instanceId == nil,
+               let identity = health.instanceId, !identity.isEmpty {
+                settings.servers[index].instanceId = identity
+                settings.save()
+            }
+
             connectionState = .connected
 
             // Fetch each section independently so one failed request no longer
@@ -584,6 +611,7 @@ final class CompanionStore: NSObject, ObservableObject {
             lastInsights = glance.insights
             lastStats = glance.stats
 
+            if let server = enabledServers.first { activeRoutes = [server.id: await client.activeBaseURL] }
             let snap = rebuildSnapshot(usageFailed: usageFailed, quotaFailed: quotaFailed)
             self.lastError = nil
             self.connectionState = .connected
@@ -748,19 +776,47 @@ final class CompanionStore: NSObject, ObservableObject {
         settings.components.perServerRows && settings.servers.filter(\.enabled).count > 1
     }
 
-    private func runMultiServerRefresh(_ servers: [CompanionServerSettings]) async {
+    private func runMultiServerRefresh(_ configuredServers: [CompanionServerSettings]) async {
         typealias ServerResult = (server: CompanionServerSettings, usage: UsageResponse, activeMs: Int?, quota: QuotaResponse, insights: InsightsResponse?, stats: StatsResponse?)
         let period = settings.selectedPeriod
         let offset = periodOffset
         let source = Self.glanceSource(for: period, components: settings.components,
                                        today: Self.now, calendar: .current)
+        let makeClient = clientFactory
+        let resolved = await withTaskGroup(of: ResolvedServer.self) { group in
+            for server in configuredServers {
+                group.addTask {
+                    let client = makeClient(server)
+                    do { return ResolvedServer(id: server.id, client: client, health: .success(try await client.health())) }
+                    catch { return ResolvedServer(id: server.id, client: client, health: .failure(error)) }
+                }
+            }
+            var result: [String: ResolvedServer] = [:]
+            for await response in group { result[response.id] = response }
+            return result
+        }
+        if Task.isCancelled { return }
+        var learnedIdentity = false
+        for index in settings.servers.indices where settings.servers[index].instanceId == nil {
+            if let health = try? resolved[settings.servers[index].id]?.health.get(), health.service == "tokdash",
+               let identity = health.instanceId, !identity.isEmpty {
+                settings.servers[index].instanceId = identity; learnedIdentity = true
+            }
+        }
+        if learnedIdentity { settings.save() }
+        var identities = Set<String>()
+        let servers = configuredServers.filter { server in
+            guard let health = try? resolved[server.id]?.health.get(), health.service == "tokdash",
+                  let identity = health.instanceId, !identity.isEmpty else { return true }
+            return identities.insert(identity).inserted
+        }
         let attempts: [MultiServerAttempt] = await withTaskGroup(of: MultiServerAttempt.self) { group in
             for server in servers {
                 group.addTask {
-                    guard let url = URL(string: server.baseURL) else { return .failure(server, busy: false, wrongService: false) }
-                    let client = TokdashClient(baseURL: url)
+                    guard let response = resolved[server.id] else { return .failure(server, busy: false, wrongService: false) }
+                    let client = response.client
                     do {
-                        let health = try await client.health()
+                        let health = try response.health.get()
                         guard health.service == "tokdash" else { return .failure(server, busy: false, wrongService: true) }
                         async let usage = Self.fetchUsage(client, period: period, offset: offset)
                         async let quota = client.quota()
@@ -784,6 +840,12 @@ final class CompanionStore: NSObject, ObservableObject {
             return values
         }
         if Task.isCancelled { return }
+        var currentRoutes: [String: String] = [:]
+        for server in servers {
+            if let client = resolved[server.id]?.client { currentRoutes[server.id] = await client.activeBaseURL }
+        }
+        if Task.isCancelled { return }
+        activeRoutes = currentRoutes
         let results: [ServerResult] = attempts.compactMap { attempt in
             guard case let .success(server, usage, activeMs, quota, insights, stats) = attempt else { return nil }
             return (server, usage, activeMs, quota, insights, stats)
@@ -2676,12 +2738,38 @@ struct CompanionServerSettings: Codable, Identifiable, Equatable, Sendable {
     var label: String
     var baseURL: String
     var enabled: Bool
+    var routes: [String] = []
+    var preferredRoute: String? = nil
+    var instanceId: String? = nil
+
+    var addresses: [String] {
+        var seen = Set<String>()
+        return ([baseURL] + routes).map { $0.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "/")) }
+            .filter { CompanionStore.isValidBaseURL($0) && seen.insert($0).inserted }
+    }
+
+    init(id: String, label: String, baseURL: String, enabled: Bool,
+         routes: [String] = [], preferredRoute: String? = nil, instanceId: String? = nil) {
+        self.id = id; self.label = label; self.baseURL = baseURL; self.enabled = enabled
+        self.routes = routes; self.preferredRoute = preferredRoute; self.instanceId = instanceId
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        label = try c.decode(String.self, forKey: .label)
+        baseURL = try c.decode(String.self, forKey: .baseURL)
+        enabled = try c.decode(Bool.self, forKey: .enabled)
+        routes = try c.decodeIfPresent([String].self, forKey: .routes) ?? []
+        preferredRoute = try c.decodeIfPresent(String.self, forKey: .preferredRoute)
+        instanceId = try c.decodeIfPresent(String.self, forKey: .instanceId)
+    }
 
     private enum CodingKeys: String, CodingKey {
         case id
         case label
         case baseURL = "baseUrl"
-        case enabled
+        case enabled, routes, preferredRoute, instanceId
     }
 
     static func make(baseURL: String) -> CompanionServerSettings {

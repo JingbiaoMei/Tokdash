@@ -8,8 +8,40 @@ import Foundation
 actor TokdashClient {
     private let session: URLSession
     private var baseURL: URL
+    private var server: CompanionServerSettings?
+    private var verifiedRoutes: [URL] = []
+    var activeBaseURL: String { baseURL.absoluteString }
+    private(set) var routeStatus: [RouteProbe] = []
 
-    init(baseURL: URL) {
+    init(server: CompanionServerSettings, session: URLSession? = nil) {
+        self.server = server
+        self.baseURL = URL(string: server.baseURL) ?? URL(fileURLWithPath: "/")
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 15
+        config.timeoutIntervalForResource = 120
+        config.waitsForConnectivity = false
+        self.session = session ?? URLSession(configuration: config)
+    }
+
+    func configure(_ server: CompanionServerSettings) {
+        self.server = server
+        baseURL = URL(string: server.baseURL) ?? URL(fileURLWithPath: "/")
+        verifiedRoutes = []
+    }
+
+    nonisolated static func probe(_ address: String, session: URLSession? = nil) async -> RouteProbe {
+        guard let url = URL(string: address) else { return RouteProbe(address: address, health: nil, milliseconds: 0) }
+        let start = Date()
+        do {
+            let health = try await TokdashClient(baseURL: url, session: session).health()
+            return RouteProbe(address: address, health: health.service == "tokdash" ? health : nil,
+                              milliseconds: Date().timeIntervalSince(start) * 1000)
+        } catch {
+            return RouteProbe(address: address, health: nil, milliseconds: 0, failure: error as? TokdashError)
+        }
+    }
+
+    init(baseURL: URL, session: URLSession? = nil) {
         self.baseURL = baseURL
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 15
@@ -18,7 +50,7 @@ actor TokdashClient {
         // to cut long windows off mid-parse and the view showed "unavailable".
         config.timeoutIntervalForResource = 120
         config.waitsForConnectivity = false
-        self.session = URLSession(configuration: config)
+        self.session = session ?? URLSession(configuration: config)
     }
 
     func updateBaseURL(_ url: URL) {
@@ -32,7 +64,39 @@ actor TokdashClient {
     // them off mid-parse - the year view then read "unavailable" every cycle.
 
     func health() async throws -> HealthResponse {
-        try await get("/health", timeout: 5)
+        guard let server else { return try await get("/health", timeout: 5) }
+        guard CompanionStore.isValidBaseURL(server.baseURL) else { throw TokdashError.badBaseURL }
+        if server.addresses.count == 1 && server.instanceId == nil { return try await get("/health", timeout: 5) }
+        let probes = await withTaskGroup(of: RouteProbe.self) { group in
+            for address in server.addresses { group.addTask { await Self.probe(address, session: self.session) } }
+            var result: [RouteProbe] = []
+            for await probe in group { result.append(probe) }
+            return result
+        }
+        try Task.checkCancellation()
+        routeStatus = probes
+        let good = Self.selectRoutes(server, probes: probes)
+        guard let first = good.first, let health = first.health else {
+            throw !probes.isEmpty && probes.allSatisfy { $0.failure == .busy } ? TokdashError.busy : TokdashError.offline
+        }
+        if self.server?.instanceId == nil { self.server?.instanceId = health.instanceId }
+        verifiedRoutes = good.compactMap { URL(string: $0.address) }
+        baseURL = verifiedRoutes[0]
+        return health
+    }
+
+    nonisolated static func selectRoutes(_ server: CompanionServerSettings, probes: [RouteProbe]) -> [RouteProbe] {
+        let identity = server.instanceId ?? probes.first { $0.address == server.addresses.first }?.health?.instanceId
+        return probes.filter { probe in
+            guard let health = probe.health, health.service == "tokdash" else { return false }
+            if let identity, !identity.isEmpty { return health.instanceId == identity }
+            return probe.address == server.addresses.first
+        }.sorted {
+            if ($0.address == server.preferredRoute) != ($1.address == server.preferredRoute) {
+                return $0.address == server.preferredRoute
+            }
+            return $0.milliseconds < $1.milliseconds
+        }
     }
 
     func usage(period: String) async throws -> UsageResponse {
@@ -109,7 +173,24 @@ actor TokdashClient {
     }
 
     private func getData(_ path: String, timeout: TimeInterval) async throws -> Data {
-        guard let url = Self.buildURL(baseURL: baseURL, path: path) else {
+        var candidates = [baseURL]
+        candidates.append(contentsOf: verifiedRoutes.filter { $0 != baseURL })
+        for (index, candidate) in candidates.enumerated() {
+            do {
+                let data = try await getDataAt(candidate, path: path, timeout: timeout)
+                baseURL = candidate
+                return data
+            } catch {
+                try Task.checkCancellation()
+                let retry = (error as? TokdashError) == .offline || (error as? TokdashError) == .timeout
+                if !retry || index == candidates.count - 1 { throw error }
+            }
+        }
+        throw TokdashError.offline
+    }
+
+    private func getDataAt(_ base: URL, path: String, timeout: TimeInterval) async throws -> Data {
+        guard let url = Self.buildURL(baseURL: base, path: path) else {
             throw TokdashError.badBaseURL
         }
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: timeout)
@@ -181,6 +262,15 @@ struct HealthResponse: Decodable, Equatable, Sendable {
     let status: String
     let service: String
     let version: String
+    var instanceId: String? = nil
+    private enum CodingKeys: String, CodingKey { case status, service, version; case instanceId = "instance_id" }
+}
+
+struct RouteProbe: Sendable {
+    let address: String
+    let health: HealthResponse?
+    let milliseconds: Double
+    var failure: TokdashError? = nil
 }
 
 struct UsageResponse: Decodable, Sendable {

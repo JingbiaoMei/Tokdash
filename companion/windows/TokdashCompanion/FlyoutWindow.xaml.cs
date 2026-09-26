@@ -931,7 +931,8 @@ public partial class FlyoutWindow : Window
             // Height budget follows the section gaps (SectionPad halved in a prior round):
             // 212 -> 280 per review so the All view shows more subscription rows before it
             // scrolls (macOS mirror: CompanionLayout.quotaMaxHeight 340).
-            var scroll = new ScrollViewer { MaxHeight = 280, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+            var scroll = new ScrollViewer { MaxHeight = 280, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+            scroll.Resources[typeof(System.Windows.Controls.Primitives.ScrollBar)] = FindResource("QuotaScrollBar");
             // Multi-server payloads sectionize the All view: one muted server header over
             // its provider groups (contract §All view). Single-server yields one
             // header-less section - the All view looks exactly as before.
@@ -1019,9 +1020,7 @@ public partial class FlyoutWindow : Window
 
     private void OpenDashboard_Click(object sender, RoutedEventArgs e)
     {
-        var url = string.IsNullOrWhiteSpace(Store?.Settings?.BaseURL)
-            ? "http://127.0.0.1:55423/"
-            : Store.Settings.BaseURL;
+        var url = Store?.DashboardBaseUrl ?? CompanionSettings.DefaultBaseURL;
         System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
         {
             FileName = url,

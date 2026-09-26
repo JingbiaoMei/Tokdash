@@ -21,6 +21,10 @@
     Deactivated="FlyoutWindow_Deactivated"
     KeyDown="FlyoutWindow_KeyDown">
     <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="SlimScrollBars.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
         <!-- Theme brushes are swapped in code-behind (light / dark / high-contrast). -->
         <SolidColorBrush x:Key="FlyoutBg" Color="#F2F4F7" Opacity="0.92"/>
         <SolidColorBrush x:Key="WindowBg" Color="#F2F4F7"/>
@@ -42,6 +46,10 @@
         <SolidColorBrush x:Key="FooterBg" Color="#000000" Opacity="0.03"/>
         <SolidColorBrush x:Key="FooterBorder" Color="#000000" Opacity="0.06"/>
         <SolidColorBrush x:Key="BarTrack" Color="#000000" Opacity="0.10"/>
+
+        <Style x:Key="QuotaScrollBar" TargetType="ScrollBar" BasedOn="{StaticResource SlimVerticalScrollBar}">
+            <Setter Property="Foreground" Value="{DynamicResource MutedBrush}"/>
+        </Style>
 
         <!-- Spacing scale: every section's horizontal inset is 16 so left edges align
              down the whole flyout. Thickness resources cover the recurring band shapes;
@@ -324,6 +332,7 @@
                 <TextBlock Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Center" FontSize="{StaticResource FontCaption}" Style="{StaticResource BodyText}"><Run Text="{Binding Pct}" Foreground="{DynamicResource MutedBrush}"/><Run Text="  "/><Run Text="{Binding Value}" Foreground="{DynamicResource FaintBrush}"/></TextBlock>
             </Grid>
         </DataTemplate>
+        </ResourceDictionary>
     </Window.Resources>
 
     <!-- CornerRadius matches DWMWCP_ROUND's 8px silhouette so the 1px border curves with

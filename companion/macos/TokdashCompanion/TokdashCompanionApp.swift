@@ -12,14 +12,11 @@ enum CompanionLayout {
     static let quotaMinHeight: CGFloat = 150
     static let quotaMaxHeight: CGFloat = 340
 
-    /// Settings opens tall enough to show every section without scrolling (user request:
-    /// "wider but not taller - fit the content"): 980pt covers the full grouped form with
-    /// server cards, capped by the screen's visible height so the window never overhangs.
-    /// If the content is STILL taller (many servers), the grouped Form scrolls as before,
-    /// and the window stays freely resizable either way.
+    /// The explicit AppKit window sizing below handles restored frames; this also
+    /// supplies a sensible ideal height during SwiftUI's initial layout.
     static var settingsIdealHeight: CGFloat {
         let visible = NSScreen.main?.visibleFrame.height ?? 900
-        return min(980, max(640, visible - 44))
+        return min(1080, max(420, visible - 44))
     }
 }
 
@@ -160,4 +157,30 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     ) {
         completionHandler([.banner, .sound])
     }
+}
+
+/// Form's ideal size does not override a restored AppKit Settings frame.
+/// Apply the opening size to the actual window, then leave user resizing alone.
+struct SettingsWindowSize: NSViewRepresentable {
+    final class SizingView: NSView {
+        private weak var sizedWindow: NSWindow?
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard let window, sizedWindow !== window else { return }
+            sizedWindow = window
+            DispatchQueue.main.async { [weak window] in
+                guard let window else { return }
+                let screen = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame
+                    ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+                var frame = window.frame
+                frame.size.height = min(1080, screen.height - 24)
+                frame.size.width = max(frame.width, 540)
+                frame.origin.y = max(screen.minY + 12, min(frame.maxY, screen.maxY - 12) - frame.height)
+                frame.origin.x = min(max(frame.minX, screen.minX), screen.maxX - frame.width)
+                window.setFrame(frame, display: true)
+            }
+        }
+    }
+    func makeNSView(context: Context) -> SizingView { SizingView() }
+    func updateNSView(_ nsView: SizingView, context: Context) {}
 }

@@ -1,7 +1,34 @@
 import XCTest
+import SwiftUI
+import AppKit
 @testable import TokdashCompanion
 
 final class SnapshotTests: XCTestCase {
+
+    @MainActor
+    func testSettingsWindowUsesScreenHeightInsteadOfSmallRestoredFrame() async throws {
+        let store = CompanionStore()
+        store.settings.automaticUpdateChecks = false
+        store.settings.servers = [CompanionServerSettings(id: "work", label: "Workstation", baseURL: "http://127.0.0.1:1", enabled: true,
+            routes: ["https://workstation.example/tokdash"], instanceId: "fixture")]
+        let host = NSHostingView(rootView: SettingsView().environmentObject(store))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 540, height: 420),
+            styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        defer { window.orderOut(nil); window.contentView = nil }
+        window.orderFrontRegardless()
+        try await Task.sleep(for: .milliseconds(700))
+        let visible = window.screen?.visibleFrame ?? NSScreen.main!.visibleFrame
+        XCTAssertEqual(window.frame.height, min(1080, visible.height - 24), accuracy: 2)
+        XCTAssertLessThanOrEqual(window.frame.maxY, visible.maxY)
+        if let directory = ProcessInfo.processInfo.environment["TOKDASH_RENDER_DIR"] {
+            host.layoutSubtreeIfNeeded()
+            let rep = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+            host.cacheDisplay(in: host.bounds, to: rep)
+            try rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: directory).appendingPathComponent("mac-settings.png"))
+        }
+    }
 
     /// Redirect settings persistence to a temp file before any store is built: constructing
     /// a CompanionStore loads the settings file, and its invalid-base-URL repair writes one.

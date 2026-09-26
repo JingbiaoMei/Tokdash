@@ -290,7 +290,12 @@ def test_companion_v2_schema_and_loose_test_rule_are_present():
     # Test remains optional: Save validates URLs but never checks a probe result.
     mac_save = mac_settings[mac_settings.index("private func saveSettings()") : mac_settings.index("private func removeServer")]
     assert "validServers" in mac_save and "testResults" not in mac_save
-    assert "entries.Any(entry => !CompanionStore.IsValidBaseURL" in win_settings
+    win_save = win_settings[win_settings.index("private async void Save_Click") : win_settings.index("private static string ServerSignature")]
+    # Every address is validated, including additional routes; an offline probe does
+    # not prevent saving an explicit URL. The old single-address expression is gone.
+    assert "new[] { entry.BaseUrl }.Concat(entry.Routes)" in win_save
+    assert "Any(a => !CompanionStore.IsValidBaseURL(a))" in win_save
+    assert "CheckRoutesAsync" not in win_save and "RouteStatus" not in win_save
     assert (root / "companion/windows/TokdashCompanion/MultiServerTokdashClient.cs").exists()
     assert "runMultiServerRefresh" in macos
     assert "combineUsage" in macos

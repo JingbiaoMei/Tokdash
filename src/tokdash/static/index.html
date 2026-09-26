@@ -701,8 +701,8 @@
     .servers-master-toggle { display: inline-flex; align-items: center; gap: 7px; min-height: 36px; color: var(--color-text); font-size: 11px; font-weight: 700; cursor: pointer; }
     .servers-master-toggle input,
     .server-select { width: 17px; height: 17px; margin: 0; accent-color: var(--color-primary); cursor: pointer; }
-    .server-settings-list { overflow: hidden; border: 1px solid color-mix(in srgb,var(--color-primary) 14%,var(--color-border)); border-radius: 11px; background: color-mix(in srgb,var(--color-surface-glass) 82%,transparent); box-shadow: inset 0 1px 0 color-mix(in srgb,#fff 56%,transparent); }
-    .server-setting-row { display: grid; grid-template-columns: 10px minmax(0,1fr) 18px 34px; align-items: center; gap: 9px; min-height: 44px; padding: 0 8px 0 11px; }
+    .server-settings-list { display: grid; gap: 14px; }
+    .server-setting-row { display: grid; grid-template-columns: 10px minmax(0,1fr) auto; align-items: center; gap: 9px; min-height: 44px; padding: 0 8px 0 11px; }
     .server-setting-row + .server-setting-row { border-top: 1px solid color-mix(in srgb,var(--color-border) 70%,transparent); }
     .server-health-dot { width: 10px; height: 10px; border: 1.5px solid color-mix(in srgb,var(--color-muted) 42%,transparent); border-radius: 50%; background: transparent; box-sizing: border-box; }
     .server-health-dot[data-state="ok"] { border-color: #2F9E5B; background: #2F9E5B; box-shadow: 0 0 0 3px color-mix(in srgb,#2F9E5B 13%,transparent); }
@@ -713,10 +713,36 @@
     .server-row-name { flex: 0 0 auto; max-width: 42%; overflow: hidden; color: var(--color-text); font-size: 12px; font-weight: 750; text-overflow: ellipsis; white-space: nowrap; }
     .server-row-separator { flex: 0 0 auto; color: var(--color-muted); font-size: 10px; }
     .server-row-host { min-width: 0; overflow: hidden; color: var(--color-muted); font-family: "Fira Code",ui-monospace,monospace; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-    .server-remove,
-    .server-remove-placeholder { width: 34px; height: 34px; }
+    .server-remove { width: 34px; height: 34px; }
     .server-remove { display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 1px solid transparent; border-radius: 8px; color: var(--color-muted); background: transparent; cursor: pointer; transition: color var(--t-fast) ease,background var(--t-fast) ease,border-color var(--t-fast) ease; }
     .server-remove:is(:hover,:focus-visible) { outline: none; border-color: color-mix(in srgb,#D94848 25%,var(--color-border)); background: color-mix(in srgb,#D94848 8%,transparent); color: #C93636; }
+    /* Host header plus one row per route: the host is what the user manages, the route is
+       what the network reaches, and the two need to read as different things. */
+    .server-host-block { min-width: 0; }
+    /* Keep host actions on a separate track and addresses aligned with the name. */
+    .server-route-list { display: grid; gap: 2px; margin: 0 8px 8px 30px; }
+    .server-route-row { display: grid; grid-template-columns: minmax(0,1fr) auto auto auto; align-items: center; gap: 7px; min-height: 30px; }
+    .server-route-url { min-width: 0; overflow: hidden; color: var(--color-muted); font-family: "Fira Code",ui-monospace,monospace; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+    .server-route-url[data-invalid="true"] { color: #D12F2F; }
+    .server-route-ms { color: var(--color-text); font-family: "Fira Code",ui-monospace,monospace; font-size: 10px; font-variant-numeric: tabular-nums; }
+    .server-route-badge { padding: 1px 6px; border: 1px solid color-mix(in srgb,var(--color-border) 80%,transparent); border-radius: 999px; color: var(--color-muted); font-size: 9px; font-weight: 750; white-space: nowrap; }
+    .server-route-badge[data-badge="active"] { border-color: color-mix(in srgb,#2F9E5B 40%,transparent); background: color-mix(in srgb,#2F9E5B 10%,transparent); color: #267C4A; }
+    .server-route-badge[data-badge="pinned"] { border-color: color-mix(in srgb,#4C6FE7 40%,transparent); background: color-mix(in srgb,#4C6FE7 10%,transparent); color: #3A56C4; }
+    .server-route-badge[data-badge="origin"] { border-color: color-mix(in srgb,var(--color-primary) 35%,transparent); color: var(--color-primary); }
+    .server-route-badge[data-badge="warn"] { border-color: color-mix(in srgb,#C27C2C 45%,transparent); background: color-mix(in srgb,#C27C2C 10%,transparent); color: #A86720; }
+    .server-route-badge[data-badge="error"] { border-color: color-mix(in srgb,#D94848 40%,transparent); background: color-mix(in srgb,#D94848 8%,transparent); color: #C93636; }
+    .server-route-actions { display: inline-flex; align-items: center; gap: 2px; }
+    .server-route-actions .server-remove { width: 26px; height: 26px; }
+    .server-editable { padding: 0; border: 0; background: transparent; text-align: left; cursor: pointer; }
+    .server-editable:hover { color: var(--color-primary); text-decoration: underline; text-underline-offset: 3px; }
+    .server-editable:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 3px; border-radius: 3px; }
+    .server-row-name.server-editable { max-width: 100%; }
+    .server-route-note { margin: 2px 0 0; color: var(--color-muted); font-size: 10px; font-weight: 650; line-height: 1.4; }
+    .server-route-note[data-tone="warn"], .server-route-note[data-tone="error"] { color: #D12F2F; }
+    .server-inline-editor { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 4px 0 6px; }
+    .server-inline-editor .ui-input { flex: 1 1 180px; min-width: 0; min-height: 32px; padding: 5px 8px; font-size: 11px; font-family: "Fira Code",ui-monospace,monospace; }
+    .server-inline-editor .btn { min-height: 32px; padding: 5px 10px; font-size: 11px; }
+    .server-host-actions { display: inline-flex; align-items: center; gap: 2px; }
     .server-add-form { display: grid; gap: 7px; margin-top: 16px; }
     .server-add-title { margin: 0 0 1px; color: var(--color-muted); font-size: 11px; font-weight: 750; }
     .server-add-form .ui-input { min-height: 40px; padding: 8px 11px; border-width: 1px; font-size: 12px; }
@@ -1234,6 +1260,13 @@
     .servers-card.dead { border-color: rgba(217,72,72,0.45); }
     .servers-card-head { display: flex; align-items: flex-start; gap: 10px; }
     .servers-card-head .server-health-dot { margin-top: 5px; flex: 0 0 auto; }
+    .servers-merge-notice { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 8px; padding: 8px 10px; border: 1px solid color-mix(in srgb,#2F9E5B 30%,var(--color-border)); border-radius: 10px; background: color-mix(in srgb,#2F9E5B 7%,transparent); color: var(--color-text); font-size: 11px; font-weight: 650; }
+    .servers-routes { display: grid; gap: 3px; margin: 6px 0 0; padding: 7px 0 0; border-top: 1px solid color-mix(in srgb,var(--color-border) 70%,transparent); }
+    .servers-route { display: flex; align-items: center; gap: 7px; min-width: 0; }
+    .servers-route .server-health-dot { flex: 0 0 auto; width: 7px; height: 7px; }
+    .servers-route-url { min-width: 0; overflow: hidden; color: var(--color-muted); font-family: "Fira Code",ui-monospace,monospace; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+    .servers-route-ms { flex: 0 0 auto; font-size: 10px; }
+    .servers-route-when { flex: 0 0 auto; margin-left: auto; color: var(--color-muted); font-size: 9px; }
     .servers-card-who { min-width: 0; }
     .servers-card-who .name { font-family: "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-weight: 700; font-size: 15px; }
     .servers-host { font-size: 12px; color: var(--color-muted); margin-top: 2px; max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -2012,7 +2045,7 @@
                     <div id="serverSettingsList" class="server-settings-list"></div>
                     <div class="server-add-form">
                       <p class="server-add-title" data-i18n="addAServer">Add a server</p>
-                      <input id="serverUrlInput" class="ui-input" type="url" data-i18n-placeholder="serverUrl" placeholder="https://host:55423/tokdash" aria-describedby="serverFormStatus">
+                      <input id="serverUrlInput" class="ui-input" type="text" data-i18n-placeholder="serverUrl" placeholder="host:55423/tokdash" aria-describedby="serverFormStatus">
                       <input id="serverLabelInput" class="ui-input" type="text" data-i18n-placeholder="serverLabelOptional" placeholder="Name (optional)">
                       <div class="server-form-actions">
                         <button id="testServerBtn" class="btn btn-ghost" type="button" data-i18n="testServer">Test</button>
@@ -4482,16 +4515,294 @@
 
     const SERVERS_STORAGE_KEY = 'tokdash-servers';
     const SERVER_SELECTION_STORAGE_KEY = 'tokdash-server-selection';
-    const LOCAL_SERVER = Object.freeze({ id: 'local', label: 'Local', baseUrl: '' });
-    const serverRuntimeStatus = new Map();
-    const csrfTokensByServer = new Map();
+    const LOCAL_HOST_ID = 'local';
+    const ORIGIN_ROUTE_ID = 'origin';
 
-    function normalizeServerBaseUrl(value) {
-      const raw = String(value || '').trim().replace(/\/+$/, '');
+    // One daemon, several addresses. A host is what the user manages and what the combined
+    // view counts once; a route is one URL that reaches it. Probing, ranking and failover
+    // are per-route, which is what stops a second address for a machine that is already in
+    // the list from becoming a second row of the same tokens.
+    const ROUTE_PROBE_SAMPLES = 3;
+    const ROUTE_PROBE_TIMEOUT_MS = 3500;            // the companion contract's health budget
+    const ROUTE_PROBE_BACKOFF_CAP_MS = 60000;
+    // A challenger takes over only when it is meaningfully faster, so ordinary jitter does
+    // not re-point every request in a fan-out and throw away warm connections.
+    const ROUTE_FLAP_MARGIN_MS = 10;
+    const ROUTE_FLAP_MARGIN_RATIO = 0.25;
+    const ROUTE_SLOW_MS = 500;
+
+    function newId(prefix) {
+      const random = globalThis.crypto?.randomUUID?.();
+      return random ? `${prefix}-${random}` : `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    }
+
+    // The canonical form doubles as route identity: two spellings of one address are one
+    // route, so dedupe compares these instead of what was typed. URL() already lowercases
+    // the host and drops a default port; the path is kept because a Serve prefix lives
+    // there, and the query and hash are dropped because neither identifies an endpoint.
+    function normalizeRouteUrl(value) {
+      const raw = String(value || '').trim();
+      if (!raw) return '';
+      let url = null;
+      try { url = new URL(raw); } catch (_error) { return ''; }
+      if (url.protocol !== 'http:' && url.protocol !== 'https:') return '';
+      if (!url.host) return '';
+      return `${url.protocol}//${url.host}${url.pathname.replace(/\/+$/, '')}`;
+    }
+
+    // Protocol discovery is only for new user input, never for persisted route identities.
+    async function resolveRouteInput(value) {
+      const raw = String(value || '').trim();
+      const explicit = normalizeRouteUrl(raw);
+      if (explicit) return { url: explicit };
+      if (!raw || /[\s@\\]/.test(raw) || raw.includes('://') || /^(?:javascript|data|file|mailto):/i.test(raw)) {
+        return { error: t('serverInvalidUrl') };
+      }
+      const address = raw.replace(/^\/\//, '');
+      const candidates = ['https:', 'http:'].map((scheme) => normalizeRouteUrl(`${scheme}//${address}`));
+      if (candidates.some((url) => !url)) return { error: t('serverInvalidUrl') };
+      let error;
+      for (const url of candidates) {
+        try { await probeServer(url); return { url }; }
+        catch (failure) { error = failure; }
+      }
+      // Do not persist a guessed protocol when neither endpoint could be verified.
+      return { error: error?.message || t('serverTestNetworkError') };
+    }
+
+    // Kept as the name every existing caller uses; it is now the canonicalising one.
+    function normalizeServerBaseUrl(value) { return normalizeRouteUrl(value); }
+
+    function routeUrlParts(value) {
+      const url = normalizeRouteUrl(value);
+      if (!url) return null;
       try {
-        const url = new URL(raw);
-        return (url.protocol === 'http:' || url.protocol === 'https:') && url.host ? raw : '';
-      } catch (_error) { return ''; }
+        const parsed = new URL(url);
+        return {
+          url,
+          protocol: parsed.protocol.replace(/:$/, ''),
+          hostname: parsed.hostname,
+          port: parsed.port ? Number(parsed.port) : (parsed.protocol === 'https:' ? 443 : 80),
+        };
+      } catch (_error) { return null; }
+    }
+
+    const LOOPBACK_HOSTNAMES = ['localhost', '127.0.0.1', '::1', '[::1]'];
+    function isLoopbackHostname(hostname) {
+      const host = String(hostname || '').toLowerCase();
+      return LOOPBACK_HOSTNAMES.includes(host) || host.startsWith('127.');
+    }
+
+    // `<machine>.<tailnet>.ts.net`. The stock policy admits an HTTPS origin whose tailnet
+    // suffix equals the request Host's, and admits no other family besides loopback.
+    function tailnetSuffix(hostname) {
+      const host = String(hostname || '').toLowerCase();
+      const first = host.indexOf('.');
+      return host.endsWith('.ts.net') && first > 0 ? host.slice(first) : '';
+    }
+
+    // A browser refuses a CORS-blocked route and a dead one with the same opaque TypeError,
+    // and no extra request tells them apart. So `blocked` is PREDICTED from the two
+    // addresses and used only when the probe also failed; everything else that failed is
+    // unreachable. Never describe a blocked route with the word unreachable: keeping the two
+    // apart is the entire point of this function.
+    function predictBlocked(pageUrl, routeUrl) {
+      const page = routeUrlParts(pageUrl);
+      const route = routeUrlParts(routeUrl);
+      if (!page || !route) return '';
+      const sameOrigin = page.protocol === route.protocol
+        && page.hostname === route.hostname
+        && page.port === route.port;
+      if (sameOrigin) return '';
+      // An https page fetching plain http is blocked by the page itself, not by the
+      // daemon's policy -- except that loopback is a potentially trustworthy scheme, so a
+      // loopback route dies on the origin rule below instead.
+      if (page.protocol === 'https' && route.protocol === 'http' && !isLoopbackHostname(route.hostname)) {
+        return 'mixedContent';
+      }
+      if (isLoopbackHostname(page.hostname)) return '';
+      const pageSuffix = tailnetSuffix(page.hostname);
+      if (page.protocol === 'https' && pageSuffix) {
+        const routeSuffix = tailnetSuffix(route.hostname);
+        if (route.protocol === 'https' && routeSuffix && routeSuffix === pageSuffix) return '';
+      }
+      // Includes a loopback route seen from a Serve page, even the loopback address of the
+      // machine serving that page: no stock rule admits it.
+      return 'originNotAdmitted';
+    }
+
+    function routeMedianMs(state) {
+      const samples = Array.isArray(state?.samples) ? state.samples.filter((ms) => Number.isFinite(ms)) : [];
+      if (!samples.length) return null;
+      const sorted = [...samples].sort((a, b) => a - b);
+      return sorted[Math.floor((sorted.length - 1) / 2)];
+    }
+
+    // A challenger replaces the incumbent only by max(10 ms, 25 %). Inside the band the
+    // active route is NOT the fastest, which is why the UI badges the active route `Active`
+    // with the reason in its tooltip instead of claiming `Fastest` on something nothing
+    // is using.
+    function beatsIncumbent(challengerMs, incumbentMs) {
+      if (!Number.isFinite(challengerMs) || !Number.isFinite(incumbentMs)) return false;
+      return (incumbentMs - challengerMs) >= Math.max(ROUTE_FLAP_MARGIN_MS, incumbentMs * ROUTE_FLAP_MARGIN_RATIO);
+    }
+
+    // Pure: routes and their probe state in, the active route and the facts behind the
+    // badges out, so the band, the pinned fallback and the all-failed placeholder are all
+    // testable without a browser. `runtime` is keyed by route id.
+    function rankRoutes({ routes = [], runtime = {}, choice = 'auto', hostInstanceId = '',
+                          incumbentRouteId = '', now = Date.now() } = {}) {
+      const hostId = String(hostInstanceId || '');
+      // What the probes say about WHO answers, separate from whether they answer well.
+      // When the host has no identity yet -- an old daemon, or one whose id has not arrived
+      // -- the Tokdash fingerprint is enough, so that host still ranks and still fails over.
+      // Once the host does have one, blank is not agreement: a current daemon can answer
+      // without an id while its first lookup runs or during the backoff after a failed one,
+      // and until a route names itself as this host it is unproven rather than verified. It
+      // stays in the probe rotation, it just cannot carry this host's figures.
+      const disproven = (route) => {
+        const state = runtime[route.id] || {};
+        if (state.state === 'not-this-daemon') return true;
+        if (!hostId || state.state !== 'ok') return false;
+        return String(state.reportedInstanceId || '') !== hostId;
+      };
+      // A probe backoff is a promise not to knock again for a while, and an ordinary read has
+      // to keep that promise or the backoff only hides the route from the probe loop.
+      const inBackoff = (state) => Number(state?.nextTryAt || 0) > now;
+      const usable = routes.filter((route) => (runtime[route.id] || {}).state === 'ok' && !disproven(route));
+      const fastest = (id) => {
+        const median = routeMedianMs(runtime[id]);
+        return Number.isFinite(median) ? median : Number.POSITIVE_INFINITY;
+      };
+      const ordered = [...usable].sort((a, b) => fastest(a.id) - fastest(b.id));
+      const fastestRouteId = ordered.length ? ordered[0].id : '';
+      const pinned = choice !== 'auto' ? usable.find((route) => route.id === choice) || null : null;
+
+      let activeRouteId = '';
+      let activeReason = '';
+      if (pinned) {
+        activeRouteId = pinned.id;
+        activeReason = 'pinned';
+      } else if (ordered.length) {
+        const incumbent = usable.find((route) => route.id === incumbentRouteId) || null;
+        const challenger = ordered[0];
+        if (!incumbent || incumbent.id === challenger.id) {
+          activeRouteId = challenger.id;
+          activeReason = 'fastest';
+        } else if (beatsIncumbent(routeMedianMs(runtime[challenger.id]), routeMedianMs(runtime[incumbent.id]))) {
+          activeRouteId = challenger.id;
+          activeReason = 'fastest';
+        } else {
+          // Held: the incumbent is inside the band, so it keeps the traffic.
+          activeRouteId = incumbent.id;
+          activeReason = 'held';
+        }
+      } else if (routes.length) {
+        // Nothing has answered, or nothing answers correctly. Keep the first route as a
+        // placeholder so the host still appears in the fan-out and shows up as that host
+        // rather than silently dropping out of the combined view. A route already caught
+        // answering as some other Tokdash is not a placeholder: reading it would file that
+        // machine's tokens under this host, which is the one error the identity rule exists
+        // to prevent. It only becomes a placeholder while the route is unverified. Neither is
+        // an address this page can never read, nor one the probe is currently backing off --
+        // dialling those on every refresh is exactly what the backoff exists to stop. When
+        // every route is barred the host fails this refresh rather than reaching for one.
+        const placeholder = routes.find((route) => {
+          const state = runtime[route.id] || {};
+          // blocked is permanent from this page, so that address is never worth a read. A
+          // failed one is skipped only for the length of its backoff, then comes back.
+          return !disproven(route) && state.state !== 'blocked' && !inBackoff(state);
+        }) || null;
+        activeRouteId = placeholder ? placeholder.id : '';
+        activeReason = placeholder ? 'unverified' : '';
+      }
+      return {
+        usableRouteIds: usable.map((route) => route.id),
+        orderedRouteIds: ordered.map((route) => route.id),
+        activeRouteId,
+        activeReason,
+        fastestRouteId,
+        pinnedRouteId: pinned ? pinned.id : '',
+      };
+    }
+
+    function hostRoutes(host) {
+      return Array.isArray(host?.routes) ? host.routes : [];
+    }
+
+    function activeRouteIdFor(host, runtime = routeRuntime) {
+      const ranking = rankRoutes({
+        routes: hostRoutes(host),
+        runtime,
+        choice: host?.choice || 'auto',
+        hostInstanceId: host?.instanceId || '',
+        incumbentRouteId: hostActiveRouteId.get(host?.id) || '',
+      });
+      return ranking.activeRouteId;
+    }
+
+    // Display and the write path. Reads go through pickRoute, which honours the probe backoff;
+    // a POST cannot be re-driven on another address after a dropped response, so it takes the
+    // route it is given even when the probes have benched every one of them.
+    function activeRouteFor(host) {
+      const routes = hostRoutes(host);
+      if (!routes.length) return null;
+      return routes.find((route) => route.id === activeRouteIdFor(host)) || routes[0];
+    }
+
+    function hostHasUsableRoute(host, runtime = routeRuntime) {
+      return rankRoutes({
+        routes: hostRoutes(host),
+        runtime,
+        choice: host?.choice || 'auto',
+        hostInstanceId: host?.instanceId || '',
+      }).usableRouteIds.length > 0;
+    }
+
+    // v1 stored one `baseUrl` per server; v2 stores a host with N routes. Read both, and
+    // keep `baseUrl` mirrored off the first route on the way out: an older build drops
+    // entries without it and would then save the filtered list back, turning a downgrade
+    // into the loss of every server the user has.
+    function migrateRegistry(parsed, pageUrl = '') {
+      if (!Array.isArray(parsed)) return [];
+      const hosts = [];
+      const ids = new Set();
+      const canonicalPage = normalizeRouteUrl(pageUrl);
+      parsed.forEach((item) => {
+        if (!item || typeof item.id !== 'string' || !item.id || ids.has(item.id)) return;
+        const isLocal = item.id === LOCAL_HOST_ID;
+        const seen = new Set();
+        const storedRoutes = [];
+        const candidates = Array.isArray(item.routes)
+          ? item.routes.map((route) => (route && typeof route === 'object' ? route.url : route))
+          : [item.baseUrl];
+        candidates.forEach((candidate, index) => {
+          const url = normalizeRouteUrl(candidate);
+          if (!url || seen.has(url)) return;
+          seen.add(url);
+          storedRoutes.push({
+            id: typeof item.routes?.[index]?.id === 'string' && item.routes[index].id ? item.routes[index].id : newId('route'),
+            url,
+            kind: 'added',
+            addedAt: Number(item.routes?.[index]?.addedAt) || 0,
+          });
+        });
+        // Every other host needs at least one route to exist; `local` does not, because its
+        // only route may legitimately be the page it is being opened from.
+        if (!storedRoutes.length && !isLocal) return;
+        const routeIds = new Set(storedRoutes.map((route) => route.id));
+        const choice = item.choice === 'auto' || routeIds.has(item.choice) ? item.choice : 'auto';
+        ids.add(item.id);
+        hosts.push({
+          id: item.id,
+          label: String(item.label || '').trim() || defaultServerLabel(storedRoutes[0]?.url || ''),
+          instanceId: typeof item.instanceId === 'string' ? item.instanceId.trim() : '',
+          choice: choice || 'auto',
+          routes: storedRoutes,
+          baseUrl: storedRoutes[0]?.url || '',
+        });
+      });
+      return hosts;
     }
 
     function defaultServerLabel(value) {
@@ -4503,21 +4814,159 @@
       } catch (_error) { return 'Server'; }
     }
 
-    function loadServerRegistry(storage = localStorage) {
-      try {
-        const parsed = JSON.parse(storage.getItem(SERVERS_STORAGE_KEY) || '[]');
-        if (!Array.isArray(parsed)) return [];
-        const ids = new Set(['local']);
-        return parsed.filter((item) => {
-          if (!item || typeof item.id !== 'string' || ids.has(item.id)) return false;
-          const baseUrl = normalizeServerBaseUrl(item.baseUrl);
-          if (!baseUrl) return false;
-          item.baseUrl = baseUrl;
-          item.label = String(item.label || defaultServerLabel(baseUrl)).trim();
-          ids.add(item.id);
-          return true;
+    // Survivor rule, stated rather than derived: ids are random UUIDs, so ordering by them
+    // means nothing, and `local` cannot be deleted -- under "keep the lower id" it would
+    // usually have lost a merge it is the only party allowed to survive.
+    function mergeHostsByIdentity(hosts, side = {}) {
+      const byInstance = new Map();
+      hosts.forEach((host) => {
+        const id = String(host.instanceId || '');
+        if (!id) return;   // identity unknown: never merged, automatically or by hand
+        if (!byInstance.has(id)) byInstance.set(id, []);
+        byInstance.get(id).push(host);
+      });
+      const notices = [];
+      const losers = new Set();
+      byInstance.forEach((group) => {
+        if (group.length < 2) return;
+        const survivor = group.find((host) => host.id === LOCAL_HOST_ID) || group[0];
+        group.forEach((host) => {
+          if (host.id === survivor.id) return;
+          losers.add(host.id);
+          const existing = new Set(hostRoutes(survivor).map((route) => route.url));
+          hostRoutes(host).forEach((route) => {
+            if (existing.has(route.url)) return;
+            existing.add(route.url);
+            survivor.routes.push({ ...route });
+          });
+          survivor.baseUrl = hostRoutes(survivor)[0]?.url || survivor.baseUrl || '';
+          Object.entries(side).forEach(([key, bag]) => {
+            if (!bag || typeof bag !== 'object') return;
+            if (Object.prototype.hasOwnProperty.call(bag, host.id)) {
+              if (!Object.prototype.hasOwnProperty.call(bag, survivor.id)) bag[survivor.id] = bag[host.id];
+              delete bag[host.id];
+            }
+          });
+          notices.push({ survivorId: survivor.id, survivorLabel: survivor.label, loserId: host.id, loserLabel: host.label });
         });
-      } catch (_error) { return []; }
+      });
+      return {
+        hosts: hosts.filter((host) => !losers.has(host.id)),
+        notices,
+        lostHostIds: [...losers],
+      };
+    }
+
+    // The address this page was opened from, in route form. `TOKDASH_BASE_PATH` matters
+    // because Tailscale Serve mounts the dashboard under /tokdash, and a route without the
+    // prefix would 404 even though the daemon is the same one.
+    const PAGE_ROUTE_URL = normalizeRouteUrl(`${location.origin}${TOKDASH_BASE_PATH}`);
+
+    function originRoute() {
+      return { id: ORIGIN_ROUTE_ID, url: PAGE_ROUTE_URL, kind: 'origin', addedAt: 0 };
+    }
+
+    // `local` is stored (its added routes, renamed label and route choice have to survive a
+    // reload) but its origin route is prepended here rather than persisted: the same daemon
+    // opened from a different address is a different origin route, and localStorage is per
+    // page address anyway.
+    function localHostFrom(stored, pageUrl = PAGE_ROUTE_URL) {
+      const base = stored && typeof stored === 'object' ? stored : null;
+      const storedRoutes = base ? hostRoutes(base) : [];
+      const origin = { id: ORIGIN_ROUTE_ID, url: normalizeRouteUrl(pageUrl), kind: 'origin', addedAt: 0 };
+      const routes = origin.url ? [origin, ...storedRoutes.filter((route) => route.url !== origin.url)] : [...storedRoutes];
+      const choice = base?.choice === 'auto' || routes.some((route) => route.id === base?.choice) ? base.choice : 'auto';
+      return {
+        id: LOCAL_HOST_ID,
+        label: String(base?.label || 'Local').trim() || 'Local',
+        // Re-read every load (§5.1): whatever daemon served this page IS this host, so an
+        // identity stored before a re-imaging would mark the page's own route wrong.
+        instanceId: '',
+        choice: choice || 'auto',
+        routes,
+        baseUrl: origin.url || routes[0]?.url || '',
+      };
+    }
+
+    function loadServerRegistry(storage = localStorage, pageUrl = PAGE_ROUTE_URL) {
+      let parsed = null;
+      try {
+        parsed = JSON.parse(storage.getItem(SERVERS_STORAGE_KEY) || '[]');
+      } catch (_error) { return [localHostFrom(null, pageUrl)]; }
+      const hosts = migrateRegistry(parsed, pageUrl);
+      const storedLocal = hosts.find((host) => host.id === LOCAL_HOST_ID) || null;
+      const others = hosts.filter((host) => host.id !== LOCAL_HOST_ID);
+      return [localHostFrom(storedLocal, pageUrl), ...others];
+    }
+
+    function saveServerRegistry() {
+      // The origin route is not stored, and neither is probe state.
+      const stored = hosts.map((host) => ({
+        id: host.id,
+        label: host.label,
+        instanceId: host.instanceId || '',
+        choice: host.choice || 'auto',
+        baseUrl: host.baseUrl || hostRoutes(host).find((route) => route.kind !== 'origin')?.url || '',
+        routes: hostRoutes(host).filter((route) => route.kind !== 'origin').map((route) => ({
+          id: route.id, url: route.url, kind: 'added', addedAt: route.addedAt || 0,
+        })),
+      }));
+      localStorage.setItem(SERVERS_STORAGE_KEY, JSON.stringify(stored));
+    }
+
+    const serverRuntimeStatus = new Map();   // hostId -> last fan-out result
+    const csrfTokensByServer = new Map();    // hostId -> CSRF token; a route change does not
+                                             // change the process, so the token survives one
+
+    // Per-route probe state, keyed by route id, and the last route a host actually used,
+    // which is what the anti-flap band compares against. Neither is persisted: a page load
+    // starts untried, as today. `routeRuntime` is a plain object so the pure ranker can take
+    // it straight from a test fixture.
+    const routeRuntime = {};
+    const hostActiveRouteId = new Map();
+
+    function setRouteState(routeId, patch) {
+      if (!routeId) return null;
+      routeRuntime[routeId] = { ...(routeRuntime[routeId] || {}), ...patch };
+      return routeRuntime[routeId];
+    }
+
+    function routePath(route, path) {
+      const url = String(route?.url || '');
+      if (!url) return appPath(path);
+      return `${url}/${String(path || '').replace(/^\/+/, '')}`;
+    }
+
+    function serverPath(server, path) {
+      if (!server) return appPath(path);
+      const forced = server._routeId ? hostRouteById(server, server._routeId) : null;
+      const route = forced || activeRouteFor(server);
+      return route ? routePath(route, path) : appPath(path);
+    }
+
+    // A host with no routes at all still means "this page", which is what an id-less `local`
+    // entry is when nothing has been added.
+    function viaRoute(server, route) {
+      return { ...server, baseUrl: String(route?.url || ''), _routeId: route?.id || '' };
+    }
+
+    function hostRouteById(server, routeId) {
+      return hostRoutes(server).find((route) => route.id === routeId) || null;
+    }
+
+    function storedRouteUrlExists(url) {
+      const canonical = normalizeRouteUrl(url);
+      if (!canonical) return { host: null, route: null };
+      for (const host of hosts) {
+        const route = hostRoutes(host).find((item) => item.url === canonical);
+        if (route) return { host, route };
+      }
+      return { host: null, route: null };
+    }
+
+    function pageRouteMatches(url) {
+      const canonical = normalizeRouteUrl(url);
+      return !!canonical && canonical === PAGE_ROUTE_URL;
     }
 
     function loadServerSelection(storage = localStorage) {
@@ -4528,23 +4977,30 @@
       return { mode: 'all', custom: [] };
     }
 
-    let addedServers = loadServerRegistry();
+    // The host list, with `local` first so the page's own daemon stays where the old
+    // `localHost()` constant put it. Everything downstream -- selection, health, quota
+    // blocks, session badges -- keeps keying on host id, which is why route support never
+    // reached past this block.
+    let hosts = loadServerRegistry();
     let serverSelection = loadServerSelection();
 
-    function allServers() { return [LOCAL_SERVER, ...addedServers]; }
+    function localHost() { return hosts.find((host) => host.id === LOCAL_HOST_ID) || localHostFrom(null); }
+    function hostById(id) { return hosts.find((host) => host.id === id) || null; }
+
+    function allServers() { return hosts; }
     function selectedServers() {
-      const list = allServers();
-      if (serverSelection.mode === 'all') return list;
+      if (serverSelection.mode === 'all') return hosts;
       const selected = new Set(serverSelection.custom);
-      const result = list.filter((server) => selected.has(server.id));
-      return result.length ? result : [LOCAL_SERVER];
+      const result = hosts.filter((host) => selected.has(host.id));
+      return result.length ? result : [localHost()];
     }
-    function saveServerRegistry() { localStorage.setItem(SERVERS_STORAGE_KEY, JSON.stringify(addedServers)); }
     function saveServerSelection() { localStorage.setItem(SERVER_SELECTION_STORAGE_KEY, JSON.stringify(serverSelection)); }
 
-    function serverPath(server, path) {
-      if (!server || server.id === 'local' || !server.baseUrl) return appPath(path);
-      return `${String(server.baseUrl).replace(/\/+$/, '')}/${String(path || '').replace(/^\/+/, '')}`;
+    // Probes run on the refresh tick, so a merge can surface between renders.
+    async function probeAllHosts({ bypassBackoff = false } = {}) {
+      await Promise.all(hosts.map((host) => probeHostRoutes(host, { bypassBackoff })));
+      renderServerSettings();
+      updateServerIndicator();
     }
 
     function combineUsagePayloads(list) {
@@ -4932,7 +5388,7 @@
         servers: 'Servers',
         allServers: 'Use all',
         addAServer: 'Add a server',
-        serverUrl: 'https://host:55423/tokdash',
+        serverUrl: 'host:55423/tokdash',
         serverLabelOptional: 'Name (optional)',
         serversThisHost: 'this host',
         serversReachable: '{ok} / {n} reachable',
@@ -4970,8 +5426,47 @@
         serverTestTesting: 'Checking /health…',
         serverTestOk: 'Reachable — /health OK ({ms} ms)',
         serverTestNetworkError: 'Unreachable — check the URL, CORS, and mixed content.',
+        serverRouteMs: '{ms} ms',
+        serverRouteSamples: '{n} samples, {min}-{med} ms',
+        serverRouteActive: 'Active',
+        serverRoutePinned: 'Pinned',
+        serverRoutePinnedTip: 'Pinned by you. Auto only takes over if this route dies.',
+        serverRouteUnpin: 'Unpin route',
+        serverRouteThisPage: 'This page',
+        serverRouteFasterHolding: 'Faster, holding',
+        serverRouteSlow: 'Slow',
+        serverRouteUnreachable: 'Unreachable',
+        serverRouteBlocked: 'Blocked from this page',
+        serverInlineSave: 'Save',
+        serverInlineCancel: 'Cancel',
+        serverRenameEmpty: 'A host needs a name.',
+        serverRouteBlockedMixed: 'This page is HTTPS, so the browser refuses a plain-HTTP address.',
+        serverRouteBlockedOrigin: 'This page\u2019s address is not one Tokdash admits as a cross-origin reader, so the browser refuses it. Opening the dashboard at http://127.0.0.1:<port> can read everything.',
+        serverRouteWrongDaemon: 'Not this Tokdash',
+        serverRouteWrongDaemonTip: 'A different Tokdash answers here. Remove and re-add the host if its machine was re-imaged.',
+        serverHostAllRoutesWrongDaemon: 'Every address of this host answers as a different Tokdash. If that machine was rebuilt, remove it and add it again.',
+        serverIdentityUnknownNote: 'This Tokdash does not identify itself, so it cannot be checked against the others. Updating it would let it be.',
+        serverIdentityUnavailable: 'This host\u2019s identity is unavailable. Check its daemon log.',
+        serverRouteReasonFastest: 'Fastest usable route',
+        serverRouteReasonPinned: 'Pinned by you',
+        serverRouteReasonHeld: 'Held inside the anti-flap band',
+        serverRouteReasonUnverified: 'No route has answered yet',
+        serverRoute: 'route',
+        serverAddRoute: 'Add route',
+        serverRouteTest: 'Test route',
+        serverRoutePin: 'Pin route',
+        serverRouteEdit: 'Edit address',
+        serverRouteRemove: 'Remove route',
+        serverRename: 'Rename host',
+        serverRouteIsThisPage: 'This is the address this page was opened from.',
+        serverRouteDuplicate: 'Already a route of this host.',
+        serverRouteAlreadyOn: 'Already a route of {name}.',
+        serverRouteJoined: 'Added as another route to {name}.',
+        serverAddedUnverified: 'Saved {name}. It has not answered yet.',
+        serverMergeNotice: 'Merged {b} into {a}. Both routes are kept.',
+        serverMergeNoticeDismiss: 'Dismiss',
         serverTestFingerprintError: 'This address is reachable, but it is not a Tokdash server.',
-        serverInvalidUrl: 'Enter a full http(s) URL, e.g. https://host:55423',
+        serverInvalidUrl: 'Enter a host address, e.g. host:55423 or https://host/tokdash',
         serverAdded: 'Added {name}.',
         serverStatusIdle: 'Not checked',
         serverStatusOk: 'Reachable',
@@ -5435,7 +5930,7 @@
         servers: '服务器',
         allServers: '全部启用',
         addAServer: '添加服务器',
-        serverUrl: 'https://主机:55423/tokdash',
+        serverUrl: '主机:55423/tokdash',
         serverLabelOptional: '名称（可选）',
         serversThisHost: '本机',
         serversReachable: '{ok} / {n} 台在线',
@@ -5473,8 +5968,47 @@
         serverTestTesting: '正在检查 /health…',
         serverTestOk: '/health 可访问（{ms} 毫秒）',
         serverTestNetworkError: '无法访问——请检查地址、CORS 和混合内容。',
+        serverRouteMs: '{ms} 毫秒',
+        serverRouteSamples: '{n} 次采样，{min}-{med} 毫秒',
+        serverRouteActive: '使用中',
+        serverRoutePinned: '已固定',
+        serverRoutePinnedTip: '由您固定。只有该地址失效时才会自动切换。',
+        serverRouteUnpin: '取消固定',
+        serverRouteThisPage: '当前页面',
+        serverRouteFasterHolding: '更快，但未切换',
+        serverRouteSlow: '较慢',
+        serverRouteUnreachable: '无法访问',
+        serverRouteBlocked: '此页面被阻止访问',
+        serverInlineSave: '保存',
+        serverInlineCancel: '取消',
+        serverRenameEmpty: '主机需要名称。',
+        serverRouteBlockedMixed: '当前页面是 HTTPS，浏览器会拒绝纯 HTTP 地址。',
+        serverRouteBlockedOrigin: '当前页面的地址不被 Tokdash 接受为跨源读取方，浏览器会拒绝。改用 http://127.0.0.1:<端口> 打开即可读取所有服务。',
+        serverRouteWrongDaemon: '不是这个 Tokdash',
+        serverRouteWrongDaemonTip: '该地址响应的是另一个 Tokdash。如果这台机器重装过，请删除后重新添加。',
+        serverHostAllRoutesWrongDaemon: '该主机的所有地址都响应为另一个 Tokdash。如果这台机器已重建，请删除后重新添加。',
+        serverIdentityUnknownNote: '这个 Tokdash 不提供标识，因此无法与其他服务核对。更新后即可。',
+        serverIdentityUnavailable: '无法获取该主机的标识，请查看其守护进程日志。',
+        serverRouteReasonFastest: '最快的可用地址',
+        serverRouteReasonPinned: '由您固定',
+        serverRouteReasonHeld: '处于防抖动区间内，暂未切换',
+        serverRouteReasonUnverified: '尚无地址响应',
+        serverRoute: '地址',
+        serverAddRoute: '添加地址',
+        serverRouteTest: '测试地址',
+        serverRoutePin: '固定该地址',
+        serverRouteEdit: '编辑地址',
+        serverRouteRemove: '移除地址',
+        serverRename: '重命名主机',
+        serverRouteIsThisPage: '这就是当前页面所用的地址。',
+        serverRouteDuplicate: '已经是该主机的地址。',
+        serverRouteAlreadyOn: '已经是 {name} 的地址。',
+        serverRouteJoined: '已作为 {name} 的另一个地址添加。',
+        serverAddedUnverified: '已保存 {name}，但尚未连接成功。',
+        serverMergeNotice: '已将 {b} 合并到 {a}，两个地址都保留。',
+        serverMergeNoticeDismiss: '忽略',
         serverTestFingerprintError: '此地址可以访问，但不是 Tokdash 服务器。',
-        serverInvalidUrl: '请输入完整的 http(s) 地址，例如 https://主机:55423',
+        serverInvalidUrl: '请输入主机地址，例如 主机:55423 或 https://主机/tokdash',
         serverAdded: '已添加 {name}。',
         serverStatusIdle: '尚未检查',
         serverStatusOk: '可访问',
@@ -5939,7 +6473,7 @@
         servers: 'サーバー',
         allServers: 'すべて使用',
         addAServer: 'サーバーを追加',
-        serverUrl: 'https://host:55423/tokdash',
+        serverUrl: 'host:55423/tokdash',
         serverLabelOptional: '名前（省略可）',
         serversThisHost: 'このホスト',
         serversReachable: '{ok} / {n} 台接続可能',
@@ -5977,8 +6511,47 @@
         serverTestTesting: '/health を確認中…',
         serverTestOk: '接続可能 — /health OK（{ms} ms）',
         serverTestNetworkError: '接続できません — URL、CORS、混在コンテンツを確認してください。',
+        serverRouteMs: '{ms} ms',
+        serverRouteSamples: '{n} 回計測、{min}-{med} ms',
+        serverRouteActive: '使用中',
+        serverRoutePinned: '固定済み',
+        serverRoutePinnedTip: '手動で固定しています。この経路が応答しなくなると自動に切り替わります。',
+        serverRouteUnpin: '固定を解除',
+        serverRouteThisPage: 'このページ',
+        serverRouteFasterHolding: '速いが据え置き',
+        serverRouteSlow: '遅い',
+        serverRouteUnreachable: '接続できません',
+        serverRouteBlocked: 'このページからは禁止',
+        serverInlineSave: '保存',
+        serverInlineCancel: 'キャンセル',
+        serverRenameEmpty: 'ホストには名前が必要です。',
+        serverRouteBlockedMixed: 'このページは HTTPS のため、ブラウザが plain-HTTP 地址を拒否します。',
+        serverRouteBlockedOrigin: 'このページのアドレスは Tokdash が認める読み取り元ではないため、ブラウザが拒否します。http://127.0.0.1:<port> で開くと全て読み取れます。',
+        serverRouteWrongDaemon: 'この Tokdash ではありません',
+        serverRouteWrongDaemonTip: '別の Tokdash が応答しています。マシンを作り直した場合は削除して再登録してください。',
+        serverHostAllRoutesWrongDaemon: 'このホストのすべてのアドレスが別の Tokdash として応答します。作り直した場合は削除して再登録してください。',
+        serverIdentityUnknownNote: 'この Tokdash は身元を返さないため、他と照合できません。更新すると可能になります。',
+        serverIdentityUnavailable: 'このホストの身元を取得できません。デーモンのログを確認してください。',
+        serverRouteReasonFastest: '最速の利用可能な経路',
+        serverRouteReasonPinned: '手動で固定',
+        serverRouteReasonHeld: 'フリッカー抑制の範囲内のため据え置き',
+        serverRouteReasonUnverified: 'まだ応答した経路がありません',
+        serverRoute: '経路',
+        serverAddRoute: '経路を追加',
+        serverRouteTest: '経路を試す',
+        serverRoutePin: '経路を固定',
+        serverRouteEdit: 'アドレスを編集',
+        serverRouteRemove: '経路を削除',
+        serverRename: 'ホスト名を変更',
+        serverRouteIsThisPage: 'これはこのページを開いたアドレスです。',
+        serverRouteDuplicate: 'このホストの経路に既に含まれています。',
+        serverRouteAlreadyOn: '{name} の経路に既に含まれています。',
+        serverRouteJoined: '{name} の追加経路として登録しました。',
+        serverAddedUnverified: '{name} を保存しました。まだ応答していません。',
+        serverMergeNotice: '{b} を {a} に統合しました。両方の経路を残しています。',
+        serverMergeNoticeDismiss: '閉じる',
         serverTestFingerprintError: 'このアドレスには接続できますが、Tokdash サーバーではありません。',
-        serverInvalidUrl: '完全な http(s) URL を入力してください。例: https://host:55423',
+        serverInvalidUrl: 'ホストのアドレスを入力してください。例: host:55423 または https://host/tokdash',
         serverAdded: '{name} を追加しました。',
         serverStatusIdle: '未確認',
         serverStatusOk: '接続可能',
@@ -6443,7 +7016,7 @@
         servers: '서버',
         allServers: '모두 사용',
         addAServer: '서버 추가',
-        serverUrl: 'https://host:55423/tokdash',
+        serverUrl: 'host:55423/tokdash',
         serverLabelOptional: '이름 (선택)',
         serversThisHost: '이 호스트',
         serversReachable: '{ok} / {n} 접속 가능',
@@ -6481,8 +7054,47 @@
         serverTestTesting: '/health 확인 중…',
         serverTestOk: '접속 가능 — /health OK ({ms} ms)',
         serverTestNetworkError: '접속할 수 없음 — URL, CORS, 혼합 콘텐츠를 확인하세요.',
+        serverRouteMs: '{ms}ms',
+        serverRouteSamples: '{n}회 측정, {min}-{med}ms',
+        serverRouteActive: '사용 중',
+        serverRoutePinned: '고정됨',
+        serverRoutePinnedTip: '직접 고정했습니다. 이 경로가 응답하지 않을 때만 자동으로 전환됩니다.',
+        serverRouteUnpin: '고정 해제',
+        serverRouteThisPage: '이 페이지',
+        serverRouteFasterHolding: '빠르지만 유지됨',
+        serverRouteSlow: '느림',
+        serverRouteUnreachable: '접속할 수 없음',
+        serverRouteBlocked: '이 페이지에서 차단됨',
+        serverInlineSave: '저장',
+        serverInlineCancel: '취소',
+        serverRenameEmpty: '호스트 이름이 필요합니다.',
+        serverRouteBlockedMixed: '이 페이지는 HTTPS이므로 브라우저가 plain-HTTP 주소를 거부합니다.',
+        serverRouteBlockedOrigin: '이 페이지의 주소는 Tokdash이 허용하는 교차 출처 읽기 측이 아니라 브라우저가 거부합니다. http://127.0.0.1:<port>에서 열면 모두 읽을 수 있습니다.',
+        serverRouteWrongDaemon: '이 Tokdash이 아님',
+        serverRouteWrongDaemonTip: '다른 Tokdash이 응답합니다. 해당 기기를 다시 설치했다면 삭제 후 다시 추가하세요.',
+        serverHostAllRoutesWrongDaemon: '이 호스트의 모든 주소가 다른 Tokdash으로 응답합니다. 기기를 다시 만들었다면 삭제 후 다시 추가하세요.',
+        serverIdentityUnknownNote: '이 Tokdash은 식별자를 반환하지 않아 다른 서비스와 대조할 수 없습니다. 업데이트하면 사용할 수 있습니다.',
+        serverIdentityUnavailable: '이 호스트의 식별자를 확인할 수 없습니다. 데몬 로그를 확인하세요.',
+        serverRouteReasonFastest: '가장 빠른 사용 가능한 경로',
+        serverRouteReasonPinned: '직접 고정함',
+        serverRouteReasonHeld: '플래핑 방지 범위 안이라 유지됨',
+        serverRouteReasonUnverified: '아직 응답한 경로가 없음',
+        serverRoute: '경로',
+        serverAddRoute: '경로 추가',
+        serverRouteTest: '경로 테스트',
+        serverRoutePin: '경로 고정',
+        serverRouteEdit: '주소 편집',
+        serverRouteRemove: '경로 제거',
+        serverRename: '호스트 이름 변경',
+        serverRouteIsThisPage: '이 페이지를 연 주소입니다.',
+        serverRouteDuplicate: '이미 이 호스트의 경로입니다.',
+        serverRouteAlreadyOn: '이미 {name}의 경로입니다.',
+        serverRouteJoined: '{name}의 추가 경로로 등록했습니다.',
+        serverAddedUnverified: '{name}을(를) 저장했습니다. 아직 응답하지 않았습니다.',
+        serverMergeNotice: '{b}을(를) {a}에 병합했습니다. 두 경로를 모두 유지합니다.',
+        serverMergeNoticeDismiss: '닫기',
         serverTestFingerprintError: '이 주소에는 접속할 수 있지만 Tokdash 서버가 아닙니다.',
-        serverInvalidUrl: '완전한 http(s) URL을 입력하세요. 예: https://host:55423',
+        serverInvalidUrl: '호스트 주소를 입력하세요. 예: host:55423 또는 https://host/tokdash',
         serverAdded: '{name} 추가됨.',
         serverStatusIdle: '미확인',
         serverStatusOk: '접속 가능',
@@ -6947,7 +7559,7 @@
         servers: 'Servidores',
         allServers: 'Usar todos',
         addAServer: 'Añadir un servidor',
-        serverUrl: 'https://host:55423/tokdash',
+        serverUrl: 'host:55423/tokdash',
         serverLabelOptional: 'Nombre (opcional)',
         serversThisHost: 'este host',
         serversReachable: '{ok} / {n} accesibles',
@@ -6985,8 +7597,47 @@
         serverTestTesting: 'Comprobando /health…',
         serverTestOk: 'Accesible — /health OK ({ms} ms)',
         serverTestNetworkError: 'Inaccesible — revisa la URL, CORS y el contenido mixto.',
+        serverRouteMs: '{ms} ms',
+        serverRouteSamples: '{n} muestras, {min}-{med} ms',
+        serverRouteActive: 'En uso',
+        serverRoutePinned: 'Fijada',
+        serverRoutePinnedTip: 'La fijaste tu. Auto solo toma el relevo si esta ruta deja de responder.',
+        serverRouteUnpin: 'Desfijar ruta',
+        serverRouteThisPage: 'Esta página',
+        serverRouteFasterHolding: 'Más rápida, sin cambio',
+        serverRouteSlow: 'Lenta',
+        serverRouteUnreachable: 'Inaccesible',
+        serverRouteBlocked: 'Bloqueada desde esta página',
+        serverInlineSave: 'Guardar',
+        serverInlineCancel: 'Cancelar',
+        serverRenameEmpty: 'El host necesita un nombre.',
+        serverRouteBlockedMixed: 'Esta página es HTTPS, así que el navegador rechaza una dirección http pura.',
+        serverRouteBlockedOrigin: 'La dirección de esta página no es una de las que Tokdash admite como lector entre orígenes, así que el navegador la rechaza. Abre el panel en http://127.0.0.1:<puerto> y podrá leer todo.',
+        serverRouteWrongDaemon: 'No es este Tokdash',
+        serverRouteWrongDaemonTip: 'Responde otro Tokdash. Si reinstalaste esa máquina, quítala y vuelve a añadirla.',
+        serverHostAllRoutesWrongDaemon: 'Todas las direcciones de este host responden como otro Tokdash. Si reconstruiste la máquina, quítalo y vuelve a añadirlo.',
+        serverIdentityUnknownNote: 'Este Tokdash no se identifica, así que no se puede contrastar con los demás. Actualizarlo lo permitiría.',
+        serverIdentityUnavailable: 'No se dispone de la identidad de este host. Revisa el registro del daemon.',
+        serverRouteReasonFastest: 'La ruta utilizable más rápida',
+        serverRouteReasonPinned: 'La fijaste tu',
+        serverRouteReasonHeld: 'Dentro de la banda antirrebote; no cambia',
+        serverRouteReasonUnverified: 'Ninguna ruta ha respondido todavía',
+        serverRoute: 'ruta',
+        serverAddRoute: 'Añadir ruta',
+        serverRouteTest: 'Probar ruta',
+        serverRoutePin: 'Fijar ruta',
+        serverRouteEdit: 'Editar dirección',
+        serverRouteRemove: 'Quitar ruta',
+        serverRename: 'Renombrar host',
+        serverRouteIsThisPage: 'Esta es la dirección desde la que abriste la página.',
+        serverRouteDuplicate: 'Ya es una ruta de este host.',
+        serverRouteAlreadyOn: 'Ya es una ruta de {name}.',
+        serverRouteJoined: 'Añadida como otra ruta de {name}.',
+        serverAddedUnverified: 'Guardado {name}. Aún no ha respondido.',
+        serverMergeNotice: '{b} se combinó con {a}. Se conservan ambas rutas.',
+        serverMergeNoticeDismiss: 'Descartar',
         serverTestFingerprintError: 'Esta dirección es accesible, pero no es un servidor de Tokdash.',
-        serverInvalidUrl: 'Introduce una URL http(s) completa, p. ej. https://host:55423',
+        serverInvalidUrl: 'Introduce una dirección, p. ej. host:55423 o https://host/tokdash',
         serverAdded: 'Se añadió {name}.',
         serverStatusIdle: 'Sin comprobar',
         serverStatusOk: 'Accesible',
@@ -7451,7 +8102,7 @@
         servers: 'Servidores',
         allServers: 'Usar todos',
         addAServer: 'Adicionar um servidor',
-        serverUrl: 'https://host:55423/tokdash',
+        serverUrl: 'host:55423/tokdash',
         serverLabelOptional: 'Nome (opcional)',
         serversThisHost: 'este host',
         serversReachable: '{ok} / {n} acessíveis',
@@ -7489,8 +8140,47 @@
         serverTestTesting: 'Verificando /health…',
         serverTestOk: 'Acessível — /health OK ({ms} ms)',
         serverTestNetworkError: 'Inacessível — confira a URL, CORS e conteúdo misto.',
+        serverRouteMs: '{ms} ms',
+        serverRouteSamples: '{n} amostras, {min}-{med} ms',
+        serverRouteActive: 'Em uso',
+        serverRoutePinned: 'Fixada',
+        serverRoutePinnedTip: 'Você fixou. O automático só assume se esta rota parar de responder.',
+        serverRouteUnpin: 'Desafixar rota',
+        serverRouteThisPage: 'Esta página',
+        serverRouteFasterHolding: 'Mais rápida, sem troca',
+        serverRouteSlow: 'Lenta',
+        serverRouteUnreachable: 'Inacessível',
+        serverRouteBlocked: 'Bloqueada desta página',
+        serverInlineSave: 'Salvar',
+        serverInlineCancel: 'Cancelar',
+        serverRenameEmpty: 'O host precisa de um nome.',
+        serverRouteBlockedMixed: 'Esta página é HTTPS, então o navegador recusa um endereço http puro.',
+        serverRouteBlockedOrigin: 'O endereço desta página não é um dos que o Tokdash admite como leitor entre origens, então o navegador recusa. Abra o painel em http://127.0.0.1:<porta> para ler tudo.',
+        serverRouteWrongDaemon: 'Não é este Tokdash',
+        serverRouteWrongDaemonTip: 'Outro Tokdash responde aqui. Se a máquina foi reinstalada, remova e adicione de novo.',
+        serverHostAllRoutesWrongDaemon: 'Todos os endereços deste host respondem como outro Tokdash. Se a máquina foi reconstruída, remova e adicione de novo.',
+        serverIdentityUnknownNote: 'Este Tokdash não se identifica, então não dá para compará-lo com os outros. Atualizá-lo resolveria.',
+        serverIdentityUnavailable: 'A identidade deste host não está disponível. Veja o log do daemon.',
+        serverRouteReasonFastest: 'Rota utilizável mais rápida',
+        serverRouteReasonPinned: 'Fixada por você',
+        serverRouteReasonHeld: 'Dentro da faixa antipiscada; sem troca',
+        serverRouteReasonUnverified: 'Nenhuma rota respondeu ainda',
+        serverRoute: 'rota',
+        serverAddRoute: 'Adicionar rota',
+        serverRouteTest: 'Testar rota',
+        serverRoutePin: 'Fixar rota',
+        serverRouteEdit: 'Editar endereço',
+        serverRouteRemove: 'Remover rota',
+        serverRename: 'Renomear host',
+        serverRouteIsThisPage: 'Este é o endereço de onde você abriu a página.',
+        serverRouteDuplicate: 'Já é uma rota deste host.',
+        serverRouteAlreadyOn: 'Já é uma rota de {name}.',
+        serverRouteJoined: 'Adicionada como outra rota de {name}.',
+        serverAddedUnverified: '{name} salvo. Ainda não respondeu.',
+        serverMergeNotice: '{b} foi mesclado em {a}. As duas rotas foram mantidas.',
+        serverMergeNoticeDismiss: 'Dispensar',
         serverTestFingerprintError: 'Este endereço é acessível, mas não é um servidor Tokdash.',
-        serverInvalidUrl: 'Insira uma URL http(s) completa, ex.: https://host:55423',
+        serverInvalidUrl: 'Insira um endereço, ex.: host:55423 ou https://host/tokdash',
         serverAdded: 'Adicionado {name}.',
         serverStatusIdle: 'Não verificado',
         serverStatusOk: 'Acessível',
@@ -8772,7 +9462,9 @@
       let lastError = null;
       for (let attempt = 0; attempt < attempts; attempt += 1) {
         try {
-          return server ? await fetchJson(server, url, options) : await fetchJson(url, options);
+          // Reads only: failover re-drives the same GET on the next route. Writes stay on
+          // the active route, because a retry after a dropped response could apply twice.
+          return server ? await fetchFromHost(server, url, options) : await fetchJson(url, options);
         } catch (error) {
           lastError = error;
           if (error?.status !== 503 || attempt === attempts - 1) throw error;
@@ -8784,7 +9476,7 @@
     }
 
     async function postJsonWithCsrf(serverOrUrl, urlOrBody = {}, maybeBody = {}) {
-      const server = typeof serverOrUrl === 'object' && serverOrUrl?.id ? serverOrUrl : LOCAL_SERVER;
+      const server = typeof serverOrUrl === 'object' && serverOrUrl?.id ? serverOrUrl : localHost();
       const url = server === serverOrUrl ? urlOrBody : serverOrUrl;
       const body = server === serverOrUrl ? maybeBody : urlOrBody;
       for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -8842,7 +9534,10 @@
       const chip = document.getElementById('serverCountChip');
       if (!chip) return;
       const selected = selectedServers();
-      const failed = selected.filter((server) => serverRuntimeStatus.get(server.id)?.ok === false);
+      // A host with no usable route is the failure the user cares about, which is not the
+      // same statement as "the last request failed": one dead route with a live sibling is
+      // fine, and the chip should say nothing about it.
+      const failed = selected.filter((server) => hostLooksDown(server) || serverRuntimeStatus.get(server.id)?.ok === false);
       chip.style.display = selected.length > 1 || failed.length ? '' : 'none';
       chip.style.color = failed.length ? '#DC2626' : 'var(--color-muted)';
       chip.textContent = failed.length
@@ -8850,69 +9545,775 @@
         : t('serverCount').replace('{n}', String(selected.length));
     }
 
-    async function probeServer(baseUrl) {
-      const candidate = { id: 'candidate', baseUrl: normalizeServerBaseUrl(baseUrl) };
-      if (!candidate.baseUrl) throw Object.assign(new Error(t('serverTestNetworkError')), { kind: 'network' });
-      let health;
-      try { health = await fetchJson(candidate, '/health', { cache: 'no-store' }); }
-      catch (error) { throw Object.assign(error, { kind: 'network' }); }
-      if (health?.service !== 'tokdash') throw Object.assign(new Error(t('serverTestFingerprintError')), { kind: 'fingerprint' });
-      return health;
+    // ---- Routes: probing, identity verification, ranking, failover ----------------
+    // Failures the route itself caused. A 503 carrying a Tokdash detail is backpressure and
+    // already retried with jitter by fetchJsonWithRetry, so counting it here would turn a
+    // cold parse into a route outage; a bare 502/503/504 is a proxy complaining.
+    function tokdashShaped(payload) {
+      return !!payload && (payload.service === 'tokdash' || typeof payload.detail === 'string');
     }
 
+    function routeLevelError(error) {
+      if (!error) return false;
+      if (error instanceof TypeError) return true;      // CORS refusal and dead socket land here alike
+      if (error?.name === 'AbortError' || error?.kind === 'timeout') return true;
+      const status = Number(error?.status);
+      if (status === 502 || status === 503 || status === 504) return !tokdashShaped(error?.payload);
+      return false;
+    }
+
+    function newRouteRuntime() {
+      return { state: 'idle', samples: [], failures: 0, attempted: 0, reportedInstanceId: '', version: '',
+        error: null, blockedRule: '', checkedAt: 0, nextTryAt: 0, backoffMs: 0 };
+    }
+
+    function routeBackoffReady(routeId, now = Date.now()) {
+      const state = routeRuntime[routeId];
+      return !state || !state.nextTryAt || now >= state.nextTryAt;
+    }
+
+    function markRouteBlocked(routeId, url, error) {
+      const prev = routeRuntime[routeId] || newRouteRuntime();
+      const backoffMs = Math.min((prev.backoffMs || 0) * 2 || 1000, ROUTE_PROBE_BACKOFF_CAP_MS);
+      setRouteState(routeId, { ...prev, state: 'blocked', samples: [], failures: (prev.failures || 0) + 1,
+        attempted: (prev.attempted || 0) + 1, error: error?.message || String(error || ''),
+        blockedRule: predictBlocked(PAGE_ROUTE_URL, url), checkedAt: Date.now(), backoffMs,
+        nextTryAt: Date.now() + backoffMs });
+    }
+
+    function markRouteFailure(routeId, url, error) {
+      const prev = routeRuntime[routeId] || newRouteRuntime();
+      const backoffMs = Math.min((prev.backoffMs || 0) * 2 || 1000, ROUTE_PROBE_BACKOFF_CAP_MS);
+      // A timeout has nothing useful to say beyond the label: the browser's own abort text
+      // ("signal is aborted without reason") would only confuse.
+      const detail = error?.name === 'AbortError' ? '' : (error?.message || String(error || ''));
+      setRouteState(routeId, { ...prev, state: 'fail', samples: [], failures: (prev.failures || 0) + 1,
+        attempted: (prev.attempted || 0) + 1, error: detail,
+        blockedRule: predictBlocked(PAGE_ROUTE_URL, url), checkedAt: Date.now(), backoffMs,
+        nextTryAt: Date.now() + backoffMs });
+    }
+
+    // Second and third samples of a round. A null return ends the round, which is what keeps
+    // a dead route off the three-samples-at-3.5-seconds floor.
+    async function probeOnce(route) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), ROUTE_PROBE_TIMEOUT_MS);
+      const startedAt = performance.now();
+      try {
+        const response = await fetch(routePath(route, '/health'), { cache: 'no-store', signal: controller.signal });
+        try { await response.json(); } catch (_error) { /* only reachability matters here */ }
+        if (!response.ok) return null;
+        return Math.max(1, Math.round(performance.now() - startedAt));
+      } catch (_error) {
+        return null;
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    // One route, one verdict. Samples only accumulate on success.
+    async function probeRoute(route, { bypassBackoff = false, samples = ROUTE_PROBE_SAMPLES } = {}) {
+      if (!route?.url) return { ok: false, kind: 'invalid' };
+      if (!bypassBackoff && !routeBackoffReady(route.id)) {
+        return { ok: false, kind: 'backoff', state: routeRuntime[route.id] || null };
+      }
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), ROUTE_PROBE_TIMEOUT_MS);
+      const startedAt = performance.now();
+      const prior = routeRuntime[route.id] || newRouteRuntime();
+      let first = null;
+      try {
+        const response = await fetch(routePath(route, '/health'), { cache: 'no-store', signal: controller.signal });
+        const elapsed = Math.max(1, Math.round(performance.now() - startedAt));
+        let payload = null;
+        try { payload = await response.json(); } catch (_error) { payload = null; }
+        if (!response.ok) {
+          const error = new Error(payload?.detail || `HTTP ${response.status}`);
+          error.status = response.status;
+          error.payload = payload;
+          throw error;
+        }
+        if (payload?.service !== 'tokdash') {
+          setRouteState(route.id, { ...prior, state: 'fingerprint', samples: [], attempted: (prior.attempted || 0) + 1,
+            error: t('serverTestFingerprintError'), blockedRule: '', checkedAt: Date.now(), backoffMs: 0, nextTryAt: 0 });
+          return { ok: false, kind: 'fingerprint' };
+        }
+        first = { ms: elapsed, instanceId: String(payload?.instance_id || ''), version: String(payload?.version || '') };
+        const timings = [elapsed];
+        for (let attempt = 1; attempt < samples; attempt += 1) {
+          const extra = await probeOnce(route);
+          if (extra !== null) { timings.push(extra); continue; }
+          // Stopping the round is half the rule; the other half is that stopping means
+          // failure. A route that answered once and then went quiet is down, and keeping it
+          // 'ok' on the earlier sample is how a dying address keeps the traffic.
+          markRouteFailure(route.id, route.url, new Error(t('serverRouteUnreachable')));
+          return { ok: false, kind: 'fail' };
+        }
+        setRouteState(route.id, { ...prior, state: 'ok', samples: timings, failures: 0,
+          attempted: (prior.attempted || 0) + 1, reportedInstanceId: first.instanceId, version: first.version,
+          error: null, blockedRule: '', checkedAt: Date.now(), backoffMs: 0, nextTryAt: 0 });
+        return { ok: true, ms: routeMedianMs({ samples: timings }), instanceId: first.instanceId, version: first.version };
+      } catch (error) {
+        if (routeLevelError(error) && predictBlocked(PAGE_ROUTE_URL, route.url)) {
+          markRouteBlocked(route.id, route.url, error);
+          return { ok: false, kind: 'blocked', blockedRule: predictBlocked(PAGE_ROUTE_URL, route.url) };
+        }
+        markRouteFailure(route.id, route.url, error);
+        return { ok: false, kind: 'fail' };
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    // §5.1: a probe verifies a host's identity and never assigns one. `local` is the exempt
+    // host because its identity is definitional (whatever daemon served this page), and a
+    // host with no id takes one only when it was created with a single route.
+    function applyProbeIdentity(host, route, probe) {
+      if (!probe?.ok) return;
+      const reported = String(probe.instanceId || '');
+      if (host.id === LOCAL_HOST_ID) {
+        // Only the address this page was served from proves which machine Local is. An added
+        // route is judged against that and never allowed to write it: a stale forward left in
+        // the list would otherwise rename the page's own host and pull it into another
+        // machine's row on the next merge.
+        if (route.kind === 'origin') {
+          if (reported) host.instanceId = reported;
+          return;
+        }
+        if (host.instanceId && reported && reported !== host.instanceId) {
+          setRouteState(route.id, { ...(routeRuntime[route.id] || newRouteRuntime()), state: 'not-this-daemon' });
+        }
+        return;
+      }
+      if (host.instanceId) {
+        if (reported && reported !== host.instanceId) {
+          setRouteState(route.id, { ...(routeRuntime[route.id] || newRouteRuntime()), state: 'not-this-daemon' });
+        }
+        return;
+      }
+      if (reported && hostRoutes(host).length === 1) host.instanceId = reported;
+    }
+
+    function refreshRanking(host) {
+      const ranking = rankRoutes({
+        routes: hostRoutes(host), runtime: routeRuntime, choice: host.choice || 'auto',
+        hostInstanceId: host.instanceId || '', incumbentRouteId: hostActiveRouteId.get(host.id) || '',
+      });
+      if (ranking.activeRouteId) hostActiveRouteId.set(host.id, ranking.activeRouteId);
+      return ranking;
+    }
+
+    // Merges compare ids stored on hosts, never what a route happens to answer with (§6.2),
+    // so this runs only after a probe has been allowed to write one.
+    function mergeStoredHostsByIdentity() {
+      // The merge works on plain bags because that is what a Node harness can hand it; the
+      // two Maps are rebuilt from those bags afterwards, or the carried-over state would
+      // land in a copy that nothing reads.
+      const runtimeBag = Object.fromEntries(serverRuntimeStatus);
+      const csrfBag = Object.fromEntries(csrfTokensByServer);
+      const result = mergeHostsByIdentity(hosts, {
+        serverRuntimeStatus: runtimeBag,
+        csrfTokensByServer: csrfBag,
+        quotaVisibilityByHost: loadQuotaVisibilityByHost(),
+      });
+      if (result.hosts.length === hosts.length) return [];
+      hosts = result.hosts;
+      serverRuntimeStatus.clear();
+      Object.entries(runtimeBag).forEach(([id, value]) => serverRuntimeStatus.set(id, value));
+      csrfTokensByServer.clear();
+      Object.entries(csrfBag).forEach(([id, value]) => csrfTokensByServer.set(id, value));
+      persistQuotaVisibility();
+      result.lostHostIds.forEach((id) => {
+        serverRuntimeStatus.delete(id);
+        csrfTokensByServer.delete(id);
+        hostActiveRouteId.delete(id);
+        if (serverSelection.mode === 'custom') {
+          serverSelection.custom = serverSelection.custom.filter((selected) => selected !== id);
+        }
+      });
+      if (serverSelection.mode === 'custom' && !serverSelection.custom.length) {
+        serverSelection = { mode: 'all', custom: [] };
+      }
+      saveServerSelection();
+      recordMergeNotices(result.notices);
+      return result.notices;
+    }
+
+    // One notice per pair per session; the Servers tab shows it until dismissed.
+    const shownMergeNotices = new Set();
+    const pendingMergeNotices = [];
+
+    function recordMergeNotices(notices) {
+      (notices || []).forEach((notice) => {
+        const key = `${notice.survivorId}<-${notice.loserId}`;
+        if (shownMergeNotices.has(key)) return;
+        shownMergeNotices.add(key);
+        pendingMergeNotices.push(notice);
+      });
+    }
+
+    function clearMergeNotices() { pendingMergeNotices.length = 0; }
+
+    async function probeHostRoutes(host, { bypassBackoff = false } = {}) {
+      const routes = hostRoutes(host);
+      if (!routes.length) return;
+      const settled = await Promise.allSettled(routes.map((route) => probeRoute(route, { bypassBackoff })));
+      settled.forEach((result, index) => {
+        if (result.status === 'fulfilled') applyProbeIdentity(host, routes[index], result.value);
+      });
+      if (mergeStoredHostsByIdentity().length) saveServerRegistry();
+      refreshRanking(host);
+    }
+
+    // The route a request should take, with the incumbent recorded so the anti-flap band has
+    // something to compare the next challenger against.
+    function pickRoute(host, excludeRouteIds = []) {
+      const excluded = new Set(excludeRouteIds);
+      const routes = hostRoutes(host).filter((route) => !excluded.has(route.id));
+      if (!routes.length) return null;
+      const ranking = rankRoutes({
+        routes, runtime: routeRuntime, choice: host.choice || 'auto',
+        hostInstanceId: host.instanceId || '', incumbentRouteId: hostActiveRouteId.get(host.id) || '',
+      });
+      if (!ranking.activeRouteId) return null;
+      const route = routes.find((item) => item.id === ranking.activeRouteId) || null;
+      if (route) hostActiveRouteId.set(host.id, route.id);
+      return route;
+    }
+
+    // Failover lives here rather than in the callers: a route-level failure demotes that
+    // route and retries the SAME action once on the next candidate, so the host never drops
+    // out of a combined view because one address died mid-request.
+    async function fetchFromHost(host, path, options = {}) {
+      const route = pickRoute(host);
+      if (!route) {
+        if (hostRoutes(host).length) {
+          // Addresses exist but none may be used -- every one is caught answering as another
+          // machine. Reading anyway would go through the page's own path and attribute some
+          // other daemon's figures to this host, so the host fails for this refresh instead.
+          throw Object.assign(new Error(t('serverRouteUnreachable')), { kind: 'network' });
+        }
+        return await fetchJson(host, path, options);
+      }
+      try {
+        return await fetchJson(viaRoute(host, route), path, options);
+      } catch (error) {
+        if (!routeLevelError(error)) throw error;
+        markRouteFailure(route.id, route.url, error);
+        const next = pickRoute(host, [route.id]);
+        if (!next) throw error;
+        try {
+          return await fetchJson(viaRoute(host, next), path, options);
+        } catch (nextError) {
+          // Both addresses are down. Leaving the second one `ok` would have every later read
+          // pick it again, with no backoff and no clue for the user, because nothing ever
+          // recorded that it failed too.
+          if (routeLevelError(nextError)) markRouteFailure(next.id, next.url, nextError);
+          throw nextError;
+        }
+      }
+    }
+
+    async function probeServer(baseUrl) {
+      const url = normalizeRouteUrl(baseUrl);
+      if (!url) throw Object.assign(new Error(t('serverTestNetworkError')), { kind: 'network' });
+      const candidate = { id: `probe-${url}`, url, kind: 'probe' };
+      const probe = await probeRoute(candidate, { bypassBackoff: true, samples: 1 });
+      delete routeRuntime[candidate.id];   // a Test click is not a stored route
+      if (probe.kind === 'blocked') throw Object.assign(new Error(t('serverRouteBlocked')), { kind: 'blocked', blockedRule: probe.blockedRule });
+      if (probe.kind === 'fingerprint') throw Object.assign(new Error(t('serverTestFingerprintError')), { kind: 'fingerprint' });
+      if (!probe.ok) throw Object.assign(new Error(t('serverTestNetworkError')), { kind: 'network' });
+      return { instance_id: probe.instanceId, version: probe.version };
+    }
+
+    let inlineEditorDraft = '';
+    let inlineEditorError = '';
+    // Which row the open editor belongs to, so a rename does not open on every host.
+    let editingHostId = '';
+    let editingRouteId = '';
+
+    // Host header is one line, name only; everything the network knows belongs to the route
+    // rows below it. With a single host and one route this renders exactly as it did before,
+    // which is acceptance 10: single-host users see no route rows, no latency, no chips.
     function renderServerSettings() {
       const list = document.getElementById('serverSettingsList');
       if (!list) return;
       const selectedIds = new Set(selectedServers().map((server) => server.id));
       const allToggle = document.getElementById('allServersToggle');
       if (allToggle) allToggle.checked = serverSelection.mode === 'all';
-      list.replaceChildren(...allServers().map((server) => {
-        const row = document.createElement('div');
-        row.className = 'server-setting-row';
-        const status = document.createElement('span');
-        const state = serverRuntimeStatus.get(server.id);
-        status.className = 'server-health-dot';
-        status.dataset.state = state ? (state.ok ? 'ok' : 'error') : 'idle';
-        const statusTitle = state ? t(state.ok ? 'serverStatusOk' : 'serverStatusError') : t('serverStatusIdle');
-        const statusDetail = (state && !state.ok && typeof state.error?.message === 'string') ? state.error.message.trim() : '';
-        status.title = statusDetail ? `${statusTitle}: ${statusDetail}` : statusTitle;
-        status.setAttribute('aria-label', status.title);
-        const checkbox = document.createElement('input');
-        checkbox.type = 'checkbox'; checkbox.className = 'server-select'; checkbox.checked = selectedIds.has(server.id);
-        checkbox.setAttribute('aria-label', `${t('servers')}: ${server.label}`);
-        checkbox.addEventListener('change', () => {
-          const ids = new Set(selectedServers().map((item) => item.id));
-          checkbox.checked ? ids.add(server.id) : ids.delete(server.id);
-          if (!ids.size) { checkbox.checked = true; return; }
-          serverSelection = { mode: 'custom', custom: [...ids] };
-          saveServerSelection(); renderServerSettings(); refreshCurrentView();
-        });
-        const text = document.createElement('span'); text.className = 'server-row-copy';
-        const name = document.createElement('span'); name.className = 'server-row-name'; name.textContent = server.label;
-        const separator = document.createElement('span'); separator.className = 'server-row-separator'; separator.textContent = '·';
-        const hostText = document.createElement('span'); hostText.className = 'server-row-host';
-        const host = server.id === 'local' ? location.host : (() => { try { return new URL(server.baseUrl).host; } catch (_) { return server.baseUrl; } })();
-        hostText.textContent = host; hostText.title = host;
-        text.append(name, separator, hostText);
-        row.append(status, text, checkbox);
-        if (server.id !== 'local') {
-          const remove = document.createElement('button');
-          remove.type = 'button'; remove.className = 'server-remove';
-          remove.title = `${t('serverRemove')} ${server.label}`;
-          remove.setAttribute('aria-label', remove.title);
-          remove.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
-          remove.addEventListener('click', () => {
-            addedServers = addedServers.filter((item) => item.id !== server.id);
-            serverRuntimeStatus.delete(server.id); saveServerRegistry();
-            if (serverSelection.mode === 'custom') { serverSelection.custom = serverSelection.custom.filter((id) => id !== server.id); if (!serverSelection.custom.length) serverSelection.custom = ['local']; saveServerSelection(); }
-            renderServerSettings(); refreshCurrentView();
-          });
-          row.appendChild(remove);
-        } else { const placeholder = document.createElement('span'); placeholder.className = 'server-remove-placeholder'; placeholder.setAttribute('aria-hidden', 'true'); row.appendChild(placeholder); }
-        return row;
-      }));
+      const multiHost = hosts.length > 1;
+      list.replaceChildren(...hosts.map((host) => renderHostBlock(host, selectedIds, multiHost)));
       updateServersTabVisibility();
       updateServerIndicator();
+    }
+
+    function renderHostBlock(host, selectedIds, multiHost) {
+      const block = document.createElement('div');
+      block.className = 'server-host-block';
+      const row = document.createElement('div');
+      row.className = 'server-setting-row';
+      const status = document.createElement('span');
+      const state = serverRuntimeStatus.get(host.id);
+      const alive = !hostLooksDown(host);
+      status.className = 'server-health-dot';
+      status.dataset.state = state ? (alive && state.ok ? 'ok' : 'error') : (alive ? 'idle' : 'error');
+      const statusTitle = state ? t(state.ok ? 'serverStatusOk' : 'serverStatusError') : t('serverStatusIdle');
+      const statusDetail = routeFailureSummary(host);
+      status.title = statusDetail ? `${statusTitle}: ${statusDetail}` : statusTitle;
+      status.setAttribute('aria-label', status.title);
+
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox'; checkbox.className = 'server-select'; checkbox.checked = selectedIds.has(host.id);
+      checkbox.setAttribute('aria-label', `${t('servers')}: ${host.label}`);
+      checkbox.addEventListener('change', () => {
+        const ids = new Set(selectedServers().map((item) => item.id));
+        checkbox.checked ? ids.add(host.id) : ids.delete(host.id);
+        if (!ids.size) { checkbox.checked = true; return; }
+        serverSelection = { mode: 'custom', custom: [...ids] };
+        saveServerSelection(); renderServerSettings(); refreshCurrentView();
+      });
+
+      const text = document.createElement('span'); text.className = 'server-row-copy';
+      const name = document.createElement('button'); name.type = 'button'; name.className = 'server-row-name server-editable'; name.textContent = host.label;
+      name.title = t('serverRename'); name.setAttribute('aria-label', `${t('serverRename')}: ${host.label}`);
+      name.addEventListener('click', () => renameHost(host));
+      text.append(name);
+      if (!multiHost) {
+        const separator = document.createElement('span'); separator.className = 'server-row-separator'; separator.textContent = '·';
+        const hostText = document.createElement('span'); hostText.className = 'server-row-host';
+        const label = serverHostLabel(host);
+        hostText.textContent = label; hostText.title = label;
+        text.append(separator, hostText);
+      }
+      row.append(status, text);
+
+      const actions = document.createElement('span'); actions.className = 'server-host-actions';
+      actions.appendChild(renderAddRouteButton(host));
+      actions.appendChild(checkbox);
+      row.append(actions);
+      block.appendChild(row);
+
+      const showRoutes = multiHost || hostRoutes(host).length > 1;
+      const routeList = document.createElement('div'); routeList.className = 'server-route-list';
+      if (showRoutes) hostRoutes(host).forEach((route) => {
+        if (inlineEditor && inlineEditor.key === 'serverRouteEdit' && editingRouteId === route.id) {
+          routeList.appendChild(buildInlineEditor());
+          return;
+        }
+        routeList.appendChild(renderRouteRow(host, route));
+      });
+      if (showRoutes) block.appendChild(routeList);
+      const note = hostIdentityNote(host);
+      if (note) {
+        const noteEl = document.createElement('div');
+        noteEl.className = 'server-route-note';
+        noteEl.dataset.tone = 'warn';
+        noteEl.textContent = note;
+        block.appendChild(noteEl);
+      }
+      if (inlineEditor && inlineEditor.key === 'serverAddRoute' && editingHostId === host.id) {
+        block.appendChild(buildInlineEditor());
+      }
+      if (inlineEditor && inlineEditor.key === 'serverRename' && editingHostId === host.id) {
+        block.insertBefore(buildInlineEditor(), block.children[1] || null);
+      }
+      return block;
+    }
+
+    // "No usable route" is only a statement once something has been tried. Before the first
+    // probe answers, a host with routes is unknown, not down, and must not paint itself red.
+    function hostLooksDown(host) {
+      const routes = hostRoutes(host);
+      if (!routes.length) return host.id !== LOCAL_HOST_ID;
+      if (!routes.some((route) => (routeRuntime[route.id]?.attempted || 0) > 0)) return false;
+      return !hostHasUsableRoute(host);
+    }
+
+    function routeFailureSummary(host) {
+      const parts = hostRoutes(host)
+        .map((route) => ({ route, state: routeRuntime[route.id] }))
+        .filter((item) => item.state && item.state.state !== 'ok')
+        .map((item) => `${routeShortUrl(item.route)}: ${t(routeStateKey(item.state.state))}`);
+      return parts.join('; ');
+    }
+
+    function iconButton(titleKey, icon, onClick) {
+      const button = document.createElement('button');
+      button.type = 'button'; button.className = 'server-remove';
+      const title = t(titleKey);
+      button.title = title; button.setAttribute('aria-label', title);
+      const glyphs = {
+        plus: '<path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>',
+        pin: '<path d="M12 4v10m0 0-3-3m3 3 3-3M6 20h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>',
+        test: '<path d="M20 12a8 8 0 1 1-3.1-6.3M20 4v5h-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>',
+        cross: '<path d="m7 7 10 10M17 7 7 17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
+      };
+      button.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">${glyphs[icon] || glyphs.cross}</svg>`;
+      button.addEventListener('click', onClick);
+      return button;
+    }
+
+    function routeShortUrl(route) {
+      try { return new URL(route.url).host + (new URL(route.url).pathname !== '/' ? new URL(route.url).pathname : ''); }
+      catch (_error) { return route.url; }
+    }
+
+    function routeStateKey(state) {
+      return {
+        idle: 'serverStatusIdle', ok: 'serverStatusOk', fail: 'serverRouteUnreachable',
+        blocked: 'serverRouteBlocked', 'not-this-daemon': 'serverRouteWrongDaemon',
+        fingerprint: 'serverTestFingerprintError',
+      }[state] || 'serverStatusIdle';
+    }
+
+    function renderRouteRow(host, route) {
+      const row = document.createElement('div');
+      row.className = 'server-route-row';
+      const url = document.createElement(route.kind === 'origin' ? 'span' : 'button');
+      url.className = 'server-route-url';
+      if (route.kind !== 'origin') {
+        url.type = 'button'; url.classList.add('server-editable');
+        url.setAttribute('aria-label', `${t('serverRouteEdit')}: ${route.url}`);
+        url.addEventListener('click', () => editRoute(host, route));
+      }
+      url.textContent = routeShortUrl(route);
+      url.title = route.url;
+
+      const state = routeRuntime[route.id] || newRouteRuntime();
+      const ranking = refreshRanking(host);
+      const isActive = ranking.activeRouteId === route.id;
+      const median = routeMedianMs(state);
+      const ms = document.createElement('span');
+      ms.className = 'server-route-ms';
+      const samples = (state.samples || []).filter((value) => Number.isFinite(value));
+      ms.textContent = median !== null ? t('serverRouteMs').replace('{ms}', String(median)) : '';
+      if (samples.length) {
+        ms.title = t('serverRouteSamples').replace('{n}', String(samples.length))
+          .replace('{min}', String(Math.min(...samples))).replace('{med}', String(median));
+      }
+
+      const badge = document.createElement('span');
+      badge.className = 'server-route-badge';
+      const badgeInfo = routeBadge(host, route, { isActive, median, state, ranking });
+      badge.dataset.badge = badgeInfo.tone;
+      badge.textContent = badgeInfo.label;
+      if (badgeInfo.tip) badge.title = badgeInfo.tip;
+
+      row.append(url, ms, badge);
+      const actions = document.createElement('span'); actions.className = 'server-route-actions';
+      if (!isActive) {
+        actions.appendChild(iconButton('serverRouteTest', 'test', () => {
+          probeRoute(route, { bypassBackoff: true, samples: 1 }).then((probe) => {
+            applyProbeIdentity(host, route, probe);
+            probeAllHosts({ bypassBackoff: false }).then(() => { renderServerSettings(); refreshCurrentView(); });
+          });
+        }));
+      }
+      if (route.kind !== 'origin') {
+        actions.appendChild(iconButton(host.choice === route.id ? 'serverRouteUnpin' : 'serverRoutePin', 'pin', () => {
+          host.choice = host.choice === route.id ? 'auto' : route.id;
+          hostActiveRouteId.set(host.id, route.id);
+          saveServerRegistry(); renderServerSettings(); refreshCurrentView();
+        }));
+        actions.appendChild(iconButton('serverRouteRemove', 'cross', () => removeRoute(host, route)));
+      }
+      // An origin row carries no controls. Its address is where this page was served from
+      // rather than something the user stored, and retyping it would let a URL decide which
+      // machine Local is -- which is the one thing §5.1 says only the served address can prove.
+      row.appendChild(actions);
+      return row;
+    }
+
+    // The active route is always badged `Active` with its reason, never `Fastest`: inside the
+    // anti-flap band the route in use is not the quickest one, and a `Fastest` badge on a
+    // route nothing is using is a bug waiting for a screenshot.
+    function routeBadge(host, route, { isActive, median, state, ranking }) {
+      const pinned = host.choice === route.id;
+      if (state.state === 'blocked') return { tone: 'error', label: t('serverRouteBlocked'), tip: blockedRuleText(state.blockedRule) };
+      if (state.state === 'not-this-daemon') return { tone: 'error', label: t('serverRouteWrongDaemon'), tip: t('serverRouteWrongDaemonTip') };
+      if (state.state === 'fingerprint') return { tone: 'error', label: t('serverTestFingerprintError'), tip: '' };
+      if (state.state === 'fail') return { tone: 'error', label: t('serverRouteUnreachable'), tip: state.error || '' };
+      // The route in use always says so; everything else about it, including being the page's
+      // own address, rides in the tooltip.
+      if (isActive) {
+        const reason = { fastest: 'serverRouteReasonFastest', pinned: 'serverRouteReasonPinned', held: 'serverRouteReasonHeld', unverified: 'serverRouteReasonUnverified' }[ranking.activeReason] || 'serverRouteReasonFastest';
+        const tip = route.kind === 'origin' ? `${t('serverRouteThisPage')} · ${t(reason)}` : t(reason);
+        return { tone: 'active', label: t('serverRouteActive'), tip };
+      }
+      if (pinned) return { tone: 'pinned', label: t('serverRoutePinned'), tip: t('serverRoutePinnedTip') };
+      if (route.kind === 'origin') return { tone: 'origin', label: t('serverRouteThisPage'), tip: '' };
+      // Faster than the route in use, and inside the band: it will not take over on its own.
+      if (ranking.activeReason === 'held' && ranking.fastestRouteId === route.id) {
+        return { tone: 'warn', label: t('serverRouteFasterHolding'), tip: t('serverRouteReasonHeld') };
+      }
+      if (median !== null && median >= ROUTE_SLOW_MS) return { tone: 'warn', label: t('serverRouteSlow'), tip: '' };
+      return { tone: '', label: t('serverStatusOk'), tip: '' };
+    }
+
+    function noticeText(notice) {
+      return t('serverMergeNotice').replace('{a}', notice.survivorLabel).replace('{b}', notice.loserLabel);
+    }
+
+    function takeVisibleMergeNotice() {
+      return pendingMergeNotices.length ? noticeText(pendingMergeNotices[0]) : '';
+    }
+
+    function blockedRuleText(rule) {
+      return rule === 'mixedContent' ? t('serverRouteBlockedMixed') : t('serverRouteBlockedOrigin');
+    }
+
+    function hostIdentityNote(host) {
+      if (host.id === LOCAL_HOST_ID) return '';
+      const routes = hostRoutes(host);
+      if (!routes.length) return '';
+      const states = routes.map((route) => routeRuntime[route.id]).filter(Boolean);
+      if (!states.length) return '';
+      if (states.some((state) => state.state === 'ok')) {
+        if (!host.instanceId && states.some((state) => isIdentityUnavailableVersion(state.version))) {
+          return t('serverIdentityUnavailable');
+        }
+        if (!host.instanceId && states.some((state) => state.version && !state.reportedInstanceId)) {
+          return t('serverIdentityUnknownNote');
+        }
+        return '';
+      }
+      if (states.length && states.every((state) => state.state === 'not-this-daemon')) return t('serverHostAllRoutesWrongDaemon');
+      return '';
+    }
+
+    // "Too old to identify itself" is read from `version`, never from the missing field: a
+    // current daemon can answer without an id while its first lookup runs or during the
+    // backoff after a failed one (§6.4).
+    const FIRST_INSTANCE_ID_VERSION = [2, 6, 4];
+
+    function parseTokdashVersion(value) {
+      const match = /^(\d+)\.(\d+)\.(\d+)/.exec(String(value || ''));
+      if (!match) return null;
+      return [Number(match[1]), Number(match[2]), Number(match[3])];
+    }
+
+    function isIdentityUnavailableVersion(value) {
+      const version = parseTokdashVersion(value);
+      if (!version) return false;
+      for (let i = 0; i < 3; i += 1) {
+        if (version[i] > FIRST_INSTANCE_ID_VERSION[i]) return true;
+        if (version[i] < FIRST_INSTANCE_ID_VERSION[i]) return false;
+      }
+      return true;
+    }
+
+    function renderAddRouteButton(host) {
+      return iconButton('serverAddRoute', 'plus', () => addRouteToHost(host));
+    }
+
+    // Inline editors instead of window.prompt: the settings panel is a form, and a browser
+    // dialog on top of it reads as a different application. One field is open at a time.
+    let inlineEditor = null;
+
+    function openInlineEditor(key, initialText, onSubmit, scope = {}) {
+      editingHostId = scope.hostId || '';
+      editingRouteId = scope.routeId || '';
+      inlineEditor = { key, onSubmit };
+      inlineEditorDraft = String(initialText || '');
+      inlineEditorError = '';
+      renderServerSettings();
+      const field = document.getElementById('serverInlineEditor');
+      if (field) { field.focus(); field.select(); }
+    }
+
+    function closeInlineEditor() {
+      inlineEditor = null;   // an in-flight validator checks this before it writes
+      inlineEditorError = '';
+      editingHostId = '';
+      editingRouteId = '';
+    }
+
+    // Set while a validator is in flight, so a held Enter key cannot stack probes on one
+    // address and a cancel cannot race a commit that is about to write.
+    let inlineEditorCommitting = false;
+
+    // A validator's return value: a string to show in the editor, or `{ apply }` -- the change
+    // to make, which commitInlineEditor runs. Validators are kept free of writes on purpose:
+    // they await the network, and Escape during that window has to be able to drop the edit
+    // outright rather than have it land in memory afterwards and get saved by whatever the
+    // user does next.
+    async function commitInlineEditor() {
+      if (!inlineEditor || inlineEditorCommitting) return;
+      const editor = inlineEditor;
+      const value = inlineEditorDraft;
+      // A route validator probes the address, so it is async. Nothing is written and nothing
+      // is saved until it comes back clean: an address stored before it was proven comes back
+      // on the next reload, which reads as the dashboard inventing a dead URL.
+      inlineEditorCommitting = true;
+      let result;
+      try {
+        result = await editor.onSubmit(value);
+      } finally {
+        inlineEditorCommitting = false;
+      }
+      if (inlineEditor !== editor) return;   // cancelled or replaced while the probe ran
+      if (typeof result === 'string') {
+        inlineEditorDraft = value;
+        inlineEditorError = result;
+        renderServerSettings();
+        const field = document.getElementById('serverInlineEditor');
+        if (field) field.focus();
+        return;
+      }
+      if (result && typeof result.apply === 'function') result.apply();
+      closeInlineEditor();
+      saveServerRegistry(); renderServerSettings(); refreshCurrentView();
+    }
+
+    function buildInlineEditor() {
+      const wrap = document.createElement('div');
+      wrap.className = 'server-inline-editor';
+      const field = document.createElement('input');
+      field.type = 'text'; field.className = 'ui-input'; field.id = 'serverInlineEditor';
+      field.value = inlineEditorDraft;
+      field.setAttribute('aria-label', t(inlineEditor.key));
+      field.addEventListener('input', () => { inlineEditorDraft = field.value; });
+      field.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') { event.preventDefault(); commitInlineEditor(); }
+        // Stop here: Escape cancels the edit, it must not also close the Settings panel.
+        if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeInlineEditor(); renderServerSettings(); }
+      });
+      const save = document.createElement('button');
+      save.type = 'button'; save.className = 'btn btn-secondary'; save.textContent = t('serverInlineSave');
+      save.addEventListener('click', commitInlineEditor);
+      const cancel = document.createElement('button');
+      cancel.type = 'button'; cancel.className = 'btn btn-ghost'; cancel.textContent = t('serverInlineCancel');
+      cancel.addEventListener('click', () => { closeInlineEditor(); renderServerSettings(); });
+      wrap.append(field, save, cancel);
+      if (inlineEditorError) {
+        const note = document.createElement('div');
+        note.className = 'server-route-note'; note.dataset.tone = 'error'; note.textContent = inlineEditorError;
+        wrap.appendChild(note);
+      }
+      return wrap;
+    }
+
+    function renameHost(host) {
+      openInlineEditor('serverRename', host.label, (value) => {
+        const next = String(value).trim();
+        if (!next) return t('serverRenameEmpty');
+        return { apply: () => { host.label = next; } };
+      }, { hostId: host.id });
+    }
+
+    function removeHost(host) {
+      if (host.id !== LOCAL_HOST_ID && !window.confirm(`${t('serverRemove')} ${host.label}?`)) return;
+      hostRoutes(host).forEach((route) => { delete routeRuntime[route.id]; });
+      hosts = hosts.filter((item) => item.id !== host.id);
+      if (host.id === LOCAL_HOST_ID) hosts.unshift(localHostFrom(null));
+      serverRuntimeStatus.delete(host.id);
+      csrfTokensByServer.delete(host.id);
+      hostActiveRouteId.delete(host.id);
+      if (serverSelection.mode === 'custom') {
+        serverSelection.custom = serverSelection.custom.filter((id) => id !== host.id);
+        if (!serverSelection.custom.length) serverSelection = { mode: 'all', custom: [] };
+      }
+      saveServerRegistry(); saveServerSelection();
+      renderServerSettings(); refreshCurrentView();
+    }
+
+    function removeRoute(host, route) {
+      if (route.kind === 'origin') return;
+      // Confirm removal of the final address before changing the host or its route state.
+      if (host.id !== LOCAL_HOST_ID && hostRoutes(host).length === 1) { removeHost(host); return; }
+      host.routes = hostRoutes(host).filter((item) => item.id !== route.id);
+      if (host.choice === route.id) host.choice = 'auto';
+      delete routeRuntime[route.id];
+      hostActiveRouteId.delete(host.id);
+      saveServerRegistry(); renderServerSettings(); refreshCurrentView();
+    }
+
+    // Judge an address before it reaches the registry, under a probe-only id. The result is
+    // handed back rather than left in place: a validation that ran under a stored route's id
+    // would leave that route holding another address's latency or verdict, and a cancelled
+    // edit has to be able to change nothing at all. `state` is what the commit copies onto the
+    // route, so a passing probe shows a latency at once instead of waiting for the next tick.
+    //
+    // Adding is held to proof of belonging: the address has to answer as this host's own
+    // daemon. A host with no identity of its own cannot supply any, so nothing can be added to
+    // it -- an unknown id cannot prove two addresses are the same machine, and reading some
+    // other daemon's usage through a row named after this one is the error the whole identity
+    // rule exists to prevent. Once a host DOES have an identity, editing and adding come to
+    // the same thing: an address that cannot name itself as that daemon would be stored,
+    // probed, and then barred from carrying the host's figures, so refusing it here is the
+    // honest answer and a silent pass would only park a dead route on the row. Only a host
+    // still waiting on its identity edits loosely, because repointing that host's only address
+    // defines it rather than merging anything. A confirmed difference in identity is a refusal
+    // whether or not the other daemon is listed; naming the owner is the honest answer.
+    async function validateRouteAddress(host, url, { requireProof = false } = {}) {
+      const candidate = { id: newId('probe'), url, kind: 'probe' };
+      const probe = await probeRoute(candidate, { bypassBackoff: true, samples: 1 });
+      const state = routeRuntime[candidate.id] || null;
+      delete routeRuntime[candidate.id];   // a rejected address leaves nothing behind
+      const fail = (error) => ({ error, probe: null, state: null });
+      if (probe.kind === 'blocked') return fail(`${t('serverRouteBlocked')}: ${blockedRuleText(probe.blockedRule)}`);
+      if (probe.kind === 'fingerprint') return fail(t('serverTestFingerprintError'));
+      if (!probe.ok && probe.kind !== 'backoff') return fail(t('serverTestNetworkError'));
+      const reported = String(probe.instanceId || '');
+      if (host.instanceId) {
+        if (reported && reported !== host.instanceId) {
+          const owner = hosts.find((item) => item !== host && item.instanceId === reported) || null;
+          return fail(owner ? t('serverRouteAlreadyOn').replace('{name}', owner.label)
+            : `${t('serverRouteWrongDaemon')}: ${t('serverRouteWrongDaemonTip')}`);
+        }
+        if (!reported) return fail(t('serverIdentityUnavailable'));
+      } else if (requireProof) {
+        // Nothing to match against, and an unknown id proves nothing about whose machine this
+        // is, so there is no way to tell an added route from somebody else's daemon.
+        return fail(t('serverIdentityUnknownNote'));
+      }
+      return { error: null, probe, state };
+    }
+
+    // Editing the address of a route proves the new one first, so a typo cannot silently take
+    // over the route a host is being read through -- and cannot survive the reload either,
+    // which is what storing it before the probe did.
+    function editRoute(host, route) {
+      openInlineEditor('serverRouteEdit', route.url, async (value) => {
+        const { url: canonical, error: inputError } = await resolveRouteInput(value);
+        if (inputError) return inputError;
+        if (route.kind === 'origin') return t('serverRouteIsThisPage');
+        if (pageRouteMatches(canonical)) return t('serverRouteIsThisPage');
+        if (hostRoutes(host).some((item) => item.id !== route.id && item.url === canonical)) return t('serverRouteDuplicate');
+        const { error, state } = await validateRouteAddress(host, canonical);
+        if (error) return error;   // the route keeps the probe state its own address earned
+        return {
+          apply: () => {
+            route.url = canonical;
+            if (state) setRouteState(route.id, state); else delete routeRuntime[route.id];
+            hostActiveRouteId.delete(host.id);
+          },
+        };
+      }, { hostId: host.id, routeId: route.id });
+    }
+
+    function addRouteToHost(host) {
+      openInlineEditor('serverAddRoute', '', async (value) => {
+        const { url: canonical, error: inputError } = await resolveRouteInput(value);
+        if (inputError) return inputError;
+        const existing = storedRouteUrlExists(canonical);
+        if (existing.route) {
+          return existing.host.id === host.id ? t('serverRouteDuplicate') : t('serverRouteAlreadyOn').replace('{name}', existing.host.label);
+        }
+        const route = { id: newId('route'), url: canonical, kind: 'added', addedAt: Date.now() };
+        const { error, probe, state } = await validateRouteAddress(host, canonical, { requireProof: true });
+        if (error) return error;
+        return {
+          apply: () => {
+            host.routes = [...hostRoutes(host), route];
+            if (state) setRouteState(route.id, state);
+            applyProbeIdentity(host, route, probe);
+            // The probe may have named a host that was still waiting on an identity, which is
+            // the merge-on-add case: it joins the host with that identity.
+            mergeStoredHostsByIdentity();
+          },
+        };
+      }, { hostId: host.id });
     }
 
     function refreshCurrentView() {
@@ -8948,10 +10349,33 @@
       input.dataset.invalid = invalid ? 'true' : 'false';
       input.setAttribute('aria-invalid', String(!!invalid));
     }
-    async function testServerForm() {
+    function setServerFormStatusMessage(message) {
+      setServerFormStatus('serverTestNetworkError', 'error');
+      const status = document.getElementById('serverFormStatus');
+      if (status) status.textContent = message;
+    }
+    let serverFormBusy = false;
+    async function runServerFormAction(action) {
+      if (serverFormBusy) return false;
+      serverFormBusy = true;
+      const buttons = ['testServerBtn', 'addServerBtn'].map((id) => document.getElementById(id)).filter(Boolean);
+      buttons.forEach((button) => { button.disabled = true; button.setAttribute('aria-busy', 'true'); });
+      try { return await action(); }
+      finally {
+        serverFormBusy = false;
+        buttons.forEach((button) => { button.disabled = false; button.removeAttribute('aria-busy'); });
+      }
+    }
+    async function testServerForm() { return runServerFormAction(testServerFormInput); }
+    async function storeServerFromForm() { return runServerFormAction(storeServerFormInput); }
+    async function testServerFormInput() {
       const input = document.getElementById('serverUrlInput');
-      const baseUrl = normalizeServerBaseUrl(input?.value);
-      if (!baseUrl) { setServerUrlInvalid(true); setServerFormStatus('serverInvalidUrl', 'error'); return false; }
+      const entered = input?.value;
+      setServerFormStatus('serverTestTesting', 'testing');
+      const { url: baseUrl, error: inputError } = await resolveRouteInput(entered);
+      if (input?.value !== entered) return false;
+      if (inputError) { setServerUrlInvalid(inputError === t('serverInvalidUrl')); setServerFormStatusMessage(inputError); return false; }
+      input.value = baseUrl;
       setServerUrlInvalid(false);
       const button = document.getElementById('testServerBtn');
       const startedAt = performance.now();
@@ -8964,25 +10388,65 @@
         return true;
       } catch (error) {
         if (normalizeServerBaseUrl(input?.value) !== baseUrl) return false;
-        setServerFormStatus(error.kind === 'fingerprint' ? 'serverTestFingerprintError' : 'serverTestNetworkError', 'error');
+        // Blocked and unreachable are different answers, and only one of them means the
+        // address is wrong; naming the rule is the difference between a fix and a guess.
+        const key = error.kind === 'fingerprint' ? 'serverTestFingerprintError'
+          : error.kind === 'blocked' ? 'serverRouteBlocked' : 'serverTestNetworkError';
+        setServerFormStatus(key, 'error');
         return false;
       } finally {
         if (button) { button.disabled = false; button.removeAttribute('aria-busy'); button.setAttribute('data-i18n', 'testServer'); button.textContent = t('testServer'); }
       }
     }
-    function storeServerFromForm() {
+    // Add stays advisory: a syntactically valid URL can always be stored, because registering
+    // a machine that is offline right now is legitimate. What a successful probe buys is a
+    // merge, and a merge the user did not ask for has to be named in the status line.
+    async function storeServerFormInput() {
       const urlInput = document.getElementById('serverUrlInput');
       const labelInput = document.getElementById('serverLabelInput');
-      const baseUrl = normalizeServerBaseUrl(urlInput?.value);
-      if (!baseUrl) { setServerUrlInvalid(true); setServerFormStatus('serverInvalidUrl', 'error'); return false; }
+      const entered = urlInput?.value;
+      setServerFormStatus('serverTestTesting', 'testing');
+      const { url: baseUrl, error: inputError } = await resolveRouteInput(entered);
+      if (urlInput?.value !== entered) return false;
+      if (inputError) { setServerUrlInvalid(inputError === t('serverInvalidUrl')); setServerFormStatusMessage(inputError); return false; }
+      urlInput.value = baseUrl;
       setServerUrlInvalid(false);
-      const id = globalThis.crypto?.randomUUID?.() || `server-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-      const label = String(labelInput?.value || defaultServerLabel(baseUrl)).trim();
-      addedServers.push({ id, label, baseUrl });
+      if (pageRouteMatches(baseUrl)) {
+        setServerFormStatus('serverRouteIsThisPage', 'error');
+        return false;
+      }
+      const already = storedRouteUrlExists(baseUrl);
+      if (already.route) {
+        setServerFormStatus('serverRouteAlreadyOn', 'error', { name: already.host.label });
+        return false;
+      }
+      const route = { id: newId('route'), url: baseUrl, kind: 'added', addedAt: Date.now() };
+      const host = {
+        id: globalThis.crypto?.randomUUID?.() || `server-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        label: String(labelInput?.value || defaultServerLabel(baseUrl)).trim(),
+        instanceId: '', choice: 'auto', routes: [route], baseUrl,
+      };
+      let probe = { ok: false, kind: 'network' };
+      try { probe = await probeRoute(route, { bypassBackoff: true, samples: 1 }); } catch (_error) { /* offline: store it anyway */ }
+      if (probe.ok) {
+        host.instanceId = String(probe.instanceId || '');   // written once, at creation (§5.1)
+        const twin = hosts.find((item) => host.instanceId && item.instanceId === host.instanceId);
+        if (twin) {
+          twin.routes = [...hostRoutes(twin), route];
+          saveServerRegistry();
+          setServerFormStatus('serverRouteJoined', 'success', { name: twin.label });
+          urlInput.value = ''; labelInput.value = '';
+          renderServerSettings(); refreshCurrentView();
+          return true;
+        }
+      }
+      hosts.push(host);
       saveServerRegistry();
-      if (serverSelection.mode === 'custom') { serverSelection.custom.push(id); saveServerSelection(); }
+      if (serverSelection.mode === 'custom') { serverSelection.custom.push(host.id); saveServerSelection(); }
       urlInput.value = ''; labelInput.value = '';
-      setServerFormStatus('serverAdded', 'success', { name: label });
+      if (probe.kind === 'blocked') setServerFormStatus('serverRouteBlocked', 'error');
+      else if (probe.ok) setServerFormStatus('serverAdded', 'success', { name: host.label });
+      else setServerFormStatus('serverAddedUnverified', 'success', { name: host.label });
       clearTimeout(serverFormStatusTimer);
       serverFormStatusTimer = setTimeout(() => {
         if (document.getElementById('serverFormStatus')?.dataset.statusKey === 'serverAdded') setServerFormStatus('serverHint');
@@ -8993,6 +10457,10 @@
 
     function initServerSettings() {
       renderServerSettings();
+      // Kick the first probe round off without holding the first paint. It does not trigger
+      // a reload: reads already fail over inside the request that finds a dead route, so the
+      // next natural refresh is the one that uses what this round learned.
+      setTimeout(() => { probeAllHosts({ bypassBackoff: true }); }, 0);
       positionQuotaGlobalControls(selectedServers().length > 1);
       document.getElementById('allServersToggle')?.addEventListener('change', (event) => {
         serverSelection = event.target.checked ? { mode: 'all', custom: [] } : { mode: 'custom', custom: selectedServers().map((server) => server.id) };
@@ -9004,7 +10472,7 @@
         setServerFormStatus('serverHint');
       });
       document.getElementById('testServerBtn')?.addEventListener('click', testServerForm);
-      document.getElementById('addServerBtn')?.addEventListener('click', storeServerFromForm);
+      document.getElementById('addServerBtn')?.addEventListener('click', () => { storeServerFromForm(); });
     }
 
     function dashboardFetchStatusText(error) {
@@ -11296,9 +12764,10 @@
       document.getElementById("sessionModalReasoningPct").textContent = "-";
 
       try {
-        const server = ownerServer || LOCAL_SERVER;
-        const response = await fetch(serverPath(server, `/api/session?tool=${encodeURIComponent(tool)}&session_id=${encodeURIComponent(sessionId)}`));
-        const data = await response.json();
+        const server = ownerServer || localHost();
+        // Through the host's routes like every other read: a drill-down opened the moment the
+        // address in use dies should move to the next one, not show a failed modal.
+        const data = await fetchFromHost(server, `/api/session?tool=${encodeURIComponent(tool)}&session_id=${encodeURIComponent(sessionId)}`);
         activeSessionDetail = { tool, data };
         const session = data.session || {};
         const turns = data.turns || [];
@@ -12522,7 +13991,7 @@
       // untouched and clear nothing here.
     }
 
-    function renderQuotaDisabledCard(container, ownerServer = LOCAL_SERVER) {
+    function renderQuotaDisabledCard(container, ownerServer = localHost()) {
       const card = document.createElement('div');
       card.className = 'surface p-8 text-center lg:col-span-3';
       const title = document.createElement('h3');
@@ -12617,7 +14086,7 @@
       card.appendChild(section);
     }
 
-    function renderQuotaProviderCards(payload, containerOverride = null, ownerServer = LOCAL_SERVER) {
+    function renderQuotaProviderCards(payload, containerOverride = null, ownerServer = localHost()) {
       const container = containerOverride || document.getElementById('quotaProviderCards');
       if (!container) return;
       // Visibility is scoped to this payload's provider set, not a global union.
@@ -12901,7 +14370,7 @@
     // deriving it from the live selection would point a cached payload at the newly
     // selected host's visibility map after that host's request failed.
     function quotaSingleScopeServer() {
-      return quotaSingleScopeOwner || LOCAL_SERVER;
+      return quotaSingleScopeOwner || localHost();
     }
 
     function quotaSingleScopeHostKey() {
@@ -13446,6 +14915,57 @@
       return { tokensIn, tokensCache };
     }
 
+    function serverRouteStrip(server) {
+      const routes = hostRoutes(server);
+      if (routes.length < 2) return null;
+      const ranking = refreshRanking(server);
+      const strip = document.createElement('div');
+      strip.className = 'servers-routes';
+      routes.forEach((route) => {
+        const state = routeRuntime[route.id] || newRouteRuntime();
+        const median = routeMedianMs(state);
+        const line = document.createElement('div');
+        line.className = 'servers-route';
+        const dot = document.createElement('span');
+        dot.className = 'server-health-dot';
+        dot.dataset.state = state.state === 'ok' ? 'ok' : (state.state === 'idle' ? 'idle' : 'error');
+        const url = document.createElement('span');
+        url.className = 'servers-route-url';
+        url.textContent = routeShortUrl(route);
+        url.title = route.url;
+        line.append(dot, url);
+        if (median !== null) {
+          const ms = document.createElement('span');
+          ms.className = 'servers-route-ms mono';
+          ms.textContent = t('serverRouteMs').replace('{ms}', String(median));
+          line.appendChild(ms);
+        }
+        if (ranking.activeRouteId === route.id) {
+          const badge = document.createElement('span');
+          badge.className = 'server-route-badge';
+          badge.dataset.badge = 'active';
+          badge.textContent = t('serverRouteActive');
+          badge.title = t(`serverRouteReason${ranking.activeReason.charAt(0).toUpperCase()}${ranking.activeReason.slice(1)}` || '');
+          line.appendChild(badge);
+        } else if (state.state !== 'ok') {
+          const badge = document.createElement('span');
+          badge.className = 'server-route-badge';
+          badge.dataset.badge = 'error';
+          badge.textContent = t(routeStateKey(state.state));
+          if (state.state === 'blocked') badge.title = blockedRuleText(state.blockedRule);
+          line.appendChild(badge);
+        }
+        if (state.checkedAt) {
+          const when = document.createElement('span');
+          when.className = 'servers-route-when';
+          when.textContent = serverTimeOfDay(state.checkedAt);
+          line.appendChild(when);
+        }
+        strip.appendChild(line);
+      });
+      return strip;
+    }
+
     function serversCard(server, row, ctx) {
       const card = document.createElement('article');
       const fresh = !!row;
@@ -13497,6 +15017,11 @@
       }
       head.append(who, when);
       card.appendChild(head);
+
+      // Route strip: the card is per host, which is what makes a double count structurally
+      // impossible, so the per-address detail belongs here rather than in another card.
+      const strip = serverRouteStrip(server);
+      if (strip) card.appendChild(strip);
 
       if (!payload) {
         const note = document.createElement('div');
@@ -13822,6 +15347,23 @@
       };
 
       const frag = document.createDocumentFragment();
+      // A merge is the moment a user wonders whether their data doubled, so the tab says
+      // which host joined which and confirms both routes survived. One per pair per session.
+      const noticeTextValue = takeVisibleMergeNotice();
+      if (noticeTextValue) {
+        const notice = document.createElement('div');
+        notice.className = 'servers-merge-notice';
+        const label = document.createElement('span');
+        label.textContent = noticeTextValue;
+        const dismiss = document.createElement('button');
+        dismiss.type = 'button'; dismiss.className = 'server-remove';
+        dismiss.title = t('serverMergeNoticeDismiss');
+        dismiss.setAttribute('aria-label', t('serverMergeNoticeDismiss'));
+        dismiss.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+        dismiss.addEventListener('click', () => { clearMergeNotices(); renderServersTab(); });
+        notice.append(label, dismiss);
+        frag.appendChild(notice);
+      }
       const strip = document.createElement('section');
       strip.className = 'surface servers-strip';
       const stripDot = document.createElement('span');
@@ -13936,7 +15478,7 @@
       }
     }
 
-    async function enableQuotaProvider(key, server = LOCAL_SERVER) {
+    async function enableQuotaProvider(key, server = localHost()) {
       setQuotaActionStatus('saving');
       try {
         await postJsonWithCsrf(server, '/api/quota/consent', { [key]: true });
@@ -13946,7 +15488,7 @@
       }
     }
 
-    async function setQuotaCredentialScan(enabled, server = LOCAL_SERVER) {
+    async function setQuotaCredentialScan(enabled, server = localHost()) {
       setQuotaActionStatus('saving');
       try {
         await postJsonWithCsrf(server, '/api/quota/consent', { credential_scan: !!enabled });
@@ -13956,7 +15498,7 @@
       }
     }
 
-    async function setQuotaEnabled(enabled, server = LOCAL_SERVER) {
+    async function setQuotaEnabled(enabled, server = localHost()) {
       setQuotaActionStatus('saving');
       try {
         await postJsonWithCsrf(server, '/api/quota/settings', { enabled: !!enabled });
@@ -13966,7 +15508,7 @@
       }
     }
 
-    async function setQuotaInterval(minutes, server = LOCAL_SERVER) {
+    async function setQuotaInterval(minutes, server = localHost()) {
       setQuotaActionStatus('saving');
       try {
         await postJsonWithCsrf(server, '/api/quota/settings', { poll_interval_minutes: Number(minutes) });
@@ -18863,7 +20405,11 @@
       setSettingsPanelOpen(settingsPanel?.hidden !== false);
     });
     document.addEventListener('click', (event) => {
-      if (!settingsPanel?.hidden && settingsMenu && !settingsMenu.contains(event.target)) {
+      // A control that re-renders its own list is detached by the time the event bubbles
+      // here, and `contains()` reads that as a click outside, which closed the panel under
+      // the user mid-edit. Only a target still in the document can prove an outside click.
+      if (!settingsPanel?.hidden && settingsMenu && event.target?.isConnected
+        && !settingsMenu.contains(event.target)) {
         setSettingsPanelOpen(false);
       }
     });
@@ -18901,6 +20447,7 @@
     // Keep 3D view responsive on window resize.
     let _resize3DTimer = null;
     window.addEventListener('resize', () => {
+      if (!document.getElementById('settingsPanel')?.hidden) setSettingsPanelOpen(true);
       fitOverviewKpis();
       if (calendarState.view === 'year') {
         const grid = document.getElementById('yearGrid');
@@ -18914,6 +20461,7 @@
     // Auto-refresh every 5 minutes
     setInterval(() => {
       if (document.hidden) return;
+      probeAllHosts();
       if (isQuotaActive()) {
         loadQuota();
         return;

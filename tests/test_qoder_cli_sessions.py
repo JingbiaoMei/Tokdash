@@ -144,6 +144,7 @@ def _clear_caches():
     # This harness has more caches than any other: per-file parser, aggregate,
     # the shared signature TTL cache and the parser's own entry cache. An
     # under-cleared fixture produces a pass that says nothing.
+    coding_tools.qoder_cli_unattributed_warning_reset()
     sessions._parse_qoder_cli_session_file.cache_clear()
     sessions._load_qoder_cli_sessions.cache_clear()
     _sig_cache.clear()
@@ -522,7 +523,8 @@ def test_no_roots_empty_view(monkeypatch, tmp_path):
 
 def test_loader_without_raising_attribute(monkeypatch, tmp_path):
     """Regression for the *extra forwarding: a replaced plain callable (no
-    .raising) must still get the five forwarded arguments and parse."""
+    .raising) must still get every forwarded argument and parse. The window
+    table rides in that tail, so losing it would silently change tokens."""
     root = tmp_path / "qoder-root"
     _segment(root, PROJ_SEG, SID_A, [
         _segment_rec("f1", T_TODAY, inp=10, outp=2),
@@ -531,9 +533,10 @@ def test_loader_without_raising_attribute(monkeypatch, tmp_path):
 
     calls = []
 
-    def plain_stub(path_str, mtime_ns, size, pricing_sig, window):
-        calls.append((path_str, mtime_ns, size, pricing_sig, window))
-        return coding_tools.qoder_cli_file_candidates(Path(path_str), window)
+    def plain_stub(path_str, mtime_ns, size, pricing_sig, window, windows_sig):
+        calls.append((path_str, mtime_ns, size, pricing_sig, window, windows_sig))
+        return coding_tools.qoder_cli_file_candidates(
+            Path(path_str), window, dict(windows_sig))
 
     # the autouse teardown clears this attribute after the test, while the
     # stub is still installed; give it the one hook the clear needs
@@ -541,7 +544,24 @@ def test_loader_without_raising_attribute(monkeypatch, tmp_path):
     monkeypatch.setattr(sessions, "_parse_qoder_cli_session_file", plain_stub)
     data = get_sessions_data("qoder_cli", "all")  # must not AttributeError
     assert data["summary"]["tokens"] == 12
-    assert calls and len(calls[0]) == 5
+    assert calls and len(calls[0]) == 6
+
+
+def test_run_log_window_table_is_a_required_key(monkeypatch, tmp_path):
+    """The window table has no default, because an omitted one is not neutral.
+
+    It used to default to (), so a caller that forgot it cached the resulting
+    empty-window candidates -- dropped pinned-model records -- against a key
+    that implied the table had been read. `window` has always been required for
+    exactly that reason; this keeps the two honest for the same reason.
+    """
+    import inspect
+
+    params = inspect.signature(
+        sessions._parse_qoder_cli_session_file
+    ).parameters
+    assert params["windows_sig"].default is inspect.Parameter.empty
+    assert params["window"].default is inspect.Parameter.empty
 
 
 def test_merged_entry_carries_source_name(monkeypatch, tmp_path):
@@ -600,13 +620,14 @@ def test_runtime_config_one_implementation(monkeypatch, tmp_path, caplog):
             for raw in raws.values() for t in raw["turns"]
         )
 
-    base_sig = coding_tools.qoder_cli_runtime_signature()
+    roots = clientpaths.qoder_cli_roots()
+    base_sig = coding_tools.qoder_cli_runtime_signature(roots)
     base = fingerprint()
-    assert base_sig == (None, None)
+    assert base_sig == (None, None, ())
 
     for bad in ("0", "-1", "abc"):
         monkeypatch.setenv("QODER_USD_PER_CREDIT", bad)
-        assert coding_tools.qoder_cli_runtime_signature() == base_sig
+        assert coding_tools.qoder_cli_runtime_signature(roots) == base_sig
         assert fingerprint() == base
 
     # Pin the warning: BaseParser.collect reads the env twice on purpose
@@ -715,3 +736,38 @@ def test_frontend_session_registry_includes_qoder_cli():
     # they were not duplicated (a repeated object key parses and silently
     # keeps the last value, which is how a wrong label ships).
     assert html.count("qoderCliSessions:") == 6
+
+
+def test_window_table_reaches_both_views(monkeypatch, tmp_path):
+    """Run-log window evidence must move the Overview AND the Sessions panel,
+    and must invalidate the per-file candidate cache, not just the aggregate.
+
+    A run log appearing is the real-world sequence: the user runs Qoder, the
+    CLI records its own model window, and previously invisible pinned-model
+    sessions become countable on the next scan.
+    """
+    root = tmp_path / "qoder-root"
+    _transcript(root, "pA", SID_A, [
+        # zero-filled like the real international build, credits only
+        _transcript_rec("w1", T_TODAY, model="qfmodel", credits=3, ratio=0.5),
+    ])
+    _setup(monkeypatch, tmp_path)
+
+    # No window evidence yet, and qfmodel is not `auto`: nothing is attributable.
+    assert get_sessions_data("qoder_cli", "all")["summary"]["tokens"] == 0
+    assert _entry_sums(_live_entries())[0] == 0
+
+    log = root / "logs" / "runs" / "2026-09-24T17-29-24-649+01-00-a-p1" / "qodercli.log"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text(
+        "INFO  debug.message [QoderInferRequest details] model_config="
+        '{"key":"qfmodel","display_name":"Qwen3.8-Flash","api_key":"[redacted]",'
+        '"max_input_tokens":180000}\n',
+        encoding="utf-8",
+    )
+
+    misses_before = sessions._parse_qoder_cli_session_file.cache_info().misses
+    tokens = get_sessions_data("qoder_cli", "all")["summary"]["tokens"]
+    assert tokens == 90000  # int(round(0.5 * 180000))
+    assert sessions._parse_qoder_cli_session_file.cache_info().misses > misses_before
+    assert _entry_sums(_live_entries())[0] == tokens

@@ -26,7 +26,7 @@ import argparse
 import os
 import sys
 import time
-from datetime import timedelta
+from datetime import date
 
 from rich.markup import escape
 from rich.table import Table
@@ -60,9 +60,9 @@ from .data import (
     fetch_quota_state,
     fetch_stats,
     fetch_usage,
-    report_windows,
     reset_remote,
     resolve_overview_period,
+    resolve_report_period,
 )
 from .formatting import (
     EM_DASH,
@@ -261,11 +261,12 @@ class TokdashApp(App):
         Binding("m", "set_period('month')", "Month", show=False),
         Binding("y", "set_period('year')", "Year", show=False),
         Binding("a", "set_period('all')", "All time", show=False),
-        # Date-shift axis (round 3): [ steps the END DATE one day back
-        # (today→yesterday→…), ] forward, 0 jumps back to today. Distinct from
-        # the period-length keys above — a different axis, per the review.
-        Binding("left_square_bracket", "shift_date(-1)", "Prev day", show=False),
-        Binding("right_square_bracket", "shift_date(1)", "Next day", show=False),
+        # Date-shift axis: [ steps WHOLE PERIODS back (month view: a whole
+        # month; "today" view: a day), ] forward, 0 jumps back to the current
+        # period (never future: clamped at 0). Distinct from the period-length
+        # keys above — a different axis, per the review.
+        Binding("left_square_bracket", "shift_date(-1)", "Prev period", show=False),
+        Binding("right_square_bracket", "shift_date(1)", "Next period", show=False),
         Binding("0", "reset_date", "Today", show=False),
         # Quota pane only: the ONE network entry point of the whole TUI.
         Binding("u", "poll_quota", "Poll quota", show=False),
@@ -291,17 +292,20 @@ class TokdashApp(App):
         # silently, and abandoned thread jobs finish harmlessly into the cache.
         self._gen = 0
         self._today = _local_today()
-        # Date-shift axis (round 3 ``[``/``]``/``0``): whole days the window's
-        # END DATE is pulled back from today (clamped >= 0). 0 keeps every
-        # warm key the round-2 parity tests pin; shift > 0 is a cold/delegated
-        # compute but the SAME calendar math — never wrong data. Snapshotted
-        # per load (anchor below), so a mid-flight keypress can never mis-pair
-        # the usage-vs-insights-vs-active windows of one load.
-        self._day_shift = 0
-        # Anchor the CURRENT load was started with (anchor = today - day_shift);
-        # painted surfaces read this, never a recomputed anchor, so a shift that
-        # lands mid-load cannot repaint the already-drawn range line out of
-        # sync with its data.
+        # Period-shift axis (``[``/``]``/``0``): WHOLE PERIODS the window steps
+        # back from the current one (clamped >= 0), counted in each pane's own
+        # unit — month view steps whole months (one back = all of last month),
+        # week view whole weeks, year view whole years, "today" single days.
+        # 0 keeps every warm key the round-2 parity tests pin; shift > 0 is a
+        # cold/delegated compute but the SAME calendar math — never wrong data.
+        # Resolved once per load (below), so a mid-flight keypress can never
+        # mis-pair the usage-vs-insights-vs-active windows of one load.
+        self._period_shift = 0
+        # Window END the CURRENT Overview load was resolved to — the year
+        # heatmap's calendar year and today-marker read this (and the painted
+        # range line pairs with it), so a shift that lands mid-load cannot
+        # repaint an already-drawn surface out of sync with its data. Shift 0
+        # on today-pinned windows = today, exactly as before.
         self._ov_anchor = self._today
         self._rp_started = False  # Report lazy-load: first tab activation only
         self._qp_started = False  # Quota lazy-load: same rule
@@ -416,6 +420,7 @@ class TokdashApp(App):
             "Provider", "Window", "Used", "Resets", "24h", "Status"
         )
         self.set_interval(1.0, self._tick_status)  # "computing… Ns" suffix
+        self._refresh_db_line()  # the footer's SQLite read runs off-loop (§17)
         self._load_overview(self._ov_period(), False)
         self._update_status()
 
@@ -447,6 +452,7 @@ class TokdashApp(App):
     def action_refresh(self) -> None:
         self._check_day_rollover()
         self._db_line = None  # a refresh may as well re-read the db footer
+        self._refresh_db_line()  # off-loop again (the accessor stays pure)
         # r re-probes the service: a one-shot dead-service latch ("gone")
         # deserves a second look when the user explicitly asks for fresh data.
         reset_remote()
@@ -516,51 +522,71 @@ class TokdashApp(App):
 
     # -------------------------------------------------------- date shift ----
 
-    def _anchor(self):
-        """The date every window ends on: today minus the day-shift. Snapshotted
-        per load (never re-read inside thread jobs), so a shift that lands while
-        a load is in flight cannot mis-pair that load's usage/insights/active
-        windows. shift 0 reproduces the exact round-2 warm keys."""
-        return self._today - timedelta(days=self._day_shift)
-
     def _ov_token_has_window(self) -> bool:
         """True when the Overview token resolves to a real date pair. "all"
-        and rolling Nd tokens have NO window to translate — ``[``/``]`` must
-        not churn that load (the Report fan-out still runs: its windows are
-        always calendar pairs)."""
+        and rolling Nd tokens have NO window to step (the shift counter must
+        stay honest: stepping a windowless Overview is a silent no-op)."""
         return resolve_overview_period(
             self._ov_period(), today=self._today
         )[1] is not None
 
-    def action_shift_date(self, delta: int) -> None:
-        """``[`` back one day / ``]`` forward one day — the DATE axis, entirely
-        separate from the period-LENGTH keys (t/w/m/y/a). The end date pulls
-        back today→yesterday→… (never future: clamped at 0). Both date-pinned
-        panes reload so neither keeps an anchor-stale body (mirrors the
-        midnight fan-out). Quota (never date-shifted) is untouched; a rolling
-        Overview token stays inert (nothing to translate)."""
-        self._check_day_rollover()
-        new_shift = max(0, self._day_shift - delta)  # ] (delta +1) shrinks back
-        if new_shift == self._day_shift:
-            return  # already at today; ] at 0 is inert (never a future window)
-        self._day_shift = new_shift
+    def _shift_unit(self, token: str) -> str:
+        """The marker suffix for a token's own period unit (d/w/m/y); "" for
+        windowless tokens — a shift can never apply to those, so neither can
+        the marker ever lie about them."""
+        return {"today": "d", "week": "w", "month": "m", "year": "y"}.get(token, "")
+
+    def _shifted_panels(self) -> tuple[bool, bool]:
+        """(reload overview?, reload report?) for a shift — date-pinned panes
+        only. Callers MUST treat ``not any(...)`` as fully inert: bumping the
+        gen without issuing a successor would strand the in-flight loads of
+        panes the shift cannot move."""
+        return self._ov_token_has_window(), self._rp_started
+
+    def _apply_shift(self, new_shift: int) -> None:
+        ov, rp = self._shifted_panels()
+        if not (ov or rp):
+            # Nothing on screen is date-pinned ("all"/rolling Overview and
+            # Report never started): stay FULLY inert — do not even store the
+            # counter, or a later Report lazy-load would silently start out
+            # shifted by presses the user never saw do anything. No gen bump
+            # either: it would strand the in-flight load with no successor.
+            return
+        self._period_shift = new_shift
         self._gen += 1
-        if self._ov_token_has_window():
+        if ov:
             self._load_overview(self._ov_period(), False)
-        if self._rp_started:
+        if rp:
             self._load_report(self._rp_idx, False)
 
-    def action_reset_date(self) -> None:
-        """``0`` — jump the shifted view back to today."""
+    def action_shift_date(self, delta: int) -> None:
+        """``[`` one period back / ``]`` one period forward — the DATE axis,
+        entirely separate from the period-LENGTH keys (t/w/m/y/a). Each press
+        steps a WHOLE calendar period in the pane's own unit: month view one
+        ``[`` = the full previous month (Aug 1→31, not Sep 1 pulled one day
+        shorter), week view the full previous Mon→Sun week, year view the full
+        previous year, "today" view single days (never future: clamped at 0).
+        Both date-pinned panes reload so neither keeps a shift-stale body
+        (mirrors the midnight fan-out). Quota (never date-shifted) is
+        untouched; a windowless Overview is inert."""
         self._check_day_rollover()
-        if self._day_shift == 0:
+        new_shift = max(0, self._period_shift - delta)  # ] (delta +1) shrinks back
+        if new_shift == self._period_shift:
+            return  # already at the current period; ] at 0 is inert (never future)
+        self._apply_shift(new_shift)
+
+    def action_reset_date(self) -> None:
+        """``0`` — jump the shifted view back to the current period. Unlike a
+        STEP this is never inert while shifted: with nothing date-pinned there
+        is nothing to reload, but the counter must still land at 0 — "0" always
+        means "now", so no hidden shift survives into the next window."""
+        self._check_day_rollover()
+        if self._period_shift == 0:
             return
-        self._day_shift = 0
-        self._gen += 1
-        if self._ov_token_has_window():
-            self._load_overview(self._ov_period(), False)
-        if self._rp_started:
-            self._load_report(self._rp_idx, False)
+        if not any(self._shifted_panels()):
+            self._period_shift = 0
+            return
+        self._apply_shift(0)
 
     # ---------------------------------------------------- day rollover ------
 
@@ -684,10 +710,39 @@ class TokdashApp(App):
 
         return _quota_poll_once(include_network=True)
 
+    @work(thread=True, exit_on_error=False)
+    def _db_summary_job(self) -> str:
+        # The db footer opens SQLite (and on a big store the row count is NOT
+        # free) — it runs HERE, never on the event loop (round 6: the status
+        # tick used to call db_summary inline the first time it painted).
+        # The job maps its own failure to the footer string; it never raises.
+        try:
+            return db_summary()
+        except Exception as exc:  # noqa: BLE001 — status/footer never die
+            return f"db status unavailable: {exc}"
+
+    @work(group="dbline", exclusive=True, exit_on_error=False)
+    async def _refresh_db_line(self) -> None:
+        # Supervisor: fill the slot off-loop, then repaint the two surfaces
+        # that read it. Exclusive group = a refresh while a read is in flight
+        # coalesces to one watcher; late answers are harmless (the strings
+        # are equally valid, last writer wins).
+        line = await self._db_summary_job().wait()
+        self._db_line = line
+        self._update_status()
+        # Repaint the report footer ONLY while the pane is idle: _rp_state is
+        # sticky across reloads, and repainting mid-reload would re-emit the
+        # PREVIOUS window's body right on top of the loading clear (the
+        # round-4 law). A load in flight repaints the footer from this slot
+        # itself when it next paints — nothing is lost by skipping here.
+        if (self._rp_usage is not None and self._rp_state == "ok"
+                and "report" not in self._inflight):
+            self._paint_report()  # the report footer carries the same line
+
     # The three report jobs take the RESOLVED (from, to) pair, not the index:
-    # the anchor is snapshotted ONCE in _load_report and every job of one load
-    # reads the identical window (the round-3 date-shift rule — no mid-load
-    # anchor can split a load's usage-vs-insights-vs-active windows).
+    # the window is resolved ONCE in _load_report and every job of one load
+    # reads the identical pair (the date-shift rule — no mid-load shift can
+    # split a load's usage-vs-insights-vs-active windows).
     @work(thread=True, exit_on_error=False)
     def _rp_usage_job(self, date_from: str, date_to: str, refresh: bool) -> FetchOutcome:
         return fetch_usage("today", date_from, date_to, refresh=refresh)
@@ -717,17 +772,26 @@ class TokdashApp(App):
     async def _load_overview(self, token: str, refresh: bool) -> None:
         gen = self._gen
         self._begin_load("overview", gen)
-        # Snapshot the anchor ONCE (round-3 date shift); the year heatmap's
-        # calendar-year cut and the resolved pairs read it, never a re-derived
-        # anchor. At shift 0 this is today — the round-2 warm-key parity.
-        anchor = self._anchor()
-        self._ov_anchor = anchor
+        # Resolve the window ONCE per load (never re-read inside thread jobs):
+        # a shift that lands mid-flight cannot mis-pair this load's
+        # usage-vs-insights-vs-active windows. today/shift are read exactly
+        # here; every job below uses the returned pair.
         # Normalize at the call site (round 2): week/month/year become the
         # calendar pairs the warmer uses, "today" the explicit (D, D) pair —
         # everything else passes through. Stored for the chart dispatch too
-        # (week/month render the resolved window, not the raw token).
-        period, date_from, date_to = resolve_overview_period(token, today=anchor)
+        # (week/month render the resolved window, not the raw token). Shift 0
+        # is the exact unshifted (round-2 warm-key parity) pair; shift > 0
+        # steps WHOLE calendar periods back (see resolve_overview_period).
+        period, date_from, date_to = resolve_overview_period(
+            token, today=self._today, shift=self._period_shift
+        )
         self._ov_pair = (date_from, date_to)
+        # Anchor = the resolved window's END — the year heatmap's calendar-year
+        # cut and today-marker read this, so shifting to a past period moves
+        # the heatmap with the data instead of staying on this year. Shift 0
+        # on today-pinned windows ends at today: unchanged.
+        anchor = date.fromisoformat(date_to) if date_to else self._today
+        self._ov_anchor = anchor
         outcomes: list[FetchOutcome] = []
         try:
             try:
@@ -791,9 +855,12 @@ class TokdashApp(App):
     async def _load_report(self, idx: int, refresh: bool) -> None:
         gen = self._gen
         self._begin_load("report", gen)
-        # Snapshot the anchor ONCE; every job of this load uses the same pair
-        # (date-shift rule). At shift 0 this is today's window = the warm keys.
-        date_from, date_to = report_windows(self._anchor())[idx]
+        # Resolve the window ONCE per load (every job of this load uses the
+        # same pair — the shift rule). Shift 0 = today's window = the warm
+        # keys; shift > 0 steps WHOLE calendar periods back.
+        date_from, date_to = resolve_report_period(
+            REPORT_PERIODS[idx], today=self._today, shift=self._period_shift
+        )[1:]
         outcomes: list[FetchOutcome] = []
         try:
             try:
@@ -879,8 +946,14 @@ class TokdashApp(App):
                 return  # a refresh/rollover owns the pane now; no reload storm
             if result.get("disabled"):
                 # Never a fake "ok": tracking off means say-so and stop.
+                # The note goes through emit_markup like every other pane
+                # text: "warn" is a SEMANTIC run name, not a Textual style —
+                # written raw it painted as a literal "[warn]" tag.
                 self.query_one("#quota-note", Static).update(
-                    "[warn]quota tracking disabled — tokdash quota consent[/]"
+                    emit_markup([[
+                        Run("quota tracking disabled — tokdash quota consent",
+                            "warn")
+                    ]])
                 )
                 return
             self.query_one("#quota-note", Static).update("poll ok")
@@ -906,9 +979,13 @@ class TokdashApp(App):
         # SEMANTIC "header" style becomes real markup ([header] is NOT a Textual
         # style name — writing it raw is a MarkupError), and where the text is
         # escaped, so pass it RAW. A date shift is shown inline so the filled
-        # header always names the exact window on screen.
-        if self._day_shift:
-            text += f"  (viewing {self._day_shift}d back · 0 = today)"
+        # header always names the exact window on screen. The suffix shows ONLY
+        # when the Overview window itself is shifted (a windowless "all"/rolling
+        # token is never stepped, even while the Report pane is) and counts in
+        # that token's own unit — "viewing 1m back" on month view, not "1d".
+        unit = self._shift_unit(self._ov_period())
+        if self._period_shift and unit:
+            text += f"  (viewing {self._period_shift}{unit} back · 0 = today)"
         self.query_one("#ov-range", Static).update(
             emit_markup([[Run(text, "header")]])
         )
@@ -1113,14 +1190,12 @@ class TokdashApp(App):
             credits.update(emit_markup(credit_lines))
 
     def _ensure_db_line(self) -> str:
-        # One sqlite status read per run (refresh clears it) — the status bar
-        # AND the report footer share it; repaints never re-open the store.
-        if self._db_line is None:
-            try:
-                self._db_line = db_summary()
-            except Exception as exc:  # noqa: BLE001 — status/footer never die
-                self._db_line = f"db status unavailable: {exc}"
-        return self._db_line
+        # PURE READ (round 6): the SQLite open/count happens in
+        # _db_summary_job's thread; the watcher fills the slot and repaints.
+        # Callers run on the event loop (every status tick, the report
+        # footer) and must never block on the store. Until the first read
+        # lands, the footer says so — a beat at startup, never a freeze.
+        return self._db_line if self._db_line is not None else "db status pending…"
 
     def _paint_report(self) -> None:
         if self._rp_usage is None:
@@ -1179,17 +1254,26 @@ class TokdashApp(App):
         pane = self._active_pane()
         # Per-pane key hints — the round-4 COMPACT ECHO of the spelled-out
         # legend pinned at the top of each pane ("[ ]" never rendered as a
-        # bare bracket pair: here the keys get words, "shift day"). The
+        # bare bracket pair: here the keys get words, "shift period"). The
         # period keys live on BOTH period panes, the poll key only on Quota.
         if pane == "overview":
-            label, hint = self._ov_period(), " · t/w/m/y/a period · [ ] shift day · 0 today"
+            label, hint = self._ov_period(), " · t/w/m/y/a period · [ ] shift period · 0 today"
         elif pane == "report":
-            label, hint = REPORT_PERIODS[self._rp_idx], " · w/m/y period · [ ] shift day · 0 today"
+            label, hint = REPORT_PERIODS[self._rp_idx], " · w/m/y period · [ ] shift period · 0 today"
         else:
             label, hint = "quota", " · u poll"
-        # Shift marker (ASCII — the cp1252-safety law): only while shifted, so
-        # the common status line stays byte-identical to round 2 at shift 0.
-        shift = f" · -{self._day_shift}d" if self._day_shift else ""
+        # Shift marker (ASCII — the cp1252-safety law): only while THIS pane's
+        # window is shifted, and counted in the pane's own period unit —
+        # month view "-1m" (one month back), week "-1w", today "-1d". Quota
+        # has no date axis, so it never shows one. The common status line
+        # stays byte-identical to round 2 at shift 0.
+        shift_token = (
+            self._ov_period() if pane == "overview"
+            else REPORT_PERIODS[self._rp_idx] if pane == "report"
+            else ""
+        )
+        unit = self._shift_unit(shift_token)
+        shift = f" · -{self._period_shift}{unit}" if (self._period_shift and unit) else ""
         # escape(hint): the report/overview hint carries a literal "[/]" (the
         # date-shift key), which Textual would otherwise read as an auto-closing
         # markup tag. The line is plain text — no markup is intended here.
@@ -1259,9 +1343,30 @@ class TokdashApp(App):
     def _begin_load(self, pane: str, gen: int) -> None:
         self._inflight[pane] = gen
         self._stranded.discard(pane)  # this load owns the pane from now on
+        # Drop the PREVIOUS window's late-arriving payloads (round-4 loading
+        # law: a reload shows computing… and NOTHING stale). Usage repaints
+        # mid-load and reads these slots — left filled, the KPIs/Time/insights
+        # would mix last window's figures into the window being computed.
+        # Paint sites all treat None as "dash / pending / running…".
+        if pane == "overview":
+            self._ov_active = None
+        elif pane == "report":
+            self._rp_insights = None
+            self._rp_active = None
+        elif pane == "quota":
+            self._quota_history_val = None
         self._load_started[pane] = time.monotonic()
         self._paint_loading(pane)
         self._update_status()
+
+    def _reload_pane(self, pane: str) -> None:
+        """(Re-)start the load for one pane at the CURRENT state."""
+        if pane == "overview":
+            self._load_overview(self._ov_period(), False)
+        elif pane == "report":
+            self._load_report(self._rp_idx, False)
+        elif pane == "quota":
+            self._load_quota(False)
 
     def _end_load(self, pane: str, gen: int) -> None:
         if self._inflight.get(pane) == gen:  # a newer load owns the spinner now
@@ -1270,11 +1375,16 @@ class TokdashApp(App):
             if gen != self._gen:
                 # `_inflight.get(pane) == gen` (above) proves no successor load
                 # took ownership, and gen moved while this load ran: the guard
-                # dropped it without a replacement for this pane. Nothing else
-                # can ever re-fetch it — mark it stranded so the TabActivated
-                # hook re-issues the load on reactivation, instead of leaving
-                # the skeleton on screen forever.
+                # dropped it without a replacement for this pane. A STRANDED
+                # pane the user is looking at gets its load re-issued right now
+                # (supersede bumped the gen without a successor for THIS pane —
+                # e.g. ``p`` while a quota fetch is in flight); the re-issue
+                # runs at the current gen, so it lands and cannot loop. Only a
+                # HIDDEN stranded pane waits for the TabActivated hook, the one
+                # re-fetch trigger a pane out of sight gets.
                 self._stranded.add(pane)
+                if pane == self._active_pane():
+                    self._reload_pane(pane)
             self._update_status()
 
     def _finish_load(

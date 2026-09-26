@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import subprocess
@@ -122,12 +123,13 @@ def test_tool_brand_registry_uses_local_lazy_assets_with_a_fallback() -> None:
         "crush",
         "muse",
         "minimax",
+        "commandcode",
     ):
         assert re.search(rf"\b{tool}:\s*\{{", body)
     assert "https://" not in body
     assert "/static/icons/agents/" in body
     asset_paths = re.findall(r"icon:\s*'(/static/icons/agents/[^']+)'", body)
-    assert len(asset_paths) == 27
+    assert len(asset_paths) == 28
     assert body.count("/static/icons/agents/qoder.png") == 2
     for asset_path in asset_paths:
         assert (STATIC_DIR / asset_path.removeprefix("/static/")).is_file()
@@ -153,6 +155,178 @@ def test_tool_identity_is_used_in_primary_tool_breakdowns() -> None:
     assert "toolCell.appendChild(createToolIdentity(row.tool));" in source
     assert "title.appendChild(createToolIdentity(appName, { compact: true }));" in source
     assert "toolCell.appendChild(createToolIdentity(session.tool, { compact: true }));" in source
+
+
+def test_quota_provider_cards_wear_the_shared_brand_marks() -> None:
+    """The Quota tab names vendors the Overview already carries marks for, under
+    its own subscription labels -- "Kimi Code" where the source is `kimi`, "MiniMax
+    (China)" where a region decides the heading. The card keeps its label and
+    borrows the mark, so a rebrand is still one table to edit.
+    """
+    source = INDEX_HTML.read_text(encoding="utf-8")
+    registry = re.search(
+        r"const TOOL_BRAND_META = Object\.freeze\(\{(?P<body>.*?)\n\s*\}\);",
+        source,
+        re.DOTALL,
+    )
+    assert registry, "tool brand registry not found"
+    table = re.search(
+        r"const QUOTA_PROVIDER_BRAND_KEYS = Object\.freeze\(\{(?P<body>.*?)\n\s*\}\);",
+        source,
+        re.DOTALL,
+    )
+    assert table, "the quota provider -> brand key table is missing"
+    pairs = dict(re.findall(r"(\w+):\s*'([^']+)'", table.group("body")))
+    assert pairs, "the quota provider -> brand key table is empty"
+    for provider, brand_key in pairs.items():
+        # The entry has to carry an actual asset. `muse` and `devin` exist in the
+        # registry with `icon: null`, so a key that only proves existence could
+        # point a card at a letter tile and still call it a mark.
+        entry = re.search(
+            rf"\b{brand_key}:\s*\{{[^}}]*\}}",
+            registry.group("body"),
+        )
+        assert entry, f"quota provider {provider} points at a brand key that does not exist: {brand_key}"
+        assert "icon: '/static/icons/agents/" in entry.group(0), (
+            f"quota provider {provider} points at {brand_key}, which has no local mark: {entry.group(0)}"
+        )
+
+    helper = _extract_js_function(source, "function createQuotaProviderIdentity(providerKey, label) {")
+    # A provider the table does not mention resolves on its own key, which is how
+    # the two without a local mark land on the shared letter tile.
+    assert "QUOTA_PROVIDER_BRAND_KEYS[providerKey] || providerKey" in helper
+    assert "createToolBrandIcon(brandKey, meta)" in helper
+    assert "identity.className = 'tool-identity';" in helper, "the card must reuse the shared identity shell"
+    assert "name.textContent = label;" in helper, "the card's own provider label wins over the tool-name map"
+    assert "title.append(createQuotaProviderIdentity(" in source
+
+    # The shared label is built to ellipsize inside a table cell. A card heading has
+    # no room left to ellipsize TO -- three cards per row, and an install name like
+    # `Claude Code (work-laptop-01)` -- so the heading opts out and wraps.
+    wrap = re.search(
+        r"\.quota-card-title \.tool-brand-label \{(?P<body>[^}]*)\}",
+        source,
+    )
+    assert wrap and "white-space: normal;" in wrap.group("body"), (
+        "a long quota card title clips instead of wrapping"
+    )
+
+    # A wrapping heading also needs the plan suffix to travel as one word. A flex
+    # title row shrinks the identity to fill the line and parks the muted plan out
+    # at the card edge, so the title flows as running text and the suffix keeps its
+    # leading separator.
+    plan = re.search(
+        r"\.quota-card-title \.quota-card-plan \{(?P<body>[^}]*)\}",
+        source,
+    )
+    assert plan and "white-space: nowrap;" in plan.group("body"), (
+        "the plan suffix can break away from its separator on a wrapping title"
+    )
+    assert (
+        "planSuffix.className = 'text-xs font-semibold ml-2 quota-card-plan'" in source
+    ), "the plan suffix is not the element the nowrap rule targets"
+    assert (
+        "title.className = 'text-base font-extrabold mono quota-card-title';" in source
+    ), "a flex title row strands the plan suffix at the card edge"
+
+
+QUOTA_IDENTITY_SIGNATURES = (
+    "function createToolBrandIcon(tool, meta) {",
+    "function createQuotaProviderIdentity(providerKey, label) {",
+)
+
+# The real provider -> brand table and the real builders over just enough DOM to walk
+# what a card heading is made of. The asset fetch is refused and the brand palette is
+# stubbed: this judges the tree, not the network and not the colours.
+QUOTA_IDENTITY_FIXTURE = """
+__TABLE__
+function makeNode(tag) {
+  return {
+    tag, children: [], attrs: {}, dataset: {}, className: '', textContent: '',
+    parent: null, isConnected: true,
+    style: { setProperty() {} },
+    setAttribute(key, value) { this.attrs[key] = String(value); },
+    append(...kids) { kids.forEach((kid) => { kid.parent = this; this.children.push(kid); }); },
+    appendChild(kid) { kid.parent = this; this.children.push(kid); return kid; },
+    replaceChildren(...kids) { this.children = kids; kids.forEach((kid) => { kid.parent = this; }); },
+    addEventListener() {},
+  };
+}
+const document = { createElement: makeNode };
+function loadToolBrandIcon() { return Promise.reject(new Error('no icon assets in the harness')); }
+function toolBrandMeta(key) {
+  return {
+    icon: Object.prototype.hasOwnProperty.call(QUOTA_PROVIDER_BRAND_KEYS, key)
+      ? '/static/icons/agents/codex-transparent.png'
+      : null,
+    color: '#111827',
+    fallback: key.charAt(0).toUpperCase(),
+    logoKind: 'mark',
+    darkInvert: true,
+  };
+}
+__FUNCTIONS__
+function find(node, wanted) {
+  if (wanted(node)) return node;
+  for (const kid of node.children) { const hit = find(kid, wanted); if (hit) return hit; }
+  return null;
+}
+const identity = createQuotaProviderIdentity('claude', 'Claude Code (work-laptop-01)');
+const name = find(identity, (node) => node.className === 'tool-brand-label');
+const hiddenChain = [];
+for (let node = name; node; node = node.parent) {
+  if (node.attrs['aria-hidden'] === 'true') hiddenChain.push(node.className || node.tag);
+}
+const unmapped = createQuotaProviderIdentity('zai', 'Z.ai');
+process.stdout.write(JSON.stringify({
+  name: name ? name.textContent : null,
+  hiddenChain,
+  unmappedMarkHidden: find(unmapped, (node) => node.className === 'tool-brand-label').attrs['aria-hidden'] || null,
+  iconHidden: find(identity, (node) => node.className === 'tool-brand-icon').attrs['aria-hidden'] || null,
+  darkInvert: identity.dataset.darkInvert,
+}));
+"""
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_the_quota_card_heading_keeps_its_name_readable(tmp_path: Path) -> None:
+    """The one accessible name a quota card heading has is the text inside the
+    identity wrapper, so hiding that wrapper to keep the mark out of the a11y tree
+    hides the provider name with it: heading navigation reads the plan suffix and
+    nothing else. `createToolIdentity` hides its wrapper only in its icon-only
+    branch, the one branch with no label.
+
+    Executed over the real table and the real builders, so the claim is about the
+    tree that ships rather than a source line that happens to mention aria.
+    """
+    source = INDEX_HTML.read_text(encoding="utf-8")
+    table = re.search(
+        r"const QUOTA_PROVIDER_BRAND_KEYS = Object\.freeze\(\{.*?\n\s*\}\);",
+        source,
+        re.DOTALL,
+    )
+    assert table, "the quota provider -> brand key table is missing"
+    functions = "\n".join(
+        _extract_js_function(source, sig) for sig in QUOTA_IDENTITY_SIGNATURES
+    )
+    harness = tmp_path / "quota-identity.js"
+    harness.write_text(
+        QUOTA_IDENTITY_FIXTURE.replace("__TABLE__", table.group(0)).replace(
+            "__FUNCTIONS__", functions
+        ),
+        encoding="utf-8",
+    )
+    report = json.loads(
+        subprocess.run(
+            ["node", str(harness)], check=True, capture_output=True, encoding="utf-8"
+        ).stdout
+    )
+
+    assert report["name"] == "Claude Code (work-laptop-01)", "the card must render its label in full"
+    assert report["hiddenChain"] == [], f"the provider name is hidden from assistive tech: {report['hiddenChain']}"
+    assert report["unmappedMarkHidden"] is None, "the letter-tile card keeps its name too"
+    assert report["iconHidden"] == "true", "the mark itself stays decorative"
+    assert report["darkInvert"] == "true", "the card inherits the brand's dark-mode inversion"
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not available")

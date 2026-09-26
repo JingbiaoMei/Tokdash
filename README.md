@@ -423,7 +423,7 @@ longer than one page scrolls with the mouse wheel. Keys:
 | `1` / `2` / `3` | Switch to Overview / Report / Quota |
 | `t` `w` `m` `y` `a` | Jump to a period directly (both period tabs; `t`/`a` are Overview-only) |
 | `p` | Next time window (forward-only cycle) |
-| `[` / `]` | Pull the window's end date one day back / forward (never into the future) |
+| `[` / `]` | Step one whole calendar period back / forward — full month on month view, full week on week view (never into the future) |
 | `0` | Back to today |
 | `u` | Poll quota (Quota tab only) |
 | `?` | Help overlay with all keys |

@@ -378,7 +378,7 @@ Ele abre as mesmas abas **Overview**, **Report** e **Quota** do painel web; uma 
 | `1` / `2` / `3` | Alternar para Overview / Report / Quota |
 | `t` `w` `m` `y` `a` | Pular direto para o período (ambas as abas de período; `t`/`a` só no Overview) |
 | `p` | Próxima janela de tempo (ciclo somente para frente) |
-| `[` / `]` | Mover a data final da janela um dia para trás / para frente (nunca para o futuro) |
+| `[` / `]` | Recuar / avançar um período calendárico inteiro — um mês cheio na vista mensal, uma semana cheia na semanal (nunca para o futuro) |
 | `0` | Voltar para hoje |
 | `u` | Sondar a cota (somente aba Quota) |
 | `?` | Painel de ajuda com todas as teclas |

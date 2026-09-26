@@ -196,6 +196,94 @@ def test_report_windows_delegates():
 
 
 # ---------------------------------------------------------------------------
+# Period shift ( [ ] / 0 ) — WHOLE calendar periods; warm parity at shift 0
+# ---------------------------------------------------------------------------
+
+SEP_SUN = datetime.date(2026, 9, 20)  # a SUNDAY (fixture app's "today")
+
+
+def test_shift_zero_is_the_exact_unshifted_triple():
+    # Warm-key parity law: shift=0 must return BYTE-EQUAL results to no-shift
+    # for every token and day — the shifted resolver may never re-key today's
+    # warm windows. Cross-checked against _report_windows itself.
+    for day in (TUESDAY, LEAP_DAY, SEP_SUN, datetime.date(2026, 1, 1)):
+        for token, idx in [("week", 0), ("month", 1), ("year", 2)]:
+            warm = api._report_windows(day)[idx]
+            for fn in (data.resolve_report_period, data.resolve_overview_period):
+                assert fn(token, today=day, shift=0)[1:] == warm
+                assert fn(token, today=day) == fn(token, today=day, shift=0)
+    assert data.resolve_overview_period("today", today=SEP_SUN, shift=0)[1:] == (
+        "2026-09-20", "2026-09-20")
+
+
+def test_month_shift_returns_full_previous_months():
+    # From ANY September day: one step = the FULL Aug 1 -> Aug 31 (never a
+    # "Sep 1 pulled one day shorter"), year-crossing steps included.
+    for shift, pair in [(1, ("2026-08-01", "2026-08-31")),
+                        (2, ("2026-07-01", "2026-07-31")),
+                        (9, ("2025-12-01", "2025-12-31"))]:
+        assert data.resolve_overview_period(
+            "month", today=SEP_SUN, shift=shift)[1:] == pair
+        assert data.resolve_report_period(
+            "month", today=SEP_SUN, shift=shift)[1:] == pair
+
+
+def test_month_shift_lands_on_februarys_true_end():
+    # Month-end clamp, both ways: stepping March back lands on Feb's ACTUAL
+    # last day — common year 28, leap year 29 (never the nonexistent Feb 31).
+    assert data.resolve_overview_period(
+        "month", today=datetime.date(2026, 3, 31), shift=1)[1:] == (
+        "2026-02-01", "2026-02-28")
+    assert data.resolve_overview_period(
+        "month", today=datetime.date(2028, 3, 31), shift=1)[1:] == (
+        "2028-02-01", "2028-02-29")
+
+
+def test_week_shift_returns_full_previous_weeks():
+    # SEP_SUN is its week's LAST day; one step back is the whole week before.
+    assert data.resolve_overview_period(
+        "week", today=SEP_SUN, shift=1)[1:] == ("2026-09-07", "2026-09-13")
+    assert data.resolve_overview_period(
+        "week", today=SEP_SUN, shift=2)[1:] == ("2026-08-31", "2026-09-06")
+    # A mid-week "today" (TUE 9.22 sits in week 9.21→9.27) steps to THAT
+    # week's predecessor whole — the step counts weeks, not days from today.
+    assert data.resolve_report_period(
+        "week", today=TUESDAY, shift=1)[1:] == ("2026-09-14", "2026-09-20")
+
+
+def test_year_shift_returns_full_previous_years_even_from_leap_day():
+    assert data.resolve_overview_period(
+        "year", today=SEP_SUN, shift=1)[1:] == ("2025-01-01", "2025-12-31")
+    assert data.resolve_overview_period(
+        "year", today=LEAP_DAY, shift=1)[1:] == ("2023-01-01", "2023-12-31")
+    # A Feb-29 "today" stepping into a common year: endpoints come from the
+    # year NUMBER, so there is no Feb-31-style clamp to explode on.
+    assert data.resolve_report_period(
+        "year", today=datetime.date(2028, 2, 29), shift=1)[1:] == (
+        "2027-01-01", "2027-12-31")
+
+
+def test_today_shift_steps_single_days():
+    # The "today" token's period IS a day — its steps stay day-by-day, and
+    # they cross year boundaries on plain date arithmetic.
+    assert data.resolve_overview_period(
+        "today", today=SEP_SUN, shift=1)[1:] == ("2026-09-19", "2026-09-19")
+    assert data.resolve_overview_period(
+        "today", today=datetime.date(2026, 1, 5), shift=10)[1:] == (
+        "2025-12-26", "2025-12-26")
+
+
+@pytest.mark.parametrize("token", ["all", "7d", "3days", "1y"])
+def test_shift_is_inert_on_windowless_tokens(token):
+    # No window to step: both resolvers pass through UNCHANGED at any shift
+    # (the app never steps these; the resolvers stay honest regardless).
+    assert data.resolve_overview_period(token, today=SEP_SUN, shift=3) == (
+        token, None, None)
+    assert data.resolve_report_period(token, today=SEP_SUN, shift=3) == (
+        token, None, None)
+
+
+# ---------------------------------------------------------------------------
 # Backpressure retry (index.html fetchJsonWithRetry parity)
 # ---------------------------------------------------------------------------
 

@@ -936,6 +936,8 @@ most one duplicate tail parse); cp1252 console with an emoji in a project path
    are inert on Overview `all`/Nd (no window to translate); always live on
    Report. Shift > 0 is cold compute but correct — warm-key parity is
    preserved byte-exactly at shift 0.
+   **SUPERSEDED (round 6, §17):** the step UNIT is the pane's whole calendar
+   period, not a day; the anchor is the resolved window END, not `today−shift`.
 5. **Never collapse** → `tool_model_detail` lists EVERY model by default
    (the `…+k more` row exists only when a caller passes an explicit `top_n`).
 6. **Normalized tool names** → `sessions.TOOL_LABELS` (canonical) +
@@ -1056,3 +1058,67 @@ most one duplicate tail parse); cp1252 console with an emoji in a project path
    red-Text override on a spacer). `rows` is display data: the test-side
    group walk skips all-empty rows and opens a group at every non-empty r[0]
    that does not start with "@".
+
+## 17. Round 6 — period stepping, stranded-pane re-issue, stale-slot drop (as shipped)
+
+1. **`[` / `]` step WHOLE CALENDAR PERIODS** (user bug: month view 9.1→9.24
+   stepped to 9.1→9.23; it must go to Aug 1→31). The counter (`_period_shift`)
+   counts PERIODS in each pane's own unit: `_stepped_calendar_window`
+   (data.py) returns the FULL period N steps before `today`'s — whole month
+   (`divmod` on `y*12+month`, end = day 1 after +32d `replace(day=1)` − 1d,
+   so Feb gets its true 28/29 and no Feb-31 clamp exists), whole Mon–Sun
+   week, whole calendar year (endpoints from the year NUMBER — a Feb-29
+   today stepping into a common year cannot explode). PAST windows are
+   never clamped to today; only shift 0 is, and it delegates to
+   `_report_windows(today)` EXACTLY — warm-key parity preserved byte-for-
+   byte (mutation-locked). The "today" token's period IS a day, so its
+   steps stay single days. `_anchor()` is DEAD: each resolver call takes
+   `today=` + `shift=`; `_ov_anchor` is now the RESOLVED WINDOW END, so the
+   year heatmap's CY and today-marker follow the shifted period.
+2. **Marker units follow the pane** → status `· -Nd` became `· -{n}{unit}`
+   with unit from `_shift_unit(token)` (d/w/m/y); Overview "all"/rolling and
+   Quota have no unit → no marker (it can never lie about a window that did
+   not move). The "(viewing Nd back · 0 = today)" range suffix got the same
+   unit treatment. Hint copy: "shift day" → "shift period", bindings read
+   "Prev/Next period".
+3. **A shift is FULLY INERT when nothing is date-pinned** (windowless
+   Overview AND Report never started): no counter store (a lazy Report start
+   must not silently begin already-shifted), no gen bump (a bump without a
+   successor strands the visible pane's in-flight load — the reviewer's
+   finding), no reload. `0` is never inert while shifted: the counter
+   clears even when there is nothing to reload ("0" always means now).
+4. **Stranded VISIBLE panes re-issue immediately** — `_end_load` knew only
+   the TabActivated hook (hidden panes); `p` while a quota fetch is in
+   flight stranded the quota pane the user is looking at. When the finished
+   load's gen moved AND no successor took the pane AND the pane is the
+   ACTIVE one, its load is re-issued at the current gen (lands; cannot
+   loop). Hidden panes keep the TabActivated rule.
+5. **Reload drops the late-payload SLOTS** (round-4 loading law, completed):
+   usage repaints MID-load and reads `_ov_active` / `_rp_insights` /
+   `_rp_active` / `_quota_history_val` — they kept the PREVIOUS window's
+   payloads, so KPIs/Time showed stale figures beside fresh tables and the
+   report's "running…" note vanished too early. `_begin_load` now clears
+   them per pane; every paint site already treats None as dash/pending.
+   (Test law: `_ov_state == "ok"` is STICKY across reloads — completion
+   waits must watch slots or counters, never the state flag.)
+6. **Textual pinned `>=8.0,<9`** → app.py is written against VERIFIED Textual-8
+   facts (no `on_*_success` delivery, non-async `@work` needs `thread=True`,
+   no DataTable column justify, arbitrary `cursor_type` strings); an unpinned
+   major could silently break the dashboard on an upgrade. Adopting 9.x is a
+   deliberate change, not a resolver accident.
+7. **The disabled-poll note rides emit_markup** → "warn" is a SEMANTIC run
+   name (report.py maps it to yellow); written as raw markup the literal
+   "[warn]" tag PAINTED in the pane. Every Static update in the app now goes
+   through `emit_markup`/`Run` or plain strings — raw semantic-tag markup is
+   a bug class, and the test asserts the TRANSLATED style in the content.
+8. **The db footer read runs off the event loop** → `_update_status` used to
+   call `db_summary()` INLINE on the first paint (opening/counting SQLite on
+   the UI thread — a visible freeze on a big store). `_db_summary_job`
+   (thread) + the exclusive `_refresh_db_line` watcher now own it;
+   `_ensure_db_line` is a PURE READ returning "db status pending…" until the
+   first answer lands, and the watcher repaints the report footer ONLY while
+   the pane is idle — repainting mid-reload would re-emit the previous
+   window's body on top of the loading clear (sticky-state again). Tests
+   record EVERY `db_summary` call's thread (a last-writer-wins flag is
+   masked by the legit worker call) and interleave a landing against a
+   gated report reload.

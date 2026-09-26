@@ -378,7 +378,7 @@ Abre las mismas pestañas **Overview**, **Report** y **Quota** que el panel web;
 | `1` / `2` / `3` | Cambiar a Overview / Report / Quota |
 | `t` `w` `m` `y` `a` | Saltar directamente al período (ambas pestañas de período; `t`/`a` solo en Overview) |
 | `p` | Ventana de tiempo siguiente (ciclo solo hacia adelante) |
-| `[` / `]` | Mover la fecha final de la ventana un día atrás / adelante (nunca al futuro) |
+| `[` / `]` | Retroceder / avanzar un período calendario completo — un mes entero en la vista mensual, una semana entera en la semanal (nunca al futuro) |
 | `0` | Volver a hoy |
 | `u` | Sondear la cuota (solo pestaña Quota) |
 | `?` | Panel de ayuda con todas las teclas |

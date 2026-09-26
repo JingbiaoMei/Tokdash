@@ -1771,7 +1771,13 @@ class AntigravityCLIParser(BaseParser):
       cacheRead <- field 1.4.5
       cacheWrite <- field 1.4.4
       reasoning <- field 1.4.9
-      timestamp <- (1.9.4.1 * 1000) + (1.9.4.2 // 1_000_000)
+      timestamp <- (1.9.4.1 * 1000) + (1.9.4.2 // 1_000_000); when that is
+                   absent (agy 1.2.x, verified with 1.2.11 on 2026-09-26, no
+                   longer writes 1.9.4), the latest creation time of the
+                   steps the row references instead: top-level field 2 is a
+                   packed list of steps.idx values, and each steps.metadata
+                   blob carries its creation time at 1.1 (seconds) / 1.2
+                   (nanos). Rows with neither stay at 0, as before.
 
     Dedup key: entry_id = "antigravity_cli:<db_stem>:<idx>"
 
@@ -1794,7 +1800,9 @@ class AntigravityCLIParser(BaseParser):
     )
     # 1: gen_metadata protobuf rows keyed on (db stem, idx), visible output
     #    preferred over total-minus-reasoning.
-    persistent_parser_version = 1
+    # 2: rows without a 1.9.4 timestamp (agy 1.2.x) are dated from the steps
+    #    they reference; they were stored at timestamp 0 before.
+    persistent_parser_version = 2
 
     # No cached root: the product homes are re-discovered per scan, so a home
     # that appears after startup (a first ACP run) is picked up without a
@@ -1828,7 +1836,44 @@ class AntigravityCLIParser(BaseParser):
             "cacheWrite": cache_w,
             "reasoning": reasoning,
             "timestamp": int(sec * 1000 + nanos // 1_000_000),
+            "stepRefs": cls._step_refs(outer.get(2) or []),
         }
+
+    @staticmethod
+    def _step_refs(values: list[Any]) -> list[int]:
+        """steps.idx values a row points at (field 2: packed varints, or plain varints)."""
+        refs: list[int] = []
+        for value in values:
+            if isinstance(value, int):
+                refs.append(value)
+                continue
+            buf, pos = bytes(value), 0
+            while pos < len(buf):
+                ref, pos = _pb_read_varint(buf, pos)
+                refs.append(ref)
+        return refs
+
+    @classmethod
+    def _step_times(cls, conn: sqlite3.Connection) -> Dict[int, int]:
+        """steps.idx -> creation time in ms (metadata 1.1 seconds / 1.2 nanos); {} when unavailable."""
+        try:
+            rows = conn.execute("SELECT idx, metadata FROM steps").fetchall()
+        except Exception:
+            return {}
+        times: Dict[int, int] = {}
+        for idx, metadata in rows:
+            try:
+                created = _pb_get_path(_pb_parse_message(bytes(metadata or b"")), (1,))
+                if not isinstance(created, bytes):
+                    continue
+                stamp = _pb_parse_message(created)
+                sec = cls._i((stamp.get(1) or [0])[-1])
+                nanos = cls._i((stamp.get(2) or [0])[-1])
+            except Exception:
+                continue
+            if sec > 0:
+                times[cls._i(idx)] = int(sec * 1000 + nanos // 1_000_000)
+        return times
 
     def _build_entry(self, idx: int, db_stem: str, decoded: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         model = str(decoded.get("model") or "unknown")
@@ -1866,6 +1911,7 @@ class AntigravityCLIParser(BaseParser):
         for path_str, _, _ in self._file_signatures():
             db_path = Path(path_str)
             rows = None
+            step_times: Dict[int, int] = {}
             # The helper already opens RO with an RW fallback, so the plain connect
             # is only the last resort: sqlite3 opens lazily, so an RO open that needs
             # recovery (the client crashed mid-write, leaving a WAL) fails on the
@@ -1877,6 +1923,7 @@ class AntigravityCLIParser(BaseParser):
                     continue
                 try:
                     rows = conn.execute("SELECT idx, data FROM gen_metadata ORDER BY idx").fetchall()
+                    step_times = self._step_times(conn)
                     break
                 except Exception:
                     pass
@@ -1893,6 +1940,10 @@ class AntigravityCLIParser(BaseParser):
                     decoded = self._decode_row(data)
                     if decoded is None:
                         continue
+                    if not decoded.get("timestamp"):
+                        referenced = [step_times[ref] for ref in decoded.get("stepRefs") or [] if ref in step_times]
+                        if referenced:
+                            decoded["timestamp"] = max(referenced)
                     entry = self._build_entry(self._i(idx), db_path.stem, decoded)
                     if entry is not None:
                         out.append(entry)

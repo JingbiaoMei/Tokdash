@@ -937,6 +937,18 @@ final class ContractV11Tests: XCTestCase {
         XCTAssertEqual(store.currentKickerText, "2024")
     }
 
+    func testE12WarmupPlanTwoUpSkipsVisitedStopsAtLimit() {
+        func plan(_ p: UsagePeriod, _ off: Int, _ done: Set<Int> = []) -> [Int] {
+            CompanionStore.warmupPlan(period: p, offset: off) { done.contains($0) }
+        }
+        XCTAssertEqual(plan(.today, 0), [1, 2])
+        XCTAssertEqual(plan(.year, 0), [1, 2])
+        XCTAssertEqual(plan(.today, 1, [0, 1, 2]), [3], "visited + warmed ones skip")
+        XCTAssertEqual(plan(.year, 0, [1, 2]), [], "already-warmed ones never re-warm")
+        XCTAssertEqual(plan(.today, 13), [], "at the walk-back limit nothing remains")
+        XCTAssertEqual(plan(.year, 1), [2], "year's limit 2 leaves one step past")
+    }
+
     func testGlanceSourceGating() {
         let all = CompanionComponents()
         XCTAssertEqual(CompanionStore.glanceSource(for: .today, components: all, today: Date(), calendar: utcCalendar), .insightsHourly)

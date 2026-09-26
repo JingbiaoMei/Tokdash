@@ -11,6 +11,16 @@ enum CompanionLayout {
     /// the All view shows noticeably more subscription rows before scrolling.
     static let quotaMinHeight: CGFloat = 150
     static let quotaMaxHeight: CGFloat = 340
+
+    /// Settings opens tall enough to show every section without scrolling (user request:
+    /// "wider but not taller - fit the content"): 980pt covers the full grouped form with
+    /// server cards, capped by the screen's visible height so the window never overhangs.
+    /// If the content is STILL taller (many servers), the grouped Form scrolls as before,
+    /// and the window stays freely resizable either way.
+    static var settingsIdealHeight: CGFloat {
+        let visible = NSScreen.main?.visibleFrame.height ?? 900
+        return min(980, max(640, visible - 44))
+    }
 }
 
 /// `MenuBarExtra` reads an AppKit image's intrinsic canvas when it creates the status
@@ -53,6 +63,13 @@ struct TokdashCompanionApp: App {
         notificationDelegate = del
         // Install the delegate early so notification taps + foreground delivery are handled.
         UNUserNotificationCenter.current().delegate = del
+        // One-shot: AppKit persists the Settings window frame, and the persisted 640 pt
+        // height kept the form scrolling after the fit-content default landed. Discard the
+        // saved frame ONCE so the new ideal height takes effect; later user resizes stick.
+        if !UserDefaults.standard.bool(forKey: "tokdashSettingsFrameFitV1") {
+            UserDefaults.standard.removeObject(forKey: "NSWindow Frame com_apple_SwiftUI_Settings_window")
+            UserDefaults.standard.set(true, forKey: "tokdashSettingsFrameFitV1")
+        }
     }
 
     var body: some Scene {

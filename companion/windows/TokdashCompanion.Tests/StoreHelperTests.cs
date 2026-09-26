@@ -689,4 +689,57 @@ public class StoreHelperTests
         }
         finally { CompanionStore.ClockOverride = null; }
     }
+
+    [TestMethod]
+    public void WarmupPlan_TwoUpSkipsVisitedAndStopsAtTheLimit()
+    {
+        static bool None(int _) => false;
+        CollectionAssert.AreEqual(new List<int> { 1, 2 }, CompanionStore.WarmupPlan(UsagePeriod.Today, 0, None));
+        CollectionAssert.AreEqual(new List<int> { 1, 2 }, CompanionStore.WarmupPlan(UsagePeriod.Year, 0, None));
+        CollectionAssert.AreEqual(new List<int> { 3 }, CompanionStore.WarmupPlan(UsagePeriod.Today, 1, s => s is 0 or 1 or 2));
+        CollectionAssert.AreEqual(new List<int>(), CompanionStore.WarmupPlan(UsagePeriod.Year, 0, s => s is 1 or 2));
+        CollectionAssert.AreEqual(new List<int>(), CompanionStore.WarmupPlan(UsagePeriod.Today, 13, None));
+        // Year's limit is 2: one back, only 2 remains on the past side.
+        CollectionAssert.AreEqual(new List<int> { 2 }, CompanionStore.WarmupPlan(UsagePeriod.Year, 1, None));
+    }
+
+    [TestMethod]
+    public async Task Warmup_WarmsNextTwoInstances_AndVisitedOnesExactlyOnce()
+    {
+        CompanionStore.ClockOverride = new DateTimeOffset(2026, 9, 24, 12, 0, 0, TimeSpan.Zero);
+        try
+        {
+            var client = new FakeClient();
+            var store = new CompanionStore(client);
+            // Anchor the granularity explicitly: the settings file is shared across tests
+            // and earlier cases may have persisted a different segment.
+            store.SelectPeriod(UsagePeriod.Today);
+            store.WarmupDelayMsForTests(0);
+            await store.RefreshAsync();
+
+            // Present settles -> offsets 1 and 2 warm: usage + active-time + hourly,
+            // the same fetch group the real step would send (contract §Instance stepper).
+            await Until(() => store.WarmDoneCount >= 3);
+            var reqs = client.Requests.ToList();
+            CollectionAssert.Contains(reqs, "/api/usage?date_from=2026-09-23&date_to=2026-09-23");
+            CollectionAssert.Contains(reqs, "/api/active-time?date_from=2026-09-23&date_to=2026-09-23");
+            CollectionAssert.Contains(reqs, "/api/insights?facets=hourly&date_from=2026-09-23&date_to=2026-09-23");
+            CollectionAssert.Contains(reqs, "/api/usage?date_from=2026-09-22&date_to=2026-09-22");
+            CollectionAssert.Contains(reqs, "/api/insights?facets=hourly&date_from=2026-09-22&date_to=2026-09-22");
+
+            // Visiting offset 1 re-arms from there: 3 warms next, already-warmed 2 skips.
+            store.StepPeriod(1);
+            await store.RefreshAsync();
+            await Until(() => client.Requests.Contains("/api/usage?date_from=2026-09-21&date_to=2026-09-21"));
+            Assert.AreEqual(1, client.Requests.Count(r => r == "/api/usage?date_from=2026-09-22&date_to=2026-09-22"),
+                "a warmed instance is never re-warmed");
+        }
+        finally { CompanionStore.ClockOverride = null; }
+    }
+
+    private static async Task Until(Func<bool> condition)
+    {
+        for (var i = 0; i < 400 && !condition(); i++) await Task.Delay(10);
+        Assert.IsTrue(condition(), "warm-up requests did not arrive in time");
+    }
 }

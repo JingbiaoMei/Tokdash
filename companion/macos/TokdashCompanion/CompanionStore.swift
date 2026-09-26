@@ -243,6 +243,81 @@ final class CompanionStore: NSObject, ObservableObject {
         }
     }
 
+    // E12 instance warm-up (contract §Instance stepper, warm-up clause): the server
+    // caches closed windows indefinitely but COLD first visits cost a full window
+    // computation (~2-6 s measured on real data), which made stepper clicks feel dead.
+    // Once an instance settles, fetch its next one or two walk-back instances in the
+    // background so the next click lands on the server's cache. Opportunistic: any real
+    // refresh cancels in-flight warm-up, every failure is silent, results are discarded,
+    // and each (period, instance, day) is warmed at most once per session.
+    private var warmTask: Task<Void, Never>?
+    private var warmDone: Set<String> = []
+    static var warmupDelayNs: UInt64 = 1_200_000_000 // test seam (same spirit as frozenNow)
+
+    private func warmKey(_ period: UsagePeriod, _ offset: Int, _ day: String) -> String {
+        "\(period.token)|\(offset)|\(day)"
+    }
+
+    /// Plan the warm-up for a settled instance: the next one or two past-side instances,
+    /// skipping anything already visited or warmed (contract §Instance stepper, warm-up
+    /// clause). Pure so tests can pin the walk without a client.
+    nonisolated static func warmupPlan(period: UsagePeriod, offset: Int, isDone: (Int) -> Bool) -> [Int] {
+        var steps: [Int] = []
+        var step = offset + 1
+        while step <= min(offset + 2, earlierLimit(for: period)) {
+            if !isDone(step) { steps.append(step) }
+            step += 1
+        }
+        return steps
+    }
+
+    private static func dayKey(_ date: Date, calendar: Calendar) -> String {
+        String(format: "%04d-%02d-%02d",
+               calendar.component(.year, from: date),
+               calendar.component(.month, from: date),
+               calendar.component(.day, from: date))
+    }
+
+    /// Called after a refresh cycle settles: warm `offset+1`/`offset+2` of the selected
+    /// granularity. Only for a usage-side success on the single-server client; a step
+    /// (or any refresh) cancels this via `refresh()`.
+    private func scheduleInstanceWarmup() {
+        warmTask?.cancel()
+        warmTask = nil
+        guard lastUsage != nil, settings.servers.filter(\.enabled).count <= 1 else { return }
+        let period = settings.selectedPeriod
+        let offset = periodOffset
+        let today = Self.now
+        let calendar = Calendar.current
+        let day = Self.dayKey(today, calendar: calendar)
+        // The instance that just settled counts as visited: it was just fetched for real.
+        warmDone.insert(warmKey(period, offset, day))
+        let steps = Self.warmupPlan(period: period, offset: offset) {
+            warmDone.contains(warmKey(period, $0, day))
+        }
+        guard !steps.isEmpty else { return }
+        warmTask = Task { [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(nanoseconds: Self.warmupDelayNs)
+            guard !Task.isCancelled else { return }
+            let glanceSource = Self.glanceSource(for: period, components: self.settings.components,
+                                                 today: today, calendar: calendar)
+            for step in steps {
+                // The user moved on (or the day rolled): abandon; the next settle re-arms.
+                if Task.isCancelled { return }
+                guard self.periodOffset == offset, self.settings.selectedPeriod == period else { return }
+                guard let w = Self.steppedRange(period: period, offset: step, today: today,
+                                                calendar: calendar) else { continue }
+                _ = try? await self.client.usageRange(from: w.from, to: w.to)
+                _ = try? await self.client.activeTimeRange(from: w.from, to: w.to)
+                _ = try? await Self.fetchGlance(self.client, source: glanceSource, period: period, offset: step)
+                // Marked only on completion: a cancelled chain re-warms on the next
+                // settle, never silently skips.
+                self.warmDone.insert(self.warmKey(period, step, day))
+            }
+        }
+    }
+
     /// The E12 stepped instance as explicit calendar dates: the FULL elapsed window N
     /// units back, or nil at the present (which keeps the existing wire forms). Stepped
     /// instances never send `period=` (contract §Instance stepper).
@@ -444,7 +519,15 @@ final class CompanionStore: NSObject, ObservableObject {
     /// replacement's timer.
     func refresh() {
         refreshTask?.cancel()
-        refreshTask = Task { await runRefresh(); guard !Task.isCancelled else { return }; reschedule() }
+        warmTask?.cancel() // warm-up is opportunistic: any real fetch (poll, manual,
+        // step) owns the server's compute window; the settle at the end re-arms it.
+        refreshTask = Task { [weak self] in
+            guard let self else { return }
+            await self.runRefresh()
+            guard !Task.isCancelled else { return }
+            self.scheduleInstanceWarmup()
+            self.reschedule()
+        }
     }
 
     private func runRefresh() async {

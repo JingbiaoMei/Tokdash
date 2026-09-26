@@ -185,6 +185,20 @@ silently - same rule as a stats failure.
 - Per-instance fetch semantics are identical to per-period semantics (same
   fetch group, same failure handling).
 
+**Instance warm-up (prefetch).** The server caches closed windows
+indefinitely, but it *computes* each one only the first time - a cold first
+visit costs a full window computation (measured on real data: ~2-6 s for the
+`hourly` facet over an explicit range). To keep stepping instant, once an
+instance has settled a companion **SHOULD** warm the next one or two
+walk-back instances in the background: the same fetch group
+(`/api/usage`, `/api/active-time`, plus the facet the instance's glance uses)
+for `offset+1`, then `offset+2`, strictly sequential, read-only GETs, results
+discarded. Warm-up **MUST** be cancelled by any segment/instance change or
+manual refresh - a fresh user action always outranks in-flight warm-up -
+**MUST** fail silently, and **MUST NOT** warm the current instance or any
+instance already visited in this session. It is a UX affordance, not a
+protocol requirement: a companion that omits it stays conformant.
+
 **Kicker labels** (all derived client-side, L10n):
 
 | Instance | Kicker |

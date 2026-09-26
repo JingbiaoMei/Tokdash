@@ -504,6 +504,7 @@ public sealed class CompanionStore : BindableBase
     private void StartUsageSideTransition(UsagePeriod period, int offset)
     {
         _cts?.Cancel();
+        _warmCts?.Cancel(); // a fresh user action always outranks in-flight warm-up
         _lastUsage = null;
         _lastActiveMs = null;
         _lastInsights = null;
@@ -552,6 +553,74 @@ public sealed class CompanionStore : BindableBase
         UsagePeriod.Month => 11,
         _ => 2,
     };
+
+    // E12 instance warm-up (contract §Instance stepper, warm-up clause): the server
+    // caches closed windows indefinitely but COLD first visits cost a full window
+    // computation (~2-6 s measured on real data), which made stepper clicks feel dead.
+    // Once an instance settles, fetch its next one or two walk-back instances in the
+    // background so the next click lands on the server's cache. Opportunistic: any new
+    // refresh cancels in-flight warm-up, every failure is silent, results are discarded,
+    // and each (period, instance, day) is warmed at most once per session.
+    private CancellationTokenSource? _warmCts;
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<(UsagePeriod, int, string), byte> _warmDone = new();
+    private int _warmupDelayMs = 1200;
+    // Per-instance test seams (a static delay would speed up OTHER tests' warm-ups too,
+    // racing their exact request-count asserts): same spirit as ClockOverride.
+    internal void WarmupDelayMsForTests(int ms) => _warmupDelayMs = ms;
+    internal int WarmDoneCount => _warmDone.Count; // completed/visited instances
+
+    /// Plan the warm-up for a settled instance: the next one or two past-side instances,
+    /// skipping anything already visited or warmed (contract §Instance stepper, warm-up
+    /// clause). Pure so tests can pin the walk without a client.
+    internal static List<int> WarmupPlan(UsagePeriod period, int offset, Func<int, bool> isDone)
+    {
+        var steps = new List<int>();
+        for (var step = offset + 1; step <= Math.Min(offset + 2, EarlierLimit(period)); step++)
+            if (!isDone(step)) steps.Add(step);
+        return steps;
+    }
+
+    private void ScheduleInstanceWarmup(UsagePeriod period, int offset, DateOnly today)
+    {
+        _warmCts?.Cancel();
+        _warmCts?.Dispose();
+        _warmCts = null;
+        // The instance that just settled counts as visited: it was just fetched for real.
+        var dayKey = today.ToString("yyyy-MM-dd");
+        _warmDone.TryAdd((period, offset, dayKey), 0);
+        var steps = WarmupPlan(period, offset, s => _warmDone.ContainsKey((period, s, dayKey)));
+        if (steps.Count == 0) return;
+        // Windows are computed synchronously at schedule time: the chain can never slide
+        // out from under a mid-flight clock/day change (and tests stay deterministic).
+        var windows = steps
+            .Select(step => (Step: step, Window: SteppedRange(period, step, today)))
+            .Where(x => x.Window is not null)
+            .Select(x => (x.Step, Window: x.Window!.Value))
+            .ToList();
+        if (windows.Count == 0) return;
+        var cts = _warmCts = new CancellationTokenSource();
+        var ct = cts.Token;
+        _ = Task.Run(async () =>
+        {
+            try { await Task.Delay(_warmupDelayMs, ct); } catch (OperationCanceledException) { return; }
+            var glanceSource = _client is MultiServerTokdashClient
+                ? GlanceSource.None
+                : GlanceSourceFor(period, Settings.Components);
+            foreach (var (step, w) in windows)
+            {
+                // The user moved on (or the day rolled): abandon; the next settle re-arms.
+                if (ct.IsCancellationRequested || PeriodOffset != offset || SelectedPeriod != period) return;
+                try { _ = await _client.UsageRangeAsync(w.From, w.To, ct); }
+                catch (OperationCanceledException) { return; } catch { }
+                try { _ = await _client.ActiveTimeRangeAsync(w.From, w.To, ct); }
+                catch (OperationCanceledException) { return; } catch { }
+                try { _ = await FetchGlanceAsync(_client, glanceSource, period, today, step, ct); }
+                catch (OperationCanceledException) { return; } catch { }
+                _warmDone.TryAdd((period, step, dayKey), 0); // marked only on completion: a
+                // cancelled chain re-warms on the next settle, never silently skipped.
+            }
+        });
+    }
 
     /// <summary>
     /// The E12 stepped instance as explicit calendar dates: the FULL elapsed window N units
@@ -859,6 +928,8 @@ public sealed class CompanionStore : BindableBase
     public async Task RefreshAsync()
     {
         _cts?.Cancel();
+        _warmCts?.Cancel(); // warm-up is opportunistic: any real fetch (poll, manual,
+        // step) owns the server's compute window; the settle at the end re-arms it.
         _cts = new CancellationTokenSource();
         var ct = _cts.Token;
         // Seam-aware: the week's date range and the daily-glance window belong to the same
@@ -942,6 +1013,10 @@ public sealed class CompanionStore : BindableBase
                     || (_client is MultiServerTokdashClient m && m.FailedServerLabels.Count > 0); // partial -> 15s short retry
                 EvaluateLowQuotaNotifications(snap);
                 EvaluateResetCreditNotifications(snap);
+                // E12: the instance has settled (and its usage side actually loaded) - warm
+                // the next walk-back instances so the stepper clicks land on cache hits.
+                // A usage-side failure means the server is struggling: skip, retry on settle.
+                if (!usageFailed) ScheduleInstanceWarmup(period, offset, today);
             }
             UpdateServerFailureCounts();
         }

@@ -41,18 +41,14 @@ struct SettingsView: View {
                     Label(L10n.t("add_server"), systemImage: "plus")
                 }
                 .buttonStyle(.bordered)
-                Text(L10n.t("server_hint"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                .help(L10n.t("server_hint"))
             }
             Section(L10n.t("section_startup")) {
                 Toggle(L10n.t("launch_at_login"), isOn: $launchAtLogin)
             }
             Section(L10n.t("section_notifications")) {
                 Toggle(L10n.t("low_quota_notifications"), isOn: $lowQuotaNotifications)
-                Text(L10n.t("low_quota_hint"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .help(L10n.t("low_quota_hint"))
             }
             Section(L10n.t("section_thresholds")) {
                 Slider(value: $fiveHourThreshold, in: 5...50, step: 1) {
@@ -85,9 +81,7 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Toggle(L10n.t("update_auto_check"), isOn: $automaticUpdateChecks)
-                Text(L10n.t("update_auto_check_hint"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .help(L10n.t("update_auto_check_hint"))
                 updateStatusView
                 HStack(spacing: 8) {
                     Button(L10n.t("update_check_now")) { store.checkForUpdates(manual: true) }
@@ -129,9 +123,7 @@ struct SettingsView: View {
                         Text(lang.displayName).tag(lang)
                     }
                 }
-                Text(L10n.t("language_hint"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                .help(L10n.t("language_hint"))
             }
         }
         .formStyle(.grouped)
@@ -142,7 +134,7 @@ struct SettingsView: View {
         // .windowResizability) impossible to drag larger. This gives a real default and
         // a draggable range; the Form scrolls when the window is short.
         .frame(minWidth: 480, idealWidth: 480, maxWidth: 680,
-               minHeight: 420, idealHeight: 640, maxHeight: .infinity)
+               minHeight: 420, idealHeight: CompanionLayout.settingsIdealHeight, maxHeight: .infinity)
         // Match the clean white content surface used by standard settings windows in
         // light mode while retaining a readable system-managed surface in dark mode.
         .background(Color(nsColor: .textBackgroundColor).ignoresSafeArea())
@@ -263,12 +255,16 @@ struct SettingsView: View {
             }
             .opacity(isEnabled ? 1 : 0.55)
 
-            HStack(spacing: 8) {
-                Color.clear.frame(width: 60, height: 1)
-                testResultView(testResults[id] ?? .idle)
+            // The result row appears only when a test ran: idle cards don't reserve its
+            // height (the form has to fit every section without scrolling).
+            if (testResults[id] ?? .idle) != .idle {
+                HStack(spacing: 8) {
+                    Color.clear.frame(width: 60, height: 1)
+                    testResultView(testResults[id] ?? .idle)
+                }
+                .frame(height: 16)
+                .opacity(isEnabled ? 1 : 0.55)
             }
-            .frame(height: 16)
-            .opacity(isEnabled ? 1 : 0.55)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)

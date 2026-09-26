@@ -1,0 +1,88 @@
+{
+  "period": "year",
+  "total_tokens": 1243500000,
+  "total_cost": 312.4,
+  "total_messages": 13204,
+  "cache_hit_rate": 0.9581,
+  "by_tool": {
+    "codex": {
+      "tokens": 812400000,
+      "cost": 201.1,
+      "tokens_in": 48744000,
+      "tokens_cache": 763656000,
+      "cache_hit_rate": 0.94
+    },
+    "claude": {
+      "tokens": 344600000,
+      "cost": 92.3,
+      "tokens_in": 10338000,
+      "tokens_cache": 334262000,
+      "cache_hit_rate": 0.97
+    },
+    "opencode": {
+      "tokens": 86500000,
+      "cost": 19.0,
+      "tokens_in": 4325000,
+      "tokens_cache": 82175000,
+      "cache_hit_rate": 0.95
+    }
+  },
+  "combined_models": [
+    {
+      "name": "openai/gpt-5.6-sol",
+      "tokens": 780000000,
+      "tokens_in": 39000000,
+      "tokens_out": 7800000,
+      "tokens_cache": 741000000,
+      "cost": 188.4,
+      "messages": 9120,
+      "cache_hit_rate": 0.95,
+      "source": "codex"
+    },
+    {
+      "name": "anthropic/claude-opus-4-7",
+      "tokens": 220000000,
+      "tokens_in": 13200000,
+      "tokens_out": 2200000,
+      "tokens_cache": 206800000,
+      "cost": 68.2,
+      "messages": 1860,
+      "cache_hit_rate": 0.94,
+      "source": "claude"
+    },
+    {
+      "name": "anthropic/claude-sonnet-4-6",
+      "tokens": 140000000,
+      "tokens_in": 4200000,
+      "tokens_out": 1400000,
+      "tokens_cache": 135800000,
+      "cost": 22.3,
+      "messages": 1240,
+      "cache_hit_rate": 0.97,
+      "source": "claude"
+    },
+    {
+      "name": "anthropic/claude-haiku-4-5",
+      "tokens": 86500000,
+      "tokens_in": 4325000,
+      "tokens_out": 865000,
+      "tokens_cache": 82175000,
+      "cost": 19.0,
+      "messages": 782,
+      "cache_hit_rate": 0.95,
+      "source": "opencode"
+    }
+  ],
+  "comparison": {
+    "tokens_prev": 0,
+    "cost_prev": 0.0,
+    "messages_prev": 0,
+    "tokens_pct": null,
+    "cost_pct": null,
+    "messages_pct": null
+  },
+  "timestamp": "2026-07-26T20:20:00+00:00",
+  "response_cache": {
+    "age_seconds": 90
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "images" : [
+    {
+      "filename" : "antigravity.png",
+      "idiom" : "mac" ,
+      "scale" : "1x"
+    }
+  ],
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  }
+}

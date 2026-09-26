@@ -1,0 +1,216 @@
+{
+  "schema_version": 1,
+  "timezone": "Etc/UTC",
+  "coverage": {
+    "stored_sources": [
+      "codex",
+      "claude",
+      "kimi",
+      "opencode",
+      "openclaw"
+    ],
+    "live_sources": [],
+    "group_count": 5
+  },
+  "timestamp": "2026-07-26T20:20:00+00:00",
+  "response_cache": {
+    "age_seconds": 45
+  },
+  "range": {
+    "period_requested": "today",
+    "period_resolved": "today",
+    "days": 1,
+    "recognized": true,
+    "from": "2026-07-26",
+    "to": "2026-07-26"
+  },
+  "facets": [
+    "hourly"
+  ],
+  "totals": {
+    "tokens": 18700000,
+    "cost": 3.42,
+    "messages": 248,
+    "entries": 512
+  },
+  "hourly": {
+    "buckets": [
+      {
+        "hour": 0,
+        "tokens": 0,
+        "cost": 0,
+        "messages": 0,
+        "entries": 0
+      },
+      {
+        "hour": 1,
+        "tokens": 0,
+        "cost": 0,
+        "messages": 0,
+        "entries": 0
+      },
+      {
+        "hour": 2,
+        "tokens": 0,
+        "cost": 0,
+        "messages": 0,
+        "entries": 0
+      },
+      {
+        "hour": 3,
+        "tokens": 0,
+        "cost": 0,
+        "messages": 0,
+        "entries": 0
+      },
+      {
+        "hour": 4,
+        "tokens": 0,
+        "cost": 0,
+        "messages": 0,
+        "entries": 0
+      },
+      {
+        "hour": 5,
+        "tokens": 0,
+        "cost": 0,
+        "messages": 0,
+        "entries": 0
+      },
+      {
+        "hour": 6,
+        "tokens": 60000,
+        "cost": 0.010973,
+        "messages": 1,
+        "entries": 1
+      },
+      {
+        "hour": 7,
+        "tokens": 240000,
+        "cost": 0.043893,
+        "messages": 3,
+        "entries": 3
+      },
+      {
+        "hour": 8,
+        "tokens": 700000,
+        "cost": 0.128021,
+        "messages": 9,
+        "entries": 9
+      },
+      {
+        "hour": 9,
+        "tokens": 1200000,
+        "cost": 0.219465,
+        "messages": 16,
+        "entries": 16
+      },
+      {
+        "hour": 10,
+        "tokens": 1600000,
+        "cost": 0.29262,
+        "messages": 21,
+        "entries": 21
+      },
+      {
+        "hour": 11,
+        "tokens": 1350000,
+        "cost": 0.246898,
+        "messages": 18,
+        "entries": 18
+      },
+      {
+        "hour": 12,
+        "tokens": 900000,
+        "cost": 0.164599,
+        "messages": 12,
+        "entries": 12
+      },
+      {
+        "hour": 13,
+        "tokens": 1900000,
+        "cost": 0.347487,
+        "messages": 25,
+        "entries": 25
+      },
+      {
+        "hour": 14,
+        "tokens": 3440000,
+        "cost": 0.629134,
+        "messages": 46,
+        "entries": 46
+      },
+      {
+        "hour": 15,
+        "tokens": 1750000,
+        "cost": 0.320053,
+        "messages": 23,
+        "entries": 23
+      },
+      {
+        "hour": 16,
+        "tokens": 1500000,
+        "cost": 0.274332,
+        "messages": 20,
+        "entries": 20
+      },
+      {
+        "hour": 17,
+        "tokens": 850000,
+        "cost": 0.155455,
+        "messages": 11,
+        "entries": 11
+      },
+      {
+        "hour": 18,
+        "tokens": 750000,
+        "cost": 0.137166,
+        "messages": 10,
+        "entries": 10
+      },
+      {
+        "hour": 19,
+        "tokens": 1050000,
+        "cost": 0.192032,
+        "messages": 14,
+        "entries": 14
+      },
+      {
+        "hour": 20,
+        "tokens": 800000,
+        "cost": 0.14631,
+        "messages": 11,
+        "entries": 11
+      },
+      {
+        "hour": 21,
+        "tokens": 400000,
+        "cost": 0.073155,
+        "messages": 5,
+        "entries": 5
+      },
+      {
+        "hour": 22,
+        "tokens": 150000,
+        "cost": 0.027433,
+        "messages": 2,
+        "entries": 2
+      },
+      {
+        "hour": 23,
+        "tokens": 60000,
+        "cost": 0.010974,
+        "messages": 1,
+        "entries": 1
+      }
+    ],
+    "peak_hour": 14,
+    "night_share": 0.0112,
+    "night_hours": [
+      0,
+      1,
+      22,
+      23
+    ]
+  }
+}

@@ -26,7 +26,7 @@ public sealed class CompanionSettings
     public const string DefaultBaseURL = "http://127.0.0.1:55423";
 
     [JsonPropertyName("version")]
-    public int Version { get; set; } = 2;
+    public int Version { get; set; } = 3;
     [JsonPropertyName("servers")]
     public List<CompanionServerSettings> Servers { get; set; } =
         [CompanionServerSettings.Create(DefaultBaseURL)];
@@ -57,12 +57,36 @@ public sealed class CompanionSettings
     public QuotaThresholds Thresholds { get; set; } = QuotaThresholds.Defaults;
     public AppLanguage Language { get; set; } = AppLanguage.System;
 
+    /// <summary>
+    /// Schema v3: the six feature components (contract §Components and settings). A v2 file
+    /// has no "components" key: every toggle then reads as ON, so upgrading never silently
+    /// disables a shipped feature. Unknown keys are ignored in both directions.
+    /// </summary>
+    [JsonPropertyName("components")]
+    public CompanionComponents Components { get; set; } = new();
+
+    /// <summary>Schema v3: the persisted period-segment selection (default today). Stored on
+    /// its own - it is a preference, not a component toggle.</summary>
+    [JsonPropertyName("selectedPeriod")]
+    public UsagePeriod SelectedPeriod { get; set; } = UsagePeriod.Today;
+
+    /// <summary>Schema v3: rows per top-ranks list - tools and models share the count
+    /// (contract §Top ranks). Clamped to 3..8 on every write; the flyout grows to fit.</summary>
+    [JsonPropertyName("rankRows")]
+    public int RankRows
+    {
+        get => rankRows;
+        set => rankRows = Math.Clamp(value, 3, 8);
+    }
+    private int rankRows = 3;
+
     // Update checking. Every field is optional in the JSON, so a settings file written by
     // v0.1.4 (which predates all of this) decodes with the feature off and every existing
     // preference intact.
 
     /// <summary>Update checking is opt-in: the companion contacts no third party until asked.</summary>
-    public bool AutomaticUpdateChecks { get; set; } = false;
+    /// <summary>On by default; the Settings checkbox is how you opt OUT.</summary>
+    public bool AutomaticUpdateChecks { get; set; } = true;
     /// <summary>Last check ATTEMPT (success or failure) - the 24h throttle reads this.</summary>
     public DateTimeOffset? LastUpdateCheckAt { get; set; }
     /// <summary>Last version found newer than this build, and its validated release page.
@@ -100,7 +124,10 @@ public sealed class CompanionSettings
                 {
                     settings.Servers = [CompanionServerSettings.Create(legacy.GetString() ?? DefaultBaseURL)];
                 }
-                settings.Version = 2;
+                // v1/v2 files migrate up: absent components = all defaults on (schema v3),
+                // and the version stamp is rewritten so the file is self-describing.
+                settings.Version = 3;
+                settings.Components ??= new CompanionComponents();
                 if (settings.Servers.Count == 0) settings.Servers.Add(CompanionServerSettings.Create(DefaultBaseURL));
                 return settings;
             }

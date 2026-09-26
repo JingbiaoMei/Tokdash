@@ -1,0 +1,2285 @@
+{
+  "meta": {
+    "source": "merged"
+  },
+  "summary": {
+    "totalTokens": 1115969290,
+    "totalCost": 227.93,
+    "activeDays": 251,
+    "totalDays": 315
+  },
+  "contributions": [
+    {
+      "date": "2025-09-15",
+      "totals": {
+        "tokens": 2730829,
+        "cost": 0.52,
+        "messages": 29
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2025-09-17",
+      "totals": {
+        "tokens": 6335241,
+        "cost": 1.42,
+        "messages": 114
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2025-09-19",
+      "totals": {
+        "tokens": 1371979,
+        "cost": 0.22,
+        "messages": 222
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2025-09-21",
+      "totals": {
+        "tokens": 3945328,
+        "cost": 0.92,
+        "messages": 36
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2025-09-22",
+      "totals": {
+        "tokens": 6855194,
+        "cost": 0.88,
+        "messages": 118
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2025-09-24",
+      "totals": {
+        "tokens": 5058837,
+        "cost": 0.99,
+        "messages": 65
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2025-09-25",
+      "totals": {
+        "tokens": 3232085,
+        "cost": 0.45,
+        "messages": 101
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2025-09-26",
+      "totals": {
+        "tokens": 1253424,
+        "cost": 0.28,
+        "messages": 110
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2025-09-27",
+      "totals": {
+        "tokens": 7373808,
+        "cost": 1.92,
+        "messages": 243
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2025-09-28",
+      "totals": {
+        "tokens": 7803172,
+        "cost": 1.44,
+        "messages": 132
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2025-09-29",
+      "totals": {
+        "tokens": 4295259,
+        "cost": 0.58,
+        "messages": 158
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2025-09-30",
+      "totals": {
+        "tokens": 5962565,
+        "cost": 1.5,
+        "messages": 152
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2025-10-01",
+      "totals": {
+        "tokens": 1428106,
+        "cost": 0.2,
+        "messages": 219
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2025-10-02",
+      "totals": {
+        "tokens": 5938744,
+        "cost": 0.88,
+        "messages": 255
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2025-10-03",
+      "totals": {
+        "tokens": 1502255,
+        "cost": 0.39,
+        "messages": 165
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2025-10-04",
+      "totals": {
+        "tokens": 6075018,
+        "cost": 1.38,
+        "messages": 238
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2025-10-07",
+      "totals": {
+        "tokens": 1290518,
+        "cost": 0.17,
+        "messages": 163
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2025-10-08",
+      "totals": {
+        "tokens": 7676611,
+        "cost": 1.31,
+        "messages": 202
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2025-10-09",
+      "totals": {
+        "tokens": 6021782,
+        "cost": 0.75,
+        "messages": 241
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2025-10-10",
+      "totals": {
+        "tokens": 2164541,
+        "cost": 0.45,
+        "messages": 116
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2025-10-11",
+      "totals": {
+        "tokens": 2369968,
+        "cost": 0.6,
+        "messages": 208
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2025-10-12",
+      "totals": {
+        "tokens": 8530000,
+        "cost": 1.15,
+        "messages": 234
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2025-10-13",
+      "totals": {
+        "tokens": 4861367,
+        "cost": 1.36,
+        "messages": 225
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2025-10-14",
+      "totals": {
+        "tokens": 4871130,
+        "cost": 1.2,
+        "messages": 188
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2025-10-15",
+      "totals": {
+        "tokens": 6582745,
+        "cost": 1.92,
+        "messages": 82
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2025-10-17",
+      "totals": {
+        "tokens": 4114729,
+        "cost": 0.5,
+        "messages": 98
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2025-10-18",
+      "totals": {
+        "tokens": 268679,
+        "cost": 0.04,
+        "messages": 194
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2025-10-19",
+      "totals": {
+        "tokens": 5545416,
+        "cost": 1.62,
+        "messages": 32
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2025-10-20",
+      "totals": {
+        "tokens": 6783025,
+        "cost": 1.3,
+        "messages": 206
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2025-10-22",
+      "totals": {
+        "tokens": 1244345,
+        "cost": 0.19,
+        "messages": 111
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2025-10-23",
+      "totals": {
+        "tokens": 2044290,
+        "cost": 0.37,
+        "messages": 31
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2025-10-25",
+      "totals": {
+        "tokens": 1902289,
+        "cost": 0.55,
+        "messages": 18
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2025-10-27",
+      "totals": {
+        "tokens": 6512081,
+        "cost": 0.96,
+        "messages": 134
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2025-10-28",
+      "totals": {
+        "tokens": 6309648,
+        "cost": 1.3,
+        "messages": 64
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2025-10-29",
+      "totals": {
+        "tokens": 8018005,
+        "cost": 1.66,
+        "messages": 164
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2025-11-01",
+      "totals": {
+        "tokens": 4641883,
+        "cost": 0.96,
+        "messages": 87
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2025-11-02",
+      "totals": {
+        "tokens": 3642936,
+        "cost": 1.06,
+        "messages": 190
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2025-11-04",
+      "totals": {
+        "tokens": 653697,
+        "cost": 0.17,
+        "messages": 157
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2025-11-05",
+      "totals": {
+        "tokens": 1726903,
+        "cost": 0.42,
+        "messages": 138
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2025-11-06",
+      "totals": {
+        "tokens": 3002500,
+        "cost": 0.55,
+        "messages": 119
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2025-11-07",
+      "totals": {
+        "tokens": 8633856,
+        "cost": 1.55,
+        "messages": 119
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2025-11-08",
+      "totals": {
+        "tokens": 3474007,
+        "cost": 0.92,
+        "messages": 210
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2025-11-09",
+      "totals": {
+        "tokens": 4004057,
+        "cost": 0.62,
+        "messages": 257
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2025-11-10",
+      "totals": {
+        "tokens": 686206,
+        "cost": 0.2,
+        "messages": 148
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2025-11-11",
+      "totals": {
+        "tokens": 3448823,
+        "cost": 0.84,
+        "messages": 181
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2025-11-12",
+      "totals": {
+        "tokens": 6063966,
+        "cost": 1.77,
+        "messages": 191
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2025-11-15",
+      "totals": {
+        "tokens": 5866294,
+        "cost": 0.92,
+        "messages": 5
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2025-11-16",
+      "totals": {
+        "tokens": 5971478,
+        "cost": 1.58,
+        "messages": 48
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2025-11-17",
+      "totals": {
+        "tokens": 2211649,
+        "cost": 0.63,
+        "messages": 107
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2025-11-18",
+      "totals": {
+        "tokens": 3195097,
+        "cost": 0.63,
+        "messages": 175
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2025-11-20",
+      "totals": {
+        "tokens": 6841067,
+        "cost": 1.39,
+        "messages": 48
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2025-11-21",
+      "totals": {
+        "tokens": 3052188,
+        "cost": 0.91,
+        "messages": 19
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2025-11-22",
+      "totals": {
+        "tokens": 8007342,
+        "cost": 2.12,
+        "messages": 79
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2025-11-23",
+      "totals": {
+        "tokens": 8158388,
+        "cost": 1.94,
+        "messages": 184
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2025-11-24",
+      "totals": {
+        "tokens": 2397544,
+        "cost": 0.3,
+        "messages": 57
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2025-11-25",
+      "totals": {
+        "tokens": 2536239,
+        "cost": 0.5,
+        "messages": 104
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2025-11-26",
+      "totals": {
+        "tokens": 3740702,
+        "cost": 0.47,
+        "messages": 113
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2025-11-27",
+      "totals": {
+        "tokens": 4235581,
+        "cost": 1.09,
+        "messages": 171
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2025-11-28",
+      "totals": {
+        "tokens": 7229864,
+        "cost": 1.95,
+        "messages": 36
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2025-11-29",
+      "totals": {
+        "tokens": 6135510,
+        "cost": 1.73,
+        "messages": 220
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2025-11-30",
+      "totals": {
+        "tokens": 8616272,
+        "cost": 1.24,
+        "messages": 82
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2025-12-01",
+      "totals": {
+        "tokens": 513815,
+        "cost": 0.14,
+        "messages": 98
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2025-12-02",
+      "totals": {
+        "tokens": 2713268,
+        "cost": 0.41,
+        "messages": 247
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2025-12-03",
+      "totals": {
+        "tokens": 2218913,
+        "cost": 0.49,
+        "messages": 171
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2025-12-04",
+      "totals": {
+        "tokens": 8294788,
+        "cost": 2.17,
+        "messages": 59
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2025-12-05",
+      "totals": {
+        "tokens": 1153324,
+        "cost": 0.19,
+        "messages": 146
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2025-12-08",
+      "totals": {
+        "tokens": 667509,
+        "cost": 0.17,
+        "messages": 37
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2025-12-09",
+      "totals": {
+        "tokens": 8681774,
+        "cost": 1.99,
+        "messages": 107
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2025-12-10",
+      "totals": {
+        "tokens": 7789103,
+        "cost": 1.65,
+        "messages": 249
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2025-12-11",
+      "totals": {
+        "tokens": 4354974,
+        "cost": 1.07,
+        "messages": 137
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2025-12-12",
+      "totals": {
+        "tokens": 3598871,
+        "cost": 0.98,
+        "messages": 75
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2025-12-13",
+      "totals": {
+        "tokens": 6782781,
+        "cost": 1.35,
+        "messages": 42
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2025-12-14",
+      "totals": {
+        "tokens": 7386330,
+        "cost": 0.98,
+        "messages": 160
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2025-12-15",
+      "totals": {
+        "tokens": 2791184,
+        "cost": 0.81,
+        "messages": 192
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2025-12-17",
+      "totals": {
+        "tokens": 8047305,
+        "cost": 1.28,
+        "messages": 53
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2025-12-18",
+      "totals": {
+        "tokens": 8374879,
+        "cost": 1.25,
+        "messages": 119
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2025-12-19",
+      "totals": {
+        "tokens": 7439734,
+        "cost": 2.22,
+        "messages": 211
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2025-12-20",
+      "totals": {
+        "tokens": 3484050,
+        "cost": 0.64,
+        "messages": 52
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2025-12-21",
+      "totals": {
+        "tokens": 526869,
+        "cost": 0.1,
+        "messages": 239
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2025-12-22",
+      "totals": {
+        "tokens": 503365,
+        "cost": 0.1,
+        "messages": 156
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2025-12-23",
+      "totals": {
+        "tokens": 1278620,
+        "cost": 0.18,
+        "messages": 122
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2025-12-24",
+      "totals": {
+        "tokens": 1957909,
+        "cost": 0.26,
+        "messages": 144
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2025-12-26",
+      "totals": {
+        "tokens": 4737332,
+        "cost": 1.21,
+        "messages": 221
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2025-12-27",
+      "totals": {
+        "tokens": 4538739,
+        "cost": 0.88,
+        "messages": 258
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2025-12-28",
+      "totals": {
+        "tokens": 1700926,
+        "cost": 0.29,
+        "messages": 98
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2025-12-29",
+      "totals": {
+        "tokens": 1414906,
+        "cost": 0.24,
+        "messages": 13
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2025-12-30",
+      "totals": {
+        "tokens": 4571335,
+        "cost": 0.62,
+        "messages": 118
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2026-01-01",
+      "totals": {
+        "tokens": 7813056,
+        "cost": 0.95,
+        "messages": 218
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2026-01-02",
+      "totals": {
+        "tokens": 4693940,
+        "cost": 1.09,
+        "messages": 27
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2026-01-03",
+      "totals": {
+        "tokens": 4200295,
+        "cost": 1.21,
+        "messages": 87
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2026-01-04",
+      "totals": {
+        "tokens": 3239125,
+        "cost": 0.51,
+        "messages": 164
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2026-01-05",
+      "totals": {
+        "tokens": 3653951,
+        "cost": 0.63,
+        "messages": 96
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2026-01-06",
+      "totals": {
+        "tokens": 504726,
+        "cost": 0.15,
+        "messages": 23
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2026-01-08",
+      "totals": {
+        "tokens": 3378552,
+        "cost": 0.72,
+        "messages": 130
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2026-01-09",
+      "totals": {
+        "tokens": 1983105,
+        "cost": 0.47,
+        "messages": 226
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2026-01-10",
+      "totals": {
+        "tokens": 6794889,
+        "cost": 2.0,
+        "messages": 162
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2026-01-11",
+      "totals": {
+        "tokens": 4051482,
+        "cost": 0.74,
+        "messages": 76
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2026-01-12",
+      "totals": {
+        "tokens": 6030957,
+        "cost": 1.79,
+        "messages": 71
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2026-01-14",
+      "totals": {
+        "tokens": 4488153,
+        "cost": 0.89,
+        "messages": 33
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2026-01-16",
+      "totals": {
+        "tokens": 8688313,
+        "cost": 2.09,
+        "messages": 149
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2026-01-17",
+      "totals": {
+        "tokens": 5116705,
+        "cost": 0.66,
+        "messages": 99
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2026-01-18",
+      "totals": {
+        "tokens": 7679695,
+        "cost": 0.93,
+        "messages": 191
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2026-01-19",
+      "totals": {
+        "tokens": 5627998,
+        "cost": 0.92,
+        "messages": 163
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2026-01-20",
+      "totals": {
+        "tokens": 3269524,
+        "cost": 0.39,
+        "messages": 200
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2026-01-22",
+      "totals": {
+        "tokens": 3571885,
+        "cost": 0.59,
+        "messages": 7
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2026-01-24",
+      "totals": {
+        "tokens": 2613656,
+        "cost": 0.5,
+        "messages": 26
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2026-01-25",
+      "totals": {
+        "tokens": 5227226,
+        "cost": 0.91,
+        "messages": 124
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2026-01-27",
+      "totals": {
+        "tokens": 2804698,
+        "cost": 0.67,
+        "messages": 204
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2026-01-28",
+      "totals": {
+        "tokens": 8491145,
+        "cost": 1.25,
+        "messages": 79
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2026-01-30",
+      "totals": {
+        "tokens": 8806396,
+        "cost": 2.05,
+        "messages": 76
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2026-01-31",
+      "totals": {
+        "tokens": 8661942,
+        "cost": 1.93,
+        "messages": 13
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2026-02-01",
+      "totals": {
+        "tokens": 4057765,
+        "cost": 0.55,
+        "messages": 26
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2026-02-03",
+      "totals": {
+        "tokens": 1960206,
+        "cost": 0.37,
+        "messages": 236
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2026-02-04",
+      "totals": {
+        "tokens": 516094,
+        "cost": 0.12,
+        "messages": 130
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2026-02-05",
+      "totals": {
+        "tokens": 255605,
+        "cost": 0.05,
+        "messages": 40
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2026-02-06",
+      "totals": {
+        "tokens": 8638453,
+        "cost": 2.43,
+        "messages": 52
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2026-02-07",
+      "totals": {
+        "tokens": 1308141,
+        "cost": 0.33,
+        "messages": 247
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2026-02-08",
+      "totals": {
+        "tokens": 1449063,
+        "cost": 0.39,
+        "messages": 125
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2026-02-09",
+      "totals": {
+        "tokens": 3642978,
+        "cost": 0.59,
+        "messages": 240
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2026-02-10",
+      "totals": {
+        "tokens": 6618299,
+        "cost": 0.89,
+        "messages": 152
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2026-02-11",
+      "totals": {
+        "tokens": 3526756,
+        "cost": 0.47,
+        "messages": 80
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2026-02-12",
+      "totals": {
+        "tokens": 5307272,
+        "cost": 1.23,
+        "messages": 73
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2026-02-15",
+      "totals": {
+        "tokens": 1869652,
+        "cost": 0.46,
+        "messages": 255
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2026-02-16",
+      "totals": {
+        "tokens": 8866030,
+        "cost": 1.52,
+        "messages": 243
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2026-02-17",
+      "totals": {
+        "tokens": 2188148,
+        "cost": 0.65,
+        "messages": 107
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2026-02-18",
+      "totals": {
+        "tokens": 1640395,
+        "cost": 0.47,
+        "messages": 13
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2026-02-19",
+      "totals": {
+        "tokens": 1482857,
+        "cost": 0.4,
+        "messages": 235
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2026-02-20",
+      "totals": {
+        "tokens": 6690238,
+        "cost": 1.06,
+        "messages": 112
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2026-02-23",
+      "totals": {
+        "tokens": 4592425,
+        "cost": 1.34,
+        "messages": 72
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2026-02-24",
+      "totals": {
+        "tokens": 8735313,
+        "cost": 1.49,
+        "messages": 62
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2026-02-25",
+      "totals": {
+        "tokens": 4081972,
+        "cost": 0.86,
+        "messages": 253
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2026-02-26",
+      "totals": {
+        "tokens": 2868672,
+        "cost": 0.35,
+        "messages": 256
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2026-02-27",
+      "totals": {
+        "tokens": 7001807,
+        "cost": 1.22,
+        "messages": 77
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2026-02-28",
+      "totals": {
+        "tokens": 6510014,
+        "cost": 1.15,
+        "messages": 174
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2026-03-02",
+      "totals": {
+        "tokens": 6881686,
+        "cost": 0.97,
+        "messages": 105
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2026-03-03",
+      "totals": {
+        "tokens": 5062590,
+        "cost": 0.84,
+        "messages": 38
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2026-03-04",
+      "totals": {
+        "tokens": 1481790,
+        "cost": 0.27,
+        "messages": 224
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2026-03-05",
+      "totals": {
+        "tokens": 1009804,
+        "cost": 0.17,
+        "messages": 31
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2026-03-06",
+      "totals": {
+        "tokens": 4991961,
+        "cost": 1.17,
+        "messages": 81
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2026-03-07",
+      "totals": {
+        "tokens": 4658176,
+        "cost": 0.92,
+        "messages": 166
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2026-03-08",
+      "totals": {
+        "tokens": 6463761,
+        "cost": 1.69,
+        "messages": 224
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2026-03-09",
+      "totals": {
+        "tokens": 6911585,
+        "cost": 1.97,
+        "messages": 109
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2026-03-10",
+      "totals": {
+        "tokens": 1030070,
+        "cost": 0.3,
+        "messages": 215
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2026-03-11",
+      "totals": {
+        "tokens": 2524861,
+        "cost": 0.6,
+        "messages": 151
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2026-03-12",
+      "totals": {
+        "tokens": 2335929,
+        "cost": 0.35,
+        "messages": 217
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2026-03-13",
+      "totals": {
+        "tokens": 5195782,
+        "cost": 0.86,
+        "messages": 138
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2026-03-14",
+      "totals": {
+        "tokens": 4204134,
+        "cost": 0.73,
+        "messages": 206
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2026-03-16",
+      "totals": {
+        "tokens": 1461153,
+        "cost": 0.23,
+        "messages": 259
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2026-03-17",
+      "totals": {
+        "tokens": 7799845,
+        "cost": 2.21,
+        "messages": 235
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2026-03-18",
+      "totals": {
+        "tokens": 3428055,
+        "cost": 0.56,
+        "messages": 94
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2026-03-19",
+      "totals": {
+        "tokens": 1728309,
+        "cost": 0.31,
+        "messages": 193
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2026-03-20",
+      "totals": {
+        "tokens": 3591377,
+        "cost": 1.0,
+        "messages": 216
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2026-03-21",
+      "totals": {
+        "tokens": 8994082,
+        "cost": 1.42,
+        "messages": 143
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2026-03-22",
+      "totals": {
+        "tokens": 1241185,
+        "cost": 0.26,
+        "messages": 189
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2026-03-24",
+      "totals": {
+        "tokens": 3823260,
+        "cost": 0.52,
+        "messages": 132
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2026-03-25",
+      "totals": {
+        "tokens": 7680262,
+        "cost": 1.52,
+        "messages": 164
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2026-03-26",
+      "totals": {
+        "tokens": 565919,
+        "cost": 0.08,
+        "messages": 222
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2026-03-27",
+      "totals": {
+        "tokens": 8140124,
+        "cost": 2.4,
+        "messages": 255
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2026-03-29",
+      "totals": {
+        "tokens": 8054277,
+        "cost": 2.38,
+        "messages": 132
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2026-03-30",
+      "totals": {
+        "tokens": 3954747,
+        "cost": 0.58,
+        "messages": 60
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2026-03-31",
+      "totals": {
+        "tokens": 7872641,
+        "cost": 1.07,
+        "messages": 25
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2026-04-03",
+      "totals": {
+        "tokens": 830684,
+        "cost": 0.2,
+        "messages": 160
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2026-04-04",
+      "totals": {
+        "tokens": 4424401,
+        "cost": 0.95,
+        "messages": 228
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2026-04-05",
+      "totals": {
+        "tokens": 2081274,
+        "cost": 0.29,
+        "messages": 158
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2026-04-06",
+      "totals": {
+        "tokens": 3416221,
+        "cost": 0.65,
+        "messages": 119
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2026-04-07",
+      "totals": {
+        "tokens": 219327,
+        "cost": 0.03,
+        "messages": 159
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2026-04-08",
+      "totals": {
+        "tokens": 4874193,
+        "cost": 1.43,
+        "messages": 129
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2026-04-09",
+      "totals": {
+        "tokens": 4138755,
+        "cost": 0.9,
+        "messages": 19
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2026-04-10",
+      "totals": {
+        "tokens": 5357279,
+        "cost": 0.7,
+        "messages": 104
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2026-04-11",
+      "totals": {
+        "tokens": 7246697,
+        "cost": 0.98,
+        "messages": 121
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2026-04-12",
+      "totals": {
+        "tokens": 6411227,
+        "cost": 1.03,
+        "messages": 22
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2026-04-13",
+      "totals": {
+        "tokens": 7255773,
+        "cost": 1.34,
+        "messages": 207
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2026-04-14",
+      "totals": {
+        "tokens": 5100812,
+        "cost": 1.29,
+        "messages": 39
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2026-04-15",
+      "totals": {
+        "tokens": 3562385,
+        "cost": 0.63,
+        "messages": 104
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2026-04-16",
+      "totals": {
+        "tokens": 3915193,
+        "cost": 0.66,
+        "messages": 156
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2026-04-18",
+      "totals": {
+        "tokens": 3342594,
+        "cost": 0.94,
+        "messages": 253
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2026-04-19",
+      "totals": {
+        "tokens": 1146521,
+        "cost": 0.33,
+        "messages": 79
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2026-04-20",
+      "totals": {
+        "tokens": 1111982,
+        "cost": 0.18,
+        "messages": 77
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2026-04-21",
+      "totals": {
+        "tokens": 1208902,
+        "cost": 0.19,
+        "messages": 235
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2026-04-22",
+      "totals": {
+        "tokens": 5471400,
+        "cost": 1.38,
+        "messages": 45
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2026-04-23",
+      "totals": {
+        "tokens": 5723776,
+        "cost": 0.88,
+        "messages": 244
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2026-04-25",
+      "totals": {
+        "tokens": 6552179,
+        "cost": 1.78,
+        "messages": 174
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2026-04-26",
+      "totals": {
+        "tokens": 2028005,
+        "cost": 0.24,
+        "messages": 148
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2026-04-28",
+      "totals": {
+        "tokens": 2275480,
+        "cost": 0.5,
+        "messages": 111
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2026-04-29",
+      "totals": {
+        "tokens": 5379113,
+        "cost": 1.44,
+        "messages": 226
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2026-05-01",
+      "totals": {
+        "tokens": 3483566,
+        "cost": 0.65,
+        "messages": 233
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2026-05-02",
+      "totals": {
+        "tokens": 6311081,
+        "cost": 1.59,
+        "messages": 247
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2026-05-04",
+      "totals": {
+        "tokens": 6990957,
+        "cost": 0.89,
+        "messages": 22
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2026-05-05",
+      "totals": {
+        "tokens": 1240252,
+        "cost": 0.21,
+        "messages": 37
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2026-05-06",
+      "totals": {
+        "tokens": 5888642,
+        "cost": 1.09,
+        "messages": 176
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2026-05-07",
+      "totals": {
+        "tokens": 931244,
+        "cost": 0.16,
+        "messages": 167
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2026-05-08",
+      "totals": {
+        "tokens": 5189642,
+        "cost": 0.63,
+        "messages": 38
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2026-05-10",
+      "totals": {
+        "tokens": 8172349,
+        "cost": 2.03,
+        "messages": 243
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2026-05-11",
+      "totals": {
+        "tokens": 6684642,
+        "cost": 1.75,
+        "messages": 225
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2026-05-12",
+      "totals": {
+        "tokens": 2426458,
+        "cost": 0.7,
+        "messages": 98
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2026-05-14",
+      "totals": {
+        "tokens": 5288777,
+        "cost": 1.42,
+        "messages": 82
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2026-05-15",
+      "totals": {
+        "tokens": 5699568,
+        "cost": 1.57,
+        "messages": 240
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2026-05-16",
+      "totals": {
+        "tokens": 1525649,
+        "cost": 0.32,
+        "messages": 205
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2026-05-17",
+      "totals": {
+        "tokens": 4349131,
+        "cost": 0.84,
+        "messages": 22
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2026-05-18",
+      "totals": {
+        "tokens": 5665318,
+        "cost": 0.84,
+        "messages": 223
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2026-05-19",
+      "totals": {
+        "tokens": 1410728,
+        "cost": 0.24,
+        "messages": 48
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2026-05-20",
+      "totals": {
+        "tokens": 7264219,
+        "cost": 1.52,
+        "messages": 233
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2026-05-21",
+      "totals": {
+        "tokens": 2430214,
+        "cost": 0.47,
+        "messages": 125
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2026-05-22",
+      "totals": {
+        "tokens": 2232806,
+        "cost": 0.58,
+        "messages": 155
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2026-05-23",
+      "totals": {
+        "tokens": 4690688,
+        "cost": 0.88,
+        "messages": 138
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2026-05-24",
+      "totals": {
+        "tokens": 4351171,
+        "cost": 0.67,
+        "messages": 125
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2026-05-25",
+      "totals": {
+        "tokens": 3358313,
+        "cost": 0.6,
+        "messages": 207
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2026-05-26",
+      "totals": {
+        "tokens": 4326343,
+        "cost": 0.91,
+        "messages": 123
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2026-05-27",
+      "totals": {
+        "tokens": 1886822,
+        "cost": 0.45,
+        "messages": 23
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2026-05-29",
+      "totals": {
+        "tokens": 4077442,
+        "cost": 1.11,
+        "messages": 196
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2026-05-31",
+      "totals": {
+        "tokens": 2200123,
+        "cost": 0.28,
+        "messages": 104
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2026-06-01",
+      "totals": {
+        "tokens": 6445099,
+        "cost": 1.37,
+        "messages": 96
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2026-06-02",
+      "totals": {
+        "tokens": 4561207,
+        "cost": 1.18,
+        "messages": 8
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2026-06-04",
+      "totals": {
+        "tokens": 6066986,
+        "cost": 0.97,
+        "messages": 193
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2026-06-05",
+      "totals": {
+        "tokens": 940991,
+        "cost": 0.15,
+        "messages": 135
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2026-06-07",
+      "totals": {
+        "tokens": 3613186,
+        "cost": 0.96,
+        "messages": 172
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2026-06-08",
+      "totals": {
+        "tokens": 6437924,
+        "cost": 0.99,
+        "messages": 164
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2026-06-11",
+      "totals": {
+        "tokens": 8311901,
+        "cost": 1.09,
+        "messages": 56
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2026-06-12",
+      "totals": {
+        "tokens": 2792955,
+        "cost": 0.66,
+        "messages": 51
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2026-06-13",
+      "totals": {
+        "tokens": 6873508,
+        "cost": 1.69,
+        "messages": 214
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2026-06-14",
+      "totals": {
+        "tokens": 5360600,
+        "cost": 1.05,
+        "messages": 31
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2026-06-15",
+      "totals": {
+        "tokens": 6192514,
+        "cost": 1.2,
+        "messages": 14
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2026-06-16",
+      "totals": {
+        "tokens": 6303238,
+        "cost": 1.49,
+        "messages": 205
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2026-06-17",
+      "totals": {
+        "tokens": 3616968,
+        "cost": 1.05,
+        "messages": 227
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2026-06-18",
+      "totals": {
+        "tokens": 7309425,
+        "cost": 1.03,
+        "messages": 51
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2026-06-19",
+      "totals": {
+        "tokens": 6319105,
+        "cost": 1.28,
+        "messages": 88
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2026-06-23",
+      "totals": {
+        "tokens": 6855842,
+        "cost": 0.93,
+        "messages": 194
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2026-06-24",
+      "totals": {
+        "tokens": 3080407,
+        "cost": 0.45,
+        "messages": 150
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2026-06-25",
+      "totals": {
+        "tokens": 3082079,
+        "cost": 0.88,
+        "messages": 60
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2026-06-26",
+      "totals": {
+        "tokens": 3510844,
+        "cost": 0.61,
+        "messages": 27
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2026-06-27",
+      "totals": {
+        "tokens": 8298974,
+        "cost": 1.47,
+        "messages": 203
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2026-06-29",
+      "totals": {
+        "tokens": 2888987,
+        "cost": 0.68,
+        "messages": 118
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2026-06-30",
+      "totals": {
+        "tokens": 3490229,
+        "cost": 0.94,
+        "messages": 98
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2026-07-01",
+      "totals": {
+        "tokens": 899820,
+        "cost": 0.17,
+        "messages": 85
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2026-07-02",
+      "totals": {
+        "tokens": 2264548,
+        "cost": 0.33,
+        "messages": 103
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2026-07-04",
+      "totals": {
+        "tokens": 839693,
+        "cost": 0.2,
+        "messages": 170
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2026-07-06",
+      "totals": {
+        "tokens": 5337420,
+        "cost": 1.26,
+        "messages": 162
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2026-07-07",
+      "totals": {
+        "tokens": 7342729,
+        "cost": 1.4,
+        "messages": 193
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2026-07-08",
+      "totals": {
+        "tokens": 7554336,
+        "cost": 1.15,
+        "messages": 6
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2026-07-09",
+      "totals": {
+        "tokens": 8412474,
+        "cost": 1.71,
+        "messages": 233
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2026-07-10",
+      "totals": {
+        "tokens": 7888814,
+        "cost": 2.13,
+        "messages": 247
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2026-07-11",
+      "totals": {
+        "tokens": 1326097,
+        "cost": 0.19,
+        "messages": 225
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2026-07-12",
+      "totals": {
+        "tokens": 7614978,
+        "cost": 1.61,
+        "messages": 25
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2026-07-15",
+      "totals": {
+        "tokens": 5463446,
+        "cost": 1.42,
+        "messages": 45
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2026-07-17",
+      "totals": {
+        "tokens": 6539482,
+        "cost": 1.55,
+        "messages": 74
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2026-07-20",
+      "totals": {
+        "tokens": 2038582,
+        "cost": 0.32,
+        "messages": 256
+      },
+      "intensity": 1
+    },
+    {
+      "date": "2026-07-21",
+      "totals": {
+        "tokens": 2970111,
+        "cost": 0.72,
+        "messages": 118
+      },
+      "intensity": 2
+    },
+    {
+      "date": "2026-07-23",
+      "totals": {
+        "tokens": 4431562,
+        "cost": 0.66,
+        "messages": 145
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2026-07-24",
+      "totals": {
+        "tokens": 7857169,
+        "cost": 1.15,
+        "messages": 250
+      },
+      "intensity": 4
+    },
+    {
+      "date": "2026-07-25",
+      "totals": {
+        "tokens": 4610187,
+        "cost": 1.06,
+        "messages": 126
+      },
+      "intensity": 3
+    },
+    {
+      "date": "2026-07-26",
+      "totals": {
+        "tokens": 817956,
+        "cost": 0.13,
+        "messages": 211
+      },
+      "intensity": 1
+    }
+  ],
+  "stats": {
+    "favorite_model": "openai/gpt-5.6-sol",
+    "most_used_model": "openai/gpt-5.6-sol",
+    "highest_cost_model": "anthropic/claude-opus-4-7",
+    "total_tokens": 1115969290,
+    "messages": 34246,
+    "sessions": 34246,
+    "current_streak": 4,
+    "longest_streak": 16,
+    "active_days": 251,
+    "total_days": 315
+  },
+  "timestamp": "2026-07-26T20:20:00+00:00"
+}

@@ -1,15 +1,18 @@
 {
   "case": "provider-error",
+  "period": "today",
   "fixtures": {
     "health": "health.json",
-    "usage_today": "usage-today.json",
-    "usage_month": "usage-month.json",
+    "usage": "usage-today.json",
+    "active_time": "active-time-today.json",
+    "insights": "insights-today.json",
     "quota": "quota-provider-error.json"
   },
   "expected": {
     "connection": "Local · Connected",
     "dot": "ok",
     "today": { "cost": "$3.42" },
+    "credits_row": null,
     "quota_section": {
       "provider_failures": ["Codex"],
       "inline_warning_contains": "Couldn't refresh - showing last known",

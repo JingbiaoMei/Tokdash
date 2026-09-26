@@ -1,0 +1,18 @@
+{
+  "case": "delta-row-off",
+  "period": "today",
+  "settings_overrides": { "components": { "fullDeltaRow": false } },
+  "fixtures": {
+    "health": "health.json",
+    "usage": "usage-today.json",
+    "active_time": "active-time-today.json",
+    "insights": "insights-today.json",
+    "quota": "quota.json"
+  },
+  "expected": {
+    "delta_row": null,
+    "hero_comparison": "12% below yesterday",
+    "hero_comparison_direction": "down",
+    "comment": "with the toggle off the hero shows the shipped cost-only comparison line"
+  }
+}

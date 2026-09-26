@@ -1,9 +1,11 @@
 {
   "case": "empty",
+  "period": "today",
   "fixtures": {
     "health": "health.json",
-    "usage_today": "usage-today-empty.json",
-    "usage_month": "usage-month.json",
+    "usage": "usage-today-empty.json",
+    "active_time": "active-time-zero.json",
+    "insights": "insights-empty.json",
     "quota": "quota.json"
   },
   "expected": {
@@ -13,14 +15,12 @@
       "hero_title": "No usage recorded today",
       "hero_sub_contains": "Tokdash is running",
       "cost": null,
-      "comparison": null
+      "active": null
     },
-    "month": {
-      "label": "JULY",
-      "cost": "$48.90",
-      "tokens_compact": "281M"
-    },
-    "activity": null,
+    "delta_row": null,
+    "top_ranks": null,
+    "glance": null,
+    "glance_comment": "an all-zero source hides the glance strip; flat 24-bar rows carry no information",
     "banner": null
   }
 }

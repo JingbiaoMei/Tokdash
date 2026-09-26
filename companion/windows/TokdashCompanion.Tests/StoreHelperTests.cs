@@ -1,3 +1,5 @@
+using System.IO;
+using System.Runtime.CompilerServices;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace TokdashCompanion.Tests;
@@ -46,7 +48,9 @@ public class StoreHelperTests
     {
         // Pinned to the macOS displayLabel cases.
         Assert.AreEqual("5-hour", QuotaRow.DisplayLabel("5-hour window"));
-        Assert.AreEqual("7-day", QuotaRow.DisplayLabel("7-day window"));
+        // A bare 7-day window normalizes to "Weekly" (contract §Row anatomy): Codex
+        // sends "7-day window", MiniMax/Kimi/Grok send "Weekly" - one reading now.
+        Assert.AreEqual("Weekly", QuotaRow.DisplayLabel("7-day window"));
         Assert.AreEqual("weekly", QuotaRow.DisplayLabel("weekly window"));
         Assert.AreEqual("5-hour", QuotaRow.DisplayLabel("5-hour Window"), "case-insensitive");
         // Labels that never carried the word are untouched.
@@ -65,7 +69,9 @@ public class StoreHelperTests
         // "GPT-5.3-Codex-Spark · 5-hour" is far too wide for the flyout; the window must
         // survive the shortening. Pinned to the macOS displayLabel cases.
         Assert.AreEqual("Spark · 5-hour", QuotaRow.DisplayLabel("GPT-5.3-Codex-Spark · 5-hour"));
-        Assert.AreEqual("Spark · 7-day", QuotaRow.DisplayLabel("GPT-5.3-Codex-Spark · 7-day"));
+        // The feature name survives the shortening; the window token normalizes like
+        // a bare one ("7-day" -> "Weekly").
+        Assert.AreEqual("Spark · Weekly", QuotaRow.DisplayLabel("GPT-5.3-Codex-Spark · 7-day"));
         // A non-hyphenated name is left alone - only Codex's model naming is verbose.
         Assert.AreEqual("Video · Weekly", QuotaRow.DisplayLabel("Video · Weekly"));
         // A bare window contains a hyphen but no " · " separator; it must not be split.
@@ -118,7 +124,7 @@ public class StoreHelperTests
             Assert.AreEqual("剩余 14%", L10n.T("percent_left", 14));
             Assert.AreEqual("wsl · 已连接", L10n.T("server_connected", "wsl"));
             Assert.AreEqual("本地", CompanionStore.ServerLabel("http://127.0.0.1:55423"));
-            Assert.AreEqual("低于昨日 12%", L10n.T("comparison_below", 12));
+            Assert.AreEqual("低于昨日 12%", L10n.T("comparison_below", 12, L10n.T("word_yesterday")));
             Assert.AreEqual("5 小时后重置", L10n.T("resets_in_hours", 5, ""));
             Assert.AreEqual("3 天后重置", L10n.T("resets_in_days", 3, ""));
             Assert.AreEqual("5 小时", ClaudeRow("session", "Session", 14).DisplayBucketLabel);
@@ -182,11 +188,172 @@ public class StoreHelperTests
     }
 
     [TestMethod]
+    public void Claude_DisplayLabel_Passes_Server_Wording_Through()
+    {
+        var saved = L10n.Current;
+        L10n.Current = AppLanguage.English;
+        try
+        {
+            // v1.1 rule: only Claude's own two names get the standard wording; everything
+            // else keeps the server's wording. The expected fixture pins the plain "weekly"
+            // bucket lower-case ("weekly", not a forced "Weekly").
+            Assert.AreEqual("weekly", ClaudeRow("weekly", "weekly", 8).DisplayBucketLabel);
+            Assert.AreEqual("5-hour", ClaudeRow("5h", "5-hour", 71).DisplayBucketLabel);
+            // Claude's own names normalize; the weekly_all id reaches the same via "weekly all".
+            Assert.AreEqual("5-hour", ClaudeRow("session", "Session", 14).DisplayBucketLabel);
+            Assert.AreEqual("Weekly", ClaudeRow("weekly_all", "Weekly All", 8).DisplayBucketLabel);
+            // Model-scoped windows keep the model name.
+            Assert.AreEqual("Opus", ClaudeRow("weekly_scoped_opus", "Opus", 8).DisplayBucketLabel);
+        }
+        finally { L10n.Current = saved; }
+    }
+
+    [TestMethod]
+    public void Rank_Helpers_Name_Display_And_Logo()
+    {
+        Assert.AreEqual("Codex", CompanionStore.ToolDisplayName("codex"));
+        Assert.AreEqual("OpenCode", CompanionStore.ToolDisplayName("opencode"));
+        Assert.AreEqual("OpenClaw", CompanionStore.ToolDisplayName("openclaw"));
+        Assert.AreEqual("Zed", CompanionStore.ToolDisplayName("zed"), "every scanner id has a name now");
+        Assert.AreEqual("Mystery_tool", CompanionStore.ToolDisplayName("mystery_tool"), "unknown ids capitalize, never blank");
+        Assert.AreEqual("Pi", CompanionStore.ToolDisplayName("pi_agent"));
+        Assert.AreEqual("DeepSeek Harness", CompanionStore.ToolDisplayName("dsh"));
+
+        Assert.AreEqual("codex", CompanionStore.LogoAssetName("codex"));
+        Assert.AreEqual("opencode", CompanionStore.LogoAssetName("opencode"));
+        Assert.AreEqual("openclaw", CompanionStore.LogoAssetName("openclaw"), "OpenClaw ships a mark now");
+        Assert.AreEqual("zed", CompanionStore.LogoAssetName("zed"), "zed ships a mark now");
+        Assert.AreEqual("pi", CompanionStore.LogoAssetName("pi_agent"));
+        Assert.AreEqual("omp", CompanionStore.LogoAssetName("omp"), "pi/omp used to be text-only");
+
+        Assert.AreEqual("gpt-5.6-sol", CompanionStore.StripProviderPrefix("openai/gpt-5.6-sol"));
+        Assert.AreEqual("claude-opus-4-7", CompanionStore.StripProviderPrefix("claude-opus-4-7"), "no slash -> unchanged");
+    }
+
+    [TestMethod]
+    public void QuotaLogo_Mark_Map_Matches_The_Web_Brand_Map()
+    {
+        // The minimax regression: MiniMax wears its OWN pink mark. MiMo is a separate
+        // provider - its wordmark must never stand in for MiniMax, and the server never
+        // emits a "mimo" quota provider, so mimo stays unmapped (text-only header).
+        Assert.AreEqual("minimax", CompanionStore.QuotaLogoAssetName("minimax"));
+        Assert.IsNull(CompanionStore.QuotaLogoAssetName("mimo"), "no mimo quota provider exists; never borrow its wordmark");
+
+        Assert.AreEqual("codex", CompanionStore.QuotaLogoAssetName("codex"));
+        Assert.AreEqual("claude", CompanionStore.QuotaLogoAssetName("claude"));
+        Assert.AreEqual("kimi", CompanionStore.QuotaLogoAssetName("kimi"));
+        Assert.AreEqual("grok", CompanionStore.QuotaLogoAssetName("grok"));
+        Assert.AreEqual("zcode", CompanionStore.QuotaLogoAssetName("zai"), "Z.ai rows wear the Zcode badge");
+        Assert.AreEqual("opencode", CompanionStore.QuotaLogoAssetName("opencode_go"), "OpenCode Go shares the OpenCode mark");
+        Assert.AreEqual("antigravity", CompanionStore.QuotaLogoAssetName("antigravity"));
+        Assert.IsNull(CompanionStore.QuotaLogoAssetName("commandcode"), "no shipped mark -> text-only header");
+
+        // Every mark the map returns must exist under Assets\Agents\ (the csproj glob
+        // packages them) - the map and the packaged asset set must not drift apart.
+        var agents = AgentsDir();
+        foreach (var name in new[] { "codex", "claude", "kimi", "grok", "zcode", "minimax", "opencode", "antigravity" })
+            Assert.IsTrue(File.Exists(Path.Combine(agents, $"{name}.png")), $"Assets/Agents/{name}.png missing");
+    }
+
+    [TestMethod]
+    public void ToolLogo_Map_Covers_Every_Scanner_Tool_And_Pins_Assets()
+    {
+        // Every source_name the scanner can emit (src/tokdash/sources/coding_tools.py) maps
+        // to a packaged mark - except the two documented text-only ids: mimo (wordmark-only
+        // brand, illegible at row height) and devin (no brand art shipped anywhere).
+        var expected = new Dictionary<string, string?>
+        {
+            ["opencode"] = "opencode", ["kilocode"] = "kilocode", ["cline"] = "cline",
+            ["codex"] = "codex", ["claude"] = "claude", ["gemini_cli"] = "gemini",
+            ["antigravity_cli"] = "antigravity", ["amp"] = "amp", ["kimi"] = "kimi",
+            ["grok"] = "grok", ["pi_agent"] = "pi", ["omp"] = "omp",
+            ["copilot_cli"] = "copilot", ["hermes"] = "hermes", ["mimo"] = null,
+            ["zcode"] = "zcode", ["qoder"] = "qoder", ["qoder_cli"] = "qoder",
+            ["dsh"] = "dsh", ["reasonix"] = "reasonix", ["workbuddy"] = "workbuddy",
+            ["zed"] = "zed", ["qwen_code"] = "qwen_code", ["muse"] = "muse",
+            ["crush"] = "crush", ["minimax"] = "minimax", ["devin"] = null,
+            // Aliases the web brand map normalizes onto the same marks.
+            ["claude_code"] = "claude", ["gemini"] = "gemini", ["pi"] = "pi",
+            ["copilot"] = "copilot", ["github_copilot_cli"] = "copilot", ["antigravity"] = "antigravity",
+            ["cursor"] = "cursor",
+        };
+        var agents = AgentsDir();
+        var packaged = new HashSet<string>();
+        foreach (var (tool, asset) in expected)
+        {
+            Assert.AreEqual(asset, CompanionStore.LogoAssetName(tool), $"tool id {tool}");
+            if (asset is not null) packaged.Add(asset);
+        }
+
+        // The map and the packaged asset set must not drift apart: every mapped mark exists
+        // as a PNG, and every darkInvert mark also ships its pre-inverted {name}-dark copy.
+        foreach (var asset in packaged)
+            Assert.IsTrue(File.Exists(Path.Combine(agents, $"{asset}.png")), $"Assets/Agents/{asset}.png missing");
+        foreach (var asset in new[] { "codex", "grok", "zcode", "cline", "hermes", "omp", "zed", "cursor" })
+            Assert.IsTrue(File.Exists(Path.Combine(agents, $"{asset}-dark.png")), $"Assets/Agents/{asset}-dark.png missing");
+        Assert.IsFalse(File.Exists(Path.Combine(agents, "mimo.png")),
+            "the MiMo wordmark must not sit unreferenced where it could be mistaken for MiniMax's mark");
+    }
+
+    private static string AgentsDir([CallerFilePath] string source = "") =>
+        Path.GetFullPath(Path.Combine(Path.GetDirectoryName(source)!, "..", "TokdashCompanion", "Assets", "Agents"));
+
+    [TestMethod]
+    public void Rank_Shares_Are_Percent_Of_Full_List_And_Never_NaN()
+    {
+        // Denominators are the FULL by_tool sum / the FULL combined_models list, so the
+        // top-3 shares need not add to 100 and the bar always matches the printed percent.
+        var usage = new UsageResponse
+        {
+            TotalTokens = 1000,
+            ByTool = new()
+            {
+                ["codex"] = new ToolAgg { Tokens = 550 },
+                ["claude"] = new ToolAgg { Tokens = 250 },
+                ["kimi"] = new ToolAgg { Tokens = 100 },
+                ["zed"] = new ToolAgg { Tokens = 100 },
+            },
+            CombinedModels = new()
+            {
+                new ModelAgg { Name = "openai/gpt-5.6", Tokens = 700 },
+                new ModelAgg { Name = "anthropic/claude-x", Tokens = 200 },
+                new ModelAgg { Name = "x/y", Tokens = 50 },
+                new ModelAgg { Name = "z/w", Tokens = 50 },
+            },
+        };
+        var snap = new Snapshot
+        {
+            Period = UsagePeriod.Today, Usage = usage, Quota = new QuotaResponse(),
+            Thresholds = QuotaThresholds.Defaults, Components = new CompanionComponents(),
+            Now = DateTimeOffset.FromUnixTimeSeconds(1785080120),
+        };
+        var tools = snap.TopTools;
+        Assert.AreEqual(3, tools.Count);
+        CollectionAssert.AreEqual(new[] { "55%", "25%", "10%" }, tools.Select(t => t.PctText).ToList(),
+            "shares of the full 1000-token by_tool sum; the omitted zed row keeps the top-3 under 100%");
+        CollectionAssert.AreEqual(new[] { 0.55, 0.25, 0.10 }, tools.Select(t => t.Fraction).ToList());
+        var models = snap.TopModels;
+        CollectionAssert.AreEqual(new[] { "70%", "20%", "5%" }, models.Select(m => m.PctText).ToList());
+
+        // Zero-sum lists: empty bar and "0%", never NaN.
+        var zero = new Snapshot
+        {
+            Period = UsagePeriod.Today,
+            Usage = new UsageResponse { TotalTokens = 0, ByTool = new(), CombinedModels = new() },
+            Quota = new QuotaResponse(), Thresholds = QuotaThresholds.Defaults,
+            Components = new CompanionComponents(),
+            Now = DateTimeOffset.FromUnixTimeSeconds(1785080120),
+        };
+        CollectionAssert.AreEqual(new string[0], zero.TopTools.Select(t => t.PctText).ToList());
+        CollectionAssert.AreEqual(new string[0], zero.TopModels.Select(m => m.PctText).ToList());
+    }
+
+    [TestMethod]
     public void AntigravityPools_Collapse_To_Two_Worst_Rows()
     {
         // One bucket per model floods the flyout; collapse to the two dashboard pools,
         // each showing the worst remaining. Pinned to the macOS antigravityPools cases.
-        var pooled = Snapshot.AntigravityPools(
+        var pooled = CompanionStore.AntigravityPools(
         [
             Row("gemini_3_pro", "Gemini 3 Pro", 62),
             Row("gemini_3_flash", "Gemini 3 Flash", 41),   // worst gemini
@@ -212,7 +379,7 @@ public class StoreHelperTests
             // A model matching neither pool must not silently vanish; it still gets a window
             // suffix (defaulting to 5-hour when it has no reset time).
             var rows = new List<QuotaRow> { Row("mystery_model", "Mystery Model", 30) };
-            var pooled = Snapshot.AntigravityPools(rows);
+            var pooled = CompanionStore.AntigravityPools(rows);
             Assert.AreEqual(1, pooled.Count);
             Assert.AreEqual("Mystery Model", pooled[0].BucketLabel, "falls back to the raw rows");
             Assert.AreEqual("Mystery Model · 5-hour", pooled[0].DisplayBucketLabel);
@@ -240,16 +407,16 @@ public class StoreHelperTests
                 DateTimeOffset.FromUnixTimeSeconds(captured + (3 * 24 + 22) * 3600L),
                 false, "default", true, false,
                 DateTimeOffset.FromUnixTimeSeconds(captured));
-            Assert.AreEqual("Gemini · Weekly", Snapshot.AntigravityPools(new List<QuotaRow> { weekly })[0].DisplayBucketLabel);
+            Assert.AreEqual("Gemini · Weekly", CompanionStore.AntigravityPools(new List<QuotaRow> { weekly })[0].DisplayBucketLabel);
 
             var fiveHour = new QuotaRow("Antigravity", "gemini_3_pro", "Gemini 3 Pro", 8,
                 DateTimeOffset.FromUnixTimeSeconds(captured + 3 * 3600L),
                 false, "default", true, false,
                 DateTimeOffset.FromUnixTimeSeconds(captured));
-            Assert.AreEqual("Gemini · 5-hour", Snapshot.AntigravityPools(new List<QuotaRow> { fiveHour })[0].DisplayBucketLabel);
+            Assert.AreEqual("Gemini · 5-hour", CompanionStore.AntigravityPools(new List<QuotaRow> { fiveHour })[0].DisplayBucketLabel);
 
             // No reset time (idle model) -> defaults to 5-hour, never "Weekly".
-            Assert.AreEqual("Gemini · 5-hour", Snapshot.AntigravityPools(new List<QuotaRow> { Row("gemini_3_pro", "Gemini 3 Pro", 8) })[0].DisplayBucketLabel);
+            Assert.AreEqual("Gemini · 5-hour", CompanionStore.AntigravityPools(new List<QuotaRow> { Row("gemini_3_pro", "Gemini 3 Pro", 8) })[0].DisplayBucketLabel);
         }
         finally { L10n.Current = saved; }
     }
@@ -297,5 +464,351 @@ public class StoreHelperTests
         Assert.IsFalse(CompanionStore.IsValidBaseURL("/tokdash"), "relative");
         Assert.IsFalse(CompanionStore.IsValidBaseURL("ftp://host/tokdash"), "wrong scheme");
         Assert.IsFalse(CompanionStore.IsValidBaseURL("http:///tokdash"), "no host");
+    }
+
+    // MARK: - E12 instance stepper (contract §Instance stepper)
+
+    /// <summary>Thursday 2026-09-24; its local week starts Monday 2026-09-21.</summary>
+    private static readonly DateOnly Thu = new(2026, 9, 24);
+
+    private static void SteppedEq((DateOnly From, DateOnly To)? actual, string from, string to)
+    {
+        Assert.IsNotNull(actual, "stepped instance has no window?");
+        Assert.AreEqual(DateOnly.Parse(from), actual.Value.From);
+        Assert.AreEqual(DateOnly.Parse(to), actual.Value.To);
+    }
+
+    [TestMethod]
+    public void EarlierLimit_Pins_The_Walkback_Limits()
+    {
+        Assert.AreEqual(13, CompanionStore.EarlierLimit(UsagePeriod.Today));
+        Assert.AreEqual(8, CompanionStore.EarlierLimit(UsagePeriod.Week));
+        Assert.AreEqual(11, CompanionStore.EarlierLimit(UsagePeriod.Month));
+        Assert.AreEqual(2, CompanionStore.EarlierLimit(UsagePeriod.Year));
+    }
+
+    [TestMethod]
+    public void SteppedDates_Are_Full_Elapsed_Calendar_Windows()
+    {
+        Assert.IsNull(CompanionStore.SteppedDates(UsagePeriod.Today, 0, Thu), "present is not stepped");
+
+        // Day: the single calendar day N back.
+        SteppedEq(CompanionStore.SteppedDates(UsagePeriod.Today, 1, Thu), "2026-09-23", "2026-09-23");
+        SteppedEq(CompanionStore.SteppedDates(UsagePeriod.Today, 13, Thu), "2026-09-11", "2026-09-11");
+
+        // Week: full Mon..Sun weeks (never a partial one), stepped from THIS week's Monday.
+        SteppedEq(CompanionStore.SteppedDates(UsagePeriod.Week, 1, Thu), "2026-09-14", "2026-09-20");
+        SteppedEq(CompanionStore.SteppedDates(UsagePeriod.Week, 2, Thu), "2026-09-07", "2026-09-13");
+
+        // A Sunday rolls back to its own week's Monday BEFORE stepping (no straddling).
+        SteppedEq(CompanionStore.SteppedDates(UsagePeriod.Week, 1, new DateOnly(2026, 9, 27)), "2026-09-14", "2026-09-20");
+
+        // Weeks may cross years: Jan 7 2026 (Wed) -> its Monday is Jan 5; one back starts Dec 29.
+        SteppedEq(CompanionStore.SteppedDates(UsagePeriod.Week, 1, new DateOnly(2026, 1, 7)), "2025-12-29", "2026-01-04");
+
+        // Month: full 1st..last-day calendar months, rolling across the year line both ways.
+        SteppedEq(CompanionStore.SteppedDates(UsagePeriod.Month, 1, Thu), "2026-08-01", "2026-08-31");
+        SteppedEq(CompanionStore.SteppedDates(UsagePeriod.Month, 11, Thu), "2025-10-01", "2025-10-31");
+        SteppedEq(CompanionStore.SteppedDates(UsagePeriod.Month, 1, new DateOnly(2026, 1, 15)), "2025-12-01", "2025-12-31");
+
+        // Year: full Jan1..Dec31 calendar years.
+        SteppedEq(CompanionStore.SteppedDates(UsagePeriod.Year, 1, Thu), "2025-01-01", "2025-12-31");
+        SteppedEq(CompanionStore.SteppedDates(UsagePeriod.Year, 2, Thu), "2024-01-01", "2024-12-31");
+    }
+
+    [TestMethod]
+    public void UsageRequestPath_Present_Keeps_Wire_Forms_Stepped_Always_Uses_Dates()
+    {
+        // Present instances: exactly the shipped §Period windows wire forms.
+        Assert.AreEqual("/api/usage?period=today", CompanionStore.UsageRequestPath(UsagePeriod.Today, Thu));
+        Assert.AreEqual("/api/usage?date_from=2026-09-21&date_to=2026-09-24", CompanionStore.UsageRequestPath(UsagePeriod.Week, Thu));
+        Assert.AreEqual("/api/usage?period=month", CompanionStore.UsageRequestPath(UsagePeriod.Month, Thu));
+        Assert.AreEqual("/api/usage?period=year", CompanionStore.UsageRequestPath(UsagePeriod.Year, Thu));
+
+        // Stepped: explicit full elapsed window, never period=.
+        Assert.AreEqual("/api/usage?date_from=2026-09-23&date_to=2026-09-23", CompanionStore.UsageRequestPath(UsagePeriod.Today, Thu, 1));
+        Assert.AreEqual("/api/usage?date_from=2026-09-07&date_to=2026-09-13", CompanionStore.UsageRequestPath(UsagePeriod.Week, Thu, 2));
+        Assert.AreEqual("/api/usage?date_from=2026-08-01&date_to=2026-08-31", CompanionStore.UsageRequestPath(UsagePeriod.Month, Thu, 1));
+        Assert.AreEqual("/api/usage?date_from=2024-01-01&date_to=2024-12-31", CompanionStore.UsageRequestPath(UsagePeriod.Year, Thu, 2));
+    }
+
+    [TestMethod]
+    public void InstanceKicker_Words_One_Back_Dates_Further_Back()
+    {
+        // Present kickers stay byte-identical.
+        Assert.AreEqual("TODAY", CompanionStore.InstanceKicker(UsagePeriod.Today, 0, Thu));
+        Assert.AreEqual("THIS WEEK", CompanionStore.InstanceKicker(UsagePeriod.Week, 0, Thu));
+        Assert.AreEqual("THIS MONTH", CompanionStore.InstanceKicker(UsagePeriod.Month, 0, Thu));
+        Assert.AreEqual("THIS YEAR", CompanionStore.InstanceKicker(UsagePeriod.Year, 0, Thu));
+
+        // One back: the localized words, uppercased to kicker style in Latin scripts.
+        Assert.AreEqual("YESTERDAY", CompanionStore.InstanceKicker(UsagePeriod.Today, 1, Thu));
+        Assert.AreEqual("LAST WEEK", CompanionStore.InstanceKicker(UsagePeriod.Week, 1, Thu));
+        Assert.AreEqual("LAST MONTH", CompanionStore.InstanceKicker(UsagePeriod.Month, 1, Thu));
+        Assert.AreEqual("LAST YEAR", CompanionStore.InstanceKicker(UsagePeriod.Year, 1, Thu));
+
+        // Further back: calendar labels. Same-month weeks drop the repeated month in English.
+        Assert.AreEqual("SEP 21", CompanionStore.InstanceKicker(UsagePeriod.Today, 3, Thu));
+        Assert.AreEqual("SEP 7 – 13", CompanionStore.InstanceKicker(UsagePeriod.Week, 2, Thu));
+        // Cross-month week (two back from Oct 12's week = Sep 28..Oct 4) and cross-year
+        // week (two back from Jan 14's week = Dec 29..Jan 4). offset 1 is the word form.
+        Assert.AreEqual("SEP 28 – OCT 4", CompanionStore.InstanceKicker(UsagePeriod.Week, 2, new DateOnly(2026, 10, 12)));
+        Assert.AreEqual("DEC 29 – JAN 4, 2026", CompanionStore.InstanceKicker(UsagePeriod.Week, 2, new DateOnly(2026, 1, 14)));
+        Assert.AreEqual("JUL 2026", CompanionStore.InstanceKicker(UsagePeriod.Month, 2, Thu));
+        Assert.AreEqual("OCT 2025", CompanionStore.InstanceKicker(UsagePeriod.Month, 11, Thu));
+        Assert.AreEqual("2024", CompanionStore.InstanceKicker(UsagePeriod.Year, 2, Thu));
+    }
+
+    [TestMethod]
+    public void InstanceKicker_Chinese_Words_And_Date_Forms()
+    {
+        var saved = L10n.Current;
+        L10n.Current = AppLanguage.ZhHans;
+        try
+        {
+            Assert.AreEqual("今日", CompanionStore.InstanceKicker(UsagePeriod.Today, 0, Thu));
+            Assert.AreEqual("昨日", CompanionStore.InstanceKicker(UsagePeriod.Today, 1, Thu));
+            Assert.AreEqual("上周", CompanionStore.InstanceKicker(UsagePeriod.Week, 1, Thu));
+            Assert.AreEqual("9月21日", CompanionStore.InstanceKicker(UsagePeriod.Today, 3, Thu));
+            // CJK forms keep both operands of a range (the "Sep 7 – 13" ellipsis is English-only).
+            Assert.AreEqual("9月7日 – 9月13日", CompanionStore.InstanceKicker(UsagePeriod.Week, 2, Thu));
+            Assert.AreEqual("2026年7月", CompanionStore.InstanceKicker(UsagePeriod.Month, 2, Thu));
+            // Cross-year CJK week ranges carry the year on both operands.
+            Assert.AreEqual("2025年12月29日 – 2026年1月4日",
+                CompanionStore.InstanceKicker(UsagePeriod.Week, 2, new DateOnly(2026, 1, 14)));
+            Assert.AreEqual("2024", CompanionStore.InstanceKicker(UsagePeriod.Year, 2, Thu));
+        }
+        finally { L10n.Current = saved; }
+    }
+
+    [TestMethod]
+    public void Glance_Stepped_Week_Histogram_Windows_On_Instances_Week()
+    {
+        var insights = new InsightsResponse
+        {
+            Daily =
+            [
+                new DailyPoint { Date = "2026-09-07", Tokens = 5 },
+                new DailyPoint { Date = "2026-09-13", Tokens = 7 },
+                // A day from the CURRENT week must not leak into the stepped instance.
+                new DailyPoint { Date = "2026-09-21", Tokens = 99 },
+            ],
+        };
+        var face = CompanionStore.GlanceFaceFor(UsagePeriod.Week, insights, null,
+            new CompanionComponents(), Thu, 2)!;
+        Assert.AreEqual(GlanceKind.Days, face.Kind);
+        Assert.AreEqual(5, face.DayTokens![0], "Mon of the stepped week");
+        Assert.AreEqual(7, face.DayTokens![6], "Sun of the stepped week");
+        Assert.IsFalse(face.DayTokens!.Contains(99), "current-week data does not leak");
+    }
+
+    [TestMethod]
+    public void Glance_Stepped_Month_Grid_Is_Calendar_Bounded()
+    {
+        var stats = StatsRollingTo("2026-09-22");
+        var face = CompanionStore.GlanceFaceFor(UsagePeriod.Month, null, stats,
+            new CompanionComponents(), Thu, 1)!;
+        Assert.AreEqual(GlanceKind.Grid, face.Kind);
+        Assert.AreEqual(31, face.WindowDays, "exactly Aug 1..31");
+        Assert.AreEqual(2, face.FilledCells, "Aug 15 + Aug 31 only");
+        // Jul 27 column is clamped (Aug 1-2 cells), then 5 whole weeks: Jul27, Aug3, 10, 17, 24, 31.
+        Assert.AreEqual(6, face.GridColumns!.Length, "Mon-start columns clamped to the month");
+    }
+
+    [TestMethod]
+    public void Glance_Stepped_Year_Hides_When_Rolling_Series_Does_Not_Reach()
+    {
+        var stats = StatsRollingTo("2026-09-22");
+        // Any stepped year starts outside a rolling 365-day series (contract §Instance stepper).
+        Assert.IsNull(CompanionStore.GlanceFaceFor(UsagePeriod.Year, null, stats, new CompanionComponents(), Thu, 1));
+        Assert.IsNull(CompanionStore.GlanceFaceFor(UsagePeriod.Year, null, stats, new CompanionComponents(), Thu, 2));
+        // Present year view is unaffected: the trailing 180-day grid still renders.
+        Assert.IsNotNull(CompanionStore.GlanceFaceFor(UsagePeriod.Year, null, stats, new CompanionComponents(), Thu));
+    }
+
+    private static StatsResponse StatsRollingTo(string newest)
+    {
+        // A sparse rolling series: newest day + one day at the 364-day edge + Aug days.
+        return new StatsResponse
+        {
+            Contributions =
+            [
+                new Contribution { Date = "2025-09-23", Intensity = 1 },
+                new Contribution { Date = "2026-08-15", Intensity = 3 },
+                new Contribution { Date = "2026-08-31", Intensity = 2 },
+                new Contribution { Date = newest, Intensity = 1 },
+            ],
+        };
+    }
+
+    [TestMethod]
+    public async Task Stepper_Walks_Clamps_Reanchors_And_Fetches_Instance_Windows()
+    {
+        CompanionStore.ClockOverride = new DateTimeOffset(2026, 9, 24, 12, 0, 0, TimeSpan.Zero);
+        try
+        {
+            var client = new FakeClient();
+            var store = new CompanionStore(client);
+
+            // Present: › is inert, ‹ is available.
+            Assert.AreEqual(0, store.PeriodOffset);
+            Assert.IsFalse(store.CanStepLater);
+            Assert.IsTrue(store.CanStepEarlier);
+
+            // Walk the day past its 13-step limit and back.
+            for (int i = 0; i < 20; i++) store.StepPeriod(-1);
+            Assert.AreEqual(13, store.PeriodOffset, "clamped at the walk-back limit");
+            Assert.IsFalse(store.CanStepEarlier, "‹ inert at the limit");
+            store.StepPeriod(1);
+            Assert.AreEqual(12, store.PeriodOffset);
+
+            // Selecting a segment re-anchors to the present, even the SAME segment.
+            store.SelectPeriod(UsagePeriod.Today);
+            Assert.AreEqual(0, store.PeriodOffset);
+            Assert.IsFalse(store.CanStepLater);
+
+            // Stepped day: fetch group used ranged hourly + explicit usage window.
+            store.StepPeriod(-1);
+            await store.RefreshAsync();
+            CollectionAssert.Contains(client.Requests.ToList(), "/api/usage?date_from=2026-09-23&date_to=2026-09-23");
+            CollectionAssert.Contains(client.Requests.ToList(), "/api/insights?facets=hourly&date_from=2026-09-23&date_to=2026-09-23");
+            var snap = store.Snapshot!;
+            Assert.AreEqual(1, snap.InstanceOffset);
+            Assert.AreEqual("YESTERDAY", snap.KickerText);
+
+            // Stepped year: snapshot stamp, kicker, explicit window on both endpoints.
+            store.SelectPeriod(UsagePeriod.Year);
+            store.StepPeriod(-2);
+            await store.RefreshAsync();
+            snap = store.Snapshot!;
+            Assert.AreEqual(UsagePeriod.Year, snap.Period);
+            Assert.AreEqual(2, snap.InstanceOffset);
+            Assert.AreEqual("2024", snap.KickerText);
+            CollectionAssert.Contains(client.Requests.ToList(), "/api/usage?date_from=2024-01-01&date_to=2024-12-31");
+            CollectionAssert.Contains(client.Requests.ToList(), "/api/active-time?date_from=2024-01-01&date_to=2024-12-31");
+        }
+        finally { CompanionStore.ClockOverride = null; }
+    }
+
+    [TestMethod]
+    public async Task Stepper_ArrowDirections_PublishLoadingBeforePendingFetch()
+    {
+        var client = new FakeClient();
+        var store = new CompanionStore(client);
+        store.SelectPeriod(UsagePeriod.Today);
+        await store.RefreshAsync();
+        var quota = store.Snapshot!.Quota;
+        client.UsageRange = "pending";
+        store.StepPeriod(-1); // same delta as the left button
+        Assert.AreEqual(1, store.PeriodOffset);
+        Assert.AreEqual("YESTERDAY", store.Snapshot!.KickerText);
+        Assert.IsTrue(store.Snapshot.UsageLoading);
+        Assert.IsNull(store.Snapshot.Insights);
+        Assert.AreSame(quota, store.Snapshot.Quota);
+        client.Usage = "pending";
+        store.StepPeriod(1); // same delta as the right button
+        Assert.AreEqual(0, store.PeriodOffset);
+        Assert.AreEqual("TODAY", store.Snapshot!.KickerText);
+        Assert.IsTrue(store.Snapshot.UsageLoading);
+        Assert.IsFalse(store.CanStepLater);
+    }
+
+    [TestMethod]
+    public async Task SupersededRefreshCannotEraseNewHistogramOnComponentRebuild()
+    {
+        var stale = new TaskCompletionSource<InsightsResponse>();
+        var client = new FakeClient { Insights = stale.Task };
+        var store = new CompanionStore(client);
+        var first = store.RefreshAsync();
+        var fresh = new InsightsResponse { Hourly = new HourlyFacet {
+            Buckets = [new HourBucket { Hour = 10, Tokens = 456 }]
+        } };
+        client.Insights = fresh;
+        await store.RefreshAsync();
+        stale.SetResult(new InsightsResponse());
+        await first;
+        store.ApplyComponentsChange();
+        Assert.AreSame(fresh, store.Snapshot!.Insights);
+    }
+
+    [TestMethod]
+    public async Task MultiServer_RefreshFetchesAndCombinesHistogram()
+    {
+        var servers = new[] {
+            new CompanionServerSettings { Id = "a", Label = "A", Enabled = true },
+            new CompanionServerSettings { Id = "b", Label = "B", Enabled = true }
+        };
+        var clients = servers.ToDictionary(s => s.Id, s => new FakeClient {
+            Insights = new InsightsResponse { Hourly = new HourlyFacet {
+                Buckets = [new HourBucket { Hour = 10, Tokens = 123 }], PeakHour = 10
+            } }
+        });
+        var store = new CompanionStore(new MultiServerTokdashClient(servers, s => clients[s.Id]));
+        store.SelectPeriod(UsagePeriod.Today);
+        await store.RefreshAsync();
+        Assert.AreEqual(246L, store.Snapshot!.Insights!.Hourly!.Buckets!.Single(b => b.Hour == 10).Tokens);
+        foreach (var client in clients.Values)
+            CollectionAssert.Contains(client.Requests.ToList(), "/api/insights?facets=hourly&period=today");
+        store.StepPeriod(-1);
+        await store.RefreshAsync();
+        Assert.AreEqual(1, store.Snapshot!.InstanceOffset);
+        Assert.IsNotNull(store.Snapshot.Insights!.Hourly);
+        store.Settings.Components.ActivityGlance = false;
+        var before = clients.Values.Sum(c => c.Requests.Count(r => r.StartsWith("/api/insights")));
+        await store.RefreshAsync();
+        Assert.AreEqual(before, clients.Values.Sum(c => c.Requests.Count(r => r.StartsWith("/api/insights"))));
+    }
+
+    [TestMethod]
+    public void WarmupPlan_TwoUpSkipsVisitedAndStopsAtTheLimit()
+    {
+        static bool None(int _) => false;
+        CollectionAssert.AreEqual(new List<int> { 1, 2 }, CompanionStore.WarmupPlan(UsagePeriod.Today, 0, None));
+        CollectionAssert.AreEqual(new List<int> { 1, 2 }, CompanionStore.WarmupPlan(UsagePeriod.Year, 0, None));
+        CollectionAssert.AreEqual(new List<int> { 3 }, CompanionStore.WarmupPlan(UsagePeriod.Today, 1, s => s is 0 or 1 or 2));
+        CollectionAssert.AreEqual(new List<int>(), CompanionStore.WarmupPlan(UsagePeriod.Year, 0, s => s is 1 or 2));
+        CollectionAssert.AreEqual(new List<int>(), CompanionStore.WarmupPlan(UsagePeriod.Today, 13, None));
+        // Year's limit is 2: one back, only 2 remains on the past side.
+        CollectionAssert.AreEqual(new List<int> { 2 }, CompanionStore.WarmupPlan(UsagePeriod.Year, 1, None));
+    }
+
+    [TestMethod]
+    public async Task Warmup_WarmsNextTwoInstances_AndVisitedOnesExactlyOnce()
+    {
+        CompanionStore.ClockOverride = new DateTimeOffset(2026, 9, 24, 12, 0, 0, TimeSpan.Zero);
+        try
+        {
+            var client = new FakeClient();
+            var store = new CompanionStore(client);
+            // Anchor the granularity explicitly: the settings file is shared across tests
+            // and earlier cases may have persisted a different segment.
+            store.SelectPeriod(UsagePeriod.Today);
+            store.WarmupDelayMsForTests(0);
+            await store.RefreshAsync();
+
+            // Present settles -> offsets 1 and 2 warm: usage + active-time + hourly,
+            // the same fetch group the real step would send (contract §Instance stepper).
+            await Until(() => store.WarmDoneCount >= 3);
+            var reqs = client.Requests.ToList();
+            CollectionAssert.Contains(reqs, "/api/usage?date_from=2026-09-23&date_to=2026-09-23");
+            CollectionAssert.Contains(reqs, "/api/active-time?date_from=2026-09-23&date_to=2026-09-23");
+            CollectionAssert.Contains(reqs, "/api/insights?facets=hourly&date_from=2026-09-23&date_to=2026-09-23");
+            CollectionAssert.Contains(reqs, "/api/usage?date_from=2026-09-22&date_to=2026-09-22");
+            CollectionAssert.Contains(reqs, "/api/insights?facets=hourly&date_from=2026-09-22&date_to=2026-09-22");
+
+            // Visiting offset 1 re-arms from there: 3 warms next, already-warmed 2 skips.
+            store.StepPeriod(-1);
+            await store.RefreshAsync();
+            await Until(() => client.Requests.Contains("/api/usage?date_from=2026-09-21&date_to=2026-09-21"));
+            Assert.AreEqual(1, client.Requests.Count(r => r == "/api/usage?date_from=2026-09-22&date_to=2026-09-22"),
+                "a warmed instance is never re-warmed");
+        }
+        finally { CompanionStore.ClockOverride = null; }
+    }
+
+    private static async Task Until(Func<bool> condition)
+    {
+        for (var i = 0; i < 400 && !condition(); i++) await Task.Delay(10);
+        Assert.IsTrue(condition(), "warm-up requests did not arrive in time");
     }
 }

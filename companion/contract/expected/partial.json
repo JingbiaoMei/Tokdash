@@ -1,16 +1,21 @@
 {
   "case": "partial",
+  "period": "today",
   "fixtures": {
     "health": "health.json",
-    "usage_today": "usage-today.json",
-    "usage_month": "503",
+    "usage": "usage-today.json",
+    "active_time": "503",
+    "insights": "503",
     "quota": "503"
   },
   "expected": {
     "connection": "Local · Connected",
     "dot": "ok",
     "today": { "cost": "$3.42" },
-    "failed_sections": ["month", "quota"],
-    "inline_warning_contains": "will retry shortly"
+    "failed_sections": ["quota"],
+    "inline_warning_contains": "will retry shortly",
+    "active": null,
+    "glance": null,
+    "comment": "active-time and insights are optional sections: they fail silently, no inline warning, no footer stale marker from them alone"
   }
 }

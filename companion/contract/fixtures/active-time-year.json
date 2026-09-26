@@ -1,0 +1,43 @@
+{
+  "period": "year",
+  "range": {
+    "period_requested": "year",
+    "period_resolved": "year",
+    "days": 1,
+    "recognized": true,
+    "from": "2026-07-26",
+    "to": "2026-07-26"
+  },
+  "active_ms": 6411600000,
+  "active_ms_sum": 7264800000,
+  "comparison": null,
+  "by_tool": {
+    "codex": {
+      "tool_label": "Codex",
+      "session_count": 14,
+      "active_ms": 3846960000,
+      "active_ms_sum": 4358880000
+    },
+    "claude": {
+      "tool_label": "Claude",
+      "session_count": 9,
+      "active_ms": 2115828000,
+      "active_ms_sum": 2397384000
+    },
+    "opencode": {
+      "tool_label": "OpenCode",
+      "session_count": 2,
+      "active_ms": 448812000,
+      "active_ms_sum": 508536000
+    }
+  },
+  "unavailable_tools": [],
+  "active_gap_cap_ms": 900000,
+  "active_time_estimated": true,
+  "active_time_method": "capped-inter-event-gap",
+  "include_review_sessions": false,
+  "timestamp": "2026-07-26T20:20:00+00:00",
+  "response_cache": {
+    "age_seconds": 45
+  }
+}

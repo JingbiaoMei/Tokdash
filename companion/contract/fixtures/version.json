@@ -1,0 +1,7 @@
+{
+  "service": "tokdash",
+  "runtime_version": "2.5.7",
+  "install_method": null,
+  "update_check_enabled": true,
+  "usage_db_schema_supported": 3
+}

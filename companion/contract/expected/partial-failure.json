@@ -1,9 +1,11 @@
 {
   "case": "partial-failure",
+  "period": "today",
   "fixtures": {
     "health": "health.json",
-    "usage_today": "usage-today.json",
-    "usage_month": "usage-month.json",
+    "usage": "usage-today.json",
+    "active_time": "active-time-today.json",
+    "insights": "insights-today.json",
     "quota": "quota-partial-failure.json"
   },
   "expected": {

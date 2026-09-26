@@ -175,6 +175,9 @@ internal static class Program
         app.Store.PropertyChanged += (_, _) => QueueTooltipUpdate();
         // Opt-in low-quota notifications: show a tray balloon when a window crosses its threshold.
         app.Store.LowQuotaAlert += rows => app.Dispatcher.BeginInvoke(() => ShowLowQuotaBalloon(rows));
+        // Reset-credit expiry balloons ride the same opt-in. A credit balloon opens the All
+        // view on click (the row lives under the Codex group there, not the Low view).
+        app.Store.CreditExpiryAlert += items => app.Dispatcher.BeginInvoke(() => ShowCreditBalloon(items));
 
         // The first refresh is driven by the scheduler's timer (StartScheduler above) so
         // we don't kick two startup fetches - an immediate RefreshAsync here would be
@@ -304,8 +307,9 @@ internal static class Program
                 // Balloon-click cursor coords are undefined under v4: anchor on the
                 // icon's own rect (via Shell_NotifyIconGetRect) and open the Low view.
                 // Open (don't toggle) so clicking a notification never closes an
-                // already-open flyout.
-                if (_app is not null) _app.Store.QuotaView = QuotaView.Low;
+                // already-open flyout. A credit balloon lands on the All view instead -
+                // the credits row renders under the Codex group there.
+                if (_app is not null) _app.Store.QuotaView = _lastBalloonIsCredits ? QuotaView.All : QuotaView.Low;
                 if (TryGetTrayIconRect(out int ix, out int iy)) _app?.EnsureFlyoutOpen(ix, iy);
                 else _app?.EnsureFlyoutOpen(x, y);
             }
@@ -395,8 +399,8 @@ internal static class Program
     {
         if (!_added || _app is null) return;
         var store = _app.Store;
-        string tip = store.Snapshot is { Today.TotalTokens: > 0 } snap
-            ? L10n.T("tooltip_today", snap.TodayCostText, snap.TodayTokensCompact)
+        string tip = store.Snapshot is { Usage.TotalTokens: > 0 } snap
+            ? L10n.T("tooltip_usage", snap.CostText, snap.TokensCompact)
             : store.ConnectionState switch
             {
                 ConnectionState.Connecting => L10n.T("tooltip_connecting"),
@@ -412,17 +416,37 @@ internal static class Program
     }
 
     /// <summary>Show a tray balloon for newly-low quota windows (opt-in notifications).</summary>
+    // Which view a balloon-click opens: low quota -> Low, reset credits -> All (the
+    // credits row lives under the Codex group, only visible there).
+    private static bool _lastBalloonIsCredits;
+
     private static void ShowLowQuotaBalloon(IReadOnlyList<QuotaRow> rows)
     {
         if (!_added || rows.Count == 0) return;
+        _lastBalloonIsCredits = false;
         var first = rows[0];
         string body = rows.Count == 1
             ? L10n.T("notif_low_single", first.Provider, first.DisplayBucketLabel, (int)first.Left)
             : L10n.T("notif_low_multi", rows.Count, first.Provider, first.DisplayBucketLabel, (int)first.Left);
+        ShowBalloon(L10n.T("notif_low_title"), body);
+    }
+
+    /// <summary>Reset credits entering their last 48 hours (same low-quota opt-in; the
+    /// store already deduped per credit).</summary>
+    private static void ShowCreditBalloon(IReadOnlyList<CompanionStore.CreditAlertItem> items)
+    {
+        if (!_added || items.Count == 0) return;
+        _lastBalloonIsCredits = true;
+        var first = items[0];
+        ShowBalloon(L10n.T("notif_credits_title"), L10n.T("notif_credits_body", first.Count, first.Clause));
+    }
+
+    private static void ShowBalloon(string title, string body)
+    {
         var nid = _nid;
         nid.uFlags = NotifyIcon.NIF_MESSAGE | NotifyIcon.NIF_ICON | NotifyIcon.NIF_TIP | NotifyIcon.NIF_INFO;
         nid.szInfo = body.Length > 200 ? body[..200] : body;
-        nid.szInfoTitle = L10n.T("notif_low_title");
+        nid.szInfoTitle = title;
         nid.dwInfoFlags = 0;
         NotifyIcon.Shell_NotifyIconW(NotifyIcon.NIM_MODIFY, ref nid);
     }

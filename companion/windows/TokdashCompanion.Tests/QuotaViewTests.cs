@@ -22,10 +22,12 @@ public class QuotaViewTests
 
     private static Snapshot Snap(QuotaResponse quota) => new()
     {
-        Today = new UsageResponse(),
-        Month = new UsageResponse(),
+        Period = UsagePeriod.Today,
+        Usage = new UsageResponse { TotalTokens = 1 },
         Quota = quota,
         Thresholds = QuotaThresholds.Defaults,
+        Components = new CompanionComponents(),
+        Now = new System.DateTimeOffset(2026, 7, 26, 15, 35, 20, TimeSpan.Zero),
     };
 
     [TestMethod]

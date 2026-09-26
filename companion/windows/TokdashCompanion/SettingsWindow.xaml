@@ -79,7 +79,15 @@
         <TextBlock x:Name="TestResult" Text="" FontSize="{StaticResource FontCaption}" TextWrapping="Wrap"
                    Visibility="Collapsed" Margin="0,0,0,4"/>
         <TextBlock x:Name="ServerHint" Text="Default: http://127.0.0.1:55423. Tailscale HTTPS URLs are supported."
-                   FontSize="{StaticResource FontCaption}" Foreground="{DynamicResource SettingsMuted}" Margin="0,0,0,16"/>
+                   FontSize="{StaticResource FontCaption}" Foreground="{DynamicResource SettingsMuted}" Margin="0,0,0,8"/>
+
+        <!-- Server diagnostics (v1.1): read from /api/version + /api/update-check on open.
+             Silent - both rows stay hidden when the server answers nothing or has no
+             update-check consent, and nothing here is ever POSTed. -->
+        <TextBlock x:Name="ServerRuntimeText" Text="" FontSize="{StaticResource FontCaption}"
+                   Foreground="{DynamicResource SettingsMuted}" Margin="0,0,0,2" Visibility="Collapsed"/>
+        <TextBlock x:Name="ServerUpdateRow" Text="" FontSize="{StaticResource FontCaption}"
+                   Foreground="{DynamicResource SettingsMuted}" Margin="0,0,0,16" Visibility="Collapsed"/>
 
         <TextBlock x:Name="StartupLabel" Text="Startup" FontWeight="SemiBold" FontSize="{StaticResource FontBody}" Margin="0,0,0,8"/>
         <CheckBox x:Name="LaunchBox" Content="Launch at login" Margin="0,0,0,16"/>
@@ -88,6 +96,40 @@
         <CheckBox x:Name="NotifyBox" Content="Low-quota notifications" Margin="0,0,0,4"/>
         <TextBlock x:Name="NotifyHint" Text="Notifies when a subscription window crosses its threshold. Opt-in."
                    FontSize="{StaticResource FontCaption}" Foreground="{DynamicResource SettingsMuted}" Margin="0,0,0,16"/>
+
+        <!-- Components (schema v3): every toggle defaults ON; an absent components object
+             (any v2 settings file) reads as all-on, so upgrading never hides a feature. -->
+        <TextBlock x:Name="ComponentsLabel" Text="Components" FontWeight="SemiBold" FontSize="{StaticResource FontBody}" Margin="0,0,0,8"/>
+        <StackPanel Margin="0,0,0,16">
+            <StackPanel.Resources>
+                <Style x:Key="CompDesc" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+                    <Setter Property="FontSize" Value="{StaticResource FontMicro}"/>
+                    <Setter Property="Foreground" Value="{DynamicResource SettingsMuted}"/>
+                    <Setter Property="Margin" Value="22,0,0,6"/>
+                </Style>
+            </StackPanel.Resources>
+            <CheckBox x:Name="CompFullDeltaBox" Content="Full delta row" Margin="0,0,0,0"/>
+            <TextBlock x:Name="CompFullDeltaDesc" Style="{StaticResource CompDesc}" Text="cost + tokens + messages"/>
+            <CheckBox x:Name="CompTopRanksBox" Content="Top tools &amp; models" Margin="0,0,0,0"/>
+            <TextBlock x:Name="CompTopRanksDesc" Style="{StaticResource CompDesc}" Text="under the hero; rows set below"/>
+            <!-- Rows per top-ranks list (contract §Top ranks): one shared count for tools and
+                 models, 3..8. Autosaves like the toggles around it; the flyout grows to fit. -->
+            <DockPanel Margin="22,2,0,6">
+                <TextBlock x:Name="RankRowsLabel" DockPanel.Dock="Left" Text="Rows: 3"
+                           FontSize="{StaticResource FontMicro}" Foreground="{DynamicResource SettingsMuted}"
+                           VerticalAlignment="Center" Width="110"/>
+                <Slider x:Name="RankRowsSlider" Minimum="3" Maximum="8" TickFrequency="1"
+                        IsSnapToTickEnabled="True" Value="3"/>
+            </DockPanel>
+            <CheckBox x:Name="CompResetCreditsBox" Content="Reset-credits row" Margin="0,0,0,0"/>
+            <TextBlock x:Name="CompResetCreditsDesc" Style="{StaticResource CompDesc}" Text="under Codex quota, All view"/>
+            <CheckBox x:Name="CompActivityGlanceBox" Content="Activity glance" Margin="0,0,0,0"/>
+            <TextBlock x:Name="CompActivityGlanceDesc" Style="{StaticResource CompDesc}" Text="grid on month / year"/>
+            <CheckBox x:Name="CompHistogramBox" Content="Histogram for today / week" Margin="0,0,0,0"/>
+            <TextBlock x:Name="CompHistogramDesc" Style="{StaticResource CompDesc}" Text="instead of grid"/>
+            <CheckBox x:Name="CompPerServerBox" Content="Per-server rows" Margin="0,0,0,0"/>
+            <TextBlock x:Name="CompPerServerDesc" Style="{StaticResource CompDesc}" Text="only with more than one server"/>
+        </StackPanel>
 
         <TextBlock x:Name="ThresholdsLabel" Text="Quota alert thresholds (% remaining)" FontWeight="SemiBold" FontSize="{StaticResource FontBody}" Margin="0,0,0,8"/>
         <StackPanel Margin="0,0,0,16">

@@ -284,7 +284,7 @@ def test_companion_v2_schema_and_loose_test_rule_are_present():
     assert 'JsonPropertyName("version")' in windows
     assert 'JsonPropertyName("servers")' in windows
     assert "TryGetProperty(\"BaseURL\"" in windows
-    assert "var version: Int = 2" in macos
+    assert "var version: Int = 3" in macos  # schema v3 (components); v2 files migrate up
     assert 'case baseURL = "baseUrl"' in macos
     assert "decodeIfPresent(String.self, forKey: .baseURL)" in macos
     # Test remains optional: Save validates URLs but never checks a probe result.

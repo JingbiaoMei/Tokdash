@@ -60,6 +60,98 @@ public class QuotaRenderTests
     };
 
     [TestMethod]
+    public void CreditNoticesStayOneLineAndScrollOnlyWhenTheyOverflow()
+    {
+        Exception? caught = null;
+        var thread = new Thread(() =>
+        {
+            Window? window = null;
+            try
+            {
+                var notice = new MarqueeText { FontSize = 11, Width = 150 };
+                window = new Window { Content = notice, Width = 180, SizeToContent = SizeToContent.Height,
+                    ShowInTaskbar = false, WindowStyle = WindowStyle.None };
+                window.Show();
+                foreach (var provider in new[] { "Codex", "Claude Code" })
+                {
+                    notice.Text = $"⚡ {provider} · 1 reset credits · expire in 26 d";
+                    Pump();
+                    var label = Descendants<TextBlock>(notice).Single();
+                    Assert.AreEqual(TextWrapping.NoWrap, label.TextWrapping);
+                    Assert.IsTrue(label.ActualWidth > notice.ActualWidth);
+                    Assert.IsTrue(notice.ActualHeight < 22, "notice must occupy one line");
+                    Assert.IsTrue(((Border)notice.Content).ClipToBounds);
+                    Assert.AreEqual(SystemParameters.ClientAreaAnimation,
+                        ((TranslateTransform)label.RenderTransform).HasAnimatedProperties);
+                    Assert.AreEqual(notice.Text, notice.ToolTip);
+                }
+                notice.Text = "1 credit";
+                Pump();
+                Assert.IsFalse(((TranslateTransform)Descendants<TextBlock>(notice).Single().RenderTransform).HasAnimatedProperties,
+                    "short notices must remain still");
+            }
+            catch (Exception error) { caught = error; }
+            finally
+            {
+                window?.Close();
+                Dispatcher.CurrentDispatcher.BeginInvokeShutdown(DispatcherPriority.Background);
+                Dispatcher.Run();
+            }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+        Assert.IsNull(caught, $"Credit marquee failed: {caught}");
+    }
+
+    [TestMethod]
+    public void ArrowButtons_UpdateKickerAndLoading_OnRealWindow()
+    {
+        Exception? caught = null;
+        var thread = new Thread(() =>
+        {
+            FlyoutWindow? flyout = null;
+            try
+            {
+                var client = new FakeClient();
+                var store = new CompanionStore(client);
+                store.SelectPeriod(UsagePeriod.Today);
+                store.RefreshAsync().GetAwaiter().GetResult();
+                flyout = new FlyoutWindow { Store = store };
+                flyout.Show();
+                Pump();
+                client.UsageRange = "pending";
+                client.Usage = "pending";
+                var earlier = (Button)flyout.FindName("StepEarlierBtn");
+                var later = (Button)flyout.FindName("StepLaterBtn");
+                Assert.IsTrue(earlier.IsEnabled);
+                Assert.IsFalse(later.IsEnabled);
+                earlier.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                Pump();
+                Assert.AreEqual("YESTERDAY", ((TextBlock)flyout.FindName("TodayHeader")).Text);
+                Assert.IsTrue(later.IsEnabled);
+                Assert.AreEqual(Visibility.Visible, ((StackPanel)flyout.FindName("HeroSkeleton")).Visibility);
+                Assert.AreEqual(Visibility.Collapsed, ((TextBlock)flyout.FindName("TodayCost")).Visibility);
+                later.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                Pump();
+                Assert.AreEqual("TODAY", ((TextBlock)flyout.FindName("TodayHeader")).Text);
+                Assert.IsFalse(later.IsEnabled);
+            }
+            catch (Exception error) { caught = error; }
+            finally
+            {
+                flyout?.Dismiss();
+                Dispatcher.CurrentDispatcher.BeginInvokeShutdown(DispatcherPriority.Background);
+                Dispatcher.Run();
+            }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+        Assert.IsNull(caught, $"Arrow button interaction failed: {caught}");
+    }
+
+    [TestMethod]
     public void RenderQuota_LowAndAllViews_NoException_OnRealWindow()
     {
         Exception? caught = null;

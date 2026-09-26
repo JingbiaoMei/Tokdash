@@ -1,41 +1,14 @@
 using System.Collections.Generic;
-using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace TokdashCompanion.Tests;
 
 /// <summary>
-/// A controllable ITokdashClient for partial-state tests: each endpoint can
-/// return data or throw, independently.
-/// </summary>
-internal sealed class FakeClient : ITokdashClient
-{
-    public HealthResponse Health { get; set; } = new("ok", "tokdash", "1.0");
-    public UsageResponse Today { get; set; } = new() { TotalTokens = 1000, TotalCost = 1.5, TotalMessages = 10 };
-    public UsageResponse Month { get; set; } = new() { TotalTokens = 5000, TotalCost = 7.5, TotalMessages = 50 };
-    public QuotaResponse? Quota { get; set; }
-    public Exception? TodayError { get; set; }
-    public Exception? MonthError { get; set; }
-    public Exception? QuotaError { get; set; }
-
-    public Task<HealthResponse> HealthAsync(CancellationToken ct = default) => Task.FromResult(Health);
-    public Task<UsageResponse> UsageAsync(string period, CancellationToken ct = default)
-    {
-        if (period == "today" && TodayError is { } te) return Task.FromException<UsageResponse>(te);
-        if (period == "month" && MonthError is { } me) return Task.FromException<UsageResponse>(me);
-        return Task.FromResult(period == "today" ? Today : Month);
-    }
-    public Task<QuotaResponse> QuotaAsync(CancellationToken ct = default)
-        => QuotaError is { } e
-            ? Task.FromException<QuotaResponse>(e)
-            : Task.FromResult(Quota ?? new QuotaResponse());
-    public void Dispose() { }
-}
-
-/// <summary>
-/// Partial-state: one failed request no longer discards the other two. The failed
-/// section is flagged; successful sections keep fresh data; last-good is retained.
+/// Partial-state: one failed request no longer discards the others. The failed section
+/// is flagged; successful sections keep fresh data; last-good is retained. v1.1 sections
+/// per the fetch group: usage + quota are real sections; active-time and the glance
+/// source are optional decorations (rule 6 - they fail silently).
 /// </summary>
 [TestClass]
 public class PartialStateTests
@@ -49,20 +22,20 @@ public class PartialStateTests
         },
     };
 
+    private static UsageResponse Usage(long tokens) => new() { TotalTokens = tokens, TotalCost = 1.5, TotalMessages = 10 };
+
     [TestMethod]
-    public async Task FailedQuota_KeepsTodayMonth_AndMarksQuotaFailed()
+    public async Task FailedQuota_KeepsUsage_AndMarksQuotaFailed()
     {
-        var client = new FakeClient { Quota = OkQuota, QuotaError = new TokdashException(TokdashError.Offline) };
+        var client = new FakeClient { Usage = Usage(1000), Quota = "fail" };
         var store = new CompanionStore(client);
 
         await store.RefreshAsync();
 
         Assert.IsNotNull(store.Snapshot);
         Assert.IsTrue(store.Snapshot!.QuotaFailed, "quota failure must be flagged");
-        Assert.IsFalse(store.Snapshot.TodayFailed);
-        Assert.IsFalse(store.Snapshot.MonthFailed);
-        Assert.AreEqual(1000, store.Snapshot.Today.TotalTokens, "today data survives a quota failure");
-        Assert.AreEqual(5000, store.Snapshot.Month.TotalTokens);
+        Assert.IsFalse(store.Snapshot.UsageFailed);
+        Assert.AreEqual(1000, store.Snapshot.Usage!.TotalTokens, "usage data survives a quota failure");
     }
 
     [TestMethod]
@@ -76,7 +49,7 @@ public class PartialStateTests
         Assert.IsTrue(store.Snapshot.Quota.Enabled);
 
         // Quota now fails; last-good quota should be retained.
-        client.QuotaError = new TokdashException(TokdashError.Offline);
+        client.Quota = "fail";
         await store.RefreshAsync();
 
         Assert.IsTrue(store.Snapshot!.QuotaFailed);
@@ -86,13 +59,13 @@ public class PartialStateTests
     [TestMethod]
     public async Task Recovery_Clears_The_FailedFlag()
     {
-        var client = new FakeClient { Quota = OkQuota, QuotaError = new TokdashException(TokdashError.Timeout) };
+        var client = new FakeClient { Quota = "fail" };
         var store = new CompanionStore(client);
 
         await store.RefreshAsync();
         Assert.IsTrue(store.Snapshot!.QuotaFailed);
 
-        client.QuotaError = null;
+        client.Quota = OkQuota;
         await store.RefreshAsync();
         Assert.IsFalse(store.Snapshot!.QuotaFailed, "a successful fetch clears the failed flag");
     }
@@ -100,7 +73,7 @@ public class PartialStateTests
     [TestMethod]
     public async Task WrongService_Backs_Off_And_Does_Not_TightLoop()
     {
-        var client = new FakeClient { Health = new("ok", "something-else", "1.0") };
+        var client = new FakeClient { Health = new HealthResponse("ok", "something-else", "1.0") };
         var store = new CompanionStore(client);
         await store.RefreshAsync();
 
@@ -110,26 +83,37 @@ public class PartialStateTests
     }
 
     [TestMethod]
-    public async Task AllSectionsFailed_Backs_Off()
+    public async Task AllRealSectionsFailed_Backs_Off()
     {
-        var client = new FakeClient
-        {
-            TodayError = new TokdashException(TokdashError.Offline),
-            MonthError = new TokdashException(TokdashError.Offline),
-            QuotaError = new TokdashException(TokdashError.Offline),
-        };
+        var client = new FakeClient { Usage = "fail", Quota = "fail" };
         var store = new CompanionStore(client);
         await store.RefreshAsync();
 
-        Assert.AreEqual(1, store.FailureCount, "all-sections-failed must back off, not retry in 10min");
+        Assert.AreEqual(1, store.FailureCount, "all-real-sections-failed must back off, not retry in 10min");
         Assert.IsFalse(store.PartialPending);
+    }
+
+    [TestMethod]
+    public async Task OptionalSections_Fail_Silently()
+    {
+        // Rule 6: active-time and insights failing while usage+quota succeed is NOT a
+        // partial failure (no warning, no short-retry state): they are decorations.
+        var client = new FakeClient { Usage = Usage(1000), Quota = OkQuota, ActiveTime = "503", Insights = "503" };
+        var store = new CompanionStore(client);
+        await store.RefreshAsync();
+
+        Assert.IsFalse(store.Snapshot!.UsageFailed);
+        Assert.IsFalse(store.Snapshot.QuotaFailed);
+        Assert.IsNull(store.Snapshot.ActiveMs, "the failed optional section contributes null");
+        Assert.IsFalse(store.PartialPending, "optional failures never flip the partial state");
     }
 
     [TestMethod]
     public async Task PartialFailure_Schedules_Short_Retry()
     {
-        var client = new FakeClient { Quota = OkQuota, QuotaError = new TokdashException(TokdashError.Timeout) };
+        var client = new FakeClient { Usage = Usage(1000), Quota = "503" };
         var store = new CompanionStore(client);
+        // usage succeeds, quota 503s -> partial
         await store.RefreshAsync();
 
         Assert.AreEqual(0, store.FailureCount, "partial is not a full failure");
@@ -137,14 +121,9 @@ public class PartialStateTests
     }
 
     [TestMethod]
-    public async Task AllSections_503_Sets_Busy_State()
+    public async Task AllRealSections_503_Sets_Busy_State()
     {
-        var client = new FakeClient
-        {
-            TodayError = new TokdashException(TokdashError.Busy),
-            MonthError = new TokdashException(TokdashError.Busy),
-            QuotaError = new TokdashException(TokdashError.Busy),
-        };
+        var client = new FakeClient { Usage = "503", ActiveTime = "503", Insights = "503", Quota = "503" };
         var store = new CompanionStore(client);
         await store.RefreshAsync();
 

@@ -7,9 +7,20 @@ import SwiftUI
 enum CompanionLayout {
     static let popoverWidth: CGFloat = 300
     /// The quota list scrolls; this keeps it tall enough to show several windows at once
-    /// while still leaving room for the Today hero above it.
+    /// while still leaving room for the Today hero above it. Raised to 340 per review so
+    /// the All view shows noticeably more subscription rows before scrolling.
     static let quotaMinHeight: CGFloat = 150
-    static let quotaMaxHeight: CGFloat = 260
+    static let quotaMaxHeight: CGFloat = 340
+
+    /// Settings opens tall enough to show every section without scrolling (user request:
+    /// "wider but not taller - fit the content"): 980pt covers the full grouped form with
+    /// server cards, capped by the screen's visible height so the window never overhangs.
+    /// If the content is STILL taller (many servers), the grouped Form scrolls as before,
+    /// and the window stays freely resizable either way.
+    static var settingsIdealHeight: CGFloat {
+        let visible = NSScreen.main?.visibleFrame.height ?? 900
+        return min(980, max(640, visible - 44))
+    }
 }
 
 /// `MenuBarExtra` reads an AppKit image's intrinsic canvas when it creates the status
@@ -52,6 +63,13 @@ struct TokdashCompanionApp: App {
         notificationDelegate = del
         // Install the delegate early so notification taps + foreground delivery are handled.
         UNUserNotificationCenter.current().delegate = del
+        // One-shot: AppKit persists the Settings window frame, and the persisted 640 pt
+        // height kept the form scrolling after the fit-content default landed. Discard the
+        // saved frame ONCE so the new ideal height takes effect; later user resizes stick.
+        if !UserDefaults.standard.bool(forKey: "tokdashSettingsFrameFitV1") {
+            UserDefaults.standard.removeObject(forKey: "NSWindow Frame com_apple_SwiftUI_Settings_window")
+            UserDefaults.standard.set(true, forKey: "tokdashSettingsFrameFitV1")
+        }
     }
 
     var body: some Scene {
@@ -73,6 +91,10 @@ struct TokdashCompanionApp: App {
             SettingsView()
                 .environmentObject(store)
         }
+        // Without this the Settings window clamps to the content's fixed frame and the
+        // user can't drag it larger than its opening size. .contentMinSize lets it grow
+        // freely from the content's minimum (the grouped Form scrolls as it shrinks).
+        .windowResizability(.contentMinSize)
     }
 }
 
@@ -89,11 +111,15 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
-        if response.notification.request.content.userInfo["openQuota"] != nil {
+        // Low-quota taps open the Low view; reset-credit taps open the All view,
+        // because the credits row lives under the Codex group there (and only there).
+        let info = response.notification.request.content.userInfo
+        let opensAll = info["openQuotaAll"] != nil
+        if opensAll || info["openQuota"] != nil {
             let s = store
             Task { @MainActor in
                 guard let s else { return }
-                s.quotaView = .low
+                s.quotaView = opensAll ? .all : .low
                 Self.openQuotaWindow(store: s)  // static -> no self capture across the @Sendable Task
             }
         }

@@ -8,7 +8,16 @@ public interface ITokdashClient : IDisposable
 {
     Task<HealthResponse> HealthAsync(CancellationToken ct = default);
     Task<UsageResponse> UsageAsync(string period, CancellationToken ct = default);
+    Task<UsageResponse> UsageRangeAsync(string from, string to, CancellationToken ct = default);
+    Task<ActiveTimeResponse> ActiveTimeAsync(string period, CancellationToken ct = default);
+    Task<ActiveTimeResponse> ActiveTimeRangeAsync(string from, string to, CancellationToken ct = default);
+    Task<InsightsResponse> InsightsHourlyTodayAsync(CancellationToken ct = default);
+    Task<InsightsResponse> InsightsHourlyRangeAsync(string from, string to, CancellationToken ct = default);
+    Task<InsightsResponse> InsightsDailyAsync(string from, string to, CancellationToken ct = default);
+    Task<StatsResponse> StatsAsync(CancellationToken ct = default);
     Task<QuotaResponse> QuotaAsync(CancellationToken ct = default);
+    Task<VersionResponse> VersionAsync(CancellationToken ct = default);
+    Task<ServerUpdateCheckResponse> ServerUpdateCheckAsync(CancellationToken ct = default);
 }
 
 /// <summary>
@@ -26,13 +35,18 @@ public sealed class TokdashClient : ITokdashClient
 
     private readonly HttpClient _healthClient;
     private readonly HttpClient _dataClient;
+    private readonly HttpClient _versionClient;
     private readonly Uri _baseUri;
 
     public TokdashClient(string baseUrl)
     {
         _baseUri = NormalizeBase(new Uri(baseUrl));
         _healthClient = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
-        _dataClient = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
+        // Cold month/year scans server-side run tens of seconds (warm docs: year ~15 s,
+        // month ~25 s + base). 20 s cut them off mid-parse and the year view showed
+        // "unavailable" on every cycle - long windows need a long ceiling.
+        _dataClient = new HttpClient { Timeout = TimeSpan.FromSeconds(90) };
+        _versionClient = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
     }
 
     public async Task<HealthResponse> HealthAsync(CancellationToken ct = default)
@@ -45,9 +59,61 @@ public sealed class TokdashClient : ITokdashClient
         return await GetAsync<UsageResponse>(_dataClient, $"/api/usage?period={period}", ct);
     }
 
+    /// Calendar-week window: `date_from`/`date_to` (local Monday .. today). `period=week`
+    /// is a rolling 7-day window and must never be used for the segment. Contract §Period windows.
+    public async Task<UsageResponse> UsageRangeAsync(string from, string to, CancellationToken ct = default)
+    {
+        return await GetAsync<UsageResponse>(_dataClient, $"/api/usage?date_from={from}&date_to={to}", ct);
+    }
+
+    public async Task<ActiveTimeResponse> ActiveTimeAsync(string period, CancellationToken ct = default)
+    {
+        return await GetAsync<ActiveTimeResponse>(_dataClient, $"/api/active-time?period={period}", ct);
+    }
+
+    public async Task<ActiveTimeResponse> ActiveTimeRangeAsync(string from, string to, CancellationToken ct = default)
+    {
+        return await GetAsync<ActiveTimeResponse>(_dataClient, $"/api/active-time?date_from={from}&date_to={to}", ct);
+    }
+
+    public async Task<InsightsResponse> InsightsHourlyTodayAsync(CancellationToken ct = default)
+    {
+        return await GetAsync<InsightsResponse>(_dataClient, "/api/insights?facets=hourly&period=today", ct);
+    }
+
+    /// Hourly facet over an explicit window - the E12 stepped day (contract §Instance
+    /// stepper: the hourly facet folds the window's own rows, so it is correct on a past day).
+    public async Task<InsightsResponse> InsightsHourlyRangeAsync(string from, string to, CancellationToken ct = default)
+    {
+        return await GetAsync<InsightsResponse>(_dataClient, $"/api/insights?facets=hourly&date_from={from}&date_to={to}", ct);
+    }
+
+    public async Task<InsightsResponse> InsightsDailyAsync(string from, string to, CancellationToken ct = default)
+    {
+        return await GetAsync<InsightsResponse>(_dataClient, $"/api/insights?facets=daily&date_from={from}&date_to={to}", ct);
+    }
+
+    public async Task<StatsResponse> StatsAsync(CancellationToken ct = default)
+    {
+        return await GetAsync<StatsResponse>(_dataClient, "/api/stats", ct);
+    }
+
     public async Task<QuotaResponse> QuotaAsync(CancellationToken ct = default)
     {
         return await GetAsync<QuotaResponse>(_dataClient, "/api/quota", ct);
+    }
+
+    /// Settings-only diagnostics (contract: never the flyout, never on a schedule).
+    public async Task<VersionResponse> VersionAsync(CancellationToken ct = default)
+    {
+        return await GetAsync<VersionResponse>(_versionClient, "/api/version", ct);
+    }
+
+    /// Settings-only. Deliberately consent-gated server-side and read-only; the consent
+    /// POST stays web-only, the companion never writes.
+    public async Task<ServerUpdateCheckResponse> ServerUpdateCheckAsync(CancellationToken ct = default)
+    {
+        return await GetAsync<ServerUpdateCheckResponse>(_dataClient, "/api/update-check", ct);
     }
 
     private async Task<T> GetAsync<T>(HttpClient client, string path, CancellationToken ct)
@@ -86,6 +152,7 @@ public sealed class TokdashClient : ITokdashClient
     {
         _healthClient.Dispose();
         _dataClient.Dispose();
+        _versionClient.Dispose();
     }
 }
 
@@ -122,7 +189,12 @@ public sealed class Comparison
     [JsonPropertyName("tokens_pct")] public double? TokensPct { get; set; }
     [JsonPropertyName("cost_pct")] public double? CostPct { get; set; }
     [JsonPropertyName("messages_pct")] public double? MessagesPct { get; set; }
+    // The *_prev fields let a multi-server companion recompute each percentage from
+    // summed current and previous totals (contract §Full delta row). A metric whose
+    // *_prev is omitted by any contributing server is omitted from the combined row.
     [JsonPropertyName("cost_prev")] public double? CostPrev { get; set; }
+    [JsonPropertyName("tokens_prev")] public double? TokensPrev { get; set; }
+    [JsonPropertyName("messages_prev")] public double? MessagesPrev { get; set; }
 }
 public sealed class CacheInfo { [JsonPropertyName("age_seconds")] public double? AgeSeconds { get; set; } }
 
@@ -149,6 +221,59 @@ public sealed class ProviderQuota
     // Absent for single-credential providers and for every pre-Accounts server. Spec §7.
     public List<AccountQuota>? Accounts { get; set; }
     public List<BucketQuota>? Buckets { get; set; }
+    // Codex-only reset credits (contract §Reset credits). Absent on every other
+    // provider, and usually on Codex too.
+    [JsonPropertyName("reset_credits")] public ResetCredits? ResetCredits { get; set; }
+}
+
+/// <summary>
+/// <c>providers.&lt;provider&gt;.reset_credits</c> (contract §Reset credits). Sent by Codex
+/// and - since server v2.6.3 - by Claude Code too. The soonest future <c>expires_at</c>
+/// dates the row and arms the expiry notification.
+/// </summary>
+public sealed class ResetCredits
+{
+    [JsonPropertyName("available_count")] public int? AvailableCount { get; set; }
+    public List<ResetCredit>? Credits { get; set; }
+}
+
+public sealed class ResetCredit
+{
+    public string? Id { get; set; }
+    [JsonPropertyName("expires_at")]
+    [JsonConverter(typeof(ExpiresAtConverter))]
+    public string? ExpiresAt { get; set; }
+
+    /// <summary>
+    /// <c>expires_at</c> has shipped in two wire shapes: Codex's credits carry an ISO 8601
+    /// <em>string</em>, Claude Code's limit resets (server v2.6.3) carry epoch <em>seconds</em>.
+    /// Both normalize to an ISO string here so the timestamp parser stays single-format -
+    /// and an unexpected shape degrades to null instead of taking the whole quota payload
+    /// down with it (a single credit line must never blank the whole quota section).
+    /// </summary>
+    public sealed class ExpiresAtConverter : JsonConverter<string?>
+    {
+        public override string? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            switch (reader.TokenType)
+            {
+                case JsonTokenType.Null: return null;
+                case JsonTokenType.String: return reader.GetString();
+                case JsonTokenType.Number when reader.TryGetInt64(out var epoch):
+                    return DateTimeOffset.FromUnixTimeSeconds(epoch).ToString("o");
+                case JsonTokenType.Number when reader.TryGetDouble(out var sec):
+                    return DateTimeOffset.FromUnixTimeSeconds((long)sec).ToString("o");
+                default:
+                    // Unknown shape: consume the value (an unconsumed token would corrupt
+                    // the rest of the parse) and degrade this one credit to "no expiry".
+                    using (JsonDocument.ParseValue(ref reader)) { }
+                    return null;
+            }
+        }
+
+        public override void Write(Utf8JsonWriter writer, string? value, JsonSerializerOptions options) =>
+            writer.WriteStringValue(value);
+    }
 }
 
 /// <summary>
@@ -179,4 +304,87 @@ public sealed class BucketQuota
     // Epoch seconds this window was observed. Older than the provider's status_at means
     // the failure is newer than the data, i.e. this row is last-known. Spec §7.
     [JsonPropertyName("captured_at")] public int? CapturedAt { get; set; }
+}
+
+// MARK: - v1.1 optional-section payloads (additive; failure/404 hides the section silently)
+
+/// <summary>
+/// <c>GET /api/active-time</c> (selected period). <c>ActiveMs</c> is MILLISECONDS - every
+/// duration in this payload is; every epoch in the quota payload is seconds. <c>by_tool</c>,
+/// <c>comparison</c> and the <c>*_sum</c> fields are not rendered in v1.1 and decode-ignored.
+/// </summary>
+public sealed class ActiveTimeResponse
+{
+    [JsonPropertyName("active_ms")] public long? ActiveMs { get; set; }
+    public string? Timestamp { get; set; }
+}
+
+/// <summary>
+/// <c>GET /api/insights?facets=hourly...</c> / <c>?facets=daily...</c>. Exactly one facet per
+/// request; only the requested facet is present.
+/// </summary>
+public sealed class InsightsResponse
+{
+    public HourlyFacet? Hourly { get; set; }
+    public List<DailyPoint>? Daily { get; set; }
+}
+
+public sealed class HourlyFacet
+{
+    public List<HourBucket>? Buckets { get; set; }
+    [JsonPropertyName("peak_hour")] public int? PeakHour { get; set; }
+}
+
+public sealed class HourBucket
+{
+    public int? Hour { get; set; }
+    public long? Tokens { get; set; }
+}
+
+/// <summary>One day of the <c>daily</c> facet. Sparse: a date with no usage has no entry.</summary>
+public sealed class DailyPoint
+{
+    public string? Date { get; set; }
+    public long? Tokens { get; set; }
+    public int? Intensity { get; set; }
+}
+
+/// <summary>
+/// <c>GET /api/stats</c> - a rolling 365 days of contributions; v1.1 windows it client-side
+/// (trailing 90 days for month, 180 for year). <c>summary.*</c> / <c>stats.*</c> are not rendered.
+/// </summary>
+public sealed class StatsResponse
+{
+    public List<Contribution>? Contributions { get; set; }
+}
+
+public sealed class Contribution
+{
+    public string? Date { get; set; }
+    public ContributionTotals? Totals { get; set; }
+    // int 0..4, ranked quartiles server-side
+    public int? Intensity { get; set; }
+}
+
+public sealed class ContributionTotals
+{
+    public long? Tokens { get; set; }
+}
+
+/// <summary><c>GET /api/version</c> - Settings only.</summary>
+public sealed class VersionResponse
+{
+    [JsonPropertyName("runtime_version")] public string? RuntimeVersion { get; set; }
+    [JsonPropertyName("update_check_enabled")] public bool? UpdateCheckEnabled { get; set; }
+}
+
+/// <summary>
+/// <c>GET /api/update-check</c> - Settings only, never a POST. <c>Enabled == false</c> means the
+/// server has no update-check consent: render nothing, never try to change that.
+/// </summary>
+public sealed class ServerUpdateCheckResponse
+{
+    public bool? Enabled { get; set; }
+    [JsonPropertyName("update_available")] public bool? UpdateAvailable { get; set; }
+    public string? Latest { get; set; }
 }

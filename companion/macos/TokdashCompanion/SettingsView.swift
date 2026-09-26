@@ -10,6 +10,8 @@ struct SettingsView: View {
     @State private var otherThreshold: Double = 15
     @State private var language: AppLanguage = .system
     @State private var automaticUpdateChecks: Bool = false
+    @State private var components: CompanionComponents = CompanionComponents()
+    @State private var rankRows: Int = 3
     @State private var serverSaveTasks: [String: Task<Void, Never>] = [:]
     @State private var testResults: [String: ConnectionTest] = [:]
     @State private var testTasks: [String: Task<Void, Never>] = [:]
@@ -39,18 +41,14 @@ struct SettingsView: View {
                     Label(L10n.t("add_server"), systemImage: "plus")
                 }
                 .buttonStyle(.bordered)
-                Text(L10n.t("server_hint"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                .help(L10n.t("server_hint"))
             }
             Section(L10n.t("section_startup")) {
                 Toggle(L10n.t("launch_at_login"), isOn: $launchAtLogin)
             }
             Section(L10n.t("section_notifications")) {
                 Toggle(L10n.t("low_quota_notifications"), isOn: $lowQuotaNotifications)
-                Text(L10n.t("low_quota_hint"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .help(L10n.t("low_quota_hint"))
             }
             Section(L10n.t("section_thresholds")) {
                 Slider(value: $fiveHourThreshold, in: 5...50, step: 1) {
@@ -63,14 +61,27 @@ struct SettingsView: View {
                     Text(L10n.t("threshold_other", Int(otherThreshold)))
                 }
             }
+            // v1.1 feature components (Settings schema v3). All six default on; a v2
+            // file decodes to all-on, so upgrading never silently hides a feature.
+            Section(L10n.t("section_components")) {
+                componentToggle("comp_full_delta_row", desc: "comp_full_delta_row_desc", isOn: $components.fullDeltaRow)
+                componentToggle("comp_top_ranks", desc: "comp_top_ranks_desc", isOn: $components.topRanks)
+                // Rows per top-ranks list (contract §Top ranks): one shared count for tools
+                // and models, 3..8; the flyout grows to fit automatically.
+                Stepper(value: $rankRows, in: 3...8, step: 1) {
+                    Text(L10n.t("rank_rows", rankRows))
+                }
+                componentToggle("comp_reset_credits", desc: "comp_reset_credits_desc", isOn: $components.resetCredits)
+                componentToggle("comp_activity_glance", desc: "comp_activity_glance_desc", isOn: $components.activityGlance)
+                componentToggle("comp_histogram_today_week", desc: "comp_histogram_today_week_desc", isOn: $components.activityHistogramTodayWeek)
+                componentToggle("comp_per_server_rows", desc: "comp_per_server_rows_desc", isOn: $components.perServerRows)
+            }
             Section(L10n.t("section_updates")) {
                 Text(L10n.t("update_current_version", CompanionStore.currentVersion))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Toggle(L10n.t("update_auto_check"), isOn: $automaticUpdateChecks)
-                Text(L10n.t("update_auto_check_hint"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .help(L10n.t("update_auto_check_hint"))
                 updateStatusView
                 HStack(spacing: 8) {
                     Button(L10n.t("update_check_now")) { store.checkForUpdates(manual: true) }
@@ -83,6 +94,28 @@ struct SettingsView: View {
                 Text(store.lastUpdateCheckText)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                // E7: the SERVER's own runtime version and update badge, read on every
+                // Settings open (GET /api/version, then /api/update-check only when the
+                // server says update checks are enabled). Both are Settings-only reads,
+                // both fail silently, and the companion never POSTs.
+                if let runtime = store.serverRuntimeVersion {
+                    HStack {
+                        Text(L10n.t("server_runtime_row"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(L10n.t("server_runtime_version", runtime))
+                            .font(.caption)
+                            .monospacedDigit()
+                    }
+                }
+                if let badge = store.serverUpdateBadgeVersion {
+                    Label(L10n.t("server_update_available", badge), systemImage: "arrow.down.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             Section(L10n.t("section_language")) {
                 Picker(L10n.t("section_language"), selection: $language) {
@@ -90,20 +123,34 @@ struct SettingsView: View {
                         Text(lang.displayName).tag(lang)
                     }
                 }
-                Text(L10n.t("language_hint"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                .help(L10n.t("language_hint"))
             }
         }
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
         .padding(20)
-        .frame(width: 480)
+        // A grouped Form is a ScrollView: with only a fixed width its ideal height is
+        // tiny, which is what made the window open small and (without
+        // .windowResizability) impossible to drag larger. This gives a real default and
+        // a draggable range; the Form scrolls when the window is short.
+        .frame(minWidth: 480, idealWidth: 480, maxWidth: 680,
+               minHeight: 420, idealHeight: CompanionLayout.settingsIdealHeight, maxHeight: .infinity)
         // Match the clean white content surface used by standard settings windows in
         // light mode while retaining a readable system-managed surface in dark mode.
         .background(Color(nsColor: .textBackgroundColor).ignoresSafeArea())
-        .onAppear { loadSettings() }
+        .onAppear {
+            loadSettings()
+            store.fetchServerUpdateInfo()
+        }
         .onChange(of: launchAtLogin) { _, _ in saveSettings() }
+        .onChange(of: components) { _, _ in
+            saveSettings()
+            store.applyComponentsChange() // toggled components appear without a refetch
+        }
+        .onChange(of: rankRows) { _, _ in
+            saveSettings()
+            store.applyComponentsChange() // both rank lists re-slice without a refetch
+        }
         .onChange(of: lowQuotaNotifications) { _, _ in saveSettings() }
         .onChange(of: fiveHourThreshold) { _, _ in saveSettings() }
         .onChange(of: weeklyThreshold) { _, _ in saveSettings() }
@@ -122,6 +169,16 @@ struct SettingsView: View {
             Button(L10n.t("cancel"), role: .cancel) { pendingRemovalID = nil }
         } message: {
             Text(L10n.t("remove_last_enabled_message"))
+        }
+    }
+
+    /// One Components toggle with its caption line (mock: title + short gray note).
+    private func componentToggle(_ titleKey: String, desc: String, isOn: Binding<Bool>) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Toggle(L10n.t(titleKey), isOn: isOn)
+            Text(L10n.t(desc))
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -198,12 +255,16 @@ struct SettingsView: View {
             }
             .opacity(isEnabled ? 1 : 0.55)
 
-            HStack(spacing: 8) {
-                Color.clear.frame(width: 60, height: 1)
-                testResultView(testResults[id] ?? .idle)
+            // The result row appears only when a test ran: idle cards don't reserve its
+            // height (the form has to fit every section without scrolling).
+            if (testResults[id] ?? .idle) != .idle {
+                HStack(spacing: 8) {
+                    Color.clear.frame(width: 60, height: 1)
+                    testResultView(testResults[id] ?? .idle)
+                }
+                .frame(height: 16)
+                .opacity(isEnabled ? 1 : 0.55)
             }
-            .frame(height: 16)
-            .opacity(isEnabled ? 1 : 0.55)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
@@ -352,6 +413,8 @@ struct SettingsView: View {
         otherThreshold = store.settings.thresholds.other
         language = store.settings.language
         automaticUpdateChecks = store.settings.automaticUpdateChecks
+        components = store.settings.components
+        rankRows = store.settings.rankRows
     }
 
     private func scheduleServerSave(_ id: String) {
@@ -380,6 +443,8 @@ struct SettingsView: View {
         // Only persist the URL when it's a valid absolute http/https URL.
         store.settings.servers = validServers
         store.settings.lowQuotaNotifications = lowQuotaNotifications
+        store.settings.components = components
+        store.settings.rankRows = rankRows
         let thresholds = QuotaThresholds(fiveHour: fiveHourThreshold, weekly: weeklyThreshold, other: otherThreshold)
         let thresholdsChanged = store.settings.thresholds != thresholds
         store.settings.thresholds = thresholds

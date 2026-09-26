@@ -355,15 +355,6 @@ public partial class FlyoutWindow : Window
         _ => _dark ? ColorFromHex("#6CCB5F") : ColorFromHex("#0F7B0F"),
     };
 
-    private Brush ComparisonBrush(double? costPct)
-    {
-        bool above = costPct is > 0;
-        Color c = above
-            ? (_dark ? ColorFromHex("#FF99A4") : ColorFromHex("#C42B1C"))
-            : (_dark ? ColorFromHex("#6CCB5F") : ColorFromHex("#0F7B0F"));
-        return new SolidColorBrush(c);
-    }
-
     [DllImport("user32.dll")]
     private static extern IntPtr MonitorFromPoint(POINT pt, uint dwFlags);
 
@@ -420,7 +411,6 @@ public partial class FlyoutWindow : Window
 
         bool showBanner = Store.ShowsBanner;
         Banner.Visibility = showBanner ? Visibility.Visible : Visibility.Collapsed;
-        SepBanner.Visibility = showBanner ? Visibility.Visible : Visibility.Collapsed;
         if (showBanner)
         {
             BannerIcon.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(
@@ -433,54 +423,70 @@ public partial class FlyoutWindow : Window
                 ? Visibility.Visible : Visibility.Collapsed;
         }
 
+        UpdatePeriodButtons();
+
         var snap = Store.Snapshot;
-        if (snap is null && Store.ConnectionState == ConnectionState.Connecting)
-        {
-            TodayCost.Text = "…";
-            return;
-        }
-        if (snap is null) return;
+        // Hero kicker follows the selected instance (E12: present or stepped) even before
+        // the first snapshot exists.
+        TodayHeader.Text = snap?.KickerText ?? Store.CurrentKickerText;
 
-        if (snap.Today.TotalTokens == 0)
+        // One skeleton for the whole usage side while the selected period's data has not
+        // landed (first load or a period switch). Quota lives in its own section (rule 2).
+        bool heroLoading = snap is null || snap.UsageLoading;
+        HeroSkeleton.Visibility = heroLoading ? Visibility.Visible : Visibility.Collapsed;
+        var components = Store.Settings.Components;
+        RanksSkeleton.Visibility = components.TopRanksOn ? Visibility.Visible : Visibility.Collapsed;
+        GlanceSkeleton.Visibility = components.ActivityGlanceOn &&
+            (Store.SelectedPeriod is UsagePeriod.Month or UsagePeriod.Year || components.ActivityHistogramTodayWeekOn)
+            ? Visibility.Visible : Visibility.Collapsed;
+        TodayCost.Visibility = heroLoading ? Visibility.Collapsed : Visibility.Visible;
+        TodaySub.Visibility = heroLoading ? Visibility.Collapsed : Visibility.Visible;
+        TodayCmp.Visibility = Visibility.Collapsed;
+        DeltaRow.Visibility = Visibility.Collapsed;
+        TodayCost.Text = "";
+        TodaySub.Text = "";
+
+        // Quota skeleton: only when no snapshot has ever been built (all endpoints pending).
+        QuotaSkeleton.Visibility = snap is null ? Visibility.Visible : Visibility.Collapsed;
+
+        if (snap is not null && !snap.UsageLoading)
         {
-            TodayCost.Text = L10n.T(snap.TodayFailed ? "today_unavailable" : "no_usage_today");
-            TodayCost.FontSize = FontRes("FontHeroEmpty");
-            TodaySub.Text = L10n.T(snap.TodayFailed ? "will_retry_shortly" : "tokdash_running");
-            TodayCmp.Text = "";
-        }
-        else
-        {
-            TodayCost.Text = snap.TodayCostText;
-            TodayCost.FontSize = FontRes("FontHero");
-            TodaySub.Text = snap.TodaySubLine;
-            TodayCmp.Text = snap.ComparisonText ?? "";
-            TodayCmp.Foreground = ComparisonBrush(snap.Today.Comparison?.CostPct);
+            if (snap.Usage is null || snap.IsEmptyUsage)
+            {
+                TodayCost.Text = snap.HeroTitle;
+                TodayCost.FontSize = FontRes("FontHeroEmpty");
+                TodaySub.Text = snap.HeroEmptySub;
+            }
+            else
+            {
+                TodayCost.Text = snap.CostText;
+                TodayCost.FontSize = FontRes("FontHero");
+                TodaySub.Text = snap.SubLine;
+                if (snap.DeltaPieces is { } pieces)
+                {
+                    DeltaRow.Inlines.Clear();
+                    for (int i = 0; i < pieces.Count; i++)
+                    {
+                        if (i > 0)
+                            DeltaRow.Inlines.Add(new Run(" · ") { Foreground = (Brush)FindResource("FaintBrush") });
+                        DeltaRow.Inlines.Add(new Run(pieces[i].Text) { Foreground = PieceBrush(pieces[i].Direction) });
+                    }
+                    DeltaRow.Inlines.Add(new Run(" " + snap.DeltaSentence) { Foreground = (Brush)FindResource("MutedBrush") });
+                    DeltaRow.Visibility = Visibility.Visible;
+                }
+                else if (snap.ComparisonLine is { Length: > 0 } line && snap.ComparisonDirection is { } dir)
+                {
+                    TodayCmp.Text = line;
+                    TodayCmp.Foreground = PieceBrush(dir);
+                    TodayCmp.Visibility = Visibility.Visible;
+                }
+            }
         }
 
-        MonthLabel.Text = snap.MonthLabel;
-        if (snap.MonthFailed && snap.Month.TotalTokens > 0)
-        {
-            // Keep last-good month visible with a retrying note (don't hide it as "-").
-            MonthCost.Text = snap.MonthCostText;
-            MonthTokens.Text = snap.MonthTokensRetrying;
-        }
-        else if (snap.MonthFailed)
-        {
-            MonthCost.Text = "–";
-            MonthTokens.Text = L10n.T("retrying");
-        }
-        else
-        {
-            MonthCost.Text = snap.MonthCostText;
-            MonthTokens.Text = snap.MonthTokensLine;
-        }
-
+        RenderRanks(snap);
+        RenderGlance(snap);
+        RenderPerServer(snap);
         RenderQuota(snap);
-
-        var activity = snap.ActivityText;
-        ActivityText.Visibility = activity is null ? Visibility.Collapsed : Visibility.Visible;
-        SepActivity.Visibility = activity is null ? Visibility.Collapsed : Visibility.Visible;
-        ActivityText.Text = activity ?? "";
 
         FreshnessText.Text = Store.FreshnessText;
 
@@ -488,6 +494,323 @@ public partial class FlyoutWindow : Window
         double opacity = (Store.ConnectionState == ConnectionState.Offline || Store.ConnectionState == ConnectionState.Busy) ? 0.45 : 1.0;
         HeroPanel.Opacity = opacity;
         QuotaPanel.Opacity = opacity;
+        RanksPanel.Opacity = opacity;
+        GlancePanel.Opacity = opacity;
+        PerServerPanel.Opacity = opacity;
+    }
+
+    private void UpdatePeriodButtons()
+    {
+        var buttons = new[] { Period0Btn, Period1Btn, Period2Btn, Period3Btn };
+        string selected = Store.SelectedPeriod.Token();
+        foreach (var b in buttons)
+        {
+            bool on = (string)b.Tag == selected;
+            b.SetResourceReference(BackgroundProperty, on ? "SegSelBg" : "SegIdleBg");
+            b.SetResourceReference(TextElement.ForegroundProperty, on ? "SegSelText" : "SegText");
+            b.FontWeight = on ? FontWeights.SemiBold : FontWeights.Normal;
+        }
+        // E12 kicker stepper: ‹ walks instances into the past, › walks back toward the
+        // present; ‹ is inert at the walk-back limit, › at the present (contract §Instance
+        // stepper). Names refresh here so a language change re-labels them.
+        StepEarlierBtn.IsEnabled = Store.CanStepEarlier;
+        StepLaterBtn.IsEnabled = Store.CanStepLater;
+        string earlierName = L10n.T("step_earlier"), laterName = L10n.T("step_later");
+        System.Windows.Automation.AutomationProperties.SetName(StepEarlierBtn, earlierName);
+        System.Windows.Automation.AutomationProperties.SetName(StepLaterBtn, laterName);
+        StepEarlierBtn.ToolTip = earlierName;
+        StepLaterBtn.ToolTip = laterName;
+    }
+
+    private void Period_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: string token } btn) return;
+        UsagePeriod period = token switch
+        {
+            "week" => UsagePeriod.Week,
+            "month" => UsagePeriod.Month,
+            "year" => UsagePeriod.Year,
+            _ => UsagePeriod.Today,
+        };
+        // Selecting a segment always re-anchors to the present instance (E12): clicking the
+        // already-selected segment while stepped steps back to the present, so no early
+        // return here - the store's own guard no-ops only a true no-op.
+        Store.SelectPeriod(period);
+        UpdatePeriodButtons();
+    }
+
+    private void PeriodStep_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: string tag }) return;
+        if (!int.TryParse(tag, out int delta)) return;
+        Store.StepPeriod(delta);
+        // Refresh the inert states immediately: a step that lands ON a limit changes button
+        // enablement even if the fetch behind it is still in flight.
+        UpdatePeriodButtons();
+    }
+
+    /// <summary>Delta line colors (mirrors macOS pieceColor): down green / up red / flat grey.</summary>
+    private Brush PieceBrush(int direction)
+    {
+        if (direction < 0) return new SolidColorBrush(_dark ? ColorFromHex("#6CCB5F") : ColorFromHex("#0F7B0F"));
+        if (direction > 0) return new SolidColorBrush(_dark ? ColorFromHex("#FF99A4") : ColorFromHex("#C42B1C"));
+        return (Brush)FindResource("MutedBrush");
+    }
+
+    // MARK: Top ranks
+
+    private void RenderRanks(Snapshot? snap)
+    {
+        var tools = snap?.TopTools ?? [];
+        var models = snap?.TopModels ?? [];
+        bool show = snap is not null && !snap.UsageLoading && snap.HasTopRanks && (tools.Count > 0 || models.Count > 0);
+        RanksPanel.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        if (!show) return;
+        ToolsKicker.Text = snap!.ToolsKickerText;
+        ModelsKicker.Text = snap.ModelsKickerText;
+        ToolsStrip.ItemsSource = tools.Select(MakeRankVM).ToList();
+        // Model rows carry no marks at all: the mark sits inside the name cell, so its
+        // absence collapses and the names sit flush with the kicker (RankTemplate).
+        ModelsStrip.ItemsSource = models.Select(MakeRankVM).ToList();
+    }
+
+    private RankVM MakeRankVM(Snapshot.RankEntry entry)
+    {
+        var logo = LogoFor(entry.LogoAsset);
+        return new RankVM
+        {
+            Logo = logo,
+            LogoVisibility = logo is null ? Visibility.Collapsed : Visibility.Visible,
+            Label = entry.Label,
+            Value = entry.ValueText,
+            FillStar = new GridLength(entry.Fraction * 100, GridUnitType.Star),
+            RestStar = new GridLength(100 - entry.Fraction * 100, GridUnitType.Star),
+            Pct = entry.PctText,
+        };
+    }
+
+    private static readonly Dictionary<string, ImageSource?> LogoCache = new();
+
+    /// <summary>Marks that ship as dark ink: the dark theme swaps in a pre-inverted
+    /// {name}-dark copy, mirroring the web dashboard's darkInvert rule (the same set the
+    /// macOS asset catalog carries as dark-appearance imageset variants).</summary>
+    private static readonly HashSet<string> DarkInvertAssets =
+        new() { "codex", "grok", "zcode", "cline", "hermes", "omp", "zed", "cursor" };
+
+    /// <summary>
+    /// Load a harness mark from the packaged Assets\Agents resources. A missing asset
+    /// degrades to text-only (never a broken-image box). Dark-ink marks (codex, grok, zcode)
+    /// swap to their pre-inverted copies when the flyout renders dark.
+    /// </summary>
+    private ImageSource? LogoFor(string? asset)
+    {
+        if (string.IsNullOrEmpty(asset)) return null;
+        string name = _dark && DarkInvertAssets.Contains(asset) ? asset + "-dark" : asset;
+        if (LogoCache.TryGetValue(name, out var cached)) return cached;
+        ImageSource? img = null;
+        try
+        {
+            var bmp = new System.Windows.Media.Imaging.BitmapImage();
+            bmp.BeginInit();
+            bmp.UriSource = new Uri($"pack://application:,,,/Assets/Agents/{name}.png");
+            bmp.DecodePixelWidth = 32;
+            bmp.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
+            bmp.EndInit();
+            bmp.Freeze();
+            img = bmp;
+        }
+        catch (Exception ex) { Diag.Log($"logo {name}: {ex.Message}"); }
+        LogoCache[name] = img;
+        return img;
+    }
+
+    // MARK: Activity glance
+
+    private void RenderGlance(Snapshot? snap)
+    {
+        var face = snap?.Glance;
+        bool show = snap is not null && !snap.UsageLoading && snap.Usage is { TotalTokens: > 0 } && snap.Components.ActivityGlanceOn && face is not null;
+        GlancePanel.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        GlanceHost.Content = null;
+        GlanceCaption.Text = "";
+        if (face is null || !show) return;
+
+        GlanceKicker.Text = face.Kind switch
+        {
+            GlanceKind.Hours => L10n.T("glance_kicker_hours"),
+            GlanceKind.Days => L10n.T("glance_kicker_days"),
+            _ => L10n.T(face.WindowDays == 90 ? "glance_kicker_90" : "glance_kicker_180"),
+        };
+
+        switch (face.Kind)
+        {
+            case GlanceKind.Hours:
+            {
+                var panel = new StackPanel();
+                panel.Children.Add(BarsVisual(face.Bars!, 24));
+                // Hour axis: labeling all 24 columns can't fit at flyout width, so label
+                // every 6th hour plus the last column - the time is readable, the axis
+                // is anchored at both ends. Bare digits, no L10n needed.
+                panel.Children.Add(LabelAxis(24, i => i % 6 == 0 || i == 23 ? i.ToString() : null));
+                GlanceHost.Content = panel;
+                if (face.PeakHour is { } peak) GlanceCaption.Text = L10n.T("peak_caption", peak);
+                break;
+            }
+            case GlanceKind.Days:
+            {
+                var panel = new StackPanel();
+                panel.Children.Add(BarsVisual(face.DayTokens!, 7, spacing: 6));
+                string[] keys = ["wd_mon", "wd_tue", "wd_wed", "wd_thu", "wd_fri", "wd_sat", "wd_sun"];
+                panel.Children.Add(LabelAxis(7, i => L10n.T(keys[i])));
+                GlanceHost.Content = panel;
+                break;
+            }
+            case GlanceKind.Grid:
+                GlanceHost.Content = GridViewVisual(face);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Axis labels under a BarsVisual: one star column per bar so each label sits under
+    /// its own column; a null label leaves that column blank (sparse hour axis).
+    /// </summary>
+    private Grid LabelAxis(int columns, Func<int, string?> label)
+    {
+        var grid = new Grid { Margin = new Thickness(0, 3, 0, 0) };
+        for (int i = 0; i < columns; i++)
+        {
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            if (label(i) is not { } text) continue;
+            var t = new TextBlock
+            {
+                Text = text,
+                FontSize = FontRes("FontMicro"),
+                Foreground = (Brush)FindResource("FaintBrush"),
+                HorizontalAlignment = HorizontalAlignment.Center,
+            };
+            Grid.SetColumn(t, i);
+            grid.Children.Add(t);
+        }
+        return grid;
+    }
+
+    /// <summary>
+    /// Histogram bars: proportional to the max, min 2px for non-zero, zero bars stay as
+    /// invisible stubs so gaps keep their position (mirrors macOS barsView).
+    /// </summary>
+    private FrameworkElement BarsVisual(long[] values, int columns, double spacing = 2)
+    {
+        double maxVal = Math.Max(values.Length == 0 ? 1 : values.Max(), 1);
+        var grid = new Grid { Height = 26 };
+        for (int i = 0; i < values.Length; i++)
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        for (int i = 0; i < values.Length; i++)
+        {
+            var bar = new Border
+            {
+                CornerRadius = new CornerRadius(1),
+                VerticalAlignment = VerticalAlignment.Bottom,
+                Height = values[i] > 0 ? Math.Max(2, 26.0 * values[i] / maxVal) : 2,
+                Background = values[i] > 0
+                    ? (Brush)FindResource("PrimaryBg")
+                    : System.Windows.Media.Brushes.Transparent,
+                Margin = new Thickness(i == 0 ? 0 : spacing / 2, 0, i == values.Length - 1 ? 0 : spacing / 2, 0),
+            };
+            Grid.SetColumn(bar, i);
+            grid.Children.Add(bar);
+        }
+        return grid;
+    }
+
+    private FrameworkElement GridViewVisual(GlanceFace face)
+    {
+        int windowDays = face.WindowDays;
+        double cell = windowDays == 90 ? 9 : 5;
+        double gap = windowDays == 90 ? 3 : 2;
+        double radius = windowDays == 90 ? 2 : 1;
+        var row = new StackPanel { Orientation = Orientation.Horizontal };
+        foreach (var column in face.GridColumns!)
+        {
+            var col = new StackPanel { Orientation = Orientation.Vertical };
+            for (int dow = 0; dow < 7; dow++)
+            {
+                int? v = column[dow];
+                col.Children.Add(new Border
+                {
+                    Width = cell,
+                    Height = cell,
+                    CornerRadius = new CornerRadius(radius),
+                    Margin = new Thickness(0, dow == 0 ? 0 : gap, 0, 0),
+                    Background = v is null
+                        ? System.Windows.Media.Brushes.Transparent
+                        : GridCellBrush(v.Value),
+                });
+            }
+            col.Margin = new Thickness(0, 0, gap, 0);
+            row.Children.Add(col);
+        }
+        return row;
+    }
+
+    // Grid intensity ramp from the approved mock (identical steps to macOS GlancePalette;
+    // intensity 4 clamps to the darkest shipped step).
+    private Brush GridCellBrush(int intensity)
+    {
+        int i = Math.Clamp(intensity, 0, 3);
+        Color c = _dark
+            ? i switch { 0 => ColorFromHex("#EBEBF5", 0.10), 1 => ColorFromHex("#4CAE68"), 2 => ColorFromHex("#30A74C"), _ => ColorFromHex("#32D74B") }
+            : i switch { 0 => ColorFromHex("#3C3C43", 0.08), 1 => ColorFromHex("#A6D8B0"), 2 => ColorFromHex("#5BB977"), _ => ColorFromHex("#166F37") };
+        return new SolidColorBrush(c);
+    }
+
+    private static Color ColorFromHex(string hex, double opacity)
+    {
+        var c = ColorFromHex(hex);
+        c.A = (byte)Math.Round(opacity * 255);
+        return c;
+    }
+
+    // MARK: Per-server rows
+
+    private void RenderPerServer(Snapshot? snap)
+    {
+        var rows = snap?.PerServerRowsView ?? [];
+        bool show = snap is not null && snap.ShowPerServerRows && rows.Count > 0 && !snap.UsageLoading;
+        PerServerPanel.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        PerServerRowsCtl.Items.Clear();
+        if (!show) return;
+
+        PerServerKicker.Text = snap!.PerServerKickerText;
+        PerServerFootnote.Text = Snapshot.PerServerFootnoteText;
+        foreach (var r in rows)
+        {
+            var grid = new Grid { Margin = new Thickness(0, 1, 0, 1) };
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var label = new TextBlock
+            {
+                Text = r.Label,
+                FontSize = FontRes("FontSecondary"),
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                Foreground = (Brush)FindResource("TextBrush"),
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            Grid.SetColumn(label, 0);
+            var value = new TextBlock
+            {
+                Text = r.ValueText,
+                FontSize = FontRes("FontSecondary"),
+                Foreground = (Brush)FindResource("MutedBrush"),
+                HorizontalAlignment = HorizontalAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(8, 0, 0, 0),
+            };
+            Grid.SetColumn(value, 1);
+            grid.Children.Add(label);
+            grid.Children.Add(value);
+            PerServerRowsCtl.Items.Add(grid);
+        }
     }
 
     /// <summary>Apply localized text to the static XAML literals. Called from UpdateView so a
@@ -496,7 +819,12 @@ public partial class FlyoutWindow : Window
     /// via the QuotaRowVM / QuotaGroupVM they're bound to, rebuilt in RenderQuota.</summary>
     private void ApplyStrings()
     {
-        TodayHeader.Text = L10n.T("today");
+        // The kicker (TodayHeader) follows the snapshot's period; UpdateView sets it.
+        // The segment buttons are static labels but still language-dependent.
+        Period0Btn.Content = L10n.T("period_today");
+        Period1Btn.Content = L10n.T("period_week");
+        Period2Btn.Content = L10n.T("period_month");
+        Period3Btn.Content = L10n.T("period_year");
         LowBtn.Content = L10n.T("low");
         AllBtn.Content = L10n.T("all");
         OpenDashboardBtn.Content = L10n.T("open_dashboard");
@@ -511,10 +839,13 @@ public partial class FlyoutWindow : Window
         System.Windows.Automation.AutomationProperties.SetName(GearBtn, Store.SettingsAccessibilityName);
     }
 
-    private void RenderQuota(Snapshot snap)
+    private void RenderQuota(Snapshot? snap)
     {
         QuotaRows.Items.Clear();
         UpdateToggleButtons();
+        // The All/High view can open before the first snapshot exists (loading case): the
+        // skeleton bars stand in, there is nothing to render here yet.
+        if (snap is null) { QuotaHeader.Text = L10n.T("subscription"); return; }
 
         if (snap.QuotaFailed)
         {
@@ -535,9 +866,24 @@ public partial class FlyoutWindow : Window
                 Foreground = (Brush)FindResource("MutedBrush"),
                 VerticalAlignment = VerticalAlignment.Center,
             });
-            var retryBtn = new Button { Content = L10n.T("retry_now"), Margin = new Thickness(8, 0, 0, 0), Style = (Style)FindResource("WinBtn") };
+            var retryBtn = new Button
+            {
+                Content = L10n.T("retry_now"),
+                Margin = new Thickness(8, 0, 0, 0),
+                Style = (Style)FindResource("WinBtn"),
+                // A plain horizontal StackPanel stretched the button to the row's height
+                // and it read "out of line" with the warning text. Grid + center keeps
+                // both on the same line, the button at the trailing edge.
+                HorizontalAlignment = HorizontalAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
             retryBtn.Click += (s, e) => _ = Store.RefreshAsync();
-            var row = new StackPanel { Orientation = Orientation.Horizontal };
+            var row = new Grid();
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            Grid.SetColumn(warn, 0);
+            warn.VerticalAlignment = VerticalAlignment.Center;
+            Grid.SetColumn(retryBtn, 1);
             row.Children.Add(warn);
             row.Children.Add(retryBtn);
             QuotaRows.Items.Add(row);
@@ -582,13 +928,32 @@ public partial class FlyoutWindow : Window
         }
         else
         {
-            var scroll = new ScrollViewer { MaxHeight = 172, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
-            var groups = new ItemsControl
+            // Height budget follows the section gaps (SectionPad halved in a prior round):
+            // 212 -> 280 per review so the All view shows more subscription rows before it
+            // scrolls (macOS mirror: CompanionLayout.quotaMaxHeight 340).
+            var scroll = new ScrollViewer { MaxHeight = 280, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+            // Multi-server payloads sectionize the All view: one muted server header over
+            // its provider groups (contract §All view). Single-server yields one
+            // header-less section - the All view looks exactly as before.
+            var stack = new StackPanel();
+            foreach (var section in snap.AllQuotaServerSections)
             {
-                ItemTemplate = (DataTemplate)FindResource("QuotaGroupTemplate"),
-                ItemsSource = snap.AllQuotaGroups.Select(MakeQuotaGroupVM).ToList(),
-            };
-            scroll.Content = groups;
+                if (section.Server.Length > 0)
+                    stack.Children.Add(new TextBlock
+                    {
+                        Text = section.Server.ToUpperInvariant(),
+                        FontSize = FontRes("FontCaption"),
+                        FontWeight = FontWeights.SemiBold,
+                        Foreground = (Brush)FindResource("MutedBrush"),
+                        Margin = new Thickness(0, 8, 0, 0),
+                    });
+                stack.Children.Add(new ItemsControl
+                {
+                    ItemTemplate = (DataTemplate)FindResource("QuotaGroupTemplate"),
+                    ItemsSource = section.Groups.Select(g => MakeQuotaGroupVM(snap, g)).ToList(),
+                });
+            }
+            scroll.Content = stack;
             QuotaRows.Items.Add(scroll);
         }
     }
@@ -619,14 +984,26 @@ public partial class FlyoutWindow : Window
     }
 
     /// <summary>Presentation shape for one provider group in the All view (QuotaGroupTemplate).</summary>
-    private QuotaGroupVM MakeQuotaGroupVM(QuotaGroup group) => new()
+    private QuotaGroupVM MakeQuotaGroupVM(Snapshot snap, QuotaGroup group) => new()
     {
-        Provider = group.Provider,
+        // Under a server section the provider reads bare - "Codex", never the
+        // "Workstation · Codex" compound (contract §All view). Single-server groups
+        // carry no prefix to strip.
+        Provider = group.ServerLabel.Length > 0 ? group.Provider.Split(" · ")[^1] : group.Provider,
+        Logo = LogoFor(CompanionStore.QuotaLogoAssetName(group.CanonicalProvider)),
         WarningText = L10n.T("couldnt_refresh"),
         // GROUP failure drives the provider-header warning (spec §7); rendered inline by
         // QuotaGroupTemplate rather than a separate MakeProviderWarning() element.
         WarningVisibility = group.Failed ? Visibility.Visible : Visibility.Collapsed,
         Rows = group.Rows.Select(r => MakeQuotaRowVM(r, showProvider: false)).ToList(),
+        // Reset-credits row: last inside its provider group (Codex, Claude Code), All
+        // view only. Null (hidden) for providers without credits, on a failed group, or
+        // component off.
+        CreditsText = snap.CreditsNotice(group) ?? "",
+        CreditsVisibility = snap.CreditsNotice(group) is null ? Visibility.Collapsed : Visibility.Visible,
+        // Static right-aligned decoration on the same row (mock design): outside the
+        // pinned row string, so CreditsNotice stays byte-identical.
+        CreditsUseOrLoseText = L10n.T("credits_use_or_lose"),
     };
 
     private void UpdateToggleButtons()
@@ -691,7 +1068,34 @@ internal sealed class QuotaRowVM
 internal sealed class QuotaGroupVM
 {
     public string Provider { get; init; } = "";
+    /// <summary>Provider mark for the group header (mock design's 14px logo); null renders
+    /// text-only - never a placeholder (see CompanionStore.QuotaLogoAssetName).</summary>
+    public ImageSource? Logo { get; init; }
     public string WarningText { get; init; } = "";
     public Visibility WarningVisibility { get; init; }
     public List<QuotaRowVM> Rows { get; init; } = new();
+    /// <summary>Reset-credits row (⚡ …), Any provider that ships reset_credits
+    /// (Codex, Claude Code), All view only.</summary>
+    public string CreditsText { get; init; } = "";
+    public Visibility CreditsVisibility { get; init; } = Visibility.Collapsed;
+    /// <summary>Muted "use or lose" hint right-aligned on the credits row (static decoration).</summary>
+    public string CreditsUseOrLoseText { get; init; } = "";
+}
+
+/// <summary>
+/// Presentation shape for one top-rank row: logo + name + share bar + token amount + percent.
+/// The logo is a pre-loaded ImageSource (null = no mark shipped / failed to load -> text-only,
+/// never a broken-image placeholder). FillStar/RestStar are the quota bar's star-column pair
+/// summing to 100*, so the fill width is exactly the printed percent (Pct) of all tokens in
+/// the list - bar and label always agree.
+/// </summary>
+internal sealed class RankVM
+{
+    public ImageSource? Logo { get; init; }
+    public Visibility LogoVisibility { get; init; } = Visibility.Collapsed;
+    public string Label { get; init; } = "";
+    public string Value { get; init; } = "";
+    public GridLength FillStar { get; init; }
+    public GridLength RestStar { get; init; }
+    public string Pct { get; init; } = "";
 }

@@ -18,14 +18,22 @@ partial failure, and the minimum-delay rule.
 | Method | Path | Purpose | When |
 |---|---|---|---|
 | `GET` | `/health` | fingerprint + connectivity | startup, reconnect |
-| `GET` | `/api/usage?period=today` | Today hero + activity line | popover open, scheduled refresh |
-| `GET` | `/api/usage?period=month` | Month context line | popover open, scheduled refresh |
-| `GET` | `/api/quota` | Quota section | popover open, scheduled refresh |
-| `GET` | `/api/version` | About / Settings diagnostics | settings open only |
+| `GET` | `/api/usage?period=<selected>` | hero, delta row, top ranks for the selected period | popover open, scheduled refresh, period change |
+| `GET` | `/api/active-time?period=<selected>` | "active" figure on the hero sub-line | same |
+| `GET` | `/api/insights?facets=hourly&period=today` | activity glance, today | same, when the glance is on and today is selected |
+| `GET` | `/api/insights?facets=daily&date_from&date_to` | activity glance, week | same, when the glance is on and week is selected |
+| `GET` | `/api/stats` | activity glance grid, month/year | same, when the glance is on and month/year is selected |
+| `GET` | `/api/quota` | Quota section (incl. reset credits) | popover open, scheduled refresh |
+| `GET` | `/api/version` | About / Settings diagnostics, update-check gate | settings open only |
+| `GET` | `/api/update-check` | server update badge | settings open only, when `update_check_enabled` |
+
+`<selected>` is the segmented hero control's period (see Period windows): one
+of `today`, `month`, `year` as tokens, or `date_from`/`date_to` for the week.
 
 Not used by the companion:
-- `POST /api/quota/consent`, `POST /api/quota/settings` (write-gated; companion
-  is read-only).
+- `POST /api/quota/consent`, `POST /api/quota/settings`,
+  `POST /api/update-check/consent` (write-gated; companion is read-only - the
+  badge reads the server's existing update-check state, it never changes it).
 - `GET /api/quota/refresh` (performs provider network I/O, 60s cooldown, 409 when
   disabled). If exposed later it must be a separate, explicitly labelled
   "Refresh provider quotas" action - never part of automatic refresh.
@@ -58,22 +66,26 @@ The client must require `service == "tokdash"`. Any other value (fixture
 state: show "This address is not a Tokdash service" and do not call usage or
 quota endpoints.
 
-### `GET /api/usage?period=today`
+### `GET /api/usage` (the selected period)
 
-Fixture: `fixtures/usage-today.json` (realistic data), `fixtures/usage-today-empty.json` (empty).
+Fixtures: `fixtures/usage-today.json` (realistic data), `fixtures/usage-today-empty.json`
+(empty), and the other period windows: `fixtures/usage-week.json`,
+`fixtures/usage-month.json`, `fixtures/usage-year.json`.
 
 Fields used by the companion:
 
 | Field | Type | Use |
 |---|---|---|
-| `total_cost` | float | Today hero primary value |
-| `total_tokens` | int | Today hero secondary line (compact notation) |
-| `total_messages` | int | Today hero secondary line |
+| `total_cost` | float | Hero primary value |
+| `total_tokens` | int | Hero secondary line (compact notation) |
+| `total_messages` | int | Hero secondary line |
 | `comparison.cost_pct` | float \| null | "12% below yesterday" / "8% above yesterday". Omit when `null`. |
 | `comparison.cost_prev` | float \| null | Previous-period cost used to recompute a combined percentage across reachable servers. Hide the comparison when any contributing server omits it. |
-| `by_tool` | object | Leading tool by cost (activity line) |
-| `top_models_by_cost` | array | Leading model by cost (activity line) — take `[0]` |
-| `combined_models` | array | Full model list, ranked by tokens. Cost fallback when `top_models_by_cost` is absent |
+| `comparison.tokens_pct`, `comparison.messages_pct` | float \| null | `tokens_pct` completes the delta row; `messages_pct` is sent but not rendered (two-metric row, see Hero display rules) |
+| `comparison.tokens_prev`, `comparison.messages_prev` | float \| null | Their combining role, same as `cost_prev` |
+| `by_tool` | object | Top tools block (v1.1). Before v1.1 it fed the "Most used today" activity line, which is retired |
+| `top_models_by_cost` | array | (legacy) Leading model by cost for the retired activity line — take `[0]` |
+| `combined_models` | array | Full model list, ranked by tokens. Top models block takes `[0..2]`; also the cost fallback when `top_models_by_cost` is absent |
 | `top_models` | array | First five of `combined_models`, so ranked by tokens |
 | `timestamp` | string (ISO 8601) | Freshness calculation |
 | `response_cache.age_seconds` | float | Freshness "· cached" hint when useful |
@@ -97,12 +109,112 @@ client that takes a maximum by cost over `top_models` picks `openai/gpt-5.6-sol`
 and fails the case. Keep that divergence when editing the fixture — an earlier
 version ranked the same both ways, and no client could fail it.
 
-### `GET /api/usage?period=month`
+### Period windows
 
-Fixture: `fixtures/usage-month.json`.
+The hero segment (Day / Week / Month / Year) maps to requests like this:
 
-Fields used: `total_cost`, `total_tokens`. The month label (e.g. "JULY") is
-derived client-side from the local calendar, not from the response.
+| Segment | Request | Comparison sentence |
+|---|---|---|
+| Today | `?period=today` | "vs yesterday" |
+| Week | `?date_from=<Monday>&date_to=<today>` | "vs last week" |
+| Month | `?period=month` (calendar month, 1st -> today) | "vs last month" |
+| Year | `?period=year` (Jan 1 -> today) | "vs last year" |
+
+Week is a **calendar week**, matching the calendar semantics of Month and Year:
+always send `date_from` (local Monday of the current week) and `date_to`
+(today). `period=week` is a rolling 7-day window and must **not** be used for
+the segment. `comparison` is returned for custom ranges too (previous equal
+window), and the server caches each distinct range, so switching back is free.
+
+The top-level `period` echo in the response is the raw query parameter, not
+the resolved window: a custom range with no `period` param still echoes
+`"today"`. Never branch on it; the fixtures reflect this (`usage-week.json`).
+The week label in the UI is "THIS WEEK", derived client-side like every other
+period label.
+
+### Instance stepper (walk-back within the selected granularity)
+
+The hero kicker row carries a `‹ ›` stepper immediately after the kicker text
+(Hero display rules -> Period segment). It walks the **selected granularity's
+instances** back in time: `Today` -> yesterday -> Sep 20 -> …; `Week` -> last
+week -> the week before -> …. State is `(period, offset)`, kept **in memory
+only** - never persisted.
+
+| Granularity | Step unit | Walk-back limit (max offset) |
+|---|---|---|
+| Today | 1 day | 13 |
+| Week | 1 calendar week | 8 |
+| Month | 1 calendar month | 11 |
+| Year | 1 calendar year | 2 |
+
+**Request mapping.** The present instance (`offset = 0`) keeps the existing
+wire forms in the table above (period tokens; week = Mon..today). A stepped
+instance (`offset = N >= 1`) always sends explicit `date_from`/`date_to` over
+the **full elapsed calendar window** - never `period=`:
+
+| Granularity | Stepped window (N >= 1) |
+|---|---|
+| Today | `date_from=date_to=<today - N days>` |
+| Week | `date_from=<Monday of current week - 7N days>&date_to=<from + 6 days>` (full Mon..Sun week, not a partial one) |
+| Month | `date_from=<1st of month - N months>&date_to=<last day of that month>` |
+| Year | `date_from=<(year-N)-01-01>&date_to=<(year-N)-12-31>` |
+
+Every period-bearing request in the fetch group uses the instance's window:
+`/api/usage`, `/api/active-time`, and the today/week `/api/insights` faces
+(the `hourly` facet folds the window's own rows, so it is correct on a past
+day; send it as `facets=hourly&date_from=<D>&date_to=<D>`). No server change
+is involved: the server already answers custom ranges with a `comparison`
+against the **previous adjacent equal-length window** and caches each distinct
+window, so stepped instances get truthful deltas and stepping back and forth
+is cheap. The delta-row sentences are **unchanged** (`vs yesterday`,
+`vs last week`, `vs last month`, `vs last year`) - for a stepped instance the
+previous adjacent window is exactly what the sentence names.
+
+**Glance on stepped instances.** `/api/stats` is a rolling 365-day series with
+no window parameter; window it client-side to the instance's **exact calendar
+days** when the series fully covers them (always true within the day/week/
+month limits). Where it does not (any stepped year), hide the glance section
+silently - same rule as a stats failure.
+
+**Button states and refresh.**
+- Arrow actions publish the selected instance's kicker and usage loading state
+  immediately, before the fetch completes. The 150 ms anti-flash delay applies
+  only to period segment changes; quota/connectivity remain visible.
+- `›` is disabled at `offset = 0` (present); `‹` is disabled at the
+  granularity's walk-back limit.
+- Changing the period segment re-anchors to `offset = 0`.
+- Polling, manual refresh and the server-change refetch all act on the
+  **selected** instance; never snap back to present.
+- Per-instance fetch semantics are identical to per-period semantics (same
+  fetch group, same failure handling).
+
+**Instance warm-up (prefetch).** The server caches closed windows
+indefinitely, but it *computes* each one only the first time - a cold first
+visit costs a full window computation (measured on real data: ~2-6 s for the
+`hourly` facet over an explicit range). To keep stepping instant, once an
+instance has settled a companion **SHOULD** warm the next one or two
+walk-back instances in the background: the same fetch group
+(`/api/usage`, `/api/active-time`, plus the facet the instance's glance uses)
+for `offset+1`, then `offset+2`, strictly sequential, read-only GETs, results
+discarded. Warm-up **MUST** be cancelled by any segment/instance change or
+manual refresh - a fresh user action always outranks in-flight warm-up -
+**MUST** fail silently, and **MUST NOT** warm the current instance or any
+instance already visited in this session. It is a UX affordance, not a
+protocol requirement: a companion that omits it stays conformant.
+
+**Kicker labels** (all derived client-side, L10n):
+
+| Instance | Kicker |
+|---|---|
+| day 0 / week 0 / month 0 / year 0 | existing kickers (`today`, `THIS WEEK`, …) |
+| day 1 / week 1 / month 1 / year 1 | `word_yesterday` / `word_last_week` / `word_last_month` / `word_last_year` |
+| day N>=2 | localized `MMM d` ("Sep 20") |
+| week N>=2 | `MMM d – d` ("Sep 7 – 13"); crossing months `MMM d – MMM d` ("Aug 30 – Sep 5"); crossing years `MMM d – MMM d, yyyy` on the end |
+| month N>=2 | `MMM yyyy` ("Aug 2026") |
+| year N>=2 | `yyyy` ("2024") |
+
+Stepper buttons are icon-only chevrons; they need accessible names from
+`step_earlier` / `step_later`.
 
 ### `GET /api/quota`
 
@@ -129,9 +241,75 @@ Fields used:
 | `buckets[].resets_at` | int \| null | Epoch seconds; humanize to user locale/TZ |
 | `buckets[].account` | string | Part of the notification dedup key |
 | `buckets[].captured_at` | int \| null | Epoch seconds this window was observed; see Provider failures |
+| `providers.codex.reset_credits` | object \| absent | Codex reset-credits row and its expiry notification (see Reset credits). Usually absent on Codex too (only when credits exist) |
+| `providers.claude.reset_credits` | object \| absent | Claude Code limit resets, same shape and same row/notification as Codex (server v2.6.3+) |
+| `reset_credits.available_count` | int | The row's count |
+| `reset_credits.credits[]` | array of `{id, expires_at, ...}` | Soonest future `expires_at` dates the row and arms the notification. **Two shapes:** Codex sends an ISO 8601 **string**, Claude sends epoch **seconds** (int) - accept both. Extra keys (`title`, `resets_left`, `clears`, `status`) are dashboard-only; ignore them |
 
 Buckets with `remaining_percent == null` are rendered without a percentage and
 without a bar fill; they are not candidates for the Low view.
+
+### `GET /api/active-time` (selected period)
+
+Fixtures: `fixtures/active-time-today.json`, `fixtures/active-time-week.json`
+(custom-range echo), `fixtures/active-time-month.json`,
+`fixtures/active-time-year.json`, `fixtures/active-time-zero.json` (no activity).
+
+Fields used: `active_ms` (int, **milliseconds** — the merged union of tool
+activity), plus `timestamp`. Every duration in this payload is milliseconds;
+every epoch in the quota payload is seconds. Request the same window as the
+selected usage period (`?period=...`, or `date_from`/`date_to` for the week).
+
+This is an optional section: 404 on a pre-active-time server, any failure, or
+`active_ms == 0` simply hides the hero's active segment. No inline warning, no
+banner, no stale marker (see Hero display rules). `by_tool`, `comparison` and
+the `*_sum` fields are not rendered in v1.1 — decode tolerantly, ignore them.
+
+### `GET /api/insights` (glance source: today / week)
+
+Fixtures: `fixtures/insights-today.json` (`?facets=hourly&period=today`),
+`fixtures/insights-week.json` (`?facets=daily&date_from&date_to`),
+`fixtures/insights-empty.json` (zero day).
+
+Fields used:
+
+| Field | Type | Use |
+|---|---|---|
+| `hourly.buckets[].tokens` | int | today's 24 bars, buckets ordered hour 0..23 |
+| `hourly.peak_hour` | int \| null | caption "Peak 14:00"; `null` when the day has no tokens |
+| `daily[]` | array | week's per-day histogram: `{date, tokens, intensity}`. **Sparse** — a date with no usage has no entry; render it as an empty column |
+
+Ask for exactly one facet per request (`facets=hourly` or `facets=daily`);
+`daily` is **not** in the server's default facet set, and an unknown facet is
+a 400. Optional section: failure hides the glance silently.
+
+### `GET /api/stats` (glance source: month / year)
+
+Fixture: `fixtures/stats-contributions.json`.
+
+Fields used: `contributions[].date`, `contributions[].totals.tokens`,
+`contributions[].intensity` (int 0..4, ranked quartiles server-side). Sparse,
+like `daily`. The payload has no period parameter — it is a rolling 365 days —
+and v1.1 windows it client-side (trailing 90 days for month, 180 for year).
+`summary.*` (camelCase) and `stats.*` (snake_case) exist but are not rendered;
+ignore them. Optional section: failure hides the glance silently.
+
+### `GET /api/version` and `GET /api/update-check` (Settings only)
+
+Fixtures: `fixtures/version.json`, `fixtures/update-check-available.json`,
+`fixtures/update-check-off.json`.
+
+| Field | Type | Use |
+|---|---|---|
+| `version.runtime_version` | string | "Tokdash v{...}" in Settings |
+| `version.update_check_enabled` | bool | whether to call `/api/update-check` at all |
+| `update-check.enabled` | bool | `false` = the server has no update-check consent and performed no network I/O; render nothing |
+| `update-check.update_available` | bool | show the badge |
+| `update-check.latest` | string \| null | badge text "Server update available: v{latest}" |
+
+`GET /api/update-check` is deliberately consent-gated server-side and safe to
+call; the consent *write* (`POST /api/update-check/consent`) stays web-only.
+Settings only — never the flyout, never on a schedule. See Server update badge.
 
 ## Client behavior rules
 
@@ -145,11 +323,26 @@ valid URL.
    mismatch or non-2xx, enter wrong-service / offline state. Do not call usage
    or quota endpoints until health passes.
 
-2. **Concurrent fetch.** After a successful health check, fetch today, month,
-   and quota concurrently. Cancel or coalesce overlapping refreshes.
+2. **Concurrent fetch.** After a successful health check, fetch concurrently
+   for the **selected period**: usage, active-time, quota, and — when the
+   Activity glance is on — its single source (insights hourly on today,
+   insights daily on week, stats on month/year). Cancel or coalesce
+   overlapping refreshes. Selecting a different segment fires the same group
+   for the new window immediately; while it is in flight the hero, delta row,
+   rank blocks and glance show their loading skeleton, and quota/connectivity
+   stay exactly as they were. **Delayed-skeleton clause:** on a period switch
+   the previous period's data stays on screen while the new one is in flight,
+   and the skeleton is only shown if the fetch is still pending after ~150 ms
+   (so a fast round-trip never visibly collapses the sections). First loads -
+   when no previous period's data exists - show skeletons immediately. A component whose toggle is off must not fetch
+   its source at all (a glance-off cycle contains no `/api/insights` or
+   `/api/stats` request).
 
-3. **Timeouts.** Short timeout (3-5s) for `/health`; longer (15-30s) for usage
-   requests which can trigger a cold parse.
+3. **Timeouts.** Short timeout (3-5s) for `/health`; long for data requests
+   (~90s): cold parses of long windows genuinely run tens of seconds (server warm
+   docs: year ~15 s, month ~25 s + a ~22 s base), and a shorter ceiling reads as a
+   client failure - the year view would show "unavailable" while the server is
+   merely still working.
 
 4. **Empty is not error.** A 2xx usage response with zero totals is the empty
    state.
@@ -159,7 +352,10 @@ valid URL.
 
 6. **Partial failure.** If today succeeds but quota fails (or vice versa), render
    the successful sections normally and show an inline warning on the failed
-   section. The header stays connected.
+   section. The header stays connected. Active-time, insights and stats are
+   **optional decorations**: their failure hides the active segment or the
+   glance silently - no inline warning, no banner, no stale marker. Only usage
+   and quota failures ever warn.
 
 7. **Freshness.** Compute "Updated N min ago" from `timestamp` (or
    `response_cache.age_seconds`). Append "· stale" only when the data is older
@@ -203,6 +399,44 @@ Every detected window, **grouped by provider** (provider order as detected; wind
 order within a provider as returned by the API). Labels are bucket-only
 (`"{bucket}"`) under a provider header. Capped at four visible rows with the
 fifth peeking, then scrolls. Never stretches the surface.
+
+When the payload spans more than one server (multi-server fan-out), rows are first
+**sectioned by server**: a muted server-label header per server, sections in
+first-seen order, and the usual provider groups nested under their server - with
+**bare provider names**, never a `"Server · Provider"` compound (the compound label
+survives only in the Low view, where rows are cross-provider and need it inline).
+A single-server payload shows no server headers at all - the All view is unchanged
+there. The same window detected on two servers appears under each of its server's
+groups; Low-view dedup is unaffected.
+
+The provider header carries a 14 px provider mark before the name, mirroring the
+web brand map: claude, codex, kimi, grok and antigravity ship their own marks;
+`zai` uses the Zcode badge, `minimax` its own mark (MiMo is a distinct provider -
+its wordmark is never borrowed), `opencode_go` the OpenCode mark. `commandcode`
+and any unknown provider render text-only - never a
+placeholder. Dark-ink marks (codex, grok, zcode) have pre-inverted dark copies;
+every other mark renders as shipped in both themes.
+
+### Row anatomy (Low and All)
+
+- Line 1: label, then the window's reset text in secondary ink right after it,
+  with `{N}% left` pushed to the trailing edge. Line 2: the bar at full row
+  width, 4 px, fill sized to `remaining_percent`.
+- **Reset text is mixed.** Within 24 h of now: the relative countdown with the
+  established truncation ladder ("resets in 40 min" / "in 3 h" / "in 2 days").
+  Beyond 24 h: absolute local time, "resets Thu 02:00" - a day-resolution
+  countdown off a stale refresh carries no information. Weekday names follow the
+  app language (English/Chinese), not the OS locale.
+- **Weekly label normalization.** After the ` window` strip, a window token
+  that reads "7-day" / "7 day" / "7d" (case-insensitive) displays as **Weekly**,
+  so Codex reads the same as MiniMax/Kimi/Grok, which already send "Weekly".
+  The rule applies to the token alone ("7-day") and inside a compound feature
+  label ("Spark · 7-day" -> "Spark · Weekly"); no other label is touched.
+- **Bar ramp** (same tier boundaries on every surface): fine >= 50, mid >= 25,
+  low < 25 remaining. macOS uses fixed status colors in both themes:
+  `#30A74C` / `#FF9F0A` / `#FF453A`. Windows uses the native status ramp:
+  light `#0F7B0F` / `#CA5010` / `#C42B1C`, dark `#6CCB5F` / `#F7630C` /
+  `#FF99A4`.
 
 ### Disabled state
 
@@ -334,6 +568,215 @@ version — attribution is not something to infer from value equality. Treat a
 missing `status_account` on a payload that has `accounts` as *unavailable*, not as
 `null`, and fall back to whatever you did before this field existed.
 
+## Components and settings (schema v3)
+
+Settings schema v3 adds a `components` object to the v2 server settings. A v2
+file (no `components`) migrates to every default below; unknown keys are
+ignored in both directions.
+
+```json
+"components": {
+  "fullDeltaRow": true,
+  "topRanks": true,
+  "resetCredits": true,
+  "activityGlance": true,
+  "activityHistogramTodayWeek": true,
+  "perServerRows": true
+}
+```
+
+| Key | Default | Gates |
+|---|---|---|
+| `fullDeltaRow` | on | the cost+tokens delta line vs the shipped cost-only comparison line |
+| `topRanks` | on | the Top tools / Top models strip |
+| `resetCredits` | on | any provider's reset-credits row (Codex, Claude Code) **and** its expiry notification |
+| `activityGlance` | on | the Activity glance component (and its endpoint reads) |
+| `activityHistogramTodayWeek` | on | histogram faces on today/week; off means no strip there; month/year grids are unaffected |
+| `perServerRows` | on | per-server rows when more than one server is enabled |
+
+Each switch persists on change with no OK/Apply - using the settings window's
+existing debounced autosave where one exists (the Windows window's 600 ms
+pattern is the reference), immediate write on macOS. "On change" means a few
+hundred ms of debounce is compliant; a separate save step is not.
+
+The period segment and the inline active-time figure are **not** settings -
+core hero furniture, always on. The selected period persists on its own as
+`selectedPeriod` (`today|week|month|year`, default `today`).
+
+The top-ranks row count persists on its own as `rankRows` (integer, default 3,
+valid range 3..8). It is **one shared count** for both the tools and the models
+list; the surface grows to fit. Absent (any pre-setting file) means 3; an
+out-of-range value is clamped into 3..8 on read and on write - never trusted
+verbatim. Changing it re-renders the strip from last-good data; no refetch.
+
+## Hero display rules
+
+### Period segment
+
+Always visible above the hero: `Day | Week | Month | Year` (the Day segment
+still uses the `today` wire token). On macOS, the date/arrow area and the period
+switch have fixed widths. Overflowing date labels scroll within a clipped viewport,
+pausing at each end; arrows remain stationary. Reduced Motion disables scrolling;
+the full label remains available to accessibility and as a tooltip. The selection
+drives the hero number, sub-line, delta row, rank kickers and the glance face.
+It is a core panel element, never a Settings option. The kicker text sits on
+the same row (left), the segment on the right; immediately after the kicker
+text sits the instance stepper (`‹ ›`, Instance stepper) - the segment itself
+is unchanged by it.
+
+### Active time
+
+The hero sub-line reads `1.24M tokens · 218 messages · active 3 h 12 m`, from
+`active_ms` (the merged union - never `active_ms_sum`, which double-counts
+concurrent tools):
+
+```
+active_ms == 0   -> segment absent (never "active 0 m")
+< 60 s           -> "active <1 m"
+< 1 h            -> "active {m} m"        floor
+< 24 h           -> "active {h} h {m} m"  floor of each part
+>= 24 h          -> "active {d} d {h} h"  floor of each part
+```
+
+Multi-server: sum `active_ms` across reachable servers; if any enabled server
+has no active-time data this cycle, drop the segment rather than present a
+known-partial sum. Against servers predating the endpoint (404) the segment is
+absent with no warning - the v1.0 fallback.
+
+### Full delta row
+
+With `fullDeltaRow` on, one line under the hero. **Two metrics** (cost +
+tokens): the line must hold one narrow flyout line in every language, and
+messages turned out to be the metric nobody acted on. The server still sends
+`comparison.messages_pct`; companions ignore it.
+
+```
+{glyph} {pct}% cost · {glyph} {pct}% tokens {sentence}
+```
+
+- glyph `▲` for > 0, `▼` for < 0, `±` for exactly 0; `{pct}` is a non-negative
+  integer (`abs(round(pct))`): `-11.7` renders `12`.
+- `{sentence}` by segment: "vs yesterday", "vs last week", "vs last month",
+  "vs last year".
+- a metric whose `*_pct` is `null` is omitted from the line; if both are
+  `null` the line is absent entirely (`healthy-year`).
+- multi-server: recompute each pct from summed current and previous totals;
+  omit a metric when any contributing server omits its `*_prev`.
+
+With the toggle off: the shipped single comparison line, cost-only and worded
+("12% below yesterday"), behavior unchanged from 1.0.2.
+
+### Top ranks
+
+One strip as the last row of the hero card, two blocks:
+`Top tools · {today|this week|this month|this year}` and `Top models · ...`.
+
+- **Tools**: `by_tool` sorted by `tokens` descending, top `rankRows`
+  (default 3). Label is the display name (Codex, Claude, Kimi, OpenCode, ...),
+  value compact tokens. Each row is prefixed with the packaged harness logo;
+  a tool id with no shipped mark reserves the slot - never a placeholder
+  dropped mid-column. Art mirrors the web `TOOL_BRAND_META` icon set, so every
+  id the scanner emits ships a mark - the only text-only ids are `mimo` (MiMo
+  Code's art is a wide wordmark, illegible at row height) and `devin` (no brand
+  art shipped anywhere). Muse ships the docs brand mark even though the web
+  shows a letter fallback there. Dark-ink marks invert on dark per the web
+  `darkInvert` rule (codex, grok, zcode, cline, hermes, omp, zed, cursor);
+  every other mark renders as shipped in both themes.
+- **Models**: first `rankRows` of `combined_models` (tokens-ranked), provider
+  prefix stripped (`openai/gpt-5.6-sol` -> `gpt-5.6-sol`), compact tokens,
+  **no logos on model rows** - and no reserved logo slot either: model names
+  render flush left.
+- Both blocks absent when their source is empty. The 1.0 "Most used today"
+  activity line is retired; top ranks replace it.
+
+### Activity glance
+
+With multiple enabled servers, fetch the selected glance source from each server
+and sum tokens by hour/date across responding servers. Hour labels retain the
+server's local-hour meaning; dates retain the server's calendar labels. Recompute
+the hourly peak from the summed buckets. For contribution grids, sum date totals
+and retain the maximum reported intensity (server-relative quartiles are not
+additive). Missing optional sources contribute no data; if none respond, hide
+the chart. Component toggles suppress these requests on every server.
+
+One component, four faces, by selected period:
+
+| Period | Face | Source | Geometry |
+|---|---|---|---|
+| today | hour histogram | `insights?facets=hourly&period=today` | 24 bars, hour 0 first |
+| week | day histogram | `insights?facets=daily&date_from&date_to` | 7 columns Mon..today |
+| month | contribution grid | `stats` | trailing 90 days, 7 rows Mon..Sun |
+| year | contribution grid | `stats` | trailing 180 days, smaller cells |
+
+- Histogram bars use the accent color, height proportional to `tokens`, a 2 px
+  minimum visible height for non-zero values; zero buckets render as empty
+  space. Caption `Peak {HH}:00` from `peak_hour` (today only); `peak_hour`
+  `null` on an all-zero day means render no strip at all.
+- Week columns are labeled with locale weekday abbreviations Mon..Sun;
+  `daily` is sparse, so a missing date is an empty column
+  (`insights-week.json` has no Tuesday).
+- Grids: window `contributions[]` client-side to the trailing 90/180 calendar
+  days (fixture ending 2026-07-26: 68 filled cells at 90 days, 143 at 180),
+  lay out strict Mon..Sun rows, and color by `intensity` 0..4. An all-zero
+  window hides the component.
+- One sequential ramp, monotonic lightness, separate light/dark steps,
+  identical on both platforms; never reuse the categorical quota colors.
+- Failures are silent (behavior rule 6): zero non-zero cells hides the strip
+  the same as a 404 would.
+
+### Per-server rows
+
+With `perServerRows` on and **more than one enabled server**: one row per
+server for the selected period - `{label}  $3.42 · 18.7M` - in settings order,
+footnoted "combined in hero · this cycle only". Values come from the fan-out
+already performed for the hero; never an extra request. An unreachable server
+shows its label plus "unreachable", never dimmed numbers. Absent entirely with
+one enabled server (the rows would only echo the hero). This retains
+per-server values within the current refresh cycle only - no persistent
+history, same as the rest of the companion.
+
+### Reset credits
+
+Credit notices stay on one line on both platforms. Overflowing text scrolls in
+its bounded viewport, pausing at each end, while the amber accent and “use or lose”
+hint stay still. Short notices do not move. Reduced-motion settings disable the
+animation; the full notice remains available as a tooltip and accessibility label.
+
+`providers.<provider>.reset_credits` appears on any provider that has
+credits: Codex since 1.0, and Claude Code limit resets since server v2.6.3
+(`GET /api/quota` -> `providers.claude.reset_credits`). Decode it per provider
+and render the row under that provider's group - the display rule is not
+codex-specific. One decode trap: **`expires_at` has two wire shapes** - Codex
+credits carry an ISO 8601 string, Claude's limit resets carry epoch seconds.
+Accept both (normalize epoch -> ISO) and never let one malformed credit fail
+the whole quota decode. With `resetCredits` on, quota tracking enabled, and
+`available_count >= 1`, render one quiet left-accent row **under the
+credentialed provider's group in the All view**:
+
+```
+⚡ {Provider} · {available_count} reset credits · expire {clause}
+```
+
+- `{clause}` from the soonest **future** `credits[].expires_at`: full days
+  remaining >= 2 -> `in {d} d` (floor); 1..2 days -> `tomorrow`; < 1 day ->
+  `today`; no future expiry -> drop the clause. Expired entries are ignored
+  for both the clause and the notification.
+- The Low view never shows the row (it is provider context, not a window).
+- The clock for "days remaining" is the client's own; tests freeze it to the
+  payload `timestamp` so fixtures stay deterministic.
+- A muted "use or lose" hint is right-aligned on the same row (design from
+  the approved mock). It is static decoration, like the bolt: not part of the
+  pinned row string and not localized per-credit.
+
+### Server update badge
+
+Settings window only. On open: `GET /api/version` and show `runtime_version`;
+when `update_check_enabled` is true, also `GET /api/update-check` and, if
+`update_available` and `latest` is non-null, a muted row "Server update
+available: v{latest}". `enabled == false` means the server's owner has not
+given update-check consent: render nothing, and never try to change that (the
+consent POST is web-only). Failures are silent.
+
 ## Low-quota notifications
 
 - Opt-in, default off.
@@ -346,26 +789,58 @@ missing `status_account` on a payload that has `accounts` as *unavailable*, not 
 - If a bucket has no `resets_at`, suppress until an explicit re-arm rule exists.
 - Suppress a window whose own row is failed (see Provider failures). A group
   failure alone must not suppress its healthy sibling windows.
+- **Reset credits** ride the same opt-in and the same scheduled quota read:
+  when the `resetCredits` component is on, notify once a future credit enters
+  its last 48 hours - the edge is inclusive: `expires_at - now <= 48 h`
+  arms. (`credits.json` freezes the clock at exactly 48 h and pins armed.)
+  Dedup by `(provider, credits[].id, expires_at)` - a
+  credit carries its own identity, so no re-arm rule is needed. Suppressed
+  while the Codex provider group failed (last-known credit data is not a
+  basis for an "expire in" warning). Click -> open the companion's quota
+  section (All view).
 
 ## Expected behavior cases
 
 Each file in `contract/expected/` describes the observable UI outcome for a
 given fixture combination. Both native test suites assert against these.
 
-| Case | Health | Usage today | Usage month | Quota | Expected outcome |
-|---|---|---|---|---|---|
-| `healthy` | health.json | usage-today.json | usage-month.json | quota.json | Connected; Today $3.42 / 18.7M / 248; "12% below yesterday"; July $48.90 / 281M; Low shows Codex 5h (14%) + Claude weekly (8%); activity "Codex · gpt-5.6-sol"; "Updated 2 min ago" |
-| `empty` | health.json | usage-today-empty.json | usage-month.json | quota.json | Connected; hero "No usage recorded today"; month line still shows; activity omitted; quota section unchanged |
-| `quota-disabled` | health.json | usage-today.json | usage-month.json | quota-disabled.json | Connected; Today/month normal; quota section shows "Subscription tracking is off" with Open Dashboard |
-| `wrong-service` | health-wrong-service.json | - | - | - | "This address is not a Tokdash service"; no usage/quota calls |
-| `offline` | (timeout/connection refused) | - | - | - | "Tokdash is not reachable"; Retry + Settings buttons; last-good data dimmed; footer "· stale" |
-| `busy` | health.json | 503 | 503 | 503 | "Tokdash is busy - retrying"; last-good data dimmed; back off |
-| `partial` | health.json | usage-today.json | 503 | 503 | Connected; Today hero normal; month + quota show inline "will retry shortly" warnings |
-| `loading` | (pending) | (pending) | (pending) | (pending) | "Connecting…"; skeletons for Today/month/quota values; no spinner |
-| `provider-error` | health.json | usage-today.json | usage-month.json | quota-provider-error.json | Connected; Today/month normal; quota All view shows an inline "Couldn't refresh - showing last known" warning under the failed provider's header, its rows still visible; healthy providers render normally; Low view prefixes ⚠ on the failed provider's low row (both Codex buckets have `captured_at` older than its `status_at`) |
-| `partial-failure` | health.json | usage-today.json | usage-month.json | quota-partial-failure.json | Connected; MiniMax header carries the "Couldn't refresh - showing last known" warning, but only `cn_general_5h` (older `captured_at`) gets the row ⚠ — `global_general_5h` was captured in the failing cycle and renders clean; Low view shows both, ⚠ on the 9% row only; notifications fire for `global_general_5h` and are suppressed for `cn_general_5h` |
+A case file names its fixtures (`health`, `usage`, `active_time`, `insights`,
+`stats`, `quota`), the `period` segment to select (default `today`), and
+optional `settings_overrides` merged over the schema-v3 defaults. In a fixture
+slot, `null` means the endpoint returns nothing at all this cycle (treated as
+a failure), `"503"` and `"pending"` keep their existing meanings. Strings are
+pinned under the English locale; both suites run cases in English.
+
+| Case | Period | Fixtures | Expected outcome |
+|---|---|---|---|
+| `healthy` | today | usage-today + active-time-today + insights-today + quota | Connected; hero $3.42 / 18.7M / 248 · active 3 h 12 m; delta row "▼ 12% cost · ▼ 12% tokens vs yesterday"; top tools "Codex 13M…" + top models "gpt-5.6-sol 12.7M…"; 24-bar histogram "Peak 14:00"; Low shows Claude weekly (8%) + Codex 5h (14%); no credits row |
+| `healthy-week` | week | usage-week + active-time-week + insights-week + quota | Week is a calendar window (`date_from` Mon..today, never `period=week`); hero $9.86 / 61.2M / 1043 · active 2 d 4 h; delta "…vs last week"; 7-column day histogram with an empty Tuesday column; kickers "this week" |
+| `healthy-month` | month | usage-month + active-time-month + stats + quota | hero $48.90 / 281M / 4218 · active 9 d 20 h; delta "…vs last month"; 90-day Mon..Sun grid, 68 filled cells |
+| `healthy-year` | year | usage-year + active-time-year + stats + quota | hero $312.40 / 1.2B / 13204 · active 74 d 5 h; delta row **absent** (previous year is zero, all `*_pct` null); 180-day grid, 143 filled cells |
+| `empty` | today | usage-today-empty + active-time-zero + insights-empty + quota | hero "No usage recorded today"; no active segment; no delta row; no top ranks; glance hidden (all-zero source) |
+| `active-zero` | today | usage-today + active-time-zero + quota | active segment absent (never "active 0 m") |
+| `credits` | today | usage-today + quota-reset-credits | row "⚡ Codex · 2 reset credits · expire in 2 d" under the Codex group (All view only, frozen clock = fixture timestamp); credits-expiry notification armed (48 h window) |
+| `delta-row-off` | today | usage-today, `fullDeltaRow` off | no delta row; shipped cost-only line "12% below yesterday" renders instead |
+| `glance-off` | today | healthy set, `activityGlance` off | no glance strip **and no `/api/insights` or `/api/stats` request at all** |
+| `histogram-off` | today | healthy set, `activityHistogramTodayWeek` off | no strip on today/week; month/year grids unaffected |
+| `per-server` | today | two servers, Second without active-time | hero sums cost/tokens but **drops** the active segment (partial data); per-server rows + footnote |
+| `multi-server` | today | two healthy servers | hero $6.84 / 37.4M · active 6 h 24 m (summed); per-server rows; Low-view dedup; minimum-delay rule; footer partial-failure wording |
+| `quota-disabled` | today | usage-today + quota-disabled | quota section "Subscription tracking is off" with Open Dashboard; no credits row |
+| `wrong-service` | - | health-wrong-service | "This address is not a Tokdash service"; no other calls |
+| `offline` | - | (timeout/connection refused) | "Tokdash is not reachable"; Retry + Settings; last-good dimmed; footer "· stale" |
+| `busy` | today | usage/active/insights/quota all 503 | "Tokdash is busy - retrying"; last-good dimmed; back off |
+| `partial` | today | usage-today ok; active/insights/quota 503 | hero normal; **quota** shows inline "will retry shortly"; active segment and glance vanish **silently** (rule 6) |
+| `loading` | today | all pending | "Connecting…"; skeletons (on a period switch: only after ~150 ms in flight, previous data held until then); segment stays visible; no spinner |
+| `provider-error` | today | usage-today + quota-provider-error | All view: "Couldn't refresh - showing last known" under the failed provider, rows still visible; Low prefixes ⚠ on its low row; no credits row (quota fixture has none) |
+| `partial-failure` | today | usage-today + quota-partial-failure | MiniMax header warns; row ⚠ only on `cn_general_5h`; notifications fire for `global_general_5h`, suppressed for `cn_general_5h` |
 
 ## Freshness text
+
+The Windows flyout shows this footer. The compact macOS flyout ends at the
+Open Dashboard/refresh actions and omits the freshness/Quit footer; Quit remains
+available from the flyout's right-click menu. Both stores retain freshness state
+for scheduling and diagnostics. On macOS, section gaps are deliberately tighter
+between the header, period switch, subscriptions, per-server rows, and actions.
 
 ```
 age < 60s    -> "Updated just now"
@@ -380,12 +855,17 @@ Append " · cached" only when it helps explain why data has not changed (rare).
 ## Token compact notation
 
 ```
-tokens >= 1_000_000  -> "{value/1M}M"   (one decimal: "18.7M")
-tokens >= 1_000      -> "{value/1k}k"   (no decimal: "24966k")
+tokens >= 1_000_000_000 -> "{value/1B}B"  (one decimal, trailing ".0" trimmed: "1.2B", "75B")
+tokens >= 1_000_000  -> "{value/1M}M"   (one decimal, trailing ".0" trimmed: "18.7M", "13M")
+tokens >= 1_000      -> "{value/1k}k"   (no decimal: "779k")
 else                 -> str(value)
 ```
 
-Exact value in accessibility text / tooltip.
+One decimal on the B and M tiers. Trailing ".0" is trimmed on all tiers:
+`12_982_308` -> "13M", `1_200_000_000` -> "1.2B", `75_000_000_000` -> "75B".
+`round` (not floor) to the shown precision. Exact value in
+accessibility text / tooltip. This same rule renders the Top-ranks values and
+per-server tokens.
 
 ## Cost formatting
 

@@ -1,27 +1,34 @@
 {
   "case": "healthy",
+  "period": "today",
   "fixtures": {
     "health": "health.json",
-    "usage_today": "usage-today.json",
-    "usage_month": "usage-month.json",
+    "usage": "usage-today.json",
+    "active_time": "active-time-today.json",
+    "insights": "insights-today.json",
     "quota": "quota.json"
   },
   "expected": {
     "connection": "Local · Connected",
     "dot": "ok",
+    "period_segment": { "visible": true, "selected": "Day", "labels": ["Day", "Week", "Month", "Year"] },
     "today": {
       "cost": "$3.42",
       "tokens_compact": "18.7M",
       "tokens_exact": "18700000",
       "messages": "248",
-      "comparison": "12% below yesterday",
-      "comparison_direction": "down"
+      "active": "active 3 h 12 m"
     },
-    "month": {
-      "label": "JULY",
-      "cost": "$48.90",
-      "tokens_compact": "281M"
+    "delta_row": "▼ 12% cost · ▼ 12% tokens vs yesterday",
+    "top_ranks": {
+      "kicker_tools": "Top tools · today",
+      "kicker_models": "Top models · today",
+      "tools": ["Codex 13M", "Claude 4.7M", "Kimi 779k"],
+      "models": ["gpt-5.6-sol 12.7M", "claude-opus-4-7 2.4M", "claude-sonnet-4-6 2.3M"]
     },
+    "glance": { "kind": "hour-histogram", "bars": 24, "caption": "Peak 14:00" },
+    "credits_row": null,
+    "per_server_rows": null,
     "quota_low": {
       "visible_count_max": 2,
       "rows": [
@@ -44,7 +51,6 @@
         ]}
       ]
     },
-    "activity": "Most used today  Codex · o5-deep-research",
     "banner": null,
     "freshness_contains": "Updated"
   }

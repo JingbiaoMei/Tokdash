@@ -633,3 +633,63 @@ def test_antigravity_cli_signature_scan_only_stats_db_and_sidecars(monkeypatch, 
     # however many the directory holds.
     dir_probes = {"antigravity-cli", "antigravity-acp", "antigravity-ide", "conversations"}
     assert set(stat_calls) - dir_probes == {"scan.db", "scan.db-wal", "scan.db-shm"}
+
+
+def _encode_step_metadata(seconds: int, nanos: int) -> bytes:
+    # steps.metadata: field 1 is the step's creation time {1: seconds, 2: nanos}.
+    return _encode_len_field(1, _encode_varint_field(1, seconds) + _encode_varint_field(2, nanos))
+
+
+def _encode_gen_metadata_blob_without_timestamp(*, model: str, input_tokens: int, output_tokens: int,
+                                                step_refs: list[int]) -> bytes:
+    # agy 1.2.x rows: no 1.9.4 timestamp; top-level field 2 packs the steps.idx values the row belongs to.
+    usage = _encode_varint_field(2, input_tokens) + _encode_varint_field(3, output_tokens)
+    inner = _encode_len_field(4, usage) + _encode_len_field(19, model.encode("utf-8"))
+    packed = b"".join(_encode_varint(ref) for ref in step_refs)
+    return _encode_len_field(2, packed) + _encode_len_field(1, inner)
+
+
+def test_antigravity_cli_parser_dates_rows_without_timestamp_from_referenced_steps(monkeypatch, tmp_path):
+    conversations_dir = _prepare_antigravity_home(monkeypatch, tmp_path)
+    db_path = conversations_dir / "session-steps.db"
+    _create_antigravity_db(
+        db_path,
+        [
+            (0, _encode_gen_metadata_blob_without_timestamp(
+                model="gemini-3.8-flash", input_tokens=13_542, output_tokens=466, step_refs=[1, 2])),
+            (1, _encode_gen_metadata_blob_without_timestamp(
+                model="gemini-3.8-flash", input_tokens=14_096, output_tokens=144, step_refs=[99])),
+        ],
+    )
+    conn = sqlite3.connect(str(db_path))
+    with conn:
+        conn.execute("CREATE TABLE steps(idx INTEGER, metadata BLOB)")
+        conn.executemany(
+            "INSERT INTO steps VALUES (?, ?)",
+            [
+                (1, sqlite3.Binary(_encode_step_metadata(1_790_399_154, 700_811_000))),
+                (2, sqlite3.Binary(_encode_step_metadata(1_790_399_157, 764_985_000))),
+            ],
+        )
+    conn.close()
+
+    entries = _get_parser_class()(PricingDatabase()).collect(None, None)
+
+    by_id = {entry["entry_id"]: entry for entry in entries}
+    # The latest referenced step dates the generation.
+    assert by_id["antigravity_cli:session-steps:0"]["timestamp"] == 1_790_399_157_764
+    # A row whose steps are unknown keeps the old behaviour (timestamp 0).
+    assert by_id["antigravity_cli:session-steps:1"]["timestamp"] == 0
+
+
+def test_antigravity_cli_parser_without_steps_table_keeps_zero_timestamp(monkeypatch, tmp_path):
+    conversations_dir = _prepare_antigravity_home(monkeypatch, tmp_path)
+    _create_antigravity_db(
+        conversations_dir / "session-nosteps.db",
+        [(0, _encode_gen_metadata_blob_without_timestamp(
+            model="gemini-3.8-flash", input_tokens=100, output_tokens=10, step_refs=[1]))],
+    )
+
+    entries = _get_parser_class()(PricingDatabase()).collect(None, None)
+
+    assert [entry["timestamp"] for entry in entries] == [0]

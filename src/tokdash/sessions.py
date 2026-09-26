@@ -9,7 +9,8 @@ import os
 import re
 import sqlite3
 import threading
-from collections import OrderedDict
+import time
+from collections import Counter, OrderedDict
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache, wraps
 from pathlib import Path
@@ -1013,7 +1014,7 @@ def _summarize_session(
     last_seen_at_ms = int(turns[-1].get("timestamp_ms", 0) or 0)
     intervals = _session_active_intervals(raw, active_gap_cap_ms(), since_ms, until_ms)
 
-    return {
+    res = {
         "tool": raw.get("tool", "unknown"),
         "session_id": raw.get("session_id", "unknown"),
         "display_name": raw.get("display_name")
@@ -1044,6 +1045,15 @@ def _summarize_session(
         "active_ms_sum": sum(end - start for start, end in intervals),
         "_active_intervals": intervals,
     }
+    if "tool_call_count" in raw:
+        res["tool_call_count"] = raw["tool_call_count"]
+    if "message_count" in raw:
+        res["message_count"] = raw["message_count"]
+    if "git_branch" in raw:
+        res["git_branch"] = raw["git_branch"]
+    if "profile_name" in raw:
+        res["profile_name"] = raw["profile_name"]
+    return res
 
 
 def _public_turns(turns: Iterable[Dict[str, Any]]) -> list[Dict[str, Any]]:
@@ -3094,19 +3104,69 @@ def _load_hermes_sessions(signature: tuple[tuple[str, int, int], ...], _pricing_
             continue
         try:
             try:
-                has_title = "title" in _sqlite_columns(conn, "sessions")
+                cols = set(_sqlite_columns(conn, "sessions"))
+                has_title = "title" in cols
+                has_cwd = "cwd" in cols
+                has_repo = "git_repo_root" in cols
+                has_branch = "git_branch" in cols
+                has_tools = "tool_call_count" in cols
+                has_msgs = "message_count" in cols
+                has_profile = "profile_name" in cols
+                has_ended = "ended_at" in cols
+                has_activity = "last_activity_at" in cols
+
                 cur = conn.cursor()
-                cur.execute(
-                    f"""
+
+                # Check if session_model_usage table exists for multi-turn / multi-model / accurate timestamps
+                has_smu = False
+                try:
+                    cur.execute(
+                        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='session_model_usage'"
+                    )
+                    has_smu = cur.fetchone() is not None
+                except Exception:
+                    has_smu = False
+
+                smu_by_session: Dict[str, list] = {}
+                if has_smu:
+                    try:
+                        cur.execute(
+                            """
+                            SELECT session_id, model, billing_provider, billing_base_url,
+                                   billing_mode, task, api_call_count, input_tokens,
+                                   output_tokens, cache_read_tokens, cache_write_tokens,
+                                   reasoning_tokens, estimated_cost_usd, actual_cost_usd,
+                                   first_seen, last_seen
+                            FROM session_model_usage
+                            WHERE (input_tokens + output_tokens + cache_read_tokens + cache_write_tokens + reasoning_tokens) > 0
+                               OR actual_cost_usd > 0 OR estimated_cost_usd > 0
+                            ORDER BY COALESCE(last_seen, first_seen, 0)
+                            """
+                        )
+                        for smu_row in cur.fetchall():
+                            smu_sid = str(smu_row[0] or "")
+                            smu_by_session.setdefault(smu_sid, []).append(smu_row)
+                    except (OSError, sqlite3.Error):
+                        smu_by_session = {}
+
+                query = f"""
                     SELECT id, model, billing_provider, started_at,
                            input_tokens, output_tokens,
                            cache_read_tokens, cache_write_tokens,
-                           reasoning_tokens, estimated_cost_usd, actual_cost_usd
-                           {', title' if has_title else ", ''"}
+                           reasoning_tokens, estimated_cost_usd, actual_cost_usd,
+                           { 'title' if has_title else "''" } as title_col,
+                           { 'cwd' if has_cwd else "''" } as cwd_col,
+                           { 'git_repo_root' if has_repo else "''" } as repo_col,
+                           { 'git_branch' if has_branch else "''" } as branch_col,
+                           { 'tool_call_count' if has_tools else "0" } as tools_col,
+                           { 'message_count' if has_msgs else "0" } as msgs_col,
+                           { 'profile_name' if has_profile else "'default'" } as profile_col,
+                           { 'ended_at' if has_ended else "NULL" } as ended_col,
+                           { 'last_activity_at' if has_activity else "NULL" } as act_col
                     FROM sessions
                     WHERE model IS NOT NULL AND TRIM(model) != ''
-                    """
-                )
+                """
+                cur.execute(query)
                 rows = cur.fetchall()
             except (OSError, sqlite3.Error):
                 # Corrupt/foreign DB: the parser skips it per-DB, so the
@@ -3120,72 +3180,220 @@ def _load_hermes_sessions(signature: tuple[tuple[str, int, int], ...], _pricing_
                             input_t, output_t,
                             cache_r, cache_w, reasoning,
                             estimated_cost, actual_cost, title_raw,
+                            cwd_val, repo_val, branch_val,
+                            tool_calls_cnt, msg_cnt, profile_val,
+                            ended_at_val, last_act_val,
                         ) = row
                         sid = str(row_id)
                         # Dedup across state.db files: first search-dir wins.
                         if sid in claimed:
                             continue
                         claimed.add(sid)
-                        input_t = _to_int(input_t)
-                        output_t = _to_int(output_t)
-                        cache_r = _to_int(cache_r)
-                        cache_w = _to_int(cache_w)
-                        reasoning = _to_int(reasoning)
-                        actual_f = float(actual_cost or 0.0)
-                        estimated_f = float(estimated_cost or 0.0)
-                        # The parser keeps exactly the rows with tokens or a
-                        # positive recorded cost.
-                        if (input_t + output_t + cache_r + cache_w + reasoning) <= 0 and not (
-                            actual_f > 0 or estimated_f > 0
-                        ):
-                            continue
+
                         # Verbatim parser expression: seconds, or ms if > 1e12.
                         try:
                             sa = float(started_at or 0.0)
                         except (ValueError, TypeError):
                             sa = 0.0
-                        ts_ms = int(sa * 1000) if sa < 1e12 else int(sa)
-                        model = str(model)
-                        provider = (
-                            str(billing_provider or "").strip()
-                            or HermesParser._infer_provider(model)
-                        )
-                        full_model = f"{provider}/{model}" if provider else model
-                        bill = _billing_record(
-                            full_model,
-                            "split-cache-write",
-                            input_tokens=input_t,
-                            output_tokens=output_t,
-                            cache_read=cache_r,
-                            cache_write=cache_w,
-                            # Cost precedence, parser 2990-3013: a recorded
-                            # positive cost is never repriced; a recorded zero
-                            # falls through to the pricing DB.
-                            fixed_cost=(
-                                actual_f if actual_f > 0
-                                else estimated_f if estimated_f > 0
-                                else None
-                            ),
-                        )
-                        turn = _build_turn(
-                            turn_index=1,
-                            timestamp_ms=ts_ms,
-                            model=model,
-                            tokens_in=input_t + cache_w,
-                            tokens_cache=cache_r,
-                            tokens_out=output_t,
-                            tokens_reasoning=reasoning,
-                            bill=bill,
-                        )
-                        turn["_event_key"] = f"hermes:{sid}"
+                        ts_start_ms = int(sa * 1000) if sa < 1e12 else int(sa)
+
+                        # Timing: check ended_at or last_activity_at
+                        try:
+                            la = float(last_act_val or ended_at_val or sa)
+                        except (ValueError, TypeError):
+                            la = sa
+                        ts_end_ms = int(la * 1000) if la < 1e12 else int(la)
+
+                        if sid in smu_by_session:
+                            turns = []
+                            for turn_idx, smu_row in enumerate(smu_by_session[sid], start=1):
+                                (
+                                    _sid, smu_model, smu_bprov, smu_burl, smu_bmode, smu_task,
+                                    smu_apicnt, smu_inp, smu_out, smu_cr, smu_cw, smu_reas,
+                                    smu_est, smu_act, smu_fseen, smu_lseen,
+                                ) = smu_row
+
+                                m_name = str(smu_model or "")
+                                if not m_name:
+                                    continue
+                                b_prov = str(smu_bprov or "")
+                                b_url = str(smu_burl or "")
+                                b_mode = str(smu_bmode or "")
+                                task_name = str(smu_task or "")
+
+                                s_inp = _to_int(smu_inp)
+                                s_out = _to_int(smu_out)
+                                s_cr = _to_int(smu_cr)
+                                s_cw = _to_int(smu_cw)
+                                s_reas = _to_int(smu_reas)
+                                s_act_f = float(smu_act or 0.0)
+                                s_est_f = float(smu_est or 0.0)
+
+                                has_s_tokens = (s_inp + s_out + s_cr + s_cw + s_reas) > 0
+                                has_s_cost = s_act_f > 0 or s_est_f > 0
+                                if not has_s_tokens and not has_s_cost:
+                                    continue
+
+                                try:
+                                    ts_val = float(smu_lseen if smu_lseen else (smu_fseen if smu_fseen else sa))
+                                except (ValueError, TypeError):
+                                    ts_val = sa
+                                turn_ts_ms = int(ts_val * 1000) if ts_val < 1e12 else int(ts_val)
+
+                                prov = b_prov.strip() or HermesParser._infer_provider(m_name)
+                                full_m = f"{prov}/{m_name}" if prov else m_name
+                                bill = _billing_record(
+                                    full_m,
+                                    "split-cache-write",
+                                    input_tokens=s_inp,
+                                    output_tokens=s_out,
+                                    cache_read=s_cr,
+                                    cache_write=s_cw,
+                                    fixed_cost=(
+                                        s_act_f if s_act_f > 0
+                                        else s_est_f if s_est_f > 0
+                                        else None
+                                    ),
+                                )
+                                turn = _build_turn(
+                                    turn_index=turn_idx,
+                                    timestamp_ms=turn_ts_ms,
+                                    model=m_name,
+                                    tokens_in=s_inp + s_cw,
+                                    tokens_cache=s_cr,
+                                    tokens_out=s_out,
+                                    tokens_reasoning=s_reas,
+                                    bill=bill,
+                                )
+                                smu_key_basis = f"{sid}|{m_name}|{b_prov}|{b_url}|{b_mode}|{task_name}"
+                                smu_hash = hashlib.sha1(smu_key_basis.encode("utf-8")).hexdigest()[:12]
+                                turn["_event_key"] = f"hermes:{sid}:{smu_hash}"
+                                turns.append(turn)
+
+                            if not turns:
+                                continue
+
+                            max_turn_ts = max(t["timestamp_ms"] for t in turns)
+                            if ts_end_ms > max_turn_ts + 1000:
+                                last_model = turns[-1]["model"]
+                                last_prov = (
+                                    str(billing_provider or "").strip()
+                                    or HermesParser._infer_provider(last_model)
+                                )
+                                end_full_model = f"{last_prov}/{last_model}" if last_prov else last_model
+                                bill_zero = _billing_record(
+                                    end_full_model,
+                                    "split-cache-write",
+                                    input_tokens=0,
+                                    output_tokens=0,
+                                    fixed_cost=0.0,
+                                )
+                                end_turn = _build_turn(
+                                    turn_index=len(turns) + 1,
+                                    timestamp_ms=ts_end_ms,
+                                    model=last_model,
+                                    tokens_in=0,
+                                    tokens_cache=0,
+                                    tokens_out=0,
+                                    tokens_reasoning=0,
+                                    bill=bill_zero,
+                                )
+                                end_turn["_event_key"] = f"hermes:{sid}:end"
+                                turns.append(end_turn)
+                        else:
+                            input_t = _to_int(input_t)
+                            output_t = _to_int(output_t)
+                            cache_r = _to_int(cache_r)
+                            cache_w = _to_int(cache_w)
+                            reasoning = _to_int(reasoning)
+                            actual_f = float(actual_cost or 0.0)
+                            estimated_f = float(estimated_cost or 0.0)
+                            # The parser keeps exactly the rows with tokens or a
+                            # positive recorded cost.
+                            if (input_t + output_t + cache_r + cache_w + reasoning) <= 0 and not (
+                                actual_f > 0 or estimated_f > 0
+                            ):
+                                continue
+
+                            model = str(model)
+                            provider = (
+                                str(billing_provider or "").strip()
+                                or HermesParser._infer_provider(model)
+                            )
+                            full_model = f"{provider}/{model}" if provider else model
+                            bill = _billing_record(
+                                full_model,
+                                "split-cache-write",
+                                input_tokens=input_t,
+                                output_tokens=output_t,
+                                cache_read=cache_r,
+                                cache_write=cache_w,
+                                fixed_cost=(
+                                    actual_f if actual_f > 0
+                                    else estimated_f if estimated_f > 0
+                                    else None
+                                ),
+                            )
+                            turn = _build_turn(
+                                turn_index=1,
+                                timestamp_ms=ts_start_ms,
+                                model=model,
+                                tokens_in=input_t + cache_w,
+                                tokens_cache=cache_r,
+                                tokens_out=output_t,
+                                tokens_reasoning=reasoning,
+                                bill=bill,
+                            )
+                            turn["_event_key"] = f"hermes:{sid}"
+
+                            turns = [turn]
+                            if ts_end_ms > ts_start_ms + 1000:
+                                bill_zero = _billing_record(
+                                    full_model,
+                                    "split-cache-write",
+                                    input_tokens=0,
+                                    output_tokens=0,
+                                    fixed_cost=0.0,
+                                )
+                                end_turn = _build_turn(
+                                    turn_index=2,
+                                    timestamp_ms=ts_end_ms,
+                                    model=model,
+                                    tokens_in=0,
+                                    tokens_cache=0,
+                                    tokens_out=0,
+                                    tokens_reasoning=0,
+                                    bill=bill_zero,
+                                )
+                                end_turn["_event_key"] = f"hermes:{sid}:end"
+                                turns.append(end_turn)
+
+                        # Extract project name from git_repo_root or cwd
+                        proj_path = repo_val or cwd_val or ""
+                        if proj_path:
+                            try:
+                                p = Path(proj_path)
+                                if p.resolve() == Path.home().resolve():
+                                    project = "~"
+                                else:
+                                    project = p.name or "unknown"
+                            except Exception:
+                                project = "unknown"
+                        else:
+                            project = "unknown"
+
                         # One extra query per title-less session; fine at
                         # current hermes scale, revisit if histories grow.
                         title = _clean_display_name(title_raw) or _hermes_user_preview(conn, sid)
                         raw: Dict[str, Any] = {
                             "tool": "hermes",
                             "session_id": sid,
-                            "project": "unknown",  # schema v12 records no cwd
-                            "turns": [turn],
+                            "project": project,
+                            "git_branch": str(branch_val or ""),
+                            "tool_call_count": _to_int(tool_calls_cnt),
+                            "message_count": _to_int(msg_cnt),
+                            "profile_name": str(profile_val or "default"),
+                            "turns": turns,
                         }
                         if title:
                             raw["display_name"] = title
@@ -6665,6 +6873,256 @@ def get_active_time_data(
     }
 
 
+def _hermes_rich_session_detail(session_id: str, raw: Dict[str, Any], session: Dict[str, Any]) -> Dict[str, Any]:
+    detail_data: Dict[str, Any] = {
+        "messages": [],
+        "tool_executions": [],
+        "model_usages": [],
+        "metadata": {
+            "project": session.get("project", "hermes"),
+            "git_branch": raw.get("git_branch", ""),
+            "profile_name": raw.get("profile_name", "default"),
+            "tool_call_count": raw.get("tool_call_count", 0),
+            "message_count": raw.get("message_count", 0),
+            "is_live": False,
+        },
+    }
+    for db_path in _hermes_db_paths():
+        if not db_path.exists():
+            continue
+        try:
+            conn = connect_sqlite_readonly(db_path)
+        except Exception:
+            continue
+        try:
+            cur = conn.cursor()
+            cols = set(_sqlite_columns(conn, "sessions"))
+            has_ended = "ended_at" in cols
+            has_last_act = "last_activity_at" in cols
+            has_cwd = "cwd" in cols
+            has_branch = "git_branch" in cols
+            has_profile = "profile_name" in cols
+            has_tools = "tool_call_count" in cols
+            has_msgs = "message_count" in cols
+
+            query = f"""
+                SELECT id, started_at,
+                       { 'ended_at' if has_ended else 'NULL' },
+                       { 'last_activity_at' if has_last_act else 'NULL' },
+                       { 'cwd' if has_cwd else "''" },
+                       { 'git_branch' if has_branch else "''" },
+                       { 'profile_name' if has_profile else "'default'" },
+                       { 'tool_call_count' if has_tools else "0" },
+                       { 'message_count' if has_msgs else "0" }
+                FROM sessions WHERE id = ?
+            """
+            cur.execute(query, (session_id,))
+            s_row = cur.fetchone()
+            if not s_row:
+                continue
+
+            tables = set(r[0] for r in cur.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall())
+            if "session_model_usage" in tables:
+                try:
+                    cur.execute(
+                        """
+                        SELECT model, billing_provider, task, api_call_count,
+                               input_tokens, output_tokens, cache_read_tokens,
+                               cache_write_tokens, reasoning_tokens,
+                               estimated_cost_usd, actual_cost_usd, first_seen, last_seen
+                        FROM session_model_usage
+                        WHERE session_id = ?
+                        ORDER BY first_seen ASC
+                        """,
+                        (session_id,),
+                    )
+                    for mr in cur.fetchall():
+                        detail_data["model_usages"].append({
+                            "model": mr[0],
+                            "provider": mr[1],
+                            "task": mr[2] or "main",
+                            "api_calls": mr[3] or 0,
+                            "input_tokens": mr[4] or 0,
+                            "output_tokens": mr[5] or 0,
+                            "cache_read_tokens": mr[6] or 0,
+                            "cache_write_tokens": mr[7] or 0,
+                            "reasoning_tokens": mr[8] or 0,
+                            "cost": float(mr[10] or mr[9] or 0.0),
+                            "first_seen": mr[11],
+                            "last_seen": mr[12],
+                        })
+                except Exception:
+                    pass
+
+            if "messages" in tables:
+                try:
+                    cur.execute(
+                        """
+                        SELECT id, role, content, tool_name, tool_call_id, tool_calls, reasoning, token_count, finish_reason, timestamp
+                        FROM messages
+                        WHERE session_id = ?
+                        ORDER BY id ASC
+                        """,
+                        (session_id,),
+                    )
+                    msg_rows = cur.fetchall()
+                    parsed_messages = []
+                    tool_calls_map: Dict[str, Dict[str, Any]] = {}
+                    for mr in msg_rows:
+                        mid, role, content, tool_name, tool_call_id, tool_calls_raw, reasoning, token_count, finish_reason, ts = mr
+                        parsed_tc = []
+                        if tool_calls_raw:
+                            try:
+                                parsed_tc = json.loads(tool_calls_raw) if isinstance(tool_calls_raw, str) else tool_calls_raw
+                            except Exception:
+                                parsed_tc = []
+
+                        msg_item = {
+                            "id": mid,
+                            "role": role,
+                            # Transcript text is intentionally NOT exposed over the
+                            # API (privacy): only per-message metadata ships.
+                            "content_chars": len(content or ""),
+                            "content_tokens": token_count,
+                            "tool_name": tool_name or "",
+                            "tool_call_id": tool_call_id or "",
+                            "has_tool_calls": bool(parsed_tc),
+                            "has_reasoning": bool(reasoning),
+                            "token_count": token_count,
+                            "finish_reason": finish_reason,
+                            "timestamp": ts,
+                        }
+                        parsed_messages.append(msg_item)
+
+                        for tc in (parsed_tc or []):
+                            if isinstance(tc, dict):
+                                cid = tc.get("id") or tc.get("call_id")
+                                fn = tc.get("function", {}) if isinstance(tc.get("function"), dict) else {}
+                                if cid:
+                                    t_name = fn.get("name") or tc.get("name", "tool")
+                                    tool_calls_map[cid] = {
+                                        "id": cid,
+                                        "name": t_name,
+                                        "tool_name": t_name,
+                                        "status": "executed",
+                                        "timestamp": ts,
+                                    }
+
+                        if role == "tool" and tool_call_id:
+                            if tool_call_id in tool_calls_map:
+                                if tool_name:
+                                    tool_calls_map[tool_call_id]["name"] = tool_name
+                                    tool_calls_map[tool_call_id]["tool_name"] = tool_name
+                            else:
+                                tool_calls_map[tool_call_id] = {
+                                    "id": tool_call_id,
+                                    "name": tool_name or "tool",
+                                    "tool_name": tool_name or "tool",
+                                    "status": "executed",
+                                    "timestamp": ts,
+                                }
+
+                    detail_data["messages"] = parsed_messages
+                    detail_data["tool_executions"] = list(tool_calls_map.values())
+                    detail_data["tool_calls"] = list(tool_calls_map.values())
+                except Exception:
+                    pass
+
+            ended_at = s_row[2]
+            last_activity = s_row[3]
+            now_sec = time.time()
+            is_live = ended_at is None and last_activity and (now_sec - float(last_activity) < 900)
+            detail_data["metadata"]["is_live"] = bool(is_live)
+            break
+        finally:
+            conn.close()
+    return detail_data
+
+
+def _antigravity_rich_session_detail(session_id: str, raw: Dict[str, Any], session: Dict[str, Any]) -> Dict[str, Any]:
+    detail_data: Dict[str, Any] = {
+        "messages": [],
+        "tool_executions": [],
+        "tool_calls": [],
+        "model_usages": [],
+        "metadata": {
+            "project": session.get("project", "antigravity"),
+            "tool_call_count": 0,
+            "message_count": 0,
+            "is_live": False,
+        },
+    }
+    from . import clientpaths
+    for base in clientpaths.antigravity_product_dirs():
+        brain_log = base / "brain" / session_id / ".system_generated" / "logs" / "transcript.jsonl"
+        if not brain_log.exists():
+            continue
+        try:
+            with open(brain_log, "r", encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        step = json.loads(line)
+                    except Exception:
+                        continue
+                    src = step.get("source", "")
+                    styp = step.get("type", "")
+                    role = "user" if (src == "USER_EXPLICIT" or styp == "USER_INPUT") else "assistant"
+                    content = step.get("content", "") or ""
+                    thinking = step.get("thinking", "") or ""
+                    t_calls = step.get("tool_calls") or []
+                    created_at = step.get("created_at", "")
+
+                    if content or thinking or t_calls:
+                        detail_data["messages"].append({
+                            "role": role,
+                            # Transcript text is intentionally NOT exposed over the
+                            # API (privacy): only per-message metadata ships.
+                            "content_chars": len(content or ""),
+                            "has_reasoning": bool(thinking),
+                            "has_tool_calls": bool(t_calls),
+                            "timestamp": created_at,
+                        })
+                    for tc in t_calls:
+                        tool_item = {
+                            "tool_name": tc.get("name", "tool"),
+                            "name": tc.get("name", "tool"),
+                            "has_args": bool(tc.get("args")),
+                            "timestamp": created_at,
+                        }
+                        detail_data["tool_executions"].append(tool_item)
+                        detail_data["tool_calls"].append(tool_item)
+            detail_data["metadata"]["tool_call_count"] = len(detail_data["tool_calls"])
+            detail_data["metadata"]["message_count"] = len(detail_data["messages"])
+            break
+        except Exception as e:
+            logger.warning(f"Error loading antigravity session transcript: {e}")
+
+    turns = raw.get("turns", [])
+    model_counts: Dict[str, Dict[str, Any]] = {}
+    for t in turns:
+        m_name = t.get("model") or "unknown"
+        if m_name not in model_counts:
+            model_counts[m_name] = {
+                "model": m_name,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cache_read_tokens": 0,
+                "reasoning_tokens": 0,
+                "cost": 0.0,
+            }
+        model_counts[m_name]["input_tokens"] += t.get("tokens_in", 0)
+        model_counts[m_name]["output_tokens"] += t.get("tokens_out", 0)
+        model_counts[m_name]["cache_read_tokens"] += t.get("tokens_cache", 0)
+        model_counts[m_name]["reasoning_tokens"] += t.get("tokens_reasoning", 0)
+        model_counts[m_name]["cost"] += float(t.get("cost", 0.0))
+    detail_data["model_usages"] = list(model_counts.values())
+
+    return detail_data
+
+
 def get_session_detail(tool: str, session_id: str) -> Dict[str, Any]:
     key = str(tool or "").strip().lower()
     if key not in SESSION_TOOLS:
@@ -6679,11 +7137,16 @@ def get_session_detail(tool: str, session_id: str) -> Dict[str, Any]:
         raise FileNotFoundError(f"{TOOL_LABELS.get(key, key.title())} session not found: {session_id}")
     session.pop("_active_intervals", None)
 
-    return {
+    res = {
         "session": session,
         "turns": _public_turns(raw.get("turns", [])),
         "timestamp": datetime.now().isoformat(),
     }
+    if key == "hermes":
+        res.update(_hermes_rich_session_detail(str(session_id), raw, session))
+    elif key in ("antigravity_cli", "antigravity"):
+        res.update(_antigravity_rich_session_detail(str(session_id), raw, session))
+    return res
 
 
 def get_codex_sessions_data(

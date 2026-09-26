@@ -2035,6 +2035,7 @@ class UsageEntryStore:
                     "tokens_in": 0,
                     "tokens_out": 0,
                     "tokens_cache": 0,
+                    "tokens_reasoning": 0,
                     "cost": 0.0,
                     "messages": 0,
                     "models": [],
@@ -2046,6 +2047,7 @@ class UsageEntryStore:
                 "tokens_in": tokens_in,
                 "tokens_out": output,
                 "tokens_cache": tokens_cache,
+                "tokens_reasoning": reasoning,
                 "cost": cost,
                 "messages": messages,
                 "cache_hit_rate": _cache_hit_rate(tokens_in, tokens_cache),
@@ -2054,6 +2056,8 @@ class UsageEntryStore:
             app_ref["tokens_in"] += tokens_in
             app_ref["tokens_out"] += output
             app_ref["tokens_cache"] += tokens_cache
+            app_ref.setdefault("tokens_reasoning", 0)
+            app_ref["tokens_reasoning"] += reasoning
             app_ref["cost"] += cost
             app_ref["messages"] += messages
             app_ref["models"].append(model_ref)

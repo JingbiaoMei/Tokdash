@@ -256,6 +256,7 @@ def _merge_parsed_usage(parts: list[Dict[str, Any]]) -> Dict[str, Any]:
                     "tokens_in": 0,
                     "tokens_out": 0,
                     "tokens_cache": 0,
+                    "tokens_reasoning": 0,
                     "cost": 0.0,
                     "messages": 0,
                     "models_dict": {},
@@ -265,6 +266,8 @@ def _merge_parsed_usage(parts: list[Dict[str, Any]]) -> Dict[str, Any]:
             app_ref["tokens_in"] += tokens_in
             app_ref["tokens_out"] += tokens_out
             app_ref["tokens_cache"] += tokens_cache
+            app_ref.setdefault("tokens_reasoning", 0)
+            app_ref["tokens_reasoning"] += int(row.get("tokens_reasoning", row.get("reasoning", 0)) or 0)
             app_ref["cost"] += cost
             app_ref["messages"] += messages
 
@@ -276,6 +279,7 @@ def _merge_parsed_usage(parts: list[Dict[str, Any]]) -> Dict[str, Any]:
                     "tokens_in": 0,
                     "tokens_out": 0,
                     "tokens_cache": 0,
+                    "tokens_reasoning": 0,
                     "cost": 0.0,
                     "messages": 0,
                 },
@@ -284,6 +288,8 @@ def _merge_parsed_usage(parts: list[Dict[str, Any]]) -> Dict[str, Any]:
             model_ref["tokens_in"] += tokens_in
             model_ref["tokens_out"] += tokens_out
             model_ref["tokens_cache"] += tokens_cache
+            model_ref.setdefault("tokens_reasoning", 0)
+            model_ref["tokens_reasoning"] += int(row.get("tokens_reasoning", row.get("reasoning", 0)) or 0)
             model_ref["cost"] += cost
             model_ref["messages"] += messages
 
@@ -296,6 +302,7 @@ def _merge_parsed_usage(parts: list[Dict[str, Any]]) -> Dict[str, Any]:
                     "tokens_in": 0,
                     "tokens_out": 0,
                     "tokens_cache": 0,
+                    "tokens_reasoning": 0,
                     "cost": 0.0,
                     "messages": 0,
                 },
@@ -304,6 +311,8 @@ def _merge_parsed_usage(parts: list[Dict[str, Any]]) -> Dict[str, Any]:
             global_ref["tokens_in"] += tokens_in
             global_ref["tokens_out"] += tokens_out
             global_ref["tokens_cache"] += tokens_cache
+            global_ref.setdefault("tokens_reasoning", 0)
+            global_ref["tokens_reasoning"] += int(row.get("tokens_reasoning", row.get("reasoning", 0)) or 0)
             global_ref["cost"] += cost
             global_ref["messages"] += messages
 
@@ -465,6 +474,7 @@ def parse_entries_json(data: Dict[str, Any]) -> Dict[str, Any]:
                 "tokens_in": 0,
                 "tokens_out": 0,
                 "tokens_cache": 0,
+                "tokens_reasoning": 0,
                 "cost": 0.0,
                 "messages": 0,
                 "models_dict": {},
@@ -475,6 +485,8 @@ def parse_entries_json(data: Dict[str, Any]) -> Dict[str, Any]:
         app_ref["tokens_in"] += tokens_in
         app_ref["tokens_out"] += tokens_out
         app_ref["tokens_cache"] += tokens_cache
+        app_ref.setdefault("tokens_reasoning", 0)
+        app_ref["tokens_reasoning"] += reasoning
         app_ref["cost"] += cost
         app_ref["messages"] += messages
 
@@ -913,18 +925,24 @@ def compute_usage(period: str, date_from: Optional[str] = None, date_to: Optiona
             "tokens": data["tokens"],
             "cost": data["cost"],
             "tokens_in": data.get("tokens_in", 0),
+            "tokens_out": data.get("tokens_out", 0),
             "tokens_cache": data.get("tokens_cache", 0),
+            "tokens_reasoning": data.get("tokens_reasoning", 0),
             "cache_hit_rate": cache_hit_rate(data.get("tokens_in", 0), data.get("tokens_cache", 0)),
         }
         for name, data in coding_apps.items()
     }
     ocl_in = openclaw_data.get("total_tokens_in", 0)
     ocl_cache = openclaw_data.get("total_tokens_cache", 0)
+    ocl_out = openclaw_data.get("total_tokens_out", 0)
+    ocl_reasoning = openclaw_data.get("total_tokens_reasoning", 0)
     by_tool["openclaw"] = {
         "tokens": openclaw_data["total_tokens"],
         "cost": openclaw_data["total_cost"],
         "tokens_in": ocl_in,
+        "tokens_out": ocl_out,
         "tokens_cache": ocl_cache,
+        "tokens_reasoning": ocl_reasoning,
         "cache_hit_rate": cache_hit_rate(ocl_in, ocl_cache),
     }
 

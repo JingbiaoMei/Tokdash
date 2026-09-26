@@ -70,6 +70,7 @@ def _isolated_home(monkeypatch, tmp_path):
         ("KIMI_SHARE_DIR", ".kimi"),
         ("KIMI_CODE_HOME", ".kimi-code"),
         ("PI_CODING_AGENT_DIR", ".pi/agent"),
+        ("HERMES_HOME", ".hermes"),
     ):
         monkeypatch.setenv(var, str(tmp_path / relative))
     yield tmp_path

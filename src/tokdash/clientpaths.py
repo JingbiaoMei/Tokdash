@@ -277,7 +277,7 @@ def gemini_root() -> Path:
 # are safe to list either way -- discovery drops homes that do not exist -- but
 # see docs/development/technical-notes/WINDOWS_CLIENT_PATHS.md before treating
 # the IDE path as verified.
-ANTIGRAVITY_SIBLING_DIR_NAMES = ("antigravity-acp", "antigravity-ide")
+ANTIGRAVITY_SIBLING_DIR_NAMES = ("antigravity", "antigravity-acp", "antigravity-ide")
 
 
 def antigravity_cli_dir() -> Path:

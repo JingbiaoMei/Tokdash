@@ -104,5 +104,9 @@ def test_previous_period_range_month_uses_full_previous_calendar_month(monkeypat
 
     prev_since, prev_until = compute.previous_period_range("month")
 
-    assert prev_since == datetime(2026, 2, 1, 0, 0, tzinfo=timezone.utc)
+    # The previous-month window starts at local midnight on the 1st, so the
+    # UTC instant depends on the machine's timezone: pin the expectation to
+    # the local zone instead of assuming UTC (CI) everywhere.
+    local_first = datetime(2026, 2, 1, 0, 0).astimezone()
+    assert prev_since == local_first.astimezone(timezone.utc)
     assert prev_until == current_since

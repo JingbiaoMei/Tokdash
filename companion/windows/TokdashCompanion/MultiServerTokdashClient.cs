@@ -17,6 +17,11 @@ public sealed class MultiServerTokdashClient : ITokdashClient
     /// Computed at usage time so a later quota/health failure on the same cycle never
     /// re-labels a server whose usage actually answered. Empty before the first cycle.
     /// </summary>
+    public string? ActiveRouteFor(string id) => _clients.FirstOrDefault(c => c.Server.Id == id).Client is TokdashClient client
+        ? client.ActiveBaseUrl : null;
+    public string? DashboardBaseUrl => _clients.Where(c => !FailedServerIds.Contains(c.Server.Id) && !_duplicateIds.Contains(c.Server.Id))
+        .Select(c => ActiveRouteFor(c.Server.Id)).FirstOrDefault(url => url is not null);
+
     public IReadOnlyList<PerServerUsage> LastPerServerRows { get; private set; } = [];
 
     public MultiServerTokdashClient(IEnumerable<CompanionServerSettings> servers) =>

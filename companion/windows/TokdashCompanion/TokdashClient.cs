@@ -40,6 +40,7 @@ public sealed class TokdashClient : ITokdashClient
     private CompanionServerSettings? _server;
     private readonly HttpMessageHandler? _handler;
     private List<Uri> _verifiedRoutes = [];
+    public string ActiveBaseUrl => _baseUri.AbsoluteUri.TrimEnd('/');
     public List<RouteProbe> RouteStatus { get; private set; } = [];
 
     public TokdashClient(CompanionServerSettings server, HttpMessageHandler? handler = null) : this(server.BaseUrl, handler) { _server = server; }

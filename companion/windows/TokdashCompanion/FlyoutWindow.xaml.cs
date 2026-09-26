@@ -1020,9 +1020,7 @@ public partial class FlyoutWindow : Window
 
     private void OpenDashboard_Click(object sender, RoutedEventArgs e)
     {
-        var url = string.IsNullOrWhiteSpace(Store?.Settings?.BaseURL)
-            ? "http://127.0.0.1:55423/"
-            : Store.Settings.BaseURL;
+        var url = Store?.DashboardBaseUrl ?? CompanionSettings.DefaultBaseURL;
         System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
         {
             FileName = url,

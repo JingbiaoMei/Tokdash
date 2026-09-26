@@ -21,6 +21,11 @@ final class CompanionStore: NSObject, ObservableObject {
     @Published var settings: CompanionSettings
     @Published var quotaView: QuotaView = .low
 
+    @Published private(set) var activeRoutes: [String: String] = [:]
+    var dashboardBaseURL: String {
+        settings.servers.filter { $0.enabled && !failedServerIDs.contains($0.id) }
+            .compactMap { activeRoutes[$0.id] }.first ?? settings.baseURL
+    }
     private let client: TokdashClient
     private var refreshTask: Task<Void, Never>?
     private var lastFetchAt: Date?
@@ -591,6 +596,7 @@ final class CompanionStore: NSObject, ObservableObject {
             lastInsights = glance.insights
             lastStats = glance.stats
 
+            if let server = enabledServers.first { activeRoutes = [server.id: await client.activeBaseURL] }
             let snap = rebuildSnapshot(usageFailed: usageFailed, quotaFailed: quotaFailed)
             self.lastError = nil
             self.connectionState = .connected
@@ -817,6 +823,12 @@ final class CompanionStore: NSObject, ObservableObject {
             return values
         }
         if Task.isCancelled { return }
+        var currentRoutes: [String: String] = [:]
+        for server in servers {
+            if let client = resolved[server.id]?.0 { currentRoutes[server.id] = await client.activeBaseURL }
+        }
+        if Task.isCancelled { return }
+        activeRoutes = currentRoutes
         let results: [ServerResult] = attempts.compactMap { attempt in
             guard case let .success(server, usage, activeMs, quota, insights, stats) = attempt else { return nil }
             return (server, usage, activeMs, quota, insights, stats)

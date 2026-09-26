@@ -337,6 +337,18 @@ public sealed class CompanionStore : BindableBase
     }
 
     public CompanionSettings Settings { get; }
+    public string DashboardBaseUrl => _client switch
+    {
+        TokdashClient client => client.ActiveBaseUrl,
+        MultiServerTokdashClient multi => multi.DashboardBaseUrl ?? Settings.BaseURL,
+        _ => Settings.BaseURL,
+    };
+    public string? ActiveRouteFor(string serverId) => _client switch
+    {
+        TokdashClient client when Settings.Servers.FirstOrDefault(s => s.Enabled)?.Id == serverId => client.ActiveBaseUrl,
+        MultiServerTokdashClient multi => multi.ActiveRouteFor(serverId),
+        _ => null,
+    };
 
     /// <summary>Apply a new language setting: update the global <see cref="L10n.Current"/>,
     /// persist, and raise a property change so the flyout re-renders its localized strings.</summary>

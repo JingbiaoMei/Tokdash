@@ -462,7 +462,8 @@ public partial class SettingsWindow : Window
                 var good = current.Where(r => r.Probe?.Health is not null &&
                     (!string.IsNullOrEmpty(identity) ? r.Probe.Health.InstanceId == identity : r.Item.Input == row.Url)).ToList();
                 string? preferred = (row.Routing.SelectedItem as ComboBoxItem)?.Tag as string;
-                var active = good.OrderBy(r => r.Probe!.Address == preferred ? 0 : 1).ThenBy(r => r.Probe!.Milliseconds).FirstOrDefault().Probe;
+                var activeAddress = Store.ActiveRouteFor(row.Model.Id);
+                var active = good.FirstOrDefault(r => r.Probe!.Address == activeAddress).Probe ?? good.OrderBy(r => r.Probe!.Address == preferred ? 0 : 1).ThenBy(r => r.Probe!.Milliseconds).FirstOrDefault().Probe;
                 foreach (var result in current)
                 {
                     bool accepted = good.Contains(result);

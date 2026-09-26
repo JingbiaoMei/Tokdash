@@ -67,6 +67,7 @@ public class RouteTests
         using var client = new TokdashClient(host, handler);
         Assert.AreEqual("daemon-a", (await client.HealthAsync()).InstanceId);
         Assert.AreEqual(42, (await client.UsageAsync("today")).TotalTokens);
+        Assert.AreEqual(host.Routes[0], client.ActiveBaseUrl);
         CollectionAssert.AreEqual(new[] { "lan.test/tokdash/api/usage?period=today", "tail.test/tokdash/api/usage?period=today" }, handler.UsageRequests.ToArray());
     }
 

@@ -723,7 +723,7 @@ private struct QuotaSection: View {
                         Text(L10n.t("tracking_off"))
                             .font(.system(size: 12.5))
                             .foregroundStyle(.secondary)
-                        Button(L10n.t("open_dashboard")) { openDashboard(baseURL: store.settings.baseURL) }
+                        Button(L10n.t("open_dashboard")) { openDashboard(baseURL: store.dashboardBaseURL) }
                             .font(.system(size: 12))
                     }
                 } else {
@@ -931,7 +931,7 @@ private struct ActionBarSection: View {
     var body: some View {
         HStack(spacing: 8) {
             Button {
-                openDashboard(baseURL: store.settings.baseURL)
+                openDashboard(baseURL: store.dashboardBaseURL)
             } label: {
                 Label(L10n.t("open_dashboard"), systemImage: "arrow.up.right.square")
             }

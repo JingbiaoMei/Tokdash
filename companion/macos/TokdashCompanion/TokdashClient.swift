@@ -10,6 +10,7 @@ actor TokdashClient {
     private var baseURL: URL
     private var server: CompanionServerSettings?
     private var verifiedRoutes: [URL] = []
+    var activeBaseURL: String { baseURL.absoluteString }
     private(set) var routeStatus: [RouteProbe] = []
 
     init(server: CompanionServerSettings, session: URLSession? = nil) {

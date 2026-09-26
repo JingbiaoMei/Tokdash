@@ -47,6 +47,8 @@ final class TokdashClientTests: XCTestCase {
         XCTAssertEqual(health.instanceId, "daemon-a")
         let usage = try await client.usage(period: "today")
         XCTAssertEqual(usage.totalTokens, 42)
+        let active = await client.activeBaseURL
+        XCTAssertEqual(active, "https://tail.test/tokdash")
     }
 
     func testHealthDecode() throws {

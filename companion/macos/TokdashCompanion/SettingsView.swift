@@ -242,7 +242,8 @@ struct SettingsView: View {
     private func routeRow(_ server: Binding<CompanionServerSettings>, address: String) -> some View {
         let good = TokdashClient.selectRoutes(server.wrappedValue, probes: server.wrappedValue.addresses.compactMap { routeProbes[$0] })
         let probe = good.first { $0.address == address }
-        let active = good.first { $0.address == server.wrappedValue.preferredRoute }
+        let active = good.first { $0.address == store.activeRoutes[server.wrappedValue.id] }
+            ?? good.first { $0.address == server.wrappedValue.preferredRoute }
             ?? good.min { $0.milliseconds < $1.milliseconds }
         return HStack(spacing: 8) {
             Circle().fill(probe?.health != nil ? Color.green : Color.secondary.opacity(0.5)).frame(width: 6, height: 6)

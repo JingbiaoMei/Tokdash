@@ -127,6 +127,9 @@ public static class L10n
         ["word_last_week"] = "last week",
         ["word_last_month"] = "last month",
         ["word_last_year"] = "last year",
+        // E12 instance stepper button names (contract §Instance stepper).
+        ["step_earlier"] = "Previous period",
+        ["step_later"] = "Next period",
         ["delta_cost"] = "{0} {1}% cost",
         ["delta_tokens"] = "{0} {1}% tokens",
         ["delta_msgs"] = "{0} {1}% msgs",
@@ -341,6 +344,8 @@ public static class L10n
         ["word_last_week"] = "上周",
         ["word_last_month"] = "上月",
         ["word_last_year"] = "去年",
+        ["step_earlier"] = "上一期",
+        ["step_later"] = "下一期",
         ["delta_cost"] = "{0}{1}% 成本",
         ["delta_tokens"] = "{0}{1}% tokens",
         ["delta_msgs"] = "{0}{1}% 消息",

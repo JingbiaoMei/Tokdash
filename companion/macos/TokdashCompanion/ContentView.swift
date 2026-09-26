@@ -182,6 +182,43 @@ private struct PeriodSwitch: View {
     }
 }
 
+/// E12 kicker stepper: two caption-sized chevrons immediately after the hero kicker.
+/// ‹ walks the selected granularity's instances into the past, ‹'s mirror walks back
+/// toward the present; each is inert (dimmed, disabled) at its bound - the walk-back
+/// limit and the present (contract §Instance stepper). Mirrors the Windows flyout's
+/// KickerStepBtn.
+private struct KickerStepper: View {
+    @EnvironmentObject var store: CompanionStore
+
+    var body: some View {
+        HStack(spacing: 2) {
+            stepButton(systemName: "chevron.left", enabled: store.canStepEarlier,
+                       name: L10n.t("step_earlier")) { store.stepPeriod(-1) }
+            stepButton(systemName: "chevron.right", enabled: store.canStepLater,
+                       name: L10n.t("step_later")) { store.stepPeriod(1) }
+        }
+        .fixedSize()
+    }
+
+    // Its own function: keeps the ForEach-free builder off the type-checker's
+    // overloaded-expression limit (same trap the PeriodSwitch pills hit).
+    private func stepButton(systemName: String, enabled: Bool, name: String,
+                            action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 8, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 12, height: 12)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .opacity(enabled ? 0.95 : 0.3)
+        .accessibilityLabel(name)
+        .help(name)
+    }
+}
+
 /// Period segment (always visible) + hero + delta row + top ranks + activity glance.
 /// The whole usage side shows one skeleton while the selected period's first fetch is
 /// in flight; quota and connectivity live in their own sections, untouched (rule 2).
@@ -191,11 +228,18 @@ private struct HeroSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                Text(L10n.t(store.selectedPeriod.kickerKey))
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .tracking(0.4)
-                    .fixedSize()
+                HStack(spacing: 5) {
+                    // Kicker follows the selected INSTANCE (E12): present or stepped.
+                    Text(store.snapshot?.kickerText ?? store.currentKickerText)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .tracking(0.4)
+                        .fixedSize()
+                    // E12 instance stepper merged into the kicker row; the segment on
+                    // the right is untouched by it (rev 4 design, contract §Instance
+                    // stepper).
+                    KickerStepper()
+                }
                 Spacer()
                 // Today | Week | Month | Year - persisted selection, fires the fetch group
                 // via selectPeriod, and stays visible in EVERY state (loading too).

@@ -132,6 +132,73 @@ the resolved window: a custom range with no `period` param still echoes
 The week label in the UI is "THIS WEEK", derived client-side like every other
 period label.
 
+### Instance stepper (walk-back within the selected granularity)
+
+The hero kicker row carries a `‹ ›` stepper immediately after the kicker text
+(Hero display rules -> Period segment). It walks the **selected granularity's
+instances** back in time: `Today` -> yesterday -> Sep 20 -> …; `Week` -> last
+week -> the week before -> …. State is `(period, offset)`, kept **in memory
+only** - never persisted.
+
+| Granularity | Step unit | Walk-back limit (max offset) |
+|---|---|---|
+| Today | 1 day | 13 |
+| Week | 1 calendar week | 8 |
+| Month | 1 calendar month | 11 |
+| Year | 1 calendar year | 2 |
+
+**Request mapping.** The present instance (`offset = 0`) keeps the existing
+wire forms in the table above (period tokens; week = Mon..today). A stepped
+instance (`offset = N >= 1`) always sends explicit `date_from`/`date_to` over
+the **full elapsed calendar window** - never `period=`:
+
+| Granularity | Stepped window (N >= 1) |
+|---|---|
+| Today | `date_from=date_to=<today - N days>` |
+| Week | `date_from=<Monday of current week - 7N days>&date_to=<from + 6 days>` (full Mon..Sun week, not a partial one) |
+| Month | `date_from=<1st of month - N months>&date_to=<last day of that month>` |
+| Year | `date_from=<(year-N)-01-01>&date_to=<(year-N)-12-31>` |
+
+Every period-bearing request in the fetch group uses the instance's window:
+`/api/usage`, `/api/active-time`, and the today/week `/api/insights` faces
+(the `hourly` facet folds the window's own rows, so it is correct on a past
+day; send it as `facets=hourly&date_from=<D>&date_to=<D>`). No server change
+is involved: the server already answers custom ranges with a `comparison`
+against the **previous adjacent equal-length window** and caches each distinct
+window, so stepped instances get truthful deltas and stepping back and forth
+is cheap. The delta-row sentences are **unchanged** (`vs yesterday`,
+`vs last week`, `vs last month`, `vs last year`) - for a stepped instance the
+previous adjacent window is exactly what the sentence names.
+
+**Glance on stepped instances.** `/api/stats` is a rolling 365-day series with
+no window parameter; window it client-side to the instance's **exact calendar
+days** when the series fully covers them (always true within the day/week/
+month limits). Where it does not (any stepped year), hide the glance section
+silently - same rule as a stats failure.
+
+**Button states and refresh.**
+- `›` is disabled at `offset = 0` (present); `‹` is disabled at the
+  granularity's walk-back limit.
+- Changing the period segment re-anchors to `offset = 0`.
+- Polling, manual refresh and the server-change refetch all act on the
+  **selected** instance; never snap back to present.
+- Per-instance fetch semantics are identical to per-period semantics (same
+  fetch group, same failure handling).
+
+**Kicker labels** (all derived client-side, L10n):
+
+| Instance | Kicker |
+|---|---|
+| day 0 / week 0 / month 0 / year 0 | existing kickers (`today`, `THIS WEEK`, …) |
+| day 1 / week 1 / month 1 / year 1 | `word_yesterday` / `word_last_week` / `word_last_month` / `word_last_year` |
+| day N>=2 | localized `MMM d` ("Sep 20") |
+| week N>=2 | `MMM d – d` ("Sep 7 – 13"); crossing months `MMM d – MMM d` ("Aug 30 – Sep 5"); crossing years `MMM d – MMM d, yyyy` on the end |
+| month N>=2 | `MMM yyyy` ("Aug 2026") |
+| year N>=2 | `yyyy` ("2024") |
+
+Stepper buttons are icon-only chevrons; they need accessible names from
+`step_earlier` / `step_later`.
+
 ### `GET /api/quota`
 
 Fixture: `fixtures/quota.json` (enabled, multi-provider), `fixtures/quota-disabled.json` (disabled), `fixtures/quota-provider-error.json` (one provider failed refresh), `fixtures/quota-multi-account.json` (one card, two credentials, one of them broken — see [Accounts](#accounts)).
@@ -531,7 +598,10 @@ verbatim. Changing it re-renders the strip from last-good data; no refetch.
 
 Always visible above the hero: `Today | Week | Month | Year`. The selection
 drives the hero number, sub-line, delta row, rank kickers and the glance face.
-It is a core panel element, never a Settings option.
+It is a core panel element, never a Settings option. The kicker text sits on
+the same row (left), the segment on the right; immediately after the kicker
+text sits the instance stepper (`‹ ›`, Instance stepper) - the segment itself
+is unchanged by it.
 
 ### Active time
 
@@ -584,8 +654,13 @@ One strip as the last row of the hero card, two blocks:
   (default 3). Label is the display name (Codex, Claude, Kimi, OpenCode, ...),
   value compact tokens. Each row is prefixed with the packaged harness logo;
   a tool id with no shipped mark reserves the slot - never a placeholder
-  dropped mid-column. Codex's black mark inverts on dark, the same rule the
-  web applies.
+  dropped mid-column. Art mirrors the web `TOOL_BRAND_META` icon set, so every
+  id the scanner emits ships a mark - the only text-only ids are `mimo` (MiMo
+  Code's art is a wide wordmark, illegible at row height) and `devin` (no brand
+  art shipped anywhere). Muse ships the docs brand mark even though the web
+  shows a letter fallback there. Dark-ink marks invert on dark per the web
+  `darkInvert` rule (codex, grok, zcode, cline, hermes, omp, zed, cursor);
+  every other mark renders as shipped in both themes.
 - **Models**: first `rankRows` of `combined_models` (tokens-ranked), provider
   prefix stripped (`openai/gpt-5.6-sol` -> `gpt-5.6-sol`), compact tokens,
   **no logos on model rows** - and no reserved logo slot either: model names

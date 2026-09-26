@@ -452,27 +452,65 @@ public sealed class CompanionStore : BindableBase
     /// </summary>
     public UsagePeriod SelectedPeriod => Settings.SelectedPeriod;
 
+    // E12 instance stepper (contract §Instance stepper): which instance of the selected
+    // granularity is shown (0 = present). In-memory ONLY - never persisted; selecting a
+    // segment re-anchors to the present.
+    private int _periodOffset;
+    public int PeriodOffset => _periodOffset;
+    public bool CanStepEarlier => PeriodOffset < EarlierLimit(SelectedPeriod);
+    public bool CanStepLater => PeriodOffset > 0;
+
     /// <summary>
     /// Select a hero period. The choice persists, and selecting a different segment fires
-    /// the whole fetch group for the new window immediately. While that is in flight the
-    /// previous period's data stays on screen (anti-flash); only if the fetch is still in
+    /// the whole fetch group for the new window immediately - re-anchored to the PRESENT
+    /// instance (E12: the segment selection always resets the walk-back). While that is in
+    /// flight the previous data stays on screen (anti-flash); only if the fetch is still in
     /// flight after ~150 ms do the hero/delta/rank blocks and the glance drop to their
     /// loading skeleton - the usage-side last-good is then dropped. Quota and connectivity
     /// stay exactly as they were (contract rule 2, delayed-skeleton clause).
     /// </summary>
     public void SelectPeriod(UsagePeriod period)
     {
-        if (Settings.SelectedPeriod == period) return;
+        if (Settings.SelectedPeriod == period && _periodOffset == 0) return;
         Settings.SelectedPeriod = period;
         Settings.Save();
+        _periodOffset = 0;
+        OnPropertyChanged(nameof(PeriodOffset));
+        OnPropertyChanged(nameof(CanStepEarlier));
+        OnPropertyChanged(nameof(CanStepLater));
+        StartUsageSideTransition(period, 0);
+    }
+
+    /// <summary>
+    /// Walk the selected granularity through its instances (E12): delta -1 steps one unit
+    /// into the past (clamped at the granularity's walk-back limit), delta +1 steps toward
+    /// the present (clamped at the present, where the later button is inert). Never
+    /// persisted; polling and refresh act on the selected instance.
+    /// </summary>
+    public void StepPeriod(int delta)
+    {
+        int next = Math.Clamp(_periodOffset + delta, 0, EarlierLimit(SelectedPeriod));
+        if (next == _periodOffset) return;
+        _periodOffset = next;
+        OnPropertyChanged(nameof(PeriodOffset));
+        OnPropertyChanged(nameof(CanStepEarlier));
+        OnPropertyChanged(nameof(CanStepLater));
+        StartUsageSideTransition(SelectedPeriod, next);
+    }
+
+    /// <summary>Shared usage-side transition for a period or instance change: drop the
+    /// usage-side last-goods, arm the delayed skeleton (generation-guarded), and fire the
+    /// fetch group. Quota and connectivity are untouched.</summary>
+    private void StartUsageSideTransition(UsagePeriod period, int offset)
+    {
         _cts?.Cancel();
         _lastUsage = null;
         _lastActiveMs = null;
         _lastInsights = null;
         _lastStats = null;
         _lastPerServer = [];
-        // Delayed skeleton: the current snapshot keeps the previous period's data while the
-        // new period is in flight, so a fast fetch never visibly collapses the sections.
+        // Delayed skeleton: the current snapshot keeps the previous instance's data while the
+        // new one is in flight, so a fast fetch never visibly collapses the sections.
         // The skeleton goes up only if the fetch is STILL in flight after 150 ms.
         // Generation guard: a superseded switch must never touch the newer switch's UI.
         int gen = ++_usageGen;
@@ -480,13 +518,14 @@ public sealed class CompanionStore : BindableBase
         {
             if (gen != _usageGen) return;
             if (Snapshot is not { } current) return;
-            // Once the new period's result has published - success OR failure - the fetch is
-            // done as far as the UI is concerned. Only a snapshot still stamped with the
-            // PREVIOUS period means the fetch is truly in flight: show the skeleton now.
-            if (current.Period == period) return;
+            // Once the new instance's result has published - success OR failure - the fetch
+            // is done as far as the UI is concerned. Only a snapshot still stamped with the
+            // PREVIOUS period/instance means the fetch is truly in flight: skeleton now.
+            if (current.Period == period && current.InstanceOffset == offset) return;
             Snapshot = new Snapshot
             {
                 Period = period,
+                InstanceOffset = offset,
                 Usage = null,
                 ActiveMs = null,
                 Insights = null,
@@ -505,6 +544,107 @@ public sealed class CompanionStore : BindableBase
         _ = RefreshAsync();
     }
 
+    /// <summary>E12 walk-back limits per granularity: max number of steps into the past.</summary>
+    internal static int EarlierLimit(UsagePeriod period) => period switch
+    {
+        UsagePeriod.Today => 13,
+        UsagePeriod.Week => 8,
+        UsagePeriod.Month => 11,
+        _ => 2,
+    };
+
+    /// <summary>
+    /// The E12 stepped instance as explicit calendar dates: the FULL elapsed window N units
+    /// back, or null at the present (which keeps the existing wire forms). Stepped instances
+    /// never send <c>period=</c> (contract §Instance stepper).
+    /// </summary>
+    internal static (DateOnly From, DateOnly To)? SteppedDates(UsagePeriod period, int offset, DateOnly today)
+    {
+        if (offset <= 0) return null;
+        DateOnly from, to;
+        switch (period)
+        {
+            case UsagePeriod.Today:
+                from = to = today.AddDays(-offset);
+                break;
+            case UsagePeriod.Week:
+                from = StartOfWeekMonday(today).AddDays(-7 * offset);
+                to = from.AddDays(6);
+                break;
+            case UsagePeriod.Month:
+                from = new DateOnly(today.Year, today.Month, 1).AddMonths(-offset);
+                to = from.AddMonths(1).AddDays(-1);
+                break;
+            default:
+                from = new DateOnly(today.Year - offset, 1, 1);
+                to = new DateOnly(today.Year - offset, 12, 31);
+                break;
+        }
+        return (from, to);
+    }
+
+    /// <summary><c>date_from</c>/<c>date_to</c>-formatted <see cref="SteppedDates"/>; null at present.</summary>
+    internal static (string From, string To)? SteppedRange(UsagePeriod period, int offset, DateOnly today)
+    {
+        if (SteppedDates(period, offset, today) is not { } d) return null;
+        return (d.From.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                d.To.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+    }
+
+    /// <summary>
+    /// The hero kicker for a period instance (E12). Present: the existing kicker keys,
+    /// byte-identical. One back: the localized word ("yesterday", "last week", ...).
+    /// Further back: a formatted calendar label, uppercased in Latin scripts to match the
+    /// kicker style ("SEP 20", "SEP 7 – 13", "AUG 2026", "2024").
+    /// </summary>
+    internal static string InstanceKicker(UsagePeriod period, int offset, DateOnly today)
+    {
+        var culture = L10n.Culture;
+        if (offset == 0) return L10n.T(period.KickerKey());
+        if (offset == 1)
+        {
+            string word = period switch
+            {
+                UsagePeriod.Today => "word_yesterday",
+                UsagePeriod.Week => "word_last_week",
+                UsagePeriod.Month => "word_last_month",
+                _ => "word_last_year",
+            };
+            return L10n.T(word).ToUpper(culture);
+        }
+        // zh-Hans gets explicit CJK patterns: its culture "MMM d" reads "9月 21", but
+        // "9月21日" is the native form. English keeps the culture's "MMM d".
+        bool zh = L10n.Current == AppLanguage.ZhHans;
+        string dayFmt = zh ? "M月d日" : "MMM d";
+        switch (period)
+        {
+            case UsagePeriod.Today:
+                return today.AddDays(-offset).ToString(dayFmt, culture).ToUpper(culture);
+            case UsagePeriod.Week:
+            {
+                var from = StartOfWeekMonday(today).AddDays(-7 * offset);
+                var to = from.AddDays(6);
+                // "Sep 7 – 13" drops the repeated month only in English - CJK date forms
+                // ("9月7日") need both operands.
+                string s = from.Year != to.Year
+                    ? $"{(zh ? from.ToString("yyyy年", culture) : "")}{from.ToString(dayFmt, culture)} – {(zh ? to.ToString("yyyy年", culture) : "")}{to.ToString(zh ? "M月d日" : "MMM d, yyyy", culture)}"
+                    : from.Month == to.Month && !zh
+                        ? $"{from.ToString(dayFmt, culture)} – {to.Day}"
+                        : $"{from.ToString(dayFmt, culture)} – {to.ToString(dayFmt, culture)}";
+                return s.ToUpper(culture);
+            }
+            case UsagePeriod.Month:
+                return new DateOnly(today.Year, today.Month, 1).AddMonths(-offset)
+                    .ToString(zh ? "yyyy年M月" : "MMM yyyy", culture).ToUpper(culture);
+            default:
+                return (today.Year - offset).ToString(CultureInfo.InvariantCulture);
+        }
+    }
+
+    /// <summary>Kicker for the instance the flyout shows before any snapshot exists.</summary>
+    public string CurrentKickerText =>
+        InstanceKicker(Settings.SelectedPeriod, _periodOffset, DateOnly.FromDateTime(Now.DateTime));
+
     /// <summary>Monday of the local week containing <paramref name="today"/>. Sunday rolls
     /// back to the Monday six days earlier, so the week never straddles two months.</summary>
     internal static DateOnly StartOfWeekMonday(DateOnly today) =>
@@ -515,17 +655,22 @@ public sealed class CompanionStore : BindableBase
         (StartOfWeekMonday(today).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
          today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
 
-    /// <summary>The usage request path for a period - pure so tests can pin the week's
-    /// date-range without a live client (contract §Period windows).</summary>
-    internal static string UsageRequestPath(UsagePeriod period, DateOnly today)
+    /// <summary>The usage request path for a period instance - pure so tests can pin the
+    /// week's date-range and every E12 stepped window without a live client (contract
+    /// §Period windows, §Instance stepper).</summary>
+    internal static string UsageRequestPath(UsagePeriod period, DateOnly today, int offset = 0)
     {
+        if (SteppedRange(period, offset, today) is { } stepped)
+            return $"/api/usage?date_from={stepped.From}&date_to={stepped.To}";
         if (period != UsagePeriod.Week) return $"/api/usage?period={period.Token()}";
         var (from, to) = WeekRange(today);
         return $"/api/usage?date_from={from}&date_to={to}";
     }
 
-    private static async Task<UsageResponse> FetchUsageAsync(ITokdashClient client, UsagePeriod period, DateOnly today, CancellationToken ct)
+    private static async Task<UsageResponse> FetchUsageAsync(ITokdashClient client, UsagePeriod period, DateOnly today, int offset, CancellationToken ct)
     {
+        if (SteppedRange(period, offset, today) is { } stepped)
+            return await client.UsageRangeAsync(stepped.From, stepped.To, ct);
         if (period == UsagePeriod.Week)
         {
             var (from, to) = WeekRange(today);
@@ -535,13 +680,15 @@ public sealed class CompanionStore : BindableBase
     }
 
     /// <summary>Active-time is optional (rule 6): any failure/404 is null, silently.</summary>
-    private static async Task<long?> ActiveTimeOptionalAsync(ITokdashClient client, UsagePeriod period, DateOnly today, CancellationToken ct)
+    private static async Task<long?> ActiveTimeOptionalAsync(ITokdashClient client, UsagePeriod period, DateOnly today, int offset, CancellationToken ct)
     {
         try
         {
-            ActiveTimeResponse response = period == UsagePeriod.Week
-                ? await client.ActiveTimeRangeAsync(WeekRange(today).From, WeekRange(today).To, ct)
-                : await client.ActiveTimeAsync(period.Token(), ct);
+            ActiveTimeResponse response = SteppedRange(period, offset, today) is { } stepped
+                ? await client.ActiveTimeRangeAsync(stepped.From, stepped.To, ct)
+                : period == UsagePeriod.Week
+                    ? await client.ActiveTimeRangeAsync(WeekRange(today).From, WeekRange(today).To, ct)
+                    : await client.ActiveTimeAsync(period.Token(), ct);
             return response.ActiveMs;
         }
         catch { return null; }
@@ -566,20 +713,26 @@ public sealed class CompanionStore : BindableBase
     }
 
     private static async Task<(InsightsResponse? Insights, StatsResponse? Stats)> FetchGlanceAsync(
-        ITokdashClient client, GlanceSource source, DateOnly today, CancellationToken ct)
+        ITokdashClient client, GlanceSource source, UsagePeriod period, DateOnly today, int offset, CancellationToken ct)
     {
         try
         {
             switch (source)
             {
                 case GlanceSource.InsightsHourly:
-                    return (await client.InsightsHourlyTodayAsync(ct), null);
+                    // Stepped day: the hourly facet over the instance's single day (contract
+                    // §Instance stepper - the facet folds the window's own rows).
+                    return (SteppedRange(period, offset, today) is { } day
+                        ? await client.InsightsHourlyRangeAsync(day.From, day.To, ct)
+                        : await client.InsightsHourlyTodayAsync(ct), null);
                 case GlanceSource.InsightsDaily:
                 {
-                    var (from, to) = WeekRange(today);
+                    var (from, to) = SteppedRange(period, offset, today) ?? WeekRange(today);
                     return (await client.InsightsDailyAsync(from, to, ct), null);
                 }
                 case GlanceSource.Stats:
+                    // Rolling 365 days, no window parameter: stepped month/year instances
+                    // are windowed client-side to the exact calendar days in the face factory.
                     return (null, await client.StatsAsync(ct));
                 default:
                     return (null, null);
@@ -595,6 +748,7 @@ public sealed class CompanionStore : BindableBase
         var snap = new Snapshot
         {
             Period = Settings.SelectedPeriod,
+            InstanceOffset = _periodOffset,
             Usage = _lastUsage,
             ActiveMs = _lastActiveMs,
             Insights = _lastInsights,
@@ -729,15 +883,18 @@ public sealed class CompanionStore : BindableBase
             // failure into null and never warn (rule 6). A component whose toggle is off
             // does not fetch its source at all.
             var period = Settings.SelectedPeriod;
+            // The E12 instance selected when this cycle began (a stepper click mid-flight
+            // supersedes this cycle via _cts; the newer cycle re-reads the offset).
+            var offset = _periodOffset;
             // Multi-server mode has no combined glance (per-server insights would need
             // merging the server doesn't share); mirror the macOS drop for fan-out cycles.
             var glanceSource = _client is MultiServerTokdashClient
                 ? GlanceSource.None
                 : GlanceSourceFor(period, Settings.Components);
-            var usageTask = FetchUsageAsync(_client, period, today, ct);
+            var usageTask = FetchUsageAsync(_client, period, today, offset, ct);
             var quotaTask = _client.QuotaAsync(ct);
-            var activeTask = ActiveTimeOptionalAsync(_client, period, today, ct);
-            var glanceTask = FetchGlanceAsync(_client, glanceSource, today, ct);
+            var activeTask = ActiveTimeOptionalAsync(_client, period, today, offset, ct);
+            var glanceTask = FetchGlanceAsync(_client, glanceSource, period, today, offset, ct);
 
             bool usageFailed = false, usageBusy = false, quotaFailed = false, quotaBusy = false;
             try { _lastUsage = await usageTask; }
@@ -900,32 +1057,80 @@ public sealed class CompanionStore : BindableBase
     // MARK: - Tool display names and logos (E3)
 
     /// <summary>
-    /// Display names for the by_tool keys the server actually emits; anything unknown
-    /// gets the id capitalized, never a blank row.
+    /// Display names for the by_tool keys the scanner emits (all 27 source_name ids plus
+    /// the web brand map's aliases); anything unknown gets the id capitalized, never a
+    /// blank row. Names follow the server's SESSION_LABELS and the README pill strip.
+    /// Mirrors macOS toolDisplayName(for:).
     /// </summary>
     internal static string ToolDisplayName(string tool) => tool.ToLowerInvariant() switch
     {
         "codex" => "Codex",
-        "claude" => "Claude",
+        "claude" or "claude_code" => "Claude",
         "kimi" => "Kimi",
         "opencode" => "OpenCode",
         "openclaw" => "OpenClaw",
-        "gemini" => "Gemini",
+        "gemini" or "gemini_cli" => "Gemini",
+        "antigravity" or "antigravity_cli" => "Antigravity",
+        "grok" => "Grok Build",
+        "pi" or "pi_agent" => "Pi",
+        "omp" => "omp",
+        "mimo" => "Mimo",
+        "kilocode" => "Kilo Code",
+        "cline" => "Cline",
+        "copilot" or "copilot_cli" or "github_copilot_cli" => "GitHub Copilot CLI",
+        "hermes" => "Hermes",
+        "dsh" => "DeepSeek Harness",
+        "reasonix" => "Reasonix",
+        "zcode" => "ZCode",
+        "workbuddy" => "WorkBuddy",
+        "qoder" => "Qoder IDE",
+        "qoder_cli" => "Qoder CLI",
+        "zed" => "Zed",
+        "qwen_code" => "Qwen Code",
+        "crush" => "Crush",
+        "muse" => "Muse Code",
+        "minimax" => "MiniMax Code",
+        "cursor" => "Cursor",
+        "amp" => "Amp",
+        "devin" => "Devin",
         _ => tool.Length == 0 ? tool : char.ToUpperInvariant(tool[0]) + tool[1..],
     };
 
     /// <summary>
     /// Packaged logo base name (Assets\Agents\{name}.png) for a tool id, null when no mark
     /// ships for it - a tool without a shipped logo renders text-only (never a placeholder).
+    /// Art mirrors the web dashboard's TOOL_BRAND_META icon set; mimo and devin are the
+    /// text-only pair: MiMo Code's art is a wide wordmark (illegible at row height) and
+    /// Devin ships no brand art anywhere. Mirrors macOS logoAssetName(for:).
     /// </summary>
     internal static string? LogoAssetName(string tool) => tool.ToLowerInvariant() switch
     {
         "codex" => "codex",
-        "claude" => "claude",
+        "claude" or "claude_code" => "claude",
         "kimi" => "kimi",
         "opencode" => "opencode",
-        "gemini" => "gemini",
+        "gemini" or "gemini_cli" => "gemini",
         "openclaw" => "openclaw",
+        "grok" => "grok",
+        "zcode" => "zcode",
+        "minimax" => "minimax",
+        "pi" or "pi_agent" => "pi",
+        "omp" => "omp",
+        "kilocode" => "kilocode",
+        "cline" => "cline",
+        "copilot" or "copilot_cli" or "github_copilot_cli" => "copilot",
+        "hermes" => "hermes",
+        "dsh" => "dsh",
+        "reasonix" => "reasonix",
+        "workbuddy" => "workbuddy",
+        "qoder" or "qoder_cli" => "qoder",
+        "zed" => "zed",
+        "qwen_code" => "qwen_code",
+        "crush" => "crush",
+        "muse" => "muse",
+        "antigravity" or "antigravity_cli" => "antigravity",
+        "cursor" => "cursor",
+        "amp" => "amp",
         _ => null,
     };
 
@@ -964,17 +1169,21 @@ public sealed class CompanionStore : BindableBase
     /// without a live server. All-zero faces return null (the component hides itself).
     /// </summary>
     internal static GlanceFace? GlanceFaceFor(UsagePeriod period, InsightsResponse? insights,
-        StatsResponse? stats, CompanionComponents components, DateOnly today)
+        StatsResponse? stats, CompanionComponents components, DateOnly today, int offset = 0)
     {
         if (!components.ActivityGlanceOn) return null;
         switch (period)
         {
             case UsagePeriod.Today:
+                // The hourly face is already windowed server-side (stepped days fetch
+                // facets=hourly over their own day).
                 return components.ActivityHistogramTodayWeekOn && insights is not null ? HourFace(insights) : null;
             case UsagePeriod.Week:
                 return components.ActivityHistogramTodayWeekOn && insights?.Daily is { } daily
-                    ? DayFace(daily, today) : null;
+                    ? DayFace(daily, StartOfWeekMonday(today).AddDays(-7 * offset)) : null;
             default:
+                if (SteppedDates(period, offset, today) is { } stepped)
+                    return BoundedGridFace(stats, stepped.From, stepped.To);
                 return GridFace(stats, period == UsagePeriod.Month ? 90 : 180);
         }
     }
@@ -994,12 +1203,12 @@ public sealed class CompanionStore : BindableBase
     }
 
     /// <summary>
-    /// Mon..Sun of the current local week. The daily facet is sparse (no entry = no
-    /// usage), so missing days render as empty zero columns, not skipped ones.
+    /// Mon..Sun of the given week (E12: the selected instance's week, not necessarily the
+    /// current one). The daily facet is sparse (no entry = no usage), so missing days render
+    /// as empty zero columns, not skipped ones.
     /// </summary>
-    private static GlanceFace? DayFace(IReadOnlyList<DailyPoint> daily, DateOnly today)
+    private static GlanceFace? DayFace(IReadOnlyList<DailyPoint> daily, DateOnly monday)
     {
-        var monday = StartOfWeekMonday(today);
         var tokens = new long[7];
         for (int i = 0; i < 7; i++)
         {
@@ -1017,10 +1226,32 @@ public sealed class CompanionStore : BindableBase
     /// </summary>
     private static GlanceFace? GridFace(StatsResponse? stats, int windowDays)
     {
+        if (!TryIntensityByDay(stats, out var intensityByDay, out DateOnly anchor)) return null;
+        return GridCore(intensityByDay, anchor.AddDays(-(windowDays - 1)), anchor, windowDays);
+    }
+
+    /// <summary>
+    /// The grid for an E12 stepped month/year instance: the EXACT calendar days
+    /// <c>[from..to]</c>. The payload is a rolling 365-day series ending at its newest date
+    /// (sparse: a missing day means zero, not "outside the window"), so coverage is judged
+    /// against that span: <c>newest-364 <= from</c> and <c>to <= newest</c>. Where it fails
+    /// (always for stepped years) the glance hides silently (contract §Instance stepper).
+    /// </summary>
+    private static GlanceFace? BoundedGridFace(StatsResponse? stats, DateOnly from, DateOnly to)
+    {
+        if (!TryIntensityByDay(stats, out var intensityByDay, out DateOnly newest)) return null;
+        if (from < newest.AddDays(-364) || to > newest) return null; // rolling series does not reach the instance
+        return GridCore(intensityByDay, from, to, (to.DayNumber - from.DayNumber) + 1);
+    }
+
+    /// <summary>Payload pass: summed intensity per day plus the newest date (the anchor).</summary>
+    private static bool TryIntensityByDay(StatsResponse? stats, out Dictionary<string, int> intensityByDay, out DateOnly newest)
+    {
+        intensityByDay = new Dictionary<string, int>();
+        newest = DateOnly.MinValue;
         var contributions = stats?.Contributions;
-        if (contributions is null || contributions.Count == 0) return null;
-        var intensityByDay = new Dictionary<string, int>();
-        DateOnly? anchor = null;
+        if (contributions is null || contributions.Count == 0) return false;
+        bool any = false;
         foreach (var c in contributions)
         {
             if (c.Date is not { Length: 10 } raw
@@ -1028,10 +1259,16 @@ public sealed class CompanionStore : BindableBase
                 continue;
             int intensity = Math.Clamp(c.Intensity ?? 0, 0, 4);
             intensityByDay[raw] = intensityByDay.TryGetValue(raw, out int old) ? old + intensity : intensity;
-            if (anchor is null || date > anchor.Value) anchor = date;
+            if (!any || date > newest) newest = date;
+            any = true;
         }
-        if (anchor is null) return null;
-        var windowStart = anchor.Value.AddDays(-(windowDays - 1));
+        return any;
+    }
+
+    /// <summary>Column-major Mon-start grid over [windowStart..windowEnd]; cells outside the
+    /// window are null. All-zero grids return null (the component hides itself).</summary>
+    private static GlanceFace? GridCore(Dictionary<string, int> intensityByDay, DateOnly windowStart, DateOnly windowEnd, int windowDays)
+    {
         var gridStart = StartOfWeekMonday(windowStart);
         var columns = new List<int?[]>();
         for (int week = 0; week <= 53; week++)
@@ -1042,12 +1279,12 @@ public sealed class CompanionStore : BindableBase
             for (int dow = 0; dow < 7; dow++)
             {
                 var cell = columnStart.AddDays(dow);
-                if (cell < windowStart || cell > anchor.Value) continue;
+                if (cell < windowStart || cell > windowEnd) continue;
                 anyCell = true;
                 column[dow] = intensityByDay.TryGetValue(
                     cell.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), out int i) ? i : 0;
             }
-            if (!anyCell) break; // past the anchor: remaining columns are all null
+            if (!anyCell) break; // past the window end: remaining columns are all null
             columns.Add(column);
         }
         int filled = columns.SelectMany(c => c).Count(i => i is > 0);
@@ -1257,6 +1494,9 @@ public sealed class GlanceFace
 public sealed class Snapshot
 {
     public required UsagePeriod Period { get; init; }
+    /// <summary>E12 instance stamp: 0 = present, N = N granularity units back (contract
+    /// §Instance stepper). Distinguishes a stepped instance's snapshot from the present one.</summary>
+    public int InstanceOffset { get; init; }
     /// <summary>Null until the selected period has landed once (or failed): the usage-side
     /// sections show their loading skeleton meanwhile.</summary>
     public UsageResponse? Usage { get; init; }
@@ -1286,8 +1526,10 @@ public sealed class Snapshot
     public bool UsageLoading => Usage is null && !UsageFailed;
     public bool IsEmptyUsage => Usage?.TotalTokens == 0;
 
-    /// <summary>Hero kicker above the cost number: TODAY / THIS WEEK / THIS MONTH / THIS YEAR.</summary>
-    public string KickerText => L10n.T(Period.KickerKey());
+    /// <summary>Hero kicker above the cost number: present instances read TODAY / THIS WEEK
+    /// / THIS MONTH / THIS YEAR; stepped instances read YESTERDAY / SEP 20 / SEP 7 – 13 /
+    /// AUG 2026 / 2024 (E12, contract §Instance stepper).</summary>
+    public string KickerText => CompanionStore.InstanceKicker(Period, InstanceOffset, Today);
 
     /// <summary>Hero title for the empty / failed states (the hero number is replaced).</summary>
     public string HeroTitle => UsageFailed
@@ -1439,7 +1681,7 @@ public sealed class Snapshot
     // MARK: Activity glance (E9)
 
     public GlanceFace? Glance =>
-        CompanionStore.GlanceFaceFor(Period, Insights, Stats, Components, Today);
+        CompanionStore.GlanceFaceFor(Period, Insights, Stats, Components, Today, InstanceOffset);
 
     // MARK: Per-server rows (E10)
 

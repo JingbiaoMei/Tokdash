@@ -426,8 +426,9 @@ public partial class FlyoutWindow : Window
         UpdatePeriodButtons();
 
         var snap = Store.Snapshot;
-        // Hero kicker follows the selection even before the first snapshot exists.
-        TodayHeader.Text = L10n.T((snap?.Period ?? Store.SelectedPeriod).KickerKey());
+        // Hero kicker follows the selected instance (E12: present or stepped) even before
+        // the first snapshot exists.
+        TodayHeader.Text = snap?.KickerText ?? Store.CurrentKickerText;
 
         // One skeleton for the whole usage side while the selected period's data has not
         // landed (first load or a period switch). Quota lives in its own section (rule 2).
@@ -504,6 +505,16 @@ public partial class FlyoutWindow : Window
             b.SetResourceReference(TextElement.ForegroundProperty, on ? "SegSelText" : "SegText");
             b.FontWeight = on ? FontWeights.SemiBold : FontWeights.Normal;
         }
+        // E12 kicker stepper: ‹ walks instances into the past, › walks back toward the
+        // present; ‹ is inert at the walk-back limit, › at the present (contract §Instance
+        // stepper). Names refresh here so a language change re-labels them.
+        StepEarlierBtn.IsEnabled = Store.CanStepEarlier;
+        StepLaterBtn.IsEnabled = Store.CanStepLater;
+        string earlierName = L10n.T("step_earlier"), laterName = L10n.T("step_later");
+        System.Windows.Automation.AutomationProperties.SetName(StepEarlierBtn, earlierName);
+        System.Windows.Automation.AutomationProperties.SetName(StepLaterBtn, laterName);
+        StepEarlierBtn.ToolTip = earlierName;
+        StepLaterBtn.ToolTip = laterName;
     }
 
     private void Period_Click(object sender, RoutedEventArgs e)
@@ -516,8 +527,21 @@ public partial class FlyoutWindow : Window
             "year" => UsagePeriod.Year,
             _ => UsagePeriod.Today,
         };
-        if (period == Store.SelectedPeriod) return;
+        // Selecting a segment always re-anchors to the present instance (E12): clicking the
+        // already-selected segment while stepped steps back to the present, so no early
+        // return here - the store's own guard no-ops only a true no-op.
         Store.SelectPeriod(period);
+        UpdatePeriodButtons();
+    }
+
+    private void PeriodStep_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: string tag }) return;
+        if (!int.TryParse(tag, out int delta)) return;
+        Store.StepPeriod(delta);
+        // Refresh the inert states immediately: a step that lands ON a limit changes button
+        // enablement even if the fetch behind it is still in flight.
+        UpdatePeriodButtons();
     }
 
     /// <summary>Delta line colors (mirrors macOS pieceColor): down green / up red / flat grey.</summary>
@@ -563,8 +587,10 @@ public partial class FlyoutWindow : Window
     private static readonly Dictionary<string, ImageSource?> LogoCache = new();
 
     /// <summary>Marks that ship as dark ink: the dark theme swaps in a pre-inverted
-    /// {name}-dark copy, mirroring the web dashboard's darkInvert rule.</summary>
-    private static readonly HashSet<string> DarkInvertAssets = new() { "codex", "grok", "zcode" };
+    /// {name}-dark copy, mirroring the web dashboard's darkInvert rule (the same set the
+    /// macOS asset catalog carries as dark-appearance imageset variants).</summary>
+    private static readonly HashSet<string> DarkInvertAssets =
+        new() { "codex", "grok", "zcode", "cline", "hermes", "omp", "zed", "cursor" };
 
     /// <summary>
     /// Load a harness mark from the packaged Assets\Agents resources. A missing asset

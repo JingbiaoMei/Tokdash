@@ -74,6 +74,9 @@ internal sealed class FakeClient : ITokdashClient
     public Task<InsightsResponse> InsightsHourlyTodayAsync(CancellationToken ct = default) =>
         Resolve(Insights, "/api/insights?facets=hourly&period=today", new InsightsResponse());
 
+    public Task<InsightsResponse> InsightsHourlyRangeAsync(string from, string to, CancellationToken ct = default) =>
+        Resolve(Insights, $"/api/insights?facets=hourly&date_from={from}&date_to={to}", new InsightsResponse());
+
     public Task<InsightsResponse> InsightsDailyAsync(string from, string to, CancellationToken ct = default) =>
         Resolve(Insights, $"/api/insights?facets=daily&date_from={from}&date_to={to}", new InsightsResponse());
 

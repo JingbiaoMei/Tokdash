@@ -57,6 +57,12 @@ actor TokdashClient {
         try await get("/api/insights?facets=hourly&period=today", timeout: 90)
     }
 
+    /// Hourly facet over an explicit window - the E12 stepped day (contract §Instance
+    /// stepper: the hourly facet folds the window's own rows, so it is correct on a past day).
+    func insightsHourlyRange(from: String, to: String) async throws -> InsightsResponse {
+        try await get("/api/insights?facets=hourly&date_from=\(from)&date_to=\(to)", timeout: 90)
+    }
+
     func insightsDaily(from: String, to: String) async throws -> InsightsResponse {
         try await get("/api/insights?facets=daily&date_from=\(from)&date_to=\(to)", timeout: 90)
     }

@@ -132,6 +132,9 @@ enum L10n {
         "word_last_week": "last week",
         "word_last_month": "last month",
         "word_last_year": "last year",
+        // E12 instance stepper button names (contract §Instance stepper).
+        "step_earlier": "Previous period",
+        "step_later": "Next period",
 
         // Full delta row (E1): `{glyph} {pct}% cost · … {sentence}`.
         "delta_cost": "%1$@ %2$d%% cost",
@@ -363,6 +366,8 @@ enum L10n {
         "word_last_week": "上周",
         "word_last_month": "上月",
         "word_last_year": "去年",
+        "step_earlier": "上一期",
+        "step_later": "下一期",
 
         "delta_cost": "%1$@%2$d%% 成本",
         "delta_tokens": "%1$@%2$d%% tokens",

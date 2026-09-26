@@ -106,9 +106,16 @@ public sealed class MultiServerTokdashClient : ITokdashClient
     /// one shared strip), so these two only exist to keep the interface whole; they merge
     /// by summing tokens per bucket/date. Silent failures like active-time.
     /// </summary>
-    public async Task<InsightsResponse> InsightsHourlyTodayAsync(CancellationToken ct = default)
+    public Task<InsightsResponse> InsightsHourlyTodayAsync(CancellationToken ct = default) =>
+        FanOutHourly(c => c.InsightsHourlyTodayAsync(ct), ct);
+
+    public Task<InsightsResponse> InsightsHourlyRangeAsync(string from, string to, CancellationToken ct = default) =>
+        FanOutHourly(c => c.InsightsHourlyRangeAsync(from, to, ct), ct);
+
+    private async Task<InsightsResponse> FanOutHourly(
+        Func<ITokdashClient, Task<InsightsResponse>> fetch, CancellationToken ct)
     {
-        var settled = await SettleSilent(c => c.InsightsHourlyTodayAsync(ct), ct);
+        var settled = await SettleSilent(fetch, ct);
         var bars = new long[24];
         int? peak = null;
         long best = 0;

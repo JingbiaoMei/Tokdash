@@ -12,6 +12,7 @@ public interface ITokdashClient : IDisposable
     Task<ActiveTimeResponse> ActiveTimeAsync(string period, CancellationToken ct = default);
     Task<ActiveTimeResponse> ActiveTimeRangeAsync(string from, string to, CancellationToken ct = default);
     Task<InsightsResponse> InsightsHourlyTodayAsync(CancellationToken ct = default);
+    Task<InsightsResponse> InsightsHourlyRangeAsync(string from, string to, CancellationToken ct = default);
     Task<InsightsResponse> InsightsDailyAsync(string from, string to, CancellationToken ct = default);
     Task<StatsResponse> StatsAsync(CancellationToken ct = default);
     Task<QuotaResponse> QuotaAsync(CancellationToken ct = default);
@@ -78,6 +79,13 @@ public sealed class TokdashClient : ITokdashClient
     public async Task<InsightsResponse> InsightsHourlyTodayAsync(CancellationToken ct = default)
     {
         return await GetAsync<InsightsResponse>(_dataClient, "/api/insights?facets=hourly&period=today", ct);
+    }
+
+    /// Hourly facet over an explicit window - the E12 stepped day (contract §Instance
+    /// stepper: the hourly facet folds the window's own rows, so it is correct on a past day).
+    public async Task<InsightsResponse> InsightsHourlyRangeAsync(string from, string to, CancellationToken ct = default)
+    {
+        return await GetAsync<InsightsResponse>(_dataClient, $"/api/insights?facets=hourly&date_from={from}&date_to={to}", ct);
     }
 
     public async Task<InsightsResponse> InsightsDailyAsync(string from, string to, CancellationToken ct = default)

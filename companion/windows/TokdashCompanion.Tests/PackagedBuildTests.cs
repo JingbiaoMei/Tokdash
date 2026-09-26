@@ -45,6 +45,8 @@ public class PackagedBuildTests
             Task.FromResult(new ActiveTimeResponse());
         public Task<InsightsResponse> InsightsHourlyTodayAsync(CancellationToken ct = default) =>
             Task.FromResult(new InsightsResponse());
+        public Task<InsightsResponse> InsightsHourlyRangeAsync(string from, string to, CancellationToken ct = default) =>
+            Task.FromResult(new InsightsResponse());
         public Task<InsightsResponse> InsightsDailyAsync(string from, string to, CancellationToken ct = default) =>
             Task.FromResult(new InsightsResponse());
         public Task<StatsResponse> StatsAsync(CancellationToken ct = default) =>

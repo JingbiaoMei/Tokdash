@@ -153,28 +153,62 @@ final class CompanionStore: NSObject, ObservableObject {
     /// ``selectPeriod(_:)``.
     var selectedPeriod: UsagePeriod { settings.selectedPeriod }
 
+    // E12 instance stepper (contract §Instance stepper): which instance of the selected
+    // granularity is shown (0 = present). In-memory ONLY - never persisted; selecting a
+    // segment re-anchors to the present.
+    @Published private(set) var periodOffset = 0
+
+    var canStepEarlier: Bool { periodOffset < Self.earlierLimit(for: selectedPeriod) }
+    var canStepLater: Bool { periodOffset > 0 }
+
+    /// Kicker for the instance the flyout shows before any snapshot exists.
+    var currentKickerText: String {
+        Self.instanceKicker(period: selectedPeriod, offset: periodOffset,
+                            today: Self.now, calendar: .current)
+    }
+
     /// Generation counter for the delayed skeleton in ``selectPeriod(_:)``: a superseded
     /// switch's pending timer must never collapse the newer switch's sections.
     private var usageGen = 0
 
     /// Select a hero period. The choice persists, and selecting a different segment
-    /// fires the whole fetch group for the new window immediately. While it is in
-    /// flight the previous period's data stays on screen (anti-flash); only if the fetch
+    /// fires the whole fetch group for the new window immediately - re-anchored to the
+    /// PRESENT instance (E12: the segment selection always resets the walk-back). While
+    /// it is in flight the previous data stays on screen (anti-flash); only if the fetch
     /// is still in flight after ~150 ms do the hero/delta/rank blocks and the glance
     /// drop to their loading skeleton (the usage-side last-good is then dropped). Quota
     /// and connectivity stay exactly as they were (contract rule 2, delayed-skeleton
     /// clause).
     func selectPeriod(_ period: UsagePeriod) {
-        guard settings.selectedPeriod != period else { return }
+        guard settings.selectedPeriod != period || periodOffset != 0 else { return }
         settings.selectedPeriod = period
         settings.save()
+        periodOffset = 0
+        startUsageSideTransition(period: period, offset: 0)
+    }
+
+    /// Walk the selected granularity through its instances (E12): delta < 0 steps
+    /// instances into the past (clamped at the granularity's walk-back limit), delta > 0
+    /// steps toward the present (clamped at the present, where › is inert). Never
+    /// persisted; polling and refresh act on the selected instance.
+    func stepPeriod(_ delta: Int) {
+        let next = min(max(periodOffset + delta, 0), Self.earlierLimit(for: selectedPeriod))
+        guard next != periodOffset else { return }
+        periodOffset = next
+        startUsageSideTransition(period: selectedPeriod, offset: next)
+    }
+
+    /// Shared usage-side transition for a period or instance change: drop the usage-side
+    /// last-goods, arm the delayed skeleton (generation-guarded), and fire the fetch
+    /// group. Quota and connectivity are untouched.
+    private func startUsageSideTransition(period: UsagePeriod, offset: Int) {
         lastUsage = nil
         lastActiveMs = nil
         lastInsights = nil
         lastStats = nil
         lastPerServer = []
-        // Delayed skeleton: the current snapshot keeps the previous period's data while
-        // the new period is in flight, so a fast fetch never visibly collapses the
+        // Delayed skeleton: the current snapshot keeps the previous instance's data while
+        // the new one is in flight, so a fast fetch never visibly collapses the
         // sections. The skeleton goes up only if the fetch is STILL in flight after
         // 150 ms - the guard below re-reads the snapshot once the delay elapses.
         usageGen += 1
@@ -182,19 +216,155 @@ final class CompanionStore: NSObject, ObservableObject {
         Task { [weak self] in
             try? await Task.sleep(nanoseconds: 150_000_000)
             guard let self, gen == self.usageGen else { return }
-            // Once the new period's result has published - success OR failure - the fetch
-            // is done as far as the UI is concerned. Only a snapshot still stamped with
-            // the PREVIOUS period means the fetch is truly in flight: show the skeleton.
-            guard let current = self.snapshot, current.period != period else { return }
+            // Once the new instance's result has published - success OR failure - the
+            // fetch is done as far as the UI is concerned. Only a snapshot still stamped
+            // with the PREVIOUS period/instance means the fetch is truly in flight: show
+            // the skeleton.
+            guard let current = self.snapshot,
+                  current.period != period || current.instanceOffset != offset else { return }
             self.snapshot = Snapshot(period: period, usage: nil, activeMs: nil,
                                      insights: nil, stats: nil,
                                      quota: current.quota, thresholds: current.thresholds,
                                      components: self.settings.components, now: Self.now,
                                      usageFailed: false, quotaFailed: current.quotaFailed,
                                      perServer: [], showPerServerRows: current.showPerServerRows,
-                                     rankRows: self.settings.rankRows)
+                                     rankRows: self.settings.rankRows, instanceOffset: offset)
         }
         refresh()
+    }
+
+    /// E12 walk-back limits per granularity: max number of steps into the past.
+    nonisolated static func earlierLimit(for period: UsagePeriod) -> Int {
+        switch period {
+        case .today: return 13
+        case .week: return 8
+        case .month: return 11
+        case .year: return 2
+        }
+    }
+
+    /// The E12 stepped instance as explicit calendar dates: the FULL elapsed window N
+    /// units back, or nil at the present (which keeps the existing wire forms). Stepped
+    /// instances never send `period=` (contract §Instance stepper).
+    nonisolated static func steppedDates(period: UsagePeriod, offset: Int, today: Date,
+                                         calendar: Calendar) -> (from: Date, to: Date)? {
+        guard offset > 0 else { return nil }
+        func day(_ date: Date, _ add: Int) -> Date {
+            calendar.date(byAdding: .day, value: add, to: date) ?? date
+        }
+        let from: Date, to: Date
+        switch period {
+        case .today:
+            from = day(today, -offset); to = from
+        case .week:
+            from = day(startOfWeekMonday(today, calendar: calendar), -7 * offset)
+            to = day(from, 6)
+        case .month:
+            guard let first = startOfMonth(today, calendar: calendar),
+                  let stepped = calendar.date(byAdding: .month, value: -offset, to: first)
+            else { return nil }
+            from = stepped
+            guard let nextMonth = calendar.date(byAdding: .month, value: 1, to: stepped)
+            else { return nil }
+            to = day(nextMonth, -1)
+        case .year:
+            guard let jan1 = startOfYear(today, calendar: calendar),
+                  let stepped = calendar.date(byAdding: .year, value: -offset, to: jan1)
+            else { return nil }
+            from = stepped
+            guard let next = calendar.date(byAdding: .year, value: 1, to: stepped)
+            else { return nil }
+            to = day(next, -1)
+        }
+        return (from, to)
+    }
+
+    /// `date_from`/`date_to`-formatted <see cref="steppedDates"/>; nil at the present.
+    nonisolated static func steppedRange(period: UsagePeriod, offset: Int, today: Date,
+                                         calendar: Calendar) -> (from: String, to: String)? {
+        guard let dates = steppedDates(period: period, offset: offset, today: today, calendar: calendar)
+        else { return nil }
+        return (dayString(dates.from, calendar: calendar), dayString(dates.to, calendar: calendar))
+    }
+
+    /// The hero kicker for a period instance (E12). Present: the existing kicker keys,
+    /// byte-identical. One back: the localized word ("yesterday", "last week", ...).
+    /// Further back: a formatted calendar label, uppercased in Latin scripts to match
+    /// the kicker style ("SEP 20", "SEP 7 – 13", "AUG 2026", "2024").
+    nonisolated static func instanceKicker(period: UsagePeriod, offset: Int, today: Date,
+                                           calendar: Calendar) -> String {
+        let zh = L10n.current == .zhHans
+        if offset == 0 { return L10n.t(period.kickerKey) }
+        if offset == 1 {
+            let key: String
+            switch period {
+            case .today: key = "word_yesterday"
+            case .week: key = "word_last_week"
+            case .month: key = "word_last_month"
+            case .year: key = "word_last_year"
+            }
+            return L10n.t(key).uppercased()
+        }
+        // zh-Hans gets explicit CJK patterns: its locale "MMM d" reads "9月 21", but
+        // "9月21日" is the native form. English keeps "MMM d".
+        let dayFmt = zh ? "M月d日" : "MMM d"
+        func fmt(_ date: Date, _ format: String) -> String {
+            let f = DateFormatter()
+            f.locale = Locale(identifier: zh ? "zh-Hans" : "en")
+            f.calendar = Calendar(identifier: .gregorian)
+            // Follow the calendar's zone (production: local; pinned tests: UTC) so the
+            // label renders the same day the calendar arithmetic landed on.
+            f.timeZone = calendar.timeZone
+            f.dateFormat = format
+            return f.string(from: date)
+        }
+        func day(_ date: Date, _ add: Int) -> Date {
+            calendar.date(byAdding: .day, value: add, to: date) ?? date
+        }
+        switch period {
+        case .today:
+            return fmt(day(today, -offset), dayFmt).uppercased()
+        case .week:
+            let from = day(startOfWeekMonday(today, calendar: calendar), -7 * offset)
+            let to = day(from, 6)
+            let fromYear = fmt(from, "yyyy"), toYear = fmt(to, "yyyy")
+            let fromMonth = fmt(from, "M"), toMonth = fmt(to, "M")
+            let s: String
+            if fromYear != toYear {
+                // Cross-year range: English appends ", yyyy" to the end; CJK prefixes the
+                // year on both operands.
+                s = zh
+                    ? "\(fmt(from, "yyyy年M月d日")) – \(fmt(to, "yyyy年M月d日"))"
+                    : "\(fmt(from, dayFmt)) – \(fmt(to, "MMM d, yyyy"))"
+            } else if fromMonth == toMonth && !zh {
+                // "Sep 7 – 13" drops the repeated month only in English.
+                s = "\(fmt(from, dayFmt)) – \(Int(fmt(to, "d"))!)"
+            } else {
+                s = "\(fmt(from, dayFmt)) – \(fmt(to, dayFmt))"
+            }
+            return s.uppercased()
+        case .month:
+            guard let first = startOfMonth(today, calendar: calendar),
+                  let stepped = calendar.date(byAdding: .month, value: -offset, to: first)
+            else { return "" }
+            return fmt(stepped, zh ? "yyyy年M月" : "MMM yyyy").uppercased()
+        case .year:
+            guard let jan1 = startOfYear(today, calendar: calendar),
+                  let stepped = calendar.date(byAdding: .year, value: -offset, to: jan1)
+            else { return "" }
+            return fmt(stepped, "yyyy")
+        }
+    }
+
+    /// Start of the local day/month/year helpers (calendar-midnight safe).
+    private nonisolated static func startOfMonth(_ date: Date, calendar: Calendar) -> Date? {
+        let comps = calendar.dateComponents([.year, .month], from: date)
+        return calendar.date(from: comps)
+    }
+
+    private nonisolated static func startOfYear(_ date: Date, calendar: Calendar) -> Date? {
+        let comps = calendar.dateComponents([.year], from: date)
+        return calendar.date(from: comps)
     }
 
     // MARK: - Server diagnostics (Settings only)
@@ -247,7 +417,7 @@ final class CompanionStore: NSObject, ObservableObject {
                             thresholds: settings.thresholds, components: settings.components,
                             now: Self.now,
                             perServer: lastPerServer, showPerServerRows: showPerServerRows,
-                            rankRows: settings.rankRows)
+                            rankRows: settings.rankRows, instanceOffset: periodOffset)
         if let cur = snapshot {
             snap.usageFailed = cur.usageFailed
             snap.quotaFailed = cur.quotaFailed
@@ -265,7 +435,7 @@ final class CompanionStore: NSObject, ObservableObject {
                             usageFailed: snapshot?.usageFailed ?? false,
                             quotaFailed: snapshot?.quotaFailed ?? false,
                             perServer: lastPerServer, showPerServerRows: showPerServerRows,
-                            rankRows: settings.rankRows)
+                            rankRows: settings.rankRows, instanceOffset: periodOffset)
     }
 
     /// Manual / immediate refresh. Cancels any in-flight refresh and reschedules
@@ -303,12 +473,15 @@ final class CompanionStore: NSObject, ObservableObject {
             // every failure into nil and never warn (rule 6). A component whose toggle is
             // off does not fetch its source at all.
             let period = settings.selectedPeriod
+            // The E12 instance selected when this cycle began (a stepper click mid-flight
+            // supersedes this cycle via refreshTask; the newer cycle re-reads the offset).
+            let offset = periodOffset
             let glanceSource = Self.glanceSource(for: period, components: settings.components,
                                                  today: Date(), calendar: .current)
-            async let usageAttempt = Self.fetchUsage(client, period: period)
+            async let usageAttempt = Self.fetchUsage(client, period: period, offset: offset)
             async let quotaAttempt = client.quota()
-            async let activeAttempt = Self.activeTimeOptional(client, period: period)
-            async let glanceAttempt = Self.fetchGlance(client, source: glanceSource)
+            async let activeAttempt = Self.activeTimeOptional(client, period: period, offset: offset)
+            async let glanceAttempt = Self.fetchGlance(client, source: glanceSource, period: period, offset: offset)
 
             var usageFailed = false, usageBusy = false, quotaFailed = false, quotaBusy = false
             do { lastUsage = try await usageAttempt } catch let e as TokdashError { usageFailed = true; if case .busy = e { usageBusy = true } } catch { usageFailed = true }
@@ -364,15 +537,25 @@ final class CompanionStore: NSObject, ObservableObject {
 
     // MARK: - Per-period fetch helpers
 
-    /// Usage for the selected period. Week uses `date_from`/`date_to` (local Monday ..
-    /// today); `period=week` is a rolling 7-day window and is never sent.
-    nonisolated static func usageRequestPath(for period: UsagePeriod, today: Date, calendar: Calendar) -> String {
+    /// Usage for the selected period instance. Week uses `date_from`/`date_to` (local
+    /// Monday .. today); `period=week` is a rolling 7-day window and is never sent.
+    /// Stepped E12 instances always send their full elapsed calendar window instead
+    /// (contract §Period windows, §Instance stepper).
+    nonisolated static func usageRequestPath(for period: UsagePeriod, today: Date, calendar: Calendar,
+                                             offset: Int = 0) -> String {
+        if let stepped = steppedRange(period: period, offset: offset, today: today, calendar: calendar) {
+            return "/api/usage?date_from=\(stepped.from)&date_to=\(stepped.to)"
+        }
         guard period == .week else { return "/api/usage?period=\(period.token)" }
         let (from, to) = weekRange(today: today, calendar: calendar)
         return "/api/usage?date_from=\(from)&date_to=\(to)"
     }
 
-    private nonisolated static func fetchUsage(_ client: TokdashClient, period: UsagePeriod) async throws -> UsageResponse {
+    private nonisolated static func fetchUsage(_ client: TokdashClient, period: UsagePeriod,
+                                               offset: Int = 0) async throws -> UsageResponse {
+        if let stepped = steppedRange(period: period, offset: offset, today: Date(), calendar: .current) {
+            return try await client.usageRange(from: stepped.from, to: stepped.to)
+        }
         if period == .week {
             let (from, to) = weekRange(today: Date(), calendar: Calendar.current)
             return try await client.usageRange(from: from, to: to)
@@ -381,10 +564,13 @@ final class CompanionStore: NSObject, ObservableObject {
     }
 
     /// Active-time is optional (rule 6): any failure/404 is nil, silently.
-    private nonisolated static func activeTimeOptional(_ client: TokdashClient, period: UsagePeriod) async -> Int? {
+    private nonisolated static func activeTimeOptional(_ client: TokdashClient, period: UsagePeriod,
+                                                       offset: Int = 0) async -> Int? {
         do {
             let response: ActiveTimeResponse
-            if period == .week {
+            if let stepped = steppedRange(period: period, offset: offset, today: Date(), calendar: .current) {
+                response = try await client.activeTimeRange(from: stepped.from, to: stepped.to)
+            } else if period == .week {
                 let (from, to) = weekRange(today: Date(), calendar: Calendar.current)
                 response = try await client.activeTimeRange(from: from, to: to)
             } else {
@@ -423,17 +609,26 @@ final class CompanionStore: NSObject, ObservableObject {
         }
     }
 
-    private nonisolated static func fetchGlance(_ client: TokdashClient, source: GlanceSource?) async
+    private nonisolated static func fetchGlance(_ client: TokdashClient, source: GlanceSource?,
+                                                period: UsagePeriod, offset: Int = 0) async
         -> (insights: InsightsResponse?, stats: StatsResponse?) {
         guard let source else { return (nil, nil) }
         do {
             switch source {
             case .insightsHourly:
+                // Stepped day: the hourly facet over the instance's single day (contract
+                // §Instance stepper - the facet folds the window's own rows).
+                if let day = steppedRange(period: period, offset: offset, today: Date(), calendar: .current) {
+                    return (try await client.insightsHourlyRange(from: day.from, to: day.to), nil)
+                }
                 return (try await client.insightsHourlyToday(), nil)
             case .insightsDaily:
-                let (from, to) = weekRange(today: Date(), calendar: Calendar.current)
+                let (from, to) = steppedRange(period: period, offset: offset, today: Date(), calendar: .current)
+                    ?? weekRange(today: Date(), calendar: Calendar.current)
                 return (try await client.insightsDaily(from: from, to: to), nil)
             case .stats:
+                // Rolling 365 days, no window parameter: stepped month/year instances are
+                // windowed client-side to the exact calendar days in the face factory.
                 return (nil, try await client.stats())
             }
         } catch {
@@ -451,7 +646,7 @@ final class CompanionStore: NSObject, ObservableObject {
                             components: settings.components, now: Self.now,
                             usageFailed: usageFailed, quotaFailed: quotaFailed,
                             perServer: lastPerServer, showPerServerRows: showPerServerRows,
-                            rankRows: settings.rankRows)
+                            rankRows: settings.rankRows, instanceOffset: periodOffset)
         snapshot = snap
         return snap
     }
@@ -465,6 +660,7 @@ final class CompanionStore: NSObject, ObservableObject {
     private func runMultiServerRefresh(_ servers: [CompanionServerSettings]) async {
         typealias ServerResult = (server: CompanionServerSettings, usage: UsageResponse, activeMs: Int?, quota: QuotaResponse)
         let period = settings.selectedPeriod
+        let offset = periodOffset
         let attempts: [MultiServerAttempt] = await withTaskGroup(of: MultiServerAttempt.self) { group in
             for server in servers {
                 group.addTask {
@@ -473,11 +669,11 @@ final class CompanionStore: NSObject, ObservableObject {
                     do {
                         let health = try await client.health()
                         guard health.service == "tokdash" else { return .failure(server, busy: false, wrongService: true) }
-                        async let usage = Self.fetchUsage(client, period: period)
+                        async let usage = Self.fetchUsage(client, period: period, offset: offset)
                         async let quota = client.quota()
                         // Active time is an optional decoration (rule 6): a failed read
                         // yields nil and the combined hero drops the segment.
-                        async let active = Self.activeTimeOptional(client, period: period)
+                        async let active = Self.activeTimeOptional(client, period: period, offset: offset)
                         let values = try await (usage, quota, active)
                         return .success(server, usage: values.0, activeMs: values.2, quota: values.1)
                     } catch let error as TokdashError {
@@ -961,16 +1157,41 @@ final class CompanionStore: NSObject, ObservableObject {
 
     // MARK: - Tool display names and logos (E3)
 
-    /// Display names for the by_tool keys the server actually emits; anything unknown
-    /// gets the id capitalized, never a blank row.
+    /// Display names for the by_tool keys the scanner emits (all 27 source_name ids plus
+    /// the web brand map's aliases); anything unknown gets the id capitalized, never a
+    /// blank row. Names follow the server's SESSION_LABELS and the README pill strip.
+    /// Mirrors Windows ToolDisplayName.
     nonisolated static func toolDisplayName(for tool: String) -> String {
         switch tool.lowercased() {
         case "codex": return "Codex"
-        case "claude": return "Claude"
+        case "claude", "claude_code": return "Claude"
         case "kimi": return "Kimi"
         case "opencode": return "OpenCode"
         case "openclaw": return "OpenClaw"
-        case "gemini": return "Gemini"
+        case "gemini", "gemini_cli": return "Gemini"
+        case "antigravity", "antigravity_cli": return "Antigravity"
+        case "grok": return "Grok Build"
+        case "pi", "pi_agent": return "Pi"
+        case "omp": return "omp"
+        case "mimo": return "Mimo"
+        case "kilocode": return "Kilo Code"
+        case "cline": return "Cline"
+        case "copilot", "copilot_cli", "github_copilot_cli": return "GitHub Copilot CLI"
+        case "hermes": return "Hermes"
+        case "dsh": return "DeepSeek Harness"
+        case "reasonix": return "Reasonix"
+        case "zcode": return "ZCode"
+        case "workbuddy": return "WorkBuddy"
+        case "qoder": return "Qoder IDE"
+        case "qoder_cli": return "Qoder CLI"
+        case "zed": return "Zed"
+        case "qwen_code": return "Qwen Code"
+        case "crush": return "Crush"
+        case "muse": return "Muse Code"
+        case "minimax": return "MiniMax Code"
+        case "cursor": return "Cursor"
+        case "amp": return "Amp"
+        case "devin": return "Devin"
         default:
             guard let first = tool.first else { return tool }
             return first.uppercased() + tool.dropFirst()
@@ -978,15 +1199,38 @@ final class CompanionStore: NSObject, ObservableObject {
     }
 
     /// Asset-catalog image name for a tool id, nil when no mark ships for it - a tool
-    /// without a shipped logo renders text-only (never a placeholder).
+    /// without a shipped logo renders text-only (never a placeholder). Art mirrors the
+    /// web dashboard's TOOL_BRAND_META icon set; mimo and devin are the text-only pair:
+    /// MiMo Code's art is a wide wordmark (illegible at row height) and Devin ships no
+    /// brand art anywhere. Mirrors Windows LogoAssetName.
     nonisolated static func logoAssetName(for tool: String) -> String? {
         switch tool.lowercased() {
         case "codex": return "AgentCodex"
-        case "claude": return "AgentClaude"
+        case "claude", "claude_code": return "AgentClaude"
         case "kimi": return "AgentKimi"
         case "opencode": return "AgentOpenCode"
-        case "gemini": return "AgentGemini"
+        case "gemini", "gemini_cli": return "AgentGemini"
         case "openclaw": return "AgentOpenClaw"
+        case "grok": return "AgentGrok"
+        case "zcode": return "AgentZai"
+        case "minimax": return "AgentMiniMax"
+        case "pi", "pi_agent": return "AgentPi"
+        case "omp": return "AgentOmp"
+        case "kilocode": return "AgentKilocode"
+        case "cline": return "AgentCline"
+        case "copilot", "copilot_cli", "github_copilot_cli": return "AgentCopilot"
+        case "hermes": return "AgentHermes"
+        case "dsh": return "AgentDsh"
+        case "reasonix": return "AgentReasonix"
+        case "workbuddy": return "AgentWorkbuddy"
+        case "qoder", "qoder_cli": return "AgentQoder"
+        case "zed": return "AgentZed"
+        case "qwen_code": return "AgentQwenCode"
+        case "crush": return "AgentCrush"
+        case "muse": return "AgentMuse"
+        case "antigravity", "antigravity_cli": return "AgentAntigravity"
+        case "cursor": return "AgentCursor"
+        case "amp": return "AgentAmp"
         default: return nil
         }
     }
@@ -1026,16 +1270,21 @@ final class CompanionStore: NSObject, ObservableObject {
     /// for the trailing-90/180-day windows.
     nonisolated static func glanceFace(period: UsagePeriod, insights: InsightsResponse?, stats: StatsResponse?,
                                        components: CompanionComponents,
-                                       calendar: Calendar, now: Date) -> Snapshot.GlanceFace? {
+                                       calendar: Calendar, now: Date, offset: Int = 0) -> Snapshot.GlanceFace? {
         guard components.activityGlance else { return nil }
         switch period {
         case .today:
+            // The hourly face is already windowed server-side (stepped days fetch
+            // facets=hourly over their own day).
             guard components.activityHistogramTodayWeek, let insights else { return nil }
             return hourFace(insights)
         case .week:
             guard components.activityHistogramTodayWeek, let insights else { return nil }
-            return dayFace(daily: insights.daily, now: now, calendar: calendar)
+            return dayFace(daily: insights.daily, now: now, calendar: calendar, offset: offset)
         case .month, .year:
+            if let stepped = steppedDates(period: period, offset: offset, today: now, calendar: calendar) {
+                return boundedGridFace(stats: stats, from: stepped.from, to: stepped.to, calendar: calendar)
+            }
             return gridFace(stats: stats, windowDays: period == .month ? 90 : 180, calendar: calendar)
         }
     }
@@ -1053,15 +1302,17 @@ final class CompanionStore: NSObject, ObservableObject {
         return .hours(bars: bars, peakHour: insights.hourly?.peakHour)
     }
 
-    /// Mon..Sun columns of the week containing `now` (the snapshot clock), with the
-    /// later days of the current week reading as empty until they happen. The facet is
-    /// sparse (no entry = no usage), so missing days render as empty zero columns, not
-    /// skipped ones. Anchoring on the clock - not the newest payload date - keeps the
-    /// face honest when the daily facet lags behind today.
+    /// Mon..Sun columns of the selected instance's week (E12: `offset` weeks before the
+    /// one containing `now`, the snapshot clock), with the later days of the CURRENT week
+    /// reading as empty until they happen. The facet is sparse (no entry = no usage), so
+    /// missing days render as empty zero columns, not skipped ones. Anchoring on the
+    /// clock - not the newest payload date - keeps the face honest when the daily facet
+    /// lags behind today.
     private nonisolated static func dayFace(daily: [DailyPoint]?, now: Date,
-                                            calendar: Calendar) -> Snapshot.GlanceFace? {
+                                            calendar: Calendar, offset: Int = 0) -> Snapshot.GlanceFace? {
         guard let daily, !daily.isEmpty else { return nil }
-        let monday = startOfWeekMonday(now, calendar: calendar)
+        let monday0 = startOfWeekMonday(now, calendar: calendar)
+        let monday = calendar.date(byAdding: .weekOfYear, value: -offset, to: monday0) ?? monday0
         var tokens: [Int] = []
         for offset in 0..<7 {
             guard let day = calendar.date(byAdding: .day, value: offset, to: monday) else { tokens.append(0); continue }
@@ -1077,15 +1328,48 @@ final class CompanionStore: NSObject, ObservableObject {
     /// truth), column-major weeks starting Monday, out-of-window cells nil.
     private nonisolated static func gridFace(stats: StatsResponse?, windowDays: Int,
                                              calendar: Calendar) -> Snapshot.GlanceFace? {
+        guard let dated = datedIntensities(stats, calendar: calendar),
+              let anchor = dated.map(\.date).max(),
+              let windowStart = calendar.date(byAdding: .day, value: -(windowDays - 1), to: anchor)
+        else { return nil }
+        return gridCore(dated: dated, windowStart: windowStart, windowEnd: anchor,
+                        windowDays: windowDays, calendar: calendar)
+    }
+
+    /// The grid for an E12 stepped month/year instance: the EXACT calendar days
+    /// [from...to]. The payload is a rolling 365-day series ending at its newest date
+    /// (sparse: a missing day means zero, not "outside the window"), so coverage is
+    /// judged against that span: `newest-364 <= from` and `to <= newest`. Where it fails
+    /// (always for stepped years) the glance hides silently (contract §Instance stepper).
+    private nonisolated static func boundedGridFace(stats: StatsResponse?, from: Date, to: Date,
+                                                    calendar: Calendar) -> Snapshot.GlanceFace? {
+        guard let dated = datedIntensities(stats, calendar: calendar),
+              let newest = dated.map(\.date).max(),
+              let reach = calendar.date(byAdding: .day, value: -364, to: newest),
+              from >= reach, to <= newest
+        else { return nil } // rolling series does not reach the instance
+        let days = (calendar.dateComponents([.day], from: from, to: to).day ?? 0) + 1
+        return gridCore(dated: dated, windowStart: from, windowEnd: to,
+                        windowDays: max(days, 1), calendar: calendar)
+    }
+
+    /// Payload pass: intensity-summed day list, nil when the payload holds none.
+    private nonisolated static func datedIntensities(_ stats: StatsResponse?,
+                                                     calendar: Calendar) -> [(date: Date, intensity: Int)]? {
         let contributions = stats?.contributions ?? []
         guard !contributions.isEmpty else { return nil }
         let dated: [(date: Date, intensity: Int)] = contributions.compactMap { c in
             guard let raw = c.date, let date = date(fromDayString: raw, calendar: calendar) else { return nil }
             return (date, min(4, max(0, c.intensity ?? 0)))
         }
-        guard let anchor = dated.map(\.date).max(),
-              let windowStart = calendar.date(byAdding: .day, value: -(windowDays - 1), to: anchor)
-        else { return nil }
+        return dated.isEmpty ? nil : dated
+    }
+
+    /// Column-major Mon-start grid over [windowStart...windowEnd]; cells outside the
+    /// window are nil. All-zero grids return nil (the component hides itself).
+    private nonisolated static func gridCore(dated: [(date: Date, intensity: Int)],
+                                             windowStart: Date, windowEnd: Date,
+                                             windowDays: Int, calendar: Calendar) -> Snapshot.GlanceFace? {
         let gridStart = startOfWeekMonday(windowStart, calendar: calendar)
         let intensityByDay = Dictionary(dated.map { (dayString($0.date, calendar: calendar), $0.intensity) },
                                         uniquingKeysWith: { $0 + $1 })
@@ -1097,11 +1381,11 @@ final class CompanionStore: NSObject, ObservableObject {
             var anyCell = false
             for dow in 0..<7 {
                 guard let cell = calendar.date(byAdding: .day, value: dow, to: columnStart) else { column.append(nil); continue }
-                if cell < windowStart || cell > anchor { column.append(nil); continue }
+                if cell < windowStart || cell > windowEnd { column.append(nil); continue }
                 anyCell = true
                 column.append(intensityByDay[dayString(cell, calendar: calendar)] ?? 0)
             }
-            guard anyCell else { break } // past the anchor: remaining columns are all nil
+            guard anyCell else { break } // past the window end: remaining columns are all nil
             columns.append(column)
             week += 1
             if week > 53 { break } // 180-day window is ~27 columns; hard stop for safety
@@ -1334,6 +1618,9 @@ enum QuotaView { case low, all }
 /// means the selected period's first fetch is still in flight (loading skeleton).
 struct Snapshot {
     let period: UsagePeriod
+    /// E12 instance stamp: 0 = present, N = N granularity units back (contract §Instance
+    /// stepper). Distinguishes a stepped instance's snapshot from the present one.
+    var instanceOffset: Int = 0
     let usage: UsageResponse?
     let activeMs: Int?
     let insights: InsightsResponse?
@@ -1371,7 +1658,9 @@ struct Snapshot {
          quotaFailed: Bool = false,
          perServer: [PerServerUsage] = [],
          showPerServerRows: Bool = false,
-         rankRows: Int = 3) {
+         rankRows: Int = 3,
+         instanceOffset: Int = 0) {
+        self.instanceOffset = instanceOffset
         self.period = period; self.usage = usage; self.activeMs = activeMs
         self.insights = insights; self.stats = stats; self.quota = quota
         self.thresholds = thresholds; self.components = components; self.now = now
@@ -1385,7 +1674,10 @@ struct Snapshot {
     var usageLoading: Bool { usage == nil && !usageFailed }
     var isEmptyUsage: Bool { usage?.totalTokens == 0 }
 
-    var kickerText: String { L10n.t(period.kickerKey) }
+    /// Hero kicker above the cost number: present instances read TODAY / THIS WEEK /
+    /// THIS MONTH / THIS YEAR; stepped instances read YESTERDAY / SEP 20 / SEP 7 – 13 /
+    /// AUG 2026 / 2024 (E12, contract §Instance stepper).
+    var kickerText: String { CompanionStore.instanceKicker(period: period, offset: instanceOffset, today: now, calendar: .current) }
 
     var perServerRows: [PerServerRow] { perServer.map(PerServerRow.init) }
 
@@ -1592,7 +1884,8 @@ struct Snapshot {
 
     var glanceFace: GlanceFace? {
         CompanionStore.glanceFace(period: period, insights: insights, stats: stats,
-                                  components: components, calendar: .current, now: now)
+                                  components: components, calendar: .current, now: now,
+                                  offset: instanceOffset)
     }
 
     /// Windows below their low-quota threshold, sorted by remaining ascending.

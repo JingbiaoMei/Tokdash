@@ -214,12 +214,17 @@ public class StoreHelperTests
         Assert.AreEqual("Codex", CompanionStore.ToolDisplayName("codex"));
         Assert.AreEqual("OpenCode", CompanionStore.ToolDisplayName("opencode"));
         Assert.AreEqual("OpenClaw", CompanionStore.ToolDisplayName("openclaw"));
-        Assert.AreEqual("Zed", CompanionStore.ToolDisplayName("zed"), "unknown ids capitalize, never blank");
+        Assert.AreEqual("Zed", CompanionStore.ToolDisplayName("zed"), "every scanner id has a name now");
+        Assert.AreEqual("Mystery_tool", CompanionStore.ToolDisplayName("mystery_tool"), "unknown ids capitalize, never blank");
+        Assert.AreEqual("Pi", CompanionStore.ToolDisplayName("pi_agent"));
+        Assert.AreEqual("DeepSeek Harness", CompanionStore.ToolDisplayName("dsh"));
 
         Assert.AreEqual("codex", CompanionStore.LogoAssetName("codex"));
         Assert.AreEqual("opencode", CompanionStore.LogoAssetName("opencode"));
         Assert.AreEqual("openclaw", CompanionStore.LogoAssetName("openclaw"), "OpenClaw ships a mark now");
-        Assert.IsNull(CompanionStore.LogoAssetName("zed"), "no shipped mark -> text-only row");
+        Assert.AreEqual("zed", CompanionStore.LogoAssetName("zed"), "zed ships a mark now");
+        Assert.AreEqual("pi", CompanionStore.LogoAssetName("pi_agent"));
+        Assert.AreEqual("omp", CompanionStore.LogoAssetName("omp"), "pi/omp used to be text-only");
 
         Assert.AreEqual("gpt-5.6-sol", CompanionStore.StripProviderPrefix("openai/gpt-5.6-sol"));
         Assert.AreEqual("claude-opus-4-7", CompanionStore.StripProviderPrefix("claude-opus-4-7"), "no slash -> unchanged");
@@ -248,6 +253,46 @@ public class StoreHelperTests
         var agents = AgentsDir();
         foreach (var name in new[] { "codex", "claude", "kimi", "grok", "zcode", "minimax", "opencode", "antigravity" })
             Assert.IsTrue(File.Exists(Path.Combine(agents, $"{name}.png")), $"Assets/Agents/{name}.png missing");
+    }
+
+    [TestMethod]
+    public void ToolLogo_Map_Covers_Every_Scanner_Tool_And_Pins_Assets()
+    {
+        // Every source_name the scanner can emit (src/tokdash/sources/coding_tools.py) maps
+        // to a packaged mark - except the two documented text-only ids: mimo (wordmark-only
+        // brand, illegible at row height) and devin (no brand art shipped anywhere).
+        var expected = new Dictionary<string, string?>
+        {
+            ["opencode"] = "opencode", ["kilocode"] = "kilocode", ["cline"] = "cline",
+            ["codex"] = "codex", ["claude"] = "claude", ["gemini_cli"] = "gemini",
+            ["antigravity_cli"] = "antigravity", ["amp"] = "amp", ["kimi"] = "kimi",
+            ["grok"] = "grok", ["pi_agent"] = "pi", ["omp"] = "omp",
+            ["copilot_cli"] = "copilot", ["hermes"] = "hermes", ["mimo"] = null,
+            ["zcode"] = "zcode", ["qoder"] = "qoder", ["qoder_cli"] = "qoder",
+            ["dsh"] = "dsh", ["reasonix"] = "reasonix", ["workbuddy"] = "workbuddy",
+            ["zed"] = "zed", ["qwen_code"] = "qwen_code", ["muse"] = "muse",
+            ["crush"] = "crush", ["minimax"] = "minimax", ["devin"] = null,
+            // Aliases the web brand map normalizes onto the same marks.
+            ["claude_code"] = "claude", ["gemini"] = "gemini", ["pi"] = "pi",
+            ["copilot"] = "copilot", ["github_copilot_cli"] = "copilot", ["antigravity"] = "antigravity",
+            ["cursor"] = "cursor",
+        };
+        var agents = AgentsDir();
+        var packaged = new HashSet<string>();
+        foreach (var (tool, asset) in expected)
+        {
+            Assert.AreEqual(asset, CompanionStore.LogoAssetName(tool), $"tool id {tool}");
+            if (asset is not null) packaged.Add(asset);
+        }
+
+        // The map and the packaged asset set must not drift apart: every mapped mark exists
+        // as a PNG, and every darkInvert mark also ships its pre-inverted {name}-dark copy.
+        foreach (var asset in packaged)
+            Assert.IsTrue(File.Exists(Path.Combine(agents, $"{asset}.png")), $"Assets/Agents/{asset}.png missing");
+        foreach (var asset in new[] { "codex", "grok", "zcode", "cline", "hermes", "omp", "zed", "cursor" })
+            Assert.IsTrue(File.Exists(Path.Combine(agents, $"{asset}-dark.png")), $"Assets/Agents/{asset}-dark.png missing");
+        Assert.IsFalse(File.Exists(Path.Combine(agents, "mimo.png")),
+            "the MiMo wordmark must not sit unreferenced where it could be mistaken for MiniMax's mark");
     }
 
     private static string AgentsDir([CallerFilePath] string source = "") =>
@@ -419,5 +464,229 @@ public class StoreHelperTests
         Assert.IsFalse(CompanionStore.IsValidBaseURL("/tokdash"), "relative");
         Assert.IsFalse(CompanionStore.IsValidBaseURL("ftp://host/tokdash"), "wrong scheme");
         Assert.IsFalse(CompanionStore.IsValidBaseURL("http:///tokdash"), "no host");
+    }
+
+    // MARK: - E12 instance stepper (contract §Instance stepper)
+
+    /// <summary>Thursday 2026-09-24; its local week starts Monday 2026-09-21.</summary>
+    private static readonly DateOnly Thu = new(2026, 9, 24);
+
+    private static void SteppedEq((DateOnly From, DateOnly To)? actual, string from, string to)
+    {
+        Assert.IsNotNull(actual, "stepped instance has no window?");
+        Assert.AreEqual(DateOnly.Parse(from), actual.Value.From);
+        Assert.AreEqual(DateOnly.Parse(to), actual.Value.To);
+    }
+
+    [TestMethod]
+    public void EarlierLimit_Pins_The_Walkback_Limits()
+    {
+        Assert.AreEqual(13, CompanionStore.EarlierLimit(UsagePeriod.Today));
+        Assert.AreEqual(8, CompanionStore.EarlierLimit(UsagePeriod.Week));
+        Assert.AreEqual(11, CompanionStore.EarlierLimit(UsagePeriod.Month));
+        Assert.AreEqual(2, CompanionStore.EarlierLimit(UsagePeriod.Year));
+    }
+
+    [TestMethod]
+    public void SteppedDates_Are_Full_Elapsed_Calendar_Windows()
+    {
+        Assert.IsNull(CompanionStore.SteppedDates(UsagePeriod.Today, 0, Thu), "present is not stepped");
+
+        // Day: the single calendar day N back.
+        SteppedEq(CompanionStore.SteppedDates(UsagePeriod.Today, 1, Thu), "2026-09-23", "2026-09-23");
+        SteppedEq(CompanionStore.SteppedDates(UsagePeriod.Today, 13, Thu), "2026-09-11", "2026-09-11");
+
+        // Week: full Mon..Sun weeks (never a partial one), stepped from THIS week's Monday.
+        SteppedEq(CompanionStore.SteppedDates(UsagePeriod.Week, 1, Thu), "2026-09-14", "2026-09-20");
+        SteppedEq(CompanionStore.SteppedDates(UsagePeriod.Week, 2, Thu), "2026-09-07", "2026-09-13");
+
+        // A Sunday rolls back to its own week's Monday BEFORE stepping (no straddling).
+        SteppedEq(CompanionStore.SteppedDates(UsagePeriod.Week, 1, new DateOnly(2026, 9, 27)), "2026-09-14", "2026-09-20");
+
+        // Weeks may cross years: Jan 7 2026 (Wed) -> its Monday is Jan 5; one back starts Dec 29.
+        SteppedEq(CompanionStore.SteppedDates(UsagePeriod.Week, 1, new DateOnly(2026, 1, 7)), "2025-12-29", "2026-01-04");
+
+        // Month: full 1st..last-day calendar months, rolling across the year line both ways.
+        SteppedEq(CompanionStore.SteppedDates(UsagePeriod.Month, 1, Thu), "2026-08-01", "2026-08-31");
+        SteppedEq(CompanionStore.SteppedDates(UsagePeriod.Month, 11, Thu), "2025-10-01", "2025-10-31");
+        SteppedEq(CompanionStore.SteppedDates(UsagePeriod.Month, 1, new DateOnly(2026, 1, 15)), "2025-12-01", "2025-12-31");
+
+        // Year: full Jan1..Dec31 calendar years.
+        SteppedEq(CompanionStore.SteppedDates(UsagePeriod.Year, 1, Thu), "2025-01-01", "2025-12-31");
+        SteppedEq(CompanionStore.SteppedDates(UsagePeriod.Year, 2, Thu), "2024-01-01", "2024-12-31");
+    }
+
+    [TestMethod]
+    public void UsageRequestPath_Present_Keeps_Wire_Forms_Stepped_Always_Uses_Dates()
+    {
+        // Present instances: exactly the shipped §Period windows wire forms.
+        Assert.AreEqual("/api/usage?period=today", CompanionStore.UsageRequestPath(UsagePeriod.Today, Thu));
+        Assert.AreEqual("/api/usage?date_from=2026-09-21&date_to=2026-09-24", CompanionStore.UsageRequestPath(UsagePeriod.Week, Thu));
+        Assert.AreEqual("/api/usage?period=month", CompanionStore.UsageRequestPath(UsagePeriod.Month, Thu));
+        Assert.AreEqual("/api/usage?period=year", CompanionStore.UsageRequestPath(UsagePeriod.Year, Thu));
+
+        // Stepped: explicit full elapsed window, never period=.
+        Assert.AreEqual("/api/usage?date_from=2026-09-23&date_to=2026-09-23", CompanionStore.UsageRequestPath(UsagePeriod.Today, Thu, 1));
+        Assert.AreEqual("/api/usage?date_from=2026-09-07&date_to=2026-09-13", CompanionStore.UsageRequestPath(UsagePeriod.Week, Thu, 2));
+        Assert.AreEqual("/api/usage?date_from=2026-08-01&date_to=2026-08-31", CompanionStore.UsageRequestPath(UsagePeriod.Month, Thu, 1));
+        Assert.AreEqual("/api/usage?date_from=2024-01-01&date_to=2024-12-31", CompanionStore.UsageRequestPath(UsagePeriod.Year, Thu, 2));
+    }
+
+    [TestMethod]
+    public void InstanceKicker_Words_One_Back_Dates_Further_Back()
+    {
+        // Present kickers stay byte-identical.
+        Assert.AreEqual("TODAY", CompanionStore.InstanceKicker(UsagePeriod.Today, 0, Thu));
+        Assert.AreEqual("THIS WEEK", CompanionStore.InstanceKicker(UsagePeriod.Week, 0, Thu));
+        Assert.AreEqual("THIS MONTH", CompanionStore.InstanceKicker(UsagePeriod.Month, 0, Thu));
+        Assert.AreEqual("THIS YEAR", CompanionStore.InstanceKicker(UsagePeriod.Year, 0, Thu));
+
+        // One back: the localized words, uppercased to kicker style in Latin scripts.
+        Assert.AreEqual("YESTERDAY", CompanionStore.InstanceKicker(UsagePeriod.Today, 1, Thu));
+        Assert.AreEqual("LAST WEEK", CompanionStore.InstanceKicker(UsagePeriod.Week, 1, Thu));
+        Assert.AreEqual("LAST MONTH", CompanionStore.InstanceKicker(UsagePeriod.Month, 1, Thu));
+        Assert.AreEqual("LAST YEAR", CompanionStore.InstanceKicker(UsagePeriod.Year, 1, Thu));
+
+        // Further back: calendar labels. Same-month weeks drop the repeated month in English.
+        Assert.AreEqual("SEP 21", CompanionStore.InstanceKicker(UsagePeriod.Today, 3, Thu));
+        Assert.AreEqual("SEP 7 – 13", CompanionStore.InstanceKicker(UsagePeriod.Week, 2, Thu));
+        // Cross-month week (two back from Oct 12's week = Sep 28..Oct 4) and cross-year
+        // week (two back from Jan 14's week = Dec 29..Jan 4). offset 1 is the word form.
+        Assert.AreEqual("SEP 28 – OCT 4", CompanionStore.InstanceKicker(UsagePeriod.Week, 2, new DateOnly(2026, 10, 12)));
+        Assert.AreEqual("DEC 29 – JAN 4, 2026", CompanionStore.InstanceKicker(UsagePeriod.Week, 2, new DateOnly(2026, 1, 14)));
+        Assert.AreEqual("JUL 2026", CompanionStore.InstanceKicker(UsagePeriod.Month, 2, Thu));
+        Assert.AreEqual("OCT 2025", CompanionStore.InstanceKicker(UsagePeriod.Month, 11, Thu));
+        Assert.AreEqual("2024", CompanionStore.InstanceKicker(UsagePeriod.Year, 2, Thu));
+    }
+
+    [TestMethod]
+    public void InstanceKicker_Chinese_Words_And_Date_Forms()
+    {
+        var saved = L10n.Current;
+        L10n.Current = AppLanguage.ZhHans;
+        try
+        {
+            Assert.AreEqual("今日", CompanionStore.InstanceKicker(UsagePeriod.Today, 0, Thu));
+            Assert.AreEqual("昨日", CompanionStore.InstanceKicker(UsagePeriod.Today, 1, Thu));
+            Assert.AreEqual("上周", CompanionStore.InstanceKicker(UsagePeriod.Week, 1, Thu));
+            Assert.AreEqual("9月21日", CompanionStore.InstanceKicker(UsagePeriod.Today, 3, Thu));
+            // CJK forms keep both operands of a range (the "Sep 7 – 13" ellipsis is English-only).
+            Assert.AreEqual("9月7日 – 9月13日", CompanionStore.InstanceKicker(UsagePeriod.Week, 2, Thu));
+            Assert.AreEqual("2026年7月", CompanionStore.InstanceKicker(UsagePeriod.Month, 2, Thu));
+            // Cross-year CJK week ranges carry the year on both operands.
+            Assert.AreEqual("2025年12月29日 – 2026年1月4日",
+                CompanionStore.InstanceKicker(UsagePeriod.Week, 2, new DateOnly(2026, 1, 14)));
+            Assert.AreEqual("2024", CompanionStore.InstanceKicker(UsagePeriod.Year, 2, Thu));
+        }
+        finally { L10n.Current = saved; }
+    }
+
+    [TestMethod]
+    public void Glance_Stepped_Week_Histogram_Windows_On_Instances_Week()
+    {
+        var insights = new InsightsResponse
+        {
+            Daily =
+            [
+                new DailyPoint { Date = "2026-09-07", Tokens = 5 },
+                new DailyPoint { Date = "2026-09-13", Tokens = 7 },
+                // A day from the CURRENT week must not leak into the stepped instance.
+                new DailyPoint { Date = "2026-09-21", Tokens = 99 },
+            ],
+        };
+        var face = CompanionStore.GlanceFaceFor(UsagePeriod.Week, insights, null,
+            new CompanionComponents(), Thu, 2)!;
+        Assert.AreEqual(GlanceKind.Days, face.Kind);
+        Assert.AreEqual(5, face.DayTokens![0], "Mon of the stepped week");
+        Assert.AreEqual(7, face.DayTokens![6], "Sun of the stepped week");
+        Assert.IsFalse(face.DayTokens!.Contains(99), "current-week data does not leak");
+    }
+
+    [TestMethod]
+    public void Glance_Stepped_Month_Grid_Is_Calendar_Bounded()
+    {
+        var stats = StatsRollingTo("2026-09-22");
+        var face = CompanionStore.GlanceFaceFor(UsagePeriod.Month, null, stats,
+            new CompanionComponents(), Thu, 1)!;
+        Assert.AreEqual(GlanceKind.Grid, face.Kind);
+        Assert.AreEqual(31, face.WindowDays, "exactly Aug 1..31");
+        Assert.AreEqual(2, face.FilledCells, "Aug 15 + Aug 31 only");
+        // Jul 27 column is clamped (Aug 1-2 cells), then 5 whole weeks: Jul27, Aug3, 10, 17, 24, 31.
+        Assert.AreEqual(6, face.GridColumns!.Length, "Mon-start columns clamped to the month");
+    }
+
+    [TestMethod]
+    public void Glance_Stepped_Year_Hides_When_Rolling_Series_Does_Not_Reach()
+    {
+        var stats = StatsRollingTo("2026-09-22");
+        // Any stepped year starts outside a rolling 365-day series (contract §Instance stepper).
+        Assert.IsNull(CompanionStore.GlanceFaceFor(UsagePeriod.Year, null, stats, new CompanionComponents(), Thu, 1));
+        Assert.IsNull(CompanionStore.GlanceFaceFor(UsagePeriod.Year, null, stats, new CompanionComponents(), Thu, 2));
+        // Present year view is unaffected: the trailing 180-day grid still renders.
+        Assert.IsNotNull(CompanionStore.GlanceFaceFor(UsagePeriod.Year, null, stats, new CompanionComponents(), Thu));
+    }
+
+    private static StatsResponse StatsRollingTo(string newest)
+    {
+        // A sparse rolling series: newest day + one day at the 364-day edge + Aug days.
+        return new StatsResponse
+        {
+            Contributions =
+            [
+                new Contribution { Date = "2025-09-23", Intensity = 1 },
+                new Contribution { Date = "2026-08-15", Intensity = 3 },
+                new Contribution { Date = "2026-08-31", Intensity = 2 },
+                new Contribution { Date = newest, Intensity = 1 },
+            ],
+        };
+    }
+
+    [TestMethod]
+    public async Task Stepper_Walks_Clamps_Reanchors_And_Fetches_Instance_Windows()
+    {
+        CompanionStore.ClockOverride = new DateTimeOffset(2026, 9, 24, 12, 0, 0, TimeSpan.Zero);
+        try
+        {
+            var client = new FakeClient();
+            var store = new CompanionStore(client);
+
+            // Present: › is inert, ‹ is available.
+            Assert.AreEqual(0, store.PeriodOffset);
+            Assert.IsFalse(store.CanStepLater);
+            Assert.IsTrue(store.CanStepEarlier);
+
+            // Walk the day past its 13-step limit and back.
+            for (int i = 0; i < 20; i++) store.StepPeriod(1);
+            Assert.AreEqual(13, store.PeriodOffset, "clamped at the walk-back limit");
+            Assert.IsFalse(store.CanStepEarlier, "‹ inert at the limit");
+            store.StepPeriod(-1);
+            Assert.AreEqual(12, store.PeriodOffset);
+
+            // Selecting a segment re-anchors to the present, even the SAME segment.
+            store.SelectPeriod(UsagePeriod.Today);
+            Assert.AreEqual(0, store.PeriodOffset);
+            Assert.IsFalse(store.CanStepLater);
+
+            // Stepped day: fetch group used ranged hourly + explicit usage window.
+            store.StepPeriod(1);
+            await store.RefreshAsync();
+            CollectionAssert.Contains(client.Requests.ToList(), "/api/usage?date_from=2026-09-23&date_to=2026-09-23");
+            CollectionAssert.Contains(client.Requests.ToList(), "/api/insights?facets=hourly&date_from=2026-09-23&date_to=2026-09-23");
+            var snap = store.Snapshot!;
+            Assert.AreEqual(1, snap.InstanceOffset);
+            Assert.AreEqual("YESTERDAY", snap.KickerText);
+
+            // Stepped year: snapshot stamp, kicker, explicit window on both endpoints.
+            store.SelectPeriod(UsagePeriod.Year);
+            store.StepPeriod(2);
+            await store.RefreshAsync();
+            snap = store.Snapshot!;
+            Assert.AreEqual(UsagePeriod.Year, snap.Period);
+            Assert.AreEqual(2, snap.InstanceOffset);
+            Assert.AreEqual("2024", snap.KickerText);
+            CollectionAssert.Contains(client.Requests.ToList(), "/api/usage?date_from=2024-01-01&date_to=2024-12-31");
+            CollectionAssert.Contains(client.Requests.ToList(), "/api/active-time?date_from=2024-01-01&date_to=2024-12-31");
+        }
+        finally { CompanionStore.ClockOverride = null; }
     }
 }

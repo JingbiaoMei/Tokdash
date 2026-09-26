@@ -132,6 +132,33 @@
             </Setter>
         </Style>
 
+        <!-- E12 kicker stepper chevron: caption-sized ghost icon button, dimmed when the
+             store says the step is not possible (at the walk-back limit / at present). -->
+        <Style x:Key="KickerStepBtn" TargetType="Button" BasedOn="{StaticResource IconBtn}">
+            <Setter Property="Foreground" Value="{DynamicResource MutedBrush}"/>
+            <Setter Property="FontSize" Value="8"/>
+            <Setter Property="Width" Value="16"/>
+            <Setter Property="Height" Value="14"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="bd" CornerRadius="3" Background="Transparent">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                              TextElement.Foreground="{TemplateBinding Foreground}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="{DynamicResource IconBtnHover}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.3"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <!-- Segmented (Low/All) pill button. -->
         <Style x:Key="SegBtn" TargetType="Button">
             <Setter Property="Foreground" Value="{DynamicResource SegText}"/>
@@ -378,7 +405,15 @@
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
-                    <TextBlock Grid.Column="0" Text="TODAY" x:Name="TodayHeader" FontSize="{StaticResource FontCaption}" FontWeight="SemiBold" Style="{StaticResource BodyText}" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center"/>
+                    <!-- Kicker + E12 instance stepper share the left cell (rev4: the segment
+                         on the right is untouched); chevrons sit right after the kicker text. -->
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Text="TODAY" x:Name="TodayHeader" FontSize="{StaticResource FontCaption}" FontWeight="SemiBold" Style="{StaticResource BodyText}" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center"/>
+                        <StackPanel Orientation="Horizontal" Margin="5,1,0,0" VerticalAlignment="Center">
+                            <Button x:Name="StepEarlierBtn" Style="{StaticResource KickerStepBtn}" Content="&#xE76B;" Click="PeriodStep_Click" Tag="-1"/>
+                            <Button x:Name="StepLaterBtn" Style="{StaticResource KickerStepBtn}" Content="&#xE76C;" Click="PeriodStep_Click" Tag="1"/>
+                        </StackPanel>
+                    </StackPanel>
                     <Border Grid.Column="1" CornerRadius="4" Padding="1" Background="{DynamicResource SegBg}">
                         <StackPanel Orientation="Horizontal">
                             <Button x:Name="Period0Btn" Click="Period_Click" Tag="today" Content="Today" Style="{StaticResource SegBtn}"/>

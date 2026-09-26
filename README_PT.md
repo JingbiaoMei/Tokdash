@@ -359,6 +359,38 @@ Abra `http://127.0.0.1:55423`. Use `tokdash serve --port <porta>` se a porta pad
 
 Para todos os detalhes do onboarding, incluindo escolhas de runtime, comportamento WSL/systemd, launchd do macOS, Tailscale, bundle, verificações de atualização e a semântica de desinstalação segura, consulte **[`docs/guides/ONBOARDING.md`](docs/guides/ONBOARDING.md)**.
 
+### Painel no terminal
+
+Prefere ficar no terminal? As duas visões de terminal funcionam sem navegador e reutilizam o mesmo índice de uso local e cache do painel web — uma iniciada ao lado do `tokdash serve` lê o banco de dados compartilhado em disco em vez de reparsear os logs.
+
+O painel interativo:
+
+```bash
+tokdash tui
+```
+
+Ele abre as mesmas abas **Overview**, **Report** e **Quota** do painel web; uma aba mais longa que uma tela rola com a roda do mouse. Teclas:
+
+| Tecla | Ação |
+|---|---|
+| `q` | Sair |
+| `r` | Atualizar a aba atual |
+| `1` / `2` / `3` | Alternar para Overview / Report / Quota |
+| `t` `w` `m` `y` `a` | Pular direto para o período (ambas as abas de período; `t`/`a` só no Overview) |
+| `p` | Próxima janela de tempo (ciclo somente para frente) |
+| `[` / `]` | Recuar / avançar um período calendárico inteiro — um mês cheio na vista mensal, uma semana cheia na semanal (nunca para o futuro) |
+| `0` | Voltar para hoje |
+| `u` | Sondar a cota (somente aba Quota) |
+| `?` | Painel de ajuda com todas as teclas |
+
+Para um relatório de execução única que você pode redirecionar por pipe ou usar em scripts:
+
+```bash
+tokdash report --period week
+```
+
+O período é uma flag, não um argumento posicional — `tokdash report week` falha por design. Valores aceitos: `today` (o padrão), `week`, `month`, `year`, `all`, um número de dias ou o atalho `Nd/Nw/Nm/Ny`; `week`, `month` e `year` são as mesmas janelas alinhadas ao calendário exibidas na aba Report do painel web. O `tokdash report` também aceita `--json`, `--pretty` e `--output <file>`, seguindo as mesmas convenções do `tokdash export`.
+
 ### Digest do OpenClaw (relatórios agendados)
 
 O Tokdash pode alimentar relatórios de uso do OpenClaw diário/semanal/mensal consultando a API local em um cronograma.
@@ -465,6 +497,8 @@ registrar a regra do Tailscale Serve após você optar por isso.
 
 Por padrão o `tokdash serve` abre o painel no seu navegador uma vez na inicialização. Passe `--no-open` para desabilitar (também é pulado automaticamente em ambientes headless/SSH e nos templates de serviço em segundo plano).
 
+Um `tokdash` sem verbo apenas mostra a ajuda de comandos e sai — não inicia mais o `tokdash serve` pelas suas costas nem abre um navegador. Abra o painel explicitamente: `tokdash serve`.
+
 ## Privacidade & segurança
 
 - **Sem telemetria**: o Tokdash não envia seus dados a lugar nenhum intencionalmente.
@@ -519,7 +553,7 @@ A cota do Coding Plan está disponível pelo polling ao vivo do Z.ai, com consen
 
 O uso do WorkBuddy é lido localmente de transcripts `~/.workbuddy-ai/projects/*/*.jsonl` (`WORKBUDDY_DATA_DIR` aceita uma lista separada por vírgulas de raízes para apontar o Tokdash para outros armazéns, ex.: um diretório de dados do Windows a partir do WSL). Cada linha de mensagem de assistente é uma chamada de modelo; a parte em cache dentro de `prompt_tokens` é separada no seu próprio balde e cobrada à taxa de cache, e tokens de raciocínio são exibidos disjuntos da saída mas cobrados à taxa de saída. O id do modelo é mantido tal qual: ids explícitos (ex.: gpt-5.5) são precificados através do banco de preços normal, enquanto o alias do roteador Auto (`default-model`) está ausente do banco de preços e custa 0.00. O valor `credit` por turno é armazenado apenas como metadados e não afeta o custo. A aba Sessões lê as mesmas linhas de transcript (uma linha de assistente faturada = um turno) a partir das mesmas raízes.
 
-O uso do Qoder é lido localmente de dois lugares: o banco SQLite da IDE (`SharedClientCache/cache/db/local.db` sob o diretório de dados da IDE; o build QoderCN é preferido ao internacional no Windows e WSL) e os logs JSONL da CLI (`~/.qoder` e `~/.qoder-cn`, mais `QODER_CONFIG_DIR` e `QODER_CLI_HOME` separados por vírgulas). Do lado da IDE, toda linha `chat_message` conta, todos os papéis: a parte em cache é separada dos tokens de prompt no seu próprio balde e o modelo vem de `model_key` (`auto` quando o nome do roteador está ausente). Do lado da CLI, o registro de faturamento do transcript de cada requisição é mesclado com seu registro de tokens de segmento em todas as raízes: linhas com créditos de provedor mantêm o custo reportado pelo provedor como autoritativo, convertido a uma estimativa de $0.01 por crédito (`QODER_USD_PER_CREDIT` sobrescreve a estimativa) e nunca repricingado, enquanto linhas apenas com tokens são precificadas através do banco de preços normal. Um registro sem tokens de entrada os recupera de `context_usage_ratio` contra a janela de contexto conhecida — `auto` em 180.000 por padrão, todo modelo uma vez `QODER_CLI_CONTEXT_WINDOW` definida explicitamente. O Qoder IDE aparece na aba Sessões: as mesmas linhas `chat_message` (todos os papéis, uma linha analisável = um turno) são lidas de um snapshot em diretório temporário do mesmo banco de dados. Qoder CLI também tem seu próprio painel Sessões: os candidatos por arquivo dos dois fluxos passam pela mesma mesclagem de request_id do Overview (mesma ordem, mesmo vencedor), as linhas com créditos mantêm o custo reportado pelo provedor como está, e os projetos de segmento exibem o rótulo de diretório saneado como está, porque o saneamento não é reversível.
+O uso do Qoder é lido localmente de dois lugares: o banco SQLite da IDE (`SharedClientCache/cache/db/local.db` sob o diretório de dados da IDE; o build QoderCN é preferido ao internacional no Windows e WSL) e os logs JSONL da CLI (`~/.qoder` e `~/.qoder-cn`, mais `QODER_CONFIG_DIR` e `QODER_CLI_HOME` separados por vírgulas). Do lado da IDE, toda linha `chat_message` conta, todos os papéis: a parte em cache é separada dos tokens de prompt no seu próprio balde e o modelo vem de `model_key` (`auto` quando o nome do roteador está ausente). Do lado da CLI, o registro de faturamento do transcript de cada requisição é mesclado com seu registro de tokens de segmento em todas as raízes: linhas com créditos de provedor mantêm o custo reportado pelo provedor como autoritativo, convertido a uma estimativa de $0.01 por crédito (`QODER_USD_PER_CREDIT` sobrescreve a estimativa) e nunca repricingado, enquanto linhas apenas com tokens são precificadas através do banco de preços normal. Um registro sem tokens de entrada os recupera de `context_usage_ratio` contra a janela de contexto daquele modelo — a janela vem do próprio log de execução do Qoder (`logs/runs/<run>/qodercli.log`, a linha `model_config` com `max_input_tokens`, a execução mais recente vence); a janela que a própria sessão declarou com `--context-window` tem prioridade sobre esse log, `auto` recorre a 180.000 quando nenhum a comprova, e `QODER_CLI_CONTEXT_WINDOW` se sobrepõe a todo modelo. O Qoder IDE aparece na aba Sessões: as mesmas linhas `chat_message` (todos os papéis, uma linha analisável = um turno) são lidas de um snapshot em diretório temporário do mesmo banco de dados. Qoder CLI também tem seu próprio painel Sessões: os candidatos por arquivo dos dois fluxos passam pela mesma mesclagem de request_id do Overview (mesma ordem, mesmo vencedor), as linhas com créditos mantêm o custo reportado pelo provedor como está, e os projetos de segmento exibem o rótulo de diretório saneado como está, porque o saneamento não é reversível.
 
 O uso do Zed é lido localmente de `threads/threads.db`, no diretório de dados do Zed de cada sistema (Linux: `$XDG_DATA_HOME/zed` ou `~/.local/share/zed`, respeitando `FLATPAK_XDG_DATA_HOME`; macOS: `~/Library/Application Support/Zed`; Windows: `%LOCALAPPDATA%\Zed`). Cada thread do agente é uma linha cujo blob comprimido com zstd (linhas antigas são JSON puro) carrega um `cumulative_token_usage` que o próprio stream de conclusão do thread acumula com marca d'água máxima por campo — é exclusivo de cache (input + cacheRead = prompt completo), então os buckets correspondem diretamente — e threads de subagente são linhas separadas que nunca são dobradas no pai, de modo que cada thread com tokens conta exatamente uma vez. Um thread é precificado pelo seu modelo atual (um que trocou de modelo, pelo último); ids auto-hospedados ausentes do banco de preços custam 0.00. O Zed não tem variável de ambiente para redirecionar o diretório de dados, então a flag `--user-data-dir` é o ponto cego documentado. O Zed não aparece na aba Sessões.
 

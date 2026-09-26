@@ -242,6 +242,7 @@ QUOTA_PREAMBLE = """
 const scenario = JSON.parse(process.argv[2]);
 const serverRuntimeStatus = new Map();
 const LOCAL_SERVER = { id: 'local', label: 'Local' };
+function localHost() { return LOCAL_SERVER; }
 let lastQuotaServerRows = [];
 let lastQuotaPayload = null;
 let lastQuotaHistory = null;
@@ -499,6 +500,7 @@ WRITE_PREAMBLE = """
 const scenario = JSON.parse(process.argv[2]);
 const serverRuntimeStatus = new Map();
 const LOCAL_SERVER = { id: 'local', label: 'Local' };
+function localHost() { return LOCAL_SERVER; }
 let lastQuotaServerRows = [];
 let lastQuotaPayload = null;
 let lastQuotaHistory = null;

@@ -22,6 +22,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from stat import S_ISREG
 from typing import Any, ClassVar, Dict, Iterator, List, Optional, Tuple
 
 import zstandard
@@ -1770,7 +1771,13 @@ class AntigravityCLIParser(BaseParser):
       cacheRead <- field 1.4.5
       cacheWrite <- field 1.4.4
       reasoning <- field 1.4.9
-      timestamp <- (1.9.4.1 * 1000) + (1.9.4.2 // 1_000_000)
+      timestamp <- (1.9.4.1 * 1000) + (1.9.4.2 // 1_000_000); when that is
+                   absent (agy 1.2.x, verified with 1.2.11 on 2026-09-26, no
+                   longer writes 1.9.4), the latest creation time of the
+                   steps the row references instead: top-level field 2 is a
+                   packed list of steps.idx values, and each steps.metadata
+                   blob carries its creation time at 1.1 (seconds) / 1.2
+                   (nanos). Rows with neither stay at 0, as before.
 
     Dedup key: entry_id = "antigravity_cli:<db_stem>:<idx>"
 
@@ -1793,7 +1800,9 @@ class AntigravityCLIParser(BaseParser):
     )
     # 1: gen_metadata protobuf rows keyed on (db stem, idx), visible output
     #    preferred over total-minus-reasoning.
-    persistent_parser_version = 1
+    # 2: rows without a 1.9.4 timestamp (agy 1.2.x) are dated from the steps
+    #    they reference; they were stored at timestamp 0 before.
+    persistent_parser_version = 2
 
     # No cached root: the product homes are re-discovered per scan, so a home
     # that appears after startup (a first ACP run) is picked up without a
@@ -1827,7 +1836,44 @@ class AntigravityCLIParser(BaseParser):
             "cacheWrite": cache_w,
             "reasoning": reasoning,
             "timestamp": int(sec * 1000 + nanos // 1_000_000),
+            "stepRefs": cls._step_refs(outer.get(2) or []),
         }
+
+    @staticmethod
+    def _step_refs(values: list[Any]) -> list[int]:
+        """steps.idx values a row points at (field 2: packed varints, or plain varints)."""
+        refs: list[int] = []
+        for value in values:
+            if isinstance(value, int):
+                refs.append(value)
+                continue
+            buf, pos = bytes(value), 0
+            while pos < len(buf):
+                ref, pos = _pb_read_varint(buf, pos)
+                refs.append(ref)
+        return refs
+
+    @classmethod
+    def _step_times(cls, conn: sqlite3.Connection) -> Dict[int, int]:
+        """steps.idx -> creation time in ms (metadata 1.1 seconds / 1.2 nanos); {} when unavailable."""
+        try:
+            rows = conn.execute("SELECT idx, metadata FROM steps").fetchall()
+        except Exception:
+            return {}
+        times: Dict[int, int] = {}
+        for idx, metadata in rows:
+            try:
+                created = _pb_get_path(_pb_parse_message(bytes(metadata or b"")), (1,))
+                if not isinstance(created, bytes):
+                    continue
+                stamp = _pb_parse_message(created)
+                sec = cls._i((stamp.get(1) or [0])[-1])
+                nanos = cls._i((stamp.get(2) or [0])[-1])
+            except Exception:
+                continue
+            if sec > 0:
+                times[cls._i(idx)] = int(sec * 1000 + nanos // 1_000_000)
+        return times
 
     def _build_entry(self, idx: int, db_stem: str, decoded: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         model = str(decoded.get("model") or "unknown")
@@ -1865,6 +1911,7 @@ class AntigravityCLIParser(BaseParser):
         for path_str, _, _ in self._file_signatures():
             db_path = Path(path_str)
             rows = None
+            step_times: Dict[int, int] = {}
             # The helper already opens RO with an RW fallback, so the plain connect
             # is only the last resort: sqlite3 opens lazily, so an RO open that needs
             # recovery (the client crashed mid-write, leaving a WAL) fails on the
@@ -1876,6 +1923,7 @@ class AntigravityCLIParser(BaseParser):
                     continue
                 try:
                     rows = conn.execute("SELECT idx, data FROM gen_metadata ORDER BY idx").fetchall()
+                    step_times = self._step_times(conn)
                     break
                 except Exception:
                     pass
@@ -1892,6 +1940,10 @@ class AntigravityCLIParser(BaseParser):
                     decoded = self._decode_row(data)
                     if decoded is None:
                         continue
+                    if not decoded.get("timestamp"):
+                        referenced = [step_times[ref] for ref in decoded.get("stepRefs") or [] if ref in step_times]
+                        if referenced:
+                            decoded["timestamp"] = max(referenced)
                     entry = self._build_entry(self._i(idx), db_path.stem, decoded)
                     if entry is not None:
                         out.append(entry)
@@ -4021,9 +4073,20 @@ def _qoder_cli_iso_ms(value: Any) -> int:
         return 0
 
 
-# The only evidenced context window; model-dependent, so it applies to
-# auto only unless QODER_CLI_CONTEXT_WINDOW is set explicitly.
+# The one context window evidenced for the `auto` router. Windows are
+# model-dependent, so this is the fallback for `auto` only; any other model
+# needs its own evidence, which Qoder writes into its own run log (see
+# qoder_cli_window_table). QODER_CLI_CONTEXT_WINDOW overrides everything.
 _AUTO_CONTEXT_WINDOW = 180_000
+# Upper bound for any window we are willing to trust, from the run log, from a
+# declared --context-window or from QODER_CLI_CONTEXT_WINDOW. It sits above
+# every window any shipping model advertises today (the largest seen in the
+# captured evidence is 256000) and far below the sentinel magnitudes a
+# malformed or placeholder field produces (1e30, 2**64). The bound is not
+# decoration: recovered input is ratio x window, so an unbounded window turns a
+# plausible-looking ratio into a token count no endpoint could ever have billed
+# -- the fabricated-number class this parser exists to close.
+_MAX_CONTEXT_WINDOW = 10_000_000
 # Documented default for an unset/invalid QODER_USD_PER_CREDIT. An
 # estimate (not a Qoder-published rate), so credit-derived costs stay
 # labeled estimates in user-facing docs.
@@ -4065,27 +4128,36 @@ def qoder_cli_runtime_config() -> Tuple[Optional[float], Optional[int]]:
             value = int(raw)
         except ValueError:
             value = None
-        if value is None or value <= 0:
+        # Same gate as the run-log evidence, so an override cannot be the one
+        # path that lets an absurd window through.
+        window = _qoder_cli_sane_window(value)
+        if window is None:
             logger.warning(
                 "tokdash qoder_cli: invalid QODER_CLI_CONTEXT_WINDOW %r; "
-                "window stays unset (auto-only ratio recovery)",
+                "the override is ignored and each model resolves at its own "
+                "evidenced window",
                 raw,
             )
-        else:
-            window = value
     return rate, window
 
 
-def qoder_cli_runtime_signature() -> Tuple[Optional[float], Optional[int]]:
-    """The validated overrides as a hashable tuple, for the cache identities.
+def qoder_cli_runtime_signature(roots: List[Path]) -> Tuple[Optional[float], Optional[int], tuple]:
+    """The validated overrides plus the resolved windows, as a hashable tuple.
 
-    Same tuple as the method-level config, not a fourth reading of the
-    environment. Storing the override -- not the effective value -- matters
-    for the window: unset (auto-only recovery) and an explicit 180000
-    (applies to every model) behave differently and must sign differently,
-    while an invalid value behaves and signs like unset.
+    Same content as the method-level dict signature, not a fourth reading of
+    the environment. Storing the override -- not the effective value -- matters
+    for the window: unset (per-model recovery) and an explicit 180000 (applies
+    to every model) behave differently and must sign differently, while an
+    invalid value behaves and signs like unset.
+
+    The resolved window table rides along because it changes recovered token
+    counts the same way the override does. Overview and the Sessions loader
+    must key on the SAME value or one view can serve candidates the other has
+    already invalidated; `roots` is explicit rather than re-derived so neither
+    side can quietly sign a different filesystem scan.
     """
-    return qoder_cli_runtime_config()
+    rate, window = qoder_cli_runtime_config()
+    return rate, window, qoder_cli_window_table_signature(roots)
 
 
 def qoder_cli_effective_rate(rate: Optional[float]) -> float:
@@ -4096,16 +4168,430 @@ def qoder_cli_effective_rate(rate: Optional[float]) -> float:
     return _DEFAULT_USD_PER_CREDIT if rate is None else rate
 
 
-def qoder_cli_window_for(model: str, override: Optional[int]) -> Optional[int]:
+# Qoder's run log records the model config of every inference request, and
+# that record is the only place the CLI states the context window it is
+# actually using:
+#   model_config={"key":"qfmodel","display_name":"Qwen3.8-Flash",...,"max_input_tokens":180000}
+# Verified against cli_version 1.1.28 (international, token fields zero-filled)
+# and 1.1.63 (same, plus custom OpenAI-compatible providers).
+_QODER_MODEL_CONFIG_MARKER = "model_config="
+
+
+# Anchored at the start of the payload, allowing only the horizontal whitespace
+# a logger might emit: the config object must BEGIN where model_config= says it
+# does, or there is no config object.
+_QODER_PAYLOAD_START_RE = re.compile(r"[ \t]*\{")
+# One shared decoder: raw_decode stops at the end of the first JSON value, which
+# is exactly the bound the window scan needs.
+_QODER_RUN_LOG_DECODER = json.JSONDecoder()
+
+
+def _qoder_cli_model_config_payload(text: str) -> Optional[Dict[str, Any]]:
+    """The object that follows model_config=, or None when there is none.
+
+    Two bounds, and the second is the one that bites.
+
+    The payload must START here. A line whose config is absent or not an object
+    -- model_config=null, a bare word, a truncated write -- must not have its
+    window read from the FIRST BRACE ANYWHERE DOWNSTREAM, because the rest of
+    the line is log payload and prompt text: `model_config=null, prompt="user
+    pasted {"key":"qwen","max_input_tokens":8192}"` is a prompt quoting JSON,
+    and treating that quote as evidence invents a window for a model that never
+    had one.
+
+    The payload must also END here, in its own object. The same line continues
+    with `, custom_model=null` and can carry prompt text, so a scan to
+    end-of-line could land on a quoted "max_input_tokens" further along.
+    raw_decode gives that bound for free: it stops where the JSON stops, is
+    string-aware (a display name like "a{b}c" cannot close the object early),
+    and never touches the trailing payload.
+
+    Anything that fails to decode to an object yields None, deliberately: an
+    undercount surfaces as the named "no window is evidenced" warning, while a
+    fabricated window looks like a measurement. Losing evidence is recoverable;
+    a wrong number is not. RecursionError is caught as well as ValueError
+    because a deeply nested payload overflows the decoder itself, and one
+    malformed log must not cost the whole source (see the contract on
+    _qoder_cli_scan_run_log_windows).
+    """
+    start = _QODER_PAYLOAD_START_RE.match(text)
+    if start is None:
+        return None
+    try:
+        # Index of the brace, not of the gap before it: unlike json.loads,
+        # raw_decode does not skip leading whitespace, so decoding from 0 would
+        # reject a log that emitted model_config= {...}.
+        payload, _end = _QODER_RUN_LOG_DECODER.raw_decode(text, start.end() - 1)
+    except (ValueError, RecursionError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+# 2026-09-24T17-29-24-649+01-00-a-p1: local time, milliseconds, and the UTC
+# offset the CLI was running under.
+_QODER_RUN_ID_RE = re.compile(
+    r"^(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})([+-])(\d{2})-(\d{2})"
+)
+
+
+def _qoder_cli_run_epoch(path: Path, fallback_mtime: Optional[float] = None) -> float:
+    """Epoch seconds of one run, read out of its <run-id> directory name.
+
+    The id embeds a LOCAL time with the offset that applied at the time, so a
+    lexicographic sort of the ids is chronological only while that offset
+    holds. Over a fall-back DST transition ...T02-30-00+02-00 (00:30Z) sorts
+    after the later ...T02-30-00+01-00 (01:30Z), which would hand "latest run
+    wins" to the stale window and divide every recovered input at it. Applying
+    the embedded offset turns the id into a real instant.
+
+    An id that does not parse falls back to the file's mtime rather than to a
+    string sort: both are the same scale, so a future id format lands in the
+    right order instead of an arbitrary one. A stat failure sorts oldest, which
+    keeps "latest wins" on the side of the logs that did resolve.
+
+    The two scales are not identical and the mix is known: a decoded id is the
+    run's START, an mtime is its last write. While every id parses -- which is
+    the only state observed in the wild -- the order is exact. Should Qoder ever
+    change the id format, a long run under the old format can outrank a short
+    one under the new, and the window table would resolve to the longer run.
+    That is a transition-only skew across two formats, not a reordering within
+    one, and it is preferred to guessing at a format not yet seen.
+    """
+    match = _QODER_RUN_ID_RE.match(path.parent.name)
+    if match is not None:
+        year, month, day, hour, minute, sec, milli, sign, off_h, off_m = match.groups()
+        try:
+            offset = timedelta(hours=int(off_h), minutes=int(off_m))
+            if sign == "-":
+                offset = -offset
+            moment = datetime(
+                int(year), int(month), int(day),
+                int(hour), int(minute), int(sec), int(milli) * 1000,
+                tzinfo=timezone(offset),
+            )
+        except ValueError:
+            pass  # impossible date (month 13): fall through to mtime
+        else:
+            return moment.timestamp()
+    if fallback_mtime is not None:
+        return fallback_mtime  # the caller already stat'd it
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def _qoder_cli_run_log_entries(roots: List[Path]) -> List[Tuple[Path, os.stat_result]]:
+    """Every readable run log with its stat, oldest run first.
+
+    <root>/logs/runs/<run-id>/qodercli.log, where <run-id> is an ISO-like
+    timestamp prefix carrying its UTC offset. The same <run-id> names the
+    segment file <session>/segments/<run-id>.jsonl, so this source needs no new
+    path logic and no new join key.
+
+    Ordered by the instant that prefix decodes to -- not by the string, which a
+    DST fall-back reorders -- across ALL roots rather than per root: a per-root
+    sort keeps each root contiguous and loses the cross-root order, which would
+    make "latest wins" mean "whatever root came first".
+
+    The walk stats each file ONCE and hands the result to both callers: the
+    file list and the signature tuple used to walk and stat the same directory
+    twice per refresh, and the mtime fallback in the sort key a third time.
+    Dropping a log that cannot be stat'd is the same rule as the old
+    `is_file()` pre-check, so a vanished log is missing from the signature and
+    the list together rather than half-present in one.
+    """
+    seen = set()
+    found: List[Tuple[Path, os.stat_result]] = []
+    for root in roots:
+        for path in root.glob("logs/runs/*/qodercli.log"):
+            key = str(path)
+            if key in seen:
+                continue
+            seen.add(key)
+            try:
+                st = path.stat()
+            except OSError:
+                continue
+            if not S_ISREG(st.st_mode):
+                continue  # a directory named qodercli.log is not a log
+            found.append((path, st))
+    return sorted(found, key=lambda item: (_qoder_cli_run_epoch(item[0], item[1].st_mtime),
+                                           str(item[0])))
+
+
+def _qoder_cli_sane_window(value: Any) -> Optional[int]:
+    """The window a value evidences, or None when it evidences no usable one.
+
+    Accepts a JSON number (int, or a float the CLI wrote without a fraction)
+    inside (0, _MAX_CONTEXT_WINDOW]; everything else -- bool, string, null,
+    NaN/inf, zero, negative, absurd -- evidences nothing and is the caller's
+    "no window" path. Losing evidence surfaces as the named warning; an absurd
+    window silently becomes a token count.
+
+    The three evidence sources (run-log max_input_tokens, the transcript's
+    declared contextWindow, QODER_CLI_CONTEXT_WINDOW) all route here so they
+    cannot disagree about what a window is, which is the same drift that made
+    Overview and Sessions sign different cache keys once before.
+
+    math.isfinite is never called on an int: int() of a 400-digit JSON literal
+    is exact, while float(that) raises OverflowError, and one malformed field
+    must not cost the whole source.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        window = value
+    elif isinstance(value, float):
+        if not math.isfinite(value):
+            return None
+        window = int(value)
+    else:
+        return None
+    if not 0 < window <= _MAX_CONTEXT_WINDOW:
+        return None
+    return window
+
+
+def _qoder_cli_model_config_pair(payload: Dict[str, Any]) -> Optional[Tuple[str, int]]:
+    """The (model key, window) a model_config object evidences, else None.
+
+    These two fields and nothing else, in the types the CLI writes them: a
+    non-empty string key and a positive JSON number that survives
+    _qoder_cli_sane_window. The decoded object is discarded by the caller; only
+    the pair is kept.
+    """
+    key = payload.get("key")
+    if not isinstance(key, str) or not key:
+        return None
+    window = _qoder_cli_sane_window(payload.get("max_input_tokens"))
+    return None if window is None else (key, window)
+
+
+def qoder_cli_run_log_files(roots: List[Path]) -> List[Path]:
+    """Qoder run logs in run order; see _qoder_cli_run_log_entries for the rules."""
+    return [path for path, _st in _qoder_cli_run_log_entries(roots)]
+
+
+# path -> (mtime_ns, size, sorted window items), maintained by
+# _qoder_cli_run_log_windows() below. Bounded by the number of run logs on
+# disk because it holds ONE entry per file, not one entry per file version.
+_QODER_RUN_LOG_WINDOW_MEMO: Dict[str, tuple] = {}
+# tokdash serve and tokdash tui can share a process, and the warmers run on
+# their own threads, so the memo is written concurrently. lru_cache brings its
+# own lock and a plain dict does not; the lock covers the lookups and the prune
+# only -- the file read happens outside it, where a racing duplicate parse is
+# merely wasted work rather than a blocked refresh.
+_QODER_RUN_LOG_WINDOW_LOCK = threading.Lock()
+
+
+def qoder_cli_run_log_window_memo_clear() -> None:
+    """Drop every memoised run-log window map.
+
+    For tests and for a roots change; leaving it alone only ever costs a
+    re-read, never a stale table, since every hit re-checks mtime and size. The
+    merged-table slot goes with it, since its key is a corpus signature.
+    """
+    global _QODER_WINDOW_MERGE_MEMO
+    with _QODER_RUN_LOG_WINDOW_LOCK:
+        _QODER_RUN_LOG_WINDOW_MEMO.clear()
+        _QODER_WINDOW_MERGE_MEMO = (None, ())
+
+
+def _qoder_cli_scan_run_log_windows(path_str: str) -> tuple:
+    """Read one run log's model_config lines into sorted window items.
+
+    Within the file the last line wins, so the merge only has to settle the
+    order BETWEEN runs to keep "latest run wins".
+    """
+    table: Dict[str, int] = {}
+    try:
+        with open(path_str, "r", encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                at = line.find(_QODER_MODEL_CONFIG_MARKER)
+                if at < 0:
+                    continue
+                try:
+                    payload = _qoder_cli_model_config_payload(
+                        line[at + len(_QODER_MODEL_CONFIG_MARKER):])
+                    pair = None if payload is None else _qoder_cli_model_config_pair(payload)
+                except (ValueError, OverflowError, RecursionError):
+                    # One hostile line costs that line, not the file: the rest
+                    # of the run's evidence is still good. The per-line helpers
+                    # are already guarded, so this is defence in depth for the
+                    # next field that arrives -- an evidence source that can
+                    # blank the dashboard has stopped being an evidence source.
+                    # UnicodeDecodeError lands in ValueError (the reader
+                    # replaces, but a signature change mid-read can still
+                    # surface one), and 10 ** 400 as a JSON int overflows on
+                    # the float conversion rather than returning False.
+                    continue
+                if pair is None:
+                    continue
+                table[pair[0]] = pair[1]
+    except OSError:
+        return ()  # unreadable: contributes nothing, same as a missing log
+    return tuple(sorted(table.items()))
+
+
+def _qoder_cli_run_log_windows(path_str: str, mtime_ns: int, size: int) -> tuple:
+    """The window pairs ONE run log evidences, memoised on its own signature.
+
+    A run log is megabyte-scale, every collect() needs the map, and Qoder
+    appends to the CURRENT run's log while a session is live: signing the whole
+    corpus would make every dashboard poll a new key and re-read every retained
+    log to reuse all but one entry.
+
+    Keyed by PATH with the signature checked inside, rather than by an
+    lru_cache over (path, mtime_ns, size). A bounded LRU over signatures is the
+    obvious shape and the wrong one: a live session produces a NEW signature
+    for the same path on every poll, so those generations compete for the same
+    slots and, past the cap, evict the historical logs the merge has not
+    reached yet -- a full re-read of every log per poll, which is the cost this
+    memo exists to remove. One entry per file cannot thrash, cannot grow past
+    the corpus, and still invalidates on any real change.
+    """
+    with _QODER_RUN_LOG_WINDOW_LOCK:
+        memo = _QODER_RUN_LOG_WINDOW_MEMO.get(path_str)
+    if memo is not None and memo[0] == mtime_ns and memo[1] == size:
+        return memo[2]
+    items = _qoder_cli_scan_run_log_windows(path_str)  # outside the lock: file IO
+    with _QODER_RUN_LOG_WINDOW_LOCK:
+        _QODER_RUN_LOG_WINDOW_MEMO[path_str] = (mtime_ns, size, items)
+    return items
+
+
+# ONE merged table, keyed on the exact file signature it was built from: see
+# _qoder_cli_window_items(). A slot rather than a cache, because the signature
+# changes on every poll of a live session and a multi-entry table keyed on it
+# would be the corpus-wide cache this code already rejects.
+_QODER_WINDOW_MERGE_MEMO: tuple = (None, ())
+
+
+def _qoder_cli_window_items(file_sig: tuple) -> tuple:
+    """Merge the per-file window maps, in the order file_sig already carries.
+
+    file_sig comes from qoder_cli_run_log_signatures(), which is run order,
+    oldest first, so a later run's model_config overwrites an earlier one's.
+    Reading the files one at a time and merging is equivalent to the old single
+    pass: same order, same last-write-wins, one fewer full re-read.
+
+    The merge is memoed against that signature because ONE refresh asks for it
+    several times -- the parse, the collect signature, the persistent-store
+    signature and the Sessions loader -- and on a large corpus the merge itself
+    is the cost, not the reads the per-file memo already covers. The key is the
+    signature rather than a timestamp, so a hit is as current as a recompute;
+    a live session simply misses each poll and pays the merge once.
+
+    Entries for logs Qoder has since pruned are dropped here too, which is what
+    keeps the per-file memo the size of the corpus rather than the history.
+    """
+    # Bound once, under the same lock the clear uses. Reading [0] and [1] as
+    # two separate globals is not atomic: a warmer thread on another core can
+    # clear the slot between them, and this caller hands back the PREVIOUS
+    # generation's table while believing it checked the signature. Same reason
+    # the per-file memo binds _QODER_RUN_LOG_WINDOW_MEMO locally.
+    global _QODER_WINDOW_MERGE_MEMO
+    with _QODER_RUN_LOG_WINDOW_LOCK:
+        memo = _QODER_WINDOW_MERGE_MEMO
+    if memo[0] == file_sig:
+        return memo[1]
+    merged: Dict[str, int] = {}
+    live = set()
+    for path_str, mtime_ns, size in file_sig:
+        live.add(path_str)
+        merged.update(_qoder_cli_run_log_windows(path_str, mtime_ns, size))
+    items = tuple(sorted(merged.items()))
+    with _QODER_RUN_LOG_WINDOW_LOCK:
+        if len(_QODER_RUN_LOG_WINDOW_MEMO) > len(live):
+            for stale in [p for p in _QODER_RUN_LOG_WINDOW_MEMO if p not in live]:
+                _QODER_RUN_LOG_WINDOW_MEMO.pop(stale, None)
+        # Stored inside the lock, and the file reads above stay outside it:
+        # threading.Lock is not reentrant, so a nested acquire would deadlock
+        # the refresh this memo is meant to speed up. A concurrent writer with
+        # a different signature loses, and both still return their own
+        # correctly-keyed table.
+        _QODER_WINDOW_MERGE_MEMO = (file_sig, items)
+    return items
+
+
+def qoder_cli_run_log_signatures(roots: List[Path]) -> tuple:
+    """(path, mtime_ns, size) per run log, in run order; unreadable ones drop out.
+
+    Same walk and the same stat results as qoder_cli_run_log_files(), so the
+    signature cannot describe an ordering the parse will not see.
+    """
+    return tuple((str(path), st.st_mtime_ns, st.st_size)
+                 for path, st in _qoder_cli_run_log_entries(roots))
+
+
+def qoder_cli_window_table(roots: List[Path]) -> Dict[str, int]:
+    """model key -> context window, read out of Qoder's own run logs.
+
+    Latest run wins, so a window the user changed mid-history resolves to what
+    the CLI currently reports. Only positive values are trusted. A missing,
+    unreadable or malformed log contributes nothing: this is an evidence
+    source, not a dependency, and losing it must degrade to the pre-existing
+    behaviour rather than blank the source.
+
+    The object is decoded per line and only those two fields are kept, because
+    the rest of the line can contain prompt text: it is read for the window and
+    discarded, never retained or returned.
+    """
+    return dict(_qoder_cli_window_items(qoder_cli_run_log_signatures(roots)))
+
+
+def qoder_cli_window_table_signature(roots: List[Path]) -> tuple:
+    """The window table as a hashable sorted tuple, for the cache identities.
+
+    Sorted, not scan-ordered: unlike the file signatures, this one only needs
+    to change when the resolved windows change, and a later run re-reporting
+    the same window must not invalidate a warm cache.
+    """
+    return _qoder_cli_window_items(qoder_cli_run_log_signatures(roots))
+
+
+def qoder_cli_window_for(
+    model: str,
+    override: Optional[int],
+    windows: Optional[Dict[str, int]] = None,
+    session_window: Optional[int] = None,
+) -> Optional[int]:
+    """Context window for one request, or None when nothing evidences one.
+
+    Order, strongest evidence first: the explicit override (every model,
+    unchanged), then the window THIS session declared, then the window Qoder
+    reported for this model key, then the evidenced `auto` router window.
+
+    `session_window` comes from the transcript's own runtime-config line, which
+    is how `--context-window` reaches disk. It outranks the run-log table
+    because it is what the CLI actually billed the session against (verified:
+    20783 input at ratio 0.15856170654296875 is exactly 131072) and it lives in
+    the transcript, so Qoder's run-log pruning cannot take it away.
+
+    A model with no evidence anywhere still returns None. That is deliberate:
+    context_usage_ratio is prompt/window, so a guessed window silently turns
+    into invented token counts, and the caller skips the record instead.
+    """
     if override is not None:
         return override
+    if session_window:
+        return session_window
+    if windows:
+        found = windows.get(model)
+        if found:
+            return found
     if model == "auto":
         return _AUTO_CONTEXT_WINDOW
     return None
 
 
 def qoder_cli_transcript_candidate(
-    d: Dict[str, Any], window: Optional[int]
+    d: Dict[str, Any],
+    window: Optional[int],
+    windows: Optional[Dict[str, int]] = None,
+    unattributed: Optional[set] = None,
+    session_window: Optional[int] = None,
 ) -> Optional[Tuple[str, Dict[str, Any]]]:
     msg = d.get("message")
     if not isinstance(msg, dict):
@@ -4126,14 +4612,27 @@ def qoder_cli_transcript_candidate(
     cache_r = BaseParser._i(u.get("cache_read_input_tokens"))
     cache_w = BaseParser._i(u.get("cache_creation_input_tokens"))
     ratio = u.get("context_usage_ratio")
-    ratio_usable = (
-        QoderCliParser._is_number(ratio)
-        and qoder_cli_window_for(model, window) is not None
-    )
+    win = qoder_cli_window_for(model, window, windows, session_window)
+    ratio_usable = QoderCliParser._is_number(ratio) and win is not None
     if in_t == 0 and cache_r == 0 and cache_w == 0 and ratio_usable:
-        in_t = max(0, int(round(float(ratio) * qoder_cli_window_for(model, window))))
-    # Skip records where nothing is attributable (see class docstring).
+        in_t = max(0, int(round(float(ratio) * win)))
+    # Skip records where nothing is attributable (see class docstring). A
+    # credit-bearing one is reported to `unattributed` so the parse can name
+    # the model it had to drop instead of losing it in silence. The reason
+    # rides along because the two causes need different advice: a model with no
+    # evidenced window is fixed by QODER_CLI_CONTEXT_WINDOW, a record with no
+    # ratio is fixed by nothing we control, and telling that reader to set the
+    # variable sends them changing a setting that cannot help.
     if in_t == 0 and out_t == 0 and cache_r == 0 and cache_w == 0 and not ratio_usable:
+        if has_credits and credits > 0 and unattributed is not None:
+            # The RATIO decides, not the window. Without a numeric ratio there
+            # is nothing to multiply, so an override rescues the record even
+            # when no window is evidenced either -- and a record missing both
+            # filed under "window" would send the reader to that variable, see
+            # the record still missing, and conclude the setting is broken.
+            # "window" therefore means "settable", nothing else.
+            has_ratio = QoderCliParser._is_number(ratio)
+            unattributed.add((model, "window" if has_ratio else "ratio"))
         return None
     return str(rid), {
         "has_credits": has_credits,
@@ -4214,7 +4713,10 @@ def qoder_cli_file_signatures(roots: List[Path]) -> tuple:
 
 
 def qoder_cli_file_candidates(
-    path: Path, window: Optional[int]
+    path: Path,
+    window: Optional[int],
+    windows: Optional[Dict[str, int]] = None,
+    unattributed: Optional[set] = None,
 ) -> List[Dict[str, Any]]:
     """One file -> one entry per surviving record line.
 
@@ -4237,6 +4739,14 @@ def qoder_cli_file_candidates(
         session_id = path.stem
         project = path.parent.name
     out: List[Dict[str, Any]] = []
+    # The transcript interleaves runtime-config records with the conversation,
+    # and each one states the window the session used from that point on
+    # (`--context-window` writes it; an unset window arrives as null, which
+    # clears it so the per-model table applies again). Tracking it as the file
+    # is read keeps a mid-session model or window change attributed correctly,
+    # and keeps this a per-file job -- which is what lets the Sessions per-file
+    # cache key stay as it is.
+    session_window: Optional[int] = None
     for line in lines:
         line = line.strip()
         if not line:
@@ -4247,10 +4757,33 @@ def qoder_cli_file_candidates(
             continue  # malformed individual line: skip
         if not isinstance(d, dict):
             continue
+        if not is_segment and d.get("type") == "runtime-config":
+            # Three states, and only the middle one is a declaration. ABSENT
+            # means this record says nothing about the window (an older emitter,
+            # or a mid-session model switch carrying only the model), so the
+            # value already standing stays; JSON null is the CLI saying "no
+            # window is set", which hands the model back to the run-log table;
+            # and a value that is neither -- contextWindow: "131072", or 0, a
+            # list, or past _MAX_CONTEXT_WINDOW -- is a value we cannot read,
+            # not a claim that no window applies. Clearing on it loses a
+            # declared --context-window for the
+            # rest of the file, which is the same failure the absent case above
+            # was fixed for, arrived at from the other direction.
+            if "contextWindow" in d:
+                declared = d["contextWindow"]
+                if declared is None:
+                    session_window = None
+                else:
+                    declared_window = _qoder_cli_sane_window(declared)
+                    if declared_window is not None:
+                        session_window = declared_window
+            continue
         cand = (
             qoder_cli_segment_candidate(d)
             if is_segment
-            else qoder_cli_transcript_candidate(d, window)
+            else qoder_cli_transcript_candidate(
+                d, window, windows, unattributed, session_window
+            )
         )
         if cand is None:
             continue
@@ -4314,6 +4847,39 @@ def qoder_cli_merged_entry(
     }
 
 
+# (model, reason) pairs already warned about in this process.
+# _parse_all() runs on every cache miss, and a live Qoder session changes a
+# transcript mtime between dashboard polls, so an unguarded warning is the
+# same block again every few seconds for as long as the source stays live --
+# which is precisely the reader the warning is aimed at, the one whose run-log
+# evidence is missing. A warning that scrolls away is a warning nobody reads,
+# so each distinct cause speaks once per process.
+_QODER_UNATTRIBUTED_WARNED: set = set()
+_QODER_UNATTRIBUTED_WARNED_LOCK = threading.Lock()
+
+
+def qoder_cli_unattributed_warning_reset() -> None:
+    """Let every (model, reason) warning speak again. For tests only."""
+    with _QODER_UNATTRIBUTED_WARNED_LOCK:
+        _QODER_UNATTRIBUTED_WARNED.clear()
+
+
+def _qoder_cli_new_unattributed_causes(unattributed: set) -> set:
+    """The (model, reason) pairs in `unattributed` that have not warned yet.
+
+    Called under no assumption about parse order, and it never removes
+    anything the parse was asked to report for a different model: the set
+    grows for the lifetime of the process, deliberately, so a cause that
+    recurs after being fixed stays silent. That is the accepted trade -- a
+    restart re-arms it -- and it is the same one-off voice the other startup
+    warnings use.
+    """
+    with _QODER_UNATTRIBUTED_WARNED_LOCK:
+        fresh = unattributed - _QODER_UNATTRIBUTED_WARNED
+        _QODER_UNATTRIBUTED_WARNED.update(fresh)
+    return fresh
+
+
 class QoderCliParser(BaseParser):
     """Parser for Qoder CLI usage: transcript credits + segment tokens.
 
@@ -4349,17 +4915,37 @@ class QoderCliParser(BaseParser):
         the buckets stay separate for the additive aggregator.
       - context_usage_ratio is prompt_tokens / window and recovered as
         input = int(round(ratio * window)), exact on every captured
-        request. Windows are model-dependent and only auto @ 180000 is
-        evidenced (both captured machines), so recovery defaults to
-        auto only; a pinned model recovers only under an explicit
-        QODER_CLI_CONTEXT_WINDOW override, which then applies to every
-        model. Recovery also requires both cache buckets to be 0: the
-        ratio is the TOTAL prompt (cache included), and assigning it to
-        input beside non-zero cache buckets would double-count them.
+        request. Windows are model-dependent, so each model needs its
+        own. Three sources, strongest first: the window the session
+        declared itself (a runtime-config record in the transcript, written
+        by --context-window, and the only one that survives Qoder pruning
+        its run logs), then the per-model map qoder_cli_window_table()
+        reads from Qoder's run log -- model_config{...,"max_input_tokens":
+        180000} -- then the evidenced `auto` router window. All three pass one
+        gate (_qoder_cli_sane_window): a positive number no larger than
+        _MAX_CONTEXT_WINDOW. The recovery is a multiplication, so a sentinel
+        window (1e30, a placeholder gone wrong) turns an ordinary ratio into a
+        token count no endpoint could have billed, and refusing it costs the
+        record only the named warning. Verified on the
+        captured evidence: qfmodel 180000, lite 200000, a declared
+        --context-window 131072 turning 20783 input into ratio
+        0.15856170654296875 exactly, and a custom OpenAI provider whose
+        20783 real input tokens at ratio 0.08118359375 divide to exactly
+        256000, the max_input_tokens its endpoint advertises.
+        QODER_CLI_CONTEXT_WINDOW still overrides everything, and a model
+        with no evidence anywhere recovers nothing (see below).
+        Recovery also requires both cache buckets to be 0: the ratio is
+        the TOTAL prompt (cache included), and assigning it to input
+        beside non-zero cache buckets would double-count them.
       - A record with nothing attributable (all token fields 0 and no
         usable ratio) is skipped even when credits > 0: the aggregator
         drops zero-token rows before reading their cost, so it could
-        never be displayed (documented under-count edge).
+        never be displayed (documented under-count edge). Each model hit
+        this way is named in a warning line, because a silently missing
+        model is indistinguishable from an unused one. The warning names
+        the cause too: a model with no evidenced window (settable, see
+        above) reads differently from a record that carries no ratio at
+        all (not settable -- nothing in Tokdash recovers those).
     =======================================================================
     """
 
@@ -4374,9 +4960,10 @@ class QoderCliParser(BaseParser):
             "visibility"
         ),
     )
-    # 1: request_id-keyed transcript/segment merge with billing-provenance
-    #    entries (fixed for credit rows, pricing for token rows).
-    persistent_parser_version = 1
+    # 2: same request_id-keyed merge, but per-model context windows (run-log
+    #    evidence) change which records survive and their recovered input, so
+    #    rows stored under v1 must not be served beside v2 output.
+    persistent_parser_version = 2
 
     # Aliases of the module constants: the candidate builders moved to module
     # scope so the Sessions harness consumes the SAME builders, and every
@@ -4394,14 +4981,28 @@ class QoderCliParser(BaseParser):
         return qoder_cli_runtime_config()
 
     def runtime_config_signature(self) -> Optional[Dict[str, Any]]:
-        """The validated overrides themselves, for the cache identities.
+        """The validated overrides plus the resolved window table.
 
         The dict form Overview's collect() signature uses; the Sessions
-        loader keys on the identical tuple instead (qoder_cli_runtime_signature)
+        loader keys on the tuple form instead, qoder_cli_runtime_signature(),
         because its cache is an lru_cache and a dict is unhashable.
+
+        Do not append qoder_cli_window_table_signature() to that tuple as if it
+        were missing from it: the table is already the third element of
+        qoder_cli_runtime_signature(), so adding it again only doubles the
+        hashing cost. Both views still key on the same table, which is the
+        property that matters.
+
+        The window table belongs here because it changes the recovered token
+        counts: a run log that appears, changes or is pruned must re-parse,
+        exactly as a changed QODER_CLI_CONTEXT_WINDOW does today.
         """
         rate, window = qoder_cli_runtime_config()
-        return {"usd_per_credit": rate, "context_window": window}
+        return {
+            "usd_per_credit": rate,
+            "context_window": window,
+            "context_windows": qoder_cli_window_table_signature(self.roots),
+        }
 
     # --- discovery -----------------------------------------------------------
 
@@ -4415,17 +5016,46 @@ class QoderCliParser(BaseParser):
 
     # --- passes ---------------------------------------------------------------
 
-    def _window_for(self, model: str, override: Optional[int]) -> Optional[int]:
-        return qoder_cli_window_for(model, override)
+    def _window_for(
+        self,
+        model: str,
+        override: Optional[int],
+        windows: Optional[Dict[str, int]] = None,
+        session_window: Optional[int] = None,
+    ) -> Optional[int]:
+        return qoder_cli_window_for(model, override, windows, session_window)
 
     @staticmethod
     def _is_number(value: Any) -> bool:
-        return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+        """A value every caller can safely feed to float().
+
+        math.isfinite(10 ** 400) raises OverflowError rather than returning
+        False -- a 400-digit JSON literal is a valid int but not a usable
+        number here, since recovery multiplies it as a float. Answering False
+        keeps the caller on its "no ratio" path; raising would cost the whole
+        source one malformed field.
+        """
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return False
+        if isinstance(value, int):
+            try:
+                float(value)
+            except OverflowError:
+                return False
+            return True
+        return math.isfinite(value)
 
     def _transcript_candidate(
-        self, d: Dict[str, Any], window: Optional[int]
+        self,
+        d: Dict[str, Any],
+        window: Optional[int],
+        windows: Optional[Dict[str, int]] = None,
+        unattributed: Optional[set] = None,
+        session_window: Optional[int] = None,
     ) -> Optional[Tuple[str, Dict[str, Any]]]:
-        return qoder_cli_transcript_candidate(d, window)
+        return qoder_cli_transcript_candidate(
+            d, window, windows, unattributed, session_window
+        )
 
     def _segment_candidate(
         self, d: Dict[str, Any]
@@ -4447,6 +5077,8 @@ class QoderCliParser(BaseParser):
 
     def _parse_all(self) -> List[Dict[str, Any]]:
         rate, window = self._runtime_config()
+        windows = qoder_cli_window_table(self.roots)
+        unattributed: set = set()
         effective_rate = qoder_cli_effective_rate(rate)
         # One global candidate map per type across ALL roots: first root in
         # scan order wins between candidates of the same type (true
@@ -4462,7 +5094,7 @@ class QoderCliParser(BaseParser):
             # catch-and-continue is only safe under file_replace.) The
             # Sessions harness deliberately handles the same failure
             # per-file; see _parse_qoder_cli_session_file in sessions.py.
-            for cand in qoder_cli_file_candidates(path, window):
+            for cand in qoder_cli_file_candidates(path, window, windows, unattributed):
                 target = (
                     segment_cands
                     if cand["family"] == "segment"
@@ -4482,8 +5114,31 @@ class QoderCliParser(BaseParser):
             if entry is not None:
                 entries.append(entry)
         entries.sort(key=lambda e: e["timestamp"])
+        # Two causes, two pieces of advice, and each cause speaks once per
+        # process (see _qoder_cli_new_unattributed_causes): a live session
+        # re-parses every poll, and re-logging the same advice each time buries
+        # it rather than surfacing it. Grouping happens on the fresh pairs, so
+        # one refresh still produces one line per cause.
+        fresh = _qoder_cli_new_unattributed_causes(unattributed)
+        if fresh:
+            no_window = sorted({m for m, reason in fresh if reason == "window"})
+            no_ratio = sorted({m for m, reason in fresh if reason == "ratio"})
+            if no_window:
+                logger.warning(
+                    "tokdash qoder_cli: skipped billed records with no attributable "
+                    "tokens for model(s) %s; no context window is evidenced for "
+                    "them. Pass QODER_CLI_CONTEXT_WINDOW=<size> to recover them.",
+                    ", ".join(no_window),
+                )
+            if no_ratio:
+                logger.warning(
+                    "tokdash qoder_cli: skipped billed records for model(s) %s "
+                    "that carry no context_usage_ratio; the token fields are "
+                    "empty and there is no ratio to recover them from, so no "
+                    "Tokdash setting can attribute them.",
+                    ", ".join(no_ratio),
+                )
         return entries
-
 
 
 class DSHParser(BaseParser):

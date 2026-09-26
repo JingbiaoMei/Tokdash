@@ -38,7 +38,9 @@ def _extract_js_function(src: str, signature: str) -> str:
 def _js_binding(source: str, name: str) -> str:
     """The shipped `const`/`let` line for a top-level binding, so harnesses never
     drift from the key names and provider list the dashboard actually uses."""
-    match = re.search(rf"^\s*(?:const|let) {re.escape(name)} = .*?;$", source, re.MULTILINE)
+    # A trailing line comment stays part of the emitted line, so ROUTE_PROBE_TIMEOUT_MS --
+    # the one binding that ships annotated -- is read verbatim instead of being restated.
+    match = re.search(rf"^\s*(?:const|let) {re.escape(name)} = .*?;(\s*//.*)?$", source, re.MULTILINE)
     assert match, f"{name} binding not found"
     return match.group(0).strip()
 
@@ -229,8 +231,10 @@ def test_multi_server_contract_is_client_only_and_service_worker_is_same_origin(
     assert "date_from=${encodeURIComponent(dateFrom)}&date_to=${encodeURIComponent(dateTo)}" in source
     assert "Add anyway" not in source and "仍然添加" not in source
     assert "await probeServer(baseUrl)" in source
-    assert "fetchJson(candidate, '/health'" in source
-    assert "addServerBtn')?.addEventListener('click', storeServerFromForm)" in source
+    # The probe is per route and it is a plain browser fetch: nothing proxies one daemon
+    # through another, which is what keeps this feature client-only.
+    assert "fetch(routePath(route, '/health')" in source
+    assert "addEventListener('click', () => { storeServerFromForm(); })" in source
     assert "server-setting-row" in source
     assert "server-form-status" in source
     assert 'placeholder="Name (optional)"' in source
@@ -710,7 +714,7 @@ def _quota_visibility_dom_functions(source: str) -> str:
             _js_binding(source, "QUOTA_VISIBILITY_GLOBAL_KEY"),
             _js_binding(source, "quotaVisibilityByHost"),
             _js_binding(source, "quotaVisibilityGlobalDefaults"),
-            "const LOCAL_SERVER = { id: 'local', label: 'Local', baseUrl: '' };",
+            "const LOCAL_SERVER = { id: 'local', label: 'Local', baseUrl: '' };\nfunction localHost() { return LOCAL_SERVER; }",
             _js_binding(source, "quotaSingleScopeOwner"),
             "let lastQuotaServerRows = [];",
             "let lastQuotaPayload = null;",
@@ -1004,3 +1008,785 @@ def test_quota_visibility_failed_reload_after_partial_multi_load_keeps_the_block
     ]
     assert out["stored"]["A"]["codex"] is False
     assert "B" not in out["stored"]
+
+
+# ---- Issue #108: one host, N routes ----------------------------------------
+# The pure half of the route model, extracted and run the same way as the mergers above.
+# None of it touches a browser, which is the point: the merge rule, the anti-flap band and
+# the blocked-vs-unreachable split are the parts that can be wrong quietly.
+
+def _route_source(source: str) -> list[str]:
+    """The route-model bindings and pure functions, in dependency order."""
+    return [
+        _js_binding(source, "LOCAL_HOST_ID"),
+        _js_binding(source, "ORIGIN_ROUTE_ID"),
+        _js_binding(source, "SERVERS_STORAGE_KEY"),
+        _js_binding(source, "ROUTE_FLAP_MARGIN_MS"),
+        _js_binding(source, "ROUTE_FLAP_MARGIN_RATIO"),
+        # The harness has no location, so the page route is a stub; every call below passes
+        # its own page address explicitly.
+        "const PAGE_ROUTE_URL = '';",
+        _extract_js_function(source, "function newId(prefix) {"),
+        _extract_js_function(source, "function normalizeRouteUrl(value) {"),
+        _extract_js_function(source, "function routeUrlParts(value) {"),
+        _js_binding(source, "LOOPBACK_HOSTNAMES"),
+        _extract_js_function(source, "function isLoopbackHostname(hostname) {"),
+        _extract_js_function(source, "function tailnetSuffix(hostname) {"),
+        _extract_js_function(source, "function predictBlocked(pageUrl, routeUrl) {"),
+        _extract_js_function(source, "function routeMedianMs(state) {"),
+        _extract_js_function(source, "function beatsIncumbent(challengerMs, incumbentMs) {"),
+        _extract_js_function_with_params(source, "function rankRoutes("),
+        _extract_js_function(source, "function hostRoutes(host) {"),
+        _extract_js_function(source, "function defaultServerLabel(value) {"),
+        _extract_js_function_with_params(source, "function migrateRegistry("),
+        _extract_js_function_with_params(source, "function localHostFrom("),
+        _extract_js_function_with_params(source, "function loadServerRegistry("),
+        _extract_js_function_with_params(source, "function mergeHostsByIdentity("),
+        _extract_js_function(source, "function tokdashShaped(payload) {"),
+        _extract_js_function(source, "function routeLevelError(error) {"),
+    ]
+
+
+def _run_routes(tmp_path: Path, name: str, expression: str, value, extra: list[str] | None = None):
+    source = INDEX_HTML.read_text(encoding="utf-8")
+    functions = _route_source(source) + (extra or [])
+    harness = tmp_path / f"{name}.js"
+    harness.write_text(
+        "\n".join(functions)
+        # Each harness names its fixture pieces directly (urls, cases, hosts...), so the
+        # parsed input is spread onto the global object rather than reached through `input`.
+        + "\nconst input = JSON.parse(process.argv[2]);\nObject.assign(globalThis, input);\n"
+        + f"process.stdout.write(JSON.stringify({expression}));\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(["node", str(harness), json.dumps(value)], check=True, capture_output=True, encoding="utf-8")
+    return json.loads(result.stdout)
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_route_url_normalisation_is_the_dedupe_key(tmp_path):
+    urls = [
+        "HTTP://127.0.0.1:55423/",
+        "http://127.0.0.1:55423",
+        "https://wsl.tail76535.ts.net:443/tokdash/",
+        "https://wsl.tail76535.ts.net/tokdash",
+        "http://192.168.1.30:55423/base//",
+        "http://[::1]:55423",
+        "not a url",
+        "ftp://host/x",
+        "/relative/only",
+    ]
+    out = _run_routes(tmp_path, "normalise", "urls.map(normalizeRouteUrl)", {"urls": urls})
+    assert out[0] == "http://127.0.0.1:55423" == out[1]
+    assert out[2] == "https://wsl.tail76535.ts.net/tokdash" == out[3], "default port and trailing slash drop, prefix stays"
+    assert out[4] == "http://192.168.1.30:55423/base"
+    assert out[5] == "http://[::1]:55423"
+    assert out[6:] == ["", "", ""], "anything a browser could not fetch is not a route"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_blocked_is_predicted_from_the_two_addresses_not_probed(tmp_path):
+    cases = [
+        # https page, LAN plain-http route: the page itself refuses it.
+        ("https://wsl.tail76535.ts.net/tokdash", "http://192.168.1.30:55423"),
+        # https Serve page, foreign tailnet: no stock rule admits that origin.
+        ("https://wsl.other.tail76535.ts.net/tokdash", "https://mac.tail76535.ts.net"),
+        # https Serve page, its own machine's loopback: still admitted by nothing.
+        ("https://wsl.tail76535.ts.net/tokdash", "http://127.0.0.1:55423"),
+        # https page on a tunnel host, any cross-origin route.
+        ("https://dash.example.com", "https://other.example.com"),
+        # the loopback page, which is where the feature lives: all of those read fine.
+        ("http://127.0.0.1:55423", "https://wsl.tail76535.ts.net/tokdash"),
+        ("http://127.0.0.1:55423", "http://192.168.1.30:55423"),
+        ("http://127.0.0.1:55423", "http://127.0.0.1:55424"),
+        # same tailnet, https to https: admitted.
+        ("https://wsl.tail76535.ts.net/tokdash", "https://mac.tail76535.ts.net"),
+        # same origin is never blocked, prefix differences included.
+        ("https://wsl.tail76535.ts.net/tokdash", "https://wsl.tail76535.ts.net/tokdash/api"),
+        # a Serve page cannot read a plain-HTTP same-tailnet address (mixed content first).
+        ("https://wsl.tail76535.ts.net/tokdash", "http://matebook.tail76535.ts.net:55423"),
+    ]
+    out = _run_routes(tmp_path, "blocked", "pairs.map(([p, r]) => predictBlocked(p, r))", {"pairs": cases})
+    assert out[0] == "mixedContent"
+    assert out[1] == "originNotAdmitted"
+    assert out[2] == "originNotAdmitted", "a Serve page reading loopback is blocked, its own machine included"
+    assert out[3] == "originNotAdmitted"
+    assert out[4:7] == ["", "", ""], "the loopback page is admitted by every daemon"
+    assert out[7] == ""
+    assert out[8] == ""
+    assert out[9] == "mixedContent"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_registry_migration_accepts_both_shapes(tmp_path):
+    stored = [
+        {"id": "old", "label": "Old", "baseUrl": "HTTP://Mac:55423/"},
+        {"id": "routed", "label": "Routed", "routes": [
+            {"id": "r1", "url": "http://192.168.1.30:55423"},
+            {"url": "http://matebook.tail76535.ts.net:55423"},
+            {"id": "dup", "url": "http://192.168.1.30:55423/"},
+        ]},
+        {"id": "local", "label": "WSL box", "choice": "r1",
+         "routes": [{"id": "w", "url": "https://wsl.tail76535.ts.net/tokdash"}]},
+        {"id": "junk", "label": "no url"},
+        {"id": "routed", "label": "duplicate id"},
+        None,
+        "not an object",
+    ]
+    out = _run_routes(
+        tmp_path, "migrate", "migrateRegistry(stored, 'http://127.0.0.1:55423')", {"stored": stored}
+    )
+    ids = [host["id"] for host in out]
+    assert ids == ["old", "routed", "local"], "junk and a repeated id drop, a route-less host drops, local does not"
+    old, routed, local = out
+    assert old["routes"][0]["url"] == "http://mac:55423", "v1 baseUrl becomes the single route, canonicalised"
+    assert [r["url"] for r in routed["routes"]] == [
+        "http://192.168.1.30:55423", "http://matebook.tail76535.ts.net:55423"]
+    assert all(r["id"] for r in routed["routes"]), "a route without an id gets one"
+    assert routed["baseUrl"] == "http://192.168.1.30:55423", "baseUrl mirrors the first route for downgrade"
+    assert local["label"] == "WSL box"
+    assert local["choice"] == "auto", "a choice naming a route this host does not own resets"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_local_entry_survives_a_reload_with_its_routes_and_choice(tmp_path):
+    stored = [{"id": "local", "label": "WSL box", "choice": "w",
+               "routes": [{"id": "w", "url": "https://wsl.tail76535.ts.net/tokdash", "kind": "added"}]},
+              {"id": "mate", "label": "matebook", "baseUrl": "http://192.168.1.30:55423"}]
+    out = _run_routes(tmp_path, "localload",
+                      "loadServerRegistry({ getItem: () => JSON.stringify(stored) }, 'http://127.0.0.1:55423')",
+                      {"stored": stored})
+    hosts = out
+    assert [h["id"] for h in hosts] == ["local", "mate"], "local stays first, as the old constant did"
+    local = hosts[0]
+    assert local["label"] == "WSL box", "the rename comes back"
+    assert local["choice"] == "w", "the pinned route comes back"
+    assert [r["url"] for r in local["routes"]] == [
+        "http://127.0.0.1:55423", "https://wsl.tail76535.ts.net/tokdash"], "the origin route is prepended, not stored"
+    assert local["routes"][0]["kind"] == "origin"
+    assert local["instanceId"] == "", "local's identity is re-read each load, never trusted from storage"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_active_route_picks_fastest_then_holds_inside_the_band(tmp_path):
+    routes = [{"id": "a", "url": "http://a"}, {"id": "b", "url": "http://b"}]
+    fast_then_held = {
+        "routes": routes,
+        "runtime": {"a": {"state": "ok", "samples": [40], "reportedInstanceId": "H"},
+                      "b": {"state": "ok", "samples": [34], "reportedInstanceId": "H"}},
+        "choice": "auto", "hostInstanceId": "H", "incumbentRouteId": "a",
+    }
+    out = _run_routes(tmp_path, "band",
+                      "[rankRoutes(scenario), rankRoutes(Object.assign({}, scenario, { runtime: { a: { state: 'ok', samples: [40], reportedInstanceId: 'H' }, b: { state: 'ok', samples: [4], reportedInstanceId: 'H' } } }))]",
+                      {"scenario": fast_then_held})
+    held, taken = out
+    assert held["activeRouteId"] == "a" and held["activeReason"] == "held", "6 ms of jitter on 40 ms is not a reason to move"
+    assert held["fastestRouteId"] == "b", "the ranker still knows which is fastest; only the active route is held"
+    assert taken["activeRouteId"] == "b" and taken["activeReason"] == "fastest"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_route_ranking_rules_pinned_unhealthy_and_all_failed(tmp_path):
+    routes = [{"id": "a", "url": "http://a"}, {"id": "b", "url": "http://b"}]
+    cases = {
+        "pinnedDead": {"routes": routes, "runtime": {"a": {"state": "ok", "samples": [10], "reportedInstanceId": "H"},
+                                                      "b": {"state": "fail", "samples": []}},
+                       "choice": "b", "hostInstanceId": "H"},
+        "pinnedLive": {"routes": routes, "runtime": {"a": {"state": "ok", "samples": [10], "reportedInstanceId": "H"},
+                                                      "b": {"state": "ok", "samples": [900], "reportedInstanceId": "H"}},
+                       "choice": "b", "hostInstanceId": "H"},
+        "allFailed": {"routes": routes, "runtime": {"a": {"state": "fail"}, "b": {"state": "blocked"}},
+                      "choice": "auto", "hostInstanceId": "H"},
+        # A route answering as a different daemon never ranks, and a host with no identity
+        # still ranks on the fingerprint alone.
+        "wrongDaemon": {"routes": routes, "runtime": {"a": {"state": "ok", "samples": [5], "reportedInstanceId": "OTHER"},
+                                                      "b": {"state": "ok", "samples": [500], "reportedInstanceId": "H"}},
+                        "choice": "auto", "hostInstanceId": "H"},
+        "noHostId": {"routes": routes, "runtime": {"a": {"state": "ok", "samples": [5], "reportedInstanceId": "OTHER"}},
+                     "choice": "auto", "hostInstanceId": ""},
+        # A route the probe marked not-this-daemon is unusable even with good samples.
+        "marked": {"routes": routes, "runtime": {"a": {"state": "not-this-daemon", "samples": [5]},
+                                                 "b": {"state": "ok", "samples": [500], "reportedInstanceId": "H"}},
+                   "choice": "auto", "hostInstanceId": "H"},
+    }
+    out = _run_routes(tmp_path, "rules",
+                      "Object.fromEntries(Object.entries(cases).map(([k, v]) => [k, rankRoutes(v)]))", {"cases": cases})
+    assert out["pinnedDead"]["activeRouteId"] == "a", "a pinned route that died falls back rather than going dark"
+    assert out["pinnedDead"]["usableRouteIds"] == ["a"]
+    assert out["pinnedLive"]["activeRouteId"] == "b" and out["pinnedLive"]["activeReason"] == "pinned"
+    assert out["allFailed"]["usableRouteIds"] == []
+    assert out["allFailed"]["activeRouteId"] == "a" and out["allFailed"]["activeReason"] == "unverified", \
+        "the host keeps a placeholder so it stays in the combined view"
+    assert out["wrongDaemon"]["usableRouteIds"] == ["b"], "a route for another daemon does not count"
+    assert out["noHostId"]["usableRouteIds"] == ["a"], "identity-less hosts rank on the fingerprint"
+    assert out["marked"]["usableRouteIds"] == ["b"]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_identity_merge_survivor_and_carried_state(tmp_path):
+    hosts = [
+        {"id": "ws", "label": "workstation", "instanceId": "SAME", "routes": [{"id": "r1", "url": "http://ws"}]},
+        {"id": "local", "label": "Local", "instanceId": "SAME", "routes": [{"id": "r2", "url": "http://127.0.0.1:55423"}]},
+        {"id": "other", "label": "other", "instanceId": "OTHER", "routes": [{"id": "r3", "url": "http://other"}]},
+    ]
+    side = {"runtime": {"ws": {"ok": True}, "local": {"ok": False}}, "csrf": {"ws": "token"}}
+    out, side_after = _run_routes(tmp_path, "merge",
+                                  "[mergeHostsByIdentity(hosts, side), side]", {"hosts": hosts, "side": side})
+    assert [h["id"] for h in out["hosts"]] == ["local", "other"], "local always survives a merge"
+    local = out["hosts"][0]
+    assert local["label"] == "Local", "the survivor keeps its label"
+    assert [r["url"] for r in local["routes"]] == ["http://127.0.0.1:55423", "http://ws"]
+    assert out["lostHostIds"] == ["ws"]
+    assert out["notices"] == [{"survivorId": "local", "survivorLabel": "Local", "loserId": "ws", "loserLabel": "workstation"}]
+    assert "local" in side_after["runtime"] and "ws" not in side_after["runtime"], "health moves with the host"
+    assert side_after["csrf"]["local"] == "token", "the cached CSRF token moves too"
+
+    # Without local in the group the earliest row wins, and a host with no id never merges.
+    pair = [
+        {"id": "a", "label": "A", "instanceId": "SAME", "routes": [{"id": "x", "url": "http://a"}]},
+        {"id": "b", "label": "B", "instanceId": "SAME", "routes": [{"id": "y", "url": "http://b"}]},
+        {"id": "d", "label": "D", "instanceId": "", "routes": [{"id": "z", "url": "http://d"}]},
+        {"id": "e", "label": "E", "instanceId": "", "routes": [{"id": "q", "url": "http://e"}]},
+    ]
+    out2 = _run_routes(tmp_path, "merge2", "mergeHostsByIdentity(pair, {})", {"pair": pair})
+    assert [h["id"] for h in out2["hosts"]] == ["a", "d", "e"], "earliest row survives; identity-less hosts stay apart"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_503_with_a_tokdash_detail_is_not_a_route_failure(tmp_path):
+    cases = {
+        "corsOrDeadSocket": {"typeName": "TypeError"},
+        "abort": {"name": "AbortError"},
+        "proxy502": {"status": 502, "payload": None},
+        "proxyJsonNoDetail": {"status": 504, "payload": {"error": "gateway timeout"}},
+        "proxy503Plain": {"status": 503, "payload": None},
+        "backpressure503": {"status": 503, "payload": {"detail": "Too many cold requests"}},
+        "notFound": {"status": 404, "payload": {"detail": "Not Found"}},
+        "nothing": None,
+    }
+    out = _run_routes(tmp_path, "routelevel",
+                      "Object.fromEntries(Object.entries(cases).map(([k, v]) => [k, routeLevelError(v)]))",
+                      {"cases": cases})
+    assert out["abort"] is True and out["nothing"] is False
+    assert out["proxy502"] is True and out["proxy503Plain"] is True and out["proxyJsonNoDetail"] is True
+    assert out["backpressure503"] is False, "Tokdash backpressure is retry, not a dead route"
+    assert out["notFound"] is False
+
+    # The TypeError half needs a real TypeError, which is what fetch throws on a CORS refusal.
+    type_case = _run_routes(tmp_path, "routelevel2", "routeLevelError(new TypeError('Failed to fetch'))", {"x": 1})
+    assert type_case is True
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_two_routes_one_host_still_counts_once(tmp_path):
+    """The regression this whole feature exists for.
+
+    combineUsagePayloads merges per host, so as long as a two-route daemon is one entry in
+    the fan-out the double count is structurally impossible. This pins that the host shape
+    still feeds the merger exactly one row per host.
+    """
+    source = INDEX_HTML.read_text(encoding="utf-8")
+    functions = _route_source(source) + [
+        _extract_js_function_with_params(source, "function loadServerRegistry("),
+        _extract_js_function(source, "function combineUsagePayloads(list) {"),
+    ]
+    harness = tmp_path / "onecount.js"
+    harness.write_text(
+        "\n".join(functions)
+        + "\nconst input = JSON.parse(process.argv[2]);\n"
+        + "const hosts = loadServerRegistry({ getItem: () => JSON.stringify(input.stored) }, input.page);\n"
+        + "const perHost = hosts.map((host) => JSON.parse(JSON.stringify(input.usage)));\n"
+        + "process.stdout.write(JSON.stringify({ hostCount: hosts.length, routeCount: hosts[0].routes.length,"
+        + " merged: combineUsagePayloads(perHost) }));\n",
+        encoding="utf-8",
+    )
+    usage = {"total_tokens": 100, "total_cost": 1.5, "daily": [{"date": "2026-09-25", "tokens": 100, "cost": 1.5}]}
+    stored = [{"id": "local", "label": "Local",
+               "routes": [{"id": "w", "url": "https://wsl.tail76535.ts.net/tokdash"}]}]
+    result = json.loads(subprocess.run(
+        ["node", str(harness), json.dumps({"stored": stored, "page": "http://127.0.0.1:55423", "usage": usage})],
+        check=True, capture_output=True, encoding="utf-8").stdout)
+    assert result["hostCount"] == 1, "the tailnet URL joined the page's own host instead of becoming a second row"
+    assert result["routeCount"] == 2, "and both addresses are still there"
+    assert result["merged"]["total_tokens"] == 100, "two routes for one daemon must not double the tokens"
+
+
+def _probing_source(source: str) -> list[str]:
+    """The live probing code, with the few globals it reaches for stubbed.
+
+    `fetch` is left to each test, so a route can be made to answer, go quiet mid-round, or
+    refuse. `hosts` is a `var` because the fixture overwrites it through `globalThis`.
+    """
+    return [
+        _js_binding(source, "LOCAL_HOST_ID"),
+        _js_binding(source, "ORIGIN_ROUTE_ID"),
+        _js_binding(source, "ROUTE_PROBE_SAMPLES"),
+        _js_binding(source, "ROUTE_PROBE_TIMEOUT_MS"),
+        _js_binding(source, "ROUTE_PROBE_BACKOFF_CAP_MS"),
+        "const PAGE_ROUTE_URL = '';",
+        "const t = (key) => key;",
+        "var hosts = [];",
+        "const routeRuntime = {};",
+        _extract_js_function(source, "function newId(prefix) {"),
+        _extract_js_function(source, "function normalizeRouteUrl(value) {"),
+        _extract_js_function(source, "function routeUrlParts(value) {"),
+        _js_binding(source, "LOOPBACK_HOSTNAMES"),
+        _extract_js_function(source, "function isLoopbackHostname(hostname) {"),
+        _extract_js_function(source, "function tailnetSuffix(hostname) {"),
+        _extract_js_function(source, "function predictBlocked(pageUrl, routeUrl) {"),
+        _extract_js_function(source, "function routeMedianMs(state) {"),
+        _extract_js_function(source, "function routePath(route, path) {"),
+        _extract_js_function(source, "function tokdashShaped(payload) {"),
+        _extract_js_function(source, "function routeLevelError(error) {"),
+        _extract_js_function(source, "function newRouteRuntime() {"),
+        _extract_js_function(source, "function setRouteState(routeId, patch) {"),
+        _extract_js_function(source, "function routeBackoffReady(routeId, now = Date.now()) {"),
+        _extract_js_function(source, "function markRouteBlocked(routeId, url, error) {"),
+        _extract_js_function(source, "function markRouteFailure(routeId, url, error) {"),
+        _extract_js_function(source, "async function probeOnce(route) {"),
+        _extract_js_function_with_params(source, "async function probeRoute("),
+        _extract_js_function(source, "function hostRoutes(host) {"),
+        _extract_js_function(source, "function applyProbeIdentity(host, route, probe) {"),
+        _extract_js_function_with_params(source, "function blockedRuleText(rule) {"),
+        _extract_js_function_with_params(source, "async function validateRouteAddress("),
+    ]
+
+
+def _fetching_source(source: str) -> list[str]:
+    """The probe code plus the read path, so failover can be driven end to end."""
+    return _probing_source(source) + [
+        _js_binding(source, "ROUTE_FLAP_MARGIN_MS"),
+        _js_binding(source, "ROUTE_FLAP_MARGIN_RATIO"),
+        # The harness has no location, so same-origin paths are passed through.
+        "const appPath = (path) => path;",
+        "const hostActiveRouteId = new Map();",
+        _extract_js_function(source, "function beatsIncumbent(challengerMs, incumbentMs) {"),
+        _extract_js_function_with_params(source, "function rankRoutes("),
+        _extract_js_function(source, "function hostRouteById(server, routeId) {"),
+        _extract_js_function(source, "function activeRouteIdFor(host, runtime = routeRuntime) {"),
+        _extract_js_function(source, "function activeRouteFor(host) {"),
+        _extract_js_function(source, "function serverPath(server, path) {"),
+        _extract_js_function(source, "function viaRoute(server, route) {"),
+        _extract_js_function_with_params(source, "async function fetchJson("),
+        _extract_js_function_with_params(source, "function pickRoute("),
+        _extract_js_function_with_params(source, "async function fetchFromHost("),
+    ]
+
+
+def _run_fetching(tmp_path: Path, name: str, body: str, value=None):
+    source = INDEX_HTML.read_text(encoding="utf-8")
+    harness = tmp_path / f"{name}.js"
+    harness.write_text(
+        "\n".join(_fetching_source(source))
+        + "\nconst input = JSON.parse(process.argv[2]);\nObject.assign(globalThis, input);\n"
+        + "const main = async () => " + body + ";\n"
+        + "main().then((result) => process.stdout.write(JSON.stringify(result)));\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        ["node", str(harness), json.dumps(value if value is not None else {})],
+        check=True, capture_output=True, encoding="utf-8",
+    )
+    return json.loads(result.stdout)
+
+
+def _run_probing(tmp_path: Path, name: str, body: str, value=None):
+    """Run an async body against the real probe code and read the JSON it returns."""
+    source = INDEX_HTML.read_text(encoding="utf-8")
+    harness = tmp_path / f"{name}.js"
+    harness.write_text(
+        "\n".join(_probing_source(source))
+        + "\nconst input = JSON.parse(process.argv[2]);\nObject.assign(globalThis, input);\n"
+        + "const main = async () => " + body + ";\n"
+        + "main().then((result) => process.stdout.write(JSON.stringify(result)));\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        ["node", str(harness), json.dumps(value if value is not None else {})],
+        check=True, capture_output=True, encoding="utf-8",
+    )
+    return json.loads(result.stdout)
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_the_placeholder_never_lands_on_a_route_from_another_daemon(tmp_path):
+    """The all-failed placeholder exists to keep an unverified host in the combined view.
+
+    Once a route has been caught answering as some other Tokdash it is no longer unverified,
+    and reading it would file that machine's tokens under this host -- which is what happens
+    on failover when the only remaining address is the stale one.
+    """
+    routes = [{"id": "stale", "url": "http://stale"}, {"id": "other", "url": "http://other"}]
+    barred = {"state": "not-this-daemon", "samples": [5]}
+    cases = {
+        "allBarred": {"routes": routes, "runtime": {"stale": barred, "other": dict(barred)},
+                      "choice": "auto", "hostInstanceId": "H"},
+        # A route that only failed says nothing about who answers it, so it keeps standing in
+        # for the host the way it always has; the bar is on identity, not on health.
+        "barredThenFailed": {"routes": routes,
+                             "runtime": {"stale": barred, "other": {"state": "fail", "samples": []}},
+                             "choice": "auto", "hostInstanceId": "H"},
+        "barredThenUnprobed": {"routes": routes, "runtime": {"stale": barred},
+                               "choice": "auto", "hostInstanceId": "H"},
+        "nothingProbedYet": {"routes": routes, "runtime": {}, "choice": "auto", "hostInstanceId": "H"},
+    }
+    out = _run_routes(tmp_path, "barred",
+                      "Object.fromEntries(Object.entries(cases).map(([k, v]) => [k, rankRoutes(v)]))",
+                      {"cases": cases})
+    assert out["allBarred"]["activeRouteId"] == "", "no route left may carry the host's figures"
+    assert out["allBarred"]["activeReason"] == ""
+    assert out["barredThenFailed"]["activeRouteId"] == "other", "a failed address still stands in"
+    assert out["barredThenUnprobed"]["activeRouteId"] == "other", "and so does an unprobed one"
+    assert out["nothingProbedYet"]["activeRouteId"] == "stale", "before any probe the first route still stands in"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_a_route_in_backoff_is_not_dialled_between_probes(tmp_path):
+    """The backoff has to cover ordinary reads, not just the probe loop.
+
+    A route that keeps failing backs off so the browser stops knocking on it -- every blocked
+    probe is a red console error and a wasted round trip. If a refresh could still pick that
+    route as the host's placeholder, the backoff would only hide it from the prober. `now` is
+    passed in so the case is about the rule rather than about the clock.
+    """
+    routes = [{"id": "dead", "url": "http://dead"}, {"id": "quiet", "url": "http://quiet"}]
+    in_backoff = {"state": "fail", "samples": [], "nextTryAt": 5_000}
+    cases = {
+        # Every address just failed and none is due yet: the host sits this refresh out.
+        "allInBackoff": {"routes": routes, "runtime": {"dead": dict(in_backoff), "quiet": dict(in_backoff)},
+                         "choice": "auto", "hostInstanceId": "H", "now": 1_000},
+        # Due again, so it is fair game -- otherwise a route stays benched for good.
+        "backoffExpired": {"routes": routes, "runtime": {"dead": dict(in_backoff), "quiet": dict(in_backoff)},
+                           "choice": "auto", "hostInstanceId": "H", "now": 6_000},
+        # blocked is permanent from this page, not a bad moment, so it never earns a request.
+        "allBlocked": {"routes": routes, "runtime": {"dead": {"state": "blocked"}, "quiet": {"state": "blocked"}},
+                       "choice": "auto", "hostInstanceId": "H", "now": 1_000},
+        "blockedThenBackedOff": {"routes": routes, "runtime": {"dead": {"state": "blocked"}, "quiet": dict(in_backoff)},
+                                 "choice": "auto", "hostInstanceId": "H", "now": 1_000},
+        # A route nothing has probed still stands in, so a host never vanishes before its
+        # first round of probes has run.
+        "blockedThenIdle": {"routes": routes, "runtime": {"dead": {"state": "blocked"}},
+                            "choice": "auto", "hostInstanceId": "H", "now": 1_000},
+    }
+    out = _run_routes(tmp_path, "backoff",
+                      "Object.fromEntries(Object.entries(cases).map(([k, v]) => [k, rankRoutes(v)]))",
+                      {"cases": cases})
+    assert out["allInBackoff"]["activeRouteId"] == "", "a refresh does not contact a route that is backing off"
+    assert out["allInBackoff"]["activeReason"] == ""
+    assert out["backoffExpired"]["activeRouteId"] == "dead", "once the backoff lapses the route is back"
+    assert out["allBlocked"]["activeRouteId"] == "", "an address this page can never read is never worth a try"
+    assert out["blockedThenBackedOff"]["activeRouteId"] == ""
+    assert out["blockedThenIdle"]["activeRouteId"] == "quiet", "the unprobed address carries the host instead"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_a_backed_off_route_receives_no_request_at_all(tmp_path):
+    """Ranking is the only door a read goes through, so the count is the proof.
+
+    The assertion that matters is that nothing was fetched: a placeholder that merely looked
+    worse in the list would still put a request on a route the probes just gave up on.
+    """
+    body = """{
+      const hits = [];
+      globalThis.fetch = async (url) => { hits.push(String(url)); throw new TypeError('Failed to fetch'); };
+      const host = { id: 'ws', instanceId: 'WS', choice: 'auto',
+        routes: [{ id: 'a', url: 'http://a', kind: 'added' }, { id: 'b', url: 'http://b', kind: 'added' }] };
+      markRouteFailure('a', 'http://a', new TypeError('Failed to fetch'));
+      markRouteFailure('b', 'http://b', new TypeError('Failed to fetch'));
+      let threw = null;
+      try { await fetchFromHost(host, '/api/usage'); } catch (error) { threw = String(error); }
+      const whileBackingOff = hits.length;
+      // Then the backoff lapses, and the very same read goes out again.
+      Object.values(routeRuntime).forEach((state) => { state.nextTryAt = 0; });
+      const recovered = await fetchFromHost(host, '/api/usage').catch((error) => `threw:${error}`);
+      return { whileBackingOff, total: hits.length, threw, recovered: String(recovered),
+               a: routeRuntime.a.state, b: routeRuntime.b.state };
+    }"""
+    out = _run_fetching(tmp_path, "backoff_reads", body)
+    assert out["whileBackingOff"] == 0, "neither address is dialled while both are backing off"
+    assert "serverRouteUnreachable" in out["threw"], "the host fails the refresh with its own reason"
+    assert out["total"] > 0 and out["recovered"].startswith("threw:"), \
+        "once they are due again the read goes out and reports the real failure"
+    assert out["a"] == "fail" and out["b"] == "fail"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_locals_identity_comes_only_from_the_page_route(tmp_path):
+    """Local is whatever daemon served this page, so only that address may say which one."""
+    body = """{
+      const local = { id: LOCAL_HOST_ID, instanceId: '',
+        routes: [{ id: 'origin', url: 'http://127.0.0.1:55423', kind: 'origin' },
+                 { id: 'added', url: 'http://127.0.0.1:55499', kind: 'added' }] };
+      // The added address is a stale forward answering as a different machine.
+      applyProbeIdentity(local, local.routes[1], { ok: true, instanceId: 'OTHER' });
+      const staleMarked = routeRuntime.added && routeRuntime.added.state;
+      applyProbeIdentity(local, local.routes[0], { ok: true, instanceId: 'MINE' });
+      // Identity known, the stale route is checked against it rather than rewriting it.
+      applyProbeIdentity(local, local.routes[1], { ok: true, instanceId: 'OTHER' });
+      const late = { id: LOCAL_HOST_ID, instanceId: '', routes: [local.routes[1]] };
+      applyProbeIdentity(late, local.routes[1], { ok: true, instanceId: 'OTHER' });
+      return { afterStaleFirst: staleMarked, identity: local.instanceId,
+               staleState: routeRuntime.added.state, lateIdentity: late.instanceId };
+    }"""
+    out = _run_probing(tmp_path, "localidentity", body)
+    assert out["identity"] == "MINE", "only the page's own address identifies Local"
+    assert out["staleState"] == "not-this-daemon", "the added address is judged against it"
+    assert out["lateIdentity"] == "", "and an added address cannot name Local before the page route does"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_a_route_that_goes_quiet_mid_probe_is_not_left_healthy(tmp_path):
+    """Stopping the round is only half the rule; the round has to end in a failure."""
+    body = """{
+      const healthy = { id: 'healthy', url: 'http://healthy', kind: 'added' };
+      const quiet = { id: 'quiet', url: 'http://quiet', kind: 'added' };
+      let calls = { healthy: 0, quiet: 0 };
+      globalThis.fetch = async (url) => {
+        const id = String(url).includes('healthy') ? 'healthy' : 'quiet';
+        calls[id] += 1;
+        if (id === 'quiet' && calls.quiet > 1) throw new TypeError('Failed to fetch');
+        return { ok: true, status: 200,
+          json: async () => ({ service: 'tokdash', instance_id: 'MINE', version: '2.6.4' }) };
+      };
+      const goodProbe = await probeRoute(healthy, { bypassBackoff: true });
+      const quietProbe = await probeRoute(quiet, { bypassBackoff: true });
+      return { good: { ok: goodProbe.ok, state: routeRuntime.healthy.state, samples: routeRuntime.healthy.samples.length },
+               quiet: { ok: quietProbe.ok, kind: quietProbe.kind, state: routeRuntime.quiet.state,
+                        samples: routeRuntime.quiet.samples.length },
+               quietCalls: calls.quiet };
+    }"""
+    out = _run_probing(tmp_path, "quietroute", body)
+    assert out["good"]["ok"] is True and out["good"]["samples"] == 3, "a live route still takes three samples"
+    assert out["quiet"]["ok"] is False and out["quiet"]["kind"] == "fail", "a route that goes quiet fails"
+    assert out["quiet"]["state"] == "fail", "and is not left green on the sample it managed"
+    assert out["quiet"]["samples"] == 0 and out["quietCalls"] == 2, "the round stops at the first failure"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_an_address_is_judged_before_it_is_stored(tmp_path):
+    """An address has to prove it belongs before it can sit on a host's row.
+
+    An unknown id cannot prove two addresses are the same machine, so a host that reports no
+    identity of its own takes no new addresses at all. Once a host DOES have an identity, an
+    address that reports none is refused on an edit just as it is on an add: ranking bars a
+    blank report from carrying that host's figures, so accepting one here would only park a
+    route that can never be used. A host still waiting on its identity edits loosely, because
+    repointing that host's only address defines it rather than merging anything.
+    """
+    body = """{
+      globalThis.fetch = async () => (typeof reply === 'function' ? reply()
+        : { ok: true, status: 200, json: async () => ({ service: 'tokdash', instance_id: reply, version: '2.6.4' }) });
+      const host = { id: 'ws', instanceId: 'WS', routes: [{ id: 'r', url: 'http://ws', kind: 'added' }] };
+      const unidentified = { id: 'old', instanceId: '', routes: [{ id: 'o', url: 'http://old', kind: 'added' }] };
+      const results = {};
+      const add = (h, url) => validateRouteAddress(h, url, { requireProof: true });
+      const edit = (h, url) => validateRouteAddress(h, url);
+
+      reply = () => { throw new TypeError('Failed to fetch'); };
+      results.unreachableOnAdd = (await add(host, 'http://c')).error;
+      results.unreachableOnEdit = (await edit(host, 'http://c')).error;
+
+      reply = 'WS';
+      results.ownDaemonOnAdd = (await add(host, 'http://c')).error;
+
+      reply = 'LAPTOP';
+      results.strangerOnAdd = (await add(host, 'http://c')).error;
+      results.strangerOnEdit = (await edit(host, 'http://c')).error;
+      hosts = [host, { id: 'lap', label: 'laptop', instanceId: 'LAPTOP', routes: [{ id: 'q', url: 'http://lap' }] }];
+      results.listedOwnerOnAdd = (await add(host, 'http://c')).error;
+
+      hosts = [host];
+      reply = '';
+      results.noIdentityOnAdd = (await add(host, 'http://c')).error;
+      results.noIdentityOnEdit = (await edit(host, 'http://c')).error;
+      // Same blank report, but this host has no identity of its own: repointing its only
+      // address defines it, so there is nothing for the silence to contradict.
+      results.noIdentitySoleRouteEdit = (await edit(unidentified, 'http://c')).error;
+
+      reply = 'WHOEVER';
+      results.hostWithoutIdentityOnAdd = (await add(unidentified, 'http://c')).error;
+      results.hostWithoutIdentityOnEdit = (await edit(unidentified, 'http://c')).error;
+      return results;
+    }"""
+    out = _run_probing(tmp_path, "validate", body, {"hosts": [], "reply": ""})
+    assert out["unreachableOnAdd"] == out["unreachableOnEdit"] == "serverTestNetworkError"
+    assert out["ownDaemonOnAdd"] is None, "an address that answers as this host's daemon is fine"
+    assert str(out["strangerOnAdd"]).startswith("serverRouteWrongDaemon"), "an unlisted daemon is refused"
+    assert str(out["strangerOnEdit"]).startswith("serverRouteWrongDaemon"), "on an edit too"
+    assert out["listedOwnerOnAdd"] == "serverRouteAlreadyOn", "a listed daemon is refused by name"
+    assert out["noIdentityOnAdd"] == "serverIdentityUnavailable", "an address with no id proves nothing"
+    assert out["noIdentityOnEdit"] == "serverIdentityUnavailable", \
+        "an edit is refused too, because ranking would never let that route carry the host"
+    assert out["noIdentitySoleRouteEdit"] is None, "a host with no identity can still be repointed"
+    assert out["hostWithoutIdentityOnAdd"] == "serverIdentityUnknownNote", "an unidentified host takes no address"
+    assert out["hostWithoutIdentityOnEdit"] is None, "an old daemon can still be repointed"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_a_rejected_address_leaves_no_trace_in_the_live_state(tmp_path):
+    """Validation probes under a probe-only id.
+
+    Probing under a stored route's id would leave that route holding the candidate's latency
+    or verdict, and Escape mid-probe could not give any of it back.
+    """
+    body = """{
+      const seen = [];
+      globalThis.fetch = async (url) => { seen.push(String(url)); throw new TypeError('Failed to fetch'); };
+      const host = { id: 'ws', instanceId: 'WS', routes: [{ id: 'stored', url: 'http://ws', kind: 'added' }] };
+      const { error } = await validateRouteAddress(host, 'http://candidate', { requireProof: true });
+      return { error, keys: Object.keys(routeRuntime),
+               storedInFile: seen.some((u) => u.includes('stored')) };
+    }"""
+    out = _run_probing(tmp_path, "no_trace", body)
+    assert out["error"] == "serverTestNetworkError"
+    assert out["keys"] == [], "a rejected probe leaves no runtime behind"
+    assert out["storedInFile"] is False, "the stored route's id never reaches the network"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_a_failover_target_that_also_fails_is_demoted_too(tmp_path):
+    """The retry has to record its own failure.
+
+    Both addresses are down here, and a route left `ok` after a request that failed on it
+    would be chosen again by every later read, with no backoff and no reason shown.
+    """
+    body = """{
+      globalThis.fetch = async () => { throw new TypeError('Failed to fetch'); };
+      const host = { id: 'ws', instanceId: 'WS', choice: 'auto',
+        routes: [{ id: 'a', url: 'http://a', kind: 'added' }, { id: 'b', url: 'http://b', kind: 'added' }] };
+      setRouteState('a', { state: 'ok', samples: [10], reportedInstanceId: 'WS' });
+      setRouteState('b', { state: 'ok', samples: [20], reportedInstanceId: 'WS' });
+      let threw = null;
+      try { await fetchFromHost(host, '/api/usage'); } catch (error) { threw = String(error); }
+      return { threw, a: routeRuntime.a.state, b: routeRuntime.b.state,
+               bBackoff: routeRuntime.b.backoffMs > 0 };
+    }"""
+    out = _run_fetching(tmp_path, "failover_both", body)
+    assert "Failed to fetch" in out["threw"], "the caller still sees the failure"
+    assert out["a"] == "fail" and out["b"] == "fail", "both addresses are demoted"
+    assert out["bBackoff"], "and the second one is off the rotation for a while"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_a_read_moves_to_the_next_route_within_the_same_call(tmp_path):
+    body = """{
+      let hits = [];
+      globalThis.fetch = async (url) => {
+        hits.push(String(url));
+        if (String(url).includes('http://a')) throw new TypeError('Failed to fetch');
+        return { ok: true, status: 200, json: async () => ({ total_tokens: 7 }) };
+      };
+      const host = { id: 'ws', instanceId: 'WS', choice: 'auto',
+        routes: [{ id: 'a', url: 'http://a', kind: 'added' }, { id: 'b', url: 'http://b', kind: 'added' }] };
+      setRouteState('a', { state: 'ok', samples: [10], reportedInstanceId: 'WS' });
+      setRouteState('b', { state: 'ok', samples: [20], reportedInstanceId: 'WS' });
+      const payload = await fetchFromHost(host, '/api/usage');
+      return { tokens: payload.total_tokens, a: routeRuntime.a.state, b: routeRuntime.b.state, hits };
+    }"""
+    out = _run_fetching(tmp_path, "failover_ok", body)
+    assert out["tokens"] == 7, "the host reads through its next address"
+    assert out["a"] == "fail" and out["b"] == "ok", "only the address that failed is demoted"
+    assert len(out["hits"]) == 2
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_an_identified_host_ranks_only_routes_that_named_themselves(tmp_path):
+    """A route that answers without an id has proven reachability, not belonging.
+
+    A current daemon can do that while its first lookup runs or during the backoff after a
+    failed one, so such a route stays in the probe rotation -- but it cannot become the
+    fastest route and supply another machine's figures under this host's name.
+    """
+    routes = [{"id": "quiet", "url": "http://quiet"}, {"id": "match", "url": "http://match"}]
+    cases = {
+        # Fastest by a mile, and still not usable: it never said it was this host.
+        "blankVsMatch": {"routes": routes,
+                         "runtime": {"quiet": {"state": "ok", "samples": [4], "reportedInstanceId": ""},
+                                     "match": {"state": "ok", "samples": [900], "reportedInstanceId": "H"}},
+                         "choice": "auto", "hostInstanceId": "H"},
+        "blankOnly": {"routes": [routes[0]],
+                      "runtime": {"quiet": {"state": "ok", "samples": [4], "reportedInstanceId": ""}},
+                      "choice": "auto", "hostInstanceId": "H"},
+        # An unidentified host is the old-daemon case, where the fingerprint is all there is.
+        "hostWithoutIdentity": {"routes": [routes[0]],
+                                "runtime": {"quiet": {"state": "ok", "samples": [4], "reportedInstanceId": ""}},
+                                "choice": "auto", "hostInstanceId": ""},
+        "notProbedYet": {"routes": routes, "runtime": {"match": {"state": "ok", "samples": [900], "reportedInstanceId": "H"}},
+                         "choice": "auto", "hostInstanceId": "H"},
+    }
+    out = _run_routes(tmp_path, "blankidentity",
+                      "Object.fromEntries(Object.entries(cases).map(([k, v]) => [k, rankRoutes(v)]))",
+                      {"cases": cases})
+    assert out["blankVsMatch"]["usableRouteIds"] == ["match"], "a blank report is not a verified match"
+    assert out["blankVsMatch"]["activeRouteId"] == "match"
+    assert out["blankOnly"]["usableRouteIds"] == []
+    assert out["blankOnly"]["activeRouteId"] == "", "and it cannot stand in as the placeholder either"
+    assert out["hostWithoutIdentity"]["usableRouteIds"] == ["quiet"], "an unidentified host ranks on the fingerprint"
+    assert out["notProbedYet"]["activeRouteId"] == "match", "a route with no probe at all still stands in"
+
+
+def test_session_detail_reads_through_the_route_system() -> None:
+    """The drill-down used to fetch one fixed address.
+
+    Every other read goes through the host's routes, so a session opened the moment its
+    address died showed a failed panel where the next address would have shown the session.
+    A browser check covers the happy path; this is what keeps the call from going back to a
+    bare fetch.
+    """
+    source = INDEX_HTML.read_text(encoding="utf-8")
+    body = _extract_js_function(source, "async function openSessionModal(tool, sessionId, ownerServer")
+    assert "fetchFromHost(" in body, "the modal has to read through the route system"
+    assert "await fetch(" not in body, "a fixed-address fetch cannot fail over to the next route"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@pytest.mark.parametrize("address,available,expected,hits", [
+    ("box.ts.net/tokdash/", ["https://box.ts.net/tokdash"], "https://box.ts.net/tokdash", 1),
+    ("127.0.0.1:55423", ["http://127.0.0.1:55423"], "http://127.0.0.1:55423", 2),
+    ("[::1]:55423/base", ["http://[::1]:55423/base"], "http://[::1]:55423/base", 2),
+    ("http://offline:55423", [], "http://offline:55423", 0),
+    ("https://offline/base", [], "https://offline/base", 0),
+    ("box:55423", [], None, 2),
+    ("ftp://box", [], None, 0),
+    ("not a host", [], None, 0),
+    ("javascript:alert(1)", [], None, 0),
+])
+def test_user_address_protocol_discovery(tmp_path, address, available, expected, hits):
+    source = INDEX_HTML.read_text(encoding="utf-8")
+    harness = tmp_path / "protocol.js"
+    harness.write_text("\n".join([
+        _extract_js_function(source, "function normalizeRouteUrl(value) {"),
+        _extract_js_function(source, "async function resolveRouteInput(value) {"),
+        "const t = key => key; const calls = [];",
+        f"const available = {json.dumps(available)};",
+        "async function probeServer(url) { calls.push(url); if (!available.includes(url)) throw new Error('unreachable'); }",
+        f"resolveRouteInput({json.dumps(address)}).then(result => console.log(JSON.stringify({{result,calls}})));",
+    ]), encoding="utf-8")
+    out = json.loads(subprocess.run(["node", str(harness)], capture_output=True, text=True, check=True).stdout)
+    assert out["result"].get("url") == expected
+    assert len(out["calls"]) == hits
+    if expected is None:
+        assert out["result"]["error"]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+@pytest.mark.parametrize("confirm", [False, True])
+def test_last_route_removal_preserves_host_when_cancelled(tmp_path, confirm):
+    source = INDEX_HTML.read_text(encoding="utf-8")
+    functions = [
+        "const LOCAL_HOST_ID = 'local'; const t = key => key;",
+        "const route = {id: 'route', kind: 'added', url: 'http://box'};",
+        "const host = {id: 'box', label: 'Box', routes: [route], choice: 'route'}; let hosts = [host];",
+        "const hostRoutes = host => host.routes; const routeRuntime = {route: {state: 'ok'}};",
+        "const serverRuntimeStatus = new Map(); const csrfTokensByServer = new Map(); const hostActiveRouteId = new Map();",
+        "let serverSelection = {mode: 'custom', custom: ['box']}; let saves = 0;",
+        "const saveServerRegistry = () => saves++; const saveServerSelection = () => {};",
+        "const renderServerSettings = () => {}; const refreshCurrentView = () => {};",
+        f"const window = {{confirm: () => {str(confirm).lower()}}};",
+        _extract_js_function(source, "function removeHost(host) {"),
+        _extract_js_function(source, "function removeRoute(host, route) {"),
+    ]
+    out = _run(tmp_path, "remove_last_route", functions,
+               "(() => { removeRoute(host, route); return {count: hosts.length, routes: host.routes.length, state: !!routeRuntime.route, saves, selection: serverSelection.mode}; })()", None)
+    assert out == {"count": 0 if confirm else 1, "routes": 1, "state": not confirm,
+                   "saves": 1 if confirm else 0, "selection": "all" if confirm else "custom"}

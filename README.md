@@ -401,6 +401,44 @@ For full onboarding details, including runtime choices, WSL/systemd behavior, ma
 Tailscale, bundling, update checks, and safe uninstall semantics, see
 **[`docs/guides/ONBOARDING.md`](docs/guides/ONBOARDING.md)**.
 
+### Terminal dashboard
+
+Prefer to stay in the terminal? Both terminal views work without a browser and reuse the
+same local usage index and cache as the web dashboard — one launched beside `tokdash serve`
+reads the shared on-disk database instead of reparsing logs.
+
+The interactive dashboard:
+
+```bash
+tokdash tui
+```
+
+It opens the same **Overview**, **Report** and **Quota** tabs as the web dashboard; a tab
+longer than one page scrolls with the mouse wheel. Keys:
+
+| Key | Action |
+|---|---|
+| `q` | Quit |
+| `r` | Refresh the current tab |
+| `1` / `2` / `3` | Switch to Overview / Report / Quota |
+| `t` `w` `m` `y` `a` | Jump to a period directly (both period tabs; `t`/`a` are Overview-only) |
+| `p` | Next time window (forward-only cycle) |
+| `[` / `]` | Step one whole calendar period back / forward — full month on month view, full week on week view (never into the future) |
+| `0` | Back to today |
+| `u` | Poll quota (Quota tab only) |
+| `?` | Help overlay with all keys |
+
+For a one-shot report you can pipe or script:
+
+```bash
+tokdash report --period week
+```
+
+The period is a flag, not a positional argument — `tokdash report week` errors by design.
+Accepted values: `today` (the default), `week`, `month`, `year`, `all`, a number of days,
+or `Nd/Nw/Nm/Ny` shorthand; `week`, `month` and `year` are the same calendar-aligned
+windows the web Report tab shows. `tokdash report` also accepts `--json`, `--pretty` and
+`--output <file>`, following the same conventions as `tokdash export`.
 
 ### OpenClaw digest (scheduled reports)
 
@@ -508,6 +546,8 @@ record the Tailscale Serve rule after you opt in.
 
 By default `tokdash serve` opens the dashboard in your browser once on startup. Pass `--no-open` to disable this (it is also skipped automatically in headless/SSH environments and in the background service templates).
 
+A bare `tokdash` with no command just prints the command help and exits — it no longer starts `tokdash serve` behind your back or opens a browser. Start the dashboard explicitly: `tokdash serve`.
+
 ## Privacy & security
 
 - **No telemetry**: Tokdash does not intentionally send your data anywhere.
@@ -556,7 +596,7 @@ ZCode usage is read locally from `$ZCODE_HOME/cli/db/db.sqlite` (default `~/.zco
 
 WorkBuddy usage is read locally from `~/.workbuddy-ai/projects/*/*.jsonl` transcripts (`WORKBUDDY_DATA_DIR` takes a comma-separated list of roots to point Tokdash at other stores, e.g. a Windows data dir from WSL). Each assistant message row is one model call; the cached share inside `prompt_tokens` is split into its own bucket and billed at the cache rate, and reasoning tokens are displayed disjoint from output while billing at the output rate. The model id is kept verbatim: explicit ids (e.g. gpt-5.5) price through the normal pricing database, while the Auto router alias (`default-model`) is absent from the pricing DB and costs 0.00. The per-turn `credit` value is stored as metadata only and does not affect cost. The Sessions tab reads the same transcript rows (one turn per billed assistant row) from the same roots.
 
-Qoder usage is read locally from two places: the IDE's SQLite database (`SharedClientCache/cache/db/local.db` under the IDE data directory; the QoderCN build is preferred over the international one on Windows and WSL) and the CLI JSONL logs (`~/.qoder` and `~/.qoder-cn`, plus `QODER_CONFIG_DIR` and a comma-separated `QODER_CLI_HOME`). On the IDE side every `chat_message` row counts, all roles: the cached share is split out of the prompt tokens into its own bucket and the model comes from `model_key` (`auto` when the router name is absent). On the CLI side each request's transcript billing record is merged with its segment token record across all roots: rows carrying provider credits keep the provider-reported cost as authoritative, converted at an estimated $0.01 per credit (`QODER_USD_PER_CREDIT` overrides the estimate) and never repriced, while token-only rows price through the normal pricing database. A record with no input tokens recovers them from `context_usage_ratio` against the known context window — `auto` at 180,000 by default, every model once `QODER_CLI_CONTEXT_WINDOW` is set explicitly. Qoder IDE appears in the Sessions tab: the same `chat_message` rows (every role, one turn per parseable row) are read from a temp-dir snapshot of the same DB. Qoder CLI also has its own Sessions panel: the per-file candidates of both streams fold through the same request_id merge as the Overview (same order, same winner), credit rows keep the provider-reported cost as-is, and segment projects display the sanitized directory label verbatim because the sanitization is not reversible.
+Qoder usage is read locally from two places: the IDE's SQLite database (`SharedClientCache/cache/db/local.db` under the IDE data directory; the QoderCN build is preferred over the international one on Windows and WSL) and the CLI JSONL logs (`~/.qoder` and `~/.qoder-cn`, plus `QODER_CONFIG_DIR` and a comma-separated `QODER_CLI_HOME`). On the IDE side every `chat_message` row counts, all roles: the cached share is split out of the prompt tokens into its own bucket and the model comes from `model_key` (`auto` when the router name is absent). On the CLI side each request's transcript billing record is merged with its segment token record across all roots: rows carrying provider credits keep the provider-reported cost as authoritative, converted at an estimated $0.01 per credit (`QODER_USD_PER_CREDIT` overrides the estimate) and never repriced, while token-only rows price through the normal pricing database. A record with no input tokens recovers them from `context_usage_ratio` against that model's context window — the window comes from Qoder's own run log (`logs/runs/<run>/qodercli.log`, the `model_config` line that carries `max_input_tokens`, latest run wins); a window the session declared itself with `--context-window` outranks that log, `auto` falls back to 180,000 when neither evidences it, and `QODER_CLI_CONTEXT_WINDOW` overrides every model. Qoder IDE appears in the Sessions tab: the same `chat_message` rows (every role, one turn per parseable row) are read from a temp-dir snapshot of the same DB. Qoder CLI also has its own Sessions panel: the per-file candidates of both streams fold through the same request_id merge as the Overview (same order, same winner), credit rows keep the provider-reported cost as-is, and segment projects display the sanitized directory label verbatim because the sanitization is not reversible.
 
 Zed usage is read locally from `threads/threads.db` under Zed's per-OS data directory (Linux: `$XDG_DATA_HOME/zed` or `~/.local/share/zed`, with `FLATPAK_XDG_DATA_HOME` honored; macOS: `~/Library/Application Support/Zed`; Windows: `%LOCALAPPDATA%\Zed`). Each agent thread is one row whose zstd-compressed blob (legacy rows are plain JSON) carries a `cumulative_token_usage` accumulated by the thread's own completion stream with a per-field high-water mark — cache-exclusive (input + cacheRead = full prompt), so the buckets map straight through — and subagent threads are separate rows whose usage never folds into the parent, so every non-zero thread counts exactly once. A thread prices at its current model (a model-switched thread at its last one); self-hosted ids absent from the pricing DB cost 0.00. Zed has no env-var data-dir override, so the `--user-data-dir` launch flag is the documented blind spot. Zed does not appear in the Sessions tab.
 

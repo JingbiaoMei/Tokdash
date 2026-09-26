@@ -389,6 +389,37 @@ tokdash serve
 完整 onboarding 说明，包括运行时选择、WSL/systemd 行为、macOS launchd、Tailscale、bundle
 集成、更新检查和安全卸载语义，见 **[`docs/guides/ONBOARDING.md`](docs/guides/ONBOARDING.md)**。
 
+### 终端仪表盘
+
+更喜欢留在终端里？两个终端视图都无需浏览器即可工作，并复用与 Web 仪表盘相同的本地索引用量数据和缓存——与 `tokdash serve` 一同启动的终端视图会直接读取共享的磁盘数据库，而不是重新解析日志。
+
+交互式仪表盘：
+
+```bash
+tokdash tui
+```
+
+它打开与 Web 仪表盘相同的 **Overview**、**Report** 和 **Quota** 标签页；标签页超过一页时可用鼠标滚轮滚动。按键：
+
+| 按键 | 操作 |
+|---|---|
+| `q` | 退出 |
+| `r` | 刷新当前标签页 |
+| `1` / `2` / `3` | 切换到 Overview / Report / Quota |
+| `t` `w` `m` `y` `a` | 直接跳转到对应周期（两个周期标签页通用；`t`/`a` 仅 Overview） |
+| `p` | 下一个时间窗口（仅向前循环） |
+| `[` / `]` | 按完整日历周期向前 / 向后切换——月视图切换整个自然月、周视图切换整个自然周（不会跳到未来） |
+| `0` | 回到今天 |
+| `u` | 轮询配额（仅 Quota 标签页） |
+| `?` | 显示所有按键的帮助面板 |
+
+用于可管道化或脚本化的一次性报表：
+
+```bash
+tokdash report --period week
+```
+
+周期只能作为参数（flag），不是位置参数——`tokdash report week` 会按设计报错。可接受的值：`today`（默认）、`week`、`month`、`year`、`all`、天数数字，或 `Nd/Nw/Nm/Ny` 简写；其中 `week`、`month`、`year` 与 Web Report 标签页显示的日历对齐窗口相同。`tokdash report` 还支持 `--json`、`--pretty` 和 `--output <file>`，遵循与 `tokdash export` 相同的约定。
 
 ### OpenClaw 摘要（定时报表）
 
@@ -496,6 +527,8 @@ tokdash db watch --pretty
 
 默认情况下，`tokdash serve` 会在启动时自动在浏览器中打开仪表盘一次。使用 `--no-open` 可禁用此行为（在无界面/SSH 环境以及后台服务模板中也会自动跳过）。
 
+不带子命令直接运行 `tokdash` 只会打印命令帮助然后退出——它不会再悄悄启动 `tokdash serve`，也不会打开浏览器。请显式启动仪表盘：`tokdash serve`。
+
 ## 隐私与安全
 
 - **无遥测**：Tokdash 不会主动把你的数据发送到任何地方。
@@ -544,7 +577,7 @@ ZCode 的用量从 `$ZCODE_HOME/cli/db/db.sqlite`（默认 `~/.zcode/cli/db/db.s
 
 WorkBuddy 的用量从 `~/.workbuddy-ai/projects/*/*.jsonl` 会话日志本地读取（`WORKBUDDY_DATA_DIR` 可指定逗号分隔的根目录列表，指向其他存储位置，例如 WSL 下的 Windows 数据目录）。每条 assistant 消息行对应一次模型调用；`prompt_tokens` 中包含缓存部分，缓存部分单独分桶、按缓存费率计费；reasoning token 与 output 分开显示，但按 output 费率计费。模型 ID 原样保留：显式模型 ID（如 gpt-5.5）照常按现有价格库计价，Auto 路由别名（`default-model`）不在价格库中，费用为 0.00。每轮的 `credit` 值仅作为元数据存储，不计入费用。Sessions 标签页从相同的根目录读取相同的会话日志行（每个计费的 assistant 行对应一个 turn）。
 
-Qoder 的用量从两处本地读取：IDE 的 SQLite 数据库（IDE 数据目录下 `SharedClientCache/cache/db/local.db`，Windows 与 WSL 下 QoderCN 版优于国际版）和 CLI 的 JSONL 日志（`~/.qoder` 与 `~/.qoder-cn`，另支持 `QODER_CONFIG_DIR` 和逗号分隔的 `QODER_CLI_HOME`）。IDE 侧对 `chat_message` 表中每个角色的行都计数：提示词 token 中的缓存部分单独分入缓存桶，模型取自 `model_key`（路由器未暴露名称时为 `auto`）。CLI 侧按请求将会话 transcript 中的计费记录与 segment 日志中的 token 记录合并（覆盖全部 CLI 根目录）：带 provider credits 的行直接使用 provider 报告的成本作为权威值，按估算的 $0.01/credit 换算（可用 `QODER_USD_PER_CREDIT` 覆盖该估算值）且永不重新计价；仅含 token 的行按常规价格库计价。记录没有 input token 时，用 `context_usage_ratio` 乘上已知的上下文窗口恢复 input——除非显式设置 `QODER_CLI_CONTEXT_WINDOW`，否则窗口只对 `auto` 已知（180,000）。Qoder IDE 出现在 Sessions 标签页：相同的 `chat_message` 行（所有角色，每个可解析的行对应一个 turn）从同一数据库的临时目录快照读取。 Qoder CLI 也拥有自己的 Sessions 面板：两条流的逐文件候选按与 Overview 完全相同的顺序、同一胜出规则经由同一个 request_id 合并折叠，credit 行原样保留提供方上报的成本，段项目以净化后的目录标签原样展示，因为该净化不可逆。
+Qoder 的用量从两处本地读取：IDE 的 SQLite 数据库（IDE 数据目录下 `SharedClientCache/cache/db/local.db`，Windows 与 WSL 下 QoderCN 版优于国际版）和 CLI 的 JSONL 日志（`~/.qoder` 与 `~/.qoder-cn`，另支持 `QODER_CONFIG_DIR` 和逗号分隔的 `QODER_CLI_HOME`）。IDE 侧对 `chat_message` 表中每个角色的行都计数：提示词 token 中的缓存部分单独分入缓存桶，模型取自 `model_key`（路由器未暴露名称时为 `auto`）。CLI 侧按请求将会话 transcript 中的计费记录与 segment 日志中的 token 记录合并（覆盖全部 CLI 根目录）：带 provider credits 的行直接使用 provider 报告的成本作为权威值，按估算的 $0.01/credit 换算（可用 `QODER_USD_PER_CREDIT` 覆盖该估算值）且永不重新计价；仅含 token 的行按常规价格库计价。记录没有 input token 时，用 `context_usage_ratio` 乘上该模型的上下文窗口恢复 input——该窗口由 Tokdash 从 Qoder 自己的运行日志读取（`logs/runs/<run>/qodercli.log` 中含 `max_input_tokens` 的 `model_config` 行，以最新一次运行为准）；会话自己用 `--context-window` 声明的窗口优先于该日志，两者都没有佐证时 `auto` 回退到 180,000，而显式设置 `QODER_CLI_CONTEXT_WINDOW` 会覆盖所有模型。Qoder IDE 出现在 Sessions 标签页：相同的 `chat_message` 行（所有角色，每个可解析的行对应一个 turn）从同一数据库的临时目录快照读取。 Qoder CLI 也拥有自己的 Sessions 面板：两条流的逐文件候选按与 Overview 完全相同的顺序、同一胜出规则经由同一个 request_id 合并折叠，credit 行原样保留提供方上报的成本，段项目以净化后的目录标签原样展示，因为该净化不可逆。
 
 Zed 的用量从 Zed 各操作系统数据目录下的 `threads/threads.db` 本地读取（Linux：`$XDG_DATA_HOME/zed` 或 `~/.local/share/zed`，支持 `FLATPAK_XDG_DATA_HOME`；macOS：`~/Library/Application Support/Zed`；Windows：`%LOCALAPPDATA%\Zed`）。每个 agent 线程是一行，带一个 zstd 压缩的 blob（旧行是纯 JSON），其中的 `cumulative_token_usage` 是线程自身完成流以高水位方式累加的总量——缓存独占（input + cacheRead = 完整提示词），各桶直接映射；子代理线程是独立的行，其用量绝不并入父线程，因此每个非零线程恰好计一次。线程按其当前模型计价（中途换过模型的线程按最后一个模型计价）；不在价格库中的自托管模型 id 计 0.00。Zed 没有环境变量形式的目录覆盖，`--user-data-dir` 启动参数是文档中记载的盲区。Zed 不出现在 Sessions 标签页。
 

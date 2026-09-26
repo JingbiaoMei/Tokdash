@@ -359,6 +359,38 @@ tokdash serve
 
 런타임 선택, WSL/systemd 동작, macOS launchd, Tailscale, 번들링, 업데이트 확인, 안전한 제거 동작을 포함한 온보딩 전체 상세는 **[`docs/guides/ONBOARDING.md`](docs/guides/ONBOARDING.md)**를 참조하세요.
 
+### 터미널 대시보드
+
+터미널에 그대로 남겠다면? 두 터미널 뷰 모두 브라우저 없이 동작하며 웹 대시보드와 동일한 로컬 사용량 인덱스와 캐시를 재사용합니다 — `tokdash serve` 옆에서 실행한 터미널 뷰는 로그를 다시 파싱하는 대신 디스크의 공유 데이터베이스를 읽습니다.
+
+인터랙티브 대시보드:
+
+```bash
+tokdash tui
+```
+
+웹 대시보드와 동일한 **Overview**, **Report**, **Quota** 탭을 엽니다. 탭이 한 화면을 넘으면 마우스 휠로 스크롤합니다. 키:
+
+| 키 | 동작 |
+|---|---|
+| `q` | 종료 |
+| `r` | 현재 탭 새로고침 |
+| `1` / `2` / `3` | Overview / Report / Quota으로 전환 |
+| `t` `w` `m` `y` `a` | 기간으로 바로 이동(두 기간 탭 공통; `t`/`a`는 Overview 전용) |
+| `p` | 다음 시간 윈도우(순환은 앞방향만) |
+| `[` / `]` | 캘린더 단위 전체 기간씩 뒤로 / 앞으로 이동 — 월 보기에서는 한 달 전체, 주 보기에서는 한 주 전체(미래로는 이동하지 않음) |
+| `0` | 오늘로 복귀 |
+| `u` | 쿼터 폴링(Quota 탭 전용) |
+| `?` | 모든 키를 표시하는 도움말 패널 |
+
+파이프나 스크립트로 쓸 수 있는 일회성 리포트:
+
+```bash
+tokdash report --period week
+```
+
+기간은 플래그로만 지정합니다 — 위치 인자로 넘기면 설계상 오류입니다 (`tokdash report week` 오류). 허용 값: `today` (기본), `week`, `month`, `year`, `all`, 일수 숫자, 또는 `Nd/Nw/Nm/Ny` 축약형. `week`, `month`, `year`는 웹 Report 탭이 표시하는 달력 기준 윈도우와 동일합니다. `tokdash report`는 `tokdash export`와 동일한 규칙에 따라 `--json`, `--pretty`, `--output <file>`도 받습니다.
+
 ### OpenClaw 다이제스트 (정기 리포트)
 
 Tokdash는 로컬 API를 일정대로 쿼리하여 OpenClaw의 일일/주간/월간 사용량 리포트를 제공할 수 있습니다.
@@ -463,6 +495,8 @@ Tailscale Serve, SSH 포워딩, 명시적 네트워크 바인딩을 통한 원�
 
 기본적으로 `tokdash serve`는 시작 시 브라우저에서 대시보드를 한 번 엽니다. 끄려면 `--no-open`을 넘기세요 (헤드리스/SSH 환경과 백그라운드 서비스 템플릿에서는 자동으로 건너뜀).
 
+명령어를 붙이지 않은 `tokdash`는 명령 헬프를 출력하고 종료하기만 합니다 — 더 이상 몰래 `tokdash serve`를 시작하거나 브라우저를 열지 않습니다. 대시보드는 명시적으로 `tokdash serve`로 여세요.
+
 ## 프라이버시 & 보안
 
 - **텔레메트리 없음**: Tokdash는 데이터를 의도적으로 어디로도 보내지 않습니다.
@@ -517,7 +551,7 @@ Coding Plan 쿼터는 별도로 동의한 Z.ai 라이브 폴러를 통해 사용
 
 WorkBuddy 사용량은 `~/.workbuddy-ai/projects/*/*.jsonl` 트랜스크립트에서 로컬로 읽습니다(`WORKBUDDY_DATA_DIR`은 쉼표 구분 루트 목록을 받아 다른 스토어, 예: WSL의 Windows 데이터 디렉터리 등을 지정할 수 있음). 각 어시스턴트 메시지 행은 하나의 모델 호출이며, `prompt_tokens` 안의 캐시 부분은 별도 버킷으로 분리해 캐시 요율을 적용하고, 추론 토큰은 출력과 분리해 표시하되 출력 요율로 과금됩니다. 모델 ID는 그대로 유지됩니다: 명시적 ID(예: gpt-5.5)는 통상 가격 데이터베이스로 가격화되고, Auto 라우터 별칭(`default-model`)은 가격 DB에 없으므로 비용 0.00입니다. 턴별 `credit` 값은 메타데이터로만 저장되며 비용에 영향을 주지 않습니다. Sessions 탭은 같은 루트에서 같은 트랜스크립트 행(과금 대상 어시스턴트 1행 = 1턴)을 읽습니다.
 
-Qoder 사용량은 두 곳에서 로컬로 읽습니다: IDE의 SQLite 데이터베이스(IDE 데이터 디렉터리 아래 `SharedClientCache/cache/db/local.db`. Windows와 WSL에서는 QoderCN 빌드가 국제판보다 우선)와 CLI JSONL 로그(`~/.qoder`와 `~/.qoder-cn`, 그리고 `QODER_CONFIG_DIR`과 쉼표 구분 `QODER_CLI_HOME`). IDE 쪽에서는 모든 롤의 `chat_message` 행이 모두 카운트되고, 캐시 부분은 프롬프트 토큰에서 별도 버킷으로 분리되며, 모델은 `model_key`(라우터 이름이 없으면 `auto`)에서 옵니다. CLI 쪽에서는 각 요청의 트랜스크립트 과금 기록이 모든 루트에서 세그먼트 토큰 기록과 병합됩니다: 제공자 크레딧을 가진 행은 제공자 보고 비용을 권위로 유지(추정 크레딧 1개당 $0.01로 환산, `QODER_USD_PER_CREDIT`이 추정을 오버라이드하며 절대 재가격화되지 않음), 토큰만 있는 행은 통상 가격 데이터베이스로 가격화됩니다. 입력 토큰이 없는 기록은 알려진 컨텍스트 윈도우에 대한 `context_usage_ratio`로 복원합니다 — 기본 `auto`는 180,000, `QODER_CLI_CONTEXT_WINDOW`이 명시 설정된 뒤로는 모든 모델. Qoder IDE는 Sessions 탭에 표시됩니다: 같은 `chat_message` 행(모든 롤, 해석 가능한 행 1개 = 턴 1개)을 같은 DB의 임시 디렉터리 스냅샷에서 읽습니다. Qoder CLI에도 고유 Sessions 패널이 있습니다: 두 스트림의 파일별 후보는 Overview과 동일한 순서·동일한 승자로 동일한 request_id 병합을 통과하며, 크레딧 행은 공급자 보고 비용을 그대로 유지하고, 세그먼트 프로젝트는 정규화 되돌리기가 불가능하므로 정규화된 디렉터리 레이블을 그대로 표시합니다.
+Qoder 사용량은 두 곳에서 로컬로 읽습니다: IDE의 SQLite 데이터베이스(IDE 데이터 디렉터리 아래 `SharedClientCache/cache/db/local.db`. Windows와 WSL에서는 QoderCN 빌드가 국제판보다 우선)와 CLI JSONL 로그(`~/.qoder`와 `~/.qoder-cn`, 그리고 `QODER_CONFIG_DIR`과 쉼표 구분 `QODER_CLI_HOME`). IDE 쪽에서는 모든 롤의 `chat_message` 행이 모두 카운트되고, 캐시 부분은 프롬프트 토큰에서 별도 버킷으로 분리되며, 모델은 `model_key`(라우터 이름이 없으면 `auto`)에서 옵니다. CLI 쪽에서는 각 요청의 트랜스크립트 과금 기록이 모든 루트에서 세그먼트 토큰 기록과 병합됩니다: 제공자 크레딧을 가진 행은 제공자 보고 비용을 권위로 유지(추정 크레딧 1개당 $0.01로 환산, `QODER_USD_PER_CREDIT`이 추정을 오버라이드하며 절대 재가격화되지 않음), 토큰만 있는 행은 통상 가격 데이터베이스로 가격화됩니다. 입력 토큰이 없는 기록은 해당 모델의 컨텍스트 윈도우에 대한 `context_usage_ratio`로 복원합니다 — 윈도우는 Qoder 자체 실행 로그(`logs/runs/<run>/qodercli.log`의 `max_input_tokens`를 담은 `model_config` 줄, 최신 실행 우선)에서 Tokdash가 읽습니다. 세션이 `--context-window`로 스스로 선언한 윈도우는 이 로그보다 우선하며, 둘 다 뒷받침하지 않으면 `auto`는 180,000으로 돌아가고, `QODER_CLI_CONTEXT_WINDOW`을 설정하면 모든 모델에 적용됩니다. Qoder IDE는 Sessions 탭에 표시됩니다: 같은 `chat_message` 행(모든 롤, 해석 가능한 행 1개 = 턴 1개)을 같은 DB의 임시 디렉터리 스냅샷에서 읽습니다. Qoder CLI에도 고유 Sessions 패널이 있습니다: 두 스트림의 파일별 후보는 Overview과 동일한 순서·동일한 승자로 동일한 request_id 병합을 통과하며, 크레딧 행은 공급자 보고 비용을 그대로 유지하고, 세그먼트 프로젝트는 정규화 되돌리기가 불가능하므로 정규화된 디렉터리 레이블을 그대로 표시합니다.
 
 Zed 사용량은 OS별 Zed 데이터 디렉터리 아래의 `threads/threads.db`에서 로컬로 읽습니다(Linux: `$XDG_DATA_HOME/zed` 또는 `~/.local/share/zed`, `FLATPAK_XDG_DATA_HOME` 반영; macOS: `~/Library/Application Support/Zed`; Windows: `%LOCALAPPDATA%\Zed`). 에이전트 스레드 하나가 한 행이며, zstd로 압축된 blob(구형 행은 일반 JSON)이 `cumulative_token_usage`를 담습니다. 이 값은 스레드 자신의 완성 스트림이 필드별 최고 수위로 누적한 것으로, 캐시 배타적(input + cacheRead가 전체 프롬프트)이라 버킷이 그대로 대응됩니다. 서브에이전트 스레드는 별도 행이며 부모로 접히지 않으므로, 토큰이 있는 각 스레드는 정확히 한 번만 계산됩니다. 스레드는 현재 모델(모델을 바꾼 경우 마지막 모델)로 가격이 매겨지고, 가격 DB에 없는 자체 호스팅 ID는 비용 0.00입니다. Zed에는 데이터 디렉터리를 바꾸는 환경 변수가 없어 `--user-data-dir` 플래그가 문서화된 사각지대입니다. Zed는 Sessions 탭에 나타나지 않습니다.
 

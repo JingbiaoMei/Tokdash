@@ -806,6 +806,25 @@ def _profile_snapshots(
     return windows + resets
 
 
+def _claude_limit_used_percent(limit: dict[str, Any]) -> float | None:
+    """Map one Anthropic usage-limit row to 0-100 used percent.
+
+    The live OAuth usage API (observed 2026-09-24, Max 20x) sends ``percent`` as an
+    integer 0-100: ``1`` is 1% used, ``severity: normal``. ``_normalize_percent``'s
+    default treats the closed unit interval as a fraction, so that ``1`` became 100%
+    used / 0 remaining and the Quota tab looked empty while Claude Code still ran.
+
+    Floats strictly inside (0, 1) stay fractions (``0.5`` → 50%), matching the
+    weekly_scoped fixture. Integers, including 0 and 1, stay on the 0-100 scale.
+    ``utilization`` (legacy five_hour/seven_day objects) keeps the default.
+    """
+    if "percent" in limit:
+        value = limit.get("percent")
+        as_fraction = isinstance(value, float) and not value.is_integer()
+        return _normalize_percent(value, unit_interval_as_fraction=as_fraction)
+    return _normalize_percent(limit.get("utilization"))
+
+
 def _window_snapshots(
     payload: dict[str, Any], *, profile: ClaudeProfile, meta: dict[str, Any], captured_at: int
 ) -> list[QuotaSnapshot]:
@@ -818,7 +837,7 @@ def _window_snapshots(
         # A single malformed entry should be skipped, never abort the whole fetch (which
         # would surface as a raw 500 on /api/quota/refresh instead of a fetch_error).
         try:
-            used = _normalize_percent(limit.get("percent", limit.get("utilization")))
+            used = _claude_limit_used_percent(limit)
             if used is None:
                 continue
             bucket, label = _label_for_limit(limit)

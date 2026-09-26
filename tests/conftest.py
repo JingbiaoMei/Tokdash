@@ -1,8 +1,45 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _no_tui_remote_probe():
+    """The suite must never probe a real localhost, on ANY code path.
+
+    ``tokdash.tui.remote.probe_service`` answers "no service" before it builds a
+    socket while TOKDASH_TUI_NO_REMOTE is set, so every data/report/app fetch
+    seam in the suite takes the same in-process path it did before HTTP
+    delegation existed — and a suite run beside the live dev service (port 55423
+    or whatever the manifest says) can neither see it nor disturb it.
+
+    Session-scoped on purpose (setdefault: an outer export still wins): the
+    tests that exercise the remote path monkeypatch ``tokdash.tui.remote``'s
+    fake opener seam and ``delenv`` the flag themselves, per test.
+    """
+    os.environ.setdefault("TOKDASH_TUI_NO_REMOTE", "1")
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _set_quota_gate_for_tests(tmp_path_factory):
+    """Default every ``*_api`` quota consent gate to ``0`` for the whole session.
+
+    The gates (``sources/quota/config.QUOTA_KEYS``: ``codex_api``,
+    ``claude_api``, ``minimax_api``, …) are persisted in
+    ``<data_dir>/config.json`` — unlike ``TOKDASH_QUOTA_POLL`` there is no env
+    var per gate (verified against ``config.network_enabled`` /
+    ``read_quota_config``), so what the gates actually read is the data
+    directory. ``isolated_usage_db`` already redirects it per test (absent file
+    ⇒ every gate reads ``False``); this session-scoped default additionally
+    covers anything that reads consent before per-test isolation lands, and
+    keeps a developer's consented ``~/.tokdash/config.json`` — with its network
+    polling on — from answering a quota code path in this suite. Individual
+    tests grant a gate via ``set_quota_consent`` inside the redirected dir.
+    """
+    os.environ.setdefault("TOKDASH_DATA_DIR", str(tmp_path_factory.mktemp("quota-gates-off")))
 
 
 @pytest.fixture(autouse=True)

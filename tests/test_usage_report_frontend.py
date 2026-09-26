@@ -28,12 +28,12 @@ I18N_LANGS = ("en", "zh", "ja", "ko", "es", "pt")
 # Kana and Han, for the copy rules that only apply where words carry no spaces.
 CJK = r"[぀-ヿ一-鿿]"
 
-# Every line that makes a claim about one machine: whose midnight starts a
-# day, whose tokdash counted, whose other tools these are. All of them take the
-# selected server's name rather than assuming local. The card's range line used
-# to be on this list; the cosyncing review cut its "on {machine}" clause.
+# Every line that makes a claim about one machine: whose midnight starts a day
+# and whose tokdash counted. Both take the selected server's name rather than
+# assuming local. The card's range line used to be on this list; the cosyncing
+# review cut its "on {machine}" clause. The agent table's folded "other tools"
+# row left with the fold, so it no longer makes one either.
 MACHINE_KEYS = (
-    "usageReportOtherTools",
     "usageReportFooterDays",
     "usageReportFooterSrc",
 )
@@ -463,9 +463,8 @@ const build = (over) => usageReportBuildModel({
 const shape = (model) => ({
   sessions: model.sessions,
   activeMs: model.activeMs,
-  primary: model.agentPrimary.map((row) => row.tool),
-  others: model.agentOthers.map((row) => row.tool),
-  primarySessions: model.agentPrimary.map((row) => row.sessions),
+  agents: model.agentRows.map((row) => row.tool),
+  agentSessions: model.agentRows.map((row) => row.sessions),
   hasStreaks: !!model.streaks,
   notices: model.notices,
 });
@@ -489,8 +488,8 @@ def test_a_failed_active_time_leaves_no_count_rather_than_a_zero(tmp_path: Path)
 
     Summing an absent `by_tool` map yields 0, which the report would then print
     as "you drove 0 sessions" for a month somebody worked. It also used to empty
-    the agent table: every row lost its session count, and the rule that parks
-    session-less tools in the disclosure row then parked all of them.
+    the agent table: every row lost its session count at once, and a session-less
+    row was a row nobody could see.
     """
     source = _source()
     body = "\n".join(_extract_js_function(source, sig) for sig in MODEL_SIGNATURES) + MODEL_FIXTURE
@@ -498,16 +497,15 @@ def test_a_failed_active_time_leaves_no_count_rather_than_a_zero(tmp_path: Path)
 
     whole = report["whole"]
     assert whole["sessions"] == 4
-    assert whole["primary"] == ["codex"], "a tool with no recorded session waits in the disclosure"
-    assert whole["others"] == ["claude"]
+    assert whole["agents"] == ["codex", "claude"], "the table prints every ranked tool"
+    assert whole["agentSessions"] == [4, None], "an untracked session count is absent, not zero"
 
     down = report["noActiveTime"]
     assert down["sessions"] is None, "an absent source has no session count, not a count of zero"
     assert down["activeMs"] == 0
     assert down["notices"]["activeTimeMissing"] is True
-    assert down["primary"] == ["codex", "claude"], "the ranking still stands on its token columns"
-    assert down["primarySessions"] == [None, None]
-    assert down["others"] == []
+    assert down["agents"] == ["codex", "claude"], "the ranking still stands on its token columns"
+    assert down["agentSessions"] == [None, None]
 
     # The other half of the same class: no streaks facet is no active-day count.
     assert report["noInsights"]["hasStreaks"] is False
@@ -531,6 +529,111 @@ def test_the_first_paint_builds_a_model_over_two_absent_sources(tmp_path: Path) 
     assert first["sessions"] is None, "no active time yet is not a count of zero"
     assert first["hasStreaks"] is False
     assert first["activeMs"] == 0
+
+
+AGENTS_TABLE_SIGNATURES = (
+    "function usageReportAgentRow(row) {",
+    "function usageReportRenderAgents(model) {",
+)
+
+# A tbody is a tbody: the harness counts emitted rows rather than reading for a
+# literal `slice(0, 10)`, which a cap renamed to `slice(0, 12)` would walk past.
+AGENTS_TABLE_FIXTURE = """
+const USAGE_REPORT_EM = '\\u2014';
+const nodes = [];
+function makeNode(tag) {
+  const node = {
+    tag, children: [], className: '', textContent: '', colSpan: null,
+    append(...kids) { kids.forEach((kid) => this.children.push(kid)); },
+    appendChild(kid) { this.children.push(kid); return kid; },
+    replaceChildren(...kids) { this.children = kids; },
+  };
+  nodes.push(node);
+  return node;
+}
+const body = makeNode('tbody');
+const note = makeNode('p');
+const document = {
+  createElement: makeNode,
+  createDocumentFragment: () => makeNode('fragment'),
+  getElementById: (id) => (id === 'usageReportAgentsBody' ? body : note),
+};
+const t = (key) => key;
+const formatNumber = (v) => `n${v}`;
+const formatTokenCount = (v) => `t${v}`;
+const formatCurrency = (v) => `$${v}`;
+const formatDurationUnits = (v) => `d${v}`;
+function usageReportFigure(value, format) {
+  return value === null || value === undefined ? USAGE_REPORT_EM : format(value);
+}
+// The real one fetches a brand asset; the row's tool name is all this test needs.
+function createToolIdentity(tool) { return makeNode(`identity:${tool}`); }
+function usageReportFillNote() {}
+function usageReportShowFacetCoverage() { return false; }
+function usageReportShare(value) { return String(value); }
+const rows = Array.from({ length: 14 }, (_, index) => ({
+  tool: `tool-${index}`,
+  tokens: 1000 - index,
+  cost: index,
+  tokensIn: index,
+  tokensOut: index,
+  tokensCache: index,
+  sessions: index === 13 ? null : index,
+  activeMs: index === 13 ? null : index * 1000,
+}));
+usageReportRenderAgents({
+  tools: rows, agentRows: rows, tokens: 1000, facetTotal: 1000, projectsAvailable: true,
+});
+const emitted = body.children[0].children;
+// The no-session tool is looked up by name, not by index. If a cap comes back
+// the row-count assertion gets to report it, rather than this harness crashing
+// on a fourteenth row that was never printed.
+const noSessionRow = emitted.find(
+  (tr) => tr.children[0].children[0].tag === 'identity:tool-13',
+);
+process.stdout.write(JSON.stringify({
+  rowCount: emitted.length,
+  tags: emitted.map((tr) => tr.children[0].children[0].tag),
+  buttonRows: emitted.filter((tr) => tr.children.some((td) => td.tag === 'button')).length,
+  emptyCells: noSessionRow
+    ? noSessionRow.children.slice(1).map((td) => td.textContent)
+    : null,
+}));
+"""
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_the_agent_table_prints_every_tool_it_was_given(tmp_path: Path) -> None:
+    """The table used to headline ten tools and park the rest behind an "Other
+    tools on this machine" disclosure. On a machine with a long tail that read as
+    a table of the same ten names, so the fold is gone.
+
+    Executed, because the fold came back the moment anybody capped the loop: the
+    report renders fourteen tools and demands fourteen rows, in rank order, with
+    no fold row anywhere in the emitted tbody.
+    """
+    source = _source()
+    block = _report_block(source)
+    body = "\n".join(_extract_js_function(block, sig) for sig in AGENTS_TABLE_SIGNATURES)
+    body += AGENTS_TABLE_FIXTURE
+    table = json.loads(_run_node(tmp_path, "usage-report-agents.js", body))
+
+    assert table["rowCount"] == 14, "one row per ranked tool, with nothing folded away"
+    assert table["tags"] == [f"identity:tool-{index}" for index in range(14)], "rank order holds"
+    assert table["buttonRows"] == 0, "the disclosure button is gone, not merely closed"
+    # The last tool has no recorded session, so the two columns that come from
+    # activity go blank -- which is not the same fact as a zero, and is exactly
+    # why the fold used to hide such rows. Its tokens and cost still print.
+    assert table["emptyCells"] == ["\u2014", "t987", "t13", "t13", "t13", "$13", "\u2014"], table["emptyCells"]
+
+    for leftover in (
+        "agentPrimary",
+        "agentOthers",
+        "othersOpen",
+        "usageReportOtherTools",
+        "usageReportToolCount",
+    ):
+        assert leftover not in source, f"{leftover} outlived the fold"
 
 
 def test_the_server_warms_the_exact_facet_string_the_tab_asks_for() -> None:
@@ -1011,16 +1114,12 @@ def test_report_copy_keys_are_prefixed_and_shared_across_languages() -> None:
 
 def test_every_line_that_names_a_machine_names_the_selected_one() -> None:
     """The report is single-server, and these lines used to be fixed strings
-    about "this machine": read from a remote server, the footer, the agent
-    table and the exported card all described the wrong box.
+    about "this machine": read from a remote server, the footer and the exported
+    card described the wrong box.
     """
     source = _source()
     block = _report_block(source)
-    for call in (
-        "t('usageReportFooterDays', { machine })",
-        "t('usageReportOtherTools', { n: tally, machine: usageReportMachineName() })",
-    ):
-        assert call in block, call
+    assert "t('usageReportFooterDays', { machine })" in block
     footer = _extract_js_function(block, "function usageReportRenderFooter(model) {")
     assert "const machine = usageReportMachineName();" in footer
     # Only the nickname fallback may still spell the phrase out.

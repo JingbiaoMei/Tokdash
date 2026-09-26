@@ -407,8 +407,41 @@ is the one write-capable method by design — the forward preserves a genuine lo
 The dashboard and companion apps can read several Tokdash instances at once. In dashboard
 Settings, add each server URL and choose All or a custom subset. Overview, Sessions, and
 Stats combine reachable servers; Quota stays grouped by server. An unreachable server drops
-out until a later refresh succeeds. Adding the same instance under two URLs double-counts
-usage.
+out until a later refresh succeeds.
+
+### Several addresses for one server
+
+One machine often has more than one way to reach it: a Tailscale Serve name, an
+`ssh -L` forward, a LAN address, and the loopback address it listens on. Every Tokdash
+answers `GET /health` with an `instance_id`, so adding a second address for a server that
+is already in the list joins it to that server instead of creating a second row. The
+combined figures count the machine once, and Settings shows the server with one row per
+address, each with its own latency.
+
+The dashboard reads through the quickest address the browser is allowed to use, and moves
+to the next one within the same request when an address dies. Three details worth knowing
+before the numbers look wrong:
+
+- It will not thrash. A challenger takes over only when it is clearly quicker (by at
+  least 10 ms and 25 %), so the address in use is not always the fastest one; the row says
+  which is in use and why. Pin an address to keep it.
+- Which addresses a page can read is decided by the browser, not the daemon. A dashboard
+  opened at `http://127.0.0.1:55423` can read every server it can reach. A dashboard
+  opened at a `https://<machine>.<tailnet>.ts.net` address can read same-tailnet servers
+  and nothing else: no plain-HTTP address, and no loopback address at all, including the
+  one on the machine serving that page. A `127.0.0.1` row left on a Serve page is therefore
+  not a slow route but an unreadable one; the dashboard marks it **Blocked from this page**
+  with the rule that blocks it and a remove button, and never merges it.
+- An address added to a server that is already listed is proved first. One that does not
+  answer, that answers as a different Tokdash, or that cannot say which Tokdash it is, is
+  refused where you typed it, naming the machine that owns that address; an address whose
+  owner cannot be established would only sit on the row and carry nothing. Adding a whole new
+  server stays advisory: registering a machine that is offline right now is legitimate, so it
+  is stored and marked unreachable until it answers.
+
+If a second address does land in two separate rows, they are two daemons even when one
+machine runs both, which is what two `TOKDASH_DATA_DIR`s give you, and their tokens really
+are counted twice.
 
 CORS only matters when **one dashboard page connects to additional Tokdash servers at
 different origins**. A dashboard and its API served through the same proxy origin — one
@@ -416,8 +449,14 @@ Cloudflare Tunnel hostname, one reverse-proxy vhost, one Serve URL — need no C
 all. When you do add remote servers: by default, a dashboard opened on loopback can read
 remote servers, and Tailscale Serve dashboards can read Tokdash servers under the same
 `<tailnet-name>.ts.net` suffix. Other remote origins must be added to every server with
-`TOKDASH_ALLOW_ORIGINS=https://<dashboard-host>`. Explicit CORS settings replace the default
-origin policy, so include every browser origin that must connect. An HTTPS page cannot
+`TOKDASH_ALLOW_ORIGINS=https://<dashboard-host>`.
+
+**An explicit CORS setting replaces the default policy, it does not extend it.** Setting
+`TOKDASH_ALLOW_ORIGINS` or `TOKDASH_ALLOW_ORIGIN_REGEX` on a server switches off both the
+loopback rule and the same-tailnet rule, so admitting one origin there silently takes away
+the ability of a loopback dashboard to read that server, and the Serve page you were
+looking at keeps working, which is what makes the mistake easy to ship. Include every
+browser origin that must connect, or set nothing at all. An HTTPS page cannot
 fetch a plain-HTTP server; use HTTPS Tailscale Serve URLs for every server. Native
 companions do not send an `Origin` header and are unaffected by CORS and browser
 mixed-content rules.

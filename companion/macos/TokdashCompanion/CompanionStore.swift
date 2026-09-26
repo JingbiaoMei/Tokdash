@@ -76,7 +76,7 @@ final class CompanionStore: NSObject, ObservableObject {
         // the right language (the store owns this so a later change can republish and re-render).
         L10n.current = L10n.resolve(loaded.language)
         self.settings = loaded
-        self.client = TokdashClient(baseURL: url)
+        self.client = TokdashClient(server: loaded.servers.first(where: \.enabled) ?? .make(baseURL: url.absoluteString))
         super.init()
         restorePendingUpdate()
     }
@@ -140,7 +140,7 @@ final class CompanionStore: NSObject, ObservableObject {
         let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard Self.isValidBaseURL(trimmed), let url = URL(string: trimmed) else { return }
         Task {
-            await client.updateBaseURL(url)
+            await client.configure(settings.servers.first(where: \.enabled) ?? .make(baseURL: url.absoluteString))
             refresh()
         }
     }
@@ -544,6 +544,7 @@ final class CompanionStore: NSObject, ObservableObject {
         failedServerIDs = []
         serverFailureCounts = [:]
         do {
+            if let server = enabledServers.first { await client.configure(server) }
             let health = try await client.health()
             guard health.service == "tokdash" else {
                 // Wrong service: back off so an open flyout doesn't tight-loop the address.
@@ -552,6 +553,12 @@ final class CompanionStore: NSObject, ObservableObject {
                 connectionState = .wrongService
                 return
             }
+            if let index = settings.servers.firstIndex(where: \.enabled), settings.servers[index].instanceId == nil,
+               let identity = health.instanceId, !identity.isEmpty {
+                settings.servers[index].instanceId = identity
+                settings.save()
+            }
+
             connectionState = .connected
 
             // Fetch each section independently so one failed request no longer
@@ -754,13 +761,39 @@ final class CompanionStore: NSObject, ObservableObject {
         let offset = periodOffset
         let source = Self.glanceSource(for: period, components: settings.components,
                                        today: Self.now, calendar: .current)
+        let resolved = await withTaskGroup(of: (String, TokdashClient, Result<HealthResponse, Error>).self) { group in
+            for server in servers {
+                group.addTask {
+                    let client = TokdashClient(server: server)
+                    do { return (server.id, client, .success(try await client.health())) }
+                    catch { return (server.id, client, .failure(error)) }
+                }
+            }
+            var result: [String: (TokdashClient, Result<HealthResponse, Error>)] = [:]
+            for await (id, client, health) in group { result[id] = (client, health) }
+            return result
+        }
+        if Task.isCancelled { return }
+        var learnedIdentity = false
+        for index in settings.servers.indices where settings.servers[index].instanceId == nil {
+            if let health = try? resolved[settings.servers[index].id]?.1.get(), health.service == "tokdash",
+               let identity = health.instanceId, !identity.isEmpty {
+                settings.servers[index].instanceId = identity; learnedIdentity = true
+            }
+        }
+        if learnedIdentity { settings.save() }
+        var identities = Set<String>()
+        let servers = servers.filter { server in
+            guard let health = try? resolved[server.id]?.1.get(), health.service == "tokdash",
+                  let identity = health.instanceId, !identity.isEmpty else { return true }
+            return identities.insert(identity).inserted
+        }
         let attempts: [MultiServerAttempt] = await withTaskGroup(of: MultiServerAttempt.self) { group in
             for server in servers {
                 group.addTask {
-                    guard let url = URL(string: server.baseURL) else { return .failure(server, busy: false, wrongService: false) }
-                    let client = TokdashClient(baseURL: url)
+                    guard let (client, healthResult) = resolved[server.id] else { return .failure(server, busy: false, wrongService: false) }
                     do {
-                        let health = try await client.health()
+                        let health = try healthResult.get()
                         guard health.service == "tokdash" else { return .failure(server, busy: false, wrongService: true) }
                         async let usage = Self.fetchUsage(client, period: period, offset: offset)
                         async let quota = client.quota()
@@ -2676,12 +2709,38 @@ struct CompanionServerSettings: Codable, Identifiable, Equatable, Sendable {
     var label: String
     var baseURL: String
     var enabled: Bool
+    var routes: [String] = []
+    var preferredRoute: String? = nil
+    var instanceId: String? = nil
+
+    var addresses: [String] {
+        var seen = Set<String>()
+        return ([baseURL] + routes).map { $0.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "/")) }
+            .filter { CompanionStore.isValidBaseURL($0) && seen.insert($0).inserted }
+    }
+
+    init(id: String, label: String, baseURL: String, enabled: Bool,
+         routes: [String] = [], preferredRoute: String? = nil, instanceId: String? = nil) {
+        self.id = id; self.label = label; self.baseURL = baseURL; self.enabled = enabled
+        self.routes = routes; self.preferredRoute = preferredRoute; self.instanceId = instanceId
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        label = try c.decode(String.self, forKey: .label)
+        baseURL = try c.decode(String.self, forKey: .baseURL)
+        enabled = try c.decode(Bool.self, forKey: .enabled)
+        routes = try c.decodeIfPresent([String].self, forKey: .routes) ?? []
+        preferredRoute = try c.decodeIfPresent(String.self, forKey: .preferredRoute)
+        instanceId = try c.decodeIfPresent(String.self, forKey: .instanceId)
+    }
 
     private enum CodingKeys: String, CodingKey {
         case id
         case label
         case baseURL = "baseUrl"
-        case enabled
+        case enabled, routes, preferredRoute, instanceId
     }
 
     static func make(baseURL: String) -> CompanionServerSettings {

@@ -13,18 +13,15 @@ struct SettingsView: View {
     @State private var components: CompanionComponents = CompanionComponents()
     @State private var rankRows: Int = 3
     @State private var serverSaveTasks: [String: Task<Void, Never>] = [:]
-    @State private var testResults: [String: ConnectionTest] = [:]
-    @State private var testTasks: [String: Task<Void, Never>] = [:]
     @State private var pendingRemovalID: String?
-
-    /// Result of the Settings "Test" button. Probes the URL in the field, not the saved
-    /// one, so a bad address can be caught before committing it.
-    private enum ConnectionTest: Equatable {
-        case idle
-        case testing
-        case ok(String)
-        case failed(message: String, detail: String)
-    }
+    @State private var editingAddress: String?
+    @State private var addingAddress = false
+    @State private var addressHostID: String?
+    @State private var addressInput = ""
+    @State private var addressError = ""
+    @State private var checkingAddress = false
+    @State private var routeProbes: [String: RouteProbe] = [:]
+    @State private var checkingRoutes = false
 
     var body: some View {
         Form {
@@ -35,13 +32,15 @@ struct SettingsView: View {
                     }
                 }
                 Button {
-                    servers.append(.make(baseURL: CompanionSettings.defaultBaseURL))
-                    saveSettings()
+                    editingAddress = nil; addressHostID = nil; addressInput = ""; addressError = ""; addingAddress = true
                 } label: {
                     Label(L10n.t("add_server"), systemImage: "plus")
                 }
                 .buttonStyle(.bordered)
-                .help(L10n.t("server_hint"))
+                .help(L10n.t("route_hint"))
+                Text(L10n.t("route_hint")).font(.caption).foregroundStyle(.secondary)
+                Button(L10n.t("route_check")) { Task { await checkRoutes() } }
+                    .disabled(checkingRoutes)
             }
             Section(L10n.t("section_startup")) {
                 Toggle(L10n.t("launch_at_login"), isOn: $launchAtLogin)
@@ -68,7 +67,7 @@ struct SettingsView: View {
                 componentToggle("comp_top_ranks", desc: "comp_top_ranks_desc", isOn: $components.topRanks)
                 // Rows per top-ranks list (contract §Top ranks): one shared count for tools
                 // and models, 3..8; the flyout grows to fit automatically.
-                Stepper(value: $rankRows, in: 3...8, step: 1) {
+                Slider(value: Binding(get: { Double(rankRows) }, set: { rankRows = Int($0) }), in: 3...8, step: 1) {
                     Text(L10n.t("rank_rows", rankRows))
                 }
                 componentToggle("comp_reset_credits", desc: "comp_reset_credits_desc", isOn: $components.resetCredits)
@@ -127,6 +126,10 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .toggleStyle(BlueSettingsSwitch())
+        .tint(.blue)
+        .accentColor(.blue)
+        .background(SettingsWindowSize())
         .scrollContentBackground(.hidden)
         .padding(20)
         // A grouped Form is a ScrollView: with only a fixed width its ideal height is
@@ -157,6 +160,27 @@ struct SettingsView: View {
         .onChange(of: otherThreshold) { _, _ in saveSettings() }
         .onChange(of: language) { _, _ in saveSettings() }
         .onChange(of: automaticUpdateChecks) { _, _ in saveSettings() }
+        .task {
+            while !Task.isCancelled {
+                await checkRoutes()
+                try? await Task.sleep(for: .seconds(30))
+            }
+        }
+        .sheet(isPresented: $addingAddress) {
+            VStack(alignment: .leading, spacing: 14) {
+                Text(L10n.t("route_add")).font(.headline)
+                Text(L10n.t("route_add_hint")).font(.caption).foregroundStyle(.secondary)
+                TextField(L10n.t("route_address"), text: $addressInput).textFieldStyle(.roundedBorder)
+                    .onSubmit { Task { await addAddress() } }
+                if !addressError.isEmpty { Text(addressError).font(.caption).foregroundStyle(.red) }
+                HStack {
+                    Spacer()
+                    Button(L10n.t("cancel")) { addingAddress = false }.disabled(checkingAddress)
+                    Button(L10n.t("route_add")) { Task { await addAddress() } }
+                        .disabled(checkingAddress || addressInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }.padding(24).frame(width: 420)
+        }
         .alert(L10n.t("remove_last_enabled_title"), isPresented: Binding(
             get: { pendingRemovalID != nil },
             set: { if !$0 { pendingRemovalID = nil } }
@@ -184,111 +208,148 @@ struct SettingsView: View {
 
     private func serverCard(_ server: Binding<CompanionServerSettings>) -> some View {
         let id = server.wrappedValue.id
-        let displayName = server.wrappedValue.label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? L10n.t("server_unnamed")
-            : server.wrappedValue.label
-        let isEnabled = server.wrappedValue.enabled
-        let isOnlyEnabled = isEnabled && servers.filter(\.enabled).count == 1
-
-        return VStack(alignment: .leading, spacing: 8) {
+        return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                Toggle("", isOn: server.enabled)
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-                    .tint(.blue)
-                    .disabled(isOnlyEnabled)
-                    .help(isOnlyEnabled ? L10n.t("keep_one_server_enabled") : L10n.t("enable_server", displayName))
-                    .accessibilityLabel(L10n.t("enable_server", displayName))
-                    .accessibilitySortPriority(5)
+                Toggle("", isOn: Binding(get: { server.wrappedValue.enabled }, set: { value in
+                    if value || servers.filter(\.enabled).count > 1 { server.wrappedValue.enabled = value; saveSettings() }
+                }))
+                    .labelsHidden().frame(width: 36)
+                    .accessibilityLabel(L10n.t("enable_server", server.wrappedValue.label))
+                Button { editingAddress = nil; addressHostID = id; addressInput = ""; addressError = ""; addingAddress = true } label: {
+                    Image(systemName: "plus")
+                }.buttonStyle(.borderless).help(L10n.t("route_add"))
+                    .accessibilityLabel(L10n.t("route_add"))
+                TextField(L10n.t("server_name_placeholder"), text: server.label)
+                    .labelsHidden().textFieldStyle(.plain).fontWeight(.semibold)
+                    .multilineTextAlignment(.leading).frame(maxWidth: .infinity, alignment: .leading)
+            }
+            ForEach(server.wrappedValue.addresses, id: \.self) { address in
+                routeRow(server, address: address)
+            }
+            Picker("", selection: Binding(get: { server.wrappedValue.preferredRoute ?? "" }, set: {
+                server.wrappedValue.preferredRoute = $0.isEmpty ? nil : $0; saveSettings()
+            })) {
+                Text(L10n.t("route_auto")).tag("")
+                ForEach(server.wrappedValue.addresses, id: \.self) { Text($0).tag($0) }
+            }.labelsHidden().accessibilityLabel(L10n.t("route_pin"))
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color(nsColor: .separatorColor).opacity(0.45)))
+        .onChange(of: server.wrappedValue.label) { _, _ in scheduleServerSave(id) }
+    }
 
-                TextField("", text: server.label, prompt: Text(L10n.t("server_name_placeholder")))
-                    .labelsHidden()
-                    .textFieldStyle(.roundedBorder)
-                    .lineLimit(1)
-                    .multilineTextAlignment(.leading)
-                    .frame(minWidth: 100, maxWidth: .infinity)
-                    .layoutPriority(1)
-                    .accessibilityLabel(L10n.t("server_name_placeholder"))
-                    .accessibilitySortPriority(4)
+    private func routeRow(_ server: Binding<CompanionServerSettings>, address: String) -> some View {
+        let good = TokdashClient.selectRoutes(server.wrappedValue, probes: server.wrappedValue.addresses.compactMap { routeProbes[$0] })
+        let probe = good.first { $0.address == address }
+        let active = good.first { $0.address == server.wrappedValue.preferredRoute }
+            ?? good.min { $0.milliseconds < $1.milliseconds }
+        return HStack(spacing: 8) {
+            Circle().fill(probe?.health != nil ? Color.green : Color.secondary.opacity(0.5)).frame(width: 6, height: 6)
+            Button { addressHostID = server.wrappedValue.id; editingAddress = address; addressInput = address; addressError = ""; addingAddress = true } label: {
+                Text(address).lineLimit(1).truncationMode(.middle).frame(maxWidth: .infinity, alignment: .leading)
+            }.buttonStyle(.plain).help(address)
+            if let probe, probe.health != nil {
+                Text("\(max(1, Int(probe.milliseconds))) ms").monospacedDigit().foregroundStyle(.secondary)
+                if active?.address == address { Text(L10n.t("route_active")).foregroundStyle(.blue) }
+            } else { Text(L10n.t(checkingRoutes && routeProbes[address] == nil ? "testing" : "route_offline")).foregroundStyle(.secondary) }
+            Button {
+                if server.wrappedValue.addresses.count == 1 { requestRemoval(of: server.wrappedValue) }
+                else {
+                    let remaining = server.wrappedValue.addresses.filter { $0 != address }
+                    server.wrappedValue.baseURL = remaining[0]; server.wrappedValue.routes = Array(remaining.dropFirst())
+                    if server.wrappedValue.preferredRoute == address { server.wrappedValue.preferredRoute = nil }
+                    saveSettings()
+                }
+            } label: { Image(systemName: "xmark").font(.system(size: 10)) }
+                .buttonStyle(.borderless).help(L10n.t("route_remove"))
+                .accessibilityLabel(L10n.t("route_remove"))
+                .disabled(servers.count == 1 && server.wrappedValue.addresses.count == 1)
+        }.font(.caption).padding(.leading, 4)
+    }
 
-                if servers.count > 1 {
-                    Button {
-                        requestRemoval(of: server.wrappedValue)
-                    } label: {
-                        Image(systemName: "minus.circle.fill")
-                            .font(.system(size: 16))
-                            .frame(width: 28, height: 28)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                    .help(L10n.t("remove_server", displayName))
-                    .accessibilityLabel(L10n.t("remove_server", displayName))
-                    .accessibilitySortPriority(1)
+    private func checkRoutes() async {
+        guard !checkingRoutes else { return }
+        checkingRoutes = true
+        defer { checkingRoutes = false }
+        let snapshot = servers
+        let addresses = snapshot.flatMap(\.addresses)
+        let results = await withTaskGroup(of: RouteProbe.self) { group in
+            for address in Set(addresses) { group.addTask { await TokdashClient.probe(address) } }
+            var probes: [RouteProbe] = []
+            for await probe in group { probes.append(probe) }
+            return probes
+        }
+        guard !Task.isCancelled, snapshot == servers else { return }
+        routeProbes = Dictionary(uniqueKeysWithValues: results.map { ($0.address, $0) })
+        var merged: [CompanionServerSettings] = []
+        for var server in snapshot {
+            let identity = server.instanceId ?? routeProbes[server.addresses.first ?? ""]?.health?.instanceId
+            if let identity, !identity.isEmpty {
+                server.instanceId = identity
+                let verified = server.addresses.contains { routeProbes[$0]?.health?.instanceId == identity }
+                if verified, let index = merged.firstIndex(where: { other in
+                    other.instanceId == identity && other.addresses.contains { routeProbes[$0]?.health?.instanceId == identity }
+                }) {
+                    merged[index].routes = Array(Set(merged[index].routes + server.addresses)).sorted()
+                    merged[index].enabled = merged[index].enabled || server.enabled
+                    continue
                 }
             }
+            merged.append(server)
+        }
+        if merged != servers { servers = merged; saveSettings() }
+    }
 
-            HStack(spacing: 8) {
-                Text(L10n.t("base_url"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 60, alignment: .trailing)
-
-                TextField("", text: server.baseURL, prompt: Text(L10n.t("base_url")))
-                    .labelsHidden()
-                    .textFieldStyle(.roundedBorder)
-                    .lineLimit(1)
-                    .multilineTextAlignment(.leading)
-                    .frame(minWidth: 180, maxWidth: .infinity)
-                    .layoutPriority(1)
-                    .help(server.wrappedValue.baseURL)
-                    .accessibilityLabel(L10n.t("base_url"))
-                    .accessibilitySortPriority(3)
-
-                Button(L10n.t("test")) { runConnectionTest(server.wrappedValue) }
-                    .buttonStyle(.bordered)
-                    .frame(width: 64)
-                    .disabled(server.wrappedValue.baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                              || testResults[id] == .testing)
-                    .accessibilityLabel(L10n.t("test_server", displayName))
-                    .accessibilitySortPriority(2)
-            }
-            .opacity(isEnabled ? 1 : 0.55)
-
-            // The result row appears only when a test ran: idle cards don't reserve its
-            // height (the form has to fit every section without scrolling).
-            if (testResults[id] ?? .idle) != .idle {
-                HStack(spacing: 8) {
-                    Color.clear.frame(width: 60, height: 1)
-                    testResultView(testResults[id] ?? .idle)
+    private func addAddress() async {
+        guard !checkingAddress else { return }
+        checkingAddress = true
+        defer { checkingAddress = false }
+        let input = addressInput.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let candidates = input.contains("://") ? [input] : ["https://" + input, "http://" + input]
+        var found: RouteProbe?
+        for candidate in candidates where CompanionStore.isValidBaseURL(candidate) {
+            let probe = await TokdashClient.probe(candidate)
+            if probe.health != nil { found = probe; break }
+        }
+        // Explicit URLs may be registered while offline. They cannot become a fallback
+        // until a later health response proves the saved host identity.
+        if found == nil, input.contains("://"), CompanionStore.isValidBaseURL(input) {
+            found = RouteProbe(address: input, health: nil, milliseconds: 0)
+        }
+        guard let probe = found else { addressError = L10n.t("test_unreachable"); return }
+        await checkRoutes()
+        let identity = probe.health?.instanceId
+        let target = addressHostID.flatMap { id in servers.firstIndex { $0.id == id } }
+            ?? identity.flatMap { value in servers.firstIndex { $0.instanceId == value && !value.isEmpty } }
+        if let index = target {
+            if probe.health != nil {
+                // A concurrent periodic check may still be running. Establish the target's
+                // identity directly before appending, rather than racing that check.
+                if servers[index].instanceId == nil {
+                    let original = await TokdashClient.probe(servers[index].baseURL)
+                    guard index < servers.count, servers[index].id == addressHostID else { return }
+                    servers[index].instanceId = original.health?.instanceId
                 }
-                .frame(height: 16)
-                .opacity(isEnabled ? 1 : 0.55)
+                let replacingLegacy = editingAddress != nil && servers[index].addresses.count == 1
+                    && identity == nil && servers[index].instanceId == nil
+                guard replacingLegacy || (identity != nil && identity?.isEmpty == false && identity == servers[index].instanceId) else {
+                    addressError = L10n.t("route_mismatch"); return
+                }
             }
+            var addresses = servers[index].addresses.filter { $0 != editingAddress }
+            if !addresses.contains(probe.address) { addresses.append(probe.address) }
+            servers[index].baseURL = addresses[0]; servers[index].routes = Array(addresses.dropFirst())
+            if let editingAddress, servers[index].preferredRoute == editingAddress {
+                servers[index].preferredRoute = probe.address
+            }
+        } else {
+            if servers.contains(where: { $0.addresses.contains(probe.address) }) { addingAddress = false; return }
+            var server = CompanionServerSettings.make(baseURL: probe.address)
+            server.instanceId = identity; servers.append(server)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(Color(nsColor: .separatorColor).opacity(0.45), lineWidth: 1)
-        )
-        .onChange(of: server.wrappedValue.baseURL) { _, _ in
-            testTasks[id]?.cancel()
-            testTasks[id] = nil
-            testResults[id] = .idle
-            scheduleServerSave(id)
-        }
-        .onChange(of: server.wrappedValue.label) { _, _ in
-            scheduleServerSave(id)
-        }
-        .onChange(of: server.wrappedValue.enabled) { _, _ in
-            saveSettings()
-        }
+        routeProbes[probe.address] = probe
+        editingAddress = nil; addingAddress = false; saveSettings()
     }
 
     /// Update status line. An available version outranks a `failed`/`idle` status: a
@@ -326,84 +387,6 @@ struct SettingsView: View {
         }
     }
 
-    @ViewBuilder private func testResultView(_ result: ConnectionTest) -> some View {
-        switch result {
-        case .idle:
-            Label(L10n.t("server_not_tested"), systemImage: "circle")
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-        case .testing:
-            HStack(spacing: 6) {
-                ProgressView().controlSize(.small)
-                Text(L10n.t("testing"))
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-            }
-        case .ok(let detail):
-            Label(detail, systemImage: "checkmark.circle.fill")
-                .font(.system(size: 11))
-                .foregroundStyle(.green)
-        case .failed(let message, let detail):
-            Label(message, systemImage: "xmark.octagon.fill")
-                .font(.system(size: 11))
-                .foregroundStyle(.red)
-                .lineLimit(1)
-                .help(detail)
-        }
-    }
-
-    /// Probe the URL currently in the field with its own short-lived client, so testing
-    /// never disturbs the live connection or persists an address that turns out to be bad.
-    private func runConnectionTest(_ server: CompanionServerSettings) {
-        let candidate = server.baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard CompanionStore.isValidBaseURL(candidate), let url = URL(string: candidate) else {
-            let message = L10n.t("test_bad_url")
-            testResults[server.id] = .failed(message: message, detail: message)
-            announceTestResult(message)
-            return
-        }
-        testTasks[server.id]?.cancel()
-        testResults[server.id] = .testing
-        testTasks[server.id] = Task {
-            let client = TokdashClient(baseURL: url)
-            let startedAt = Date()
-            do {
-                let health = try await client.health()
-                if Task.isCancelled { return }
-                // A reachable server that isn't Tokdash is a failure, not a success -
-                // otherwise a proxy or a wrong port would test green.
-                if health.service == "tokdash" {
-                    let elapsed = max(1, Int(Date().timeIntervalSince(startedAt) * 1_000))
-                    let message = L10n.t("test_reachable_latency", elapsed)
-                    testResults[server.id] = .ok(message)
-                    announceTestResult(message)
-                } else {
-                    let detail = L10n.t("test_not_tokdash")
-                    let message = L10n.t("test_invalid_response")
-                    testResults[server.id] = .failed(message: message, detail: detail)
-                    announceTestResult(message)
-                }
-            } catch {
-                if Task.isCancelled { return }
-                let message: String
-                switch error as? TokdashError {
-                case .timeout:
-                    message = L10n.t("test_timed_out")
-                case .badResponse, .decode:
-                    message = L10n.t("test_invalid_response")
-                default:
-                    message = L10n.t("test_unreachable")
-                }
-                testResults[server.id] = .failed(message: message, detail: error.localizedDescription)
-                announceTestResult(message)
-            }
-        }
-    }
-
-    private func announceTestResult(_ message: String) {
-        AccessibilityNotification.Announcement(message).post()
-    }
-
     private func loadSettings() {
         servers = store.settings.servers
         launchAtLogin = store.settings.launchAtLogin
@@ -437,7 +420,7 @@ struct SettingsView: View {
         // persisted registry intact until every visible row is valid; never silently
         // drop the row the user is still editing.
         guard validServers.count == servers.count, validServers.contains(where: { $0.enabled }) else { return }
-        let urlChanged = validServers.first(where: { $0.enabled })?.baseURL != store.settings.baseURL
+        let urlChanged = validServers != store.settings.servers
         let launchChanged = launchAtLogin != store.settings.launchAtLogin
 
         // Only persist the URL when it's a valid absolute http/https URL.
@@ -472,11 +455,32 @@ struct SettingsView: View {
         if keepOneEnabled, !servers.contains(where: \.enabled), !servers.isEmpty {
             servers[0].enabled = true
         }
-        testTasks[id]?.cancel()
-        testTasks[id] = nil
-        testResults[id] = nil
         serverSaveTasks[id]?.cancel()
         serverSaveTasks[id] = nil
         saveSettings()
+    }
+}
+
+/// AppKit desaturates native switches in inactive windows even with an explicit tint.
+/// Draw the track directly; expose the same native Toggle accessibility semantics.
+private struct BlueSettingsSwitch: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 0) {
+            configuration.label
+            Spacer(minLength: 0)
+            Button { configuration.isOn.toggle() } label: {
+                ZStack(alignment: configuration.isOn ? .trailing : .leading) {
+                    Capsule().fill(configuration.isOn
+                        ? Color(red: 0, green: 0.478, blue: 1)
+                        : Color(nsColor: .tertiaryLabelColor).opacity(0.4))
+                    Circle().fill(.white).shadow(color: .black.opacity(0.12), radius: 1, y: 1)
+                        .padding(2).frame(width: 20, height: 20)
+                }.frame(width: 36, height: 20).contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+        }
+        .accessibilityRepresentation {
+            Toggle(isOn: configuration.$isOn) { configuration.label }.toggleStyle(.switch)
+        }
     }
 }

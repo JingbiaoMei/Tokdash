@@ -4,9 +4,9 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:sys="clr-namespace:System;assembly=System.Runtime"
     Title="Tokdash Settings"
-    Width="440"
-    SizeToContent="Height"
-    ResizeMode="NoResize"
+    Width="540" MinWidth="480" Height="850" MaxHeight="1100"
+    SizeToContent="Manual"
+    ResizeMode="CanResize"
     WindowStartupLocation="CenterScreen"
     ShowActivated="True"
     Background="{DynamicResource SettingsBg}"
@@ -57,7 +57,8 @@
             <Setter Property="Foreground" Value="{DynamicResource SettingsText}"/>
         </Style>
     </Window.Resources>
-    <StackPanel Margin="16">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+    <StackPanel Margin="20">
         <StackPanel.Resources>
             <Style TargetType="TextBlock">
                 <Setter Property="FontFamily" Value="Segoe UI Variable Text"/>
@@ -191,4 +192,5 @@
             <Button x:Name="SaveBtn" Content="Save" Click="Save_Click" Padding="16,5" FontWeight="SemiBold"/>
         </StackPanel>
     </StackPanel>
+    </ScrollViewer>
 </Window>

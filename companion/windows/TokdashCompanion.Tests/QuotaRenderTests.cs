@@ -185,6 +185,27 @@ public class QuotaRenderTests
                 Pump();
                 allCount = flyout.QuotaRows.Items.Count;
 
+                var scroller = flyout.QuotaRows.Items.OfType<ScrollViewer>().Single();
+                scroller.ApplyTemplate();
+                Pump();
+                var bar = Descendants<System.Windows.Controls.Primitives.ScrollBar>(scroller).First(b => b.Orientation == Orientation.Vertical);
+                Assert.AreEqual(12.0, bar.Width);
+                var track = (System.Windows.Controls.Primitives.Track)bar.Template.FindName("PART_Track", bar);
+                Assert.IsNotNull(track.Thumb);
+                track.Thumb.ApplyTemplate();
+                var handle = (Border)track.Thumb.Template.FindName("Handle", track.Thumb);
+                Assert.IsTrue(handle.ActualWidth <= 6.1, $"Thumb should paint a 6px handle, got {handle.ActualWidth}");
+                if (Environment.GetEnvironmentVariable("TOKDASH_RENDER_DIR") is { Length: > 0 } renderDir)
+                {
+                    System.IO.Directory.CreateDirectory(renderDir);
+                    var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap((int)flyout.ActualWidth, (int)flyout.ActualHeight, 96, 96, PixelFormats.Pbgra32);
+                    bitmap.Render(flyout);
+                    var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
+                    encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));
+                    using var file = System.IO.File.Create(System.IO.Path.Combine(renderDir, "windows-quota.png"));
+                    encoder.Save(file);
+                }
+
                 flyout.Dismiss();
                 flyout.Dismiss(); // Deactivation/other close paths may race; dismissal is idempotent.
                 Pump();

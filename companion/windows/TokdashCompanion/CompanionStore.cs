@@ -323,7 +323,7 @@ public sealed class CompanionStore : BindableBase
         }
         return settings.Servers.Count(s => s.Enabled) > 1
             ? new MultiServerTokdashClient(settings.Servers)
-            : new TokdashClient(settings.BaseURL);
+            : new TokdashClient(settings.Servers.First(s => s.Enabled));
     }
 
     public CompanionStore(ITokdashClient client)
@@ -361,7 +361,7 @@ public sealed class CompanionStore : BindableBase
         _serverFailureCounts.Clear();
         _client = Settings.Servers.Count(s => s.Enabled) > 1
             ? new MultiServerTokdashClient(Settings.Servers)
-            : new TokdashClient(url.Trim());
+            : new TokdashClient(Settings.Servers.First(s => s.Enabled));
         old.Dispose();
         // ConnectionLabel embeds the server name, so it has to re-render on a URL change.
         OnPropertyChanged(nameof(ServerName));

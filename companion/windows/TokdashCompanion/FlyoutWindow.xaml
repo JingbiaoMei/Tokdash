@@ -43,6 +43,44 @@
         <SolidColorBrush x:Key="FooterBorder" Color="#000000" Opacity="0.06"/>
         <SolidColorBrush x:Key="BarTrack" Color="#000000" Opacity="0.10"/>
 
+        <!-- Narrow thumb with a larger hit target; colors follow high-contrast too. -->
+        <Style x:Key="QuotaScrollBar" TargetType="ScrollBar">
+            <Setter Property="Width" Value="12"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ScrollBar">
+                        <Track x:Name="PART_Track" IsDirectionReversed="True" Orientation="Vertical">
+                            <Track.DecreaseRepeatButton>
+                                <RepeatButton Command="ScrollBar.PageUpCommand" Focusable="False" Opacity="0"/>
+                            </Track.DecreaseRepeatButton>
+                            <Track.Thumb>
+                                <Thumb MinHeight="28" Width="12" MinWidth="0">
+                                    <Thumb.Template>
+                                        <ControlTemplate TargetType="Thumb">
+                                            <Border x:Name="Handle" Background="{DynamicResource MutedBrush}"
+                                                    CornerRadius="3" Margin="3,1" Opacity="0.55"/>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter TargetName="Handle" Property="Opacity" Value="0.9"/>
+                                                </Trigger>
+                                                <Trigger Property="IsDragging" Value="True">
+                                                    <Setter TargetName="Handle" Property="Opacity" Value="1"/>
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </Thumb.Template>
+                                </Thumb>
+                            </Track.Thumb>
+                            <Track.IncreaseRepeatButton>
+                                <RepeatButton Command="ScrollBar.PageDownCommand" Focusable="False" Opacity="0"/>
+                            </Track.IncreaseRepeatButton>
+                        </Track>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <!-- Spacing scale: every section's horizontal inset is 16 so left edges align
              down the whole flyout. Thickness resources cover the recurring band shapes;
              one-off inner gaps are written as literals drawn from the same 4/8/12/16

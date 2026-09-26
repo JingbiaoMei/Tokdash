@@ -4,6 +4,7 @@ namespace TokdashCompanion;
 public sealed class MultiServerTokdashClient : ITokdashClient
 {
     private readonly List<(CompanionServerSettings Server, ITokdashClient Client)> _clients;
+    private HashSet<string> _duplicateIds = [];
     private readonly object _failureLock = new();
     private List<CompanionServerSettings> _failedServers = [];
     public IReadOnlyList<CompanionServerSettings> FailedServers { get { lock (_failureLock) return _failedServers.ToList(); } }
@@ -20,7 +21,7 @@ public sealed class MultiServerTokdashClient : ITokdashClient
 
     public MultiServerTokdashClient(IEnumerable<CompanionServerSettings> servers) =>
         _clients = servers.Where(s => s.Enabled)
-            .Select(s => (s, (ITokdashClient)new TokdashClient(s.BaseUrl))).ToList();
+            .Select(s => (s, (ITokdashClient)new TokdashClient(s))).ToList();
 
     /// <summary>Test seam: inject per-server clients (a fake per enabled server).</summary>
     internal MultiServerTokdashClient(
@@ -32,8 +33,12 @@ public sealed class MultiServerTokdashClient : ITokdashClient
     public async Task<HealthResponse> HealthAsync(CancellationToken ct = default)
     {
         lock (_failureLock) _failedServers = [];
+        _duplicateIds = [];
         var results = await Settle(c => c.HealthAsync(ct), ct);
         var good = results.Where(r => r.Value?.Service == "tokdash").ToList();
+        var identities = new HashSet<string>(StringComparer.Ordinal);
+        _duplicateIds = good.Where(r => !string.IsNullOrWhiteSpace(r.Value!.InstanceId) &&
+            !identities.Add(r.Value.InstanceId!)).Select(r => r.Server.Id).ToHashSet();
         AddFailures(results.Where(r => r.Value?.Service != "tokdash").Select(r => r.Server));
         if (good.Count == 0) ThrowAggregateFailure(results);
         return good[0].Value!;
@@ -51,7 +56,7 @@ public sealed class MultiServerTokdashClient : ITokdashClient
         AddFailures(settled.Where(r => r.Value is null).Select(r => r.Server));
         // Per-server rows for this cycle, computed NOW (see LastPerServerRows).
         LastPerServerRows = CompanionStore.PerServerRows(
-            _clients.Select(c => c.Server).ToList(),
+            _clients.Where(c => !_duplicateIds.Contains(c.Server.Id)).Select(c => c.Server).ToList(),
             settled.Select(r => r.Value).ToList(),
             FailedServerIds.ToHashSet());
         var rows = settled.Where(r => r.Value is not null).Select(r => r.Value!).ToList();
@@ -200,7 +205,7 @@ public sealed class MultiServerTokdashClient : ITokdashClient
 
     private async Task<List<Settled<T>>> Settle<T>(Func<ITokdashClient, Task<T>> fetch, CancellationToken ct) where T : class
     {
-        var tasks = _clients.Select(async item =>
+        var tasks = _clients.Where(item => !_duplicateIds.Contains(item.Server.Id)).Select(async item =>
         {
             try { return new Settled<T>(item.Server, await fetch(item.Client), null); }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }

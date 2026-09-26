@@ -19,33 +19,50 @@ public partial class SettingsWindow : Window
     private bool _highContrast;
     private readonly List<ServerRow> _serverRows = new();
 
-    private sealed record ServerRow(
-        CompanionServerSettings Model,
-        CheckBox Enabled,
-        TextBox Label,
-        TextBox Url,
-        TextBlock Result,
-        StackPanel Container);
+    private readonly System.Windows.Threading.DispatcherTimer _routeTimer = new() { Interval = TimeSpan.FromSeconds(30) };
+    private readonly CancellationTokenSource _routeLifetime = new();
+    private bool _checkingRoutes;
+    private sealed class ServerRow(CompanionServerSettings model, CheckBox enabled, TextBox label,
+        TextBlock result, StackPanel container, ComboBox routing)
+    {
+        public CompanionServerSettings Model = model;
+        public CheckBox Enabled = enabled;
+        public TextBox Label = label;
+        public TextBlock Result = result;
+        public StackPanel Container = container;
+        public ComboBox Routing = routing;
+        public List<(TextBox Input, TextBlock Status)> Addresses = [];
+        public TextBox Url => Addresses[0].Input;
+    }
 
     public CompanionStore Store { get; set; } = null!;
 
-    public SettingsWindow()
+    public SettingsWindow() : this(true) { }
+
+    internal SettingsWindow(bool initializeNativeSettings)
     {
         InitializeComponent();
         ApplyTheme();
+        ApplySettingsStrings();
         ApplyWindowIcon();
         SourceInitialized += (_, _) => ApplyDwmTheme();
-        Loaded += SettingsWindow_Loaded;
+        if (initializeNativeSettings) Loaded += SettingsWindow_Loaded;
+        _routeTimer.Tick += async (_, _) => await CheckRoutesAsync();
+        Closed += (_, _) => { _routeTimer.Stop(); _routeLifetime.Cancel(); };
     }
 
     private async void SettingsWindow_Loaded(object sender, RoutedEventArgs e)
     {
+        MaxHeight = Math.Max(420, SystemParameters.WorkArea.Height - 24);
+        Height = Math.Min(850, MaxHeight);
         var s = Store.Settings;
         // Registry/StartupTask is authoritative. This also removes a stale portable
         // Run entry if the extracted directory was moved.
         s.LaunchAtLogin = await LaunchAtLogin.GetEnabledAsync();
         BaseUrlBox.Text = s.BaseURL;
         RenderServerRows(s.Servers);
+        _routeTimer.Start();
+        _ = CheckRoutesAsync();
         LaunchBox.IsChecked = s.LaunchAtLogin;
         NotifyBox.IsChecked = s.LowQuotaNotifications;
         FiveHourSlider.Value = s.Thresholds.FiveHour;
@@ -236,7 +253,7 @@ public partial class SettingsWindow : Window
         ServerLabel.Text = L10n.T("section_servers");
         AddServerButton.Content = L10n.T("add_server");
         TestButton.Content = L10n.T("test");
-        ServerHint.Text = L10n.T("server_hint");
+        ServerHint.Text = L10n.T("route_hint");
         StartupLabel.Text = L10n.T("section_startup");
         LaunchBox.Content = L10n.T("launch_at_login");
         NotificationsLabel.Text = L10n.T("section_notifications");
@@ -345,7 +362,7 @@ public partial class SettingsWindow : Window
             ok is null ? "SettingsMuted" : ok.Value ? "SettingsSuccess" : "SettingsError");
     }
 
-    private void RenderServerRows(IEnumerable<CompanionServerSettings> servers)
+    internal void RenderServerRows(IEnumerable<CompanionServerSettings> servers)
     {
         _serverRows.Clear();
         ServersPanel.Children.Clear();
@@ -353,47 +370,128 @@ public partial class SettingsWindow : Window
         if (_serverRows.Count == 0) AddServerRow(CompanionServerSettings.Create(CompanionSettings.DefaultBaseURL));
     }
 
-    private void AddServerRow(CompanionServerSettings server)
+    private void AddServerRow(CompanionServerSettings original)
     {
-        var enabled = new CheckBox { IsChecked = server.Enabled, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) };
-        var label = new TextBox { Text = server.Label, Width = 72, Margin = new Thickness(0, 0, 6, 0) };
-        var url = new TextBox { Text = server.BaseUrl, MinWidth = 190 };
-        var test = new Button { Content = L10n.T("test"), Padding = new Thickness(9, 2, 9, 2), Margin = new Thickness(6, 0, 0, 0) };
-        var remove = new Button { Content = "−", Padding = new Thickness(8, 2, 8, 2), Margin = new Thickness(4, 0, 0, 0) };
-        var line = new StackPanel { Orientation = Orientation.Horizontal };
-        line.Children.Add(enabled); line.Children.Add(label); line.Children.Add(url); line.Children.Add(test); line.Children.Add(remove);
-        var result = new TextBlock { FontSize = 10, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(22, 3, 0, 0), Visibility = Visibility.Collapsed };
-        var container = new StackPanel { Margin = new Thickness(0, 0, 0, 7) };
-        container.Children.Add(line); container.Children.Add(result);
-        var row = new ServerRow(server, enabled, label, url, result, container);
+        // Edits stay local until Save, including route tests and host merging.
+        var server = System.Text.Json.JsonSerializer.Deserialize<CompanionServerSettings>(
+            System.Text.Json.JsonSerializer.Serialize(original))!;
+        var enabled = new CheckBox { IsChecked = server.Enabled, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) };
+        var label = new TextBox { Text = server.Label, FontWeight = FontWeights.SemiBold, BorderThickness = new Thickness(0) };
+        var add = new Button { Content = "+", ToolTip = L10n.T("route_add"), Padding = new Thickness(8, 2, 8, 2), Margin = new Thickness(0, 0, 8, 0) };
+        var header = new DockPanel();
+        DockPanel.SetDock(enabled, Dock.Left); DockPanel.SetDock(add, Dock.Left);
+        header.Children.Add(enabled); header.Children.Add(add); header.Children.Add(label);
+        var result = new TextBlock { FontSize = 11, TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
+        var container = new StackPanel { Margin = new Thickness(0, 0, 0, 14) };
+        var routing = new ComboBox { Margin = new Thickness(22, 4, 0, 0), FontSize = 11 };
+        var row = new ServerRow(server, enabled, label, result, container, routing);
+        container.Children.Add(header); container.Children.Add(result);
         _serverRows.Add(row); ServersPanel.Children.Add(container);
-        test.Click += async (_, _) => await TestServerRowAsync(row, test);
-        remove.Click += (_, _) => {
-            if (_serverRows.Count <= 1) return;
-            _serverRows.Remove(row); ServersPanel.Children.Remove(container);
+        foreach (var address in server.Addresses) AddAddressRow(row, address);
+        if (row.Addresses.Count == 0) AddAddressRow(row, server.BaseUrl);
+        container.Children.Add(routing);
+        RefreshRouteChoices(row);
+        add.Click += (_, _) => { AddAddressRow(row, ""); RefreshRouteChoices(row); row.Addresses[^1].Input.Focus(); };
+        enabled.Unchecked += (_, _) => {
+            if (!_serverRows.Any(r => r.Enabled.IsChecked == true)) enabled.IsChecked = true;
         };
     }
 
-    private async Task TestServerRowAsync(ServerRow row, Button button)
+    private void AddAddressRow(ServerRow row, string address)
     {
-        string candidate = row.Url.Text.Trim();
-        row.Result.Visibility = Visibility.Visible;
-        if (!CompanionStore.IsValidBaseURL(candidate)) { row.Result.Text = L10n.T("test_bad_url"); row.Result.Foreground = (Brush)FindResource("SettingsError"); return; }
-        button.IsEnabled = false;
+        var url = new TextBox { Text = address, MinWidth = 140, ToolTip = L10n.T("route_add_hint"), BorderThickness = new Thickness(0) };
+        var status = new TextBlock { FontSize = 10, Margin = new Thickness(0, 2, 0, 0), Foreground = (Brush)FindResource("SettingsMuted") };
+        var test = new Button { Content = L10n.T("test"), Padding = new Thickness(6, 2, 6, 2), Margin = new Thickness(6, 0, 0, 0) };
+        var remove = new Button { Content = "×", ToolTip = L10n.T("route_remove"), Padding = new Thickness(6, 2, 6, 2), Margin = new Thickness(4, 0, 0, 0) };
+        var line = new DockPanel();
+        DockPanel.SetDock(remove, Dock.Right); DockPanel.SetDock(test, Dock.Right);
+        line.Children.Add(remove); line.Children.Add(test); line.Children.Add(url);
+        var block = new StackPanel { Margin = new Thickness(22, 6, 0, 0) };
+        block.Children.Add(line); block.Children.Add(status);
+        row.Container.Children.Insert(Math.Max(2, row.Container.Children.Count - (row.Container.Children.Contains(row.Routing) ? 1 : 0)), block);
+        row.Addresses.Add((url, status));
+        test.Click += async (_, _) => { test.IsEnabled = false; await CheckRoutesAsync(); test.IsEnabled = true; };
+        url.LostKeyboardFocus += (_, _) => RefreshRouteChoices(row);
+        remove.Click += (_, _) => {
+            if (row.Addresses.Count == 1)
+            {
+                if (_serverRows.Count == 1) return;
+                if (MessageBox.Show(L10n.T("route_remove_last"), "Tokdash", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return;
+                _serverRows.Remove(row); ServersPanel.Children.Remove(row.Container);
+                if (!_serverRows.Any(r => r.Enabled.IsChecked == true)) _serverRows[0].Enabled.IsChecked = true;
+            }
+            else { row.Addresses.RemoveAll(r => r.Input == url); row.Container.Children.Remove(block); RefreshRouteChoices(row); }
+        };
+    }
+
+    private static void RefreshRouteChoices(ServerRow row)
+    {
+        string selected = (row.Routing.SelectedItem as ComboBoxItem)?.Tag as string ?? row.Model.PreferredRoute ?? "";
+        row.Routing.Items.Clear();
+        row.Routing.Items.Add(new ComboBoxItem { Content = L10n.T("route_auto"), Tag = "" });
+        foreach (var address in row.Addresses.Select(r => r.Input.Text.Trim()).Where(CompanionStore.IsValidBaseURL).Distinct())
+            row.Routing.Items.Add(new ComboBoxItem { Content = address, Tag = address });
+        row.Routing.SelectedItem = row.Routing.Items.Cast<ComboBoxItem>().FirstOrDefault(i => (string)i.Tag == selected) ?? row.Routing.Items[0];
+    }
+
+    private async Task CheckRoutesAsync()
+    {
+        if (_checkingRoutes || _routeLifetime.IsCancellationRequested) return;
+        _checkingRoutes = true;
         try
         {
-            using var probe = new TokdashClient(candidate);
-            var health = await probe.HealthAsync();
-            bool ok = health.Service == "tokdash";
-            row.Result.Text = ok ? L10n.T("test_ok", CompanionStore.ServerLabel(candidate), health.Version) : L10n.T("test_not_tokdash");
-            row.Result.Foreground = (Brush)FindResource(ok ? "SettingsSuccess" : "SettingsError");
+            var rows = _serverRows.ToList();
+            var inputs = rows.SelectMany(row => row.Addresses.Select(a => (Row: row, a.Input, a.Status, Text: a.Input.Text.Trim().TrimEnd('/')))).ToList();
+            foreach (var input in inputs) input.Status.Text = L10n.T("testing");
+            var results = await Task.WhenAll(inputs.Select(async item => {
+                var candidates = item.Text.Contains("://") ? new[] { item.Text } : new[] { "https://" + item.Text, "http://" + item.Text };
+                RouteProbe? probe = null;
+                foreach (var candidate in candidates.Where(CompanionStore.IsValidBaseURL))
+                {
+                    probe = await TokdashClient.ProbeAsync(candidate, _routeLifetime.Token);
+                    if (probe.Health is not null) break;
+                }
+                return (Item: item, Probe: probe);
+            }));
+            if (_routeLifetime.IsCancellationRequested) return;
+            foreach (var row in rows.Where(_serverRows.Contains))
+            {
+                var current = results.Where(r => r.Item.Row == row && row.Addresses.Any(a => a.Input == r.Item.Input) && r.Item.Input.Text.Trim().TrimEnd('/') == r.Item.Text).ToList();
+                var identity = row.Model.InstanceId ?? current.FirstOrDefault(r => r.Item.Input == row.Url).Probe?.Health?.InstanceId;
+                row.Model.InstanceId = identity;
+                var good = current.Where(r => r.Probe?.Health is not null &&
+                    (!string.IsNullOrEmpty(identity) ? r.Probe.Health.InstanceId == identity : r.Item.Input == row.Url)).ToList();
+                string? preferred = (row.Routing.SelectedItem as ComboBoxItem)?.Tag as string;
+                var active = good.OrderBy(r => r.Probe!.Address == preferred ? 0 : 1).ThenBy(r => r.Probe!.Milliseconds).FirstOrDefault().Probe;
+                foreach (var result in current)
+                {
+                    bool accepted = good.Contains(result);
+                    result.Item.Status.Text = accepted
+                        ? $"{Math.Max(1, (int)result.Probe!.Milliseconds)} ms" + (result.Probe == active ? " · " + L10n.T("route_active") : "")
+                        : L10n.T(result.Probe?.Health is null ? "route_offline" : "route_mismatch");
+                    result.Item.Status.Foreground = (Brush)FindResource(accepted ? "SettingsSuccess" : "SettingsMuted");
+                    if (accepted) result.Item.Input.Text = result.Probe!.Address;
+                }
+                RefreshRouteChoices(row);
+            }
+            // Only successful, current identity evidence joins two host cards.
+            var known = new Dictionary<string, ServerRow>();
+            foreach (var row in rows.Where(_serverRows.Contains))
+            {
+                if (row.Model.InstanceId is not { Length: > 0 } id || !results.Any(r => r.Item.Row == row && r.Item.Input.Text.Trim() == r.Probe?.Address && r.Probe?.Health?.InstanceId == id)) continue;
+                if (!known.TryGetValue(id, out var target)) { known[id] = row; continue; }
+                foreach (var address in row.Addresses.Select(a => a.Input.Text.Trim()))
+                    if (!target.Addresses.Any(a => a.Input.Text.Trim() == address)) AddAddressRow(target, address);
+                target.Enabled.IsChecked = target.Enabled.IsChecked == true || row.Enabled.IsChecked == true;
+                _serverRows.Remove(row); ServersPanel.Children.Remove(row.Container); RefreshRouteChoices(target);
+            }
         }
-        catch (Exception ex) { row.Result.Text = L10n.T("test_reachable_error", ex.Message); row.Result.Foreground = (Brush)FindResource("SettingsError"); }
-        finally { button.IsEnabled = true; }
+        catch (OperationCanceledException) when (_routeLifetime.IsCancellationRequested) { }
+        finally { _checkingRoutes = false; }
     }
 
     private void AddServer_Click(object sender, RoutedEventArgs e) =>
-        AddServerRow(CompanionServerSettings.Create(CompanionSettings.DefaultBaseURL));
+        AddServerRow(new CompanionServerSettings { BaseUrl = "", Label = L10n.T("server_unnamed") });
 
     private void ApplyTheme()
     {
@@ -477,10 +575,13 @@ public partial class SettingsWindow : Window
         {
             Id = row.Model.Id,
             Label = string.IsNullOrWhiteSpace(row.Label.Text) ? CompanionStore.ServerLabel(row.Url.Text) : row.Label.Text.Trim(),
-            BaseUrl = row.Url.Text.Trim(),
+            BaseUrl = row.Url.Text.Trim().TrimEnd('/'),
             Enabled = row.Enabled.IsChecked == true,
+            Routes = row.Addresses.Skip(1).Select(a => a.Input.Text.Trim().TrimEnd('/')).ToList(),
+            PreferredRoute = ((row.Routing.SelectedItem as ComboBoxItem)?.Tag as string)?.TrimEnd('/'),
+            InstanceId = row.Model.InstanceId,
         }).ToList();
-        if (entries.Any(entry => !CompanionStore.IsValidBaseURL(entry.BaseUrl)) || !entries.Any(entry => entry.Enabled))
+        if (entries.Any(entry => new[] { entry.BaseUrl }.Concat(entry.Routes).Any(a => !CompanionStore.IsValidBaseURL(a))) || !entries.Any(entry => entry.Enabled))
         {
             MessageBox.Show(L10n.T("valid_url"), "Tokdash", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
@@ -544,7 +645,7 @@ public partial class SettingsWindow : Window
     }
 
     private static string ServerSignature(CompanionServerSettings server) =>
-        $"{server.Id}\u001f{server.Label}\u001f{server.BaseUrl.Trim()}\u001f{server.Enabled}";
+        $"{server.Id}\u001f{server.Label}\u001f{server.BaseUrl.Trim()}\u001f{server.Enabled}\u001f{string.Join("|", server.Routes)}\u001f{server.PreferredRoute}\u001f{server.InstanceId}";
 
     internal static bool ServerRegistriesEqual(
         IEnumerable<CompanionServerSettings> left,

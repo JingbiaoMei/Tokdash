@@ -159,6 +159,17 @@ public sealed class CompanionServerSettings
     [JsonPropertyName("enabled")]
     public bool Enabled { get; set; } = true;
 
+    [JsonPropertyName("routes")]
+    public List<string> Routes { get; set; } = [];
+    [JsonPropertyName("preferredRoute")]
+    public string? PreferredRoute { get; set; }
+    [JsonPropertyName("instanceId")]
+    public string? InstanceId { get; set; }
+    [JsonIgnore]
+    public List<string> Addresses => new[] { BaseUrl }.Concat(Routes)
+        .Select(s => s.Trim().TrimEnd('/')).Where(CompanionStore.IsValidBaseURL)
+        .Distinct(StringComparer.Ordinal).ToList();
+
     public static CompanionServerSettings Create(string baseUrl) => new()
     {
         BaseUrl = baseUrl,

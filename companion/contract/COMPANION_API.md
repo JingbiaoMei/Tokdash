@@ -319,6 +319,25 @@ fan out across enabled servers; failed servers are excluded from combined figure
 until they recover. Native clients do not require a passing Test before saving a
 valid URL.
 
+Optional additive fields on each server are `routes` (additional URL strings),
+`instanceId` (the daemon's `/health.instance_id`) and `preferredRoute` (a URL or
+null for automatic selection). `baseUrl` remains the first address for backward
+compatibility. Settings nests addresses under editable host names, checks
+availability/latency every 30 seconds while open, and merges hosts only after
+current health responses prove they are the same daemon. Explicit HTTP(S) URLs
+can be saved offline; addresses without a protocol are checked with HTTPS then
+HTTP before acceptance.
+
+Each refresh probes the enabled host's addresses concurrently. Only routes with
+the expected daemon identity qualify; choose the preferred reachable address or
+the fastest qualifying address. Read failures caused by a disconnected or timed
+out route retry another verified route. Application errors (including busy/503)
+are not hidden by retrying another address to the same daemon. Duplicate live
+identities contribute usage once, even before Settings has merged their cards.
+Identity-less older servers remain supported as single-address hosts; they are
+never merged by hostname or by matching usage. Settings remains schema v3, with
+absent route fields defaulting to an empty list and automatic selection.
+
 1. **Health gate.** Call `/health` first. Require `service == "tokdash"`. On
    mismatch or non-2xx, enter wrong-service / offline state. Do not call usage
    or quota endpoints until health passes.

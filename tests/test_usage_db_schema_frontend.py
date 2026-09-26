@@ -241,7 +241,8 @@ def test_status_line_is_rendered_from_the_shared_helper() -> None:
 QUOTA_PREAMBLE = """
 const scenario = JSON.parse(process.argv[2]);
 const serverRuntimeStatus = new Map();
-const LOCAL_SERVER = { id: 'local', label: 'Local' };\nfunction localHost() { return LOCAL_SERVER; }
+const LOCAL_SERVER = { id: 'local', label: 'Local' };
+function localHost() { return LOCAL_SERVER; }
 let lastQuotaServerRows = [];
 let lastQuotaPayload = null;
 let lastQuotaHistory = null;
@@ -498,7 +499,8 @@ def test_quota_refresh_button_leaves_no_banner_for_503(tmp_path: Path) -> None:
 WRITE_PREAMBLE = """
 const scenario = JSON.parse(process.argv[2]);
 const serverRuntimeStatus = new Map();
-const LOCAL_SERVER = { id: 'local', label: 'Local' };\nfunction localHost() { return LOCAL_SERVER; }
+const LOCAL_SERVER = { id: 'local', label: 'Local' };
+function localHost() { return LOCAL_SERVER; }
 let lastQuotaServerRows = [];
 let lastQuotaPayload = null;
 let lastQuotaHistory = null;

@@ -4673,9 +4673,13 @@
       } else if (routes.length) {
         // Nothing has answered, or nothing answers correctly. Keep the first route as a
         // placeholder so the host still appears in the fan-out and shows up as that host
-        // rather than silently dropping out of the combined view.
-        activeRouteId = routes[0].id;
-        activeReason = 'unverified';
+        // rather than silently dropping out of the combined view. A route already caught
+        // answering as some other Tokdash is not a placeholder: reading it would file that
+        // machine's tokens under this host, which is the one error the identity rule exists
+        // to prevent. It only becomes a placeholder while the route is unverified.
+        const placeholder = routes.find((route) => (runtime[route.id] || {}).state !== 'not-this-daemon') || null;
+        activeRouteId = placeholder ? placeholder.id : '';
+        activeReason = placeholder ? 'unverified' : '';
       }
       return {
         usableRouteIds: usable.map((route) => route.id),
@@ -9600,8 +9604,12 @@
         const timings = [elapsed];
         for (let attempt = 1; attempt < samples; attempt += 1) {
           const extra = await probeOnce(route);
-          if (extra === null) break;
-          timings.push(extra);
+          if (extra !== null) { timings.push(extra); continue; }
+          // Stopping the round is half the rule; the other half is that stopping means
+          // failure. A route that answered once and then went quiet is down, and keeping it
+          // 'ok' on the earlier sample is how a dying address keeps the traffic.
+          markRouteFailure(route.id, route.url, new Error(t('serverRouteUnreachable')));
+          return { ok: false, kind: 'fail' };
         }
         setRouteState(route.id, { ...prior, state: 'ok', samples: timings, failures: 0,
           attempted: (prior.attempted || 0) + 1, reportedInstanceId: first.instanceId, version: first.version,
@@ -9626,7 +9634,17 @@
       if (!probe?.ok) return;
       const reported = String(probe.instanceId || '');
       if (host.id === LOCAL_HOST_ID) {
-        if (reported) host.instanceId = reported;
+        // Only the address this page was served from proves which machine Local is. An added
+        // route is judged against that and never allowed to write it: a stale forward left in
+        // the list would otherwise rename the page's own host and pull it into another
+        // machine's row on the next merge.
+        if (route.kind === 'origin') {
+          if (reported) host.instanceId = reported;
+          return;
+        }
+        if (host.instanceId && reported && reported !== host.instanceId) {
+          setRouteState(route.id, { ...(routeRuntime[route.id] || newRouteRuntime()), state: 'not-this-daemon' });
+        }
         return;
       }
       if (host.instanceId) {
@@ -9730,7 +9748,15 @@
     // out of a combined view because one address died mid-request.
     async function fetchFromHost(host, path, options = {}) {
       const route = pickRoute(host);
-      if (!route) return await fetchJson(host, path, options);
+      if (!route) {
+        if (hostRoutes(host).length) {
+          // Addresses exist but none may be used -- every one is caught answering as another
+          // machine. Reading anyway would go through the page's own path and attribute some
+          // other daemon's figures to this host, so the host fails for this refresh instead.
+          throw Object.assign(new Error(t('serverRouteUnreachable')), { kind: 'network' });
+        }
+        return await fetchJson(host, path, options);
+      }
       try {
         return await fetchJson(viaRoute(host, route), path, options);
       } catch (error) {
@@ -10065,17 +10091,31 @@
     }
 
     function closeInlineEditor() {
-      inlineEditor = null;
+      inlineEditor = null;   // an in-flight validator checks this before it writes
       inlineEditorError = '';
       editingHostId = '';
       editingRouteId = '';
     }
 
-    function commitInlineEditor() {
-      if (!inlineEditor) return;
+    // Set while a validator is in flight, so a held Enter key cannot stack probes on one
+    // address and a cancel cannot race a commit that is about to write.
+    let inlineEditorCommitting = false;
+
+    async function commitInlineEditor() {
+      if (!inlineEditor || inlineEditorCommitting) return;
       const editor = inlineEditor;
       const value = inlineEditorDraft;
-      const error = editor.onSubmit(value);
+      // A route validator probes the address, so it is async. Nothing is written and nothing
+      // is saved until it comes back clean: an address stored before it was proven comes back
+      // on the next reload, which reads as the dashboard inventing a dead URL.
+      inlineEditorCommitting = true;
+      let error;
+      try {
+        error = await editor.onSubmit(value);
+      } finally {
+        inlineEditorCommitting = false;
+      }
+      if (inlineEditor !== editor) return;   // cancelled or replaced while the probe ran
       if (typeof error === 'string') {
         inlineEditorDraft = value;
         inlineEditorError = error;
@@ -10149,33 +10189,46 @@
       saveServerRegistry(); renderServerSettings(); refreshCurrentView();
     }
 
-    // Editing the address of a route re-probes it before committing, so a typo cannot
-    // silently take over the route a host is being read through.
+    // Judge an address before it reaches the registry. Probing under the candidate's own
+    // route id means a pass leaves a usable sample behind rather than a row that has to wait
+    // for the next tick to show a latency.
+    //
+    // A different daemon is only a refusal when it is nobody in the list. When it is, this is
+    // merge-on-add: the address belongs to the host that already carries that identity.
+    async function validateRouteAddress(host, candidate) {
+      const probe = await probeRoute(candidate, { bypassBackoff: true, samples: 1 });
+      if (probe.kind === 'blocked') return { error: `${t('serverRouteBlocked')}: ${blockedRuleText(probe.blockedRule)}`, probe };
+      if (probe.kind === 'fingerprint') return { error: t('serverTestFingerprintError'), probe };
+      if (!probe.ok && probe.kind !== 'backoff') return { error: t('serverTestNetworkError'), probe };
+      const reported = String(probe.instanceId || '');
+      const stranger = reported && host.instanceId && reported !== host.instanceId
+        && !hosts.some((item) => item !== host && item.instanceId === reported);
+      if (stranger) return { error: `${t('serverRouteWrongDaemon')}: ${t('serverRouteWrongDaemonTip')}`, probe };
+      return { error: null, probe };
+    }
+
+    // Editing the address of a route proves the new one first, so a typo cannot silently take
+    // over the route a host is being read through -- and cannot survive the reload either,
+    // which is what storing it before the probe did.
     function editRoute(host, route) {
-      openInlineEditor('serverRouteEdit', route.url, (value) => {
+      openInlineEditor('serverRouteEdit', route.url, async (value) => {
         const canonical = normalizeRouteUrl(value);
         if (!canonical) return t('serverInvalidUrl');
         if (pageRouteMatches(canonical) && route.kind !== 'origin') return t('serverRouteIsThisPage');
         if (hostRoutes(host).some((item) => item.id !== route.id && item.url === canonical)) return t('serverRouteDuplicate');
-        const previous = route.url;
-        route.url = canonical;
+        const { error } = await validateRouteAddress(host, { ...route, url: canonical });
+        // Either way the samples belong to an address that is not settled, so they go; the
+        // next round re-probes whatever URL the route actually ends up keeping.
         delete routeRuntime[route.id];
-        // Re-probe before trusting the new address: the row the user is editing may be the
-        // one every request is going through, and a typo must not survive the commit.
-        probeRoute(route, { bypassBackoff: true, samples: 1 }).then((probe) => {
-          if (!probe.ok && probe.kind !== 'backoff') {
-            route.url = previous;
-            setRouteState(route.id, newRouteRuntime());
-            renderServerSettings();
-          }
-          refreshCurrentView();
-        });
+        if (error) return error;
+        route.url = canonical;
+        hostActiveRouteId.delete(host.id);
         return null;
       }, { hostId: host.id, routeId: route.id });
     }
 
     function addRouteToHost(host) {
-      openInlineEditor('serverAddRoute', 'http://', (value) => {
+      openInlineEditor('serverAddRoute', 'http://', async (value) => {
         const canonical = normalizeRouteUrl(value);
         if (!canonical) return t('serverInvalidUrl');
         const existing = storedRouteUrlExists(canonical);
@@ -10183,14 +10236,13 @@
           return existing.host.id === host.id ? t('serverRouteDuplicate') : t('serverRouteAlreadyOn').replace('{name}', existing.host.label);
         }
         const route = { id: newId('route'), url: canonical, kind: 'added', addedAt: Date.now() };
+        const { error, probe } = await validateRouteAddress(host, route);
+        if (error) { delete routeRuntime[route.id]; return error; }
         host.routes = [...hostRoutes(host), route];
-        probeRoute(route, { bypassBackoff: true, samples: 1 }).then((probe) => {
-          applyProbeIdentity(host, route, probe);
-          // The probe may have just identified a host already in the list, which is the
-          // merge-on-add case: the route joins that host instead of staying here.
-          mergeStoredHostsByIdentity();
-          saveServerRegistry(); renderServerSettings(); refreshCurrentView();
-        });
+        applyProbeIdentity(host, route, probe);
+        // The probe may have just identified a host already in the list, which is the
+        // merge-on-add case: the route joins that host instead of staying here.
+        mergeStoredHostsByIdentity();
         return null;
       }, { hostId: host.id });
     }
@@ -12617,8 +12669,9 @@
 
       try {
         const server = ownerServer || localHost();
-        const response = await fetch(serverPath(server, `/api/session?tool=${encodeURIComponent(tool)}&session_id=${encodeURIComponent(sessionId)}`));
-        const data = await response.json();
+        // Through the host's routes like every other read: a drill-down opened the moment the
+        // address in use dies should move to the next one, not show a failed modal.
+        const data = await fetchFromHost(server, `/api/session?tool=${encodeURIComponent(tool)}&session_id=${encodeURIComponent(sessionId)}`);
         activeSessionDetail = { tool, data };
         const session = data.session || {};
         const turns = data.turns || [];

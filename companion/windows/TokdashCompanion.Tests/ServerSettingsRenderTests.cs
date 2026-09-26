@@ -3,6 +3,9 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using System.Windows.Automation.Peers;
+using System.Windows.Automation.Provider;
+using System.Windows.Controls.Primitives;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace TokdashCompanion.Tests;
@@ -51,15 +54,53 @@ public class ServerSettingsRenderTests
                     var right = editor.TranslatePoint(new Point(editor.ActualWidth, 0), panel).X;
                     Assert.IsTrue(right <= panel.ActualWidth + 1, "Address editor overflowed the settings window");
                 }
+                // The custom templates must preserve native interaction and automation.
+                var toggle = (CheckBox)window.FindName("NotifyBox");
+                var togglePeer = new CheckBoxAutomationPeer(toggle);
+                var toggleProvider = (IToggleProvider)togglePeer.GetPattern(PatternInterface.Toggle);
+                toggleProvider.Toggle();
+                Assert.AreEqual(true, toggle.IsChecked);
+                toggleProvider.Toggle();
+                Assert.AreEqual(false, toggle.IsChecked);
+                var slider = (Slider)window.FindName("FiveHourSlider");
+                var before = slider.Value;
+                Slider.IncreaseSmall.Execute(null, slider);
+                Assert.IsTrue(slider.Value > before);
+                var sliderTrack = (Track)slider.Template.FindName("PART_Track", slider);
+                Assert.AreEqual(slider.Value, sliderTrack.Value, "Track must follow the slider's native value binding");
+                var routing = Descendants<ComboBox>(panel).First();
+                var dropDownButton = (ToggleButton)routing.Template.FindName("DropDownToggle", routing);
+                var dropDownPeer = new ToggleButtonAutomationPeer(dropDownButton);
+                ((IToggleProvider)dropDownPeer.GetPattern(PatternInterface.Toggle)).Toggle();
+                Assert.IsTrue(routing.IsDropDownOpen, "Clicking the dropdown must update the ComboBox");
+                Pump(); window.UpdateLayout();
+                var popup = (Popup)routing.Template.FindName("PART_Popup", routing);
+                Assert.IsTrue(popup.IsOpen && popup.Child.IsVisible, "Route choices must open in the custom dropdown");
+                Assert.IsTrue(popup.Child.RenderSize.Width <= routing.ActualWidth + 1, "Long addresses must not widen the dropdown");
+                routing.SelectedIndex = 1;
+                Assert.IsInstanceOfType<ComboBoxItem>(routing.SelectedItem);
+                routing.IsDropDownOpen = false;
                 if (Environment.GetEnvironmentVariable("TOKDASH_RENDER_DIR") is { Length: > 0 } renderDir)
                 {
                     System.IO.Directory.CreateDirectory(renderDir);
-                    var bitmap = new RenderTargetBitmap((int)window.ActualWidth, (int)window.ActualHeight, 96, 96, PixelFormats.Pbgra32);
-                    bitmap.Render(window);
-                    var encoder = new PngBitmapEncoder();
-                    encoder.Frames.Add(BitmapFrame.Create(bitmap));
-                    using var file = System.IO.File.Create(System.IO.Path.Combine(renderDir, "windows-settings.png"));
-                    encoder.Save(file);
+                    var language = (ComboBox)window.FindName("LanguageCombo");
+                    language.Items.Add("System language"); language.SelectedIndex = 0;
+                    foreach (bool dark in new[] { true, false })
+                    {
+                        window.ApplyTheme(dark);
+                        foreach (bool bottom in new[] { false, true })
+                        {
+                            if (bottom) scroller.ScrollToBottom(); else scroller.ScrollToTop();
+                            Pump(); window.UpdateLayout();
+                            var bitmap = new RenderTargetBitmap((int)window.ActualWidth, (int)window.ActualHeight, 96, 96, PixelFormats.Pbgra32);
+                            bitmap.Render(window);
+                            var encoder = new PngBitmapEncoder();
+                            encoder.Frames.Add(BitmapFrame.Create(bitmap));
+                            string name = $"windows-settings-{(dark ? "dark" : "light")}-{(bottom ? "bottom" : "top")}.png";
+                            using var file = System.IO.File.Create(System.IO.Path.Combine(renderDir, name));
+                            encoder.Save(file);
+                        }
+                    }
                 }
                 Descendants<Button>(panel).First(b => b.Content as string == "+").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                 Pump();

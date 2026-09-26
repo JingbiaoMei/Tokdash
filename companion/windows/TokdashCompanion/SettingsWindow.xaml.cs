@@ -2,6 +2,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Automation;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Microsoft.Win32;
@@ -376,14 +377,19 @@ public partial class SettingsWindow : Window
         var server = System.Text.Json.JsonSerializer.Deserialize<CompanionServerSettings>(
             System.Text.Json.JsonSerializer.Serialize(original))!;
         var enabled = new CheckBox { IsChecked = server.Enabled, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) };
-        var label = new TextBox { Text = server.Label, FontWeight = FontWeights.SemiBold, BorderThickness = new Thickness(0) };
+        var label = new TextBox { Text = server.Label, FontWeight = FontWeights.SemiBold };
         var add = new Button { Content = "+", ToolTip = L10n.T("route_add"), Padding = new Thickness(8, 2, 8, 2), Margin = new Thickness(0, 0, 8, 0) };
+        AutomationProperties.SetName(add, L10n.T("route_add"));
+        AutomationProperties.SetName(label, L10n.T("server_label"));
+        AutomationProperties.SetName(enabled, server.Label);
+        label.TextChanged += (_, _) => AutomationProperties.SetName(enabled, label.Text);
         var header = new DockPanel();
         DockPanel.SetDock(enabled, Dock.Left); DockPanel.SetDock(add, Dock.Left);
         header.Children.Add(enabled); header.Children.Add(add); header.Children.Add(label);
         var result = new TextBlock { FontSize = 11, TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
         var container = new StackPanel { Margin = new Thickness(0, 0, 0, 14) };
-        var routing = new ComboBox { Margin = new Thickness(22, 4, 0, 0), FontSize = 11 };
+        var routing = new ComboBox { Margin = new Thickness(46, 8, 0, 0), FontSize = 11 };
+        AutomationProperties.SetName(routing, L10n.T("route_pin"));
         var row = new ServerRow(server, enabled, label, result, container, routing);
         container.Children.Add(header); container.Children.Add(result);
         _serverRows.Add(row); ServersPanel.Children.Add(container);
@@ -399,14 +405,16 @@ public partial class SettingsWindow : Window
 
     private void AddAddressRow(ServerRow row, string address)
     {
-        var url = new TextBox { Text = address, MinWidth = 140, ToolTip = L10n.T("route_add_hint"), BorderThickness = new Thickness(0) };
+        var url = new TextBox { Text = address, MinWidth = 140, ToolTip = L10n.T("route_add_hint") };
         var status = new TextBlock { FontSize = 10, Margin = new Thickness(0, 2, 0, 0), Foreground = (Brush)FindResource("SettingsMuted") };
         var test = new Button { Content = L10n.T("test"), Padding = new Thickness(6, 2, 6, 2), Margin = new Thickness(6, 0, 0, 0) };
         var remove = new Button { Content = "×", ToolTip = L10n.T("route_remove"), Padding = new Thickness(6, 2, 6, 2), Margin = new Thickness(4, 0, 0, 0) };
+        AutomationProperties.SetName(url, L10n.T("route_address"));
+        AutomationProperties.SetName(remove, L10n.T("route_remove"));
         var line = new DockPanel();
         DockPanel.SetDock(remove, Dock.Right); DockPanel.SetDock(test, Dock.Right);
         line.Children.Add(remove); line.Children.Add(test); line.Children.Add(url);
-        var block = new StackPanel { Margin = new Thickness(22, 6, 0, 0) };
+        var block = new StackPanel { Margin = new Thickness(46, 8, 0, 0) };
         block.Children.Add(line); block.Children.Add(status);
         row.Container.Children.Insert(Math.Max(2, row.Container.Children.Count - (row.Container.Children.Contains(row.Routing) ? 1 : 0)), block);
         row.Addresses.Add((url, status));
@@ -494,10 +502,10 @@ public partial class SettingsWindow : Window
     private void AddServer_Click(object sender, RoutedEventArgs e) =>
         AddServerRow(new CompanionServerSettings { BaseUrl = "", Label = L10n.T("server_unnamed") });
 
-    private void ApplyTheme()
+    internal void ApplyTheme(bool? darkMode = null)
     {
         _highContrast = SystemParameters.HighContrast;
-        _dark = !_highContrast && IsDarkMode();
+        _dark = !_highContrast && (darkMode ?? IsDarkMode());
 
         if (_highContrast)
         {
@@ -506,6 +514,9 @@ public partial class SettingsWindow : Window
             SetBrush("SettingsMuted", SystemColors.GrayTextBrush);
             SetBrush("SettingsControlBg", SystemColors.ControlBrush);
             SetBrush("SettingsControlBorder", SystemColors.ControlTextBrush);
+            SetBrush("SettingsAccent", SystemColors.HighlightBrush);
+            SetBrush("SettingsAccentText", SystemColors.HighlightTextBrush);
+            SetBrush("SettingsHover", SystemColors.ControlBrush);
             SetBrush("SettingsSuccess", SystemColors.HighlightBrush);
             SetBrush("SettingsError", SystemColors.WindowTextBrush);
         }
@@ -515,7 +526,10 @@ public partial class SettingsWindow : Window
             SetBrush("SettingsText", HexBrush("#F3F3F3"));
             SetBrush("SettingsMuted", HexBrush("#B4B4B4"));
             SetBrush("SettingsControlBg", HexBrush("#2B2D31"));
-            SetBrush("SettingsControlBorder", HexBrush("#686A70"));
+            SetBrush("SettingsControlBorder", HexBrush("#484B52"));
+            SetBrush("SettingsAccent", HexBrush("#60A5FA"));
+            SetBrush("SettingsAccentText", HexBrush("#101B2C"));
+            SetBrush("SettingsHover", HexBrush("#3B3F46"));
             SetBrush("SettingsSuccess", HexBrush("#6CCB5F"));
             SetBrush("SettingsError", HexBrush("#FF99A4"));
         }
@@ -525,7 +539,10 @@ public partial class SettingsWindow : Window
             SetBrush("SettingsText", HexBrush("#1B1B1B"));
             SetBrush("SettingsMuted", HexBrush("#616161"));
             SetBrush("SettingsControlBg", HexBrush("#FFFFFF"));
-            SetBrush("SettingsControlBorder", HexBrush("#8A8A8A"));
+            SetBrush("SettingsControlBorder", HexBrush("#C8CDD5"));
+            SetBrush("SettingsAccent", HexBrush("#1765CF"));
+            SetBrush("SettingsAccentText", HexBrush("#FFFFFF"));
+            SetBrush("SettingsHover", HexBrush("#E7EBF1"));
             SetBrush("SettingsSuccess", HexBrush("#187A32"));
             SetBrush("SettingsError", HexBrush("#C42B1C"));
         }

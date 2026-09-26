@@ -19,6 +19,7 @@
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
                 <ResourceDictionary Source="SlimScrollBars.xaml"/>
+                <ResourceDictionary Source="SettingsControls.xaml"/>
             </ResourceDictionary.MergedDictionaries>
         <SolidColorBrush x:Key="SettingsBg" Color="#F2F4F7"/>
         <SolidColorBrush x:Key="SettingsText" Color="#1B1B1B"/>
@@ -44,22 +45,6 @@
         <sys:Double x:Key="FontCaption">11</sys:Double>
         <sys:Double x:Key="FontMicro">10</sys:Double>
 
-        <Style TargetType="Button">
-            <Setter Property="FontFamily" Value="Segoe UI Variable Text"/>
-            <Setter Property="Foreground" Value="{DynamicResource SettingsText}"/>
-            <Setter Property="Background" Value="{DynamicResource SettingsControlBg}"/>
-            <Setter Property="BorderBrush" Value="{DynamicResource SettingsControlBorder}"/>
-        </Style>
-        <Style TargetType="TextBox">
-            <Setter Property="FontFamily" Value="Segoe UI Variable Text"/>
-            <Setter Property="Foreground" Value="{DynamicResource SettingsText}"/>
-            <Setter Property="Background" Value="{DynamicResource SettingsControlBg}"/>
-            <Setter Property="BorderBrush" Value="{DynamicResource SettingsControlBorder}"/>
-        </Style>
-        <Style TargetType="CheckBox">
-            <Setter Property="FontFamily" Value="Segoe UI Variable Text"/>
-            <Setter Property="Foreground" Value="{DynamicResource SettingsText}"/>
-        </Style>
         </ResourceDictionary>
     </Window.Resources>
     <ScrollViewer x:Name="SettingsScrollViewer" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
@@ -72,7 +57,6 @@
         <StackPanel.Resources>
             <Style TargetType="TextBlock">
                 <Setter Property="FontFamily" Value="Segoe UI Variable Text"/>
-                <Setter Property="Foreground" Value="{DynamicResource SettingsText}"/>
             </Style>
         </StackPanel.Resources>
 
@@ -116,7 +100,7 @@
                 <Style x:Key="CompDesc" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
                     <Setter Property="FontSize" Value="{StaticResource FontMicro}"/>
                     <Setter Property="Foreground" Value="{DynamicResource SettingsMuted}"/>
-                    <Setter Property="Margin" Value="22,0,0,6"/>
+                    <Setter Property="Margin" Value="46,0,0,8"/>
                 </Style>
             </StackPanel.Resources>
             <CheckBox x:Name="CompFullDeltaBox" Content="Full delta row" Margin="0,0,0,0"/>
@@ -125,7 +109,7 @@
             <TextBlock x:Name="CompTopRanksDesc" Style="{StaticResource CompDesc}" Text="under the hero; rows set below"/>
             <!-- Rows per top-ranks list (contract §Top ranks): one shared count for tools and
                  models, 3..8. Autosaves like the toggles around it; the flyout grows to fit. -->
-            <DockPanel Margin="22,2,0,6">
+            <DockPanel Margin="46,2,0,8">
                 <TextBlock x:Name="RankRowsLabel" DockPanel.Dock="Left" Text="Rows: 3"
                            FontSize="{StaticResource FontMicro}" Foreground="{DynamicResource SettingsMuted}"
                            VerticalAlignment="Center" Width="110"/>
@@ -199,7 +183,7 @@
 
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
             <Button x:Name="CancelBtn" Content="Cancel" Click="Cancel_Click" Margin="0,0,8,0" Padding="16,5"/>
-            <Button x:Name="SaveBtn" Content="Save" Click="Save_Click" Padding="16,5" FontWeight="SemiBold"/>
+            <Button x:Name="SaveBtn" Style="{StaticResource SettingsPrimaryButton}" Content="Save" Click="Save_Click" Padding="16,5" FontWeight="SemiBold"/>
         </StackPanel>
     </StackPanel>
     </ScrollViewer>

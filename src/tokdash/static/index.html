@@ -13342,9 +13342,13 @@
     // is picked by hand. `antigravity` would resolve through the shared alias table
     // on its own, `opencode_go` is OpenCode's own subscription, and `commandcode` is
     // a quota-only provider: it never reaches the Overview, so this table is the only
-    // place its mark is resolved. Z.ai has no mark in the local asset set, so it lands
-    // on the same letter tile as any other unidentified source, which is what
-    // `toolBrandMeta` gives -- the one entry worth checking when a card looks plain.
+    // place its mark is resolved. `zai` is quota-only too, and its mark is not a guess:
+    // the poll reads the Z.ai key out of the ZCode CLI's own config
+    // ($ZCODE_HOME/v2/config.json, the path the consent panel names), so the card wears
+    // the same vendor glyph as the tool row that earned the spend instead of a second
+    // copy of the same asset. A provider this table does not mention yet still resolves
+    // on its own key and lands on the letter tile `toolBrandMeta` gives -- the one thing
+    // worth checking when a card looks plain.
     const QUOTA_PROVIDER_BRAND_KEYS = Object.freeze({
       codex: 'codex',
       claude: 'claude',
@@ -13352,6 +13356,7 @@
       minimax: 'minimax',
       kimi: 'kimi',
       grok: 'grok',
+      zai: 'zcode',
       opencode_go: 'opencode',
       commandcode: 'commandcode',
     });

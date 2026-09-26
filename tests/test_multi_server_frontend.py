@@ -1441,6 +1441,76 @@ def test_the_placeholder_never_lands_on_a_route_from_another_daemon(tmp_path):
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_a_route_in_backoff_is_not_dialled_between_probes(tmp_path):
+    """The backoff has to cover ordinary reads, not just the probe loop.
+
+    A route that keeps failing backs off so the browser stops knocking on it -- every blocked
+    probe is a red console error and a wasted round trip. If a refresh could still pick that
+    route as the host's placeholder, the backoff would only hide it from the prober. `now` is
+    passed in so the case is about the rule rather than about the clock.
+    """
+    routes = [{"id": "dead", "url": "http://dead"}, {"id": "quiet", "url": "http://quiet"}]
+    in_backoff = {"state": "fail", "samples": [], "nextTryAt": 5_000}
+    cases = {
+        # Every address just failed and none is due yet: the host sits this refresh out.
+        "allInBackoff": {"routes": routes, "runtime": {"dead": dict(in_backoff), "quiet": dict(in_backoff)},
+                         "choice": "auto", "hostInstanceId": "H", "now": 1_000},
+        # Due again, so it is fair game -- otherwise a route stays benched for good.
+        "backoffExpired": {"routes": routes, "runtime": {"dead": dict(in_backoff), "quiet": dict(in_backoff)},
+                           "choice": "auto", "hostInstanceId": "H", "now": 6_000},
+        # blocked is permanent from this page, not a bad moment, so it never earns a request.
+        "allBlocked": {"routes": routes, "runtime": {"dead": {"state": "blocked"}, "quiet": {"state": "blocked"}},
+                       "choice": "auto", "hostInstanceId": "H", "now": 1_000},
+        "blockedThenBackedOff": {"routes": routes, "runtime": {"dead": {"state": "blocked"}, "quiet": dict(in_backoff)},
+                                 "choice": "auto", "hostInstanceId": "H", "now": 1_000},
+        # A route nothing has probed still stands in, so a host never vanishes before its
+        # first round of probes has run.
+        "blockedThenIdle": {"routes": routes, "runtime": {"dead": {"state": "blocked"}},
+                            "choice": "auto", "hostInstanceId": "H", "now": 1_000},
+    }
+    out = _run_routes(tmp_path, "backoff",
+                      "Object.fromEntries(Object.entries(cases).map(([k, v]) => [k, rankRoutes(v)]))",
+                      {"cases": cases})
+    assert out["allInBackoff"]["activeRouteId"] == "", "a refresh does not contact a route that is backing off"
+    assert out["allInBackoff"]["activeReason"] == ""
+    assert out["backoffExpired"]["activeRouteId"] == "dead", "once the backoff lapses the route is back"
+    assert out["allBlocked"]["activeRouteId"] == "", "an address this page can never read is never worth a try"
+    assert out["blockedThenBackedOff"]["activeRouteId"] == ""
+    assert out["blockedThenIdle"]["activeRouteId"] == "quiet", "the unprobed address carries the host instead"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_a_backed_off_route_receives_no_request_at_all(tmp_path):
+    """Ranking is the only door a read goes through, so the count is the proof.
+
+    The assertion that matters is that nothing was fetched: a placeholder that merely looked
+    worse in the list would still put a request on a route the probes just gave up on.
+    """
+    body = """{
+      const hits = [];
+      globalThis.fetch = async (url) => { hits.push(String(url)); throw new TypeError('Failed to fetch'); };
+      const host = { id: 'ws', instanceId: 'WS', choice: 'auto',
+        routes: [{ id: 'a', url: 'http://a', kind: 'added' }, { id: 'b', url: 'http://b', kind: 'added' }] };
+      markRouteFailure('a', 'http://a', new TypeError('Failed to fetch'));
+      markRouteFailure('b', 'http://b', new TypeError('Failed to fetch'));
+      let threw = null;
+      try { await fetchFromHost(host, '/api/usage'); } catch (error) { threw = String(error); }
+      const whileBackingOff = hits.length;
+      // Then the backoff lapses, and the very same read goes out again.
+      Object.values(routeRuntime).forEach((state) => { state.nextTryAt = 0; });
+      const recovered = await fetchFromHost(host, '/api/usage').catch((error) => `threw:${error}`);
+      return { whileBackingOff, total: hits.length, threw, recovered: String(recovered),
+               a: routeRuntime.a.state, b: routeRuntime.b.state };
+    }"""
+    out = _run_fetching(tmp_path, "backoff_reads", body)
+    assert out["whileBackingOff"] == 0, "neither address is dialled while both are backing off"
+    assert "serverRouteUnreachable" in out["threw"], "the host fails the refresh with its own reason"
+    assert out["total"] > 0 and out["recovered"].startswith("threw:"), \
+        "once they are due again the read goes out and reports the real failure"
+    assert out["a"] == "fail" and out["b"] == "fail"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
 def test_locals_identity_comes_only_from_the_page_route(tmp_path):
     """Local is whatever daemon served this page, so only that address may say which one."""
     body = """{
@@ -1494,12 +1564,14 @@ def test_a_route_that_goes_quiet_mid_probe_is_not_left_healthy(tmp_path):
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
 def test_an_address_is_judged_before_it_is_stored(tmp_path):
-    """Adding an address has to prove it belongs; editing only has to not clash.
+    """An address has to prove it belongs before it can sit on a host's row.
 
     An unknown id cannot prove two addresses are the same machine, so a host that reports no
-    identity of its own takes no new addresses at all, and an address that reports none cannot
-    join a host that has one. Editing is looser on purpose: the route already belongs here, and
-    repointing someone's only address defines that host rather than merging anything.
+    identity of its own takes no new addresses at all. Once a host DOES have an identity, an
+    address that reports none is refused on an edit just as it is on an add: ranking bars a
+    blank report from carrying that host's figures, so accepting one here would only park a
+    route that can never be used. A host still waiting on its identity edits loosely, because
+    repointing that host's only address defines it rather than merging anything.
     """
     body = """{
       globalThis.fetch = async () => (typeof reply === 'function' ? reply()
@@ -1527,6 +1599,9 @@ def test_an_address_is_judged_before_it_is_stored(tmp_path):
       reply = '';
       results.noIdentityOnAdd = (await add(host, 'http://c')).error;
       results.noIdentityOnEdit = (await edit(host, 'http://c')).error;
+      // Same blank report, but this host has no identity of its own: repointing its only
+      // address defines it, so there is nothing for the silence to contradict.
+      results.noIdentitySoleRouteEdit = (await edit(unidentified, 'http://c')).error;
 
       reply = 'WHOEVER';
       results.hostWithoutIdentityOnAdd = (await add(unidentified, 'http://c')).error;
@@ -1540,7 +1615,9 @@ def test_an_address_is_judged_before_it_is_stored(tmp_path):
     assert str(out["strangerOnEdit"]).startswith("serverRouteWrongDaemon"), "on an edit too"
     assert out["listedOwnerOnAdd"] == "serverRouteAlreadyOn", "a listed daemon is refused by name"
     assert out["noIdentityOnAdd"] == "serverIdentityUnavailable", "an address with no id proves nothing"
-    assert out["noIdentityOnEdit"] is None, "but a route may still be repointed by its owner"
+    assert out["noIdentityOnEdit"] == "serverIdentityUnavailable", \
+        "an edit is refused too, because ranking would never let that route carry the host"
+    assert out["noIdentitySoleRouteEdit"] is None, "a host with no identity can still be repointed"
     assert out["hostWithoutIdentityOnAdd"] == "serverIdentityUnknownNote", "an unidentified host takes no address"
     assert out["hostWithoutIdentityOnEdit"] is None, "an old daemon can still be repointed"
 

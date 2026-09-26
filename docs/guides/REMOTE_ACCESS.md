@@ -433,10 +433,11 @@ before the numbers look wrong:
   not a slow route but an unreadable one; the dashboard marks it **Blocked from this page**
   with the rule that blocks it and a remove button, and never merges it.
 - An address added to a server that is already listed is proved first. One that does not
-  answer, or that answers as a different Tokdash, is refused where you typed it, naming the
-  machine that owns that address. Adding a whole new server stays advisory: registering a
-  machine that is offline right now is legitimate, so it is stored and marked unreachable
-  until it answers.
+  answer, that answers as a different Tokdash, or that cannot say which Tokdash it is, is
+  refused where you typed it, naming the machine that owns that address; an address whose
+  owner cannot be established would only sit on the row and carry nothing. Adding a whole new
+  server stays advisory: registering a machine that is offline right now is legitimate, so it
+  is stored and marked unreachable until it answers.
 
 If a second address does land in two separate rows, they are two daemons even when one
 machine runs both, which is what two `TOKDASH_DATA_DIR`s give you, and their tokens really

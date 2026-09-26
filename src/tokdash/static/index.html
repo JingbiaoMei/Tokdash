@@ -4631,7 +4631,8 @@
     // Pure: routes and their probe state in, the active route and the facts behind the
     // badges out, so the band, the pinned fallback and the all-failed placeholder are all
     // testable without a browser. `runtime` is keyed by route id.
-    function rankRoutes({ routes = [], runtime = {}, choice = 'auto', hostInstanceId = '', incumbentRouteId = '' } = {}) {
+    function rankRoutes({ routes = [], runtime = {}, choice = 'auto', hostInstanceId = '',
+                          incumbentRouteId = '', now = Date.now() } = {}) {
       const hostId = String(hostInstanceId || '');
       // What the probes say about WHO answers, separate from whether they answer well.
       // When the host has no identity yet -- an old daemon, or one whose id has not arrived
@@ -4646,6 +4647,9 @@
         if (!hostId || state.state !== 'ok') return false;
         return String(state.reportedInstanceId || '') !== hostId;
       };
+      // A probe backoff is a promise not to knock again for a while, and an ordinary read has
+      // to keep that promise or the backoff only hides the route from the probe loop.
+      const inBackoff = (state) => Number(state?.nextTryAt || 0) > now;
       const usable = routes.filter((route) => (runtime[route.id] || {}).state === 'ok' && !disproven(route));
       const fastest = (id) => {
         const median = routeMedianMs(runtime[id]);
@@ -4680,8 +4684,16 @@
         // rather than silently dropping out of the combined view. A route already caught
         // answering as some other Tokdash is not a placeholder: reading it would file that
         // machine's tokens under this host, which is the one error the identity rule exists
-        // to prevent. It only becomes a placeholder while the route is unverified.
-        const placeholder = routes.find((route) => !disproven(route)) || null;
+        // to prevent. It only becomes a placeholder while the route is unverified. Neither is
+        // an address this page can never read, nor one the probe is currently backing off --
+        // dialling those on every refresh is exactly what the backoff exists to stop. When
+        // every route is barred the host fails this refresh rather than reaching for one.
+        const placeholder = routes.find((route) => {
+          const state = runtime[route.id] || {};
+          // blocked is permanent from this page, so that address is never worth a read. A
+          // failed one is skipped only for the length of its backoff, then comes back.
+          return !disproven(route) && state.state !== 'blocked' && !inBackoff(state);
+        }) || null;
         activeRouteId = placeholder ? placeholder.id : '';
         activeReason = placeholder ? 'unverified' : '';
       }
@@ -4710,6 +4722,9 @@
       return ranking.activeRouteId;
     }
 
+    // Display and the write path. Reads go through pickRoute, which honours the probe backoff;
+    // a POST cannot be re-driven on another address after a dropped response, so it takes the
+    // route it is given even when the probes have benched every one of them.
     function activeRouteFor(host) {
       const routes = hostRoutes(host);
       if (!routes.length) return null;
@@ -10217,10 +10232,13 @@
     // daemon. A host with no identity of its own cannot supply any, so nothing can be added to
     // it -- an unknown id cannot prove two addresses are the same machine, and reading some
     // other daemon's usage through a row named after this one is the error the whole identity
-    // rule exists to prevent. Editing is looser, because the route already belongs to this
-    // host and repointing someone's only address defines it rather than merging anything, so
-    // only a proven mismatch stops it. A confirmed difference in identity is a refusal whether
-    // or not that daemon is listed; naming the owner is the honest answer.
+    // rule exists to prevent. Once a host DOES have an identity, editing and adding come to
+    // the same thing: an address that cannot name itself as that daemon would be stored,
+    // probed, and then barred from carrying the host's figures, so refusing it here is the
+    // honest answer and a silent pass would only park a dead route on the row. Only a host
+    // still waiting on its identity edits loosely, because repointing that host's only address
+    // defines it rather than merging anything. A confirmed difference in identity is a refusal
+    // whether or not the other daemon is listed; naming the owner is the honest answer.
     async function validateRouteAddress(host, url, { requireProof = false } = {}) {
       const candidate = { id: newId('probe'), url, kind: 'probe' };
       const probe = await probeRoute(candidate, { bypassBackoff: true, samples: 1 });
@@ -10231,14 +10249,17 @@
       if (probe.kind === 'fingerprint') return fail(t('serverTestFingerprintError'));
       if (!probe.ok && probe.kind !== 'backoff') return fail(t('serverTestNetworkError'));
       const reported = String(probe.instanceId || '');
-      if (reported && host.instanceId && reported !== host.instanceId) {
-        const owner = hosts.find((item) => item !== host && item.instanceId === reported) || null;
-        return fail(owner ? t('serverRouteAlreadyOn').replace('{name}', owner.label)
-          : `${t('serverRouteWrongDaemon')}: ${t('serverRouteWrongDaemonTip')}`);
-      }
-      if (requireProof) {
-        if (!host.instanceId) return fail(t('serverIdentityUnknownNote'));
+      if (host.instanceId) {
+        if (reported && reported !== host.instanceId) {
+          const owner = hosts.find((item) => item !== host && item.instanceId === reported) || null;
+          return fail(owner ? t('serverRouteAlreadyOn').replace('{name}', owner.label)
+            : `${t('serverRouteWrongDaemon')}: ${t('serverRouteWrongDaemonTip')}`);
+        }
         if (!reported) return fail(t('serverIdentityUnavailable'));
+      } else if (requireProof) {
+        // Nothing to match against, and an unknown id proves nothing about whose machine this
+        // is, so there is no way to tell an added route from somebody else's daemon.
+        return fail(t('serverIdentityUnknownNote'));
       }
       return { error: null, probe, state };
     }

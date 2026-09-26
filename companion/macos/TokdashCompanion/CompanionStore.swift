@@ -11,6 +11,14 @@ private enum MultiServerAttempt: Sendable {
     case failure(CompanionServerSettings, busy: Bool, wrongService: Bool)
 }
 
+// Keep the task-group payload nominal: the optimized Swift build on newer macOS
+// toolchains lost the health results when this payload was an anonymous tuple.
+private struct ResolvedServer: Sendable {
+    let id: String
+    let client: TokdashClient
+    let health: Result<HealthResponse, Error>
+}
+
 /// Companion store: holds connection state, the decoded snapshot, the refresh
 /// scheduler, and settings. All mutations happen on the main actor.
 @MainActor
@@ -775,22 +783,22 @@ final class CompanionStore: NSObject, ObservableObject {
         let source = Self.glanceSource(for: period, components: settings.components,
                                        today: Self.now, calendar: .current)
         let makeClient = clientFactory
-        let resolved = await withTaskGroup(of: (String, TokdashClient, Result<HealthResponse, Error>).self) { group in
+        let resolved = await withTaskGroup(of: ResolvedServer.self) { group in
             for server in configuredServers {
                 group.addTask {
                     let client = makeClient(server)
-                    do { return (server.id, client, .success(try await client.health())) }
-                    catch { return (server.id, client, .failure(error)) }
+                    do { return ResolvedServer(id: server.id, client: client, health: .success(try await client.health())) }
+                    catch { return ResolvedServer(id: server.id, client: client, health: .failure(error)) }
                 }
             }
-            var result: [String: (TokdashClient, Result<HealthResponse, Error>)] = [:]
-            for await (id, client, health) in group { result[id] = (client, health) }
+            var result: [String: ResolvedServer] = [:]
+            for await response in group { result[response.id] = response }
             return result
         }
         if Task.isCancelled { return }
         var learnedIdentity = false
         for index in settings.servers.indices where settings.servers[index].instanceId == nil {
-            if let health = try? resolved[settings.servers[index].id]?.1.get(), health.service == "tokdash",
+            if let health = try? resolved[settings.servers[index].id]?.health.get(), health.service == "tokdash",
                let identity = health.instanceId, !identity.isEmpty {
                 settings.servers[index].instanceId = identity; learnedIdentity = true
             }
@@ -798,16 +806,17 @@ final class CompanionStore: NSObject, ObservableObject {
         if learnedIdentity { settings.save() }
         var identities = Set<String>()
         let servers = configuredServers.filter { server in
-            guard let health = try? resolved[server.id]?.1.get(), health.service == "tokdash",
+            guard let health = try? resolved[server.id]?.health.get(), health.service == "tokdash",
                   let identity = health.instanceId, !identity.isEmpty else { return true }
             return identities.insert(identity).inserted
         }
         let attempts: [MultiServerAttempt] = await withTaskGroup(of: MultiServerAttempt.self) { group in
             for server in servers {
                 group.addTask {
-                    guard let (client, healthResult) = resolved[server.id] else { return .failure(server, busy: false, wrongService: false) }
+                    guard let response = resolved[server.id] else { return .failure(server, busy: false, wrongService: false) }
+                    let client = response.client
                     do {
-                        let health = try healthResult.get()
+                        let health = try response.health.get()
                         guard health.service == "tokdash" else { return .failure(server, busy: false, wrongService: true) }
                         async let usage = Self.fetchUsage(client, period: period, offset: offset)
                         async let quota = client.quota()
@@ -833,7 +842,7 @@ final class CompanionStore: NSObject, ObservableObject {
         if Task.isCancelled { return }
         var currentRoutes: [String: String] = [:]
         for server in servers {
-            if let client = resolved[server.id]?.0 { currentRoutes[server.id] = await client.activeBaseURL }
+            if let client = resolved[server.id]?.client { currentRoutes[server.id] = await client.activeBaseURL }
         }
         if Task.isCancelled { return }
         activeRoutes = currentRoutes

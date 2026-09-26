@@ -4633,16 +4633,20 @@
     // testable without a browser. `runtime` is keyed by route id.
     function rankRoutes({ routes = [], runtime = {}, choice = 'auto', hostInstanceId = '', incumbentRouteId = '' } = {}) {
       const hostId = String(hostInstanceId || '');
-      // A route only counts for the host it belongs to. When the host has no identity yet
-      // -- an old daemon, or a current one whose id has not arrived -- the Tokdash
-      // fingerprint is enough, so that host still ranks and still fails over.
-      const usable = routes.filter((route) => {
+      // What the probes say about WHO answers, separate from whether they answer well.
+      // When the host has no identity yet -- an old daemon, or one whose id has not arrived
+      // -- the Tokdash fingerprint is enough, so that host still ranks and still fails over.
+      // Once the host does have one, blank is not agreement: a current daemon can answer
+      // without an id while its first lookup runs or during the backoff after a failed one,
+      // and until a route names itself as this host it is unproven rather than verified. It
+      // stays in the probe rotation, it just cannot carry this host's figures.
+      const disproven = (route) => {
         const state = runtime[route.id] || {};
-        if (state.state !== 'ok') return false;
-        if (!hostId) return true;
-        const reported = String(state.reportedInstanceId || '');
-        return !reported || reported === hostId;
-      });
+        if (state.state === 'not-this-daemon') return true;
+        if (!hostId || state.state !== 'ok') return false;
+        return String(state.reportedInstanceId || '') !== hostId;
+      };
+      const usable = routes.filter((route) => (runtime[route.id] || {}).state === 'ok' && !disproven(route));
       const fastest = (id) => {
         const median = routeMedianMs(runtime[id]);
         return Number.isFinite(median) ? median : Number.POSITIVE_INFINITY;
@@ -4677,7 +4681,7 @@
         // answering as some other Tokdash is not a placeholder: reading it would file that
         // machine's tokens under this host, which is the one error the identity rule exists
         // to prevent. It only becomes a placeholder while the route is unverified.
-        const placeholder = routes.find((route) => (runtime[route.id] || {}).state !== 'not-this-daemon') || null;
+        const placeholder = routes.find((route) => !disproven(route)) || null;
         activeRouteId = placeholder ? placeholder.id : '';
         activeReason = placeholder ? 'unverified' : '';
       }
@@ -9982,9 +9986,10 @@
         }));
         actions.appendChild(iconButton('serverRouteEdit', 'pencil', () => editRoute(host, route)));
         actions.appendChild(iconButton('serverRouteRemove', 'cross', () => removeRoute(host, route)));
-      } else {
-        actions.appendChild(iconButton('serverRouteEdit', 'pencil', () => editRoute(host, route)));
       }
+      // An origin row carries no controls. Its address is where this page was served from
+      // rather than something the user stored, and retyping it would let a URL decide which
+      // machine Local is -- which is the one thing §5.1 says only the served address can prove.
       row.appendChild(actions);
       return row;
     }
@@ -10101,6 +10106,11 @@
     // address and a cancel cannot race a commit that is about to write.
     let inlineEditorCommitting = false;
 
+    // A validator's return value: a string to show in the editor, or `{ apply }` -- the change
+    // to make, which commitInlineEditor runs. Validators are kept free of writes on purpose:
+    // they await the network, and Escape during that window has to be able to drop the edit
+    // outright rather than have it land in memory afterwards and get saved by whatever the
+    // user does next.
     async function commitInlineEditor() {
       if (!inlineEditor || inlineEditorCommitting) return;
       const editor = inlineEditor;
@@ -10109,21 +10119,22 @@
       // is saved until it comes back clean: an address stored before it was proven comes back
       // on the next reload, which reads as the dashboard inventing a dead URL.
       inlineEditorCommitting = true;
-      let error;
+      let result;
       try {
-        error = await editor.onSubmit(value);
+        result = await editor.onSubmit(value);
       } finally {
         inlineEditorCommitting = false;
       }
       if (inlineEditor !== editor) return;   // cancelled or replaced while the probe ran
-      if (typeof error === 'string') {
+      if (typeof result === 'string') {
         inlineEditorDraft = value;
-        inlineEditorError = error;
+        inlineEditorError = result;
         renderServerSettings();
         const field = document.getElementById('serverInlineEditor');
         if (field) field.focus();
         return;
       }
+      if (result && typeof result.apply === 'function') result.apply();
       closeInlineEditor();
       saveServerRegistry(); renderServerSettings(); refreshCurrentView();
     }
@@ -10160,8 +10171,7 @@
       openInlineEditor('serverRename', host.label, (value) => {
         const next = String(value).trim();
         if (!next) return t('serverRenameEmpty');
-        host.label = next;
-        return null;
+        return { apply: () => { host.label = next; } };
       }, { hostId: host.id });
     }
 
@@ -10193,17 +10203,27 @@
     // route id means a pass leaves a usable sample behind rather than a row that has to wait
     // for the next tick to show a latency.
     //
-    // A different daemon is only a refusal when it is nobody in the list. When it is, this is
-    // merge-on-add: the address belongs to the host that already carries that identity.
+    // A confirmed difference in identity is a refusal whether or not that daemon is listed.
+    // An address belonging to a listed host used to be waved through on the theory that the
+    // identity merge would move it along, but the merge joins hosts whose own ids match, so
+    // the route stayed put and nothing noticed until the next probe stamped it `Not this
+    // Tokdash` a minute after the row looked like it had been added. Naming the owner at the
+    // keyboard is the honest answer. A host with no identity of its own has nothing to
+    // disagree with, so an unknown-provenance host is still judged on reachability alone.
     async function validateRouteAddress(host, candidate) {
       const probe = await probeRoute(candidate, { bypassBackoff: true, samples: 1 });
       if (probe.kind === 'blocked') return { error: `${t('serverRouteBlocked')}: ${blockedRuleText(probe.blockedRule)}`, probe };
       if (probe.kind === 'fingerprint') return { error: t('serverTestFingerprintError'), probe };
       if (!probe.ok && probe.kind !== 'backoff') return { error: t('serverTestNetworkError'), probe };
       const reported = String(probe.instanceId || '');
-      const stranger = reported && host.instanceId && reported !== host.instanceId
-        && !hosts.some((item) => item !== host && item.instanceId === reported);
-      if (stranger) return { error: `${t('serverRouteWrongDaemon')}: ${t('serverRouteWrongDaemonTip')}`, probe };
+      if (reported && host.instanceId && reported !== host.instanceId) {
+        const owner = hosts.find((item) => item !== host && item.instanceId === reported) || null;
+        return {
+          error: owner ? t('serverRouteAlreadyOn').replace('{name}', owner.label)
+            : `${t('serverRouteWrongDaemon')}: ${t('serverRouteWrongDaemonTip')}`,
+          probe,
+        };
+      }
       return { error: null, probe };
     }
 
@@ -10214,16 +10234,24 @@
       openInlineEditor('serverRouteEdit', route.url, async (value) => {
         const canonical = normalizeRouteUrl(value);
         if (!canonical) return t('serverInvalidUrl');
-        if (pageRouteMatches(canonical) && route.kind !== 'origin') return t('serverRouteIsThisPage');
+        if (route.kind === 'origin') return t('serverRouteIsThisPage');
+        if (pageRouteMatches(canonical)) return t('serverRouteIsThisPage');
         if (hostRoutes(host).some((item) => item.id !== route.id && item.url === canonical)) return t('serverRouteDuplicate');
         const { error } = await validateRouteAddress(host, { ...route, url: canonical });
-        // Either way the samples belong to an address that is not settled, so they go; the
-        // next round re-probes whatever URL the route actually ends up keeping.
-        delete routeRuntime[route.id];
-        if (error) return error;
-        route.url = canonical;
-        hostActiveRouteId.delete(host.id);
-        return null;
+        if (error) {
+          // The samples belong to an address that is not settled either way, so they go; the
+          // next round re-probes whatever URL the route actually keeps.
+          delete routeRuntime[route.id];
+          return error;
+        }
+        return {
+          apply: () => {
+            route.url = canonical;
+            hostActiveRouteId.delete(host.id);
+            // The probe ran under this route's own id, so its sample is already there and the
+            // row shows a latency without waiting for the next tick.
+          },
+        };
       }, { hostId: host.id, routeId: route.id });
     }
 
@@ -10238,12 +10266,15 @@
         const route = { id: newId('route'), url: canonical, kind: 'added', addedAt: Date.now() };
         const { error, probe } = await validateRouteAddress(host, route);
         if (error) { delete routeRuntime[route.id]; return error; }
-        host.routes = [...hostRoutes(host), route];
-        applyProbeIdentity(host, route, probe);
-        // The probe may have just identified a host already in the list, which is the
-        // merge-on-add case: the route joins that host instead of staying here.
-        mergeStoredHostsByIdentity();
-        return null;
+        return {
+          apply: () => {
+            host.routes = [...hostRoutes(host), route];
+            // The route may have just named a host that was still waiting on an identity,
+            // which is the merge-on-add case: it joins the host with that identity.
+            applyProbeIdentity(host, route, probe);
+            mergeStoredHostsByIdentity();
+          },
+        };
       }, { hostId: host.id });
     }
 

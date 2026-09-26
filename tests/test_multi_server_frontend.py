@@ -1172,11 +1172,12 @@ def test_active_route_picks_fastest_then_holds_inside_the_band(tmp_path):
     routes = [{"id": "a", "url": "http://a"}, {"id": "b", "url": "http://b"}]
     fast_then_held = {
         "routes": routes,
-        "runtime": {"a": {"state": "ok", "samples": [40]}, "b": {"state": "ok", "samples": [34]}},
+        "runtime": {"a": {"state": "ok", "samples": [40], "reportedInstanceId": "H"},
+                      "b": {"state": "ok", "samples": [34], "reportedInstanceId": "H"}},
         "choice": "auto", "hostInstanceId": "H", "incumbentRouteId": "a",
     }
     out = _run_routes(tmp_path, "band",
-                      "[rankRoutes(scenario), rankRoutes(Object.assign({}, scenario, { runtime: { a: { state: 'ok', samples: [40] }, b: { state: 'ok', samples: [4] } } }))]",
+                      "[rankRoutes(scenario), rankRoutes(Object.assign({}, scenario, { runtime: { a: { state: 'ok', samples: [40], reportedInstanceId: 'H' }, b: { state: 'ok', samples: [4], reportedInstanceId: 'H' } } }))]",
                       {"scenario": fast_then_held})
     held, taken = out
     assert held["activeRouteId"] == "a" and held["activeReason"] == "held", "6 ms of jitter on 40 ms is not a reason to move"
@@ -1188,11 +1189,11 @@ def test_active_route_picks_fastest_then_holds_inside_the_band(tmp_path):
 def test_route_ranking_rules_pinned_unhealthy_and_all_failed(tmp_path):
     routes = [{"id": "a", "url": "http://a"}, {"id": "b", "url": "http://b"}]
     cases = {
-        "pinnedDead": {"routes": routes, "runtime": {"a": {"state": "ok", "samples": [10]},
+        "pinnedDead": {"routes": routes, "runtime": {"a": {"state": "ok", "samples": [10], "reportedInstanceId": "H"},
                                                       "b": {"state": "fail", "samples": []}},
                        "choice": "b", "hostInstanceId": "H"},
-        "pinnedLive": {"routes": routes, "runtime": {"a": {"state": "ok", "samples": [10]},
-                                                      "b": {"state": "ok", "samples": [900]}},
+        "pinnedLive": {"routes": routes, "runtime": {"a": {"state": "ok", "samples": [10], "reportedInstanceId": "H"},
+                                                      "b": {"state": "ok", "samples": [900], "reportedInstanceId": "H"}},
                        "choice": "b", "hostInstanceId": "H"},
         "allFailed": {"routes": routes, "runtime": {"a": {"state": "fail"}, "b": {"state": "blocked"}},
                       "choice": "auto", "hostInstanceId": "H"},
@@ -1205,7 +1206,7 @@ def test_route_ranking_rules_pinned_unhealthy_and_all_failed(tmp_path):
                      "choice": "auto", "hostInstanceId": ""},
         # A route the probe marked not-this-daemon is unusable even with good samples.
         "marked": {"routes": routes, "runtime": {"a": {"state": "not-this-daemon", "samples": [5]},
-                                                 "b": {"state": "ok", "samples": [500]}},
+                                                 "b": {"state": "ok", "samples": [500], "reportedInstanceId": "H"}},
                    "choice": "auto", "hostInstanceId": "H"},
     }
     out = _run_routes(tmp_path, "rules",
@@ -1461,10 +1462,11 @@ def test_a_route_that_goes_quiet_mid_probe_is_not_left_healthy(tmp_path):
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
 def test_an_address_is_judged_before_it_is_stored(tmp_path):
-    """An address that cannot be read, or belongs to nobody in the list, never reaches storage.
+    """No confirmed stranger reaches storage, whether or not that daemon is listed.
 
-    The exception is the merge-on-add case: an address answering as a daemon that IS already
-    listed belongs to that host, and refusing it would break the feature's headline case.
+    A listed owner used to be waved through on the theory that the identity merge would move
+    the route to the right host. It never could -- the merge joins hosts whose own ids match --
+    so the row just sat on the wrong host until the next probe said so.
     """
     body = """{
       globalThis.fetch = async () => (typeof reply === 'function' ? reply()
@@ -1478,15 +1480,57 @@ def test_an_address_is_judged_before_it_is_stored(tmp_path):
       results.sameDaemon = (await validateRouteAddress(host, { ...candidate, id: 's' })).error;
       reply = 'LAPTOP';
       results.stranger = (await validateRouteAddress(host, { ...candidate, id: 'x' })).error;
-      hosts = [host, { id: 'lap', instanceId: 'LAPTOP', routes: [{ id: 'q', url: 'http://lap', kind: 'added' }] }];
-      results.twin = (await validateRouteAddress(host, { ...candidate, id: 't' })).error;
+      hosts = [host, { id: 'lap', label: 'laptop', instanceId: 'LAPTOP', routes: [{ id: 'q', url: 'http://lap', kind: 'added' }] }];
+      results.listedOwner = (await validateRouteAddress(host, { ...candidate, id: 't' })).error;
+      // A host that has no identity of its own -- an old daemon, or one whose id has not
+      // arrived -- has nothing to disagree with, so reachability is all a probe can prove.
+      hosts = [host];
+      const unknown = { id: 'old', instanceId: '', routes: [{ id: 'o', url: 'http://old', kind: 'added' }] };
+      results.hostWithoutIdentity = (await validateRouteAddress(unknown, { id: 'o2', url: 'http://o2', kind: 'added' })).error;
       return results;
     }"""
     out = _run_probing(tmp_path, "validate", body, {"hosts": [], "reply": ""})
     assert out["unreachable"] == "serverTestNetworkError"
     assert out["sameDaemon"] is None, "the host's own daemon is fine"
-    assert str(out["stranger"]).startswith("serverRouteWrongDaemon"), "a stranger is refused"
-    assert out["twin"] is None, "a daemon already in the list is a merge, not an error"
+    assert str(out["stranger"]).startswith("serverRouteWrongDaemon"), "an unlisted daemon is refused"
+    assert out["listedOwner"] == "serverRouteAlreadyOn", "a listed daemon is refused too, by name"
+    assert out["hostWithoutIdentity"] is None, "nothing to disagree with on an unidentified host"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_an_identified_host_ranks_only_routes_that_named_themselves(tmp_path):
+    """A route that answers without an id has proven reachability, not belonging.
+
+    A current daemon can do that while its first lookup runs or during the backoff after a
+    failed one, so such a route stays in the probe rotation -- but it cannot become the
+    fastest route and supply another machine's figures under this host's name.
+    """
+    routes = [{"id": "quiet", "url": "http://quiet"}, {"id": "match", "url": "http://match"}]
+    cases = {
+        # Fastest by a mile, and still not usable: it never said it was this host.
+        "blankVsMatch": {"routes": routes,
+                         "runtime": {"quiet": {"state": "ok", "samples": [4], "reportedInstanceId": ""},
+                                     "match": {"state": "ok", "samples": [900], "reportedInstanceId": "H"}},
+                         "choice": "auto", "hostInstanceId": "H"},
+        "blankOnly": {"routes": [routes[0]],
+                      "runtime": {"quiet": {"state": "ok", "samples": [4], "reportedInstanceId": ""}},
+                      "choice": "auto", "hostInstanceId": "H"},
+        # An unidentified host is the old-daemon case, where the fingerprint is all there is.
+        "hostWithoutIdentity": {"routes": [routes[0]],
+                                "runtime": {"quiet": {"state": "ok", "samples": [4], "reportedInstanceId": ""}},
+                                "choice": "auto", "hostInstanceId": ""},
+        "notProbedYet": {"routes": routes, "runtime": {"match": {"state": "ok", "samples": [900], "reportedInstanceId": "H"}},
+                         "choice": "auto", "hostInstanceId": "H"},
+    }
+    out = _run_routes(tmp_path, "blankidentity",
+                      "Object.fromEntries(Object.entries(cases).map(([k, v]) => [k, rankRoutes(v)]))",
+                      {"cases": cases})
+    assert out["blankVsMatch"]["usableRouteIds"] == ["match"], "a blank report is not a verified match"
+    assert out["blankVsMatch"]["activeRouteId"] == "match"
+    assert out["blankOnly"]["usableRouteIds"] == []
+    assert out["blankOnly"]["activeRouteId"] == "", "and it cannot stand in as the placeholder either"
+    assert out["hostWithoutIdentity"]["usableRouteIds"] == ["quiet"], "an unidentified host ranks on the fingerprint"
+    assert out["notProbedYet"]["activeRouteId"] == "match", "a route with no probe at all still stands in"
 
 
 def test_session_detail_reads_through_the_route_system() -> None:

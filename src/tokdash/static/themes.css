@@ -3150,3 +3150,14 @@ html[data-ui-theme]:not([data-ui-theme="brutalist"]) body {
   background-size: 100% 100%;
   background-color: var(--color-bg);
 }
+
+/* Borderless cards for the soft/ambient themes (prototype).
+   These themes already carry separation through shadow + background delta, so
+   the 1px edge only adds a second contour around every box. Border-first
+   themes — brutalist, arcade, terminal — keep theirs: there the border IS the
+   design language, not a redundancy. border-color (not border:none) keeps
+   layout metrics untouched. Tabs, inputs, selects and other controls keep
+   their borders — those convey affordance, not separation. */
+html:not([data-ui-theme="brutalist"]):not([data-ui-theme="arcade"]):not([data-ui-theme="terminal"]) .surface.surface {
+  border-color: transparent;
+}

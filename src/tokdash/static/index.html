@@ -5388,12 +5388,12 @@
     const TOKDASH_BASE_PATH = window.TOKDASH_BASE_PATH || "";
     const appPath = window.tokdashPath || ((path) => `${TOKDASH_BASE_PATH}${path}`);
     const appAssetWithBase = window.tokdashAssetWithBase || ((path) => appPath(path));
-    // Dashboard v2.6.2 - sessions tab + i18n + dark mode
+    // Dashboard front end - sidebar shell, i18n, light/dark theming
     // - "Streak" label (not "Current Streak")
     // - Month/Year: streak within that view period
     // - 3D/All-time: current ongoing streak from today
     // - "Longest Streak" always shows longest ever across all data
-    console.log('📊 Token Dashboard v2.6.2 - sessions tab + i18n + dark mode');
+    console.log('📊 Tokdash dashboard');
 
     let toolChart = null;
     let modelChart = null;

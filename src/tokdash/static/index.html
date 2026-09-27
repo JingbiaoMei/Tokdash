@@ -618,7 +618,9 @@
       width: 100%;
       min-width: 0;
       overflow: visible;
-      justify-content: flex-end;
+      /* Centered at every width so the quick-range row reads as one balanced
+         block whether it sits under the picker (wide) or stacked (phone). */
+      justify-content: center;
     }
 
     /* Report chips have no overflow menu; wrap them on narrow screens. */

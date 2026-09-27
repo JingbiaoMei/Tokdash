@@ -1111,9 +1111,11 @@ def test_period_keys_set_token_and_normalize_fetch_args(monkeypatch):
         assert calls.usage_full[0] == ("today", "2026-09-20", "2026-09-20")
         assert "t/w/m/y/a" in static_text(app, "status")
 
-        seen = len(calls.usage)
+        seen = len(calls.active_full)
         await pilot.press("w")
-        assert await wait_for(app, pilot, lambda: len(calls.usage) > seen)
+        # Active time loads after usage; seeing the usage call does not mean
+        # the active-time arguments below belong to the new period yet.
+        assert await wait_for(app, pilot, lambda: len(calls.active_full) > seen)
         assert app._ov_period() == "week"
         assert calls.usage_full[-1] == ("today", "2026-09-14", "2026-09-20")
         assert calls.active_full[-1] == ("today", "2026-09-14", "2026-09-20", None)

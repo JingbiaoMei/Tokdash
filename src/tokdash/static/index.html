@@ -1576,9 +1576,13 @@
       border-color: rgba(147, 197, 253, 0.35);
     }
     .update-enable-link {
-      font-size: 11px; cursor: pointer; background: none; border: none; padding: 0;
-      color: var(--color-label); text-decoration: underline dotted;
+      width: 100%; text-align: left; font-size: 12px; font-weight: 600; cursor: pointer;
+      padding: 8px 12px; border-radius: 10px;
+      background: color-mix(in srgb, var(--color-text) 5%, transparent);
+      border: 1px solid color-mix(in srgb, var(--color-text) 10%, transparent);
+      color: var(--color-label); text-decoration: none;
     }
+    .update-enable-link:hover { border-color: color-mix(in srgb, var(--color-primary) 40%, transparent); }
     .update-popover {
       /* Right-anchored on desktop: the pill sits deep in the control rail, so the panel
          opens leftward toward the page center instead of clipping at the viewport edge. */
@@ -1830,6 +1834,13 @@
     .usage-report-delta-down { color: #DC2626; font-weight: 800; }
     html.dark .usage-report-delta-up { color: #4ADE80; }
     html.dark .usage-report-delta-down { color: #F87171; }
+    #tokenCompositionBar { background: color-mix(in srgb, var(--color-text) 10%, transparent); }
+    .comp-chip { background: color-mix(in srgb, var(--color-text) 5%, transparent); border: 1px solid color-mix(in srgb, var(--color-text) 12%, transparent); }
+    .kpi-delta { color: var(--color-muted); }
+    .kpi-delta.is-up { color: #DC2626; }
+    .kpi-delta.is-down { color: #16A34A; }
+    html.dark .kpi-delta.is-up { color: #F87171; }
+    html.dark .kpi-delta.is-down { color: #4ADE80; }
     .usage-report-sentence { font-size: 16px; line-height: 1.6; margin: 0; max-width: 80ch; }
     .usage-report-banner { margin-top: 14px; border: 1px solid var(--color-cta); border-radius: 12px; padding: 10px 14px; background: color-mix(in srgb, var(--color-cta) 12%, transparent); font-size: 13px; line-height: 1.5; }
     .usage-report-notice { color: var(--color-muted); font-size: 13px; margin: 0; }
@@ -2043,7 +2054,7 @@
       display: none !important;
     }
     .btn-primary {
-      background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%) !important;
+      background: linear-gradient(135deg, #4f46e5 0%, #4338ca 100%) !important;
       color: #ffffff !important;
       border: 1px solid rgba(255, 255, 255, 0.15) !important;
       box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2) !important;
@@ -2407,6 +2418,8 @@
     html:not(.dark) .hover\:text-slate-200:hover { color: #1e293b; }
     html:not(.dark) .hover\:text-indigo-400:hover { color: #4338ca; }
     html:not(.dark) .hover\:bg-slate-800:hover { background: color-mix(in srgb, var(--color-text) 7%, transparent); }
+    html:not(.dark) .btn-ghost:not([aria-pressed="true"]) { background: color-mix(in srgb, var(--color-text) 4%, transparent) !important; border: 1px solid color-mix(in srgb, var(--color-text) 13%, transparent) !important; }
+    html:not(.dark) .btn-ghost:not([aria-pressed="true"]):hover { background: color-mix(in srgb, var(--color-text) 8%, transparent) !important; border-color: color-mix(in srgb, var(--color-text) 22%, transparent) !important; }
 
     @media (min-width: 768px) {
       nav[aria-label="Dashboard sections"] {
@@ -2643,6 +2656,16 @@
                 </section>
               </div>
 
+              <!-- Mobile-only entry points: the sidebar (and with it Settings and
+                   What's New) is display:none below 768px, so these mirror it in the
+                   top action row. Hidden at md+ where the sidebar carries them. -->
+              <button id="mobileSettingsBtn" class="btn btn-ghost compact-control rounded-lg md:hidden" type="button" aria-label="Settings" title="Settings" data-i18n-title="settings" onclick="openSettingsModal()">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-purple-400" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l-2.86 2.86A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1.4 1.6H9.55a1.7 1.7 0 0 0-1.08-1.66 1.7 1.7 0 0 0-1.88.34l-2.86-2.86A1.7 1.7 0 0 0 4.07 15a1.7 1.7 0 0 0-1.77-1.4V9.55a1.7 1.7 0 0 0 1.66-1.08 1.7 1.7 0 0 0-.34-1.88l2.86-2.86A1.7 1.7 0 0 0 8.36 4.07 1.7 1.7 0 0 0 9.76 2.3h4.05a1.7 1.7 0 0 0 1.08 1.66 1.7 1.7 0 0 0 1.88-.34l2.86 2.86a1.7 1.7 0 0 0-.34 1.88 1.7 1.7 0 0 0 1.77 1.4v4.05A1.7 1.7 0 0 0 19.4 15Z"/></svg>
+              </button>
+              <button id="mobileReleaseNotesBtn" class="btn btn-ghost compact-control rounded-lg md:hidden" type="button" aria-label="What's New" title="What's New" data-i18n-title="whatsNew" onclick="openReleaseNotesModal()">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-indigo-400" aria-hidden="true"><path d="M6.5 4.5h11a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2Z"/><path d="M8 9h8M8 12h8M8 15h5"/></svg>
+              </button>
+
               <!-- Quick Theme Mode Toggle (Sun/Moon) -->
               <button id="themeToggleQuick" class="btn btn-ghost compact-control rounded-lg" type="button" aria-label="Toggle light or dark theme" title="Toggle Light / Dark mode" onclick="toggleThemeQuick()">
                 <svg id="themeQuickSun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-amber-500" style="display:none;"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
@@ -2794,12 +2817,13 @@
             <div class="text-[11px] font-semibold uppercase tracking-wider flex items-center gap-1.5" style="color: var(--color-label);">
               <span data-i18n="totalTokens">Total Tokens</span>
               <span id="tokensDeltaPulseDot" class="w-2 h-2 rounded-full bg-indigo-400" style="display:none;" title="Live token update"></span>
+            </div>
           </div>
           <div id="totalTokensWrap" class="overview-token-value-wrap" data-readable="true">
             <div id="totalTokens" class="text-3xl sm:text-4xl font-extrabold mt-1.5 font-mono text-indigo-400" tabindex="0" aria-describedby="totalTokensExact">-</div>
             <div id="totalTokensExact" class="overview-token-exact-tooltip" role="tooltip">-</div>
           </div>
-          <div id="tokensDelta" class="text-xs font-semibold mt-1" style="color: var(--color-muted);"></div>
+          <div id="tokensDelta" class="text-xs font-semibold mt-1 kpi-delta"></div>
           <svg id="sparklineTokens" class="kpi-sparkline text-indigo-400/60" viewBox="0 0 100 35" preserveAspectRatio="none" fill="none"><defs><linearGradient id="kpiG1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="currentColor" stop-opacity="0.25"/><stop offset="100%" stop-color="currentColor" stop-opacity="0.0"/></linearGradient></defs><path id="sparklineTokensPath" d="M0 24 Q25 18 45 14 T75 10 T100 6" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/><path id="sparklineTokensArea" d="M0 24 Q25 18 45 14 T75 10 T100 6 L100 35 L0 35 Z" fill="url(#kpiG1)"/></svg>
         </div>
         <div class="surface p-5">
@@ -2807,7 +2831,7 @@
             <div class="text-[11px] font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="totalCost">Total Cost</div>
           </div>
           <div id="totalCost" class="text-3xl sm:text-4xl font-extrabold mt-1.5 font-mono text-emerald-400">$-</div>
-          <div id="costDelta" class="text-xs font-semibold mt-1" style="color: var(--color-muted);"></div>
+          <div id="costDelta" class="text-xs font-semibold mt-1 kpi-delta"></div>
           <svg id="sparklineCost" class="kpi-sparkline text-emerald-400/60" viewBox="0 0 100 35" preserveAspectRatio="none" fill="none"><defs><linearGradient id="kpiG2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="currentColor" stop-opacity="0.25"/><stop offset="100%" stop-color="currentColor" stop-opacity="0.0"/></linearGradient></defs><path id="sparklineCostPath" d="M0 28 L100 28" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/><path id="sparklineCostArea" d="M0 28 L100 28 L100 35 L0 35 Z" fill="url(#kpiG2)"/></svg>
         </div>
         <div class="surface p-5">
@@ -2815,7 +2839,7 @@
             <div class="text-[11px] font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="totalMessages">Total Messages</div>
           </div>
           <div id="totalMessages" class="text-3xl sm:text-4xl font-extrabold mt-1.5 font-mono text-purple-400">-</div>
-          <div id="messagesDelta" class="text-xs font-semibold mt-1" style="color: var(--color-muted);"></div>
+          <div id="messagesDelta" class="text-xs font-semibold mt-1 kpi-delta"></div>
           <svg id="sparklineMessages" class="kpi-sparkline text-purple-400/60" viewBox="0 0 100 35" preserveAspectRatio="none" fill="none"><defs><linearGradient id="kpiG3" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="currentColor" stop-opacity="0.25"/><stop offset="100%" stop-color="currentColor" stop-opacity="0.0"/></linearGradient></defs><path id="sparklineMessagesPath" d="M0 22 Q30 16 50 18 T80 12 T100 8" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/><path id="sparklineMessagesArea" d="M0 22 Q30 16 50 18 T80 12 T100 8 L100 35 L0 35 Z" fill="url(#kpiG3)"/></svg>
         </div>
         <div class="surface p-5">
@@ -2827,8 +2851,8 @@
             <span class="text-[9px] px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-400 font-mono font-bold">-61%</span>
           </div>
           <div id="overviewActiveTime" class="text-3xl sm:text-4xl font-extrabold mt-1.5 font-mono text-sky-400">-</div>
-          <div id="overviewActiveDelta" class="text-xs font-semibold mt-1" style="color: var(--color-muted);"></div>
-          <div id="overviewActiveMeta" class="text-xs font-semibold mt-1" style="color: var(--color-muted);"></div>
+          <div id="overviewActiveDelta" class="text-xs font-semibold mt-1 kpi-delta"></div>
+          <div id="overviewActiveMeta" class="text-xs font-semibold mt-1 kpi-delta"></div>
           <svg id="sparklineActiveTime" class="kpi-sparkline text-sky-400/60" viewBox="0 0 100 35" preserveAspectRatio="none" fill="none"><defs><linearGradient id="kpiG4" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="currentColor" stop-opacity="0.25"/><stop offset="100%" stop-color="currentColor" stop-opacity="0.0"/></linearGradient></defs><path id="sparklineActiveTimePath" d="M0 24 Q25 18 50 16 T75 12 T100 8" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/><path id="sparklineActiveTimeArea" d="M0 24 Q25 18 50 16 T75 12 T100 8 L100 35 L0 35 Z" fill="url(#kpiG4)"/></svg>
         </div>
         <div class="surface p-5">
@@ -2840,7 +2864,7 @@
             <span class="text-[9px] px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-400 font-mono font-bold">92%</span>
           </div>
           <div id="avgCacheHitRate" class="text-3xl sm:text-4xl font-extrabold mt-1.5 font-mono text-cyan-400">-</div>
-          <div id="avgCacheHitMeta" class="text-xs font-semibold mt-1" style="color: var(--color-muted);"></div>
+          <div id="avgCacheHitMeta" class="text-xs font-semibold mt-1 kpi-delta"></div>
           <svg id="sparklineCacheRate" class="kpi-sparkline text-cyan-400/60" viewBox="0 0 100 35" preserveAspectRatio="none" fill="none"><defs><linearGradient id="kpiG5" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="currentColor" stop-opacity="0.25"/><stop offset="100%" stop-color="currentColor" stop-opacity="0.0"/></linearGradient></defs><path id="sparklineCacheRatePath" d="M0 20 Q30 18 55 12 T85 10 T100 6" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/><path id="sparklineCacheRateArea" d="M0 20 Q30 18 55 12 T85 10 T100 6 L100 35 L0 35 Z" fill="url(#kpiG5)"/></svg>
         </div>
         <div class="surface p-5">
@@ -2861,12 +2885,12 @@
           </div>
           <div class="flex items-center gap-3 text-xs font-mono">
             <span class="text-slate-400"><span data-i18n="cacheSaved">Cache Saved:</span> <strong id="cacheSavingsKpi" class="text-teal-400">—</strong></span>
-            <span style="color: var(--color-border);">·</span>
+            <span style="color: var(--color-muted);">·</span>
             <span class="text-slate-500" id="tokenCompositionTotal">Full Range Distribution</span>
           </div>
         </div>
         <!-- Segmented bar -->
-        <div class="h-2.5 w-full rounded-full overflow-hidden flex bg-slate-800/60 mb-3.5 shadow-inner" id="tokenCompositionBar">
+        <div class="h-2.5 w-full rounded-full overflow-hidden flex mb-3.5 shadow-inner" id="tokenCompositionBar">
           <div id="compPromptBar" class="h-full bg-indigo-500 transition-all duration-500" style="width: 50%;" title="Prompt Tokens"></div>
           <div id="compCacheBar" class="h-full bg-emerald-500 transition-all duration-500" style="width: 25%;" title="Cache Read Tokens"></div>
           <div id="compOutputBar" class="h-full bg-amber-500 transition-all duration-500" style="width: 15%;" title="Output Tokens"></div>
@@ -2874,28 +2898,28 @@
         </div>
         <!-- Legend pills with counts -->
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
-          <div class="flex items-center gap-2.5 p-2 rounded-lg bg-slate-900/50 border border-slate-800/80 hover:border-indigo-500/30 transition">
+          <div class="flex items-center gap-2.5 comp-chip p-2 rounded-lg hover:border-indigo-500/40 transition">
             <span class="w-2 h-2 rounded-full bg-indigo-500 flex-shrink-0"></span>
             <div class="min-w-0">
               <div class="text-slate-400 text-[10px] uppercase font-bold tracking-wider">Input / Prompt</div>
               <div class="font-extrabold mono text-slate-200 truncate" id="compPromptVal">—</div>
             </div>
           </div>
-          <div class="flex items-center gap-2.5 p-2 rounded-lg bg-slate-900/50 border border-slate-800/80 hover:border-emerald-500/30 transition">
+          <div class="flex items-center gap-2.5 comp-chip p-2 rounded-lg hover:border-emerald-500/40 transition">
             <span class="w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0"></span>
             <div class="min-w-0">
               <div class="text-slate-400 text-[10px] uppercase font-bold tracking-wider">Cache Read</div>
               <div class="font-extrabold mono text-slate-200 truncate" id="compCacheVal">—</div>
             </div>
           </div>
-          <div class="flex items-center gap-2.5 p-2 rounded-lg bg-slate-900/50 border border-slate-800/80 hover:border-amber-500/30 transition">
+          <div class="flex items-center gap-2.5 comp-chip p-2 rounded-lg hover:border-amber-500/40 transition">
             <span class="w-2 h-2 rounded-full bg-amber-500 flex-shrink-0"></span>
             <div class="min-w-0">
               <div class="text-slate-400 text-[10px] uppercase font-bold tracking-wider">Generation Output</div>
               <div class="font-extrabold mono text-slate-200 truncate" id="compOutputVal">—</div>
             </div>
           </div>
-          <div class="flex items-center gap-2.5 p-2 rounded-lg bg-slate-900/50 border border-slate-800/80 hover:border-purple-500/30 transition">
+          <div class="flex items-center gap-2.5 comp-chip p-2 rounded-lg hover:border-purple-500/40 transition">
             <span class="w-2 h-2 rounded-full bg-purple-500 flex-shrink-0"></span>
             <div class="min-w-0">
               <div class="text-slate-400 text-[10px] uppercase font-bold tracking-wider">Reasoning / CoT</div>
@@ -9837,16 +9861,18 @@
     function renderDelta(elementId, pctChange) {
       const el = document.getElementById(elementId);
       if (!el) return;
+      el.classList.add('kpi-delta');
       if (pctChange === null || pctChange === undefined) {
         el.textContent = '';
-        el.style.color = 'var(--color-muted)';
+        el.classList.remove('is-up', 'is-down');
         return;
       }
 
       const arrow = pctChange > 0 ? '↑' : pctChange < 0 ? '↓' : '→';
       const abs = Math.abs(pctChange).toFixed(1);
       el.textContent = `${arrow} ${abs}% ${t('vsPrevPeriod')}`;
-      el.style.color = pctChange > 0 ? '#DC2626' : pctChange < 0 ? '#16A34A' : 'var(--color-muted)';
+      el.classList.toggle('is-up', pctChange > 0);
+      el.classList.toggle('is-down', pctChange < 0);
     }
 
     function updateComparisonDeltas(data) {
@@ -14422,9 +14448,13 @@
     // is picked by hand. `antigravity` would resolve through the shared alias table
     // on its own, `opencode_go` is OpenCode's own subscription, and `commandcode` is
     // a quota-only provider: it never reaches the Overview, so this table is the only
-    // place its mark is resolved. Z.ai has no mark in the local asset set, so it lands
-    // on the same letter tile as any other unidentified source, which is what
-    // `toolBrandMeta` gives -- the one entry worth checking when a card looks plain.
+    // place its mark is resolved. `zai` is quota-only too, and its mark is not a guess:
+    // the poll reads the Z.ai key out of the ZCode CLI's own config
+    // ($ZCODE_HOME/v2/config.json, the path the consent panel names), so the card wears
+    // the same vendor glyph as the tool row that earned the spend instead of a second
+    // copy of the same asset. A provider this table does not mention yet still resolves
+    // on its own key and lands on the letter tile `toolBrandMeta` gives -- the one thing
+    // worth checking when a card looks plain.
     const QUOTA_PROVIDER_BRAND_KEYS = Object.freeze({
       codex: 'codex',
       claude: 'claude',
@@ -14432,6 +14462,7 @@
       minimax: 'minimax',
       kimi: 'kimi',
       grok: 'grok',
+      zai: 'zcode',
       opencode_go: 'opencode',
       commandcode: 'commandcode',
     });

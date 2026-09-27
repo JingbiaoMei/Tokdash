@@ -107,7 +107,14 @@ def test_overview_deltas_use_one_decimal_place(tmp_path):
     source = INDEX_HTML.read_text(encoding="utf-8")
     function = _extract_js_function(source, "function renderDelta(elementId, pctChange) {")
     harness = [
-        "const element = { textContent: '', style: {} };",
+        # renderDelta toggles classes now (inline colors were invisible in dark mode),
+        # so the stub element carries a minimal classList.
+        "const element = { textContent: '', style: {}, classList: {",
+        "  _s: new Set(),",
+        "  add(c) { this._s.add(c); },",
+        "  remove(...cs) { cs.forEach((c) => this._s.delete(c)); },",
+        "  toggle(c, on) { if (on === undefined) { on = !this._s.has(c); } if (on) this._s.add(c); else this._s.delete(c); },",
+        "} };",
         "const document = { getElementById: () => element };",
         "function t() { return 'vs prev period'; }",
         function,

@@ -191,9 +191,21 @@ def test_quota_provider_cards_wear_the_shared_brand_marks() -> None:
             f"quota provider {provider} points at {brand_key}, which has no local mark: {entry.group(0)}"
         )
 
+    # Every card the tab can draw has to be in that table. A provider missing from it
+    # does not fail -- it resolves on its own key and quietly renders the letter tile --
+    # so the coverage is what the assertion is really for: `zai` maps to `zcode` because
+    # the poll reads its key from the ZCode CLI's config, not because a tile is ugly.
+    providers = re.search(r"const QUOTA_PROVIDERS = \[(?P<items>[^\]]*)\];", source)
+    assert providers, "the quota provider list is missing"
+    listed = set(re.findall(r"'([^']+)'", providers.group("items")))
+    assert listed == set(pairs), (
+        "quota providers render without a brand entry and land on the letter tile: "
+        f"{sorted(listed - set(pairs))}"
+    )
+
     helper = _extract_js_function(source, "function createQuotaProviderIdentity(providerKey, label) {")
-    # A provider the table does not mention resolves on its own key, which is how
-    # the two without a local mark land on the shared letter tile.
+    # A provider the table does not mention yet resolves on its own key, which is how a
+    # card for a brand with no asset in the package still renders, on the shared tile.
     assert "QUOTA_PROVIDER_BRAND_KEYS[providerKey] || providerKey" in helper
     assert "createToolBrandIcon(brandKey, meta)" in helper
     assert "identity.className = 'tool-identity';" in helper, "the card must reuse the shared identity shell"
@@ -277,11 +289,11 @@ const hiddenChain = [];
 for (let node = name; node; node = node.parent) {
   if (node.attrs['aria-hidden'] === 'true') hiddenChain.push(node.className || node.tag);
 }
-const unmapped = createQuotaProviderIdentity('zai', 'Z.ai');
+const unbranded = createQuotaProviderIdentity('future_cli', 'Future CLI');
 process.stdout.write(JSON.stringify({
   name: name ? name.textContent : null,
   hiddenChain,
-  unmappedMarkHidden: find(unmapped, (node) => node.className === 'tool-brand-label').attrs['aria-hidden'] || null,
+  unbrandedMarkHidden: find(unbranded, (node) => node.className === 'tool-brand-label').attrs['aria-hidden'] || null,
   iconHidden: find(identity, (node) => node.className === 'tool-brand-icon').attrs['aria-hidden'] || null,
   darkInvert: identity.dataset.darkInvert,
 }));
@@ -324,7 +336,7 @@ def test_the_quota_card_heading_keeps_its_name_readable(tmp_path: Path) -> None:
 
     assert report["name"] == "Claude Code (work-laptop-01)", "the card must render its label in full"
     assert report["hiddenChain"] == [], f"the provider name is hidden from assistive tech: {report['hiddenChain']}"
-    assert report["unmappedMarkHidden"] is None, "the letter-tile card keeps its name too"
+    assert report["unbrandedMarkHidden"] is None, "the letter-tile card keeps its name too"
     assert report["iconHidden"] == "true", "the mark itself stays decorative"
     assert report["darkInvert"] == "true", "the card inherits the brand's dark-mode inversion"
 

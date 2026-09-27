@@ -89,11 +89,12 @@ def test_release_notes_accessible_drawer_contract() -> None:
     assert "version?.runtime_version || version?.current" in source
     assert source.count("whatsNew: '") == 6
     assert source.count("releaseNotesIntro: '") == 6
-    assert 'class="btn btn-ghost compact-control release-notes-trigger"' in source
-    assert source.index('id="refreshBtn"') < source.index('id="releaseNotesToggle"')
-    assert source.index('id="releaseNotesToggle"') < source.index('id="settingsMenu"')
-    brand_block = source[source.index('alt="Tokdash logo"') : source.index('class="topbar-control-rail"')]
-    assert 'id="releaseNotesToggle"' not in brand_block
+    # PR #110 moved the trigger from the header rail into the sidebar footer, and added a
+    # phone-width mirror because the sidebar itself is display:none below 768px.
+    assert 'id="mobileReleaseNotesBtn"' in source
+    assert source.index('id="appSidebar"') < source.index('id="releaseNotesToggle"')
+    assert source.index('id="releaseNotesToggle"') < source.index('id="sidebarSettingsBtn"')
+    assert 'id="settingsMenu"' not in source  # the duplicate header pair is gone for good
 
 
 def test_release_notes_render_with_text_content_and_lazy_local_fetch() -> None:

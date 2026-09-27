@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -269,7 +270,11 @@ def test_settings_panel_groups_display_and_install_controls() -> None:
     panel_start = source.index('id="settingsPanel"')
     overview_start = source.index('id="overview-content"')
 
-    assert source.index('id="settingsToggle"') < panel_start
+    # PR #110 turned the header-anchored panel into a centered modal opened from the
+    # sidebar, with a phone-width mirror (#sidebar is display:none below 768px).
+    assert source.index('id="sidebarSettingsBtn"') < panel_start
+    assert 'id="mobileSettingsBtn"' in source
+    assert 'id="settingsToggle"' not in source  # the duplicate header trigger is gone for good
     assert 'aria-expanded="false"' in source
     assert 'aria-controls="settingsPanel"' in source
     assert 'aria-labelledby="settingsPanelTitle"' in source
@@ -283,9 +288,8 @@ def test_settings_panel_groups_display_and_install_controls() -> None:
         assert panel_start < source.index(f'id="{control_id}"') < overview_start
 
     assert "function setSettingsPanelOpen(open, returnFocus = false)" in source
-    assert "panel.getBoundingClientRect()" in source
-    assert "window.innerWidth - gutter" in source
+    assert re.search(r"\.settings-panel\s*\{[^}]*position:\s*static", source), "panel must be modal-flow, not header-anchored"
     assert "event.key === 'Escape'" in source
-    assert "!settingsMenu.contains(event.target)" in source
+    assert "event.target === settingsBackdrop" in source  # backdrop click closes
     assert source.count("settings: '") == 6
     assert source.count("colorMode: '") == 6

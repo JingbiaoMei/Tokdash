@@ -202,8 +202,12 @@
       box-shadow: none;
     }
 
-    .tool-chart-shell{display:grid;height:280px;grid-template-rows:minmax(0,1fr) auto;gap:8px;}
-    .tool-chart-canvas{position:relative;min-height:0;}
+    .tool-chart-shell{display:grid;height:280px;grid-template-rows:minmax(0,1fr) auto;gap:8px;min-width:0;}
+    .tool-chart-canvas{position:relative;min-height:0;min-width:0;}
+    /* Chart.js can leave the canvas a few px wider than its box (it sizes against
+       the shell, not the canvas cell); when the viewport narrows the whole donut
+       then drifts right. Clamping the canvas keeps it inside the card at any width. */
+    .tool-chart-canvas canvas{max-width:100%;}
     .tool-chart-legend{display:flex;min-height:22px;flex-wrap:wrap;align-items:center;justify-content:center;gap:7px 16px;}
     .tool-chart-legend-item{display:inline-flex;align-items:center;gap:7px;min-width:0;color:var(--color-muted);font-size:12px;}
     .tool-chart-legend-swatch{width:15px;height:3px;flex:0 0 auto;border-radius:999px;}
@@ -372,6 +376,13 @@
       color: #B45309;
       background: color-mix(in srgb, #D97706 13%, transparent);
     }
+    /* The success glyph sat at theme-primary-on-thin-tint: on warm light surfaces it
+       washed out against the blurred panel, and reviewers could not find it. Darken
+       the icon and deepen the chip so the "okay" mark reads at a glance. */
+    html:not(.dark) .refresh-report-mark {
+      color: color-mix(in srgb, var(--color-primary) 45%, #0b1220);
+      background: color-mix(in srgb, var(--color-primary) 16%, transparent);
+    }
     .refresh-report-title { margin: 0; font-size: 14px; font-weight: 850; letter-spacing: -0.01em; }
     .refresh-report-meta { margin: 2px 0 0; color: var(--color-muted); font-size: 11px; line-height: 1.4; }
     .refresh-report-close {
@@ -381,11 +392,14 @@
       place-items: center;
       border: 0;
       border-radius: 9px;
-      color: var(--color-muted);
-      background: transparent;
+      /* A borderless muted glyph reads as decoration, not as the close affordance —
+         under light themes it effectively disappeared, which is why the panel felt
+         unclosable. Give it a visible chip so the X is found instantly. */
+      color: color-mix(in srgb, var(--color-text) 80%, transparent);
+      background: color-mix(in srgb, var(--color-text) 8%, transparent);
       cursor: pointer;
     }
-    .refresh-report-close:hover { color: var(--color-text); background: color-mix(in srgb, var(--color-text) 7%, transparent); }
+    .refresh-report-close:hover { color: var(--color-text); background: color-mix(in srgb, var(--color-text) 15%, transparent); }
     .refresh-report-close:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
     .refresh-report-deltas {
       display: grid;
@@ -2473,7 +2487,34 @@
       pointer-events: none;
       transition: opacity 0.2s ease;
     }
+    /* Stacked phone topbar: center the three control rows (quick ranges,
+       refresh/actions, date picker) so they read as one balanced block. */
+    @media (max-width: 639px) {
+      .topbar-control-rail { justify-items: center; }
+      .range-picker-group,
+      .quick-range-panel,
+      .topbar-actions { justify-content: center; }
+    }
     @media (max-width: 767px) {
+      /* Hamburger aligned to the logo row (same 44px box) and painted with
+         theme-aware ink/border: the ghost button's white-alpha chrome is built
+         for dark surfaces and disappears on light ones. */
+      #sidebarDrawerBtn {
+        display: grid;
+        place-items: center;
+        width: 44px;
+        height: 44px;
+        padding: 0 !important;
+        border-radius: 12px;
+        color: var(--color-text) !important;
+        border-color: var(--color-border) !important;
+        background: color-mix(in srgb, var(--color-text) 5%, transparent) !important;
+      }
+      #sidebarDrawerBtn:hover {
+        color: var(--color-text) !important;
+        background: color-mix(in srgb, var(--color-text) 10%, transparent) !important;
+        border-color: color-mix(in srgb, var(--color-text) 22%, transparent) !important;
+      }
       #appSidebar {
         position: fixed;
         top: 0;
@@ -2525,7 +2566,11 @@
   <div id="tokdash-loader" class="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-md transition-opacity duration-300" style="position:fixed !important; top:0 !important; left:0 !important; width:100vw !important; height:100vh !important; pointer-events:none; background: var(--color-bg);">
     <svg xmlns="http://www.w3.org/2000/svg" class="ap" viewBox="0 0 64 64" width="96" height="96" fill="none" role="img" aria-label="Loading">
       <style>
-        svg { color: var(--loader-color, #f5f5f7); --rate: 1; }
+        /* Must stay id-scoped: a <style> inside inline SVG is NOT scoped — a bare
+           `svg` selector here leaked to the whole page, and since the SVG's own
+           color beat inheritance, every unclassed currentColor icon (refresh-report
+           check/X, mobile hamburger) rendered near-white on light themes. */
+        #tokdash-loader svg { color: var(--loader-color, #f5f5f7); --rate: 1; }
         .ap-halo { stroke: currentColor; stroke-width: 1; opacity: .1; }
         .ap-r1, .ap-r2, .ap-r3 {
           stroke: currentColor; stroke-linecap: round; fill: none;
@@ -2648,7 +2693,7 @@
       <header class="surface p-5 sm:p-6 mb-6">
       <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
         <div class="flex items-start gap-4">
-          <button id="sidebarDrawerBtn" class="btn btn-ghost compact-control rounded-lg md:hidden self-center" type="button" aria-label="Menu" data-i18n-title="menu" aria-controls="appSidebar" aria-expanded="false" onclick="toggleSidebarDrawer()">
+          <button id="sidebarDrawerBtn" class="btn btn-ghost md:hidden" type="button" aria-label="Menu" data-i18n-title="menu" aria-controls="appSidebar" aria-expanded="false" onclick="toggleSidebarDrawer()">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" stroke-linecap="round"/></svg>
           </button>
           <div class="h-11 w-11 flex items-center justify-center">
@@ -7072,7 +7117,7 @@
         navPricing: '价格库',
         brandTag: '智能体可观测性',
         allTools: '全部工具',
-        tokenComposition: '令牌构成',
+        tokenComposition: 'Token 构成',
         cacheSaved: '缓存节省：',
         sessionsPage: '会话',
         stats: '统计',

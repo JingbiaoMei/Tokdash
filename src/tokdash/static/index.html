@@ -440,7 +440,11 @@
     }
 
     @media (max-width: 640px) {
-      .refresh-report { right: auto; left: 0; }
+      /* Anchoring the card to the narrow refresh button pushed its 366px body past
+         the viewport (right edge 403px at 390px width). Re-anchor to the full-width
+         header card instead, so the card spans it and its close button stays clear. */
+      .refresh-control { position: static; }
+      .refresh-report { left: 12px; right: 12px; width: auto; }
     }
 
     .btn-ghost {
@@ -737,6 +741,10 @@
     .server-health-dot[data-state="error"] { border-color: #D94848; background: #D94848; box-shadow: 0 0 0 3px color-mix(in srgb,#D94848 11%,transparent); }
     .server-health-dot[data-state="testing"] { border-color: #C27C2C; background: #C27C2C; animation: server-health-pulse 1.4s ease-in-out infinite; }
     @keyframes server-health-pulse { 50% { opacity: .45; box-shadow: 0 0 0 4px color-mix(in srgb,#C27C2C 12%,transparent); } }
+    html.dark .server-health-dot[data-state="ok"] { border-color: #34D399; background: #34D399; box-shadow: 0 0 0 3px color-mix(in srgb,#34D399 15%,transparent); }
+    html.dark .server-health-dot[data-state="error"] { border-color: #F87171; background: #F87171; box-shadow: 0 0 0 3px color-mix(in srgb,#F87171 14%,transparent); }
+    html.dark .server-health-dot[data-state="testing"] { border-color: #FBBF24; background: #FBBF24; }
+    .server-health-dot.inline { display: inline-block; vertical-align: -1px; margin-right: 6px; }
     .server-row-copy { display: flex; align-items: baseline; min-width: 0; gap: 5px; line-height: 1.2; }
     .server-row-name { flex: 0 0 auto; max-width: 42%; overflow: hidden; color: var(--color-text); font-size: 12px; font-weight: 750; text-overflow: ellipsis; white-space: nowrap; }
     .server-row-separator { flex: 0 0 auto; color: var(--color-muted); font-size: 10px; }
@@ -751,14 +759,18 @@
     .server-route-list { display: grid; gap: 2px; margin: 0 8px 8px 30px; }
     .server-route-row { display: grid; grid-template-columns: minmax(0,1fr) auto auto auto; align-items: center; gap: 7px; min-height: 30px; }
     .server-route-url { min-width: 0; overflow: hidden; color: var(--color-muted); font-family: "Fira Code",ui-monospace,monospace; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-    .server-route-url[data-invalid="true"] { color: #D12F2F; }
+    .server-route-url[data-invalid="true"] { color: #B42318; }
+    html.dark .server-route-url[data-invalid="true"] { color: #F87171; }
     .server-route-ms { color: var(--color-text); font-family: "Fira Code",ui-monospace,monospace; font-size: 10px; font-variant-numeric: tabular-nums; }
     .server-route-badge { padding: 1px 6px; border: 1px solid color-mix(in srgb,var(--color-border) 80%,transparent); border-radius: 999px; color: var(--color-muted); font-size: 9px; font-weight: 750; white-space: nowrap; }
     .server-route-badge[data-badge="active"] { border-color: color-mix(in srgb,#2F9E5B 40%,transparent); background: color-mix(in srgb,#2F9E5B 10%,transparent); color: #267C4A; }
+    html.dark .server-route-badge[data-badge="active"] { color: #6EE7B7; }
     .server-route-badge[data-badge="pinned"] { border-color: color-mix(in srgb,#4C6FE7 40%,transparent); background: color-mix(in srgb,#4C6FE7 10%,transparent); color: #3A56C4; }
     .server-route-badge[data-badge="origin"] { border-color: color-mix(in srgb,var(--color-primary) 35%,transparent); color: var(--color-primary); }
     .server-route-badge[data-badge="warn"] { border-color: color-mix(in srgb,#C27C2C 45%,transparent); background: color-mix(in srgb,#C27C2C 10%,transparent); color: #A86720; }
+    html.dark .server-route-badge[data-badge="warn"] { color: #FCD34D; }
     .server-route-badge[data-badge="error"] { border-color: color-mix(in srgb,#D94848 40%,transparent); background: color-mix(in srgb,#D94848 8%,transparent); color: #C93636; }
+    html.dark .server-route-badge[data-badge="error"] { color: #FCA5A5; }
     .server-route-actions { display: inline-flex; align-items: center; gap: 2px; }
     .server-route-actions .server-remove { width: 26px; height: 26px; }
     .server-editable { padding: 0; border: 0; background: transparent; text-align: left; cursor: pointer; }
@@ -1308,9 +1320,14 @@
     .servers-kpi .v { font-family: "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-weight: 700; font-size: 16px; margin-top: 3px; display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
     .servers-kpi .v.cost { color: var(--color-cost); }
     .servers-delta { font-size: 11px; font-weight: 700; border-radius: 999px; padding: 1px 8px; font-family: "Fira Sans", ui-sans-serif, system-ui, sans-serif; }
-    .servers-delta.up { color: #C27C2C; background: color-mix(in srgb, #C27C2C 14%, transparent); }
-    .servers-delta.down { color: #2F9E5B; background: color-mix(in srgb, #2F9E5B 12%, transparent); }
-    .servers-stale-tag { font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #D94848; border: 1px solid rgba(217,72,72,0.4); border-radius: 6px; padding: 1px 6px; font-family: "Fira Sans", ui-sans-serif, system-ui, sans-serif; }
+    /* Same semantics as the Overview KPI deltas: up is red, down is green, and the
+       dark theme gets the lighter pair. The old amber/green predated that rework. */
+    .servers-delta.up { color: #B42318; background: color-mix(in srgb, #DC2626 10%, transparent); }
+    .servers-delta.down { color: #15803D; background: color-mix(in srgb, #16A34A 10%, transparent); }
+    html.dark .servers-delta.up { color: #F87171; }
+    html.dark .servers-delta.down { color: #4ADE80; }
+    .servers-stale-tag { font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #B42318; border: 1px solid color-mix(in srgb, #DC2626 40%, transparent); border-radius: 6px; padding: 1px 6px; font-family: "Fira Sans", ui-sans-serif, system-ui, sans-serif; }
+    html.dark .servers-stale-tag { color: #F87171; border-color: color-mix(in srgb, #F87171 40%, transparent); }
     .servers-share-row { display: grid; grid-template-columns: 100px 1fr 52px; align-items: center; gap: 10px; font-size: 12px; color: var(--color-muted); }
     .servers-share-row + .servers-share-row { margin-top: 6px; }
     .servers-bar-track { height: 7px; border-radius: 999px; background: color-mix(in srgb, var(--color-text) 8%, transparent); overflow: hidden; }
@@ -1326,17 +1343,22 @@
     .servers-meta b { color: var(--color-text); font-family: "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     .servers-quota-link { color: var(--color-primary); cursor: pointer; font-weight: 600; background: none; border: 0; padding: 0; font: inherit; }
     .servers-quota-link:hover { text-decoration: underline; }
-    .servers-src-errors { display: flex; gap: 4px; align-items: baseline; font-size: 12px; color: #C27C2C; }
-    .servers-dead-note { font-size: 13px; color: #D94848; font-weight: 600; }
+    .servers-src-errors { display: flex; gap: 4px; align-items: baseline; font-size: 12px; color: #B45309; }
+    html.dark .servers-src-errors { color: #FBBF24; }
+    .servers-dead-note { font-size: 13px; color: #B42318; font-weight: 600; }
+    html.dark .servers-dead-note { color: #F87171; }
+    #serverCountChip { color: var(--color-muted); }
+    #serverCountChip.has-failures { color: #B42318; }
+    html.dark #serverCountChip.has-failures { color: #F87171; }
     .servers-table-wrap { overflow-x: auto; }
     .servers-compare { width: 100%; border-collapse: collapse; font-size: 12.5px; min-width: 760px; }
     .servers-compare th, .servers-compare td { padding: 8px 14px; text-align: right; white-space: nowrap; }
     .servers-compare th { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-label); border-bottom: 1px solid var(--color-border); }
     .servers-compare th:first-child, .servers-compare td:first-child { text-align: left; }
-    .servers-compare td { border-bottom: 1px solid color-mix(in srgb, var(--color-border) 60%, transparent); font-family: "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+    .servers-compare td { font-family: "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
     .servers-compare td.row-label { font-family: inherit; color: var(--color-muted); font-weight: 600; }
-    .servers-compare td .st, .servers-strip .st { color: #D94848; font-size: 9px; vertical-align: super; margin-left: 2px; cursor: help; font-family: "Fira Sans", ui-sans-serif, system-ui, sans-serif; }
-    .servers-compare tr:last-child td { border-bottom: none; }
+    .servers-compare td .st, .servers-strip .st { color: #B42318; font-size: 9px; vertical-align: super; margin-left: 2px; cursor: help; font-family: "Fira Sans", ui-sans-serif, system-ui, sans-serif; }
+    html.dark .servers-compare td .st, html.dark .servers-strip .st { color: #F87171; }
     .servers-compare th.combined, .servers-compare td.combined { background: color-mix(in srgb, var(--color-primary) 5%, transparent); }
     .servers-compare th.combined { color: var(--color-primary); }
     .servers-footnote { font-size: 11.5px; color: var(--color-muted); padding: 10px 14px 4px; }
@@ -1909,7 +1931,7 @@
     .usage-report-agents th, .usage-report-agents td { padding: 8px 10px; text-align: right; white-space: nowrap; }
     .usage-report-agents th { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--color-label); border-bottom: 1px solid var(--color-border); font-weight: 800; }
     .usage-report-agents th:first-child, .usage-report-agents td:first-child { text-align: left; }
-    .usage-report-agents tbody tr { border-bottom: 1px solid color-mix(in srgb, var(--color-border) 55%, transparent); }
+    .usage-report-agents tbody tr { transition: background-color .12s ease; }
     .usage-report-agents tbody tr:hover { background: color-mix(in srgb, var(--color-secondary) 7%, transparent); }
     .usage-report-agents .usage-report-qual { color: var(--color-label); font-weight: 700; font-size: 9px; display: block; text-transform: none; letter-spacing: 0; }
 
@@ -2357,8 +2379,14 @@
     /* Table styling and row hover */
     .session-table tbody tr {
       cursor: pointer;
-      transition: background-color 0.12s ease, border-color 0.12s ease;
-      border-bottom: 1px solid color-mix(in srgb, var(--color-border) 55%, transparent);
+      transition: background-color 0.12s ease;
+    }
+    /* Rows read by hover now that the grid lines are gone (theme-aware, unlike the
+       slate-50 some JS rows still carry from main). */
+    .session-table tbody tr:hover,
+    .apps-model-table tbody tr:hover,
+    .servers-compare tbody tr:hover {
+      background: color-mix(in srgb, var(--color-text) 4%, transparent);
     }
     /* Sidebar Navigation Styles */
     .sidebar-nav-item {
@@ -2433,6 +2461,44 @@
       }
     }
 
+    /* Phone widths turn the sidebar into an off-canvas drawer opened by the
+       hamburger, instead of hiding it and scattering mirrors across the top bar.
+       Above 768px it stays the static sticky column it has always been. */
+    #sidebarDrawerBackdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 129;
+      background: rgba(0, 0, 0, 0.5);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s ease;
+    }
+    @media (max-width: 767px) {
+      #appSidebar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        z-index: 130;
+        height: 100dvh;
+        min-height: 0;
+        max-width: min(16rem, 84vw);
+        transform: translateX(-102%);
+      }
+      #appSidebar.drawer-open {
+        transform: translateX(0);
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+      }
+      #sidebarDrawerBackdrop.open {
+        opacity: 1;
+        pointer-events: auto;
+      }
+      body.sidebar-drawer-open .dashboard-main { overflow: hidden; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      #appSidebar, #sidebarDrawerBackdrop { transition: none; }
+    }
+
     /* Keyframes and Animations */
     @keyframes kpiFadeIn {
       from { opacity: 0; transform: translateY(6px); }
@@ -2499,7 +2565,7 @@
   <!-- Interactive Mesh / Constellation Canvas Background -->
   <canvas id="linkyBg" class="fixed inset-0 pointer-events-none z-0 opacity-40"></canvas>
   <!-- Modern High-Tech Navigation Sidebar -->
-  <aside id="appSidebar" class="w-64 border-r flex flex-col flex-shrink-0 min-h-screen sticky top-0 h-screen z-30 transition-all duration-300 select-none hidden md:flex" style="background: var(--color-surface-glass, var(--color-bg)); border-color: var(--color-border);">
+  <aside id="appSidebar" class="w-64 border-r flex flex-col flex-shrink-0 min-h-screen sticky top-0 h-screen z-30 transition-all duration-300 select-none" style="background: var(--color-surface-glass, var(--color-bg)); border-color: var(--color-border);">
     <!-- Brand -->
     <div class="p-4 border-b flex items-center justify-between" style="border-color: var(--color-border);">
       <div class="flex items-center gap-3">
@@ -2571,6 +2637,9 @@
 
   </aside>
 
+  <!-- Mobile sidebar drawer scrim: only interactive while the drawer is open (see #sidebarDrawerBackdrop CSS). -->
+  <div id="sidebarDrawerBackdrop" aria-hidden="true"></div>
+
   <!-- Main Viewport -->
   <div class="flex-1 min-w-0 flex flex-col min-h-screen overflow-x-hidden dashboard-main">
     <div class="w-full max-w-[1680px] p-4 sm:p-6 lg:p-8 space-y-6">
@@ -2579,6 +2648,9 @@
       <header class="surface p-5 sm:p-6 mb-6">
       <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
         <div class="flex items-start gap-4">
+          <button id="sidebarDrawerBtn" class="btn btn-ghost compact-control rounded-lg md:hidden self-center" type="button" aria-label="Menu" data-i18n-title="menu" aria-controls="appSidebar" aria-expanded="false" onclick="toggleSidebarDrawer()">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" stroke-linecap="round"/></svg>
+          </button>
           <div class="h-11 w-11 flex items-center justify-center">
             <script>document.write(`<img src="${window.tokdashPath('/static/icons/logo.png')}" alt="Tokdash logo" width="44" height="44" style="display:block; width:44px; height:44px; object-fit:contain;" />`);</script>
           </div>
@@ -2699,104 +2771,8 @@
                 </button>
               </div>
             </div>
-            <span id="serverCountChip" class="text-xs font-semibold" style="display:none;padding:5px 9px;border:1px solid var(--color-border);border-radius:999px;color:var(--color-muted);"></span>
+            <span id="serverCountChip" class="text-xs font-semibold" style="display:none;padding:5px 9px;border:1px solid var(--color-border);border-radius:999px;"></span>
 
-            <div id="settingsBackdrop" class="app-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="settingsPanelTitle" hidden>
-              <section id="settingsPanel" class="settings-panel" aria-labelledby="settingsPanelTitle">
-                <div class="settings-panel-head">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l-2.86 2.86A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1.4 1.6H9.55a1.7 1.7 0 0 0-1.08-1.66 1.7 1.7 0 0 0-1.88.34l-2.86-2.86A1.7 1.7 0 0 0 4.07 15a1.7 1.7 0 0 0-1.77-1.4V9.55a1.7 1.7 0 0 0 1.66-1.08 1.7 1.7 0 0 0-.34-1.88l2.86-2.86A1.7 1.7 0 0 0 8.36 4.07 1.7 1.7 0 0 0 9.76 2.3h4.05a1.7 1.7 0 0 0 1.08 1.66 1.7 1.7 0 0 0 1.88-.34l2.86 2.86a1.7 1.7 0 0 0-.34 1.88 1.7 1.7 0 0 0 1.77 1.4v4.05A1.7 1.7 0 0 0 19.4 15Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-                  <h2 id="settingsPanelTitle" data-i18n="settings">Settings</h2>
-                  <button type="button" class="settings-panel-close" onclick="setSettingsPanelOpen(false, true)" aria-label="Close settings">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-                  </button>
-                </div>
-                <div class="settings-panel-body">
-<div id="updateNotice" class="update-notice" style="margin-bottom:14px;" hidden>
-                    <button id="updateBadge" class="update-badge" hidden aria-haspopup="true" aria-expanded="false"></button>
-                    <button id="updateEnableLink" class="update-enable-link" hidden data-i18n="updateEnable">Enable update notices</button>
-                    <div id="updatePopover" class="update-popover" hidden>
-                      <div id="updatePopoverText" class="text-xs mb-2"></div>
-                      <div class="update-cmd-row">
-                        <code>tokdash update</code>
-                        <button id="updateCopyBtn" class="btn btn-ghost update-copy-btn" data-i18n="updateCopy">Copy</button>
-                      </div>
-                      <button id="updateSkipBtn" class="update-skip-btn" data-i18n="updateSkip">Skip this version</button>
-                    </div>
-                  </div>
-                  <section id="serversSettings" class="servers-settings">
-                    <div class="servers-settings-head">
-                      <strong class="settings-label" data-i18n="servers">Servers</strong>
-                      <label class="servers-master-toggle"><input id="allServersToggle" type="checkbox"> <span data-i18n="allServers">Use all</span></label>
-                    </div>
-                    <div id="serverSettingsList" class="server-settings-list"></div>
-                    <div class="server-add-form">
-                      <p class="server-add-title" data-i18n="addAServer">Add a server</p>
-                      <input id="serverUrlInput" class="ui-input" type="text" data-i18n-placeholder="serverUrl" placeholder="host:55423/tokdash" aria-describedby="serverFormStatus">
-                      <input id="serverLabelInput" class="ui-input" type="text" data-i18n-placeholder="serverLabelOptional" placeholder="Name (optional)">
-                      <div class="server-form-actions">
-                        <button id="testServerBtn" class="btn btn-ghost" type="button" data-i18n="testServer">Test</button>
-                        <button id="addServerBtn" class="btn btn-primary" type="button" data-i18n="addServer">Add server</button>
-                      </div>
-                      <p id="serverFormStatus" class="server-form-status" data-state="neutral" aria-live="polite" data-i18n="serverHint">Check the URL, then test or add.</p>
-                    </div>
-                  </section>
-                  <div class="settings-preferences">
-                    <div class="settings-row">
-                      <span class="settings-label" data-i18n="language">Language</span>
-                      <select id="langToggle" class="ui-input settings-select" aria-label="Language">
-                        <option value="system" data-i18n="langSystem">System</option>
-                        <option value="en">English</option>
-                        <option value="zh">中文</option>
-                        <option value="ja">日本語</option>
-                        <option value="ko">한국어</option>
-                        <option value="es">Español</option>
-                        <option value="pt">Português</option>
-                      </select>
-                    </div>
-                    <div class="settings-row">
-                      <span class="settings-label" data-i18n="colorMode">Light / dark</span>
-                      <button id="themeToggle" class="btn btn-ghost settings-control-button" type="button" aria-label="Toggle theme">
-                        <svg id="themeIconMoon" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                        <svg id="themeIconSun" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="display:none;"><circle cx="12" cy="12" r="5" stroke="currentColor" stroke-width="2"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-                        <span id="themeModeLabel">Light</span>
-                      </button>
-                    </div>
-                    <label class="settings-row" for="styleThemeSelect">
-                      <span class="settings-label" data-i18n="styleTheme">Style</span>
-                      <select id="styleThemeSelect" class="ui-input style-select settings-select" aria-label="Style theme">
-                        <option value="classic" data-i18n="styleClassic">Classic</option>
-                        <option value="elevated" data-i18n="styleElevated">Elevated</option>
-                        <option value="paper" data-i18n="stylePaper">Paper</option>
-                        <option value="liquid" data-i18n="styleLiquid">Liquid</option>
-                        <option value="vibrant" data-i18n="styleVibrant">Vibrant</option>
-                        <option value="midnight" data-i18n="styleMidnight">Midnight</option>
-                        <option value="terminal" data-i18n="styleTerminal">Terminal</option>
-                        <option value="brutalist" data-i18n="styleBrutalist">Brutalist</option>
-                        <option value="arcade" data-i18n="styleArcade">Arcade</option>
-                        <option value="studio" data-i18n="styleStudio">Studio</option>
-                        <option value="obsidian" data-i18n="styleObsidian">Teal Obsidian</option>
-                        <option value="graphite" data-i18n="styleGraphite">Graphite</option>
-                        <option value="nordic" data-i18n="styleNordic">Nordic Warmth</option>
-                        <option value="amber" data-i18n="styleAmber">Cyber Amber</option>
-                        <option value="navy" data-i18n="styleNavy">Royal Navy</option>
-                        <option value="soft" data-i18n="styleSoft">Soft Minimalist</option>
-                        <option value="flat" data-i18n="styleFlat">Flat White</option>
-                      </select>
-                    </label>
-                    <div class="settings-row">
-                      <span class="settings-label" data-i18n="readableTokens">Readable tokens</span>
-                      <button id="readableTokensToggle" class="btn btn-ghost overview-readable-tokens-toggle" type="button" role="switch" aria-checked="true" aria-label="Readable tokens">
-                        <span class="overview-readable-tokens-track" aria-hidden="true"></span>
-                      </button>
-                    </div>
-                  </div>
-                  <button id="installBtn" class="btn btn-ghost settings-install" type="button" style="display:none;" data-i18n-title="installApp" aria-label="Install app">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                    <span data-i18n="install">Install</span>
-                  </button>
-                </div>
-              </section>
-            </div>
           </div>
         </div>
       </div>
@@ -5083,7 +5059,7 @@
 
     <!-- Servers Tab -->
     <div id="servers-content" class="tab-content">
-      <div id="serversTabBody" class="surface p-10 text-center"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
+      <div id="serversTabBody" class="surface p-10 text-center tokdash-loading-placeholder"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
     </div>
 
     <!-- Pricing Tab -->
@@ -5413,6 +5389,103 @@
   <div id="overviewProfileTooltip" class="profile-activity-tooltip overview-profile-tooltip" role="tooltip" hidden></div>
   <div id="profileActivityTooltip" class="profile-activity-tooltip" role="tooltip" hidden></div>
 
+  <!-- Body-level: fixed overlays must not live under a .surface (themes set backdrop-filter, which turns any ancestor into the containing block for position:fixed). -->
+            <div id="settingsBackdrop" class="app-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="settingsPanelTitle" hidden>
+              <section id="settingsPanel" class="settings-panel" aria-labelledby="settingsPanelTitle">
+                <div class="settings-panel-head">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l-2.86 2.86A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1.4 1.6H9.55a1.7 1.7 0 0 0-1.08-1.66 1.7 1.7 0 0 0-1.88.34l-2.86-2.86A1.7 1.7 0 0 0 4.07 15a1.7 1.7 0 0 0-1.77-1.4V9.55a1.7 1.7 0 0 0 1.66-1.08 1.7 1.7 0 0 0-.34-1.88l2.86-2.86A1.7 1.7 0 0 0 8.36 4.07 1.7 1.7 0 0 0 9.76 2.3h4.05a1.7 1.7 0 0 0 1.08 1.66 1.7 1.7 0 0 0 1.88-.34l2.86 2.86a1.7 1.7 0 0 0-.34 1.88 1.7 1.7 0 0 0 1.77 1.4v4.05A1.7 1.7 0 0 0 19.4 15Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                  <h2 id="settingsPanelTitle" data-i18n="settings">Settings</h2>
+                  <button type="button" class="settings-panel-close" onclick="setSettingsPanelOpen(false, true)" aria-label="Close settings">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                  </button>
+                </div>
+                <div class="settings-panel-body">
+<div id="updateNotice" class="update-notice" style="margin-bottom:14px;" hidden>
+                    <button id="updateBadge" class="update-badge" hidden aria-haspopup="true" aria-expanded="false"></button>
+                    <button id="updateEnableLink" class="update-enable-link" hidden data-i18n="updateEnable">Enable update notices</button>
+                    <div id="updatePopover" class="update-popover" hidden>
+                      <div id="updatePopoverText" class="text-xs mb-2"></div>
+                      <div class="update-cmd-row">
+                        <code>tokdash update</code>
+                        <button id="updateCopyBtn" class="btn btn-ghost update-copy-btn" data-i18n="updateCopy">Copy</button>
+                      </div>
+                      <button id="updateSkipBtn" class="update-skip-btn" data-i18n="updateSkip">Skip this version</button>
+                    </div>
+                  </div>
+                  <section id="serversSettings" class="servers-settings">
+                    <div class="servers-settings-head">
+                      <strong class="settings-label" data-i18n="servers">Servers</strong>
+                      <label class="servers-master-toggle"><input id="allServersToggle" type="checkbox"> <span data-i18n="allServers">Use all</span></label>
+                    </div>
+                    <div id="serverSettingsList" class="server-settings-list"></div>
+                    <div class="server-add-form">
+                      <p class="server-add-title" data-i18n="addAServer">Add a server</p>
+                      <input id="serverUrlInput" class="ui-input" type="text" data-i18n-placeholder="serverUrl" placeholder="host:55423/tokdash" aria-describedby="serverFormStatus">
+                      <input id="serverLabelInput" class="ui-input" type="text" data-i18n-placeholder="serverLabelOptional" placeholder="Name (optional)">
+                      <div class="server-form-actions">
+                        <button id="testServerBtn" class="btn btn-ghost" type="button" data-i18n="testServer">Test</button>
+                        <button id="addServerBtn" class="btn btn-primary" type="button" data-i18n="addServer">Add server</button>
+                      </div>
+                      <p id="serverFormStatus" class="server-form-status" data-state="neutral" aria-live="polite" data-i18n="serverHint">Check the URL, then test or add.</p>
+                    </div>
+                  </section>
+                  <div class="settings-preferences">
+                    <div class="settings-row">
+                      <span class="settings-label" data-i18n="language">Language</span>
+                      <select id="langToggle" class="ui-input settings-select" aria-label="Language">
+                        <option value="system" data-i18n="langSystem">System</option>
+                        <option value="en">English</option>
+                        <option value="zh">中文</option>
+                        <option value="ja">日本語</option>
+                        <option value="ko">한국어</option>
+                        <option value="es">Español</option>
+                        <option value="pt">Português</option>
+                      </select>
+                    </div>
+                    <div class="settings-row">
+                      <span class="settings-label" data-i18n="colorMode">Light / dark</span>
+                      <button id="themeToggle" class="btn btn-ghost settings-control-button" type="button" aria-label="Toggle theme">
+                        <svg id="themeIconMoon" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        <svg id="themeIconSun" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="display:none;"><circle cx="12" cy="12" r="5" stroke="currentColor" stroke-width="2"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                        <span id="themeModeLabel">Light</span>
+                      </button>
+                    </div>
+                    <label class="settings-row" for="styleThemeSelect">
+                      <span class="settings-label" data-i18n="styleTheme">Style</span>
+                      <select id="styleThemeSelect" class="ui-input style-select settings-select" aria-label="Style theme">
+                        <option value="classic" data-i18n="styleClassic">Classic</option>
+                        <option value="elevated" data-i18n="styleElevated">Elevated</option>
+                        <option value="paper" data-i18n="stylePaper">Paper</option>
+                        <option value="liquid" data-i18n="styleLiquid">Liquid</option>
+                        <option value="vibrant" data-i18n="styleVibrant">Vibrant</option>
+                        <option value="midnight" data-i18n="styleMidnight">Midnight</option>
+                        <option value="terminal" data-i18n="styleTerminal">Terminal</option>
+                        <option value="brutalist" data-i18n="styleBrutalist">Brutalist</option>
+                        <option value="arcade" data-i18n="styleArcade">Arcade</option>
+                        <option value="studio" data-i18n="styleStudio">Studio</option>
+                        <option value="obsidian" data-i18n="styleObsidian">Teal Obsidian</option>
+                        <option value="graphite" data-i18n="styleGraphite">Graphite</option>
+                        <option value="nordic" data-i18n="styleNordic">Nordic Warmth</option>
+                        <option value="amber" data-i18n="styleAmber">Cyber Amber</option>
+                        <option value="navy" data-i18n="styleNavy">Royal Navy</option>
+                        <option value="soft" data-i18n="styleSoft">Soft Minimalist</option>
+                        <option value="flat" data-i18n="styleFlat">Flat White</option>
+                      </select>
+                    </label>
+                    <div class="settings-row">
+                      <span class="settings-label" data-i18n="readableTokens">Readable tokens</span>
+                      <button id="readableTokensToggle" class="btn btn-ghost overview-readable-tokens-toggle" type="button" role="switch" aria-checked="true" aria-label="Readable tokens">
+                        <span class="overview-readable-tokens-track" aria-hidden="true"></span>
+                      </button>
+                    </div>
+                  </div>
+                  <button id="installBtn" class="btn btn-ghost settings-install" type="button" style="display:none;" data-i18n-title="installApp" aria-label="Install app">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    <span data-i18n="install">Install</span>
+                  </button>
+                </div>
+              </section>
+            </div>
   <script>document.write(`<script src="${window.tokdashPath('/static/theme-config.js')}"><\/script>`);</script>
   <script>
     const TOKDASH_BASE_PATH = window.TOKDASH_BASE_PATH || "";
@@ -6422,6 +6495,7 @@
         styleFlat: 'Flat White',
         loading: 'Loading…',
         whatsNew: 'What\'s new',
+        menu: 'Menu',
         releaseNotes: 'Release notes',
         releaseNotesIntro: 'A concise record of what changed in each Tokdash release.',
         releaseNotesUnavailable: 'Release notes are unavailable right now.',
@@ -6973,6 +7047,7 @@
         styleFlat: '平白',
         loading: '加载中…',
         whatsNew: '更新动态',
+        menu: '菜单',
         releaseNotes: '更新日志',
         releaseNotesIntro: '简要记录每个 Tokdash 版本带来的变化。',
         releaseNotesUnavailable: '暂时无法加载更新日志。',
@@ -7525,6 +7600,7 @@
         styleFlat: 'フラットホワイト',
         loading: '読み込み中…',
         whatsNew: '新着情報',
+        menu: 'メニュー',
         releaseNotes: 'リリースノート',
         releaseNotesIntro: '各 Tokdash リリースの変更点を簡潔に記録しています。',
         releaseNotesUnavailable: 'リリースノートは一時的に表示できません。',
@@ -8077,6 +8153,7 @@
         styleFlat: '플랫 화이트',
         loading: '로딩 중…',
         whatsNew: '새로운 소식',
+        menu: '메뉴',
         releaseNotes: '릴리스 노트',
         releaseNotesIntro: '각 Tokdash 릴리스의 변경 사항을 간략히 기록합니다.',
         releaseNotesUnavailable: '현재 릴리스 노트를 사용할 수 없습니다.',
@@ -8629,6 +8706,7 @@
         styleFlat: 'Blanco plano',
         loading: 'Cargando…',
         whatsNew: 'Novedades',
+        menu: 'Menú',
         releaseNotes: 'Notas de versión',
         releaseNotesIntro: 'Un registro conciso de los cambios en cada versión de Tokdash.',
         releaseNotesUnavailable: 'Las notas de versión no están disponibles ahora mismo.',
@@ -9181,6 +9259,7 @@
         styleFlat: 'Branco plano',
         loading: 'Carregando…',
         whatsNew: 'Novidades',
+        menu: 'Menu',
         releaseNotes: 'Notas de versão',
         releaseNotesIntro: 'Um registro conciso das mudanças em cada versão do Tokdash.',
         releaseNotesUnavailable: 'As notas de versão não estão disponíveis no momento.',
@@ -10415,7 +10494,7 @@
       // fine, and the chip should say nothing about it.
       const failed = selected.filter((server) => hostLooksDown(server) || serverRuntimeStatus.get(server.id)?.ok === false);
       chip.style.display = selected.length > 1 || failed.length ? '' : 'none';
-      chip.style.color = failed.length ? '#DC2626' : 'var(--color-muted)';
+      chip.classList.toggle('has-failures', failed.length > 0);
       chip.textContent = failed.length
         ? t('unreachableServers').replace('{names}', failed.map((server) => server.label).join(', '))
         : t('serverCount').replace('{n}', String(selected.length));
@@ -13357,7 +13436,7 @@
 
         group.sessions.forEach((session) => {
           const row = document.createElement("tr");
-          row.className = "border-t hover:bg-slate-50 transition cursor-pointer";
+          row.className = "hover:bg-slate-50 transition cursor-pointer";
           const nameCell = document.createElement("td");
           nameCell.className = "py-3 px-4 text-slate-800";
           nameCell.title = session.session_id ? `${sessionDisplayName(session)} · ${session.session_id}` : sessionDisplayName(session);
@@ -14118,7 +14197,7 @@
       const frag = document.createDocumentFragment();
       rows.forEach((row) => {
         const tr = document.createElement('tr');
-        tr.className = 'border-b hover:bg-slate-50 transition';
+        tr.className = 'hover:bg-slate-50 transition';
         tr.style.borderColor = 'rgba(226,232,240,0.9)';
         const toolCell = document.createElement('td');
         toolCell.className = 'py-3 px-4 font-semibold text-slate-800';
@@ -14230,7 +14309,7 @@
         const tbody = table.querySelector('tbody');
         visibleModels.forEach((model) => {
           const row = document.createElement('tr');
-          row.className = 'border-b hover:bg-slate-50 transition';
+          row.className = 'hover:bg-slate-50 transition';
           row.innerHTML = `
             <td class="py-2 px-3 text-slate-800" title="${model.name}">${model.name}</td>
             <td class="py-2 px-3 text-right text-slate-700">${formatTokenCount(model.tokens_in)}</td>
@@ -14305,7 +14384,7 @@
       const frag = document.createDocumentFragment();
       shown.forEach((model) => {
         const row = document.createElement('tr');
-        row.className = 'border-b hover:bg-slate-50 transition';
+        row.className = 'hover:bg-slate-50 transition';
         row.innerHTML = `
           <td class="py-2 px-3 text-slate-800">${model.name}</td>
           <td class="py-2 px-3 text-right text-slate-700">${formatTokenCount(model.tokens_in)}</td>
@@ -15975,7 +16054,7 @@
       const v = Number(pct);
       const chip = document.createElement('span');
       chip.className = `servers-delta ${v >= 0 ? 'up' : 'down'}`;
-      chip.textContent = `${v >= 0 ? '+' : '\u2212'}${Math.abs(v).toFixed(1)}%`;
+      chip.textContent = `${v >= 0 ? '\u2191' : '\u2193'}${Math.abs(v).toFixed(1)}%`;
       return chip;
     }
 
@@ -16311,8 +16390,8 @@
         ['status', (combined, sv) => {
           if (combined) return { text: '\u2014' };
           const row = byId.get(sv.id);
-          if (row) return { html: `<span class="server-health-dot" data-state="ok" style="display:inline-block;margin-right:6px;"></span>${t('serverStatusOk')}` };
-          return { html: `<span class="server-health-dot" data-state="error" style="display:inline-block;margin-right:6px;"></span>${t('serverStatusError')}`, stale: true };
+          if (row) return { html: `<span class="server-health-dot inline" data-state="ok"></span>${t('serverStatusOk')}` };
+          return { html: `<span class="server-health-dot inline" data-state="error"></span>${t('serverStatusError')}`, stale: true };
         }],
         ['updated', (combined, sv) => {
           const cell = combined ? { value: usage, stale: combinedStale } : cellText(sv);
@@ -21858,6 +21937,15 @@
       if (event.key === 'Escape' && !document.getElementById('refreshReport')?.hidden) {
         hideUsageRefreshReport({ focusButton: true, dismissed: true });
       }
+      if (event.key === 'Escape' && document.getElementById('appSidebar')?.classList.contains('drawer-open')) {
+        setSidebarDrawerOpen(false, true);
+      }
+    });
+    document.getElementById('sidebarDrawerBackdrop')?.addEventListener('click', () => setSidebarDrawerOpen(false));
+    // Tapping any sidebar item dismisses the drawer; desktop keeps the sidebar
+    // in flow, so the dismissal is phone-width only.
+    document.getElementById('appSidebar')?.addEventListener('click', (event) => {
+      if (event.target.closest('.sidebar-nav-item') && window.innerWidth < 768) setSidebarDrawerOpen(false);
     });
 
     document.getElementById('codexReviewToggle')?.addEventListener('change', (event) => {
@@ -21886,6 +21974,7 @@
     let _resize3DTimer = null;
     window.addEventListener('resize', () => {
       if (!document.getElementById('settingsPanel')?.hidden) setSettingsPanelOpen(true);
+      if (window.innerWidth >= 768) setSidebarDrawerOpen(false);
       fitOverviewKpis();
       if (calendarState.view === 'year') {
         const grid = document.getElementById('yearGrid');
@@ -22140,6 +22229,25 @@
 
     function openSettingsModal() {
       setSettingsPanelOpen(true);
+    }
+
+    function setSidebarDrawerOpen(open, returnFocus = false) {
+      const sidebar = document.getElementById('appSidebar');
+      const trigger = document.getElementById('sidebarDrawerBtn');
+      const backdrop = document.getElementById('sidebarDrawerBackdrop');
+      if (!sidebar) return;
+      const isOpen = Boolean(open);
+      sidebar.classList.toggle('drawer-open', isOpen);
+      backdrop?.classList.toggle('open', isOpen);
+      // The page scroll lives on .dashboard-main, not the body, so the scrim
+      // cannot be fought by flicking the content behind it.
+      document.body.classList.toggle('sidebar-drawer-open', isOpen);
+      trigger?.setAttribute('aria-expanded', String(isOpen));
+      if (!isOpen && returnFocus) trigger?.focus();
+    }
+
+    function toggleSidebarDrawer() {
+      setSidebarDrawerOpen(!document.getElementById('appSidebar')?.classList.contains('drawer-open'));
     }
 
     function initReleaseNotes() {

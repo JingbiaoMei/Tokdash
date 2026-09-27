@@ -177,9 +177,9 @@ def test_readable_token_switch_markup_and_tooltip_contract() -> None:
     assert 'id="totalTokensWrap"' in source
     assert 'id="totalTokensExact"' in source
     assert 'role="tooltip"' in source
-    assert source.index('id="settingsPanel"') < source.index(
-        'id="readableTokensToggle"'
-    ) < source.index('id="overview-content"')
+    panel_start = source.index('id="settingsPanel"')
+    panel_end = source.index("theme-config.js")  # panel markup ends right before the app scripts
+    assert panel_start < source.index('id="readableTokensToggle"') < panel_end
     assert "#totalTokens:hover+.overview-token-exact-tooltip" in compact
     assert "#totalTokens:focus-visible+.overview-token-exact-tooltip" in compact
     assert source.count("readableTokens: '") == 6
@@ -268,6 +268,7 @@ def test_global_token_toggle_rerenders_cached_views_without_fetching() -> None:
 def test_settings_panel_groups_display_and_install_controls() -> None:
     source = INDEX_HTML.read_text(encoding="utf-8")
     panel_start = source.index('id="settingsPanel"')
+    panel_end = source.index("theme-config.js")  # panel markup ends right before the app scripts
     overview_start = source.index('id="overview-content"')
 
     # PR #110 turned the header-anchored panel into a centered modal opened from the
@@ -285,7 +286,13 @@ def test_settings_panel_groups_display_and_install_controls() -> None:
         "readableTokensToggle",
         "installBtn",
     ):
-        assert panel_start < source.index(f'id="{control_id}"') < overview_start
+        assert panel_start < source.index(f'id="{control_id}"') < panel_end
+
+    # The backdrop is position:fixed, so its markup must live at body level: the
+    # style themes set backdrop-filter on .surface, and a filtered ancestor becomes
+    # the containing block for fixed elements — trapped in the topbar, the "full
+    # page" overlay covered 1118x144px and pushed the panel above the viewport.
+    assert overview_start < source.index('id="settingsBackdrop"') < panel_start
 
     assert "function setSettingsPanelOpen(open, returnFocus = false)" in source
     assert re.search(r"\.settings-panel\s*\{[^}]*position:\s*static", source), "panel must be modal-flow, not header-anchored"

@@ -1804,7 +1804,10 @@
     /* ---- Usage report (Report tab) --------------------------------------
        Own panel class rather than .surface: the report is a stack of reading
        panels, and the card hover-lift would move text under the cursor. */
-    .usage-report-shell { max-width: 95vw; width: 95vw; margin: 0 auto; padding: 0 1rem; }
+    /* Sized to the content column, not the viewport: this tab lives inside the
+       sidebar flex row, so a 95vw sheet overflowed the column and pushed the
+       Week/Month/Year switcher past the viewport edge behind overflow-x:hidden. */
+    .usage-report-shell { max-width: 1180px; width: 100%; margin: 0 auto; }
     .usage-report-head { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 18px; }
     .usage-report-title { margin: 0; font-size: 24px; font-weight: 800; letter-spacing: -.01em; }
     .usage-report-sub { color: var(--color-muted); font-size: 13px; margin-top: 4px; }
@@ -1816,7 +1819,10 @@
     .usage-report-seg { display: inline-flex; padding: 3px; gap: 3px; border: 1px solid var(--color-border); border-radius: 12px; background: color-mix(in srgb, var(--color-primary) 5%, transparent); }
     .usage-report-seg button { border: 0; background: transparent; border-radius: 9px; padding: 6px 14px; font-size: 12px; font-weight: 700; color: var(--color-muted); cursor: pointer; transition: background var(--t-fast) ease, color var(--t-fast) ease; }
     .usage-report-seg button:hover { color: var(--color-text); }
-    .usage-report-seg button[aria-pressed="true"] { background: var(--color-primary); color: #fff; }
+    /* color: var(--color-bg), not #fff: in the dark Paper theme --color-primary is
+       cream (#E3D3B4), so white sat at 1.47:1. --color-bg inverts with the theme
+       and always opposes the primary's luminance. */
+    .usage-report-seg button[aria-pressed="true"] { background: var(--color-primary); color: var(--color-bg); }
     .usage-report-stack { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; margin-top: 14px; }
     /* Painted from --color-surface-glass, the token every theme overrides, the way
        .settings-panel is: a literal here would leave the report the only slate-blue

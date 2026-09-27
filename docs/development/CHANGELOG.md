@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Added
+
+- The desktop dashboard gained a sidebar: Overview, Sessions Explorer, Stats & Heatmap, Usage Report, Quota & Budgets, Servers and Pricing DB as navigation items, with What's New and Settings at its foot, a light/dark quick toggle in the header, and a Sessions tab filter row built from the tools that actually have sessions in the selected period. (#110, thanks @Dhruv7401)
+
+- Session detail now surfaces what the harnesses already record about a session: the working directory's project name and git branch for Hermes, per-session tool-call and message counts, profile name, and a metadata-only message timeline (roles, sizes, token counts, timestamps, tool names) for Hermes and Antigravity sessions. Transcript text is never read into the API; only its measurements ship. (#110, thanks @Dhruv7401)
+
+- The Overview carries a Token Composition band breaking the window's tokens into prompt, cache, output and reasoning, with the cash value of the cache hits beside it. `tokens_reasoning` is now aggregated through the compute layer so the split adds up to the total. (#110, thanks @Dhruv7401)
+
+### Changed
+
+- Settings opens as a modal over the page from its sidebar trigger. It used to render as a panel anchored to the header while its button sat at the bottom of the sidebar, nearly a screen away, and both Settings and What's New had two copies (header and sidebar); one copy each remains. An available update now raises a red dot on the Settings row, with the copy/skip controls inside the modal. (#110, thanks @Dhruv7401)
+
+- Light mode is no longer dark-mode paint with a light wall. The redesign's hardcoded surfaces (`#0d121f` cards, `#090d16` session drawer, white-alpha hairlines, dark-palette text on the default Paper theme) are mapped to the theme tokens, so cards, the KPI grid, the drawer and the scrollbar follow the selected style theme instead of staying black. (#110, thanks @Dhruv7401)
+
+- The energy/kWh estimate is gone. Its Joules-per-token coefficients cited a research note outside the repository, and the model matcher that fed them priced Kimi as `llama-405b` and any Gemini "pro" as `claude-opus`; Tokdash does not publish numbers it cannot source. Cost is the proxy that was always there. (#110, thanks @Dhruv7401)
+
+- The version strings in the sidebar and header are read from the running package instead of hardcoded literals that were already stale when written. (#110, thanks @Dhruv7401)
+
+### Fixed
+
+- Hermes sessions keep their real end-of-activity timing. An earlier cut of this PR appended a zero-token turn at each session's `ended_at` to extend the active-time span, which credited sessions with hours of idle time between messages; the fabricated turn and the `session_model_usage` read it depended on are out, and `HermesParser.persistent_parser_version` stays 1 so existing parsed caches survive the upgrade. (#110, thanks @Dhruv7401)
+
 ### Changed
 
 - The Z.ai quota card wears a mark instead of the grey letter tile, and it is Z.ai's own. Until now the card was the one provider in the Quota tab with no local asset, which fell out of `toolBrandMeta`'s letter-tile fallback for an unidentified source. The mark it needed was already in the package: the poll reads the Z.ai key out of the ZCode CLI's own config (`$ZCODE_HOME/v2/config.json`, the very path the consent panel names), so the provider table maps `zai` onto the ZCode entry rather than shipping a second copy of the same glyph -- the same route `commandcode` already takes, since neither provider is ever a tool row on the Overview. The card keeps its own heading, so a Z.ai card still reads `Z.ai`. The test that used `zai` as its example of a provider with no mark now uses a provider that does not exist yet, and the table is pinned to the Quota tab's provider list, so a future card cannot slip onto the letter tile unnoticed. (#123)

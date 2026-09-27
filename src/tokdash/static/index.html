@@ -710,8 +710,11 @@
     .settings-menu { position: relative; }
     .settings-trigger { gap: 7px; }
     .settings-trigger svg { flex: 0 0 auto; }
-    .settings-panel { position: absolute; z-index: 110; top: calc(100% + 9px); right: 0; width: min(364px, calc(100vw - 24px)); max-height: min(78vh, 760px); overflow-y: auto; padding: 16px; border: 1px solid color-mix(in srgb,var(--color-primary) 18%,var(--color-border)); border-radius: 16px; background: color-mix(in srgb,var(--color-surface-glass) 96%,var(--color-bg)); box-shadow: var(--shadow-md),0 16px 42px color-mix(in srgb,var(--color-text) 16%,transparent); backdrop-filter: blur(18px); scrollbar-width: thin; }
-    .settings-panel[hidden] { display: none; }
+    .app-modal-backdrop[hidden] { display: none; }
+    .settings-panel { position: static; z-index: 110; width: min(420px, calc(100vw - 32px)); max-height: min(78vh, 760px); overflow-y: auto; padding: 16px; border: 1px solid var(--color-border); border-radius: 16px; background: var(--color-surface-glass, var(--color-bg)); box-shadow: var(--shadow-md),0 16px 42px color-mix(in srgb,var(--color-text) 16%,transparent); scrollbar-width: thin; }
+    .settings-panel-close { margin-left: auto; display: inline-flex; padding: 5px; border-radius: 8px; color: var(--color-muted); background: transparent; border: none; cursor: pointer; }
+    .settings-panel-close:hover { color: var(--color-text); background: color-mix(in srgb, var(--color-text) 8%, transparent); }
+    .update-dot { width: 7px; height: 7px; border-radius: 9999px; background: #ef4444; margin-left: auto; flex-shrink: 0; box-shadow: 0 0 0 2px color-mix(in srgb, #ef4444 25%, transparent); }
     .settings-panel-head { position: sticky; z-index: 2; top: -16px; display: flex; align-items: center; gap: 9px; margin: -1px -2px 0; padding: 1px 2px 13px; border-bottom: 1px solid var(--color-border); background: color-mix(in srgb,var(--color-surface-glass) 97%,var(--color-bg)); }
     .settings-panel-head svg { color: var(--color-primary); }
     .settings-panel-head h2 { margin: 0; font-size: 13px; font-weight: 850; }
@@ -2012,15 +2015,13 @@
     }
     .tab-btn:hover {
       color: var(--color-text);
-      background: rgba(255, 255, 255, 0.05);
-      border-color: rgba(255, 255, 255, 0.07);
+      background: color-mix(in srgb, var(--color-text) 6%, transparent);
       transform: translateY(-1px);
     }
     .tab-btn[aria-selected="true"] {
-      background: rgba(99, 102, 241, 0.14) !important;
-      border-color: rgba(99, 102, 241, 0.38) !important;
-      color: #ffffff !important;
-      box-shadow: 0 0 16px -2px rgba(99, 102, 241, 0.25);
+      background: color-mix(in srgb, var(--color-primary, #6366f1) 14%, transparent) !important;
+      border-color: color-mix(in srgb, var(--color-primary, #6366f1) 38%, transparent) !important;
+      color: var(--color-text) !important;
     }
     .tab-btn[aria-selected="true"]::after {
       display: none !important;
@@ -2067,8 +2068,8 @@
     /* Modernized date range control */
     .date-range-trigger {
       border-radius: 8px;
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--color-border);
+      background: color-mix(in srgb, var(--color-text) 3%, transparent);
       padding: 6px 12px;
       transition: all 0.15s ease;
     }
@@ -2274,58 +2275,6 @@
       animation: cardFadeInUp 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
     }
 
-    .hermes-live-dot {
-      width: 7px;
-      height: 7px;
-      border-radius: 9999px;
-      background: #10b981;
-      box-shadow: 0 0 8px #10b981;
-      animation: pulse-live 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-    }
-    @keyframes pulse-live {
-      0%, 100% { opacity: 1; transform: scale(1); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
-      50% { opacity: 0.65; transform: scale(0.9); box-shadow: 0 0 0 4px rgba(16, 185, 129, 0); }
-    }
-    .hermes-pill-title { font-weight: 700; color: #d8b4fe; }
-    .hermes-pill-sep { opacity: 0.4; }
-
-    /* Export dropdown */
-    .export-dropdown-wrapper { position: relative; display: inline-block; }
-    .export-dropdown-menu {
-      position: absolute;
-      right: 0;
-      top: calc(100% + 6px);
-      min-width: 195px;
-      background: #0d121e;
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      border-radius: 10px;
-      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.7), 0 0 20px rgba(99, 102, 241, 0.1);
-      padding: 5px;
-      z-index: 50;
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-      animation: fadeSlideUp 0.15s ease-out;
-    }
-    @keyframes fadeSlideUp {
-      from { opacity: 0; transform: translateY(4px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-    .export-dropdown-menu a {
-      padding: 7px 12px;
-      font-size: 12px;
-      color: var(--color-text);
-      text-decoration: none;
-      border-radius: 7px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      transition: background 0.12s ease;
-    }
-    .export-dropdown-menu a:hover {
-      background: rgba(99, 102, 241, 0.12);
-      color: #ffffff;
-    }
 
     /* Modern Quick Tool Filter Pills */
     .modern-tool-pill {
@@ -2333,8 +2282,8 @@
       padding: 4px 12px;
       font-size: 12px;
       font-weight: 600;
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--color-border);
+      background: transparent;
       color: var(--color-muted);
       cursor: pointer;
       transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
@@ -2345,15 +2294,12 @@
     }
     .modern-tool-pill:hover {
       color: var(--color-text);
-      background: rgba(255, 255, 255, 0.08);
-      border-color: rgba(255, 255, 255, 0.16);
-      transform: translateY(-1px);
+      background: color-mix(in srgb, var(--color-text) 7%, transparent);
     }
     .modern-tool-pill.active {
-      background: rgba(99, 102, 241, 0.16);
-      border-color: rgba(99, 102, 241, 0.45);
-      color: #ffffff;
-      box-shadow: 0 0 12px rgba(99, 102, 241, 0.2);
+      background: color-mix(in srgb, var(--color-primary, #6366f1) 16%, transparent);
+      border-color: color-mix(in srgb, var(--color-primary, #6366f1) 45%, transparent);
+      color: var(--color-text);
     }
 
     /* Slide-Over Drawer Styles */
@@ -2378,9 +2324,10 @@
       width: 100%;
       max-width: 820px;
       height: 100%;
-      background: #090d16;
-      border-left: 1px solid rgba(255, 255, 255, 0.1);
-      box-shadow: -20px 0 50px rgba(0, 0, 0, 0.85);
+      background: var(--color-bg);
+      border-left: 1px solid var(--color-border);
+      box-shadow: -20px 0 50px rgba(0, 0, 0, 0.35);
+      color: var(--color-text);
       transform: translateX(100%);
       transition: transform 0.32s cubic-bezier(0.16, 1, 0.3, 1);
       display: flex;
@@ -2394,7 +2341,7 @@
     .session-table tbody tr {
       cursor: pointer;
       transition: background-color 0.12s ease, border-color 0.12s ease;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      border-bottom: 1px solid color-mix(in srgb, var(--color-border) 55%, transparent);
     }
     /* Sidebar Navigation Styles */
     .sidebar-nav-item {
@@ -2431,51 +2378,36 @@
       bottom: 6px;
       width: 3px;
       border-radius: 2px;
-      background: #6366f1;
-      box-shadow: 0 0 8px #6366f1;
+      background: var(--color-primary, #6366f1);
     }
 
     /* Modern custom scrollbar */
     ::-webkit-scrollbar { width: 6px; height: 6px; }
     ::-webkit-scrollbar-track { background: transparent; }
-    ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.12); border-radius: 9999px; }
-    ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.22); }
+    ::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--color-text) 18%, transparent); border-radius: 9999px; }
+    ::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--color-text) 30%, transparent); }
 
-    /* High-Tech Card & KPI Box Treatments */
-    .surface {
-      background: #0d121f;
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 12px;
-      box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.4), inset 0 1px 0 0 rgba(255, 255, 255, 0.05);
-      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-    }
-    .surface:hover {
-      border-color: rgba(255, 255, 255, 0.14);
-    }
-    #overviewKpiGrid > .surface {
-      position: relative;
-      overflow: hidden;
-      background: radial-gradient(circle at top left, rgba(255, 255, 255, 0.035), transparent 70%), #0d121f;
-    }
-    #overviewKpiGrid > .surface::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      height: 2px;
-      opacity: 0.9;
-    }
-    #overviewKpiGrid > .surface:nth-child(1)::before { background: linear-gradient(90deg, #6366f1, transparent); }
-    #overviewKpiGrid > .surface:nth-child(2)::before { background: linear-gradient(90deg, #10b981, transparent); }
-    #overviewKpiGrid > .surface:nth-child(3)::before { background: linear-gradient(90deg, #a855f7, transparent); }
-    #overviewKpiGrid > .surface:nth-child(4)::before { background: linear-gradient(90deg, #0ea5e9, transparent); }
-    #overviewKpiGrid > .surface:nth-child(5)::before { background: linear-gradient(90deg, #06b6d4, transparent); }
-    #overviewKpiGrid > .surface:nth-child(6)::before { background: linear-gradient(90deg, #f59e0b, transparent); }
-    #overviewKpiGrid > .surface:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 12px 30px -4px rgba(0, 0, 0, 0.6), inset 0 1px 0 0 rgba(255, 255, 255, 0.12);
-    }
+    /* Light mode: the redesign added dark-palette text utilities (slate-100..400,
+       indigo/purple/teal/amber/emerald/cyan 300-400). On a light background those
+       are invisible; remap them to the same hue's dark step. html:not(.dark)
+       outranks the runtime-generated Tailwind utility, so order does not matter. */
+    html:not(.dark) .text-slate-50, html:not(.dark) .text-slate-100,
+    html:not(.dark) .text-slate-200 { color: #1e293b; }
+    html:not(.dark) .text-slate-300, html:not(.dark) .text-slate-400 { color: #475569; }
+    html:not(.dark) .text-indigo-300, html:not(.dark) .text-indigo-400,
+    html:not(.dark) .text-indigo-500 { color: #4338ca; }
+    html:not(.dark) .text-purple-300, html:not(.dark) .text-purple-400 { color: #7e22ce; }
+    html:not(.dark) .text-teal-400 { color: #0f766e; }
+    html:not(.dark) .text-amber-300, html:not(.dark) .text-amber-400 { color: #b45309; }
+    html:not(.dark) .text-emerald-400 { color: #047857; }
+    html:not(.dark) .text-cyan-400 { color: #0e7490; }
+    html:not(.dark) .text-sky-400 { color: #0369a1; }
+    html:not(.dark) .text-pink-400 { color: #be185d; }
+    html:not(.dark) .text-yellow-400 { color: #a16207; }
+    html:not(.dark) .hover\:text-slate-200:hover { color: #1e293b; }
+    html:not(.dark) .hover\:text-indigo-400:hover { color: #4338ca; }
+    html:not(.dark) .hover\:bg-slate-800:hover { background: color-mix(in srgb, var(--color-text) 7%, transparent); }
+
     @media (min-width: 768px) {
       nav[aria-label="Dashboard sections"] {
         display: none !important;
@@ -2499,18 +2431,6 @@
       animation: sparklineDraw 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
     }
 
-    .achievement-icon-wrap {
-      width: 44px;
-      height: 44px;
-      border-radius: 12px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 22px;
-      flex-shrink: 0;
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-    }
   </style>
   <script>document.write(`<link rel="stylesheet" href="${window.tokdashPath('/static/themes.css')}" />`);</script>
 </head>
@@ -2564,89 +2484,69 @@
     <!-- Brand -->
     <div class="p-4 border-b flex items-center justify-between" style="border-color: var(--color-border);">
       <div class="flex items-center gap-3">
-        <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 p-0.5 shadow-[0_0_12px_rgba(99,102,241,0.35)] flex items-center justify-center flex-shrink-0">
+        <div class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style="border: 1px solid var(--color-border); background: color-mix(in srgb, var(--color-text) 4%, transparent);">
           <script>document.write(`<img src="${window.tokdashPath('/static/icons/logo.png')}" alt="Tokdash logo" width="28" height="28" style="display:block; width:28px; height:28px; object-fit:contain;" />`);</script>
         </div>
         <div>
           <div class="flex items-center gap-1.5">
             <span class="font-extrabold text-sm tracking-tight font-mono" style="color: var(--color-text);">Tokdash</span>
-            <span class="text-[9px] font-bold px-1.5 py-0.2 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">v2.6.2</span>
+            <span class="text-[9px] font-bold px-1.5 py-0.2 rounded font-mono" style="background: color-mix(in srgb, var(--color-text) 7%, transparent); color: var(--color-muted); border: 1px solid var(--color-border);" data-app-version>v—</span>
           </div>
-          <span class="text-[10px]" style="color: var(--color-muted);">Agent Observability</span>
+          <span class="text-[10px]" style="color: var(--color-muted);" data-i18n="brandTag">Agent Observability</span>
         </div>
       </div>
     </div>
 
     <!-- Navigation Menu Items with Clean SVGs -->
     <nav class="flex-1 px-2.5 py-3 space-y-1 overflow-y-auto" aria-label="Main sidebar navigation">
-      <div class="text-[11.5px] font-bold uppercase tracking-wider px-3 pt-2 pb-1" style="color: var(--color-muted);">Telemetry</div>
+      <div class="text-[11.5px] font-bold uppercase tracking-wider px-3 pt-2 pb-1" style="color: var(--color-muted);" data-i18n="navTelemetry">Telemetry</div>
       <a class="sidebar-nav-item active" data-tab-target="overview" onclick="activateDashboardTab('overview')">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-indigo-400"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>
-        <span>Overview</span>
+        <span data-i18n="overview">Overview</span>
       </a>
       <span id="hermesSsePulseDot" style="display:none;"></span>
       <a class="sidebar-nav-item" data-tab-target="sessions" onclick="activateDashboardTab('sessions')">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-sky-400"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg>
-        <span>Sessions Explorer</span>
+        <span data-i18n="navSessions">Sessions Explorer</span>
       </a>
-      <div class="text-[11.5px] font-bold uppercase tracking-wider px-3 pt-3 pb-1" style="color: var(--color-muted);">Intelligence</div>
+      <div class="text-[11.5px] font-bold uppercase tracking-wider px-3 pt-3 pb-1" style="color: var(--color-muted);" data-i18n="navIntelligence">Intelligence</div>
 
       <a class="sidebar-nav-item" data-tab-target="stats" onclick="activateDashboardTab('stats')">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-yellow-400"><line x1="18" x2="18" y1="20" y2="10"/><line x1="12" x2="12" y1="20" y2="4"/><line x1="6" x2="6" y1="20" y2="14"/></svg>
-        <span>Stats & Heatmap</span>
+        <span data-i18n="navStats">Stats & Heatmap</span>
       </a>
 
       <a class="sidebar-nav-item" data-tab-target="report" onclick="activateDashboardTab('report')">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-emerald-400"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" x2="8" y1="13" y2="13"/><line x1="16" x2="8" y1="17" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
-        <span>Usage Report</span>
+        <span data-i18n="navReport">Usage Report</span>
       </a>
 
-      <div class="text-[11.5px] font-bold uppercase tracking-wider px-3 pt-3 pb-1" style="color: var(--color-muted);">Infrastructure</div>
+      <div class="text-[11.5px] font-bold uppercase tracking-wider px-3 pt-3 pb-1" style="color: var(--color-muted);" data-i18n="navInfrastructure">Infrastructure</div>
       <a class="sidebar-nav-item" data-tab-target="quota" onclick="activateDashboardTab('quota')">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-cyan-400"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg>
-        <span>Quota & Budgets</span>
+        <span data-i18n="navQuota">Quota & Budgets</span>
       </a>
       <a class="sidebar-nav-item" data-tab-target="servers" onclick="activateDashboardTab('servers')">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-indigo-400"><rect width="20" height="8" x="2" y="2" rx="2" ry="2"/><rect width="20" height="8" x="2" y="14" rx="2" ry="2"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/></svg>
-        <span>Servers</span>
+        <span data-i18n="servers">Servers</span>
       </a>
       <a class="sidebar-nav-item" data-tab-target="pricing" onclick="activateDashboardTab('pricing')">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-pink-400"><line x1="12" x2="12" y1="2" y2="22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-        <span>Pricing DB</span>
+        <span data-i18n="navPricing">Pricing DB</span>
       </a>
     </nav>
 
     <!-- Sidebar Footer Quick Actions -->
     <div class="px-2.5 py-2.5 border-t space-y-1 relative" style="border-color: var(--color-border); background: var(--color-surface-glass, transparent);">
-      <!-- Floating popover for Export -->
-      <div id="sidebarExportPopover" class="sidebar-export-popover" style="display:none;">
-        <a href="/api/export/csv" download="tokdash_sessions.csv">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
-          Export CSV (Sessions)
-        </a>
-        <a href="/api/export/markdown" download="tokdash_report.md">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
-          Export Markdown Report
-        </a>
-        <button type="button" onclick="exportJsonData()">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 18l6-6-6-6"/><path d="M8 6l-6 6 6 6"/></svg>
-          Export Raw JSON
-        </button>
-      </div>
-
-      <button class="sidebar-nav-item w-full !text-left" type="button" onclick="openReleaseNotesModal()" title="View what's new and release notes">
+      <button id="releaseNotesToggle" class="sidebar-nav-item w-full !text-left" type="button" aria-controls="releaseNotesDialog" aria-expanded="false" title="View what's new and release notes">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-indigo-400"><path d="M6.5 4.5h11a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2Z"/><path d="M8 9h8M8 12h8M8 15h5"/></svg>
-        <span>What's New</span>
-        <span class="ml-auto text-[10px] mono text-indigo-400 font-bold">v2.6.2</span>
+        <span data-i18n="whatsNew">What's New</span>
+        <span id="releaseNotesVersion" class="ml-auto text-[10px] mono" style="color: var(--color-muted); font-weight:700;">v—</span>
       </button>
-      <button class="sidebar-nav-item w-full !text-left" type="button" onclick="toggleSidebarExportMenu(event)" title="Export session data or markdown report">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-emerald-400"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-        <span>Export</span>
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="ml-auto text-slate-500"><path d="m6 9 6 6 6-6"/></svg>
-      </button>
-      <button class="sidebar-nav-item w-full !text-left" type="button" onclick="openSettingsModal()" title="Configure Tokdash settings and servers">
+      <button id="sidebarSettingsBtn" class="sidebar-nav-item w-full !text-left" type="button" onclick="openSettingsModal()" title="Configure Tokdash settings and servers" aria-controls="settingsPanel" aria-expanded="false">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-purple-400"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l-2.86 2.86A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1.4 1.6H9.55a1.7 1.7 0 0 0-1.08-1.66 1.7 1.7 0 0 0-1.88.34l-2.86-2.86A1.7 1.7 0 0 0 4.07 15a1.7 1.7 0 0 0-1.77-1.4V9.55a1.7 1.7 0 0 0 1.66-1.08 1.7 1.7 0 0 0-.34-1.88l2.86-2.86A1.7 1.7 0 0 0 8.36 4.07 1.7 1.7 0 0 0 9.76 2.3h4.05a1.7 1.7 0 0 0 1.08 1.66 1.7 1.7 0 0 0 1.88-.34l2.86 2.86a1.7 1.7 0 0 0-.34 1.88 1.7 1.7 0 0 0 1.77 1.4v4.05A1.7 1.7 0 0 0 19.4 15Z"/></svg>
-        <span>Settings</span>
+        <span data-i18n="settings">Settings</span>
+        <span id="updateDot" class="update-dot" hidden aria-hidden="true"></span>
       </button>
     </div>
 
@@ -2667,7 +2567,7 @@
             <div class="flex flex-wrap items-center gap-2.5">
               <div class="flex items-center gap-2">
                 <h1 class="text-xl sm:text-2xl font-extrabold tracking-tight mono text-slate-900 dark:text-white">Tokdash</h1>
-                <span class="text-[9px] font-bold px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-500 dark:text-indigo-300 border border-indigo-500/30 font-mono">v2.6.2</span>
+                <span class="text-[9px] font-bold px-1.5 py-0.5 rounded font-mono" style="background: color-mix(in srgb, var(--color-text) 7%, transparent); color: var(--color-muted); border: 1px solid var(--color-border);" data-app-version>v—</span>
               </div>
             </div>
             <p id="lastUpdate" class="tokdash-loading-placeholder text-xs mt-2" style="color: var(--color-label);"><span class="tokdash-loading-label">Loading...</span></p>
@@ -2769,68 +2669,31 @@
                   </svg>
                 </button>
               </div>
-              <div id="updateNotice" class="update-notice" hidden>
-                <button id="updateBadge" class="update-badge" hidden aria-haspopup="true" aria-expanded="false"></button>
-                <button id="updateEnableLink" class="update-enable-link" hidden data-i18n="updateEnable">Enable update notices</button>
-                <div id="updatePopover" class="update-popover" hidden>
-                  <div id="updatePopoverText" class="text-xs mb-2"></div>
-                  <div class="update-cmd-row">
-                    <code>tokdash update</code>
-                    <button id="updateCopyBtn" class="btn btn-ghost update-copy-btn" data-i18n="updateCopy">Copy</button>
-                  </div>
-                  <button id="updateSkipBtn" class="update-skip-btn" data-i18n="updateSkip">Skip this version</button>
-                </div>
-              </div>
-            </div>
-            <button id="releaseNotesToggle" class="btn btn-ghost compact-control release-notes-trigger" type="button" aria-controls="releaseNotesDialog" aria-expanded="false">
-              <svg class="release-notes-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path d="M6.5 4.5h11a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.7"/>
-                <path d="M8 9h8M8 12h8M8 15h5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
-              </svg>
-              <span data-i18n="whatsNew">What's new</span>
-              <span id="releaseNotesVersion" class="release-notes-version mono">v—</span>
-            </button>
-            <div class="export-dropdown-wrapper" style="display:none !important;" aria-hidden="true">
-              <button id="exportDropdownBtn" class="btn btn-ghost compact-control" type="button" aria-haspopup="true" aria-expanded="false" onclick="toggleExportMenu(event)">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                  <polyline points="7 10 12 15 17 10"></polyline>
-                  <line x1="12" y1="15" x2="12" y2="3"></line>
-                </svg>
-                <span>Export</span>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
-              </button>
-              <div id="exportDropdownMenu" class="export-dropdown-menu" style="display:none;">
-                <a href="/api/export/csv" download="tokdash_sessions.csv">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
-                  Export CSV (Sessions)
-                </a>
-                <a href="/api/export/markdown" download="tokdash_report.md">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
-                  Export Markdown Report
-                </a>
-                <a href="javascript:void(0)" onclick="exportJsonData()">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 18l6-6-6-6"/><path d="M8 6l-6 6 6 6"/></svg>
-                  Export Raw JSON
-                </a>
-              </div>
             </div>
             <span id="serverCountChip" class="text-xs font-semibold" style="display:none;padding:5px 9px;border:1px solid var(--color-border);border-radius:999px;color:var(--color-muted);"></span>
 
-            <div id="settingsMenu" class="settings-menu">
-              <button id="settingsToggle" class="btn btn-ghost compact-control settings-trigger" type="button" aria-expanded="false" aria-controls="settingsPanel">
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" stroke="currentColor" stroke-width="1.8"/>
-                  <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.86 2.86-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21H9.55v-.1a1.7 1.7 0 0 0-1.08-1.56 1.7 1.7 0 0 0-1.88.34l-.06.06-2.86-2.86.06-.06A1.7 1.7 0 0 0 4.07 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H2.3V9.55h.1a1.7 1.7 0 0 0 1.56-1.08 1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.86-2.86.06.06A1.7 1.7 0 0 0 8.36 4.07a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V2.3h4.05v.1a1.7 1.7 0 0 0 1.08 1.56 1.7 1.7 0 0 0 1.88-.34l.06-.06 2.86 2.86-.06.06a1.7 1.7 0 0 0-.34 1.88 1.7 1.7 0 0 0 .6 1 1.7 1.7 0 0 0 1.1.4h.1v4.05h-.1a1.7 1.7 0 0 0-1.59 1.19Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-                <span data-i18n="settings">Settings</span>
-              </button>
-              <section id="settingsPanel" class="settings-panel" aria-labelledby="settingsPanelTitle" hidden>
+            <div id="settingsBackdrop" class="app-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="settingsPanelTitle" hidden>
+              <section id="settingsPanel" class="settings-panel" aria-labelledby="settingsPanelTitle">
                 <div class="settings-panel-head">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l-2.86 2.86A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1.4 1.6H9.55a1.7 1.7 0 0 0-1.08-1.66 1.7 1.7 0 0 0-1.88.34l-2.86-2.86A1.7 1.7 0 0 0 4.07 15a1.7 1.7 0 0 0-1.77-1.4V9.55a1.7 1.7 0 0 0 1.66-1.08 1.7 1.7 0 0 0-.34-1.88l2.86-2.86A1.7 1.7 0 0 0 8.36 4.07 1.7 1.7 0 0 0 9.76 2.3h4.05a1.7 1.7 0 0 0 1.08 1.66 1.7 1.7 0 0 0 1.88-.34l2.86 2.86a1.7 1.7 0 0 0-.34 1.88 1.7 1.7 0 0 0 1.77 1.4v4.05A1.7 1.7 0 0 0 19.4 15Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
                   <h2 id="settingsPanelTitle" data-i18n="settings">Settings</h2>
+                  <button type="button" class="settings-panel-close" onclick="setSettingsPanelOpen(false, true)" aria-label="Close settings">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                  </button>
                 </div>
                 <div class="settings-panel-body">
+<div id="updateNotice" class="update-notice" style="margin-bottom:14px;" hidden>
+                    <button id="updateBadge" class="update-badge" hidden aria-haspopup="true" aria-expanded="false"></button>
+                    <button id="updateEnableLink" class="update-enable-link" hidden data-i18n="updateEnable">Enable update notices</button>
+                    <div id="updatePopover" class="update-popover" hidden>
+                      <div id="updatePopoverText" class="text-xs mb-2"></div>
+                      <div class="update-cmd-row">
+                        <code>tokdash update</code>
+                        <button id="updateCopyBtn" class="btn btn-ghost update-copy-btn" data-i18n="updateCopy">Copy</button>
+                      </div>
+                      <button id="updateSkipBtn" class="update-skip-btn" data-i18n="updateSkip">Skip this version</button>
+                    </div>
+                  </div>
                   <section id="serversSettings" class="servers-settings">
                     <div class="servers-settings-head">
                       <strong class="settings-label" data-i18n="servers">Servers</strong>
@@ -2930,9 +2793,7 @@
           <div class="flex items-center justify-between">
             <div class="text-[11px] font-semibold uppercase tracking-wider flex items-center gap-1.5" style="color: var(--color-label);">
               <span data-i18n="totalTokens">Total Tokens</span>
-              <span id="tokensDeltaPulseDot" class="w-2 h-2 rounded-full bg-indigo-400 shadow-[0_0_6px_#818cf8]" style="display:none;" title="Live token update"></span>
-            </div>
-            <span class="text-[9px] px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-400 font-mono font-bold">+81%</span>
+              <span id="tokensDeltaPulseDot" class="w-2 h-2 rounded-full bg-indigo-400" style="display:none;" title="Live token update"></span>
           </div>
           <div id="totalTokensWrap" class="overview-token-value-wrap" data-readable="true">
             <div id="totalTokens" class="text-3xl sm:text-4xl font-extrabold mt-1.5 font-mono text-indigo-400" tabindex="0" aria-describedby="totalTokensExact">-</div>
@@ -2944,7 +2805,6 @@
         <div class="surface p-5">
           <div class="flex items-center justify-between">
             <div class="text-[11px] font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="totalCost">Total Cost</div>
-            <span class="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 font-mono font-bold">$0.00/M</span>
           </div>
           <div id="totalCost" class="text-3xl sm:text-4xl font-extrabold mt-1.5 font-mono text-emerald-400">$-</div>
           <div id="costDelta" class="text-xs font-semibold mt-1" style="color: var(--color-muted);"></div>
@@ -2953,7 +2813,6 @@
         <div class="surface p-5">
           <div class="flex items-center justify-between">
             <div class="text-[11px] font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="totalMessages">Total Messages</div>
-            <span class="text-[9px] px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-400 font-mono font-bold">Turns</span>
           </div>
           <div id="totalMessages" class="text-3xl sm:text-4xl font-extrabold mt-1.5 font-mono text-purple-400">-</div>
           <div id="messagesDelta" class="text-xs font-semibold mt-1" style="color: var(--color-muted);"></div>
@@ -2987,7 +2846,6 @@
         <div class="surface p-5">
           <div class="flex items-center justify-between">
             <div class="text-[11px] font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="topModel">Top Model</div>
-            <span class="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 font-mono font-bold">Rank #1</span>
           </div>
           <div id="topModel" class="text-lg sm:text-xl font-extrabold mt-1.5 mono break-all text-amber-300" title=""></div>
           <div id="topModelMeta" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
@@ -2999,12 +2857,11 @@
       <section class="surface p-4 sm:p-5 mb-4">
         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
           <div class="flex items-center gap-2">
-            <span class="text-sm sm:text-base font-extrabold mono text-slate-200">Token Composition</span>
-            <span class="text-[10px] px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/25 font-semibold">Real-time</span>
+            <span class="text-sm sm:text-base font-extrabold mono text-slate-200" data-i18n="tokenComposition">Token Composition</span>
           </div>
           <div class="flex items-center gap-3 text-xs font-mono">
-            <span class="text-slate-400">Cache Saved: <strong id="cacheSavingsKpi" class="text-teal-400">—</strong> <span id="cacheSavingsMeta" class="hidden">cache efficiency</span></span>
-            <span class="text-slate-600">·</span>
+            <span class="text-slate-400"><span data-i18n="cacheSaved">Cache Saved:</span> <strong id="cacheSavingsKpi" class="text-teal-400">—</strong></span>
+            <span style="color: var(--color-border);">·</span>
             <span class="text-slate-500" id="tokenCompositionTotal">Full Range Distribution</span>
           </div>
         </div>
@@ -3180,11 +3037,7 @@
     <div id="sessions-content" class="tab-content">
       <div id="sessionsPanelToolbar" class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
         <div class="flex items-center gap-2 overflow-x-auto py-1" id="sessionsQuickFilterBar">
-          <button class="modern-tool-pill active" type="button" onclick="filterSessionPanels('all', this)">All Tools</button>
-          <button class="modern-tool-pill" type="button" onclick="filterSessionPanels('hermes', this)"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#10b981;margin-right:5px;box-shadow:0 0 6px #10b981;"></span>Hermes</button>
-          <button class="modern-tool-pill" type="button" onclick="filterSessionPanels('codex', this)">Codex</button>
-          <button class="modern-tool-pill" type="button" onclick="filterSessionPanels('claude', this)">Claude</button>
-          <button class="modern-tool-pill" type="button" onclick="filterSessionPanels('antigravity_cli', this)">Antigravity</button>
+          <button class="modern-tool-pill active" type="button" data-tool="all" onclick="filterSessionPanels('all', this)" data-i18n="allTools">All Tools</button>
         </div>
         <div class="flex items-center gap-2 flex-shrink-0">
           <input type="text" id="sessionSearchInput" class="ui-input text-xs py-1.5 px-3 rounded-lg" placeholder="Search sessions/projects..." oninput="filterSessionsBySearch(this.value)" />
@@ -4744,7 +4597,6 @@
             <div id="statsMetricControls" class="flex items-center gap-2 rounded-xl border px-2 py-1.5" style="border-color: var(--color-border); background: color-mix(in srgb, var(--color-surface-glass) 90%, var(--color-bg));">
               <span class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="calendarMetric">Metric</span>
               <button id="metricTokensBtn" class="btn btn-primary" type="button" style="min-height:36px; padding:8px 12px;" data-i18n="metricTokens">Tokens</button>
-              <button id="metricEnergyBtn" class="btn btn-ghost" type="button" style="min-height:36px; padding:8px 12px;" data-i18n="metricEnergy">Energy</button>
               <button id="metricCostBtn" class="btn btn-ghost" type="button" style="min-height:36px; padding:8px 12px;" data-i18n="metricCost">Cost</button>
               <button id="metricMessagesBtn" class="btn btn-ghost" type="button" style="min-height:36px; padding:8px 12px;" data-i18n="metricMessages">Messages</button>
             </div>
@@ -4842,12 +4694,6 @@
                   <div id="monthTotalCost" class="font-extrabold text-xl" style="color: var(--color-cost);">$0.00</div>
                 </div>
 
-                <!-- Total Energy -->
-                <div>
-                  <div class="text-xs font-semibold text-slate-500 mb-1" data-i18n="totalEnergy">Total Energy (kWh)</div>
-                  <div id="monthTotalEnergy" class="font-bold text-lg">0.00 kWh</div>
-                </div>
-
                 <!-- Sessions -->
                 <div>
                   <div class="text-xs font-semibold text-slate-500 mb-1" data-i18n="messages">Messages</div>
@@ -4908,11 +4754,10 @@
                     <th class="text-left py-2 px-3 font-semibold" style="color: var(--color-muted);" data-i18n="month">Month</th>
                     <th class="text-right py-2 px-3 font-semibold" style="color: var(--color-muted);" data-i18n="totalTokens">Total Tokens</th>
                     <th class="text-right py-2 px-3 font-semibold" style="color: var(--color-muted);" data-i18n="totalCost">Total Cost</th>
-                    <th class="text-right py-2 px-3 font-semibold" style="color: var(--color-muted);" data-i18n="energy">Energy</th>
                   </tr>
                 </thead>
                 <tbody id="yearMonthlyTotalsTable">
-                  <tr><td colspan="4" class="tokdash-loading-placeholder text-center py-6" style="color: var(--color-muted);"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></td></tr>
+                  <tr><td colspan="3" class="tokdash-loading-placeholder text-center py-6" style="color: var(--color-muted);"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></td></tr>
                 </tbody>
               </table>
             </div>
@@ -6561,6 +6406,18 @@
         statsLoadFailed: 'Failed to load stats.',
         retry: 'Retry',
         overview: 'Overview',
+        navTelemetry: 'Telemetry',
+        navIntelligence: 'Intelligence',
+        navInfrastructure: 'Infrastructure',
+        navSessions: 'Sessions Explorer',
+        navStats: 'Stats & Heatmap',
+        navReport: 'Usage Report',
+        navQuota: 'Quota & Budgets',
+        navPricing: 'Pricing DB',
+        brandTag: 'Agent Observability',
+        allTools: 'All Tools',
+        tokenComposition: 'Token Composition',
+        cacheSaved: 'Cache Saved:',
         sessionsPage: 'Sessions',
         stats: 'Stats',
         quota: 'Quota',
@@ -6762,11 +6619,8 @@
         hideMilestones: 'Hide milestone colors',
         calendarMetric: 'Metric',
         metricTokens: 'Tokens',
-        metricEnergy: 'Energy',
         metricCost: 'Cost',
         metricMessages: 'Messages',
-        totalEnergy: 'Total Energy (kWh)',
-        energy: 'Energy',
         peakDay: 'Peak Day',
         peakWeek: 'Peak Week',
         peakWeekday: 'Top Weekday',
@@ -7103,6 +6957,18 @@
         statsLoadFailed: '统计数据加载失败。',
         retry: '重试',
         overview: '概览',
+        navTelemetry: '遥测',
+        navIntelligence: '智能分析',
+        navInfrastructure: '基础设施',
+        navSessions: '会话浏览器',
+        navStats: '统计与热力图',
+        navReport: '用量报告',
+        navQuota: '额度与预算',
+        navPricing: '价格库',
+        brandTag: '智能体可观测性',
+        allTools: '全部工具',
+        tokenComposition: '令牌构成',
+        cacheSaved: '缓存节省：',
         sessionsPage: '会话',
         stats: '统计',
         quota: '额度',
@@ -7304,11 +7170,8 @@
         hideMilestones: '隐藏里程碑颜色',
         calendarMetric: '指标',
         metricTokens: 'Tokens',
-        metricEnergy: '能耗',
         metricCost: '费用',
         metricMessages: '消息数',
-        totalEnergy: '总能耗 (kWh)',
-        energy: '能耗',
         peakDay: '峰值日',
         peakWeek: '峰值周',
         peakWeekday: '最高活跃日',
@@ -7646,6 +7509,18 @@
         statsLoadFailed: '統計の読み込みに失敗しました。',
         retry: '再試行',
         overview: '概要',
+        navTelemetry: 'テレメトリ',
+        navIntelligence: 'インテリジェンス',
+        navInfrastructure: 'インフラストラクチャ',
+        navSessions: 'セッションエクスプローラ',
+        navStats: '統計＆ヒートマップ',
+        navReport: '使用量レポート',
+        navQuota: 'クォータ＆予算',
+        navPricing: '価格DB',
+        brandTag: 'エージェント可観測性',
+        allTools: '全ツール',
+        tokenComposition: 'トークン構成',
+        cacheSaved: 'キャッシュ節約:',
         sessionsPage: 'セッション',
         stats: '統計',
         quota: 'クォータ',
@@ -7847,11 +7722,8 @@
         hideMilestones: 'マイルストーンのカラーを非表示',
         calendarMetric: '指標',
         metricTokens: 'トークン',
-        metricEnergy: 'エネルギー',
         metricCost: 'コスト',
         metricMessages: 'メッセージ',
-        totalEnergy: '総エネルギー (kWh)',
-        energy: 'エネルギー',
         peakDay: 'ピーク日',
         peakWeek: 'ピーク週',
         peakWeekday: '最多利用曜日',
@@ -8189,6 +8061,18 @@
         statsLoadFailed: '통계를 불러오지 못했습니다.',
         retry: '다시 시도',
         overview: '개요',
+        navTelemetry: '텔레메트리',
+        navIntelligence: '인텔리전스',
+        navInfrastructure: '인프라',
+        navSessions: '세션 탐색기',
+        navStats: '통계 & 히트맵',
+        navReport: '사용량 리포트',
+        navQuota: '할당량 & 예산',
+        navPricing: '가격 DB',
+        brandTag: '에이전트 관측',
+        allTools: '모든 도구',
+        tokenComposition: '토큰 구성',
+        cacheSaved: '캐시 절약:',
         sessionsPage: '세션',
         stats: '통계',
         quota: '쿼터',
@@ -8390,11 +8274,8 @@
         hideMilestones: '마일스톤 색상 숨김',
         calendarMetric: '지표',
         metricTokens: '토큰',
-        metricEnergy: '에너지',
         metricCost: '비용',
         metricMessages: '메시지',
-        totalEnergy: '총 에너지 (kWh)',
-        energy: '에너지',
         peakDay: '피크일',
         peakWeek: '피크 주',
         peakWeekday: '최다 요일',
@@ -8732,6 +8613,18 @@
         statsLoadFailed: 'No se pudo cargar la estadística.',
         retry: 'Reintentar',
         overview: 'Resumen',
+        navTelemetry: 'Telemetría',
+        navIntelligence: 'Inteligencia',
+        navInfrastructure: 'Infraestructura',
+        navSessions: 'Explorador de sesiones',
+        navStats: 'Estadísticas y mapa de calor',
+        navReport: 'Informe de uso',
+        navQuota: 'Cuota y presupuestos',
+        navPricing: 'Base de precios',
+        brandTag: 'Observabilidad de agentes',
+        allTools: 'Todas las herramientas',
+        tokenComposition: 'Composición de tokens',
+        cacheSaved: 'Ahorro de caché:',
         sessionsPage: 'Sesiones',
         stats: 'Estadísticas',
         quota: 'Cuota',
@@ -8933,11 +8826,8 @@
         hideMilestones: 'Ocultar colores de hitos',
         calendarMetric: 'Métrica',
         metricTokens: 'Tokens',
-        metricEnergy: 'Energía',
         metricCost: 'Coste',
         metricMessages: 'Mensajes',
-        totalEnergy: 'Energía total (kWh)',
-        energy: 'Energía',
         peakDay: 'Día pico',
         peakWeek: 'Semana pico',
         peakWeekday: 'Mejor día de la semana',
@@ -9275,6 +9165,18 @@
         statsLoadFailed: 'Falha ao carregar as estatísticas.',
         retry: 'Tentar de novo',
         overview: 'Visão geral',
+        navTelemetry: 'Telemetria',
+        navIntelligence: 'Inteligência',
+        navInfrastructure: 'Infraestrutura',
+        navSessions: 'Explorador de sessões',
+        navStats: 'Estatísticas e mapa de calor',
+        navReport: 'Relatório de uso',
+        navQuota: 'Cota e orçamentos',
+        navPricing: 'Banco de preços',
+        brandTag: 'Observabilidade de agentes',
+        allTools: 'Todas as ferramentas',
+        tokenComposition: 'Composição de tokens',
+        cacheSaved: 'Economia de cache:',
         sessionsPage: 'Sessões',
         stats: 'Estatísticas',
         quota: 'Cota',
@@ -9476,11 +9378,8 @@
         hideMilestones: 'Ocultar cores de marcos',
         calendarMetric: 'Métrica',
         metricTokens: 'Tokens',
-        metricEnergy: 'Energia',
         metricCost: 'Custo',
         metricMessages: 'Mensagens',
-        totalEnergy: 'Energia total (kWh)',
-        energy: 'Energia',
         peakDay: 'Dia de pico',
         peakWeek: 'Semana de pico',
         peakWeekday: 'Melhor dia da semana',
@@ -9844,24 +9743,17 @@
     }
 
     function setSettingsPanelOpen(open, returnFocus = false) {
-      const trigger = document.getElementById('settingsToggle');
+      const trigger = document.getElementById('sidebarSettingsBtn');
       const panel = document.getElementById('settingsPanel');
-      if (!trigger || !panel) return;
+      const backdrop = document.getElementById('settingsBackdrop');
+      if (!panel || !backdrop) return;
       const expanded = Boolean(open);
-      trigger.setAttribute('aria-expanded', String(expanded));
       panel.hidden = !expanded;
-      panel.style.removeProperty('transform');
-      if (expanded) {
-        const gutter = 16;
-        const bounds = panel.getBoundingClientRect();
-        let shiftX = 0;
-        if (bounds.left < gutter) shiftX = gutter - bounds.left;
-        else if (bounds.right > window.innerWidth - gutter) {
-          shiftX = window.innerWidth - gutter - bounds.right;
-        }
-        if (shiftX) panel.style.transform = `translateX(${shiftX}px)`;
-      }
-      if (!expanded && returnFocus) trigger.focus();
+      backdrop.hidden = !expanded;
+      if (expanded) requestAnimationFrame(() => backdrop.classList.add('open'));
+      else backdrop.classList.remove('open');
+      if (trigger) trigger.setAttribute('aria-expanded', String(expanded));
+      if (!expanded && returnFocus && trigger) trigger.focus();
     }
 
     function syncThemeModeControl() {
@@ -9884,110 +9776,6 @@
       return '$' + n.toFixed(2);
     }
 
-    // ===== Energy estimation =====
-    // Coefficients: Joules per token for {prefill, cached, decode}.
-    // Source: ~/.openclaw/workspace/research/tokdash-energy-feasibility.md §4
-    // (TokenPowerBench AAAI 2026 + "How Hungry is AI?" + cost-as-proxy).
-    // Order-of-magnitude accuracy; excellent for relative comparisons.
-    const ENERGY_COEFFICIENTS = {
-      'gpt-5.5':       { prefill: 8.0,  cached: 0.8,   decode: 24.0 },
-      'gpt-5.4':       { prefill: 4.0,  cached: 0.4,   decode: 12.0 },
-      'gpt-5.4-mini':  { prefill: 1.2,  cached: 0.12,  decode: 3.6  },
-      'claude-opus':   { prefill: 6.0,  cached: 0.6,   decode: 18.0 },
-      'claude-sonnet': { prefill: 2.0,  cached: 0.2,   decode: 6.0  },
-      'claude-haiku':  { prefill: 0.3,  cached: 0.03,  decode: 0.9  },
-      'llama-405b':    { prefill: 3.0,  cached: 0.3,   decode: 8.0  },
-      'llama-70b':     { prefill: 0.4,  cached: 0.04,  decode: 1.2  },
-      'llama-8b':      { prefill: 0.05, cached: 0.005, decode: 0.15 },
-      'qwen-7b':       { prefill: 0.04, cached: 0.004, decode: 0.12 },
-      'mistral-7b':    { prefill: 0.05, cached: 0.005, decode: 0.14 },
-      'default':       { prefill: 1.0,  cached: 0.1,   decode: 3.0  },
-    };
-
-    // Map an arbitrary model name to a coefficient family.
-    // Order matters: the most specific patterns are tested first.
-    function energyCoefficientsFor(modelName) {
-      const raw = String(modelName || '').toLowerCase();
-      // Strip provider prefixes and aliases consistent with our model normalizer.
-      const n = raw.replace(/^(antigravity-)/, '').replace(/.*\//, '');
-
-      // OpenAI families
-      if (/(^|[^\d])gpt-?5\.5/.test(n) || /^o5/.test(n)) return ENERGY_COEFFICIENTS['gpt-5.5'];
-      if (/(^|[^\d])gpt-?5(?:\.\d+)?-(?:mini|nano)|codex-mini/.test(n)) return ENERGY_COEFFICIENTS['gpt-5.4-mini'];
-      if (/(^|[^\d])gpt-?5(?:\.\d+)?(?:$|-|_)|o3(?!-mini)|gpt-4(o|-turbo)/.test(n)) return ENERGY_COEFFICIENTS['gpt-5.4'];
-      if (/o3-mini|gpt-4o-mini|gpt-4-mini/.test(n)) return ENERGY_COEFFICIENTS['gpt-5.4-mini'];
-
-      // Anthropic families (handles claude-opus-*, opus-*, claude-3.5-sonnet, etc.)
-      if (/opus/.test(n)) return ENERGY_COEFFICIENTS['claude-opus'];
-      if (/haiku/.test(n)) return ENERGY_COEFFICIENTS['claude-haiku'];
-      if (/sonnet/.test(n)) return ENERGY_COEFFICIENTS['claude-sonnet'];
-
-      // Google Gemini — treat Pro as frontier, Flash as mid.
-      if (/gemini.*flash|gemini-2\.5-flash|gemini-flash/.test(n)) return ENERGY_COEFFICIENTS['claude-sonnet'];
-      if (/gemini-?3|gemini-2\.5-pro|gemini.*pro/.test(n)) return ENERGY_COEFFICIENTS['claude-opus'];
-
-      // Kimi K2.x — large open-weight class, treat as Llama-405B tier.
-      if (/k2\.[56]|kimi/.test(n)) return ENERGY_COEFFICIENTS['llama-405b'];
-
-      // Llama / open-weight matches
-      if (/llama.*405|llama-3\.1-405/.test(n)) return ENERGY_COEFFICIENTS['llama-405b'];
-      if (/llama.*70|llama-3\.1-70/.test(n)) return ENERGY_COEFFICIENTS['llama-70b'];
-      if (/llama.*8b|llama-3\.1-8/.test(n)) return ENERGY_COEFFICIENTS['llama-8b'];
-      if (/qwen.*7|qwen2\.5-7/.test(n)) return ENERGY_COEFFICIENTS['qwen-7b'];
-      if (/mistral.*7|mistral-7b/.test(n)) return ENERGY_COEFFICIENTS['mistral-7b'];
-
-      return ENERGY_COEFFICIENTS['default'];
-    }
-
-    // Energy in Joules for one source row.
-    // Mapping (per research doc §2):
-    //   prefill ← tokens.input  (which already includes cacheWrite — full prefill cost)
-    //   cached  ← tokens.cacheRead
-    //   decode  ← tokens.output + tokens.reasoning
-    function sourceEnergyJ(src) {
-      if (!src || !src.tokens) return 0;
-      const c = energyCoefficientsFor(src.modelId || src.model);
-      const t = src.tokens;
-      const prefill = Number(t.input || 0);
-      const cached  = Number(t.cacheRead || 0);
-      const decode  = Number(t.output || 0) + Number(t.reasoning || 0);
-      return prefill * c.prefill + cached * c.cached + decode * c.decode;
-    }
-
-    // Energy in Joules for one day (sums across all sources).
-    function dayEnergyJ(day) {
-      if (!day || !Array.isArray(day.sources)) return 0;
-      let total = 0;
-      for (const src of day.sources) total += sourceEnergyJ(src);
-      return total;
-    }
-
-    function joulesToWh(j) { return Number(j || 0) / 3600; }
-    function joulesToKwh(j) { return Number(j || 0) / 3_600_000; }
-
-    // Auto Wh / kWh formatter — switches above 1000 Wh.
-    // Day-level values (~10 Wh) read naturally; month-level (~hundreds of Wh
-    // up to a few kWh) get the kWh suffix.
-    function formatEnergy(joules) {
-      const wh = joulesToWh(joules);
-      if (wh >= 1000) {
-        const kwh = wh / 1000;
-        return kwh.toLocaleString(langLocale(), {
-          minimumFractionDigits: 2, maximumFractionDigits: 2,
-        }) + ' kWh';
-      }
-      const decimals = wh >= 10 ? 1 : 2;
-      return wh.toLocaleString(langLocale(), {
-        minimumFractionDigits: decimals, maximumFractionDigits: decimals,
-      }) + ' Wh';
-    }
-
-    function formatEnergyKwh(joules) {
-      return joulesToKwh(joules).toLocaleString(langLocale(), {
-        minimumFractionDigits: 2, maximumFractionDigits: 2,
-      }) + ' kWh';
-    }
-    // ===== End energy estimation =====
 
     function parseDateKey(value) {
       const [year, month, day] = String(value || '').split('-').map((v) => Number(v));
@@ -10113,9 +9901,6 @@
       if (metric === 'messages') {
         return { key: 'messages', label: t('metricMessages'), format: formatNumber };
       }
-      if (metric === 'energy') {
-        return { key: 'energy', label: t('metricEnergy'), format: formatEnergy };
-      }
       return { key: 'tokens', label: t('metricTokens'), format: formatTokenCount };
     }
 
@@ -10123,7 +9908,6 @@
       const totals = day?.totals || {};
       if (metric === 'cost') return Number(totals.cost || 0);
       if (metric === 'messages') return Number(totals.messages || 0);
-      if (metric === 'energy') return dayEnergyJ(day);
       return Number(totals.tokens || 0);
     }
 
@@ -13645,6 +13429,8 @@
         // hides the flex row.
         toolbarEl.style.display = showEmpty ? "none" : "";
       }
+
+      buildSessionQuickFilterPills();
 
       // Initialize sortable headers (idempotent — skips if already initialized)
       initSortHeaders("codex", renderSessionsTab);
@@ -19345,6 +19131,38 @@
     // ==========================================
     // Sessions Quick Tool Filters & Live Search
     // ==========================================
+    // The pill row lists only tools that actually have sessions in the selected
+    // range — a pill that always renders (or always glows) shows "0 Sessions /
+    // No data" on "Today" and reads as broken. Rebuilt on every render.
+    function buildSessionQuickFilterPills() {
+      const bar = document.getElementById('sessionsQuickFilterBar');
+      if (!bar) return;
+      const previous = bar.querySelector('.modern-tool-pill.active')?.dataset?.tool || 'all';
+      bar.querySelectorAll('.modern-tool-pill[data-tool]:not([data-tool="all"])').forEach((el) => el.remove());
+      const withData = SESSION_TOOL_KEYS.filter((tool) => (lastSessionsResponses?.[tool]?.sessions?.length || 0) > 0);
+      const frag = document.createDocumentFragment();
+      withData.forEach((tool) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'modern-tool-pill';
+        btn.dataset.tool = tool;
+        btn.textContent = formatToolName(tool);
+        btn.addEventListener('click', () => filterSessionPanels(tool, btn));
+        frag.appendChild(btn);
+      });
+      bar.appendChild(frag);
+      const allBtn = bar.querySelector('.modern-tool-pill[data-tool="all"]');
+      bar.querySelectorAll('.modern-tool-pill').forEach((p) => p.classList.remove('active'));
+      const active = previous !== 'all'
+        ? bar.querySelector(`.modern-tool-pill[data-tool="${(window.CSS && CSS.escape) ? CSS.escape(previous) : previous}"]`)
+        : null;
+      if (active) active.classList.add('active');
+      else {
+        allBtn?.classList.add('active');
+        if (previous !== 'all') filterSessionPanels('all', allBtn);
+      }
+    }
+
     function filterSessionPanels(toolName, btn) {
       document.querySelectorAll('#sessionsQuickFilterBar .modern-tool-pill').forEach(p => p.classList.remove('active'));
       if (btn) btn.classList.add('active');
@@ -19371,40 +19189,6 @@
         }
         r.style.display = r.textContent.toLowerCase().includes(q) ? '' : 'none';
       });
-    }
-
-    // ==========================================
-    // Export Dropdown & JSON Handlers
-    // ==========================================
-    function toggleExportMenu(event) {
-      if (event) event.stopPropagation();
-      const menu = document.getElementById('exportDropdownMenu');
-      if (!menu) return;
-      menu.style.display = menu.style.display === 'none' ? 'flex' : 'none';
-    }
-
-    document.addEventListener('click', () => {
-      const menu = document.getElementById('exportDropdownMenu');
-      if (menu) menu.style.display = 'none';
-    });
-
-    function exportJsonData() {
-      if (!lastUsageResponse && !lastSessionsResponses) {
-        alert('No data loaded to export yet.');
-        return;
-      }
-      const payload = {
-        exported_at: new Date().toISOString(),
-        usage: lastUsageResponse,
-        sessions: lastSessionsResponses,
-      };
-      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `tokdash_export_${new Date().toISOString().slice(0, 10)}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
     }
 
     // ==========================================
@@ -20850,7 +20634,6 @@
       const activeMetric = calendarState.metric;
       const buttonMap = {
         tokens: document.getElementById('metricTokensBtn'),
-        energy: document.getElementById('metricEnergyBtn'),
         cost: document.getElementById('metricCostBtn'),
         messages: document.getElementById('metricMessagesBtn'),
       };
@@ -20937,7 +20720,7 @@
     }
 
     function setCalendarMetric(metric) {
-      if (!['tokens', 'energy', 'cost', 'messages'].includes(metric)) return;
+      if (!['tokens', 'cost', 'messages'].includes(metric)) return;
       calendarState.metric = metric;
       updateMetricControls();
       if (document.getElementById('stats-content').classList.contains('active')) {
@@ -21065,7 +20848,6 @@
       let totalTokens = 0;
       let totalCost = 0;
       let totalMessages = 0;
-      let totalEnergyJ = 0;
       let activeDays = 0;
       const modelCosts = new Map();
       const modelTokens = new Map();
@@ -21075,7 +20857,6 @@
           totalTokens += day.totals.tokens || 0;
           totalCost += day.totals.cost || 0;
           totalMessages += day.totals.messages || 0;
-          totalEnergyJ += dayEnergyJ(day);
 
           if ((day.totals.tokens || 0) > 0) {
             activeDays++;
@@ -21147,7 +20928,6 @@
       document.getElementById('monthFavoriteModel').textContent = topModel;
       document.getElementById('monthTotalTokens').textContent = formatTokenCount(totalTokens);
       document.getElementById('monthTotalCost').textContent = formatCurrency(totalCost);
-      document.getElementById('monthTotalEnergy').textContent = formatEnergyKwh(totalEnergyJ);
       document.getElementById('monthTotalSessions').textContent = formatNumber(totalMessages);
       document.getElementById('monthActiveDays').textContent = activeDays;
       document.getElementById('monthCacheHitRate').textContent = formatHitRate(monthPromptInput > 0 ? monthCacheRead / monthPromptInput : null);
@@ -21443,7 +21223,7 @@
       if (!tbody) return;
 
       const monthNames = getMonthLabels();
-      const buckets = Array.from({ length: 12 }, () => ({ tokens: 0, cost: 0, energyJ: 0 }));
+      const buckets = Array.from({ length: 12 }, () => ({ tokens: 0, cost: 0 }));
 
       (yearDays || []).forEach((day) => {
         if (!day || !day.date) return;
@@ -21454,7 +21234,6 @@
           buckets[m].tokens += Number(day.totals.tokens || 0);
           buckets[m].cost += Number(day.totals.cost || 0);
         }
-        buckets[m].energyJ += dayEnergyJ(day);
       });
 
       const now = new Date();
@@ -21472,7 +21251,6 @@
           <td class="py-2 px-3 font-semibold mono">${monthNames[m]}</td>
           <td class="py-2 px-3 text-right">${formatTokenCount(b.tokens)}</td>
           <td class="py-2 px-3 text-right font-semibold" style="color:var(--color-cost)">${formatCurrency(b.cost)}</td>
-          <td class="py-2 px-3 text-right">${formatEnergy(b.energyJ)}</td>
         `;
         tr.addEventListener('click', () => goToMonthView(year, m));
         tbody.appendChild(tr);
@@ -21515,7 +21293,6 @@
           <div><span class="text-slate-500">${t('cost')}</span><div class="font-semibold" style="color:var(--color-cost)">${formatCurrency(day.totals.cost)}</div></div>
           <div><span class="text-slate-500">${t('tokens')}</span><div class="font-semibold">${formatTokenCount(day.totals.tokens)}</div></div>
           <div><span class="text-slate-500">${t('messages')}</span><div class="font-semibold">${formatNumber(day.totals.messages)}</div></div>
-          <div><span class="text-slate-500">${t('energy')}</span><div class="font-semibold">${formatEnergy(dayEnergyJ(day))}</div></div>
           <div><span class="text-slate-500">${t('cacheHitRate')}</span><div class="font-semibold" style="color:var(--color-primary)">${formatHitRate(hitRateFrom(day.tokenBreakdown.input, day.tokenBreakdown.cacheRead))}</div></div>
         </div>
         <div class="mb-2 text-sm font-semibold mono">${t('tokenBreakdown')}</div>
@@ -21568,7 +21345,6 @@
                   <th class="text-left py-2">${t('source')}</th>
                   <th class="text-left py-2">${t('model')}</th>
                   <th class="text-right py-2">${t('totalTokens')}</th>
-                  <th class="text-right py-2">${t('energy')}</th>
                   <th class="text-right py-2">${t('cost')}</th>
                   <th class="text-right py-2">${t('msgs')}</th>
                 </tr>
@@ -21578,13 +21354,11 @@
 
         sourcesByCost.forEach((src) => {
           const totalTokens = (src.tokens.input || 0) + (src.tokens.output || 0) + (src.tokens.cacheRead || 0) + (src.tokens.reasoning || 0);
-          const energyJ = sourceEnergyJ({ modelId: src.modelId, tokens: src.tokens });
           html += `
             <tr class="border-b">
               <td class="py-2 text-slate-700">${formatToolName(src.source)}</td>
               <td class="py-2 text-slate-800">${src.modelId}</td>
               <td class="py-2 text-right text-slate-700">${formatTokenCount(totalTokens)}</td>
-              <td class="py-2 text-right text-slate-700">${formatEnergy(energyJ)}</td>
               <td class="py-2 text-right font-semibold" style="color:var(--color-cost)">${formatCurrency(src.cost)}</td>
               <td class="py-2 text-right text-slate-500">${formatNumber(src.messages)}</td>
             </tr>
@@ -21971,7 +21745,6 @@
     window.addEventListener('resize', ensureOverviewProfileInitialScroll, { passive: true });
     document.getElementById('statsRetryBtn')?.addEventListener('click', () => loadStats());
     document.getElementById('metricTokensBtn').addEventListener('click', () => setCalendarMetric('tokens'));
-    document.getElementById('metricEnergyBtn').addEventListener('click', () => setCalendarMetric('energy'));
     document.getElementById('metricCostBtn').addEventListener('click', () => setCalendarMetric('cost'));
     document.getElementById('metricMessagesBtn').addEventListener('click', () => setCalendarMetric('messages'));
 
@@ -22027,23 +21800,18 @@
       setOverviewReadableTokens(!overviewReadableTokens);
     });
 
-    const settingsMenu = document.getElementById('settingsMenu');
-    const settingsToggle = document.getElementById('settingsToggle');
     const settingsPanel = document.getElementById('settingsPanel');
-    settingsToggle?.addEventListener('click', () => {
-      setSettingsPanelOpen(settingsPanel?.hidden !== false);
+    const settingsBackdrop = document.getElementById('settingsBackdrop');
+    settingsBackdrop?.addEventListener('click', (event) => {
+      if (event.target === settingsBackdrop) setSettingsPanelOpen(false, true);
     });
     document.addEventListener('click', (event) => {
       // A control that re-renders its own list is detached by the time the event bubbles
       // here, and `contains()` reads that as a click outside, which closed the panel under
       // the user mid-edit. Only a target still in the document can prove an outside click.
-      if (!settingsPanel?.hidden && settingsMenu && event.target?.isConnected
-        && !settingsMenu.contains(event.target) && !event.target.closest('button[onclick*="openSettingsModal"]')) {
+      if (!settingsPanel?.hidden && event.target?.isConnected
+        && !settingsPanel.contains(event.target) && !event.target.closest('button[onclick*="openSettingsModal"]')) {
         setSettingsPanelOpen(false);
-      }
-      const sidebarExp = document.getElementById('sidebarExportPopover');
-      if (sidebarExp && sidebarExp.style.display !== 'none' && !sidebarExp.contains(event.target) && !event.target.closest('button[onclick*="toggleSidebarExportMenu"]')) {
-        sidebarExp.style.display = 'none';
       }
     });
     document.addEventListener('keydown', (event) => {
@@ -22242,8 +22010,6 @@
       });
       list.removeAttribute('data-i18n');
       list.replaceChildren(fragment);
-      const current = document.getElementById('releaseNotesVersion');
-      if (current && payload.current) current.textContent = `v${payload.current}`;
       const changelogLink = document.querySelector('#releaseNotesDialog .release-notes-footer a');
       if (changelogLink) changelogLink.href = CHANGELOG_DOCS_URLS[currentLang] || CHANGELOG_DOCS_URLS.en;
     }
@@ -22334,13 +22100,6 @@
       openReleaseNotes();
     }
 
-    function toggleSidebarExportMenu(event) {
-      if (event) event.stopPropagation();
-      const popover = document.getElementById('sidebarExportPopover');
-      if (popover) {
-        popover.style.display = popover.style.display === 'none' ? 'flex' : 'none';
-      }
-    }
 
     function openSettingsModal() {
       setSettingsPanelOpen(true);
@@ -22367,9 +22126,11 @@
         }
       });
       getRuntimeVersion().then((version) => {
-        const label = document.getElementById('releaseNotesVersion');
         const current = version?.runtime_version || version?.current;
-        if (label && current) label.textContent = `v${current}`;
+        if (!current) return;
+        const label = document.getElementById('releaseNotesVersion');
+        if (label) label.textContent = `v${current}`;
+        document.querySelectorAll('[data-app-version]').forEach((el) => { el.textContent = `v${current}`; });
       }).catch(() => {});
     }
 
@@ -22396,6 +22157,8 @@
       const badge = document.getElementById('updateBadge');
       const popover = document.getElementById('updatePopover');
       badge.textContent = `${t('updateAvailable')}: v${info.latest}`;
+      const dot = document.getElementById('updateDot');
+      if (dot) dot.hidden = false;
       document.getElementById('updatePopoverText').textContent = t('updateBody')
         .replace('{current}', info.current || '?')
         .replace('{latest}', info.latest);
@@ -22415,6 +22178,8 @@
       document.getElementById('updateSkipBtn').addEventListener('click', () => {
         localStorage.setItem(UPDATE_SKIP_KEY, String(info.latest));
         notice.hidden = true;
+        const dot = document.getElementById('updateDot');
+        if (dot) dot.hidden = true;
       });
     }
 

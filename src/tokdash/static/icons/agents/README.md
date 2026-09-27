@@ -11,6 +11,8 @@ These small local assets are used only to identify coding-tool rows in Tokdash. 
 - MiniMax mark: the official MiniMax brand mark (white wave-M on the pink→orange gradient), taken from minimax.io's 512px Open Graph share image (`og:image`, served at 300x300; `docs/assets/agents/minimax.png` is the file verbatim). The packaged copy is a 64x64 downscale. Its gradient carries its own contrast on both themes, so the entry has no `darkInvert`; the brand pink at the gradient's start (`#E11580`) is the chart/label accent color.
 
 - Command Code mark: the official Command Code app icon -- the 512px Android Chrome icon commandcode.ai serves for its favicon set (`/favicon/2024/android-chrome-512x512.png`; `docs/assets/agents/commandcode.png` is that file verbatim). The packaged copy is a 64x64 downscale. It is a white glyph on a black rounded tile, so it carries its own contrast on both themes and the entry has no `darkInvert`; near-black `#111111` is the accent, as it is for the other black marks. Command Code is quota-only, so this mark reaches the dashboard through the Quota tab's provider table rather than a tool row.
+- Z.ai quota card: no asset of its own. The card wears `zcode.png`, because the Z.ai poll reads its API key from the ZCode CLI's own config (`$ZCODE_HOME/v2/config.json`) -- same vendor, same glyph, so the Quota tab's provider table maps `zai` onto the ZCode entry rather than shipping a duplicate of it.
+
 All marks remain the property of their respective owners.
 
 `codex-transparent.png` and `grok-transparent.png` are locally normalized,

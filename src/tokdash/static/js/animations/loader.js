@@ -5,6 +5,7 @@
 
 import { animate } from '../anime.esm.js';
 import { respectsReducedMotion } from './reduced-motion.js';
+import { stopAnimation } from './anime-stop.js';
 
 let rateTimers = [];
 let currentRateObj = { value: 0.8 };
@@ -29,9 +30,7 @@ export function setLoaderRate(targetRate, duration = 400) {
     return;
   }
 
-  if (rateAnimation && typeof rateAnimation.stop === 'function') {
-    rateAnimation.stop();
-  }
+  rateAnimation = stopAnimation(rateAnimation);
 
   rateAnimation = animate(currentRateObj, {
     value: targetRate,

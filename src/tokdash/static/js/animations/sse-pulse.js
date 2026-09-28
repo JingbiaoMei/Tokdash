@@ -5,6 +5,7 @@
 
 import { animate, createSpring } from '../anime.esm.js';
 import { respectsReducedMotion } from './reduced-motion.js';
+import { stopAnimation } from './anime-stop.js';
 
 let pulseAnimation = null;
 let currentDotEl = null;
@@ -24,10 +25,7 @@ export function setSSEConnected(isConnected) {
   const dot = currentDotEl;
   if (!dot) return;
 
-  if (pulseAnimation && typeof pulseAnimation.stop === 'function') {
-    pulseAnimation.stop();
-    pulseAnimation = null;
-  }
+  pulseAnimation = stopAnimation(pulseAnimation);
 
   if (respectsReducedMotion()) {
     dot.style.display = isConnected ? 'inline-block' : 'none';

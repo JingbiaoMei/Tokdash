@@ -3,14 +3,16 @@
  * Incoming slide/fade in and spring bounce on the tab button.
  *
  * Class commitment is synchronous by design: the .active removal used to live
- * in an anime onComplete, and anime v4's stop() does not run onComplete — a
- * second click inside the 200ms window silently cancelled the previous
- * panel's removal, leaving two .tab-content.active panels stacked (or zero,
- * when a stale removal hit the panel that had become current again).
+ * in an anime onComplete, and stopping (pausing) an animation never runs its
+ * onComplete — a second click inside the 200ms window silently cancelled the
+ * previous panel's removal, leaving two .tab-content.active panels stacked
+ * (or zero, when a stale removal hit the panel that had become current
+ * again).
  */
 
 import { animate, createSpring } from '../anime.esm.js';
 import { respectsReducedMotion } from './reduced-motion.js';
+import { stopAnimation } from './anime-stop.js';
 
 let activeTransitions = [];
 let transitionElements = [];
@@ -26,13 +28,7 @@ function clearTransitionStyles() {
 }
 
 export function stopTabTransitions() {
-  activeTransitions.forEach((anim) => {
-    try {
-      if (anim && typeof anim.stop === 'function') anim.stop();
-    } catch (e) {
-      // already finished
-    }
-  });
+  activeTransitions.forEach(stopAnimation);
   activeTransitions = [];
   // stop() skips onComplete — release any inline styles the killed animations owned.
   clearTransitionStyles();

@@ -19409,6 +19409,14 @@
     // Token Composition Flow
     // ==========================================
     function resetTokenComposition() {
+      // A still-running animateCacheHitBar from the previous period writes its
+      // stale percentage straight back over any width we set (anime keeps
+      // ticking on the element no matter what we set). Stop it before the
+      // widths below, so nothing can overwrite them.
+      const cacheBar = document.getElementById('compCacheBar');
+      if (cacheBar && window.TokDashAnimations?.stopCacheHitBar) {
+        window.TokDashAnimations.stopCacheHitBar(cacheBar);
+      }
       ['compPromptBar', 'compCacheBar', 'compOutputBar', 'compReasoningBar'].forEach((id) => {
         const bar = document.getElementById(id);
         if (bar) bar.style.width = '0%';

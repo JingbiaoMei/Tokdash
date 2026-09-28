@@ -6,6 +6,7 @@
 
 import { animate, createSpring } from '../anime.esm.js';
 import { respectsReducedMotion } from './reduced-motion.js';
+import { stopAnimation } from './anime-stop.js';
 
 export function initChipInteractions(selector = '.modern-tool-pill, .quick-range-btn') {
   if (respectsReducedMotion()) return;
@@ -50,6 +51,21 @@ export function initChipInteractions(selector = '.modern-tool-pill, .quick-range
   });
 }
 
+// In-flight animations per cache bar. anime keeps ticking on an element even
+// after other code writes style.width directly, so the width animation of the
+// previous period happily overwrote the empty-period reset to 0% on its next
+// tick — a stale-width bar under an em-dash label. Track the handles so the
+// next render, or a reset, can stop them first.
+function stopCacheBarAnims(barEl) {
+  const anims = barEl.__cacheBarAnims || [];
+  barEl.__cacheBarAnims = [];
+  anims.forEach(stopAnimation);
+}
+
+export function stopCacheHitBar(barEl) {
+  if (barEl) stopCacheBarAnims(barEl);
+}
+
 export function animateCacheHitBar(barEl, percentage) {
   if (!barEl) return;
   const pct = Math.max(0, Math.min(100, Number(percentage) || 0));
@@ -61,6 +77,8 @@ export function animateCacheHitBar(barEl, percentage) {
     targetColor = '#f59e0b'; // Amber 50-80%
   }
 
+  stopCacheBarAnims(barEl);
+
   if (respectsReducedMotion()) {
     barEl.style.width = `${pct}%`;
     barEl.style.backgroundColor = targetColor;
@@ -69,18 +87,19 @@ export function animateCacheHitBar(barEl, percentage) {
 
   // Animate width from 0% to actual% over 1000ms
   barEl.style.width = '0%';
-  animate(barEl, {
-    width: `${pct}%`,
-    duration: 1000,
-    ease: 'outExpo'
-  });
-
-  // Animate color transition over 600ms
-  animate(barEl, {
-    backgroundColor: targetColor,
-    duration: 600,
-    ease: 'inOutSine'
-  });
+  barEl.__cacheBarAnims = [
+    animate(barEl, {
+      width: `${pct}%`,
+      duration: 1000,
+      ease: 'outExpo'
+    }),
+    // Color transition over 600ms
+    animate(barEl, {
+      backgroundColor: targetColor,
+      duration: 600,
+      ease: 'inOutSine'
+    })
+  ];
 }
 
 export function animateFilterRowAdd(rowEl) {
@@ -183,6 +202,7 @@ export function animateSettingsToggle(panelEl, isOpen, onComplete) {
 export default {
   initChipInteractions,
   animateCacheHitBar,
+  stopCacheHitBar,
   animateFilterRowAdd,
   animateFilterRowRemove,
   animateSettingsToggle

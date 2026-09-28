@@ -6326,6 +6326,9 @@
     let lastRefreshReport = null;
     let refreshReportDismissedWindowKey = null;
     const SESSION_TOOL_KEYS = ['codex', 'claude', 'opencode', 'pi_agent', 'mimo', 'kimi', 'dsh', 'reasonix', 'zcode', 'kilocode', 'omp', 'grok', 'hermes', 'antigravity_cli', 'cline', 'workbuddy', 'qoder', 'qwen_code', 'openclaw', 'qoder_cli'];
+    // Tool filter is state, not a class on a pill: every rerender rebuilds the
+    // pill row and the panels, and DOM-derived filter memory died with them.
+    let sessionToolFilter = 'all';
     let lastSessionsResponses = { codex: null, claude: null, opencode: null, pi_agent: null, mimo: null, kimi: null, dsh: null, reasonix: null, zcode: null, kilocode: null, omp: null, grok: null, hermes: null, antigravity_cli: null, cline: null, workbuddy: null, qoder: null, qwen_code: null, openclaw: null, qoder_cli: null, combined: null };
     let lastCombinedModels = [];
     let lastAppsBreakdown = null;
@@ -13611,6 +13614,11 @@
 
       buildSessionQuickFilterPills();
 
+      // The search box survives rebuilds but its filtering does not — re-apply
+      // the current term over the fresh rows.
+      const activeSearch = document.getElementById('sessionSearchInput');
+      if (activeSearch && activeSearch.value) filterSessionsBySearch(activeSearch.value);
+
       // Initialize sortable headers (idempotent — skips if already initialized)
       initSortHeaders("codex", renderSessionsTab);
       initSortHeaders("claude", renderSessionsTab);
@@ -19337,7 +19345,7 @@
     function buildSessionQuickFilterPills() {
       const bar = document.getElementById('sessionsQuickFilterBar');
       if (!bar) return;
-      const previous = bar.querySelector('.modern-tool-pill.active')?.dataset?.tool || 'all';
+      const previous = sessionToolFilter;
       bar.querySelectorAll('.modern-tool-pill[data-tool]:not([data-tool="all"])').forEach((el) => el.remove());
       const withData = SESSION_TOOL_KEYS.filter((tool) => (lastSessionsResponses?.[tool]?.sessions?.length || 0) > 0);
       const frag = document.createDocumentFragment();
@@ -19356,14 +19364,20 @@
       const active = previous !== 'all'
         ? bar.querySelector(`.modern-tool-pill[data-tool="${(window.CSS && CSS.escape) ? CSS.escape(previous) : previous}"]`)
         : null;
-      if (active) active.classList.add('active');
-      else {
+      if (active) {
+        active.classList.add('active');
+        // Re-apply after every rebuild: updateSessionPanel() re-shows each tool
+        // wrapper, so a pill that is merely highlighted again would leave all
+        // tools visible while still glowing on the filtered one.
+        filterSessionPanels(previous, active);
+      } else {
         allBtn?.classList.add('active');
         if (previous !== 'all') filterSessionPanels('all', allBtn);
       }
     }
 
     function filterSessionPanels(toolName, btn) {
+      sessionToolFilter = toolName || 'all';
       document.querySelectorAll('#sessionsQuickFilterBar .modern-tool-pill').forEach(p => p.classList.remove('active'));
       if (btn) btn.classList.add('active');
 

@@ -1917,9 +1917,18 @@ def test_schema_too_new_from_quota_exits_one(monkeypatch):
 
     async def steps(pilot):
         assert await wait_for(app, pilot, lambda: app._ov_state == "ok")
-        await pilot.press("3")
-        # Terminal by design wherever it raises — the Quota job included.
-        assert await wait_for(app, pilot, lambda: app.return_code == 1)
+        # This load intentionally shuts the app down. Pilot.press/pause wait
+        # for screen messages that shutdown can discard, so do not await a
+        # rendering barrier after triggering the fatal error. The ordinary
+        # quota tests above already cover the "3" key binding.
+        app.action_show_pane("pane-quota")
+
+        async def exited():
+            while app.return_code != 1:
+                await asyncio.sleep(0.01)
+
+        # Still exercise the real quota worker and assert the terminal status.
+        await asyncio.wait_for(exited(), timeout=5)
 
     drive(app, steps)
 

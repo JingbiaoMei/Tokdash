@@ -14,20 +14,20 @@ pytestmark = pytest.mark.skipif(shutil.which("node") is None, reason="node unava
 def run_js(tmp_path, source):
     script = tmp_path / "probe.mjs"
     script.write_text(source, encoding="utf-8")
-    result = subprocess.run(["node", str(script)], capture_output=True, text=True, timeout=10)
+    result = subprocess.run(["node", str(script)], capture_output=True, text=True, encoding="utf-8", timeout=10)
     assert result.returncode == 0, result.stderr
     return json.loads(result.stdout)
 
 
 def test_stopped_cache_animation_cannot_restore_previous_width(tmp_path):
     # Use the shipped animation engine, not a fake implementing an invented API.
-    (tmp_path / "anime.mjs").write_text((STATIC / "js/anime.esm.js").read_text())
+    (tmp_path / "anime.mjs").write_text((STATIC / "js/anime.esm.js").read_text(encoding="utf-8"), encoding="utf-8")
     for name in ("anime-stop", "reduced-motion", "micro"):
-        source = (STATIC / f"js/animations/{name}.js").read_text()
+        source = (STATIC / f"js/animations/{name}.js").read_text(encoding="utf-8")
         source = source.replace("../anime.esm.js", "./anime.mjs")
         for dependency in ("anime-stop", "reduced-motion"):
             source = source.replace(f"./{dependency}.js", f"./{dependency}.mjs")
-        (tmp_path / f"{name}.mjs").write_text(source)
+        (tmp_path / f"{name}.mjs").write_text(source, encoding="utf-8")
     result = run_js(tmp_path, """
 import {animateCacheHitBar, stopCacheHitBar} from './micro.mjs';
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -44,7 +44,7 @@ console.log(JSON.stringify({width: bar.width}));
 
 
 def test_all_tools_keeps_empty_panels_hidden_and_errors_visible(tmp_path):
-    html = (STATIC / "index.html").read_text()
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
     source = html.split("    function filterSessionPanels(", 1)[1]
     source = "function filterSessionPanels(" + source.split("\n    function ", 1)[0]
     result = run_js(tmp_path, """

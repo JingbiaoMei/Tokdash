@@ -19408,8 +19408,21 @@
     // ==========================================
     // Token Composition Flow
     // ==========================================
+    function resetTokenComposition() {
+      ['compPromptBar', 'compCacheBar', 'compOutputBar', 'compReasoningBar'].forEach((id) => {
+        const bar = document.getElementById(id);
+        if (bar) bar.style.width = '0%';
+      });
+      ['compPromptVal', 'compCacheVal', 'compOutputVal', 'compReasoningVal'].forEach((id) => {
+        const cell = document.getElementById(id);
+        if (cell) cell.textContent = '—';
+      });
+      const cacheKpi = document.getElementById('cacheSavingsKpi');
+      if (cacheKpi) cacheKpi.textContent = '—';
+    }
+
     function updateTokenCompositionBar(data) {
-      if (!data) return;
+      if (!data) { resetTokenComposition(); return; }
       const byTool = data.by_tool || {};
       let inTok = 0, cacheTok = 0, outTok = 0, reasonTok = 0;
       Object.values(byTool).forEach(t => {
@@ -19464,6 +19477,10 @@
 
         const cacheKpi = document.getElementById('cacheSavingsKpi');
         if (cacheKpi) cacheKpi.textContent = formatTokenCount(cacheTok);
+      } else {
+        // Empty period: without this the seeded bar widths (and the previous
+        // period's numbers) survive into a window that has no tokens at all.
+        resetTokenComposition();
       }
     }
 

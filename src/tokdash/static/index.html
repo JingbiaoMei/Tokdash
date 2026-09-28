@@ -19384,9 +19384,20 @@
       const details = document.querySelectorAll('#sessions-content details.session-panel');
       details.forEach(panel => {
         const panelTool = panel.dataset.panelDetails;
-        if (toolName === 'all' || panelTool === toolName) {
-          if (panel.parentElement) panel.parentElement.style.display = '';
-          panel.open = true;
+        const data = lastSessionsResponses?.[panelTool] || null;
+        const hasContent = Boolean(data?.sessions?.length) || Boolean(data?.error);
+        if (toolName === 'all') {
+          // Restore the render-time invariant instead of blanket-showing and
+          // opening everything: updateSessionPanel hides a zero-session
+          // wrapper, so returning from a filter must keep empty tools hidden —
+          // otherwise all the empty sections reappear (opened, since .open was
+          // forced too) next to the empty-range message. Open state goes back
+          // to the collapse state machine, including Expand-all overrides.
+          if (panel.parentElement) panel.parentElement.style.display = hasContent ? '' : 'none';
+          sessionPanelSetOpen(panel, sessionPanelShouldOpen(sessionCollapseOverrides[panelTool], data));
+        } else if (panelTool === toolName) {
+          if (panel.parentElement) panel.parentElement.style.display = hasContent ? '' : 'none';
+          if (hasContent) sessionPanelSetOpen(panel, true);
         } else {
           if (panel.parentElement) panel.parentElement.style.display = 'none';
         }

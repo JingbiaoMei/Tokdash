@@ -13724,7 +13724,7 @@
                 </span>
                 ${m.model ? `<span class="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-400 font-mono">${escapeHtml(m.model)}</span>` : ''}
               </div>
-              <span class="text-[11px] text-slate-500 font-mono">${m.timestamp || ''}</span>
+              <span class="text-[11px] text-slate-500 font-mono">${escapeHtml(String(m.timestamp || ''))}</span>
             </div>
             ${reasoningHtml}
             <div class="flex flex-wrap items-center gap-2 text-xs text-slate-400">${metaChips || '<span class="text-slate-500 font-mono">no content recorded</span>'}</div>
@@ -14379,7 +14379,7 @@
           const row = document.createElement('tr');
           row.className = 'hover:bg-slate-50 transition';
           row.innerHTML = `
-            <td class="py-2 px-3 text-slate-800" title="${model.name}">${model.name}</td>
+            <td class="py-2 px-3 text-slate-800" title="${escapeHtml(String(model.name ?? ''))}">${escapeHtml(String(model.name ?? ''))}</td>
             <td class="py-2 px-3 text-right text-slate-700">${formatTokenCount(model.tokens_in)}</td>
             <td class="py-2 px-3 text-right text-slate-700">${formatTokenCount(model.tokens_out)}</td>
             <td class="py-2 px-3 text-right text-slate-700">${formatTokenCount(model.tokens_cache)}</td>
@@ -14454,7 +14454,7 @@
         const row = document.createElement('tr');
         row.className = 'hover:bg-slate-50 transition';
         row.innerHTML = `
-          <td class="py-2 px-3 text-slate-800">${model.name}</td>
+          <td class="py-2 px-3 text-slate-800">${escapeHtml(String(model.name ?? ''))}</td>
           <td class="py-2 px-3 text-right text-slate-700">${formatTokenCount(model.tokens_in)}</td>
           <td class="py-2 px-3 text-right text-slate-700">${formatTokenCount(model.tokens_out)}</td>
           <td class="py-2 px-3 text-right text-slate-700">${formatTokenCount(model.tokens_cache)}</td>
@@ -19243,7 +19243,7 @@
                   ${roleLabel} #${idx + 1}
                 </span>
               </div>
-              <span class="text-[11px] text-slate-500 font-mono">${m.timestamp || ''}</span>
+              <span class="text-[11px] text-slate-500 font-mono">${escapeHtml(String(m.timestamp || ''))}</span>
             </div>
             ${reasoningHtml}
             <div class="flex flex-wrap items-center gap-2 text-xs text-slate-400">${metaChips || '<span class="text-slate-500 font-mono">no content recorded</span>'}</div>
@@ -21473,7 +21473,7 @@
 
       let html = `
         <div class="grid grid-cols-2 gap-4 mb-4 text-sm">
-          <div><span class="text-slate-500">${t('date')}</span><div class="font-semibold">${day.date}</div></div>
+          <div><span class="text-slate-500">${t('date')}</span><div class="font-semibold">${escapeHtml(String(day.date ?? ''))}</div></div>
           <div><span class="text-slate-500">${t('cost')}</span><div class="font-semibold" style="color:var(--color-cost)">${formatCurrency(day.totals.cost)}</div></div>
           <div><span class="text-slate-500">${t('tokens')}</span><div class="font-semibold">${formatTokenCount(day.totals.tokens)}</div></div>
           <div><span class="text-slate-500">${t('messages')}</span><div class="font-semibold">${formatNumber(day.totals.messages)}</div></div>
@@ -21541,7 +21541,7 @@
           html += `
             <tr class="border-b">
               <td class="py-2 text-slate-700">${formatToolName(src.source)}</td>
-              <td class="py-2 text-slate-800">${src.modelId}</td>
+              <td class="py-2 text-slate-800">${escapeHtml(String(src.modelId ?? ''))}</td>
               <td class="py-2 text-right text-slate-700">${formatTokenCount(totalTokens)}</td>
               <td class="py-2 text-right font-semibold" style="color:var(--color-cost)">${formatCurrency(src.cost)}</td>
               <td class="py-2 text-right text-slate-500">${formatNumber(src.messages)}</td>

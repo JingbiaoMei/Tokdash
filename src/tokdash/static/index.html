@@ -1975,11 +1975,11 @@
           <!-- Report window chips: the quick ranges step aside on the Report
                tab, where the window is a period (week/month/year), and these
                chips walk it backwards. Filled by usageReportRenderPeriodChips. -->
-          <div class="quick-range-panel" id="reportPeriodChips" role="toolbar" aria-label="Report window" hidden></div>
+          <div class="quick-range-panel" id="reportPeriodChips" role="toolbar" data-i18n-aria="ariaLabels.reportWindow" aria-label="Report window" hidden></div>
 
           <div class="topbar-actions">
             <div class="refresh-control">
-              <button id="refreshBtn" class="btn btn-primary" aria-label="Refresh dashboard" aria-controls="refreshReport" aria-expanded="false">
+              <button id="refreshBtn" class="btn btn-primary" data-i18n-aria="ariaLabels.refreshDashboard" aria-label="Refresh dashboard" aria-controls="refreshReport" aria-expanded="false">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                   <path d="M20 12a8 8 0 1 1-2.343-5.657" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
                   <path d="M20 4v6h-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -1997,11 +1997,11 @@
                     <h2 id="refreshReportTitle" class="refresh-report-title">Refresh complete</h2>
                     <p id="refreshReportMeta" class="refresh-report-meta"></p>
                   </div>
-                  <button id="refreshReportClose" class="refresh-report-close" type="button" aria-label="Close">
+                  <button id="refreshReportClose" class="refresh-report-close" type="button" data-i18n-aria="ariaLabels.close" aria-label="Close">
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
                   </button>
                 </div>
-                <div class="refresh-report-deltas" aria-label="Changes after refresh">
+                <div class="refresh-report-deltas" data-i18n-aria="ariaLabels.changesAfterRefresh" aria-label="Changes after refresh">
                   <div class="refresh-report-delta"><strong id="refreshReportTokens" class="mono">—</strong><span data-i18n="refreshReportTokens">Tokens</span></div>
                   <div class="refresh-report-delta"><strong id="refreshReportCost" class="mono">—</strong><span data-i18n="refreshReportCost">Cost</span></div>
                   <div class="refresh-report-delta"><strong id="refreshReportMessages" class="mono">—</strong><span data-i18n="refreshReportMessages">Messages</span></div>
@@ -2057,7 +2057,7 @@
                   <div class="settings-preferences">
                     <div class="settings-row">
                       <span class="settings-label" data-i18n="language">Language</span>
-                      <select id="langToggle" class="ui-input settings-select" aria-label="Language">
+                      <select id="langToggle" class="ui-input settings-select" data-i18n-aria="ariaLabels.language" aria-label="Language">
                         <option value="system" data-i18n="langSystem">System</option>
                         <option value="en">English</option>
                         <option value="zh">中文</option>
@@ -2069,7 +2069,7 @@
                     </div>
                     <div class="settings-row">
                       <span class="settings-label" data-i18n="colorMode">Light / dark</span>
-                      <button id="themeToggle" class="btn btn-ghost settings-control-button" type="button" aria-label="Toggle theme">
+                      <button id="themeToggle" class="btn btn-ghost settings-control-button" type="button" data-i18n-aria="ariaLabels.toggleTheme" aria-label="Toggle theme">
                         <svg id="themeIconMoon" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
                         <svg id="themeIconSun" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="display:none;"><circle cx="12" cy="12" r="5" stroke="currentColor" stroke-width="2"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
                         <span id="themeModeLabel">Light</span>
@@ -2077,7 +2077,7 @@
                     </div>
                     <label class="settings-row" for="styleThemeSelect">
                       <span class="settings-label" data-i18n="styleTheme">Style</span>
-                      <select id="styleThemeSelect" class="ui-input style-select settings-select" aria-label="Style theme">
+                      <select id="styleThemeSelect" class="ui-input style-select settings-select" data-i18n-aria="ariaLabels.styleTheme" aria-label="Style theme">
                         <option value="classic" data-i18n="styleClassic">Classic</option>
                         <option value="elevated" data-i18n="styleElevated">Elevated</option>
                         <option value="paper" data-i18n="stylePaper">Paper</option>
@@ -2099,12 +2099,12 @@
                     </label>
                     <div class="settings-row">
                       <span class="settings-label" data-i18n="readableTokens">Readable tokens</span>
-                      <button id="readableTokensToggle" class="btn btn-ghost overview-readable-tokens-toggle" type="button" role="switch" aria-checked="true" aria-label="Readable tokens">
+                      <button id="readableTokensToggle" class="btn btn-ghost overview-readable-tokens-toggle" type="button" role="switch" aria-checked="true" data-i18n-aria="ariaLabels.readableTokens" aria-label="Readable tokens">
                         <span class="overview-readable-tokens-track" aria-hidden="true"></span>
                       </button>
                     </div>
                   </div>
-                  <button id="installBtn" class="btn btn-ghost settings-install" type="button" style="display:none;" data-i18n-title="installApp" aria-label="Install app">
+                  <button id="installBtn" class="btn btn-ghost settings-install" type="button" style="display:none;" data-i18n-title="installApp" data-i18n-aria="ariaLabels.installApp" aria-label="Install app">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     <span data-i18n="install">Install</span>
                   </button>
@@ -2116,7 +2116,7 @@
       </div>
 
       <!-- Tabs -->
-      <nav class="mt-5 flex flex-wrap gap-2" aria-label="Dashboard sections">
+      <nav class="mt-5 flex flex-wrap gap-2" data-i18n-aria="ariaLabels.dashboardSections" aria-label="Dashboard sections">
         <button class="tab-btn" data-tab="overview" aria-selected="true" data-i18n="overview">Overview</button>
         <button class="tab-btn" data-tab="sessions" aria-selected="false" data-i18n="sessionsPage">Sessions</button>
         <button class="tab-btn" data-tab="stats" aria-selected="false" data-i18n="stats">Stats</button>
@@ -2183,9 +2183,9 @@
           </div>
           <div class="tool-chart-shell">
             <div class="tool-chart-canvas">
-              <canvas id="toolChart" aria-label="Usage by tool chart" role="img"></canvas>
+              <canvas id="toolChart" data-i18n-aria="ariaLabels.usageByToolChart" aria-label="Usage by tool chart" role="img"></canvas>
             </div>
-            <div id="toolChartLegend" class="tool-chart-legend" role="list" aria-label="Tool chart legend"></div>
+            <div id="toolChartLegend" class="tool-chart-legend" role="list" data-i18n-aria="ariaLabels.toolChartLegend" aria-label="Tool chart legend"></div>
           </div>
         </div>
 
@@ -2195,7 +2195,7 @@
             <div class="text-xs" style="color: var(--color-muted);" data-i18n="usd">USD</div>
           </div>
           <div class="h-[280px]">
-            <canvas id="modelChart" aria-label="Top models by cost chart" role="img"></canvas>
+            <canvas id="modelChart" data-i18n-aria="ariaLabels.topModelsByCostChart" aria-label="Top models by cost chart" role="img"></canvas>
           </div>
         </div>
       </section>
@@ -2233,12 +2233,12 @@
             </div>
             <div id="overviewProfileScroller" class="overview-profile-scroll">
               <div id="overviewProfileGridWrap" class="overview-profile-grid-wrap">
-                <div id="overviewProfileGrid" class="overview-profile-grid" role="grid" aria-label="Token activity"></div>
+                <div id="overviewProfileGrid" class="overview-profile-grid" role="grid" data-i18n-aria="ariaLabels.tokenActivity" aria-label="Token activity"></div>
                 <div id="overviewProfileWeekHits" class="profile-activity-week-hits overview-profile-week-hits" hidden></div>
               </div>
               <div id="overviewProfileLegend" class="profile-activity-legend overview-profile-legend"></div>
             </div>
-            <section id="overviewActivityInsights" class="overview-activity-insights" data-state="loading" aria-busy="true" aria-label="Activity insights">
+            <section id="overviewActivityInsights" class="overview-activity-insights" data-state="loading" aria-busy="true" data-i18n-aria="ariaLabels.activityInsights" aria-label="Activity insights">
               <dl id="overviewActivityInsightsValues" class="overview-activity-insights-values"></dl>
               <p id="overviewActivityInsightsState" class="tokdash-loading-placeholder overview-activity-insights-state" aria-live="polite"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></p>
             </section>
@@ -2250,7 +2250,7 @@
       <section class="surface p-5 mb-6">
         <h2 class="text-base font-extrabold mono mb-4" data-i18n="toolsBreakdown">Tools Breakdown</h2>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm" aria-label="Tools breakdown table">
+          <table class="w-full text-sm" data-i18n-aria="ariaLabels.toolsBreakdownTable" aria-label="Tools breakdown table">
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
                 <th class="text-left py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="tool" data-sortable="tool">Tool</th>
@@ -2281,7 +2281,7 @@
           <button id="combinedModelsToggle" class="btn btn-ghost" type="button" style="min-height: 36px; padding: 6px 10px; font-size: 12px; display:none;" data-i18n="showAll">Show all</button>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm" aria-label="Combined models table">
+          <table class="w-full text-sm" data-i18n-aria="ariaLabels.combinedModelsTable" aria-label="Combined models table">
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
                 <th class="text-left py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="model" data-sortable="name">Model</th>
@@ -2360,7 +2360,7 @@
           </div>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm session-table" aria-label="Codex sessions table" data-panel="codex">
+          <table class="w-full text-sm session-table" data-i18n-aria="ariaLabels.codexSessionsTable" aria-label="Codex sessions table" data-panel="codex">
             <colgroup><col style="width:16%"><col style="width:10%"><col style="width:9%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:10%"><col style="width:8%"><col style="width:9%"><col style="width:12%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
@@ -2430,7 +2430,7 @@
           </div>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm session-table" aria-label="Claude Code sessions table" data-panel="claude">
+          <table class="w-full text-sm session-table" data-i18n-aria="ariaLabels.claudeCodeSessionsTable" aria-label="Claude Code sessions table" data-panel="claude">
             <colgroup><col style="width:16%"><col style="width:10%"><col style="width:9%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:10%"><col style="width:8%"><col style="width:9%"><col style="width:12%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
@@ -2500,7 +2500,7 @@
           </div>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm session-table" aria-label="OpenCode sessions table" data-panel="opencode">
+          <table class="w-full text-sm session-table" data-i18n-aria="ariaLabels.opencodeSessionsTable" aria-label="OpenCode sessions table" data-panel="opencode">
             <colgroup><col style="width:16%"><col style="width:10%"><col style="width:9%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:10%"><col style="width:8%"><col style="width:9%"><col style="width:12%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
@@ -2570,7 +2570,7 @@
           </div>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm session-table" aria-label="Pi sessions table" data-panel="pi_agent">
+          <table class="w-full text-sm session-table" data-i18n-aria="ariaLabels.piSessionsTable" aria-label="Pi sessions table" data-panel="pi_agent">
             <colgroup><col style="width:16%"><col style="width:10%"><col style="width:9%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:10%"><col style="width:8%"><col style="width:9%"><col style="width:12%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
@@ -2640,7 +2640,7 @@
           </div>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm session-table" aria-label="Mimo sessions table" data-panel="mimo">
+          <table class="w-full text-sm session-table" data-i18n-aria="ariaLabels.mimoSessionsTable" aria-label="Mimo sessions table" data-panel="mimo">
             <colgroup><col style="width:16%"><col style="width:10%"><col style="width:9%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:10%"><col style="width:8%"><col style="width:9%"><col style="width:12%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
@@ -2710,7 +2710,7 @@
           </div>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm session-table" aria-label="Kimi sessions table" data-panel="kimi">
+          <table class="w-full text-sm session-table" data-i18n-aria="ariaLabels.kimiSessionsTable" aria-label="Kimi sessions table" data-panel="kimi">
             <colgroup><col style="width:16%"><col style="width:10%"><col style="width:9%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:10%"><col style="width:8%"><col style="width:9%"><col style="width:12%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
@@ -2780,7 +2780,7 @@
           </div>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm session-table" aria-label="DeepSeek Harness sessions table" data-panel="dsh">
+          <table class="w-full text-sm session-table" data-i18n-aria="ariaLabels.deepSeekHarnessSessionsTable" aria-label="DeepSeek Harness sessions table" data-panel="dsh">
             <colgroup><col style="width:16%"><col style="width:10%"><col style="width:9%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:10%"><col style="width:8%"><col style="width:9%"><col style="width:12%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
@@ -2850,7 +2850,7 @@
           </div>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm session-table" aria-label="Reasonix sessions table" data-panel="reasonix">
+          <table class="w-full text-sm session-table" data-i18n-aria="ariaLabels.reasonixSessionsTable" aria-label="Reasonix sessions table" data-panel="reasonix">
             <colgroup><col style="width:16%"><col style="width:10%"><col style="width:9%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:10%"><col style="width:8%"><col style="width:9%"><col style="width:12%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
@@ -2920,7 +2920,7 @@
           </div>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm session-table" aria-label="ZCode sessions table" data-panel="zcode">
+          <table class="w-full text-sm session-table" data-i18n-aria="ariaLabels.zcodeSessionsTable" aria-label="ZCode sessions table" data-panel="zcode">
             <colgroup><col style="width:16%"><col style="width:10%"><col style="width:9%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:10%"><col style="width:8%"><col style="width:9%"><col style="width:12%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
@@ -2990,7 +2990,7 @@
           </div>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm session-table" aria-label="Kilo Code sessions table" data-panel="kilocode">
+          <table class="w-full text-sm session-table" data-i18n-aria="ariaLabels.kiloCodeSessionsTable" aria-label="Kilo Code sessions table" data-panel="kilocode">
             <colgroup><col style="width:16%"><col style="width:10%"><col style="width:9%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:10%"><col style="width:8%"><col style="width:9%"><col style="width:12%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
@@ -3060,7 +3060,7 @@
           </div>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm session-table" aria-label="omp sessions table" data-panel="omp">
+          <table class="w-full text-sm session-table" data-i18n-aria="ariaLabels.ompSessionsTable" aria-label="omp sessions table" data-panel="omp">
             <colgroup><col style="width:16%"><col style="width:10%"><col style="width:9%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:10%"><col style="width:8%"><col style="width:9%"><col style="width:12%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
@@ -3130,7 +3130,7 @@
           </div>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm session-table" aria-label="Grok Build sessions table" data-panel="grok">
+          <table class="w-full text-sm session-table" data-i18n-aria="ariaLabels.grokBuildSessionsTable" aria-label="Grok Build sessions table" data-panel="grok">
             <colgroup><col style="width:16%"><col style="width:10%"><col style="width:9%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:10%"><col style="width:8%"><col style="width:9%"><col style="width:12%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
@@ -3200,7 +3200,7 @@
           </div>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm session-table" aria-label="Hermes sessions table" data-panel="hermes">
+          <table class="w-full text-sm session-table" data-i18n-aria="ariaLabels.hermesSessionsTable" aria-label="Hermes sessions table" data-panel="hermes">
             <colgroup><col style="width:16%"><col style="width:10%"><col style="width:9%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:10%"><col style="width:8%"><col style="width:9%"><col style="width:12%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
@@ -3270,7 +3270,7 @@
           </div>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm session-table" aria-label="Antigravity sessions table" data-panel="antigravity_cli">
+          <table class="w-full text-sm session-table" data-i18n-aria="ariaLabels.antigravitySessionsTable" aria-label="Antigravity sessions table" data-panel="antigravity_cli">
             <colgroup><col style="width:16%"><col style="width:10%"><col style="width:9%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:10%"><col style="width:8%"><col style="width:9%"><col style="width:12%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
@@ -3340,7 +3340,7 @@
           </div>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm session-table" aria-label="Cline sessions table" data-panel="cline">
+          <table class="w-full text-sm session-table" data-i18n-aria="ariaLabels.clineSessionsTable" aria-label="Cline sessions table" data-panel="cline">
             <colgroup><col style="width:16%"><col style="width:10%"><col style="width:9%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:10%"><col style="width:8%"><col style="width:9%"><col style="width:12%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
@@ -3410,7 +3410,7 @@
           </div>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm session-table" aria-label="WorkBuddy sessions table" data-panel="workbuddy">
+          <table class="w-full text-sm session-table" data-i18n-aria="ariaLabels.workbuddySessionsTable" aria-label="WorkBuddy sessions table" data-panel="workbuddy">
             <colgroup><col style="width:16%"><col style="width:10%"><col style="width:9%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:10%"><col style="width:8%"><col style="width:9%"><col style="width:12%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
@@ -3480,7 +3480,7 @@
           </div>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm session-table" aria-label="Qoder IDE sessions table" data-panel="qoder">
+          <table class="w-full text-sm session-table" data-i18n-aria="ariaLabels.qoderIdeSessionsTable" aria-label="Qoder IDE sessions table" data-panel="qoder">
             <colgroup><col style="width:16%"><col style="width:10%"><col style="width:9%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:10%"><col style="width:8%"><col style="width:9%"><col style="width:12%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
@@ -3550,7 +3550,7 @@
           </div>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm session-table" aria-label="Qwen Code sessions table" data-panel="qwen_code">
+          <table class="w-full text-sm session-table" data-i18n-aria="ariaLabels.qwenCodeSessionsTable" aria-label="Qwen Code sessions table" data-panel="qwen_code">
             <colgroup><col style="width:16%"><col style="width:10%"><col style="width:9%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:10%"><col style="width:8%"><col style="width:9%"><col style="width:12%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
@@ -3620,7 +3620,7 @@
           </div>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm session-table" aria-label="OpenClaw sessions table" data-panel="openclaw">
+          <table class="w-full text-sm session-table" data-i18n-aria="ariaLabels.openclawSessionsTable" aria-label="OpenClaw sessions table" data-panel="openclaw">
             <colgroup><col style="width:16%"><col style="width:10%"><col style="width:9%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:10%"><col style="width:8%"><col style="width:9%"><col style="width:12%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
@@ -3690,7 +3690,7 @@
           </div>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm session-table" aria-label="Qoder CLI sessions table" data-panel="qoder_cli">
+          <table class="w-full text-sm session-table" data-i18n-aria="ariaLabels.qoderCliSessionsTable" aria-label="Qoder CLI sessions table" data-panel="qoder_cli">
             <colgroup><col style="width:16%"><col style="width:10%"><col style="width:9%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:10%"><col style="width:8%"><col style="width:9%"><col style="width:12%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
@@ -3760,7 +3760,7 @@
           </div>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm session-table" aria-label="Combined sessions table" data-panel="combined">
+          <table class="w-full text-sm session-table" data-i18n-aria="ariaLabels.combinedSessionsTable" aria-label="Combined sessions table" data-panel="combined">
             <colgroup><col style="width:15%"><col style="width:8%"><col style="width:9%"><col style="width:8%"><col style="width:8%"><col style="width:7%"><col style="width:8%"><col style="width:9%"><col style="width:8%"><col style="width:8%"><col style="width:12%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
@@ -3893,7 +3893,7 @@
             </div>
             <div id="profileActivityScroller" class="profile-activity-scroll">
               <div class="profile-activity-grid-wrap">
-                <div id="profileActivityGrid" class="profile-activity-grid" role="grid" aria-label="Token activity"></div>
+                <div id="profileActivityGrid" class="profile-activity-grid" role="grid" data-i18n-aria="ariaLabels.tokenActivity" aria-label="Token activity"></div>
                 <div id="profileActivityWeekHits" class="profile-activity-week-hits" hidden></div>
               </div>
               <div id="profileActivityMonths" class="profile-activity-months" aria-hidden="true"></div>
@@ -3904,7 +3904,7 @@
               <dl id="profileActivityInsightsKpis" class="profile-activity-insights-kpis"></dl>
               <div class="profile-activity-insights-detail">
                 <p id="profileActivityCoverage" class="profile-activity-insights-coverage" aria-live="polite"></p>
-                <ol id="profileActivityToolRanking" class="profile-activity-tool-ranking" aria-label="Most-used structured tools"></ol>
+                <ol id="profileActivityToolRanking" class="profile-activity-tool-ranking" data-i18n-aria="ariaLabels.mostUsedStructuredTools" aria-label="Most-used structured tools"></ol>
               </div>
             </section>
           </div>
@@ -3913,9 +3913,9 @@
         <!-- Month view -->
         <div id="calendarMonthView">
           <div class="flex items-center gap-3 mb-4">
-            <button id="prevMonth" class="btn btn-ghost px-3" type="button" aria-label="Previous month">←</button>
+            <button id="prevMonth" class="btn btn-ghost px-3" type="button" data-i18n-aria="ariaLabels.previousMonth" aria-label="Previous month">←</button>
             <h3 id="monthTitle" class="text-lg font-extrabold mono mx-auto">—</h3>
-            <button id="nextMonth" class="btn btn-ghost px-3" type="button" aria-label="Next month">→</button>
+            <button id="nextMonth" class="btn btn-ghost px-3" type="button" data-i18n-aria="ariaLabels.nextMonth" aria-label="Next month">→</button>
           </div>
 
           <div class="grid grid-cols-1 lg:grid-cols-[1fr,auto] gap-6">
@@ -3995,9 +3995,9 @@
         <!-- Year view -->
         <div id="calendarYearView" style="display:none;">
           <div class="flex items-center gap-3 mb-4">
-            <button id="prevYear" class="btn btn-ghost px-3" type="button" aria-label="Previous year">←</button>
+            <button id="prevYear" class="btn btn-ghost px-3" type="button" data-i18n-aria="ariaLabels.previousYear" aria-label="Previous year">←</button>
             <h3 id="yearTitle" class="text-lg font-extrabold mono mx-auto">—</h3>
-            <button id="nextYear" class="btn btn-ghost px-3" type="button" aria-label="Next year">→</button>
+            <button id="nextYear" class="btn btn-ghost px-3" type="button" data-i18n-aria="ariaLabels.nextYear" aria-label="Next year">→</button>
           </div>
 
           <div class="flex items-center justify-between gap-4 mb-3">
@@ -4018,7 +4018,7 @@
           <div class="surface p-5 mt-6">
             <h4 class="text-sm font-extrabold uppercase tracking-wider mb-4" style="color: var(--color-label);" data-i18n="monthlyTotals">Monthly Totals</h4>
             <div class="overflow-x-auto">
-              <table class="w-full text-sm" aria-label="Monthly totals table">
+              <table class="w-full text-sm" data-i18n-aria="ariaLabels.monthlyTotalsTable" aria-label="Monthly totals table">
                 <thead>
                   <tr class="border-b" style="border-color: var(--color-border);">
                     <th class="text-left py-2 px-3 font-semibold" style="color: var(--color-muted);" data-i18n="month">Month</th>
@@ -4083,7 +4083,7 @@
           <div class="surface p-5">
             <div class="flex items-center justify-between mb-3">
               <h3 class="text-base font-extrabold mono" data-i18n="dayDetails">Day Details</h3>
-              <button id="closeDayDetails" class="btn btn-ghost" type="button" aria-label="Close day details" data-i18n="close">Close</button>
+              <button id="closeDayDetails" class="btn btn-ghost" type="button" data-i18n-aria="ariaLabels.closeDayDetails" aria-label="Close day details" data-i18n="close">Close</button>
             </div>
             <div id="dayDetailsContent"></div>
           </div>
@@ -4107,7 +4107,7 @@
               <span data-i18n="usageReportServerLabel">Server</span>
               <select id="usageReportServer" class="ui-input compact-control"></select>
             </label>
-            <div class="usage-report-seg" id="usageReportPeriod" role="group" aria-label="Report period">
+            <div class="usage-report-seg" id="usageReportPeriod" role="group" data-i18n-aria="ariaLabels.reportPeriod" aria-label="Report period">
               <button type="button" data-period="week" data-i18n="usageReportPeriodWeek">Week</button>
               <button type="button" data-period="month" data-i18n="usageReportPeriodMonth">Month</button>
               <button type="button" data-period="year" data-i18n="usageReportPeriodYear">Year</button>
@@ -4253,7 +4253,7 @@
     <!-- Quota Tab -->
     <div id="quota-content" class="tab-content">
       <div id="quotaGlobalControls" class="flex flex-wrap items-center justify-end gap-2 mb-4">
-        <select id="quotaRangeSelect" class="ui-input compact-control" aria-label="Quota history range">
+        <select id="quotaRangeSelect" class="ui-input compact-control" data-i18n-aria="ariaLabels.quotaHistoryRange" aria-label="Quota history range">
           <option value="24h" data-i18n="quotaRange24h">Last 24 Hours</option>
           <option value="7d" data-i18n="quotaRange7d">Last 7 Days</option>
           <option value="30d" data-i18n="quotaRange30d">Last 30 Days</option>
@@ -4277,7 +4277,7 @@
             </label>
             <label class="flex items-center gap-2 text-sm" for="quotaIntervalSelect">
               <span style="color: var(--color-muted);" data-i18n="pollInterval">Poll every</span>
-              <select id="quotaIntervalSelect" class="ui-input compact-control" aria-label="Quota poll interval">
+              <select id="quotaIntervalSelect" class="ui-input compact-control" data-i18n-aria="ariaLabels.quotaPollInterval" aria-label="Quota poll interval">
                 <option value="15" data-i18n="pollInterval15">15 min</option>
                 <option value="30" data-i18n="pollInterval30">30 min</option>
                 <option value="60" data-i18n="pollInterval60">60 min</option>
@@ -4306,7 +4306,7 @@
             <div class="text-xs" style="color: var(--color-muted);">%</div>
           </div>
           <div class="h-[280px]">
-            <canvas id="quotaUtilizationChart" aria-label="Quota utilization history chart" role="img"></canvas>
+            <canvas id="quotaUtilizationChart" data-i18n-aria="ariaLabels.quotaUtilizationHistoryChart" aria-label="Quota utilization history chart" role="img"></canvas>
           </div>
         </div>
         <div class="surface p-5">
@@ -4316,7 +4316,7 @@
           </div>
           <div id="quotaConsumptionEstimatedBanner" class="text-xs mb-2 hidden" style="color: var(--color-muted);" data-i18n="quotaConsumptionEstimated">Estimated from local session logs — approximate and may be wrong. Enable Codex API polling for accurate quota.</div>
           <div class="h-[280px]">
-            <canvas id="quotaConsumptionChart" aria-label="Quota consumption history chart" role="img"></canvas>
+            <canvas id="quotaConsumptionChart" data-i18n-aria="ariaLabels.quotaConsumptionHistoryChart" aria-label="Quota consumption history chart" role="img"></canvas>
           </div>
         </div>
       </section>
@@ -4357,7 +4357,7 @@
             <div id="pricingDbJsonState" class="tokdash-loading-placeholder mt-2 font-extrabold" style="color: var(--color-muted);"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
           </div>
         </div>
-        <textarea id="pricingDbEditor" class="pricing-editor mono" spellcheck="false" aria-label="pricing_db.json editor"></textarea>
+        <textarea id="pricingDbEditor" class="pricing-editor mono" spellcheck="false" data-i18n-aria="ariaLabels.pricingDbEditor" aria-label="pricing_db.json editor"></textarea>
       </section>
     </div>
 
@@ -4438,7 +4438,7 @@
             <div class="text-xs" style="color: var(--color-muted);" data-i18n="tokens">Tokens</div>
           </div>
           <div class="h-[320px]">
-            <canvas id="sessionPerTurnChart" aria-label="Session per-turn trend chart" role="img"></canvas>
+            <canvas id="sessionPerTurnChart" data-i18n-aria="ariaLabels.sessionPerTurnTrendChart" aria-label="Session per-turn trend chart" role="img"></canvas>
           </div>
         </div>
         <div class="surface p-4 mb-5">
@@ -4447,7 +4447,7 @@
             <div class="text-xs" style="color: var(--color-muted);" data-i18n="tokens">Tokens</div>
           </div>
           <div class="h-[320px]">
-            <canvas id="sessionCumulativeChart" aria-label="Session cumulative turn trend chart" role="img"></canvas>
+            <canvas id="sessionCumulativeChart" data-i18n-aria="ariaLabels.sessionCumulativeTurnTrendChart" aria-label="Session cumulative turn trend chart" role="img"></canvas>
           </div>
         </div>
         <div class="surface p-4">
@@ -4456,7 +4456,7 @@
             <div class="text-xs" style="color: var(--color-muted);" data-i18n="tokens">Tokens</div>
           </div>
           <div class="h-[320px]">
-            <canvas id="sessionTimeCumulativeChart" aria-label="Session cumulative time trend chart" role="img"></canvas>
+            <canvas id="sessionTimeCumulativeChart" data-i18n-aria="ariaLabels.sessionCumulativeTimeTrendChart" aria-label="Session cumulative time trend chart" role="img"></canvas>
           </div>
         </div>
       </div>
@@ -4471,7 +4471,7 @@
           <h2 id="releaseNotesTitle" class="release-notes-title" data-i18n="whatsNew">What's new</h2>
           <p class="release-notes-intro" data-i18n="releaseNotesIntro">A concise record of what changed in each Tokdash release.</p>
         </div>
-        <button id="releaseNotesClose" class="release-notes-close" type="button" aria-label="Close release notes">
+        <button id="releaseNotesClose" class="release-notes-close" type="button" data-i18n-aria="ariaLabels.closeReleaseNotes" aria-label="Close release notes">
           <svg width="17" height="17" viewBox="0 0 18 18" fill="none" aria-hidden="true">
             <path d="m4.5 4.5 9 9m0-9-9 9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
           </svg>
@@ -5902,6 +5902,9 @@
         last3months: '最近 3 个月',
         thisYear: '本年',
         lastYear: '去年',
+            quotaUtilizationHistoryChart: 'Quota utilization history chart',
+            pricingDbEditor: 'pricing_db.json editor',
+
         moreRanges: '更多范围',
         customDays: '自定义天数…',
         daysPlaceholder: '天数',
@@ -6243,7 +6246,63 @@
         activityTopTool: '最常用工具',
         activityTopTools: '最常用结构化工具',
         activityCoverage: '覆盖范围',
-        activityNoData: '尚无本地 Codex 活动记录。',
+        activityNoData: '尚无本地
+          ariaLabels: {
+            activityInsights: 'Activity insights',
+            antigravitySessionsTable: 'Antigravity sessions table',
+            changesAfterRefresh: 'Changes after refresh',
+            claudeCodeSessionsTable: 'Claude Code sessions table',
+            clineSessionsTable: 'Cline sessions table',
+            close: 'Close',
+            closeDayDetails: 'Close day details',
+            closeReleaseNotes: 'Close release notes',
+            codexSessionsTable: 'Codex sessions table',
+            combinedModelsTable: 'Combined models table',
+            combinedSessionsTable: 'Combined sessions table',
+            dashboardSections: 'Dashboard sections',
+            deepSeekHarnessSessionsTable: 'DeepSeek Harness sessions table',
+            grokBuildSessionsTable: 'Grok Build sessions table',
+            hermesSessionsTable: 'Hermes sessions table',
+            installApp: 'Install app',
+            kiloCodeSessionsTable: 'Kilo Code sessions table',
+            kimiSessionsTable: 'Kimi sessions table',
+            language: 'Language',
+            mimoSessionsTable: 'Mimo sessions table',
+            monthlyTotalsTable: 'Monthly totals table',
+            mostUsedStructuredTools: 'Most-used structured tools',
+            nextMonth: 'Next month',
+            nextYear: 'Next year',
+            ompSessionsTable: 'omp sessions table',
+            openclawSessionsTable: 'OpenClaw sessions table',
+            opencodeSessionsTable: 'OpenCode sessions table',
+            piSessionsTable: 'Pi sessions table',
+            previousMonth: 'Previous month',
+            previousYear: 'Previous year',
+            qoderCliSessionsTable: 'Qoder CLI sessions table',
+            qoderIdeSessionsTable: 'Qoder IDE sessions table',
+            quotaConsumptionHistoryChart: 'Quota consumption history chart',
+            quotaHistoryRange: 'Quota history range',
+            quotaPollInterval: 'Quota poll interval',
+            qwenCodeSessionsTable: 'Qwen Code sessions table',
+            readableTokens: 'Readable tokens',
+            reasonixSessionsTable: 'Reasonix sessions table',
+            refreshDashboard: 'Refresh dashboard',
+            reportPeriod: 'Report period',
+            reportWindow: 'Report window',
+            sessionCumulativeTimeTrendChart: 'Session cumulative time trend chart',
+            sessionCumulativeTurnTrendChart: 'Session cumulative turn trend chart',
+            sessionPerTurnTrendChart: 'Session per-turn trend chart',
+            styleTheme: 'Style theme',
+            toggleTheme: 'Toggle theme',
+            tokenActivity: 'Token activity',
+            toolChartLegend: 'Tool chart legend',
+            toolsBreakdownTable: 'Tools breakdown table',
+            topModelsByCostChart: 'Top models by cost chart',
+            usageByToolChart: 'Usage by tool chart',
+            workbuddySessionsTable: 'WorkBuddy sessions table',
+            zcodeSessionsTable: 'ZCode sessions table',
+          },
+ Codex 活动记录。',
         activityUnavailable: '活动洞察暂时不可用。',
         activityLocalScope: '本地主会话 Codex 历史',
         activityFilesIdentified: '个文件已识别',
@@ -6444,7 +6503,10 @@
         last7days: '過去 7 日間',
         lastWeek: '先週',
         last14days: '過去 14 日間',
-        last4weeks: '過去 4 週間',
+       
+            quotaUtilizationHistoryChart: '配额利用历史图表',
+            pricingDbEditor: 'pricing_db.json 编辑器',
+ last4weeks: '過去 4 週間',
         thisMonth: '今月',
         lastMonth: '先月',
         last3months: '過去 3 か月',
@@ -6704,7 +6766,63 @@
         tokens: 'トークン',
         topModelsByCost: 'コスト上位モデル',
         usd: 'USD',
-        toolsBreakdown: 'ツール内訳',
+        toolsBreakdown: '
+          ariaLabels: {
+            activityInsights: '活动洞察',
+            antigravitySessionsTable: 'Antigravity 会话表',
+            changesAfterRefresh: '刷新后更改',
+            claudeCodeSessionsTable: 'Claude Code 会话表',
+            clineSessionsTable: 'Cline 会话表',
+            close: '关闭',
+            closeDayDetails: '关闭日期详情',
+            closeReleaseNotes: '关闭发布说明',
+            codexSessionsTable: 'Codex 会话表',
+            combinedModelsTable: '合并模型表',
+            combinedSessionsTable: '合并会话表',
+            dashboardSections: '仪表板部分',
+            deepSeekHarnessSessionsTable: 'DeepSeek Harness 会话表',
+            grokBuildSessionsTable: 'Grok Build 会话表',
+            hermesSessionsTable: 'Hermes 会话表',
+            installApp: '安装应用',
+            kiloCodeSessionsTable: 'Kilo Code 会话表',
+            kimiSessionsTable: 'Kimi 会话表',
+            language: '语言',
+            mimoSessionsTable: 'Mimo 会话表',
+            monthlyTotalsTable: '月度汇总表',
+            mostUsedStructuredTools: '最常用结构化工具',
+            nextMonth: '下个月',
+            nextYear: '明年',
+            ompSessionsTable: 'omp 会话表',
+            openclawSessionsTable: 'OpenClaw 会话表',
+            opencodeSessionsTable: 'OpenCode 会话表',
+            piSessionsTable: 'Pi 会话表',
+            previousMonth: '上个月',
+            previousYear: '去年',
+            qoderCliSessionsTable: 'Qoder CLI 会话表',
+            qoderIdeSessionsTable: 'Qoder IDE 会话表',
+            quotaConsumptionHistoryChart: '配额消耗历史图表',
+            quotaHistoryRange: '配额历史范围',
+            quotaPollInterval: '配额轮询间隔',
+            qwenCodeSessionsTable: 'Qwen Code 会话表',
+            readableTokens: '可读代币',
+            reasonixSessionsTable: 'Reasonix 会话表',
+            refreshDashboard: '刷新仪表板',
+            reportPeriod: '报告期间',
+            reportWindow: '报告窗口',
+            sessionCumulativeTimeTrendChart: '会话累计时间趋势图',
+            sessionCumulativeTurnTrendChart: '会话累计轮次趋势图',
+            sessionPerTurnTrendChart: '会话单轮趋势图',
+            styleTheme: '样式主题',
+            toggleTheme: '切换主题',
+            tokenActivity: '代币活动',
+            toolChartLegend: '工具图表图例',
+            toolsBreakdownTable: '工具明细表',
+            topModelsByCostChart: '按成本排名的顶级模型图表',
+            usageByToolChart: '按工具使用情况图表',
+            workbuddySessionsTable: 'WorkBuddy 会话表',
+            zcodeSessionsTable: 'ZCode 会话表',
+          },
+ツール内訳',
         appsModelsBreakdown: 'アプリとモデルの内訳',
         combinedModels: 'モデル統合',
         combinedModelsDesc: 'すべてのアプリとプロバイダーにわたる統合ビュー。同名のモデルは出典を問わず集計されます。',
@@ -6988,7 +7106,10 @@
         customRange: '사용자 지정 기간',
         today: '오늘',
         yesterday: '어제',
-        last3days: '최근 3일',
+        last3days: '최
+            quotaUtilizationHistoryChart: 'クォータ利用履歴チャート',
+            pricingDbEditor: 'pricing_db.json エディター',
+근 3일',
         last7days: '최근 7일',
         lastWeek: '지난주',
         last14days: '최근 14일',
@@ -7192,7 +7313,63 @@
         pollInterval120: '120분',
         hitPctHint: '캐시 적중률 — 캐시를 통해 제공된 프롬프트 입력',
         quotaDisabledTitle: '쿼터 추적이 꺼져 있습니다',
-        quotaDisabledDesc: '쿼터 추적을 사용해야 구독 창을 기록하고 승인된 제공자 API를 폴링하여 이력을 차트로 표시할 수 있습니다.',
+        quotaDisabledDesc: '쿼터 추적을 
+          ariaLabels: {
+            activityInsights: 'アクティビティインサイト',
+            antigravitySessionsTable: 'Antigravity セッション表',
+            changesAfterRefresh: '更新後の変更',
+            claudeCodeSessionsTable: 'Claude Code セッション表',
+            clineSessionsTable: 'Cline セッション表',
+            close: '閉じる',
+            closeDayDetails: '日付詳細を閉じる',
+            closeReleaseNotes: 'リリースノートを閉じる',
+            codexSessionsTable: 'Codex セッション表',
+            combinedModelsTable: '結合モデル表',
+            combinedSessionsTable: '結合セッション表',
+            dashboardSections: 'ダッシュボードセクション',
+            deepSeekHarnessSessionsTable: 'DeepSeek Harness セッション表',
+            grokBuildSessionsTable: 'Grok Build セッション表',
+            hermesSessionsTable: 'Hermes セッション表',
+            installApp: 'アプリをインストール',
+            kiloCodeSessionsTable: 'Kilo Code セッション表',
+            kimiSessionsTable: 'Kimi セッション表',
+            language: '言語',
+            mimoSessionsTable: 'Mimo セッション表',
+            monthlyTotalsTable: '月次合計表',
+            mostUsedStructuredTools: '最も使用された構造化ツール',
+            nextMonth: '次の月',
+            nextYear: '翌年',
+            ompSessionsTable: 'omp セッション表',
+            openclawSessionsTable: 'OpenClaw セッション表',
+            opencodeSessionsTable: 'OpenCode セッション表',
+            piSessionsTable: 'Pi セッション表',
+            previousMonth: '前月',
+            previousYear: '前年',
+            qoderCliSessionsTable: 'Qoder CLI セッション表',
+            qoderIdeSessionsTable: 'Qoder IDE セッション表',
+            quotaConsumptionHistoryChart: 'クォータ消費履歴チャート',
+            quotaHistoryRange: 'クォータ履歴範囲',
+            quotaPollInterval: 'クォータポーリング間隔',
+            qwenCodeSessionsTable: 'Qwen Code セッション表',
+            readableTokens: '読みやすいトークン',
+            reasonixSessionsTable: 'Reasonix セッション表',
+            refreshDashboard: 'ダッシュボードを更新',
+            reportPeriod: 'レポート期間',
+            reportWindow: 'レポートウィンドウ',
+            sessionCumulativeTimeTrendChart: 'セッション累積時間トレンドチャート',
+            sessionCumulativeTurnTrendChart: 'セッション累積ターン数トレンドチャート',
+            sessionPerTurnTrendChart: 'セッション単体ターン傾向チャート',
+            styleTheme: 'スタイルテーマ',
+            toggleTheme: 'テーマを切り替え',
+            tokenActivity: 'トークンアクティビティ',
+            toolChartLegend: 'ツールチャート凡例',
+            toolsBreakdownTable: 'ツール内訳表',
+            topModelsByCostChart: '費用別トップモデルチャート',
+            usageByToolChart: 'ツール別使用状況チャート',
+            workbuddySessionsTable: 'WorkBuddy セッション表',
+            zcodeSessionsTable: 'ZCode セッション表',
+          },
+사용해야 구독 창을 기록하고 승인된 제공자 API를 폴링하여 이력을 차트로 표시할 수 있습니다.',
         enableQuotaTracking: '쿼터 추적 사용',
         quotaIntervalEnv: '간격은 TOKDASH_QUOTA_POLL_INTERVAL로 설정됨',
         quotaIntervalConfig: '저장된 간격',
@@ -7530,7 +7707,10 @@
         updateCopy: 'Copiar',
         updateCopied: '¡Copiado!',
         updateSkip: 'Omitir esta versión',
-        updateEnable: 'Activar avisos de actualización',
+        updateEnab
+            quotaUtilizationHistoryChart: '할당량 활용 이력 차트',
+            pricingDbEditor: 'pricing_db.json 편집기',
+le: 'Activar avisos de actualización',
         range: 'Rango',
         selectRange: 'Seleccionar rango',
         customRange: 'Rango personalizado',
@@ -7641,6 +7821,62 @@
         serverRouteReasonFastest: 'La ruta utilizable más rápida',
         serverRouteReasonPinned: 'La fijaste tu',
         serverRouteReasonHeld: 'Dentro de la banda antirrebote; no cambia',
+
+          ariaLabels: {
+            activityInsights: '활동 인사이트',
+            antigravitySessionsTable: 'Antigravity 세션 테이블',
+            changesAfterRefresh: '새로 고침 후 변경 사항',
+            claudeCodeSessionsTable: 'Claude Code 세션 테이블',
+            clineSessionsTable: 'Cline 세션 테이블',
+            close: '닫기',
+            closeDayDetails: '날짜 세부 정보 닫기',
+            closeReleaseNotes: '출시 노트 닫기',
+            codexSessionsTable: 'Codex 세션 테이블',
+            combinedModelsTable: '통합 모델 테이블',
+            combinedSessionsTable: '통합 세션 테이블',
+            dashboardSections: '대시보드 섹션',
+            deepSeekHarnessSessionsTable: 'DeepSeek Harness 세션 테이블',
+            grokBuildSessionsTable: 'Grok Build 세션 테이블',
+            hermesSessionsTable: 'Hermes 세션 테이블',
+            installApp: '앱 설치',
+            kiloCodeSessionsTable: 'Kilo Code 세션 테이블',
+            kimiSessionsTable: 'Kimi 세션 테이블',
+            language: '언어',
+            mimoSessionsTable: 'Mimo 세션 테이블',
+            monthlyTotalsTable: '월간 합계 테이블',
+            mostUsedStructuredTools: '가장 많이 사용된 구조화 도구',
+            nextMonth: '다음 달',
+            nextYear: '내년',
+            ompSessionsTable: 'omp 세션 테이블',
+            openclawSessionsTable: 'OpenClaw 세션 테이블',
+            opencodeSessionsTable: 'OpenCode 세션 테이블',
+            piSessionsTable: 'Pi 세션 테이블',
+            previousMonth: '이전 달',
+            previousYear: '작년',
+            qoderCliSessionsTable: 'Qoder CLI 세션 테이블',
+            qoderIdeSessionsTable: 'Qoder IDE 세션 테이블',
+            quotaConsumptionHistoryChart: '할당량 소비 이력 차트',
+            quotaHistoryRange: '할당량 이력 범위',
+            quotaPollInterval: '할당량 폴링 간격',
+            qwenCodeSessionsTable: 'Qwen Code 세션 테이블',
+            readableTokens: '읽기 쉬운 토큰',
+            reasonixSessionsTable: 'Reasonix 세션 테이블',
+            refreshDashboard: '대시보드 새로 고침',
+            reportPeriod: '보고 기간',
+            reportWindow: '보고 창',
+            sessionCumulativeTimeTrendChart: '세션 누적 시간 추세 차트',
+            sessionCumulativeTurnTrendChart: '세션 누적 턴 추세 차트',
+            sessionPerTurnTrendChart: '세션 턴별 추세 차트',
+            styleTheme: '스타일 테마',
+            toggleTheme: '테마 전환',
+            tokenActivity: '토큰 활동',
+            toolChartLegend: '도구 차트 범례',
+            toolsBreakdownTable: '도구 내역 테이블',
+            topModelsByCostChart: '비용별 상위 모델 차트',
+            usageByToolChart: '도구별 사용량 차트',
+            workbuddySessionsTable: 'WorkBuddy 세션 테이블',
+            zcodeSessionsTable: 'ZCode 세션 테이블',
+          },
         serverRouteReasonUnverified: 'Ninguna ruta ha respondido todavía',
         serverRoute: 'ruta',
         serverAddRoute: 'Añadir ruta',
@@ -8074,7 +8310,10 @@
 
       pt: {
         updateAvailable: 'Atualização disponível',
-        updateBody: 'Você está na v{current}. A v{latest} está disponível — execute isto em um terminal:',
+        updateBody: 'Você está na v{current}. A v{latest} está disponível — exec
+            quotaUtilizationHistoryChart: 'Gráfico de historial de utilización de cuota',
+            pricingDbEditor: 'Editor de pricing_db.json',
+ute isto em um terminal:',
         updateCopy: 'Copiar',
         updateCopied: 'Copiado!',
         updateSkip: 'Pular esta versão',
@@ -8138,7 +8377,63 @@
         serversUnreachable: 'inacessível',
         serversNoDataYet: 'Ainda não há dados — a primeira atualização deste servidor falhou',
         serversStale: 'desatualizado',
-        serversStaleFootnote: 'st — desatualizado: última leitura completa deste período; os valores retidos permanecem no total Combinado exibido até que uma atualização completa tenha sucesso.',
+        serversStaleFootnote: 'st — desatualizado: úl
+          ariaLabels: {
+            activityInsights: 'Actividad',
+            antigravitySessionsTable: 'Tabla de sesiones de Antigravity',
+            changesAfterRefresh: 'Cambios tras actualizar',
+            claudeCodeSessionsTable: 'Tabla de sesiones de Claude Code',
+            clineSessionsTable: 'Tabla de sesiones de Cline',
+            close: 'Cerrar',
+            closeDayDetails: 'Cerrar detalles del día',
+            closeReleaseNotes: 'Cerrar notas de la versión',
+            codexSessionsTable: 'Tabla de sesiones de Codex',
+            combinedModelsTable: 'Tabla de modelos combinados',
+            combinedSessionsTable: 'Tabla de sesiones combinadas',
+            dashboardSections: 'Secciones del panel',
+            deepSeekHarnessSessionsTable: 'Tabla de sesiones de DeepSeek Harness',
+            grokBuildSessionsTable: 'Tabla de sesiones de Grok Build',
+            hermesSessionsTable: 'Tabla de sesiones de Hermes',
+            installApp: 'Instalar aplicación',
+            kiloCodeSessionsTable: 'Tabla de sesiones de Kilo Code',
+            kimiSessionsTable: 'Tabla de sesiones de Kimi',
+            language: 'Idioma',
+            mimoSessionsTable: 'Tabla de sesiones de Mimo',
+            monthlyTotalsTable: 'Tabla de totales mensuales',
+            mostUsedStructuredTools: 'Herramientas estructuradas más usadas',
+            nextMonth: 'Siguiente mes',
+            nextYear: 'Próximo año',
+            ompSessionsTable: 'Tabla de sesiones de omp',
+            openclawSessionsTable: 'Tabla de sesiones de OpenClaw',
+            opencodeSessionsTable: 'Tabla de sesiones de OpenCode',
+            piSessionsTable: 'Tabla de sesiones de Pi',
+            previousMonth: 'Mes anterior',
+            previousYear: 'Año anterior',
+            qoderCliSessionsTable: 'Tabla de sesiones de Qoder CLI',
+            qoderIdeSessionsTable: 'Tabla de sesiones de Qoder IDE',
+            quotaConsumptionHistoryChart: 'Gráfico de historial de consumo de cuota',
+            quotaHistoryRange: 'Rango de historial de cuota',
+            quotaPollInterval: 'Intervalo de consulta de cuota',
+            qwenCodeSessionsTable: 'Tabla de sesiones de Qwen Code',
+            readableTokens: 'Tokens legibles',
+            reasonixSessionsTable: 'Tabla de sesiones de Reasonix',
+            refreshDashboard: 'Actualizar panel',
+            reportPeriod: 'Período del informe',
+            reportWindow: 'Ventana del informe',
+            sessionCumulativeTimeTrendChart: 'Gráfico de tendencia de tiempo acumulado de sesiones',
+            sessionCumulativeTurnTrendChart: 'Gráfico de tendencia de turnos acumulados de sesiones',
+            sessionPerTurnTrendChart: 'Gráfico de tendencia por turno de sesiones',
+            styleTheme: 'Tema de estilo',
+            toggleTheme: 'Cambiar tema',
+            tokenActivity: 'Actividad de tokens',
+            toolChartLegend: 'Leyenda del gráfico de herramientas',
+            toolsBreakdownTable: 'Tabla de desglose de herramientas',
+            topModelsByCostChart: 'Gráfico de mejores modelos por costo',
+            usageByToolChart: 'Gráfico de uso por herramienta',
+            workbuddySessionsTable: 'Tabla de sesiones de WorkBuddy',
+            zcodeSessionsTable: 'Tabla de sesiones de ZCode',
+          },
+tima leitura completa deste período; os valores retidos permanecem no total Combinado exibido até que uma atualização completa tenha sucesso.',
         serversCombinedCol: 'Combinado (exibido)',
         serversShareTokens: 'Cota · tokens',
         serversShareCost: 'Cota · custo',
@@ -8618,7 +8913,66 @@
         usageReportCardProjects: 'Projetos principais',
         usageReportCardBusiestLabel: 'Dia mais intenso',
         usageReportCardNicknameFallback: 'esta máquina',
-      },
+      
+          ariaLabels: {
+            activityInsights: 'Atividade',
+            antigravitySessionsTable: 'Tabela de sessões Antigravity',
+            changesAfterRefresh: 'Alterações após atualizar',
+            claudeCodeSessionsTable: 'Tabela de sessões Claude Code',
+            clineSessionsTable: 'Tabela de sessões Cline',
+            close: 'Fechar',
+            closeDayDetails: 'Fechar detalhes do dia',
+            closeReleaseNotes: 'Fechar notas de versão',
+            codexSessionsTable: 'Tabela de sessões Codex',
+            combinedModelsTable: 'Tabela de modelos combinados',
+            combinedSessionsTable: 'Tabela de sessões combinadas',
+            dashboardSections: 'Seções do painel',
+            deepSeekHarnessSessionsTable: 'Tabela de sessões DeepSeek Harness',
+            grokBuildSessionsTable: 'Tabela de sessões Grok Build',
+            hermesSessionsTable: 'Tabela de sessões Hermes',
+            installApp: 'Instalar app',
+            kiloCodeSessionsTable: 'Tabela de sessões Kilo Code',
+            kimiSessionsTable: 'Tabela de sessões Kimi',
+            language: 'Idioma',
+            mimoSessionsTable: 'Tabela de sessões Mimo',
+            monthlyTotalsTable: 'Tabela de totais mensais',
+            mostUsedStructuredTools: 'Ferramentas estruturadas mais usadas',
+            nextMonth: 'Próximo mês',
+            nextYear: 'Próximo ano',
+            ompSessionsTable: 'Tabela de sessões omp',
+            openclawSessionsTable: 'Tabela de sessões OpenClaw',
+            opencodeSessionsTable: 'Tabela de sessões OpenCode',
+            piSessionsTable: 'Tabela de sessões Pi',
+            previousMonth: 'Mês anterior',
+            previousYear: 'Ano anterior',
+            qoderCliSessionsTable: 'Tabela de sessões Qoder CLI',
+            qoderIdeSessionsTable: 'Tabela de sessões Qoder IDE',
+            quotaConsumptionHistoryChart: 'Gráfico de histórico de consumo de cota',
+            quotaHistoryRange: 'Intervalo de histórico de cota',
+            quotaPollInterval: 'Intervalo de consulta de cota',
+            qwenCodeSessionsTable: 'Tabela de sessões Qwen Code',
+            readableTokens: 'Tokens legíveis',
+            reasonixSessionsTable: 'Tabela de sessões Reasonix',
+            refreshDashboard: 'Atualizar painel',
+            reportPeriod: 'Período do relatório',
+            reportWindow: 'Janela do relatório',
+            sessionCumulativeTimeTrendChart: 'Gráfico de tendência de tempo acumulado das sessões',
+            sessionCumulativeTurnTrendChart: 'Gráfico de tendência de turnos acumulados das sessões',
+            sessionPerTurnTrendChart: 'Gráfico de tendência por turno das sessões',
+            styleTheme: 'Tema de estilo',
+            toggleTheme: 'Alternar tema',
+            tokenActivity: 'Atividade de tokens',
+            toolChartLegend: 'Legenda do gráfico de ferramentas',
+            toolsBreakdownTable: 'Tabela de detalhamento de ferramentas',
+            topModelsByCostChart: 'Gráfico dos principais modelos por custo',
+            usageByToolChart: 'Gráfico de uso por ferramenta',
+            workbuddySessionsTable: 'Tabela de sessões WorkBuddy',
+            zcodeSessionsTable: 'Tabela de sessões ZCode',
+          },
+
+            quotaUtilizationHistoryChart: 'Gráfico de histórico de utilização de cota',
+            pricingDbEditor: 'Editor do pricing_db.json',
+},
     };
 
     const LANG_LOCALES = { en: 'en-US', zh: 'zh-CN', ja: 'ja-JP', ko: 'ko-KR', es: 'es-ES', pt: 'pt-BR' };
@@ -10540,6 +10894,20 @@
       document.querySelectorAll('[data-i18n-title]').forEach((el) => {
         const key = el.getAttribute('data-i18n-title');
         el.setAttribute('title', t(key));
+
+
+      });
+
+      // Translate aria-label attributes via data-i18n-aria (nested ariaLabels object).
+      document.querySelectorAll('[data-i18n-aria]').forEach((el) => {
+        const keyPath = el.getAttribute('data-i18n-aria');
+        const parts = keyPath.split('.');
+        let obj = (I18N[currentLang] || I18N.en);
+        for (const p of parts) {
+          if (!obj || typeof obj !== 'object') break;
+          obj = obj[p];
+        }
+        if (typeof obj === 'string') el.setAttribute('aria-label', obj);
       });
       // Re-translating data-i18n headers above replaces their textContent, which
       // drops the child sort-arrow span; restore the active-sort indicator on the

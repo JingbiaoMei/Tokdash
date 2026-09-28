@@ -222,6 +222,13 @@ def build_parser(prog: str) -> argparse.ArgumentParser:
         help="Service runtime to use (default: auto = the current interpreter)",
     )
     lifecycle.add_argument(
+        "--to",
+        dest="to_version",
+        default=None,
+        metavar="X.Y.Z",
+        help="Upgrade to an exact release instead of the newest one (update)",
+    )
+    lifecycle.add_argument(
         "--service",
         choices=["auto", "systemd", "launchd", "winsched", "none"],
         default="auto",
@@ -1050,7 +1057,7 @@ def cli(argv: list[str] | None = None, prog: str = "tokdash") -> int:
         print(f"tokdash {__version__}")
         return 0
 
-    if args.command in {"setup", "doctor", "update", "uninstall"}:
+    if args.command in {"setup", "doctor", "update", "update-enroll", "uninstall"}:
         # Only `setup` binds a port, so only it resolves (and validates) TOKDASH_PORT here —
         # symmetric with how --bind defaults to TOKDASH_HOST and serve resolves the port.
         # doctor prefers the manifest-recorded port; update/uninstall don't use the port at

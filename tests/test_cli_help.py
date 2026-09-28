@@ -88,6 +88,7 @@ EXPECTED_SECTIONS = {
         "--auto",
         "-y",
         "--runtime",
+        "--to",
         "--service",
         "--no-service",
         "--purge",

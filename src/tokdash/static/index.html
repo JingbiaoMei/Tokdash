@@ -1657,6 +1657,46 @@
       margin-top: 10px; font-size: 11px; cursor: pointer; background: none; border: none;
       padding: 0; color: var(--color-label); text-decoration: underline dotted;
     }
+    /* Click-to-update (managed installs): apply button, enrollment row, job state.
+       Deliberately flat text rows — the popover stays one column of states. */
+    .update-apply-btn { width: 100%; margin-bottom: 8px; }
+    .update-enroll-row { margin-bottom: 8px; }
+    .update-pair-input { flex: 1; min-width: 0; text-transform: uppercase; letter-spacing: 0.08em; }
+    .update-job {
+      margin-bottom: 8px; padding: 8px 10px; border-radius: 8px;
+      background: color-mix(in srgb, var(--color-text) 5%, transparent);
+    }
+    .update-job[data-state="running"] {
+      background: rgba(30, 64, 175, 0.08);
+      border: 1px solid rgba(30, 64, 175, 0.30);
+      color: #1E40AF;
+    }
+    html.dark .update-job[data-state="running"] {
+      background: rgba(147, 197, 253, 0.10);
+      border-color: rgba(147, 197, 253, 0.30);
+      color: #93C5FD;
+    }
+    .update-job[data-state="failed"] {
+      background: rgba(217, 72, 72, 0.08);
+      border: 1px solid rgba(217, 72, 72, 0.35);
+      color: #C93636;
+    }
+    html.dark .update-job[data-state="failed"] {
+      background: rgba(252, 165, 165, 0.10);
+      border-color: rgba(252, 165, 165, 0.30);
+      color: #FCA5A5;
+    }
+    .update-job[data-state="done"] {
+      background: rgba(47, 158, 91, 0.10);
+      border: 1px solid rgba(47, 158, 91, 0.35);
+      color: #267C4A;
+    }
+    html.dark .update-job[data-state="done"] {
+      background: rgba(110, 231, 183, 0.10);
+      border-color: rgba(110, 231, 183, 0.30);
+      color: #6EE7B7;
+    }
+    .update-job button { margin-top: 6px; width: 100%; }
 
     /* Release notes live with dashboard actions, leaving the brand lockup uncluttered. */
     .release-notes-trigger {
@@ -5469,6 +5509,18 @@
                     <button id="updateEnableLink" class="update-enable-link" hidden data-i18n="updateEnable">Enable update notices</button>
                     <div id="updatePopover" class="update-popover" hidden>
                       <div id="updatePopoverText" class="text-xs mb-2"></div>
+                      <button id="updateApplyBtn" class="btn btn-primary update-apply-btn" hidden></button>
+                      <div id="updateEnrollRow" class="update-enroll-row" hidden>
+                        <p class="text-xs" data-i18n="updateEnrollPrompt">Enter the pairing code from `tokdash update-enroll` on this machine:</p>
+                        <div class="update-cmd-row">
+                          <input id="updatePairInput" class="ui-input update-pair-input" type="text" maxlength="9" autocomplete="off" spellcheck="false" placeholder="ABCDEF23">
+                          <button id="updateEnrollBtn" class="btn btn-ghost" data-i18n="updateEnrollBtn">Authorize</button>
+                        </div>
+                      </div>
+                      <div id="updateJobBox" class="update-job" hidden>
+                        <p id="updateJobText" class="text-xs"></p>
+                        <button id="updateRefreshBtn" class="btn btn-primary" hidden data-i18n="updateRefreshPage">Refresh now</button>
+                      </div>
                       <div class="update-cmd-row">
                         <code>tokdash update</code>
                         <button id="updateCopyBtn" class="btn btn-ghost update-copy-btn" data-i18n="updateCopy">Copy</button>
@@ -6402,6 +6454,17 @@
         updateCopied: 'Copied!',
         updateSkip: 'Skip this version',
         updateEnable: 'Enable update notices',
+        updateApply: 'Update to {version}',
+        updateEnrollPrompt: 'Enter the pairing code from `tokdash update-enroll` on this machine:',
+        updateEnrollBtn: 'Authorize',
+        updateBusy: 'Updating… Tokdash will briefly disconnect. You can leave this page open.',
+        updateReconnect: 'Restarting the service…',
+        updateDone: 'Updated to {version}. Refresh to finish.',
+        updateRefreshPage: 'Refresh now',
+        updateFailed: 'Update failed ({phase}): {message}',
+        updateTimeout: 'This server has not come back yet. Check it on the host; the updater keeps a log under its data directory.',
+        updateEnrollFailed: 'The code was wrong or expired. Ask for a new one on the host.',
+        updateEnrollLocked: 'Too many attempts. Wait a few minutes and try again.',
         range: 'Range',
         selectRange: 'Select range',
         customRange: 'Custom range',
@@ -6954,6 +7017,17 @@
         updateCopied: '已复制',
         updateSkip: '跳过此版本',
         updateEnable: '开启更新提醒',
+        updateApply: '更新到 {version}',
+        updateEnrollPrompt: '请输入本机终端运行 `tokdash update-enroll` 显示的配对码：',
+        updateEnrollBtn: '授权',
+        updateBusy: '正在更新……Tokdash 将短暂断开连接，您可以保持此页面打开。',
+        updateReconnect: '正在重启服务……',
+        updateDone: '已更新到 {version}，刷新以完成。',
+        updateRefreshPage: '立即刷新',
+        updateFailed: '更新失败（{phase}）：{message}',
+        updateTimeout: '服务器尚未恢复。请在主机上检查；更新程序会在数据目录下保留日志。',
+        updateEnrollFailed: '配对码有误或已过期，请在主机上重新生成。',
+        updateEnrollLocked: '尝试次数过多，请稍后再试。',
         range: '范围',
         selectRange: '选择日期范围',
         customRange: '自定义范围',
@@ -7507,6 +7581,17 @@
         updateCopied: 'コピーしました',
         updateSkip: 'このバージョンをスキップ',
         updateEnable: '更新通知を有効にする',
+        updateApply: '{version} に更新',
+        updateEnrollPrompt: 'このマシンの端末で `tokdash update-enroll` が表示したペアリングコードを入力してください：',
+        updateEnrollBtn: '認証',
+        updateBusy: '更新中… Tokdash は一時的に切断されます。このページを開いたままにできます。',
+        updateReconnect: 'サービス再起動中…',
+        updateDone: '{version} に更新しました。リロードして完了してください。',
+        updateRefreshPage: '今すぐリロード',
+        updateFailed: '更新失敗（{phase}）：{message}',
+        updateTimeout: 'サーバーがまだ復帰していません。ホスト上で確認してください。更新プログラムはデータディレクトリにログを残します。',
+        updateEnrollFailed: 'コードが間違っているか有効期限切れです。ホストで再生成してください。',
+        updateEnrollLocked: '試行が多すぎます。数分後に再試行してください。',
         range: '期間',
         selectRange: '期間を選択',
         customRange: 'カスタム期間',
@@ -8060,6 +8145,17 @@
         updateCopied: '복사됨',
         updateSkip: '이 버전 건너뛰기',
         updateEnable: '업데이트 알림 사용',
+        updateApply: '{version}(으)로 업데이트',
+        updateEnrollPrompt: '이 컴퓨터의 터미널에서 `tokdash update-enroll`이 표시한 페어링 코드를 입력하세요:',
+        updateEnrollBtn: '인증',
+        updateBusy: '업데이트 중… Tokdash가 잠시 연결을 끊습니다. 이 페이지를 열어 둘 수 있습니다.',
+        updateReconnect: '서비스 재시작 중…',
+        updateDone: '{version}(으)로 업데이트되었습니다. 새로고침하면 완료됩니다.',
+        updateRefreshPage: '지금 새로고침',
+        updateFailed: '업데이트 실패 ({phase}): {message}',
+        updateTimeout: '서버가 아직 돌아오지 않았습니다. 호스트에서 확인하세요. 업데이터가 데이터 디렉터리에 로그를 남깁니다.',
+        updateEnrollFailed: '코드가 올바르지 않거나 만료되었습니다. 호스트에서 새 코드를 발급하세요.',
+        updateEnrollLocked: '시도 횟수가 너무 많습니다. 몇 분 후 다시 시도하세요.',
         range: '기간',
         selectRange: '기간 선택',
         customRange: '사용자 지정 기간',
@@ -8613,6 +8709,17 @@
         updateCopied: '¡Copiado!',
         updateSkip: 'Omitir esta versión',
         updateEnable: 'Activar avisos de actualización',
+        updateApply: 'Actualizar a {version}',
+        updateEnrollPrompt: 'Introduce el código de emparejamiento que muestra `tokdash update-enroll` en esta máquina:',
+        updateEnrollBtn: 'Autorizar',
+        updateBusy: 'Actualizando… Tokdash se desconectará brevemente. Puedes dejar esta página abierta.',
+        updateReconnect: 'Reiniciando el servicio…',
+        updateDone: 'Actualizado a {version}. Recarga para terminar.',
+        updateRefreshPage: 'Recargar ahora',
+        updateFailed: 'Actualización fallida ({phase}): {message}',
+        updateTimeout: 'Este servidor aún no ha vuelto. Compruébalo en el equipo; el actualizador guarda un registro en su directorio de datos.',
+        updateEnrollFailed: 'El código era incorrecto o había caducado. Pide uno nuevo en el equipo.',
+        updateEnrollLocked: 'Demasiados intentos. Espera unos minutos e inténtalo de nuevo.',
         range: 'Rango',
         selectRange: 'Seleccionar rango',
         customRange: 'Rango personalizado',
@@ -9166,6 +9273,17 @@
         updateCopied: 'Copiado!',
         updateSkip: 'Pular esta versão',
         updateEnable: 'Ativar avisos de atualização',
+        updateApply: 'Atualizar para {version}',
+        updateEnrollPrompt: 'Digite o código de pareamento exibido por `tokdash update-enroll` nesta máquina:',
+        updateEnrollBtn: 'Autorizar',
+        updateBusy: 'Atualizando… O Tokdash ficará brevemente desconectado. Você pode deixar esta página aberta.',
+        updateReconnect: 'Reiniciando o serviço…',
+        updateDone: 'Atualizado para {version}. Recarregue para concluir.',
+        updateRefreshPage: 'Recarregar agora',
+        updateFailed: 'Falha na atualização ({phase}): {message}',
+        updateTimeout: 'Este servidor ainda não voltou. Verifique no host; o atualizador mantém um log no diretório de dados.',
+        updateEnrollFailed: 'O código estava errado ou expirou. Gere um novo no host.',
+        updateEnrollLocked: 'Muitas tentativas. Aguarde alguns minutos e tente novamente.',
         range: 'Período',
         selectRange: 'Selecionar período',
         customRange: 'Período personalizado',
@@ -22181,10 +22299,21 @@
 
     // --- Update notice ------------------------------------------------------
     // Opt-in by design (§14): the PyPI check runs only after explicit consent
-    // (dashboard link, wizard, or TOKDASH_UPDATE_CHECK=1). The badge only
-    // *reports* availability — upgrading stays a terminal action
-    // (`tokdash update`, which detects pip/pipx); the web UI never runs it (§15).
+    // (dashboard link, wizard, or TOKDASH_UPDATE_CHECK=1). The badge reports
+    // availability. On VERIFIED MANAGED installs the popover additionally offers
+    // one-click "Update to X.Y.Z" (the proposed §15 exception): one fixed
+    // self-update job per click, never arbitrary commands, and only after the
+    // per-plane authorization the server enforces (loopback write token, or the
+    // enrolled-operator session + CSRF on the configured exact HTTPS origin).
+    // Anything unmanaged stays terminal-only: the server says so, we show the
+    // manual command.
     const UPDATE_SKIP_KEY = 'tokdash-update-skipped';
+    const UPDATE_CSRF_HEADER = 'X-Tokdash-Csrf';
+    let updateCapabilityInfo = null;
+    let updateCsrfToken = '';   // memory-only, per enrollment; never persisted
+    let updateLatestKnown = null;
+    let updatePollTimer = null;
+    let updatePollMisses = 0;
     let runtimeVersionPromise = null;
     let releaseNotesPayload = null;
     let releaseNotesPromise = null;
@@ -22433,12 +22562,234 @@
       return resp.json();
     }
 
+    function updateIsLocalHost() {
+      const h = location.hostname;
+      return h === 'localhost' || h === '127.0.0.1' || h === '[::1]' || h === '::1';
+    }
+
+    function updateUi() {
+      return {
+        apply: document.getElementById('updateApplyBtn'),
+        enroll: document.getElementById('updateEnrollRow'),
+        pairInput: document.getElementById('updatePairInput'),
+        enrollBtn: document.getElementById('updateEnrollBtn'),
+        jobBox: document.getElementById('updateJobBox'),
+        jobText: document.getElementById('updateJobText'),
+        refresh: document.getElementById('updateRefreshBtn'),
+      };
+    }
+
+    function renderUpdateApply() {
+      const info = updateCapabilityInfo;
+      const ui = updateUi();
+      if (!ui.apply) return;
+      const eligible = Boolean(info && info.eligible && info.target);
+      if (!eligible) { ui.apply.hidden = true; ui.enroll.hidden = true; return; }
+      ui.apply.textContent = t('updateApply').replace('{version}', `v${info.target}`);
+      if (updateIsLocalHost()) {
+        ui.apply.hidden = false;
+        ui.enroll.hidden = true;
+      } else if (info.remote_updates_enabled && info.enrolled) {
+        ui.apply.hidden = false;
+        ui.enroll.hidden = true;
+      } else if (info.remote_updates_enabled) {
+        // Remote, origin configured, this browser not yet enrolled: pairing code.
+        ui.apply.hidden = true;
+        ui.enroll.hidden = false;
+      } else {
+        ui.apply.hidden = true;
+        ui.enroll.hidden = true;
+      }
+    }
+
+    function renderUpdateJob(job) {
+      const ui = updateUi();
+      if (!ui.jobBox) return;
+      if (!job) { ui.jobBox.hidden = true; ui.refresh.hidden = true; return; }
+      ui.jobBox.hidden = false;
+      ui.refresh.hidden = true;
+      const version = `v${job.to_version || '?'}`;
+      if (job.phase === 'succeeded') {
+        ui.jobBox.dataset.state = 'done';
+        ui.jobText.textContent = t('updateDone').replace('{version}', version);
+        ui.refresh.hidden = false;
+        return;
+      }
+      if (job.phase === 'failed') {
+        ui.jobBox.dataset.state = 'failed';
+        ui.jobText.textContent = t('updateFailed')
+          .replace('{phase}', job.failed_phase || job.phase)
+          .replace('{message}', job.message || '');
+        return;
+      }
+      ui.jobBox.dataset.state = 'running';
+      ui.jobText.textContent = (job.phase === 'starting' || job.phase === 'ready')
+        ? t('updateReconnect')
+        : t('updateBusy');
+    }
+
+    // Reconnect with bounded backoff while the planned outage is on: a dropped request
+    // during the restart is expected and means NOTHING about the job's outcome. Only the
+    // status endpoint's verdict (or a hard bound on unreachable time) ends the polling.
+    function startUpdatePolling(jobId) {
+      if (updatePollTimer) { clearTimeout(updatePollTimer); updatePollTimer = null; }
+      updatePollMisses = 0;
+      let delay = 2000;
+      const tick = async () => {
+        try {
+          const resp = await fetch(appPath(`/api/update/status?job=${encodeURIComponent(jobId)}`), {
+            cache: 'no-store', credentials: 'same-origin',
+          });
+          if (!resp.ok) throw new Error(String(resp.status));
+          const data = await resp.json();
+          updatePollMisses = 0;
+          delay = 2000;
+          renderUpdateJob(data.job);
+          if (data.job && data.job.terminal) {
+            updatePollTimer = null;
+            refreshUpdateCapability({ quiet: true });
+            return;
+          }
+        } catch (_) {
+          updatePollMisses += 1;
+          delay = Math.min(10000, delay * 1.5);
+          if (updatePollMisses > 90) {
+            // The server never came back: say we cannot know the outcome, point at the
+            // host-side log; the already-loaded page must not claim failure it saw.
+            const ui = updateUi();
+            ui.jobBox.hidden = false;
+            ui.jobBox.dataset.state = 'failed';
+            ui.jobText.textContent = t('updateTimeout');
+            updatePollTimer = null;
+            return;
+          }
+        }
+        updatePollTimer = setTimeout(tick, delay);
+      };
+      tick();
+    }
+
+    async function requestDashboardUpdate() {
+      const info = updateCapabilityInfo;
+      const ui = updateUi();
+      if (!info || !info.target) return;
+      const headers = { 'Content-Type': 'application/json' };
+      if (updateIsLocalHost()) {
+        try {
+          const tokenResp = await fetch(appPath('/api/csrf-token'));
+          if (tokenResp.ok) headers['X-Tokdash-Token'] = (await tokenResp.json()).token || '';
+        } catch (_) { /* the POST will 403 and we surface nothing worse */ }
+      } else {
+        headers[UPDATE_CSRF_HEADER] = updateCsrfToken;
+      }
+      try {
+        const resp = await fetch(appPath('/api/update/start'), {
+          method: 'POST', headers, credentials: 'same-origin',
+          body: JSON.stringify({ version: info.target }),
+        });
+        if (resp.status === 403 && !updateIsLocalHost()) {
+          // Session expired or was never established here: ask the server (the local
+          // enrolled flag may be stale), then show enrollment — never resubmit blind.
+          await refreshUpdateCapability({ quiet: true });
+          return;
+        }
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) {
+          ui.jobBox.hidden = false;
+          ui.jobBox.dataset.state = 'failed';
+          ui.jobText.textContent = t('updateFailed')
+            .replace('{phase}', 'request')
+            .replace('{message}', data.detail || String(resp.status));
+          return;
+        }
+        if (data.job) {
+          ui.apply.hidden = true;
+          ui.enroll.hidden = true;
+          renderUpdateJob(data.job);
+          startUpdatePolling(data.job.id);
+        }
+      } catch (_) { /* offline already; polling is not running — retry by clicking again */ }
+    }
+
+    async function enrollUpdateBrowser() {
+      const ui = updateUi();
+      const code = (ui.pairInput.value || '').trim();
+      if (!code) return;
+      try {
+        const resp = await fetch(appPath('/api/update/enroll'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ code }),
+        });
+        if (!resp.ok) {
+          // The code was consumed server-side whether or not the guess was right, so
+          // the field must be emptied; 429 means "wait", anything else "wrong/expired".
+          ui.pairInput.value = '';
+          const box = ui.jobBox;
+          box.hidden = false;
+          box.dataset.state = 'failed';
+          ui.jobText.textContent = resp.status === 429 ? t('updateEnrollLocked') : t('updateEnrollFailed');
+          return;
+        }
+        const data = await resp.json();
+        updateCsrfToken = data.csrf || '';
+        ui.pairInput.value = '';
+        renderUpdateJob(null);  // clear any earlier "wrong code" message
+        renderUpdateCapabilityAfterEnroll();
+      } catch (_) { /* leave the row for a retry */ }
+    }
+
+    async function renderUpdateCapabilityAfterEnroll() {
+      await refreshUpdateCapability({ quiet: true });
+    }
+
+    async function refreshUpdateCapability({ quiet = false } = {}) {
+      try {
+        updateCapabilityInfo = await fetchJsonWithRetry(appPath('/api/update/capability'), { cache: 'no-store' });
+      } catch (_) {
+        updateCapabilityInfo = null;
+        return null;
+      }
+      renderUpdateApply();
+      const job = updateCapabilityInfo.latest_job;
+      if (job && !job.terminal) {
+        renderUpdateJob(job);
+        if (!updatePollTimer) startUpdatePolling(job.id);
+      } else if (job && job.phase === 'succeeded' && updateCapabilityInfo.current === job.to_version) {
+        // A finished apply the page has not yet picked up (e.g. reopened tab): offer the
+        // refresh, but do NOT auto-reload — the reader chooses the moment.
+        renderUpdateJob(job);
+      } else if (!job || job.terminal) {
+        if (!quiet) renderUpdateJob(null);
+      }
+      return updateCapabilityInfo;
+    }
+
+    function initUpdateUi() {
+      const ui = updateUi();
+      if (ui.apply) ui.apply.addEventListener('click', requestDashboardUpdate);
+      if (ui.enrollBtn) ui.enrollBtn.addEventListener('click', enrollUpdateBrowser);
+      if (ui.pairInput) ui.pairInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') enrollUpdateBrowser();
+      });
+      if (ui.refresh) ui.refresh.addEventListener('click', () => {
+        // Clear every cached version view, then hand the page to the NEW server —
+        // success is established by the fresh runtime, never by the old promise.
+        runtimeVersionPromise = null;
+        releaseNotesPayload = null;
+        releaseNotesPromise = null;
+        localStorage.removeItem(UPDATE_SKIP_KEY);
+        window.location.reload();
+      });
+    }
+
     function renderUpdateBadge(info) {
       if (!info || !info.update_available || !info.latest) return;
+      updateLatestKnown = String(info.latest);
       if (localStorage.getItem(UPDATE_SKIP_KEY) === String(info.latest)) return;
       const notice = document.getElementById('updateNotice');
       const badge = document.getElementById('updateBadge');
-      const popover = document.getElementById('updatePopover');
       badge.textContent = `${t('updateAvailable')}: v${info.latest}`;
       const dot = document.getElementById('updateDot');
       if (dot) dot.hidden = false;
@@ -22447,20 +22798,31 @@
         .replace('{latest}', info.latest);
       notice.hidden = false;
       badge.hidden = false;
-      badge.addEventListener('click', () => {
-        popover.hidden = !popover.hidden;
-        badge.setAttribute('aria-expanded', String(!popover.hidden));
-      });
-      document.getElementById('updateCopyBtn').addEventListener('click', async (ev) => {
+    }
+
+    function initUpdateBadgeUi() {
+      // Bound once, not on every badge render: re-adding inside renderUpdateBadge made
+      // each refresh stack another toggle on the same click.
+      const badge = document.getElementById('updateBadge');
+      const popover = document.getElementById('updatePopover');
+      if (badge && popover) {
+        badge.addEventListener('click', () => {
+          popover.hidden = !popover.hidden;
+          badge.setAttribute('aria-expanded', String(!popover.hidden));
+        });
+      }
+      const copy = document.getElementById('updateCopyBtn');
+      if (copy) copy.addEventListener('click', async (ev) => {
         try {
           await navigator.clipboard.writeText('tokdash update');
           ev.target.textContent = t('updateCopied');
           setTimeout(() => { ev.target.textContent = t('updateCopy'); }, 1500);
         } catch (_) { /* clipboard unavailable (http remote); command stays visible to select */ }
       });
-      document.getElementById('updateSkipBtn').addEventListener('click', () => {
-        localStorage.setItem(UPDATE_SKIP_KEY, String(info.latest));
-        notice.hidden = true;
+      const skip = document.getElementById('updateSkipBtn');
+      if (skip) skip.addEventListener('click', () => {
+        if (updateLatestKnown) localStorage.setItem(UPDATE_SKIP_KEY, updateLatestKnown);
+        document.getElementById('updateNotice').hidden = true;
         const dot = document.getElementById('updateDot');
         if (dot) dot.hidden = true;
       });
@@ -22485,6 +22847,9 @@
           return;
         }
         renderUpdateBadge(await fetchJsonWithRetry(appPath('/api/update-check'), { cache: 'no-store' }));
+        // Capability is a read; it also recovers an in-flight/finished job after a tab
+        // close, a reload, or a server restart (the journal is the source of truth).
+        await refreshUpdateCapability();
       } catch (_) { /* fail-soft: the dashboard must never depend on this */ }
     }
 
@@ -22495,6 +22860,8 @@
     initQuotaRangeSelect();
     initQuotaVisibilityControls();
     initReleaseNotes();
+    initUpdateUi();
+    initUpdateBadgeUi();
     initUpdateNotice();
 
     document.getElementById('styleThemeSelect').addEventListener('change', (event) => {

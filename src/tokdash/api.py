@@ -640,6 +640,17 @@ async def _lifespan(app: "FastAPI"):
     # garbage-collected out from under itself, and cancelled on the way out so a daemon
     # shutting down in the first seconds of its life does not close the loop under it.
     app.state.identity_warm = asyncio.create_task(_warm_instance_identity())
+    if not _dev_fixture_mode(app):
+        # Boot-time reconciliation for the dashboard updater: an in-flight job whose
+        # heartbeat went stale can never complete (its helper died with the outage or
+        # the host rebooted), so it must not strand the UI in "Updating…" forever.
+        # A fresh heartbeat means a live helper (e.g. a CLI update) and is left alone.
+        try:
+            from .onboard import update_jobs
+
+            update_jobs.reconcile_boot()
+        except Exception:
+            pass
     try:
         yield
     finally:
@@ -813,6 +824,64 @@ def mutation_denied_reason(
     return None
 
 
+# --- Dashboard self-update: the ONE remote-authorized exception (§5, proposed §15) ---
+# Everything said above about loopback-only writes still holds for the entire API. The
+# exception is exactly two paths — operator enrollment and update start — and it is
+# granted only when an EXACT configured HTTPS origin matches Host (and Origin, when the
+# browser sent one), plus an enrolled operator session with a per-session CSRF token on
+# the update start itself. The browser can never supply shell text, executables, package
+# names, indexes, or flags; it can only trigger the fixed self-update of the managed
+# installation this server owns (eligibility is re-checked in the handler). Token
+# issuance (/api/csrf-token) and every other write endpoint stay loopback-only.
+
+_UPDATE_ENROLL_PATH = "/api/update/enroll"
+_UPDATE_START_PATH = "/api/update/start"
+
+
+def _request_route_path(request: Request) -> str:
+    # Tailscale Serve --set-path strips the prefix before proxying, but a deployment
+    # that forwards it intact must still match these exact routes.
+    path = request.url.path or "/"
+    base = _request_base_path(request)
+    if base and path.startswith(base):
+        path = path[len(base):] or "/"
+    return path
+
+
+def _update_remote_authorized(request: Request, *, require_session: bool) -> bool:
+    """Remote authorization for the update endpoints; fails closed on any doubt."""
+    try:
+        from .onboard import update_auth
+    except Exception:
+        return False
+    origin = update_auth.configured_origin()
+    if not origin:
+        return False
+    if not update_auth.origin_matches(
+        origin,
+        host_header=request.headers.get("host") or "",
+        origin_header=request.headers.get("origin"),
+    ):
+        return False
+    if not require_session:
+        return True
+    token = request.cookies.get(update_auth.SESSION_COOKIE)
+    if not update_auth.validate_session(token):
+        return False
+    if request.method.upper() in _MUTATING_METHODS:
+        # A MISSING header is a mismatch, not a skipped check — pass "" so the
+        # comparison fails closed.
+        csrf = request.headers.get(update_auth.CSRF_HEADER.lower()) or ""
+        if not update_auth.validate_session(token, csrf=csrf):
+            return False
+    return True
+
+
+def _request_is_loopback_write(request: Request) -> bool:
+    """Whether this request already satisfies the LOCAL write gate (no 403 reason)."""
+    return mutation_denied_reason(request.method, request.headers) is None
+
+
 @app.middleware("http")
 async def _write_guard(request: Request, call_next):
     if request.method.upper() in _MUTATING_METHODS and _dev_fixture_mode(request.app):
@@ -820,6 +889,12 @@ async def _write_guard(request: Request, call_next):
             {"detail": "Writes are disabled while a synthetic development fixture is active."},
             status_code=409,
         )
+    if request.method.upper() in _MUTATING_METHODS:
+        route = _request_route_path(request)
+        if route == _UPDATE_ENROLL_PATH and _update_remote_authorized(request, require_session=False):
+            return await call_next(request)
+        if route == _UPDATE_START_PATH and _update_remote_authorized(request, require_session=True):
+            return await call_next(request)
     reason = mutation_denied_reason(request.method, request.headers)
     if reason is not None:
         return JSONResponse({"detail": reason}, status_code=403)
@@ -2555,7 +2630,9 @@ async def update_check_consent() -> Dict[str, Any]:
 # POST, so it works over Tailscale/WSL/any forward while the CONSENT endpoint above (which
 # writes config.json) stays loopback-guarded. Opt-in still applies: it only ever *reports*
 # availability when the user has enabled update checks — never an automatic/background call
-# (§14) — and it never runs an upgrade (no web-triggered shell, §15).
+# (§14). An upgrade is still never a web-triggered shell: the one web-traversable apply
+# (the §15 amendment) is the authenticated /api/update/* family below, which runs only the
+# fixed self-update of a verified managed installation through the independent helper.
 @app.get("/api/update-check")
 async def run_update_check() -> Dict[str, Any]:
     from .onboard import updatecheck
@@ -2581,3 +2658,118 @@ async def get_csrf_token(request: Request) -> Dict[str, str]:
     ):
         raise HTTPException(status_code=403, detail="unavailable")
     return {"token": _CSRF_TOKEN}
+
+
+# --- Dashboard self-update API (feasibility §5/§6) ---------------------------------
+# capability + status are reads; enroll + start are the two mutations the remote
+# exception above exists for. Every handler re-checks its own authorization because the
+# middleware grant is the transport decision, not proof of what the handler may do.
+
+
+def _update_request_class(request: Request) -> str:
+    """Classify the caller: ``local`` (loopback plane), ``remote`` (reaches us through
+    the configured dashboard origin), or ``other``. Mutations must additionally clear
+    the local write gate to count as ``local``."""
+    from .onboard import update_auth
+
+    host = (request.headers.get("host") or "").strip().lower()
+    port = _effective_port()
+    if host in _host_allowlist(port):
+        # Same physical machine (or an ssh -L forward, which by design keeps the
+        # loopback Host). Writes still need the token via the write gate.
+        if request.method.upper() not in _MUTATING_METHODS or _request_is_loopback_write(request):
+            return "local"
+        return "other"
+    if update_auth.origin_matches(
+        update_auth.configured_origin(),
+        host_header=host,
+        origin_header=request.headers.get("origin"),
+    ):
+        return "remote"
+    return "other"
+
+
+@app.get("/api/update/capability")
+async def update_capability(request: Request) -> Dict[str, Any]:
+    from .onboard import update_auth, update_control
+
+    plane = _update_request_class(request)
+    if plane == "other":
+        raise HTTPException(status_code=403, detail="unavailable")
+    payload = update_control.capability(__version__)
+    payload["enrolled"] = bool(
+        update_auth.validate_session(request.cookies.get(update_auth.SESSION_COOKIE))
+    )
+    return payload
+
+
+@app.post("/api/update/enroll")
+async def update_enroll(request: Request, payload: Dict[str, Any] = None) -> JSONResponse:
+    from .onboard import update_auth
+
+    plane = _update_request_class(request)
+    # Enroll makes sense only for the remote plane: a localhost browser already holds
+    # the per-process write token. Local and other callers get a flat 403 (a local CLI
+    # mints codes via `tokdash update-enroll`, not via this route).
+    if plane != "remote":
+        raise HTTPException(status_code=403, detail="unavailable")
+    if update_auth.enrollment_locked():
+        raise HTTPException(status_code=429, detail="Too many enrollment attempts. Wait a few minutes.")
+    code = str((payload or {}).get("code") or "")
+    if not update_auth.redeem_pairing_code(code):
+        raise HTTPException(status_code=403, detail="Invalid or expired pairing code.")
+    session = update_auth.create_session()
+    if not session:
+        raise HTTPException(status_code=403, detail="Remote updates are not configured on this host.")
+    response = JSONResponse({"csrf": session["csrf"], "expires_at": session["expires_at"]})
+    # Host-only (no Domain), Secure (the only real remote path is the HTTPS Serve route),
+    # HttpOnly, SameSite=Lax: the cookie authenticates THIS origin's pages only, and no
+    # script or localStorage ever sees it. State lives server-side and survives restart.
+    response.set_cookie(
+        update_auth.SESSION_COOKIE,
+        session["token"],
+        max_age=update_auth.SESSION_TTL_SECONDS,
+        secure=True,
+        httponly=True,
+        samesite="lax",
+        path="/",
+    )
+    return response
+
+
+@app.post("/api/update/start")
+async def update_start(request: Request, payload: Dict[str, Any] = None) -> JSONResponse:
+    from .onboard import update_control
+
+    plane = _update_request_class(request)
+    if plane == "local":
+        ok = True
+    elif plane == "remote":
+        ok = _update_remote_authorized(request, require_session=True)
+    else:
+        ok = False
+    if not ok:
+        raise HTTPException(status_code=403, detail="unavailable")
+    version = str((payload or {}).get("version") or "").strip()
+    status, body = update_control.start_update(version, current_version=__version__)
+    return JSONResponse(body, status_code=status)
+
+
+@app.get("/api/update/status")
+async def update_status(request: Request, job: Optional[str] = None) -> Dict[str, Any]:
+    from .onboard import update_auth, update_jobs
+
+    plane = _update_request_class(request)
+    if plane == "other":
+        raise HTTPException(status_code=403, detail="unavailable")
+    if plane == "remote":
+        # Status is a read, but it is a remote read of a control-plane endpoint: the
+        # enrolled session (cookie + exact origin) is required, CSRF is not (no state
+        # changes on GET).
+        if not _update_remote_authorized(request, require_session=True):
+            raise HTTPException(status_code=403, detail="unavailable")
+    if job:
+        record = update_jobs.get_job(job)
+    else:
+        record = update_jobs.latest_job()
+    return {"job": update_jobs.public_view(record)}

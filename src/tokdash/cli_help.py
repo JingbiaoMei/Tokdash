@@ -39,6 +39,7 @@ _SECTIONS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
             ("setup", "install the local-only background service"),
             ("doctor", "check the install and the service"),
             ("update", "upgrade tokdash and restart the service"),
+            ("update-enroll", "issue a pairing code for dashboard updates"),
             ("uninstall", "revert what setup did"),
             ("version", "print the version"),
         ),
@@ -71,6 +72,7 @@ COMMAND_VERBS = (
     "setup",
     "doctor",
     "update",
+    "update-enroll",
     "uninstall",
 )
 

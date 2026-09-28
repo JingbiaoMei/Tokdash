@@ -11,6 +11,7 @@ just because it happened to run without a terminal.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -22,7 +23,20 @@ from pathlib import Path, PureWindowsPath
 from typing import Any, Dict, List, Optional, Tuple
 
 from .. import osinfo
-from . import detect, launchd, manifest, paths, plan, runtime, systemd, tailscale, updatecheck, winsched
+from . import (
+    detect,
+    launchd,
+    manifest,
+    paths,
+    plan,
+    runtime,
+    systemd,
+    tailscale,
+    update_mechanics,
+    updatecheck,
+    update_jobs,
+    winsched,
+)
 from .plan import DEFAULT_PORT, Options
 
 EXIT_OK = 0
@@ -49,6 +63,7 @@ def options_from_args(args) -> Options:
         purge=getattr(args, "purge", False),
         keep_runtime=getattr(args, "keep_runtime", False),
         force=getattr(args, "force", False),
+        to_version=getattr(args, "to_version", None),
     )
 
 
@@ -60,6 +75,8 @@ def run_lifecycle(args) -> int:
         return cmd_doctor(opts)
     if opts.action == "update":
         return cmd_update(opts)
+    if opts.action == "update-enroll":
+        return cmd_update_enroll(opts)
     if opts.action == "uninstall":
         return cmd_uninstall(opts)
     _err(f"unknown lifecycle command: {opts.action}")
@@ -1049,6 +1066,10 @@ def cmd_update(opts: Options) -> int:
     Ownership does NOT gate update — the user explicitly asked to upgrade — but the method
     must be one we can drive in place (pipx / managed venv). An ``existing`` interpreter
     (unknown package manager) or a missing manifest only prints guidance and never mutates.
+
+    The run is recorded in the shared update journal and holds the shared update lock, so
+    a concurrent dashboard apply attaches to the live job instead of double-applying.
+    ``--to X.Y.Z`` pins the exact release (same builder the dashboard helper uses).
     """
     man = manifest.read_manifest()
     method = (man or {}).get("install_method")
@@ -1056,12 +1077,26 @@ def cmd_update(opts: Options) -> int:
     venv_python = (man or {}).get("python_path") or str(paths.managed_venv_python())
     runtime_command = list((man or {}).get("runtime_command") or [])
 
+    target = (getattr(opts, "to_version", None) or "").strip() or None
+    if target is not None:
+        from .. import __version__ as running
+        if not update_mechanics.valid_target_version(target):
+            return _update_guidance(opts, f"--to {opts.to_version!r} is not a plain release version (e.g. `tokdash update --to 2.7.0`).")
+        if not updatecheck._is_newer(target, running):
+            return _update_guidance(opts, f"--to v{target} is not newer than the running v{running}.")
+
     if method == "pipx":
-        if not detect.find_pipx():
+        # A pinned target installs through the pipx venv's own pip (``pipx upgrade`` has
+        # no version selector); the unpinned path keeps using the pipx front-end.
+        if target is None and not detect.find_pipx():
             return _update_guidance(opts, "pipx is recorded but not on PATH; run `pipx upgrade tokdash` yourself.")
-        cmd = ["pipx", "upgrade", "tokdash"]
+        cmd = update_mechanics.install_argv("pipx", venv_python, target)
+        if cmd is None:
+            return _update_guidance(opts, "pipx is recorded but no interpreter is recorded to upgrade in place.")
     elif method == "managed-venv":
-        cmd = [venv_python, "-m", "pip", "install", "-U", "tokdash"]
+        cmd = update_mechanics.install_argv("managed-venv", venv_python, target)
+        if cmd is None:
+            return _update_guidance(opts, "A managed venv is recorded but no interpreter is recorded to upgrade in place.")
     elif method is None:
         return _update_guidance(
             opts,
@@ -1095,6 +1130,7 @@ def cmd_update(opts: Options) -> int:
         # Use the SAME `has_managed_service` key as the live result below so a bundler reading
         # the --json output sees one stable schema across dry-run and apply.
         payload = {"ok": True, "action": "update", "install_method": method, "command": cmd,
+                   "target_version": target,
                    "has_managed_service": restart_managed, "service_type": service_type, "dry_run": True}
         if opts.json:
             _print_json(payload)
@@ -1109,32 +1145,145 @@ def cmd_update(opts: Options) -> int:
                     print(f"Would restart: systemctl --user restart {service_name}")
         return EXIT_OK
 
+    # --- shared journal + lock (feasibility §6.1) ---------------------------------
+    # Same lock the dashboard helper holds for its whole apply: a live job means an
+    # updater is mid-flight, so attach (exit 0, explain) instead of racing it. Journal
+    # failures (read-only state dir …) degrade to the pre-journal behavior, never to a
+    # refusal of the terminal verb the user explicitly ran.
+    # Probe the running version once: it is both the journal's ``from_version`` and the
+    # report's ``version_before`` — a second probe could straddle a concurrent upgrade
+    # and make the two disagree.
     version_before = _runtime_tokdash_version(runtime_command, venv_python)
+
+    stack = None
+    job_id = None
+    try:
+        existing = update_jobs.latest_job()
+        if existing and existing.get("phase") not in update_jobs.TERMINAL_PHASES and not update_jobs.is_stale(existing):
+            return _update_guidance(
+                opts,
+                f"An update is already running (job {existing.get('id')}, phase {existing.get('phase')}). "
+                "The dashboard shows its progress; nothing to do here.",
+            )
+        job, created = update_jobs.create_job(
+            to_version=target,
+            from_version=version_before,
+            trigger="cli",
+            install_argv=list(cmd),
+            service_type=service_type,
+            service_name=service_name,
+            service_marker=service.get("marker"),
+            python_path=str((man or {}).get("python_path") or venv_python),
+            usage_db=str(paths.usage_db_path()),
+        )
+        if not created:
+            return _update_guidance(
+                opts,
+                f"An update is already running (job {job.get('id')}). Attached to it; nothing to do here.",
+            )
+        job_id = job["id"]
+        stack = contextlib.ExitStack()
+        stack.enter_context(update_jobs.with_update_lock())
+    except Exception:
+        stack = None
+        job_id = None
+
+    try:
+        if job_id:
+            try:
+                update_jobs.set_phase(job_id, "installing")
+            except Exception:
+                pass
+        result = _apply_cli_update(
+            opts, cmd, method, service_type, restart_managed, service_name,
+            venv_python, runtime_command, man, job_id=job_id, version_before=version_before,
+        )
+    finally:
+        if stack is not None:
+            try:
+                stack.close()
+            except Exception:
+                pass
+
+    if job_id:
+        try:
+            if result.get("ok"):
+                update_jobs.set_phase(
+                    job_id, "succeeded", failed_phase=None,
+                    result_version=result.get("version_after"), message=None,
+                )
+            elif result.get("restart_failed"):
+                update_jobs.set_phase(job_id, "failed", failed_phase="starting", message=result.get("restart_detail") or "service restart failed")
+            else:
+                update_jobs.set_phase(job_id, "failed", failed_phase="install", message=str(result.get("error") or "upgrade failed"))
+        except Exception:
+            pass
+
+    return _emit_update_result(opts, result)
+
+
+def cmd_update_enroll(opts: Options) -> int:
+    """Mint a single-use pairing code for dashboard update enrollment (§5).
+
+    Deliberately terminal-only: possession of a shell on the host is the proof that
+    authorizes a browser to update this machine. The code is short-lived, single-use,
+    and stored hashed; it works only on the exact configured dashboard origin.
+    """
+    from . import update_auth
+
+    origin = update_auth.configured_origin()
+    try:
+        code = update_auth.create_pairing_code()
+    except Exception as exc:
+        _err(f"could not create pairing code: {exc}")
+        return EXIT_FAIL
+    if opts.json:
+        _print_json({
+            "ok": True, "action": "update-enroll", "code": code,
+            "expires_in": update_auth.PAIR_TTL_SECONDS, "origin": origin,
+        })
+    else:
+        print(f"Pairing code: {code}")
+        print(f"Enter it once on the dashboard's update panel, within {update_auth.PAIR_TTL_SECONDS // 60} minutes.")
+        if origin:
+            print(f"It works only on the dashboard at {origin}.")
+        else:
+            print("NOTE: no update origin is configured yet (TOKDASH_UPDATE_ORIGIN env or")
+            print('      "update_origin" in <data dir>/config.json), so remote enrollment is')
+            print("      currently rejected. Set the exact HTTPS dashboard origin first, e.g.:")
+            print('      {"update_origin": "https://your-host.tailnet.ts.net"}')
+    return EXIT_OK
+
+
+def _apply_cli_update(opts, cmd, method, service_type, restart_managed, service_name,
+                      venv_python, runtime_command, man, job_id=None,
+                      version_before=None) -> Dict[str, Any]:
+    """The mutation body of ``cmd_update``, run under the shared update lock.
+
+    ``version_before`` is the caller's single pre-update version probe (shared with the
+    journal's ``from_version`` so the two can never disagree).
+    """
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
     except Exception as exc:
-        return _emit_update_result(
-            opts,
-            {
-                "ok": False,
-                "action": "update",
-                "install_method": method,
-                "version_before": version_before,
-                "error": f"upgrade failed: {exc}",
-            },
-        )
+        return {
+            "ok": False,
+            "action": "update",
+            "install_method": method,
+            "job_id": job_id,
+            "version_before": version_before,
+            "error": f"upgrade failed: {exc}",
+        }
     if proc.returncode != 0:
         detail = (proc.stderr or proc.stdout or "").strip()[-500:]
-        return _emit_update_result(
-            opts,
-            {
-                "ok": False,
-                "action": "update",
-                "install_method": method,
-                "version_before": version_before,
-                "error": detail or "upgrade failed",
-            },
-        )
+        return {
+            "ok": False,
+            "action": "update",
+            "install_method": method,
+            "job_id": job_id,
+            "version_before": version_before,
+            "error": detail or "upgrade failed",
+        }
     version_after = _runtime_tokdash_version(runtime_command, venv_python)
     updated = (version_before != version_after) if version_before and version_after else None
 
@@ -1214,24 +1363,22 @@ def cmd_update(opts: Options) -> int:
         else:
             restart_failed = True  # a managed service exists but systemd is unreachable
 
-    return _emit_update_result(
-        opts,
-        {
-            "ok": not restart_failed,
-            "action": "update",
-            "install_method": method,
-            "command": cmd,
-            "version_before": version_before,
-            "version_after": version_after,
-            "updated": updated,
-            "has_managed_service": restart_managed,
-            "service_type": service_type,
-            "service_name": service_name,
-            "service_restarted": restarted,
-            "restart_failed": restart_failed,
-            "restart_detail": restart_detail,
-        },
-    )
+    return {
+        "ok": not restart_failed,
+        "action": "update",
+        "install_method": method,
+        "job_id": job_id,
+        "command": cmd,
+        "version_before": version_before,
+        "version_after": version_after,
+        "updated": updated,
+        "has_managed_service": restart_managed,
+        "service_type": service_type,
+        "service_name": service_name,
+        "service_restarted": restarted,
+        "restart_failed": restart_failed,
+        "restart_detail": restart_detail,
+    }
 
 
 def _runtime_tokdash_version(runtime_command: List[str], python_path: str = "") -> Optional[str]:

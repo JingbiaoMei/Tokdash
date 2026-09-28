@@ -37,6 +37,7 @@ class Options:
     purge: bool = False
     keep_runtime: bool = False
     force: bool = False
+    to_version: Optional[str] = None
 
 
 def _is_loopback(bind: str) -> bool:

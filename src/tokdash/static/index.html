@@ -19067,19 +19067,35 @@
       usageReportWireShare();
     }
 
+    // The previously active tab is tracked state, not a DOM query: mid
+    // transition a query returns panels whose .active removal is still pending,
+    // which is how rapid clicking produced two active panels (or none).
+    let currentDashboardTab = 'overview';
+
     function activateDashboardTab(tab) {
       const button = document.querySelector(`.tab-btn[data-tab="${tab}"]`);
       const content = document.getElementById(`${tab}-content`);
       if (!button || !content) return;
 
-      const previousActiveContent = document.querySelector('.tab-content.active');
+      const previousActiveContent = currentDashboardTab !== tab
+        ? document.getElementById(`${currentDashboardTab}-content`)
+        : null;
+      currentDashboardTab = tab;
       document.querySelectorAll('.tab-btn').forEach((item) => item.setAttribute('aria-selected', 'false'));
       button.setAttribute('aria-selected', 'true');
 
       const sidebarItem = document.querySelector(`.sidebar-nav-item[data-tab-target="${tab}"]`);
-      if (window.TokDashAnimations && typeof window.TokDashAnimations.animateTabTransition === 'function' && previousActiveContent !== content) {
+      // Exactly one active panel, committed synchronously — even if an
+      // animation from a previous click is still running.
+      if (window.TokDashAnimations && typeof window.TokDashAnimations.animateTabTransition === 'function' && previousActiveContent && previousActiveContent !== content) {
+        document.querySelectorAll('.tab-content.active').forEach((item) => {
+          if (item !== previousActiveContent && item !== content) item.classList.remove('active');
+        });
         window.TokDashAnimations.animateTabTransition(previousActiveContent, content, sidebarItem || button);
       } else {
+        if (window.TokDashAnimations && typeof window.TokDashAnimations.stopTabTransitions === 'function') {
+          window.TokDashAnimations.stopTabTransitions();
+        }
         document.querySelectorAll('.tab-content').forEach((item) => item.classList.remove('active'));
         content.classList.add('active');
       }

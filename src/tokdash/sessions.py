@@ -6843,6 +6843,13 @@ def _hermes_rich_session_detail(session_id: str, raw: Dict[str, Any], session: D
             is_live = ended_at is None and last_activity and (now_sec - float(last_activity) < 900)
             detail_data["metadata"]["is_live"] = bool(is_live)
             break
+        except (OSError, sqlite3.Error, ValueError):
+            # Corrupt/foreign DB (or junk last_activity values): skip this file
+            # and keep scanning, mirroring the listing loader's per-DB guard.
+            # Without this, a foreign state.db scanned before the session's own
+            # database raised out of the loop and killed detail lookup for every
+            # valid session living in a later DB.
+            continue
         finally:
             conn.close()
     return detail_data

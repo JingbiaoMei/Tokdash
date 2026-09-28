@@ -446,3 +446,33 @@ def test_session_detail_exposes_no_transcripts(monkeypatch, tmp_path):
     assert detail["messages"][0]["content_chars"] == len("SECRET user prompt text")
     assert detail["metadata"]["message_count"] >= 1
 
+
+
+def test_foreign_db_first_does_not_break_later_detail(monkeypatch, tmp_path):
+    """Regression: a foreign state.db scanned BEFORE the session's own database
+    used to raise out of _hermes_rich_session_detail's loop (its per-DB try had
+    no except) and kill get_session_detail for every valid session living in a
+    later database. The listing loader has always skipped foreign DBs per-file
+    (see the parity comment in _load_hermes_sessions); the detail scan must too.
+    """
+    foreign = _home(tmp_path, "foreign")
+    conn = sqlite3.connect(str(foreign / "state.db"))
+    conn.executescript("CREATE TABLE unrelated (id INTEGER PRIMARY KEY, note TEXT);")
+    conn.commit()
+    conn.close()
+
+    valid = _home(tmp_path, "valid")
+    _write_db(
+        valid,
+        [_row("h-later", "deepseek-chat", "deepseek", 1779395293.0,
+              100, 10, 5, 1, title="Later db session")],
+        messages=[(1, "h-later", "user", "a prompt", 1779395294.0)],
+    )
+
+    # hermes_search_dirs keeps HERMES_HOME order: the foreign DB is scanned first.
+    monkeypatch.setenv("HERMES_HOME", f"{foreign},{valid}")
+
+    detail = get_session_detail("hermes", "h-later")
+
+    assert detail.get("messages"), "detail from the later database must still resolve"
+    assert detail["messages"][0]["role"] == "user"

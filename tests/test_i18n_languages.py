@@ -148,6 +148,29 @@ def test_language_mechanism_supports_all_languages() -> None:
     assert "selectedLang === 'system' ? detectBrowserLang()" in source
 
 
+def test_hit_rate_headers_carry_translated_hint() -> None:
+    source = INDEX_HTML.read_text(encoding="utf-8")
+    # Static headers take the hint through data-i18n-title; the Apps & Models
+    # sub-tables are rebuilt per render and set it with t() directly.
+    headers = re.findall(r'<th\b[^>]*data-sortable="cache_hit_rate"[^>]*>', source)
+    assert len(headers) > 20, "Hit % headers not found"
+    bare = [h for h in headers if "cacheHitRateHint" not in h]
+    assert not bare, f"{len(bare)} Hit % headers lack the translated hint"
+    # A hardcoded English title stays English in every language.
+    assert 'title="Cache hit rate' not in source
+
+
+def test_quota_poll_options_use_translated_minute_unit() -> None:
+    source = INDEX_HTML.read_text(encoding="utf-8")
+    select_start = source.index('<select id="quotaIntervalSelect"')
+    select = source[select_start : source.index("</select>", select_start)]
+    assert re.findall(r'<option value="(\d+)"', select) == ["15", "30", "60", "120"]
+    apply_start = source.index("function applyI18n()")
+    apply_body = source[apply_start : source.index("\n    }\n", apply_start)]
+    assert "#quotaIntervalSelect option" in apply_body
+    assert "${option.value} ${t('minuteShort')}" in apply_body
+
+
 @pytest.mark.parametrize("readme", TRANSLATED_READMES)
 def test_translated_readmes_cover_zai_quota(readme: str) -> None:
     source = (REPO_ROOT / readme).read_text(encoding="utf-8")

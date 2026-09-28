@@ -127,9 +127,12 @@ def test_rapid_tab_switching_keeps_exactly_one_active_panel(tmp_path):
     harness = """
 // --- stand-ins ---------------------------------------------------------------
 function respectsReducedMotion() { return false; }
+// anime-stop.js is an import stripped from the harness; replicate it.
+function stopAnimation(a) { if (a && typeof a.pause === 'function') a.pause(); return null; }
 const liveAnims = [];
 function animate(el, opts) {
-  const a = { stopped: false, stop() { this.stopped = true; /* anime v4: no onComplete on stop */ } };
+  // anime 4.0.0 instance: pause() is the stop API, and it never runs onComplete
+  const a = { stopped: false, pause() { this.stopped = true; } };
   liveAnims.push(a);
   return a;
 }
@@ -219,3 +222,75 @@ def test_reset_zeroes_bars_and_values():
     for bar in ("compPromptBar", "compCacheBar", "compOutputBar", "compReasoningBar"):
         assert bar in fn
     assert "'—'" in fn or '"—"' in fn
+
+
+# ---------------------------------------------------------------------------
+# P2 (round 4) — the cache bar's in-flight animation must not outrank the reset
+# ---------------------------------------------------------------------------
+
+MICRO_JS = (STATIC / "js" / "animations" / "micro.js").read_text(encoding="utf-8")
+
+
+def test_cache_hit_bar_tracks_and_stops_its_animations():
+    fn = MICRO_JS[MICRO_JS.index("function animateCacheHitBar"):]
+    assert "__cacheBarAnims" in fn, "animations must be tracked per bar"
+    assert "stopCacheBarAnims(barEl);" in fn[: fn.index("respectsReducedMotion")] , (
+        "previous animations must be stopped before starting new ones"
+    )
+
+
+def test_stop_cache_hit_bar_is_exported():
+    assert "export function stopCacheHitBar" in MICRO_JS
+
+
+ANIM_MODULES = STATIC / "js" / "animations"
+
+
+def test_anime_stop_helper_uses_pause_not_stop():
+    helper = (ANIM_MODULES / "anime-stop.js").read_text(encoding="utf-8")
+    assert "anim.pause()" in helper, (
+        "the bundled anime 4.0.0 has no stop() — pause() is the real API"
+    )
+
+
+def test_no_module_relies_on_the_missing_stop_method_guard():
+    # `typeof anim.stop === 'function'` is always false in this anime build;
+    # a guard around it is a silent no-op that lets cancelled animations keep
+    # writing to their target.
+    for js in sorted(ANIM_MODULES.glob("*.js")):
+        if js.name == "anime-stop.js":
+            continue
+        src = js.read_text(encoding="utf-8")
+        assert "typeof anim.stop === 'function'" not in src, js.name
+        assert "typeof rateAnimation.stop" not in src, js.name
+        assert "typeof pulseAnimation.stop" not in src, js.name
+
+
+def test_reset_stops_cache_animation_before_writing_width():
+    fn = INDEX_HTML[INDEX_HTML.index("function resetTokenComposition"):]
+    fn = fn[: fn.index("\n    function ", 10)]
+    stop = fn.index("stopCacheHitBar")
+    write = fn.index("style.width = '0%'")
+    assert 0 < stop < write, (
+        "anime keeps ticking after external style writes: an un-stopped width "
+        "animation restores its stale percentage over the reset"
+    )
+
+
+# ---------------------------------------------------------------------------
+# P2 (round 4) — "All Tools" must not reveal or open empty session panels
+# ---------------------------------------------------------------------------
+
+def test_all_filter_restores_render_invariant_not_blanket_show():
+    fn = INDEX_HTML[INDEX_HTML.index("function filterSessionPanels"):]
+    fn = fn[: fn.index("\n    function ", 10)]
+    all_branch = fn[fn.index("if (toolName === 'all')"):]
+    all_branch = all_branch[: all_branch.index("} else if")]
+    assert "hasContent ? '' : 'none'" in all_branch, (
+        "the all-branch must hide zero-session wrappers (the updateSessionPanel "
+        "invariant), not blanket display:'' all 21 sections"
+    )
+    assert "sessionPanelShouldOpen" in all_branch, (
+        "open state returns to the collapse state machine, not forced open"
+    )
+    assert "panel.open = true" not in fn

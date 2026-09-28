@@ -9,6 +9,7 @@ on:
 jobs:
   test:
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -42,7 +43,9 @@ jobs:
         run: python -m compileall -q src/tokdash main.py docs/guides/agents/openclaw_reporting/openclaw_cron_job.py
 
       - name: Test
-        run: pytest -q
+        # The thread watchdog also works on Windows and dumps every thread on
+        # timeout. Verbose output identifies the test if the runner is killed.
+        run: python -m pytest -vv --durations=20 --timeout=180 --timeout-method=thread
 
       # Every winsched unit test fakes `schtasks`; this is the only place the rendered
       # task XML meets the real Task Scheduler. Added after `tokdash setup` failed on a

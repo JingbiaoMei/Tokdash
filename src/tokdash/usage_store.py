@@ -1509,6 +1509,22 @@ class UsageEntryStore:
                 conn.commit()
                 return True
 
+    def file_contexts(self, source: str) -> dict[str, Any]:
+        """Previously established file metadata, including durable missing files."""
+        with closing(self._connect()) as conn:
+            rows = conn.execute(
+                "SELECT path, signature FROM file_state WHERE source = ?", (source,),
+            ).fetchall()
+        contexts = {}
+        for row in rows:
+            try:
+                context = json.loads(row["signature"]).get("extra", {}).get("context")
+            except (ValueError, TypeError, AttributeError):
+                continue
+            if context is not None:
+                contexts[str(row["path"])] = context
+        return contexts
+
     def sync_files(
         self,
         source: str,
@@ -1522,6 +1538,7 @@ class UsageEntryStore:
         ] = None,
         durable: Optional[bool] = None,
         cross_file_stable_keys: bool = False,
+        file_context: Optional[dict[str, Any]] = None,
     ) -> bool:
         """:meth:`_sync_files_now`, one in flight per source (see ``_single_flight_sync``)."""
         return _single_flight_sync(
@@ -1537,6 +1554,7 @@ class UsageEntryStore:
                 parse_file_tail_entries=parse_file_tail_entries,
                 durable=durable,
                 cross_file_stable_keys=cross_file_stable_keys,
+                file_context=file_context,
             ),
         )
 
@@ -1553,6 +1571,7 @@ class UsageEntryStore:
         ] = None,
         durable: Optional[bool] = None,
         cross_file_stable_keys: bool = False,
+        file_context: Optional[dict[str, Any]] = None,
     ) -> bool:
         """Sync a file-backed source by replacing only changed files.
 
@@ -1583,13 +1602,27 @@ class UsageEntryStore:
         when the owner was deleted or rewritten, and the reparse-survivors
         paths promote a surviving copy) instead of letting whichever file
         parsed last own the key.
+
+        ``file_context`` stores parser-supplied dependencies in each file's
+        signature. Its optional integer ``dedup_priority`` precedes the
+        timestamp/path ordering (lower wins); Pi uses ancestry depth so an
+        original session owns copied billing even if a fork sorts first.
+        Previously indexed contexts remain available through ``file_contexts``
+        for durable files whose logs have disappeared.
         """
         files = _normalize_file_signatures(file_signatures)
+        # Cross-file metadata can change a file's event identities without
+        # changing its bytes. Keep this dependency local to the affected file.
+        file_extra = {path: {"mode": "file"} for path, _, _ in files}
+        if file_context:
+            for path, extra in file_extra.items():
+                if path in file_context:
+                    extra["context"] = file_context[path]
         file_sig_by_path = {
             path: build_source_signature(
                 files=[(path, mtime_ns, size)],
                 parser=parser,
-                extra={"mode": "file"},
+                extra=file_extra[path],
             )
             for path, mtime_ns, size in files
         }
@@ -1651,7 +1684,7 @@ class UsageEntryStore:
                 old_sig = build_source_signature(
                     files=[(path, int(state.get("mtime_ns") or 0), old_size)],
                     parser=parser,
-                    extra={"mode": "file"},
+                    extra=file_extra[path],
                 )
                 if size > old_size and old_sig == state.get("signature"):
                     try:
@@ -1741,8 +1774,19 @@ class UsageEntryStore:
                         )
                     )
 
+        # An ancestry-aware source can prefer the original session over a copy.
+        # Keep archived priorities too: a retained parent's billing must not be
+        # overwritten by a newly indexed descendant. Other sources remain at 0
+        # and retain the existing (timestamp, path) winner rule.
+        priorities = {}
+        if file_context:
+            for path, context in {**self.file_contexts(source), **file_context}.items():
+                if isinstance(context, dict):
+                    priorities[path] = int(context.get("dedup_priority", 0))
+
         with usage_db_process_lock(self.path):
             with closing(self._connect()) as conn:
+                conn.create_function("usage_file_priority", 1, lambda path: priorities.get(path, 0))
                 conn.execute("BEGIN IMMEDIATE")
                 self._drop_stale_pricing_identity(conn, pricing_identity)
                 for path in removed_paths:
@@ -1791,9 +1835,11 @@ class UsageEntryStore:
                             raw_json = excluded.raw_json,
                             billing_json = excluded.billing_json,
                             cost_authoritative = excluded.cost_authoritative
-                        WHERE excluded.timestamp < usage_entries.timestamp
-                           OR (excluded.timestamp = usage_entries.timestamp
-                               AND excluded.file_path <= usage_entries.file_path)
+                        WHERE usage_file_priority(excluded.file_path) < usage_file_priority(usage_entries.file_path)
+                           OR (usage_file_priority(excluded.file_path) = usage_file_priority(usage_entries.file_path)
+                               AND (excluded.timestamp < usage_entries.timestamp
+                                    OR (excluded.timestamp = usage_entries.timestamp
+                                        AND excluded.file_path <= usage_entries.file_path)))
                     """
                 else:
                     insert_sql = """
@@ -1860,7 +1906,7 @@ class UsageEntryStore:
                             build_source_signature(
                                 files=[(path, mtime_ns, safe_offset)],
                                 parser=parser,
-                                extra={"mode": "file"},
+                                extra=file_extra[path],
                             ),
                             int(datetime.now(timezone.utc).timestamp() * 1000),
                             len(entries),

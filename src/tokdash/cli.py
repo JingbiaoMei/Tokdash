@@ -16,6 +16,7 @@ import uvicorn
 
 from . import __version__, osinfo
 from .api import app
+from .cli_help import COMMAND_VERBS, brief_help
 from .compute import compute_usage
 from .sources.quota.config import POLL_INTERVAL_FLOOR_SECONDS
 
@@ -72,6 +73,10 @@ def _positive_int_env(name: str, default: int) -> int:
 
 def build_parser(prog: str) -> argparse.ArgumentParser:
     parser = TokdashArgumentParser(prog=prog, description="Tokdash")
+    # One flat parser carries the flags of every verb, so argparse's own usage line
+    # would enumerate all of them (it did: six wrapped lines before the first help
+    # text). The verbs are the contract; the flags follow below, grouped per verb.
+    parser.usage = "%(prog)s <command> [options]"
     parser.add_argument(
         "--version",
         action="version",
@@ -82,7 +87,7 @@ def build_parser(prog: str) -> argparse.ArgumentParser:
         "command",
         nargs="?",
         default=None,
-        choices=["serve", "export", "db", "quota", "tui", "report", "version", "setup", "doctor", "update", "uninstall"],
+        choices=list(COMMAND_VERBS),
         help="Command (default: show help)",
     )
     parser.add_argument(
@@ -93,100 +98,106 @@ def build_parser(prog: str) -> argparse.ArgumentParser:
         help="Database action for `tokdash db` or quota action for `tokdash quota` (default: status)",
     )
 
-    # Serve options
-    parser.add_argument(
+    net = parser.add_argument_group("address and port (serve / setup / doctor)")
+    server = parser.add_argument_group("server (serve)")
+    net.add_argument(
         "--bind",
         "--host",
         dest="bind",
         default=os.environ.get("TOKDASH_HOST", "127.0.0.1"),
         help="Bind address (default: 127.0.0.1)",
     )
-    parser.add_argument(
+    net.add_argument(
         "--port",
         type=_port_type,
         default=None,
         help="Port to listen on (default: 55423)",
     )
-    parser.add_argument(
+    server.add_argument(
         "--log-level",
         default=os.environ.get("TOKDASH_LOG_LEVEL", "info"),
         help="Uvicorn log level (default: info)",
     )
-    parser.add_argument(
+    server.add_argument(
         "--no-open",
         action="store_true",
         help="Don't automatically open the browser",
     )
-    parser.add_argument(
+    dev = parser.add_argument_group("development fixture (serve)")
+    dev.add_argument(
         "--dev-fixture",
         choices=["dense"],
         default=None,
         help="Serve seeded synthetic data for visual development (never reads local history)",
     )
-    parser.add_argument(
+    dev.add_argument(
         "--dev-seed",
         type=int,
         default=None,
         help="Reproduce a development fixture dataset with a specific integer seed",
     )
 
-    # Export options
-    parser.add_argument(
+    window = parser.add_argument_group("usage window (export / report / tui)")
+    out = parser.add_argument_group("output (export / report / db / quota)")
+    window.add_argument(
         "--period",
         default="today",
         help='Usage period: "today", "week", "month", or an integer number of days (default: today)',
     )
-    parser.add_argument(
+    out.add_argument(
         "--pretty",
         action="store_true",
         help="Pretty-print JSON output",
     )
-    parser.add_argument(
+    out.add_argument(
         "--json",
         action="store_true",
-        help="(compat) export outputs JSON by default",
+        help="(compat) `export` is JSON by default; selects JSON output for `report` and the lifecycle verbs",
     )
-    parser.add_argument(
+    out.add_argument(
         "--output",
         type=str,
         help="Write output to a file instead of stdout",
     )
-    parser.add_argument(
+    out.add_argument(
         "--include-quota",
         action="store_true",
-        help="For `tokdash export`, include local quota state. Off by default.",
+        help="`export` only: include local quota state. Off by default.",
     )
-    parser.add_argument(
+    db = parser.add_argument_group("usage database (db)")
+    preview = parser.add_argument_group("dry run (db repair / setup / update / uninstall)")
+    db.add_argument(
         "--verify-period",
         default="today",
-        help='Period for `tokdash db verify` (default: today)',
+        help='Period for `db verify` (default: today)',
     )
-    parser.add_argument(
+    preview.add_argument(
         "--dry-run",
         action="store_true",
-        help="For `tokdash db repair`, report checks without changing counters. "
-        "For setup/update/uninstall, print the plan/command and change nothing.",
+        help="db repair: report the checks without changing counters. Lifecycle verbs: print the "
+        "plan/command and change nothing.",
     )
-    parser.add_argument("--codex-api", choices=["on", "off"], help="For `tokdash quota consent`: enable/disable Codex API quota polling.")
-    parser.add_argument("--claude-api", choices=["on", "off"], help="For `tokdash quota consent`: enable/disable Claude API quota polling.")
-    parser.add_argument("--antigravity-api", choices=["on", "off"], help="For `tokdash quota consent`: enable/disable Antigravity API quota polling.")
-    parser.add_argument("--minimax-api", choices=["on", "off"], help="For `tokdash quota consent`: enable/disable MiniMax Token Plan quota polling.")
-    parser.add_argument("--kimi-api", choices=["on", "off"], help="For `tokdash quota consent`: enable/disable Kimi Code quota polling.")
-    parser.add_argument("--grok-api", choices=["on", "off"], help="For `tokdash quota consent`: enable/disable Grok Build quota polling.")
-    parser.add_argument("--zai-api", choices=["on", "off"], help="For `tokdash quota consent`: enable/disable Z.ai Coding Plan quota polling.")
-    parser.add_argument("--opencode-go-api", dest="opencode_go_api", choices=["on", "off"], help="For `tokdash quota consent`: enable/disable OpenCode Go subscription quota polling.")
-    parser.add_argument("--commandcode-api", dest="commandcode_api", choices=["on", "off"], help="For `tokdash quota consent`: enable/disable Command Code subscription quota polling.")
-    parser.add_argument(
+    quota = parser.add_argument_group("quota consent (quota consent)")
+    quota.add_argument("--codex-api", choices=["on", "off"], help="Enable/disable Codex API quota polling.")
+    quota.add_argument("--claude-api", choices=["on", "off"], help="Enable/disable Claude API quota polling.")
+    quota.add_argument("--antigravity-api", choices=["on", "off"], help="Enable/disable Antigravity API quota polling.")
+    quota.add_argument("--minimax-api", choices=["on", "off"], help="Enable/disable MiniMax Token Plan quota polling.")
+    quota.add_argument("--kimi-api", choices=["on", "off"], help="Enable/disable Kimi Code quota polling.")
+    quota.add_argument("--grok-api", choices=["on", "off"], help="Enable/disable Grok Build quota polling.")
+    quota.add_argument("--zai-api", choices=["on", "off"], help="Enable/disable Z.ai Coding Plan quota polling.")
+    quota.add_argument("--opencode-go-api", dest="opencode_go_api", choices=["on", "off"], help="Enable/disable OpenCode Go subscription quota polling.")
+    quota.add_argument("--commandcode-api", dest="commandcode_api", choices=["on", "off"], help="Enable/disable Command Code subscription quota polling.")
+    quota.add_argument(
         "--credential-scan",
         choices=["on", "off"],
-        help="For `tokdash quota consent`: allow/deny read-only access to allowlisted local credential stores.",
+        help="Allow/deny read-only access to allowlisted local credential stores.",
     )
-    parser.add_argument("--enabled", choices=["on", "off"], help="For `tokdash quota consent`: master switch for all quota tracking.")
-    parser.add_argument(
+    quota.add_argument("--enabled", choices=["on", "off"], help="Master switch for all quota tracking.")
+    quota.add_argument(
         "--poll-interval",
         type=int,
         choices=[15, 30, 60, 120],
-        help="For `tokdash quota consent`: background poll interval in minutes (15/30/60/120).",
+        help="Background poll interval in minutes (15/30/60/120).",
     )
 
     # Lifecycle options (setup / doctor / update / uninstall). These reuse the global
@@ -1005,7 +1016,9 @@ def cli(argv: list[str] | None = None, prog: str = "tokdash") -> int:
     # unattended. Global flags alone land here too: flags with no verb are still
     # no verb.
     if args.command is None:
-        parser.print_help()
+        # The curated card, not the full reference: eleven verbs and none of the
+        # forty flags. `--help` still prints everything.
+        print(brief_help(prog), end="")
         return 0
 
     # Checked before any command dispatch, not inside the serve branch. These live

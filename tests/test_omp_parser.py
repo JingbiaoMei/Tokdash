@@ -151,7 +151,8 @@ def test_entry_and_sig_keys_are_source_scoped(monkeypatch, tmp_path):
     monkeypatch.setenv("PI_AGENT_DIR", str(home / ".omp" / "agent" / "sessions"))
     pi = PiAgentParser(PricingDatabase())
     pi_entries = pi.collect(None, None)
-    assert pi_entries[0]["entry_id"] == "pi_agent:2c4de341"
+    assert pi_entries[0]["entry_id"].startswith("pi_agent:")
+    assert "2c4de341" in pi_entries[0]["entry_id"]
     pi_sig_keys = [k for k in _sig_cache if k.startswith("pi_agent:")]
     assert len(pi_sig_keys) == 1
 

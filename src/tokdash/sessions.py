@@ -61,6 +61,7 @@ from .sources.coding_tools import (
     zcode_snapshot_signatures,
 )
 from .sources import dsh_log
+from .sources import pi_forks
 from .sources import openclaw as openclaw_source
 from .sources.dsh_log import (
     decode_dsh_session_file,
@@ -2807,12 +2808,7 @@ def _pi_session_signatures() -> tuple[tuple[str, int, int], ...]:
 
 
 def _pi_session_id_from_path(path: Path) -> str:
-    stem = path.stem
-    if "_" in stem:
-        tail = stem.rsplit("_", 1)[-1]
-        if tail:
-            return tail
-    return stem
+    return pi_forks.session_id_from_path(str(path))
 
 
 def _parse_pi_family_session_file(
@@ -2963,10 +2959,12 @@ def _parse_pi_family_session_file(
             )
             # omp: a resume continuation re-logs rows into a second file under
             # the same session UUID with the same outer id; the cross-file
-            # merge collapses by that id (Reconciliation rule 4). pi keeps the
-            # released field-identity merge and carries no event key.
+            # merge collapses by that id (Reconciliation rule 4). Pi carries
+            # corroborated event identities for its fork-family assembly pass.
             if entry_id and tool == "omp":
                 turn["_event_key"] = f"omp:{session_id}:{entry_id}"
+            elif tool == "pi_agent":
+                turn["_event_key"] = pi_forks.event_identity(obj)
             turns.append(turn)
 
     if not turns:
@@ -3005,8 +3003,14 @@ def _parse_omp_session_file(path_str: str, _mtime_ns: int, _size: int, _pricing_
 
 
 @_cached_session_aggregate()
-def _load_pi_sessions(signature: tuple[tuple[str, int, int], ...], pricing_sig: tuple = ()) -> Dict[str, Dict[str, Any]]:
+def _load_pi_sessions(
+    signature: tuple[tuple[str, int, int], ...], pricing_sig: tuple = (), ancestry: tuple = (),
+) -> Dict[str, Dict[str, Any]]:
     grouped: Dict[str, list[tuple[Any, Dict[str, Any]]]] = {}
+    previous = {path: {"session_id": sid, "parent_id": parent} for path, sid, parent in ancestry}
+    contexts = pi_forks.fork_contexts(signature, previous)
+    families = {}
+    first_path = {}
     transient_miss = False
     for path_str, mtime_ns, size in signature:
         try:
@@ -3018,17 +3022,52 @@ def _load_pi_sessions(signature: tuple[tuple[str, int, int], ...], pricing_sig: 
             continue
         if not raw:
             continue
+        families[str(raw["session_id"])] = contexts[path_str]
+        sid = str(raw["session_id"])
+        first_path[sid] = min(first_path.get(sid, path_str), path_str)
         grouped.setdefault(str(raw["session_id"]), []).append(
             ((path_str, mtime_ns, size), raw)
         )
     sessions = _assemble_raw_sessions("pi_agent", pricing_sig, grouped)
+    # Parents own copied events before descendants. When a parent is absent,
+    # the shallowest surviving fork (then file path) retains one copy, matching
+    # the live parser and usage store, including the recorded billing. Resolve
+    # the whole family before filtering dates, and never mutate cached raws.
+    seen = set()
+    result = {}
+    for sid in sorted(sessions, key=lambda sid: (families[sid]["dedup_priority"], first_path[sid])):
+        raw = sessions[sid]
+        turns = []
+        for turn in raw["turns"]:
+            key = pi_forks.event_key(families[sid]["family"], str(turn.get("_event_key") or ""))
+            if key and key in seen:
+                continue
+            if key:
+                seen.add(key)
+            turns.append(turn)
+        if turns:
+            result[sid] = {**raw, "turns": turns}
+    sessions = result
     if transient_miss:
         raise _PartialSessionView(sessions)
     return sessions
 
 
 def _pi_sessions() -> Dict[str, Dict[str, Any]]:
-    return _load_pi_sessions(_pi_session_signatures(), _pricing_signature())
+    ancestry = ()
+    if persistent_usage_db_enabled():
+        try:
+            contexts = UsageEntryStore().file_contexts("pi_agent")
+            ancestry = tuple(sorted(
+                (path, ctx["session_id"], ctx.get("parent_id", ""))
+                for path, ctx in contexts.items()
+                if isinstance(ctx, dict) and ctx.get("session_id")
+            ))
+        except UsageDatabaseSchemaTooNewError:
+            raise
+        except Exception:
+            logger.debug("Pi stored ancestry unavailable; using source files", exc_info=True)
+    return _load_pi_sessions(_pi_session_signatures(), _pricing_signature(), ancestry)
 
 
 def _hermes_db_paths() -> list[Path]:

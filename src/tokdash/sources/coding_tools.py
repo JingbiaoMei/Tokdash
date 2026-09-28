@@ -39,6 +39,7 @@ try:
         usage_entry_cost,
     )
     from . import dsh_log as dsh_log_module
+    from . import pi_forks
     from .dsh_log import decode_dsh_session_file, dsh_entry_id, dsh_file_signatures, fold_dsh_usage_samples
 except ImportError:  # pragma: no cover
     # Allow running as a script by file path.
@@ -52,6 +53,7 @@ except ImportError:  # pragma: no cover
         usage_entry_cost,
     )
     import dsh_log as dsh_log_module
+    import pi_forks
     from dsh_log import decode_dsh_session_file, dsh_entry_id, dsh_file_signatures, fold_dsh_usage_samples
 
 logger = logging.getLogger(__name__)
@@ -85,7 +87,8 @@ class SourceSyncCapability:
     # position owns the key — ties break on the lexicographically smallest
     # path, matching the parsers' own source-wide dedup — and re-parses
     # surviving files when the owner is removed or rewritten. See
-    # UsageEntryStore.sync_files.
+    # UsageEntryStore.sync_files. An explicit file-context dedup_priority may
+    # precede that ordering (Pi originals before descendant copies).
     cross_file_stable_keys: bool = False
     reason: str = ""
 
@@ -2499,11 +2502,13 @@ class PiAgentParser(BaseParser):
     source_name = "pi_agent"
     sync_capability = SourceSyncCapability(
         mode="file_replace",
+        cross_file_stable_keys=True,
         reason="Pi Agent JSONL rows have stable top-level IDs but are kept on full-file replacement until tail semantics are proven.",
     )
     # 1: assistant rows keyed on (session id, row id), totalTokens fallback
     #    attributed to output, a positive recorded cost.total kept as fixed.
-    persistent_parser_version = 1
+    # 2: fork-family event keys corroborate short ids with copied event fields.
+    persistent_parser_version = 2
 
     # Cost policy hook: when True, a positive usage.cost.total is kept as a
     # fixed (never-repriced) cost; when False, the row is priced from the
@@ -2547,6 +2552,17 @@ class PiAgentParser(BaseParser):
         cache_key = f"{self.source_name}:{','.join(str(d) for d in self.search_dirs)}"
         return _timed_sigs(cache_key, scan)
 
+    def prepare_file_context(self, signatures: tuple, previous_context: Optional[dict] = None) -> dict:
+        """Resolve ancestry before persistent ingestion narrows parsing to one file.
+
+        Family changes invalidate the affected file even if its bytes did not
+        change (e.g. an intermediate ancestor was restored). Ordinary appends
+        do not invalidate other files.
+        """
+        if self.source_name != "pi_agent":
+            return {}
+        return pi_forks.fork_contexts(signatures, previous_context)
+
     def _parse_all(self) -> List[Dict[str, Any]]:
         out: List[Dict[str, Any]] = []
         # Dedup by (session id, message id). Scoping on session id removes genuine
@@ -2554,8 +2570,17 @@ class PiAgentParser(BaseParser):
         # while avoiding dropping rows when Pi's 8-char hex message ids collide across
         # different sessions at scale — which would diverge from the session view.
         seen_ids: set = set()
+        seen_events: set = set()
+        signatures = self._file_signatures()
+        families = getattr(self, "_file_context", None)
+        if self.source_name == "pi_agent" and families is None:
+            families = self.prepare_file_context(signatures)
+        if self.source_name == "pi_agent":
+            signatures = sorted(signatures, key=lambda sig: (
+                families.get(sig[0], {}).get("dedup_priority", 0), sig[0],
+            ))
 
-        for path_str, _, _ in self._file_signatures():
+        for path_str, _, _ in signatures:
             try:
                 cur_model = ""
                 cur_provider = ""
@@ -2642,6 +2667,15 @@ class PiAgentParser(BaseParser):
                         if input_t == 0 and output_t == 0 and cache_r == 0 and cache_w == 0:
                             continue
 
+                        event_key = f"{self.source_name}:{entry_id}" if entry_id else ""
+                        if self.source_name == "pi_agent":
+                            family = families.get(path_str, {}).get("family", cur_session_id)
+                            event_key = pi_forks.event_key(family, pi_forks.event_identity(obj))
+                            if event_key and event_key in seen_events:
+                                continue
+                            if event_key:
+                                seen_events.add(event_key)
+
                         # Cost: prefer usage.cost.total when present and > 0,
                         # unless the source prices from the pricing DB itself
                         # (use_recorded_cost = False).
@@ -2672,7 +2706,7 @@ class PiAgentParser(BaseParser):
                             "reasoning": 0,
                             "cost": cost,
                             "timestamp": int(ts.timestamp() * 1000),
-                            "entry_id": f"{self.source_name}:{entry_id}" if entry_id else "",
+                            "entry_id": event_key,
                             "_billing": billing,
                         })
             except Exception:
@@ -2700,12 +2734,14 @@ class OmpParser(PiAgentParser):
     the dashboard. use_recorded_cost = False prices from the pricing DB
     instead; self-hosted ids absent from it cost 0.00.
 
-    O5: the two sources share ONE _parse_all implementation. A future edit
-    to PiAgentParser._parse_all changes the stored rows of BOTH pi_agent
-    and omp and needs persistent_parser_version bumps for BOTH.
+    O5: the two sources share ONE _parse_all implementation. An edit affecting
+    both sources' stored rows needs persistent_parser_version bumps for BOTH.
+    Pi's fork-family keys are source-gated and do not change OMP's v1 rows.
     """
 
     source_name = "omp"
+    persistent_parser_version = 1
+    sync_capability = SourceSyncCapability(mode="file_replace", reason="OMP session-scoped rows.")
     use_recorded_cost = False
 
     def __init__(self, pricing_db: PricingDatabase):

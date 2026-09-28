@@ -92,7 +92,9 @@ def _usage_store_live_sources(tracker: CodingToolsUsageTracker) -> list[str]:
     ]
 
 
-def _collect_parser_file(parser: Any, file_sig: tuple[str, int, int]) -> list[dict[str, Any]]:
+def _collect_parser_file(
+    parser: Any, file_sig: tuple[str, int, int], *, file_context: Optional[dict] = None,
+) -> list[dict[str, Any]]:
     # Parsers that expose the strict single-file entry point (``_parse_file_strict``)
     # are parsed through it, so a UsageFileVanished raised on the path the store
     # handed in reaches sync_files untouched and can be isolated there. The
@@ -103,11 +105,14 @@ def _collect_parser_file(parser: Any, file_sig: tuple[str, int, int]) -> list[di
     if strict is not None:
         return list(strict(file_sig))
     original_file_signatures = parser._file_signatures
+    original_context = getattr(parser, "_file_context", None)
     try:
         parser._file_signatures = lambda: (file_sig,)
+        parser._file_context = file_context
         return parser._parse_all()
     finally:
         parser._file_signatures = original_file_signatures
+        parser._file_context = original_context
 
 
 def _complete_jsonl_tail(path: str, start_offset: int) -> tuple[str, int]:
@@ -184,18 +189,26 @@ def _sync_usage_store(tracker: CodingToolsUsageTracker) -> tuple[UsageEntryStore
         files = parser._file_signatures()
         parser_sig = parser.persistent_parser_signature()
         if capability.mode == "file_replace":
+            prepare_context = getattr(parser, "prepare_file_context", None)
+            file_context = (
+                prepare_context(files, previous_context=store.file_contexts(name))
+                if prepare_context is not None else None
+            )
             store.sync_files(
                 name,
                 files,
                 parser=parser_sig,
                 pricing_identity=pricing,
-                parse_file_entries=lambda file_sig, parser=parser: _collect_parser_file(parser, file_sig),
+                parse_file_entries=lambda file_sig, parser=parser, context=file_context: _collect_parser_file(
+                    parser, file_sig, file_context=context,
+                ),
                 parse_file_tail_entries=(
                     (lambda file_sig, start_offset, parser=parser: _collect_parser_tail(parser, file_sig, start_offset))
                     if capability.append_jsonl
                     else None
                 ),
                 cross_file_stable_keys=capability.cross_file_stable_keys,
+                file_context=file_context,
             )
             continue
         if capability.mode != "source_replace":

@@ -55,7 +55,9 @@ def test_bare_command_prints_help_and_does_not_serve(capsys, monkeypatch):
     assert cli.cli([]) == 0
     out = capsys.readouterr().out
     assert "usage: tokdash" in out
-    assert "show help" in out  # the choices help line advertises the new default
+    # A bare `tokdash` prints the curated verb card. It says outright that
+    # nothing started, so the card cannot be misread as the old serve default.
+    assert "nothing was started" in out
     # Global flags with no verb are still no verb: help, not serve.
     assert cli.cli(["--no-open"]) == 0
     assert "usage: tokdash" in capsys.readouterr().out

@@ -14,11 +14,11 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import os
 import re
 import shutil
 import sys
 import types
-from types import SimpleNamespace
 
 import pytest
 
@@ -447,9 +447,10 @@ def test_width_is_80_when_piped_regardless_of_terminal_size(monkeypatch, no_db, 
         return real_build(usage, insights, active_time, **kwargs)
 
     monkeypatch.setattr(report, "build_report_segments", spy)
-    # report.py only reads .columns, so a stub terminal size is honest here.
+    # Preserve the tuple interface too: pytest's verbose reporter unpacks this
+    # shared function's result before monkeypatch teardown restores it.
     monkeypatch.setattr(shutil, "get_terminal_size",
-                        lambda fallback=(80, 24): SimpleNamespace(columns=200, lines=24))
+                        lambda fallback=(80, 24): os.terminal_size((200, 24)))
     _patch_fetchers(monkeypatch)
     report.run_report(_args())
     assert seen["width"] == 80
@@ -469,11 +470,11 @@ def test_width_from_terminal_when_tty(monkeypatch, no_db):
     monkeypatch.setattr(report, "glyph_style", lambda: "blocks")
     _patch_fetchers(monkeypatch)
     monkeypatch.setattr(shutil, "get_terminal_size",
-                        lambda fallback=(80, 24): SimpleNamespace(columns=300, lines=24))
+                        lambda fallback=(80, 24): os.terminal_size((300, 24)))
     report.run_report(_args())
     assert seen["width"] == 200  # capped
     monkeypatch.setattr(shutil, "get_terminal_size",
-                        lambda fallback=(80, 24): SimpleNamespace(columns=40, lines=24))
+                        lambda fallback=(80, 24): os.terminal_size((40, 24)))
     report.run_report(_args())
     assert seen["width"] == 60  # floored
 

@@ -294,7 +294,7 @@ def test_pi_agent_parser_default_dir_is_recursive(monkeypatch, tmp_path):
     entries = PiAgentParser(PricingDatabase()).collect(None, None)
 
     assert len(entries) == 2
-    assert {entry["entry_id"] for entry in entries} == {"pi_agent:root-msg", "pi_agent:nested-msg"}
+    assert {json.loads(entry["entry_id"].removeprefix("pi_agent:"))[0] for entry in entries} == {"root-session", "nested-session"}
 
 
 def test_pi_agent_model_change_modelid_with_slash_is_verbatim(monkeypatch, tmp_path):

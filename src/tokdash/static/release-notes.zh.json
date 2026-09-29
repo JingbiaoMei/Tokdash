@@ -3,6 +3,14 @@
   "source": "release-notes.json",
   "comment": "简体中文更新日志。项与 release-notes.json 按下标一一对齐；未翻译的版本回落英文。",
   "releases": {
+    "2.6.7": {
+      "added": [
+        "定价数据库按 2026-09-28 的扫描结果重新生成。Claude Sonnet 5.5 以每百万 token 输入 2.00 美元、输出 10.00 美元加入，缓存读取 0.20 美元、写入 2.50 美元；同批加入的还有 GLM 5.3 Prime（2.80 / 8.80 美元）、Qwen 3.8 Max Prime（4.00 / 12.00 美元）与 Command A Plus（0.30 / 1.50 美元）。新增别名 sonnet-5.5 与 sonnet55 指向该模型，因此 Claude Code 里的简短名称会像已有的 sonnet-5 一样正常计价，而不再算出 0。本次未包含该次扫描中标记为需要人工复核的 86 项调价。"
+      ],
+      "fixed": [
+        "配额轮询间隔与 Hit % 列头现在会跟随仪表盘的语言。静态的 Poll every 下拉框把 15 min 到 120 min 写死，因此在全部六种语言里始终是英文，而按服务器的同类下拉框早已使用已翻译的分钟单位；每个 Hit % 列头现在都采用现有的 cacheHitRateHint 译文——此前其中两个只有英文提示，另外 21 个则完全没有提示。"
+      ]
+    },
     "2.6.6": {
       "added": [
         "桌面仪表盘新增侧边栏：Overview、Sessions Explorer、Stats & Heatmap、Usage Report、Quota & Budgets、Servers 与 Pricing DB 作为导航项，底部是 What's New 与设置，页眉提供深浅色快速切换，Sessions 页的筛选行则按所选周期内真正有会话的工具生成。手机宽度保留原有标签栏，并补上原先藏在侧边栏里的齿轮与 What's New 图标，因此 768px 以下仍可打开设置与切换语言。",

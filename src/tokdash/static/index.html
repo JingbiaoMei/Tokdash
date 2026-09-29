@@ -2576,6 +2576,31 @@
       animation: sparklineDraw 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
     }
 
+  /* Tokdash toast notification */
+  .tokdash-toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: var(--color-text);
+    color: var(--color-bg);
+    padding: 10px 16px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-family: inherit;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease;
+    z-index: 9999;
+    max-width: 90vw;
+    text-align: center;
+  }
+  .tokdash-toast.show {
+    opacity: 1;
+    visibility: visible;
+    transform: translateX(-50%) translateY(0);
+  }
   </style>
   <script>document.write(`<link rel="stylesheet" href="${window.tokdashPath('/static/themes.css')}" />`);</script>
 </head>
@@ -5557,11 +5582,29 @@
     const appAssetWithBase = window.tokdashAssetWithBase || ((path) => appPath(path));
     // Dashboard front end - sidebar shell, i18n, light/dark theming
     // - "Streak" label (not "Current Streak")
+    // - Debug logging gated behind localStorage flag
+    const DEBUG = () => localStorage.getItem('tokdash-debug') === '1';
+
     // - Month/Year: streak within that view period
     // - 3D/All-time: current ongoing streak from today
     // - "Longest Streak" always shows longest ever across all data
-    console.log('📊 Tokdash dashboard');
 
+    // Show a non-blocking toast notification
+    function showToast(message) {
+      let toast = document.getElementById('tokdashToast');
+      if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'tokdashToast';
+        toast.className = 'tokdash-toast';
+        toast.setAttribute('role', 'status');
+        toast.setAttribute('aria-live', 'polite');
+        document.body.appendChild(toast);
+      }
+      toast.textContent = message;
+      toast.classList.add('show');
+      clearTimeout(toast._hideTimer);
+      toast._hideTimer = setTimeout(() => toast.classList.remove('show'), 4000);
+    }
     let toolChart = null;
     let modelChart = null;
     let sessionPerTurnChart = null;
@@ -6946,6 +6989,7 @@
         usageReportCardProjects: 'Top projects',
         usageReportCardBusiestLabel: 'Busiest day',
         usageReportCardNicknameFallback: 'this machine',
+        fetchDataFailed: "Couldn't load data. Check your server connection and try again.",
       },
       zh: {
         updateAvailable: '有新版本',
@@ -7498,6 +7542,7 @@
         usageReportCardProjects: '项目排名',
         usageReportCardBusiestLabel: '最忙的一天',
         usageReportCardNicknameFallback: '本机',
+        fetchDataFailed: "无法加载数据，请检查服务器连接后重试。",
       },
 
       ja: {
@@ -8051,6 +8096,7 @@
         usageReportCardProjects: 'プロジェクト上位',
         usageReportCardBusiestLabel: '最も多かった日',
         usageReportCardNicknameFallback: 'このマシン',
+        fetchDataFailed: "データを取得できませんでした。サーバー接続を確認してからもう一度お試しください。",
       },
 
       ko: {
@@ -8604,6 +8650,7 @@
         usageReportCardProjects: '상위 프로젝트',
         usageReportCardBusiestLabel: '가장 바빴던 날',
         usageReportCardNicknameFallback: '이 머신',
+        fetchDataFailed: "데이터를 불러오지 못했습니다. 서버 연결을 확인한 후 다시 시도해 주세요.",
       },
 
       es: {
@@ -9157,6 +9204,7 @@
         usageReportCardProjects: 'Proyectos principales',
         usageReportCardBusiestLabel: 'Día más intenso',
         usageReportCardNicknameFallback: 'esta máquina',
+        fetchDataFailed: "No se pudieron cargar los datos. Comprueba tu conexion al servidor e intentalo de nuevo.",
       },
 
       pt: {
@@ -9710,6 +9758,7 @@
         usageReportCardProjects: 'Projetos principais',
         usageReportCardBusiestLabel: 'Dia mais intenso',
         usageReportCardNicknameFallback: 'esta máquina',
+        fetchDataFailed: "Nao foi possivel carregar os dados. Verifique sua conexao com o servidor e tente novamente.",
       },
     };
 
@@ -12748,7 +12797,7 @@
         if (isSessionsActive()) renderSessionsTab();
         if (isServersActive()) renderServersTab();
         if (error?.status !== 503 && !lastUsageResponse) {
-          alert('Failed to fetch data. Check console for details.');
+          showToast(t('fetchDataFailed'));
         }
       } finally {
         if (forceRefresh) {
@@ -18885,7 +18934,7 @@
         stack.dataset.cardAudit = audits.join(' | ');
         stack.dataset.cardFile = usageReportCardFilename(model, 'green', 'light');
       }
-      console.debug(`tokdash report card fit (logical px, ${USAGE_REPORT_CARD.W}x${USAGE_REPORT_CARD.H})\n`
+      DEBUG() && console.debug(`tokdash report card fit (logical px, ${USAGE_REPORT_CARD.W}x${USAGE_REPORT_CARD.H})\n`
         + audits.join('\n')
         + `\nfile: ${usageReportCardFilename(model, 'green', 'light')}`);
     }
@@ -19028,7 +19077,7 @@
       usageReportRenderFooter(model);
       // Last, and off the main paint: the cards wait for webfonts and brand icons.
       usageReportRenderShare(model).catch((error) => {
-        console.warn('tokdash: the share cards did not paint', error);
+        DEBUG() && console.warn('tokdash: the share cards did not paint', error);
       });
     }
 

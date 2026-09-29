@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 2.6.7 - 2026-09-28
+
+### Added
+
+- Updated `src/tokdash/pricing_db.json` from pricing DB `2.0.29` to `2.0.32` (`lastUpdated: 2026-09-28T19:49:31Z`) with the auto-approved additions from the 2026-09-28 pricing-updater scan. Claude Sonnet 5.5 joins at $2.00 input / $10.00 output per MTok with cache at $0.20 read / $2.50 write, beside GLM 5.3 Prime ($2.80 / $8.80), Qwen 3.8 Max Prime ($4.00 / $12.00) and Command A Plus ($0.30 / $1.50). The new aliases `sonnet-5.5` and `sonnet55` resolve to `claude-sonnet-5.5`, matching the existing `sonnet-5`/`sonnet5` pair -- without them Claude Code's bare short name priced at nothing while `opus-5-5` already worked, and the hyphenated, dated-snapshot and provider-qualified spellings (`claude-sonnet-5-5`, `claude-sonnet-5.5-20260926`, `anthropic/claude-sonnet-5.5`, `-thinking`) were already covered by normalization. The 86 price changes the scan flagged for manual review are deliberately not part of this update. (#131)
+
+### Fixed
+
+- The quota poll interval and the `Hit %` column header now speak the dashboard's language. The static "Poll every" select hardcoded `15 min` through `120 min`, so it stayed English in all six locales while the per-server selects already used the translated minute unit; `applyI18n()` now relabels its options the same way. Two `Hit %` headers carried an English-only tooltip and the other 21 had none at all, so every one of them now takes the existing `cacheHitRateHint` translation, including the JS-built Apps & Models sub-tables. (#130)
+
 ## 2.6.6 - 2026-09-28
 
 ### Added

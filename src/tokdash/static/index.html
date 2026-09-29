@@ -24,72 +24,19 @@
     document.write(`<link rel="icon" href="${window.tokdashPath('/static/icons/icon-192.png')}" sizes="192x192" />`);
   </script>
 
-  <!-- CDN failure detection: show a toast when an external library fails to load -->
-  <script>
-    (function() {
-      var shownErrors = {};
-      var FALLBACK_MESSAGES = {
-        cdnTailwindFailed: 'Tailwind CSS failed to load. The dashboard may not display correctly.',
-        cdnChartFailed: 'Chart.js failed to load. Charts will not be available.',
-        cdnThreeFailed: 'Three.js failed to load. The 3D stats view will not be available.',
-        cdnFlatpickrFailed: 'Flatpickr failed to load. The date picker will not work.',
-        cdnFontsFailed: 'Google Fonts failed to load. Using system fonts.'
-      };
-      function showCdnError(key) {
-        try {
-          if (shownErrors[key]) return;
-          shownErrors[key] = true;
-          var msg = (typeof t === 'function' && t(key)) || FALLBACK_MESSAGES[key] || key;
-          var container = document.getElementById('cdn-error-container');
-          if (!container) {
-            container = document.createElement('div');
-            container.id = 'cdn-error-container';
-            container.style.cssText = 'position:fixed;top:12px;right:12px;z-index:99999;display:flex;flex-direction:column;gap:8px;max-width:400px;';
-            if (!document.body) {
-              document.addEventListener('DOMContentLoaded', function() { document.body.appendChild(container); });
-            } else {
-              document.body.appendChild(container);
-            }
-          }
-          var toast = document.createElement('div');
-          toast.setAttribute('role', 'alert');
-          toast.setAttribute('aria-live', 'assertive');
-          toast.style.cssText = 'background:var(--color-bg,#1e293b);color:var(--color-text,#f1f5f9);padding:12px 16px;border-radius:8px;font-size:13px;line-height:1.4;box-shadow:0 4px 12px rgba(0,0,0,0.3);border-left:4px solid #ef4444;display:flex;align-items:flex-start;gap:8px;';
-          var text = document.createElement('span');
-          text.style.flex = '1';
-          text.textContent = msg;
-          var closeBtn = document.createElement('button');
-          closeBtn.setAttribute('aria-label', 'Dismiss');
-          closeBtn.style.cssText = 'background:none;border:none;color:inherit;font-size:16px;cursor:pointer;padding:0;line-height:1;opacity:0.7;';
-          closeBtn.textContent = '×';
-          closeBtn.onclick = function() { toast.remove(); };
-          toast.appendChild(text);
-          toast.appendChild(closeBtn);
-          container.appendChild(toast);
-          setTimeout(function() {
-            toast.style.opacity = '0';
-            toast.style.transition = 'opacity 0.5s';
-            setTimeout(function() { toast.remove(); }, 500);
-          }, 8000);
-        } catch(e) { console.error('[Tokdash] CDN load failure:', key, e); }
-      }
-      window.showCdnError = showCdnError;
-    })();
-  </script>
-
   <!-- Fonts (Design System: Fira Code / Fira Sans) -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300,400,500,600,700,800&family=Inter:wght@300,400,500,600,700,800&family=Fira+Code:wght@400,500,600,700&family=Fira+Sans:wght@300,400,500,600,700&display=swap" rel="stylesheet" onerror="showCdnError('cdnFontsFailed')" />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700;800&family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
 
-  <script src="https://cdn.tailwindcss.com" onerror="showCdnError('cdnTailwindFailed')"></script>
-  <script>tailwind.config = { darkMode: 'class' }</script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js" onerror="showCdnError('cdnChartFailed')"></script>
-  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js" onerror="showCdnError('cdnThreeFailed')"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>if (window.tailwind) tailwind.config = { darkMode: 'class' }</script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
 
   <!-- Flatpickr Date Picker -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css" onerror="showCdnError('cdnFlatpickrFailed')">
-  <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.js" onerror="showCdnError('cdnFlatpickrFailed')"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.js"></script>
 
   <style>
     :root {
@@ -2634,6 +2581,112 @@
 </head>
 
 <body class="flex min-h-screen font-sans selection:bg-indigo-500 selection:text-white transition-colors duration-200 relative">
+  <!-- CDN failure banner. The live region exists in the markup from the start
+       (content inserted into a region that already exists is what screen
+       readers announce), and it is filled with t() at DOMContentLoaded, when
+       the translations are defined. Critical failures stay on screen until
+       dismissed, because the dashboard itself stays broken after them. -->
+  <div id="cdnFailureBanner" role="status" aria-live="polite" hidden
+       style="position:fixed;top:12px;right:12px;z-index:99999;display:flex;flex-direction:column;gap:8px;max-width:400px;"></div>
+  <script>
+    (function() {
+      // (key, severity, condition): the banner entry is built only when the
+      // condition is true. Critical entries stay until dismissed; warnings
+      // fade after 8s measured from when they become visible.
+      const CDN_CHECKS = [
+        ['cdnTailwindFailed', 'critical', () => !window.tailwind],
+        ['cdnChartFailed', 'critical', () => typeof Chart === 'undefined'],
+        ['cdnThreeFailed', 'warning', () => typeof THREE === 'undefined'],
+        ['cdnFlatpickrFailed', 'critical', () => typeof flatpickr === 'undefined'
+          || !Array.from(document.styleSheets).some((sheet) => {
+            try { return String(sheet.href || '').includes('/flatpickr'); }
+            catch (err) { return false; }
+          })],
+      ];
+
+      function addCdnFailure(key, severity) {
+        const banner = document.getElementById('cdnFailureBanner');
+        if (!banner) return;
+        if (banner.querySelector(`[data-cdn-key="${key}"]`)) return;
+        const card = document.createElement('div');
+        card.dataset.cdnKey = key;
+        card.style.cssText = 'background:var(--datepickr-panel-bg,var(--color-surface-glass,#ffffff));color:var(--color-text,#0f172a);padding:12px 16px;border-radius:8px;font-size:13px;line-height:1.4;box-shadow:var(--shadow-md,0 8px 24px rgba(15,23,42,0.08));border-left:4px solid ' + (severity === 'critical' ? '#ef4444' : '#f59e0b') + ';display:flex;align-items:flex-start;gap:8px;';
+        const text = document.createElement('span');
+        text.style.flex = '1';
+        // data-i18n makes applyI18n re-translate the card on a language switch;
+        // the assignment below only covers the display until the next pass.
+        text.setAttribute('data-i18n', key);
+        // The main script has run by DOMContentLoaded, but stay defensive: if it
+        // died before defining t(), show the key rather than throw.
+        text.textContent = typeof t === 'function' ? t(key) : key;
+        const closeBtn = document.createElement('button');
+        // The accessible name is the visually hidden translated child, so it
+        // re-translates with the data-i18n pass instead of freezing at the
+        // language the card was created in.
+        closeBtn.style.cssText = 'background:none;border:none;color:inherit;font-size:16px;cursor:pointer;padding:0;line-height:1;opacity:0.7;';
+        const closeGlyph = document.createElement('span');
+        closeGlyph.setAttribute('aria-hidden', 'true');
+        closeGlyph.textContent = '×';
+        const closeLabel = document.createElement('span');
+        // Inline sr-only styling: the class depends on Tailwind, which may be
+        // the very thing that failed to load.
+        closeLabel.style.cssText = 'position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;';
+        closeLabel.setAttribute('data-i18n', 'close');
+        closeLabel.textContent = typeof t === 'function' ? t('close') : 'close';
+        closeBtn.appendChild(closeGlyph);
+        closeBtn.appendChild(closeLabel);
+        closeBtn.onclick = () => {
+          card.remove();
+          if (!banner.firstElementChild) banner.hidden = true;
+        };
+        card.appendChild(text);
+        card.appendChild(closeBtn);
+        banner.appendChild(card);
+        banner.hidden = false;
+        if (severity !== 'critical') {
+          setTimeout(() => {
+            card.remove();
+            if (!banner.firstElementChild) banner.hidden = true;
+          }, 8000);
+        }
+      }
+
+      function reportCdnFailures() {
+        let shown = 0;
+        CDN_CHECKS.forEach(([key, severity, isFailed]) => {
+          let failed = false;
+          try { failed = isFailed(); } catch (err) { /* a probing error is not a load failure */ }
+          if (failed) {
+            console.error(`[Tokdash] Failed to load ${key.replace(/^cdn/, '').replace(/Failed$/, '')} from its CDN`);
+            addCdnFailure(key, severity);
+            shown += 1;
+          }
+        });
+        // Fonts cannot be checked synchronously: declared-but-not-yet-used faces
+        // are not "loaded" at DOMContentLoaded, so probing document.fonts here
+        // would false-positive. Force the load instead; no matching face means
+        // the Google Fonts stylesheet never arrived.
+        if (document.fonts && typeof document.fonts.load === 'function') {
+          document.fonts.load('16px "Fira Code"').then((faces) => {
+            if (!faces.length) {
+              console.error('[Tokdash] Failed to load Fonts from its CDN');
+              addCdnFailure('cdnFontsFailed', 'warning');
+            }
+          }).catch(() => {
+            console.error('[Tokdash] Failed to load Fonts from its CDN');
+            addCdnFailure('cdnFontsFailed', 'warning');
+          });
+        } // No FontFaceSet: cannot detect; fonts degrade to system fonts anyway.
+        return shown;
+      }
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', reportCdnFailures);
+      } else {
+        reportCdnFailures();
+      }
+    })();
+  </script>
   <!-- TokDash v4 SVG Hero Loader -->
   <div id="tokdash-loader" class="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-md transition-opacity duration-300" style="position:fixed !important; top:0 !important; left:0 !important; width:100vw !important; height:100vh !important; pointer-events:none; background: var(--color-bg);">
     <svg xmlns="http://www.w3.org/2000/svg" class="ap" viewBox="0 0 64 64" width="96" height="96" fill="none" role="img" aria-label="Loading">
@@ -7002,7 +7055,7 @@
         cdnTailwindFailed: 'Tailwind CSS failed to load. The dashboard may not display correctly.',
         cdnChartFailed: 'Chart.js failed to load. Charts will not be available.',
         cdnThreeFailed: 'Three.js failed to load. The 3D stats view will not be available.',
-        cdnFlatpickrFailed: 'Flatpickr failed to load. The date picker will not work.',
+        cdnFlatpickrFailed: 'Flatpickr failed to load. The date picker and data loading may not work.',
         cdnFontsFailed: 'Google Fonts failed to load. Using system fonts.',
       },
       zh: {
@@ -7559,7 +7612,7 @@
         cdnTailwindFailed: 'Tailwind CSS 加载失败，仪表板可能无法正常显示。',
         cdnChartFailed: 'Chart.js 加载失败，图表将不可用。',
         cdnThreeFailed: 'Three.js 加载失败，3D 统计视图将不可用。',
-        cdnFlatpickrFailed: 'Flatpickr 加载失败，日期选择器将无法使用。',
+        cdnFlatpickrFailed: 'Flatpickr 加载失败，日期选择与数据加载可能无法使用。',
         cdnFontsFailed: 'Google Fonts 加载失败，正在使用系统字体。',
       },
 
@@ -8117,7 +8170,7 @@
         cdnTailwindFailed: 'Tailwind CSS の読み込みに失敗しました。ダッシュボードが正しく表示されない可能性があります。',
         cdnChartFailed: 'Chart.js の読み込みに失敗しました。チャートは利用できません。',
         cdnThreeFailed: 'Three.js の読み込みに失敗しました。3D 統計ビューは利用できません。',
-        cdnFlatpickrFailed: 'Flatpickr の読み込みに失敗しました。日付ピッカーは動作しません。',
+        cdnFlatpickrFailed: 'Flatpickr の読み込みに失敗しました。日付選択とデータの読み込みができない可能性があります。',
         cdnFontsFailed: 'Google Fonts の読み込みに失敗しました。システムフォントを使用しています。',
       },
 
@@ -8675,7 +8728,7 @@
         cdnTailwindFailed: 'Tailwind CSS를 불러오지 못했습니다. 대시보드가 제대로 표시되지 않을 수 있습니다.',
         cdnChartFailed: 'Chart.js를 불러오지 못했습니다. 차트를 사용할 수 없습니다.',
         cdnThreeFailed: 'Three.js를 불러오지 못했습니다. 3D 통계 보기를 사용할 수 없습니다.',
-        cdnFlatpickrFailed: 'Flatpickr를 불러오지 못했습니다. 날짜 선택기가 작동하지 않습니다.',
+        cdnFlatpickrFailed: 'Flatpickr를 불러오지 못했습니다. 날짜 선택과 데이터 로딩이 작동하지 않을 수 있습니다.',
         cdnFontsFailed: 'Google Fonts를 불러오지 못했습니다. 시스템 폰트를 사용합니다.',
       },
 
@@ -9233,7 +9286,7 @@
         cdnTailwindFailed: 'Tailwind CSS no se pudo cargar. El panel puede no mostrarse correctamente.',
         cdnChartFailed: 'Chart.js no se pudo cargar. Los gráficos no estarán disponibles.',
         cdnThreeFailed: 'Three.js no se pudo cargar. La vista de estadísticas 3D no estará disponible.',
-        cdnFlatpickrFailed: 'Flatpickr no se pudo cargar. El selector de fechas no funcionará.',
+        cdnFlatpickrFailed: 'Flatpickr no se pudo cargar. El selector de fechas y la carga de datos podrían no funcionar.',
         cdnFontsFailed: 'Google Fonts no se pudo cargar. Usando fuentes del sistema.',
       },
 
@@ -9791,7 +9844,7 @@
         cdnTailwindFailed: 'Tailwind CSS não pôde ser carregado. O painel pode não ser exibido corretamente.',
         cdnChartFailed: 'Chart.js não pôde ser carregado. Os gráficos não estarão disponíveis.',
         cdnThreeFailed: 'Three.js não pôde ser carregado. A visualização de estatísticas 3D não estará disponível.',
-        cdnFlatpickrFailed: 'Flatpickr não pôde ser carregado. O seletor de datas não funcionará.',
+        cdnFlatpickrFailed: 'Flatpickr não pôde ser carregado. O seletor de datas e o carregamento de dados podem não funcionar.',
         cdnFontsFailed: 'Google Fonts não pôde ser carregado. Usando fontes do sistema.',
       },
     };
@@ -12205,6 +12258,13 @@
       if (!dateInput || !dateTrigger) return;
       dateTrigger.addEventListener('click', () => flatpickrInstance?.open());
 
+      // flatpickr comes from a CDN; without it this top-level call used to
+      // throw and take the rest of the main script (including the initial
+      // updateDashboardByDateRange) down with it.
+      if (typeof flatpickr !== 'function') {
+        console.error('[Tokdash] flatpickr is unavailable; the date range picker is disabled');
+        return;
+      }
       flatpickrInstance = flatpickr(dateInput, {
         mode: 'range',
         dateFormat: 'Y-m-d',
@@ -14158,6 +14218,10 @@
     function updateToolChart(byTool) {
       const canvas = document.getElementById('toolChart');
       if (!canvas) return;
+      // Chart.js comes from a CDN; without it new Chart throws and the tools
+      // and model tables (rendered after this call in renderOverviewTab)
+      // would never paint.
+      if (typeof Chart === 'undefined') return;
       const ctx = canvas.getContext('2d');
 
       const entries = Object.entries(byTool || {}).filter(([, v]) => Number(v?.tokens || 0) > 0)
@@ -14209,6 +14273,7 @@
     function updateModelChart(topModels) {
       const canvas = document.getElementById('modelChart');
       if (!canvas) return;
+      if (typeof Chart === 'undefined') return;
       const ctx = canvas.getContext('2d');
 
       // Served pre-ranked as top_models_by_cost. The sort stays because the
@@ -21738,6 +21803,9 @@
     function render3DCalendar(contributions) {
       const container = document.getElementById('calendar3D');
       if (!container) return;
+      // Three.js comes from a CDN; without it the scene construction below
+      // would throw on the first Profile visit.
+      if (typeof THREE === 'undefined') return;
 
       render3DLegend();
 

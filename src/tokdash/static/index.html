@@ -27,32 +27,53 @@
   <!-- CDN failure detection: show a toast when an external library fails to load -->
   <script>
     (function() {
-      var CDN_ERRORS = {
-        'cdn.tailwindcss.com': 'cdnTailwindFailed',
-        'cdn.jsdelivr.net/npm/chart.js': 'cdnChartFailed',
-        'cdn.jsdelivr.net/npm/three': 'cdnThreeFailed',
-        'cdn.jsdelivr.net/npm/flatpickr': 'cdnFlatpickrFailed',
-        'fonts.googleapis.com': 'cdnFontsFailed'
+      var shownErrors = {};
+      var FALLBACK_MESSAGES = {
+        cdnTailwindFailed: 'Tailwind CSS failed to load. The dashboard may not display correctly.',
+        cdnChartFailed: 'Chart.js failed to load. Charts will not be available.',
+        cdnThreeFailed: 'Three.js failed to load. The 3D stats view will not be available.',
+        cdnFlatpickrFailed: 'Flatpickr failed to load. The date picker will not work.',
+        cdnFontsFailed: 'Google Fonts failed to load. Using system fonts.'
       };
       function showCdnError(key) {
         try {
-          var msg = (typeof t === 'function' && t(key)) || key;
+          if (shownErrors[key]) return;
+          shownErrors[key] = true;
+          var msg = (typeof t === 'function' && t(key)) || FALLBACK_MESSAGES[key] || key;
           var container = document.getElementById('cdn-error-container');
           if (!container) {
             container = document.createElement('div');
             container.id = 'cdn-error-container';
             container.style.cssText = 'position:fixed;top:12px;right:12px;z-index:99999;display:flex;flex-direction:column;gap:8px;max-width:400px;';
-            document.body.appendChild(container);
+            if (!document.body) {
+              document.addEventListener('DOMContentLoaded', function() { document.body.appendChild(container); });
+            } else {
+              document.body.appendChild(container);
+            }
           }
           var toast = document.createElement('div');
-          toast.style.cssText = 'background:#1e293b;color:#f1f5f9;padding:12px 16px;border-radius:8px;font-size:13px;line-height:1.4;box-shadow:0 4px 12px rgba(0,0,0,0.3);border-left:4px solid #ef4444;';
-          toast.textContent = msg;
+          toast.setAttribute('role', 'alert');
+          toast.setAttribute('aria-live', 'assertive');
+          toast.style.cssText = 'background:var(--color-bg,#1e293b);color:var(--color-text,#f1f5f9);padding:12px 16px;border-radius:8px;font-size:13px;line-height:1.4;box-shadow:0 4px 12px rgba(0,0,0,0.3);border-left:4px solid #ef4444;display:flex;align-items:flex-start;gap:8px;';
+          var text = document.createElement('span');
+          text.style.flex = '1';
+          text.textContent = msg;
+          var closeBtn = document.createElement('button');
+          closeBtn.setAttribute('aria-label', 'Dismiss');
+          closeBtn.style.cssText = 'background:none;border:none;color:inherit;font-size:16px;cursor:pointer;padding:0;line-height:1;opacity:0.7;';
+          closeBtn.textContent = '×';
+          closeBtn.onclick = function() { toast.remove(); };
+          toast.appendChild(text);
+          toast.appendChild(closeBtn);
           container.appendChild(toast);
-          setTimeout(function() { toast.style.opacity = '0'; toast.style.transition = 'opacity 0.5s'; setTimeout(function() { toast.remove(); }, 500); }, 8000);
+          setTimeout(function() {
+            toast.style.opacity = '0';
+            toast.style.transition = 'opacity 0.5s';
+            setTimeout(function() { toast.remove(); }, 500);
+          }, 8000);
         } catch(e) { console.error('[Tokdash] CDN load failure:', key, e); }
       }
       window.showCdnError = showCdnError;
-      window.CDN_ERRORS = CDN_ERRORS;
     })();
   </script>
 

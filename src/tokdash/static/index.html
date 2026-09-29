@@ -6951,6 +6951,7 @@
         emptyMessages: 'No messages found',
         emptyRefreshData: 'No refresh data',
         emptyStats3DActiveDate: 'No active day',
+        emptyTopModel: 'No model data',
       },
       zh: {
         updateAvailable: '有新版本',
@@ -7508,6 +7509,7 @@
         emptyMessages: '暂无消息记录',
         emptyRefreshData: '暂无刷新数据',
         emptyStats3DActiveDate: '暂无活跃日期',
+        emptyTopModel: '暂无模型数据',
       },
 
       ja: {
@@ -8066,6 +8068,7 @@
         emptyMessages: 'メッセージ記録なし',
         emptyRefreshData: 'リフレッシュデータなし',
         emptyStats3DActiveDate: 'アクティブ日なし',
+        emptyTopModel: 'モデルデータなし',
       },
 
       ko: {
@@ -8624,6 +8627,7 @@
         emptyMessages: '메시지 기록 없음',
         emptyRefreshData: '새로고침 데이터 없음',
         emptyStats3DActiveDate: '활동 날짜 없음',
+        emptyTopModel: '모델 데이터 없음',
       },
 
       es: {
@@ -9182,6 +9186,7 @@
         emptyMessages: 'Sin mensajes encontrados',
         emptyRefreshData: 'Sin datos de actualización',
         emptyStats3DActiveDate: 'Sin día activo',
+        emptyTopModel: 'Sin datos de modelo',
       },
 
       pt: {
@@ -9740,6 +9745,7 @@
         emptyMessages: 'Nenhuma mensagem encontrada',
         emptyRefreshData: 'Nenhum dado de atualização',
         emptyStats3DActiveDate: 'Nenhum dia ativo',
+        emptyTopModel: 'Nenhum dado de modelo',
       },
     };
 
@@ -12486,7 +12492,7 @@
         topModelEl.title = top.name;
         document.getElementById('topModelMeta').textContent = `${formatCurrency(top.cost)} · ${formatTokenCount(top.tokens, true)}`;
       } else {
-        topModelEl.textContent = '—';
+        topModelEl.textContent = t('emptyTopModel');
         topModelEl.title = '';
         document.getElementById('topModelMeta').textContent = '—';
       }

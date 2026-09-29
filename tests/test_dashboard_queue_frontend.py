@@ -114,6 +114,9 @@ function sleep() {
 }
 let holdSleep = false;
 function releaseSleep() { heldSleep.resolve(); }
+// Tripwire: updateDashboard must never open a blocking dialog. A failure is
+// reported through setDashboardFetchStatus (the persistent #lastUpdate line);
+// any alert() call here is a regression.
 function alert(message) { log.alerts.push(String(message)); }
 function t(key) { return key; }
 
@@ -367,10 +370,12 @@ def test_a_superseded_failure_is_not_shown(tmp_path):
 
     stale = out["afterStaleFailure"]
     assert stale["errors"] == [], "a superseded failure must not reach the status line"
-    assert stale["alerts"] == []
-    # The queued request reports its own outcome, and the queue drains.
+    assert stale["alerts"] == [], "a superseded failure must not open a blocking dialog"
+    # The queued request reports its own outcome through the persistent status
+    # line, and the queue drains. No blocking alert: the failure is already on
+    # the #lastUpdate line, and a dialog would freeze the page.
     assert out["errors"] == ["current boom"]
-    assert out["alerts"] == ["Failed to fetch data. Check console for details."]
+    assert out["alerts"] == []
     assert out["updateInFlight"] is False
     assert out["pending"] is None
 

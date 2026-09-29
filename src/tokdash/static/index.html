@@ -5560,7 +5560,6 @@
     // - Month/Year: streak within that view period
     // - 3D/All-time: current ongoing streak from today
     // - "Longest Streak" always shows longest ever across all data
-    console.log('📊 Tokdash dashboard');
 
     let toolChart = null;
     let modelChart = null;
@@ -12747,9 +12746,12 @@
         if (isOverviewActive() && lastUsageResponse) renderOverviewTab(lastUsageResponse);
         if (isSessionsActive()) renderSessionsTab();
         if (isServersActive()) renderServersTab();
-        if (error?.status !== 503 && !lastUsageResponse) {
-          alert('Failed to fetch data. Check console for details.');
-        }
+        // A blocking alert() here would freeze the whole page, and it would fire
+        // even when setDashboardFetchStatus above has already written
+        // "Load failed" (t('loadFailed')) into the persistent #lastUpdate status
+        // line and showUsageRefreshReport has reported the failed refresh, so the
+        // failure is never silent; the real error stays in the console.error
+        // above. Nothing further to show the user.
       } finally {
         if (forceRefresh) {
           const remainingMs = 400 - (Date.now() - refreshStartedAt);

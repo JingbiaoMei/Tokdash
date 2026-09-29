@@ -6946,6 +6946,9 @@
         usageReportCardProjects: 'Top projects',
         usageReportCardBusiestLabel: 'Busiest day',
         usageReportCardNicknameFallback: 'this machine',
+        emptyTotalTokens: 'No tokens recorded',
+        emptyTotalCost: 'No cost data',
+        emptyMessages: 'No messages found',
       },
       zh: {
         updateAvailable: '有新版本',
@@ -7498,6 +7501,9 @@
         usageReportCardProjects: '项目排名',
         usageReportCardBusiestLabel: '最忙的一天',
         usageReportCardNicknameFallback: '本机',
+        emptyTotalTokens: '暂无 token 记录',
+        emptyTotalCost: '暂无费用数据',
+        emptyMessages: '暂无消息记录',
       },
 
       ja: {
@@ -8051,6 +8057,9 @@
         usageReportCardProjects: 'プロジェクト上位',
         usageReportCardBusiestLabel: '最も多かった日',
         usageReportCardNicknameFallback: 'このマシン',
+        emptyTotalTokens: 'トークン記録なし',
+        emptyTotalCost: 'コストデータなし',
+        emptyMessages: 'メッセージ記録なし',
       },
 
       ko: {
@@ -8604,6 +8613,9 @@
         usageReportCardProjects: '상위 프로젝트',
         usageReportCardBusiestLabel: '가장 바빴던 날',
         usageReportCardNicknameFallback: '이 머신',
+        emptyTotalTokens: '토큰 기록 없음',
+        emptyTotalCost: '비용 데이터 없음',
+        emptyMessages: '메시지 기록 없음',
       },
 
       es: {
@@ -9157,6 +9169,9 @@
         usageReportCardProjects: 'Proyectos principales',
         usageReportCardBusiestLabel: 'Día más intenso',
         usageReportCardNicknameFallback: 'esta máquina',
+        emptyTotalTokens: 'Sin tokens registrados',
+        emptyTotalCost: 'Sin datos de coste',
+        emptyMessages: 'Sin mensajes encontrados',
       },
 
       pt: {
@@ -9710,6 +9725,9 @@
         usageReportCardProjects: 'Projetos principais',
         usageReportCardBusiestLabel: 'Dia mais intenso',
         usageReportCardNicknameFallback: 'esta máquina',
+        emptyTotalTokens: 'Nenhum token registrado',
+        emptyTotalCost: 'Nenhum dado de custo',
+        emptyMessages: 'Nenhuma mensagem encontrada',
       },
     };
 
@@ -9886,6 +9904,15 @@
       // The card is already labelled "Total Tokens", so the value carries no unit
       // — it would only cost width the KPI row no longer has. The exact count in
       // the tooltip and the aria-label keep it.
+      if (overviewTotalTokensRaw === 0) {
+        valueElement.textContent = t('emptyTotalTokens');
+        valueElement.removeAttribute('tabindex');
+        valueElement.removeAttribute('aria-describedby');
+        valueElement.removeAttribute('aria-label');
+        tooltip.textContent = '-';
+        tooltip.hidden = true;
+        return;
+      }
       valueElement.textContent = overviewReadableTokens
         ? formatCompactTokenCount(overviewTotalTokensRaw)
         : formatNumber(overviewTotalTokensRaw);
@@ -12379,31 +12406,49 @@
     function renderOverviewTab(data) {
       if (!data) return;
       renderOverviewTokenTotal(data.total_tokens);
-      document.getElementById('totalCost').textContent = formatCurrency(data.total_cost);
-      document.getElementById('totalMessages').textContent = formatNumber(data.total_messages || 0);
+      const totalCostEl = document.getElementById('totalCost');
+      const totalMessagesEl = document.getElementById('totalMessages');
+      const costVal = Number(data.total_cost) || 0;
+      const msgVal = Number(data.total_messages) || 0;
+      if (costVal === 0) {
+        totalCostEl.textContent = t('emptyTotalCost');
+      } else {
+        totalCostEl.textContent = formatCurrency(data.total_cost);
+      }
+      if (msgVal === 0) {
+        totalMessagesEl.textContent = t('emptyMessages');
+      } else {
+        totalMessagesEl.textContent = formatNumber(data.total_messages || 0);
+      }
       const hitEl = document.getElementById('avgCacheHitRate');
       if (hitEl) hitEl.textContent = formatHitRate(data.cache_hit_rate);
 
       if (typeof window !== 'undefined' && window.TokDashAnimations && typeof window.TokDashAnimations.animateNumber === 'function') {
         const rawTokens = typeof overviewTotalTokensRaw !== 'undefined' ? overviewTotalTokensRaw : (Number(data.total_tokens) || 0);
-        window.TokDashAnimations.animateNumber(
-          document.getElementById('totalTokens'),
-          rawTokens,
-          1200,
-          (v) => (typeof overviewReadableTokens !== 'undefined' && overviewReadableTokens) ? formatCompactTokenCount(v) : formatNumber(v)
-        );
-        window.TokDashAnimations.animateNumber(
-          document.getElementById('totalCost'),
-          Number(data.total_cost) || 0,
-          1200,
-          (v) => formatCurrency(v)
-        );
-        window.TokDashAnimations.animateNumber(
-          document.getElementById('totalMessages'),
-          Number(data.total_messages) || 0,
-          1200,
-          (v) => formatNumber(v)
-        );
+        if (rawTokens !== 0) {
+          window.TokDashAnimations.animateNumber(
+            document.getElementById('totalTokens'),
+            rawTokens,
+            1200,
+            (v) => (typeof overviewReadableTokens !== 'undefined' && overviewReadableTokens) ? formatCompactTokenCount(v) : formatNumber(v)
+          );
+        }
+        if (costVal !== 0) {
+          window.TokDashAnimations.animateNumber(
+            document.getElementById('totalCost'),
+            costVal,
+            1200,
+            (v) => formatCurrency(v)
+          );
+        }
+        if (msgVal !== 0) {
+          window.TokDashAnimations.animateNumber(
+            document.getElementById('totalMessages'),
+            msgVal,
+            1200,
+            (v) => formatNumber(v)
+          );
+        }
         if (hitEl && data.cache_hit_rate !== null && data.cache_hit_rate !== undefined) {
           window.TokDashAnimations.animateNumber(
             hitEl,

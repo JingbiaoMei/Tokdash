@@ -24,19 +24,51 @@
     document.write(`<link rel="icon" href="${window.tokdashPath('/static/icons/icon-192.png')}" sizes="192x192" />`);
   </script>
 
+  <!-- CDN failure detection: show a toast when an external library fails to load -->
+  <script>
+    (function() {
+      var CDN_ERRORS = {
+        'cdn.tailwindcss.com': 'cdnTailwindFailed',
+        'cdn.jsdelivr.net/npm/chart.js': 'cdnChartFailed',
+        'cdn.jsdelivr.net/npm/three': 'cdnThreeFailed',
+        'cdn.jsdelivr.net/npm/flatpickr': 'cdnFlatpickrFailed',
+        'fonts.googleapis.com': 'cdnFontsFailed'
+      };
+      function showCdnError(key) {
+        try {
+          var msg = (typeof t === 'function' && t(key)) || key;
+          var container = document.getElementById('cdn-error-container');
+          if (!container) {
+            container = document.createElement('div');
+            container.id = 'cdn-error-container';
+            container.style.cssText = 'position:fixed;top:12px;right:12px;z-index:99999;display:flex;flex-direction:column;gap:8px;max-width:400px;';
+            document.body.appendChild(container);
+          }
+          var toast = document.createElement('div');
+          toast.style.cssText = 'background:#1e293b;color:#f1f5f9;padding:12px 16px;border-radius:8px;font-size:13px;line-height:1.4;box-shadow:0 4px 12px rgba(0,0,0,0.3);border-left:4px solid #ef4444;';
+          toast.textContent = msg;
+          container.appendChild(toast);
+          setTimeout(function() { toast.style.opacity = '0'; toast.style.transition = 'opacity 0.5s'; setTimeout(function() { toast.remove(); }, 500); }, 8000);
+        } catch(e) { console.error('[Tokdash] CDN load failure:', key, e); }
+      }
+      window.showCdnError = showCdnError;
+      window.CDN_ERRORS = CDN_ERRORS;
+    })();
+  </script>
+
   <!-- Fonts (Design System: Fira Code / Fira Sans) -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700;800&family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300,400,500,600,700,800&family=Inter:wght@300,400,500,600,700,800&family=Fira+Code:wght@400,500,600,700&family=Fira+Sans:wght@300,400,500,600,700&display=swap" rel="stylesheet" onerror="showCdnError('cdnFontsFailed')" />
 
-  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.tailwindcss.com" onerror="showCdnError('cdnTailwindFailed')"></script>
   <script>tailwind.config = { darkMode: 'class' }</script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js" onerror="showCdnError('cdnChartFailed')"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js" onerror="showCdnError('cdnThreeFailed')"></script>
 
   <!-- Flatpickr Date Picker -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">
-  <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css" onerror="showCdnError('cdnFlatpickrFailed')">
+  <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.js" onerror="showCdnError('cdnFlatpickrFailed')"></script>
 
   <style>
     :root {
@@ -6946,6 +6978,11 @@
         usageReportCardProjects: 'Top projects',
         usageReportCardBusiestLabel: 'Busiest day',
         usageReportCardNicknameFallback: 'this machine',
+        cdnTailwindFailed: 'Tailwind CSS failed to load. The dashboard may not display correctly.',
+        cdnChartFailed: 'Chart.js failed to load. Charts will not be available.',
+        cdnThreeFailed: 'Three.js failed to load. The 3D stats view will not be available.',
+        cdnFlatpickrFailed: 'Flatpickr failed to load. The date picker will not work.',
+        cdnFontsFailed: 'Google Fonts failed to load. Using system fonts.',
       },
       zh: {
         updateAvailable: '有新版本',
@@ -7498,6 +7535,11 @@
         usageReportCardProjects: '项目排名',
         usageReportCardBusiestLabel: '最忙的一天',
         usageReportCardNicknameFallback: '本机',
+        cdnTailwindFailed: 'Tailwind CSS 加载失败，仪表板可能无法正常显示。',
+        cdnChartFailed: 'Chart.js 加载失败，图表将不可用。',
+        cdnThreeFailed: 'Three.js 加载失败，3D 统计视图将不可用。',
+        cdnFlatpickrFailed: 'Flatpickr 加载失败，日期选择器将无法使用。',
+        cdnFontsFailed: 'Google Fonts 加载失败，正在使用系统字体。',
       },
 
       ja: {
@@ -8051,6 +8093,11 @@
         usageReportCardProjects: 'プロジェクト上位',
         usageReportCardBusiestLabel: '最も多かった日',
         usageReportCardNicknameFallback: 'このマシン',
+        cdnTailwindFailed: 'Tailwind CSS の読み込みに失敗しました。ダッシュボードが正しく表示されない可能性があります。',
+        cdnChartFailed: 'Chart.js の読み込みに失敗しました。チャートは利用できません。',
+        cdnThreeFailed: 'Three.js の読み込みに失敗しました。3D 統計ビューは利用できません。',
+        cdnFlatpickrFailed: 'Flatpickr の読み込みに失敗しました。日付ピッカーは動作しません。',
+        cdnFontsFailed: 'Google Fonts の読み込みに失敗しました。システムフォントを使用しています。',
       },
 
       ko: {
@@ -8604,6 +8651,11 @@
         usageReportCardProjects: '상위 프로젝트',
         usageReportCardBusiestLabel: '가장 바빴던 날',
         usageReportCardNicknameFallback: '이 머신',
+        cdnTailwindFailed: 'Tailwind CSS를 불러오지 못했습니다. 대시보드가 제대로 표시되지 않을 수 있습니다.',
+        cdnChartFailed: 'Chart.js를 불러오지 못했습니다. 차트를 사용할 수 없습니다.',
+        cdnThreeFailed: 'Three.js를 불러오지 못했습니다. 3D 통계 보기를 사용할 수 없습니다.',
+        cdnFlatpickrFailed: 'Flatpickr를 불러오지 못했습니다. 날짜 선택기가 작동하지 않습니다.',
+        cdnFontsFailed: 'Google Fonts를 불러오지 못했습니다. 시스템 폰트를 사용합니다.',
       },
 
       es: {
@@ -9157,6 +9209,11 @@
         usageReportCardProjects: 'Proyectos principales',
         usageReportCardBusiestLabel: 'Día más intenso',
         usageReportCardNicknameFallback: 'esta máquina',
+        cdnTailwindFailed: 'Tailwind CSS no se pudo cargar. El panel puede no mostrarse correctamente.',
+        cdnChartFailed: 'Chart.js no se pudo cargar. Los gráficos no estarán disponibles.',
+        cdnThreeFailed: 'Three.js no se pudo cargar. La vista de estadísticas 3D no estará disponible.',
+        cdnFlatpickrFailed: 'Flatpickr no se pudo cargar. El selector de fechas no funcionará.',
+        cdnFontsFailed: 'Google Fonts no se pudo cargar. Usando fuentes del sistema.',
       },
 
       pt: {
@@ -9710,6 +9767,11 @@
         usageReportCardProjects: 'Projetos principais',
         usageReportCardBusiestLabel: 'Dia mais intenso',
         usageReportCardNicknameFallback: 'esta máquina',
+        cdnTailwindFailed: 'Tailwind CSS não pôde ser carregado. O painel pode não ser exibido corretamente.',
+        cdnChartFailed: 'Chart.js não pôde ser carregado. Os gráficos não estarão disponíveis.',
+        cdnThreeFailed: 'Three.js não pôde ser carregado. A visualização de estatísticas 3D não estará disponível.',
+        cdnFlatpickrFailed: 'Flatpickr não pôde ser carregado. O seletor de datas não funcionará.',
+        cdnFontsFailed: 'Google Fonts não pôde ser carregado. Usando fontes do sistema.',
       },
     };
 

@@ -88,6 +88,21 @@ def managed_manifest(tmp_path, marker_id="abcd1234"):
     return data, marker
 
 
+def stub_who_runs_the_service(monkeypatch, py, *, bind="127.0.0.1", port=55423, loaded=True):
+    """Make the two live-system probes in update_eligibility answer about this tmp env:
+    the LOADED ExecStart and the interpreter identity of the current process."""
+    import os
+
+    if loaded:
+        monkeypatch.setattr(
+            update_eligibility, "_loaded_execstart",
+            lambda unit: [str(py), "-m", "tokdash", "serve", "--bind", bind, "--port", str(port)],
+        )
+    else:
+        monkeypatch.setattr(update_eligibility, "_loaded_execstart", lambda unit: None)
+    monkeypatch.setattr(update_eligibility, "_current_interpreter", lambda: os.path.realpath(str(py)))
+
+
 @pytest.fixture()
 def eligible_env(tmp_path, monkeypatch):
     """A manifest + unit that pass eligibility; interpreter file must exist too."""
@@ -96,6 +111,7 @@ def eligible_env(tmp_path, monkeypatch):
     py.parent.mkdir(parents=True, exist_ok=True)
     py.write_text("#!/bin/sh\n", encoding="utf-8")
     monkeypatch.setattr(update_eligibility.detect, "systemd_user_available", lambda: True)
+    stub_who_runs_the_service(monkeypatch, py)
     return data, marker
 
 
@@ -226,12 +242,68 @@ def test_managed_venv_requires_marker(tmp_path, monkeypatch):
     data["install_method"] = "managed-venv"
     manifest_mod.write_manifest(data)
     monkeypatch.setattr(update_eligibility.detect, "systemd_user_available", lambda: True)
+    stub_who_runs_the_service(monkeypatch, py)
     result = update_eligibility.check_eligibility()
     assert result["eligible"] is False
     assert "marker" in result["reason"]
     paths.runtime_marker_path().parent.mkdir(parents=True, exist_ok=True)
     paths.runtime_marker_path().write_text("created-by=tokdash-setup\n", encoding="utf-8")
     assert update_eligibility.check_eligibility()["eligible"] is True
+
+
+# --- eligibility: LOADED service proof (§3 — a manifest-selected file proves nothing) ---
+
+
+def test_eligibility_rejects_unrelated_app(eligible_env, monkeypatch):
+    data, _ = eligible_env
+    py = Path(data["python_path"])
+    monkeypatch.setattr(
+        update_eligibility, "_loaded_execstart",
+        lambda unit: [str(py), "-m", "totally_unrelated_app", "serve",
+                      "--bind", "127.0.0.1", "--port", "55423"],
+    )
+    r = update_eligibility.check_eligibility()
+    assert not r["eligible"]
+    assert "Tokdash" in r["reason"]
+
+
+def test_eligibility_rejects_foreign_interpreter(eligible_env, monkeypatch):
+    monkeypatch.setattr(
+        update_eligibility, "_loaded_execstart",
+        lambda unit: ["/usr/bin/python3", "-m", "tokdash", "serve",
+                      "--bind", "127.0.0.1", "--port", "55423"],
+    )
+    r = update_eligibility.check_eligibility()
+    assert not r["eligible"]
+    assert "interpreter" in r["reason"]
+
+
+def test_eligibility_requires_running_managed_instance(eligible_env, monkeypatch):
+    # A dev run against the same data dir must not drive the managed service.
+    monkeypatch.setattr(update_eligibility, "_current_interpreter", lambda: "/some/dev/python")
+    r = update_eligibility.check_eligibility()
+    assert not r["eligible"]
+    assert "managed service" in r["reason"]
+
+
+def test_eligibility_requires_loaded_unit(eligible_env, monkeypatch):
+    data, _ = eligible_env
+    stub_who_runs_the_service(monkeypatch, Path(data["python_path"]), loaded=False)
+    r = update_eligibility.check_eligibility()
+    assert not r["eligible"]
+    assert "not loaded" in r["reason"]
+
+
+def test_eligibility_rejects_port_drift(eligible_env, monkeypatch):
+    data, _ = eligible_env
+    py = Path(data["python_path"])
+    monkeypatch.setattr(
+        update_eligibility, "_loaded_execstart",
+        lambda unit: [str(py), "-m", "tokdash", "serve", "--bind", "127.0.0.1", "--port", "9999"],
+    )
+    r = update_eligibility.check_eligibility()
+    assert not r["eligible"]
+    assert "--port" in r["reason"]
 
 
 # --- job journal ----------------------------------------------------------------------
@@ -339,6 +411,54 @@ def test_reads_answer_while_a_runner_holds_the_lock():
         assert update_jobs.get_job(job["id"])["phase"] == "accepted"
 
 
+def test_journal_updates_are_thread_safe(data_dir):
+    # The helper's heartbeat thread and phase machine hit the same read-modify-write
+    # file; unsynchronized writers could resurrect a stale phase or corrupt the store.
+    import threading
+
+    job = _mk_job()
+    journal = update_helper.Journal(str(data_dir), lock_free=True)
+    errors = []
+
+    def hammer(tag):
+        for i in range(30):
+            try:
+                journal.update(job["id"], message=f"{tag}-{i}")
+            except Exception as exc:  # pragma: no cover - failure path detail
+                errors.append(exc)
+
+    threads = [threading.Thread(target=hammer, args=(n,)) for n in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert not errors
+    final = update_jobs.get_job(job["id"])
+    assert final["phase"] == "accepted"  # timestamp-only writes never move the phase
+    assert "-" in (final["message"] or "")  # one whole write survived, not a torn blend
+
+
+def test_stale_reconcile_never_blocks_behind_a_live_lock(data_dir):
+    # An async request handler must never wait on update.lock: a live updater holding
+    # it means the "stale" job is NOT interrupted — reconciliation skips, not stalls.
+    fcntl = pytest.importorskip("fcntl")
+    import os
+
+    job = _mk_job()
+    with update_jobs.with_update_lock():
+        data = update_jobs._load()
+        data["jobs"][job["id"]]["updated_at"] = "2020-01-01T00:00:00Z"
+        update_jobs._store(data)
+    fd = os.open(str(update_jobs.update_lock_path()), os.O_RDWR | os.O_CREAT, 0o600)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    try:
+        latest = update_jobs.latest_job()  # would hang forever on a blocking reconcile
+        assert latest["phase"] == "accepted"  # untouched: holder is a live updater
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+
+
 # --- auth -------------------------------------------------------------------------------
 
 
@@ -398,6 +518,20 @@ def test_sessions_survive_and_expire():
 
 def test_no_session_without_origin():
     assert update_auth.create_session() is None
+
+
+def test_csrf_rotation_recovers_after_token_loss(monkeypatch):
+    # A reload keeps the cookie but loses the in-memory CSRF token; the session must be
+    # able to mint a fresh one — and the old token must die with the rotation.
+    monkeypatch.setenv("TOKDASH_UPDATE_ORIGIN", TAILNET_ORIGIN)
+    session = update_auth.create_session()
+    token = session["token"]
+    fresh = update_auth.rotate_csrf(token)
+    assert fresh and fresh != session["csrf"]
+    assert update_auth.validate_session(token, csrf=fresh)
+    assert not update_auth.validate_session(token, csrf=session["csrf"])
+    assert update_auth.rotate_csrf("bogus-token") is None
+    assert update_auth.rotate_csrf(None) is None
 
 
 # --- control ------------------------------------------------------------------------------
@@ -472,6 +606,27 @@ def test_start_launch_failure_records_failed(eligible_env, monkeypatch):
     assert status == 500
     job = update_jobs.latest_job()
     assert job["phase"] == "failed" and job["failed_phase"] == "preflight"
+
+
+def test_control_imports_on_platforms_without_fcntl():
+    # Windows capability checks must answer with manual guidance, not ImportError:
+    # importing control must not drag in the Linux-only helper module.
+    import os
+    import sys
+
+    probe = (
+        "import sys\n"
+        "sys.modules['fcntl'] = None\n"
+        "import tokdash.onboard.update_control as c\n"
+        "import tokdash.onboard.update_helper as h\n"
+        "assert h.fcntl is None\n"
+        "assert c._helper_source_path().is_file()\n"
+        "print('ok')\n"
+    )
+    env = {**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src")}
+    proc = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, env=env, timeout=60)
+    assert proc.returncode == 0, proc.stderr
+    assert "ok" in proc.stdout
 
 
 # --- API (ASGI) -----------------------------------------------------------------------------
@@ -608,6 +763,70 @@ def test_other_writes_stay_loopback(loopback_app, monkeypatch):
     assert r.status_code == 403
 
 
+def test_api_remote_plane_denied_when_bound_wide(eligible_env, monkeypatch):
+    # The remote update plane exists ONLY for a loopback bind behind a serve proxy. A
+    # 0.0.0.0 bind invalidates that assumption, so origin + session + CSRF together
+    # still buy nothing: the plane is refused outright.
+    monkeypatch.setenv("TOKDASH_UPDATE_ORIGIN", TAILNET_ORIGIN)
+    api.app.state.bind = "0.0.0.0"
+    api.app.state.port = 55423
+    try:
+        client = _client()
+        headers = {"host": TAILNET_HOST, "origin": TAILNET_ORIGIN}
+        code = update_auth.create_pairing_code()
+        r = client.post("/api/update/enroll", headers=headers, json={"code": code})
+        assert r.status_code == 403
+        r = client.get("/api/update/capability", headers=headers)
+        assert r.status_code == 403
+        r = client.get("/api/update/status", headers=headers)
+        assert r.status_code == 403
+    finally:
+        api.app.state.bind = None
+        api.app.state.port = None
+
+
+def test_api_csrf_recovery_after_token_loss(loopback_app, eligible_env, monkeypatch):
+    monkeypatch.setenv("TOKDASH_UPDATE_ORIGIN", TAILNET_ORIGIN)
+    monkeypatch.setattr(updatecheck, "is_enabled", lambda: True)
+    monkeypatch.setattr(updatecheck, "check", lambda v, **k: {
+        "current": v, "latest": "9.9.9", "update_available": True, "error": None, "cached": False,
+    })
+    monkeypatch.setattr(update_control.shutil, "which", lambda name: "/usr/bin/systemd-run")
+    monkeypatch.setattr(
+        update_control.subprocess, "run",
+        lambda cmd, **k: subprocess.CompletedProcess(cmd, 0, "", ""),
+    )
+    client = _client()
+    headers = {"host": TAILNET_HOST, "origin": TAILNET_ORIGIN}
+
+    code = update_auth.create_pairing_code()
+    r = client.post("/api/update/enroll", headers=headers, json={"code": code})
+    assert r.status_code == 200
+    old_csrf = r.json()["csrf"]
+    token = r.headers["set-cookie"].split("=", 1)[1].split(";", 1)[0]
+    cookie = {update_auth.SESSION_COOKIE: token}
+
+    # The token lived only in the (now reloaded) page. Recovery over the session:
+    r = client.get("/api/update/capability?want_csrf=1", headers=headers, cookies=cookie)
+    assert r.status_code == 200
+    fresh = r.json().get("csrf")
+    assert fresh and fresh != old_csrf
+
+    # The rotated-out token must no longer start anything:
+    r = client.post("/api/update/start", headers={**headers, update_auth.CSRF_HEADER: old_csrf},
+                    cookies=cookie, json={"version": "9.9.9"})
+    assert r.status_code == 403
+
+    # The recovered token does:
+    r = client.post("/api/update/start", headers={**headers, update_auth.CSRF_HEADER: fresh},
+                    cookies=cookie, json={"version": "9.9.9"})
+    assert r.status_code in (200, 202), r.text
+
+    # Plain capability polls never rotate tokens (a second tab must not be poisoned).
+    r = client.get("/api/update/capability", headers=headers, cookies=cookie)
+    assert "csrf" not in r.json()
+
+
 # --- helper script ---------------------------------------------------------------------------
 
 
@@ -619,7 +838,17 @@ class FakeRunner(update_helper.Runner):
 
     def run(self, args, timeout=60):
         self.calls.append(list(args))
-        return subprocess.CompletedProcess(args, 0, "", "")
+        stdout = ""
+        # The preflight now proves the LOADED unit really runs the recorded service;
+        # answer `systemctl show` with what setup's unit would load.
+        if args[:3] == ["systemctl", "--user", "show"] and "-p" in args and "ExecStart" in args:
+            stdout = (
+                f"{self.data_dir}/venv/bin/python -m tokdash serve "
+                "--bind 127.0.0.1 --port 55423 --no-open\n"
+            )
+        elif args[:3] == ["systemctl", "--user", "show"] and "MainPID" in args:
+            stdout = "0\n"
+        return subprocess.CompletedProcess(args, 0, stdout, "")
 
     def port_open(self, host, port):
         return False
@@ -741,6 +970,109 @@ def test_helper_readiness_version_mismatch_fails(eligible_env, tmp_path):
     assert record["failed_phase"] == "starting"
 
 
+def test_helper_heartbeat_joined_before_terminal_write(eligible_env, tmp_path, monkeypatch):
+    # A heartbeat thread still mid-write when install fails could land its (stale)
+    # snapshot AFTER the terminal write and resurrect a non-terminal phase. The runner
+    # must join the heartbeat before ANY terminal write.
+    import threading
+
+    job = _seed_job(tmp_path)
+    runner = FakeRunner(tmp_path, job["id"], lambda m: None)
+    runner.install_ok = False
+    order = []
+    real_update = runner.journal.update
+
+    def spy(job_id, **fields):
+        order.append((fields.get("phase"), threading.current_thread().name))
+        return real_update(job_id, **fields)
+
+    monkeypatch.setattr(update_helper, "HEARTBEAT_SECONDS", 0.01)
+    monkeypatch.setattr(runner.journal, "update", spy)
+    ok = update_helper.main(str(tmp_path), job["id"], runner=runner, opener=lambda *a, **k: {})
+    assert ok is False
+    phases = [ph for ph, _ in order]
+    assert "failed" in phases
+    after = order[phases.index("failed") + 1:]
+    assert all(th == "MainThread" for _, th in after), after
+    assert update_jobs.get_job(job["id"])["phase"] == "failed"
+
+
+def test_backup_holds_db_lock_until_replacement_done(eligible_env, tmp_path):
+    # Snapshot alone is not enough: the lock must exclude other tokdash writers for the
+    # whole install window (it is released only when the NEW server is about to start).
+    fcntl = pytest.importorskip("fcntl")
+
+    db = tmp_path / "usage.sqlite3"
+    conn = sqlite3.connect(db)
+    conn.execute("create table t(x)")
+    conn.commit()
+    conn.close()
+    runner = update_helper.Runner(tmp_path, "j", lambda m: None)
+    dest = runner.backup_db(str(db), tmp_path / "backups")
+    assert dest and Path(dest).is_file()
+
+    probe = (tmp_path / "usage.sqlite3.lock").open("a+")
+    try:
+        with pytest.raises(BlockingIOError):
+            fcntl.flock(probe.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    finally:
+        probe.close()
+    runner.release_db_lock()
+    probe = (tmp_path / "usage.sqlite3.lock").open("a+")
+    try:
+        fcntl.flock(probe.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)  # free again
+        fcntl.flock(probe.fileno(), fcntl.LOCK_UN)
+    finally:
+        probe.close()
+
+
+def test_helper_refuses_sibling_tokdash_process(eligible_env, tmp_path, monkeypatch):
+    # An idle co-tenant tokdash on the same data dir would resume writing the DB the
+    # replacement migrates; the honest answer is refusal, before any downtime.
+    job = _seed_job(tmp_path)
+    monkeypatch.setattr(update_helper.Runner, "_sibling_tokdash_pids", lambda self, exclude: [4242])
+    runner = FakeRunner(tmp_path, job["id"], lambda m: None)
+    ok = update_helper.main(str(tmp_path), job["id"], runner=runner, opener=lambda *a, **k: {})
+    assert ok is False
+    record = update_jobs.get_job(job["id"])
+    assert record["phase"] == "failed" and record["failed_phase"] == "preflight"
+    assert "another Tokdash process" in (record["message"] or "")
+    assert not [c for c in runner.calls if c[:3] == ["systemctl", "--user", "stop"]]
+
+
+def test_helper_preflight_rejects_unrelated_execstart(eligible_env, tmp_path):
+    # Loaded configuration must run the RECORDED tokdash service — an ExecStart that
+    # merely starts with our interpreter proves nothing.
+    job = _seed_job(tmp_path)
+
+    class LiarRunner(FakeRunner):
+        def run(self, args, timeout=60):
+            self.calls.append(list(args))
+            if args[:3] == ["systemctl", "--user", "show"] and "ExecStart" in args:
+                return subprocess.CompletedProcess(
+                    args, 0,
+                    f"{self.data_dir}/venv/bin/python -m totally_unrelated_app serve\n", "",
+                )
+            return super().run(args, timeout=timeout)
+
+    runner = LiarRunner(tmp_path, job["id"], lambda m: None)
+    ok = update_helper.main(str(tmp_path), job["id"], runner=runner, opener=lambda *a, **k: {})
+    assert ok is False
+    record = update_jobs.get_job(job["id"])
+    assert record["failed_phase"] == "preflight"
+    assert not [c for c in runner.calls if c[:3] == ["systemctl", "--user", "stop"]]
+
+
+def test_looks_like_tokdash():
+    assert update_helper._looks_like_tokdash(["/home/u/.local/bin/tokdash", "serve"])
+    assert update_helper._looks_like_tokdash(["/venv/bin/python", "-m", "tokdash", "serve"])
+    assert update_helper._looks_like_tokdash(["python3", "main.py"])
+    assert not update_helper._looks_like_tokdash(
+        ["/venv/bin/python", "-m", "pip", "install", "tokdash==9.9.9"]
+    )
+    assert not update_helper._looks_like_tokdash(["systemctl", "--user", "restart", "tokdash"])
+
+
 # --- CLI/engine contract -------------------------------------------------------------------------
 
 
@@ -785,6 +1117,31 @@ def test_cmd_update_attaches_to_live_job(eligible_env, capsys, monkeypatch):
     assert rc == engine.EXIT_OK
     out = capsys.readouterr().out
     assert "already running" in out
+
+
+def test_cmd_update_heartbeats_during_install(eligible_env, monkeypatch):
+    # A minutes-long terminal update must keep its job's heartbeat warm; otherwise a
+    # dashboard polling beside it watches a LIVE update age into "interrupted".
+    from tokdash.onboard import engine
+    from tokdash.onboard.plan import Options
+
+    monkeypatch.setattr(engine.detect, "find_pipx", lambda: "/usr/bin/pipx")
+    monkeypatch.setattr(engine, "_CLI_HEARTBEAT_SECONDS", 0.01)
+    heartbeats = []
+    real_hb = update_jobs.touch_heartbeat
+    monkeypatch.setattr(
+        update_jobs, "touch_heartbeat",
+        lambda job_id: (heartbeats.append(job_id), real_hb(job_id))[1],
+    )
+
+    def slow_run(cmd, *a, **k):
+        time.sleep(0.1)
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(engine.subprocess, "run", slow_run)
+    rc = engine.cmd_update(Options(action="update"))
+    assert rc == engine.EXIT_OK
+    assert heartbeats, "no heartbeat refreshes while the install ran"
 
 
 def test_update_enroll_mints_code(monkeypatch, capsys):

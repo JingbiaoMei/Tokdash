@@ -18,6 +18,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path, PureWindowsPath
 from typing import Any, Dict, List, Optional, Tuple
@@ -1059,6 +1060,9 @@ def _doctor_quota() -> Dict[str, Any]:
 
 # --- update ---------------------------------------------------------------------
 
+# How often a long-running terminal `tokdash update` refreshes its job heartbeat.
+_CLI_HEARTBEAT_SECONDS = 20
+
 
 def cmd_update(opts: Options) -> int:
     """Upgrade the runtime in place per the recorded install method (§14).
@@ -1188,17 +1192,38 @@ def cmd_update(opts: Options) -> int:
         stack = None
         job_id = None
 
+    # The install can run for minutes while this process holds the update lock; keep
+    # the job's heartbeat warm so a dashboard polling alongside does not declare the
+    # live update "interrupted" (its stale-reconcile is non-blocking, but liveness
+    # should be the truth, not the fallback).
+    hb_stop = threading.Event()
+
+    def _heartbeat_loop():
+        # touch_heartbeat, not heartbeat: the main thread holds update.lock while it
+        # blocks in the installer — this thread must tick without queueing on it.
+        while not hb_stop.wait(_CLI_HEARTBEAT_SECONDS):
+            try:
+                update_jobs.touch_heartbeat(job_id)
+            except Exception:
+                pass
+
+    hb_thread = None
     try:
         if job_id:
             try:
                 update_jobs.set_phase(job_id, "installing")
             except Exception:
                 pass
+            hb_thread = threading.Thread(target=_heartbeat_loop, daemon=True)
+            hb_thread.start()
         result = _apply_cli_update(
             opts, cmd, method, service_type, restart_managed, service_name,
             venv_python, runtime_command, man, job_id=job_id, version_before=version_before,
         )
     finally:
+        hb_stop.set()
+        if hb_thread is not None:
+            hb_thread.join(timeout=30)
         if stack is not None:
             try:
                 stack.close()

@@ -25,18 +25,25 @@ Usage: ``python update_helper.py <data_dir> <job_id>``
 """
 from __future__ import annotations
 
-import fcntl
 import json
+import os
 import re
+import shlex
 import socket
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:  # the helper only RUNS on Linux/systemd; importing it must not crash
+    fcntl = None
 
 TERMINAL = {"succeeded", "failed"}
 ACCEPT_PHASES = {"accepted", "staged"}
@@ -47,6 +54,13 @@ HEARTBEAT_SECONDS = 10
 LOCK_ACQUIRE_TIMEOUT = 60
 
 _TARGET_RE = re.compile(r"\d+(\.\d+)+(?:[a-zA-Z0-9_.+-]+)?")
+
+# The journal is one read-modify-write file and the helper touches it from two threads
+# (the heartbeat loop and the phase machine). flock only covers OTHER processes, so
+# every in-process mutation serializes on this lock: an unsynchronized heartbeat could
+# interleave with a phase write and resurrect a stale phase (e.g. overwrite a finished
+# job back to "installing").
+_WRITE_LOCK = threading.Lock()
 
 
 def safe_install_argv(argv):
@@ -60,6 +74,24 @@ def safe_install_argv(argv):
     return len(specs) == 1 and specs[0].startswith("tokdash==") and bool(
         _TARGET_RE.fullmatch(specs[0].split("==", 1)[1])
     )
+
+
+def _looks_like_tokdash(argv):
+    """Conservative argv test for "this process is a tokdash invocation".
+
+    Matches the console script, ``python -m tokdash``, and the repo's ``main.py`` dev
+    runner. Deliberately does NOT match ``pip install tokdash==X`` (our own child).
+    """
+    first = argv[0]
+    if "bin/tokdash" in first:
+        return True
+    if len(argv) > 2 and argv[1] == "-m" and argv[2] == "tokdash":
+        return True
+    if any(a == "tokdash" for a in argv[1:3]):
+        return True
+    if first.endswith("main.py") or any(a.endswith("main.py") for a in argv[1:3]):
+        return True
+    return False
 
 
 def _now_iso():
@@ -120,22 +152,33 @@ class Journal:
             return None
 
     def update(self, job_id, **fields):
-        handle = None if self.lock_free else self._locked()
-        try:
-            data = json.loads(self.path.read_text(encoding="utf-8"))
-            job = data.get("jobs", {}).get(job_id)
-            if not job:
-                return None
-            job.update(fields)
-            job["updated_at"] = _now_iso()
-            tmp = self.path.with_suffix(".json.tmp")
-            tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-            tmp.replace(self.path)
-            return job
-        finally:
-            if handle is not None:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-                handle.close()
+        # One lock for the whole read-modify-write: the heartbeat thread and the phase
+        # machine must never interleave (a lost update could undo a terminal phase).
+        with _WRITE_LOCK:
+            handle = None if self.lock_free else self._locked()
+            try:
+                data = json.loads(self.path.read_text(encoding="utf-8"))
+                job = data.get("jobs", {}).get(job_id)
+                if not job:
+                    return None
+                job.update(fields)
+                job["updated_at"] = _now_iso()
+                fd, tmp = tempfile.mkstemp(dir=str(self.path.parent), prefix=self.path.name + ".", suffix=".tmp")
+                try:
+                    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                        fh.write(json.dumps(data, indent=2) + "\n")
+                    os.replace(tmp, self.path)
+                except BaseException:
+                    try:
+                        os.unlink(tmp)
+                    except OSError:
+                        pass
+                    raise
+                return job
+            finally:
+                if handle is not None:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                    handle.close()
 
 
 class Runner:
@@ -148,6 +191,8 @@ class Runner:
         self.log = log
         self.service_stopped = False
         self._hb = None
+        self._hb_thread = None
+        self._db_lock_handle = None
 
     # -- plumbing ---------------------------------------------------------------
     def run(self, args, timeout=60):
@@ -191,14 +236,105 @@ class Runner:
                     pass
 
         self._hb = stop
-        thread = threading.Thread(target=loop, daemon=True)
-        thread.start()
+        self._hb_thread = threading.Thread(target=loop, daemon=True)
+        self._hb_thread.start()
 
     def heartbeat_stop(self):
-        if self._hb:
+        """Stop the heartbeat AND join the thread.
+
+        Stopping is not enough: a thread already inside its update would still land its
+        write AFTER a terminal write and un-finish the job. Callers quiesce (this)
+        BEFORE writing any terminal phase, so the last writer is always the phase
+        machine. Idempotent.
+        """
+        thread = getattr(self, "_hb_thread", None)
+        if thread is not None:
+            self._hb_thread = None
             self._hb.set()
+            thread.join(timeout=HEARTBEAT_SECONDS + 5)
 
     # -- phases -----------------------------------------------------------------
+    def _loaded_execstart(self, unit_name):
+        """First LOADED ExecStart argv for the unit (mirror of update_eligibility)."""
+        proc = self.systemctl("show", unit_name, "-p", "ExecStart", "--value")
+        for line in (proc.stdout or "").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            while line[:1] in ("+", "-", "!", "@", ":"):
+                line = line[1:].lstrip()
+            try:
+                argv = shlex.split(line)
+            except ValueError:
+                return None
+            return argv or None
+        return None
+
+    @staticmethod
+    def _check_loaded_argv(loaded, python, man):
+        """Same proof update_eligibility._loaded_argv_mismatch gives, stdlib-only."""
+        try:
+            if os.path.realpath(loaded[0]) != os.path.realpath(str(python)):
+                raise RuntimeError("loaded service does not run the recorded interpreter")
+        except OSError:
+            raise RuntimeError("loaded service interpreter path is unusable")
+        if loaded[1:3] != ["-m", "tokdash"] or "serve" not in loaded[3:]:
+            raise RuntimeError("loaded service does not run the recorded Tokdash service")
+        for flag, key in (("--bind", "bind"), ("--port", "port")):
+            want = man.get(key)
+            if want in (None, ""):
+                continue
+            want_s = str(want)
+            try:
+                i = loaded.index(flag)
+            except ValueError:
+                raise RuntimeError(f"loaded service does not pin {flag} as setup recorded")
+            if i + 1 >= len(loaded) or loaded[i + 1] != want_s:
+                raise RuntimeError(f"loaded service {flag} differs from setup's record")
+
+    def _sibling_tokdash_pids(self, exclude):
+        """PIDs of OTHER live processes that plausibly write THIS data dir's usage DB.
+
+        The DB lock covers individual writes, not process lifetimes, so a tokdash that
+        is idle at backup time can resume writing mid-install. The helper cannot order
+        such a process around — the honest move is to refuse the update while it runs.
+        """
+        found = []
+        me = os.getpid()
+        try:
+            entries = os.listdir("/proc")
+        except OSError:
+            return found
+        want_dir = os.path.realpath(str(self.data_dir))
+        for entry in entries:
+            if not entry.isdigit():
+                continue
+            pid = int(entry)
+            if pid == me or pid in exclude:
+                continue
+            try:
+                raw = Path(f"/proc/{entry}/cmdline").read_bytes()
+                env_raw = Path(f"/proc/{entry}/environ").read_bytes()
+            except OSError:
+                continue
+            argv = [a.decode("utf-8", "replace") for a in raw.split(b"\0") if a]
+            if not argv:
+                continue
+            if not _looks_like_tokdash(argv):
+                continue
+            env = {}
+            for pair in env_raw.split(b"\0"):
+                chunk = pair.decode("utf-8", "replace")
+                if "=" in chunk:
+                    k, _, v = chunk.partition("=")
+                    env[k] = v
+            dd = env.get("TOKDASH_DATA_DIR") or os.path.join(env.get("HOME", ""), ".tokdash")
+            if not dd:
+                continue
+            if os.path.realpath(dd) == want_dir:
+                found.append(pid)
+        return found
+
     def preflight(self, job):
         """Re-verify (against the helper's own eyes) everything the server checked."""
         if job.get("phase") not in ACCEPT_PHASES:
@@ -223,6 +359,29 @@ class Runner:
             raise RuntimeError("service unit file is missing")
         if marker not in unit_text:
             raise RuntimeError("service unit lost setup's ownership marker")
+
+        # Loaded configuration, complete arguments (mirrors update_eligibility): what
+        # systemd would ACTUALLY restart must be the recorded Tokdash service.
+        unit_name = f"{(man.get('service') or {}).get('name') or job.get('service_name') or 'tokdash'}.service"
+        loaded = self._loaded_execstart(unit_name)
+        if not loaded:
+            raise RuntimeError(f"loaded configuration for {unit_name} is unavailable")
+        self._check_loaded_argv(loaded, python, man)
+
+        # No compatible co-tenant: another tokdash on this data dir would survive the
+        # service stop and keep writing the database the replacement migrates.
+        main_pid = 0
+        try:
+            shown = self.systemctl("show", unit_name, "-p", "MainPID", "--value")
+            main_pid = int((shown.stdout or "0").strip() or 0)
+        except Exception:
+            main_pid = 0
+        others = self._sibling_tokdash_pids(exclude={main_pid} if main_pid else set())
+        if others:
+            raise RuntimeError(
+                "another Tokdash process is using this data directory (pid "
+                f"{', '.join(str(p) for p in others[:4])}); close it and retry the update"
+            )
         return man
 
     def stop_service(self, name, bind, port):
@@ -237,19 +396,28 @@ class Runner:
         raise RuntimeError(f"service port {port} did not release after stop")
 
     def backup_db(self, db_path, backups_dir, keep=3):
+        """Snapshot the usage DB and HOLD the DB write lock until released.
+
+        The lock is Tokdash's own write-serialization point. Taking it exclusively for
+        the WHOLE replacement — not just the snapshot — means any tokdash process that
+        tries to write during the install waits (it cannot write a half-replaced,
+        mid-migration database). Processes that are merely IDLE at snapshot time are
+        excluded the other way: preflight refused the update if any existed.
+        """
         if not db_path or not Path(db_path).is_file():
             self.log("no usage DB on disk; nothing to back up")
             return None
-        # Shared-writer guard: refuse before replacement if another Tokdash process
-        # still holds the usage-DB write lock (feasibility §7).
         lock_path = Path(str(db_path) + ".lock")
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         handle = lock_path.open("a+", encoding="utf-8")
+        self._db_lock_handle = handle
         try:
-            try:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except OSError:
-                raise RuntimeError("another Tokdash process holds the usage-DB lock; not replacing the package")
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            handle.close()
+            self._db_lock_handle = None
+            raise RuntimeError("another Tokdash process holds the usage-DB lock; not replacing the package")
+        try:
             # Server is stopped (writers quiesced); SQLite's online backup still gives a
             # consistent snapshot including any leftover WAL.
             backups_dir.mkdir(parents=True, exist_ok=True)
@@ -269,7 +437,16 @@ class Runner:
                 except OSError:
                     pass
             return str(dest)
-        finally:
+        except BaseException:
+            self.release_db_lock()
+            raise
+
+    def release_db_lock(self):
+        """Give the usage-DB lock back — BEFORE the new service starts, so its own
+        startup writes are not blocked by us, and on every failure path."""
+        handle = getattr(self, "_db_lock_handle", None)
+        if handle is not None:
+            self._db_lock_handle = None
             try:
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
             except OSError:
@@ -321,6 +498,10 @@ class Runner:
 
 def main(data_dir, job_id, *, runner=None, opener=None):
     """Run the full managed apply for one accepted job. Returns True on success."""
+    if fcntl is None:
+        # Imported (so capability paths work anywhere) but can only run where flock does.
+        print("update helper requires POSIX flock (Linux); aborting without touching anything", flush=True)
+        return False
     journal = Journal(data_dir)
     job = journal.read(job_id)
     log_path = None
@@ -381,7 +562,9 @@ def main(data_dir, job_id, *, runner=None, opener=None):
             except Exception as exc:
                 # Package replacement failed (possibly partially): the environment can
                 # NOT be assumed intact. Attempt recovery, report honestly.
+                r.release_db_lock()  # recovered service must be able to write
                 r.recover_service(name)
+                r.heartbeat_stop()  # last writer must be us, not a late heartbeat
                 r.journal.update(
                     job_id, phase="failed", failed_phase="install",
                     message=(
@@ -393,12 +576,16 @@ def main(data_dir, job_id, *, runner=None, opener=None):
                 log("FAILED during install")
                 return False
 
+            # The replacement is done: give the usage-DB lock back BEFORE starting the
+            # new server, whose startup writes take the very same lock.
+            r.release_db_lock()
             r.journal.update(job_id, phase="starting")
             try:
                 r.start_service(name, bind, port)
                 r.journal.update(job_id, phase="ready")
                 r.readiness(str(job["to_version"]), bind, port)
             except Exception as exc:
+                r.heartbeat_stop()
                 r.journal.update(
                     job_id, phase="failed", failed_phase="starting",
                     message=(
@@ -410,6 +597,7 @@ def main(data_dir, job_id, *, runner=None, opener=None):
                 log("FAILED during start/readiness")
                 return False
 
+            r.heartbeat_stop()
             r.journal.update(
                 job_id, phase="succeeded", failed_phase=None,
                 result_version=str(job["to_version"]), message=None,
@@ -417,7 +605,9 @@ def main(data_dir, job_id, *, runner=None, opener=None):
             log(f"SUCCESS: v{job['to_version']} ready")
             return True
         finally:
+            # Idempotent safety nets for paths that jumped out mid-phase.
             r.heartbeat_stop()
+            r.release_db_lock()
     except Exception as exc:
         log(f"FAILED: {exc}")
         try:

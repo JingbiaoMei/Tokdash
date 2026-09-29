@@ -218,6 +218,32 @@ def create_session() -> Optional[Dict[str, str]]:
     return {"token": token, "csrf": csrf, "expires_at": now + SESSION_TTL_SECONDS}
 
 
+def rotate_csrf(token: Optional[str]) -> Optional[str]:
+    """Issue a fresh CSRF token for an existing valid session, or None.
+
+    A page reload keeps the (HttpOnly) session cookie but loses the in-memory CSRF
+    token, which would otherwise strand an enrolled browser. Only the cookie holder
+    can ask, and the answer travels in a same-origin response body — cross-site
+    scripts cannot read it. Rotation invalidates the previous token: two tabs
+    recovered by their next ``want_csrf`` fetch, not by racing stale tokens.
+    """
+    if not token:
+        return None
+    now = _now()
+    with process_lock(state_path().with_suffix(".lock")):
+        data = _load()
+        fresh = None
+        for s in data.get("sessions", []):
+            if isinstance(s, dict) and s.get("expires_at", 0) > now and _matches(_hash(token), str(s.get("token_hash") or "")):
+                fresh = secrets.token_urlsafe(24)
+                s["csrf"] = fresh
+                break
+        if fresh is None:
+            return None
+        _store(data)
+        return fresh
+
+
 def validate_session(token: Optional[str], *, csrf: Optional[str] = None) -> bool:
     """Session validity; when ``csrf`` is given, also require it to match (writes)."""
     if not token:

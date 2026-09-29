@@ -849,7 +849,16 @@ def _request_route_path(request: Request) -> str:
 
 
 def _update_remote_authorized(request: Request, *, require_session: bool) -> bool:
-    """Remote authorization for the update endpoints; fails closed on any doubt."""
+    """Remote authorization for the update endpoints; fails closed on any doubt.
+
+    Prerequisite (not a detail): the server itself must be bound to loopback. The
+    remote plane exists for a Tailscale-serve-proxy in front of a 127.0.0.1 bind, so
+    the origin/session/CSRF machinery can assume a direct network attacker never
+    reaches this socket. On a 0.0.0.0 bind there is no such assumption left to make,
+    so the exception is denied outright — the plane is refused, not merely gated.
+    """
+    if not _is_loopback(_effective_bind()):
+        return False
     try:
         from .onboard import update_auth
     except Exception:
@@ -2680,26 +2689,36 @@ def _update_request_class(request: Request) -> str:
         if request.method.upper() not in _MUTATING_METHODS or _request_is_loopback_write(request):
             return "local"
         return "other"
-    if update_auth.origin_matches(
-        update_auth.configured_origin(),
-        host_header=host,
-        origin_header=request.headers.get("origin"),
+    if (
+        _is_loopback(_effective_bind())
+        and update_auth.origin_matches(
+            update_auth.configured_origin(),
+            host_header=host,
+            origin_header=request.headers.get("origin"),
+        )
     ):
         return "remote"
     return "other"
 
 
 @app.get("/api/update/capability")
-async def update_capability(request: Request) -> Dict[str, Any]:
+async def update_capability(request: Request, want_csrf: bool = False) -> Dict[str, Any]:
     from .onboard import update_auth, update_control
 
     plane = _update_request_class(request)
     if plane == "other":
         raise HTTPException(status_code=403, detail="unavailable")
     payload = update_control.capability(__version__)
-    payload["enrolled"] = bool(
-        update_auth.validate_session(request.cookies.get(update_auth.SESSION_COOKIE))
-    )
+    token = request.cookies.get(update_auth.SESSION_COOKIE)
+    payload["enrolled"] = bool(update_auth.validate_session(token))
+    # CSRF recovery (feasibility §5): the session cookie survives a page reload, the
+    # in-memory token does not. An enrolled remote caller explicitly asks, and gets a
+    # fresh token in this same-origin response body — the double-submit property holds
+    # because a cross-site page cannot read it.
+    if want_csrf and plane == "remote" and payload["enrolled"]:
+        fresh = update_auth.rotate_csrf(token)
+        if fresh:
+            payload["csrf"] = fresh
     return payload
 
 

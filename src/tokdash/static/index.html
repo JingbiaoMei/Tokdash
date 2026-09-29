@@ -22308,6 +22308,7 @@
     // Anything unmanaged stays terminal-only: the server says so, we show the
     // manual command.
     const UPDATE_SKIP_KEY = 'tokdash-update-skipped';
+    const UPDATE_ACK_KEY = 'tokdash-update-job-acked';
     const UPDATE_CSRF_HEADER = 'X-Tokdash-Csrf';
     let updateCapabilityInfo = null;
     let updateCsrfToken = '';   // memory-only, per enrollment; never persisted
@@ -22602,10 +22603,21 @@
       }
     }
 
+    function updateJobAcked(job) {
+      try {
+        return !!job && localStorage.getItem(UPDATE_ACK_KEY) === String(job.id);
+      } catch (_) {
+        return false;
+      }
+    }
+
     function renderUpdateJob(job) {
       const ui = updateUi();
       if (!ui.jobBox) return;
       if (!job) { ui.jobBox.hidden = true; ui.refresh.hidden = true; return; }
+      if (job.phase === 'failed' && updateJobAcked(job)) {
+        ui.jobBox.hidden = true; ui.refresh.hidden = true; return;
+      }
       ui.jobBox.hidden = false;
       ui.refresh.hidden = true;
       const version = `v${job.to_version || '?'}`;
@@ -22669,6 +22681,21 @@
       tick();
     }
 
+    // The session cookie survives a page reload but the CSRF token lives only in this
+    // page's memory. Recovery: ask the server over the authenticated session
+    // (want_csrf=1) and it rotates a fresh token into the same-origin response body.
+    // A cross-site page cannot read that body, so double-submit still protects writes.
+    async function recoverUpdateCsrf() {
+      try {
+        const data = await fetchJsonWithRetry(appPath('/api/update/capability?want_csrf=1'), { cache: 'no-store' });
+        if (data && data.csrf) {
+          updateCsrfToken = data.csrf;
+          return true;
+        }
+      } catch (_) { /* fall through to re-enrollment */ }
+      return false;
+    }
+
     async function requestDashboardUpdate() {
       const info = updateCapabilityInfo;
       const ui = updateUi();
@@ -22680,18 +22707,27 @@
           if (tokenResp.ok) headers['X-Tokdash-Token'] = (await tokenResp.json()).token || '';
         } catch (_) { /* the POST will 403 and we surface nothing worse */ }
       } else {
+        if (!updateCsrfToken) await recoverUpdateCsrf();  // reloaded tab: rebuild the token
         headers[UPDATE_CSRF_HEADER] = updateCsrfToken;
       }
+      const postStart = () => fetch(appPath('/api/update/start'), {
+        method: 'POST', credentials: 'same-origin',
+        headers: Object.assign({}, headers, updateIsLocalHost() ? {} : { [UPDATE_CSRF_HEADER]: updateCsrfToken }),
+        body: JSON.stringify({ version: info.target }),
+      });
       try {
-        const resp = await fetch(appPath('/api/update/start'), {
-          method: 'POST', headers, credentials: 'same-origin',
-          body: JSON.stringify({ version: info.target }),
-        });
+        let resp = await postStart();
         if (resp.status === 403 && !updateIsLocalHost()) {
-          // Session expired or was never established here: ask the server (the local
-          // enrolled flag may be stale), then show enrollment — never resubmit blind.
-          await refreshUpdateCapability({ quiet: true });
-          return;
+          // A token stolen by a reload (or another tab's enrollment) recovers once via
+          // the session; anything still 403 after that means the session itself is gone
+          // — ask the server, then show enrollment. Never resubmit blind.
+          if (await recoverUpdateCsrf()) {
+            resp = await postStart();
+          }
+          if (resp.status === 403) {
+            await refreshUpdateCapability({ quiet: true });
+            return;
+          }
         }
         const data = await resp.json().catch(() => ({}));
         if (!resp.ok) {
@@ -22760,8 +22796,18 @@
         // A finished apply the page has not yet picked up (e.g. reopened tab): offer the
         // refresh, but do NOT auto-reload — the reader chooses the moment.
         renderUpdateJob(job);
+      } else if (job && job.phase === 'failed') {
+        // A failed job must NOT vanish on reload/reconnect: the journal keeps it and we
+        // keep showing it, until the user acknowledges it (a failure discovered only
+        // from console logs is a failure nobody believed).
+        renderUpdateJob(job);
       } else if (!job || job.terminal) {
         if (!quiet) renderUpdateJob(null);
+      }
+      // Remote browser with a live session but no in-memory token (reloaded tab):
+      // rebuild the token now, not at the next 403.
+      if (!updateIsLocalHost() && updateCapabilityInfo.enrolled && !updateCsrfToken) {
+        await recoverUpdateCsrf();
       }
       return updateCapabilityInfo;
     }
@@ -22770,6 +22816,16 @@
       const ui = updateUi();
       if (ui.apply) ui.apply.addEventListener('click', requestDashboardUpdate);
       if (ui.enrollBtn) ui.enrollBtn.addEventListener('click', enrollUpdateBrowser);
+      if (ui.jobBox) ui.jobBox.addEventListener('click', () => {
+        // Acknowledge a persisted failure: remembered by job id so a reload does not
+        // resurrect the same message forever.
+        if (ui.jobBox.dataset.state !== 'failed') return;
+        const job = updateCapabilityInfo && updateCapabilityInfo.latest_job;
+        if (job && job.phase === 'failed') {
+          localStorage.setItem(UPDATE_ACK_KEY, String(job.id));
+          renderUpdateJob(null);
+        }
+      });
       if (ui.pairInput) ui.pairInput.addEventListener('keydown', (event) => {
         if (event.key === 'Enter') enrollUpdateBrowser();
       });

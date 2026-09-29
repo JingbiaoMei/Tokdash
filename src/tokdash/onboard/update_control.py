@@ -19,9 +19,19 @@ import subprocess
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
-from . import manifest, paths, update_auth, update_eligibility, update_helper, update_jobs, update_mechanics, updatecheck
+from . import manifest, paths, update_auth, update_eligibility, update_jobs, update_mechanics, updatecheck
 
 SERVICE_OP_TIMEOUT = 30
+
+
+def _helper_source_path() -> Path:
+    """Locate the helper's source WITHOUT importing it.
+
+    The helper imports Linux-only ``fcntl`` at run time; a Windows server must be able
+    to answer ``capability``/``start`` with manual guidance, which means loading the
+    control module there must never crash. A sibling-path read needs no interpreter.
+    """
+    return Path(__file__).with_name("update_helper.py")
 
 
 def capability(current_version: str) -> Dict[str, Any]:
@@ -125,7 +135,9 @@ def _stage_and_launch(job: Dict[str, Any]) -> None:
             old.unlink()
         except OSError:
             pass
-    source = Path(update_helper.__file__).resolve()
+    source = _helper_source_path()
+    if not source.is_file():
+        raise RuntimeError("the updater helper script is missing from this installation")
     staged = staging / f"update-helper-{job_id}.py"
     shutil.copyfile(source, staged)
 

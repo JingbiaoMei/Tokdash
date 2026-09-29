@@ -19,10 +19,19 @@ Only sanitized views leave this module over the API: records keep local paths ou
 """
 from __future__ import annotations
 
+import contextlib
 import json
+import os
 import secrets
 import socket
+import tempfile
+import threading
 from contextlib import contextmanager
+
+try:
+    import fcntl
+except ImportError:  # non-POSIX: reconcile stays lock-free (best effort)
+    fcntl = None
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
@@ -92,38 +101,51 @@ def _load() -> Dict[str, Any]:
 def _store(data: Dict[str, Any]) -> None:
     p = journal_path()
     p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(p.suffix + ".tmp")
-    tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-    tmp.replace(p)
+    # Unique temp name: two writers must never share one scratch file.
+    fd, tmp_name = tempfile.mkstemp(dir=str(p.parent), prefix=p.name + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(data, indent=2) + "\n")
+        os.replace(tmp_name, p)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp_name)
+        raise
 
 
-_depth = 0
+# Thread-local: a second thread in the same process (e.g. two concurrent API writes on
+# the server's threadpool) must still queue on the real flock — only re-entry on the
+# HOLDING thread may skip it. A cross-thread counter would wrongly vouch for that.
+_tls = threading.local()
+
+
+def _held_here() -> int:
+    return getattr(_tls, "depth", 0)
 
 
 @contextmanager
 def with_update_lock():
-    """Take the shared update lock; reentrant within this process.
+    """Take the shared update lock; reentrant on the holding thread.
 
     ``flock`` is not reentrant and every nesting level would open a fresh file
     description — so the CLI, which holds this lock across the whole update while the
-    journal functions inside it take it again, would deadlock against itself. The depth
-    counter keeps the nesting honest for the one process that already owns it;
-    cross-process exclusion still gates the outermost entry.
+    journal functions inside it take it again, would deadlock against itself. The
+    per-thread depth keeps that nesting honest; cross-process (and cross-thread)
+    exclusion still gates every other entry.
     """
-    global _depth
-    if _depth:
-        _depth += 1
+    if _held_here():
+        _tls.depth += 1
         try:
             yield
         finally:
-            _depth -= 1
+            _tls.depth -= 1
         return
     with process_lock(update_lock_path()):
-        _depth = 1
+        _tls.depth = 1
         try:
             yield
         finally:
-            _depth = 0
+            _tls.depth = 0
 
 
 def is_stale(job: Optional[Dict[str, Any]]) -> bool:
@@ -223,24 +245,81 @@ def heartbeat(job_id: str) -> None:
             _store(data)
 
 
+def touch_heartbeat(job_id: str) -> None:
+    """Refresh the liveness stamp WITHOUT taking the lock.
+
+    For the update's HOLDING process only, from a thread the lock-holder is parked
+    behind: the CLI's main thread sits in the installer holding update.lock while its
+    heartbeat thread ticks. That thread must neither wait on the lock (it would never
+    tick) nor race another writer (there is none: the holder is parked). Never call
+    this from a process that does not hold update.lock — the helper has its own
+    lock_free journal client for exactly this pattern.
+    """
+    data = _load()
+    job = data["jobs"].get(job_id)
+    if job is not None:
+        job["updated_at"] = _now()
+        _store(data)
+
+
+@contextmanager
+def _try_reconcile_lock():
+    """Try (never wait) to hold the update lock for a reconcile write.
+
+    A caller who cannot grab the lock has the answer already: the lock's holder is a
+    LIVE updater (CLI or helper), so its "stale" heartbeat proves nothing and the job
+    is not interrupted. Waiting here would put a blocking flock inside async request
+    handlers — the server's event loop must never wait on an update in flight.
+    """
+    if _held_here() or fcntl is None:
+        yield True
+        return
+    fd = None
+    got = False
+    try:
+        path = update_lock_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(str(path), os.O_RDWR | os.O_CREAT, 0o600)
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        got = True
+    except OSError:
+        got = False
+    try:
+        yield got
+    finally:
+        if got and fd is not None:
+            with contextlib.suppress(OSError):
+                fcntl.flock(fd, fcntl.LOCK_UN)
+        if fd is not None:
+            with contextlib.suppress(OSError):
+                os.close(fd)
+
+
+def _reconcile_stale(job_id: str, job: Dict[str, Any]) -> Dict[str, Any]:
+    """Re-check a stale job under a non-blocking lock; return the job to show."""
+    with _try_reconcile_lock() as got:
+        if not got:
+            return job  # a live updater holds the lock; this job is not interrupted
+        data = _load()
+        fresh = data["jobs"].get(job_id)
+        if fresh and is_stale(fresh):
+            _reconcile_one(data, fresh, failed_phase="interrupted",
+                           message="The updater stopped reporting; it was not resumed.")
+            _store(data)
+        return data["jobs"].get(job_id) or job
+
+
 def get_job(job_id: str, *, reconcile: bool = True) -> Optional[Dict[str, Any]]:
     """Read one job without taking the update lock.
 
     The helper holds that lock for the whole apply, and status polling must answer
     while an update runs; ``_store`` is an atomic replace, so a plain read is always a
-    complete record. Only a stale job needs a write, and that path takes the lock and
-    re-checks under it.
+    complete record. Only a stale job needs a write, and that attempt is non-blocking
+    (see :func:`_try_reconcile_lock`).
     """
     job = _load()["jobs"].get(job_id)
     if job and reconcile and is_stale(job):
-        with with_update_lock():
-            data = _load()
-            job = data["jobs"].get(job_id)
-            if job and is_stale(job):
-                _reconcile_one(data, job, failed_phase="interrupted",
-                               message="The updater stopped reporting; it was not resumed.")
-                _store(data)
-            return data["jobs"].get(job_id)
+        return _reconcile_stale(job_id, job)
     return job
 
 
@@ -250,15 +329,7 @@ def latest_job(*, reconcile: bool = True) -> Optional[Dict[str, Any]]:
     latest_id = data.get("latest") or ""
     job = data["jobs"].get(latest_id)
     if job and reconcile and is_stale(job):
-        with with_update_lock():
-            data = _load()
-            latest_id = data.get("latest") or ""
-            job = data["jobs"].get(latest_id)
-            if job and is_stale(job):
-                _reconcile_one(data, job, failed_phase="interrupted",
-                               message="The updater stopped reporting; it was not resumed.")
-                _store(data)
-            return data["jobs"].get(latest_id) if data.get("latest") else None
+        return _reconcile_stale(latest_id, job)
     return job
 
 

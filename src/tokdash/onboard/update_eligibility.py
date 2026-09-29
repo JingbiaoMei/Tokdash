@@ -22,11 +22,57 @@ cannot push an upgrade into a machine setup no longer owns.
 """
 from __future__ import annotations
 
+import os
+import shlex
+import subprocess
+import sys
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from . import detect, manifest, paths
 from .update_mechanics import MANUAL_COMMAND
+
+SYSTEMCTL_TIMEOUT = 10
+
+
+def _current_interpreter() -> str:
+    """Realpath of the interpreter running this code (the server, for the API plane)."""
+    try:
+        return os.path.realpath(sys.executable or "")
+    except Exception:
+        return ""
+
+
+def _loaded_execstart(unit_name: str) -> Optional[List[str]]:
+    """argv of the FIRST ExecStart systemd actually has LOADED for ``unit_name``.
+
+    The manifest's unit path only says which file setup wrote; a daemon-reload can be
+    missing, the unit can be masked or overridden, or another unit of the same name can
+    be loaded. Only ``systemctl show`` reports what would actually start. None when the
+    unit is not loaded or reports no exec line.
+    """
+    try:
+        proc = subprocess.run(
+            ["systemctl", "--user", "show", unit_name, "-p", "ExecStart", "--value"],
+            capture_output=True, text=True, timeout=SYSTEMCTL_TIMEOUT,
+        )
+    except Exception:
+        return None
+    if proc.returncode != 0:
+        return None
+    for line in (proc.stdout or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        # systemd prefixes exec entries with option flags (+ - ! @ :); strip them.
+        while line[:1] in ("+", "-", "!", "@", ":"):
+            line = line[1:].lstrip()
+        try:
+            argv = shlex.split(line)
+        except ValueError:
+            return None
+        return argv or None
+    return None
 
 # Platform adapters ship only after their acceptance gates pass (§9). Linux/systemd is
 # validated first; macOS/Windows report "manual for now" instead of failing obscurely.
@@ -101,7 +147,53 @@ def check_eligibility(man: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     if not _unit_targets_runtime(target_path, marker, python_path):
         return _ineligible("The service definition does not match what setup wrote (marker or runtime mismatch).")
 
+    # File-on-disk agreement is necessary but not sufficient: systemd may be running a
+    # stale load, an override, or a wholly different ExecStart. Verify the LOADED unit
+    # and its complete arguments — an ExecStart that merely *starts with* the recorded
+    # interpreter proves the interpreter, not that Tokdash is what runs under it.
+    unit_name = f"{service.get('name') or 'tokdash'}.service"
+    loaded = _loaded_execstart(unit_name)
+    if not loaded:
+        return _ineligible(f"The user service {unit_name} is not loaded, so its live configuration cannot be verified.")
+    reason = _loaded_argv_mismatch(loaded, python_path, man)
+    if reason:
+        return _ineligible(reason)
+
+    # Identity: the server answering this capability/start IS the managed instance.
+    # Otherwise a dev run or a second tokdash against the same data dir could drive an
+    # update of a service it does not run (and stop something it owns no part of).
+    if _current_interpreter() != os.path.realpath(python_path):
+        return _ineligible(
+            "This Tokdash process is not the managed service instance recorded by setup; "
+            "trigger updates from the managed service (or run `tokdash update` in a terminal)."
+        )
+
     return {"eligible": True, "reason": None, "manual_command": MANUAL_COMMAND, "method": method}
+
+
+def _loaded_argv_mismatch(loaded: List[str], python_path: str, man: Dict[str, Any]) -> Optional[str]:
+    """Whether the LOADED ExecStart runs the recorded runtime as the recorded Tokdash
+    service. Returns a user-facing reason, or None when every argument agrees."""
+    try:
+        same_interpreter = os.path.realpath(loaded[0]) == os.path.realpath(python_path)
+    except OSError:
+        same_interpreter = False
+    if not same_interpreter:
+        return "The loaded service does not run the interpreter recorded by setup."
+    if loaded[1:3] != ["-m", "tokdash"] or "serve" not in loaded[3:]:
+        return "The loaded service does not run the recorded Tokdash service."
+    for flag, key, stringify in (("--bind", "bind", str), ("--port", "port", str)):
+        want = man.get(key)
+        if want in (None, ""):
+            continue
+        want_s = stringify(want)
+        try:
+            i = loaded.index(flag)
+        except ValueError:
+            return f"The loaded service does not pin {flag} as setup recorded."
+        if i + 1 >= len(loaded) or loaded[i + 1] != want_s:
+            return f"The loaded service's {flag} differs from what setup recorded."
+    return None
 
 
 def _unit_targets_runtime(unit_path: str, marker: str, python_path: str) -> bool:

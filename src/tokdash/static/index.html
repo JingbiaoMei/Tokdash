@@ -6949,6 +6949,8 @@
         emptyTotalTokens: 'No tokens recorded',
         emptyTotalCost: 'No cost data',
         emptyMessages: 'No messages found',
+        emptyRefreshData: 'No refresh data',
+        emptyStats3DActiveDate: 'No active day',
       },
       zh: {
         updateAvailable: '有新版本',
@@ -7504,6 +7506,8 @@
         emptyTotalTokens: '暂无 token 记录',
         emptyTotalCost: '暂无费用数据',
         emptyMessages: '暂无消息记录',
+        emptyRefreshData: '暂无刷新数据',
+        emptyStats3DActiveDate: '暂无活跃日期',
       },
 
       ja: {
@@ -8060,6 +8064,8 @@
         emptyTotalTokens: 'トークン記録なし',
         emptyTotalCost: 'コストデータなし',
         emptyMessages: 'メッセージ記録なし',
+        emptyRefreshData: 'リフレッシュデータなし',
+        emptyStats3DActiveDate: 'アクティブ日なし',
       },
 
       ko: {
@@ -8616,6 +8622,8 @@
         emptyTotalTokens: '토큰 기록 없음',
         emptyTotalCost: '비용 데이터 없음',
         emptyMessages: '메시지 기록 없음',
+        emptyRefreshData: '새로고침 데이터 없음',
+        emptyStats3DActiveDate: '활동 날짜 없음',
       },
 
       es: {
@@ -9172,6 +9180,8 @@
         emptyTotalTokens: 'Sin tokens registrados',
         emptyTotalCost: 'Sin datos de coste',
         emptyMessages: 'Sin mensajes encontrados',
+        emptyRefreshData: 'Sin datos de actualización',
+        emptyStats3DActiveDate: 'Sin día activo',
       },
 
       pt: {
@@ -9728,6 +9738,8 @@
         emptyTotalTokens: 'Nenhum token registrado',
         emptyTotalCost: 'Nenhum dado de custo',
         emptyMessages: 'Nenhuma mensagem encontrada',
+        emptyRefreshData: 'Nenhum dado de atualização',
+        emptyStats3DActiveDate: 'Nenhum dia ativo',
       },
     };
 
@@ -10393,7 +10405,7 @@
     }
 
     function signedRefreshValue(value, formatter) {
-      if (value === null || value === undefined) return '—';
+      if (value === null || value === undefined) return t('emptyRefreshData');
       const numeric = Number(value) || 0;
       if (numeric === 0) return formatter(0);
       return `${numeric > 0 ? '+' : '−'}${formatter(Math.abs(numeric))}`;
@@ -21709,9 +21721,9 @@
 
       if (days.length === 0) {
         container.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:750px;color:var(--color-muted);font-size:16px;">${t('noActivityData')}</div>`;
-        document.getElementById('stats3DTotalCost').textContent = formatCurrency(0);
-        document.getElementById('stats3DTotalTokens').textContent = formatTokenCount(0);
-        document.getElementById('stats3DActiveDate').textContent = '—';
+        document.getElementById('stats3DTotalCost').textContent = t('emptyTotalCost');
+        document.getElementById('stats3DTotalTokens').textContent = t('emptyTotalTokens');
+        document.getElementById('stats3DActiveDate').textContent = t('emptyStats3DActiveDate');
         document.getElementById('stats3DActiveTokens').textContent = '—';
         document.getElementById('stats3DActiveCost').textContent = '—';
         updateStatsInsights([]);
@@ -21990,7 +22002,7 @@
         document.getElementById('stats3DActiveTokens').textContent = dayTokens;
         document.getElementById('stats3DActiveCost').textContent = dayCost;
       } else {
-        document.getElementById('stats3DActiveDate').textContent = '—';
+        document.getElementById('stats3DActiveDate').textContent = t('emptyStats3DActiveDate');
         document.getElementById('stats3DActiveTokens').textContent = '—';
         document.getElementById('stats3DActiveCost').textContent = '—';
       }

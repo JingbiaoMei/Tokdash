@@ -6455,6 +6455,7 @@
         updateSkip: 'Skip this version',
         updateEnable: 'Enable update notices',
         updateApply: 'Update to {version}',
+        updatePanelTitle: 'Self-update',
         updateEnrollPrompt: 'Enter the pairing code from `tokdash update-enroll` on this machine:',
         updateEnrollBtn: 'Authorize',
         updateBusy: 'Updating… Tokdash will briefly disconnect. You can leave this page open.',
@@ -7018,6 +7019,7 @@
         updateSkip: '跳过此版本',
         updateEnable: '开启更新提醒',
         updateApply: '更新到 {version}',
+        updatePanelTitle: '应用更新',
         updateEnrollPrompt: '请输入本机终端运行 `tokdash update-enroll` 显示的配对码：',
         updateEnrollBtn: '授权',
         updateBusy: '正在更新……Tokdash 将短暂断开连接，您可以保持此页面打开。',
@@ -7582,6 +7584,7 @@
         updateSkip: 'このバージョンをスキップ',
         updateEnable: '更新通知を有効にする',
         updateApply: '{version} に更新',
+        updatePanelTitle: 'アプリの更新',
         updateEnrollPrompt: 'このマシンの端末で `tokdash update-enroll` が表示したペアリングコードを入力してください：',
         updateEnrollBtn: '認証',
         updateBusy: '更新中… Tokdash は一時的に切断されます。このページを開いたままにできます。',
@@ -8146,6 +8149,7 @@
         updateSkip: '이 버전 건너뛰기',
         updateEnable: '업데이트 알림 사용',
         updateApply: '{version}(으)로 업데이트',
+        updatePanelTitle: '앱 업데이트',
         updateEnrollPrompt: '이 컴퓨터의 터미널에서 `tokdash update-enroll`이 표시한 페어링 코드를 입력하세요:',
         updateEnrollBtn: '인증',
         updateBusy: '업데이트 중… Tokdash가 잠시 연결을 끊습니다. 이 페이지를 열어 둘 수 있습니다.',
@@ -8710,6 +8714,7 @@
         updateSkip: 'Omitir esta versión',
         updateEnable: 'Activar avisos de actualización',
         updateApply: 'Actualizar a {version}',
+        updatePanelTitle: 'Actualización de la app',
         updateEnrollPrompt: 'Introduce el código de emparejamiento que muestra `tokdash update-enroll` en esta máquina:',
         updateEnrollBtn: 'Autorizar',
         updateBusy: 'Actualizando… Tokdash se desconectará brevemente. Puedes dejar esta página abierta.',
@@ -9274,6 +9279,7 @@
         updateSkip: 'Pular esta versão',
         updateEnable: 'Ativar avisos de atualização',
         updateApply: 'Atualizar para {version}',
+        updatePanelTitle: 'Atualização do app',
         updateEnrollPrompt: 'Digite o código de pareamento exibido por `tokdash update-enroll` nesta máquina:',
         updateEnrollBtn: 'Autorizar',
         updateBusy: 'Atualizando… O Tokdash ficará brevemente desconectado. Você pode deixar esta página aberta.',
@@ -22611,6 +22617,31 @@
       }
     }
 
+    function updatePanelReveal() {
+      // Job visibility must not depend on update availability: the readiness-failure
+      // case runs the NEW version already, so no newer release exists, the badge was
+      // never shown, and the failure box would render inside hidden ancestors.
+      // Revealing puts a neutral opener in the DOM so the job is always reachable.
+      const notice = document.getElementById('updateNotice');
+      const badge = document.getElementById('updateBadge');
+      if (notice) notice.hidden = false;
+      if (badge) {
+        if (badge.hidden || !badge.textContent) badge.textContent = t('updatePanelTitle');
+        badge.hidden = false;
+      }
+    }
+
+    function updatePanelHideIfIdle() {
+      // Retract the panel only when the update-check has nothing to show either.
+      if (updateLatestKnown) return;
+      const notice = document.getElementById('updateNotice');
+      const badge = document.getElementById('updateBadge');
+      const popover = document.getElementById('updatePopover');
+      if (popover) popover.hidden = true;
+      if (badge) badge.hidden = true;
+      if (notice) notice.hidden = true;
+    }
+
     function renderUpdateJob(job) {
       const ui = updateUi();
       if (!ui.jobBox) return;
@@ -22620,6 +22651,7 @@
       }
       ui.jobBox.hidden = false;
       ui.refresh.hidden = true;
+      updatePanelReveal();
       const version = `v${job.to_version || '?'}`;
       if (job.phase === 'succeeded') {
         ui.jobBox.dataset.state = 'done';
@@ -22824,6 +22856,7 @@
         if (job && job.phase === 'failed') {
           localStorage.setItem(UPDATE_ACK_KEY, String(job.id));
           renderUpdateJob(null);
+          updatePanelHideIfIdle();  // nothing left to show — retract the opener too
         }
       });
       if (ui.pairInput) ui.pairInput.addEventListener('keydown', (event) => {

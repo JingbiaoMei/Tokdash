@@ -23,9 +23,9 @@ cannot push an upgrade into a machine setup no longer owns.
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import subprocess
-import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -35,16 +35,60 @@ from .update_mechanics import MANUAL_COMMAND
 SYSTEMCTL_TIMEOUT = 10
 
 
-def _current_interpreter() -> str:
-    """Realpath of the interpreter running this code (the server, for the API plane)."""
+def _parse_execstart_line(line: str) -> Optional[List[str]]:
+    """Parse ONE loaded ExecStart line into argv, in any format systemd emits.
+
+    Modern systemd (what this installer actually runs on) answers
+    ``-p ExecStart --value`` with the structured form::
+
+        { path=/…/venv/bin/python ; argv[]=/…/venv/bin/python -m tokdash serve … ; ignore_errors=no ; … }
+
+    where ``;`` separates fields, ``;``/quotes inside values are backslash-escaped,
+    and older releases answer with the bare command line instead. shlex-ing the whole
+    structure would make ``{`` the executable, so both shapes are handled explicitly.
+    """
+    line = line.strip()
+    if not line:
+        return None
+    if line.startswith("{") and "argv[]=" in line:
+        return _parse_structured_execstart(line)
+    # Legacy plain line: strip per-entry option prefixes (+ - ! @ :).
+    while line[:1] in ("+", "-", "!", "@", ":"):
+        line = line[1:].lstrip()
     try:
-        return os.path.realpath(sys.executable or "")
-    except Exception:
-        return ""
+        return shlex.split(line) or None
+    except ValueError:
+        return None
+
+
+def _parse_structured_execstart(line: str) -> Optional[List[str]]:
+    m = re.search(r"argv\[\]=(.*)$", line)
+    if not m:
+        return None
+    rest = m.group(1)
+    chars: List[str] = []
+    i = 0
+    while i < len(rest):
+        c = rest[i]
+        if c == "\\" and i + 1 < len(rest):
+            chars.append(rest[i + 1])  # systemd escapes ';' and quotes with a backslash
+            i += 2
+            continue
+        if c == ";":
+            break  # unescaped field separator
+        if c == "}":
+            break  # closing brace of the entry
+        chars.append(c)
+        i += 1
+    raw = "".join(chars).strip()
+    try:
+        return shlex.split(raw) or None
+    except ValueError:
+        return None
 
 
 def _loaded_execstart(unit_name: str) -> Optional[List[str]]:
-    """argv of the FIRST ExecStart systemd actually has LOADED for ``unit_name``.
+    """argv of the ExecStart systemd actually has LOADED for ``unit_name``.
 
     The manifest's unit path only says which file setup wrote; a daemon-reload can be
     missing, the unit can be masked or overridden, or another unit of the same name can
@@ -61,18 +105,55 @@ def _loaded_execstart(unit_name: str) -> Optional[List[str]]:
     if proc.returncode != 0:
         return None
     for line in (proc.stdout or "").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        # systemd prefixes exec entries with option flags (+ - ! @ :); strip them.
-        while line[:1] in ("+", "-", "!", "@", ":"):
-            line = line[1:].lstrip()
-        try:
-            argv = shlex.split(line)
-        except ValueError:
-            return None
-        return argv or None
+        argv = _parse_execstart_line(line)
+        if argv:
+            return argv
     return None
+
+
+def _service_control_group(unit_name: str) -> Optional[str]:
+    """The cgroup systemd runs ``unit_name`` in, or None when unknown."""
+    try:
+        proc = subprocess.run(
+            ["systemctl", "--user", "show", unit_name, "-p", "ControlGroup", "--value"],
+            capture_output=True, text=True, timeout=SYSTEMCTL_TIMEOUT,
+        )
+    except Exception:
+        return None
+    if proc.returncode != 0:
+        return None
+    cg = (proc.stdout or "").strip().lstrip("/")
+    return cg or None
+
+
+def _read_self_cgroup() -> str:
+    try:
+        return Path("/proc/self/cgroup").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+def _process_in_service_cgroup(unit_name: str) -> bool:
+    """Whether THIS process runs inside the unit's control group.
+
+    This is the identity proof, and interpreter paths can never be one: virtualenvs
+    symlink ``bin/python`` to a shared base interpreter, so two unrelated runtimes
+    realpath to the same file, and any foreground shell running that same interpreter
+    would pass. Cgroup membership is what systemd itself uses to answer "is this
+    process the service" — MainPID plus every descendant, and nothing else.
+    """
+    cg = _service_control_group(unit_name)
+    if not cg:
+        return False
+    for line in _read_self_cgroup().splitlines():
+        parts = line.split(":", 2)
+        if len(parts) != 3:
+            continue
+        # systemd prints ControlGroup both ways across versions; normalize the slash.
+        path = parts[2].strip().lstrip("/")
+        if path == cg or path.startswith(cg + "/"):
+            return True
+    return False
 
 # Platform adapters ship only after their acceptance gates pass (§9). Linux/systemd is
 # validated first; macOS/Windows report "manual for now" instead of failing obscurely.
@@ -159,10 +240,10 @@ def check_eligibility(man: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     if reason:
         return _ineligible(reason)
 
-    # Identity: the server answering this capability/start IS the managed instance.
-    # Otherwise a dev run or a second tokdash against the same data dir could drive an
-    # update of a service it does not run (and stop something it owns no part of).
-    if _current_interpreter() != os.path.realpath(python_path):
+    # Identity: the server answering this capability/start IS a process of the managed
+    # service — proven by cgroup membership, not by interpreter paths, which
+    # virtualenv symlinks collapse and foreground shells share.
+    if not _process_in_service_cgroup(unit_name):
         return _ineligible(
             "This Tokdash process is not the managed service instance recorded by setup; "
             "trigger updates from the managed service (or run `tokdash update` in a terminal)."
@@ -173,11 +254,14 @@ def check_eligibility(man: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
 
 def _loaded_argv_mismatch(loaded: List[str], python_path: str, man: Dict[str, Any]) -> Optional[str]:
     """Whether the LOADED ExecStart runs the recorded runtime as the recorded Tokdash
-    service. Returns a user-facing reason, or None when every argument agrees."""
-    try:
-        same_interpreter = os.path.realpath(loaded[0]) == os.path.realpath(python_path)
-    except OSError:
-        same_interpreter = False
+    service. Returns a user-facing reason, or None when every argument agrees.
+
+    The interpreter comparison is ``normpath`` equality, NOT realpath: virtualenvs
+    (pipx included) ship ``bin/python`` as a symlink to a shared base interpreter, and
+    resolving it would make one venv indistinguishable from another or from the system
+    python. The unit records the venv's own path; it must match literally.
+    """
+    same_interpreter = os.path.normpath(loaded[0]) == os.path.normpath(python_path)
     if not same_interpreter:
         return "The loaded service does not run the interpreter recorded by setup."
     if loaded[1:3] != ["-m", "tokdash"] or "serve" not in loaded[3:]:

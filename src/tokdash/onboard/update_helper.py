@@ -79,19 +79,58 @@ def safe_install_argv(argv):
 def _looks_like_tokdash(argv):
     """Conservative argv test for "this process is a tokdash invocation".
 
-    Matches the console script, ``python -m tokdash``, and the repo's ``main.py`` dev
-    runner. Deliberately does NOT match ``pip install tokdash==X`` (our own child).
+    Covers every supported launch shape, including the one a venv console script
+    produces under ``python -m``-style parents — ``[/venv/bin/python,
+    /home/u/.local/bin/tokdash, serve]`` — the repo's ``main.py`` dev runner, and the
+    bare ``tokdash`` script resolved from PATH. Over-matching is safe (it refuses an
+    update); ``pip install tokdash==X`` deliberately does NOT match (our own child).
     """
-    first = argv[0]
-    if "bin/tokdash" in first:
-        return True
-    if len(argv) > 2 and argv[1] == "-m" and argv[2] == "tokdash":
-        return True
-    if any(a == "tokdash" for a in argv[1:3]):
-        return True
-    if first.endswith("main.py") or any(a.endswith("main.py") for a in argv[1:3]):
-        return True
+    for i, a in enumerate(argv):
+        if i == 0 and a == "tokdash":
+            return True
+        if a.endswith("/tokdash") and a.startswith("/"):
+            return True  # absolute console-script path at any position
+        if a == "-m" and i + 1 < len(argv) and argv[i + 1] == "tokdash":
+            return True
+        if a == "main.py" or a.endswith("/main.py"):
+            return True
     return False
+
+
+def _parse_execstart_line(line):
+    """Parse one loaded ExecStart line into argv — mirror of update_eligibility's
+    parser (the staged copy cannot import it). Handles both the modern structured
+    ``{ path=… ; argv[]=… ; … }`` form (field separator ``;``, backslash escapes
+    inside values) and the legacy bare command line."""
+    line = line.strip()
+    if not line:
+        return None
+    if line.startswith("{") and "argv[]=" in line:
+        m = re.search(r"argv\[\]=(.*)$", line)
+        if not m:
+            return None
+        rest = m.group(1)
+        chars = []
+        i = 0
+        while i < len(rest):
+            c = rest[i]
+            if c == "\\" and i + 1 < len(rest):
+                chars.append(rest[i + 1])
+                i += 2
+                continue
+            if c in (";", "}"):
+                break
+            chars.append(c)
+            i += 1
+        raw = "".join(chars).strip()
+    else:
+        while line[:1] in ("+", "-", "!", "@", ":"):
+            line = line[1:].lstrip()
+        raw = line
+    try:
+        return shlex.split(raw) or None
+    except ValueError:
+        return None
 
 
 def _now_iso():
@@ -255,29 +294,22 @@ class Runner:
 
     # -- phases -----------------------------------------------------------------
     def _loaded_execstart(self, unit_name):
-        """First LOADED ExecStart argv for the unit (mirror of update_eligibility)."""
+        """First LOADED ExecStart argv for the unit (mirror of update_eligibility,
+        including the structured ``{ path=… ; argv[]=… }`` modern systemd emits)."""
         proc = self.systemctl("show", unit_name, "-p", "ExecStart", "--value")
         for line in (proc.stdout or "").splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            while line[:1] in ("+", "-", "!", "@", ":"):
-                line = line[1:].lstrip()
-            try:
-                argv = shlex.split(line)
-            except ValueError:
-                return None
-            return argv or None
+            argv = _parse_execstart_line(line)
+            if argv:
+                return argv
         return None
 
     @staticmethod
     def _check_loaded_argv(loaded, python, man):
-        """Same proof update_eligibility._loaded_argv_mismatch gives, stdlib-only."""
-        try:
-            if os.path.realpath(loaded[0]) != os.path.realpath(str(python)):
-                raise RuntimeError("loaded service does not run the recorded interpreter")
-        except OSError:
-            raise RuntimeError("loaded service interpreter path is unusable")
+        """Same proof update_eligibility._loaded_argv_mismatch gives, stdlib-only.
+        normpath (not realpath) preserves virtualenv identity — venv bin/python is
+        normally a symlink to a shared base interpreter."""
+        if os.path.normpath(loaded[0]) != os.path.normpath(str(python)):
+            raise RuntimeError("loaded service does not run the recorded interpreter")
         if loaded[1:3] != ["-m", "tokdash"] or "serve" not in loaded[3:]:
             raise RuntimeError("loaded service does not run the recorded Tokdash service")
         for flag, key in (("--bind", "bind"), ("--port", "port")):
@@ -292,25 +324,14 @@ class Runner:
             if i + 1 >= len(loaded) or loaded[i + 1] != want_s:
                 raise RuntimeError(f"loaded service {flag} differs from setup's record")
 
-    def _sibling_tokdash_pids(self, exclude):
-        """PIDs of OTHER live processes that plausibly write THIS data dir's usage DB.
-
-        The DB lock covers individual writes, not process lifetimes, so a tokdash that
-        is idle at backup time can resume writing mid-install. The helper cannot order
-        such a process around — the honest move is to refuse the update while it runs.
-        """
-        found = []
-        me = os.getpid()
+    def _proc_snapshot(self):
+        """Yield (pid, argv, environ) for every readable /proc entry (empty off-Linux)."""
         try:
             entries = os.listdir("/proc")
         except OSError:
-            return found
-        want_dir = os.path.realpath(str(self.data_dir))
+            return
         for entry in entries:
             if not entry.isdigit():
-                continue
-            pid = int(entry)
-            if pid == me or pid in exclude:
                 continue
             try:
                 raw = Path(f"/proc/{entry}/cmdline").read_bytes()
@@ -320,19 +341,40 @@ class Runner:
             argv = [a.decode("utf-8", "replace") for a in raw.split(b"\0") if a]
             if not argv:
                 continue
-            if not _looks_like_tokdash(argv):
-                continue
             env = {}
             for pair in env_raw.split(b"\0"):
                 chunk = pair.decode("utf-8", "replace")
                 if "=" in chunk:
                     k, _, v = chunk.partition("=")
                     env[k] = v
-            dd = env.get("TOKDASH_DATA_DIR") or os.path.join(env.get("HOME", ""), ".tokdash")
-            if not dd:
+            yield int(entry), argv, env
+
+    def _sibling_tokdash_pids(self, exclude, usage_db=None):
+        """PIDs of OTHER live processes that can write THIS update's usage DB.
+
+        The DB lock covers individual writes, not process lifetimes, so a tokdash that
+        is idle at backup time can resume writing mid-install. The helper cannot order
+        such a process around — the honest move is to refuse the update while it runs.
+        Matching follows BOTH bindings a process can have to our database: its data
+        directory AND an explicit shared ``TOKDASH_USAGE_DB_PATH`` (the plan supports
+        that override, so a different data dir does not prove a different database).
+        """
+        found = []
+        me = os.getpid()
+        want_dir = os.path.realpath(str(self.data_dir))
+        want_db = os.path.realpath(usage_db) if usage_db else os.path.join(want_dir, "usage.sqlite3")
+        for pid, argv, env in self._proc_snapshot():
+            if pid == me or pid in exclude:
                 continue
-            if os.path.realpath(dd) == want_dir:
-                found.append(pid)
+            if not _looks_like_tokdash(argv):
+                continue
+            dd = env.get("TOKDASH_DATA_DIR") or os.path.join(env.get("HOME", ""), ".tokdash")
+            db = env.get("TOKDASH_USAGE_DB_PATH") or (os.path.join(dd, "usage.sqlite3") if dd else "")
+            try:
+                if (dd and os.path.realpath(dd) == want_dir) or (db and os.path.realpath(db) == want_db):
+                    found.append(pid)
+            except OSError:
+                continue
         return found
 
     def preflight(self, job):
@@ -376,7 +418,9 @@ class Runner:
             main_pid = int((shown.stdout or "0").strip() or 0)
         except Exception:
             main_pid = 0
-        others = self._sibling_tokdash_pids(exclude={main_pid} if main_pid else set())
+        others = self._sibling_tokdash_pids(
+            exclude={main_pid} if main_pid else set(), usage_db=job.get("usage_db"),
+        )
         if others:
             raise RuntimeError(
                 "another Tokdash process is using this data directory (pid "

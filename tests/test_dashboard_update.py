@@ -88,11 +88,11 @@ def managed_manifest(tmp_path, marker_id="abcd1234"):
     return data, marker
 
 
-def stub_who_runs_the_service(monkeypatch, py, *, bind="127.0.0.1", port=55423, loaded=True):
-    """Make the two live-system probes in update_eligibility answer about this tmp env:
-    the LOADED ExecStart and the interpreter identity of the current process."""
-    import os
-
+def stub_who_runs_the_service(monkeypatch, py, *, bind="127.0.0.1", port=55423, loaded=True, in_cgroup=True):
+    """Make the live-system probes in update_eligibility answer about this tmp env:
+    the LOADED ExecStart argv and this process's membership in the service cgroup.
+    (The argv-level parse of systemd's real structured output is covered separately
+    by a test against a captured live response.)"""
     if loaded:
         monkeypatch.setattr(
             update_eligibility, "_loaded_execstart",
@@ -100,7 +100,7 @@ def stub_who_runs_the_service(monkeypatch, py, *, bind="127.0.0.1", port=55423, 
         )
     else:
         monkeypatch.setattr(update_eligibility, "_loaded_execstart", lambda unit: None)
-    monkeypatch.setattr(update_eligibility, "_current_interpreter", lambda: os.path.realpath(str(py)))
+    monkeypatch.setattr(update_eligibility, "_process_in_service_cgroup", lambda unit: in_cgroup)
 
 
 @pytest.fixture()
@@ -280,10 +280,94 @@ def test_eligibility_rejects_foreign_interpreter(eligible_env, monkeypatch):
 
 def test_eligibility_requires_running_managed_instance(eligible_env, monkeypatch):
     # A dev run against the same data dir must not drive the managed service.
-    monkeypatch.setattr(update_eligibility, "_current_interpreter", lambda: "/some/dev/python")
+    monkeypatch.setattr(update_eligibility, "_process_in_service_cgroup", lambda unit: False)
     r = update_eligibility.check_eligibility()
     assert not r["eligible"]
     assert "managed service" in r["reason"]
+
+
+def test_eligibility_rejects_base_interpreter_behind_venv_symlink(eligible_env, monkeypatch):
+    # venv bin/python is normally a symlink to a shared base interpreter: comparing
+    # realpaths would call /usr/bin/python3 and the recorded venv identical. The
+    # LOADED ExecStart must name the recorded venv path itself.
+    monkeypatch.setattr(
+        update_eligibility, "_loaded_execstart",
+        lambda unit: ["/usr/bin/python3", "-m", "tokdash", "serve",
+                      "--bind", "127.0.0.1", "--port", "55423"],
+    )
+    r = update_eligibility.check_eligibility()
+    assert not r["eligible"]
+    assert "interpreter" in r["reason"]
+
+
+def test_cgroup_membership_proves_identity(monkeypatch):
+    cg = "/user.slice/user-1000.slice/user@1000.service/app.slice/tokdash.service"
+    monkeypatch.setattr(update_eligibility, "_service_control_group", lambda unit: cg.lstrip("/"))
+
+    def self_cgroup(path):
+        monkeypatch.setattr(update_eligibility, "_read_self_cgroup", lambda: f"0::/{path}\n")
+
+    self_cgroup(cg.lstrip("/"))
+    assert update_eligibility._process_in_service_cgroup("tokdash.service") is True
+    self_cgroup(cg.lstrip("/") + "/worker-7.scope")  # descendants belong too
+    assert update_eligibility._process_in_service_cgroup("tokdash.service") is True
+    self_cgroup("/user.slice/user-1000.slice/user@1000.service/app.slice/tokdash2.service")
+    assert update_eligibility._process_in_service_cgroup("tokdash.service") is False
+    self_cgroup("/init.scope")  # a login shell
+    assert update_eligibility._process_in_service_cgroup("tokdash.service") is False
+    monkeypatch.setattr(update_eligibility, "_service_control_group", lambda unit: None)
+    assert update_eligibility._process_in_service_cgroup("tokdash.service") is False
+
+
+# systemd's LOADED ExecStart on this machine's installer (captured live from
+# `systemctl --user show tokdash.service -p ExecStart --value`) — the structured form
+# real systemd emits. Parsing it as a plain command line would make "{" the executable.
+CAPTURED_STRUCTURED_EXECSTART = (
+    "{ path=/home/howard/.local/share/pipx/venvs/tokdash/bin/python ; "
+    "argv[]=/home/howard/.local/share/pipx/venvs/tokdash/bin/python -m tokdash serve "
+    "--bind 127.0.0.1 --port 55423 --no-open ; ignore_errors=no ; start_time=[n/a] ; "
+    "stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }"
+)
+
+
+def test_parses_captured_systemd_structured_response():
+    argv = update_eligibility._parse_execstart_line(CAPTURED_STRUCTURED_EXECSTART)
+    assert argv is not None
+    assert argv[0] == "/home/howard/.local/share/pipx/venvs/tokdash/bin/python"
+    assert argv[1:5] == ["-m", "tokdash", "serve", "--bind"]
+    assert argv[-2:] == ["--port", "55423"] or "--no-open" in argv  # full argv survives
+    assert "{" not in "".join(argv)
+
+
+def test_legacy_plain_execstart_still_parses():
+    argv = update_eligibility._parse_execstart_line(
+        "/home/u/.local/share/pipx/venvs/tokdash/bin/python -m tokdash serve --bind 127.0.0.1 --port 55423"
+    )
+    assert argv and argv[1:4] == ["-m", "tokdash", "serve"]
+
+
+def test_helper_parser_matches_eligibility_parser():
+    # The staged helper cannot import the eligibility parser; the mirror must agree.
+    for sample in (CAPTURED_STRUCTURED_EXECSTART,
+                   "/venv/bin/python -m tokdash serve --bind 127.0.0.1 --port 55423"):
+        assert update_helper._parse_execstart_line(sample) == update_eligibility._parse_execstart_line(sample), sample
+
+
+def test_eligibility_end_to_end_with_captured_systemd_output(tmp_path, monkeypatch):
+    # Full path: captured raw systemctl text -> parser -> checks. No argv stubbing.
+    data, _ = managed_manifest(tmp_path)
+    py = str(Path(data["python_path"]))
+    monkeypatch.setattr(update_eligibility.detect, "systemd_user_available", lambda: True)
+    monkeypatch.setattr(update_eligibility, "_process_in_service_cgroup", lambda unit: True)
+    captured = CAPTURED_STRUCTURED_EXECSTART.replace(
+        "/home/howard/.local/share/pipx/venvs/tokdash/bin/python", py)
+    monkeypatch.setattr(
+        update_eligibility.subprocess, "run",
+        lambda cmd, **k: subprocess.CompletedProcess(
+            cmd, 0, captured if "ExecStart" in cmd else "0\n", ""),
+    )
+    r = update_eligibility.check_eligibility()
+    assert r["eligible"] is True, r["reason"]
 
 
 def test_eligibility_requires_loaded_unit(eligible_env, monkeypatch):
@@ -839,12 +923,15 @@ class FakeRunner(update_helper.Runner):
     def run(self, args, timeout=60):
         self.calls.append(list(args))
         stdout = ""
-        # The preflight now proves the LOADED unit really runs the recorded service;
-        # answer `systemctl show` with what setup's unit would load.
+        # The preflight proves the LOADED unit really runs the recorded service; answer
+        # `systemctl show` in systemd's REAL structured form (captured from a live
+        # pipx-managed install), not a bare command line.
         if args[:3] == ["systemctl", "--user", "show"] and "-p" in args and "ExecStart" in args:
+            py = f"{self.data_dir}/venv/bin/python"
             stdout = (
-                f"{self.data_dir}/venv/bin/python -m tokdash serve "
-                "--bind 127.0.0.1 --port 55423 --no-open\n"
+                f"{{ path={py} ; argv[]={py} -m tokdash serve --bind 127.0.0.1 "
+                "--port 55423 --no-open ; ignore_errors=no ; start_time=[n/a] ; "
+                "stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }\n"
             )
         elif args[:3] == ["systemctl", "--user", "show"] and "MainPID" in args:
             stdout = "0\n"
@@ -1030,7 +1117,10 @@ def test_helper_refuses_sibling_tokdash_process(eligible_env, tmp_path, monkeypa
     # An idle co-tenant tokdash on the same data dir would resume writing the DB the
     # replacement migrates; the honest answer is refusal, before any downtime.
     job = _seed_job(tmp_path)
-    monkeypatch.setattr(update_helper.Runner, "_sibling_tokdash_pids", lambda self, exclude: [4242])
+    monkeypatch.setattr(
+        update_helper.Runner, "_sibling_tokdash_pids",
+        lambda self, exclude, usage_db=None: [4242],
+    )
     runner = FakeRunner(tmp_path, job["id"], lambda m: None)
     ok = update_helper.main(str(tmp_path), job["id"], runner=runner, opener=lambda *a, **k: {})
     assert ok is False
@@ -1065,12 +1155,45 @@ def test_helper_preflight_rejects_unrelated_execstart(eligible_env, tmp_path):
 
 def test_looks_like_tokdash():
     assert update_helper._looks_like_tokdash(["/home/u/.local/bin/tokdash", "serve"])
+    assert update_helper._looks_like_tokdash(["tokdash", "serve"])  # resolved from PATH
     assert update_helper._looks_like_tokdash(["/venv/bin/python", "-m", "tokdash", "serve"])
+    # console script launched through its interpreter — the shape a venv parent produces
+    assert update_helper._looks_like_tokdash(
+        ["/venv/bin/python", "/home/user/.local/bin/tokdash", "serve"]
+    )
     assert update_helper._looks_like_tokdash(["python3", "main.py"])
     assert not update_helper._looks_like_tokdash(
         ["/venv/bin/python", "-m", "pip", "install", "tokdash==9.9.9"]
     )
     assert not update_helper._looks_like_tokdash(["systemctl", "--user", "restart", "tokdash"])
+
+
+def test_sibling_scan_covers_console_scripts_and_shared_db(eligible_env, tmp_path, monkeypatch):
+    import os as _os
+
+    db = str(tmp_path / "usage.sqlite3")
+
+    def fake_snapshot(self):
+        # 111: console-script shape, different data dir, SHARED usage DB → caught
+        yield 111, ["/venv/bin/python", "/home/user/.local/bin/tokdash", "serve"], \
+            {"TOKDASH_USAGE_DB_PATH": db}
+        # 222: our own pip child (not tokdash), shared DB → ignored
+        yield 222, ["/venv/bin/python", "-m", "pip", "install", "tokdash==9.9.9"], \
+            {"TOKDASH_USAGE_DB_PATH": db}
+        # 333: same data dir → caught
+        yield 333, ["tokdash", "serve"], {"TOKDASH_DATA_DIR": str(tmp_path)}
+        # 444: unrelated install → ignored
+        yield 444, ["tokdash", "serve"], {
+            "TOKDASH_DATA_DIR": "/home/u/.tokdash",
+            "TOKDASH_USAGE_DB_PATH": "/elsewhere/usage.sqlite3", "HOME": "/home/u",
+        }
+        # self: excluded regardless of shape
+        yield _os.getpid(), ["tokdash", "serve"], {"TOKDASH_DATA_DIR": str(tmp_path)}
+
+    monkeypatch.setattr(update_helper.Runner, "_proc_snapshot", fake_snapshot)
+    r = update_helper.Runner(tmp_path, "j", lambda m: None)
+    pids = r._sibling_tokdash_pids(exclude={999}, usage_db=db)
+    assert sorted(pids) == [111, 333]
 
 
 # --- CLI/engine contract -------------------------------------------------------------------------

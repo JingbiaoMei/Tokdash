@@ -6946,12 +6946,6 @@
         usageReportCardProjects: 'Top projects',
         usageReportCardBusiestLabel: 'Busiest day',
         usageReportCardNicknameFallback: 'this machine',
-        emptyTotalTokens: 'No tokens recorded',
-        emptyTotalCost: 'No cost data',
-        emptyMessages: 'No messages found',
-        emptyRefreshData: 'No refresh data',
-        emptyStats3DActiveDate: 'No active day',
-        emptyTopModel: 'No model data',
       },
       zh: {
         updateAvailable: '有新版本',
@@ -7504,12 +7498,6 @@
         usageReportCardProjects: '项目排名',
         usageReportCardBusiestLabel: '最忙的一天',
         usageReportCardNicknameFallback: '本机',
-        emptyTotalTokens: '暂无 token 记录',
-        emptyTotalCost: '暂无费用数据',
-        emptyMessages: '暂无消息记录',
-        emptyRefreshData: '暂无刷新数据',
-        emptyStats3DActiveDate: '暂无活跃日期',
-        emptyTopModel: '暂无模型数据',
       },
 
       ja: {
@@ -8063,12 +8051,6 @@
         usageReportCardProjects: 'プロジェクト上位',
         usageReportCardBusiestLabel: '最も多かった日',
         usageReportCardNicknameFallback: 'このマシン',
-        emptyTotalTokens: 'トークン記録なし',
-        emptyTotalCost: 'コストデータなし',
-        emptyMessages: 'メッセージ記録なし',
-        emptyRefreshData: 'リフレッシュデータなし',
-        emptyStats3DActiveDate: 'アクティブ日なし',
-        emptyTopModel: 'モデルデータなし',
       },
 
       ko: {
@@ -8622,12 +8604,6 @@
         usageReportCardProjects: '상위 프로젝트',
         usageReportCardBusiestLabel: '가장 바빴던 날',
         usageReportCardNicknameFallback: '이 머신',
-        emptyTotalTokens: '토큰 기록 없음',
-        emptyTotalCost: '비용 데이터 없음',
-        emptyMessages: '메시지 기록 없음',
-        emptyRefreshData: '새로고침 데이터 없음',
-        emptyStats3DActiveDate: '활동 날짜 없음',
-        emptyTopModel: '모델 데이터 없음',
       },
 
       es: {
@@ -9181,12 +9157,6 @@
         usageReportCardProjects: 'Proyectos principales',
         usageReportCardBusiestLabel: 'Día más intenso',
         usageReportCardNicknameFallback: 'esta máquina',
-        emptyTotalTokens: 'Sin tokens registrados',
-        emptyTotalCost: 'Sin datos de coste',
-        emptyMessages: 'Sin mensajes encontrados',
-        emptyRefreshData: 'Sin datos de actualización',
-        emptyStats3DActiveDate: 'Sin día activo',
-        emptyTopModel: 'Sin datos de modelo',
       },
 
       pt: {
@@ -9740,12 +9710,6 @@
         usageReportCardProjects: 'Projetos principais',
         usageReportCardBusiestLabel: 'Dia mais intenso',
         usageReportCardNicknameFallback: 'esta máquina',
-        emptyTotalTokens: 'Nenhum token registrado',
-        emptyTotalCost: 'Nenhum dado de custo',
-        emptyMessages: 'Nenhuma mensagem encontrada',
-        emptyRefreshData: 'Nenhum dado de atualização',
-        emptyStats3DActiveDate: 'Nenhum dia ativo',
-        emptyTopModel: 'Nenhum dado de modelo',
       },
     };
 
@@ -9902,6 +9866,31 @@
       }
     }
 
+    // An Overview range counts as empty only when the whole read came back with
+    // nothing in it. Deciding per-metric mixes answers within one row (tokens say
+    // "no data" while cost says "$0.00"), and a zero alone cannot tell "the range
+    // was empty" from "the read failed and reconciled to zeros" — the _partial /
+    // _has_incomplete_server_rows flags from reconcileUsageRows and
+    // _server_rows_stale mark the latter, and a broken read must fall through to
+    // its numbers rather than claim there is no data.
+    function overviewRangeIsEmpty(data) {
+      if (!data) return false;
+      if (data._partial || data._has_incomplete_server_rows || data._server_rows_stale) return false;
+      return !Number(data.total_tokens) && !Number(data.total_messages) && !Number(data.total_cost);
+    }
+
+    // animateNumber builds a new animation per call and never cancels the previous
+    // one, so its onUpdate keeps writing textContent for ~1.2s. A range that renders
+    // statically (zero or empty) must first cancel whatever is still writing into
+    // the element, or the stale animation finishes last and overwrites the value.
+    function cancelOverviewCounterAnimation(el) {
+      if (!el) return;
+      const cancel = typeof window !== 'undefined' && window.TokDashAnimations
+        ? window.TokDashAnimations.cancelCounter
+        : null;
+      if (typeof cancel === 'function') cancel(el);
+    }
+
     function renderOverviewTokenTotal(value = overviewTotalTokensRaw) {
       const valueElement = document.getElementById('totalTokens');
       const wrapper = document.getElementById('totalTokensWrap');
@@ -9923,12 +9912,16 @@
       // — it would only cost width the KPI row no longer has. The exact count in
       // the tooltip and the aria-label keep it.
       if (overviewTotalTokensRaw === 0) {
-        valueElement.textContent = t('emptyTotalTokens');
+        cancelOverviewCounterAnimation(valueElement);
+        valueElement.textContent = formatNumber(0);
+        valueElement._currentValue = 0;
         valueElement.removeAttribute('tabindex');
         valueElement.removeAttribute('aria-describedby');
         valueElement.removeAttribute('aria-label');
+        wrapper.dataset.readable = String(overviewReadableTokens);
         tooltip.textContent = '-';
         tooltip.hidden = true;
+        fitKpiValue(valueElement);
         return;
       }
       valueElement.textContent = overviewReadableTokens
@@ -10411,7 +10404,9 @@
     }
 
     function signedRefreshValue(value, formatter) {
-      if (value === null || value === undefined) return t('emptyRefreshData');
+      // "—" on a first read is correct: the refresh did return data, only the
+      // comparison is missing, and the summary line right below says so.
+      if (value === null || value === undefined) return '—';
       const numeric = Number(value) || 0;
       if (numeric === 0) return formatter(0);
       return `${numeric > 0 ? '+' : '−'}${formatter(Math.abs(numeric))}`;
@@ -12423,48 +12418,56 @@
 
     function renderOverviewTab(data) {
       if (!data) return;
+      // Emptiness is decided once for the whole range so every card in the row
+      // agrees, and a broken read never dresses up as an empty one.
+      const rangeIsEmpty = overviewRangeIsEmpty(data);
       renderOverviewTokenTotal(data.total_tokens);
+      const totalTokensEl = document.getElementById('totalTokens');
       const totalCostEl = document.getElementById('totalCost');
       const totalMessagesEl = document.getElementById('totalMessages');
       const costVal = Number(data.total_cost) || 0;
       const msgVal = Number(data.total_messages) || 0;
-      if (costVal === 0) {
-        totalCostEl.textContent = t('emptyTotalCost');
+      if (rangeIsEmpty) {
+        cancelOverviewCounterAnimation(totalTokensEl);
+        totalTokensEl.textContent = t('noData');
+        cancelOverviewCounterAnimation(totalCostEl);
+        totalCostEl.textContent = t('noData');
+        totalCostEl._currentValue = 0;
+        cancelOverviewCounterAnimation(totalMessagesEl);
+        totalMessagesEl.textContent = t('noData');
+        totalMessagesEl._currentValue = 0;
       } else {
-        totalCostEl.textContent = formatCurrency(data.total_cost);
-      }
-      if (msgVal === 0) {
-        totalMessagesEl.textContent = t('emptyMessages');
-      } else {
-        totalMessagesEl.textContent = formatNumber(data.total_messages || 0);
+        // Unpriced models keep the $0 "FREE" state, and a zero target still
+        // animates so a later range counts from 0 rather than a stale value.
+        if (typeof window !== 'undefined' && window.TokDashAnimations) {
+          window.TokDashAnimations.animateNumber(
+            totalCostEl,
+            costVal,
+            1200,
+            (v) => formatCurrency(v)
+          );
+          window.TokDashAnimations.animateNumber(
+            totalMessagesEl,
+            msgVal,
+            1200,
+            (v) => formatNumber(v)
+          );
+        } else {
+          totalCostEl.textContent = formatCurrency(costVal);
+          totalMessagesEl.textContent = formatNumber(msgVal);
+        }
       }
       const hitEl = document.getElementById('avgCacheHitRate');
       if (hitEl) hitEl.textContent = formatHitRate(data.cache_hit_rate);
 
       if (typeof window !== 'undefined' && window.TokDashAnimations && typeof window.TokDashAnimations.animateNumber === 'function') {
         const rawTokens = typeof overviewTotalTokensRaw !== 'undefined' ? overviewTotalTokensRaw : (Number(data.total_tokens) || 0);
-        if (rawTokens !== 0) {
+        if (rawTokens > 0) {
           window.TokDashAnimations.animateNumber(
-            document.getElementById('totalTokens'),
+            totalTokensEl,
             rawTokens,
             1200,
             (v) => (typeof overviewReadableTokens !== 'undefined' && overviewReadableTokens) ? formatCompactTokenCount(v) : formatNumber(v)
-          );
-        }
-        if (costVal !== 0) {
-          window.TokDashAnimations.animateNumber(
-            document.getElementById('totalCost'),
-            costVal,
-            1200,
-            (v) => formatCurrency(v)
-          );
-        }
-        if (msgVal !== 0) {
-          window.TokDashAnimations.animateNumber(
-            document.getElementById('totalMessages'),
-            msgVal,
-            1200,
-            (v) => formatNumber(v)
           );
         }
         if (hitEl && data.cache_hit_rate !== null && data.cache_hit_rate !== undefined) {
@@ -12492,7 +12495,7 @@
         topModelEl.title = top.name;
         document.getElementById('topModelMeta').textContent = `${formatCurrency(top.cost)} · ${formatTokenCount(top.tokens, true)}`;
       } else {
-        topModelEl.textContent = t('emptyTopModel');
+        topModelEl.textContent = '—';
         topModelEl.title = '';
         document.getElementById('topModelMeta').textContent = '—';
       }
@@ -21727,9 +21730,9 @@
 
       if (days.length === 0) {
         container.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:750px;color:var(--color-muted);font-size:16px;">${t('noActivityData')}</div>`;
-        document.getElementById('stats3DTotalCost').textContent = t('emptyTotalCost');
-        document.getElementById('stats3DTotalTokens').textContent = t('emptyTotalTokens');
-        document.getElementById('stats3DActiveDate').textContent = t('emptyStats3DActiveDate');
+        document.getElementById('stats3DTotalCost').textContent = formatCurrency(0);
+        document.getElementById('stats3DTotalTokens').textContent = formatTokenCount(0);
+        document.getElementById('stats3DActiveDate').textContent = '—';
         document.getElementById('stats3DActiveTokens').textContent = '—';
         document.getElementById('stats3DActiveCost').textContent = '—';
         updateStatsInsights([]);
@@ -22008,7 +22011,7 @@
         document.getElementById('stats3DActiveTokens').textContent = dayTokens;
         document.getElementById('stats3DActiveCost').textContent = dayCost;
       } else {
-        document.getElementById('stats3DActiveDate').textContent = t('emptyStats3DActiveDate');
+        document.getElementById('stats3DActiveDate').textContent = '—';
         document.getElementById('stats3DActiveTokens').textContent = '—';
         document.getElementById('stats3DActiveCost').textContent = '—';
       }

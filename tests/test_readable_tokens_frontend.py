@@ -234,8 +234,7 @@ def test_readable_token_scope_covers_all_token_views() -> None:
         assert token_view in source
 
     # Non-token quantities must remain exact when readable tokens are enabled.
-    for exact_count in (
-        "formatNumber(data.total_messages || 0)",
+    for exact_count in (            "formatNumber(msgVal)",
         "formatNumber(session.token_events || 0)",
         "formatNumber(model.messages || 0)",
         "formatNumber(summary.activeDays || 0)",

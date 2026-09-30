@@ -6847,6 +6847,7 @@
         quotaVisibilityAll: 'Show: All',
         quotaVisibilityNone: 'Show: None',
         quotaVisibilityPrefix: 'Show:',
+        quotaVisibilityMenu: 'Show providers',
         quotaAllHidden: 'All providers hidden — enable one from the Show menu.',
         consumptionUnitDay: '% of window consumed per day',
         consumptionUnitHour: '% of window consumed per hour',
@@ -7429,6 +7430,7 @@
         quotaVisibilityAll: '显示：全部',
         quotaVisibilityNone: '显示：无',
         quotaVisibilityPrefix: '显示：',
+        quotaVisibilityMenu: '显示提供商',
         quotaAllHidden: '已隐藏全部提供方 — 从“显示”菜单启用。',
         consumptionUnitDay: '每天消耗的窗口百分比',
         consumptionUnitHour: '每小时消耗的窗口百分比',
@@ -8012,6 +8014,7 @@
         quotaVisibilityAll: '表示: すべて',
         quotaVisibilityNone: '表示: なし',
         quotaVisibilityPrefix: '表示:',
+        quotaVisibilityMenu: 'プロバイダーを表示',
         quotaAllHidden: 'すべてのプロバイダーが非表示です — 「表示」メニューで有効にしてください。',
         consumptionUnitDay: 'ウィンドウ消費率（1 日あたり %）',
         consumptionUnitHour: 'ウィンドウ消費率（1 時間あたり %）',
@@ -8595,6 +8598,7 @@
         quotaVisibilityAll: '표시: 전체',
         quotaVisibilityNone: '표시: 없음',
         quotaVisibilityPrefix: '표시:',
+        quotaVisibilityMenu: '제공업체 표시',
         quotaAllHidden: '모든 제공자가 숨겨짐 — "표시" 메뉴에서 하나를 활성화하세요.',
         consumptionUnitDay: '1일당 창 소비 비율(%)',
         consumptionUnitHour: '1시간당 창 소비 비율(%)',
@@ -9178,6 +9182,7 @@
         quotaVisibilityAll: 'Mostrar: todo',
         quotaVisibilityNone: 'Mostrar: nada',
         quotaVisibilityPrefix: 'Mostrar:',
+        quotaVisibilityMenu: 'Mostrar proveedores',
         quotaAllHidden: 'Todos los proveedores ocultos — activa uno desde el menú Mostrar.',
         consumptionUnitDay: '% de la ventana consumido por día',
         consumptionUnitHour: '% de la ventana consumido por hora',
@@ -9761,6 +9766,7 @@
         quotaVisibilityAll: 'Mostrar: todos',
         quotaVisibilityNone: 'Mostrar: nenhum',
         quotaVisibilityPrefix: 'Mostrar:',
+        quotaVisibilityMenu: 'Mostrar provedores',
         quotaAllHidden: 'Todos os provedores ocultos — ative um pelo menu Mostrar.',
         consumptionUnitDay: '% da janela consumido por dia',
         consumptionUnitHour: '% da janela consumido por hora',
@@ -16220,7 +16226,7 @@
       const panel = document.createElement('div');
       panel.className = 'quota-visibility-panel hidden';
       panel.setAttribute('role', 'menu');
-      panel.setAttribute('aria-label', 'Show providers');
+      panel.setAttribute('aria-label', t('quotaVisibilityMenu'));
       QUOTA_PROVIDERS.forEach((provider) => {
         if (!present.has(provider)) return;
         panel.appendChild(buildQuotaVisibilityRow(provider, wrap.dataset.hostKey));

@@ -565,6 +565,65 @@ def test_brand_text_is_static(source: str, english_dictionary: dict[str, str]) -
     assert "appName" not in english_dictionary
 
 
+# --- JavaScript-written names must go through t() --------------------------
+
+
+# Attributes whose value is the accessible name or the tooltip. A bare
+# English literal assigned to one of these is invisible to every other
+# check in this file -- there is no element in the static markup to
+# inspect, so nothing fails when the six locales all keep saying English.
+JS_WRITTEN_NAME_ATTRIBUTES = ("aria-label", "title", "placeholder")
+
+
+def test_js_written_names_are_never_hardcoded_english(source: str) -> None:
+    """No aria-label / title / placeholder may be set to a bare literal.
+
+    ``createQuotaVisibilityControl`` named its provider menu with
+    ``setAttribute('aria-label', 'Show providers')`` while every other
+    name in the same function went through ``t()``, so that menu announced
+    itself in English in all six locales.
+
+    Only *literals* are rejected. The other writers legitimately pass a
+    variable that already came from ``t()`` -- ``refreshBtn``'s ``label``,
+    the server rows' ```${t('servers')}: ${host.label}``` -- and
+    ``formatToolName`` returns brand proper nouns ("Claude Code", "Codex"),
+    which no locale translates.
+    """
+    offenders: list[str] = []
+    for number, line in enumerate(source.splitlines(), 1):
+        for attribute in JS_WRITTEN_NAME_ATTRIBUTES:
+            patterns = (
+                rf"""setAttribute\(\s*['"]{attribute}['"]\s*,\s*(['"])(.*?)\1""",
+                rf"""\.{attribute}\s*=\s*(['"])(.*?)\1""",
+            )
+            for pattern in patterns:
+                for match in re.finditer(pattern, line):
+                    literal = match.group(2)
+                    if not re.search(r"[A-Za-z]", literal):
+                        continue  # '', '—', '...' carry no words to translate
+                    if "t(" in literal:
+                        continue
+                    offenders.append(
+                        f"line {number}: {attribute} = {literal!r} never goes "
+                        "through t()"
+                    )
+    assert not offenders, (
+        "these names are written by JavaScript, so nothing in the static "
+        f"markup catches them: {offenders}"
+    )
+
+
+def test_quota_provider_menu_name_comes_from_the_dictionary(
+    source: str, english_dictionary: dict[str, str]
+) -> None:
+    """The provider-visibility menu is named in all six locales."""
+    assert "setAttribute('aria-label', t('quotaVisibilityMenu'))" in source
+    assert english_dictionary["quotaVisibilityMenu"] == "Show providers"
+    # Sits with the Show: / Show: All / Show: None family it labels.
+    for sibling in ("quotaVisibilityPrefix", "quotaVisibilityAll", "quotaVisibilityNone"):
+        assert sibling in english_dictionary
+
+
 # --- the translation mechanism itself -------------------------------------
 
 

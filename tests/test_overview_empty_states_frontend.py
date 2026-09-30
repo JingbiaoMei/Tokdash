@@ -403,6 +403,26 @@ async function main() {
     out.settled = node('totalCost').textContent;
   }
 
+  if (scenario === 'a-range-without-a-token-total-does-not-count-down') {
+    // A range with cost and messages but no token figure of its own is not an
+    // empty range, so the Tokens card falls back to a dash. A dash is not a
+    // number: if the previous total survives as the counter base, the next range
+    // animates down from 5.2M rather than up from nothing.
+    overviewReadableTokens = false;
+    renderOverviewTab(populated({ total_cost: 12.5, total_messages: 300 }));
+    await advance(1600);
+    out.settledFirst = node('totalTokens').textContent;
+    renderOverviewTab(populated({ total_tokens: null, total_cost: 3, total_messages: 7 }));
+    out.rightAfter = node('totalTokens').textContent;
+    await advance(200);
+    out.duringNullRange = node('totalTokens').textContent;
+    renderOverviewTab(populated({ total_tokens: 1000, total_cost: 1, total_messages: 2 }));
+    await advance(80);
+    out.startOfNextCount = node('totalTokens').textContent;
+    await advance(1600);
+    out.settledNext = node('totalTokens').textContent;
+  }
+
   if (scenario === 'the-empty-render-writes-the-card-once') {
     // renderOverviewTokenTotal owns the Tokens card, so the range tells it what
     // to show instead of writing "0" and correcting it on the next line. Record
@@ -616,6 +636,27 @@ def test_a_rerender_mid_count_resumes_from_the_number_on_screen(tmp_path):
         f"value: {out['liveBefore']} -> {out['shortlyAfter']}"
     )
     assert out["settled"] == "$4000.00"
+
+
+def test_a_range_without_a_token_total_does_not_count_down_from_the_old_one(tmp_path):
+    """A dash leaves nothing to count from.
+
+    The null branch of renderOverviewTokenTotal writes the card through
+    setCounterText, and a call without a value leaves el._currentValue on the
+    previous range's total. The next range then animated down from 5.2M, and the
+    old total itself stayed live for any caller that reached the count-up first.
+    """
+    out = _run(tmp_path, "a-range-without-a-token-total-does-not-count-down")
+
+    assert out["settledFirst"] == "5,200,000"
+    assert out["rightAfter"] == "-"
+    assert out["duringNullRange"] == "-", (
+        "the previous range's token total was still live and animated over the dash"
+    )
+    assert float(out["startOfNextCount"].replace(",", "")) < 1000, (
+        f"the next range counted down from the old total: {out['startOfNextCount']}"
+    )
+    assert out["settledNext"] == "1,000"
 
 
 def test_the_empty_render_writes_the_tokens_card_once(tmp_path):

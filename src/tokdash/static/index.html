@@ -9929,10 +9929,12 @@
       };
       if (value === null) {
         // Cleared, not left alone: a stale total left here is what the Tokens
-        // count-up would otherwise animate from after a null payload. A range
-        // that knows what it wants shown still wins over the loading dash.
+        // count-up would otherwise animate from after a null payload. The counter
+        // base goes to 0 for the same reason — a dash is not a number to count
+        // down from. A range that knows what it wants shown still wins over the
+        // loading dash.
         overviewTotalTokensRaw = null;
-        setOverviewCounterText(valueElement, staticText ?? '-');
+        setOverviewCounterText(valueElement, staticText ?? '-', 0);
         clearExact();
         return;
       }

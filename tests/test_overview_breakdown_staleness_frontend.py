@@ -83,6 +83,9 @@ let lastWindowKey = null;
 let lastUsageServerKey = null;
 let overviewBreakdownWindowKey = null;
 let overviewRenderToken = 0;
+// renderOverviewTab reads the page-level token total for the Tokens count-up.
+// renderOverviewTokenTotal is stubbed out here, so nothing else sets it.
+let overviewTotalTokensRaw = null;
 let lastCombinedModels = [];
 let lastAppsBreakdown = null;
 let lastByTool = {};

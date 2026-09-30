@@ -19,6 +19,12 @@ const activeCounters = new WeakMap();
 // running to the end of its duration with only the identity guards below
 // standing between it and the element. So use the strongest verb the instance
 // actually has.
+//
+// This is not the same helper as stopAnimation() in anime-stop.js, and the two
+// orderings are deliberate: that one tries pause() first because its callers
+// (the loader rate, the SSE pulse) own the element's styles and must not have
+// them reverted out from under them. A counter owns nothing but a number, so it
+// takes cancel()/revert() instead and leaves nothing behind that could write.
 function stopCounterInstance(instance) {
   if (!instance) return;
   if (typeof instance.cancel === 'function') { instance.cancel(); return; }
@@ -78,6 +84,9 @@ export function animateNumber(el, targetValue, duration = 1200, format = null) {
   const isCacheHit = format && typeof format === 'function' && format(1).toString().includes('%');
 
   const state = { val: startValue };
+  // Identity guards, not the cancellation itself: the instance is really stopped
+  // now, so these only cover a callback that was already queued when a new
+  // animation took the slot. Kept as a cheap safety net.
   const isCurrent = () => {
     const active = activeCounters.get(el);
     return !!active && active.instance === instance;

@@ -9885,8 +9885,10 @@
     // runs, so any static value written into a KPI has to stop the in-flight
     // count-up first — otherwise the previous range's animation finishes last
     // and paints over it. setCounterText does the cancel, the write and the
-    // counter-base reset together; the fallback keeps the same behaviour when
-    // the animation module has not loaded.
+    // counter-base reset together. cancelCounter() and setCounterText ship from
+    // the same module, so there is no half-loaded state to branch on: either the
+    // module is there, or the plain write stands in for it and follows the same
+    // rule about the counter base.
     function setOverviewCounterText(el, text, value) {
       if (!el) return;
       const animations = typeof window !== 'undefined' ? window.TokDashAnimations : null;
@@ -9894,9 +9896,8 @@
         animations.setCounterText(el, text, value);
         return;
       }
-      if (animations && typeof animations.cancelCounter === 'function') animations.cancelCounter(el);
       el.textContent = text;
-      el._currentValue = value;
+      if (typeof value === 'number') el._currentValue = value;
     }
 
     // Checked on every call rather than once per render: the module is loaded
@@ -9944,11 +9945,12 @@
       // The card is already labelled "Total Tokens", so the value carries no unit
       // — it would only cost width the KPI row no longer has. The exact count in
       // the tooltip and the aria-label keep it.
+      // No fitKpiValue() here: every caller reaches renderOverviewTab, which fits
+      // the whole row once the rest of it is written.
       if (overviewTotalTokensRaw === 0) {
         setOverviewCounterText(valueElement, staticText ?? formatNumber(0), 0);
         clearExact();
         wrapper.dataset.readable = String(overviewReadableTokens);
-        fitKpiValue(valueElement);
         return;
       }
       valueElement.textContent = overviewReadableTokens
@@ -12489,12 +12491,8 @@
       }
 
       // Tokens and Hit % animate over what was just written, and neither animates
-      // for an empty range because there is nothing to count to. The typeof guard
-      // is kept from main: renderOverviewTokenTotal is what owns this variable, and
-      // a caller can reach the count-up before it has run.
-      const rawTokens = typeof overviewTotalTokensRaw !== 'undefined'
-        ? overviewTotalTokensRaw
-        : (Number(data.total_tokens) || 0);
+      // for an empty range because there is nothing to count to.
+      const rawTokens = overviewTotalTokensRaw;
       if (totalTokensEl && !rangeIsEmpty && typeof rawTokens === 'number' && rawTokens > 0) {
         animateOverviewCounter(
           totalTokensEl,

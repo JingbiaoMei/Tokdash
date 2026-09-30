@@ -11,6 +11,12 @@
  * pause() is the right call (not cancel()): it detaches the instance from
  * the engine without writing anything, so callers own the final state
  * through their own style writes.
+ *
+ * Animatable instances -- what createAnimatable() returns, and the only thing
+ * that verb hands back -- have neither pause() nor stop(). For those, revert()
+ * is the only verb that exists, so it is the last resort here rather than a
+ * silent return. Counters do not use this helper at all: see
+ * stopCounterInstance() in counters.js for why they cancel instead.
  */
 
 export function stopAnimation(anim) {
@@ -18,6 +24,7 @@ export function stopAnimation(anim) {
   try {
     if (typeof anim.pause === 'function') anim.pause();
     else if (typeof anim.stop === 'function') anim.stop(); // future anime builds
+    else if (typeof anim.revert === 'function') anim.revert(); // createAnimatable()
   } catch (e) {
     // already finished
   }

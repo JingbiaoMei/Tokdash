@@ -90,6 +90,10 @@ def test_multi_server_merge_keeps_token_ranking(tmp_path):
 def test_cost_chart_picks_its_own_top_five_by_cost(tmp_path):
     source = INDEX_HTML.read_text(encoding="utf-8")
     function = _extract_js_function(source, "function updateModelChart(topModels) {")
+    # The real chart factory, not a stub: updateModelChart now reaches Chart.js
+    # through it, and a stub would let the function under test keep passing even
+    # if the helper the page actually ships were broken.
+    create_chart = _extract_js_function(source, "function createChart(context, config) {")
 
     # Six models. By tokens the last one is bottom of the list; by cost it is top.
     # The panel is titled "Top Models by Cost", so it must lead with the $12 model
@@ -111,6 +115,7 @@ def test_cost_chart_picks_its_own_top_five_by_cost(tmp_path):
         "const t = (key) => key;\n"
         "const getChartPalette = () => ['#000000'];\n"
         "const formatCurrency = (value) => String(value);\n"
+        + create_chart
         + function
         + "\nconst input = JSON.parse(process.argv[2]);\n"
         + "updateModelChart(input);\n"

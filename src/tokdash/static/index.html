@@ -9945,9 +9945,10 @@
       // The card is already labelled "Total Tokens", so the value carries no unit
       // — it would only cost width the KPI row no longer has. The exact count in
       // the tooltip and the aria-label keep it.
-      // No fitKpiValue() here: every caller reaches renderOverviewTab, which fits
-      // the whole row once the rest of it is written.
       if (overviewTotalTokensRaw === 0) {
+        // This branch fits nothing of its own. renderOverviewTokenTotal has one
+        // caller, renderOverviewTab, and it fits the whole row -- this card
+        // included -- once the rest of the row is written.
         setOverviewCounterText(valueElement, staticText ?? formatNumber(0), 0);
         clearExact();
         wrapper.dataset.readable = String(overviewReadableTokens);

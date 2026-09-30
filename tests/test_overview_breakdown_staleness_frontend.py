@@ -377,7 +377,6 @@ def _run(tmp_path: Path, scenario: str) -> dict:
             "function invalidateOverviewActiveTime(customDays, dateFrom, dateTo) {",
             "function clearOverviewBreakdowns() {",
             "function setOverviewState({ pending = false, stale = false } = {}) {",
-            "function overviewRangeIsBroken(data) {",
             "function overviewRangeIsEmpty(data) {",
             "function setOverviewCounterText(el, text, value) {",
             "function animateOverviewCounter(el, value, duration, format) {",

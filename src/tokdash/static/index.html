@@ -9865,27 +9865,19 @@
       }
     }
 
-    // Three states, not two. A range is broken when the read itself failed:
-    // its totals are reconciled zeros, so "no data" would wrongly claim the
-    // range was empty and a $0 "FREE" would wrongly claim the usage cost
-    // nothing. It is empty only when the read succeeded and returned nothing.
-    // Deciding per-metric mixes answers inside one row (tokens say "no data"
-    // while cost says "$0.00"), so both are decided once, for the whole range.
+    // Emptiness is a property of the range, decided once here so the row cannot
+    // mix answers (tokens saying "No data" while cost says "$0.00").
     //
-    // _has_incomplete_server_rows is the only broken-read flag that actually
-    // reaches this payload. reconcileUsageRows puts _partial on the row
-    // wrappers and combineUsagePayloads builds the response from row.payload,
-    // so data._partial is never set in production. _server_rows_stale is set on
-    // the last good response after a failed refresh purely so the Servers tab
-    // reads its rows as stale; it says nothing about this range, and treating it
-    // as a broken read made one failed auto-refresh repaint an empty range as
-    // 0 / FREE / 0 until the next success flipped it back.
-    function overviewRangeIsBroken(data) {
-      return !!(data && data._has_incomplete_server_rows);
-    }
-
+    // An incomplete read is not an empty one. _has_incomplete_server_rows means a
+    // selected server was unreachable, or answered with source errors and had no
+    // cached snapshot for this range, so the totals below are only part of the
+    // answer -- and part of an answer is still an answer. Saying "No data" over it
+    // would read as a proven zero, so an incomplete read renders the numbers it
+    // does have, exactly as it did before these states existed. _server_rows_stale
+    // is deliberately not consulted: it marks the last good response for the
+    // Servers tab after a failed refresh and says nothing about this range.
     function overviewRangeIsEmpty(data) {
-      if (!data || overviewRangeIsBroken(data)) return false;
+      if (!data || data._has_incomplete_server_rows) return false;
       return !Number(data.total_tokens) && !Number(data.total_messages) && !Number(data.total_cost);
     }
 
@@ -9918,9 +9910,9 @@
     }
 
     // staticText is what the range wants shown instead of the number itself -
-    // "No data" for an empty range, a dash for a broken one. It is passed in
-    // rather than written over the top afterwards, so the card is written once
-    // instead of being told "0" and then corrected a line later.
+    // "No data" for an empty range. It is passed in rather than written over the
+    // top afterwards, so the card is written once instead of being told "0" and
+    // then corrected a line later.
     function renderOverviewTokenTotal(value = overviewTotalTokensRaw, staticText = null) {
       const valueElement = document.getElementById('totalTokens');
       const wrapper = document.getElementById('totalTokensWrap');
@@ -12452,27 +12444,18 @@
     function renderOverviewTab(data) {
       if (!data) return;
       // Emptiness is decided once for the whole range so every card in the row
-      // agrees, and a broken read is kept apart from an empty one: its zeros are
-      // reconciled, not measured.
-      const rangeIsBroken = overviewRangeIsBroken(data);
-      const rangeIsEmpty = !rangeIsBroken && overviewRangeIsEmpty(data);
+      // agrees; every other read, complete or not, renders its own numbers.
+      const rangeIsEmpty = overviewRangeIsEmpty(data);
       // The Tokens card is rendered by renderOverviewTokenTotal, which owns its
       // tooltip and aria wiring, so it is told what to show rather than being
       // written here and then overwritten.
-      const staticTokenText = rangeIsBroken ? '—' : (rangeIsEmpty ? t('noData') : null);
-      renderOverviewTokenTotal(rangeIsBroken ? 0 : data.total_tokens, staticTokenText);
+      renderOverviewTokenTotal(data.total_tokens, rangeIsEmpty ? t('noData') : null);
       const totalTokensEl = document.getElementById('totalTokens');
       const totalCostEl = document.getElementById('totalCost');
       const totalMessagesEl = document.getElementById('totalMessages');
       const costVal = Number(data.total_cost) || 0;
       const msgVal = Number(data.total_messages) || 0;
-      if (rangeIsBroken) {
-        // Nothing is known about this range. A dash is the only honest value:
-        // "No data" would claim it was empty, and $0 "FREE" would claim the
-        // usage cost nothing.
-        setOverviewCounterText(totalCostEl, '—', 0);
-        setOverviewCounterText(totalMessagesEl, '—', 0);
-      } else if (rangeIsEmpty) {
+      if (rangeIsEmpty) {
         setOverviewCounterText(totalCostEl, t('noData'), 0);
         setOverviewCounterText(totalMessagesEl, t('noData'), 0);
       } else {
@@ -12501,15 +12484,14 @@
         else setOverviewCounterText(hitEl, formatHitRate(data.cache_hit_rate), 0);
       }
 
-      // Tokens and Hit % animate over what was just written. Neither animates for
-      // an empty or broken range, because there is nothing to count to. The
-      // typeof guard is kept from main: renderOverviewTokenTotal is what owns
-      // this variable, and a caller can reach the count-up before it has run.
+      // Tokens and Hit % animate over what was just written, and neither animates
+      // for an empty range because there is nothing to count to. The typeof guard
+      // is kept from main: renderOverviewTokenTotal is what owns this variable, and
+      // a caller can reach the count-up before it has run.
       const rawTokens = typeof overviewTotalTokensRaw !== 'undefined'
         ? overviewTotalTokensRaw
         : (Number(data.total_tokens) || 0);
-      if (totalTokensEl && !rangeIsEmpty && !rangeIsBroken
-        && typeof rawTokens === 'number' && rawTokens > 0) {
+      if (totalTokensEl && !rangeIsEmpty && typeof rawTokens === 'number' && rawTokens > 0) {
         animateOverviewCounter(
           totalTokensEl,
           rawTokens,

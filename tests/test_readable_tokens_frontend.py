@@ -210,11 +210,10 @@ def test_readable_token_render_and_toggle_do_not_refetch() -> None:
     assert "loadStats" not in setter
     # The range's token total must still go through renderOverviewTokenTotal
     # rather than be written inline, so the readable formatting and the exact
-    # tooltip stay in one place. A broken read is routed to 0 first, and the
-    # text to show is passed in so the card is written once instead of being
-    # told "0" and corrected afterwards.
+    # tooltip stay in one place. The text to show is passed in so the card is
+    # written once instead of being told "0" and corrected afterwards.
     assert (
-        "renderOverviewTokenTotal(rangeIsBroken ? 0 : data.total_tokens, staticTokenText);"
+        "renderOverviewTokenTotal(data.total_tokens, rangeIsEmpty ? t('noData') : null);"
         in overview
     )
     assert "rerenderTokenPresentation();" in i18n

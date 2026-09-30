@@ -9,12 +9,16 @@ Seven ways this regresses, none of which string assertions on the page can see:
 - Cost/Messages updating only from animation callbacks, so fitOverviewKpis()
   measured the previous text and clipped large values, and a background tab —
   where anime pauses its engine — kept the old range's numbers;
-- a failed read dressing up as an empty range, and an empty range unpainting
-  itself after a failed refresh, because the wrong flags were consulted;
-- a failed read showing $0 "FREE", which tells the user their usage cost
-  nothing when in fact the read failed;
+- an incomplete read dressing up as an empty range, and an empty range
+  unpainting itself after a failed refresh, because the wrong flag was
+  consulted. Both halves matter: a read that came back short of a full answer
+  still has numbers, and "No data" over them reads as a proven zero;
 - a "n/a" hit rate painted over by the previous range's count-up;
-- the next range counting up from a value that was never on screen.
+- the next range counting up from a value that was never on screen — because the
+  counter base was read before the running animation handed its live value back,
+  or because a range with no token figure of its own left the old total behind;
+- a count-up frame formatted while it still held a fraction, which paints a
+  string wider than the value the card was just fitted to.
 
 These run the real renderOverviewTab against a stub DOM, together with the real
 animation counters module and the real anime.js engine — imported from disk, not
@@ -102,6 +106,9 @@ function t(key) { return LABELS[key] || key; }
 let overviewReadableTokens = true;
 let overviewTotalTokensRaw = 0;
 let overviewRenderToken = 0;
+// reconcileUsageRows defaults to these; every scenario passes its own cache.
+const lastUsageRowsByServer = new Map();
+function selectedServers() { return [{ id: 'local' }]; }
 let lastWindowKey = null;
 let lastCombinedModels = [];
 let lastAppsBreakdown = null;
@@ -179,6 +186,39 @@ async function main() {
     by_tool: {},
     top_models: [{ name: 'gpt', cost: 12.5, tokens: 5200000 }],
     ...extra,
+  });
+
+  // One server's /api/usage body. A scenario that needs a partial read builds
+  // the response through the real reconcileUsageRows + combineUsagePayloads
+  // rather than hand-setting flags on a literal, so which flags production
+  // actually sets — and what the totals end up being — is the code's answer,
+  // not the test's guess.
+  const serverPayload = (extra = {}) => ({
+    range: 'S',
+    timestamp: '2026-09-30T12:00:00Z',
+    total_tokens: 5200000,
+    total_cost: 12.5,
+    total_messages: 300,
+    cache_hit_rate: 0.4,
+    by_tool: { codex: { tokens: 5200000, cost: 12.5 } },
+    combined_models: [{ name: 'gpt', tokens: 5200000, cost: 12.5 }],
+    ...extra,
+  });
+
+  function combinedFrom(rows, servers) {
+    const reconciliation = reconcileUsageRows(rows, 'test-window', servers, new Map());
+    const combined = combineUsagePayloads(reconciliation.rows.map((row) => row.payload));
+    // Mirrors updateDashboard's `.then`: the combined response is built from the
+    // row payloads, and the flags are set on the result.
+    combined._has_incomplete_server_rows = reconciliation.unavailable.length > 0;
+    combined._has_retained_server_rows = reconciliation.retained.length > 0;
+    return { combined, reconciliation };
+  }
+
+  const kpiRow = () => ({
+    tokens: node('totalTokens').textContent,
+    cost: node('totalCost').textContent,
+    messages: node('totalMessages').textContent,
   });
 
   const settle = () => new Promise((resolve) => setTimeout(resolve, 5));
@@ -272,20 +312,47 @@ async function main() {
     out.messages = node('totalMessages').textContent;
   }
 
-  if (scenario === 'broken-read-does-not-claim-empty-or-free') {
-    // combineUsagePayloads builds the response from row.payload, so _partial —
-    // which reconcileUsageRows puts on the row wrappers — never reaches here.
-    // _has_incomplete_server_rows is the flag production actually sets.
-    renderOverviewTab(zeroPayload({
-      range: 'BROKEN',
-      _has_incomplete_server_rows: true,
-      _source_errors: ['usage.jsonl'],
-      by_tool: { codex: { tokens: 0, cost: 0 } },
-    }));
+  if (scenario === 'an-incomplete-read-shows-the-numbers-it-has') {
+    // Case 1: the only selected server answered with source errors and has no
+    // cached snapshot for this range, so it lands in `unavailable` — and its
+    // (partial) totals are all the page is ever going to get.
+    const degraded = combinedFrom(
+      [{ server: { id: 'local' }, payload: serverPayload({ source_errors: ['sessions.jsonl'] }) }],
+      [{ id: 'local' }],
+    );
+    out.flaggedIncomplete = degraded.reconciliation.unavailable.length > 0;
+    renderOverviewTab(degraded.combined);
     await advance(1400);
-    out.tokens = node('totalTokens').textContent;
-    out.cost = node('totalCost').textContent;
-    out.messages = node('totalMessages').textContent;
+    out.degradedCards = kpiRow();
+
+    // Case 2: two servers, the second unreachable with no snapshot, the first
+    // clean. The combined answer covers one machine, which is not the same as
+    // covering none of them.
+    const partial = combinedFrom(
+      [{ server: { id: 'lan' }, payload: serverPayload({ total_tokens: 1000, total_cost: 2.25, total_messages: 40 }) }],
+      [{ id: 'lan' }, { id: 'offline' }],
+    );
+    out.secondServerUnavailable = partial.reconciliation.unavailable.length > 0;
+    renderOverviewTab(partial.combined);
+    await advance(1400);
+    out.partialCards = kpiRow();
+  }
+
+  if (scenario === 'an-incomplete-read-with-zero-totals-is-not-no-data') {
+    // Zeroes from a short read are not a proven-empty range either, so the row
+    // must not claim "No data". It renders what it was given, which is what the
+    // row did before these states existed.
+    const short = combinedFrom(
+      [{ server: { id: 'local' }, payload: serverPayload({
+        total_tokens: 0, total_cost: 0, total_messages: 0, cache_hit_rate: null,
+        by_tool: {}, combined_models: [], source_errors: ['usage.jsonl'],
+      }) }],
+      [{ id: 'local' }],
+    );
+    out.flaggedIncomplete = short.reconciliation.unavailable.length > 0;
+    renderOverviewTab(short.combined);
+    await settle();
+    out.cards = kpiRow();
   }
 
   if (scenario === 'a-failed-refresh-keeps-the-empty-state') {
@@ -356,12 +423,17 @@ main();
 """
 
 FUNCTIONS_UNDER_TEST = (
-    "function overviewRangeIsBroken(data) {",
     "function overviewRangeIsEmpty(data) {",
     "function setOverviewCounterText(el, text, value) {",
     "function animateOverviewCounter(el, value, duration, format) {",
     "function renderOverviewTokenTotal(value = overviewTotalTokensRaw, staticText = null) {",
     "function renderOverviewTab(data) {",
+    # A partial read is built here, not asserted from a hand-written flag: these
+    # are the two functions that turn per-server rows into the response body the
+    # Overview renders.
+    "function usageSourceErrors(payload) {",
+    "function reconcileUsageRows(rows, windowKey, servers = selectedServers(), cache = lastUsageRowsByServer) {",
+    "function combineUsagePayloads(list) {",
 )
 
 
@@ -468,18 +540,32 @@ def test_unpriced_but_populated_keeps_the_free_state(tmp_path):
     assert out["messages"] == "300"
 
 
-def test_a_broken_read_neither_claims_empty_nor_free(tmp_path):
-    """A failed read is neither an empty range nor a free one.
+def test_an_incomplete_read_shows_the_numbers_it_has(tmp_path):
+    """A short read is a partial answer, not an absent one.
 
-    "FREE" tells the user their usage cost nothing when the read actually failed,
-    which is precisely the case this feature exists to tell apart from an empty
-    range. A dash is the only value that is not a claim.
+    One server with source errors, or one machine of two that cannot be reached
+    at all, sets _has_incomplete_server_rows — and the totals that did come back
+    are still the honest sum of what Tokdash can see. Replacing them with a dash
+    on every card would hide real usage behind a symbol that means "unknown",
+    which is worse than the 0 it replaced: a dash cannot be compared, summed, or
+    believed.
     """
-    out = _run(tmp_path, "broken-read-does-not-claim-empty-or-free")
+    out = _run(tmp_path, "an-incomplete-read-shows-the-numbers-it-has")
 
-    assert out["tokens"] == "—", "a failed read must not state there are no tokens"
-    assert out["cost"] == "—", 'a failed read must not report $0 "FREE"'
-    assert out["messages"] == "—"
+    assert out["flaggedIncomplete"], "the fixture must really produce an incomplete read"
+    assert out["degradedCards"] == {"tokens": "5.2M", "cost": "$12.50", "messages": "300"}
+    assert out["secondServerUnavailable"], "the unreachable server must land in unavailable"
+    assert out["partialCards"] == {"tokens": "1.0k", "cost": "$2.25", "messages": "40"}
+
+
+def test_an_incomplete_read_with_zero_totals_does_not_say_no_data(tmp_path):
+    """Zeros the page cannot vouch for are not a claim that the range is empty."""
+    out = _run(tmp_path, "an-incomplete-read-with-zero-totals-is-not-no-data")
+
+    assert out["flaggedIncomplete"]
+    assert "No data" not in out["cards"].values(), (
+        f"an unvouched zero rendered as a proven-empty range: {out['cards']}"
+    )
 
 
 def test_a_failed_refresh_keeps_the_empty_state(tmp_path):

@@ -33,6 +33,7 @@ import tokdash
 
 INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
 COUNTERS_JS = INDEX_HTML.parent / "js" / "animations" / "counters.js"
+ANIME_JS = INDEX_HTML.parent / "js" / "anime.esm.js"
 
 pytestmark = pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
 
@@ -148,6 +149,8 @@ import { pathToFileURL } from 'node:url';
 const { animateNumber, cancelCounter, setCounterText } = await import(
   pathToFileURL('__COUNTERS_PATH__').href
 );
+// The engine itself, so a test can tell "stopped" from "running but ignored".
+const { engine } = await import(pathToFileURL('__ANIME_PATH__').href);
 window.TokDashAnimations = { animateNumber, cancelCounter, setCounterText };
 
 // --- driving ------------------------------------------------------------------
@@ -201,22 +204,27 @@ async function main() {
   if (scenario === 'cancelling-actually-stops-the-animation') {
     // The engine returns an Animatable from createAnimatable() that exposes only
     // revert(). Calling pause() on it throws, and swallowing that left superseded
-    // animations running to the end of their duration. Count the writes.
-    let writes = 0;
-    const el = {
-      _t: '',
-      get textContent() { return this._t; },
-      set textContent(value) { writes += 1; this._t = value; },
-    };
-    animateNumber(el, 100, 500, (v) => '$' + Number(v).toFixed(2));
-    await advance(250);
-    out.writesWhileAnimating = writes;
+    // animations registered with the engine for their whole duration.
+    //
+    // The element's text is NOT a usable signal here: the identity guards in
+    // onUpdate/onComplete keep a superseded animation from writing even while it
+    // keeps running, so the text stays correct in both cases. What separates them
+    // is whether the engine is still holding the animation, so assert on that -
+    // with a duration far longer than the wait, "still registered" can only mean
+    // the cancel did not take.
+    const el = { _t: '', _currentValue: undefined };
+    Object.defineProperty(el, 'textContent', {
+      get() { return this._t; },
+      set(value) { this._t = value; },
+    });
+    animateNumber(el, 100, 2000, (v) => '$' + Number(v).toFixed(2));
+    await advance(200);
+    out.registeredWhileAnimating = !!engine._head;
     cancelCounter(el);
     out.liveValueOnCancel = typeof el._currentValue === 'number';
-    const atCancel = writes;
-    await advance(500);
-    out.writesAfterCancel = writes;
-    out.stopped = writes === atCancel;
+    await advance(600);
+    out.stillRegisteredAfterCancel = !!engine._head;
+    out.stopped = out.stillRegisteredAfterCancel === false;
   }
 
   if (scenario === 'large-values-are-measured-at-their-final-width') {
@@ -339,9 +347,9 @@ def _run(tmp_path: Path, scenario: str) -> dict:
     )
     harness = tmp_path / f"{scenario}.mjs"
     harness.write_text(
-        HARNESS_HEAD.replace("__FUNCTIONS__", functions).replace(
-            "__COUNTERS_PATH__", COUNTERS_JS.resolve().as_posix()
-        )
+        HARNESS_HEAD.replace("__FUNCTIONS__", functions)
+        .replace("__COUNTERS_PATH__", COUNTERS_JS.resolve().as_posix())
+        .replace("__ANIME_PATH__", ANIME_JS.resolve().as_posix())
         + SCENARIOS,
         encoding="utf-8",
     )
@@ -369,20 +377,21 @@ def test_stale_animation_cannot_overwrite_the_empty_state(tmp_path):
 
 
 def test_cancelling_a_counter_actually_stops_the_animation(tmp_path):
-    """The guards are not a substitute for stopping the engine.
+    """The identity guards are not a substitute for stopping the engine.
 
-    The identity checks in onUpdate/onComplete keep a superseded animation from
-    writing, but the animation itself kept running to the end of its duration —
-    every frame, for 1.2s, across every KPI card. That is the difference between
-    cancelling and merely ignoring.
+    The guards in onUpdate/onComplete keep a superseded animation from writing,
+    so the text looks right either way — but the animation itself stayed
+    registered with the engine for its whole 1.2s duration, on every KPI card,
+    for every range switch. That is the difference between cancelling and merely
+    ignoring, and only the engine knows the difference.
     """
     out = _run(tmp_path, "cancelling-actually-stops-the-animation")
 
-    assert out["writesWhileAnimating"] > 0, "the counter must really be animating"
+    assert out["registeredWhileAnimating"], "the counter must really be animating"
     assert out["stopped"], (
-        "cancelCounter() left the animation running; it called pause() on an "
-        f"Animatable, which has no pause (writes went {out['writesAfterCancel']} "
-        "past the cancel)"
+        "cancelCounter() left the animation registered with the engine; it called "
+        "pause() on an Animatable, which has no pause method, and swallowed the "
+        "TypeError"
     )
     assert out["liveValueOnCancel"], (
         "cancelling must hand the live value back, or a re-render mid-flight "

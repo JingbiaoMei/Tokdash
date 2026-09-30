@@ -59,24 +59,34 @@
 
 ## Table of Contents
 
+- [Quick start](#quick-start)
 - [One package, four views](#one-package-four-views)
   - [WebUI](#webui)
   - [Terminal dashboard (TUI)](#terminal-dashboard-tui)
   - [Companion status bar app](#companion-status-bar-app)
   - [Statusline](#statusline)
-- [Quick start](#quick-start)
+- [Install & run](#install--run)
 - [Features](#features)
-- [Supported clients](docs/reference/SUPPORTED_CLIENTS.md)
-- [Configuration](docs/reference/CONFIG.md)
-- [Privacy \& security](docs/SECURITY.md)
 - [Quota tracking (optional)](#quota-tracking-optional)
-- [API reference](docs/reference/API.md)
 - [Cost accuracy note](#cost-accuracy-note)
 - [History retention](#history-retention)
 - [Roadmap](#roadmap)
 - [Contributing / security](#contributing--security)
 - [Documentation](#documentation)
 - [License](#license)
+
+## Quick start
+
+```bash
+pipx install tokdash
+tokdash setup
+```
+
+That's it. `tokdash setup` detects the runtime, installs a managed one if
+needed, registers a local service, and prints the dashboard URL —
+`http://127.0.0.1:55423`. Full options, first-run notes, and updates live in
+[Install & run](#install--run); prefer to look around first? The
+[live demo](https://tokdash.github.io/demo/) runs on the real UI.
 
 ## One package, four views
 
@@ -254,7 +264,7 @@ a universal DMG (`arm64` + `x86_64`, macOS 14+) and a self-contained portable ZI
 - System language detection plus English, Simplified Chinese, Japanese, Korean, Spanish, and Portuguese
 - No telemetry, credential discovery, port scanning, or direct log parsing
 
-Setup: run **Tokdash 1.5.2 or newer** ([Quick start](#quick-start)), install the
+Setup: run **Tokdash 1.5.2 or newer** ([Install & run](#install--run)), install the
 companion, and it connects to `http://127.0.0.1:55423` by default — its settings
 let you add, test, name, or remove explicit endpoints, including private Tailscale
 Serve URLs. The companion only contacts the endpoints you configure; low-quota
@@ -284,7 +294,7 @@ token/cost stats:
 Ready-made templates (bash and PowerShell), install/config, and the endpoint
 reference live in **[`docs/guides/statusline/`](docs/guides/statusline/)**.
 
-## Quick start
+## Install & run
 
 ### Platform support
 

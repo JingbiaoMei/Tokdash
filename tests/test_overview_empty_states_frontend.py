@@ -728,12 +728,19 @@ def test_the_empty_render_writes_the_tokens_card_once(tmp_path):
 
 
 def test_a_null_token_payload_is_not_animated_over(tmp_path):
+    """A null total with nothing else in the range is an empty range.
+
+    The dash a null total writes is not a number to animate, so the row holds
+    "No data" through the duration of the range before it. What the null total
+    leaves in the counter base is the other half, covered on a non-empty range
+    by test_a_range_without_a_token_total_does_not_count_down_from_the_old_one.
+    """
     out = _run(tmp_path, "a-null-token-payload-is-not-animated-over")
 
     assert out["rightAfter"] == "No data"
     assert out["after"] == "No data", (
-        "a null token payload left the previous range's total in "
-        "overviewTotalTokensRaw, and the count-up animated it over the card"
+        "a null token total did not read as an empty range, so the row fell back "
+        "to 0 / FREE / 0 over a range that has nothing in it"
     )
 
 

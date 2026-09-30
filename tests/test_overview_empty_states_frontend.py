@@ -1,16 +1,20 @@
 """An Overview range must read as one consistent state, not per-metric zeros.
 
-Four ways this regresses, none of which string assertions can see:
+Seven ways this regresses, none of which string assertions on the page can see:
 
-- a stale count-up finishing over a freshly rendered empty state. animateNumber
-  builds a new animation per call and used to never cancel the previous one, so
-  switching from a populated range to an empty one left "5.2M" on the card;
-- the $0 "FREE" cost state being swallowed by a "no cost data" branch, even
-  though tokens were recorded and every model is simply unpriced;
-- a broken read (source errors) dressing up as an empty range, because
-  reconciled totals are zeros too;
-- a later range counting up from a stale previous value instead of from the
-  value actually on screen.
+- a stale count-up finishing over a freshly rendered value. anime.js hands back
+  different objects from createAnimatable() and animate(), and only one of them
+  can actually be cancelled, so the wrong verb silently threw and every
+  superseded animation ran to the end of its duration;
+- Cost/Messages updating only from animation callbacks, so fitOverviewKpis()
+  measured the previous text and clipped large values, and a background tab —
+  where anime pauses its engine — kept the old range's numbers;
+- a failed read dressing up as an empty range, and an empty range unpainting
+  itself after a failed refresh, because the wrong flags were consulted;
+- a failed read showing $0 "FREE", which tells the user their usage cost
+  nothing when in fact the read failed;
+- a "n/a" hit rate painted over by the previous range's count-up;
+- the next range counting up from a value that was never on screen.
 
 These run the real renderOverviewTab against a stub DOM, together with the real
 animation counters module and the real anime.js engine — imported from disk, not
@@ -36,8 +40,22 @@ pytestmark = pytest.mark.skipif(shutil.which("node") is None, reason="node not a
 def _extract_js_function(src: str, signature: str) -> str:
     start = src.find(signature)
     assert start >= 0, f"{signature} not found"
+    # Skip the parameter list: a default such as `value = x` or `options = {}`
+    # puts braces inside parentheses, and counting those as the body truncates
+    # the function at the default value.
+    parens = 0
+    body_start = -1
+    for index in range(start, len(src)):
+        char = src[index]
+        if char == "(":
+            parens += 1
+        elif char == ")":
+            parens -= 1
+        elif char == "{" and parens == 0:
+            body_start = index
+            break
+    assert body_start >= 0, f"no body for {signature}"
     depth = 0
-    body_start = start + len(signature) - 1 if signature.endswith("{") else src.find("{", start)
     for index in range(body_start, len(src)):
         if src[index] == "{":
             depth += 1
@@ -104,8 +122,11 @@ function formatHitRate(rate) {
   if (rate === null || rate === undefined || Number.isNaN(Number(rate))) return 'n/a';
   return (Number(rate) * 100).toFixed(1) + '%';
 }
-function fitKpiValue() {}
-function fitOverviewKpis() {}
+// fitKpiValue only shrinks text that is already on screen, so record what each
+// card held at fit time: that is exactly the measurement the real fit uses.
+const seenAtFit = {};
+function fitKpiValue(el) { if (el) seenAtFit[el.id] = el.textContent; }
+function fitOverviewKpis() { ['totalTokens', 'totalCost', 'totalMessages', 'overviewActiveTime'].forEach((id) => fitKpiValue(node(id))); }
 function renderOverviewActiveTime() {}
 function updateComparisonDeltas() {}
 function updateToolChart() {}
@@ -124,10 +145,10 @@ __FUNCTIONS__
 
 // --- the real animation module and the real anime.js engine, imported --------
 import { pathToFileURL } from 'node:url';
-const { animateNumber, cancelCounter } = await import(
+const { animateNumber, cancelCounter, setCounterText } = await import(
   pathToFileURL('__COUNTERS_PATH__').href
 );
-window.TokDashAnimations = { animateNumber, cancelCounter };
+window.TokDashAnimations = { animateNumber, cancelCounter, setCounterText };
 
 // --- driving ------------------------------------------------------------------
 """
@@ -146,18 +167,25 @@ async function main() {
     top_models: [],
     ...extra,
   });
+  const populated = (extra = {}) => ({
+    range: 'X',
+    total_tokens: 5200000,
+    total_cost: 12.5,
+    total_messages: 300,
+    cache_hit_rate: 0.4,
+    by_tool: {},
+    top_models: [{ name: 'gpt', cost: 12.5, tokens: 5200000 }],
+    ...extra,
+  });
 
   const settle = () => new Promise((resolve) => setTimeout(resolve, 5));
-  const advance = async (ms) => { await new Promise((resolve) => setTimeout(resolve, ms)); };
+  const advance = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
   if (scenario === 'stale-animation-cannot-overwrite-empty-state') {
     // A populated range is rendered (starting real 1.2s count-ups), then an
     // empty range lands while those animations are still running. The empty
     // render must win: no in-flight onUpdate may paint over "No data".
-    renderOverviewTab({
-      range: 'X', total_tokens: 5200000, total_cost: 12.5, total_messages: 300,
-      cache_hit_rate: 0.4, by_tool: {}, top_models: [{ name: 'gpt', cost: 12.5, tokens: 5200000 }],
-    });
+    renderOverviewTab(populated());
     await advance(400);
     out.midFlightValue = node('totalTokens').textContent;
     renderOverviewTab(zeroPayload());
@@ -168,6 +196,53 @@ async function main() {
     out.afterStaleAnimationWouldHaveFinished = node('totalTokens').textContent;
     out.costAfter = node('totalCost').textContent;
     out.messagesAfter = node('totalMessages').textContent;
+  }
+
+  if (scenario === 'cancelling-actually-stops-the-animation') {
+    // The engine returns an Animatable from createAnimatable() that exposes only
+    // revert(). Calling pause() on it throws, and swallowing that left superseded
+    // animations running to the end of their duration. Count the writes.
+    let writes = 0;
+    const el = {
+      _t: '',
+      get textContent() { return this._t; },
+      set textContent(value) { writes += 1; this._t = value; },
+    };
+    animateNumber(el, 100, 500, (v) => '$' + Number(v).toFixed(2));
+    await advance(250);
+    out.writesWhileAnimating = writes;
+    cancelCounter(el);
+    out.liveValueOnCancel = typeof el._currentValue === 'number';
+    const atCancel = writes;
+    await advance(500);
+    out.writesAfterCancel = writes;
+    out.stopped = writes === atCancel;
+  }
+
+  if (scenario === 'large-values-are-measured-at-their-final-width') {
+    // fitOverviewKpis() runs after the row is written and only shrinks text that
+    // is already there. Cost/Messages used to update purely from animation
+    // callbacks, so the fit measured the previous range's text and a big value
+    // stayed clipped until the window was resized.
+    renderOverviewTab(populated({ total_cost: 12345.67, total_messages: 12345678 }));
+    out.costAtFit = seenAtFit.totalCost;
+    out.messagesAtFit = seenAtFit.totalMessages;
+    out.expectedCost = formatCurrency(12345.67);
+    out.expectedMessages = formatNumber(12345678);
+    await advance(1400);
+    out.costSettled = node('totalCost').textContent;
+    out.messagesSettled = node('totalMessages').textContent;
+  }
+
+  if (scenario === 'a-null-hit-rate-cancels-the-in-flight-count-up') {
+    // "n/a" is a static write. Without a cancel the previous range's 40% count-up
+    // finishes on top of it and the card shows a number next to its own "n/a".
+    renderOverviewTab(populated({ cache_hit_rate: 0.4 }));
+    await advance(300);
+    renderOverviewTab(populated({ cache_hit_rate: null, total_tokens: 900, total_cost: 1, total_messages: 5 }));
+    out.hitRightAfter = node('avgCacheHitRate').textContent;
+    await advance(1400);
+    out.hitAfter = node('avgCacheHitRate').textContent;
   }
 
   if (scenario === 'empty-range-agrees-across-the-row') {
@@ -182,22 +257,20 @@ async function main() {
   if (scenario === 'unpriced-but-populated-keeps-free') {
     // Tokens and messages exist, every model is unpriced: this is data, not
     // emptiness. Cost must show the $0 FREE state and animate back to 0.
-    renderOverviewTokenTotal(5200000);
-    node('totalCost')._currentValue = 12.5;
-    renderOverviewTab(zeroPayload({
-      range: 'FREE', total_tokens: 5200000, total_messages: 300,
-    }));
+    renderOverviewTab(populated({ total_cost: 0 }));
     await advance(1400);
     out.tokens = node('totalTokens').textContent;
     out.cost = node('totalCost').textContent;
     out.messages = node('totalMessages').textContent;
   }
 
-  if (scenario === 'broken-read-does-not-claim-empty') {
-    // Source errors reconcile to zero totals; the cards must fall through to
-    // their numbers instead of stating "No data".
+  if (scenario === 'broken-read-does-not-claim-empty-or-free') {
+    // combineUsagePayloads builds the response from row.payload, so _partial —
+    // which reconcileUsageRows puts on the row wrappers — never reaches here.
+    // _has_incomplete_server_rows is the flag production actually sets.
     renderOverviewTab(zeroPayload({
-      range: 'BROKEN', _partial: true,
+      range: 'BROKEN',
+      _has_incomplete_server_rows: true,
       _source_errors: ['usage.jsonl'],
       by_tool: { codex: { tokens: 0, cost: 0 } },
     }));
@@ -207,17 +280,36 @@ async function main() {
     out.messages = node('totalMessages').textContent;
   }
 
+  if (scenario === 'a-failed-refresh-keeps-the-empty-state') {
+    // The catch path sets _server_rows_stale on the last good response so the
+    // Servers tab reads its rows as stale. It says nothing about this range, and
+    // treating it as a broken read repainted an empty range as 0 / FREE / 0
+    // until the next successful refresh flipped it back.
+    const payload = zeroPayload();
+    renderOverviewTab(payload);
+    await settle();
+    out.beforeFailure = node('totalCost').textContent;
+    payload._server_rows_stale = true;
+    renderOverviewTab(payload);
+    await settle();
+    out.afterFailedRefresh = node('totalCost').textContent;
+    out.tokensAfterFailedRefresh = node('totalTokens').textContent;
+  }
+
   if (scenario === 'next-range-counts-from-the-value-on-screen') {
-    // A zero render resets the counter base: the next populated range must not
-    // resume from a stale previous value.
-    renderOverviewTokenTotal(5200000);
+    // Driven through renderOverviewTab, which is what writes _currentValue on the
+    // Cost and Messages cards. renderOverviewTokenTotal never animates, so a test
+    // that only calls it could not tell whether the resets are there.
+    renderOverviewTab(populated({ total_cost: 12.5, total_messages: 300 }));
     await settle();
-    renderOverviewTokenTotal(0);
-    out.zeroShown = node('totalTokens').textContent;
-    out.baseAfterZero = node('totalTokens')._currentValue;
-    renderOverviewTokenTotal(1000);
-    await settle();
-    out.recountShown = node('totalTokens').textContent;
+    out.costBaseAfterPopulated = node('totalCost')._currentValue;
+    renderOverviewTab(zeroPayload());
+    out.costBaseAfterEmpty = node('totalCost')._currentValue;
+    out.messagesBaseAfterEmpty = node('totalMessages')._currentValue;
+    renderOverviewTab(populated({ total_cost: 1, total_messages: 2, total_tokens: 1000 }));
+    await advance(60);
+    out.recountCost = node('totalCost').textContent;
+    out.recountMessages = node('totalMessages').textContent;
   }
 
   process.stdout.write(JSON.stringify(out));
@@ -226,17 +318,20 @@ async function main() {
 main();
 """
 
+FUNCTIONS_UNDER_TEST = (
+    "function overviewRangeIsBroken(data) {",
+    "function overviewRangeIsEmpty(data) {",
+    "function setOverviewCounterText(el, text, value) {",
+    "function animateOverviewCounter(el, value, duration, format) {",
+    "function renderOverviewTokenTotal(value = overviewTotalTokensRaw) {",
+    "function renderOverviewTab(data) {",
+)
+
 
 def _run(tmp_path: Path, scenario: str) -> dict:
     source = INDEX_HTML.read_text(encoding="utf-8")
     functions = "\n".join(
-        _extract_js_function(source, signature)
-        for signature in (
-            "function overviewRangeIsEmpty(data) {",
-            "function cancelOverviewCounterAnimation(el) {",
-            "function renderOverviewTokenTotal(value = overviewTotalTokensRaw) {",
-            "function renderOverviewTab(data) {",
-        )
+        _extract_js_function(source, signature) for signature in FUNCTIONS_UNDER_TEST
     )
     # `function` declarations cannot be reassigned under the module wrapper.
     functions = functions.replace(
@@ -273,6 +368,51 @@ def test_stale_animation_cannot_overwrite_the_empty_state(tmp_path):
     assert out["messagesAfter"] == "No data"
 
 
+def test_cancelling_a_counter_actually_stops_the_animation(tmp_path):
+    """The guards are not a substitute for stopping the engine.
+
+    The identity checks in onUpdate/onComplete keep a superseded animation from
+    writing, but the animation itself kept running to the end of its duration —
+    every frame, for 1.2s, across every KPI card. That is the difference between
+    cancelling and merely ignoring.
+    """
+    out = _run(tmp_path, "cancelling-actually-stops-the-animation")
+
+    assert out["writesWhileAnimating"] > 0, "the counter must really be animating"
+    assert out["stopped"], (
+        "cancelCounter() left the animation running; it called pause() on an "
+        f"Animatable, which has no pause (writes went {out['writesAfterCancel']} "
+        "past the cancel)"
+    )
+    assert out["liveValueOnCancel"], (
+        "cancelling must hand the live value back, or a re-render mid-flight "
+        "resumes from the last completed total and visibly jumps"
+    )
+
+
+def test_large_values_are_measured_at_their_final_width(tmp_path):
+    out = _run(tmp_path, "large-values-are-measured-at-their-final-width")
+
+    assert out["costAtFit"] == out["expectedCost"], (
+        "the Cost card must hold its final text before fitOverviewKpis() "
+        "measures it, or a large value is never shrunk and stays clipped"
+    )
+    assert out["messagesAtFit"] == out["expectedMessages"], (
+        "the Messages card must hold its final text before the fit measures it"
+    )
+    assert out["costSettled"] == out["expectedCost"]
+    assert out["messagesSettled"] == out["expectedMessages"]
+
+
+def test_a_null_hit_rate_cancels_the_in_flight_count_up(tmp_path):
+    out = _run(tmp_path, "a-null-hit-rate-cancels-the-in-flight-count-up")
+
+    assert out["hitRightAfter"] == "n/a"
+    assert out["hitAfter"] == "n/a", (
+        "the previous range's count-up finished on top of the static n/a"
+    )
+
+
 def test_an_empty_range_agrees_across_the_whole_row(tmp_path):
     out = _run(tmp_path, "empty-range-agrees-across-the-row")
 
@@ -290,17 +430,46 @@ def test_unpriced_but_populated_keeps_the_free_state(tmp_path):
     assert out["messages"] == "300"
 
 
-def test_a_broken_read_does_not_claim_the_range_is_empty(tmp_path):
-    out = _run(tmp_path, "broken-read-does-not-claim-empty")
+def test_a_broken_read_neither_claims_empty_nor_free(tmp_path):
+    """A failed read is neither an empty range nor a free one.
 
-    assert out["tokens"] == "0", "a failed read must fall through to its numbers"
-    assert out["cost"] == "FREE"
-    assert out["messages"] == "0"
+    "FREE" tells the user their usage cost nothing when the read actually failed,
+    which is precisely the case this feature exists to tell apart from an empty
+    range. A dash is the only value that is not a claim.
+    """
+    out = _run(tmp_path, "broken-read-does-not-claim-empty-or-free")
+
+    assert out["tokens"] == "—", "a failed read must not state there are no tokens"
+    assert out["cost"] == "—", 'a failed read must not report $0 "FREE"'
+    assert out["messages"] == "—"
+
+
+def test_a_failed_refresh_keeps_the_empty_state(tmp_path):
+    out = _run(tmp_path, "a-failed-refresh-keeps-the-empty-state")
+
+    assert out["beforeFailure"] == "No data"
+    assert out["afterFailedRefresh"] == "No data", (
+        "_server_rows_stale marks the Servers tab's rows as stale, not this "
+        "range as incomplete; one failed auto-refresh must not repaint an empty "
+        "range as 0 / FREE / 0"
+    )
+    assert out["tokensAfterFailedRefresh"] == "No data"
 
 
 def test_the_next_range_counts_from_the_value_on_screen(tmp_path):
     out = _run(tmp_path, "next-range-counts-from-the-value-on-screen")
 
-    assert out["zeroShown"] == "0"
-    assert out["baseAfterZero"] == 0, "the counter base must follow the zero actually shown"
-    assert out["recountShown"] == "1.0k", "a small recount must not get stuck at the old total"
+    assert out["costBaseAfterEmpty"] == 0, (
+        "the Cost counter base must follow the value actually shown; otherwise "
+        "the next range counts up from the range before it"
+    )
+    assert out["messagesBaseAfterEmpty"] == 0
+    # Counted a moment into a 1.2s animation, so this is a partial value. The
+    # previous range showed 12.5, so anything far below that proves the new
+    # count-up started from 0 rather than resuming from the stale total.
+    assert float(out["recountCost"].replace("$", "")) < 5, (
+        f"the recount resumed from a stale total instead of 0: {out['recountCost']}"
+    )
+    assert float(out["recountMessages"].replace(",", "")) < 100, (
+        f"the Messages recount resumed from a stale total: {out['recountMessages']}"
+    )

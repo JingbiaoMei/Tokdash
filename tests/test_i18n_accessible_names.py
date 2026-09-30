@@ -35,6 +35,12 @@ import tokdash  # type: ignore[import-untyped]
 INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
+# HTML elements that never have a closing tag.
+VOID_ELEMENTS = {
+    "area", "base", "br", "col", "embed", "hr", "img", "input",
+    "link", "meta", "param", "source", "track", "wbr",
+}
+
 # data-i18n-<suffix> -> the HTML attribute that suffix writes.
 ATTRIBUTE_FOR_KEY = {
     "data-i18n-placeholder": "placeholder",
@@ -521,6 +527,61 @@ def test_applyi18n_translates_every_attribute_form_through_one_table(
         "the attribute passes must read the marker from I18N_ATTR_TARGETS"
     )
     assert "el.setAttribute(attribute, t(el.getAttribute(marker)))" in body
+
+
+def test_static_markup_stays_well_formed(static_html: str) -> None:
+    """The translated markup is still well-formed HTML.
+
+    Editing a long single-page template by hand can quietly weld two
+    elements onto one line, or drop a tag, without any test noticing --
+    the page still parses, it just stops looking like the rest of the
+    file and, in the worst case, nests one control inside another.
+    """
+
+    class Balance(HTMLParser):
+        def __init__(self) -> None:
+            super().__init__(convert_charrefs=True)
+            self.stack: list[tuple[str, int]] = []
+            self.errors: list[str] = []
+
+        def handle_starttag(self, tag, attrs):  # type: ignore[no-untyped-def]
+            if tag.lower() not in VOID_ELEMENTS:
+                self.stack.append((tag, self.getpos()[0]))
+
+        def handle_endtag(self, tag):  # type: ignore[no-untyped-def]
+            if tag.lower() in VOID_ELEMENTS:
+                return
+            if not self.stack:
+                self.errors.append(f"stray </{tag}> at line {self.getpos()[0]}")
+                return
+            opened, line = self.stack.pop()
+            if opened != tag:
+                self.errors.append(
+                    f"</{tag}> at line {self.getpos()[0]} closes <{opened}> "
+                    f"opened at line {line}"
+                )
+
+    parser = Balance()
+    # The slice ends inside <body>, so close the two ancestors it truncates;
+    # anything still unbalanced after that is a real defect in the markup.
+    parser.feed(static_html + "</body></html>")
+    assert not parser.errors, parser.errors
+    assert not parser.stack, [f"<{tag}> never closed (line {line})" for tag, line in parser.stack]
+
+
+def test_no_line_welds_two_elements_together(static_html: str) -> None:
+    """Each top-level element keeps its own line.
+
+    A ``</p>`` immediately followed by ``<ol>`` on the same line means an
+    edit consumed the newline between two siblings; the markup still
+    parses, so nothing else would notice.
+    """
+    welded = [
+        (number, line.strip()[:120])
+        for number, line in enumerate(static_html.splitlines(), 1)
+        if re.search(r"</[a-zA-Z][\w-]*>\s{2,}<", line)
+    ]
+    assert not welded, f"two elements share a line: {welded}"
 
 
 def test_parity_test_covers_the_aria_form() -> None:

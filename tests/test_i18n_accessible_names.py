@@ -484,7 +484,10 @@ def test_brand_text_is_static(source: str, english_dictionary: dict[str, str]) -
     keys only implied the brand could be translated, and applyI18n wrote
     document.title on every language switch for no effect.
     """
-    assert "document.title = t(" not in source
+    assert "document.title =" not in source, (
+        "applyI18n must not write document.title; the brand is the same in "
+        "every locale and <title> already carries it"
+    )
     assert 'data-i18n="appName"' not in source
     assert 'data-i18n="appTitle"' not in source
     assert "<title>Tokdash</title>" in source
@@ -524,13 +527,87 @@ def test_parity_test_covers_the_aria_form() -> None:
     """tests/test_i18n_languages.py must check data-i18n-aria keys too.
 
     Without ``-aria`` in that regex, a typo in any of the aria keys would
-    pass CI and be announced as a raw key name.
+    pass CI and be announced as a raw key name. This runs the parity
+    test's own regex against one element per marker form, so a narrowing
+    of the pattern is caught here rather than in the dictionary.
     """
     parity = (REPO_ROOT / "tests" / "test_i18n_languages.py").read_text(
         encoding="utf-8"
     )
     match = re.search(r"re\.findall\(\s*r'(data-i18n[^']*)'", parity)
     assert match, "the referenced-key regex in the parity test is gone"
-    assert "-aria" in match.group(1), (
-        f"the parity regex {match.group(1)!r} does not cover data-i18n-aria"
+    pattern = re.compile(match.group(1))
+    samples = {
+        "data-i18n": '<span data-i18n="close">Close</span>',
+        **{
+            marker: f'<div {marker}="someKey">'
+            for marker in ATTRIBUTE_FOR_KEY
+        },
+    }
+    for marker, markup in samples.items():
+        found = pattern.findall(markup)
+        assert found == ["someKey" if marker != "data-i18n" else "close"], (
+            f"the parity regex {match.group(1)!r} does not extract the key "
+            f"from {marker}: found {found}"
+        )
+
+
+# --- tooltips name the same thing as the heading above them ----------------
+
+
+CHART_TOOLTIPS = {
+    "turnTrendDesc": "turnTrend",
+    "cumulativeTurnTrendDesc": "cumulativeTurnTrend",
+    "cumulativeTrendByTimeDesc": "cumulativeTrendByTime",
+}
+
+
+def test_chart_tooltips_reuse_their_heading_terminology() -> None:
+    """Every locale's tooltip opens with its own heading's wording.
+
+    The three session-chart tooltips sit directly under headings. The ja
+    "Turn trend" tooltip sat under "Turn Trend", the ko one said "Turn
+    Trend" under "Turn Trend", and the es and pt tooltips kept the
+    English heading verbatim. A tooltip that names the chart differently
+    from the heading above it is a mismatch the reader has to resolve
+    themselves, so each one must start with the heading's own term.
+    """
+    node = shutil.which("node")
+    if node is None:  # pragma: no cover - node ships with the dev extra
+        pytest.skip("node not available")
+    source = INDEX_HTML.read_text(encoding="utf-8")
+    harness = (
+        REPO_ROOT / "_i18n_tooltip_probe.js"
+    )
+    harness.write_text(
+        _i18n_literal(source)
+        + "\nconst pairs = "
+        + json.dumps(CHART_TOOLTIPS)
+        + ";\nconst out = [];\n"
+        "for (const lang of Object.keys(I18N)) {\n"
+        "  for (const [tip, heading] of Object.entries(pairs)) {\n"
+        "    out.push([lang, tip, I18N[lang][tip], I18N[lang][heading],\n"
+        "      I18N[lang][tip].startsWith(I18N[lang][heading])]);\n"
+        "  }\n"
+        "}\n"
+        "process.stdout.write(JSON.stringify(out));",
+        encoding="utf-8",
+    )
+    try:
+        rows = json.loads(
+            subprocess.run(
+                [node, str(harness)], capture_output=True, text=True, check=True
+            ).stdout
+        )
+    finally:
+        harness.unlink(missing_ok=True)
+    mismatches = [
+        f"{lang} {tip}: {tip!r} starts {tooltip!r} instead of the heading "
+        f"{heading!r}"
+        for lang, tip, tooltip, heading, ok in rows
+        if not ok
+    ]
+    assert not mismatches, (
+        "a chart tooltip must name the chart the way the heading above it "
+        f"does: {mismatches}"
     )

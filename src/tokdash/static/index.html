@@ -22761,8 +22761,10 @@
             return;
           }
         }
-        const data = await resp.json().catch(() => ({}));
         if (!resp.ok) {
+          // Best-effort body: the status itself is the verdict, so a truncated
+          // error body only costs us the detail string.
+          const data = await resp.json().catch(() => ({}));
           ui.jobBox.hidden = false;
           ui.jobBox.dataset.state = 'failed';
           ui.jobText.textContent = t('updateFailed')
@@ -22770,12 +22772,21 @@
             .replace('{message}', data.detail || String(resp.status));
           return;
         }
-        if (data.job) {
-          ui.apply.hidden = true;
-          ui.enroll.hidden = true;
-          renderUpdateJob(data.job);
-          startUpdatePolling(data.job.id);
+        // On the success path the body is the whole message, and the accepted
+        // update kills this server mid-delivery — headers can land just before
+        // the shutdown and the JSON arrive truncated, making json() REJECT on a
+        // click that worked. No `.catch(()=>({}))` here: a parse failure falls to
+        // the outer handler into recovery, and a body that parses but carries no
+        // usable job id is in the same epistemic position as no response at all.
+        const data = await resp.json();
+        if (!data.job || !data.job.id) {
+          await recoverLostStart();
+          return;
         }
+        ui.apply.hidden = true;
+        ui.enroll.hidden = true;
+        renderUpdateJob(data.job);
+        startUpdatePolling(data.job.id);
       } catch (_) {
         // A LOST response is an expected outcome of a successful click: the accepted
         // update stops this very server moments later, before the response lands.

@@ -1137,6 +1137,125 @@ def test_lost_start_response_recovers_without_a_second_click():
     assert "updateTimeout" in rec[rec.index("async function recoverLostStart"):]
 
 
+def _run_click_response_harness(cases_js: str) -> dict:
+    """Drive the real requestDashboardUpdate/recoverLostStart code in node.
+
+    Extracts the two functions verbatim from index.html and evaluates them under
+    stubbed UI/network globals, so a test can script what the start response and
+    the capability endpoint do and observe what the browser code actually does.
+    """
+    node = __import__("shutil").which("node")
+    if not node:
+        pytest.skip("node not available")
+    html = (Path(__file__).resolve().parents[1] / "src" / "tokdash" / "static"
+            / "index.html").read_text(encoding="utf-8")
+    region = html[html.index("async function requestDashboardUpdate"):
+                  html.index("async function enrollUpdateBrowser")]
+    harness = """
+const state = { polls: [], capabilityCalls: 0, capabilityQueue: [] };
+global.setTimeout = (fn) => { fn(); return 0; };  // the bounded loop must answer fast in tests
+global.appPath = (u) => u;
+global.t = (k) => k + ' {phase} {message} {version}';  // keep placeholders substitutable
+global.updateIsLocalHost = () => true;
+global.UPDATE_CSRF_HEADER = 'X-Tokdash-CSRF';
+global.updateCapabilityInfo = { target: '9.9.9', latest_job: null };
+global.updateUi = () => global.__ui;
+global.renderUpdateJob = (job) => { global.__renders.push(job); };
+global.updatePanelReveal = () => {};
+global.recoverUpdateCsrf = async () => false;
+global.startUpdatePolling = (id) => { state.polls.push(id); };
+global.refreshUpdateCapability = async () => {
+  // Stands in for the real one, including its side effect: a live latest_job is
+  // rendered and handed to polling (the real function starts polling there).
+  state.capabilityCalls += 1;
+  const q = state.capabilityQueue;
+  const info = q.length > 1 ? q.shift() : (q[0] === undefined ? null : q[0]);
+  const job = info && info.latest_job;
+  if (job && !job.terminal) { global.renderUpdateJob(job); global.startUpdatePolling(job.id); }
+  return info;
+};
+let __start = null;
+global.fetch = async (url) => {
+  if (url.includes('/api/csrf-token')) return { ok: true, json: async () => ({ token: 't' }) };
+  if (url.includes('/api/update/start')) {
+    const s = __start;
+    if (s.kind === 'reject') throw new TypeError('fetch failed');
+    return {
+      ok: s.kind !== 'status', status: s.status || 200,
+      json: s.jsonReject ? () => Promise.reject(new TypeError('truncated'))
+                          : async () => (s.kind === 'job' ? { job: s.job } : {}),
+    };
+  }
+  throw new TypeError('unexpected url ' + url);
+};
+async function runCase(c) {
+  state.polls = []; state.capabilityCalls = 0; state.capabilityQueue = c.capability;
+  __start = c.start;
+  global.__ui = { apply: { hidden: false }, enroll: { hidden: false },
+                  jobBox: { hidden: true, dataset: {} }, jobText: {} };
+  global.__renders = [];
+  await requestDashboardUpdate();
+  return {
+    polls: state.polls, capabilityCalls: state.capabilityCalls,
+    applyHidden: global.__ui.apply.hidden, boxState: global.__ui.jobBox.dataset.state || null,
+    boxText: String(global.__ui.jobText.textContent || ''),
+  };
+}
+""" + region + """
+const CASES = %%CASES%%;
+(async () => {
+  const out = {};
+  for (const c of CASES) out[c.name] = await runCase(c);
+  console.log(JSON.stringify(out));
+})().catch((e) => { console.error(String(e && e.stack || e)); process.exit(1); });
+"""
+    cases = [
+        # Headers never arrive: fetch itself rejects.
+        {"name": "headers_lost", "start": {"kind": "reject"},
+         "capability": [None, None, {"latest_job": {"id": "j-live", "terminal": False}}]},
+        # Reviewer's case: headers land, the JSON body dies with the server.
+        {"name": "body_truncated", "start": {"kind": "job", "status": 200, "jsonReject": True},
+         "capability": [None, {"latest_job": {"id": "j-live", "terminal": False}}]},
+        # A 200 that parses but names no usable job: same unknown state as no response.
+        {"name": "ok_without_job", "start": {"kind": "body", "status": 200},
+         "capability": [{"latest_job": {"id": "j-live", "terminal": False}}]},
+        # The good path: polling starts immediately, recovery is never consulted.
+        {"name": "complete_response", "start": {"kind": "job", "status": 200,
+                                                "job": {"id": "j-live", "terminal": False}},
+         "capability": [{"latest_job": None}]},
+        # A failure response with a truncated body: the STATUS is still the verdict,
+        # and recovery must NOT hijack a real refusal.
+        {"name": "refused_truncated", "start": {"kind": "status", "status": 503,
+                                                "jsonReject": True},
+         "capability": [{"latest_job": None}]},
+    ]
+    import json as _json
+    import subprocess as _sp
+    import tempfile as _tf
+    with _tf.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as fh:
+        fh.write(harness.replace("%%CASES%%", _json.dumps(cases)))
+        path = fh.name
+    proc = _sp.run([node, path], capture_output=True, text=True, timeout=60)
+    assert proc.returncode == 0, proc.stderr
+    return _json.loads(proc.stdout)
+
+
+def test_click_response_variants_behave_correctly():
+    out = _run_click_response_harness(None)
+    # Every lost-response shape recovers by consulting the durable journal.
+    for name in ("headers_lost", "body_truncated", "ok_without_job"):
+        assert out[name]["capabilityCalls"] > 0, f"{name} must start recovery, not go silent"
+        assert out[name]["applyHidden"], f"{name} must not leave a second click armed"
+        assert out[name]["polls"] == ["j-live"], f"{name} must hand the live job to polling"
+    # A complete response polls directly, without recovery.
+    assert out["complete_response"]["polls"] == ["j-live"]
+    assert out["complete_response"]["capabilityCalls"] == 0
+    # A genuine refusal shows its status and is NOT mistaken for a lost response.
+    assert out["refused_truncated"]["capabilityCalls"] == 0
+    assert out["refused_truncated"]["boxState"] == "failed"
+    assert "503" in out["refused_truncated"]["boxText"]
+
+
 def _seed_snapshots(backups_dir, *stamps):
     backups_dir.mkdir(parents=True, exist_ok=True)
     for stamp in stamps:

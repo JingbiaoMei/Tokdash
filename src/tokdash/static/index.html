@@ -1431,6 +1431,13 @@
     html.dark .hover\:bg-slate-50:hover { background-color: rgba(51, 65, 85, 0.3); }
     html.dark .border-b { border-color: #334155; }
 
+    /* Without flatpickr.min.css the calendar loses its position:absolute and its
+       closed-state hiding, and sits static in the body's flex row. The CDN
+       banner sets this class when the stylesheet (or the script) failed. */
+    .tokdash-datepicker-unavailable .flatpickr-calendar {
+      display: none !important;
+    }
+
     /* Flatpickr Custom Styles */
     .flatpickr-calendar {
       background: var(--datepickr-panel-bg);
@@ -2147,6 +2154,16 @@
       border-color: rgba(99, 102, 241, 0.35);
       background: rgba(255, 255, 255, 0.06);
     }
+    /* Flatpickr failed to load (script or stylesheet), so the CDN banner has
+       disabled the trigger. It still shows the selected range; hovering it
+       shows why it cannot open rather than inviting a click. */
+    .date-range-trigger:disabled,
+    .date-range-trigger:disabled:hover {
+      cursor: not-allowed;
+      opacity: 0.6;
+      border-color: var(--color-border);
+      background: color-mix(in srgb, var(--color-text) 3%, transparent);
+    }
     /* KPI cards sparkline stretching */
     #overviewKpiGrid .surface {
       position: relative;
@@ -2597,10 +2614,12 @@
        theme toggle and the date-range trigger, which are exactly the controls
        a broken CDN leaves unusable. The max-width keeps a 16px gutter on both
        sides at 360px. The region is never display:none - a live region that is
-       hidden when its cards are appended is not announced - but an empty flex
-       container has no footprint of its own, so it never swallows a click. -->
+       hidden when its cards are appended is not announced. Its box spans the
+       widest card, so it takes no pointer events itself and each card opts back
+       in: otherwise the gaps between cards, and the space beside a narrower
+       one, swallow clicks meant for the page underneath. -->
   <div id="cdnFailureBanner" role="status" aria-live="polite"
-       style="position:fixed;bottom:16px;right:16px;z-index:99999;display:flex;flex-direction:column;align-items:flex-end;gap:8px;max-width:calc(100vw - 32px);max-height:calc(100vh - 32px);overflow-y:auto;"></div>
+       style="position:fixed;bottom:16px;right:16px;z-index:99999;display:flex;flex-direction:column;align-items:flex-end;gap:8px;max-width:calc(100vw - 32px);max-height:calc(100vh - 32px);overflow-y:auto;pointer-events:none;"></div>
   <script>
     (function() {
       const banner = document.getElementById('cdnFailureBanner');
@@ -2617,8 +2636,22 @@
         // always passes. The link sets a flag on a successful load instead,
         // which is the only positive evidence the CSS actually arrived.
         ['cdnFlatpickrFailed', 'warning', () => typeof flatpickr === 'undefined'
-          || !window.__tokdashFlatpickrCssLoaded],
+          || !window.__tokdashFlatpickrCssLoaded, disableDatePicker],
       ];
+
+      // Without the script there is no picker, and without the stylesheet its
+      // calendar is an unstyled block left static in the body's flex row: a
+      // 528x6451px column at 1400x900, the whole viewport on a phone. Hide it,
+      // and take the trigger out of play rather than leave a button that opens
+      // nothing. The quick ranges still work without either.
+      function disableDatePicker() {
+        document.documentElement.classList.add('tokdash-datepicker-unavailable');
+        const trigger = document.getElementById('dateRangeTrigger');
+        if (!trigger) return;
+        trigger.disabled = true;
+        trigger.removeAttribute('aria-haspopup');
+        trigger.setAttribute('title', translate('cdnFlatpickrFailed'));
+      }
 
       // t is a hoisted function declaration, so `typeof t === 'function'` is
       // true even when the main script died before it reached `const I18N`, and
@@ -2674,7 +2707,10 @@
         if (banner.querySelector(`[data-cdn-key="${key}"]`)) return;
         const card = document.createElement('div');
         card.dataset.cdnKey = key;
-        card.style.cssText = 'background:var(--datepickr-panel-bg,var(--color-surface-glass,#ffffff));color:var(--color-text,#0f172a);padding:12px 16px;border-radius:8px;font-size:13px;line-height:1.4;box-shadow:var(--shadow-md,0 8px 24px rgba(15,23,42,0.08));border-left:4px solid ' + (severity === 'critical' ? '#ef4444' : '#f59e0b') + ';display:flex;align-items:flex-start;gap:8px;';
+        // pointer-events:auto opts the card back in (the region itself takes
+        // none), and max-width stops a long message from widening one card
+        // across the content beneath it.
+        card.style.cssText = 'background:var(--datepickr-panel-bg,var(--color-surface-glass,#ffffff));color:var(--color-text,#0f172a);padding:12px 16px;border-radius:8px;font-size:13px;line-height:1.4;box-shadow:var(--shadow-md,0 8px 24px rgba(15,23,42,0.08));border-left:4px solid ' + (severity === 'critical' ? '#ef4444' : '#f59e0b') + ';display:flex;align-items:flex-start;gap:8px;pointer-events:auto;max-width:400px;box-sizing:border-box;';
         const text = document.createElement('span');
         text.style.flex = '1';
         // data-i18n makes applyI18n re-translate the card on a language switch;
@@ -2707,7 +2743,7 @@
       }
 
       function reportCdnFailures() {
-        CDN_CHECKS.forEach(([key, severity, isFailed]) => {
+        CDN_CHECKS.forEach(([key, severity, isFailed, onFailure]) => {
           let failed = false;
           // A probe that throws is not evidence of a load failure.
           try { failed = isFailed(); } catch (err) { return; }
@@ -2716,6 +2752,10 @@
           // One notice that cannot be built must not cost the user the rest.
           try { addCdnFailure(key, severity); }
           catch (err) { console.error(`[Tokdash] Could not show the ${key} notice`, err); }
+          if (onFailure) {
+            try { onFailure(); }
+            catch (err) { console.error(`[Tokdash] Could not degrade the page for ${key}`, err); }
+          }
         });
 
         // Fonts cannot be checked synchronously: declared-but-not-yet-used faces
@@ -7121,7 +7161,7 @@
         cdnTailwindFailed: 'Tailwind CSS failed to load. The dashboard may not display correctly.',
         cdnChartFailed: 'Chart.js failed to load. Charts will not be available.',
         cdnThreeFailed: 'Three.js failed to load. The 3D stats view will not be available.',
-        cdnFlatpickrFailed: 'Flatpickr failed to load. The date picker may be unstyled or unavailable; the quick range buttons still work.',
+        cdnFlatpickrFailed: 'Flatpickr failed to load, so the date picker is unavailable. The quick range buttons still work.',
         cdnFontsFailed: 'Google Fonts failed to load. Using system fonts.',
       },
       zh: {
@@ -7678,7 +7718,7 @@
         cdnTailwindFailed: 'Tailwind CSS 加载失败，仪表板可能无法正常显示。',
         cdnChartFailed: 'Chart.js 加载失败，图表将不可用。',
         cdnThreeFailed: 'Three.js 加载失败，3D 统计视图将不可用。',
-        cdnFlatpickrFailed: 'Flatpickr 加载失败。日期选择器可能未正确显示或无法使用，快捷范围按钮仍可使用。',
+        cdnFlatpickrFailed: 'Flatpickr 加载失败，日期选择器不可用。快捷范围按钮仍可使用。',
         cdnFontsFailed: 'Google Fonts 加载失败，正在使用系统字体。',
       },
 
@@ -8236,7 +8276,7 @@
         cdnTailwindFailed: 'Tailwind CSS の読み込みに失敗しました。ダッシュボードが正しく表示されない可能性があります。',
         cdnChartFailed: 'Chart.js の読み込みに失敗しました。チャートは利用できません。',
         cdnThreeFailed: 'Three.js の読み込みに失敗しました。3D 統計ビューは利用できません。',
-        cdnFlatpickrFailed: 'Flatpickr の読み込みに失敗しました。日程ピッカーが正しく表示されない、または利用できない可能性があります。クイックレンジボタンは引き続き利用できます。',
+        cdnFlatpickrFailed: 'Flatpickr の読み込みに失敗したため、日付ピッカーは利用できません。クイックレンジボタンは引き続き利用できます。',
         cdnFontsFailed: 'Google Fonts の読み込みに失敗しました。システムフォントを使用しています。',
       },
 
@@ -8794,7 +8834,7 @@
         cdnTailwindFailed: 'Tailwind CSS를 불러오지 못했습니다. 대시보드가 제대로 표시되지 않을 수 있습니다.',
         cdnChartFailed: 'Chart.js를 불러오지 못했습니다. 차트를 사용할 수 없습니다.',
         cdnThreeFailed: 'Three.js를 불러오지 못했습니다. 3D 통계 보기를 사용할 수 없습니다.',
-        cdnFlatpickrFailed: 'Flatpickr를 불러오지 못했습니다. 날짜 선택기가 올바르게 표시되지 않거나 사용할 수 없을 수 있으며, 빠른 기간 버튼은 계속 사용할 수 있습니다.',
+        cdnFlatpickrFailed: 'Flatpickr를 불러오지 못해 날짜 선택기를 사용할 수 없습니다. 빠른 기간 버튼은 계속 사용할 수 있습니다.',
         cdnFontsFailed: 'Google Fonts를 불러오지 못했습니다. 시스템 폰트를 사용합니다.',
       },
 
@@ -9352,7 +9392,7 @@
         cdnTailwindFailed: 'Tailwind CSS no se pudo cargar. El panel puede no mostrarse correctamente.',
         cdnChartFailed: 'Chart.js no se pudo cargar. Los gráficos no estarán disponibles.',
         cdnThreeFailed: 'Three.js no se pudo cargar. La vista de estadísticas 3D no estará disponible.',
-        cdnFlatpickrFailed: 'Flatpickr no se pudo cargar. El selector de fechas puede mostrarse sin estilos o no estar disponible; los botones de rango rápido siguen funcionando.',
+        cdnFlatpickrFailed: 'Flatpickr no se pudo cargar, así que el selector de fechas no está disponible. Los botones de rango rápido siguen funcionando.',
         cdnFontsFailed: 'Google Fonts no se pudo cargar. Usando fuentes del sistema.',
       },
 
@@ -9910,7 +9950,7 @@
         cdnTailwindFailed: 'Tailwind CSS não pôde ser carregado. O painel pode não ser exibido corretamente.',
         cdnChartFailed: 'Chart.js não pôde ser carregado. Os gráficos não estarão disponíveis.',
         cdnThreeFailed: 'Three.js não pôde ser carregado. A visualização de estatísticas 3D não estará disponível.',
-        cdnFlatpickrFailed: 'Flatpickr não pôde ser carregado. O seletor de datas pode aparecer sem estilo ou não estar disponível; os botões de intervalo rápido continuam funcionando.',
+        cdnFlatpickrFailed: 'Flatpickr não pôde ser carregado, então o seletor de datas não está disponível. Os botões de intervalo rápido continuam funcionando.',
         cdnFontsFailed: 'Google Fonts não pôde ser carregado. Usando fontes do sistema.',
       },
     };
@@ -12226,7 +12266,9 @@
       const presetKey = activeQuickRange || 'customRange';
       preset.textContent = t(presetKey);
       exact.textContent = formatDateRangeTriggerText(currentStartDate, currentEndDate);
-      trigger.setAttribute('title', t('selectRange'));
+      // A trigger the CDN banner disabled keeps saying why, through every
+      // range change and language switch, instead of inviting a click.
+      trigger.setAttribute('title', t(trigger.disabled ? 'cdnFlatpickrFailed' : 'selectRange'));
       let isSecondaryActive = false;
       document.querySelectorAll('.quick-range-btn').forEach((button) => {
         const isActive = button.dataset.range === activeQuickRange;

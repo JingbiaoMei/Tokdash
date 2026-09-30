@@ -83,6 +83,120 @@ def _run_js(tmp_path: Path, name: str, script: str, arg: str | None = None) -> s
     return result.stdout
 
 
+def _banner_script(source: str) -> str:
+    """The inline <script> that follows the #cdnFailureBanner region."""
+    region = source.find('<div id="cdnFailureBanner"')
+    assert region != -1, "the banner region not found"
+    start = source.find("<script>", region)
+    end = source.find("</script>", start)
+    assert start != -1 and end != -1, "the banner script not found"
+    return source[start + len("<script>") : end]
+
+
+# Just enough DOM for the banner script: the region, the date-range trigger,
+# <html>'s class list and element creation. `createFailures` makes the next N
+# createElement calls throw, which is how a notice that cannot be built is
+# simulated. Timers are stubbed so a warning's 8s fade does not hold node open.
+_BANNER_DOM = r"""
+const logs = [];
+console.error = (...args) => logs.push(args.map(String).join(' '));
+setTimeout = () => 0;
+clearTimeout = () => {};
+class El {
+  constructor(tag) {
+    this.tagName = tag; this.children = []; this.attrs = {}; this.dataset = {};
+    this.style = { cssText: '' }; this.parent = null; this.textContent = '';
+  }
+  setAttribute(name, value) { this.attrs[name] = String(value); }
+  getAttribute(name) { return name in this.attrs ? this.attrs[name] : null; }
+  removeAttribute(name) { delete this.attrs[name]; }
+  appendChild(child) { child.parent = this; this.children.push(child); return child; }
+  remove() {
+    if (!this.parent) return;
+    this.parent.children = this.parent.children.filter((c) => c !== this);
+    this.parent = null;
+  }
+  get isConnected() {
+    for (let node = this; node; node = node.parent) if (node.root) return true;
+    return false;
+  }
+  addEventListener() {}
+  querySelector(selector) {
+    const match = /data-cdn-key="([^"]+)"/.exec(selector);
+    return match ? this.children.find((c) => c.dataset.cdnKey === match[1]) || null : null;
+  }
+}
+const banner = new El('div'); banner.root = true;
+const trigger = new El('button'); trigger.root = true; trigger.disabled = false;
+trigger.setAttribute('aria-haspopup', 'dialog');
+const htmlClasses = new Set();
+const domListeners = {};
+let createFailures = 0;
+const document = {
+  readyState: 'loading',
+  hidden: false,
+  documentElement: { classList: { add: (name) => htmlClasses.add(name) } },
+  getElementById: (id) => ({ cdnFailureBanner: banner, dateRangeTrigger: trigger })[id] || null,
+  createElement(tag) {
+    if (createFailures > 0) { createFailures -= 1; throw new Error('createElement failed'); }
+    return new El(tag);
+  },
+  addEventListener(type, fn) { (domListeners[type] = domListeners[type] || []).push(fn); },
+};
+const window = globalThis;
+"""
+
+_BANNER_REPORT = r"""
+let threw = null;
+try { (domListeners.DOMContentLoaded || []).forEach((fn) => fn()); }
+catch (err) { threw = String(err); }
+process.stdout.write(JSON.stringify({
+  threw,
+  logs,
+  cards: banner.children.map((card) => ({
+    key: card.dataset.cdnKey,
+    text: card.children[0].textContent,
+    closeLabel: card.children[1].children[1].textContent,
+    css: card.style.cssText,
+  })),
+  trigger: {
+    disabled: trigger.disabled,
+    haspopup: trigger.getAttribute('aria-haspopup'),
+    title: trigger.getAttribute('title'),
+  },
+  htmlClasses: [...htmlClasses],
+}));
+"""
+
+# Every library present and the Flatpickr stylesheet's load flag set: the
+# baseline each banner test removes one thing from.
+_ALL_LOADED = (
+    "window.tailwind = {};\n"
+    "globalThis.Chart = function Chart() {};\n"
+    "globalThis.THREE = {};\n"
+    "globalThis.flatpickr = function flatpickr() {};\n"
+    "window.__tokdashFlatpickrCssLoaded = true;\n"
+)
+
+
+def _run_banner(tmp_path: Path, name: str, setup: str) -> dict:
+    """Run the real banner script against the stub DOM, then fire DOMContentLoaded."""
+    script = _BANNER_DOM + setup + "\n" + _banner_script(_source()) + "\n" + _BANNER_REPORT
+    return json.loads(_run_js(tmp_path, name, script))
+
+
+def _flatpickr_css_onload(source: str) -> str:
+    """The code the Flatpickr stylesheet link runs when it loads."""
+    link = re.search(r"<link[^>]*flatpickr\.min\.css[^>]*>", source)
+    assert link, "the Flatpickr stylesheet link not found"
+    onload = re.search(r'onload="([^"]+)"', link.group(0))
+    assert onload, (
+        "the stylesheet link must record a load flag, or a CSS-only CDN failure "
+        "is undetectable"
+    )
+    return onload.group(1)
+
+
 # --------------------------------------------------------------------------
 # Chart.js: one guarded factory instead of a guard per call site
 # --------------------------------------------------------------------------
@@ -279,34 +393,133 @@ def test_quick_ranges_commit_without_flatpickr(tmp_path: Path) -> None:
     assert out["activeQuickRange"] == "last7days", "the active range must be tracked"
 
 
-def test_flatpickr_stylesheet_failure_is_actually_detectable() -> None:
-    """A broken stylesheet link cannot be found by inspecting document.styleSheets.
+@needs_node
+def test_flatpickr_stylesheet_failure_is_actually_detectable(tmp_path: Path) -> None:
+    """The link's own onload code is what tells the check the CSS arrived.
 
     A <link rel="stylesheet"> that fails to load still appears in
     document.styleSheets carrying its href, so an href sniff always passes and
     the notice never fires for the CSS-only failure. The link records a load
-    flag instead, which is positive evidence the CSS arrived.
+    flag instead. Running the link's real onload code, then the real check,
+    ties the two together: a renamed flag on either side shows the warning on
+    every normal load, and a check that cannot fire misses the failure.
     """
+    onload = _flatpickr_css_onload(_source())
+    loaded_setup = _ALL_LOADED.replace("window.__tokdashFlatpickrCssLoaded = true;\n", "")
+
+    loaded = _run_banner(tmp_path, "flatpickr_css_loaded", loaded_setup + onload + ";\n")
+    failed = _run_banner(tmp_path, "flatpickr_css_failed", loaded_setup)
+
+    assert loaded["threw"] is None and failed["threw"] is None
+    assert loaded["cards"] == [], (
+        "a stylesheet that ran its onload must not be reported as failed, got "
+        f"{[card['key'] for card in loaded['cards']]}"
+    )
+    assert [card["key"] for card in failed["cards"]] == ["cdnFlatpickrFailed"], (
+        "a stylesheet that never loaded must be reported"
+    )
+
+
+@needs_node
+def test_a_failed_date_picker_is_disabled_rather_than_left_dead(tmp_path: Path) -> None:
+    """Script or stylesheet missing: hide the calendar and disable its trigger.
+
+    Without the stylesheet the calendar is an unstyled block left static in the
+    body's flex row (a 528x6451px column at 1400x900, the whole viewport on a
+    phone); without the script the trigger opens nothing. Either way the page
+    marks the picker unavailable, and the trigger says why instead of inviting
+    a click. With both loaded, nothing about the trigger changes.
+    """
+    setup = "function t(key) { return 'T:' + key; }\n"
+    no_css = _run_banner(
+        tmp_path,
+        "picker_no_css",
+        setup + _ALL_LOADED.replace("window.__tokdashFlatpickrCssLoaded = true;\n", ""),
+    )
+    no_script = _run_banner(
+        tmp_path,
+        "picker_no_script",
+        setup + _ALL_LOADED.replace("globalThis.flatpickr = function flatpickr() {};\n", ""),
+    )
+    healthy = _run_banner(tmp_path, "picker_healthy", setup + _ALL_LOADED)
+
+    for name, out in (("stylesheet", no_css), ("script", no_script)):
+        assert out["threw"] is None, f"missing {name}: the banner threw {out['threw']}"
+        assert "tokdash-datepicker-unavailable" in out["htmlClasses"], (
+            f"missing {name}: the calendar must be hidden"
+        )
+        assert out["trigger"] == {
+            "disabled": True,
+            "haspopup": None,
+            "title": "T:cdnFlatpickrFailed",
+        }, f"missing {name}: the trigger must be disabled and say why, got {out['trigger']}"
+
+    assert healthy["htmlClasses"] == []
+    assert healthy["trigger"] == {"disabled": False, "haspopup": "dialog", "title": None}
+
+    rule = re.search(
+        r"\.tokdash-datepicker-unavailable\s+\.flatpickr-calendar\s*\{([^}]*)\}", _source()
+    )
+    assert rule and re.search(r"display:\s*none", rule.group(1)), (
+        "the unavailable class must actually hide the calendar"
+    )
+
+
+@needs_node
+def test_the_disabled_date_trigger_keeps_its_reason(tmp_path: Path) -> None:
+    """syncDateRangeControl rewrites the trigger's title on every range change
+    and language switch, so it must not put back "select a range" on a trigger
+    that cannot open."""
     source = _source()
+    script = (
+        "function t(key) { return 'T:' + key; }\n"
+        "const els = {\n"
+        "  dateRangeTrigger: { disabled: false, attrs: {},"
+        " setAttribute(name, value) { this.attrs[name] = value; } },\n"
+        "  dateRangePresetLabel: { textContent: '' },\n"
+        "  dateRangeExactLabel: { textContent: '' },\n"
+        "};\n"
+        "const document = { getElementById: (id) => els[id] || null, querySelectorAll: () => [] };\n"
+        "let activeQuickRange = 'today', currentStartDate = null, currentEndDate = null;\n"
+        "function formatDateRangeTriggerText() { return ''; }\n"
+        + _extract_js_function(source, "function syncDateRangeControl() {")
+        + "\n"
+        + "syncDateRangeControl();\n"
+        + "const enabledTitle = els.dateRangeTrigger.attrs.title;\n"
+        + "els.dateRangeTrigger.disabled = true;\n"
+        + "syncDateRangeControl();\n"
+        + "process.stdout.write(JSON.stringify({ enabledTitle,"
+        " disabledTitle: els.dateRangeTrigger.attrs.title }));\n"
+    )
+    out = json.loads(_run_js(tmp_path, "trigger_title", script))
 
-    link = re.search(r"<link[^>]*flatpickr\.min\.css[^>]*>", source)
-    assert link, "the Flatpickr stylesheet link not found"
-    assert "onload" in link.group(0), (
-        "the stylesheet link must record a load flag, or a CSS-only CDN failure "
-        "is undetectable"
-    )
+    assert out["enabledTitle"] == "T:selectRange"
+    assert out["disabledTitle"] == "T:cdnFlatpickrFailed"
 
-    banner = source[source.find("const CDN_CHECKS") : source.find("function addCdnFailure")]
-    # Comments explain why href sniffing was dropped; only the code is asserted.
-    banner_code = "\n".join(
-        line for line in banner.splitlines() if not line.strip().startswith("//")
+
+@needs_node
+def test_date_picker_init_survives_a_missing_flatpickr(tmp_path: Path) -> None:
+    """initDateRangePicker is a top-level call in the main script; a throw here
+    used to take the initial data load down with it."""
+    source = _source()
+    script = (
+        "console.error = () => {};\n"
+        "const handlers = {};\n"
+        "const document = { getElementById: (id) => ({ id,"
+        " addEventListener(type, fn) { handlers[id + ':' + type] = fn; } }) };\n"
+        "let flatpickrInstance = null;\n"
+        + _extract_js_function(source, "function initDateRangePicker() {")
+        + "\n"
+        + "let threw = null;\n"
+        + "try { initDateRangePicker(); handlers['dateRangeTrigger:click'](); }"
+        " catch (err) { threw = String(err); }\n"
+        + "process.stdout.write(JSON.stringify({ threw,"
+        " instanceIsNull: flatpickrInstance === null }));\n"
     )
-    assert "__tokdashFlatpickrCssLoaded" in banner_code, (
-        "the Flatpickr check must test the link's load flag"
-    )
-    assert "document.styleSheets" not in banner_code, (
-        "href sniffing cannot detect a failed stylesheet and must not be used"
-    )
+    out = json.loads(_run_js(tmp_path, "picker_init", script))
+
+    assert out["threw"] is None, f"initDateRangePicker threw without flatpickr: {out['threw']}"
+    assert out["instanceIsNull"]
 
 
 # --------------------------------------------------------------------------
@@ -314,29 +527,81 @@ def test_flatpickr_stylesheet_failure_is_actually_detectable() -> None:
 # --------------------------------------------------------------------------
 
 
-def test_one_failed_notice_cannot_silence_the_others() -> None:
-    """Each notice is built in its own try/catch, and each lookup is isolated.
+@needs_node
+def test_one_failed_notice_cannot_silence_the_others(tmp_path: Path) -> None:
+    """A notice that cannot be built must not cost the user the rest.
 
-    t is a hoisted function declaration, so `typeof t === 'function'` is true
-    even when the main script died before it reached `const I18N` - calling it
-    then throws. Without a per-card catch the first throw stopped every card
-    after it, so a dead CDN plus a dead main script produced no notices at all.
+    Tailwind, Chart.js and Three.js all missing, and the first card's
+    createElement throws: the Tailwind notice is lost, but the Chart.js and
+    Three.js notices after it must still appear. Without a per-card catch the
+    first throw ended the whole report.
     """
-    source = _source()
-    reporter = source[
-        source.find("function reportCdnFailures") : source.find("if (document.readyState")
-    ]
+    setup = (
+        "function t(key) { return 'T:' + key; }\n"
+        "globalThis.flatpickr = function flatpickr() {};\n"
+        "window.__tokdashFlatpickrCssLoaded = true;\n"
+        "createFailures = 1;\n"
+    )
+    out = _run_banner(tmp_path, "isolated_notices", setup)
 
-    guarded = reporter.count("addCdnFailure(")
-    assert guarded >= 2, "both the checks loop and the fonts branch need a catch"
-    assert reporter.count("try {") >= 2, (
-        "every addCdnFailure call must be wrapped, or one throw hides the rest"
+    assert out["threw"] is None, f"one failed notice stopped the report: {out['threw']}"
+    assert [card["key"] for card in out["cards"]] == ["cdnChartFailed", "cdnThreeFailed"]
+    assert any("cdnTailwindFailed" in line for line in out["logs"]), (
+        "the notice that could not be built must still be logged"
     )
 
-    translator = _extract_js_function(source, "function translate(key) {")
-    assert translator.count("try {") >= 2, (
-        "each lookup needs its own catch: t() and I18N can fail independently"
+
+@needs_node
+def test_notices_fall_back_to_english_when_the_main_script_died(tmp_path: Path) -> None:
+    """t is a hoisted function declaration, so `typeof t === 'function'` is true
+    even when the main script died before it reached `const I18N`, and calling
+    it then throws. The notice must fall back to the English strings, and to the
+    bare key only when there is no dictionary at all."""
+    dead_t = (
+        "function t() { throw new ReferenceError("
+        "\"Cannot access 'I18N' before initialization\"); }\n"
     )
+    only_chart_missing = _ALL_LOADED.replace("globalThis.Chart = function Chart() {};\n", "")
+
+    english = _run_banner(
+        tmp_path,
+        "fallback_english",
+        dead_t
+        + "globalThis.I18N = { en: { cdnChartFailed: 'Chart.js (en)', close: 'Close (en)' } };\n"
+        + only_chart_missing,
+    )
+    bare = _run_banner(tmp_path, "fallback_bare", dead_t + only_chart_missing)
+
+    assert english["threw"] is None and bare["threw"] is None
+    assert [(c["text"], c["closeLabel"]) for c in english["cards"]] == [
+        ("Chart.js (en)", "Close (en)")
+    ], "a dead t() must fall back to the English dictionary"
+    assert [(c["text"], c["closeLabel"]) for c in bare["cards"]] == [
+        ("cdnChartFailed", "close")
+    ], "with no dictionary at all the notice still renders, keyed"
+
+
+@needs_node
+def test_the_notice_region_lets_clicks_through_between_cards(tmp_path: Path) -> None:
+    """The region's box spans its widest card, so it must not take clicks
+    itself; each card opts back in, and is capped so one long message cannot
+    spread across the content beneath it."""
+    region = re.search(r"<div id=\"cdnFailureBanner\"[^>]*>", _source())
+    assert region, "the banner region not found"
+    assert re.search(r"pointer-events:\s*none", region.group(0)), (
+        "the region must not swallow clicks in the gaps between cards"
+    )
+
+    out = _run_banner(
+        tmp_path,
+        "card_style",
+        "function t(key) { return 'T:' + key; }\n"
+        + _ALL_LOADED.replace("globalThis.Chart = function Chart() {};\n", ""),
+    )
+    assert len(out["cards"]) == 1
+    css = out["cards"][0]["css"]
+    assert re.search(r"pointer-events:\s*auto", css), "a card must stay clickable"
+    assert re.search(r"max-width:\s*400px", css), "a card needs its own width cap"
 
 
 def test_the_notice_does_not_cover_the_header_controls() -> None:
@@ -378,3 +643,34 @@ def test_every_locale_carries_the_cdn_keys() -> None:
         "cdnFontsFailed",
     ):
         assert source.count(f"{key}:") == 6, f"{key} must exist in all six locales"
+
+
+# --------------------------------------------------------------------------
+# Three.js: the 3D view says what happened instead of throwing
+# --------------------------------------------------------------------------
+
+
+@needs_node
+def test_3d_view_survives_a_missing_three(tmp_path: Path) -> None:
+    """Without Three.js the 3D view shows the failure in place, with dashes
+    rather than a $0 / 0 overlay that would read as a real reading."""
+    source = _source()
+    script = (
+        "function t(key) { return 'T:' + key; }\n"
+        "const els = {};\n"
+        "const document = { getElementById: (id) =>"
+        " (els[id] = els[id] || { innerHTML: '', textContent: '' }) };\n"
+        + _extract_js_function(source, "function render3DCalendar(contributions) {")
+        + "\n"
+        + "let threw = null;\n"
+        + "try { render3DCalendar([{ date: '2026-09-30', tokens: 5, cost: 1 }]); }"
+        " catch (err) { threw = String(err); }\n"
+        + "process.stdout.write(JSON.stringify({ threw,"
+        " view: els.calendar3D.innerHTML, cost: els.stats3DTotalCost.textContent,"
+        " tokens: els.stats3DTotalTokens.textContent }));\n"
+    )
+    out = json.loads(_run_js(tmp_path, "three_missing", script))
+
+    assert out["threw"] is None, f"render3DCalendar threw without Three.js: {out['threw']}"
+    assert "T:cdnThreeFailed" in out["view"], "the view must say Three.js failed"
+    assert (out["cost"], out["tokens"]) == ("—", "—")

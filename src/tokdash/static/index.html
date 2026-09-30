@@ -9865,18 +9865,83 @@
       }
     }
 
-    function renderOverviewTokenTotal(value = overviewTotalTokensRaw) {
+    // Three states, not two. A range is broken when the read itself failed:
+    // its totals are reconciled zeros, so "no data" would wrongly claim the
+    // range was empty and a $0 "FREE" would wrongly claim the usage cost
+    // nothing. It is empty only when the read succeeded and returned nothing.
+    // Deciding per-metric mixes answers inside one row (tokens say "no data"
+    // while cost says "$0.00"), so both are decided once, for the whole range.
+    //
+    // _has_incomplete_server_rows is the only broken-read flag that actually
+    // reaches this payload. reconcileUsageRows puts _partial on the row
+    // wrappers and combineUsagePayloads builds the response from row.payload,
+    // so data._partial is never set in production. _server_rows_stale is set on
+    // the last good response after a failed refresh purely so the Servers tab
+    // reads its rows as stale; it says nothing about this range, and treating it
+    // as a broken read made one failed auto-refresh repaint an empty range as
+    // 0 / FREE / 0 until the next success flipped it back.
+    function overviewRangeIsBroken(data) {
+      return !!(data && data._has_incomplete_server_rows);
+    }
+
+    function overviewRangeIsEmpty(data) {
+      if (!data || overviewRangeIsBroken(data)) return false;
+      return !Number(data.total_tokens) && !Number(data.total_messages) && !Number(data.total_cost);
+    }
+
+    // animateNumber writes textContent from its callbacks for as long as it
+    // runs, so any static value written into a KPI has to stop the in-flight
+    // count-up first — otherwise the previous range's animation finishes last
+    // and paints over it. setCounterText does the cancel, the write and the
+    // counter-base reset together; the fallback keeps the same behaviour when
+    // the animation module has not loaded.
+    function setOverviewCounterText(el, text, value) {
+      if (!el) return;
+      const animations = typeof window !== 'undefined' ? window.TokDashAnimations : null;
+      if (animations && typeof animations.setCounterText === 'function') {
+        animations.setCounterText(el, text, value);
+        return;
+      }
+      if (animations && typeof animations.cancelCounter === 'function') animations.cancelCounter(el);
+      el.textContent = text;
+      el._currentValue = value;
+    }
+
+    // Checked on every call rather than once per render: the module is loaded
+    // asynchronously, and a partially stubbed TokDashAnimations must not throw
+    // and leave the Overview row half-painted. Callers write the final text
+    // first, so a missing module degrades to plain text rather than a stale card.
+    function animateOverviewCounter(el, value, duration, format) {
+      const animations = typeof window !== 'undefined' ? window.TokDashAnimations : null;
+      if (!animations || typeof animations.animateNumber !== 'function') return;
+      animations.animateNumber(el, value, duration, format);
+    }
+
+    // staticText is what the range wants shown instead of the number itself -
+    // "No data" for an empty range, a dash for a broken one. It is passed in
+    // rather than written over the top afterwards, so the card is written once
+    // instead of being told "0" and then corrected a line later.
+    function renderOverviewTokenTotal(value = overviewTotalTokensRaw, staticText = null) {
       const valueElement = document.getElementById('totalTokens');
       const wrapper = document.getElementById('totalTokensWrap');
       const tooltip = document.getElementById('totalTokensExact');
       if (!valueElement || !wrapper || !tooltip) return;
-      if (value === null) {
-        valueElement.textContent = '-';
+      // A zero or a null total has no exact count worth a tooltip, and nothing
+      // to drill into, so the card drops its focus target and its aria wiring.
+      const clearExact = () => {
         valueElement.removeAttribute('tabindex');
         valueElement.removeAttribute('aria-describedby');
         valueElement.removeAttribute('aria-label');
         tooltip.textContent = '-';
         tooltip.hidden = true;
+      };
+      if (value === null) {
+        // Cleared, not left alone: a stale total left here is what the Tokens
+        // count-up would otherwise animate from after a null payload. A range
+        // that knows what it wants shown still wins over the loading dash.
+        overviewTotalTokensRaw = null;
+        setOverviewCounterText(valueElement, staticText ?? '-');
+        clearExact();
         return;
       }
 
@@ -9885,6 +9950,13 @@
       // The card is already labelled "Total Tokens", so the value carries no unit
       // — it would only cost width the KPI row no longer has. The exact count in
       // the tooltip and the aria-label keep it.
+      if (overviewTotalTokensRaw === 0) {
+        setOverviewCounterText(valueElement, staticText ?? formatNumber(0), 0);
+        clearExact();
+        wrapper.dataset.readable = String(overviewReadableTokens);
+        fitKpiValue(valueElement);
+        return;
+      }
       valueElement.textContent = overviewReadableTokens
         ? formatCompactTokenCount(overviewTotalTokensRaw)
         : formatNumber(overviewTotalTokensRaw);
@@ -10365,6 +10437,8 @@
     }
 
     function signedRefreshValue(value, formatter) {
+      // "—" on a first read is correct: the refresh did return data, only the
+      // comparison is missing, and the summary line right below says so.
       if (value === null || value === undefined) return '—';
       const numeric = Number(value) || 0;
       if (numeric === 0) return formatter(0);
@@ -12377,42 +12451,77 @@
 
     function renderOverviewTab(data) {
       if (!data) return;
-      renderOverviewTokenTotal(data.total_tokens);
-      document.getElementById('totalCost').textContent = formatCurrency(data.total_cost);
-      document.getElementById('totalMessages').textContent = formatNumber(data.total_messages || 0);
-      const hitEl = document.getElementById('avgCacheHitRate');
-      if (hitEl) hitEl.textContent = formatHitRate(data.cache_hit_rate);
+      // Emptiness is decided once for the whole range so every card in the row
+      // agrees, and a broken read is kept apart from an empty one: its zeros are
+      // reconciled, not measured.
+      const rangeIsBroken = overviewRangeIsBroken(data);
+      const rangeIsEmpty = !rangeIsBroken && overviewRangeIsEmpty(data);
+      // The Tokens card is rendered by renderOverviewTokenTotal, which owns its
+      // tooltip and aria wiring, so it is told what to show rather than being
+      // written here and then overwritten.
+      const staticTokenText = rangeIsBroken ? '—' : (rangeIsEmpty ? t('noData') : null);
+      renderOverviewTokenTotal(rangeIsBroken ? 0 : data.total_tokens, staticTokenText);
+      const totalTokensEl = document.getElementById('totalTokens');
+      const totalCostEl = document.getElementById('totalCost');
+      const totalMessagesEl = document.getElementById('totalMessages');
+      const costVal = Number(data.total_cost) || 0;
+      const msgVal = Number(data.total_messages) || 0;
+      if (rangeIsBroken) {
+        // Nothing is known about this range. A dash is the only honest value:
+        // "No data" would claim it was empty, and $0 "FREE" would claim the
+        // usage cost nothing.
+        setOverviewCounterText(totalCostEl, '—', 0);
+        setOverviewCounterText(totalMessagesEl, '—', 0);
+      } else if (rangeIsEmpty) {
+        setOverviewCounterText(totalCostEl, t('noData'), 0);
+        setOverviewCounterText(totalMessagesEl, t('noData'), 0);
+      } else {
+        // The final text is written first and the count-up is layered on top,
+        // which is the order main had and the order that matters twice over:
+        // fitOverviewKpis() below measures what is on screen, so a card that only
+        // ever updates from an animation callback is measured at its previous
+        // width and never shrinks; and anime pauses its engine while the
+        // document is hidden, so in a background tab a callback-only card keeps
+        // the old range's value while Tokens shows the new one.
+        totalCostEl.textContent = formatCurrency(costVal);
+        totalMessagesEl.textContent = formatNumber(msgVal);
+        // Unpriced models keep the $0 "FREE" state, and a zero target still
+        // animates so a later range counts from 0 rather than a stale value.
+        animateOverviewCounter(totalCostEl, costVal, 1200, (v) => formatCurrency(v));
+        animateOverviewCounter(totalMessagesEl, msgVal, 1200, (v) => formatNumber(v));
+      }
 
-      if (typeof window !== 'undefined' && window.TokDashAnimations && typeof window.TokDashAnimations.animateNumber === 'function') {
-        const rawTokens = typeof overviewTotalTokensRaw !== 'undefined' ? overviewTotalTokensRaw : (Number(data.total_tokens) || 0);
-        window.TokDashAnimations.animateNumber(
-          document.getElementById('totalTokens'),
+      const hitEl = document.getElementById('avgCacheHitRate');
+      const hasHitRate = data.cache_hit_rate !== null && data.cache_hit_rate !== undefined;
+      if (hitEl) {
+        // "n/a" is a static write, so it has to stop the previous range's count-up
+        // like every other one: without the cancel a 40% animation finishes on top
+        // of it and the card shows a number in a row that says "n/a".
+        if (hasHitRate) hitEl.textContent = formatHitRate(data.cache_hit_rate);
+        else setOverviewCounterText(hitEl, formatHitRate(data.cache_hit_rate), 0);
+      }
+
+      // Tokens and Hit % animate over what was just written. Neither animates for
+      // an empty or broken range, because there is nothing to count to. The
+      // typeof guard is kept from main: renderOverviewTokenTotal is what owns
+      // this variable, and a caller can reach the count-up before it has run.
+      const rawTokens = typeof overviewTotalTokensRaw !== 'undefined'
+        ? overviewTotalTokensRaw
+        : (Number(data.total_tokens) || 0);
+      if (totalTokensEl && !rangeIsEmpty && !rangeIsBroken
+        && typeof rawTokens === 'number' && rawTokens > 0) {
+        animateOverviewCounter(
+          totalTokensEl,
           rawTokens,
           1200,
           (v) => (typeof overviewReadableTokens !== 'undefined' && overviewReadableTokens) ? formatCompactTokenCount(v) : formatNumber(v)
         );
-        window.TokDashAnimations.animateNumber(
-          document.getElementById('totalCost'),
-          Number(data.total_cost) || 0,
-          1200,
-          (v) => formatCurrency(v)
-        );
-        window.TokDashAnimations.animateNumber(
-          document.getElementById('totalMessages'),
-          Number(data.total_messages) || 0,
-          1200,
-          (v) => formatNumber(v)
-        );
-        if (hitEl && data.cache_hit_rate !== null && data.cache_hit_rate !== undefined) {
-          window.TokDashAnimations.animateNumber(
-            hitEl,
-            Number(data.cache_hit_rate),
-            1200,
-            (v) => formatHitRate(v)
-          );
-          if (typeof window.TokDashAnimations.setLoaderCacheHitRate === 'function') {
-            window.TokDashAnimations.setLoaderCacheHitRate(Number(data.cache_hit_rate) * 100);
-          }
+      }
+      if (hitEl && hasHitRate) {
+        animateOverviewCounter(hitEl, Number(data.cache_hit_rate), 1200, (v) => formatHitRate(v));
+        const animations = typeof window !== 'undefined' ? window.TokDashAnimations : null;
+        if (animations && typeof animations.setLoaderCacheHitRate === 'function') {
+          animations.setLoaderCacheHitRate(Number(data.cache_hit_rate) * 100);
         }
       }
       fitOverviewKpis();

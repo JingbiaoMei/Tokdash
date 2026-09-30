@@ -259,6 +259,11 @@ async function main() {
     });
     animateNumber(el, 100, 2000, (v) => '$' + Number(v).toFixed(2));
     await advance(200);
+    // engine._head is the head of the engine's linked list of live instances. It
+    // is private to the bundled anime 4.0.0 — the engine's only public surface is
+    // fps/speed/timeUnit/precision, and an Animatable exposes nothing but val()
+    // and revert(), so there is no public way to ask whether one is still
+    // registered. Pinned by test_the_engine_probe_is_pinned_to_the_bundled_anime.
     out.registeredWhileAnimating = !!engine._head;
     cancelCounter(el);
     out.liveValueOnCancel = typeof el._currentValue === 'number';
@@ -549,6 +554,21 @@ def test_cancelling_a_counter_actually_stops_the_animation(tmp_path):
     assert out["liveValueOnCancel"], (
         "cancelling must hand the live value back, or a re-render mid-flight "
         "resumes from the last completed total and visibly jumps"
+    )
+
+
+def test_the_engine_probe_is_pinned_to_the_bundled_anime():
+    """engine._head is a private field, so the pin has to live somewhere.
+
+    The cancellation test above reads anime's linked list directly. If anime is
+    ever upgraded, that read could start meaning something else — or nothing —
+    and the test would go quietly green. This one goes loudly.
+    """
+    source = ANIME_JS.read_text(encoding="utf-8")
+
+    assert 'version:"4.0.0"' in source, (
+        "the bundled anime is no longer 4.0.0: re-check that engine._head still "
+        "means 'an instance is registered with the engine' before bumping this pin"
     )
 
 

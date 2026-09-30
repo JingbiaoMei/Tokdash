@@ -30,6 +30,38 @@ Tokdash reads usage **locally** from each tool's own session/log files — nothi
   <a href="https://github.com/MiniMax-AI/minimax-code" title="MiniMax Code"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/minimax.png" alt="MiniMax Code" height="34"></a>
 </p>
 
+## Client support matrix
+
+| Client | Usage & cost | Session Explorer |
+|---|:---:|:---:|
+| OpenCode | ✅ | ✅ |
+| Codex | ✅ | ✅ |
+| Claude Code | ✅ | ✅ |
+| Gemini CLI | ✅ | — |
+| Antigravity CLI | ✅ | ✅ |
+| OpenClaw | ✅ | ✅ |
+| Kimi Code / Kimi CLI | ✅ | ✅ |
+| MiMo Code | ✅ | ✅ |
+| Grok Build | ✅ | ✅ |
+| Pi | ✅ | ✅ |
+| **omp** | ✅ | ✅ |
+| **Kilo Code** | ✅ | ✅ |
+| **Cline** | ✅ | ✅ |
+| GitHub Copilot CLI | ✅ | — |
+| Hermes | ✅ | ✅ |
+| DeepSeek Harness | ✅ | ✅ |
+| Reasonix | ✅ | ✅ |
+| **ZCode** | ✅ | ✅ |
+| **WorkBuddy** | ✅ | ✅ |
+| **Qoder IDE** | ✅ | ✅ |
+| **Qoder CLI** | ✅ | ✅ |
+| **Zed** | ✅ | — |
+| **Qwen Code** | ✅ | ✅ |
+| **Crush** | ✅ | — |
+| **Muse Code** | ✅ | — |
+| **MiniMax Code** | ✅ | — |
+| **Devin CLI** | ✅ | — |
+
 ## Where each client logs
 
 - **OpenCode**: `~/.local/share/opencode/`

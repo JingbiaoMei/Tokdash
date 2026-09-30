@@ -15,6 +15,8 @@
 ## reference/ — lookup material
 
 - [API reference](reference/API.md) — the local HTTP API (FastAPI) for token usage, costs, and session data.
+- [Configuration](reference/CONFIG.md) — environment variables, active-time estimation, and usage-DB semantics.
+- [Quota tracking internals](reference/QUOTA.md) — master switch, poller, consent semantics, and per-provider credential notes.
 - [Supported clients](reference/SUPPORTED_CLIENTS.md) — which coding tools Tokdash reads usage from and how detection works.
 - [History retention](reference/HISTORY_RETENTION.md) — why Tokdash's past months can shrink, and how to prevent it.
 - [Day boundaries](reference/DAY_BOUNDARIES.md) — Tokdash buckets by your local day; why a provider's own usage page shows a different number.

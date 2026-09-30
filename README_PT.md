@@ -59,24 +59,35 @@
 
 ## Sumário
 
+- [Início rápido](#início-rápido)
 - [Um pacote, quatro visões](#um-pacote-quatro-visões)
   - [WebUI](#webui)
   - [Painel no terminal (TUI)](#painel-no-terminal-tui)
   - [App de barra de status Companion](#app-de-barra-de-status-companion)
   - [Statusline](#statusline)
-- [Início rápido](#início-rápido)
+- [Instalação e execução](#instalação-e-execução)
 - [Funcionalidades](#funcionalidades)
-- [Clientes suportados](docs/reference/SUPPORTED_CLIENTS.md)
-- [Configuração](docs/reference/CONFIG.md)
-- [Privacidade \& segurança](docs/SECURITY.md)
 - [Acompanhamento de cota (opcional)](#acompanhamento-de-cota-opcional)
-- [Referência da API](docs/reference/API.md)
 - [Nota sobre a precisão do custo](#nota-sobre-a-precisão-do-custo)
 - [Retenção do histórico](#retenção-do-histórico)
 - [Roadmap](#roadmap)
 - [Contribuição / segurança](#contribuição--segurança)
 - [Documentação](#documentação)
 - [Licença](#licença)
+
+## Início rápido
+
+```bash
+pipx install tokdash
+tokdash setup
+```
+
+Isso é tudo. O `tokdash setup` detecta o runtime, instala um gerenciado se
+necessário, registra um serviço local e imprime a URL do painel —
+`http://127.0.0.1:55423`. As opções completas, as notas da primeira execução e
+as atualizações estão em [Instalação e execução](#instalação-e-execução);
+prefere dar uma olhada antes? A [demo ao vivo](https://tokdash.github.io/demo/)
+roda na interface real.
 
 ## Um pacote, quatro visões
 
@@ -259,7 +270,7 @@ autocontido (`x64`, Windows 11; Windows on Arm via emulação x64).
 - Detecção do idioma do sistema mais English, chinês simplificado, japonês, coreano, espanhol e português
 - Sem telemetria, sem descoberta de credenciais, sem varredura de portas nem parsing direto de logs
 
-Configuração: execute o **Tokdash 1.5.2 ou mais novo** ([Início rápido](#início-rápido)),
+Configuração: execute o **Tokdash 1.5.2 ou mais novo** ([Instalação e execução](#instalação-e-execução)),
 instale o companion, e ele se conecta a `http://127.0.0.1:55423` por padrão — as
 configurações dele permitem adicionar, testar, nomear ou remover endpoints
 explícitos, incluindo URLs privadas do Tailscale Serve. O companion só contata os
@@ -291,7 +302,7 @@ mostrando estatísticas de tokens/custo ao vivo:
 Os modelos prontos (bash e PowerShell), a instalação/configuração e a referência
 de endpoints estão em **[`docs/guides/statusline/`](docs/guides/statusline/)**.
 
-## Início rápido
+## Instalação e execução
 
 ### Suporte por plataforma
 

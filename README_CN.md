@@ -59,24 +59,33 @@
 
 ## 目录
 
+- [快速开始](#快速开始)
 - [一个包，四种视图](#一个包四种视图)
   - [WebUI](#webui)
   - [终端仪表盘（TUI）](#终端仪表盘tui)
   - [Companion 状态栏应用](#companion-状态栏应用)
   - [状态栏（Statusline）](#状态栏statusline)
-- [快速开始](#快速开始)
+- [安装与运行](#安装与运行)
 - [功能特性](#功能特性)
-- [已支持客户端](docs/reference/SUPPORTED_CLIENTS.md)
-- [配置](docs/reference/CONFIG.md)
-- [隐私与安全](docs/SECURITY.md)
 - [额度跟踪（可选）](#额度跟踪可选)
-- [API 参考](docs/reference/API.md)
 - [费用精度说明](#费用精度说明)
 - [历史数据保留](#历史数据保留)
 - [路线图](#路线图)
 - [贡献 / 安全](#贡献--安全)
 - [文档](#文档)
 - [License](#license)
+
+## 快速开始
+
+```bash
+pipx install tokdash
+tokdash setup
+```
+
+就这两条命令。`tokdash setup` 会检测运行时、在需要时安装托管运行时、注册本地
+服务，并打印仪表盘地址 —— `http://127.0.0.1:55423`。完整安装选项、首次运行
+说明与更新方式见 [安装与运行](#安装与运行)；想先逛逛？[在线演示](https://tokdash.github.io/demo/)
+运行在真实界面上。
 
 ## 一个包，四种视图
 
@@ -240,7 +249,7 @@ tokdash report --period week
 - 跟随系统语言，并支持 English、简体中文、日语、韩语、西班牙语与葡萄牙语
 - 无遥测、凭据发现、端口扫描或直接日志解析
 
-设置：运行 **Tokdash 1.5.2 或更高版本**（[快速开始](#快速开始)），安装 Companion，
+设置：运行 **Tokdash 1.5.2 或更高版本**（[安装与运行](#安装与运行)），安装 Companion，
 它默认连接 `http://127.0.0.1:55423` —— 其设置允许你添加、测试、命名或移除明确
 指定的端点，包括私有 Tailscale Serve 地址。Companion 只会访问你配置的端点；
 低额度通知与登录时启动均为可选功能。
@@ -268,7 +277,7 @@ tokdash report --period week
 现成模板（bash 与 PowerShell）、安装 / 配置与端点参考见
 **[`docs/guides/statusline/`](docs/guides/statusline/)**。
 
-## 快速开始
+## 安装与运行
 
 ### 平台支持
 

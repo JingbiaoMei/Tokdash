@@ -12472,8 +12472,10 @@
         totalMessagesEl.textContent = formatNumber(msgVal);
         // Unpriced models keep the $0 "FREE" state, and a zero target still
         // animates so a later range counts from 0 rather than a stale value.
+        // The frames are whole numbers: a mid-animation "74,745,113.682" is wider
+        // than the value the card was just fitted to.
         animateOverviewCounter(totalCostEl, costVal, 1200, (v) => formatCurrency(v));
-        animateOverviewCounter(totalMessagesEl, msgVal, 1200, (v) => formatNumber(v));
+        animateOverviewCounter(totalMessagesEl, msgVal, 1200, (v) => formatNumber(Math.round(v)));
       }
 
       const hitEl = document.getElementById('avgCacheHitRate');
@@ -12498,7 +12500,14 @@
           totalTokensEl,
           rawTokens,
           1200,
-          (v) => (typeof overviewReadableTokens !== 'undefined' && overviewReadableTokens) ? formatCompactTokenCount(v) : formatNumber(v)
+          // Whole numbers, for the same reason as the Messages card: the animation
+          // value is a float and neither formatter wants to show one.
+          (v) => {
+            const whole = Math.round(v);
+            return (typeof overviewReadableTokens !== 'undefined' && overviewReadableTokens)
+              ? formatCompactTokenCount(whole)
+              : formatNumber(whole);
+          }
         );
       }
       if (hitEl && hasHitRate) {

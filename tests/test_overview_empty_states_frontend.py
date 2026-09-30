@@ -423,6 +423,22 @@ async function main() {
     out.settledNext = node('totalTokens').textContent;
   }
 
+  if (scenario === 'count-up-frames-are-whole-numbers') {
+    // Messages, and Tokens with readable tokens off, run their frames through
+    // formatNumber. The animation value is a float, so a frame came out as
+    // "74,745,113.682" — a string wider than the value the card was just fitted
+    // to, and nonsense for a count of messages as well.
+    overviewReadableTokens = false;
+    renderOverviewTab(populated({
+      total_tokens: 74745113, total_messages: 74745113, total_cost: 5,
+    }));
+    out.frames = [];
+    for (let i = 0; i < 8; i += 1) {
+      await advance(40);
+      out.frames.push(node('totalMessages').textContent, node('totalTokens').textContent);
+    }
+  }
+
   if (scenario === 'the-empty-render-writes-the-card-once') {
     // renderOverviewTokenTotal owns the Tokens card, so the range tells it what
     // to show instead of writing "0" and correcting it on the next line. Record
@@ -657,6 +673,19 @@ def test_a_range_without_a_token_total_does_not_count_down_from_the_old_one(tmp_
         f"the next range counted down from the old total: {out['startOfNextCount']}"
     )
     assert out["settledNext"] == "1,000"
+
+
+def test_count_up_frames_are_whole_numbers(tmp_path):
+    """Nobody counted 0.682 of a message."""
+    out = _run(tmp_path, "count-up-frames-are-whole-numbers")
+
+    frames = out["frames"]
+    assert any(frame != "74,745,113" for frame in frames), (
+        "the cards never got caught mid-count, so the run proves nothing"
+    )
+    fractional = [frame for frame in frames if "." in frame]
+    assert not fractional, f"a count-up frame rendered a fraction: {fractional[:4]}"
+    assert all(int(frame.replace(",", "")) >= 0 for frame in frames)
 
 
 def test_the_empty_render_writes_the_tokens_card_once(tmp_path):

@@ -387,6 +387,22 @@ async function main() {
     out.recountMessages = node('totalMessages').textContent;
   }
 
+  if (scenario === 'a-rerender-mid-count-resumes-from-the-live-value') {
+    // A language switch or the readable-tokens toggle re-renders the range while
+    // a count-up is mid-flight. The replacement animation must pick up the number
+    // that is actually on screen, not the last total that finished animating —
+    // which for a first render is nothing at all, so the card drops to $0 and
+    // climbs again while the user watches.
+    renderOverviewTab(populated({ total_cost: 5000, total_messages: 20000 }));
+    await advance(250);
+    out.liveBefore = node('totalCost').textContent;
+    renderOverviewTab(populated({ total_cost: 4000, total_messages: 20000 }));
+    await advance(80);
+    out.shortlyAfter = node('totalCost').textContent;
+    await advance(1600);
+    out.settled = node('totalCost').textContent;
+  }
+
   if (scenario === 'the-empty-render-writes-the-card-once') {
     // renderOverviewTokenTotal owns the Tokens card, so the range tells it what
     // to show instead of writing "0" and correcting it on the next line. Record
@@ -578,6 +594,28 @@ def test_a_failed_refresh_keeps_the_empty_state(tmp_path):
         "range as 0 / FREE / 0"
     )
     assert out["tokensAfterFailedRefresh"] == "No data"
+
+
+def test_a_rerender_mid_count_resumes_from_the_number_on_screen(tmp_path):
+    """Cost went $1935.30 -> $2000.00 -> $1528.06 on every language switch.
+
+    The resume point lives in the running animation, and cancelCounter() is what
+    copies it onto the element. Reading _currentValue before the cancel reads the
+    last total that *finished*, so a re-render mid-count restarted the climb from
+    the bottom — or from zero outright, when nothing had finished yet.
+    """
+    out = _run(tmp_path, "a-rerender-mid-count-resumes-from-the-live-value")
+
+    live = float(out["liveBefore"].replace("$", ""))
+    assert 1000 < live < 4500, (
+        f"the first count-up must still be running when the range re-renders: {out}"
+    )
+    resumed = float(out["shortlyAfter"].replace("$", ""))
+    assert resumed > live * 0.6, (
+        f"the re-render restarted from the last completed total instead of the live "
+        f"value: {out['liveBefore']} -> {out['shortlyAfter']}"
+    )
+    assert out["settled"] == "$4000.00"
 
 
 def test_the_empty_render_writes_the_tokens_card_once(tmp_path):

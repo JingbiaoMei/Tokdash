@@ -67,9 +67,13 @@ export function animateNumber(el, targetValue, duration = 1200, format = null) {
     return;
   }
 
-  // Read the resume point before the new animation supersedes the running one.
-  const startValue = typeof el._currentValue === 'number' ? el._currentValue : 0;
+  // Cancel first, *then* read the resume point: cancelCounter() is the call that
+  // copies the live value out of the running animation into _currentValue. Read
+  // it the other way round and a re-render mid-count (a language switch, the
+  // readable-tokens toggle) restarts from the last completed total, so the card
+  // visibly jumps away from the number on screen before climbing back.
   cancelCounter(el);
+  const startValue = typeof el._currentValue === 'number' ? el._currentValue : 0;
 
   const isCacheHit = format && typeof format === 'function' && format(1).toString().includes('%');
 

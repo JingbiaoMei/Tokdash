@@ -22776,7 +22776,48 @@
           renderUpdateJob(data.job);
           startUpdatePolling(data.job.id);
         }
-      } catch (_) { /* offline already; polling is not running — retry by clicking again */ }
+      } catch (_) {
+        // A LOST response is an expected outcome of a successful click: the accepted
+        // update stops this very server moments later, before the response lands.
+        // The job is already durable — recover it by waiting for the server, not by
+        // demanding a second click into a machine that may already be updating.
+        await recoverLostStart();
+      }
+    }
+
+    // Bounded recovery for a lost /api/update/start response, with the same miss
+    // budget and backoff as job polling: ask the capability endpoint (which carries
+    // the durable latest_job) until the server answers, then let the normal
+    // rendering take over — live jobs start polling, finished ones show their notice.
+    async function recoverLostStart() {
+      const ui = updateUi();
+      ui.apply.hidden = true;  // recovery in flight; a double click must not race it
+      let misses = 0, delay = 2000, outageShown = false;
+      while (misses < 90) {
+        await new Promise((r) => setTimeout(r, delay));
+        const info = await refreshUpdateCapability({ quiet: true });
+        if (info !== null) {
+          const job = info.latest_job;
+          if (job && !job.terminal) ui.apply.hidden = true;
+          else if (outageShown && ui.jobBox.dataset.state === 'running') renderUpdateJob(null);
+          return;  // the server answered: refreshUpdateCapability has rendered the verdict
+        }
+        if (!outageShown) {
+          // First unanswered round: the outage the click promised has begun — say so.
+          outageShown = true;
+          ui.jobBox.hidden = false;
+          ui.jobBox.dataset.state = 'running';
+          ui.jobText.textContent = t('updateBusy');
+          updatePanelReveal();
+        }
+        misses += 1;
+        delay = Math.min(10000, delay * 1.5);
+      }
+      // Never answered again: same honesty as the polling timeout — the outcome is
+      // unknown from here, and the host-side log is the only witness.
+      ui.jobBox.hidden = false;
+      ui.jobBox.dataset.state = 'failed';
+      ui.jobText.textContent = t('updateTimeout');
     }
 
     async function enrollUpdateBrowser() {

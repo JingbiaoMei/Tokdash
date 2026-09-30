@@ -982,6 +982,9 @@ def test_helper_happy_path(eligible_env, tmp_path):
     assert record["phase"] == "succeeded"
     assert record["result_version"] == "9.9.9"
     assert record["backup_path"] and Path(record["backup_path"]).is_file()
+    # Readiness passed -> the release stamp is written, so the NEXT rotation may
+    # prune the snapshot this failed-free streak used to pin.
+    assert (tmp_path / "backups" / update_helper.VALIDATED_MARKER).is_file()
     stops = [c for c in runner.calls if c[:3] == ["systemctl", "--user", "stop"]]
     starts = [c for c in runner.calls if c[:3] == ["systemctl", "--user", "start"]]
     assert stops and starts
@@ -1111,6 +1114,104 @@ def test_backup_holds_db_lock_until_replacement_done(eligible_env, tmp_path):
         fcntl.flock(probe.fileno(), fcntl.LOCK_UN)
     finally:
         probe.close()
+
+
+def test_lost_start_response_recovers_without_a_second_click():
+    # The helper stops the server before (or just after) the accepted-job response
+    # lands, so the browser's fetch rejects on a SUCCESSFUL click. The catch must
+    # not silently tell the user to click again — it has to recover the durable
+    # job by waiting for the server, with a bounded budget like polling.
+    import re as _re
+    html = (Path(__file__).resolve().parents[1] / "src" / "tokdash" / "static"
+            / "index.html").read_text(encoding="utf-8")
+    start = html.index("async function requestDashboardUpdate")
+    fn = html[start:html.index("async function recoverLostStart")]
+    assert "recoverLostStart()" in fn, "lost-response catch must start recovery"
+    assert "clicking again" not in fn, "the browser may not demand a second click"
+    rec = html[start:html.index("async function enrollUpdateBrowser")]
+    m = _re.search(r"while \(misses < (\d+)\)", rec)
+    assert m and int(m.group(1)) >= 60, "recovery must be bounded but outlast an install"
+    assert "refreshUpdateCapability" in rec[rec.index("async function recoverLostStart"):]
+    # Server answered -> the capability render owns the UI again (live jobs poll,
+    # finished ones show their notice); server never answered -> honest unknown state.
+    assert "updateTimeout" in rec[rec.index("async function recoverLostStart"):]
+
+
+def _seed_snapshots(backups_dir, *stamps):
+    backups_dir.mkdir(parents=True, exist_ok=True)
+    for stamp in stamps:
+        (backups_dir / f"pre-update-{stamp}.sqlite3").write_bytes(b"x")
+    return sorted(backups_dir.glob("pre-update-*.sqlite3"))
+
+
+def test_backup_rotation_pins_the_recovery_baseline(eligible_env, tmp_path):
+    # A failed update can migrate the live DB to a schema the previously working
+    # version cannot read; every snapshot the failed streak takes is in the NEW
+    # schema, and naive newest-3 rotation deletes the last rollback-compatible one
+    # (reproduced by the reviewer). The oldest snapshot taken since the last
+    # readiness pass is that rollback point and must survive rotation.
+    bdir = tmp_path / "backups"
+    _seed_snapshots(bdir, "20200102000000", "20200103000000", "20200104000000",
+                    "20200105000000", "20200106000000")
+    marker = bdir / update_helper.VALIDATED_MARKER
+    marker.write_text("20200101000000 old-success-job\n", encoding="utf-8")
+    runner = update_helper.Runner(tmp_path, "j", lambda m: None)
+    runner._prune_backups(bdir, keep=3)
+    assert (bdir / "pre-update-20200102000000.sqlite3").is_file()  # the baseline, pinned
+    assert not (bdir / "pre-update-20200103000000.sqlite3").is_file()  # count rotation otherwise
+    assert (bdir / "pre-update-20200105000000.sqlite3").is_file()
+    # No marker at all: nothing ever passed readiness, the oldest snapshot stays pinned.
+    marker.unlink()
+    _seed_snapshots(bdir, "20200107000000", "20200108000000")
+    runner._prune_backups(bdir, keep=3)
+    assert (bdir / "pre-update-20200102000000.sqlite3").is_file()  # still pinned
+    assert not (bdir / "pre-update-20200104000000.sqlite3").is_file()
+
+
+def test_readiness_release_lets_rotation_prune_the_old_baseline(eligible_env, tmp_path):
+    # The pin is not permanent: once a SUBSEQUENT update passes readiness, the old
+    # baseline is history and count rotation reclaims it.
+    bdir = tmp_path / "backups"
+    _seed_snapshots(bdir, "20200102000000", "20200103000000", "20200104000000",
+                    "20200105000000", "20200106000000")
+    runner = update_helper.Runner(tmp_path, "new-job", lambda m: None)
+    runner.mark_readiness_passed(bdir)
+    stamp = (bdir / update_helper.VALIDATED_MARKER).read_text(encoding="utf-8").split()[0]
+    assert stamp.isdigit() and len(stamp) == 14  # comparable with snapshot names
+    runner._prune_backups(bdir, keep=3)
+    assert not (bdir / "pre-update-20200102000000.sqlite3").is_file()  # released by the pass
+    assert not (bdir / "pre-update-20200103000000.sqlite3").is_file()
+    assert (bdir / "pre-update-20200104000000.sqlite3").is_file()
+    assert (bdir / "pre-update-20200105000000.sqlite3").is_file()
+
+
+def test_failed_update_end_to_end_keeps_the_baseline(eligible_env, tmp_path):
+    # The reviewer's scenario end to end: a prior success, one snapshot readable by
+    # the previously working version, several NEWER-schema snapshots, and another
+    # attempt that fails at readiness. Rotation must not eat the old snapshot.
+    db = tmp_path / "usage.sqlite3"
+    conn = sqlite3.connect(db)
+    conn.execute("create table t(x)")
+    conn.commit()
+    conn.close()
+    bdir = tmp_path / "backups"
+    _seed_snapshots(bdir, "20200102000000", "20200103000000", "20200104000000", "20200105000000")
+    marker = bdir / update_helper.VALIDATED_MARKER
+    marker.write_text("20200101000000 earlier-success\n", encoding="utf-8")
+
+    class _NeverReady(FakeRunner):
+        def readiness(self, to_version, bind, port):
+            raise RuntimeError("service never became ready")
+
+    job = _seed_job(tmp_path, usage_db=str(db))
+    ok = update_helper.main(
+        str(tmp_path), job["id"], runner=_NeverReady(tmp_path, job["id"], lambda m: None),
+        opener=lambda *a, **k: {},
+    )
+    assert ok is False
+    assert update_jobs.get_job(job["id"])["phase"] == "failed"
+    assert (bdir / "pre-update-20200102000000.sqlite3").is_file()  # the only rollback-compatible one
+    assert not (bdir / "pre-update-20200103000000.sqlite3").is_file()  # rotation still happened
 
 
 def test_helper_refuses_sibling_tokdash_process(eligible_env, tmp_path, monkeypatch):

@@ -55,6 +55,12 @@ LOCK_ACQUIRE_TIMEOUT = 60
 
 _TARGET_RE = re.compile(r"\d+(\.\d+)+(?:[a-zA-Z0-9_.+-]+)?")
 
+# Snapshot names are `pre-update-%Y%m%d%H%M%S.sqlite3`; this marker (inside the
+# backups dir, outside that glob so rotation never touches it) holds the stamp of
+# the most recent update that passed readiness — see _prune_backups.
+VALIDATED_MARKER = ".last-readiness-passed"
+_STAMP_START = len("pre-update-")
+
 # The journal is one read-modify-write file and the helper touches it from two threads
 # (the heartbeat loop and the phase machine). flock only covers OTHER processes, so
 # every in-process mutation serializes on this lock: an unsynchronized heartbeat could
@@ -475,15 +481,60 @@ class Runner:
                 dst.close()
                 src.close()
             self.log(f"usage DB backed up to {dest}")
-            for old in sorted(backups_dir.glob("pre-update-*.sqlite3"))[:-keep]:
-                try:
-                    old.unlink()
-                except OSError:
-                    pass
+            self._prune_backups(backups_dir, keep)
             return str(dest)
         except BaseException:
             self.release_db_lock()
             raise
+
+    def _prune_backups(self, backups_dir, keep):
+        """Rotate old snapshots — but never past the recovery baseline.
+
+        Pure count-based rotation is unsafe across a FAILED update: the failed new
+        version may already have migrated the live DB to a schema the previously
+        working version cannot read, so every snapshot the next attempts take is
+        in the NEW schema and rotating to the newest three would delete the last
+        snapshot that could still roll back. The baseline is the OLDEST snapshot
+        taken since the last readiness-passed stamp — exactly the streak of failed
+        attempts protecting the pre-failure state — and it is pinned regardless of
+        age. :meth:`mark_readiness_passed` stamps the release; until then, count
+        rotation applies to everything else.
+        """
+        all_backups = sorted(backups_dir.glob("pre-update-*.sqlite3"))
+        if len(all_backups) <= keep:
+            return
+        try:
+            validated = (backups_dir / VALIDATED_MARKER).read_text(encoding="utf-8").split()[0]
+        except (OSError, IndexError):
+            validated = ""  # nothing ever passed readiness: the oldest snapshot is the baseline
+        baseline = None
+        for path in all_backups:  # names embed %Y%m%d%H%M%S, so sorted order is time order
+            if path.name[_STAMP_START:-len(".sqlite3")] > validated:
+                baseline = path
+                break
+        for old in all_backups[:-keep]:
+            if old == baseline:
+                continue
+            try:
+                old.unlink()
+            except OSError:
+                pass
+
+    def mark_readiness_passed(self, backups_dir):
+        """Stamp that an update reached readiness, releasing the pinned baseline.
+
+        Written the moment :meth:`readiness` passes, so the NEXT backup's rotation
+        no longer pins the failed streak that preceded this success. The content
+        is the same %Y%m%d%H%M%S stamp the snapshot names carry (plus the job id
+        for humans), which makes the comparison in :meth:`_prune_backups` a plain
+        lexicographic one.
+        """
+        try:
+            backups_dir.mkdir(parents=True, exist_ok=True)
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+            (backups_dir / VALIDATED_MARKER).write_text(f"{stamp} {self.job_id}\n", encoding="utf-8")
+        except OSError:
+            pass  # a missing marker only keeps the (safe) baseline pinned one round longer
 
     def release_db_lock(self):
         """Give the usage-DB lock back — BEFORE the new service starts, so its own
@@ -628,6 +679,9 @@ def main(data_dir, job_id, *, runner=None, opener=None):
                 r.start_service(name, bind, port)
                 r.journal.update(job_id, phase="ready")
                 r.readiness(str(job["to_version"]), bind, port)
+                # Readiness passed: the new version is the working baseline now, so
+                # the failed-streak snapshot that rotation pins may be released.
+                r.mark_readiness_passed(Path(data_dir) / "backups")
             except Exception as exc:
                 r.heartbeat_stop()
                 r.journal.update(

@@ -12,6 +12,7 @@ import json
 import re
 import shutil
 import subprocess
+import unicodedata
 from pathlib import Path
 
 import pytest
@@ -173,8 +174,11 @@ def test_quota_poll_options_use_translated_minute_unit() -> None:
 
 @pytest.mark.parametrize("readme", TRANSLATED_READMES)
 def test_translated_readmes_cover_zai_quota(readme: str) -> None:
+    # The per-provider quota commands and env keys moved to
+    # docs/reference/QUOTA.md; what stays in every README is the Z.ai name
+    # (pill alt and quota sentence) and the link to the quota internals doc.
     source = (REPO_ROOT / readme).read_text(encoding="utf-8")
-    for marker in ("Z.ai", "--zai-api on", "ZAI_API_KEY", "Z_AI_API_KEY"):
+    for marker in ("Z.ai", "docs/reference/QUOTA.md"):
         assert marker in source, f"{readme} is missing {marker}"
 
 
@@ -185,64 +189,92 @@ def test_readmes_link_every_translation(readme: str) -> None:
         assert f'href="{target}"' in source, f"{readme} does not link to {target}"
 
 
-# --- README client-support parity -------------------------------------------
-#
-# The client support matrix, its pill row and its per-client notes are the same
-# content in all six READMEs, and drift between them is invisible to the rest of
-# the suite: test_recent_sources_have_readme_pills reads only README.md,
-# README_CN.md and SUPPORTED_CLIENTS.md. Two changes in a row drifted anyway —
-# one added three clients to the English and 中文 READMEs alone, and one flipped
-# two matrix rows to a Sessions tick in every language while updating the prose
-# in four of the six, leaving ES and PT contradicting their own table.
-
-# `| Name | ✅ | — |`, bolded or not. Requiring both cells to be a tick or a dash
-# is what keeps the unrelated platform/download table out of the match.
-CLIENT_ROW = re.compile(r"^\| \*{0,2}([^|*]+?)\*{0,2} \| (✅|—) \| (✅|—) \|$", re.M)
-
-PILL_IMAGE = re.compile(r"/docs/assets/agents/pills/([A-Za-z0-9_-]+\.png)")
-
-# Each language's wording of "this client has no Sessions tab". These are
-# counted, not located: the count has to equal English's. That is what catches a
-# translation whose matrix row gained a Sessions tick while its prose still said
-# the client had none. A reworded translation quietly stops being checked rather
-# than failing for the wrong reason, which is the right way for this to age.
-NO_SESSIONS_NOTE = {
-    "README.md": "does not appear in the Sessions tab",
-    "README_CN.md": "不出现在 Sessions 标签页",
-    "README_JA.md": "Sessions タブには登場しません",
-    "README_KO.md": "Sessions 탭에 나타나지 않습니다",
-    "README_ES.md": "no aparece en la pestaña Sesiones",
-    "README_PT.md": "não aparece na aba Sessões",
-}
-
 LOCALIZED_READMES = README_FILES[1:]
+
+# --- README structural parity -----------------------------------------------
+#
+# The six READMEs are one document in six languages. The client support matrix
+# and its per-client notes used to live here and had their own parity test; they
+# now live in one place (docs/reference/SUPPORTED_CLIENTS.md), so six-way drift
+# on them is impossible. What every language still duplicates is the marketing
+# structure itself — the four-views lead, the gallery, the folded details blocks
+# — and drift there is invisible to the rest of the suite, so this pins it:
+# identical heading levels, block counts, links, and image sets, with every
+# table-of-contents anchor resolving under GitHub's slug rules.
 
 
 def _readme_text(name: str) -> str:
     return (REPO_ROOT / name).read_text(encoding="utf-8")
 
 
-def _client_matrix(source: str) -> dict[str, tuple[str, str]]:
+def _heading_levels(source: str) -> list[str]:
+    return [m.group(1) for m in re.finditer(r"^(#{1,6}) .*$", source, re.M)]
+
+
+def _block_counts(source: str) -> dict[str, int]:
     return {
-        m.group(1).strip(): (m.group(2), m.group(3))
-        for m in CLIENT_ROW.finditer(source)
+        "fences": source.count("```") // 2,
+        "details": len(re.findall(r"<details", source)),
+        "tables": len(re.findall(r"<table[ >]", source)),
+        "pictures": len(re.findall(r"<picture", source)),
+        "imgs": len(re.findall(r"<img\b", source)),
+        "callouts": len(
+            re.findall(r"^> \[!(?:NOTE|WARNING|TIP|IMPORTANT)\]", source, re.M)
+        ),
+    }
+
+
+def _github_slug(heading: str) -> str:
+    out = []
+    for ch in heading.lower():
+        if ch in " ":
+            out.append("-")
+        elif ch in "-_":
+            out.append(ch)
+        elif unicodedata.category(ch)[0] in ("L", "N", "M"):
+            out.append(ch)
+    return "".join(out)
+
+
+# The WebUI gallery swaps to -cn- captures in README_CN.md only; after
+# normalising those URLs both sides must carry the identical image set.
+CN_GALLERY = re.compile(r"demo-(overview|report|quota|servers)-cn-")
+
+PILL_IMAGE = re.compile(r"/docs/assets/agents/pills/([A-Za-z0-9_-]+\.png)")
+
+
+def _link_urls(source: str) -> set[str]:
+    urls = re.findall(r"https?://[^\s\")<>`]+", source)
+    return {
+        CN_GALLERY.sub(r"demo-\1-en-", re.sub(r"[^\w/&=#%?~.-]+$", "", u))
+        for u in urls
     }
 
 
 @pytest.mark.parametrize("readme", LOCALIZED_READMES)
-def test_readme_client_matrix_matches_english(readme: str) -> None:
-    source = _readme_text("README.md")
-    english = _client_matrix(source)
-    assert len(english) > 20, "client matrix not parsed out of README.md"
-    theirs = _client_matrix(_readme_text(readme))
-    missing = {k: v for k, v in english.items() if k not in theirs}
-    extra = {k: v for k, v in theirs.items() if k not in english}
-    differing = {
-        k: (v, theirs[k]) for k, v in english.items() if k in theirs and theirs[k] != v
+def test_readme_structure_matches_english(readme: str) -> None:
+    english = _readme_text("README.md")
+    theirs = _readme_text(readme)
+
+    assert _heading_levels(theirs) == _heading_levels(english), (
+        f"{readme} heading levels differ from README.md"
+    )
+    mine, ref = _block_counts(theirs), _block_counts(english)
+    assert mine == ref, (
+        f"{readme} block counts differ: {mine} vs README.md {ref}"
+    )
+
+    slugs = {
+        _github_slug(m.group(2)) for m in re.finditer(r"^(#{1,6}) (.*)$", theirs, re.M)
     }
-    assert theirs == english, (
-        f"{readme} client matrix has drifted from README.md: "
-        f"missing={missing} extra={extra} differing_marks={differing}"
+    broken = [a for a in re.findall(r"\]\(#([^)]+)\)", theirs) if a not in slugs]
+    assert not broken, f"{readme} has anchors that resolve to no heading: {broken}"
+
+    en_urls, their_urls = _link_urls(english), _link_urls(theirs)
+    assert their_urls == en_urls, (
+        f"{readme} link/image URLs drifted from README.md: "
+        f"missing={sorted(en_urls - their_urls)[:5]} "
+        f"extra={sorted(their_urls - en_urls)[:5]}"
     )
 
 
@@ -255,16 +287,4 @@ def test_readme_client_pills_match_english(readme: str) -> None:
     assert theirs == english, (
         f"{readme} pill row has drifted from README.md: "
         f"missing={sorted(english - theirs)} extra={sorted(theirs - english)}"
-    )
-
-
-@pytest.mark.parametrize("readme", LOCALIZED_READMES)
-def test_readme_no_sessions_notes_match_english(readme: str) -> None:
-    source = _readme_text("README.md")
-    expected = source.count(NO_SESSIONS_NOTE["README.md"])
-    assert expected, "English 'no Sessions tab' note not found"
-    found = _readme_text(readme).count(NO_SESSIONS_NOTE[readme])
-    assert found == expected, (
-        f"{readme} says {found} clients have no Sessions tab, README.md says "
-        f"{expected}. A matrix row and its prose have most likely disagreed."
     )

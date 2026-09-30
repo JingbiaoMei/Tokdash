@@ -9918,7 +9918,11 @@
       animations.animateNumber(el, value, duration, format);
     }
 
-    function renderOverviewTokenTotal(value = overviewTotalTokensRaw) {
+    // staticText is what the range wants shown instead of the number itself -
+    // "No data" for an empty range, a dash for a broken one. It is passed in
+    // rather than written over the top afterwards, so the card is written once
+    // instead of being told "0" and then corrected a line later.
+    function renderOverviewTokenTotal(value = overviewTotalTokensRaw, staticText = null) {
       const valueElement = document.getElementById('totalTokens');
       const wrapper = document.getElementById('totalTokensWrap');
       const tooltip = document.getElementById('totalTokensExact');
@@ -9934,9 +9938,10 @@
       };
       if (value === null) {
         // Cleared, not left alone: a stale total left here is what the Tokens
-        // count-up would otherwise animate from after a null payload.
+        // count-up would otherwise animate from after a null payload. A range
+        // that knows what it wants shown still wins over the loading dash.
         overviewTotalTokensRaw = null;
-        setOverviewCounterText(valueElement, '-');
+        setOverviewCounterText(valueElement, staticText ?? '-');
         clearExact();
         return;
       }
@@ -9947,7 +9952,7 @@
       // — it would only cost width the KPI row no longer has. The exact count in
       // the tooltip and the aria-label keep it.
       if (overviewTotalTokensRaw === 0) {
-        setOverviewCounterText(valueElement, formatNumber(0), 0);
+        setOverviewCounterText(valueElement, staticText ?? formatNumber(0), 0);
         clearExact();
         wrapper.dataset.readable = String(overviewReadableTokens);
         fitKpiValue(valueElement);
@@ -12452,7 +12457,11 @@
       // reconciled, not measured.
       const rangeIsBroken = overviewRangeIsBroken(data);
       const rangeIsEmpty = !rangeIsBroken && overviewRangeIsEmpty(data);
-      renderOverviewTokenTotal(rangeIsBroken ? 0 : data.total_tokens);
+      // The Tokens card is rendered by renderOverviewTokenTotal, which owns its
+      // tooltip and aria wiring, so it is told what to show rather than being
+      // written here and then overwritten.
+      const staticTokenText = rangeIsBroken ? '—' : (rangeIsEmpty ? t('noData') : null);
+      renderOverviewTokenTotal(rangeIsBroken ? 0 : data.total_tokens, staticTokenText);
       const totalTokensEl = document.getElementById('totalTokens');
       const totalCostEl = document.getElementById('totalCost');
       const totalMessagesEl = document.getElementById('totalMessages');
@@ -12462,11 +12471,9 @@
         // Nothing is known about this range. A dash is the only honest value:
         // "No data" would claim it was empty, and $0 "FREE" would claim the
         // usage cost nothing.
-        setOverviewCounterText(totalTokensEl, '—', 0);
         setOverviewCounterText(totalCostEl, '—', 0);
         setOverviewCounterText(totalMessagesEl, '—', 0);
       } else if (rangeIsEmpty) {
-        setOverviewCounterText(totalTokensEl, t('noData'), 0);
         setOverviewCounterText(totalCostEl, t('noData'), 0);
         setOverviewCounterText(totalMessagesEl, t('noData'), 0);
       } else {

@@ -320,6 +320,35 @@ async function main() {
     out.recountMessages = node('totalMessages').textContent;
   }
 
+  if (scenario === 'the-empty-render-writes-the-card-once') {
+    // renderOverviewTokenTotal owns the Tokens card, so the range tells it what
+    // to show instead of writing "0" and correcting it on the next line. Record
+    // every value the card actually receives.
+    const el = node('totalTokens');
+    const seen = [];
+    let current = '';
+    Object.defineProperty(el, 'textContent', {
+      get() { return current; },
+      set(value) { current = value; seen.push(value); },
+    });
+    renderOverviewTab(zeroPayload());
+    await settle();
+    out.writes = seen;
+    out.final = current;
+  }
+
+  if (scenario === 'a-null-token-payload-is-not-animated-over') {
+    // total_tokens: null with zero cost and messages is an empty range. The
+    // null branch used to leave the previous range's total in
+    // overviewTotalTokensRaw, and the count-up then animated it over the card.
+    renderOverviewTab(populated({ total_cost: 12.5, total_messages: 300 }));
+    await advance(300);
+    renderOverviewTab(zeroPayload({ total_tokens: null }));
+    out.rightAfter = node('totalTokens').textContent;
+    await advance(1600);
+    out.after = node('totalTokens').textContent;
+  }
+
   process.stdout.write(JSON.stringify(out));
 }
 
@@ -331,7 +360,7 @@ FUNCTIONS_UNDER_TEST = (
     "function overviewRangeIsEmpty(data) {",
     "function setOverviewCounterText(el, text, value) {",
     "function animateOverviewCounter(el, value, duration, format) {",
-    "function renderOverviewTokenTotal(value = overviewTotalTokensRaw) {",
+    "function renderOverviewTokenTotal(value = overviewTotalTokensRaw, staticText = null) {",
     "function renderOverviewTab(data) {",
 )
 
@@ -463,6 +492,35 @@ def test_a_failed_refresh_keeps_the_empty_state(tmp_path):
         "range as 0 / FREE / 0"
     )
     assert out["tokensAfterFailedRefresh"] == "No data"
+
+
+def test_the_empty_render_writes_the_tokens_card_once(tmp_path):
+    """One write, not "0" followed by a correction.
+
+    renderOverviewTokenTotal owns the Tokens card, its tooltip and its aria
+    wiring, so the range hands it the text to show. Writing the number first and
+    correcting it on the next line also left a stray "0" in the DOM for anything
+    observing the card mid-render.
+    """
+    out = _run(tmp_path, "the-empty-render-writes-the-card-once")
+
+    assert "0" not in out["writes"], (
+        f'the card was written "0" before being corrected: {out["writes"]}'
+    )
+    assert out["writes"] == ["No data"], (
+        f"the empty range should write the card exactly once: {out['writes']}"
+    )
+    assert out["final"] == "No data"
+
+
+def test_a_null_token_payload_is_not_animated_over(tmp_path):
+    out = _run(tmp_path, "a-null-token-payload-is-not-animated-over")
+
+    assert out["rightAfter"] == "No data"
+    assert out["after"] == "No data", (
+        "a null token payload left the previous range's total in "
+        "overviewTotalTokensRaw, and the count-up animated it over the card"
+    )
 
 
 def test_the_next_range_counts_from_the_value_on_screen(tmp_path):

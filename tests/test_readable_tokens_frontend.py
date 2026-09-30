@@ -189,7 +189,7 @@ def test_readable_token_render_and_toggle_do_not_refetch() -> None:
     source = INDEX_HTML.read_text(encoding="utf-8")
     renderer = _extract_js_function(
         source,
-        "function renderOverviewTokenTotal(value = overviewTotalTokensRaw) {",
+        "function renderOverviewTokenTotal(value = overviewTotalTokensRaw, staticText = null) {",
     )
     setter = _extract_js_function(
         source,
@@ -210,9 +210,13 @@ def test_readable_token_render_and_toggle_do_not_refetch() -> None:
     assert "loadStats" not in setter
     # The range's token total must still go through renderOverviewTokenTotal
     # rather than be written inline, so the readable formatting and the exact
-    # tooltip stay in one place. A broken read is routed to 0 first, because
-    # renderOverviewTab puts its own neutral dash over the card afterwards.
-    assert "renderOverviewTokenTotal(rangeIsBroken ? 0 : data.total_tokens);" in overview
+    # tooltip stay in one place. A broken read is routed to 0 first, and the
+    # text to show is passed in so the card is written once instead of being
+    # told "0" and corrected afterwards.
+    assert (
+        "renderOverviewTokenTotal(rangeIsBroken ? 0 : data.total_tokens, staticTokenText);"
+        in overview
+    )
     assert "rerenderTokenPresentation();" in i18n
 
 

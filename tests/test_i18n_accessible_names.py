@@ -65,6 +65,14 @@ JS_SET_LABELS = {
         "aria-label",
         "activityTopTools",
     ),
+    # Same key on both sides, so the two writes never disagreed -- but it is
+    # still a second source of truth for one attribute, and the JS side is the
+    # one that runs on every re-render.
+    "overviewActivityInsights": (
+        "renderOverviewActivityInsights",
+        "aria-label",
+        "activityInsightsTitle",
+    ),
 }
 
 # Accessible names the untranslated page shipped before. A translation
@@ -357,6 +365,7 @@ def test_refresh_report_labels_come_from_the_javascript_pass(source: str) -> Non
     assert "t('refreshReportClose')" in source
     assert "t('refreshReportDiffLabel')" in source
     assert "ranking.setAttribute('aria-label', t('activityTopTools'))" in source
+    assert "shell.setAttribute('aria-label', t('activityInsightsTitle'))" in source
 
 
 # --- inline fallbacks agree with the dictionary ---------------------------
@@ -389,6 +398,61 @@ def test_inline_attribute_fallbacks_match_the_english_dictionary(
     assert not mismatches, (
         "inline English fallbacks must equal the en dictionary value: "
         f"{mismatches}"
+    )
+
+
+def test_inline_text_fallbacks_match_the_english_dictionary(
+    static_html: str, english_dictionary: dict[str, str]
+) -> None:
+    """The same rule for `data-i18n` text, not just the three attributes.
+
+    Checking only the attributes would have missed the sidebar's
+    "What's New" against a dictionary that says "What's new": the text
+    pass rewrites it on load, so the markup was quietly lying.
+    """
+    leaf_keys: list[tuple[str, str]] = []
+
+    class Collector(HTMLParser):
+        def __init__(self) -> None:
+            super().__init__(convert_charrefs=True)
+            self.open: list[tuple[str, str, list[str]]] = []
+            self.pending: tuple[str, str, list[str]] | None = None
+
+        def handle_starttag(self, tag, attrs):  # type: ignore[no-untyped-def]
+            element = {name: value for name, value in attrs if value is not None}
+            entry = (tag, element.get("data-i18n", ""), [])
+            if "data-i18n" in element and not any(
+                name in element for name in ATTRIBUTE_FOR_KEY
+            ):
+                self.pending = entry
+            else:
+                self.open.append(entry)
+
+        def handle_endtag(self, tag):  # type: ignore[no-untyped-def]
+            if self.pending is not None:
+                _tag, key, chunks = self.pending
+                if key:
+                    leaf_keys.append((key, "".join(chunks).strip()))
+                self.pending = None
+                return
+            for index in range(len(self.open) - 1, -1, -1):
+                if self.open[index][0] == tag:
+                    del self.open[index:]
+                    return
+
+        def handle_data(self, data):  # type: ignore[no-untyped-def]
+            if self.pending is not None:
+                self.pending[2].append(data)
+
+    collector = Collector()
+    collector.feed(static_html)
+    mismatches = [
+        f"{key}: {text!r} != en[{key}]={english_dictionary.get(key)!r}"
+        for key, text in leaf_keys
+        if key in english_dictionary and text != english_dictionary[key]
+    ]
+    assert not mismatches, (
+        f"inline English text must equal the en dictionary value: {mismatches}"
     )
 
 

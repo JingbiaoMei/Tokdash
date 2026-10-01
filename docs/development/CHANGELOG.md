@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 2.6.9 - Unreleased
+
+### Added
+
+- Read the DeepSeek Harness format generation 4 that dsh >= 0.2.0 writes as `session.v4.jsonl[.zstd]`. Upstream bumped `SESSION_FORMAT_VERSION` from 0 to 4, so Tokdash found the renamed files on their suffix and then skipped every one -- upgrading dsh emptied the DSH source. Generation 4 keeps the generation-0 usage-event shape; it does drop `header.seedLength` for `header.isSeeded` plus a `session/end-seed` marker carrying `data.inherited: true`, and that marker is now the inherited-prefix boundary. A plain `session/end-seed` with empty data marks a resume and is not a cut, so taking the last marker of either kind would drop a forked session's own work from its first resume on. A seeded log with no inherited marker bills nothing rather than guessing.
+
+### Fixed
+
+- A DeepSeek Harness log that cannot be read no longer loses its stored rows, and no longer fails silently. A whole-file failure -- every frame corrupt, a header generation this build does not read, an unreadable path -- parsed as zero entries, and `file_replace` sync takes zero entries as the file's new truth, so the history went until the file read again; nothing was logged. Such a file now raises instead, keeping its rows and its prior signature, and every skip is reported once per `(path, reason)`. A damaged interior frame still costs the rows inside it, but frames now decode independently when the single-pass read fails, so the batches around it survive -- one real live log carries 2,846 frames. Recovery is the failure path, so healthy logs decode no slower. A damaged header frame still fails closed. (closes #147)
+- Overview and the Sessions tab now resolve one DeepSeek Harness corpus to one winner. Identity is `dsh:{session_id}:{turn}:{step}` with no path in it, so duplicate copies share an entry key -- but Overview kept the last file parsed, Sessions the first, and the store whichever committed last, so two copies recording different usage billed 999/99 against 100/10 for the same files. All three now take the earliest `(timestamp, file_path)`, ties on the smallest path. The fold also keys replace-not-add on the whole file's `(turn, step)` rather than the previous sample, so a key repeating after a different one yields one sample instead of two that Overview collapsed and Sessions counted twice. Overview totals for duplicated corpora converge on what Sessions already showed; a DSH accounting-version bump reparses stored rows. (closes #148)
+
 ## 2.6.8 - 2026-09-30
 
 ### Added

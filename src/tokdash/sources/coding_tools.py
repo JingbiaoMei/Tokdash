@@ -34,6 +34,7 @@ try:
     from ..usage_store import (
         USAGE_ENTRY_FORMAT_VERSION,
         UsageFileVanished,
+        UsageFileUnreadable,
         usage_billing_fixed,
         usage_billing_pricing,
         usage_entry_cost,
@@ -48,6 +49,7 @@ except ImportError:  # pragma: no cover
     from usage_store import (
         USAGE_ENTRY_FORMAT_VERSION,
         UsageFileVanished,
+        UsageFileUnreadable,
         usage_billing_fixed,
         usage_billing_pricing,
         usage_entry_cost,
@@ -5195,6 +5197,13 @@ class DSHParser(BaseParser):
         mode="file_replace",
         append_jsonl=False,
         session_store=True,
+        # dsh_entry_id deliberately carries no file path so duplicate physical
+        # copies of one session never bill twice -- which means one entry_key
+        # legitimately occurs in several files, exactly what this flag declares.
+        # Without it the store upserts with INSERT OR REPLACE, so the last file
+        # committed owns the key and the Sessions tab (which keeps the earliest
+        # (timestamp, path)) shows different tokens for the same corpus.
+        cross_file_stable_keys=True,
         reason=(
             "DSH append batches are concatenated zstd frames, and a final usage message replaces an "
             "earlier same-step chunk; changed files are reparsed whole."
@@ -5229,49 +5238,126 @@ class DSHParser(BaseParser):
             lambda: dsh_file_signatures(self.sessions_dir),
         )
 
+    def _report_decoded(self, path_str: str, decoded: Any) -> None:
+        """Say so when a decoded log came up short.
+
+        A file that yields no rows and a file that yielded none because it could
+        not be read look identical downstream -- which is the whole of issue #147.
+        Both entry points report here so neither surface can be quietly smaller.
+        """
+        if getattr(decoded, "failed_frames", 0):
+            dsh_log_module.report_dsh_diagnostic(
+                path_str,
+                "frames-lost",
+                f"{decoded.failed_frames} zstd frame(s) did not decode; their rows are "
+                "missing from this source",
+            )
+
+    def _entries_for_decoded(self, path_str: str, decoded: Any) -> List[Dict[str, Any]]:
+        """Fold one decoded log into usage entries.
+
+        Shared by the live ``_parse_all`` and the stored ``_parse_file_strict`` so
+        the two surfaces can never bill one file differently.
+        """
+        session_id = str(decoded.header.get("id") or Path(path_str).parent.name)
+        _boundary, seed_unprovable = dsh_log_module.dsh_seed_boundary(
+            decoded.header, decoded.events
+        )
+        if seed_unprovable:
+            dsh_log_module.report_dsh_diagnostic(
+                path_str,
+                "seed-unprovable",
+                "seeded session with no session/end-seed boundary; billing nothing "
+                "rather than double-billing the parent's inherited prefix",
+            )
+        entries: List[Dict[str, Any]] = []
+        for sample in fold_dsh_usage_samples(decoded.header, decoded.events):
+            model = sample["model"]
+            input_t = sample["input"]
+            output_t = sample["output"]
+            cache_r = sample["cache_read"]
+            cache_w = sample["cache_write"]
+            entries.append(
+                {
+                    "source": self.source_name,
+                    "model": model,
+                    "provider": sample["provider"],
+                    "input": input_t,
+                    "output": output_t,
+                    "cacheRead": cache_r,
+                    "cacheWrite": cache_w,
+                    "reasoning": 0,
+                    "cost": self.pricing_db.get_cost(model, input_t, output_t, cache_r, cache_w),
+                    "timestamp": int(sample["timestamp_ms"]),
+                    "entry_id": dsh_entry_id(session_id, sample["turn"], sample["step"]),
+                    "_billing": usage_billing_pricing(
+                        [model],
+                        input_tokens=input_t,
+                        output_tokens=output_t,
+                        cache_read=cache_r,
+                        cache_write=cache_w,
+                    ),
+                }
+            )
+        return entries
+
+    def _parse_file_strict(self, file_sig: Tuple[str, int, int]) -> List[Dict[str, Any]]:
+        """Strict single-file entry point for the stored sync.
+
+        Raises UsageFileUnreadable / UsageFileVanished rather than returning []
+        when the file yields nothing: under file_replace an empty list is an
+        assertion that the file has zero entries, and the commit would delete the
+        stored rows of a log that merely could not be decoded (corrupt frame, a
+        header generation this build does not read). compute._collect_parser_file
+        prefers this method when a parser defines it, so the signal reaches
+        sync_files intact and the rows survive until the file reads again.
+        """
+        path_str = str(file_sig[0])
+        decoded = decode_dsh_session_file(Path(path_str))
+        if decoded.skip_reason is not None or decoded.header is None:
+            reason = decoded.skip_reason or "missing-header"
+            dsh_log_module.report_dsh_diagnostic(path_str, f"skip:{reason}")
+            if not Path(path_str).exists():
+                raise UsageFileVanished(path_str)
+            raise UsageFileUnreadable(path_str, reason)
+        self._report_decoded(path_str, decoded)
+        return self._entries_for_decoded(path_str, decoded)
+
     def _parse_all(self) -> List[Dict[str, Any]]:
         # Keyed on the stable entry id so duplicate physical files for one
         # session id (both suffixes present, or one id under two project keys)
-        # never bill twice. Discovery is sorted, so the later file's sample
-        # wins deterministically; the emitted order below stays timestamp-sorted.
-        by_entry_id: Dict[str, Dict[str, Any]] = {}
+        # never bill twice. The winner is the EARLIEST (timestamp, file_path)
+        # occurrence, ties breaking on the lexicographically smallest path -- the
+        # same rule sync_files applies for cross_file_stable_keys sources and the
+        # same one _merge_raw_session_sequence applies on the Sessions side, so
+        # all three surfaces resolve a duplicate id to one winner no matter which
+        # copy parses last. Parse order must not be an input to the answer.
+        by_entry_id: Dict[str, Tuple[tuple, Dict[str, Any]]] = {}
         for path_str, _, _ in self._file_signatures():
             try:
                 decoded = decode_dsh_session_file(Path(path_str))
                 if decoded.skip_reason is not None or decoded.header is None:
+                    # The DB-off path keeps skipping (one unreadable log must not
+                    # blank the source or land it in source_errors) but it no
+                    # longer gets to be silent about it.
+                    dsh_log_module.report_dsh_diagnostic(
+                        path_str, f"skip:{decoded.skip_reason or 'missing-header'}"
+                    )
                     continue
-                session_id = str(decoded.header.get("id") or Path(path_str).parent.name)
-                for sample in fold_dsh_usage_samples(decoded.header, decoded.events):
-                    model = sample["model"]
-                    input_t = sample["input"]
-                    output_t = sample["output"]
-                    cache_r = sample["cache_read"]
-                    cache_w = sample["cache_write"]
-                    entry = {
-                        "source": self.source_name,
-                        "model": model,
-                        "provider": sample["provider"],
-                        "input": input_t,
-                        "output": output_t,
-                        "cacheRead": cache_r,
-                        "cacheWrite": cache_w,
-                        "reasoning": 0,
-                        "cost": self.pricing_db.get_cost(model, input_t, output_t, cache_r, cache_w),
-                        "timestamp": int(sample["timestamp_ms"]),
-                        "entry_id": dsh_entry_id(session_id, sample["turn"], sample["step"]),
-                        "_billing": usage_billing_pricing(
-                            [model],
-                            input_tokens=input_t,
-                            output_tokens=output_t,
-                            cache_read=cache_r,
-                            cache_write=cache_w,
-                        ),
-                    }
-                    by_entry_id[entry["entry_id"]] = entry
+                self._report_decoded(path_str, decoded)
+                for entry in self._entries_for_decoded(path_str, decoded):
+                    entry_id = entry["entry_id"]
+                    position = (int(entry["timestamp"]), path_str)
+                    previous = by_entry_id.get(entry_id)
+                    if previous is None or position < previous[0]:
+                        by_entry_id[entry_id] = (position, entry)
             except Exception:
                 # One malformed file never blanks the whole DSH source.
                 continue
-        out = sorted(by_entry_id.values(), key=lambda entry: int(entry.get("timestamp", 0) or 0))
+        out = sorted(
+            (entry for _position, entry in by_entry_id.values()),
+            key=lambda entry: int(entry.get("timestamp", 0) or 0),
+        )
         return out
 
 

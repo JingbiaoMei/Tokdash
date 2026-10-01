@@ -291,3 +291,74 @@ def test_frontend_session_registry_includes_dsh():
     assert "dsh:" in brand and "fallback: 'D'" in brand
     assert "dsh: { icon: '/static/icons/agents/dsh.svg'" in brand
     assert (index.parent / "icons" / "agents" / "dsh.svg").is_file()
+
+
+# --- issue #148: Overview and Sessions must resolve identity to one winner -------
+# The invariant is the one SUPPORTED_CLIENTS.md already promises for Qoder CLI and
+# OpenClaw: the two surfaces consume one corpus and cannot disagree about it. DSH
+# had a winner rule per surface (last file parsed in Overview, first occurrence in
+# the Sessions merge), so the same logs produced two different totals.
+
+
+def _write_copied_session(home: Path, session_id: str, rows, project_dir: str, name="session.jsonl") -> Path:
+    path = home / "sessions" / project_dir / session_id / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+    return path
+
+
+def _overview_tokens_in() -> int:
+    from tokdash.sources.coding_tools import BaseParser, DSHParser, _sig_cache
+
+    _sig_cache.clear()
+    BaseParser._entry_cache.clear()
+    entries = DSHParser(PricingDatabase()).collect(None, None)
+    return sum(entry["input"] + entry["cacheWrite"] for entry in entries)
+
+
+def _sessions_tokens_in() -> int:
+    sessions._parse_dsh_session_file.cache_clear()
+    sessions._load_dsh_sessions.cache_clear()
+    loaded = sessions._load_dsh_sessions(sessions._dsh_session_signatures(), ())
+    return sum(turn["tokens_in"] for session in loaded.values() for turn in session["turns"])
+
+
+def test_overview_and_sessions_agree_on_duplicate_copies(_isolated_dsh_home):
+    """One session id, two physical copies, different usage for the same
+    (turn, step): both surfaces must bill the same single winner."""
+    home = _isolated_dsh_home
+    # "--work-a--" sorts first, so its copy owns the key on every surface.
+    _write_copied_session(
+        home, "s5", [_header("s5"), _assistant_message(1, 0, 0, {"inputTokens": 100, "outputTokens": 10}, DAY1_MS)], "--work-a--"
+    )
+    _write_copied_session(
+        home,
+        "s5",
+        [_header("s5"), _assistant_message(1, 0, 0, {"inputTokens": 999, "outputTokens": 99}, DAY1_MS)],
+        "--work-b--",
+    )
+
+    overview = _overview_tokens_in()
+    sessions_total = _sessions_tokens_in()
+    assert overview == sessions_total == 100
+
+
+def test_overview_and_sessions_agree_on_repeated_turn_step(_isolated_dsh_home):
+    """A (turn, step) that repeats non-adjacently must fold to one sample on
+    both surfaces, not collapse in one and double in the other."""
+    home = _isolated_dsh_home
+    _write_copied_session(
+        home,
+        "s6",
+        [
+            _header("s6"),
+            _assistant_message(1, 0, 0, {"inputTokens": 100, "outputTokens": 10}, DAY1_MS),
+            _assistant_message(2, 1, 0, {"inputTokens": 300, "outputTokens": 30}, DAY1_MS + 1000),
+            _assistant_message(3, 0, 0, {"inputTokens": 111, "outputTokens": 22}, DAY1_MS + 2000),
+        ],
+        "--work-a--",
+    )
+
+    overview = _overview_tokens_in()
+    sessions_total = _sessions_tokens_in()
+    assert overview == sessions_total == 411

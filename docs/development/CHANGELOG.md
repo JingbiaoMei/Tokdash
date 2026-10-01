@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 2.6.9 - Unreleased
+
+### Fixed
+
+- A copied Reasonix day file no longer bills twice with the usage database off, and its rows no longer vanish when the copy is deleted. Reasonix appends each provider request to exactly one day file under `stats/.append.lock` with a nanosecond timestamp, so one row in two scanned `stats/*.jsonl` files can only mean the file was copied -- a sync client's conflict copy or a hand-made duplicate that kept the `.jsonl` suffix. Entry ids hash row content, so the store already collapsed that copy to one row, but `ReasonixParser._parse_all` kept its byte-identical-row occurrence counter across files, handing the two copies different ids: the DB-off view billed the copy a second time while the DB-backed view billed it once, so the same install reported two different totals for the same files, 458/452 rows on a 14-file corpus with one day copied. The counter now runs per file and the live merge resolves each id to the smallest path, the earliest `(timestamp, file_path)` rule `sync_files` already applies elsewhere, so both views agree row for row rather than by total alone. Ownership needed the same treatment: `reasonix` runs `file_replace` without `cross_file_stable_keys`, so `INSERT OR REPLACE` left the deduplicated rows owned by whichever file committed last, and with `TOKDASH_USAGE_DB_DURABLE=0` deleting that copy discarded usage the original file still recorded (0 stored rows for 2 files' worth), while rewriting it under durable mode cost the same rows the survivor reparse now promotes. The flag is on, so the smallest path owns and both copies can be removed in either order. Accepted collapse: two files holding the same single row read exactly like a copy and count once; two byte-identical rows inside one file stay two requests, since there the single writer really did append them in sequence. No stored key changes, so `persistent_parser_version` stays 1 and no source reparses. (closes #149)
+
 ## 2.6.8 - 2026-09-30
 
 ### Added

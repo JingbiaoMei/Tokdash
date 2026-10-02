@@ -260,7 +260,12 @@ add it in a follow-up with a `_parse_reasonix_session_file` version bump rather 
    which is the earliest `(timestamp, file_path)` rule `UsageEntryStore.sync_files` applies for
    `cross_file_stable_keys` sources (`sync_capability` sets it). Reasonix appends each request to
    one day file under `stats/.append.lock` with nanosecond stamps, so one row in two scanned files
-   means a copy of the file, and a copy bills once. Accepted collapse: two files holding the same
+   means a copy of the file, and a copy bills once. Basis: `Writer.Append` in
+   `internal/stats/record.go` (esengine/DeepSeek-Reasonix), checked at v1.25.2 and v1.39.7: the day
+   file is the row's own `ts` formatted `2006-01-02`, appended with `O_APPEND` under
+   `filelock.Acquire(<stats>/.append.lock)`, and `ts` is `time.Now()` marshalled as RFC 3339 with
+   up to nine fractional digits. Because the file name derives from the row, no writer path puts
+   one row in two files. Accepted collapse: two files holding the same
    single row (`R | R`) read the same as a copy and count once, while two byte-identical rows inside
    one file stay two requests. The store parses one file per call (`compute._collect_parser_file`),
    so a counter spanning files gave a copy two ids it then collapsed to one row, and the DB-off view

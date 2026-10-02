@@ -5363,20 +5363,40 @@ class ReasonixParser(BaseParser):
     ``total``, ``requests`` and Reasonix's own ``cost_*`` / ``display_*`` fields
     are ignored: the first two are redundant and the rest describe Reasonix's
     pricing status, while Tokdash prices from its own database.
+
+    A duplicated day file bills once. Reasonix writes each request to exactly one
+    day file, under ``stats/.append.lock``, stamped with nanoseconds, so the same
+    row in two scanned files can only come from a copy of the file -- a sync
+    client's conflict copy, or a hand-made duplicate that kept the ``.jsonl``
+    suffix (``.bak`` copies fall outside the scanned glob). Entry ids are
+    content-keyed, so the copy collapses to one row in the live view and in the
+    store alike. Two byte-identical rows inside ONE file stay two requests,
+    because there the single writer really did append them one after the other.
     """
 
     source_name = "reasonix"
     sync_capability = SourceSyncCapability(
         mode="file_replace",
+        # Deliberately False: the store's tail path (compute._collect_parser_tail)
+        # hands the parser a temp file holding only the appended bytes, which would
+        # parse them without the corpus, exactly where _parse_all's cross-file copy
+        # dedup needs the corpus. Daily stats files are small, so whole-file
+        # replacement is cheap and keeps a copy of a day file from billing twice.
         append_jsonl=False,
         session_store=True,
+        cross_file_stable_keys=True,
         reason=(
             "Reasonix stats logs are append-only daily JSONL files; entry ids are content-keyed, "
-            "so a changed day file is reparsed whole without rebilling its earlier rows."
+            "so a changed day file is reparsed whole without rebilling its earlier rows. A copy of "
+            "a day file (a sync-client conflict copy, a hand-made *.jsonl duplicate) repeats those "
+            "keys in a second file, so ownership must follow the earliest occurrence across files: "
+            "without the flag the last file written owns the deduplicated row, and deleting that "
+            "copy discards usage the original file still records."
         ),
     )
     # 1: daily stats rows keyed on a content digest plus an occurrence
-    #    counter, prompt split into disjoint input / cacheRead halves.
+    #    counter, prompt split into disjoint input / cacheRead halves. The
+    #    cross-file copy dedup in _parse_all mints no new key, so this stays 1.
     persistent_parser_version = 1
 
     # Reasonix writes up to 9 fractional-second digits. datetime.fromisoformat
@@ -5463,14 +5483,23 @@ class ReasonixParser(BaseParser):
             return None
 
     def _parse_all(self) -> List[Dict[str, Any]]:
-        out: List[Dict[str, Any]] = []
-        # Entry ids are keyed on row content, never on the file path or line
-        # number: a moved REASONIX_HOME or a rewritten day file would otherwise
-        # re-ingest the whole history as new rows. Two byte-identical requests
-        # in one day are indistinguishable by content, so an occurrence counter
-        # keeps them apart; unlike a line number it is stable under appends.
-        seen_digests: Dict[str, int] = {}
+        # winners: {entry_id: (path, entry)} -- one row per entry id over the whole
+        # corpus. Entry ids are keyed on row content, never on the file path or the
+        # line number, so a moved REASONIX_HOME or a rewritten day file cannot
+        # re-ingest the whole history as new rows.
+        winners: Dict[str, Tuple[str, Dict[str, Any]]] = {}
         for path_str, _, _ in self._file_signatures():
+            # The occurrence counter runs per FILE while the merge below spans
+            # files, because the store parses one file per call
+            # (compute._collect_parser_file). A counter that spanned files gave two
+            # copies of one row two different ids, which the store then collapsed
+            # into one row, so the DB-off view billed a copied day file twice while
+            # the DB-backed view billed it once. Within one file the counter still
+            # separates two byte-identical requests, which the single writer did
+            # append one after the other, and unlike a line number it is stable
+            # under appends.
+            seen_digests: Dict[str, int] = {}
+            out: List[Dict[str, Any]] = []
             try:
                 with open(path_str, "r", encoding="utf-8") as f:
                     lines = list(f)
@@ -5555,8 +5584,24 @@ class ReasonixParser(BaseParser):
                         cache_read=cache_hit,
                     ),
                 })
-        out.sort(key=lambda item: int(item.get("timestamp", 0) or 0))
-        return out
+            # One entry id in two files means one file is a copy of the other:
+            # Reasonix appends each request to exactly one day file, under
+            # stats/.append.lock, stamped with nanoseconds, so the same row in a
+            # second file got there by copying rather than by being written. The
+            # copy must not bill again, and the smallest path wins. Every copy of a
+            # key carries the same timestamp, since the timestamp is inside the
+            # digest, so this is the same earliest-(timestamp, file_path) rule
+            # UsageEntryStore.sync_files applies for cross_file_stable_keys sources
+            # and its path tie-break: the two database modes resolve a copy to the
+            # same single row no matter which file parses last.
+            for entry in out:
+                previous = winners.get(entry["entry_id"])
+                if previous is None or path_str < previous[0]:
+                    winners[entry["entry_id"]] = (path_str, entry)
+
+        merged = [entry for _path, entry in winners.values()]
+        merged.sort(key=lambda item: int(item.get("timestamp", 0) or 0))
+        return merged
 
 
 def workbuddy_file_signatures(roots: List[Path]) -> tuple:

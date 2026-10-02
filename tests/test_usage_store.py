@@ -27,6 +27,7 @@ from tokdash.sources.coding_tools import (
     GrokParser,
     HermesParser,
     QoderCliParser,
+    ReasonixParser,
     _sig_cache,
 )
 from tokdash.usage_store import (
@@ -1165,6 +1166,17 @@ def test_coding_tool_parsers_declare_sync_capabilities():
     assert tracker.parsers["minimax"].sync_capability.append_jsonl is True
     assert tracker.parsers["minimax"].sync_capability.cross_file_stable_keys is True
     assert tracker.parsers["minimax"].persistent_parser_version == 1
+
+    # Reasonix stats rows are content-keyed, so a copy of a day file repeats its
+    # keys in a second file. The earliest-path owner rule is what keeps those rows
+    # alive when either copy is removed or rewritten (#149); append_jsonl stays off
+    # because the tail path parses the appended bytes without the corpus that
+    # makes a copy recognisable as a copy.
+    assert modes["reasonix"] == "file_replace"
+    assert isinstance(tracker.parsers["reasonix"], ReasonixParser)
+    assert tracker.parsers["reasonix"].sync_capability.cross_file_stable_keys is True
+    assert tracker.parsers["reasonix"].sync_capability.append_jsonl is False
+    assert tracker.parsers["reasonix"].persistent_parser_version == 1
 
 
 def test_parser_code_signature_unwraps_lru_cache_functions():

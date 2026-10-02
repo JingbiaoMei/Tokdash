@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from .dateutil import parse_date_range
+from .dateutil import local_midnight, parse_date_range
 from .model_normalization import normalize_model_name
 from .pricing import PricingDatabase
 from .sources.openclaw import get_usage_for_days as get_session_usage_days
@@ -55,19 +55,20 @@ def run_tokscale_json(period_args: list[str]) -> Dict[str, Any]:
 
 def _date_range_from_args(period_args: list[str]) -> tuple[Optional[datetime], Optional[datetime]]:
     if "--today" in period_args:
-        start = datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
+        start = local_midnight(datetime.now().replace(hour=0, minute=0, second=0, microsecond=0))
         return start, start + timedelta(days=1)
 
     since = None
     until = None
-    local_tz = datetime.now().astimezone().tzinfo or timezone.utc
     try:
         if "--since" in period_args:
-            since = datetime.strptime(period_args[period_args.index("--since") + 1], "%Y-%m-%d").replace(tzinfo=local_tz)
+            since = local_midnight(
+                datetime.strptime(period_args[period_args.index("--since") + 1], "%Y-%m-%d")
+            )
         if "--until" in period_args:
             # CLI args are inclusive; tracker expects [since, until) exclusive.
-            until = (
-                datetime.strptime(period_args[period_args.index("--until") + 1], "%Y-%m-%d").replace(tzinfo=local_tz)
+            until = local_midnight(
+                datetime.strptime(period_args[period_args.index("--until") + 1], "%Y-%m-%d")
                 + timedelta(days=1)
             )
     except Exception:
@@ -1036,15 +1037,15 @@ def compute_usage(period: str, date_from: Optional[str] = None, date_to: Optiona
 
 def _current_period_range(period: str) -> tuple[datetime, datetime]:
     now_local = datetime.now().astimezone()
-    local_tz = now_local.tzinfo or timezone.utc
 
     if period == "month":
-        since_local = now_local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        first_of_month = datetime.combine(now_local.date().replace(day=1), datetime.min.time())
+        since_local = local_midnight(first_of_month)
     else:
         days = period_to_days(period)
         today_midnight = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
         start_date = today_midnight.date() - timedelta(days=days - 1)
-        since_local = datetime.combine(start_date, datetime.min.time(), tzinfo=local_tz)
+        since_local = local_midnight(datetime.combine(start_date, datetime.min.time()))
 
     return since_local.astimezone(timezone.utc), now_local.astimezone(timezone.utc)
 

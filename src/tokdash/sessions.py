@@ -27,7 +27,7 @@ from .activity_insights import (
     record_structured_tool_call,
 )
 from .compute import cache_hit_rate, pct_change, period_to_days, previous_period_range
-from .dateutil import parse_date_range
+from .dateutil import local_midnight, parse_date_range
 from .pricing import PricingDatabase
 from .sources.coding_tools import (
     CODEX_DEFAULT_MODEL,
@@ -565,8 +565,8 @@ def _period_range(period: str) -> tuple[int, int]:
 
     end_date = now_local.date()
     start_date = end_date - timedelta(days=days - 1)
-    since = datetime.combine(start_date, datetime.min.time(), tzinfo=local_tz).astimezone(timezone.utc)
-    until = datetime.combine(end_date, datetime.min.time(), tzinfo=local_tz).astimezone(timezone.utc) + timedelta(days=1)
+    since = local_midnight(datetime.combine(start_date, datetime.min.time())).astimezone(timezone.utc)
+    until = local_midnight(datetime.combine(end_date, datetime.min.time())).astimezone(timezone.utc) + timedelta(days=1)
     return _dt_to_ms(since), _dt_to_ms(until)
 
 

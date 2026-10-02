@@ -27,10 +27,12 @@ from tokdash.sources.coding_tools import (
     GrokParser,
     HermesParser,
     QoderCliParser,
+    ReasonixParser,
     _sig_cache,
 )
 from tokdash.usage_store import (
     UsageEntryStore,
+    UsageFileUnreadable,
     UsageFileVanished,
     build_source_signature,
     parser_code_signature,
@@ -1164,6 +1166,17 @@ def test_coding_tool_parsers_declare_sync_capabilities():
     assert tracker.parsers["minimax"].sync_capability.append_jsonl is True
     assert tracker.parsers["minimax"].sync_capability.cross_file_stable_keys is True
     assert tracker.parsers["minimax"].persistent_parser_version == 1
+
+    # Reasonix stats rows are content-keyed, so a copy of a day file repeats its
+    # keys in a second file. The earliest-path owner rule is what keeps those rows
+    # alive when either copy is removed or rewritten (#149); append_jsonl stays off
+    # because the tail path parses the appended bytes without the corpus that
+    # makes a copy recognisable as a copy.
+    assert modes["reasonix"] == "file_replace"
+    assert isinstance(tracker.parsers["reasonix"], ReasonixParser)
+    assert tracker.parsers["reasonix"].sync_capability.cross_file_stable_keys is True
+    assert tracker.parsers["reasonix"].sync_capability.append_jsonl is False
+    assert tracker.parsers["reasonix"].persistent_parser_version == 1
 
 
 def test_parser_code_signature_unwraps_lru_cache_functions():
@@ -4385,3 +4398,125 @@ def test_owner_rewrite_at_equal_timestamp_keeps_exactly_one_row(tmp_path):
     rows = [row for row in _stored_usage_rows(db, "tie") if row["entry_key"] == "tie:shared"]
     assert len(rows) == 1
     assert rows[0]["timestamp"] == 1_700_000_000_000
+
+
+def test_unreadable_survivor_keeps_the_key_it_might_have_owned(tmp_path, caplog):
+    """A rewritten owner drops a stable key while the only surviving copy of that
+    key cannot be read.
+
+    Skipping the unreadable survivor is required (adding it with an empty list
+    would delete its own rows); so is not letting the key vanish with the owner.
+    The commit therefore keeps the key's last known-good row instead of either
+    aborting the whole source or losing the only stored copy.
+    """
+    db = tmp_path / "usage.sqlite3"
+    store = UsageEntryStore(db)
+    owner = str(tmp_path / "a-owner.jsonl")  # sorts first, so it owns the key
+    copy = str(tmp_path / "b-copy.jsonl")
+
+    def first_sync(file_sig):
+        if file_sig[0] == owner:
+            return [_tie_entry(1_700_000_000_000, "shared:k1")]
+        return [
+            _tie_entry(1_700_000_000_000, "shared:k1"),
+            _tie_entry(1_700_000_000_000, "copy:k3"),
+        ]
+
+    files = ((owner, 1, 100), (copy, 1, 100))
+    assert store.sync_files(
+        "tie", files, parser={"v": 1}, parse_file_entries=first_sync, cross_file_stable_keys=True
+    )
+    rows = _stored_usage_rows(db, "tie")
+    assert [row["file_path"] for row in rows if row["entry_key"] == "shared:k1"] == [owner]
+
+    # The owner is rewritten and no longer emits k1. The copy is unchanged on
+    # disk, so it is reached only through the survivor reparse -- and it will not
+    # decode. Whether it holds k1 is exactly what cannot be established.
+    def owner_dropped_key(file_sig):
+        if file_sig[0] == owner:
+            return [_tie_entry(1_700_000_500_000, "shared:k2")]
+        raise UsageFileUnreadable(file_sig[0], "decode-error")
+
+    changed = ((owner, 2, 110), (copy, 1, 100))
+    assert store.sync_files(
+        "tie", changed, parser={"v": 1}, parse_file_entries=owner_dropped_key, cross_file_stable_keys=True
+    )
+
+    rows = _stored_usage_rows(db, "tie")
+    # k1 keeps its last known-good row rather than disappearing with its owner...
+    assert [row for row in rows if row["entry_key"] == "shared:k1"]
+    # ...the owner's own rewrite still committed...
+    assert [row for row in rows if row["entry_key"] == "shared:k2"]
+    # ...and the unreadable file kept its own rows instead of being zeroed out.
+    assert [row for row in rows if row["entry_key"] == "copy:k3" and row["file_path"] == copy]
+    assert "could not be read to confirm a new owner" in caplog.text
+
+
+def test_unreadable_signal_for_another_path_still_fails_the_sync(tmp_path):
+    """Same narrowness rule as UsageFileVanished: an UsageFileUnreadable naming a
+    different path is not this file's problem and must not be swallowed."""
+    store = UsageEntryStore(tmp_path / "usage.sqlite3")
+    a_path = str(tmp_path / "a.jsonl")
+
+    def wrong_path(file_sig):
+        raise UsageFileUnreadable(str(tmp_path / "somewhere-else.jsonl"), "decode-error")
+
+    try:
+        store.sync_files("tie", ((a_path, 1, 100),), parser={"v": 1}, parse_file_entries=wrong_path)
+    except UsageFileUnreadable as exc:
+        assert exc.filename == str(tmp_path / "somewhere-else.jsonl")
+    else:
+        raise AssertionError("wrong-path unreadable signal must not be isolated")
+
+
+def test_persistently_unreadable_file_is_decoded_once_per_sync(tmp_path):
+    """A file that stays broken must not be decoded twice on every sync.
+
+    It is skipped at the main site, which leaves it out of `parsed` and therefore
+    eligible for the survivor reparse -- which would fail identically. Counting
+    the reads pins that the second decode does not happen while still holding the
+    keys the file might own.
+    """
+    db = tmp_path / "usage.sqlite3"
+    store = UsageEntryStore(db)
+    owner = str(tmp_path / "a-owner.jsonl")
+    copy = str(tmp_path / "b-copy.jsonl")
+
+    def first_sync(file_sig):
+        if file_sig[0] == owner:
+            return [_tie_entry(1_700_000_000_000, "shared:k1")]
+        return [
+            _tie_entry(1_700_000_000_000, "shared:k1"),
+            _tie_entry(1_700_000_000_000, "copy:k3"),
+        ]
+
+    assert store.sync_files(
+        "tie",
+        ((owner, 1, 100), (copy, 1, 100)),
+        parser={"v": 1},
+        parse_file_entries=first_sync,
+        cross_file_stable_keys=True,
+    )
+
+    reads: dict[str, int] = {owner: 0, copy: 0}
+
+    def both_changed(file_sig):
+        reads[file_sig[0]] += 1
+        if file_sig[0] == owner:
+            return [_tie_entry(1_700_000_500_000, "shared:k2")]
+        raise UsageFileUnreadable(file_sig[0], "decode-error")
+
+    # Both files changed, so the copy is parsed at the main site AND is a
+    # survivor-reparse candidate. It must only be read once.
+    assert store.sync_files(
+        "tie",
+        ((owner, 2, 110), (copy, 2, 110)),
+        parser={"v": 1},
+        parse_file_entries=both_changed,
+        cross_file_stable_keys=True,
+    )
+    assert reads == {owner: 1, copy: 1}
+
+    rows = _stored_usage_rows(db, "tie")
+    assert [row for row in rows if row["entry_key"] == "shared:k1"]
+    assert [row for row in rows if row["entry_key"] == "copy:k3" and row["file_path"] == copy]

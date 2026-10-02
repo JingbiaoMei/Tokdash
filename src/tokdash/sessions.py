@@ -4184,6 +4184,11 @@ def _parse_dsh_session_file(path_str: str, _mtime_ns: int, _size: int, _pricing_
         decoded = decode_dsh_session_file(session_path)
     except Exception:
         return None
+    # Same rule as the usage parser, through the same reporter: skipping is fine,
+    # silence is not. A skipped or seed-unprovable session simply vanishes from
+    # the panel otherwise, with the Overview still showing its rows or not
+    # depending on which surface read last.
+    dsh_log.report_dsh_decode(path_str, decoded)
     if decoded.skip_reason is not None or decoded.header is None:
         return None
 

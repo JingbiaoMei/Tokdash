@@ -40,6 +40,7 @@ from .compute import (
     get_openclaw_data,
     get_tools_data,
     resolve_period,
+    validate_period,
 )
 from .dateutil import parse_date_range
 from .insights import UnknownFacetError, compute_insights
@@ -126,6 +127,16 @@ def _validate_date_params(date_from: Optional[str], date_to: Optional[str]) -> N
             if "does not match format" in detail:
                 detail = "Invalid date format, expected YYYY-MM-DD"
             raise HTTPException(status_code=400, detail=detail)
+
+
+def _validate_period(period: Optional[str]) -> None:
+    """Raise HTTPException(400) if numeric period is out of supported range."""
+    if not period:
+        return
+    try:
+        validate_period(period)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 class NoCacheMiddleware:
@@ -1870,6 +1881,7 @@ def get_usage(
     refresh: bool = False,
 ) -> Dict[str, Any]:
     _validate_date_params(date_from, date_to)
+    _validate_period(period)
     if _dev_fixture_mode() == "dense":
         from .dev_fixtures import dense_usage
 
@@ -1898,6 +1910,7 @@ def get_usage(
 
 @app.get("/api/openclaw")
 def get_openclaw(period: str = "today") -> Dict[str, Any]:
+    _validate_period(period)
     if _dev_fixture_mode() == "dense":
         from .dev_fixtures import dense_openclaw
 
@@ -1926,6 +1939,7 @@ def get_openclaw(period: str = "today") -> Dict[str, Any]:
 @app.get("/api/tools")
 def get_tools(period: str = "today") -> Dict[str, Any]:
     """Coding tools usage (local parsers)."""
+    _validate_period(period)
 
     if _dev_fixture_mode() == "dense":
         from .dev_fixtures import dense_tools
@@ -2133,6 +2147,7 @@ def refresh_quota() -> Dict[str, Any]:
 
 @app.get("/api/codex/sessions")
 def get_codex_sessions(period: str = "today", include_review_sessions: Optional[bool] = None) -> Dict[str, Any]:
+    _validate_period(period)
     if _dev_fixture_mode() == "dense":
         from .dev_fixtures import dense_sessions
 
@@ -2184,6 +2199,7 @@ def get_sessions(
     include_review_sessions: Optional[bool] = None,
 ) -> Dict[str, Any]:
     _validate_date_params(date_from, date_to)
+    _validate_period(period)
     try:
         if _dev_fixture_mode() == "dense":
             from .dev_fixtures import dense_sessions
@@ -2238,6 +2254,7 @@ def get_active_time(
     Refresh button can clear a stale figure or one missing a tool that failed.
     """
     _validate_date_params(date_from, date_to)
+    _validate_period(period)
     if _dev_fixture_mode() == "dense":
         from .dev_fixtures import dense_active_time
 
@@ -2397,6 +2414,7 @@ def get_insights(
     year is computed once and every later view is a cache hit.
     """
     _validate_date_params(date_from, date_to)
+    _validate_period(period)
     if _dev_fixture_mode() == "dense":
         # Synthesized, and folded by the same `insights._fold_*` helpers
         # production uses, so the fixture cannot drift from the facet contract

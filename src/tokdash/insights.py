@@ -290,10 +290,11 @@ def compute_insights(
     if date_from and date_to:
         since, until = parse_date_range(date_from, date_to)
     else:
-        since = datetime.strptime(window["from"], "%Y-%m-%d").astimezone() if window.get("from") else None
+        local_tz = datetime.now().astimezone().tzinfo or timezone.utc
+        since = datetime.strptime(window["from"], "%Y-%m-%d").replace(tzinfo=local_tz) if window.get("from") else None
         until = None
         if window.get("to"):
-            end = datetime.strptime(window["to"], "%Y-%m-%d").astimezone()
+            end = datetime.strptime(window["to"], "%Y-%m-%d").replace(tzinfo=local_tz)
             until = end.replace(hour=23, minute=59, second=59, microsecond=999000)
 
     rows: list[dict[str, Any]] = []

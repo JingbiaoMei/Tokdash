@@ -597,13 +597,55 @@ def _alias_period_days(token: str) -> Optional[int]:
     multiplier = _PERIOD_UNIT_DAYS.get(unit)
     if multiplier is None or not count.isdigit():
         return None
-    return max(1, int(count) * multiplier)
+    try:
+        return int(count) * multiplier
+    except (ValueError, OverflowError):
+        return None
+
+
+def _parse_numeric_period_days(token: str) -> Optional[int]:
+    """Return parsed day count if token represents a numeric period, else None."""
+    if not token:
+        return None
+    cleaned = token.strip().lower()
+    if cleaned.isdigit() or (cleaned.startswith(("-", "+")) and cleaned[1:].isdigit()):
+        try:
+            return int(cleaned)
+        except (ValueError, OverflowError):
+            return ALL_TIME_DAYS + 1
+    if len(cleaned) >= 2 and cleaned[-1] in _PERIOD_UNIT_DAYS:
+        count = cleaned[:-1]
+        mult = _PERIOD_UNIT_DAYS[cleaned[-1]]
+        if count.isdigit() or (count.startswith(("-", "+")) and count[1:].isdigit()):
+            try:
+                return int(count) * mult
+            except (ValueError, OverflowError):
+                return ALL_TIME_DAYS + 1
+    return None
+
+
+def validate_period(period: Optional[str]) -> None:
+    """Validate that period is a supported named period or a numeric day count within [1, ALL_TIME_DAYS].
+
+    Raises ValueError('period out of range') if a numeric period is < 1 or > ALL_TIME_DAYS.
+    Unknown named/string tokens (e.g. 'bogus') are permitted and resolve to all-time.
+    """
+    if not period:
+        return
+    token = str(period).strip().lower()
+    if token in NAMED_PERIODS:
+        return
+    numeric_days = _parse_numeric_period_days(token)
+    if numeric_days is not None:
+        if numeric_days < 1 or numeric_days > ALL_TIME_DAYS:
+            raise ValueError("period out of range")
 
 
 def period_to_days(period: str) -> int:
     try:
-        return max(1, int(period))
-    except (TypeError, ValueError):
+        val = int(period)
+        return max(1, min(val, ALL_TIME_DAYS))
+    except (TypeError, ValueError, OverflowError):
         pass
 
     token = str(period or "").strip().lower()
@@ -612,7 +654,7 @@ def period_to_days(period: str) -> int:
 
     alias = _alias_period_days(token)
     if alias is not None:
-        return alias
+        return max(1, min(alias, ALL_TIME_DAYS))
 
     # Named periods we don't recognise previously fell through to 1 (today),
     # which silently truncated `?period=all` / `?period=year` to a single day
@@ -626,12 +668,15 @@ def period_to_days(period: str) -> int:
 def period_is_recognized(period: str) -> bool:
     """Whether ``period`` names a window, as opposed to hitting the fallback."""
     try:
-        int(period)
-        return True
-    except (TypeError, ValueError):
+        val = int(period)
+        return 1 <= val <= ALL_TIME_DAYS
+    except (TypeError, ValueError, OverflowError):
         pass
     token = str(period or "").strip().lower()
-    return token in NAMED_PERIODS or _alias_period_days(token) is not None
+    if token in NAMED_PERIODS:
+        return True
+    alias = _alias_period_days(token)
+    return alias is not None and 1 <= alias <= ALL_TIME_DAYS
 
 
 def _canonical_period(period: str) -> str:

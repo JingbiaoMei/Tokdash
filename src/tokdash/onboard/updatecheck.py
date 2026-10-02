@@ -46,18 +46,12 @@ def is_enabled() -> bool:
 
 def enable() -> None:
     """Persist one-time consent to ``config.json`` (used by the dashboard/CLI consent step)."""
-    p = paths.config_path()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        cfg = json.loads(p.read_text(encoding="utf-8")) if p.is_file() else {}
-        if not isinstance(cfg, dict):
-            cfg = {}
-    except Exception:
-        cfg = {}
-    cfg["update_check"] = True
-    tmp = p.with_suffix(p.suffix + ".tmp")
-    tmp.write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8")
-    tmp.replace(p)
+    from ..sources.quota.config import _mutate_config
+
+    def _set(cfg: dict[str, Any]) -> None:
+        cfg["update_check"] = True
+
+    _mutate_config(_set)
 
 
 def _version_key(value: str) -> tuple:

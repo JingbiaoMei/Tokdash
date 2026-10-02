@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import json
 import os
+import threading
+import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Iterator, Optional
 
+from ...filelock import process_lock
 from ...onboard import paths
 
 QUOTA_KEYS = (
@@ -46,13 +50,33 @@ DEFAULT_BOUNDARY_PRE_RESET_SECONDS = 120
 DEFAULT_BOUNDARY_POST_RESET_ENABLED = True
 DEFAULT_BOUNDARY_POST_RESET_SECONDS = 120
 
+_CONFIG_WRITE_LOCK = threading.RLock()
+
 
 def config_path() -> Path:
     return paths.config_path()
 
 
-def _read_config() -> dict[str, Any]:
-    p = config_path()
+@contextmanager
+def config_process_lock(path: Optional[Path] = None) -> Iterator[None]:
+    """Serialize config.json reads/writes across threads and processes.
+
+    Combines an in-process lock to serialize worker threads instantly without
+    kernel lock overhead, and a cross-process sidecar lock file (``<config>.lock``)
+    via :func:`tokdash.filelock.process_lock`.
+    """
+    p = path or config_path()
+    lock_path = Path(str(p) + ".lock")
+    with _CONFIG_WRITE_LOCK:
+        with process_lock(lock_path):
+            yield
+
+
+config_lock = config_process_lock
+
+
+def _read_config(path: Optional[Path] = None) -> dict[str, Any]:
+    p = path or config_path()
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
     except Exception:
@@ -60,12 +84,44 @@ def _read_config() -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-def _write_config(data: dict[str, Any]) -> None:
-    p = config_path()
+def _write_config_unlocked(data: dict[str, Any], path: Optional[Path] = None) -> None:
+    p = path or config_path()
     p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(p.suffix + ".tmp")
-    tmp.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    tmp.replace(p)
+    # Unique temp file in the same directory guarantees atomic replacement on the same
+    # filesystem without filename collision across concurrent threads or processes.
+    tmp = p.with_name(f".{p.name}.{os.getpid()}.{threading.get_ident()}.{uuid.uuid4().hex[:8]}.tmp")
+    try:
+        tmp.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        tmp.replace(p)
+    finally:
+        try:
+            if tmp.exists():
+                tmp.unlink()
+        except OSError:
+            pass
+
+
+def _write_config(data: dict[str, Any], path: Optional[Path] = None) -> None:
+    with config_process_lock(path):
+        _write_config_unlocked(data, path)
+
+
+def _mutate_config(
+    updater: Callable[[dict[str, Any]], Any],
+    path: Optional[Path] = None,
+) -> dict[str, Any]:
+    """Execute an atomic read-modify-write against config.json under process lock.
+
+    If ``updater(cfg)`` returns ``False``, the mutation is skipped and no disk
+    write occurs (e.g. for idempotent checks). Otherwise, the updated config is
+    atomically written to disk before releasing the lock.
+    """
+    with config_process_lock(path):
+        cfg = _read_config(path)
+        changed = updater(cfg)
+        if changed is not False:
+            _write_config_unlocked(cfg, path)
+        return cfg
 
 
 def _raw_quota() -> dict[str, Any]:
@@ -91,22 +147,27 @@ def set_quota_consent(updates: dict[str, Any]) -> dict[str, bool]:
     # alone — otherwise the sibling keys ``enabled`` (master switch) and
     # ``poll_interval_minutes`` would be dropped, silently re-enabling tracking and
     # resetting the interval whenever consent changes.
-    cfg = _read_config()
-    quota = dict(cfg.get("quota")) if isinstance(cfg.get("quota"), dict) else {}
-    # Preserve the upgrade grandfather: if credential_scan was never stored and this
-    # call isn't setting it, seed it from the legacy providers before the normalize
-    # loop materializes it. Otherwise it would be written as False here and silently
-    # revoke credential access the install already had.
-    if CREDENTIAL_SCAN_KEY not in quota and CREDENTIAL_SCAN_KEY not in updates:
-        quota[CREDENTIAL_SCAN_KEY] = _grandfathered_credential_scan(quota)
-    for key in CONSENT_KEYS:
-        # Apply the update if present, otherwise normalize the existing value — either way
-        # all consent keys stay materialized, while sibling keys (enabled,
-        # poll_interval_minutes) are left untouched.
-        quota[key] = bool(updates[key]) if key in updates else bool(quota.get(key))
-    cfg["quota"] = quota
-    _write_config(cfg)
-    return {key: bool(quota.get(key)) for key in CONSENT_KEYS}
+    result_consent: dict[str, bool] = {}
+
+    def _update(cfg: dict[str, Any]) -> None:
+        nonlocal result_consent
+        quota = dict(cfg.get("quota")) if isinstance(cfg.get("quota"), dict) else {}
+        # Preserve the upgrade grandfather: if credential_scan was never stored and this
+        # call isn't setting it, seed it from the legacy providers before the normalize
+        # loop materializes it. Otherwise it would be written as False here and silently
+        # revoke credential access the install already had.
+        if CREDENTIAL_SCAN_KEY not in quota and CREDENTIAL_SCAN_KEY not in updates:
+            quota[CREDENTIAL_SCAN_KEY] = _grandfathered_credential_scan(quota)
+        for key in CONSENT_KEYS:
+            # Apply the update if present, otherwise normalize the existing value — either way
+            # all consent keys stay materialized, while sibling keys (enabled,
+            # poll_interval_minutes) are left untouched.
+            quota[key] = bool(updates[key]) if key in updates else bool(quota.get(key))
+        cfg["quota"] = quota
+        result_consent = {key: bool(quota.get(key)) for key in CONSENT_KEYS}
+
+    _mutate_config(_update)
+    return result_consent
 
 
 def quota_poll_killed() -> bool:
@@ -155,18 +216,26 @@ def ensure_quota_consent_migrated() -> None:
     """Persist the credential_scan grandfather once, so later reads and consent
     writes see an explicit value instead of re-deriving it. Idempotent; a no-op
     on fresh installs (nothing stored) and once credential_scan is materialized."""
-    raw = _raw_quota()
-    if not raw or CREDENTIAL_SCAN_KEY in raw:
-        return
-    set_quota_consent({CREDENTIAL_SCAN_KEY: _grandfathered_credential_scan(raw)})
+    def _migrate(cfg: dict[str, Any]) -> bool | None:
+        quota = dict(cfg.get("quota")) if isinstance(cfg.get("quota"), dict) else {}
+        if not quota or CREDENTIAL_SCAN_KEY in quota:
+            return False
+        quota[CREDENTIAL_SCAN_KEY] = _grandfathered_credential_scan(quota)
+        for key in CONSENT_KEYS:
+            quota[key] = bool(quota.get(key))
+        cfg["quota"] = quota
+        return True
+
+    _mutate_config(_migrate)
 
 
 def set_quota_enabled(enabled: bool) -> bool:
-    cfg = _read_config()
-    quota = dict(cfg.get("quota")) if isinstance(cfg.get("quota"), dict) else {}
-    quota["enabled"] = bool(enabled)
-    cfg["quota"] = quota
-    _write_config(cfg)
+    def _update(cfg: dict[str, Any]) -> None:
+        quota = dict(cfg.get("quota")) if isinstance(cfg.get("quota"), dict) else {}
+        quota["enabled"] = bool(enabled)
+        cfg["quota"] = quota
+
+    _mutate_config(_update)
     return bool(enabled)
 
 
@@ -185,11 +254,13 @@ def set_poll_interval_minutes(minutes: int) -> int:
     value = int(minutes)
     if value not in POLL_INTERVAL_CHOICES:
         raise ValueError(f"poll_interval_minutes must be one of {POLL_INTERVAL_CHOICES}")
-    cfg = _read_config()
-    quota = dict(cfg.get("quota")) if isinstance(cfg.get("quota"), dict) else {}
-    quota["poll_interval_minutes"] = value
-    cfg["quota"] = quota
-    _write_config(cfg)
+
+    def _update(cfg: dict[str, Any]) -> None:
+        quota = dict(cfg.get("quota")) if isinstance(cfg.get("quota"), dict) else {}
+        quota["poll_interval_minutes"] = value
+        cfg["quota"] = quota
+
+    _mutate_config(_update)
     return value
 
 

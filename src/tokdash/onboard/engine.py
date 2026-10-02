@@ -1579,6 +1579,7 @@ def _purge_data() -> None:
         Path(str(db) + "-shm"),
         Path(str(db) + ".lock"),
         paths.config_path(),
+        Path(str(paths.config_path()) + ".lock"),
         override,
         override.with_suffix(override.suffix + ".tmp"),  # crashed-write sidecar from update_pricing_db
     )

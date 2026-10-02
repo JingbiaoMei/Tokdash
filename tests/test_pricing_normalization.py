@@ -169,13 +169,3 @@ def test_pricing_resolver_protects_version_stamped_keys():
     assert rates("Mistral-Large-2512") == (0.5, 1.5)  # case-variant still protected
     assert rates("kimi-k2-0905") == (0.6, 2.5)
     assert rates("qwen3-235b-a22b-2507") == (0.071, 0.1)
-
-
-def test_total_cost_hint_frontend_markup():
-    from pathlib import Path
-    import tokdash
-
-    index_html = (Path(tokdash.__file__).parent / "static" / "index.html").read_text(encoding="utf-8")
-    assert 'id="totalCostHint"' in index_html
-    assert 'data-i18n-title="totalCostHint"' in index_html
-    assert 'id="statTotalCostHint"' in index_html

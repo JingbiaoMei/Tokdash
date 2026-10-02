@@ -50,6 +50,13 @@ ACCEPT_PHASES = {"accepted", "staged"}
 INSTALL_TIMEOUT = 600
 SERVICE_OP_TIMEOUT = 60
 READY_TIMEOUT = 90
+# The application probe (/api/tools) gets its OWN budget: on a freshly restarted
+# server with cold caches the first request reads every session rollout — tens
+# of seconds on a large dev machine. Counting that slowness as a failed update
+# would be a lie about a working install, so the probe retries under a dedicated
+# deadline with a per-request timeout that a cold read can actually satisfy.
+READY_APP_TIMEOUT = 180
+READY_APP_PROBE_TIMEOUT = 40
 HEARTBEAT_SECONDS = 10
 LOCK_ACQUIRE_TIMEOUT = 60
 
@@ -82,25 +89,50 @@ def safe_install_argv(argv):
     )
 
 
-def _looks_like_tokdash(argv):
-    """Conservative argv test for "this process is a tokdash invocation".
+def _tokdash_launch(argv):
+    """Classify a process argv as a tokdash LAUNCH — launch position only, never a
+    mere mention. Returns:
 
-    Covers every supported launch shape, including the one a venv console script
-    produces under ``python -m``-style parents — ``[/venv/bin/python,
-    /home/u/.local/bin/tokdash, serve]`` — the repo's ``main.py`` dev runner, and the
-    bare ``tokdash`` script resolved from PATH. Over-matching is safe (it refuses an
-    update); ``pip install tokdash==X`` deliberately does NOT match (our own child).
+    - ``"definite"``: unmistakably tokdash is being executed (console script in
+      program or interpreter-script position, or ``python -m tokdash``).
+    - ``"ambiguous"``: the ``python main.py`` dev-runner shape — the tokdash repo's
+      runner looks exactly like this, and so does every other python project, so
+      the caller needs a positive binding signal before convicting it.
+    - ``None``: not a tokdash launch. Editors opened on ``.../tokdash``, ``git``,
+      ``find``, node servers naming ``main.py`` — all land here, because an argv
+      that merely MENTIONS a tokdash-ish path is not running tokdash. Over-matching
+      used to be framed as safe ("it refuses an update"); it is not — one editor
+      window on this repo blocked every future update of the real service.
+
+    ``python -m pip install tokdash==X`` deliberately returns None (our own child).
     """
+    if not argv:
+        return None
+    prog = argv[0]
+    if prog == "tokdash" or (prog.startswith("/") and prog.endswith("/tokdash")):
+        return "definite"  # console script launched directly (kernel resolved it)
+    if not os.path.basename(prog).startswith("python"):
+        return None
+    if len(argv) > 1:
+        script = argv[1]
+        if script == "main.py" or script.endswith("/main.py"):
+            return "ambiguous"
+        if script.startswith("/") and script.endswith("/tokdash"):
+            return "definite"  # console script run through its interpreter
     for i, a in enumerate(argv):
-        if i == 0 and a == "tokdash":
-            return True
-        if a.endswith("/tokdash") and a.startswith("/"):
-            return True  # absolute console-script path at any position
-        if a == "-m" and i + 1 < len(argv) and argv[i + 1] == "tokdash":
-            return True
-        if a == "main.py" or a.endswith("/main.py"):
-            return True
-    return False
+        if a == "-m" and i + 1 < len(argv):
+            if argv[i + 1] == "tokdash":
+                return "definite"
+            if argv[i + 1] == "pip":
+                return None
+    return None
+
+
+def _looks_like_tokdash(argv):
+    """True when the process is a (possibly) tokdash invocation. Callers must not
+    act on the argv shape alone — pair it with positive evidence of the
+    data-directory binding, see :meth:`Runner._sibling_tokdash_pids`."""
+    return _tokdash_launch(argv) is not None
 
 
 def _parse_execstart_line(line):
@@ -364,6 +396,11 @@ class Runner:
         Matching follows BOTH bindings a process can have to our database: its data
         directory AND an explicit shared ``TOKDASH_USAGE_DB_PATH`` (the plan supports
         that override, so a different data dir does not prove a different database).
+        A match needs the process to actually RUN tokdash (launch-position argv
+        evidence, not a path mention) AND to positively bind this data dir; an
+        INFERRED default-location binding only convicts a definite launch, and the
+        ambiguous ``python main.py`` shape additionally needs to be sitting in a
+        Tokdash project root.
         """
         found = []
         me = os.getpid()
@@ -372,16 +409,42 @@ class Runner:
         for pid, argv, env in self._proc_snapshot():
             if pid == me or pid in exclude:
                 continue
-            if not _looks_like_tokdash(argv):
+            form = _tokdash_launch(argv)
+            if form is None:
                 continue
-            dd = env.get("TOKDASH_DATA_DIR") or os.path.join(env.get("HOME", ""), ".tokdash")
-            db = env.get("TOKDASH_USAGE_DB_PATH") or (os.path.join(dd, "usage.sqlite3") if dd else "")
+            dd_env = env.get("TOKDASH_DATA_DIR")
+            db_env = env.get("TOKDASH_USAGE_DB_PATH")
+            dd = dd_env or os.path.join(env.get("HOME", ""), ".tokdash")
+            db = db_env or (os.path.join(dd, "usage.sqlite3") if dd else "")
             try:
-                if (dd and os.path.realpath(dd) == want_dir) or (db and os.path.realpath(db) == want_db):
-                    found.append(pid)
+                if not ((dd and os.path.realpath(dd) == want_dir)
+                        or (db and os.path.realpath(db) == want_db)):
+                    continue
             except OSError:
                 continue
+            # A default-location match is inferred, not proven: it convicts a real
+            # `tokdash serve` left running (that default IS ~/.tokdash), but the
+            # ambiguous dev-runner shape would convict every python project whose
+            # main.py happens to run under this $HOME. That form is only guilty
+            # when its own cwd is a Tokdash project root — its runner imports the
+            # package sitting right next to it.
+            if not (dd_env or db_env) and form == "ambiguous" \
+                    and not self._cwd_is_tokdash_project(pid):
+                continue
+            found.append(pid)
         return found
+
+    def _cwd_is_tokdash_project(self, pid):
+        """True when /proc/<pid>/cwd is a Tokdash project root: a ``main.py`` dev
+        runner sitting next to the package it imports (flat or ``src/`` layout)."""
+        try:
+            cwd = Path(os.readlink(f"/proc/{pid}/cwd"))
+        except OSError:
+            return False
+        return (cwd / "main.py").is_file() and (
+            (cwd / "tokdash" / "__main__.py").is_file()
+            or (cwd / "src" / "tokdash" / "__main__.py").is_file()
+        )
 
     def preflight(self, job):
         """Re-verify (against the helper's own eyes) everything the server checked."""
@@ -435,8 +498,13 @@ class Runner:
         return man
 
     def stop_service(self, name, bind, port):
-        self.systemctl("stop", name)
+        # Arm the flag BEFORE issuing the stop. A slow or failing `systemctl stop`
+        # still leaves systemd walking the unit down — recovery must then start it
+        # again, and starting an already-running unit is a safe no-op. Arming after
+        # the call is the bug: a stop that times out leaves the flag False, skips
+        # recovery, and strands the service stopped.
         self.service_stopped = True
+        self.systemctl("stop", name)
         probe_host = "127.0.0.1" if bind in {"0.0.0.0", "::", ""} else bind
         deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
@@ -562,7 +630,8 @@ class Runner:
         base = f"http://{probe_host}:{port}"
         deadline = time.monotonic() + READY_TIMEOUT
         last_error = "server never answered"
-        while time.monotonic() < deadline:
+        version_ok = False
+        while time.monotonic() < deadline and not version_ok:
             try:
                 health = self.http_json(f"{base}/health")
                 if health.get("service") != "tokdash":
@@ -574,13 +643,32 @@ class Runner:
                     if version_info.get("runtime_version") != to_version:
                         last_error = "runtime_version mismatch"
                     else:
-                        # Application-readiness beyond /health: exercise the usage DB.
-                        self.http_json(f"{base}/api/tools", timeout=15)
-                        return
+                        version_ok = True
+            except Exception as exc:
+                last_error = str(exc)
+            if not version_ok:
+                time.sleep(2)
+        if not version_ok:
+            raise RuntimeError(f"readiness check failed: {last_error}")
+
+        # The right version answers /health — now exercise the application itself
+        # (the usage-DB read path) under its OWN deadline: cold caches make the
+        # first request read every session rollout, tens of seconds on a large
+        # dev machine. That is slowness, not a failed update, so each probe gets
+        # READY_APP_PROBE_TIMEOUT and the phase gets READY_APP_TIMEOUT in total;
+        # only spending the whole budget re-proving the same slowness is failure.
+        app_deadline = time.monotonic() + READY_APP_TIMEOUT
+        while True:
+            remaining = app_deadline - time.monotonic()
+            if remaining <= 0:
+                raise RuntimeError(f"readiness check failed: {last_error}")
+            try:
+                self.http_json(f"{base}/api/tools",
+                               timeout=min(READY_APP_PROBE_TIMEOUT, max(1.0, remaining)))
+                return
             except Exception as exc:
                 last_error = str(exc)
             time.sleep(2)
-        raise RuntimeError(f"readiness check failed: {last_error}")
 
     def recover_service(self, name):
         try:

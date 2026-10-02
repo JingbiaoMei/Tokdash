@@ -22831,7 +22831,10 @@
         ui.jobBox.hidden = true; ui.refresh.hidden = true; ui.retry.hidden = true;
         ui.jobPhases.hidden = true; return;
       }
-      if (job.phase === 'failed' && updateJobAcked(job)) {
+      if ((job.phase === 'failed' || job.phase === 'succeeded') && updateJobAcked(job)) {
+        // Terminal notices — failure AND success — are dismissed by ack, remembered
+        // by job id: a "Refresh to finish" that resurrects itself on every page
+        // load is a notification, not a state.
         ui.jobBox.hidden = true; ui.refresh.hidden = true; ui.retry.hidden = true; return;
       }
       ui.jobBox.hidden = false;
@@ -22861,7 +22864,12 @@
           .replace('{phase}', job.failed_phase || job.phase)
           .replace('{message}', job.message || '');
         ui.jobPhases.hidden = true;
-        ui.retry.hidden = false;
+        // Retry is a plain second CLICK of the update button — so it only belongs
+        // on the box while that click would DO something (a target still newer
+        // than the runtime). After a readiness failure the new version IS running
+        // and there is no target: a button that hides the box and then no-ops is
+        // worse than no button.
+        ui.retry.hidden = !(updateCapabilityInfo && updateCapabilityInfo.target);
         return;
       }
       ui.jobBox.dataset.state = 'running';
@@ -23071,7 +23079,14 @@
 
     async function refreshUpdateCapability({ quiet = false } = {}) {
       try {
-        updateCapabilityInfo = await fetchJsonWithRetry(appPath('/api/update/capability'), { cache: 'no-store' });
+        const info = await fetchJsonWithRetry(appPath('/api/update/capability'), { cache: 'no-store' });
+        // A response CUT OFF mid-body (the planned outage kills the server
+        // mid-delivery) makes fetchJson RESOLVE NULL rather than throw — same
+        // epistemic position as no response at all, so treat it as a miss:
+        // recovery keeps polling instead of crashing on .latest_job of null
+        // and stranding the spinner.
+        if (!info) throw new Error('empty capability body');
+        updateCapabilityInfo = info;
       } catch (_) {
         updateCapabilityInfo = null;
         return null;
@@ -23081,11 +23096,14 @@
       if (job && !job.terminal) {
         renderUpdateJob(job);
         if (!updatePollTimer) startUpdatePolling(job.id);
-      } else if (job && job.phase === 'succeeded' && updateCapabilityInfo.current === job.to_version) {
+      } else if (job && job.phase === 'succeeded'
+                 && updateCapabilityInfo.current === job.to_version && !updateJobAcked(job)) {
         // A finished apply the page has not yet picked up (e.g. reopened tab): offer the
-        // refresh, but do NOT auto-reload — the reader chooses the moment.
+        // refresh, but do NOT auto-reload — the reader chooses the moment. Once acked
+        // (by click or by the refresh itself), the success stays dismissed: the journal
+        // is not a message queue, and "current === to_version" is true forever after.
         renderUpdateJob(job);
-      } else if (job && job.phase === 'failed') {
+      } else if (job && job.phase === 'failed' && !updateJobAcked(job)) {
         // A failed job must NOT vanish on reload/reconnect: the journal keeps it and we
         // keep showing it, until the user acknowledges it (a failure discovered only
         // from console logs is a failure nobody believed).
@@ -23106,13 +23124,13 @@
       if (ui.apply) ui.apply.addEventListener('click', requestDashboardUpdate);
       if (ui.enrollBtn) ui.enrollBtn.addEventListener('click', enrollUpdateBrowser);
       if (ui.jobBox) ui.jobBox.addEventListener('click', (event) => {
-        // Acknowledge a persisted failure: remembered by job id so a reload does not
-        // resurrect the same message forever. Buttons inside the box (retry/refresh)
-        // act; they must not also ack.
+        // Acknowledge a persisted terminal notice — failure OR success — remembered
+        // by job id so a reload does not resurrect it forever. Buttons inside the
+        // box (retry/refresh) act; they must not also ack.
         if (event.target.closest('button')) return;
-        if (ui.jobBox.dataset.state !== 'failed') return;
+        if (ui.jobBox.dataset.state !== 'failed' && ui.jobBox.dataset.state !== 'done') return;
         const job = updateCapabilityInfo && updateCapabilityInfo.latest_job;
-        if (job && job.phase === 'failed') {
+        if (job && (job.phase === 'failed' || job.phase === 'succeeded')) {
           localStorage.setItem(UPDATE_ACK_KEY, String(job.id));
           renderUpdateJob(null);
           updatePanelHideIfIdle();  // nothing left to show — retract the opener too
@@ -23128,6 +23146,13 @@
         if (event.key === 'Enter') enrollUpdateBrowser();
       });
       if (ui.refresh) ui.refresh.addEventListener('click', () => {
+        // Acknowledge the success BEFORE handing the tab to the new server: the
+        // whole point of "Refresh to finish" is that the notice did its job, and
+        // an un-acked success would greet the reloaded page again.
+        const doneJob = updateCapabilityInfo && updateCapabilityInfo.latest_job;
+        if (doneJob && doneJob.phase === 'succeeded') {
+          localStorage.setItem(UPDATE_ACK_KEY, String(doneJob.id));
+        }
         // Clear every cached version view, then hand the page to the NEW server —
         // success is established by the fresh runtime, never by the old promise.
         runtimeVersionPromise = null;

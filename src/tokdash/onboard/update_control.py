@@ -72,6 +72,17 @@ def start_update(
         return 403, {"detail": elig["reason"] or "This installation is not eligible for dashboard updates.",
                      "manual_command": update_mechanics.MANUAL_COMMAND}
 
+    # Attach BEFORE validating the version. Once the helper has restarted the
+    # service, the RUNNING version equals the job's target while the job is still
+    # finishing its readiness probe; a retried click carries that target and
+    # validate_target would answer 400 "not newer" on an update that is genuinely
+    # in flight. A live job always wins over a fresh admission (create_job applies
+    # the same rule under the lock; this peek just answers before it).
+    live = update_jobs.latest_job()
+    if live is not None and live.get("phase") not in update_jobs.TERMINAL_PHASES \
+            and not update_jobs.is_stale(live):
+        return 200, {"job": update_jobs.public_view(live), "attached": True}
+
     latest = None
     if updatecheck.is_enabled():
         check = updatecheck.check(current_version)

@@ -1174,19 +1174,24 @@ def test_lost_start_response_recovers_without_a_second_click():
 
 
 def _run_click_response_harness(cases_js: str) -> dict:
-    """Drive the real requestDashboardUpdate/recoverLostStart code in node.
+    """Drive the real requestDashboardUpdate/recoverLostStart/refreshUpdateCapability
+    code in node.
 
-    Extracts the two functions verbatim from index.html and evaluates them under
+    Extracts the functions verbatim from index.html and evaluates them under
     stubbed UI/network globals, so a test can script what the start response and
-    the capability endpoint do and observe what the browser code actually does.
+    the capability endpoint do (including a body cut off mid-delivery: the real
+    fetchJson RESOLVES null there) and observe what the browser code actually does.
     """
     node = __import__("shutil").which("node")
     if not node:
         pytest.skip("node not available")
     html = (Path(__file__).resolve().parents[1] / "src" / "tokdash" / "static"
             / "index.html").read_text(encoding="utf-8")
-    region = html[html.index("async function requestDashboardUpdate"):
-                  html.index("async function enrollUpdateBrowser")]
+    region = (html[html.index("async function requestDashboardUpdate"):
+                   html.index("async function enrollUpdateBrowser")]
+              + "\n"
+              + html[html.index("async function refreshUpdateCapability"):
+                     html.index("function initUpdateUi")])
     harness = """
 const state = { polls: [], capabilityCalls: 0, capabilityQueue: [] };
 global.setTimeout = (fn) => { fn(); return 0; };  // the bounded loop must answer fast in tests
@@ -1202,15 +1207,18 @@ global.UP_ICONS = { cross: '', spinner: '', check: '' };
 global.updatePanelReveal = () => {};
 global.recoverUpdateCsrf = async () => false;
 global.startUpdatePolling = (id) => { state.polls.push(id); };
-global.refreshUpdateCapability = async () => {
-  // Stands in for the real one, including its side effect: a live latest_job is
-  // rendered and handed to polling (the real function starts polling there).
+// renderUpdateApply/renderUpdateJob/updateJobAcked live OUTSIDE the extracted
+// region: stand in for them. The real refreshUpdateCapability calls all three.
+global.renderUpdateApply = () => {};
+global.updateJobAcked = () => false;
+global.updatePollTimer = null;
+// The capability ENDPOINT is a queue. A null entry models a response cut off
+// mid-body — fetchJsonWithRetry RESOLVES null there (fetchJson swallows the
+// parse error on a 200), exactly the case that used to crash the refresh path.
+global.fetchJsonWithRetry = async () => {
   state.capabilityCalls += 1;
   const q = state.capabilityQueue;
-  const info = q.length > 1 ? q.shift() : (q[0] === undefined ? null : q[0]);
-  const job = info && info.latest_job;
-  if (job && !job.terminal) { global.renderUpdateJob(job); global.startUpdatePolling(job.id); }
-  return info;
+  return q.length > 1 ? q.shift() : (q.length === 1 ? q[0] : null);
 };
 let __start = null;
 global.fetch = async (url) => {
@@ -1229,9 +1237,21 @@ global.fetch = async (url) => {
 async function runCase(c) {
   state.polls = []; state.capabilityCalls = 0; state.capabilityQueue = c.capability;
   __start = c.start;
+  // The real refresh overwrites updateCapabilityInfo every call; each case starts
+  // from the page's pre-refresh shape so requestDashboardUpdate sees its target.
+  global.updateCapabilityInfo = { target: '9.9.9', latest_job: null };
+  global.updatePollTimer = null;
   global.__ui = { apply: { hidden: false }, enroll: { hidden: false },
                   jobBox: { hidden: true, dataset: {} }, jobText: {} };
   global.__renders = [];
+  if (c.refreshOnly) {
+    try {
+      const ret = await refreshUpdateCapability({ quiet: true });
+      return { threw: null, returnedNull: ret === null,
+               infoNull: global.updateCapabilityInfo === null,
+               capabilityCalls: state.capabilityCalls };
+    } catch (e) { return { threw: String(e && e.message || e) }; }
+  }
   await requestDashboardUpdate();
   return {
     polls: state.polls, capabilityCalls: state.capabilityCalls,
@@ -1266,6 +1286,15 @@ const CASES = %%CASES%%;
         {"name": "refused_truncated", "start": {"kind": "status", "status": 503,
                                                 "jsonReject": True},
          "capability": [{"latest_job": None}]},
+        # A CAPABILITY response cut off mid-body during recovery: fetchJsonWithRetry
+        # resolves null on the truncated 200. That used to make the real refresh
+        # throw on null.latest_job inside recoverLostStart — an unhandled rejection
+        # that strands the spinner forever. It must count as a miss instead.
+        {"name": "capability_truncated_recovery", "start": {"kind": "reject"},
+         "capability": [None, {"latest_job": {"id": "j-live", "terminal": False}}]},
+        # The same shape on a plain refresh: null out through the contract, no throw.
+        {"name": "refresh_truncated_body", "refreshOnly": True, "start": None,
+         "capability": [None]},
     ]
     import json as _json
     import subprocess as _sp
@@ -1292,6 +1321,16 @@ def test_click_response_variants_behave_correctly():
     assert out["refused_truncated"]["capabilityCalls"] == 0
     assert out["refused_truncated"]["boxState"] == "failed"
     assert "503" in out["refused_truncated"]["boxText"]
+    # A capability response cut off mid-body (fetchJsonWithRetry resolves null) is a
+    # MISS, not a crash: recovery survives it and still recovers the durable job.
+    # Pre-fix this made refreshUpdateCapability throw on null.latest_job, rejecting
+    # requestDashboardUpdate outright.
+    assert out["capability_truncated_recovery"]["capabilityCalls"] >= 2
+    assert out["capability_truncated_recovery"]["polls"] == ["j-live"]
+    # The refresh contract on a truncated body: null out, never throw.
+    assert out["refresh_truncated_body"]["threw"] is None
+    assert out["refresh_truncated_body"]["returnedNull"] is True
+    assert out["refresh_truncated_body"]["infoNull"] is True
 
 
 def _seed_snapshots(backups_dir, *stamps):
@@ -1452,6 +1491,196 @@ def test_sibling_scan_covers_console_scripts_and_shared_db(eligible_env, tmp_pat
     r = update_helper.Runner(tmp_path, "j", lambda m: None)
     pids = r._sibling_tokdash_pids(exclude={999}, usage_db=db)
     assert sorted(pids) == [111, 333]
+
+
+# --- review round 5: recovery, binding precision, budgets, page lifecycle -----------
+
+
+def test_slow_or_failed_stop_still_recovers_service(eligible_env, tmp_path):
+    # `systemctl stop` is bounded by SERVICE_OP_TIMEOUT; if it times out (or errors)
+    # AFTER systemd has walked the unit down, skipping the recovery start strands
+    # the service stopped while the job message claims "Nothing was changed beyond
+    # the service restart" — the one outcome this feature must never produce.
+    # Arming service_stopped before issuing the stop makes recovery run either
+    # way, and starting a running unit is a safe no-op.
+    job = _seed_job(tmp_path)
+
+    class StuckStop(FakeRunner):
+        def run(self, args, timeout=60):
+            self.calls.append(list(args))
+            if args[:3] == ["systemctl", "--user", "stop"]:
+                raise RuntimeError("systemctl --user stop failed: timed out")
+            return super().run(args, timeout=timeout)
+
+    runner = StuckStop(tmp_path, job["id"], lambda m: None)
+    ok = update_helper.main(str(tmp_path), job["id"], runner=runner, opener=lambda *a, **k: {})
+    assert ok is False
+    stop_i = next(i for i, c in enumerate(runner.calls)
+                  if c[:3] == ["systemctl", "--user", "stop"])
+    starts = [i for i, c in enumerate(runner.calls)
+              if i > stop_i and c[:3] == ["systemctl", "--user", "start"]]
+    assert starts, "a failed/slow stop must still attempt the recovery start"
+    assert update_jobs.get_job(job["id"])["phase"] == "failed"
+
+
+def test_readiness_gives_a_cold_app_probe_a_real_budget(eligible_env, tmp_path):
+    # The FIRST /api/tools call on a freshly restarted server reads every session
+    # rollout — tens of seconds on a large dev machine, then milliseconds. That is
+    # slowness, not a failed update: the probe must run under its own, longer
+    # deadline with a per-request timeout a cold read can actually satisfy.
+    r = update_helper.Runner(tmp_path, "j", lambda m: None)
+    probes = []
+
+    def opener(url, timeout=5):
+        if url.endswith("/health"):
+            return {"service": "tokdash", "version": "9.9.9"}
+        if url.endswith("/api/version"):
+            return {"runtime_version": "9.9.9"}
+        # Simulate the cold cache: answering takes READY_APP_PROBE_TIMEOUT-ish;
+        # any client with a shorter per-request ceiling just times out.
+        probes.append(timeout)
+        if timeout < update_helper.READY_APP_PROBE_TIMEOUT:
+            raise RuntimeError("timed out")
+        return {"tools": []}
+
+    r.http_json = opener
+    r.readiness("9.9.9", "127.0.0.1", 55423)  # must NOT raise
+    assert probes and probes[0] >= update_helper.READY_APP_PROBE_TIMEOUT
+
+
+def test_readiness_app_probe_still_bails_out(eligible_env, tmp_path, monkeypatch):
+    # The generous budget is still a budget: an application endpoint that never
+    # answers must end the job, not wedge the helper (journal reconciliation
+    # depends on every step being individually bounded).
+    monkeypatch.setattr(update_helper, "READY_APP_TIMEOUT", 1)
+    monkeypatch.setattr(update_helper, "READY_APP_PROBE_TIMEOUT", 1)
+    monkeypatch.setattr(time, "sleep", lambda s: None)
+    r = update_helper.Runner(tmp_path, "j", lambda m: None)
+
+    def opener(url, timeout=5):
+        if url.endswith("/health"):
+            return {"service": "tokdash", "version": "9.9.9"}
+        if url.endswith("/api/version"):
+            return {"runtime_version": "9.9.9"}
+        raise RuntimeError("always slow")
+
+    r.http_json = opener
+    with pytest.raises(RuntimeError, match="readiness check failed"):
+        r.readiness("9.9.9", "127.0.0.1", 55423)
+
+
+def test_tokdash_launch_needs_a_launch_not_a_mention():
+    # An editor opened on the repo, or `git`/`find`/node naming a tokdash-ish
+    # path, must never be classified as a running tokdash — those refusals block
+    # every future update of the REAL service over a false positive.
+    L = update_helper._tokdash_launch
+    assert L(["/home/u/.local/bin/tokdash", "serve"]) == "definite"
+    assert L(["tokdash", "serve"]) == "definite"
+    assert L(["/venv/bin/python", "-m", "tokdash", "serve"]) == "definite"
+    assert L(["/venv/bin/python", "/home/u/.local/bin/tokdash", "serve"]) == "definite"
+    assert L(["python3", "main.py"]) == "ambiguous"  # dev-runner shape — binder decides
+    assert L(["/usr/bin/python", "-m", "pip", "install", "tokdash==9.9.9"]) is None
+    assert L(["systemctl", "--user", "restart", "tokdash"]) is None
+    assert L(["/usr/bin/code", "/home/u/Dev/Tokdash_Project/tokdash"]) is None
+    assert L(["vim", "/home/u/other/main.py"]) is None
+    assert L(["node", "main.py", "serve"]) is None
+    assert L(["git", "-C", "/home/u/Dev/tokdash", "status"]) is None
+    assert L(["/usr/bin/code", "tokdash"]) is None  # basename-only mention
+
+
+def test_sibling_scan_requires_a_positive_binding(eligible_env, tmp_path, monkeypatch):
+    # Home's DEFAULT data dir is the update's own — so an inferred default-location
+    # match may only convict definite launches. The ambiguous `python main.py`
+    # shape additionally has to be sitting in a Tokdash project root, or every
+    # python project run under this $HOME would block the update forever.
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".tokdash").symlink_to(tmp_path)  # inferred default == our data dir
+    other = tmp_path / "other-project"
+    (other / "sub").mkdir(parents=True)
+    proj = tmp_path / "tokdash-checkout"
+    (proj / "src" / "tokdash").mkdir(parents=True)
+    (proj / "main.py").write_text("# dev runner\n", encoding="utf-8")
+    (proj / "src" / "tokdash" / "__main__.py").write_text("", encoding="utf-8")
+
+    cwds = {111: other, 333: proj}
+
+    # Patching os.readlink hits EVERY readlink (posixpath.realpath uses it too),
+    # so only /proc/<pid>/cwd is faked; everything else falls through to the
+    # real syscall.
+    import os as _os
+    real_readlink = _os.readlink
+
+    def fake_readlink(path, *a, **k):
+        parts = str(path).split("/")
+        if len(parts) > 3 and parts[1] == "proc" and parts[2].isdigit():
+            return str(cwds[int(parts[2])])
+        return real_readlink(path, *a, **k)
+
+    def fake_snapshot(self):
+        # 111: unrelated project's main.py, no env, cwd elsewhere -> ignored
+        yield 111, ["/usr/bin/python3", "main.py", "serve"], {"HOME": str(home)}
+        # 222: editor opened ON the tokdash checkout -> not even a launch
+        yield 222, ["/usr/bin/code", str(proj)], {"HOME": str(home)}
+        # 333: real dev-runner co-tenant on the default dir, cwd = project root -> caught
+        yield 333, ["/usr/bin/python3", "main.py", "serve"], {"HOME": str(home)}
+        # 444: plain `tokdash serve`, no env -> definite launch + default dir -> caught
+        yield 444, ["tokdash", "serve"], {"HOME": str(home)}
+
+    monkeypatch.setattr(update_helper.Runner, "_proc_snapshot", fake_snapshot)
+    monkeypatch.setattr(update_helper.os, "readlink", fake_readlink)
+    r = update_helper.Runner(tmp_path, "j", lambda m: None)
+    assert sorted(r._sibling_tokdash_pids(exclude=set())) == [333, 444]
+
+
+def test_update_handlers_are_off_the_event_loop():
+    # capability does systemctl subprocesses (5-10s timeouts) + a PyPI request;
+    # start waits on systemd-run (30s) and locks. As coroutines that work runs ON
+    # the event loop — it stalls /health, which the browser's own recovery loop
+    # polls. Plain-def endpoints run in Starlette's threadpool instead.
+    import inspect
+    endpoints = {r.path: r.endpoint for r in api.app.routes
+                 if str(getattr(r, "path", "")).startswith("/api/update/")}
+    assert {"/api/update/capability", "/api/update/enroll",
+            "/api/update/start", "/api/update/status"} <= set(endpoints)
+    for path, fn in endpoints.items():
+        assert not inspect.iscoroutinefunction(fn), f"{path} blocks the event loop"
+
+
+def test_retry_after_restart_attaches_to_live_job(eligible_env, tmp_path):
+    # Once the NEW version is serving while its job is still verifying readiness,
+    # the cached target is no longer "newer" than the runtime. A retried click
+    # must JOIN the live job — 400 "not newer" over a version comparison hides an
+    # update that is genuinely in flight.
+    job = _seed_job(tmp_path, to_version="9.9.9")
+    update_jobs.set_phase(job["id"], "starting")
+    status, body = update_control.start_update("9.9.9", current_version="9.9.9")
+    assert status == 200, body
+    assert body.get("attached") is True
+    assert body["job"]["id"] == job["id"]
+
+
+def test_terminal_notices_are_acknowledgeable():
+    # Review round 5 (page): "Refresh to finish." reappeared on EVERY load because
+    # success has no ack path and `current === to_version` stays true forever;
+    # and "Try again" after a readiness failure hid the box and then no-op'd.
+    html = (Path(__file__).resolve().parents[1] / "src" / "tokdash" / "static"
+            / "index.html").read_text(encoding="utf-8")
+    rj = html[html.index("function renderUpdateJob"):html.index("function startUpdatePolling")]
+    assert "(job.phase === 'failed' || job.phase === 'succeeded') && updateJobAcked(job))" in rj
+    assert "ui.retry.hidden = !(updateCapabilityInfo && updateCapabilityInfo.target);" in rj
+
+    cap = html[html.index("async function refreshUpdateCapability"):
+               html.index("function initUpdateUi")]
+    assert cap.count("!updateJobAcked(job)") == 2, "both terminal branches must respect the ack"
+
+    init = html[html.index("function initUpdateUi"):html.index("function renderUpdateBadge")]
+    box = init[:init.index("ui.retry.addEventListener")]
+    assert "ui.jobBox.dataset.state !== 'done'" in box, "success box must be clickable-to-ack"
+    assert "job.phase === 'succeeded'))" in box
+    refresh = init[init.index("if (ui.refresh)"):init.index("window.location.reload")]
+    assert "doneJob.phase === 'succeeded'" in refresh and "UPDATE_ACK_KEY" in refresh, \
+        "the refresh click itself must acknowledge the success it delivered"
 
 
 # --- CLI/engine contract -------------------------------------------------------------------------

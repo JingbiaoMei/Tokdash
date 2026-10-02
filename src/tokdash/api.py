@@ -2701,8 +2701,13 @@ def _update_request_class(request: Request) -> str:
     return "other"
 
 
+# Sync handlers on purpose: capability/start/status run systemctl subprocesses
+# (5-10s timeouts), a PyPI check (3s), systemd-run (30s), and lock waits. As
+# coroutines those would block the event loop — stalling every other request
+# including /health, which the browser recovery loop itself polls. Plain ``def``
+# routes run in Starlette's threadpool instead.
 @app.get("/api/update/capability")
-async def update_capability(request: Request, want_csrf: bool = False) -> Dict[str, Any]:
+def update_capability(request: Request, want_csrf: bool = False) -> Dict[str, Any]:
     from .onboard import update_auth, update_control
 
     plane = _update_request_class(request)
@@ -2723,7 +2728,7 @@ async def update_capability(request: Request, want_csrf: bool = False) -> Dict[s
 
 
 @app.post("/api/update/enroll")
-async def update_enroll(request: Request, payload: Dict[str, Any] = None) -> JSONResponse:
+def update_enroll(request: Request, payload: Dict[str, Any] = None) -> JSONResponse:
     from .onboard import update_auth
 
     plane = _update_request_class(request)
@@ -2757,7 +2762,7 @@ async def update_enroll(request: Request, payload: Dict[str, Any] = None) -> JSO
 
 
 @app.post("/api/update/start")
-async def update_start(request: Request, payload: Dict[str, Any] = None) -> JSONResponse:
+def update_start(request: Request, payload: Dict[str, Any] = None) -> JSONResponse:
     from .onboard import update_control
 
     plane = _update_request_class(request)
@@ -2775,7 +2780,7 @@ async def update_start(request: Request, payload: Dict[str, Any] = None) -> JSON
 
 
 @app.get("/api/update/status")
-async def update_status(request: Request, job: Optional[str] = None) -> Dict[str, Any]:
+def update_status(request: Request, job: Optional[str] = None) -> Dict[str, Any]:
     from .onboard import update_auth, update_jobs
 
     plane = _update_request_class(request)

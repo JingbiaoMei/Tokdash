@@ -22,6 +22,10 @@ per-session token); see [`docs/SECURITY.md`](../SECURITY.md) and `PUT /api/prici
 | `GET` | `/api/csrf-token` | Per-session write token (loopback/same-origin only) |
 | `GET` | `/api/update-check` | Opt-in cached PyPI version check (read-only) |
 | `POST` | `/api/update-check/consent` | Persist one-time update-check consent (write-gated) |
+| `GET` | `/api/update/capability` | Click-to-update eligibility, target, live job (loopback or enrolled-remote) |
+| `POST` | `/api/update/enroll` | Redeem a host-minted pairing code for a remote session |
+| `POST` | `/api/update/start` | Admit/attach one update job and launch the isolated updater |
+| `GET` | `/api/update/status` | Job progress for the click-to-update flow (session-gated when remote) |
 | `GET` | `/api/usage` | Aggregated token usage and cost across all tools |
 | `GET` | `/api/tools` | Per-tool usage breakdown (coding apps only) |
 | `GET` | `/api/quota` | Current subscription quota state from local snapshots |
@@ -166,8 +170,10 @@ Opt-in, default-off PyPI version check (see `docs/guides/ONBOARDING.md` → Upda
 — PyPI read plus an in-memory cache, no disk write — so it is served as `GET` and is **not**
 write-gated; it works over Tailscale/WSL/any forward like `GET /api/quota/refresh` (see
 `docs/SECURITY.md`). No-op unless update checks are enabled (`TOKDASH_UPDATE_CHECK=1` or saved
-consent). Result is cached for hours; never an automatic/background call, and it only *reports*
-— it never runs an upgrade.
+consent). Result is cached for hours; never an automatic/background call, and this endpoint
+itself only *reports*. Starting an upgrade is a separate, gated flow — the eligible managed
+install's dashboard `POST /api/update/start` (see the update endpoints above and
+`docs/guides/ONBOARDING.md` → "Dashboard updates"), or `tokdash update` from a terminal.
 
 **Response (enabled)**
 ```json

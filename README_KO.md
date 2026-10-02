@@ -476,6 +476,7 @@ TOKDASH_DATA_DIR=output/dev-data PYTHONPATH=src python3 main.py
 - `TOKDASH_USAGE_DB` (기본값: `1`) — `0`, `false`, `no`, `off` 중 하나로 설정하면 영속 사용량 DB 비활성화
 - `TOKDASH_DATA_DIR` (기본값: `~/.tokdash`) — Tokdash 로컬 상태의 기본 디렉터리
 - `TOKDASH_USAGE_DB_PATH` (기본값: `$TOKDASH_DATA_DIR/usage.sqlite3`) — 명시적 SQLite 파일 경로
+- `TOKDASH_UPDATE_ORIGIN` (기본값 미설정) — 원격 브라우저의 클릭 업데이트 페어링을 허용하는 정확한 HTTPS 오리진. 미설정이면 원격 업데이트가 완전히 꺼집니다 (페어링 코드는 `tokdash update-enroll`로 발급)
 - `TOKDASH_USAGE_DB_DURABLE` (기본값: `1`) — 소스 파일이 일시적으로 사라지거나 파서가 행을 반환하지 않아도 이미 인덱싱된 행을 유지. 엄격한 소스 대체를 원하면 `0`
 - `TOKDASH_USAGE_DB_WATCH` (기본값: `0`) — `1`로 설정하면 `tokdash serve` 내부에서 백그라운드 동기화 루프 실행
 - `TOKDASH_USAGE_DB_WATCH_INTERVAL` (기본값: `30`초) — `tokdash db watch`와 serve 시 워치 루프의 동기화 간격

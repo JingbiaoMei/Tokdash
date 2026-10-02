@@ -200,8 +200,42 @@ you explicitly ask:
 - When enabled, `tokdash doctor` reports whether a newer version is on PyPI, and
   `GET /api/update-check` (read-only — PyPI read + in-memory cache, not write-gated, so it
   works over Tailscale/WSL/any forward) returns the comparison.
-  Results are cached for hours; there are no automatic background checks. The check only
-  *reports* availability — it never runs an upgrade (run `tokdash update` for that).
+  Results are cached for hours; there are no automatic background checks. The check itself
+  only *reports* availability. On an eligible managed install the dashboard can go one step
+  further and apply the update for you — see "Dashboard updates" below — and anywhere else
+  you run `tokdash update`.
+
+### Dashboard updates (click to update)
+
+On a **managed install** (setup-created pipx/venv runtime with a managed service on
+Linux/systemd), the update notice carries an **Update to vX.Y.Z** button instead of only the
+terminal command. What the click runs is decided server-side — the page's claims prove nothing:
+
+- Only when eligibility passes (recorded install method, intact service identity); everything
+  else keeps the copyable `tokdash update` command as the whole story.
+- The apply does **not** run inside the server (the upgrade replaces the code that server is
+  serving). The server stages the dependency-free updater OUTSIDE the package tree and hands it
+  to `systemd-run --user`, which survives the service it is about to stop: stop → usage-DB
+  backup → exact-version install → start → bounded application-readiness probe, with service
+  recovery attempted on every failure path and the outcome recorded in a durable journal.
+- The popover shows live phases; a response lost to the planned outage recovers the job without
+  a second click, a failure offers Try again, and the success notice dismisses permanently once
+  acknowledged.
+
+Remote browsers can drive the same flow, but only with an explicit opt-in:
+
+1. **Pin the exact public origin**: `TOKDASH_UPDATE_ORIGIN=https://<host>.ts.net` (env, or
+   `update_origin` in `config.json`). Unset = the remote update plane is completely off.
+2. **Mint a pairing code on the host**: `tokdash update-enroll`. Codes are single-use —
+   consumed whether the browser's guess is right or wrong — and enrollment attempts are
+   rate-limited.
+3. **Enter the code once** in the browser's update popover. The browser receives a `Secure`
+   `HttpOnly` host-only session cookie and an in-memory CSRF token (re-minted automatically
+   after a reload over the still-valid session); then it can click Update wherever that HTTPS
+   origin serves the dashboard.
+
+The security model for all of this is `docs/SECURITY.md` → "The one authenticated-write
+exception".
 
 ## `tokdash uninstall`
 

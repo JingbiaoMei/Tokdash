@@ -506,6 +506,7 @@ TOKDASH_DATA_DIR=output/dev-data PYTHONPATH=src python3 main.py
 - `TOKDASH_USAGE_DB`（默认：`1`）——设为 `0`、`false`、`no` 或 `off` 可禁用持久化使用量 DB
 - `TOKDASH_DATA_DIR`（默认：`~/.tokdash`）——Tokdash 本地状态目录
 - `TOKDASH_USAGE_DB_PATH`（默认：`$TOKDASH_DATA_DIR/usage.sqlite3`）——显式指定 SQLite 文件路径
+- `TOKDASH_UPDATE_ORIGIN`（默认不设置）——允许远程浏览器配对「点击更新」的精确 HTTPS 来源；不设置即远程更新完全关闭（用 `tokdash update-enroll` 生成配对码）
 - `TOKDASH_USAGE_DB_DURABLE`（默认：`1`）——当源文件临时消失或解析器返回空结果时保留已索引行；设为 `0` 则严格按源文件替换
 - `TOKDASH_USAGE_DB_WATCH`（默认：`0`）——设为 `1` 后，`tokdash serve` 内部会启动后台同步循环
 - `TOKDASH_USAGE_DB_WATCH_INTERVAL`（默认：`30` 秒）——`tokdash db watch` 和 serve-time watch 循环的同步间隔

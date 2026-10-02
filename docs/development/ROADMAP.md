@@ -101,9 +101,18 @@ service worker), which covers the "standalone app window" want with zero code.
 
 ## Dashboard update notice — ✅ shipped
 Opt-in update badge in the dashboard header backed by the existing `§14` update-check endpoints
-(`/api/version`, `GET /api/update-check`, `POST /api/update-check/consent`). Constraints that
-must hold for any future change: no network check without consent (§14), and the web UI never
-executes the upgrade — it shows a copyable `tokdash update` command only (§15).
+(`/api/version`, `GET /api/update-check`, `POST /api/update-check/consent`). Constraint that
+must hold for any future change: no network check without consent (§14).
+
+**§15 amendment (accepted 2026-10).** The "the web UI never executes the upgrade" clause was
+overturned by the owner when the click-to-update feature was commissioned: eligible *managed*
+installs can now apply an update from the dashboard itself. The safety framing carries the
+constraint instead of the prohibition: server-side eligibility only (the page's claims prove
+nothing), loopback or pairing-code/session auth, the apply executed by an isolated transient
+systemd helper OUTSIDE the server process (never a thread or child of what it stops), bounded
+recovery, and the copyable `tokdash update` command kept as the fallback for every install the
+click path does not cover. Design: `docs/local/20260927_auto_update/AUTO_UPDATE_FEASIBILITY.md`;
+user-facing: `docs/guides/ONBOARDING.md` ("Dashboard updates"); threat model: `docs/SECURITY.md`.
 
 ## Client / IDE support
 Principle: **no inference**. Only emit entries when numeric token fields exist.

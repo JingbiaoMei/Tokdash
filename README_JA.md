@@ -476,6 +476,7 @@ TOKDASH_DATA_DIR=output/dev-data PYTHONPATH=src python3 main.py
 - `TOKDASH_USAGE_DB`（デフォルト: `1`） — `0`、`false`、`no`、`off` のいずれかに設定すると永続使用量 DB を無効化
 - `TOKDASH_DATA_DIR`（デフォルト: `~/.tokdash`） — Tokdash ローカル状態のベースディレクトリ
 - `TOKDASH_USAGE_DB_PATH`（デフォルト: `$TOKDASH_DATA_DIR/usage.sqlite3`） — 明示的な SQLite ファイルパス
+- `TOKDASH_UPDATE_ORIGIN`（デフォルト未設定）— リモートブラウザのクリック更新ペアリングを許可する完全な HTTPS オリジン。未設定ならリモート更新は完全に無効（ペアリングコードは `tokdash update-enroll` で発行）
 - `TOKDASH_USAGE_DB_DURABLE`（デフォルト: `1`） — ソースファイルが一時的に消えたりパーサーが行を返さなくなっても、インデックス済みの行を保持。厳密なソース置き換えにするには `0`
 - `TOKDASH_USAGE_DB_WATCH`（デフォルト: `0`） — `1` にすると `tokdash serve` 内でバックグラウンド同期ループを実行
 - `TOKDASH_USAGE_DB_WATCH_INTERVAL`（デフォルト: `30` 秒） — `tokdash db watch` と serve 時のウォッチループの同期間隔

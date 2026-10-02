@@ -476,6 +476,7 @@ TOKDASH_DATA_DIR=output/dev-data PYTHONPATH=src python3 main.py
 - `TOKDASH_USAGE_DB` (padrão: `1`) — defina `0`, `false`, `no` ou `off` para desabilitar o banco de uso persistente
 - `TOKDASH_DATA_DIR` (padrão: `~/.tokdash`) — diretório base do estado local do Tokdash
 - `TOKDASH_USAGE_DB_PATH` (padrão: `$TOKDASH_DATA_DIR/usage.sqlite3`) — caminho explícito do arquivo SQLite
+- `TOKDASH_UPDATE_ORIGIN` (sem valor) — origem HTTPS exata autorizada a parear um navegador remoto para atualizar com um clique; sem valor, atualizações remotas ficam totalmente desativadas (`tokdash update-enroll` emite os códigos)
 - `TOKDASH_USAGE_DB_DURABLE` (padrão: `1`) — mantém linhas já indexadas se um arquivo de origem sumir temporariamente ou um parser não retornar linhas; defina `0` para substituição estrita de origem
 - `TOKDASH_USAGE_DB_WATCH` (padrão: `0`) — defina `1` para rodar um loop de sincronização em segundo plano dentro do `tokdash serve`
 - `TOKDASH_USAGE_DB_WATCH_INTERVAL` (padrão: `30` segundos) — intervalo de sincronização do `tokdash db watch` e do loop de observação durante o serve

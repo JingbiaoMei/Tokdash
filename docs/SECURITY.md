@@ -38,6 +38,34 @@ as non-loopback):
   `X-Tokdash-Token`. The dashboard fetches it from `GET /api/csrf-token` (itself loopback/
   same-origin gated, so another localhost port can't read it).
 
+### The one authenticated-write exception: dashboard click-to-update
+
+The dashboard updater (`POST /api/update/enroll` and `/api/update/start`) is deliberately **not**
+reachable through the loopback write gate above — it is the single state-changing path allowed to
+serve a genuine remote caller, and it carries its own, stronger authentication chain instead of
+the loopback/Host/token trio:
+
+- **An explicit opt-in origin.** Remote updates stay off until the operator pins the exact HTTPS
+  origin in `TOKDASH_UPDATE_ORIGIN` (or `update_origin` in `config.json`). No origin configured =
+  every remote update request is refused; the localhost CLI path is unaffected.
+- **A pairing code minted on the host.** `tokdash update-enroll` issues a single-use code; the
+  browser redeems it at `POST /api/update/enroll` to get a session. The code is consumed whether
+  the guess is right or wrong, and enrollment is rate-limited.
+- **A `Secure`/`HttpOnly`/`SameSite=Lax` host-only session cookie + a double-submit CSRF token.**
+  The cookie authenticates exactly the pinned origin's pages (never a Domain-wide share, never
+  readable by script or localStorage); the CSRF token lives only in that page's memory and must be
+  echoed on every write, so a cross-site page cannot forge one even with the cookie attached.
+- **Server-side eligibility, re-checked at apply.** The page's claims prove nothing; the updater
+  re-verifies eligibility and a valid target, and the actual package swap runs OUTSIDE the server
+  process (a transient `systemd-run --user` unit), never a thread/child of the service it stops.
+  `GET /api/update/status` requires the same enrolled session.
+
+This is the ONLY write that reaches a non-loopback caller, and only over an HTTPS origin the
+operator configured. Everything else — `PUT /api/pricing-db`, the quota/consent/settings writes,
+`POST /api/update-check/consent` — remains loopback-gated exactly as before. A localhost browser
+uses the ordinary loopback write path (`X-Tokdash-Token`) for `/api/update/start`; the pairing
+chain is only for remote origins.
+
 For setup commands and a comparison of remote-access methods, see
 [`REMOTE_ACCESS.md`](guides/REMOTE_ACCESS.md). Prefer `ssh -L` forwarding, Tailscale Serve,
 or Cloudflare Tunnel protected by Cloudflare Access over a non-loopback bind.
@@ -51,9 +79,12 @@ headers:
   and reliably distinguishing a forwarded-localhost connection from a genuine local one is
   not possible from HTTP headers. If you do not want SSH-forwarded writes, bind to a
   non-loopback address (which disables all writes) or stop the service when you are done.
-- **Tailscale Serve** requests are effectively read-only (their foreign `Host` / `https`
-  `Origin` fail the allowlist). Tailscale identity is the read-access boundary: only
-  devices on your tailnet can connect.
+- **Tailscale Serve** requests are effectively read-only *through the write gate* (their foreign
+  `Host` / `https` `Origin` fail the allowlist). Tailscale identity is the read-access boundary:
+  only devices on your tailnet can connect. The single carve-out is the authenticated
+  click-to-update plane above: if you pin this Serve hostname in `TOKDASH_UPDATE_ORIGIN`, an
+  enrolled + CSRF-tokened browser on your tailnet may start an update — that is the feature
+  working as designed, and pinning the origin IS the opt-in.
 - **Cloudflare Tunnel** requests fail the same allowlist — cloudflared preserves the
   external `Host`/`Origin` — and are read-only through the gate. The tunnel alone
   authenticates no one — a **Cloudflare Access** application in front of the hostname is

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import bisect
 import json
+import logging
 import math
 import os
 import subprocess
@@ -9,6 +10,8 @@ import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
+
+logger = logging.getLogger(__name__)
 
 from .dateutil import parse_date_range
 from .model_normalization import normalize_model_name
@@ -391,25 +394,35 @@ def run_local_coding_tools_json(period_args: list[str]) -> Dict[str, Any]:
     """Collect coding-tool entries using the in-process local parsers."""
     since, until = _date_range_from_args(period_args)
     tracker = CodingToolsUsageTracker()
+    db_error: Optional[str] = None
     if persistent_usage_db_enabled():
         try:
             store, stored_sources = _sync_usage_store(tracker)
             entries = store.query_entries(sources=stored_sources, since=since, until=until)
             entries.extend(_collect_live_coding_entries(tracker, since, until, _usage_store_live_sources(tracker)))
             entries.sort(key=lambda e: int(e.get("timestamp", 0) or 0))
-            return {"entries": entries}
+            return {
+                "entries": entries,
+                "source_errors": tracker.source_errors,
+            }
         except UsageDatabaseSchemaTooNewError:
             # A newer database is terminal for this build; reparsing the logs
             # instead would hide the skew behind a permanent full-history reparse.
             raise
-        except Exception:
+        except Exception as exc:
             # The persistent DB is a cache. If it is corrupt or temporarily
             # unavailable, preserve current behavior by falling back to the live
             # parsers for this request.
-            pass
+            logger.warning(
+                "tokdash persistent usage cache failed; falling back to live parsers",
+                exc_info=True,
+            )
+            db_error = str(exc)
     tracker.collect(since, until)
     data = tracker.to_json()
     data["entries"] = [public_usage_entry(entry) for entry in data.get("entries", [])]
+    if db_error is not None:
+        data.setdefault("source_errors", []).append({"source": "usage-db", "error": db_error})
     return data
 
 
@@ -834,6 +847,7 @@ def get_tools_data_for_range(
     """
     if USE_LOCAL_CODING_TOOLS_BACKEND:
         tracker = CodingToolsUsageTracker()
+        db_error: Optional[str] = None
         if persistent_usage_db_enabled():
             try:
                 if sync:
@@ -854,13 +868,20 @@ def get_tools_data_for_range(
                 # schema never heals on retry, so degrading here would reparse the
                 # full history on every request.
                 raise
-            except Exception:
+            except Exception as exc:
                 # Keep the DB fail-open: serving correctness should not depend on
                 # cache health while this backend is still evolving.
-                pass
+                logger.warning(
+                    "tokdash persistent usage cache failed; falling back to live parsers",
+                    exc_info=True,
+                )
+                db_error = str(exc)
         tracker.collect(since, until)
         result = parse_entries_json(tracker.to_json())
-        result["source_errors"] = [e["source"] for e in tracker.source_errors]
+        errors = [e["source"] for e in tracker.source_errors]
+        if db_error is not None and "usage-db" not in errors:
+            errors.append("usage-db")
+        result["source_errors"] = errors
         return result
 
     since_str = since.astimezone().strftime("%Y-%m-%d")
@@ -887,7 +908,10 @@ def get_tools_contributions_for_range(since: Optional[datetime], until: Optional
             except UsageDatabaseSchemaTooNewError:
                 raise
             except Exception:
-                pass
+                logger.warning(
+                    "tokdash persistent usage cache failed for contributions; falling back to live parsers",
+                    exc_info=True,
+                )
         tracker.collect(since, until)
         return _contributions_from_entries(tracker.to_json().get("entries", []))
 

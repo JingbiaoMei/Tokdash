@@ -533,7 +533,10 @@ def _collect_normalized_entries(
             # version skew into a pinned server.
             raise
         except Exception:
-            pass
+            logger.warning(
+                "tokdash persistent openclaw cache failed; falling back to session logs",
+                exc_info=True,
+            )
 
     return [_normalized_entry(e, pricing_db) for e in _collect_entries(session_dirs)]
 
@@ -750,7 +753,10 @@ def get_session_usage(
         except UsageDatabaseSchemaTooNewError:
             raise
         except Exception:
-            pass
+            logger.warning(
+                "tokdash persistent openclaw cache failed; falling back to session logs",
+                exc_info=True,
+            )
 
     entries = _collect_normalized_entries(session_dirs, pricing_db, since_date, until_date)
 

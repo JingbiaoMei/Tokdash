@@ -5238,21 +5238,6 @@ class DSHParser(BaseParser):
             lambda: dsh_file_signatures(self.sessions_dir),
         )
 
-    def _report_decoded(self, path_str: str, decoded: Any) -> None:
-        """Say so when a decoded log came up short.
-
-        A file that yields no rows and a file that yielded none because it could
-        not be read look identical downstream -- which is the whole of issue #147.
-        Both entry points report here so neither surface can be quietly smaller.
-        """
-        if getattr(decoded, "failed_frames", 0):
-            dsh_log_module.report_dsh_diagnostic(
-                path_str,
-                "frames-lost",
-                f"{decoded.failed_frames} zstd frame(s) did not decode; their rows are "
-                "missing from this source",
-            )
-
     def _entries_for_decoded(self, path_str: str, decoded: Any) -> List[Dict[str, Any]]:
         """Fold one decoded log into usage entries.
 
@@ -5260,16 +5245,6 @@ class DSHParser(BaseParser):
         the two surfaces can never bill one file differently.
         """
         session_id = str(decoded.header.get("id") or Path(path_str).parent.name)
-        _boundary, seed_unprovable = dsh_log_module.dsh_seed_boundary(
-            decoded.header, decoded.events
-        )
-        if seed_unprovable:
-            dsh_log_module.report_dsh_diagnostic(
-                path_str,
-                "seed-unprovable",
-                "seeded session with no session/end-seed boundary; billing nothing "
-                "rather than double-billing the parent's inherited prefix",
-            )
         entries: List[Dict[str, Any]] = []
         for sample in fold_dsh_usage_samples(decoded.header, decoded.events):
             model = sample["model"]
@@ -5314,13 +5289,14 @@ class DSHParser(BaseParser):
         """
         path_str = str(file_sig[0])
         decoded = decode_dsh_session_file(Path(path_str))
+        # A file that yields no rows and one that yielded none because it could
+        # not be read look identical downstream -- the whole of issue #147 -- so
+        # every decode says what it lost, through the same reporter as Sessions.
+        dsh_log_module.report_dsh_decode(path_str, decoded)
         if decoded.skip_reason is not None or decoded.header is None:
-            reason = decoded.skip_reason or "missing-header"
-            dsh_log_module.report_dsh_diagnostic(path_str, f"skip:{reason}")
             if not Path(path_str).exists():
                 raise UsageFileVanished(path_str)
-            raise UsageFileUnreadable(path_str, reason)
-        self._report_decoded(path_str, decoded)
+            raise UsageFileUnreadable(path_str, decoded.skip_reason or "missing-header")
         return self._entries_for_decoded(path_str, decoded)
 
     def _parse_all(self) -> List[Dict[str, Any]]:
@@ -5336,15 +5312,12 @@ class DSHParser(BaseParser):
         for path_str, _, _ in self._file_signatures():
             try:
                 decoded = decode_dsh_session_file(Path(path_str))
+                dsh_log_module.report_dsh_decode(path_str, decoded)
                 if decoded.skip_reason is not None or decoded.header is None:
                     # The DB-off path keeps skipping (one unreadable log must not
                     # blank the source or land it in source_errors) but it no
                     # longer gets to be silent about it.
-                    dsh_log_module.report_dsh_diagnostic(
-                        path_str, f"skip:{decoded.skip_reason or 'missing-header'}"
-                    )
                     continue
-                self._report_decoded(path_str, decoded)
                 for entry in self._entries_for_decoded(path_str, decoded):
                     entry_id = entry["entry_id"]
                     position = (int(entry["timestamp"]), path_str)

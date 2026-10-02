@@ -99,14 +99,21 @@ The first line is a session header:
 `seq` is monotonic inside the logical session and `time` is Unix epoch milliseconds.
 
 Version 0 is a developer-preview format with no upstream compatibility promise. Tokdash accepts a
-generation **set**, currently `{0, 4}`: generation 4 is what dsh >= 0.2.0 writes
+generation **set**, currently `{0, 3, 4}`: generation 4 is what dsh >= 0.2.0 writes
 (`SESSION_FORMAT_VERSION` in `@deepseek-ai/dsh-session`) and keeps the v0 usage-event shape, so
-reading it needed nothing beyond widening the gate. Generations 1-3 were superseded upstream in
-place and are not claimed until a corpus proves the read.
+reading it needed nothing beyond widening the gate. Generation 3 is what earlier dsh builds left on
+disk: its header has the v4 key set, and dsh's own v3 reader
+(`dsh-session-format-v2-to-v3`) derives the inherited cut from the final `inherited: true`
+`session/end-seed` marker exactly as v4 does. A real corpus of 24 v3/v4 logs decoded whole under the
+widened gate (#147). Generations 1-2 were superseded upstream in place and are not claimed until a
+corpus proves the read.
 
-A version outside the set is unsupported, not corrupt: skip that file and **say so** --
-`dsh_log.report_dsh_diagnostic(path, "skip:<reason>")` warns once per `(path, reason)` and both
-surfaces report through it. An unreported skip is indistinguishable from a user who stopped using
+A version outside the set is unsupported, not corrupt: skip that file and **say so**.
+`dsh_log.report_dsh_decode(path, decoded)` reports what one decode lost -- `skip:<reason>`,
+`frames-lost`, `seed-unprovable` -- and both surfaces call it with the same wording, so a broken
+file is named once per problem whichever surface read it. After a restart the store re-reads only
+changed files, so the Sessions panel may be the only surface that decodes an unchanged broken log;
+it cannot be the silent one. An unreported skip is indistinguishable from a user who stopped using
 dsh, which is how a real format bump once silently emptied the source. Bump the explicit DSH parser
 version whenever extraction or accounting semantics change.
 
@@ -245,14 +252,14 @@ them.
 still make genuine, independently billable calls.
 
 A forked child can clone a completed parent prefix into its own durable log. Generation 0 marks
-that prefix with `seedLength`. Generation 4 dropped the field: the header carries a boolean
+that prefix with `seedLength`. Generations 3 and 4 have no such field: the header carries a boolean
 `isSeeded` and the cut is a `session/end-seed` event carrying `data.inherited: true`.
 `buildForkSeed` copies the parent's events through `boundary` inclusive and appends the marker at
 `boundary + 1`, so:
 
 ```text
-generation 0:  event.seq < header.seedLength
-generation 4:  event.seq < seq(final session/end-seed marker whose data.inherited is true)
+generation 0:   event.seq < header.seedLength
+generation 3/4: event.seq < seq(final session/end-seed marker whose data.inherited is true)
 ```
 
 Those events remain visible in the child transcript but are already owned by the parent log.
@@ -387,6 +394,16 @@ Avoid maintaining a frontend-only source list that can drift from the backend re
   Under `file_replace` an empty list asserts "this file now has zero entries", and the sync would
   delete the stored history of a file that merely went unreadable. The store keeps the file's rows
   **and its prior signature**, so the rows return automatically once it reads again.
+- Unreadable file during cross-file promotion: when a replaced file drops an entry key and the only
+  other copy that could own it is unreadable, that key is **held, not healed**. The replaced file's
+  DELETE skips the held keys (`entry_key NOT IN (...)`), so the row stays attributed to its old file
+  until that file changes again or a readable copy re-establishes the key. For a finished session
+  whose log never changes, that can be indefinitely, and a key that really was retired keeps
+  counting until then. Aborting instead would wedge the whole source for as long as the file stays
+  unreadable, and deleting would lose the only stored copy of a key the unreadable file may still
+  hold. Past `_UNRESOLVED_KEY_LIMIT` (4,000) held keys the sync fails rather than name them all;
+  the request then falls back to live parsing for that request, which `source_errors` does not yet
+  report (#151).
 - Damaged interior zstd frame: keep the rows of every other frame, report `frames-lost`, and skip
   the file if the damaged frame carried the header.
 - Duplicate physical files for one header id: deduplicate by session id and stable event key, with

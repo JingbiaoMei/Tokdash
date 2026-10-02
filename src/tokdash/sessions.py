@@ -4184,21 +4184,13 @@ def _parse_dsh_session_file(path_str: str, _mtime_ns: int, _size: int, _pricing_
         decoded = decode_dsh_session_file(session_path)
     except Exception:
         return None
+    # Same rule as the usage parser, through the same reporter: skipping is fine,
+    # silence is not. A skipped or seed-unprovable session simply vanishes from
+    # the panel otherwise, with the Overview still showing its rows or not
+    # depending on which surface read last.
+    dsh_log.report_dsh_decode(path_str, decoded)
     if decoded.skip_reason is not None or decoded.header is None:
-        # Same rule as the usage parser: skipping is fine, silence is not. The
-        # session simply vanishes from the panel otherwise, with the Overview
-        # still showing its rows or not depending on which surface read last.
-        dsh_log.report_dsh_diagnostic(
-            path_str, f"skip:{decoded.skip_reason or 'missing-header'}"
-        )
         return None
-    if getattr(decoded, "failed_frames", 0):
-        dsh_log.report_dsh_diagnostic(
-            path_str,
-            "frames-lost",
-            f"{decoded.failed_frames} zstd frame(s) did not decode; the session is "
-            "shown with those turns missing",
-        )
 
     header = decoded.header
     # The header id is authoritative; the project directory name is lossy by

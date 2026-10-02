@@ -847,6 +847,27 @@ def test_v4_seeded_without_marker_bills_nothing(_isolated_dsh_home, caplog):
     assert "seed-unprovable" in caplog.text
 
 
+def test_v3_generation_is_read_with_the_v4_seed_rule(_isolated_dsh_home):
+    """Earlier dsh Desktop builds left generation-3 logs with the v4 header key
+    set, and dsh's own v3 reader cuts a seeded log at the final inherited
+    end-seed marker exactly as v4 does. So v3 is the gate plus the v4 rule: the
+    inherited prefix is skipped and own work after a plain resume marker bills."""
+    home = _isolated_dsh_home
+    _write_zstd(
+        _session_path(home, suffix=".v3.jsonl.zstd"),
+        [
+            _header(version=3, isSeeded=True, delegationDepth=0),
+            _assistant_message(1, 0, 0, {"inputTokens": 100, "outputTokens": 10}),
+            _end_seed(2, inherited=True),
+            _assistant_message(3, 1, 1, {"inputTokens": 300, "outputTokens": 30}),
+            _end_seed(4),
+            _assistant_message(5, 2, 1, {"inputTokens": 500, "outputTokens": 50}),
+        ],
+    )
+
+    assert sorted(entry["input"] for entry in _collect(home)) == [300, 500]
+
+
 def test_unknown_generation_is_skipped_and_named(_isolated_dsh_home, caplog):
     """A future dsh bump must show up as a named skip, not as a user who appears
     to have stopped using the tool."""

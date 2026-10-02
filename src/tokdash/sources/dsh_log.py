@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 # Bump when framing/extraction semantics change; included in the persistent
 # session-store signature so stored rows reparse instead of going stale.
 # 2: zstd frames decode independently, and the header-version gate became a
-#    generation set (v0 + v4).
+#    generation set (v0, v3, v4).
 DSH_DECODER_VERSION = 2
 # Bump when usage-accounting rules change (fold keys, seed boundary, zero skip).
 # 2: fold_dsh_usage_samples keys its replace-not-add fold on the whole file's
@@ -41,9 +41,13 @@ DSH_ACCOUNTING_VERSION = 2
 # (SESSION_FORMAT_VERSION in @deepseek-ai/dsh-session); its usage events keep
 # the v0 shape (assistant/message with data.turn/step/data.usage), so the fold
 # reads both. dsh names those files session.v4.jsonl[.zstd]; discovery matches
-# them on the suffix. Generations 1-3 were superseded in place upstream and are
-# not claimed here until a corpus proves the read.
-SUPPORTED_SESSION_FORMAT_VERSIONS = frozenset({0, 4})
+# them on the suffix. 3 is what earlier dsh builds left on disk: its
+# header has the v4 key set, and dsh's own v3 reader cuts a seeded log at the
+# final inherited end-seed marker exactly as v4 does, so the same fold and seed
+# boundary apply (a real 24-log v3/v4 corpus decoded whole, #147). Generations
+# 1-2 were superseded in place upstream and are not claimed here until a corpus
+# proves the read.
+SUPPORTED_SESSION_FORMAT_VERSIONS = frozenset({0, 3, 4})
 
 # zstd frame magic (LE 0xFD2FB528), the resync marker for a damaged frame.
 _ZSTD_FRAME_MAGIC = b"\x28\xb5\x2f\xfd"
@@ -139,6 +143,33 @@ def report_dsh_diagnostic(path: Any, kind: str, detail: str = "") -> None:
     logger.warning(
         "tokdash dsh: %s [%s]%s", path, kind, f" {detail}" if detail else ""
     )
+
+
+def report_dsh_decode(path: Any, decoded: "DSHDecodedSession") -> None:
+    """Report everything one decode lost, identically for both surfaces.
+
+    The usage parser and the Sessions panel decode the same file on their own
+    schedules -- after a restart the persistent store re-reads only changed files,
+    so the panel may be the only surface that ever sees an unchanged broken one.
+    Each calls this, with one wording per problem, so the registry above names a
+    file once no matter which surface read it, and neither can be the silent one.
+    """
+    if decoded.skip_reason is not None or decoded.header is None:
+        report_dsh_diagnostic(path, f"skip:{decoded.skip_reason or 'missing-header'}")
+        return
+    if decoded.failed_frames:
+        report_dsh_diagnostic(
+            path,
+            "frames-lost",
+            f"{decoded.failed_frames} zstd frame(s) did not decode; their rows are missing",
+        )
+    if dsh_seed_boundary(decoded.header, decoded.events)[1]:
+        report_dsh_diagnostic(
+            path,
+            "seed-unprovable",
+            "seeded session with no inherited session/end-seed marker; billing nothing "
+            "rather than double-billing the parent's inherited prefix",
+        )
 
 
 def reset_dsh_diagnostics() -> None:

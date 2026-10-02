@@ -781,6 +781,26 @@ def build_source_signature(*, files: Any, pricing: Any = None, parser: Any = Non
     )
 
 
+# SQLite binds Python ints as signed 64-bit values; anything outside that
+# range raises ``OverflowError`` at bind time. A sync commits all or nothing,
+# so before #144 one out-of-range number in one log failed that source's usage
+# sync on every attempt and silently downgraded every cache-bypassing request
+# to the live parsers; the same number in a session turn timestamp failed that
+# tool's session sync (and the v7 migration backfill that reads those bounds
+# back out of already-stored rows).
+# The storage boundary clamps instead of rejecting: the index stays alive, and
+# the affected row keeps the largest (or smallest) value its column can
+# represent. Note this bounds the stored magnitude, it does not correct it --
+# a count of 10**25 is stored as 2**63 - 1, so the DB and the live parsers
+# disagree about that one row.
+_SQLITE_INT_MIN = -(2**63)
+_SQLITE_INT_MAX = 2**63 - 1
+
+
+def _clamp_sqlite_int(value: int) -> int:
+    return max(_SQLITE_INT_MIN, min(int(value), _SQLITE_INT_MAX))
+
+
 def _timestamp_ms(value: Any) -> int:
     try:
         if isinstance(value, datetime):
@@ -788,14 +808,14 @@ def _timestamp_ms(value: Any) -> int:
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=timezone.utc)
             return int(dt.astimezone(timezone.utc).timestamp() * 1000)
-        return int(value or 0)
+        return _clamp_sqlite_int(int(value or 0))
     except Exception:
         return 0
 
 
 def _int_field(entry: dict[str, Any], key: str) -> int:
     try:
-        return int(entry.get(key, 0) or 0)
+        return _clamp_sqlite_int(int(entry.get(key, 0) or 0))
     except Exception:
         return 0
 
@@ -912,8 +932,11 @@ def _session_time_bounds(raw: dict[str, Any]) -> tuple[Optional[int], Optional[i
         if not isinstance(turn, dict):
             continue
         try:
-            timestamp_ms = int(turn.get("timestamp_ms", 0) or 0)
-        except (TypeError, ValueError):
+            timestamp_ms = _clamp_sqlite_int(int(turn.get("timestamp_ms", 0) or 0))
+        except (TypeError, ValueError, OverflowError):
+            # OverflowError covers a JSON float too large to be finite (1e400
+            # parses to inf), which int() cannot convert. Skipping the turn keeps
+            # the rest of the session's bounds instead of failing the sync.
             continue
         if timestamp_ms > 0:
             timestamps.append(timestamp_ms)

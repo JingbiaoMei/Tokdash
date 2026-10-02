@@ -36,6 +36,8 @@ def test_four_digit_suffixes_preserved_for_distinct_grouping():
 
 def test_alias_variants_normalization():
     assert normalize_model_name("gemini-3-flash-a") == "gemini-3-flash"
+    assert normalize_model_name("gemini-3.8-flash-n") == "gemini-3.8-flash"
+    assert normalize_model_name("antigravity-gemini-3.8-flash-n") == "gemini-3.8-flash"
     assert normalize_model_name("google/gemini-3-pro-high") == "gemini-3-pro"
     assert normalize_model_name("google/gemini-3-pro-medium") == "gemini-3-pro"
     assert normalize_model_name("google/gemini-3-pro-low") == "gemini-3-pro"

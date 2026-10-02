@@ -401,6 +401,8 @@ def test_derived_antigravity_models_resolve():
         ("antigravity-claude-opus-4-6-thinking", "claude-opus-4.6"),
         ("antigravity-claude-sonnet-4-6", "claude-sonnet-4.6"),
         ("antigravity-gemini-3-flash", "gemini-3-flash-preview"),
+        ("antigravity-gemini-3.8-flash-n", "gemini-3.8-flash"),
+        ("gemini-3.8-flash-n", "gemini-3.8-flash"),
     ]
     for derived, base in pairs:
         d_cost = db.get_cost(derived, 1000, 2000, 0, 0)

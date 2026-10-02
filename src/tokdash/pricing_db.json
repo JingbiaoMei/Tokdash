@@ -4,6 +4,7 @@
   "note": "Comprehensive pricing database with all Moonshot, MiniMax, GLM, and OpenAI models from OpenRouter. Cache pricing estimated at 10% of input for cache_read, 100% of input for cache_write.",
   "aliases": {
     "Qwen/Qwen3.8-Flash-Next": "qwen3.8-flash",
+    "antigravity-gemini-3.8-flash-n": "gemini-3.8-flash",
     "ark-code": "seed-2.0-code",
     "claude-sonnet-5-20260630": "claude-sonnet-5",
     "cloudflare/glm-5.2": "glm-5.2",
@@ -22,6 +23,7 @@
     "fable5.1": "claude-fable-5.1",
     "gemini-3-flash-a": "antigravity-gemini-3-flash",
     "gemini-3.7-flash-control": "gemini-3.7-flash",
+    "gemini-3.8-flash-n": "gemini-3.8-flash",
     "glm-5-1": "glm-5.1",
     "glm-5-2": "glm-5.2",
     "glm-5-3": "glm-5.3",

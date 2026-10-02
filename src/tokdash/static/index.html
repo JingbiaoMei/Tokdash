@@ -3074,7 +3074,10 @@
         </div>
         <div class="surface p-5">
           <div class="flex items-center justify-between">
-            <div class="text-[11px] font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="totalCost">Total Cost</div>
+            <div class="text-[11px] font-semibold uppercase tracking-wider flex items-center gap-1" style="color: var(--color-label);">
+              <span data-i18n="totalCost">Total Cost</span>
+              <span id="totalCostHint" class="cursor-help select-none" style="opacity:0.6;" data-i18n-title="totalCostHint" title="Estimated commercial API list price based on standard public rate cards. Free tools (e.g. Antigravity) and flat-rate subscriptions incur $0 out-of-pocket API spend.">ⓘ</span>
+            </div>
           </div>
           <div id="totalCost" class="text-3xl sm:text-4xl font-extrabold mt-1.5 font-mono text-emerald-400">$-</div>
           <div id="costDelta" class="text-xs font-semibold mt-1 kpi-delta"></div>
@@ -4826,7 +4829,10 @@
           <div id="statTotalDays" class="tokdash-loading-placeholder mt-2 font-extrabold"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
         </div>
         <div class="surface p-4">
-          <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="totalCost">Total Cost</div>
+          <div class="text-xs font-semibold uppercase tracking-wider flex items-center gap-1" style="color: var(--color-label);">
+            <span data-i18n="totalCost">Total Cost</span>
+            <span id="statTotalCostHint" class="cursor-help select-none" style="opacity:0.6;" data-i18n-title="totalCostHint" title="Estimated commercial API list price based on standard public rate cards. Free tools (e.g. Antigravity) and flat-rate subscriptions incur $0 out-of-pocket API spend.">ⓘ</span>
+          </div>
           <div id="statTotalCost" class="tokdash-loading-placeholder mt-2 font-extrabold"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
         </div>
       </section>
@@ -6883,6 +6889,7 @@
         totalTokens: 'Total Tokens',
         readableTokens: 'Readable tokens',
         totalCost: 'Total Cost',
+        totalCostHint: 'Estimated commercial API list price based on standard public rate cards. Free tools (e.g. Antigravity) and flat-rate subscriptions incur $0 out-of-pocket API spend.',
         totalMessages: 'Total Messages',
         topModel: 'Top Model',
         vsPrevPeriod: 'vs prev period',
@@ -7440,6 +7447,7 @@
         totalTokens: '总 Token 数',
         readableTokens: '易读 Token',
         totalCost: '总费用',
+        totalCostHint: '基于标准公开资费估算的商业 API 市场价值。免费工具（如 Antigravity）和包月订阅实际自费为 0 美元。',
         totalMessages: '总消息数',
         topModel: '最常用模型',
         vsPrevPeriod: '较上一时段',
@@ -7998,6 +8006,7 @@
         totalTokens: 'トークン合計',
         readableTokens: '読みやすいトークン',
         totalCost: '総コスト',
+        totalCostHint: '標準公開レートに基づく商用API推定利用額。Antigravity等の無料ツールや定額制サブスクリプションでは実際の自己負担額は0ドルです。',
         totalMessages: 'メッセージ合計',
         topModel: '上位モデル',
         vsPrevPeriod: '前期間比',
@@ -8556,6 +8565,7 @@
         totalTokens: '총 토큰',
         readableTokens: '읽기 쉬운 토큰',
         totalCost: '총 비용',
+        totalCostHint: '표준 공개 요금 기준 상용 API 예상 시장 가치입니다. Antigravity와 같은 무료 도구 및 정액 구독은 실제 지출액이 0달러입니다.',
         totalMessages: '총 메시지',
         topModel: '상위 모델',
         vsPrevPeriod: '전 기간 대비',
@@ -9114,6 +9124,7 @@
         totalTokens: 'Tokens totales',
         readableTokens: 'Tokens legibles',
         totalCost: 'Coste total',
+        totalCostHint: 'Valor de mercado estimado de la API comercial según tarifas públicas estándar. Las herramientas gratuitas (ej. Antigravity) y suscripciones fijas tienen un gasto real de 0 $.',
         totalMessages: 'Mensajes totales',
         topModel: 'Mejor modelo',
         vsPrevPeriod: 'vs período anterior',
@@ -9672,6 +9683,7 @@
         totalTokens: 'Tokens totais',
         readableTokens: 'Tokens legíveis',
         totalCost: 'Custo total',
+        totalCostHint: 'Valor de mercado estimado da API comercial com base nas tarifas públicas padrão. Ferramentas gratuitas (ex. Antigravity) e assinaturas fixas têm gasto real de 0 $.',
         totalMessages: 'Mensagens totais',
         topModel: 'Melhor modelo',
         vsPrevPeriod: 'vs período anterior',
@@ -12229,6 +12241,7 @@
         'gemini-3-pro-low': 'gemini-3-pro',
         'gemini-3-pro-preview': 'gemini-3-pro',
         'gemini-3-flash-a': 'gemini-3-flash',
+        'gemini-3.8-flash-n': 'gemini-3.8-flash',
         'o3-mini-high': 'o3-mini',
         'o3-mini-low': 'o3-mini',
         'claude-3-5-sonnet': 'claude-3.5-sonnet',

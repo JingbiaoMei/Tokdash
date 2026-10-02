@@ -73,8 +73,21 @@ def test_pricing_lookup_supports_real_antigravity_model_ids():
         "gemini-3-pro-high",
         "gemini-3-pro-low",
         "claude-opus-4-6-thinking",
+        "gemini-3.8-flash-n",
+        "antigravity-gemini-3.8-flash-n",
     ]:
         assert db.get_cost(model, 1000, 2000, 300, 400) > 0.0
+
+
+def test_pricing_lookup_gemini_3_8_flash_n_matches_base():
+    db = PricingDatabase()
+    base = db.get_cost("gemini-3.8-flash", 1000, 2000, 300, 400)
+    variant = db.get_cost("gemini-3.8-flash-n", 1000, 2000, 300, 400)
+    prefixed = db.get_cost("antigravity-gemini-3.8-flash-n", 1000, 2000, 300, 400)
+
+    assert base > 0.0
+    assert abs(base - variant) < 1e-12
+    assert abs(base - prefixed) < 1e-12
 
 
 def test_pricing_lookup_strips_six_digit_date_suffixes():
@@ -156,3 +169,13 @@ def test_pricing_resolver_protects_version_stamped_keys():
     assert rates("Mistral-Large-2512") == (0.5, 1.5)  # case-variant still protected
     assert rates("kimi-k2-0905") == (0.6, 2.5)
     assert rates("qwen3-235b-a22b-2507") == (0.071, 0.1)
+
+
+def test_total_cost_hint_frontend_markup():
+    from pathlib import Path
+    import tokdash
+
+    index_html = (Path(tokdash.__file__).parent / "static" / "index.html").read_text(encoding="utf-8")
+    assert 'id="totalCostHint"' in index_html
+    assert 'data-i18n-title="totalCostHint"' in index_html
+    assert 'id="statTotalCostHint"' in index_html

@@ -61,6 +61,7 @@ def normalize_model_name(name: str) -> str:
         "gemini-3-pro-high": "gemini-3-pro",
         "gemini-3-pro-low": "gemini-3-pro",
         "gemini-3-pro-preview": "gemini-3-pro",
+        "gemini-3.8-flash-n": "gemini-3.8-flash",
         "o3-mini-high": "o3-mini",
         "o3-mini-low": "o3-mini",
         "claude-3-5-sonnet": "claude-3.5-sonnet",
@@ -104,6 +105,7 @@ NORMALIZATION_EXAMPLES = {
     "openrouter/openai/gpt-4o-mini-2024-07-18": "gpt-4o-mini",
     # Alias / version-dot normalisation
     "gemini-3-flash-a": "gemini-3-flash",
+    "antigravity-gemini-3.8-flash-n": "gemini-3.8-flash",
     "google/gemini-3-pro-high": "gemini-3-pro",
     "google/gemini-3-pro-medium": "gemini-3-pro",
     "anthropic/claude-3-5-sonnet": "claude-3.5-sonnet",

@@ -208,6 +208,7 @@ class PricingDatabase:
         k = re.sub(r"-(high|medium|low)$", "", k)
         # Quantization / precision format suffixes (e.g. qwen3.6-27B-FP8 -> qwen3.6-27b).
         k = re.sub(r"-(fp16|fp8|int8|int4|bf16|awq|gptq|gguf)$", "", k)
+        k = re.sub(r"-n$", "", k)
         return k
 
     @staticmethod
@@ -272,6 +273,12 @@ class PricingDatabase:
             alias_variants.append(self._strip_common_suffixes(ak))
             alias_variants.append(self._version_hyphen_to_dot(ak))
             alias_variants.append(self._version_hyphen_to_dot(self._strip_common_suffixes(ak)))
+            if ak.startswith("antigravity-"):
+                ak2 = ak.removeprefix("antigravity-")
+                alias_variants.append(ak2)
+                alias_variants.append(self._strip_common_suffixes(ak2))
+                alias_variants.append(self._version_hyphen_to_dot(ak2))
+                alias_variants.append(self._version_hyphen_to_dot(self._strip_common_suffixes(ak2)))
 
         for ak in alias_variants:
             if not ak:

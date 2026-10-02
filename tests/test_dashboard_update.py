@@ -1116,6 +1116,42 @@ def test_backup_holds_db_lock_until_replacement_done(eligible_env, tmp_path):
         probe.close()
 
 
+def test_redesigned_popover_contract():
+    # The popover's action-first structure: version summary, primary button,
+    # job state with a phase stepper, terminal fallback BELOW the button, skip.
+    # Accents must follow the theme variables, not literals, and every key the
+    # JS reaches for must exist in the English dictionary.
+    html = (Path(__file__).resolve().parents[1] / "src" / "tokdash" / "static"
+            / "index.html").read_text(encoding="utf-8")
+    body = html[html.index('id="updatePopover"'):html.index("async function requestDashboardUpdate")]
+    pos = [body.index(m) for m in ('id="updateApplyBtn"', 'id="updateJobBox"',
+                                   'class="up-term"', 'id="updateTermLabel"')]
+    assert pos == sorted(pos), "order: apply, job, terminal fallback/label"
+    assert "run this in a terminal:" not in body.split('id="updateApplyBtn"')[0].lower()
+
+    for key in ("updateTitle", "updateSub", "updateSubManual", "updateTermPrefer",
+                "updateTermRun", "updateRetry", "phaseStopping", "phaseBackup",
+                "phaseInstall", "phaseVerify"):
+        assert html.count(f"{key}: '") == 6, f"i18n key {key} missing from some locale"
+
+    # Theme sync: no hardcoded accent literals in the redesigned block, and the
+    # apply button keeps .btn.btn-primary so theme overrides of it still apply.
+    css = html[html.index("Click-to-update popover, action-first"):html.index("Release notes live with")]
+    assert "var(--color-primary" in css and "#1E40AF)" not in css.replace(
+        "var(--color-primary, #1E40AF)", "")  # literals only as var() fallbacks
+    markup = html[html.index('id="updatePopover"'):html.index('id="updateTermLabel"')]
+    assert "btn btn-primary update-apply-btn" in markup
+
+    # Behavior wiring: phase stepper in the render path, retry handler bound,
+    # the ack click must not fire when a button inside the box was the target,
+    # and the badge render fills the new header (not the removed text div).
+    assert "renderUpdatePhases" in body
+    init = html[html.index("function initUpdateUi"):]
+    assert "ui.retry.addEventListener" in init and "closest('button')" in init
+    assert "head.title.textContent" in html[html.index("function renderUpdateBadge"):
+                                            html.index("function initUpdateBadgeUi")]
+
+
 def test_lost_start_response_recovers_without_a_second_click():
     # The helper stops the server before (or just after) the accepted-job response
     # lands, so the browser's fetch rejects on a SUCCESSFUL click. The catch must
@@ -1161,6 +1197,8 @@ global.UPDATE_CSRF_HEADER = 'X-Tokdash-CSRF';
 global.updateCapabilityInfo = { target: '9.9.9', latest_job: null };
 global.updateUi = () => global.__ui;
 global.renderUpdateJob = (job) => { global.__renders.push(job); };
+global.setJobIcon = () => {};  // icon chrome is outside the tested control flow
+global.UP_ICONS = { cross: '', spinner: '', check: '' };
 global.updatePanelReveal = () => {};
 global.recoverUpdateCsrf = async () => false;
 global.startUpdatePolling = (id) => { state.polls.push(id); };

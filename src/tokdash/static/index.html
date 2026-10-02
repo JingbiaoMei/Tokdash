@@ -1636,9 +1636,12 @@
       /* Right-anchored on desktop: the pill sits deep in the control rail, so the panel
          opens leftward toward the page center instead of clipping at the viewport edge. */
       position: absolute; z-index: 60; top: calc(100% + 6px); right: 0;
-      min-width: 260px; max-width: min(320px, calc(100vw - 32px));
-      padding: 12px; border-radius: 12px;
-      background: var(--color-surface, #fff);
+      min-width: 280px; max-width: min(330px, calc(100vw - 32px));
+      padding: 14px; border-radius: 14px;
+      /* Painted from --color-surface-glass like the viewport tooltips: every
+         theme overrides that token, and --color-text is only readable on it
+         (--color-surface is not a defined token; never depend on it). */
+      background: color-mix(in srgb, var(--color-surface-glass) 96%, var(--color-bg));
       border: 1px solid var(--color-border, #d0d7de);
       box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
       color: var(--color-muted);
@@ -1647,56 +1650,97 @@
       /* Single-column layout: the pill sits near the left edge, so open rightward. */
       .update-popover { right: auto; left: 0; }
     }
+    /* Click-to-update popover, action-first reading order: version summary,
+       primary button, live job state, terminal fallback (a footnote, never an
+       interrupted lead-in), skip. Accents follow the ACTIVE theme through
+       var(--color-primary); the button keeps .btn.btn-primary so theme-level
+       overrides of it apply unchanged. Flat rows only — no dividers, no chrome. */
+    .up-head { display: flex; align-items: center; gap: 9px; margin-bottom: 12px; }
+    .up-head-ic {
+      flex: none; width: 28px; height: 28px; border-radius: 9px;
+      display: grid; place-items: center;
+      color: var(--color-primary, #1E40AF);
+      background: color-mix(in srgb, var(--color-primary, #1E40AF) 12%, transparent);
+    }
+    .up-title { font-size: 13px; font-weight: 650; color: var(--color-text); line-height: 1.3; }
+    .up-sub { font-size: 12px; color: var(--color-muted); line-height: 1.3; }
+    .update-apply-btn {
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      width: 100%; min-height: 38px; border-radius: 10px; font-size: 13px;
+      margin-bottom: 10px;
+    }
+    .update-apply-btn svg { flex: none; }
+    .update-enroll-row { margin-bottom: 10px; }
+    .update-enroll-row p { margin: 0 0 6px; }
+    .update-pair-input { flex: 1; min-width: 0; text-transform: uppercase; letter-spacing: 0.08em; }
+    .update-job {
+      margin-bottom: 10px; padding: 10px 12px; border-radius: 10px;
+      border: 1px solid transparent;
+      background: color-mix(in srgb, var(--color-text) 4%, transparent);
+    }
+    .up-job-row { display: flex; align-items: center; gap: 9px; }
+    .up-job-row p { margin: 0; }
+    .update-job button { margin-top: 8px; width: 100%; }
+    .update-retry-btn { border-color: currentColor; color: inherit; background: transparent; }
+    .update-job[data-state="running"] {
+      border-color: color-mix(in srgb, var(--color-primary, #1E40AF) 30%, transparent);
+      background: color-mix(in srgb, var(--color-primary, #1E40AF) 6%, transparent);
+      color: color-mix(in srgb, var(--color-primary, #1E40AF) 75%, var(--color-text));
+    }
+    html.dark .update-job[data-state="running"] {
+      border-color: color-mix(in srgb, var(--color-primary, #60A5FA) 30%, transparent);
+      color: color-mix(in srgb, var(--color-primary, #60A5FA) 70%, var(--color-text));
+    }
+    .update-job[data-state="failed"] {
+      background: rgba(217, 72, 72, 0.07);
+      border-color: rgba(217, 72, 72, 0.35);
+      color: #C93636;
+    }
+    html.dark .update-job[data-state="failed"] {
+      background: rgba(252, 165, 165, 0.08);
+      border-color: rgba(252, 165, 165, 0.28);
+      color: #FCA5A5;
+    }
+    .update-job[data-state="done"] {
+      background: rgba(47, 158, 91, 0.08);
+      border-color: rgba(47, 158, 91, 0.35);
+      color: #267C4A;
+    }
+    html.dark .update-job[data-state="done"] {
+      background: rgba(110, 231, 183, 0.08);
+      border-color: rgba(110, 231, 183, 0.26);
+      color: #6EE7B7;
+    }
+    /* Flat phase stepper: one line per journal phase, states as dots — the
+       updater's real progress, no invented percentages, no per-step spinners. */
+    .up-phases { margin-top: 8px; display: grid; gap: 3px; }
+    .up-phase { display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--color-label); }
+    .up-phase .up-dot {
+      flex: none; width: 14px; height: 14px; border-radius: 50%;
+      display: grid; place-items: center;
+    }
+    .up-phase[data-s="done"] .up-dot { background: rgba(47, 158, 91, 0.15); color: #267C4A; }
+    html.dark .up-phase[data-s="done"] .up-dot { color: #6EE7B7; }
+    .up-phase[data-s="now"] { color: var(--color-text); font-weight: 600; }
+    .up-phase[data-s="now"] .up-dot {
+      background: color-mix(in srgb, var(--color-primary, #1E40AF) 15%, transparent);
+      color: var(--color-primary, #1E40AF);
+    }
+    .up-phase[data-s="todo"] .up-dot { border: 1.5px solid var(--color-border); }
+    .up-spinner { animation: upspin 0.9s linear infinite; }
+    @keyframes upspin { to { transform: rotate(360deg); } }
+    .up-term { margin-bottom: 2px; }
+    .up-term-label { display: block; font-size: 11px; color: var(--color-label); margin-bottom: 5px; }
     .update-cmd-row { display: flex; align-items: center; gap: 8px; }
     .update-cmd-row code {
-      flex: 1; padding: 6px 10px; border-radius: 8px; font-size: 12px;
-      background: rgba(127, 127, 127, 0.12);
+      flex: 1; padding: 5px 9px; border-radius: 7px; font-size: 11.5px;
+      background: color-mix(in srgb, var(--color-text) 6%, transparent); color: var(--color-label);
     }
-    .update-copy-btn { min-height: 28px; padding: 3px 10px; font-size: 12px; }
+    .update-copy-btn { min-height: 26px; padding: 2px 9px; font-size: 11.5px; }
     .update-skip-btn {
       margin-top: 10px; font-size: 11px; cursor: pointer; background: none; border: none;
       padding: 0; color: var(--color-label); text-decoration: underline dotted;
     }
-    /* Click-to-update (managed installs): apply button, enrollment row, job state.
-       Deliberately flat text rows — the popover stays one column of states. */
-    .update-apply-btn { width: 100%; margin-bottom: 8px; }
-    .update-enroll-row { margin-bottom: 8px; }
-    .update-pair-input { flex: 1; min-width: 0; text-transform: uppercase; letter-spacing: 0.08em; }
-    .update-job {
-      margin-bottom: 8px; padding: 8px 10px; border-radius: 8px;
-      background: color-mix(in srgb, var(--color-text) 5%, transparent);
-    }
-    .update-job[data-state="running"] {
-      background: rgba(30, 64, 175, 0.08);
-      border: 1px solid rgba(30, 64, 175, 0.30);
-      color: #1E40AF;
-    }
-    html.dark .update-job[data-state="running"] {
-      background: rgba(147, 197, 253, 0.10);
-      border-color: rgba(147, 197, 253, 0.30);
-      color: #93C5FD;
-    }
-    .update-job[data-state="failed"] {
-      background: rgba(217, 72, 72, 0.08);
-      border: 1px solid rgba(217, 72, 72, 0.35);
-      color: #C93636;
-    }
-    html.dark .update-job[data-state="failed"] {
-      background: rgba(252, 165, 165, 0.10);
-      border-color: rgba(252, 165, 165, 0.30);
-      color: #FCA5A5;
-    }
-    .update-job[data-state="done"] {
-      background: rgba(47, 158, 91, 0.10);
-      border: 1px solid rgba(47, 158, 91, 0.35);
-      color: #267C4A;
-    }
-    html.dark .update-job[data-state="done"] {
-      background: rgba(110, 231, 183, 0.10);
-      border-color: rgba(110, 231, 183, 0.30);
-      color: #6EE7B7;
-    }
-    .update-job button { margin-top: 6px; width: 100%; }
 
     /* Release notes live with dashboard actions, leaving the brand lockup uncluttered. */
     .release-notes-trigger {
@@ -5508,8 +5552,19 @@
                     <button id="updateBadge" class="update-badge" hidden aria-haspopup="true" aria-expanded="false"></button>
                     <button id="updateEnableLink" class="update-enable-link" hidden data-i18n="updateEnable">Enable update notices</button>
                     <div id="updatePopover" class="update-popover" hidden>
-                      <div id="updatePopoverText" class="text-xs mb-2"></div>
-                      <button id="updateApplyBtn" class="btn btn-primary update-apply-btn" hidden></button>
+                      <div class="up-head">
+                        <span class="up-head-ic" aria-hidden="true">
+                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 4v10m0 0 4-4m-4 4-4-4" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 17v1.5A2.5 2.5 0 0 0 6.5 21h11a2.5 2.5 0 0 0 2.5-2.5V17" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+                        </span>
+                        <div>
+                          <div id="updateTitle" class="up-title"></div>
+                          <div id="updateSub" class="up-sub"></div>
+                        </div>
+                      </div>
+                      <button id="updateApplyBtn" class="btn btn-primary update-apply-btn" hidden>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 4v10m0 0 4-4m-4 4-4-4" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 17v1.5A2.5 2.5 0 0 0 6.5 21h11a2.5 2.5 0 0 0 2.5-2.5V17" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
+                        <span id="updateApplyLabel"></span>
+                      </button>
                       <div id="updateEnrollRow" class="update-enroll-row" hidden>
                         <p class="text-xs" data-i18n="updateEnrollPrompt">Enter the pairing code from `tokdash update-enroll` on this machine:</p>
                         <div class="update-cmd-row">
@@ -5518,12 +5573,20 @@
                         </div>
                       </div>
                       <div id="updateJobBox" class="update-job" hidden>
-                        <p id="updateJobText" class="text-xs"></p>
+                        <div class="up-job-row">
+                          <svg id="updateJobIcon" width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true" hidden></svg>
+                          <p id="updateJobText" class="text-xs"></p>
+                        </div>
+                        <div id="updateJobPhases" class="up-phases" hidden></div>
                         <button id="updateRefreshBtn" class="btn btn-primary" hidden data-i18n="updateRefreshPage">Refresh now</button>
+                        <button id="updateRetryBtn" class="btn btn-ghost update-retry-btn" hidden data-i18n="updateRetry">Try again</button>
                       </div>
-                      <div class="update-cmd-row">
-                        <code>tokdash update</code>
-                        <button id="updateCopyBtn" class="btn btn-ghost update-copy-btn" data-i18n="updateCopy">Copy</button>
+                      <div class="up-term">
+                        <span class="up-term-label" id="updateTermLabel" data-i18n="updateTermRun">Run in a terminal:</span>
+                        <div class="update-cmd-row">
+                          <code>tokdash update</code>
+                          <button id="updateCopyBtn" class="btn btn-ghost update-copy-btn" data-i18n="updateCopy">Copy</button>
+                        </div>
                       </div>
                       <button id="updateSkipBtn" class="update-skip-btn" data-i18n="updateSkip">Skip this version</button>
                     </div>
@@ -6455,6 +6518,16 @@
         updateSkip: 'Skip this version',
         updateEnable: 'Enable update notices',
         updateApply: 'Update to {version}',
+        updateTitle: 'v{latest} is available',
+        updateSub: 'You are on v{current} — one click applies it.',
+        updateSubManual: 'You are on v{current}.',
+        updateTermPrefer: 'Prefer the terminal?',
+        updateTermRun: 'Run this in a terminal:',
+        updateRetry: 'Try again',
+        phaseStopping: 'Stopping the service',
+        phaseBackup: 'Backing up usage data',
+        phaseInstall: 'Installing v{version}',
+        phaseVerify: 'Restarting and verifying',
         updatePanelTitle: 'Self-update',
         updateEnrollPrompt: 'Enter the pairing code from `tokdash update-enroll` on this machine:',
         updateEnrollBtn: 'Authorize',
@@ -7019,6 +7092,16 @@
         updateSkip: '跳过此版本',
         updateEnable: '开启更新提醒',
         updateApply: '更新到 {version}',
+        updateTitle: 'v{latest} 可用',
+        updateSub: '当前版本 v{current} — 一键完成更新。',
+        updateSubManual: '当前版本 v{current}。',
+        updateTermPrefer: '想在终端里执行？',
+        updateTermRun: '在终端运行：',
+        updateRetry: '重试',
+        phaseStopping: '停止服务',
+        phaseBackup: '备份使用数据',
+        phaseInstall: '安装 v{version}',
+        phaseVerify: '重启并验证',
         updatePanelTitle: '应用更新',
         updateEnrollPrompt: '请输入本机终端运行 `tokdash update-enroll` 显示的配对码：',
         updateEnrollBtn: '授权',
@@ -7584,6 +7667,16 @@
         updateSkip: 'このバージョンをスキップ',
         updateEnable: '更新通知を有効にする',
         updateApply: '{version} に更新',
+        updateTitle: 'v{latest} が利用可能です',
+        updateSub: '現在のバージョンは v{current} — ワンクリックで適用されます。',
+        updateSubManual: '現在のバージョンは v{current} です。',
+        updateTermPrefer: 'ターミナルで実行しますか？',
+        updateTermRun: 'ターミナルで実行してください:',
+        updateRetry: '再試行',
+        phaseStopping: 'サービスを停止しています',
+        phaseBackup: '使用データをバックアップしています',
+        phaseInstall: 'v{version} をインストールしています',
+        phaseVerify: '再起動して確認しています',
         updatePanelTitle: 'アプリの更新',
         updateEnrollPrompt: 'このマシンの端末で `tokdash update-enroll` が表示したペアリングコードを入力してください：',
         updateEnrollBtn: '認証',
@@ -8149,6 +8242,16 @@
         updateSkip: '이 버전 건너뛰기',
         updateEnable: '업데이트 알림 사용',
         updateApply: '{version}(으)로 업데이트',
+        updateTitle: 'v{latest} 업데이트 가능',
+        updateSub: '현재 버전 v{current} — 클릭 한 번으로 적용됩니다.',
+        updateSubManual: '현재 버전 v{current}.',
+        updateTermPrefer: '터미널에서 실행하시겠습니까?',
+        updateTermRun: '터미널에서 실행:',
+        updateRetry: '다시 시도',
+        phaseStopping: '서비스 중지 중',
+        phaseBackup: '사용 데이터 백업 중',
+        phaseInstall: 'v{version} 설치 중',
+        phaseVerify: '재시작 후 확인 중',
         updatePanelTitle: '앱 업데이트',
         updateEnrollPrompt: '이 컴퓨터의 터미널에서 `tokdash update-enroll`이 표시한 페어링 코드를 입력하세요:',
         updateEnrollBtn: '인증',
@@ -8714,6 +8817,16 @@
         updateSkip: 'Omitir esta versión',
         updateEnable: 'Activar avisos de actualización',
         updateApply: 'Actualizar a {version}',
+        updateTitle: 'v{latest} está disponible',
+        updateSub: 'Estás en v{current} — un clic lo aplica.',
+        updateSubManual: 'Estás en v{current}.',
+        updateTermPrefer: '¿Prefieres la terminal?',
+        updateTermRun: 'Ejecuta esto en una terminal:',
+        updateRetry: 'Reintentar',
+        phaseStopping: 'Deteniendo el servicio',
+        phaseBackup: 'Respaldando datos de uso',
+        phaseInstall: 'Instalando v{version}',
+        phaseVerify: 'Reiniciando y verificando',
         updatePanelTitle: 'Actualización de la app',
         updateEnrollPrompt: 'Introduce el código de emparejamiento que muestra `tokdash update-enroll` en esta máquina:',
         updateEnrollBtn: 'Autorizar',
@@ -9279,6 +9392,16 @@
         updateSkip: 'Pular esta versão',
         updateEnable: 'Ativar avisos de atualização',
         updateApply: 'Atualizar para {version}',
+        updateTitle: 'v{latest} está disponível',
+        updateSub: 'Você está na v{current} — um clique aplica.',
+        updateSubManual: 'Você está na v{current}.',
+        updateTermPrefer: 'Prefere o terminal?',
+        updateTermRun: 'Execute isto em um terminal:',
+        updateRetry: 'Tentar novamente',
+        phaseStopping: 'Parando o serviço',
+        phaseBackup: 'Fazendo backup dos dados de uso',
+        phaseInstall: 'Instalando v{version}',
+        phaseVerify: 'Reiniciando e verificando',
         updatePanelTitle: 'Atualização do app',
         updateEnrollPrompt: 'Digite o código de pareamento exibido por `tokdash update-enroll` nesta máquina:',
         updateEnrollBtn: 'Autorizar',
@@ -22576,23 +22699,42 @@
 
     function updateUi() {
       return {
+        title: document.getElementById('updateTitle'),
+        sub: document.getElementById('updateSub'),
         apply: document.getElementById('updateApplyBtn'),
+        applyLabel: document.getElementById('updateApplyLabel'),
         enroll: document.getElementById('updateEnrollRow'),
         pairInput: document.getElementById('updatePairInput'),
         enrollBtn: document.getElementById('updateEnrollBtn'),
         jobBox: document.getElementById('updateJobBox'),
         jobText: document.getElementById('updateJobText'),
+        jobIcon: document.getElementById('updateJobIcon'),
+        jobPhases: document.getElementById('updateJobPhases'),
         refresh: document.getElementById('updateRefreshBtn'),
+        retry: document.getElementById('updateRetryBtn'),
+        termLabel: document.getElementById('updateTermLabel'),
       };
+    }
+
+    // The terminal command is a fallback now; its label depends on whether the
+    // click path exists at all. Eligible installs offer it as an option,
+    // manual installs get it as the instruction it always was.
+    function updateTermLabel() {
+      const ui = updateUi();
+      if (!ui.termLabel) return;
+      const clickable = Boolean(updateCapabilityInfo && updateCapabilityInfo.eligible
+        && updateCapabilityInfo.target);
+      ui.termLabel.textContent = t(clickable ? 'updateTermPrefer' : 'updateTermRun');
     }
 
     function renderUpdateApply() {
       const info = updateCapabilityInfo;
       const ui = updateUi();
       if (!ui.apply) return;
+      updateTermLabel();
       const eligible = Boolean(info && info.eligible && info.target);
       if (!eligible) { ui.apply.hidden = true; ui.enroll.hidden = true; return; }
-      ui.apply.textContent = t('updateApply').replace('{version}', `v${info.target}`);
+      if (ui.applyLabel) ui.applyLabel.textContent = t('updateApply').replace('{version}', `v${info.target}`);
       if (updateIsLocalHost()) {
         ui.apply.hidden = false;
         ui.enroll.hidden = true;
@@ -22642,34 +22784,92 @@
       if (notice) notice.hidden = true;
     }
 
+    const UP_ICONS = {
+      spinner: '<circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="3" opacity="0.25"/><path d="M20 12a8 8 0 0 0-8-8" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>',
+      check: '<path d="m5 13 4.5 4.5L19 8" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>',
+      cross: '<path d="M7 7l10 10M17 7 7 17" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/>',
+      stepDone: '<path d="m5.5 12.5 4 4L18.5 8" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>',
+      stepNow: '<circle cx="12" cy="12" r="5" fill="currentColor"/>',
+    };
+
+    function setJobIcon(svg, spin) {
+      const ui = updateUi();
+      if (!ui.jobIcon) return;
+      ui.jobIcon.innerHTML = svg || '';
+      ui.jobIcon.classList.toggle('up-spinner', !!spin);
+      ui.jobIcon.hidden = !svg;
+    }
+
+    // The stepper mirrors the helper's journal phases — what has genuinely
+    // finished, what is running, what is queued. accepted/preflight are
+    // pre-flight work the user should not wait on per-line, so only the four
+    // visible steps map to phases ('ready' still belongs to 'starting').
+    const UP_STEPS = ['stopping', 'backing_up', 'installing', 'starting'];
+    function renderUpdatePhases(job) {
+      const ui = updateUi();
+      if (!ui.jobPhases) return;
+      const phase = job.phase === 'ready' ? 'starting' : job.phase;
+      const i = UP_STEPS.indexOf(phase);
+      if (i < 0) { ui.jobPhases.hidden = true; ui.jobPhases.innerHTML = ''; return; }
+      const names = { stopping: 'phaseStopping', backing_up: 'phaseBackup',
+                      installing: 'phaseInstall', starting: 'phaseVerify' };
+      ui.jobPhases.innerHTML = UP_STEPS.map((s, k) => {
+        const state = k < i ? 'done' : (k === i ? 'now' : 'todo');
+        const dot = state === 'done' ? UP_ICONS.stepDone : (state === 'now' ? UP_ICONS.stepNow : '');
+        const label = t(names[s]).replace('{version}', job.to_version || '?');
+        return `<div class="up-phase" data-s="${state}"><span class="up-dot">`
+          + (dot ? `<svg width="9" height="9" viewBox="0 0 24 24" fill="none">${dot}</svg>` : '')
+          + `</span>${label}</div>`;
+      }).join('');
+      ui.jobPhases.hidden = false;
+    }
+
     function renderUpdateJob(job) {
       const ui = updateUi();
       if (!ui.jobBox) return;
-      if (!job) { ui.jobBox.hidden = true; ui.refresh.hidden = true; return; }
+      if (!job) {
+        ui.jobBox.hidden = true; ui.refresh.hidden = true; ui.retry.hidden = true;
+        ui.jobPhases.hidden = true; return;
+      }
       if (job.phase === 'failed' && updateJobAcked(job)) {
-        ui.jobBox.hidden = true; ui.refresh.hidden = true; return;
+        ui.jobBox.hidden = true; ui.refresh.hidden = true; ui.retry.hidden = true; return;
       }
       ui.jobBox.hidden = false;
       ui.refresh.hidden = true;
+      ui.retry.hidden = true;
       updatePanelReveal();
+      if (ui.title && !updateLatestKnown) {
+        // Reaching the job through the neutral opener (e.g. a failure re-shown
+        // after reload with no newer release): give the popover a real header.
+        ui.title.textContent = t('updatePanelTitle');
+        ui.sub.textContent = t('updateSubManual')
+          .replace('{current}', (updateCapabilityInfo && updateCapabilityInfo.current) || '?');
+      }
       const version = `v${job.to_version || '?'}`;
       if (job.phase === 'succeeded') {
         ui.jobBox.dataset.state = 'done';
+        setJobIcon(UP_ICONS.check);
         ui.jobText.textContent = t('updateDone').replace('{version}', version);
+        ui.jobPhases.hidden = true;
         ui.refresh.hidden = false;
         return;
       }
       if (job.phase === 'failed') {
         ui.jobBox.dataset.state = 'failed';
+        setJobIcon(UP_ICONS.cross);
         ui.jobText.textContent = t('updateFailed')
           .replace('{phase}', job.failed_phase || job.phase)
           .replace('{message}', job.message || '');
+        ui.jobPhases.hidden = true;
+        ui.retry.hidden = false;
         return;
       }
       ui.jobBox.dataset.state = 'running';
+      setJobIcon(UP_ICONS.spinner, true);
       ui.jobText.textContent = (job.phase === 'starting' || job.phase === 'ready')
         ? t('updateReconnect')
         : t('updateBusy');
+      renderUpdatePhases(job);
     }
 
     // Reconnect with bounded backoff while the planned outage is on: a dropped request
@@ -22703,6 +22903,7 @@
             const ui = updateUi();
             ui.jobBox.hidden = false;
             ui.jobBox.dataset.state = 'failed';
+            setJobIcon(null);
             ui.jobText.textContent = t('updateTimeout');
             updatePollTimer = null;
             return;
@@ -22767,6 +22968,7 @@
           const data = await resp.json().catch(() => ({}));
           ui.jobBox.hidden = false;
           ui.jobBox.dataset.state = 'failed';
+          setJobIcon(UP_ICONS.cross);
           ui.jobText.textContent = t('updateFailed')
             .replace('{phase}', 'request')
             .replace('{message}', data.detail || String(resp.status));
@@ -22818,6 +23020,7 @@
           outageShown = true;
           ui.jobBox.hidden = false;
           ui.jobBox.dataset.state = 'running';
+          setJobIcon(UP_ICONS.spinner, true);
           ui.jobText.textContent = t('updateBusy');
           updatePanelReveal();
         }
@@ -22828,6 +23031,7 @@
       // unknown from here, and the host-side log is the only witness.
       ui.jobBox.hidden = false;
       ui.jobBox.dataset.state = 'failed';
+      setJobIcon(null);
       ui.jobText.textContent = t('updateTimeout');
     }
 
@@ -22849,6 +23053,7 @@
           const box = ui.jobBox;
           box.hidden = false;
           box.dataset.state = 'failed';
+          setJobIcon(UP_ICONS.cross);
           ui.jobText.textContent = resp.status === 429 ? t('updateEnrollLocked') : t('updateEnrollFailed');
           return;
         }
@@ -22900,9 +23105,11 @@
       const ui = updateUi();
       if (ui.apply) ui.apply.addEventListener('click', requestDashboardUpdate);
       if (ui.enrollBtn) ui.enrollBtn.addEventListener('click', enrollUpdateBrowser);
-      if (ui.jobBox) ui.jobBox.addEventListener('click', () => {
+      if (ui.jobBox) ui.jobBox.addEventListener('click', (event) => {
         // Acknowledge a persisted failure: remembered by job id so a reload does not
-        // resurrect the same message forever.
+        // resurrect the same message forever. Buttons inside the box (retry/refresh)
+        // act; they must not also ack.
+        if (event.target.closest('button')) return;
         if (ui.jobBox.dataset.state !== 'failed') return;
         const job = updateCapabilityInfo && updateCapabilityInfo.latest_job;
         if (job && job.phase === 'failed') {
@@ -22910,6 +23117,12 @@
           renderUpdateJob(null);
           updatePanelHideIfIdle();  // nothing left to show — retract the opener too
         }
+      });
+      if (ui.retry) ui.retry.addEventListener('click', () => {
+        // Failed terminal jobs never block a new one (create_job only attaches to
+        // LIVE jobs), so retry is a plain second click — same guards, same path.
+        renderUpdateJob(null);
+        if (updateCapabilityInfo && updateCapabilityInfo.target) requestDashboardUpdate();
       });
       if (ui.pairInput) ui.pairInput.addEventListener('keydown', (event) => {
         if (event.key === 'Enter') enrollUpdateBrowser();
@@ -22934,9 +23147,12 @@
       badge.textContent = `${t('updateAvailable')}: v${info.latest}`;
       const dot = document.getElementById('updateDot');
       if (dot) dot.hidden = false;
-      document.getElementById('updatePopoverText').textContent = t('updateBody')
-        .replace('{current}', info.current || '?')
-        .replace('{latest}', info.latest);
+      const head = updateUi();
+      if (head.title) {
+        head.title.textContent = t('updateTitle').replace('{latest}', info.latest);
+        head.sub.textContent = t(updateCapabilityInfo && updateCapabilityInfo.eligible
+          ? 'updateSub' : 'updateSubManual').replace('{current}', info.current || '?');
+      }
       notice.hidden = false;
       badge.hidden = false;
     }

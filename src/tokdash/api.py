@@ -2716,6 +2716,15 @@ def update_capability(request: Request, want_csrf: bool = False) -> Dict[str, An
     payload = update_control.capability(__version__)
     token = request.cookies.get(update_auth.SESSION_COOKIE)
     payload["enrolled"] = bool(update_auth.validate_session(token))
+    # The plane classification is Host/Origin-based, and those headers belong to
+    # the client: anyone who can guess the configured origin reads the
+    # unauthenticated shape of this payload. Eligibility and the target version
+    # are public facts (the same numbers the badge shows), but latest_job carries
+    # the host name and raw failure text with paths and pids — that is job detail,
+    # and /api/update/status gates the very same record behind a session. Remote
+    # callers without one get the payload WITHOUT it.
+    if plane == "remote" and not payload["enrolled"]:
+        payload["latest_job"] = None
     # CSRF recovery (feasibility §5): the session cookie survives a page reload, the
     # in-memory token does not. An enrolled remote caller explicitly asks, and gets a
     # fresh token in this same-origin response body — the double-submit property holds

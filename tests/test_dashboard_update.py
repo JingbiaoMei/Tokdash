@@ -738,6 +738,47 @@ def test_api_capability_rejects_foreign_host(loopback_app):
     assert r.status_code == 403
 
 
+def test_api_capability_hides_job_from_unenrolled_remote(loopback_app, eligible_env, tmp_path,
+                                                          monkeypatch):
+    # Review round 6 #1: the plane classification is Host/Origin-based, and those
+    # headers belong to the client — anyone who can GUESS the configured origin
+    # already reads the unauthenticated capability payload. Eligibility and the
+    # target are fine (the badge shows them to the same page); latest_job is not:
+    # it carries the host name and raw failure text. It belongs behind the same
+    # session gate as /api/update/status, which serves that exact record.
+    monkeypatch.setenv("TOKDASH_UPDATE_ORIGIN", TAILNET_ORIGIN)
+    job = _seed_job(tmp_path)
+    update_jobs.set_phase(job["id"], "failed",
+                          message="pip crashed: /home/user/.tokdash/usage.sqlite3 (pid 4242)")
+    headers = {"host": TAILNET_HOST, "origin": TAILNET_ORIGIN}
+    client = _client()
+
+    # Remote plane, no session: eligibility yes, job detail no.
+    r = client.get("/api/update/capability", headers=headers)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["eligible"] is True and body["enrolled"] is False
+    assert body["latest_job"] is None, "unauthenticated remote must not see the journal"
+
+    # Loopback keeps the job — the local page still shows the failure box.
+    r = client.get("/api/update/capability", headers={"host": HOST})
+    assert r.status_code == 200
+    assert r.json()["latest_job"]["id"] == job["id"]
+
+    # An enrolled remote caller (real session cookie from the pairing exchange)
+    # gets the same details back.
+    code = update_auth.create_pairing_code()
+    r = client.post("/api/update/enroll", headers=headers, json={"code": code})
+    assert r.status_code == 200
+    token = r.headers["set-cookie"].split("=", 1)[1].split(";", 1)[0]
+    r = client.get("/api/update/capability", headers=headers,
+                   cookies={update_auth.SESSION_COOKIE: token})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["enrolled"] is True
+    assert body["latest_job"]["id"] == job["id"]
+
+
 def test_api_start_requires_auth(loopback_app, eligible_env):
     # Tailnet Host, no configured origin → the write gate still applies → 403.
     r = _client().post(
@@ -1579,6 +1620,11 @@ def test_tokdash_launch_needs_a_launch_not_a_mention():
     assert L(["/venv/bin/python", "-m", "tokdash", "serve"]) == "definite"
     assert L(["/venv/bin/python", "/home/u/.local/bin/tokdash", "serve"]) == "definite"
     assert L(["python3", "main.py"]) == "ambiguous"  # dev-runner shape — binder decides
+    # Review round 6 #6: interpreter flags between the interpreter and the script
+    # must not hide the launch position — `python -u main.py` is still a runner.
+    assert L(["/usr/bin/python3", "-u", "main.py", "serve"]) == "ambiguous"
+    assert L(["python", "-X", "utf8", "-m", "tokdash", "serve"]) == "definite"
+    assert L(["/usr/bin/python", "-c", "import tokdash"]) is None  # inline code, no runner
     assert L(["/usr/bin/python", "-m", "pip", "install", "tokdash==9.9.9"]) is None
     assert L(["systemctl", "--user", "restart", "tokdash"]) is None
     assert L(["/usr/bin/code", "/home/u/Dev/Tokdash_Project/tokdash"]) is None
@@ -1603,7 +1649,7 @@ def test_sibling_scan_requires_a_positive_binding(eligible_env, tmp_path, monkey
     (proj / "main.py").write_text("# dev runner\n", encoding="utf-8")
     (proj / "src" / "tokdash" / "__main__.py").write_text("", encoding="utf-8")
 
-    cwds = {111: other, 333: proj}
+    cwds = {111: other, 333: proj, 555: other, 666: other}
 
     # Patching os.readlink hits EVERY readlink (posixpath.realpath uses it too),
     # so only /proc/<pid>/cwd is faked; everything else falls through to the
@@ -1626,11 +1672,21 @@ def test_sibling_scan_requires_a_positive_binding(eligible_env, tmp_path, monkey
         yield 333, ["/usr/bin/python3", "main.py", "serve"], {"HOME": str(home)}
         # 444: plain `tokdash serve`, no env -> definite launch + default dir -> caught
         yield 444, ["tokdash", "serve"], {"HOME": str(home)}
+        # 555: `python main.py` in a shell that merely EXPORTS the dir (review
+        # round 6 #6) — an exported default-ish dir must not convict every
+        # `python main.py` ever typed there. cwd elsewhere -> ignored.
+        yield 555, ["/usr/bin/python3", "main.py", "serve"], {
+            "HOME": str(home), "TOKDASH_DATA_DIR": str(tmp_path)}
+        # 666: `python main.py` with the usage DB EXPLICITLY bound to ours —
+        # a deliberate shared-DB run; the binding itself is the proof, cwd
+        # elsewhere still convicts.
+        yield 666, ["/usr/bin/python3", "main.py", "serve"], {
+            "HOME": str(home), "TOKDASH_USAGE_DB_PATH": str(tmp_path / "usage.sqlite3")}
 
     monkeypatch.setattr(update_helper.Runner, "_proc_snapshot", fake_snapshot)
     monkeypatch.setattr(update_helper.os, "readlink", fake_readlink)
     r = update_helper.Runner(tmp_path, "j", lambda m: None)
-    assert sorted(r._sibling_tokdash_pids(exclude=set())) == [333, 444]
+    assert sorted(r._sibling_tokdash_pids(exclude=set())) == [333, 444, 666]
 
 
 def test_update_handlers_are_off_the_event_loop():
@@ -1661,14 +1717,16 @@ def test_retry_after_restart_attaches_to_live_job(eligible_env, tmp_path):
 
 
 def test_terminal_notices_are_acknowledgeable():
-    # Review round 5 (page): "Refresh to finish." reappeared on EVERY load because
-    # success has no ack path and `current === to_version` stays true forever;
-    # and "Try again" after a readiness failure hid the box and then no-op'd.
+    # Wiring-level contract (behavior is proven in node below): success is
+    # acknowledgeable like failure, BOTH click paths route through the guarded
+    # helper (no unguarded localStorage write may sit in a click handler), and
+    # "Try again" only shows while that click would DO something.
     html = (Path(__file__).resolve().parents[1] / "src" / "tokdash" / "static"
             / "index.html").read_text(encoding="utf-8")
     rj = html[html.index("function renderUpdateJob"):html.index("function startUpdatePolling")]
     assert "(job.phase === 'failed' || job.phase === 'succeeded') && updateJobAcked(job))" in rj
     assert "ui.retry.hidden = !(updateCapabilityInfo && updateCapabilityInfo.target);" in rj
+    assert "updateJobShown = job;" in rj, "the box must remember the job it paints"
 
     cap = html[html.index("async function refreshUpdateCapability"):
                html.index("function initUpdateUi")]
@@ -1677,10 +1735,98 @@ def test_terminal_notices_are_acknowledgeable():
     init = html[html.index("function initUpdateUi"):html.index("function renderUpdateBadge")]
     box = init[:init.index("ui.retry.addEventListener")]
     assert "ui.jobBox.dataset.state !== 'done'" in box, "success box must be clickable-to-ack"
-    assert "job.phase === 'succeeded'))" in box
+    assert "const job = updateJobShown;" in box and "ackShownUpdateJob()" in box
     refresh = init[init.index("if (ui.refresh)"):init.index("window.location.reload")]
-    assert "doneJob.phase === 'succeeded'" in refresh and "UPDATE_ACK_KEY" in refresh, \
+    assert "ackShownUpdateJob();" in refresh, \
         "the refresh click itself must acknowledge the success it delivered"
+    assert "localStorage.setItem" not in init, \
+        "no unguarded storage write may sit in the click handlers (blocked storage = dead button)"
+    assert "localStorage.removeItem(UPDATE_SKIP_KEY);\n        } catch" in refresh, \
+        "even the skip-flag cleanup must not be able to cancel the reload"
+
+
+def test_shown_job_is_what_gets_acked():
+    # Behavior (review rounds 5–6): the success box is painted straight from the
+    # polling response while capability still reports the PREVIOUS job; the ack
+    # must remember the SHOWN job or the fresh success reappears after reload.
+    # And with storage blocked, the click must fail quiet — never throw.
+    node = __import__("shutil").which("node")
+    if not node:
+        pytest.skip("node not available")
+    html = (Path(__file__).resolve().parents[1] / "src" / "tokdash" / "static"
+            / "index.html").read_text(encoding="utf-8")
+    helpers = html[html.index("function updateJobAcked"):html.index("function updatePanelReveal")]
+    render = html[html.index("function renderUpdateJob"):
+                  html.index("// Reconnect with bounded backoff")]
+    harness = """
+const els = () => ({ hidden: true, dataset: {}, textContent: '', classList: { toggle: () => {} }, innerHTML: '' });
+global.t = (k) => k + ' {version} {phase} {message}';
+global.updateUi = () => global.__ui;
+global.updatePanelReveal = () => {};
+global.setJobIcon = () => {};
+global.renderUpdatePhases = () => {};
+global.UP_ICONS = { spinner: '', check: '', cross: '' };
+global.updateLatestKnown = null;
+global.UPDATE_ACK_KEY = 'ackkey';
+function freshUi() {
+  global.__ui = { jobBox: els(), refresh: els(), retry: els(), jobPhases: els(),
+                  jobIcon: els(), jobText: els(), title: els(), sub: els() };
+}
+function runCase(c) {
+  freshUi();
+  global.updateJobShown = undefined;  // the page-level `let`, fresh per case
+  global.__store = {};
+  global.localStorage = c.blockStorage
+    ? { getItem: () => { throw new Error('SecurityError'); },
+        setItem: () => { throw new Error('SecurityError'); },
+        removeItem: () => { throw new Error('SecurityError'); } }
+    : { getItem: (k) => (k in global.__store ? global.__store[k] : null),
+        setItem: (k, v) => { global.__store[k] = String(v); },
+        removeItem: (k) => { delete global.__store[k]; } };
+  // The race, made real: capability is a poll behind and still names j-OLD.
+  global.updateCapabilityInfo = { current: '9.9.9', target: null,
+                                  latest_job: { id: 'j-OLD', phase: 'succeeded' } };
+  renderUpdateJob(c.render);
+  let threw = null, acked = null;
+  try { acked = ackShownUpdateJob(); } catch (e) { threw = String(e && e.message || e); }
+  return { shownId: (global.updateJobShown || {}).id || null,
+           boxHidden: global.__ui.jobBox.hidden,
+           threw, acked, storedId: global.__store['ackkey'] || null };
+}
+""" + helpers + "\n" + render + """
+const CASES = %%CASES%%;
+const out = {};
+for (const c of CASES) out[c.name] = runCase(c);
+console.log(JSON.stringify(out));
+"""
+    cases = [
+        {"name": "acks_shown_job",
+         "render": {"id": "j-NEW", "phase": "succeeded", "to_version": "9.9.9"}},
+        {"name": "blocked_storage", "blockStorage": True,
+         "render": {"id": "j-NEW", "phase": "succeeded", "to_version": "9.9.9"}},
+        {"name": "hidden_clears", "render": None},
+    ]
+    import json as _json
+    import subprocess as _sp
+    import tempfile as _tf
+    with _tf.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as fh:
+        fh.write(harness.replace("%%CASES%%", _json.dumps(cases)))
+        path = fh.name
+    proc = _sp.run([node, path], capture_output=True, text=True, timeout=60)
+    assert proc.returncode == 0, proc.stderr
+    out = _json.loads(proc.stdout)
+    # The SHOWN job wins over capability's stale one — and it is what gets stored.
+    assert out["acks_shown_job"]["shownId"] == "j-NEW"
+    assert out["acks_shown_job"]["acked"] is True
+    assert out["acks_shown_job"]["storedId"] == "j-NEW"
+    assert out["acks_shown_job"]["boxHidden"] is False
+    # Blocked storage: no throw, nothing remembered — the handler decides.
+    assert out["blocked_storage"]["threw"] is None
+    assert out["blocked_storage"]["acked"] is False
+    assert out["blocked_storage"]["storedId"] is None
+    # A hidden box has nothing to ack.
+    assert out["hidden_clears"]["shownId"] is None
+    assert out["hidden_clears"]["acked"] is False
 
 
 # --- CLI/engine contract -------------------------------------------------------------------------

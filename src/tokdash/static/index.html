@@ -22442,6 +22442,7 @@
     let updateCapabilityInfo = null;
     let updateCsrfToken = '';   // memory-only, per enrollment; never persisted
     let updateLatestKnown = null;
+    let updateJobShown = null;   // the job renderUpdateJob last PAINTED (may lead capability)
     let updatePollTimer = null;
     let updatePollMisses = 0;
     let runtimeVersionPromise = null;
@@ -22759,6 +22760,24 @@
       }
     }
 
+    // Ack the job CURRENTLY SHOWN in the box, not the one capability last
+    // happened to report: the success box is painted straight from the polling
+    // response, so updateCapabilityInfo.latest_job can still name the PREVIOUS
+    // job for a beat after a fresh success lands (capability only refreshes once
+    // polling sees the terminal phase). Acking the stale id would leave the real
+    // success undismissed. Storage can be blocked (private mode / quota); the
+    // write must never throw into a click handler and strand its own action.
+    function ackShownUpdateJob() {
+      const job = updateJobShown;
+      if (!job) return false;
+      try {
+        localStorage.setItem(UPDATE_ACK_KEY, String(job.id));
+        return true;
+      } catch (_) {
+        return false;
+      }
+    }
+
     function updatePanelReveal() {
       // Job visibility must not depend on update availability: the readiness-failure
       // case runs the NEW version already, so no newer release exists, the badge was
@@ -22828,6 +22847,7 @@
       const ui = updateUi();
       if (!ui.jobBox) return;
       if (!job) {
+        updateJobShown = null;
         ui.jobBox.hidden = true; ui.refresh.hidden = true; ui.retry.hidden = true;
         ui.jobPhases.hidden = true; return;
       }
@@ -22835,8 +22855,10 @@
         // Terminal notices — failure AND success — are dismissed by ack, remembered
         // by job id: a "Refresh to finish" that resurrects itself on every page
         // load is a notification, not a state.
+        updateJobShown = null;
         ui.jobBox.hidden = true; ui.refresh.hidden = true; ui.retry.hidden = true; return;
       }
+      updateJobShown = job;  // what the box shows is what an ack must remember
       ui.jobBox.hidden = false;
       ui.refresh.hidden = true;
       ui.retry.hidden = true;
@@ -23129,9 +23151,8 @@
         // box (retry/refresh) act; they must not also ack.
         if (event.target.closest('button')) return;
         if (ui.jobBox.dataset.state !== 'failed' && ui.jobBox.dataset.state !== 'done') return;
-        const job = updateCapabilityInfo && updateCapabilityInfo.latest_job;
-        if (job && (job.phase === 'failed' || job.phase === 'succeeded')) {
-          localStorage.setItem(UPDATE_ACK_KEY, String(job.id));
+        const job = updateJobShown;
+        if (job && (job.phase === 'failed' || job.phase === 'succeeded') && ackShownUpdateJob()) {
           renderUpdateJob(null);
           updatePanelHideIfIdle();  // nothing left to show — retract the opener too
         }
@@ -23148,17 +23169,18 @@
       if (ui.refresh) ui.refresh.addEventListener('click', () => {
         // Acknowledge the success BEFORE handing the tab to the new server: the
         // whole point of "Refresh to finish" is that the notice did its job, and
-        // an un-acked success would greet the reloaded page again.
-        const doneJob = updateCapabilityInfo && updateCapabilityInfo.latest_job;
-        if (doneJob && doneJob.phase === 'succeeded') {
-          localStorage.setItem(UPDATE_ACK_KEY, String(doneJob.id));
-        }
+        // an un-acked success would greet the reloaded page again. The ack is
+        // best-effort bookkeeping — storage can be blocked — it must never
+        // cancel the reload the user actually asked for.
+        ackShownUpdateJob();
         // Clear every cached version view, then hand the page to the NEW server —
         // success is established by the fresh runtime, never by the old promise.
         runtimeVersionPromise = null;
         releaseNotesPayload = null;
         releaseNotesPromise = null;
-        localStorage.removeItem(UPDATE_SKIP_KEY);
+        try {
+          localStorage.removeItem(UPDATE_SKIP_KEY);
+        } catch (_) { /* blocked storage: the skip flag just stays as it is */ }
         window.location.reload();
       });
     }

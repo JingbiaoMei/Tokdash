@@ -113,17 +113,27 @@ def _tokdash_launch(argv):
         return "definite"  # console script launched directly (kernel resolved it)
     if not os.path.basename(prog).startswith("python"):
         return None
-    if len(argv) > 1:
-        script = argv[1]
+    # Interpreter flags may sit between the interpreter and the script
+    # (`python -u main.py`, `python -X utf8 -m tokdash serve`): the SCRIPT
+    # position identifies the launch, so skip the flags to find it.
+    i = 1
+    while i < len(argv) and argv[i].startswith("-") and argv[i] != "-":
+        if argv[i] == "-c":
+            return None  # runs inline code, not a runner script
+        if argv[i] == "-m":
+            break  # module launch — the -m scan below decides
+        i += 1
+    if i < len(argv) and not argv[i].startswith("-"):
+        script = argv[i]
         if script == "main.py" or script.endswith("/main.py"):
             return "ambiguous"
         if script.startswith("/") and script.endswith("/tokdash"):
             return "definite"  # console script run through its interpreter
-    for i, a in enumerate(argv):
-        if a == "-m" and i + 1 < len(argv):
-            if argv[i + 1] == "tokdash":
+    for j, a in enumerate(argv):
+        if a == "-m" and j + 1 < len(argv):
+            if argv[j + 1] == "tokdash":
                 return "definite"
-            if argv[i + 1] == "pip":
+            if argv[j + 1] == "pip":
                 return None
     return None
 
@@ -422,15 +432,24 @@ class Runner:
                     continue
             except OSError:
                 continue
-            # A default-location match is inferred, not proven: it convicts a real
-            # `tokdash serve` left running (that default IS ~/.tokdash), but the
-            # ambiguous dev-runner shape would convict every python project whose
-            # main.py happens to run under this $HOME. That form is only guilty
-            # when its own cwd is a Tokdash project root — its runner imports the
-            # package sitting right next to it.
-            if not (dd_env or db_env) and form == "ambiguous" \
-                    and not self._cwd_is_tokdash_project(pid):
-                continue
+            # The dev-runner shape must prove ITSELF as a tokdash run. Neither a
+            # default-location inference nor an EXPORTED TOKDASH_DATA_DIR does:
+            # a shell that exports it would otherwise convict every `python
+            # main.py` ever typed there. Guilty means: cwd is a Tokdash project
+            # root (the runner imports the package next to it), or the process
+            # explicitly binds THIS usage DB — the plan's supported shared-DB
+            # override, which proves intent regardless of cwd. (A definite
+            # launch — the tokdash console script / -m tokdash — needs no such
+            # extra proof: running that binary IS the intent.)
+            if form == "ambiguous":
+                shared_db_bound = False
+                if db_env:
+                    try:
+                        shared_db_bound = os.path.realpath(db_env) == want_db
+                    except OSError:
+                        shared_db_bound = False
+                if not shared_db_bound and not self._cwd_is_tokdash_project(pid):
+                    continue
             found.append(pid)
         return found
 

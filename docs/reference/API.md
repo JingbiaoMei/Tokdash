@@ -22,7 +22,7 @@ per-session token); see [`docs/SECURITY.md`](../SECURITY.md) and `PUT /api/prici
 | `GET` | `/api/csrf-token` | Per-session write token (loopback/same-origin only) |
 | `GET` | `/api/update-check` | Opt-in cached PyPI version check (read-only) |
 | `POST` | `/api/update-check/consent` | Persist one-time update-check consent (write-gated) |
-| `GET` | `/api/update/capability` | Click-to-update eligibility, target, live job (loopback or enrolled-remote) |
+| `GET` | `/api/update/capability` | Click-to-update eligibility + target (live job details require a session) |
 | `POST` | `/api/update/enroll` | Redeem a host-minted pairing code for a remote session |
 | `POST` | `/api/update/start` | Admit/attach one update job and launch the isolated updater |
 | `GET` | `/api/update/status` | Job progress for the click-to-update flow (session-gated when remote) |

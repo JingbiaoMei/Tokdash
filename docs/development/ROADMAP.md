@@ -111,8 +111,10 @@ constraint instead of the prohibition: server-side eligibility only (the page's 
 nothing), loopback or pairing-code/session auth, the apply executed by an isolated transient
 systemd helper OUTSIDE the server process (never a thread or child of what it stops), bounded
 recovery, and the copyable `tokdash update` command kept as the fallback for every install the
-click path does not cover. Design: `docs/local/20260927_auto_update/AUTO_UPDATE_FEASIBILITY.md`;
-user-facing: `docs/guides/ONBOARDING.md` ("Dashboard updates"); threat model: `docs/SECURITY.md`.
+click path does not cover. The feasibility study that preceded it lives in the project's
+untracked local design archive (`docs/local/`, gitignored by convention — it is not a link
+any clone can follow); user-facing: `docs/guides/ONBOARDING.md` ("Dashboard updates");
+threat model: `docs/SECURITY.md`.
 
 ## Client / IDE support
 Principle: **no inference**. Only emit entries when numeric token fields exist.

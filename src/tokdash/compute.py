@@ -866,13 +866,8 @@ def get_tools_data_for_range(
             except Exception as exc:
                 # Keep the DB fail-open: serving correctness should not depend on
                 # cache health while this backend is still evolving. The answer is
-                # complete either way, so it must not be marked incomplete.
-                # `source_errors` is the channel for sources that could not answer,
-                # and the dashboard treats a non-empty list as "this server's answer
-                # is unusable": it falls back to that server's last complete
-                # snapshot, or marks the row partial when there is none. Reporting
-                # a failed cache there would pin the view to stale numbers for as
-                # long as usage.db stays broken. The failure goes to the log.
+                # complete either way, so it must not be marked incomplete; the
+                # reasoning lives in store_logging, which owns that rule.
                 log_store_failure(
                     logger,
                     "tokdash persistent usage cache failed; falling back to live parsers",

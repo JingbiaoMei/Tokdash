@@ -49,4 +49,4 @@ def parse_date_range(date_from: str, date_to: str) -> Tuple[datetime, datetime]:
     until = datetime.strptime(date_to, "%Y-%m-%d") + timedelta(days=1)
     if since >= until:
         raise ValueError("date_from must be on or before date_to")
-    return local_midnight(since), local_midnight(until)
+    return local_midnight(since), local_midnight(until)

@@ -214,6 +214,47 @@ def test_the_previous_month_starts_at_its_own_dates_offset(os_zone, frozen_local
 
 @needs_tzset
 @pytest.mark.parametrize(
+    "now,period,prev_start",
+    [
+        (datetime(2026, 10, 26, 12, 0), "today", datetime(2026, 10, 25)),
+        (datetime(2026, 11, 1, 12, 0), "7d", datetime(2026, 10, 19)),
+    ],
+)
+def test_the_previous_window_starts_at_its_own_dates_offset(
+    os_zone, frozen_local_now, now, period, prev_start
+):
+    os_zone(LONDON)
+    frozen_local_now(now)
+
+    current_since, _ = compute._current_period_range(period)
+    prev_since, prev_until = compute.previous_period_range(period)
+
+    assert prev_until == current_since
+    # The clock change falls exactly on the boundary between this window and the
+    # one before it, so this window's start is on GMT and the previous window's
+    # start is still on BST: its first midnight is an hour before that date's
+    # 00:00 UTC. Subtracting a timedelta from an aware UTC instant landed on
+    # 00:00 UTC instead and dropped that hour.
+    assert prev_since == local_midnight(prev_start)
+    assert prev_since.astimezone().utcoffset() == timedelta(hours=1)
+
+
+@needs_tzset
+def test_the_previous_day_after_a_clock_change_is_25_hours_long(os_zone, frozen_local_now):
+    os_zone(LONDON)
+    frozen_local_now(datetime(2026, 10, 26, 12, 0))  # the day after London leaves BST
+
+    prev_since, prev_until = compute.previous_period_range("today")
+
+    # 25 Oct began on BST and ran 25 hours. A 24-hour step back from a GMT
+    # instant dropped its first hour, which is exactly what the "vs previous
+    # period" comparison is measuring.
+    assert prev_since == datetime(2026, 10, 25).astimezone(timezone.utc)
+    assert prev_until - prev_since == timedelta(hours=25)
+
+
+@needs_tzset
+@pytest.mark.parametrize(
     "call,args,expected",
     [
         ("get_usage_for_month", (), datetime(2026, 10, 1)),
@@ -268,4 +309,4 @@ def test_no_environment_variable_moves_the_window(os_zone, monkeypatch):
     since, until = parse_date_range("2026-01-05", "2026-01-05")
 
     assert since == datetime(2026, 1, 5).astimezone(timezone.utc)
-    assert until == datetime(2026, 1, 6).astimezone(timezone.utc)
+    assert until == datetime(2026, 1, 6).astimezone(timezone.utc)

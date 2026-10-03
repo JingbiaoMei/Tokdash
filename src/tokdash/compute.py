@@ -1065,15 +1065,18 @@ def previous_period_range(period: str) -> tuple[datetime, datetime]:
         prev_since_local = local_midnight(datetime.combine(prev_month_start, datetime.min.time()))
         return prev_since_local.astimezone(timezone.utc), prev_until
 
-    if period_to_days(period) == 1:
-        prev_since = current_since - timedelta(days=1)
-        prev_until = current_since
-        return prev_since, prev_until
-
+    # Day and N-day windows step back from a DATE for the same reason the month
+    # branch does: subtracting a timedelta from an aware UTC instant carries that
+    # instant's offset onto the boundary. On the day after a clock change the
+    # current window's start is ``local midnight in the new offset``, and a
+    # 24-hour step back from it lands an hour late -- it misses the first hour
+    # of a window that was 23 or 25 hours long, which is exactly what the
+    # "vs previous period" comparison measures.
     days = period_to_days(period)
     prev_until = current_since
-    prev_since = prev_until - timedelta(days=days)
-    return prev_since, prev_until
+    prev_start_date = current_since.astimezone().date() - timedelta(days=days)
+    prev_since_local = local_midnight(datetime.combine(prev_start_date, datetime.min.time()))
+    return prev_since_local.astimezone(timezone.utc), prev_until
 
 
 def _compute_previous_usage(

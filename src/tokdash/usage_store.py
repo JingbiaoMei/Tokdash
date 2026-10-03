@@ -817,36 +817,84 @@ def build_source_signature(*, files: Any, pricing: Any = None, parser: Any = Non
 # to the live parsers; the same number in a session turn timestamp failed that
 # tool's session sync (and the v7 migration backfill that reads those bounds
 # back out of already-stored rows).
-# The storage boundary clamps instead of rejecting: the index stays alive, and
-# the affected row keeps the largest (or smallest) value its column can
-# represent. Note this bounds the stored magnitude, it does not correct it --
-# a count of 10**25 is stored as 2**63 - 1, so the DB and the live parsers
-# disagree about that one row.
-_SQLITE_INT_MIN = -(2**63)
-_SQLITE_INT_MAX = 2**63 - 1
+#
+# This module is the boundary that owns the invariant, and an unrepresentable
+# value is read as unreadable rather than stored as a bound for it. The read
+# half of the same rule is the ``total()`` sums in the SQL below.
+#
+#   * A count is stored as 0, the reading ``_int_field`` and the parsers' ``_i()``
+#     already give junk. Storing 2**63 - 1 instead would be a number no source
+#     reported -- one ``kimi-k2`` row priced at it bills about $5.5T -- and the
+#     live parsers, which have no reason to clamp, would disagree with the row
+#     this store wrote.
+#   * A timestamp is dropped, the reading ``_entry_for_storage`` already gives
+#     ``timestamp <= 0`` and ``_session_time_bounds`` gives ``inf``. A clamped
+#     timestamp would keep a row that no date query can place
+#     (``date(9223372036854775807 / 1000, 'unixepoch')`` is NULL) while every
+#     aggregate still counted it, and would push a session's ``last_seen_at_ms``
+#     to the ceiling, so the session read as live until the year 292 million.
+SQLITE_INT_MIN = -(2**63)
+SQLITE_INT_MAX = 2**63 - 1
 
 
-def _clamp_sqlite_int(value: int) -> int:
-    return max(_SQLITE_INT_MIN, min(int(value), _SQLITE_INT_MAX))
+def _representable_int(value: Any) -> Optional[int]:
+    """``int(value)`` when SQLite can bind it, else ``None``.
 
-
-def _timestamp_ms(value: Any) -> int:
+    ``None`` covers the two ways a value fails here: one that is not a number
+    at all (``None``, a string, a dict) and one that is a number SQLite has no
+    column for. ``OverflowError`` is the second case's common face -- ``int(inf)``,
+    and ``int(1e400)``, which is ``inf`` once a JSON parser has read it.
+    """
     try:
-        if isinstance(value, datetime):
+        as_int = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return as_int if SQLITE_INT_MIN <= as_int <= SQLITE_INT_MAX else None
+
+
+def _epoch_ms(value: Any) -> Optional[int]:
+    """Milliseconds since the epoch, or ``None`` when it is not a time.
+
+    Unbounded: this is the conversion, not the storage rule. ``_entry_timestamp_ms``
+    applies that on the write path, ``_timestamp_ms`` on the read path.
+    """
+    if isinstance(value, datetime):
+        try:
             dt = value
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=timezone.utc)
             return int(dt.astimezone(timezone.utc).timestamp() * 1000)
-        return _clamp_sqlite_int(int(value or 0))
-    except Exception:
-        return 0
+        except (TypeError, ValueError, OverflowError, OSError):
+            # OSError: Windows cannot convert a year-1 datetime to a POSIX
+            # timestamp, so a caller may legitimately hand us one.
+            return None
+    return _representable_int(value)
+
+
+def _timestamp_ms(value: Any) -> int:
+    """A query bound in epoch milliseconds -- always a number SQLite can bind.
+
+    Read path: a caller hands us the ``since``/``until`` it wants rows between,
+    and an unusable one still has to produce a runnable query. A datetime
+    converts to a value inside the range by construction, so this only decides
+    what a bad bound means: 0 (the epoch), which a window that starts there
+    includes rather than drops.
+    """
+    return _representable_int(_epoch_ms(value)) or 0
+
+
+def _entry_timestamp_ms(value: Any) -> Optional[int]:
+    """An entry's timestamp in epoch milliseconds, or ``None`` when it has none.
+
+    ``None`` drops the entry (see ``_entry_for_storage``) and, on the session
+    path, skips the turn.
+    """
+    return _representable_int(_epoch_ms(value))
 
 
 def _int_field(entry: dict[str, Any], key: str) -> int:
-    try:
-        return _clamp_sqlite_int(int(entry.get(key, 0) or 0))
-    except Exception:
-        return 0
+    """A count as the store will hold it: 0 for junk and for out of range."""
+    return _representable_int(entry.get(key) or 0) or 0
 
 
 def _float_field(entry: dict[str, Any], key: str) -> float:
@@ -860,8 +908,8 @@ def _entry_for_storage(entry: dict[str, Any]) -> Optional[dict[str, Any]]:
     source = str(entry.get("source") or "unknown")
     model = str(entry.get("model") or "unknown")
     provider = str(entry.get("provider") or "")
-    timestamp = _timestamp_ms(entry.get("timestamp"))
-    if timestamp <= 0:
+    timestamp = _entry_timestamp_ms(entry.get("timestamp"))
+    if timestamp is None or timestamp <= 0:
         return None
 
     raw = dict(entry)
@@ -875,6 +923,8 @@ def _entry_for_storage(entry: dict[str, Any]) -> Optional[dict[str, Any]]:
     raw["reasoning"] = _int_field(raw, "reasoning")
     raw["cost"] = _float_field(raw, "cost")
     raw["timestamp"] = timestamp
+    # An unreadable message count still describes one message, exactly as a
+    # zero one does.
     raw["messageCount"] = _int_field(raw, "messageCount") or 1
     raw["entry_key"] = _entry_key(raw)
     if not isinstance(raw.get("_billing"), dict):
@@ -960,14 +1010,14 @@ def _session_time_bounds(raw: dict[str, Any]) -> tuple[Optional[int], Optional[i
     for turn in raw.get("turns", []):
         if not isinstance(turn, dict):
             continue
-        try:
-            timestamp_ms = _clamp_sqlite_int(int(turn.get("timestamp_ms", 0) or 0))
-        except (TypeError, ValueError, OverflowError):
-            # OverflowError covers a JSON float too large to be finite (1e400
-            # parses to inf), which int() cannot convert. Skipping the turn keeps
-            # the rest of the session's bounds instead of failing the sync.
-            continue
-        if timestamp_ms > 0:
+        # Skipping keeps the rest of the session's bounds instead of failing the
+        # sync, and an unusable timestamp is the one that must not be clamped:
+        # a bound stored at the ceiling dates the session to the year 292
+        # million, so the session shows under Today forever and lands in no
+        # window a user would ever look at. Same for inf, which _representable_int
+        # rejects as OverflowError.
+        timestamp_ms = _representable_int(turn.get("timestamp_ms") or 0)
+        if timestamp_ms is not None and timestamp_ms > 0:
             timestamps.append(timestamp_ms)
     if not timestamps:
         return None, None

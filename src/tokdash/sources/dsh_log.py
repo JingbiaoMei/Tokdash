@@ -28,6 +28,11 @@ DSH_ACCOUNTING_VERSION = 1
 # corrupt — the file is skipped, never treated as empty.
 SUPPORTED_SESSION_FORMAT_VERSION = 0
 
+# SQLite's signed 64-bit integer range. Duplicated from usage_store rather than
+# imported: this module deliberately knows nothing about the usage store, and
+# what it needs from that range is only the bound below (#144).
+_SQLITE_INT_MAX = 2**63 - 1
+
 
 @dataclass(frozen=True)
 class DSHDecodedSession:
@@ -119,14 +124,22 @@ def decode_dsh_session_file(path: Path) -> DSHDecodedSession:
 
 
 def _to_int(value: Any) -> Optional[int]:
-    """An explicit non-negative integer, or None when absent or invalid."""
+    """An explicit non-negative integer, or None when absent or invalid.
+
+    A count past SQLite's signed 64-bit range is invalid here too (#144): it
+    cannot be stored, and this parser rejects its row rather than storing a
+    bound for it, so the live parse and the stored row agree on the row not
+    existing. Same for a timestamp, where None already means "skip this event".
+    """
     if isinstance(value, bool) or value is None:
         return None
     try:
         result = int(value)
     except (TypeError, ValueError):
         return None
-    return result if result >= 0 else None
+    if result < 0 or result > _SQLITE_INT_MAX:
+        return None
+    return result
 
 
 def fold_dsh_usage_samples(

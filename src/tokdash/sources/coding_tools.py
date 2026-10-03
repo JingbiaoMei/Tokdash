@@ -32,6 +32,8 @@ try:
     from .. import clientpaths
     from ..pricing import PricingDatabase
     from ..usage_store import (
+        SQLITE_INT_MAX,
+        SQLITE_INT_MIN,
         USAGE_ENTRY_FORMAT_VERSION,
         UsageFileVanished,
         usage_billing_fixed,
@@ -46,6 +48,8 @@ except ImportError:  # pragma: no cover
     import clientpaths
     from pricing import PricingDatabase
     from usage_store import (
+        SQLITE_INT_MAX,
+        SQLITE_INT_MIN,
         USAGE_ENTRY_FORMAT_VERSION,
         UsageFileVanished,
         usage_billing_fixed,
@@ -601,10 +605,19 @@ class BaseParser(ABC):
 
     @staticmethod
     def _i(v: Any) -> int:
+        """A token count as reported, or 0 when the value is not one.
+
+        0 is also what a count SQLite could never hold reads as (#144). Doing it
+        here, once, where the parser reads the number, is what makes the live
+        parsers and the usage DB agree about the same row: the store cannot
+        write 10**25 either, and a row that reads 10**25 with the DB off and 0
+        with it on is a bug whichever side is "right".
+        """
         try:
-            return int(v or 0)
+            count = int(v or 0)
         except Exception:
             return 0
+        return count if SQLITE_INT_MIN <= count <= SQLITE_INT_MAX else 0
 
 
 def _opencode_model_identity(data: Dict[str, Any]) -> tuple[str, str]:
@@ -2297,9 +2310,12 @@ class GrokParser(BaseParser):
         if value is None or isinstance(value, bool):
             return 0
         try:
-            return int(value)
+            count = int(value)
         except (TypeError, ValueError, OverflowError):
             return 0
+        # Same rule as BaseParser._i: a count the usage DB could not hold reads
+        # as 0, so the live parse and the stored row do not disagree (#144).
+        return count if SQLITE_INT_MIN <= count <= SQLITE_INT_MAX else 0
 
     @staticmethod
     def _timestamp_ms(raw: Any) -> Optional[int]:
@@ -5359,6 +5375,12 @@ class ReasonixParser(BaseParser):
         Mirrors dsh_log._to_int: a missing field is the caller's business, an
         unusable one rejects its row rather than raising into the per-file
         handler and silently discarding the rest of the day.
+
+        Unusable includes a count past SQLite's signed 64-bit range (#144). It
+        cannot be stored, and unlike the parsers that read 0 for one this
+        parser's rule is that a present field it cannot vouch for takes its
+        whole row with it -- so the live parse and the stored row still agree,
+        on the row not existing.
         """
         if value is None:
             return None
@@ -5368,7 +5390,9 @@ class ReasonixParser(BaseParser):
             result = int(value)
         except (TypeError, ValueError):
             return None
-        return result if result >= 0 else None
+        if result < 0 or result > SQLITE_INT_MAX:
+            return None
+        return result
 
     @classmethod
     def _token_field(cls, entry: Dict[str, Any], key: str) -> Optional[int]:

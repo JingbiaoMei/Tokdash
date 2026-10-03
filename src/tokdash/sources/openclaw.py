@@ -16,6 +16,8 @@ try:
     from ..clientpaths import openclaw_agent_sessions_glob
     from ..pricing import PricingDatabase
     from ..usage_store import (
+        SQLITE_INT_MAX,
+        SQLITE_INT_MIN,
         USAGE_ENTRY_FORMAT_VERSION,
         UsageDatabaseSchemaTooNewError,
         UsageEntryStore,
@@ -30,6 +32,10 @@ except ImportError:  # pragma: no cover
     from clientpaths import openclaw_agent_sessions_glob
     from pricing import PricingDatabase
     USAGE_ENTRY_FORMAT_VERSION = 1  # type: ignore
+    # Still read live in this branch, so _i() below needs the same bound the
+    # store would have applied.
+    SQLITE_INT_MIN = -(2**63)  # type: ignore
+    SQLITE_INT_MAX = 2**63 - 1  # type: ignore
 
     class UsageDatabaseSchemaTooNewError(RuntimeError):  # type: ignore
         """Stand-in so the fail-fast `except` clauses below stay valid.
@@ -111,10 +117,17 @@ def parse_session_file(
 
 
 def _i(v: Any) -> int:
+    """A token count as reported, or 0 when the value is not one.
+
+    A count outside SQLite's signed 64-bit range reads as 0 here for the same
+    reason it does in the parsers (#144): the store cannot write it either, and
+    a row that reads 10**25 with the DB off and 0 with it on is a bug.
+    """
     try:
-        return int(v or 0)
+        count = int(v or 0)
     except Exception:
         return 0
+    return count if SQLITE_INT_MIN <= count <= SQLITE_INT_MAX else 0
 
 
 def _parse_message_datetime(ts: Any) -> Optional[datetime]:

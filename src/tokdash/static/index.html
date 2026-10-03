@@ -30,12 +30,16 @@
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700;800&family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
 
   <script src="https://cdn.tailwindcss.com"></script>
-  <script>tailwind.config = { darkMode: 'class' }</script>
+  <script>if (window.tailwind) tailwind.config = { darkMode: 'class' }</script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
 
-  <!-- Flatpickr Date Picker -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">
+  <!-- Flatpickr Date Picker. The stylesheet link sets a flag when it loads:
+       a link that fails to load still appears in document.styleSheets with its
+       href, so the CDN banner cannot detect the failure by inspecting sheets.
+       The load event is the only positive evidence the CSS arrived, and it has
+       always fired by the time the banner checks at DOMContentLoaded. -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css" onload="window.__tokdashFlatpickrCssLoaded = true">
   <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.js"></script>
 
   <style>
@@ -1427,6 +1431,13 @@
     html.dark .hover\:bg-slate-50:hover { background-color: rgba(51, 65, 85, 0.3); }
     html.dark .border-b { border-color: #334155; }
 
+    /* Without flatpickr.min.css the calendar loses its position:absolute and its
+       closed-state hiding, and sits static in the body's flex row. The CDN
+       banner sets this class when the stylesheet (or the script) failed. */
+    .tokdash-datepicker-unavailable .flatpickr-calendar {
+      display: none !important;
+    }
+
     /* Flatpickr Custom Styles */
     .flatpickr-calendar {
       background: var(--datepickr-panel-bg);
@@ -2227,6 +2238,16 @@
       border-color: rgba(99, 102, 241, 0.35);
       background: rgba(255, 255, 255, 0.06);
     }
+    /* Flatpickr failed to load (script or stylesheet), so the CDN banner has
+       disabled the trigger. It still shows the selected range; hovering it
+       shows why it cannot open rather than inviting a click. */
+    .date-range-trigger:disabled,
+    .date-range-trigger:disabled:hover {
+      cursor: not-allowed;
+      opacity: 0.6;
+      border-color: var(--color-border);
+      background: color-mix(in srgb, var(--color-text) 3%, transparent);
+    }
     /* KPI cards sparkline stretching */
     #overviewKpiGrid .surface {
       position: relative;
@@ -2665,6 +2686,185 @@
 </head>
 
 <body class="flex min-h-screen font-sans selection:bg-indigo-500 selection:text-white transition-colors duration-200 relative">
+  <!-- CDN failure banner. The live region exists in the markup from the start
+       (content inserted into a region that already exists is what screen
+       readers announce), and it is filled with t() at DOMContentLoaded, when
+       the translations are defined.
+
+       Critical failures stay on screen until dismissed, because the dashboard
+       stays broken after them; warnings fade once they have been read.
+
+       Bottom-right, not top-right: the top-right corner holds Refresh, the
+       theme toggle and the date-range trigger, which are exactly the controls
+       a broken CDN leaves unusable. The max-width keeps a 16px gutter on both
+       sides at 360px. The region is never display:none - a live region that is
+       hidden when its cards are appended is not announced. Its box spans the
+       widest card, so it takes no pointer events itself and each card opts back
+       in: otherwise the gaps between cards, and the space beside a narrower
+       one, swallow clicks meant for the page underneath. -->
+  <div id="cdnFailureBanner" role="status" aria-live="polite"
+       style="position:fixed;bottom:16px;right:16px;z-index:99999;display:flex;flex-direction:column;align-items:flex-end;gap:8px;max-width:calc(100vw - 32px);max-height:calc(100vh - 32px);overflow-y:auto;pointer-events:none;"></div>
+  <script>
+    (function() {
+      const banner = document.getElementById('cdnFailureBanner');
+
+      // (key, severity, condition): the banner entry is built only when the
+      // condition is true. Critical entries stay until dismissed; warnings
+      // fade once they have had a chance to be read.
+      const CDN_CHECKS = [
+        ['cdnTailwindFailed', 'critical', () => !window.tailwind],
+        ['cdnChartFailed', 'critical', () => typeof Chart === 'undefined'],
+        ['cdnThreeFailed', 'warning', () => typeof THREE === 'undefined'],
+        // A <link rel="stylesheet"> that failed to load still shows up in
+        // document.styleSheets carrying its href, so sniffing the sheet list
+        // always passes. The link sets a flag on a successful load instead,
+        // which is the only positive evidence the CSS actually arrived.
+        ['cdnFlatpickrFailed', 'warning', () => typeof flatpickr === 'undefined'
+          || !window.__tokdashFlatpickrCssLoaded, disableDatePicker],
+      ];
+
+      // Without the script there is no picker, and without the stylesheet its
+      // calendar is an unstyled block left static in the body's flex row: a
+      // 528x6451px column at 1400x900, the whole viewport on a phone. Hide it,
+      // and take the trigger out of play rather than leave a button that opens
+      // nothing. The quick ranges still work without either.
+      function disableDatePicker() {
+        document.documentElement.classList.add('tokdash-datepicker-unavailable');
+        const trigger = document.getElementById('dateRangeTrigger');
+        if (!trigger) return;
+        trigger.disabled = true;
+        trigger.removeAttribute('aria-haspopup');
+        trigger.setAttribute('title', translate('cdnFlatpickrFailed'));
+      }
+
+      // t is a hoisted function declaration, so `typeof t === 'function'` is
+      // true even when the main script died before it reached `const I18N`, and
+      // calling it then throws from the temporal dead zone. I18N is a top-level
+      // const, so it is reachable by name from this script once initialized and
+      // throws the same way when it is not. Each lookup is isolated so that one
+      // failed lookup cannot silence the cards that come after it.
+      function translate(key) {
+        try {
+          if (typeof t === 'function') return t(key);
+        } catch (err) { /* the main script died before I18N was initialized */ }
+        try {
+          return I18N.en[key] || key;
+        } catch (err) { /* I18N never got initialized either */ }
+        return key;
+      }
+
+      function dismiss(card) {
+        // A timer racing the close button is harmless: removing a card that has
+        // already gone is a no-op.
+        if (card && card.isConnected) card.remove();
+      }
+
+      // A warning fades on its own, but the clock only runs while the card is
+      // actually being looked at: it pauses on hover and while keyboard focus is
+      // inside - so focus is never yanked out from under a tabbing user - and
+      // while the tab is in the background, then resumes from a full delay.
+      function autoDismissWarning(card) {
+        const DELAY = 8000;
+        let timer = null;
+        let hovered = false;
+        let focused = false;
+
+        function stop() {
+          if (timer !== null) { clearTimeout(timer); timer = null; }
+        }
+        function start() {
+          stop();
+          if (hovered || focused || document.hidden || !card.isConnected) return;
+          timer = setTimeout(() => dismiss(card), DELAY);
+        }
+
+        card.addEventListener('mouseenter', () => { hovered = true; stop(); });
+        card.addEventListener('mouseleave', () => { hovered = false; start(); });
+        card.addEventListener('focusin', () => { focused = true; stop(); });
+        card.addEventListener('focusout', () => { focused = false; start(); });
+        document.addEventListener('visibilitychange', start);
+        start();
+      }
+
+      function addCdnFailure(key, severity) {
+        if (!banner) return;
+        if (banner.querySelector(`[data-cdn-key="${key}"]`)) return;
+        const card = document.createElement('div');
+        card.dataset.cdnKey = key;
+        // pointer-events:auto opts the card back in (the region itself takes
+        // none), and max-width stops a long message from widening one card
+        // across the content beneath it.
+        card.style.cssText = 'background:var(--datepickr-panel-bg,var(--color-surface-glass,#ffffff));color:var(--color-text,#0f172a);padding:12px 16px;border-radius:8px;font-size:13px;line-height:1.4;box-shadow:var(--shadow-md,0 8px 24px rgba(15,23,42,0.08));border-left:4px solid ' + (severity === 'critical' ? '#ef4444' : '#f59e0b') + ';display:flex;align-items:flex-start;gap:8px;pointer-events:auto;max-width:400px;box-sizing:border-box;';
+        const text = document.createElement('span');
+        text.style.flex = '1';
+        // data-i18n makes applyI18n re-translate the card on a language switch;
+        // the assignment below only covers the display until the next pass.
+        text.setAttribute('data-i18n', key);
+        text.textContent = translate(key);
+        const closeBtn = document.createElement('button');
+        closeBtn.type = 'button';
+        // The accessible name is the visually hidden translated child, so it
+        // re-translates with the data-i18n pass instead of freezing at the
+        // language the card was created in. 28px is the smallest comfortable
+        // pointer target; the negative margin keeps it from growing the card.
+        closeBtn.style.cssText = 'background:none;border:none;color:inherit;cursor:pointer;display:flex;align-items:center;justify-content:center;flex:none;min-width:28px;min-height:28px;margin:-5px -8px -5px 0;padding:0;line-height:1;opacity:0.7;';
+        const closeGlyph = document.createElement('span');
+        closeGlyph.setAttribute('aria-hidden', 'true');
+        closeGlyph.textContent = '×';
+        const closeLabel = document.createElement('span');
+        // Inline sr-only styling: the class depends on Tailwind, which may be
+        // the very thing that failed to load.
+        closeLabel.style.cssText = 'position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;';
+        closeLabel.setAttribute('data-i18n', 'close');
+        closeLabel.textContent = translate('close');
+        closeBtn.appendChild(closeGlyph);
+        closeBtn.appendChild(closeLabel);
+        closeBtn.onclick = () => dismiss(card);
+        card.appendChild(text);
+        card.appendChild(closeBtn);
+        banner.appendChild(card);
+        if (severity !== 'critical') autoDismissWarning(card);
+      }
+
+      function reportCdnFailures() {
+        CDN_CHECKS.forEach(([key, severity, isFailed, onFailure]) => {
+          let failed = false;
+          // A probe that throws is not evidence of a load failure.
+          try { failed = isFailed(); } catch (err) { return; }
+          if (!failed) return;
+          console.error(`[Tokdash] Failed to load ${key.replace(/^cdn/, '').replace(/Failed$/, '')} from its CDN`);
+          // One notice that cannot be built must not cost the user the rest.
+          try { addCdnFailure(key, severity); }
+          catch (err) { console.error(`[Tokdash] Could not show the ${key} notice`, err); }
+          if (onFailure) {
+            try { onFailure(); }
+            catch (err) { console.error(`[Tokdash] Could not degrade the page for ${key}`, err); }
+          }
+        });
+
+        // Fonts cannot be checked synchronously: declared-but-not-yet-used faces
+        // are not "loaded" at DOMContentLoaded, so probing document.fonts here
+        // would false-positive. Force the load instead; no matching face means
+        // the Google Fonts stylesheet never arrived.
+        if (document.fonts && typeof document.fonts.load === 'function') {
+          const reportFontsFailure = () => {
+            console.error('[Tokdash] Failed to load Fonts from its CDN');
+            try { addCdnFailure('cdnFontsFailed', 'warning'); }
+            catch (err) { console.error('[Tokdash] Could not show the cdnFontsFailed notice', err); }
+          };
+          document.fonts.load('16px "Fira Code"')
+            .then((faces) => { if (!faces.length) reportFontsFailure(); })
+            .catch(reportFontsFailure);
+        } // No FontFaceSet: cannot detect; fonts degrade to system fonts anyway.
+      }
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', reportCdnFailures);
+      } else {
+        reportCdnFailures();
+      }
+    })();
+  </script>
   <!-- TokDash v4 SVG Hero Loader -->
   <div id="tokdash-loader" class="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-md transition-opacity duration-300" style="position:fixed !important; top:0 !important; left:0 !important; width:100vw !important; height:100vh !important; pointer-events:none; background: var(--color-bg);">
     <svg xmlns="http://www.w3.org/2000/svg" class="ap" viewBox="0 0 64 64" width="96" height="96" fill="none" role="img" aria-label="Loading">
@@ -5675,7 +5875,6 @@
     // - Month/Year: streak within that view period
     // - 3D/All-time: current ongoing streak from today
     // - "Longest Streak" always shows longest ever across all data
-    console.log('📊 Tokdash dashboard');
 
     let toolChart = null;
     let modelChart = null;
@@ -6494,6 +6693,18 @@
       return [...(dark ? entry.dark : entry.light)];
     }
 
+    // Chart.js comes from a CDN, so `new Chart` is not always there. Every call
+    // site goes through this: without Chart.js the rest of the render survives
+    // instead of the throw taking down whatever ran after it (the tools and
+    // model tables, the session modal's chat, the Quota tab's status line, the
+    // language switch). Returns null when the library is missing, which every
+    // call site already tolerates - each one either parks the result in a
+    // null-checked variable or null-checks before touching it.
+    function createChart(context, config) {
+      if (typeof Chart === 'undefined') return null;
+      return new Chart(context, config);
+    }
+
     function getChartPalette(theme = document.documentElement.dataset.uiTheme || 'elevated', dark = isDark()) {
       const chartPaletteMap = THEME_CONFIG.chartPaletteMap || {};
       const entry = chartPaletteMap[theme] || chartPaletteMap.elevated || {
@@ -7083,6 +7294,11 @@
         usageReportCardProjects: 'Top projects',
         usageReportCardBusiestLabel: 'Busiest day',
         usageReportCardNicknameFallback: 'this machine',
+        cdnTailwindFailed: 'Tailwind CSS failed to load. The dashboard may not display correctly.',
+        cdnChartFailed: 'Chart.js failed to load. Charts will not be available.',
+        cdnThreeFailed: 'Three.js failed to load. The 3D stats view will not be available.',
+        cdnFlatpickrFailed: 'Flatpickr failed to load, so the date picker is unavailable. The quick range buttons still work.',
+        cdnFontsFailed: 'Google Fonts failed to load. Using system fonts.',
       },
       zh: {
         updateAvailable: '有新版本',
@@ -7657,6 +7873,11 @@
         usageReportCardProjects: '项目排名',
         usageReportCardBusiestLabel: '最忙的一天',
         usageReportCardNicknameFallback: '本机',
+        cdnTailwindFailed: 'Tailwind CSS 加载失败，仪表板可能无法正常显示。',
+        cdnChartFailed: 'Chart.js 加载失败，图表将不可用。',
+        cdnThreeFailed: 'Three.js 加载失败，3D 统计视图将不可用。',
+        cdnFlatpickrFailed: 'Flatpickr 加载失败，日期选择器不可用。快捷范围按钮仍可使用。',
+        cdnFontsFailed: 'Google Fonts 加载失败，正在使用系统字体。',
       },
 
       ja: {
@@ -8232,6 +8453,11 @@
         usageReportCardProjects: 'プロジェクト上位',
         usageReportCardBusiestLabel: '最も多かった日',
         usageReportCardNicknameFallback: 'このマシン',
+        cdnTailwindFailed: 'Tailwind CSS の読み込みに失敗しました。ダッシュボードが正しく表示されない可能性があります。',
+        cdnChartFailed: 'Chart.js の読み込みに失敗しました。チャートは利用できません。',
+        cdnThreeFailed: 'Three.js の読み込みに失敗しました。3D 統計ビューは利用できません。',
+        cdnFlatpickrFailed: 'Flatpickr の読み込みに失敗したため、日付ピッカーは利用できません。クイックレンジボタンは引き続き利用できます。',
+        cdnFontsFailed: 'Google Fonts の読み込みに失敗しました。システムフォントを使用しています。',
       },
 
       ko: {
@@ -8807,6 +9033,11 @@
         usageReportCardProjects: '상위 프로젝트',
         usageReportCardBusiestLabel: '가장 바빴던 날',
         usageReportCardNicknameFallback: '이 머신',
+        cdnTailwindFailed: 'Tailwind CSS를 불러오지 못했습니다. 대시보드가 제대로 표시되지 않을 수 있습니다.',
+        cdnChartFailed: 'Chart.js를 불러오지 못했습니다. 차트를 사용할 수 없습니다.',
+        cdnThreeFailed: 'Three.js를 불러오지 못했습니다. 3D 통계 보기를 사용할 수 없습니다.',
+        cdnFlatpickrFailed: 'Flatpickr를 불러오지 못해 날짜 선택기를 사용할 수 없습니다. 빠른 기간 버튼은 계속 사용할 수 있습니다.',
+        cdnFontsFailed: 'Google Fonts를 불러오지 못했습니다. 시스템 폰트를 사용합니다.',
       },
 
       es: {
@@ -9382,6 +9613,11 @@
         usageReportCardProjects: 'Proyectos principales',
         usageReportCardBusiestLabel: 'Día más intenso',
         usageReportCardNicknameFallback: 'esta máquina',
+        cdnTailwindFailed: 'Tailwind CSS no se pudo cargar. El panel puede no mostrarse correctamente.',
+        cdnChartFailed: 'Chart.js no se pudo cargar. Los gráficos no estarán disponibles.',
+        cdnThreeFailed: 'Three.js no se pudo cargar. La vista de estadísticas 3D no estará disponible.',
+        cdnFlatpickrFailed: 'Flatpickr no se pudo cargar, así que el selector de fechas no está disponible. Los botones de rango rápido siguen funcionando.',
+        cdnFontsFailed: 'Google Fonts no se pudo cargar. Usando fuentes del sistema.',
       },
 
       pt: {
@@ -9957,6 +10193,11 @@
         usageReportCardProjects: 'Projetos principais',
         usageReportCardBusiestLabel: 'Dia mais intenso',
         usageReportCardNicknameFallback: 'esta máquina',
+        cdnTailwindFailed: 'Tailwind CSS não pôde ser carregado. O painel pode não ser exibido corretamente.',
+        cdnChartFailed: 'Chart.js não pôde ser carregado. Os gráficos não estarão disponíveis.',
+        cdnThreeFailed: 'Three.js não pôde ser carregado. A visualização de estatísticas 3D não estará disponível.',
+        cdnFlatpickrFailed: 'Flatpickr não pôde ser carregado, então o seletor de datas não está disponível. Os botões de intervalo rápido continuam funcionando.',
+        cdnFontsFailed: 'Google Fonts não pôde ser carregado. Usando fontes do sistema.',
       },
     };
 
@@ -10113,18 +10354,78 @@
       }
     }
 
-    function renderOverviewTokenTotal(value = overviewTotalTokensRaw) {
+    // Emptiness is a property of the range, decided once here so the row cannot
+    // mix answers (tokens saying "No data" while cost says "$0.00").
+    //
+    // An incomplete read is not an empty one. _has_incomplete_server_rows means a
+    // selected server was unreachable, or answered with source errors and had no
+    // cached snapshot for this range, so the totals below are only part of the
+    // answer -- and part of an answer is still an answer. Saying "No data" over it
+    // would read as a proven zero, so an incomplete read renders the numbers it
+    // does have, exactly as it did before these states existed. _server_rows_stale
+    // is deliberately not consulted: it marks the last good response for the
+    // Servers tab after a failed refresh and says nothing about this range.
+    function overviewRangeIsEmpty(data) {
+      if (!data || data._has_incomplete_server_rows) return false;
+      return !Number(data.total_tokens) && !Number(data.total_messages) && !Number(data.total_cost);
+    }
+
+    // animateNumber writes textContent from its callbacks for as long as it
+    // runs, so any static value written into a KPI has to stop the in-flight
+    // count-up first — otherwise the previous range's animation finishes last
+    // and paints over it. setCounterText does the cancel, the write and the
+    // counter-base reset together. cancelCounter() and setCounterText ship from
+    // the same module, so there is no half-loaded state to branch on: either the
+    // module is there, or the plain write stands in for it and follows the same
+    // rule about the counter base.
+    function setOverviewCounterText(el, text, value) {
+      if (!el) return;
+      const animations = typeof window !== 'undefined' ? window.TokDashAnimations : null;
+      if (animations && typeof animations.setCounterText === 'function') {
+        animations.setCounterText(el, text, value);
+        return;
+      }
+      el.textContent = text;
+      if (typeof value === 'number') el._currentValue = value;
+    }
+
+    // Checked on every call rather than once per render: the module is loaded
+    // asynchronously, and a partially stubbed TokDashAnimations must not throw
+    // and leave the Overview row half-painted. Callers write the final text
+    // first, so a missing module degrades to plain text rather than a stale card.
+    function animateOverviewCounter(el, value, duration, format) {
+      const animations = typeof window !== 'undefined' ? window.TokDashAnimations : null;
+      if (!animations || typeof animations.animateNumber !== 'function') return;
+      animations.animateNumber(el, value, duration, format);
+    }
+
+    // staticText is what the range wants shown instead of the number itself -
+    // "No data" for an empty range. It is passed in rather than written over the
+    // top afterwards, so the card is written once instead of being told "0" and
+    // then corrected a line later.
+    function renderOverviewTokenTotal(value = overviewTotalTokensRaw, staticText = null) {
       const valueElement = document.getElementById('totalTokens');
       const wrapper = document.getElementById('totalTokensWrap');
       const tooltip = document.getElementById('totalTokensExact');
       if (!valueElement || !wrapper || !tooltip) return;
-      if (value === null) {
-        valueElement.textContent = '-';
+      // A zero or a null total has no exact count worth a tooltip, and nothing
+      // to drill into, so the card drops its focus target and its aria wiring.
+      const clearExact = () => {
         valueElement.removeAttribute('tabindex');
         valueElement.removeAttribute('aria-describedby');
         valueElement.removeAttribute('aria-label');
         tooltip.textContent = '-';
         tooltip.hidden = true;
+      };
+      if (value === null) {
+        // Cleared, not left alone: a stale total left here is what the Tokens
+        // count-up would otherwise animate from after a null payload. The counter
+        // base goes to 0 for the same reason — a dash is not a number to count
+        // down from. A range that knows what it wants shown still wins over the
+        // loading dash.
+        overviewTotalTokensRaw = null;
+        setOverviewCounterText(valueElement, staticText ?? '-', 0);
+        clearExact();
         return;
       }
 
@@ -10133,6 +10434,15 @@
       // The card is already labelled "Total Tokens", so the value carries no unit
       // — it would only cost width the KPI row no longer has. The exact count in
       // the tooltip and the aria-label keep it.
+      if (overviewTotalTokensRaw === 0) {
+        // This branch fits nothing of its own. renderOverviewTokenTotal has one
+        // caller, renderOverviewTab, and it fits the whole row -- this card
+        // included -- once the rest of the row is written.
+        setOverviewCounterText(valueElement, staticText ?? formatNumber(0), 0);
+        clearExact();
+        wrapper.dataset.readable = String(overviewReadableTokens);
+        return;
+      }
       valueElement.textContent = overviewReadableTokens
         ? formatCompactTokenCount(overviewTotalTokensRaw)
         : formatNumber(overviewTotalTokensRaw);
@@ -10613,6 +10923,8 @@
     }
 
     function signedRefreshValue(value, formatter) {
+      // "—" on a first read is correct: the refresh did return data, only the
+      // comparison is missing, and the summary line right below says so.
       if (value === null || value === undefined) return '—';
       const numeric = Number(value) || 0;
       if (numeric === 0) return formatter(0);
@@ -11967,7 +12279,7 @@
       muse: { icon: null, color: '#0668E1', fallback: 'M' },
       minimax: { icon: '/static/icons/agents/minimax.png', color: '#E11580', fallback: 'M' },
       commandcode: { icon: '/static/icons/agents/commandcode.png', color: '#111111', fallback: 'C' },
-      devin: { icon: null, color: '#3F4756', fallback: 'D' },
+      devin: { icon: '/static/icons/agents/devin.png', color: '#3F4756', fallback: 'D' },
     });
     const toolBrandIconPromises = new Map();
 
@@ -12164,6 +12476,7 @@
         'gemini-3-pro-low': 'gemini-3-pro',
         'gemini-3-pro-preview': 'gemini-3-pro',
         'gemini-3-flash-a': 'gemini-3-flash',
+        'gemini-3.8-flash-n': 'gemini-3.8-flash',
         'o3-mini-high': 'o3-mini',
         'o3-mini-low': 'o3-mini',
         'claude-3-5-sonnet': 'claude-3.5-sonnet',
@@ -12271,7 +12584,9 @@
       const presetKey = activeQuickRange || 'customRange';
       preset.textContent = t(presetKey);
       exact.textContent = formatDateRangeTriggerText(currentStartDate, currentEndDate);
-      trigger.setAttribute('title', t('selectRange'));
+      // A trigger the CDN banner disabled keeps saying why, through every
+      // range change and language switch, instead of inviting a click.
+      trigger.setAttribute('title', t(trigger.disabled ? 'cdnFlatpickrFailed' : 'selectRange'));
       let isSecondaryActive = false;
       document.querySelectorAll('.quick-range-btn').forEach((button) => {
         const isActive = button.dataset.range === activeQuickRange;
@@ -12369,6 +12684,13 @@
       if (!dateInput || !dateTrigger) return;
       dateTrigger.addEventListener('click', () => flatpickrInstance?.open());
 
+      // flatpickr comes from a CDN; without it this top-level call used to
+      // throw and take the rest of the main script (including the initial
+      // updateDashboardByDateRange) down with it.
+      if (typeof flatpickr !== 'function') {
+        console.error('[Tokdash] flatpickr is unavailable; the date range picker is disabled');
+        return;
+      }
       flatpickrInstance = flatpickr(dateInput, {
         mode: 'range',
         dateFormat: 'Y-m-d',
@@ -12559,14 +12881,17 @@
         const range = this.getAttribute('data-range');
         const { startDate, endDate } = getQuickRangeDates(range);
 
-        if (flatpickrInstance) {
-          commitDateSelection(startDate, endDate, {
-            closePicker: true,
-            triggerUpdate: true,
-            triggerPickerSync: true,
-            rangeKey: range,
-          });
-        }
+        // Not guarded on flatpickrInstance: commitDateSelection already no-ops
+        // the two picker-only steps when the picker is missing, so wrapping this
+        // used to leave the quick ranges doing nothing at all - no fetch, label
+        // stuck on "Today" - which is the one date control that still works
+        // without the CDN.
+        commitDateSelection(startDate, endDate, {
+          closePicker: true,
+          triggerUpdate: true,
+          triggerPickerSync: true,
+          rangeKey: range,
+        });
         if (this.closest('#quickRangeMoreMenu')) setQuickRangeMoreOpen(false, true);
       });
     });
@@ -12625,42 +12950,72 @@
 
     function renderOverviewTab(data) {
       if (!data) return;
-      renderOverviewTokenTotal(data.total_tokens);
-      document.getElementById('totalCost').textContent = formatCurrency(data.total_cost);
-      document.getElementById('totalMessages').textContent = formatNumber(data.total_messages || 0);
-      const hitEl = document.getElementById('avgCacheHitRate');
-      if (hitEl) hitEl.textContent = formatHitRate(data.cache_hit_rate);
+      // Emptiness is decided once for the whole range so every card in the row
+      // agrees; every other read, complete or not, renders its own numbers.
+      const rangeIsEmpty = overviewRangeIsEmpty(data);
+      // The Tokens card is rendered by renderOverviewTokenTotal, which owns its
+      // tooltip and aria wiring, so it is told what to show rather than being
+      // written here and then overwritten.
+      renderOverviewTokenTotal(data.total_tokens, rangeIsEmpty ? t('noData') : null);
+      const totalTokensEl = document.getElementById('totalTokens');
+      const totalCostEl = document.getElementById('totalCost');
+      const totalMessagesEl = document.getElementById('totalMessages');
+      const costVal = Number(data.total_cost) || 0;
+      const msgVal = Number(data.total_messages) || 0;
+      if (rangeIsEmpty) {
+        setOverviewCounterText(totalCostEl, t('noData'), 0);
+        setOverviewCounterText(totalMessagesEl, t('noData'), 0);
+      } else {
+        // The final text is written first and the count-up is layered on top,
+        // which is the order main had and the order that matters twice over:
+        // fitOverviewKpis() below measures what is on screen, so a card that only
+        // ever updates from an animation callback is measured at its previous
+        // width and never shrinks; and anime pauses its engine while the
+        // document is hidden, so in a background tab a callback-only card keeps
+        // the old range's value while Tokens shows the new one.
+        totalCostEl.textContent = formatCurrency(costVal);
+        totalMessagesEl.textContent = formatNumber(msgVal);
+        // Unpriced models keep the $0 "FREE" state, and a zero target still
+        // animates so a later range counts from 0 rather than a stale value.
+        // The frames are whole numbers: a mid-animation "74,745,113.682" is wider
+        // than the value the card was just fitted to.
+        animateOverviewCounter(totalCostEl, costVal, 1200, (v) => formatCurrency(v));
+        animateOverviewCounter(totalMessagesEl, msgVal, 1200, (v) => formatNumber(Math.round(v)));
+      }
 
-      if (typeof window !== 'undefined' && window.TokDashAnimations && typeof window.TokDashAnimations.animateNumber === 'function') {
-        const rawTokens = typeof overviewTotalTokensRaw !== 'undefined' ? overviewTotalTokensRaw : (Number(data.total_tokens) || 0);
-        window.TokDashAnimations.animateNumber(
-          document.getElementById('totalTokens'),
+      const hitEl = document.getElementById('avgCacheHitRate');
+      const hasHitRate = data.cache_hit_rate !== null && data.cache_hit_rate !== undefined;
+      if (hitEl) {
+        // "n/a" is a static write, so it has to stop the previous range's count-up
+        // like every other one: without the cancel a 40% animation finishes on top
+        // of it and the card shows a number in a row that says "n/a".
+        if (hasHitRate) hitEl.textContent = formatHitRate(data.cache_hit_rate);
+        else setOverviewCounterText(hitEl, formatHitRate(data.cache_hit_rate), 0);
+      }
+
+      // Tokens and Hit % animate over what was just written, and neither animates
+      // for an empty range because there is nothing to count to.
+      const rawTokens = overviewTotalTokensRaw;
+      if (totalTokensEl && !rangeIsEmpty && typeof rawTokens === 'number' && rawTokens > 0) {
+        animateOverviewCounter(
+          totalTokensEl,
           rawTokens,
           1200,
-          (v) => (typeof overviewReadableTokens !== 'undefined' && overviewReadableTokens) ? formatCompactTokenCount(v) : formatNumber(v)
-        );
-        window.TokDashAnimations.animateNumber(
-          document.getElementById('totalCost'),
-          Number(data.total_cost) || 0,
-          1200,
-          (v) => formatCurrency(v)
-        );
-        window.TokDashAnimations.animateNumber(
-          document.getElementById('totalMessages'),
-          Number(data.total_messages) || 0,
-          1200,
-          (v) => formatNumber(v)
-        );
-        if (hitEl && data.cache_hit_rate !== null && data.cache_hit_rate !== undefined) {
-          window.TokDashAnimations.animateNumber(
-            hitEl,
-            Number(data.cache_hit_rate),
-            1200,
-            (v) => formatHitRate(v)
-          );
-          if (typeof window.TokDashAnimations.setLoaderCacheHitRate === 'function') {
-            window.TokDashAnimations.setLoaderCacheHitRate(Number(data.cache_hit_rate) * 100);
+          // Whole numbers, for the same reason as the Messages card: the animation
+          // value is a float and neither formatter wants to show one.
+          (v) => {
+            const whole = Math.round(v);
+            return (typeof overviewReadableTokens !== 'undefined' && overviewReadableTokens)
+              ? formatCompactTokenCount(whole)
+              : formatNumber(whole);
           }
+        );
+      }
+      if (hitEl && hasHitRate) {
+        animateOverviewCounter(hitEl, Number(data.cache_hit_rate), 1200, (v) => formatHitRate(v));
+        const animations = typeof window !== 'undefined' ? window.TokDashAnimations : null;
+        if (animations && typeof animations.setLoaderCacheHitRate === 'function') {
+          animations.setLoaderCacheHitRate(Number(data.cache_hit_rate) * 100);
         }
       }
       fitOverviewKpis();
@@ -12994,9 +13349,12 @@
         if (isOverviewActive() && lastUsageResponse) renderOverviewTab(lastUsageResponse);
         if (isSessionsActive()) renderSessionsTab();
         if (isServersActive()) renderServersTab();
-        if (error?.status !== 503 && !lastUsageResponse) {
-          alert('Failed to fetch data. Check console for details.');
-        }
+        // A blocking alert() here would freeze the whole page, and it would fire
+        // even when setDashboardFetchStatus above has already written
+        // "Load failed" (t('loadFailed')) into the persistent #lastUpdate status
+        // line and showUsageRefreshReport has reported the failed refresh, so the
+        // failure is never silent; the real error stays in the console.error
+        // above. Nothing further to show the user.
       } finally {
         if (forceRefresh) {
           const remainingMs = 400 - (Date.now() - refreshStartedAt);
@@ -14044,7 +14402,7 @@
       if (type === 'perTurn') {
         if (titleEl) titleEl.textContent = `${t('turnTrend')} (Full Screen)`;
         if (subEl) subEl.textContent = 'Token consumption breakdown per conversation turn';
-        graphExpandChartInstance = new Chart(canvas.getContext('2d'), {
+        graphExpandChartInstance = createChart(canvas.getContext('2d'), {
           type: 'bar',
           data: {
             labels,
@@ -14061,7 +14419,7 @@
         if (titleEl) titleEl.textContent = `${t('cumulativeTurnTrend')} (Full Screen)`;
         if (subEl) subEl.textContent = 'Cumulative token accumulation progression by turn';
         const cumulativeSeries = buildCumulativeTurnSeries(turns);
-        graphExpandChartInstance = new Chart(canvas.getContext('2d'), {
+        graphExpandChartInstance = createChart(canvas.getContext('2d'), {
           type: 'line',
           data: { labels, datasets: makeTurnDatasets(cumulativeSeries) },
           options: buildTurnChartOptions('Turn')
@@ -14070,7 +14428,7 @@
         if (titleEl) titleEl.textContent = `${t('cumulativeTrendByTime')} (Full Screen)`;
         if (subEl) subEl.textContent = 'Cumulative token accumulation along actual timeline';
         const timeSeries = buildCumulativeTimeSeries(turns);
-        graphExpandChartInstance = new Chart(canvas.getContext('2d'), {
+        graphExpandChartInstance = createChart(canvas.getContext('2d'), {
           type: 'line',
           data: { labels: timeSeries.labels, datasets: makeTurnDatasets(timeSeries.cumulative) },
           options: buildTurnChartOptions(t('time'), { maxTicksLimit: 12 })
@@ -14249,17 +14607,17 @@
       if (sessionCumulativeChart) sessionCumulativeChart.destroy();
       if (sessionTimeCumulativeChart) sessionTimeCumulativeChart.destroy();
 
-      sessionPerTurnChart = new Chart(perTurnCanvas.getContext("2d"), {
+      sessionPerTurnChart = createChart(perTurnCanvas.getContext("2d"), {
         type: "line",
         data: { labels, datasets: makeTurnDatasets(perTurn) },
         options: buildTurnChartOptions("Turn", { maxTicksLimit: 12 }),
       });
-      sessionCumulativeChart = new Chart(cumulativeCanvas.getContext("2d"), {
+      sessionCumulativeChart = createChart(cumulativeCanvas.getContext("2d"), {
         type: "line",
         data: { labels, datasets: makeTurnDatasets(cumulative) },
         options: buildTurnChartOptions("Turn", { maxTicksLimit: 12 }),
       });
-      sessionTimeCumulativeChart = new Chart(timeCumulativeCanvas.getContext("2d"), {
+      sessionTimeCumulativeChart = createChart(timeCumulativeCanvas.getContext("2d"), {
         type: "line",
         data: { labels: timeSeries.labels, datasets: makeTurnDatasets(timeSeries.cumulative) },
         options: buildTurnChartOptions(t("time"), { maxTicksLimit: 8 }),
@@ -14330,10 +14688,14 @@
       const values = entries.map(([, v]) => Number(v?.tokens || 0));
       const palette = getChartPalette();
       const colors = values.map((_, i) => palette[i % palette.length]);
+      // Plain HTML, so it must keep rendering when Chart.js is missing: the
+      // legend is the only thing left that names the tools. createChart below
+      // is what absorbs the missing library, which is why there is no guard
+      // above this line.
       renderToolChartLegend(entries, colors);
 
       if (!toolChart) {
-        toolChart = new Chart(ctx, {
+        toolChart = createChart(ctx, {
           type: 'doughnut',
           data: {
             labels,
@@ -14385,7 +14747,7 @@
       const values = byCost.map((m) => m.cost);
 
       if (!modelChart) {
-        modelChart = new Chart(ctx, {
+        modelChart = createChart(ctx, {
           type: 'bar',
           data: {
             labels,
@@ -16165,7 +16527,7 @@
 
       if (utilizationCanvas) {
         quotaUtilizationCharts.get(chartKey)?.destroy();
-        const chart = new Chart(utilizationCanvas.getContext('2d'), {
+        const chart = createChart(utilizationCanvas.getContext('2d'), {
           type: 'line',
           data: { datasets: utilizationDatasets },
           options: {
@@ -16182,7 +16544,7 @@
       }
       if (consumptionCanvas) {
         quotaConsumptionCharts.get(chartKey)?.destroy();
-        const chart = new Chart(consumptionCanvas.getContext('2d'), {
+        const chart = createChart(consumptionCanvas.getContext('2d'), {
           type: 'bar',
           data: { labels: consumptionLabels, datasets: consumptionDatasets },
           options: {
@@ -19567,7 +19929,7 @@
       const inData = turns.map(t => Number(t.tokens_in || 0));
       const outData = turns.map(t => Number(t.tokens_out || 0));
 
-      drawerChartInstance = new Chart(canvas.getContext('2d'), {
+      drawerChartInstance = createChart(canvas.getContext('2d'), {
         type: 'bar',
         data: {
           labels,
@@ -21902,6 +22264,21 @@
     function render3DCalendar(contributions) {
       const container = document.getElementById('calendar3D');
       if (!container) return;
+      // Three.js comes from a CDN and there is no scene to build without it, so
+      // say so in the view itself: the corner banner's warning has usually faded
+      // by the time anyone opens Stats -> 3D, and a blank box reads as "no
+      // activity" rather than as a failure.
+      if (typeof THREE === 'undefined') {
+        container.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:750px;color:var(--color-muted);font-size:16px;text-align:center;padding:0 24px;">${t('cdnThreeFailed')}</div>`;
+        // Dashes rather than zeroes: no scene was built, so there is nothing to
+        // report, and a $0 / 0 overlay would read as a real reading.
+        document.getElementById('stats3DTotalCost').textContent = '—';
+        document.getElementById('stats3DTotalTokens').textContent = '—';
+        document.getElementById('stats3DActiveDate').textContent = '—';
+        document.getElementById('stats3DActiveTokens').textContent = '—';
+        document.getElementById('stats3DActiveCost').textContent = '—';
+        return;
+      }
 
       render3DLegend();
 

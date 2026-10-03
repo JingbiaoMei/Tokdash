@@ -70,7 +70,10 @@ Tailscale Serve is read-only for state-changing API actions. Serve preserves the
 hostname as `Host` and the browser sends an HTTPS origin, both of which fail Tokdash's
 loopback write gate. The Quota tab's "Refresh now" button (`GET /api/quota/refresh`) still
 works over Serve — it only polls providers' read-only usage endpoints, so it is a `GET` and
-is exempt from the write gate like any other read.
+is exempt from the write gate like any other read. The one opt-in exception is dashboard
+click-to-update: if you pin this Serve hostname in `TOKDASH_UPDATE_ORIGIN`, a browser
+enrolled with a `tokdash update-enroll` pairing code can start an update. See
+[`docs/SECURITY.md`](../SECURITY.md) ("The one authenticated-write exception").
 
 If onboarding creates the Serve rule, it records the matching teardown command in
 `install.json`; `tokdash uninstall` removes that specific `/tokdash` rule without resetting

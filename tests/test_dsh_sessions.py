@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
+from zstandard import ZstdCompressor
 
 from tokdash import sessions
 from tokdash.pricing import PricingDatabase
@@ -291,3 +293,129 @@ def test_frontend_session_registry_includes_dsh():
     assert "dsh:" in brand and "fallback: 'D'" in brand
     assert "dsh: { icon: '/static/icons/agents/dsh.svg'" in brand
     assert (index.parent / "icons" / "agents" / "dsh.svg").is_file()
+
+
+# --- issue #148: Overview and Sessions must resolve identity to one winner -------
+# The invariant is the one SUPPORTED_CLIENTS.md already promises for Qoder CLI and
+# OpenClaw: the two surfaces consume one corpus and cannot disagree about it. DSH
+# had a winner rule per surface (last file parsed in Overview, first occurrence in
+# the Sessions merge), so the same logs produced two different totals.
+
+
+def _write_copied_session(home: Path, session_id: str, rows, project_dir: str, name="session.jsonl") -> Path:
+    path = home / "sessions" / project_dir / session_id / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+    return path
+
+
+def _overview_tokens_in() -> int:
+    from tokdash.sources.coding_tools import BaseParser, DSHParser, _sig_cache
+
+    _sig_cache.clear()
+    BaseParser._entry_cache.clear()
+    entries = DSHParser(PricingDatabase()).collect(None, None)
+    return sum(entry["input"] + entry["cacheWrite"] for entry in entries)
+
+
+def _sessions_tokens_in() -> int:
+    sessions._parse_dsh_session_file.cache_clear()
+    sessions._load_dsh_sessions.cache_clear()
+    loaded = sessions._load_dsh_sessions(sessions._dsh_session_signatures(), ())
+    return sum(turn["tokens_in"] for session in loaded.values() for turn in session["turns"])
+
+
+def test_overview_and_sessions_agree_on_duplicate_copies(_isolated_dsh_home):
+    """One session id, two physical copies, different usage for the same
+    (turn, step): both surfaces must bill the same single winner."""
+    home = _isolated_dsh_home
+    # "--work-a--" sorts first, so its copy owns the key on every surface.
+    _write_copied_session(
+        home, "s5", [_header("s5"), _assistant_message(1, 0, 0, {"inputTokens": 100, "outputTokens": 10}, DAY1_MS)], "--work-a--"
+    )
+    _write_copied_session(
+        home,
+        "s5",
+        [_header("s5"), _assistant_message(1, 0, 0, {"inputTokens": 999, "outputTokens": 99}, DAY1_MS)],
+        "--work-b--",
+    )
+
+    overview = _overview_tokens_in()
+    sessions_total = _sessions_tokens_in()
+    assert overview == sessions_total == 100
+
+
+def test_overview_and_sessions_agree_on_repeated_turn_step(_isolated_dsh_home):
+    """A (turn, step) that repeats non-adjacently must fold to one sample on
+    both surfaces, not collapse in one and double in the other."""
+    home = _isolated_dsh_home
+    _write_copied_session(
+        home,
+        "s6",
+        [
+            _header("s6"),
+            _assistant_message(1, 0, 0, {"inputTokens": 100, "outputTokens": 10}, DAY1_MS),
+            _assistant_message(2, 1, 0, {"inputTokens": 300, "outputTokens": 30}, DAY1_MS + 1000),
+            _assistant_message(3, 0, 0, {"inputTokens": 111, "outputTokens": 22}, DAY1_MS + 2000),
+        ],
+        "--work-a--",
+    )
+
+    overview = _overview_tokens_in()
+    sessions_total = _sessions_tokens_in()
+    assert overview == sessions_total == 411
+
+
+# --- issue #147 diagnostics: neither surface may be the silent one ---------------
+
+
+def _dsh_warnings(caplog, kind: str) -> list:
+    return [
+        record
+        for record in caplog.records
+        if record.name == "tokdash.sources.dsh_log" and f"[{kind}]" in record.getMessage()
+    ]
+
+
+def test_sessions_panel_reports_seed_unprovable(_isolated_dsh_home, caplog):
+    """After a restart the store does not re-read an unchanged log, so the panel
+    can be the only surface that decodes it. A seeded session with no inherited
+    marker drops out of the panel, and that must be said, as Overview says it."""
+    from tokdash.sources.dsh_log import reset_dsh_diagnostics
+
+    reset_dsh_diagnostics()
+    caplog.set_level(logging.WARNING, logger="tokdash.sources.dsh_log")
+    _write_session(
+        _isolated_dsh_home,
+        "s7",
+        [
+            _header("s7", version=4, isSeeded=True),
+            _assistant_message(1, 1, 1, {"inputTokens": 100, "outputTokens": 10}, DAY1_MS),
+        ],
+    )
+
+    assert _sessions_tokens_in() == 0
+    assert len(_dsh_warnings(caplog, "seed-unprovable")) == 1
+
+
+def test_frame_loss_is_reported_once_across_both_surfaces(_isolated_dsh_home, caplog):
+    """One damaged file is one problem. Both surfaces report it in one wording,
+    so the once-per-problem registry names it once rather than once per surface."""
+    from tokdash.sources.dsh_log import reset_dsh_diagnostics
+
+    reset_dsh_diagnostics()
+    caplog.set_level(logging.WARNING, logger="tokdash.sources.dsh_log")
+    rows = [_header("s8")] + [
+        _assistant_message(seq, seq, 1, {"inputTokens": 100 * seq, "outputTokens": 1}, DAY1_MS + seq)
+        for seq in (1, 2, 3)
+    ]
+    compressor = ZstdCompressor()
+    frames = [compressor.compress((json.dumps(row) + "\n").encode("utf-8")) for row in rows]
+    payload = bytearray(b"".join(frames))
+    payload[sum(len(frame) for frame in frames[:2]) + 5] ^= 0xFF  # damage message seq 2
+    path = _isolated_dsh_home / "sessions" / "--work-proj--" / "s8" / "session.jsonl.zstd"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(bytes(payload))
+
+    assert _overview_tokens_in() == _sessions_tokens_in() == 400
+    assert len(_dsh_warnings(caplog, "frames-lost")) == 1

@@ -10,6 +10,7 @@ https://github.com/JingbiaoMei/Tokdash/issues/124#issuecomment-5855921857
 """
 import copy
 import json
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -35,7 +36,7 @@ def isolated(monkeypatch, tmp_path):
 def turn(mid, tokens, day=14):
     return {
         "type": "message", "id": mid, "parentId": "previous-" + mid,
-        "timestamp": f"2026-09-{day:02}T21:33:00.000Z",
+        "timestamp": f"2026-09-{day:02}T12:00:00.000Z",
         "message": {"role": "assistant", "model": "test-model", "provider": "test",
                     "usage": {"input": tokens, "output": tokens // 10,
                               "cacheRead": 0, "cacheWrite": 0,
@@ -98,7 +99,12 @@ def test_parent_fork_and_views(tmp_path, named):
     assert not sync(store, root)
     raw = sessions._load_pi_sessions(signatures(root))
     assert {sid: len(s["turns"]) for sid, s in raw.items()} == {"parent": 1, "child": 1}
-    data = sessions.get_sessions_data("pi_agent", "today", "2026-09-17", "2026-09-17")
+    own_date = (
+        datetime.fromisoformat(own["timestamp"].replace("Z", "+00:00"))
+        .astimezone()
+        .strftime("%Y-%m-%d")
+    )
+    data = sessions.get_sessions_data("pi_agent", "today", own_date, own_date)
     assert [(r["session_id"], r["tokens"]) for r in data["sessions"]] == [("child", 550)]
     detail = sessions.get_session_detail("pi_agent", "child")
     assert detail["session"]["tokens"] == 550

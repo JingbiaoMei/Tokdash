@@ -98,10 +98,28 @@ The first line is a session header:
 
 `seq` is monotonic inside the logical session and `time` is Unix epoch milliseconds.
 
-Version 0 is a developer-preview format with no upstream compatibility promise. Accept only
-`header.version == 0`. A different version is unsupported, not corrupt: skip that file and expose
-a count through parser diagnostics if one is added. Bump the explicit DSH parser version whenever
-extraction or accounting semantics change.
+Version 0 is a developer-preview format with no upstream compatibility promise. Tokdash accepts a
+generation **set**, currently `{0, 3, 4}`: generation 4 is what dsh >= 0.2.0 writes
+(`SESSION_FORMAT_VERSION` in `@deepseek-ai/dsh-session`) and keeps the v0 usage-event shape, so
+reading it needed nothing beyond widening the gate. Generation 3 is what earlier dsh builds left on
+disk: its header has the v4 key set, and dsh's own v3 reader
+(`dsh-session-format-v2-to-v3`) derives the inherited cut from the final `inherited: true`
+`session/end-seed` marker exactly as v4 does. A real corpus of 24 v3/v4 logs decoded whole under the
+widened gate (#147). Generations 1-2 were superseded upstream in place and are not claimed until a
+corpus proves the read.
+
+A version outside the set is unsupported, not corrupt: skip that file and **say so**.
+`dsh_log.report_dsh_decode(path, decoded)` reports what one decode lost -- `skip:<reason>`,
+`frames-lost`, `seed-unprovable` -- and both surfaces call it with the same wording, so a broken
+file is named once per problem whichever surface read it. After a restart the store re-reads only
+changed files, so the Sessions panel may be the only surface that decodes an unchanged broken log;
+it cannot be the silent one. An unreported skip is indistinguishable from a user who stopped using
+dsh, which is how a real format bump once silently emptied the source. Bump the explicit DSH parser
+version whenever extraction or accounting semantics change.
+
+A generation-4 log is named `session.v4.jsonl[.zstd]`, not `session.jsonl[.zstd]`: dsh names every
+generation above zero after its version. Discovery still matches on the suffix, so the file is
+found and then gated by `header.version`, never by the filename.
 
 ### Zstandard decoding
 
@@ -109,20 +127,39 @@ extraction or accounting semantics change.
 the header and each durable append batch, then concatenates those frames. Decoding only the first
 stream or making a one-shot decompressor call is incorrect.
 
-Add `zstandard>=0.23` to core dependencies and read with:
+Add `zstandard>=0.23` to core dependencies. This is a required runtime dependency, not an optional
+import found opportunistically in the current development environment. Windows `cp313-win_amd64`
+and macOS `cp314-macosx_11_0_arm64` wheels were both verified during research.
+
+Read a healthy file in one pass with `stream_reader(read_across_frames=True)`, and fall back to
+per-frame decoding only when that raises. The single call is correct across frames but aborts the
+whole file on the first damaged frame, and real logs are heavily framed (a live session measured
+2,846 frames in one file, typical files 3-30), so one corrupt byte would cost every batch around it.
 
 ```python
-ZstdDecompressor().stream_reader(data, read_across_frames=True).read()
+context = ZstdDecompressor().decompressobj()
+out += context.decompress(remaining) + context.flush()
+remaining = context.unused_data        # exactly the next frame
 ```
 
-This is a required runtime dependency, not an optional import found opportunistically in the
-current development environment. Windows `cp313-win_amd64` and macOS
-`cp314-macosx_11_0_arm64` wheels were both verified during research.
+The fallback must stay the fallback: `unused_data` hands back the rest of the buffer as a fresh
+object per frame, so per-frame decoding is quadratic in frame count -- measured 117x slower than the
+streaming read on a 20,000-frame log, and DSH files are re-read whole on every change. With the
+fast path first, a healthy log decodes no slower than it did before the recovery existed.
+
+In the fallback a frame that raises is counted and skipped, and the scan resumes at the next frame
+magic (`28 B5 2F FD`). Recovery cannot invent rows: a false-positive resync yields a bogus slice that
+also fails and is skipped. The failed-frame count is reported as a `frames-lost` diagnostic, since
+the file is short rather than absent. Note this cannot save the damaged frame's own rows -- they are
+compressed inside it -- so a row lost to frame damage is still lost.
+
+This fails **closed** on the header frame. Without the first row there is no `version` to gate and
+no session id, and guessing either for an ungated generation is worse than skipping the file.
 
 dsh can append while Tokdash reads. Decode inside the per-file exception boundary, accept only
-complete newline-terminated JSON rows, and discard a torn final line. If decoding raises, skip
-that file for this parse rather than failing all DSH usage. File replacement is driven by the
-normal `(path, mtime_ns, size)` signature.
+complete newline-terminated JSON rows, and discard a torn final line. If a file yields nothing,
+raise rather than return an empty list -- see [Error and edge-case policy](#error-and-edge-case-policy).
+File replacement is driven by the normal `(path, mtime_ns, size)` signature.
 
 Ignore unknown event types. Tokdash does not reconstruct the DSH session and therefore does not
 need dsh's strict required-event refusal semantics. This may change if a future event version
@@ -214,15 +251,32 @@ them.
 `parentSession` alone must not cause skipping. A fresh one-shot subagent can have a parent and
 still make genuine, independently billable calls.
 
-A forked child can clone a completed parent prefix into its own durable log. Its header marks that
-prefix with `seedLength`. Skip usage events with:
+A forked child can clone a completed parent prefix into its own durable log. Generation 0 marks
+that prefix with `seedLength`. Generations 3 and 4 have no such field: the header carries a boolean
+`isSeeded` and the cut is a `session/end-seed` event carrying `data.inherited: true`.
+`buildForkSeed` copies the parent's events through `boundary` inclusive and appends the marker at
+`boundary + 1`, so:
 
 ```text
-event.seq < header.seedLength
+generation 0:   event.seq < header.seedLength
+generation 3/4: event.seq < seq(final session/end-seed marker whose data.inherited is true)
 ```
 
 Those events remain visible in the child transcript but are already owned by the parent log.
 Counting both would double-count tokens and cost across Session Explorer and Overview.
+
+**Only `inherited: true` markers are cuts.** dsh appends a plain `session/end-seed` with empty data
+every time a session is resumed, seeded or not (`dsh-session` constructor:
+`this.append("session/end-seed", {})`), and it lands at the END of the log. Selecting the last
+marker of either kind therefore moves the cut past everything a forked session did on its own,
+silently dropping that work from the first resume onward and more on each resume after it. dsh's own
+invariant is that the seeded prefix is identified by the final `inherited: true` marker, so filter
+on that flag and take the highest `seq`. An unseeded session needs no special case: it has no
+`inherited` marker to find.
+
+A seeded log with no `inherited` marker has no provable boundary. Bill nothing from it and report
+`seed-unprovable`: either guess double-bills the parent's whole prefix or drops real work, and
+neither is silent.
 
 Fresh child sessions without a seed boundary count normally. This also prevents a resumed fork
 from counting inherited parent history again.
@@ -266,6 +320,7 @@ SourceSyncCapability(
     mode="file_replace",
     append_jsonl=False,
     session_store=True,
+    cross_file_stable_keys=True,
     reason=(
         "DSH append batches are concatenated zstd frames, and a final usage message replaces an "
         "earlier same-step chunk; changed files are reparsed whole."
@@ -276,6 +331,20 @@ SourceSyncCapability(
 `append_jsonl` stays false even though dsh logically appends. A physical append is another zstd
 frame, and same-step replacement means line-local accumulation is not sufficient for correctness.
 Full-file replacement keeps failure handling simple and matches the existing parser cache.
+
+`cross_file_stable_keys` is true because `dsh:{session_id}:{turn}:{step}` deliberately carries no
+file path so duplicate physical copies of one session never bill twice -- which means one entry key
+legitimately occurs in several files. The flag makes the store resolve that to the earliest
+`(timestamp, file_path)` occurrence, ties on the smallest path. The same rule is the one
+`_merge_raw_session_sequence` already applies on the Sessions side, and `DSHParser._parse_all`
+mirrors it for the DB-off path. Without the flag the store upserted with `INSERT OR REPLACE`, so
+whichever copy committed last owned the key while Sessions kept the earliest -- one corpus, two
+totals. **Parse order must never be an input to the answer.**
+
+Because the fold is shared, one sample per `(turn, step)` is also an invariant rather than a
+coordination problem: `fold_dsh_usage_samples` keys replace-not-add on the whole file's
+`(turn, step)`, so a key repeating after a different one yields one sample. Keeping two would let
+Overview collapse them by entry id while Sessions kept both turns.
 
 Discover both suffixes in one recursive pass and sort the result. Avoid a second recursive scan for
 the alternate suffix. Include the effective pricing signature in the normal in-memory cache, as
@@ -318,8 +387,27 @@ Avoid maintaining a frontend-only source list that can drift from the backend re
 ## Error and edge-case policy
 
 - Missing `DSH_HOME` directory: empty source, no error.
-- Missing header, invalid JSON header, or unsupported version: skip that file.
-- Duplicate physical files for one header id: deduplicate by session id and stable event key.
+- Missing header, invalid JSON header, or unsupported version: skip that file, **and report it**
+  (`report_dsh_diagnostic`, once per `(path, reason)`).
+- File present but undecodable, or a header this build does not read: raise
+  `UsageFileUnreadable` from the strict single-file entry point instead of returning an empty list.
+  Under `file_replace` an empty list asserts "this file now has zero entries", and the sync would
+  delete the stored history of a file that merely went unreadable. The store keeps the file's rows
+  **and its prior signature**, so the rows return automatically once it reads again.
+- Unreadable file during cross-file promotion: when a replaced file drops an entry key and the only
+  other copy that could own it is unreadable, that key is **held, not healed**. The replaced file's
+  DELETE skips the held keys (`entry_key NOT IN (...)`), so the row stays attributed to its old file
+  until that file changes again or a readable copy re-establishes the key. For a finished session
+  whose log never changes, that can be indefinitely, and a key that really was retired keeps
+  counting until then. Aborting instead would wedge the whole source for as long as the file stays
+  unreadable, and deleting would lose the only stored copy of a key the unreadable file may still
+  hold. Past `_UNRESOLVED_KEY_LIMIT` (4,000) held keys the sync fails rather than name them all;
+  the request then falls back to live parsing for that request, which `source_errors` does not yet
+  report (#151).
+- Damaged interior zstd frame: keep the rows of every other frame, report `frames-lost`, and skip
+  the file if the damaged frame carried the header.
+- Duplicate physical files for one header id: deduplicate by session id and stable event key, with
+  the earliest `(timestamp, path)` copy winning on every surface.
 - Missing title: use the first user preview and then the existing fallback.
 - Missing model: use `unknown`; never infer by timestamp.
 - Missing token fields: treat optional cache and reasoning fields as absent; require an explicit

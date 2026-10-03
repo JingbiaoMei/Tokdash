@@ -136,7 +136,9 @@ def test_date_range_state_sync_does_not_fetch() -> None:
     assert "button.setAttribute('aria-pressed', String(isActive));" in sync
     assert "moreToggle?.setAttribute('aria-pressed', String(isSecondaryActive));" in sync
     assert "moreLabel.textContent = isSecondaryActive ? t(activeQuickRange) : t('moreRanges');" in sync
-    assert "trigger.setAttribute('title', t('selectRange'));" in sync
+    # A trigger the CDN banner disabled keeps its failure reason as the title
+    # (test_cdn_failure_frontend.py runs both branches).
+    assert "trigger.setAttribute('title', t(trigger.disabled ? 'cdnFlatpickrFailed' : 'selectRange'));" in sync
     assert "fetch(" not in sync
     assert "updateDashboard" not in sync
     assert "rangeKey = null" in commit

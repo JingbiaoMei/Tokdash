@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import bisect
 import json
+import logging
 import math
 import os
 import subprocess
@@ -10,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from .dateutil import parse_date_range
+from .dateutil import local_midnight, parse_date_range
 from .model_normalization import normalize_model_name
 from .pricing import PricingDatabase
 from .sources.openclaw import get_usage_for_days as get_session_usage_days
@@ -18,6 +19,7 @@ from .sources.openclaw import get_usage_for_month as get_session_usage_month
 from .sources.openclaw import get_usage_for_range as get_session_usage_range
 from .sources.openclaw import get_usage_for_year as get_session_usage_year
 from .sources.coding_tools import CodingToolsUsageTracker
+from .store_logging import log_store_failure
 from .usage_store import (
     UsageDatabaseSchemaTooNewError,
     UsageEntryStore,
@@ -28,6 +30,8 @@ from .usage_store import (
     persistent_usage_db_enabled,
     public_usage_entry,
 )
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================
@@ -55,19 +59,25 @@ def run_tokscale_json(period_args: list[str]) -> Dict[str, Any]:
 
 def _date_range_from_args(period_args: list[str]) -> tuple[Optional[datetime], Optional[datetime]]:
     if "--today" in period_args:
-        start = datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
-        return start, start + timedelta(days=1)
+        # Both ends are resolved from their own date: adding a day to an aware
+        # midnight would keep today's offset, which is an hour out whenever
+        # tomorrow is on the other side of a clock change.
+        today = datetime.now().date()
+        start = local_midnight(datetime.combine(today, datetime.min.time()))
+        until = local_midnight(datetime.combine(today + timedelta(days=1), datetime.min.time()))
+        return start, until
 
     since = None
     until = None
-    local_tz = datetime.now().astimezone().tzinfo or timezone.utc
     try:
         if "--since" in period_args:
-            since = datetime.strptime(period_args[period_args.index("--since") + 1], "%Y-%m-%d").replace(tzinfo=local_tz)
+            since = local_midnight(
+                datetime.strptime(period_args[period_args.index("--since") + 1], "%Y-%m-%d")
+            )
         if "--until" in period_args:
             # CLI args are inclusive; tracker expects [since, until) exclusive.
-            until = (
-                datetime.strptime(period_args[period_args.index("--until") + 1], "%Y-%m-%d").replace(tzinfo=local_tz)
+            until = local_midnight(
+                datetime.strptime(period_args[period_args.index("--until") + 1], "%Y-%m-%d")
                 + timedelta(days=1)
             )
     except Exception:
@@ -402,11 +412,16 @@ def run_local_coding_tools_json(period_args: list[str]) -> Dict[str, Any]:
             # A newer database is terminal for this build; reparsing the logs
             # instead would hide the skew behind a permanent full-history reparse.
             raise
-        except Exception:
+        except Exception as exc:
             # The persistent DB is a cache. If it is corrupt or temporarily
             # unavailable, preserve current behavior by falling back to the live
             # parsers for this request.
-            pass
+            log_store_failure(
+                logger,
+                "tokdash persistent usage cache failed; falling back to live parsers",
+                exc,
+                site="compute.run_local_coding_tools_json",
+            )
     tracker.collect(since, until)
     data = tracker.to_json()
     data["entries"] = [public_usage_entry(entry) for entry in data.get("entries", [])]
@@ -854,10 +869,17 @@ def get_tools_data_for_range(
                 # schema never heals on retry, so degrading here would reparse the
                 # full history on every request.
                 raise
-            except Exception:
+            except Exception as exc:
                 # Keep the DB fail-open: serving correctness should not depend on
-                # cache health while this backend is still evolving.
-                pass
+                # cache health while this backend is still evolving. The answer is
+                # complete either way, so it must not be marked incomplete; the
+                # reasoning lives in store_logging, which owns that rule.
+                log_store_failure(
+                    logger,
+                    "tokdash persistent usage cache failed; falling back to live parsers",
+                    exc,
+                    site="compute.get_tools_data_for_range",
+                )
         tracker.collect(since, until)
         result = parse_entries_json(tracker.to_json())
         result["source_errors"] = [e["source"] for e in tracker.source_errors]
@@ -886,8 +908,13 @@ def get_tools_contributions_for_range(since: Optional[datetime], until: Optional
                 return _merge_contribution_days([store_days, live_days])
             except UsageDatabaseSchemaTooNewError:
                 raise
-            except Exception:
-                pass
+            except Exception as exc:
+                log_store_failure(
+                    logger,
+                    "tokdash persistent usage cache failed for contributions; falling back to live parsers",
+                    exc,
+                    site="compute.get_tools_contributions_for_range",
+                )
         tracker.collect(since, until)
         return _contributions_from_entries(tracker.to_json().get("entries", []))
 
@@ -1036,15 +1063,13 @@ def compute_usage(period: str, date_from: Optional[str] = None, date_to: Optiona
 
 def _current_period_range(period: str) -> tuple[datetime, datetime]:
     now_local = datetime.now().astimezone()
-    local_tz = now_local.tzinfo or timezone.utc
 
     if period == "month":
-        since_local = now_local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        start_date = now_local.date().replace(day=1)
     else:
         days = period_to_days(period)
-        today_midnight = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
-        start_date = today_midnight.date() - timedelta(days=days - 1)
-        since_local = datetime.combine(start_date, datetime.min.time(), tzinfo=local_tz)
+        start_date = now_local.date() - timedelta(days=days - 1)
+    since_local = local_midnight(datetime.combine(start_date, datetime.min.time()))
 
     return since_local.astimezone(timezone.utc), now_local.astimezone(timezone.utc)
 
@@ -1053,20 +1078,26 @@ def previous_period_range(period: str) -> tuple[datetime, datetime]:
     current_since, current_until = _current_period_range(period)
     if period == "month":
         prev_until = current_since
-        prev_until_local = prev_until.astimezone()
-        prev_month_anchor = prev_until_local - timedelta(days=1)
-        prev_since_local = prev_month_anchor.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        # The 1st of the previous month, resolved as a date first: reaching it
+        # by .replace(day=1) on an aware datetime would carry that instant's
+        # offset onto a date that may not share it (October's 1st is BST, and
+        # this runs in November).
+        prev_month_start = (prev_until.astimezone().date() - timedelta(days=1)).replace(day=1)
+        prev_since_local = local_midnight(datetime.combine(prev_month_start, datetime.min.time()))
         return prev_since_local.astimezone(timezone.utc), prev_until
 
-    if period_to_days(period) == 1:
-        prev_since = current_since - timedelta(days=1)
-        prev_until = current_since
-        return prev_since, prev_until
-
+    # Day and N-day windows step back from a DATE for the same reason the month
+    # branch does: subtracting a timedelta from an aware UTC instant carries that
+    # instant's offset onto the boundary. On the day after a clock change the
+    # current window's start is ``local midnight in the new offset``, and a
+    # 24-hour step back from it lands an hour late -- it misses the first hour
+    # of a window that was 23 or 25 hours long, which is exactly what the
+    # "vs previous period" comparison measures.
     days = period_to_days(period)
     prev_until = current_since
-    prev_since = prev_until - timedelta(days=days)
-    return prev_since, prev_until
+    prev_start_date = current_since.astimezone().date() - timedelta(days=days)
+    prev_since_local = local_midnight(datetime.combine(prev_start_date, datetime.min.time()))
+    return prev_since_local.astimezone(timezone.utc), prev_until
 
 
 def _compute_previous_usage(

@@ -27,6 +27,8 @@ SYNC_CASES = [
     "models:claude-3.7-sonnet-latest",
     "google/gemini-3-pro-preview",
     "gemini-3-flash-a",          # alias -> gemini-3-flash
+    "gemini-3.8-flash-n",        # alias -> gemini-3.8-flash
+    "antigravity-gemini-3.8-flash-n",  # provider strip + alias -> gemini-3.8-flash
     "kimi/kimi-k2p6",            # Kimi collapse -> kimi-k2.6
     "k2p6",                      # alias + collapse -> kimi-k2.6
     "kimi-coding/k2p5",          # -> kimi-k2.5

@@ -91,11 +91,12 @@ def _cost(input_price, output_price, cache_read_price, cache_write_price):
 
 
 def test_gpt_6_sol_and_luna_pricing():
-    """GPT-6 Sol and Luna (2026-09-22) must match OpenAI's standard short-context rates."""
+    """GPT-6 Sol/Luna (2026-09-22) and GPT-6.1 Sol (2026-09-29) must match OpenAI's standard short-context rates."""
     db = PricingDatabase()
 
     expected = {
         "gpt-6-sol": (2.0, 10.0, 0.20, 2.50),
+        "gpt-6.1-sol": (2.0, 10.0, 0.10, 2.50),
         "gpt-6-luna": (0.10, 0.50, 0.01, 0.125),
         "gpt-5.6-cyber": (12.5, 75.0, 1.25, 15.625),
     }
@@ -400,6 +401,8 @@ def test_derived_antigravity_models_resolve():
         ("antigravity-claude-opus-4-6-thinking", "claude-opus-4.6"),
         ("antigravity-claude-sonnet-4-6", "claude-sonnet-4.6"),
         ("antigravity-gemini-3-flash", "gemini-3-flash-preview"),
+        ("antigravity-gemini-3.8-flash-n", "gemini-3.8-flash"),
+        ("gemini-3.8-flash-n", "gemini-3.8-flash"),
     ]
     for derived, base in pairs:
         d_cost = db.get_cost(derived, 1000, 2000, 0, 0)

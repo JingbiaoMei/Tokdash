@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import logging
 import os
 import sqlite3
 import threading
@@ -15,6 +16,8 @@ from . import clientpaths
 from .codex_quota_windows import classify_codex_api_windows
 from .filelock import process_lock
 from .pricing import PricingDatabase
+
+logger = logging.getLogger(__name__)
 
 
 SCHEMA_VERSION = 9
@@ -152,9 +155,37 @@ QUOTA_RECOVERY_EPSILON_PERCENT = 0.5
 # torn read before points/consumption are derived. See `_drop_torn_reads`.
 QUOTA_TORN_READ_MIN_PERCENT = 40.0
 
+# Ceiling on how many promotion-blocked keys the survivor reparse will name in
+# one DELETE. Past it the sync fails instead of guessing, which is the
+# conservative outcome the unconditional abort used to produce.
+_UNRESOLVED_KEY_LIMIT = 4000
+
 _WRITE_LOCK = threading.RLock()
 _SCHEMA_LOCK = threading.RLock()
 _SCHEMA_READY: set[str] = set()
+
+
+class UsageFileUnreadable(RuntimeError):
+    """The enumerated file is present but its contents could not be decoded.
+
+    The sibling of :class:`UsageFileVanished`, and the same sync consequence is
+    the entire point: under ``file_replace`` an empty entry list means "this file
+    now has zero entries", so a commit would delete every row stored for a file
+    that merely went unreadable — corrupt frame, a header format this build does
+    not read, a file held without share-read. The rows are the user's history and
+    the file is still on disk, so a failed read must not answer "zero".
+
+    Parsers raise it instead of returning ``[]``; ``sync_files`` keeps the file's
+    rows AND its prior signature, so a later sync reparses it once it reads
+    again. Recovery is automatic: the rows return when the file does.
+
+    ``reason`` is the parser's own classifier, for the log line only.
+    """
+
+    def __init__(self, path: str, reason: str = ""):
+        super().__init__(f"{path}: {reason}" if reason else str(path))
+        self.filename = str(path)
+        self.reason = reason
 
 
 class _SyncFlight:
@@ -1674,6 +1705,7 @@ class UsageEntryStore:
             return False
 
         parsed: list[tuple[tuple[str, int, int], list[dict[str, Any]], int, bool]] = []
+        unreadable_paths: set[str] = set()
         for file_sig in changed_files:
             path, mtime_ns, size = file_sig
             state = stored.get(path)
@@ -1697,23 +1729,31 @@ class UsageEntryStore:
             if not appended:
                 try:
                     file_entries = list(parse_file_entries(file_sig))
-                except UsageFileVanished as exc:
-                    # Typed-vanished-file isolation: the enumerated path
-                    # disappeared before the parse opened it. Skip this file
-                    # entirely — keep its stored rows and its file_state
-                    # (including its old signature, so a later sync reparses
-                    # it if it is back) — and let every other file commit.
-                    # Returning [] here would silently delete the file's
-                    # rows; any other exception still fails the sync, so the
-                    # isolation cannot swallow a real parser bug. The
-                    # filename check is the second half of the narrowness
-                    # rule: a UsageFileVanished raised for some other path is
-                    # not this file's race.
+                except (UsageFileVanished, UsageFileUnreadable) as exc:
+                    # Typed-unreadable-file isolation: the enumerated path either
+                    # disappeared before the parse opened it, or it opened and
+                    # would not decode. Skip this file entirely — keep its stored
+                    # rows and its file_state (including its old signature, so a
+                    # later sync reparses it if it is back) — and let every other
+                    # file commit. Returning [] here would silently delete the
+                    # file's rows; any other exception still fails the sync, so the
+                    # isolation cannot swallow a real parser bug. The filename check
+                    # is the second half of the narrowness rule: a signal raised for
+                    # some other path is not this file's race.
                     if exc.filename != path:
                         raise
+                    if isinstance(exc, UsageFileUnreadable):
+                        unreadable_paths.add(path)
                     continue
                 rows = [_entry_for_storage(e) for e in file_entries]
                 parsed.append((file_sig, [e for e in rows if e is not None], int(size), False))
+
+        # Keys a replaced file dropped that no surviving copy proved it owns,
+        # held back from deletion because an unreadable file could still be their
+        # owner. Empty unless the survivor reparse hit an unreadable file, so
+        # whether a frame-damaged row survives depends on an unrelated file being
+        # unreadable in the same sync -- an accepted wart of key-granular holding.
+        unresolved_keys: list[str] = []
 
         if cross_file_stable_keys:
             # A full replacement can remove a stable key currently owned by this
@@ -1751,20 +1791,50 @@ class UsageEntryStore:
                 if not appended
             )
             if replacement_lost_owned_keys:
-                # NOTE: no UsageFileVanished catch here, deliberately. Skipping
-                # a vanished survivor at the main site keeps rows that file
-                # itself owns; a survivor re-parsed here holds none of the rows
-                # in question — the old canonical owner does — so skipping it
-                # and committing would let the owner lose its key to nothing
-                # and delete the only stored copy. A vanished file at this site
-                # therefore aborts the sync (the exception propagates before
-                # the write transaction opens); the next sync sees the file out
-                # of discovery and handles its real disappearance.
+                # NOTE: a UsageFileVanished here is deliberately NOT caught. A
+                # survivor re-parsed here holds none of the rows in question — the
+                # old canonical owner does — so skipping it and committing would let
+                # the owner lose its key to nothing and delete the only stored copy.
+                # UsageFileUnreadable IS caught below, and solves that differently:
+                # the skipped file is left out of the commit entirely (so its own
+                # rows survive) and the keys whose promotion it blocked keep their
+                # last known-good row. See survivor_unreadable.
+                # A truly vanished file at this site still aborts the sync (the
+                # exception propagates before the write transaction opens); the next
+                # sync sees the file out of discovery and handles its real
+                # disappearance.
                 parsed_paths = {file_sig[0] for file_sig, _entries, _safe_offset, _appended in parsed}
+                survivor_unreadable: list[str] = []
                 for file_sig in files:
                     if file_sig[0] in parsed_paths:
                         continue
-                    rows = [_entry_for_storage(e) for e in parse_file_entries(file_sig)]
+                    if file_sig[0] in unreadable_paths:
+                        # Already established unreadable at the main site earlier
+                        # in this same sync; decoding it again would only fail
+                        # again, and a file that stays broken would be decoded
+                        # twice on every sync indefinitely. Count it so the keys it
+                        # might hold are still held back.
+                        survivor_unreadable.append(str(file_sig[0]))
+                        continue
+                    try:
+                        rows = [_entry_for_storage(e) for e in parse_file_entries(file_sig)]
+                    except UsageFileUnreadable as exc:
+                        # An unreadable survivor is skipped WITHOUT being added to
+                        # `parsed`: adding it with an empty list would run this
+                        # file's DELETE in the commit and wipe the very rows the
+                        # main site just protected. Not adding it means it keeps
+                        # its rows, but it also cannot promote a key the replaced
+                        # owner dropped -- and we cannot prove it holds no such key,
+                        # because the file is the thing we could not read. So name
+                        # exactly those keys and let the commit keep their last
+                        # known-good row instead of either aborting the whole source
+                        # or deleting the only stored copy. (A vanished survivor is
+                        # still NOT caught here: its absence is settled by the next
+                        # sync's discovery, as before.)
+                        if exc.filename != file_sig[0]:
+                            raise
+                        survivor_unreadable.append(str(file_sig[0]))
+                        continue
                     parsed.append(
                         (
                             file_sig,
@@ -1772,6 +1842,39 @@ class UsageEntryStore:
                             int(file_sig[2]),
                             False,
                         )
+                    )
+
+                if survivor_unreadable:
+                    parsed_keys = {
+                        str(entry.get("entry_key") or "")
+                        for _sig, entries, _offset, _appended in parsed
+                        for entry in entries
+                        if entry.get("entry_key")
+                    }
+                    unresolved_keys = sorted(
+                        {
+                            key
+                            for path in full_replaced_paths
+                            for key in owned_keys.get(path, ())
+                            if key and key not in parsed_keys
+                        }
+                    )
+                    if len(unresolved_keys) > _UNRESOLVED_KEY_LIMIT:
+                        # Too many to name in one statement. Fail the sync rather
+                        # than guess: this is the conservative outcome the old
+                        # unconditional abort produced, kept as the escape hatch.
+                        raise RuntimeError(
+                            f"{source}: {len(unresolved_keys)} entry keys could not be "
+                            f"reassigned after {len(survivor_unreadable)} unreadable file(s); "
+                            "sync aborted so no stored row is lost"
+                        )
+                    logger.warning(
+                        "tokdash %s: %d stored row(s) kept in place because %d file(s) could "
+                        "not be read to confirm a new owner (%s)",
+                        source,
+                        len(unresolved_keys),
+                        len(survivor_unreadable),
+                        ", ".join(survivor_unreadable[:3]),
                     )
 
         # An ancestry-aware source can prefer the original session over a copy.
@@ -1852,10 +1955,32 @@ class UsageEntryStore:
                 for (path, mtime_ns, size), entries, safe_offset, appended in parsed:
                     total_changed_entries += len(entries)
                     if not appended:
-                        conn.execute(
-                            "DELETE FROM usage_entries WHERE source = ? AND file_path = ?",
-                            (source, path),
-                        )
+                        if unresolved_keys:
+                            # Hold, not heal. These keys keep the row they already
+                            # had instead of losing it with the replaced owner, and
+                            # that is all this does: the owner's new signature is
+                            # committed below, so no later sync re-examines it, and
+                            # the unreadable file stores no state either. The row
+                            # persists -- still attributed to a file that no longer
+                            # lists that key -- until that file changes again or the
+                            # key is re-established. If the key really was retired,
+                            # its usage keeps counting until then. Chosen over both
+                            # alternatives: aborting wedges the whole source for as
+                            # long as the file stays unreadable, and deleting loses
+                            # the only stored copy of a key that an unreadable file
+                            # may still legitimately hold.
+                            placeholders = ",".join("?" for _ in unresolved_keys)
+                            conn.execute(
+                                f"DELETE FROM usage_entries "
+                                f"WHERE source = ? AND file_path = ? "
+                                f"AND entry_key NOT IN ({placeholders})",
+                                [source, path, *unresolved_keys],
+                            )
+                        else:
+                            conn.execute(
+                                "DELETE FROM usage_entries WHERE source = ? AND file_path = ?",
+                                (source, path),
+                            )
                     conn.executemany(
                         insert_sql,
                         [

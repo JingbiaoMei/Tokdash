@@ -1,6 +1,7 @@
 <p align="center">
   <a href="README.md">English</a> &nbsp;|&nbsp; <a href="README_CN.md">中文</a> &nbsp;|&nbsp; <a href="README_JA.md">日本語</a> &nbsp;|&nbsp; <a href="README_KO.md">한국어</a> &nbsp;|&nbsp; <a href="README_ES.md">Español</a> &nbsp;|&nbsp; <a href="README_PT.md">Português</a>
 </p>
+
 <p align="center">
   <a href="https://tokdash.github.io/"><img src="https://raw.githubusercontent.com/JingbiaoMei/tokdash/main/docs/assets/tokdash_logo_full.png" alt="Tokdash" width="420" /></a>
 </p>
@@ -36,14 +37,15 @@
   <a href="https://charm.land/crush" title="Crush"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/crush.png" alt="Crush" height="34"></a>
   <a href="https://dev.meta.ai/docs/muse-code" title="Muse Code"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/muse.png" alt="Muse Code" height="34"></a>
   <a href="https://github.com/MiniMax-AI/minimax-code" title="MiniMax Code"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/minimax.png" alt="MiniMax Code" height="34"></a>
+<a href="https://devin.ai/cli" title="Devin CLI"><img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/agents/pills/devin.png" alt="Devin CLI" height="34"></a>
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/FastAPI-009688?style=flat&logo=fastapi&logoColor=white" alt="FastAPI" />
   <img src="https://img.shields.io/badge/Python-3.10+-3776AB?style=flat&logo=python&logoColor=white" alt="Python" />
   <img src="https://img.shields.io/badge/License-MIT-green?style=flat" alt="License" />
-  <a href="https://tokdash.github.io/"><img src="https://img.shields.io/badge/%E5%AE%98%E7%BD%91-tokdash.github.io-1E40AF?style=flat&logo=githubpages&logoColor=white" alt="官网" /></a>
-  <a href="https://tokdash.github.io/demo/"><img src="https://img.shields.io/badge/%E5%9C%A8%E7%BA%BF%E4%BD%93%E9%AA%8C-tokdash.github.io%2Fdemo-F59E0B?style=flat&logo=githubpages&logoColor=white" alt="在线体验" /></a>
+  <a href="https://tokdash.github.io/"><img src="https://img.shields.io/badge/Website-tokdash.github.io-1E40AF?style=flat&logo=githubpages&logoColor=white" alt="Website" /></a>
+  <a href="https://tokdash.github.io/demo/"><img src="https://img.shields.io/badge/Live%20Demo-tokdash.github.io%2Fdemo-F59E0B?style=flat&logo=githubpages&logoColor=white" alt="Live Demo" /></a>
 </p>
 
 <p align="center">
@@ -51,189 +53,206 @@
 </p>
 
 > [!NOTE]
-> **多台机器，一个仪表盘。** 在设置里添加运行在 WSL、Mac 或其他机器上的 Tokdash 实例：总览、会话与统计会按你选择的范围合并，Servers 标签页并排对比每台机器，额度标签页则按机器分别展示各家的额度窗口与重置倒计时。[远程访问 →](docs/guides/REMOTE_ACCESS.md) · [额度跟踪 →](#额度跟踪可选)
+> **多台机器，一个仪表盘。** 在设置里添加运行在 WSL、Mac 或其他机器上的 Tokdash 实例：每个视图都会合并你选择的范围，Servers 标签页并排对比各台机器，额度标签页则按机器分别展示各服务商的额度窗口进度条与重置倒计时。[远程访问 →](docs/guides/REMOTE_ACCESS.md) · [额度跟踪 →](#额度跟踪可选)
 >
-> **同一作者的另一个项目：[Cosyncing](https://github.com/cosyncing/cosyncing)。** 同步并操控你的 agent —— 从 CLI 到 GUI，从桌面到手机。随时随地，从上次中断的地方接着继续。Cosyncing 让你的编码 agent 在你自己的网络中保持同步。
-
-> [!TIP]
-> **Tokdash Companion 现已上架 Microsoft Store。** 无需一直打开仪表盘，即可在 Windows 通知区域或 macOS 菜单栏查看今日费用与订阅额度。[从 Microsoft Store 获取](https://apps.microsoft.com/detail/9ppnmpdq8b52) · [查看截图、下载并设置 →](#tokdash-companion-状态栏应用)
+> **同一作者的另一个项目：[Cosyncing](https://github.com/cosyncing/cosyncing)。** 同步并操控你的 agent —— 从 CLI 到 GUI，从桌面到手机。Cosyncing 让你的编码 agent 在你自己的网络中保持同步。
 
 ## 目录
 
-- [功能特性](#功能特性)
-- [已支持客户端](docs/reference/SUPPORTED_CLIENTS.md)
-- [Tokdash Companion 状态栏应用](#tokdash-companion-状态栏应用)
 - [快速开始](#快速开始)
-  - [平台支持](#平台支持)
-- [配置](#配置)
-- [隐私与安全](#隐私与安全)
-- [API（本地）](#api本地)
+- [一个包，四种视图](#一个包四种视图)
+  - [WebUI](#webui)
+  - [终端仪表盘（TUI）](#终端仪表盘tui)
+  - [Companion 状态栏应用](#companion-状态栏应用)
+  - [状态栏（Statusline）](#状态栏statusline)
+- [安装与运行](#安装与运行)
+- [功能特性](#功能特性)
+- [额度跟踪（可选）](#额度跟踪可选)
 - [费用精度说明](#费用精度说明)
 - [历史数据保留](#历史数据保留)
 - [路线图](#路线图)
 - [贡献 / 安全](#贡献--安全)
 - [文档](#文档)
-- [项目结构](#项目结构)
 - [License](#license)
 
-## 功能特性
+## 快速开始
 
-- **精确 Token 统计**：输入 / 输出 / 缓存 Token 明细
-- **状态栏集成** *[新]*：把实时 Token 使用量挂到 Claude Code（或任何能访问本地 HTTP 端点的 Agent）的状态栏中 — 见[状态栏集成](#状态栏集成statusline-integration)
-- **贡献日历**：2D 热力图 + 3D 等距视图，支持 Tokens / Cost / Messages 切换
-- **会话浏览器**：逐会话下钻
-- **报告标签页** *[新]*：本机 Agent 活动的周 / 月 / 年初至今报告，并按详细程度提供两种可分享卡片；每次导出都会同时生成浅色与深色两张 PNG
-- **额度标签页** *[新]*：Codex、Claude Code 与 Antigravity 的订阅额度窗口进度条与重置倒计时。Codex 的窗口读取本地日志即可开箱使用；Codex 重置额度、按量功能额度以及全部 Claude / Antigravity 额度都需要选择启用[实时轮询](#额度跟踪可选)
-- **Companion 状态栏应用** *[新]*：在 macOS 菜单栏或 Windows 通知区域查看费用与订阅额度，Windows 版已上架 [Microsoft Store](https://apps.microsoft.com/detail/9ppnmpdq8b52) — [截图与下载](#tokdash-companion-状态栏应用)
-- **多服务器视图**：在设置中添加 WSL、macOS 或其他 Tokdash 服务器；可合并任意选择的用量，并按机器分组显示额度。参见[远程访问](docs/guides/REMOTE_ACCESS.md)。
-- **主题与应用体验**：17 款样式主题、明暗模式与 PWA 安装支持、六种界面语言（English / 中文 / 日本語 / 한국어 / Español / Português）
+```bash
+pipx install tokdash
+tokdash setup
+```
 
-### 客户端支持矩阵
+就这两条命令。`tokdash setup` 会检测运行时、在需要时安装托管运行时、注册本地
+服务，并打印仪表盘地址 —— `http://127.0.0.1:55423`。完整安装选项、首次运行
+说明与更新方式见 [安装与运行](#安装与运行)；想先逛逛？[在线演示](https://tokdash.github.io/demo/)
+运行在真实界面上。
 
-| 客户端 | 用量与费用 | 会话浏览器 |
-|---|:---:|:---:|
-| OpenCode | ✅ | ✅ |
-| Codex | ✅ | ✅ |
-| Claude Code | ✅ | ✅ |
-| Gemini CLI | ✅ | — |
-| Antigravity CLI | ✅ | ✅ |
-| OpenClaw | ✅ | ✅ |
-| Kimi Code / Kimi CLI | ✅ | ✅ |
-| MiMo Code | ✅ | ✅ |
-| Grok Build | ✅ | ✅ |
-| Pi | ✅ | ✅ |
-| **omp** | ✅ | ✅ |
-| **Kilo Code** | ✅ | ✅ |
-| **Cline** | ✅ | ✅ |
-| GitHub Copilot CLI | ✅ | — |
-| Hermes | ✅ | ✅ |
-| DeepSeek Harness | ✅ | ✅ |
-| Reasonix | ✅ | ✅ |
-| **ZCode** | ✅ | ✅ |
-| **WorkBuddy** | ✅ | ✅ |
-| **Qoder IDE** | ✅ | ✅ |
-| **Qoder CLI** | ✅ | ✅ |
-| **Zed** | ✅ | — |
-| **Qwen Code** | ✅ | ✅ |
-| **Crush** | ✅ | — |
-| **Muse Code** | ✅ | — |
-| **MiniMax Code** | ✅ | — |
-| **Devin CLI** | ✅ | — |
+## 一个包，四种视图
 
-本地数据路径、覆盖变量与各来源的计费说明见[已支持客户端](docs/reference/SUPPORTED_CLIENTS.md)。
+一个本地包，一个本地数据索引 —— 四种读取方式。每个界面解析的都是你自己机器上的同一批会话日志，因此浏览器仪表盘、终端、菜单栏，以及你 Agent 的状态栏永远口径一致。
 
-<p align="center">
-  <b>总览</b><br />
-  <a href="https://tokdash.github.io/demo/">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-overview-cn-dark.png" />
-      <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-overview-cn-light.png" alt="Tokdash 总览仪表盘 — 点击体验在线 Demo" width="860" />
-    </picture>
-  </a>
-</p>
-<p align="center">
-  <b>会话列表</b><br />
-  <a href="https://tokdash.github.io/demo/">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-sessions-cn-dark.png" />
-      <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-sessions-cn-light.png" alt="Tokdash 会话列表 — 点击体验在线 Demo" width="860" />
-    </picture>
-  </a>
-</p>
-<p align="center">
-  <b>月度使用热力图</b><br />
-  <a href="https://tokdash.github.io/demo/">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-heatmap-cn-dark.png" />
-      <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-heatmap-cn-light.png" alt="Tokdash 月度使用热力图 — 点击体验在线 Demo" width="860" />
-    </picture>
-  </a>
-</p>
-<p align="center">
-  <b>年度使用热力图</b><br />
-  <a href="https://tokdash.github.io/demo/">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-heatmap-year-cn-dark.png" />
-      <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-heatmap-year-cn-light.png" alt="Tokdash 年度使用热力图 — 点击体验在线 Demo" width="860" />
-    </picture>
-  </a>
-</p>
-<p align="center">
-  <b>用量报告</b><br />
-  <a href="https://tokdash.github.io/demo/">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-report-cn-dark.png" />
-      <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-report-cn-light.png" alt="Tokdash 用量报告 — 点击体验在线 Demo" width="860" />
-    </picture>
-  </a>
-</p>
-<p align="center">
-  <b>额度追踪</b><br />
-  <a href="https://tokdash.github.io/demo/">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-quota-cn-dark.png" />
-      <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-quota-cn-light.png" alt="Tokdash 额度追踪 — 点击体验在线 Demo" width="860" />
-    </picture>
-  </a>
-</p>
-<p align="center">
-  <b>多台服务器，一个总计</b><br />
-  <a href="https://tokdash.github.io/demo/">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-servers-cn-dark.png" />
-      <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-servers-cn-light.png" alt="Tokdash 多服务器对比 — 点击体验在线 Demo" width="860" />
-    </picture>
-  </a>
-</p>
+| 视图 | 它是什么 | 什么时候用它 |
+|---|---|---|
+| **[WebUI](#webui)** | 完整仪表盘：Overview、Sessions、Stats、Report、Quota、Servers | 你想要全局视图、图表与逐层下钻 |
+| **[TUI](#终端仪表盘tui)** | `tokdash tui` —— 在终端里查看 Overview、Report 与 Quota | 你常驻终端，不想为了看数字打开浏览器 |
+| **[Companion](#companion-状态栏应用)** | 原生菜单栏（macOS）/ 通知区域（Windows）应用 | 你想全天可见今日费用与额度，哪怕仪表盘没有打开 |
+| **[状态栏](#状态栏statusline)** | 你 Agent 状态栏里的实时 Token / 费用条目 | 你想在打字的正下方看到费用跳动 |
 
-## Tokdash Companion 状态栏应用
+### WebUI
 
-Tokdash Companion 状态栏应用是一个可选的原生客户端：在 macOS
-菜单栏或 Windows 通知区域中，提供紧凑、只读的 Tokdash 服务视图，
-无需一直打开完整仪表盘。
+仪表盘是由本地 FastAPI 应用提供的单页应用：精确的输入 / 缓存 / 输出 Token 明细、按工具与按模型的表格、贡献热力图、周 / 月 / 年的 **Report** 报告、按服务商的 **Quota** 额度窗口与重置倒计时，以及可以合并、对比多台机器的 **Servers** 标签页。点击任意截图即可打开[在线 Demo](https://tokdash.github.io/demo/)。
 
-<p align="center">
-  <a href="docs/assets/companion/demo-mac.png">
-    <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/companion/demo-mac.png" alt="macOS 上的 Tokdash Companion 状态栏应用" width="360" />
-  </a>
-  &nbsp;&nbsp;
-  <a href="docs/assets/companion/demo-win.png">
-    <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/companion/demo-win.png" alt="Windows 上的 Tokdash Companion 状态栏应用" width="360" />
-  </a>
-</p>
-<p align="center">
-  <sub><b>macOS</b> 菜单栏 &nbsp;&nbsp;&nbsp;&nbsp; <b>Windows</b> 通知区域</sub>
-</p>
+<table>
+  <tr>
+    <td align="center">
+      <b>Overview</b><br />
+      <a href="https://tokdash.github.io/demo/">
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-overview-cn-dark.png" />
+          <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-overview-cn-light.png" alt="Tokdash 总览仪表盘 — 点击体验在线 Demo" width="470" />
+        </picture>
+      </a>
+    </td>
+    <td align="center">
+      <b>用量报告</b><br />
+      <a href="https://tokdash.github.io/demo/">
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-report-cn-dark.png" />
+          <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-report-cn-light.png" alt="Tokdash 用量报告 — 点击体验在线 Demo" width="470" />
+        </picture>
+      </a>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <b>额度追踪</b><br />
+      <a href="https://tokdash.github.io/demo/">
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-quota-cn-dark.png" />
+          <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-quota-cn-light.png" alt="Tokdash 额度追踪 — 点击体验在线 Demo" width="470" />
+        </picture>
+      </a>
+    </td>
+    <td align="center">
+      <b>多台服务器，一个总计</b><br />
+      <a href="https://tokdash.github.io/demo/">
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-servers-cn-dark.png" />
+          <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-servers-cn-light.png" alt="Tokdash Servers 标签页对比各机器 — 点击体验在线 Demo" width="470" />
+        </picture>
+      </a>
+    </td>
+  </tr>
+</table>
 
-- 今日费用、Token、消息数和本月累计用量
-- 汇总多个 Tokdash 端点的总计，并按服务器分组显示额度
-- Codex、Claude、Kimi、MiniMax、Antigravity、Grok 与 Z.ai 额度窗口
-- 相对重置时间与可选的低额度通知
-- 可选的登录时启动
-- 跟随系统语言，或选择 English、简体中文、日语、韩语、西班牙语与葡萄牙语
-- 无遥测、凭据发现、端口扫描或直接日志解析
+<p align="center"><sub>浅色与深色模式跟随系统外观。应用内置 17 款样式主题、明暗模式、PWA 安装与六种界面语言（English / 中文 / 日本語 / 한국어 / Español / Português）。</sub></p>
 
-### 下载
+### 终端仪表盘（TUI）
 
-**Windows —— Microsoft Store**（推荐）
+更喜欢留在终端里？`tokdash tui` 无需浏览器即可打开 **Overview**、**Report** 和 **Quota** 标签页，读取同一个本地索引（当旁边运行着 `tokdash serve` 时，还会读取共享的磁盘数据库）。
+
+<table>
+  <tr>
+    <td align="center">
+      <b>TUI — Overview</b><br />
+      <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-tui-overview.png" alt="tokdash tui Overview 标签页" width="470" />
+    </td>
+    <td align="center">
+      <b>TUI — Quota</b><br />
+      <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-tui-quota.png" alt="tokdash tui Quota 标签页" width="470" />
+    </td>
+  </tr>
+</table>
+
+```bash
+tokdash tui
+```
+
+<details>
+<summary>按键</summary>
+
+| 按键 | 操作 |
+|---|---|
+| `q` | 退出 |
+| `r` | 刷新当前标签页 |
+| `1` / `2` / `3` | 切换到 Overview / Report / Quota |
+| `t` `w` `m` `y` `a` | 直接跳转到对应周期（两个周期标签页通用；`t`/`a` 仅 Overview） |
+| `p` | 下一个时间窗口（仅向前循环） |
+| `[` / `]` | 按整个日历周期向后 / 向前切换 —— 绝不跳入未来 |
+| `0` | 回到今天 |
+| `u` | 轮询额度（仅 Quota 标签页） |
+| `?` | 显示所有按键的帮助面板 |
+
+</details>
+
+<details>
+<summary>一次性报表 CLI</summary>
+
+用于可管道化或脚本化的一次性报表：
+
+```bash
+tokdash report --period week
+```
+
+周期是一个参数（flag），不是位置参数。可接受的值：`today`（默认）、`week`、`month`、`year`、`all`、天数数字，或 `Nd/Nw/Nm/Ny` 简写；其中 `week`、`month` 和 `year` 与 Web Report 标签页显示的日历对齐窗口相同。`tokdash report` 还支持 `--json`、`--pretty` 和 `--output <file>`，遵循与 `tokdash export` 相同的约定。
+
+</details>
+
+### Companion 状态栏应用
+
+可选的原生应用：macOS 菜单栏应用与 Windows 通知区域应用 —— 在不打开仪表盘的情况下，提供紧凑、只读的 Tokdash 服务视图。
+
+<table>
+  <tr>
+    <td align="center">
+      <a href="https://apps.microsoft.com/detail/9ppnmpdq8b52">
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/companion/demo-mac-dark.png" />
+          <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/companion/demo-mac-light.png" alt="macOS 上的 Tokdash Companion 状态栏应用" width="300" />
+        </picture>
+      </a>
+    </td>
+    <td align="center">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/companion/demo-win-dark.png" />
+        <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/companion/demo-win-light.png" alt="Windows 上的 Tokdash Companion 状态栏应用" width="300" />
+      </picture>
+    </td>
+  </tr>
+  <tr>
+    <td align="center"><sub><b>macOS</b> 菜单栏</sub></td>
+    <td align="center"><sub><b>Windows</b> 通知区域</sub></td>
+  </tr>
+</table>
+
+**Windows —— Microsoft Store**（推荐，由 Microsoft 签名，需要 Windows 11）：
 
 <p>
   <a href="https://apps.microsoft.com/detail/9ppnmpdq8b52?mode=direct">
     <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://get.microsoft.com/images/zh-cn%20light.svg" />
-      <img src="https://get.microsoft.com/images/zh-cn%20dark.svg" alt="从 Microsoft Store 获取 Tokdash Companion" width="200" />
+      <source media="(prefers-color-scheme: dark)" srcset="https://get.microsoft.com/images/en-us%20light.svg" />
+      <img src="https://get.microsoft.com/images/en-us%20dark.svg" alt="从 Microsoft Store 获取 Tokdash Companion" width="200" />
     </picture>
   </a>
 </p>
 
-由 Microsoft 签名，并通过 Store 更新。需要 Windows 11。
+**直接下载** —— [最新 Companion Release](https://github.com/JingbiaoMei/Tokdash/releases?q=companion-v)：
+通用 DMG（`arm64` + `x86_64`，macOS 14+）与自包含便携 ZIP（`x64`，Windows 11；Windows on Arm 可通过 x64 模拟运行）。
 
-**直接下载** —— **[Tokdash Companion 1.1.0](https://github.com/JingbiaoMei/Tokdash/releases/tag/companion-v1.1.0)**：
+<details>
+<summary>它显示什么，以及如何设置</summary>
 
-| 平台 | 下载 | 要求 |
-|---|---|---|
-| macOS | 通用 DMG（`arm64` + `x86_64`） | macOS 14 或更高版本 |
-| Windows | 自包含便携 ZIP（`x64`） | Windows 11；Windows on Arm 可使用 x64 模拟 |
+- 今日费用、Token、消息数与本月累计用量
+- 汇总多个 Tokdash 端点的总计，并按服务器分组显示额度
+- Codex、Claude、Kimi、MiniMax、Antigravity、Grok 与 Z.ai 额度窗口
+- 相对重置时间与可选的低额度通知
+- 跟随系统语言，并支持 English、简体中文、日语、韩语、西班牙语与葡萄牙语
+- 无遥测、凭据发现、端口扫描或直接日志解析
+
+设置：运行 **Tokdash 1.5.2 或更高版本**（[安装与运行](#安装与运行)），安装 Companion，
+它默认连接 `http://127.0.0.1:55423` —— 其设置允许你添加、测试、命名或移除明确
+指定的端点，包括私有 Tailscale Serve 地址。Companion 只会访问你配置的端点；
+低额度通知与登录时启动均为可选功能。
 
 > [!WARNING]
 > GitHub Releases 提供的二进制文件**未签名**。macOS Gatekeeper 和
@@ -242,36 +261,36 @@ Tokdash Companion 状态栏应用是一个可选的原生客户端：在 macOS
 > Microsoft Store 版本由 Microsoft 签名，不受此影响；macOS 的签名与公证
 > 在后续版本中加入。
 
-### 设置
-
-1. 按照[快速开始](#快速开始)安装并启动 **Tokdash 1.5.2 或更高版本**。
-2. 安装 Companion。Windows 用户可直接使用上方的 Microsoft Store 链接；
-   如需直接下载，请获取对应平台的文件并使用 `SHA256SUMS` 验证。
-3. 使用直接下载时：在 macOS 上打开 DMG，将 `TokdashCompanion` 拖入“应用程序”；
-   在 Windows 上将 ZIP 解压到固定目录，然后运行 `TokdashCompanion.exe`。
-4. Companion 默认连接 `http://127.0.0.1:55423`。你可以在设置中添加、测试、
-   命名、启用或移除明确指定的 Tokdash 端点，包括私有 Tailscale Serve 地址。
-
-Companion 只会访问你配置的 Tokdash 端点。低额度通知与登录时启动均为
-可选功能，默认关闭。校验、更新与移除说明见
+校验、更新与移除说明见
 [Companion Release 指南](companion/docs/RELEASE.md)。
 
-## 快速开始
+</details>
+
+### 状态栏（Statusline）
+
+本地 API 可以驱动编程 Agent 状态栏中的一个条目，实时显示 Token / 费用统计：
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-statusline.png" alt="Tokdash 状态栏集成示例" width="900" />
+</p>
+
+现成模板（bash 与 PowerShell）、安装 / 配置与端点参考见
+**[`docs/guides/statusline/`](docs/guides/statusline/)**。
+
+## 安装与运行
 
 ### 平台支持
 
-- **Linux（含 WSL2）**：支持
-- **macOS**：支持
-- **Windows（原生）**：实验性支持
+- **Linux（含 WSL2）：** 支持
+- **macOS：** 支持
+- **Windows（原生）：** 实验性支持
 
-### 前置要求
-
-- Python **3.10+**
-- 已安装一个或多个[支持的客户端](docs/reference/SUPPORTED_CLIENTS.md)
+**前置要求：** Python **3.10+** 以及一个或多个
+[支持的客户端](docs/reference/SUPPORTED_CLIENTS.md)。
 
 ### 安装
 
-推荐使用隔离安装：
+推荐的隔离安装：
 
 ```bash
 pipx install tokdash
@@ -295,22 +314,12 @@ tokdash setup
 `http://127.0.0.1:55423`）。如果没有可用的服务管理器，它会记录 setup 状态并打印前台运行指引。
 它默认只监听 localhost，本地服务不需要 `sudo`，并且除非你后续使用 `--purge` 卸载，否则会保留使用历史。
 
-如需显式监听所有网络接口并保持写入接口禁用，请运行 `tokdash setup --bind 0.0.0.0`；操作前请先阅读
-[远程访问指南](docs/guides/REMOTE_ACCESS.md)。
+如果你通过 Agent、脚本或上层 bundle 做非交互安装，请运行
+`tokdash setup --auto --json`；如需先预览 setup 会做什么，运行 `tokdash setup --dry-run`。
+如需显式监听所有网络接口并保持写入接口禁用，请运行 `tokdash setup --bind 0.0.0.0`；
+操作前请先阅读[远程访问指南](docs/guides/REMOTE_ACCESS.md)。
 
-如果你通过 Agent、脚本或上层 bundle 做非交互安装：
-
-```bash
-tokdash setup --auto --json
-```
-
-如需先预览 setup 会做什么：
-
-```bash
-tokdash setup --dry-run
-```
-
-### 验证
+然后检查安装：
 
 ```bash
 tokdash doctor
@@ -327,11 +336,10 @@ tokdash uninstall    # 精确撤销 setup 创建的内容；默认保留使用�
 ```
 
 `update` 只会驱动 Tokdash 能安全管理的安装方式。如果当前运行时来自 Tokdash 不拥有的包管理器，
-它会打印明确的手动升级建议，而不是修改该环境。对于受管运行时，`update` 会显示升级前后的
-Tokdash 版本；如果版本没有变化，会明确说明 Tokdash 已经在该版本，而不是让人误以为安装了新包。
+它会打印明确的手动升级建议，而不是修改该环境。
 
 <details>
-<summary>既有安装：从 v1.0 前迁移</summary>
+<summary>既有安装：从 v1.0 之前迁移</summary>
 
 如果你是在 onboarding 流程加入前安装的 Tokdash，请先升级：
 
@@ -341,14 +349,14 @@ pipx upgrade tokdash
 ```
 
 然后运行 `tokdash doctor`；当你希望 Tokdash 接管后台服务时，再运行 `tokdash setup`。如果你已经有
-手写的 systemd 或 launchd 服务，setup **不会** 静默替换它：默认会拒绝覆盖未带 Tokdash setup 标记的
+手写的 systemd 或 launchd 服务，setup **不会**静默替换它：默认会拒绝覆盖未带 Tokdash setup 标记的
 `tokdash.service` / plist。你可以继续自行维护该服务、先移除它再运行 setup，或在确认
 `tokdash setup --dry-run` 输出后使用 `tokdash setup --force`。`--force` 也会处理已经占用
 `55423`、但还没有新版 `/health` 指纹的 1.0 之前服务：它会重写并重启现有 `tokdash.service`。
 如果要跳过服务创建，使用 `tokdash setup --no-service`。
 
 如果当前 setup 使用的是 conda / 系统 Python / user-pip 解释器，而你希望后续由
-`tokdash update` 自动管理升级，可以把服务迁移到 Tokdash 自己创建并拥有的 venv：
+`tokdash update` 自动管理升级，可以把服务迁移到 Tokdash setup 自己创建并拥有的 venv：
 
 ```bash
 # 先升级你接下来要运行的 tokdash 命令，例如：
@@ -366,16 +374,6 @@ tokdash doctor
 
 </details>
 
-### 远程访问
-
-Tokdash 默认保持回环地址绑定。交互式 `tokdash setup` 可在用户明确确认后配置 Tailscale
-Serve，让 Windows 或其他 tailnet 设备通过私有 HTTPS 进行只读访问。需要经过认证的远程写入时，
-请使用 SSH 转发。显式使用 `--bind 0.0.0.0` 可以提供只读网络访问，但会把未经认证的仪表盘
-暴露到所有可达接口。
-
-设置命令、WSL2 说明、访问地址、写入行为和安全取舍见
-**[`docs/guides/REMOTE_ACCESS.md`](docs/guides/REMOTE_ACCESS.md)**。
-
 ### 前台运行备用方式
 
 如果你只需要一次性的前台进程：
@@ -385,253 +383,63 @@ tokdash serve
 ```
 
 打开 `http://127.0.0.1:55423`。如果默认端口被占用，使用 `tokdash serve --port <port>`。
-
-完整 onboarding 说明，包括运行时选择、WSL/systemd 行为、macOS launchd、Tailscale、bundle
-集成、更新检查和安全卸载语义，见 **[`docs/guides/ONBOARDING.md`](docs/guides/ONBOARDING.md)**。
-
-### 终端仪表盘
-
-更喜欢留在终端里？两个终端视图都无需浏览器即可工作，并复用与 Web 仪表盘相同的本地索引用量数据和缓存——与 `tokdash serve` 一同启动的终端视图会直接读取共享的磁盘数据库，而不是重新解析日志。
-
-交互式仪表盘：
-
-```bash
-tokdash tui
-```
-
-它打开与 Web 仪表盘相同的 **Overview**、**Report** 和 **Quota** 标签页；标签页超过一页时可用鼠标滚轮滚动。按键：
-
-| 按键 | 操作 |
-|---|---|
-| `q` | 退出 |
-| `r` | 刷新当前标签页 |
-| `1` / `2` / `3` | 切换到 Overview / Report / Quota |
-| `t` `w` `m` `y` `a` | 直接跳转到对应周期（两个周期标签页通用；`t`/`a` 仅 Overview） |
-| `p` | 下一个时间窗口（仅向前循环） |
-| `[` / `]` | 按完整日历周期向前 / 向后切换——月视图切换整个自然月、周视图切换整个自然周（不会跳到未来） |
-| `0` | 回到今天 |
-| `u` | 轮询配额（仅 Quota 标签页） |
-| `?` | 显示所有按键的帮助面板 |
-
-用于可管道化或脚本化的一次性报表：
-
-```bash
-tokdash report --period week
-```
-
-周期只能作为参数（flag），不是位置参数——`tokdash report week` 会按设计报错。可接受的值：`today`（默认）、`week`、`month`、`year`、`all`、天数数字，或 `Nd/Nw/Nm/Ny` 简写；其中 `week`、`month`、`year` 与 Web Report 标签页显示的日历对齐窗口相同。`tokdash report` 还支持 `--json`、`--pretty` 和 `--output <file>`，遵循与 `tokdash export` 相同的约定。
-
-### OpenClaw 摘要（定时报表）
-
-Tokdash 可以通过定时查询本地 API，生成 OpenClaw 的日报 / 周报 / 月报。
-
-#### 面向人类用户
-
-把下面这段提示词复制给你的 LLM 代理（Claude Code、AmpCode、Cursor 等）：
-
-```text
-Install and configure scheduled Tokdash usage reports for OpenClaw by following the instructions here:
-https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/guides/agents/openclaw_reporting/AGENTS.md
-
-Or read the guide yourself, but seriously, let an agent do it.
-```
-
-#### 面向 LLM 代理
-
-拉取安装指南并按照其说明执行：
-
-```bash
-curl -s https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/guides/agents/openclaw_reporting/AGENTS.md
-```
-
-### 状态栏集成（Statusline integration）
-
-本地 API 可为编程 Agent（如 Claude Code）提供实时 token/费用状态栏。
-
-**开箱即用的模板**位于 [`docs/guides/statusline/`](docs/guides/statusline/)：把其中一个脚本复制到 `~/.claude/scripts/`，再把 `statusLine` 配置块加入 `~/.claude/settings.json` 即可。
-
-- [`statusline-minimal.sh`](docs/guides/statusline/statusline-minimal.sh) → 单行：`[Claude Sonnet 4.6] 📁 myproject | 📊 12.3M ($4.56) today`
-- [`statusline-full.sh`](docs/guides/statusline/statusline-full.sh) → 四行面板，含今日 + 本周合计，以及按工具的 Top-3 明细
-- [`statusline.ps1`](docs/guides/statusline/statusline.ps1) → 输出与 minimal 模板相同的单行，供在原生 Windows 上运行 Claude Code 的用户使用（PowerShell 原生实现，无需 `curl`/`jq`）
-
-三者均为只读、仅本地访问，Tokdash 未运行时会静默隐藏 📊 段。安装与配置见[该目录的 README](docs/guides/statusline/README.md)，端点细节见 [`docs/reference/API.md`](docs/reference/API.md)。
-
-想自己定制？把下面这段提示词发给你的 Agent，并把 [`docs/reference/API.md`](docs/reference/API.md) 一起给它：
-
-> *"I would like to add a statusline item from the tokdash endpoint's API; it should show the total tokens used today."*
-
-<p align="center">
-  <img src="https://raw.githubusercontent.com/JingbiaoMei/Tokdash/main/docs/assets/demo-statusline.png" alt="Tokdash 状态栏集成示例" width="900" />
-</p>
-
-## 配置
-
-Tokdash 默认**只监听 localhost**。
-
-- `TOKDASH_HOST`（默认：`127.0.0.1`）
-- `TOKDASH_PORT`（默认：`55423`）
-- `TOKDASH_CACHE_TTL`（默认：`600` 秒）
-- `TOKDASH_CACHE_MAX_ENTRIES`（默认：`256`）——限制 API 响应缓存及其空闲键锁的数量
-- `TOKDASH_COMPUTE_CONCURRENCY`（默认：`2`）——同时进行的重型历史重解析数量上限；超出的冷请求会立即返回 `503`，而不是在高负载下耗尽服务线程
-- `TOKDASH_STARTUP_WARM_JOIN_SECONDS`（默认：`30` 秒）——启动预热某个键期间，第一个请求该键的请求最多等待该次预热多久，而不是直接返回 `503`；每个键最多只有一个请求等待
-- `TOKDASH_LIMIT_CONCURRENCY`（默认：`64`）——uvicorn 接受的最大并发连接数（背压）
-- `TOKDASH_KEEPALIVE`（默认：`5` 秒）——uvicorn keep-alive 超时
-- `TOKDASH_ALLOW_ORIGINS`（逗号分隔，默认：空）
-- `TOKDASH_ALLOW_ORIGIN_REGEX`（默认 CORS 策略允许 localhost/127.0.0.1，以及同一 tailnet 内的 Tailscale Serve 读取；设置任一 CORS 选项会替换该默认策略）
-- `TOKDASH_NO_RETENTION_NOTICE`（设为 `1` 可静默 `tokdash serve` 启动时打印的历史保留提醒）
-- `TOKDASH_SETUP_NO_OPEN`（设为 `1` 可跳过 `tokdash setup` 结束时可选的浏览器打开）
-
-会话活跃时长（估算）：
-
-每个会话除 `span_ms` 外还会给出 `active_ms`。span 是首末事件之间的跨度；活跃时长则把相邻 token 事件之间的间隔按空闲上限截断后累加，因此一个开着过夜的会话不再显示成 14 小时。
-
-这是估算值，API 中已明确标注：`summary.active_time_estimated` 为 `true`，`summary.active_time_method` 为 `capped-inter-event-gap`。其局限来自方法本身——事件之间的短暂停顿与真实工作无法区分，单次超过上限的操作会被截断到上限，只有一个 token 事件的会话则记为 0（前面没有可比较的事件）。
-
-并行工作会给出两个口径：`active_ms` 是时钟时长，重叠只计一次；`active_ms_sum` 把重叠也累加，即智能体时长。两者在单个会话和按工具汇总（`summary`）中都会出现。Kimi 的 agent 与 Claude 的子智能体都与主智能体并行运行，各自按独立事件流计时：一个子智能体并行工作一分钟，只增加一分钟智能体时长，不增加时钟时长。
-
-- `TOKDASH_ACTIVE_GAP_CAP_SECONDS`（默认：`300`）——空闲上限（秒）；超过该值的间隔只按上限计入。取值范围限制在 1 秒至 6 小时。
-
-持久化使用量数据库（默认开启）：
-
-Tokdash 默认会在 `~/.tokdash/usage.sqlite3` 维护一个本地 SQLite 索引。它保存解析后的 token 行以及 Codex/Claude/Kimi/DeepSeek Harness/Reasonix 会话摘要，让仪表盘和 API 的重复读取可以走索引 SQL，而不是每次重新解析所有源日志。源日志仍然是事实来源；这个 DB 是本地性能索引，禁用或不可用时 Tokdash 会回退到实时解析。
-
-缓存的会话行不含价格：它们只保存每轮的计费输入（模型、新增输入、缓存读取与写入、输出），费用在读取时按当前进程加载的价格计算。因此修改价格会立即重算，而不需要重新读取数 GB 日志；共用同一个数据库的两个 Tokdash 版本也不会因价格不同而互相作废对方的行。但只有在两个版本支持同一 DB schema 时共用才安全：schema 迁移只能向前，一旦较新的版本迁移了该文件，较旧的版本在升级前就无法再打开它，期间所有缓存读取都会失败。`tokdash doctor` 会同时报告磁盘上的 schema 与当前构建支持的 schema。解析器变更与源文件变更仍会照常触发重新解析。此前写入的行（包括 `TOKDASH_USAGE_DB_DURABLE` 在源日志消失后保留的行）会按存储的合计值重算，结果一致，但无法再区分 Claude/Kimi 的缓存写入与新增输入；只有重新解析这些日志才能恢复该区分。Codex 按 `provider/model` 计费但只存裸模型名，因此它的旧行不会被复用，而是重新解析一次。
-
-源码检出请使用独立的数据目录运行，避免迁移已安装服务所用的数据库：
-
-```bash
-TOKDASH_DATA_DIR=output/dev-data PYTHONPATH=src python3 main.py
-```
-
-- `TOKDASH_USAGE_DB`（默认：`1`）——设为 `0`、`false`、`no` 或 `off` 可禁用持久化使用量 DB
-- `TOKDASH_DATA_DIR`（默认：`~/.tokdash`）——Tokdash 本地状态目录
-- `TOKDASH_USAGE_DB_PATH`（默认：`$TOKDASH_DATA_DIR/usage.sqlite3`）——显式指定 SQLite 文件路径
-- `TOKDASH_UPDATE_ORIGIN`（默认不设置）——允许远程浏览器配对「点击更新」的精确 HTTPS 来源；不设置即远程更新完全关闭（用 `tokdash update-enroll` 生成配对码）
-- `TOKDASH_USAGE_DB_DURABLE`（默认：`1`）——当源文件临时消失或解析器返回空结果时保留已索引行；设为 `0` 则严格按源文件替换
-- `TOKDASH_USAGE_DB_WATCH`（默认：`0`）——设为 `1` 后，`tokdash serve` 内部会启动后台同步循环
-- `TOKDASH_USAGE_DB_WATCH_INTERVAL`（默认：`30` 秒）——`tokdash db watch` 和 serve-time watch 循环的同步间隔
-
-DB 维护命令：
-
-```bash
-tokdash db status --pretty
-tokdash db sync --pretty
-tokdash db verify --verify-period today --pretty
-tokdash db repair --dry-run --pretty
-tokdash db resync --pretty
-tokdash db watch --pretty
-```
-
-通过 Tailscale Serve、SSH 转发或显式网络绑定进行远程访问的说明见
-[`docs/guides/REMOTE_ACCESS.md`](docs/guides/REMOTE_ACCESS.md)。交互式 `tokdash setup` 可在用户选择启用后，
-配置并记录 Tailscale Serve 规则。
-
-默认情况下，`tokdash serve` 会在启动时自动在浏览器中打开仪表盘一次。使用 `--no-open` 可禁用此行为（在无界面/SSH 环境以及后台服务模板中也会自动跳过）。
-
-不带子命令直接运行 `tokdash` 只会打印命令帮助然后退出——它不会再悄悄启动 `tokdash serve`，也不会打开浏览器。请显式启动仪表盘：`tokdash serve`。
-
-## 隐私与安全
-
-- **无遥测**：Tokdash 不会主动把你的数据发送到任何地方。
-- **本地解析**：使用量由本机会话文件计算得出（见[支持的客户端](docs/reference/SUPPORTED_CLIENTS.md)）。
-- **可选额度轮询**：「额度」标签页默认仅使用本地数据。可在标签页内或用 `tokdash quota consent` 按服务商开启 API 轮询；它只用你本机的 CLI 凭据去调用对应服务商自己的额度接口，并把响应存入本地 SQLite 数据库。
-- **服务暴露**：Tokdash 默认绑定 `127.0.0.1`。Tailscale Serve 提供私有只读访问，SSH 转发提供经过认证的写入访问；`--bind 0.0.0.0` 会在所有接口上显式暴露未经认证的只读访问。详见[远程访问指南](docs/guides/REMOTE_ACCESS.md)。
-
-### 额度跟踪（可选）
-
-「额度」标签页展示订阅用量窗口与重置倒计时，来自两类数据源。**本地日志**（无网络）：Codex 会在会话文件里记录自己的额度，因此 Codex 的 5 小时 / 每周窗口可开箱即用；但它只会在你使用 Codex 时更新，且本地日志永远不包含重置额度或按量功能窗口。请把基于 Codex 会话日志的消耗视为**可能明显出错的估算值**：每个会话会缓存上一次获取到的额度快照，并在后续消息中原样重放，因此数字可能过期，重置边界附近的噪声也可能进一步扭曲某个窗口。「额度」标签页会把这些图表标记为估算。**实时轮询**（默认关闭，按服务商授权）：Tokdash 使用你本机 CLI 已登录的身份调用服务商自己的额度接口；数据更新、更完整，会加入 Codex 重置额度与按量功能窗口，是获得**准确** Codex 消耗所需的数据源，也是 Claude Code、Antigravity、MiniMax、Kimi Code、SuperGrok/Grok Build、Z.ai Coding Plan、OpenCode Go 与 Command Code 额度的唯一来源。可在标签页内或用 CLI 按服务商单独开启：
-
-```bash
-tokdash quota consent --codex-api on --claude-api on --antigravity-api on
-tokdash quota consent --minimax-api on --kimi-api on --grok-api on --zai-api on
-tokdash quota consent --opencode-go-api on
-tokdash quota consent --commandcode-api on
-tokdash quota consent --credential-scan on   # 允许读取已披露的本地凭据存储
-tokdash quota consent --poll-interval 30      # 后台轮询周期：15、30、60 或 120 分钟
-tokdash quota consent --enabled off           # 总开关：关闭全部额度跟踪
-tokdash quota poll
-tokdash quota show
-```
-
-**总开关。** `quota.enabled`（默认开启）控制*所有*额度工作——会话扫描、网络轮询与快照写入。可在「额度」标签页或用 `tokdash quota consent --enabled on|off` 切换。关闭后（或设置了 `TOKDASH_QUOTA_POLL=0` 终止开关时），后台轮询会完全停摆，`GET /api/quota/refresh` 会返回「额度跟踪已禁用」错误，标签页也会显示「启用额度跟踪」卡片而非数据。按服务商的授权键仍保留其更窄的、仅网络的含义。
-
-**轮询间隔。** 后台轮询默认每 **30 分钟** 记录一次快照。可在「额度」标签页、`tokdash setup` 过程中或用 `tokdash quota consent --poll-interval N` 选择 15/30/60/120 分钟，它会保存为 `config.json` 中的 `quota.poll_interval_minutes`。环境变量 `TOKDASH_QUOTA_POLL_INTERVAL`（单位秒，下限 300）会覆盖保存的值，标签页会显示当前生效的来源。间隔调整会在下一个轮询周期生效，无需重启服务。Codex 会话摄取采用增量方式——首次一次性回填历史后，每个周期只对增长过的会话文件做尾部读取，因此稳态轮询只需个位数毫秒。
-
-对于固定重置时间的额度窗口，轮询器还会在重置边界附近采样，以便历史记录捕获重置前的峰值和重置后的基线。边界采样默认开启，只调用触发边界的服务商接口，合并时间相近的多个服务商边界，并保证后台轮询周期之间至少间隔 300 秒。设置 `TOKDASH_QUOTA_BOUNDARY_POLL=0` 可关闭边界采样；设置 `TOKDASH_QUOTA_BOUNDARY_POST=0` 可只关闭重置后采样；还可通过 `TOKDASH_QUOTA_BOUNDARY_PRE_SECONDS` 和 `TOKDASH_QUOTA_BOUNDARY_POST_SECONDS` 调整默认 120 秒的提前量与延后量。
-
-**多个 Claude Code 安装。** Claude Code 每个配置目录对应一个订阅，因此以 `CLAUDE_CONFIG_DIR=~/.claude-academic claude` 运行的第二份登录就是另一个订阅，拥有自己的额度窗口。在授予凭据扫描许可后，Tokdash 会读取 `$CLAUDE_CONFIG_DIR` 以及每个自带 `.credentials.json` 的 `~/.claude*` 目录，分别轮询，并在 Claude Code 卡片内按目录所用的 profile 名称（例如 `academic`）分组展示。历史记录同样区分两者：`Claude-academic 5-hour` 是与 `Claude 5-hour` 并列的独立序列。登录过期的那份安装只在自己的分组里提示，不会掩盖正常安装的数据；持有同一份登录的两个目录只计算一次。若安装位于主目录之外，可用 `TOKDASH_CLAUDE_PROFILES` 指定以系统路径分隔符分隔的目录列表。用量统计无需改动：每个 `~/.claude*` 安装下的会话日志早已被计入。
-
-**Claude Code 额度重置。** 当 Anthropic 为你的账户提供额度重置（即 Claude Code 的 `/limit-reset` 所消耗的重置）时，Claude Code 卡片会在与 Codex 卡片相同的 **重置额度** 区块中列出它们及各自的到期时间，并显示在持有它们的那份安装之下。它们来自同一个用量请求，只是加上了 `?cedar_ember=1`。Anthropic 只向 Claude Code 自身的客户端列出重置，因此该请求的 User-Agent 以 Claude Code 的 `claude-cli/…` 开头，随后注明 `tokdash/<version>`。Tokdash 只读取重置；使用重置仍需在 Claude Code 中进行。
-
-实时轮询需要两层独立授权：`quota.credential_scan` 允许只读访问已披露的本地凭据存储，然后每个 `<provider>_api` 键允许向该服务商发起网络请求。Tokdash 只读取原生 CLI 认证/配置文件、OpenCode 的 `auth.json` 与全局供应商配置、当前 Claude 设置，以及通过只读 SQLite 连接读取 CC Switch 的 `providers` 表；不会扫描服务商日志、shell 配置或任意 `{file:...}` 引用。MiniMax 可使用 `mmx` 登录或 Token Plan Subscription Key（`MINIMAX_TOKEN_PLAN_GLOBAL_KEY` / `MINIMAX_TOKEN_PLAN_CN_KEY`）；普通按量 API key 不保证能读取 Token Plan。Kimi 需要 Kimi Code 登录或 key（`KIMI_API_KEY`），Moonshot Open Platform 的按量 key 不适用。SuperGrok/Grok Build 需要 `$GROK_HOME/auth.json` 中的 xAI OAuth 登录，普通 xAI API key 无法读取消费者账单额度。Z.ai 可读取 `$ZCODE_HOME/v2/config.json`、受支持工具配置、`ZAI_API_KEY` 或 `Z_AI_API_KEY` 中的 Coding Plan key，并查询 5 小时 / 每周额度及旧版 MCP 限额。Tokdash 从不刷新或写入服务商凭据。`TOKDASH_QUOTA_POLL=0` 是关闭全部额度跟踪的硬终止开关。`tokdash export` 默认排除额度数据；只有当你确实想把它写入 JSON 时才使用 `--include-quota`。
-
-OpenCode Go 优先使用 `OPENCODE_API_KEY`，未设置时读取 OpenCode 的 `auth.json` 中的 `opencode-go` key，并从 `opencode.ai/zen/go/v1/usage` 查询滚动 / 每周 / 每月订阅额度窗口。Zen 按量付费余额没有支持 key 认证的接口，因此不跟踪。
-
-Command Code 依次从 `COMMAND_CODE_API_KEY`、`COMMANDCODE_API_KEY`、`~/.commandcode/auth.json`，再到 OpenCode `auth.json` 中的 `commandcode` 条目读取账号密钥（不会刷新或写回）。它轮询 `api.commandcode.ai/alpha/billing/credits` 与 `/alpha/billing/subscriptions`，获取 5 小时 / 每周用量上限以及每月额度窗口。5 小时与每周进度条直接来自接口；**每月窗口是推算的**：套餐目录给出额度池，减去剩余额度并套用解析出的套餐名（Go / GOAT / Pro / Max 10x / Max 20x / Team Pro / Provider）。当无法解析出有效订阅及套餐时，每月进度条与其套餐名会被撤回，而不是继续显示上一次的读数。
-
-Tokdash 还会从 `$GROK_HOME/logs/unified.jsonl` 本地统计 Grok Build token。推理记录会提供 prompt、缓存 prompt、completion 与 reasoning token；Tokdash 使用同一 CLI 进程的模型事件完成归属，并通过常规价格数据库计算费用。缺少模型事件的记录会被跳过，不会猜测价格。
-
-DeepSeek Harness（`dsh`）的用量与会话从 `$DSH_HOME/sessions/*/*/session.jsonl.zstd`（或未压缩的 `session.jsonl`）本地读取，`DSH_HOME` 默认为 `~/.dsh`。每个日志由多个独立 zstd 帧拼接而成；Tokdash 会解码全部帧，把每个 step 的早期 usage chunk 折叠进最终消息而不是重复计数，并跳过 fork 会话继承自父会话的前缀，确保父会话与子会话不会对同一批 token 重复计费。
-
-Reasonix 的用量与会话从 `$REASONIX_HOME`（默认 `~/.reasonix`）本地读取：逐次请求的 token 来自每日 `stats/YYYY-MM-DD.jsonl` 日志，会话结构来自 `projects/*/sessions/*.jsonl`。Reasonix 连接的是其 `config.toml` 中配置的任意供应商，因此每行的 `provider/model` 会照常归因并按现有价格库计价；没有公开价格的自建模型只统计 token，费用为 0。Reasonix 按请求记录用量，且不会写入会话 ID，所以会话浏览器中的行只有轮次、项目与时长，没有 token 数 —— 完整总量在概览与统计中。
-ZCode 的用量从 `$ZCODE_HOME/cli/db/db.sqlite`（默认 `~/.zcode/cli/db/db.sqlite`，`ZCODE_HOME` 跟随 ZCode 自身设置）本地读取。`model_usage` 表中每行是一次模型请求（含重试），该行的 `model_id` 照常按现有价格库计价，`provider_id`（如 `builtin:zai-start-plan`）只作标签。ZCode 的 `input_tokens` 把已缓存与未缓存的提示词 token 合在一起计数，因此缓存部分单独分桶、按缓存费率计费；reasoning token 与 output 分开显示，但按 output 费率计费。ZCode 也会出现在 Sessions 标签页：turn 从同一数据库读取，按 (turn, model) 用相同规则计费，只读顶层会话；没有可计费 token 的 turn 仍会将其测量时长计入该工具的活跃时间。Coding Plan 额度属于远程账户数据，可通过单独授权的 Z.ai 实时轮询器读取。
-
-WorkBuddy 的用量从 `~/.workbuddy-ai/projects/*/*.jsonl` 会话日志本地读取（`WORKBUDDY_DATA_DIR` 可指定逗号分隔的根目录列表，指向其他存储位置，例如 WSL 下的 Windows 数据目录）。每条 assistant 消息行对应一次模型调用；`prompt_tokens` 中包含缓存部分，缓存部分单独分桶、按缓存费率计费；reasoning token 与 output 分开显示，但按 output 费率计费。模型 ID 原样保留：显式模型 ID（如 gpt-5.5）照常按现有价格库计价，Auto 路由别名（`default-model`）不在价格库中，费用为 0.00。每轮的 `credit` 值仅作为元数据存储，不计入费用。Sessions 标签页从相同的根目录读取相同的会话日志行（每个计费的 assistant 行对应一个 turn）。
-
-Qoder 的用量从两处本地读取：IDE 的 SQLite 数据库（IDE 数据目录下 `SharedClientCache/cache/db/local.db`，Windows 与 WSL 下 QoderCN 版优于国际版）和 CLI 的 JSONL 日志（`~/.qoder` 与 `~/.qoder-cn`，另支持 `QODER_CONFIG_DIR` 和逗号分隔的 `QODER_CLI_HOME`）。IDE 侧对 `chat_message` 表中每个角色的行都计数：提示词 token 中的缓存部分单独分入缓存桶，模型取自 `model_key`（路由器未暴露名称时为 `auto`）。CLI 侧按请求将会话 transcript 中的计费记录与 segment 日志中的 token 记录合并（覆盖全部 CLI 根目录）：带 provider credits 的行直接使用 provider 报告的成本作为权威值，按估算的 $0.01/credit 换算（可用 `QODER_USD_PER_CREDIT` 覆盖该估算值）且永不重新计价；仅含 token 的行按常规价格库计价。记录没有 input token 时，用 `context_usage_ratio` 乘上该模型的上下文窗口恢复 input——该窗口由 Tokdash 从 Qoder 自己的运行日志读取（`logs/runs/<run>/qodercli.log` 中含 `max_input_tokens` 的 `model_config` 行，以最新一次运行为准）；会话自己用 `--context-window` 声明的窗口优先于该日志，两者都没有佐证时 `auto` 回退到 180,000，而显式设置 `QODER_CLI_CONTEXT_WINDOW` 会覆盖所有模型。Qoder IDE 出现在 Sessions 标签页：相同的 `chat_message` 行（所有角色，每个可解析的行对应一个 turn）从同一数据库的临时目录快照读取。 Qoder CLI 也拥有自己的 Sessions 面板：两条流的逐文件候选按与 Overview 完全相同的顺序、同一胜出规则经由同一个 request_id 合并折叠，credit 行原样保留提供方上报的成本，段项目以净化后的目录标签原样展示，因为该净化不可逆。
-
-Zed 的用量从 Zed 各操作系统数据目录下的 `threads/threads.db` 本地读取（Linux：`$XDG_DATA_HOME/zed` 或 `~/.local/share/zed`，支持 `FLATPAK_XDG_DATA_HOME`；macOS：`~/Library/Application Support/Zed`；Windows：`%LOCALAPPDATA%\Zed`）。每个 agent 线程是一行，带一个 zstd 压缩的 blob（旧行是纯 JSON），其中的 `cumulative_token_usage` 是线程自身完成流以高水位方式累加的总量——缓存独占（input + cacheRead = 完整提示词），各桶直接映射；子代理线程是独立的行，其用量绝不并入父线程，因此每个非零线程恰好计一次。线程按其当前模型计价（中途换过模型的线程按最后一个模型计价）；不在价格库中的自托管模型 id 计 0.00。Zed 没有环境变量形式的目录覆盖，`--user-data-dir` 启动参数是文档中记载的盲区。Zed 不出现在 Sessions 标签页。
-
-Qwen Code 的用量从 `<base>/projects/*/chats/*.jsonl`（另含改名前的 `<base>/tmp/*/chats/*.jsonl`）本地读取，base 依次取 `$QWEN_RUNTIME_DIR`、`$QWEN_HOME`、`~/.qwen`——settings 级的 `runtime_base_dir` 覆盖项 Tokdash 无法感知，是文档中记载的盲区。文件为 append-only、每会话一个文件；每条 assistant 记录原样携带 provider 的 `usageMetadata`：`promptTokenCount` 含缓存部分，缓存份额单独分入缓存桶并按缓存价计费，`thoughtsTokenCount` 显示为 reasoning。每条记录的 `uuid` 是稳定的、跨文件全局的去重键：`/branch` 会把父会话的记录（uuid 不变）复制进 fork 的文件，因此用量存储以最早出现的时间戳拥有每个键，规范文件被删除时由幸存副本接管。子代理记录与主记录同文件，自动计入。成本按价格库计价；没有模型的记录按 `unknown` 计 token、成本 0.00。Sessions 标签页读取同一批 assistant 记录，每条记录一个 turn；fork 复制的历史归最早的一份所有。
-
-Crush 的用量从 `$CRUSH_DATA_DIR`（逗号分隔的数据目录列表，每个目录内含 `crush.db`）本地读取——必填，因为 Crush 默认的数据目录是工作目录旁的按项目 `.crush`，没有全局根目录可扫描。数据库为 WAL 模式，Tokdash 通过与 ZCode 相同的复制快照路径读取。每个 token 非零的会话按其 `prompt_tokens`/`completion_tokens` 贡献一条记录（含子 agent 会话）：Crush 只把 cost 汇总进父会话，从不汇总 token，因此若沿用其自身统计查询的顶层口径（`parent_session_id IS NULL`），子 agent 的用量会被整体丢弃。每条记录归因于所属会话最后一条非 summary 的 assistant 消息——混合模型的会话按最后一个模型计价。三处注意事项与来源并列记载：计数器按步赋值而非累加，因此只保留最后一次请求的上下文大小与最后一轮的输出，多步会话会偏低（针对 Crush v0.91.2 核实）；provider 报告零用量时 token 可能是字符数估算（数据库中无标记）；缓存/reasoning 拆分未被持久化。时间戳为秒；行按 `updated_at`（最后触碰时间）分桶，一个会话的整个生命周期总量落在同一天。`sessions.cost` 被忽略，成本只来自价格库。Crush 不出现在 Sessions 标签页。
-
-`tokdash setup` 会提供一个可选的额度步骤（按服务商的网络授权，默认为否，以及轮询间隔），`tokdash doctor` 会报告额度状态：总开关、按服务商授权、终止开关、生效间隔及其来源、上次轮询时间，以及已保存的快照数量。
-
-额度快照及其历史保存在本地使用量数据库（`usage.sqlite3`，默认开启），**默认永久保留**——将 `TOKDASH_QUOTA_RETENTION_DAYS` 设为正整数天数可开启对更早快照的清理。如果你用 `TOKDASH_USAGE_DB=0` 关闭本地持久化，「额度」标签页将失去主要数据来源：不再保留快照历史，后台轮询也不运行，标签页只会在当前服务进程存活期间展示手动**刷新**（已授权的网络服务商）得到的内存中结果。日常额度跟踪请保持使用量数据库开启（默认）。
-
-## API（本地）
-
-Tokdash 是一个本地 HTTP 服务。常用接口：
-
-- `GET /api/usage?period=today|week|month|N`
-- `GET /api/usage?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD`
-- `GET /api/tools?period=...`（仅编程工具）
-- `GET /api/openclaw?period=...`（仅 OpenClaw）
-- `GET /api/sessions?tool=codex|claude|opencode|pi_agent|omp|mimo|kimi|dsh|reasonix|zcode|kilocode|grok|hermes|antigravity_cli|cline&period=...`（追加 `&include_review_sessions=true` 可包含默认隐藏的 Codex 审核/权限会话）
-- `GET /api/active-time?period=...`（跨全部会话工具的活跃时长，并按工具细分）
-- `GET /api/quota` 与 `GET /api/quota/history`（订阅额度快照；网络刷新受写入保护且需显式授权）
-- `GET /api/stats`（贡献日历与统计数据）
-
-示例：
-
-```bash
-curl 'http://127.0.0.1:55423/api/usage?period=today'
-```
-
-完整 API 参考：[`docs/reference/API.md`](docs/reference/API.md) — 包含每个端点的请求参数与响应结构。
+默认情况下，`tokdash serve` 会在启动时在浏览器中打开仪表盘一次；传入 `--no-open` 可禁用。
+不带子命令直接运行 `tokdash` 只会打印命令帮助然后退出 —— 它不会再在你背后悄悄启动
+`tokdash serve`。
+
+完整 onboarding 说明 —— 运行时选择、WSL/systemd 行为、macOS launchd、Tailscale、bundle
+集成、更新检查与安全卸载语义 —— 见 **[`docs/guides/ONBOARDING.md`](docs/guides/ONBOARDING.md)**。
+通过 Tailscale Serve、SSH 转发或显式网络绑定进行远程访问，见
+**[`docs/guides/REMOTE_ACCESS.md`](docs/guides/REMOTE_ACCESS.md)**。
+
+## 功能特性
+
+- **精确 Token 统计**：输入 / 输出 / 缓存 Token 明细
+- **会话浏览器**：逐会话下钻
+- **贡献日历**：2D 热力图 + 3D 等距视图，支持 Tokens / Cost / Messages 指标
+- **Report 标签页**：本机 Agent 活动的周 / 月 / 年初至今报告，每个详细层级都配有可分享卡片；每次导出都会同时生成浅色与深色两张 PNG
+- **Quota 标签页**：九家服务商的订阅窗口进度条与重置倒计时。Codex 窗口读取本地日志即可开箱使用；多数其他来源需要选择启用[实时轮询](#额度跟踪可选)
+- **终端仪表盘** *[新]*：`tokdash tui` —— 在终端里查看 Overview、Report 与 Quota，无需浏览器
+- **Companion 状态栏应用**：在 macOS 菜单栏或 Windows 通知区域查看费用与订阅额度 —— Windows 版已上架 [Microsoft Store](https://apps.microsoft.com/detail/9ppnmpdq8b52)
+- **状态栏集成**：在 Claude Code 的状态栏（或任何能访问本地 HTTP 端点的 Agent）中显示实时 Token 使用量
+- **多服务器视图**：在设置中添加 WSL、macOS 或其他 Tokdash 服务器；可合并任意选择的用量，并按机器分组显示额度。参见[远程访问](docs/guides/REMOTE_ACCESS.md)。
+- **主题与应用体验**：17 款样式主题、明暗模式、PWA 安装支持、六种界面语言
+
+## 已支持客户端
+
+Tokdash 读取 **27 个已支持 Agent** 的本机会话日志 —— 上方的品牌图标行列出了
+它们的名字；完整矩阵（用量与费用 / 会话浏览器覆盖、各客户端数据路径、覆盖变量
+与各来源的计费说明）见 **[已支持客户端](docs/reference/SUPPORTED_CLIENTS.md)**。
+
+## 额度跟踪（可选）
+
+「额度」标签页展示**九家服务商**的订阅用量窗口与重置倒计时。Codex 的 5 小时 /
+每周窗口读取本地日志即可开箱使用（请将其视为估算值）；准确的 Codex 消耗与其余
+全部服务商 —— Claude Code、Antigravity、MiniMax、Kimi Code、Grok、Z.ai、OpenCode
+Go、Command Code —— 来自**选择启用的实时轮询**：Tokdash 使用你的 CLI 已经登录的
+身份调用各服务商自己的额度接口。默认关闭、按服务商授权、结果保存在本地数据库。
+
+授权命令、总开关、轮询频率与按服务商的凭据说明见
+**[`docs/reference/QUOTA.md`](docs/reference/QUOTA.md)**。
 
 ## 费用精度说明
 
-Token 统计依赖各客户端本地记录的内容。费用默认由内置定价数据库（`src/tokdash/pricing_db.json`）计算；如果存在你在「定价」标签页保存的覆盖文件 `<data_dir>/pricing_db.json`，则改用该覆盖文件（它会完全替换内置费率）。两种情况都可能滞后于真实服务商价格，请将其作为估算值，如金额敏感请以你的账单来源为准。
+Token 统计取决于各客户端本地记录的内容。费用默认由内置定价数据库（`src/tokdash/pricing_db.json`）计算；如果存在你在仪表盘定价设置中保存的覆盖文件 `<data_dir>/pricing_db.json`，则改用该覆盖文件。两种方式都可能滞后于真实服务商价格 —— 请将其作为估算值，如金额敏感请以你的账单来源为准。
 
 ## 历史数据保留
 
 > [!IMPORTANT]
 > **保留你的历史。** Claude Code 与 Gemini CLI 默认会删除超过约 30 天的本地会话，因此 Tokdash 早期月份的统计可能会悄悄变少。
 
-Tokdash 通过读取各客户端的**本地**会话日志来统计用量，同时也维护一个本地 SQLite 性能索引。这个索引可以保留 Tokdash 已经见过的行，但无法恢复在索引前就被删除的日志，也不能替代原始客户端历史。如果客户端在 Tokdash 同步前删除了旧日志，过去某个月的统计仍然**可能比你最初记录时更低**。只有两个受支持的客户端会默认这样做，且都只需改一行配置：
+Tokdash 读取各客户端的**本地**会话日志；本地 SQLite 索引无法恢复在索引前
+就被删除的日志。只有两个受支持的客户端会默认删除旧会话，且都只需改一行配置：
 
-- **Claude Code** 会在启动时删除超过 `cleanupPeriodDays`（**默认 30 天**）的会话。请把这个键添加到你现有的 `~/.claude/settings.json`（以及任何其他 `CLAUDE_CONFIG_DIR`）：
-  ```json
-  { "cleanupPeriodDays": 3650 }
-  ```
-- **Gemini CLI** 会删除超过 30 天的会话。在 `~/.gemini/settings.json` 中关闭它；如果某个项目有 `.gemini/settings.json`，也要同步修改，因为工作区设置会覆盖用户设置：
-  ```json
-  { "general": { "sessionRetention": { "enabled": false } } }
-  ```
+- **Claude Code**：把 `{ "cleanupPeriodDays": 3650 }` 添加到 `~/.claude/settings.json`（以及任何其他 `CLAUDE_CONFIG_DIR`）。
+- **Gemini CLI**：在 `~/.gemini/settings.json` 中设置 `{ "general": { "sessionRetention": { "enabled": false } } }`（工作区设置会覆盖用户设置）。
 
-其他所有受支持的客户端默认都会无限期保留历史。完整的逐客户端清单、配置细节，以及本地 SQLite 索引能保留什么、不能保留什么，详见 **[docs/reference/HISTORY_RETENTION.md](docs/reference/HISTORY_RETENTION.md)**。
+其他所有受支持的客户端默认都会无限期保留历史。完整的逐客户端清单、配置细节，
+以及本地 SQLite 索引能保留什么、不能保留什么，详见
+**[docs/reference/HISTORY_RETENTION.md](docs/reference/HISTORY_RETENTION.md)**。
 
 ## 路线图
 
@@ -647,38 +455,8 @@ Tokdash 通过读取各客户端的**本地**会话日志来统计用量，同�
 完整文档位于 **[`docs/`](docs/README.md)**（建议从索引开始），按分组组织：
 
 - **[guides/](docs/guides/)** —— 面向任务的配置：onboarding、远程访问、状态栏、后台服务。
-- **[reference/](docs/reference/)** —— 查阅资料：API 参考、支持的客户端、历史数据保留。
+- **[reference/](docs/reference/)** —— 查阅资料：API 参考、配置、额度内部机制、支持的客户端、历史数据保留。
 - **[development/](docs/development/)** —— 更新日志、发布流程、路线图，以及公开的 `technical-notes/` 技术笔记。
-
-## 项目结构
-
-```text
-tokdash/
-├── main.py                 # 源码入口（python3 main.py）
-├── tokdash                 # CLI 包装器（./tokdash serve）
-├── src/
-│   └── tokdash/
-│       ├── cli.py
-│       ├── api.py                # FastAPI 路由 / 应用
-│       ├── compute.py            # 聚合 / 合并逻辑
-│       ├── dateutil.py           # 共享的日期范围解析
-│       ├── sessions.py           # 会话浏览器逻辑
-│       ├── pricing.py            # PricingDatabase 封装
-│       ├── assets.py             # 静态资源管理
-│       ├── model_normalization.py
-│       ├── pricing_db.json
-│       ├── sources/
-│       │   ├── openclaw.py       # OpenClaw 会话日志解析器
-│       │   └── coding_tools.py   # 本地编程工具解析器
-│       └── static/
-│           ├── index.html        # 单页仪表盘
-│           ├── theme-config.js   # 主题调色板 & 热力图颜色
-│           └── themes.css        # 各主题 CSS 覆写
-└── docs/                   # 文档 —— 索引见 docs/README.md
-    ├── guides/             # Onboarding、远程访问、状态栏、后台服务
-    ├── reference/          # API 参考、支持的客户端、历史数据保留
-    └── development/        # 更新日志、发布流程、路线图、technical-notes/ 技术笔记
-```
 
 ## License
 

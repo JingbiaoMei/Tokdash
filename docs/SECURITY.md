@@ -10,6 +10,13 @@ Preferred:
 If that’s not available for your fork:
 - Open a minimal issue without sensitive details and ask for a private contact channel
 
+## Privacy model
+
+- **No telemetry**: Tokdash does not intentionally send your data anywhere.
+- **Local parsing**: usage is computed from local session files (see [supported clients](reference/SUPPORTED_CLIENTS.md)).
+- **Optional quota polling**: the Quota tab is local-only by default. Per-provider API polling can be enabled from the tab or with `tokdash quota consent`; it uses your local CLI credentials only to call that provider's own quota endpoint, and stores responses in the local usage SQLite DB. See [quota tracking internals](reference/QUOTA.md).
+- **Server exposure**: Tokdash binds to `127.0.0.1` by default. Tailscale Serve provides private read-only access (apart from the opt-in click-to-update exception below), SSH forwarding provides authenticated write access, and `--bind 0.0.0.0` explicitly exposes unauthenticated reads on every interface. See the [remote-access guide](guides/REMOTE_ACCESS.md).
+
 ## Scope notes
 
 - Tokdash is a **local** dashboard by default (`127.0.0.1` bind).

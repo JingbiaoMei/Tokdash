@@ -367,7 +367,7 @@ def test_the_card_sits_after_total_messages_in_a_six_column_row():
 def test_the_total_tokens_value_carries_no_unit():
     """The card's own label says "Total Tokens"; the value only costs width."""
     source = INDEX_HTML.read_text(encoding="utf-8")
-    renderer = _extract_js_function(source, "function renderOverviewTokenTotal(value = overviewTotalTokensRaw) {")
+    renderer = _extract_js_function(source, "function renderOverviewTokenTotal(value = overviewTotalTokensRaw, staticText = null) {")
 
     assert "formatCompactTokenCount(overviewTotalTokensRaw)" in renderer
     assert "formatReadableTokenCount" not in source

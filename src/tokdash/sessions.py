@@ -27,7 +27,7 @@ from .activity_insights import (
     record_structured_tool_call,
 )
 from .compute import cache_hit_rate, pct_change, period_to_days, previous_period_range
-from .dateutil import parse_date_range
+from .dateutil import local_midnight, parse_date_range
 from .pricing import PricingDatabase
 from .sources.coding_tools import (
     CODEX_DEFAULT_MODEL,
@@ -69,6 +69,7 @@ from .sources.dsh_log import (
     dsh_file_signatures,
     fold_dsh_usage_samples,
 )
+from .store_logging import log_store_failure
 from .usage_store import (
     UsageDatabaseSchemaTooNewError,
     UsageEntryStore,
@@ -548,26 +549,27 @@ def _period_to_days(period: str) -> int:
 
 
 def _period_range(period: str) -> tuple[int, int]:
-    """Return [since_ms, until_ms) in local time."""
+    """Return [since_ms, until_ms) in local time.
+
+    Both ends are built from their date and resolved once, so each boundary
+    carries the offset that *that* date has. Anchoring them to today's offset
+    (now_local.replace(...)) or adding a day after converting to UTC both made
+    this tab's window differ from Overview's, and the first hour of a month was
+    counted on one tab and not the other (#145).
+    """
     now_local = datetime.now().astimezone()
-    local_tz = now_local.tzinfo or timezone.utc
+    today = now_local.date()
 
     if period == "month":
-        since = now_local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        until = now_local.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
-        return _dt_to_ms(since.astimezone(timezone.utc)), _dt_to_ms(until.astimezone(timezone.utc))
+        start_date = today.replace(day=1)
+    else:
+        days = _period_to_days(period)
+        start_date = today - timedelta(days=days - 1)
+    end_date = today + timedelta(days=1)
 
-    days = _period_to_days(period)
-    if days == 1:
-        since = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
-        until = since + timedelta(days=1)
-        return _dt_to_ms(since.astimezone(timezone.utc)), _dt_to_ms(until.astimezone(timezone.utc))
-
-    end_date = now_local.date()
-    start_date = end_date - timedelta(days=days - 1)
-    since = datetime.combine(start_date, datetime.min.time(), tzinfo=local_tz).astimezone(timezone.utc)
-    until = datetime.combine(end_date, datetime.min.time(), tzinfo=local_tz).astimezone(timezone.utc) + timedelta(days=1)
-    return _dt_to_ms(since), _dt_to_ms(until)
+    since = local_midnight(datetime.combine(start_date, datetime.min.time()))
+    until = local_midnight(datetime.combine(end_date, datetime.min.time()))
+    return _dt_to_ms(since.astimezone(timezone.utc)), _dt_to_ms(until.astimezone(timezone.utc))
 
 
 def _dt_to_ms(dt: datetime) -> int:
@@ -4184,6 +4186,11 @@ def _parse_dsh_session_file(path_str: str, _mtime_ns: int, _size: int, _pricing_
         decoded = decode_dsh_session_file(session_path)
     except Exception:
         return None
+    # Same rule as the usage parser, through the same reporter: skipping is fine,
+    # silence is not. A skipped or seed-unprovable session simply vanishes from
+    # the panel otherwise, with the Overview still showing its rows or not
+    # depending on which surface read last.
+    dsh_log.report_dsh_decode(path_str, decoded)
     if decoded.skip_reason is not None or decoded.header is None:
         return None
 
@@ -6202,11 +6209,18 @@ def _raw_sessions_for_tool(
             # on every request for as long as the version skew lasts, which is
             # vastly worse than surfacing the error once.
             raise
-        except Exception:
-            logger.warning(
-                "tokdash persistent session cache failed tool=%s; falling back to source files",
-                key,
-                exc_info=True,
+        except Exception as exc:
+            # Reported once per tool for the life of the process rather than on
+            # every request. One Overview refresh asks for sessions across five
+            # tools and reads each more than once, so with the database broken
+            # this site alone put 45 tracebacks in the journal per refresh. The
+            # tool is part of `site` rather than left to the message, so the five
+            # unreadable stores stay five lines.
+            log_store_failure(
+                logger,
+                f"tokdash persistent session cache failed tool={key}; falling back to source files",
+                exc,
+                site=f"sessions._raw_sessions_for_tool:{key}",
             )
     try:
         if key == "codex":

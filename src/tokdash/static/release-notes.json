@@ -1,6 +1,42 @@
 {
-  "current": "2.6.6",
+  "current": "2.6.8",
   "releases": [
+    {
+      "version": "2.6.8",
+      "date": "2026-09-30",
+      "sections": [
+        {
+          "type": "added",
+          "items": [
+            "gpt-6.1-sol is priced. OpenAI's newest Sol tier reads $2.00 input / $10.00 output per MTok at the standard short-context rates, with cache read at $0.10 and cache write at $2.50 -- the same as gpt-6-sol except that cached input is halved, and its long-context and Batch/Flex/Fast rules carry over unchanged."
+          ]
+        },
+        {
+          "type": "fixed",
+          "items": [
+            "A failed dashboard load no longer freezes the page behind a dialog. That failure was already reported on the persistent status line, so the alert was a second, blocking copy of a message the page had just shown; the error now stays in the console."
+          ]
+        }
+      ]
+    },
+    {
+      "version": "2.6.7",
+      "date": "2026-09-28",
+      "sections": [
+        {
+          "type": "added",
+          "items": [
+            "The pricing database is regenerated from the 2026-09-28 scan. Claude Sonnet 5.5 joins at $2.00 input / $10.00 output per MTok with cache at $0.20 read / $2.50 write, beside GLM 5.3 Prime ($2.80 / $8.80), Qwen 3.8 Max Prime ($4.00 / $12.00) and Command A Plus ($0.30 / $1.50). The sonnet-5.5 and sonnet55 aliases resolve to it, so Claude Code's bare short name prices like the sonnet-5 pair already did instead of costing nothing. The 86 price changes the scan flagged for manual review are not part of this update."
+          ]
+        },
+        {
+          "type": "fixed",
+          "items": [
+            "The quota poll interval and the Hit % column header speak the dashboard's language. The static \"Poll every\" select hardcoded 15 min through 120 min and so stayed English in all six locales while the per-server selects already used the translated minute unit; every Hit % header now takes the existing cacheHitRateHint translation too, where two carried an English-only tooltip and 21 had none at all."
+          ]
+        }
+      ]
+    },
     {
       "version": "2.6.6",
       "date": "2026-09-28",

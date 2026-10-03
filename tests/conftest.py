@@ -56,6 +56,22 @@ def isolated_usage_db(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def fresh_store_failure_reports():
+    """Give every test a process that has not reported a store failure yet.
+
+    ``log_store_failure`` reports once per process by design, so without this a
+    test would see whichever call happened to come first in the session. It lives
+    here, autouse, rather than in each module so the rule has one home -- and it
+    goes through the module's public reset rather than reaching for the set.
+    """
+    from tokdash import store_logging
+
+    store_logging.reset_store_failure_reports()
+    yield
+    store_logging.reset_store_failure_reports()
+
+
+@pytest.fixture(autouse=True)
 def empty_session_assembly_cache():
     """Keep the process-global merged-session cache out of every other test.
 

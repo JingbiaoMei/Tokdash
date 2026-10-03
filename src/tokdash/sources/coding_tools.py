@@ -34,6 +34,7 @@ try:
     from ..usage_store import (
         USAGE_ENTRY_FORMAT_VERSION,
         UsageFileVanished,
+        UsageFileUnreadable,
         usage_billing_fixed,
         usage_billing_pricing,
         usage_entry_cost,
@@ -48,6 +49,7 @@ except ImportError:  # pragma: no cover
     from usage_store import (
         USAGE_ENTRY_FORMAT_VERSION,
         UsageFileVanished,
+        UsageFileUnreadable,
         usage_billing_fixed,
         usage_billing_pricing,
         usage_entry_cost,
@@ -5195,6 +5197,13 @@ class DSHParser(BaseParser):
         mode="file_replace",
         append_jsonl=False,
         session_store=True,
+        # dsh_entry_id deliberately carries no file path so duplicate physical
+        # copies of one session never bill twice -- which means one entry_key
+        # legitimately occurs in several files, exactly what this flag declares.
+        # Without it the store upserts with INSERT OR REPLACE, so the last file
+        # committed owns the key and the Sessions tab (which keeps the earliest
+        # (timestamp, path)) shows different tokens for the same corpus.
+        cross_file_stable_keys=True,
         reason=(
             "DSH append batches are concatenated zstd frames, and a final usage message replaces an "
             "earlier same-step chunk; changed files are reparsed whole."
@@ -5229,49 +5238,99 @@ class DSHParser(BaseParser):
             lambda: dsh_file_signatures(self.sessions_dir),
         )
 
+    def _entries_for_decoded(self, path_str: str, decoded: Any) -> List[Dict[str, Any]]:
+        """Fold one decoded log into usage entries.
+
+        Shared by the live ``_parse_all`` and the stored ``_parse_file_strict`` so
+        the two surfaces can never bill one file differently.
+        """
+        session_id = str(decoded.header.get("id") or Path(path_str).parent.name)
+        entries: List[Dict[str, Any]] = []
+        for sample in fold_dsh_usage_samples(decoded.header, decoded.events):
+            model = sample["model"]
+            input_t = sample["input"]
+            output_t = sample["output"]
+            cache_r = sample["cache_read"]
+            cache_w = sample["cache_write"]
+            entries.append(
+                {
+                    "source": self.source_name,
+                    "model": model,
+                    "provider": sample["provider"],
+                    "input": input_t,
+                    "output": output_t,
+                    "cacheRead": cache_r,
+                    "cacheWrite": cache_w,
+                    "reasoning": 0,
+                    "cost": self.pricing_db.get_cost(model, input_t, output_t, cache_r, cache_w),
+                    "timestamp": int(sample["timestamp_ms"]),
+                    "entry_id": dsh_entry_id(session_id, sample["turn"], sample["step"]),
+                    "_billing": usage_billing_pricing(
+                        [model],
+                        input_tokens=input_t,
+                        output_tokens=output_t,
+                        cache_read=cache_r,
+                        cache_write=cache_w,
+                    ),
+                }
+            )
+        return entries
+
+    def _parse_file_strict(self, file_sig: Tuple[str, int, int]) -> List[Dict[str, Any]]:
+        """Strict single-file entry point for the stored sync.
+
+        Raises UsageFileUnreadable / UsageFileVanished rather than returning []
+        when the file yields nothing: under file_replace an empty list is an
+        assertion that the file has zero entries, and the commit would delete the
+        stored rows of a log that merely could not be decoded (corrupt frame, a
+        header generation this build does not read). compute._collect_parser_file
+        prefers this method when a parser defines it, so the signal reaches
+        sync_files intact and the rows survive until the file reads again.
+        """
+        path_str = str(file_sig[0])
+        decoded = decode_dsh_session_file(Path(path_str))
+        # A file that yields no rows and one that yielded none because it could
+        # not be read look identical downstream -- the whole of issue #147 -- so
+        # every decode says what it lost, through the same reporter as Sessions.
+        dsh_log_module.report_dsh_decode(path_str, decoded)
+        if decoded.skip_reason is not None or decoded.header is None:
+            if not Path(path_str).exists():
+                raise UsageFileVanished(path_str)
+            raise UsageFileUnreadable(path_str, decoded.skip_reason or "missing-header")
+        return self._entries_for_decoded(path_str, decoded)
+
     def _parse_all(self) -> List[Dict[str, Any]]:
         # Keyed on the stable entry id so duplicate physical files for one
         # session id (both suffixes present, or one id under two project keys)
-        # never bill twice. Discovery is sorted, so the later file's sample
-        # wins deterministically; the emitted order below stays timestamp-sorted.
-        by_entry_id: Dict[str, Dict[str, Any]] = {}
+        # never bill twice. The winner is the EARLIEST (timestamp, file_path)
+        # occurrence, ties breaking on the lexicographically smallest path -- the
+        # same rule sync_files applies for cross_file_stable_keys sources and the
+        # same one _merge_raw_session_sequence applies on the Sessions side, so
+        # all three surfaces resolve a duplicate id to one winner no matter which
+        # copy parses last. Parse order must not be an input to the answer.
+        by_entry_id: Dict[str, Tuple[tuple, Dict[str, Any]]] = {}
         for path_str, _, _ in self._file_signatures():
             try:
                 decoded = decode_dsh_session_file(Path(path_str))
+                dsh_log_module.report_dsh_decode(path_str, decoded)
                 if decoded.skip_reason is not None or decoded.header is None:
+                    # The DB-off path keeps skipping (one unreadable log must not
+                    # blank the source or land it in source_errors) but it no
+                    # longer gets to be silent about it.
                     continue
-                session_id = str(decoded.header.get("id") or Path(path_str).parent.name)
-                for sample in fold_dsh_usage_samples(decoded.header, decoded.events):
-                    model = sample["model"]
-                    input_t = sample["input"]
-                    output_t = sample["output"]
-                    cache_r = sample["cache_read"]
-                    cache_w = sample["cache_write"]
-                    entry = {
-                        "source": self.source_name,
-                        "model": model,
-                        "provider": sample["provider"],
-                        "input": input_t,
-                        "output": output_t,
-                        "cacheRead": cache_r,
-                        "cacheWrite": cache_w,
-                        "reasoning": 0,
-                        "cost": self.pricing_db.get_cost(model, input_t, output_t, cache_r, cache_w),
-                        "timestamp": int(sample["timestamp_ms"]),
-                        "entry_id": dsh_entry_id(session_id, sample["turn"], sample["step"]),
-                        "_billing": usage_billing_pricing(
-                            [model],
-                            input_tokens=input_t,
-                            output_tokens=output_t,
-                            cache_read=cache_r,
-                            cache_write=cache_w,
-                        ),
-                    }
-                    by_entry_id[entry["entry_id"]] = entry
+                for entry in self._entries_for_decoded(path_str, decoded):
+                    entry_id = entry["entry_id"]
+                    position = (int(entry["timestamp"]), path_str)
+                    previous = by_entry_id.get(entry_id)
+                    if previous is None or position < previous[0]:
+                        by_entry_id[entry_id] = (position, entry)
             except Exception:
                 # One malformed file never blanks the whole DSH source.
                 continue
-        out = sorted(by_entry_id.values(), key=lambda entry: int(entry.get("timestamp", 0) or 0))
+        out = sorted(
+            (entry for _position, entry in by_entry_id.values()),
+            key=lambda entry: int(entry.get("timestamp", 0) or 0),
+        )
         return out
 
 
@@ -5304,20 +5363,40 @@ class ReasonixParser(BaseParser):
     ``total``, ``requests`` and Reasonix's own ``cost_*`` / ``display_*`` fields
     are ignored: the first two are redundant and the rest describe Reasonix's
     pricing status, while Tokdash prices from its own database.
+
+    A duplicated day file bills once. Reasonix writes each request to exactly one
+    day file, under ``stats/.append.lock``, stamped with nanoseconds, so the same
+    row in two scanned files can only come from a copy of the file -- a sync
+    client's conflict copy, or a hand-made duplicate that kept the ``.jsonl``
+    suffix (``.bak`` copies fall outside the scanned glob). Entry ids are
+    content-keyed, so the copy collapses to one row in the live view and in the
+    store alike. Two byte-identical rows inside ONE file stay two requests,
+    because there the single writer really did append them one after the other.
     """
 
     source_name = "reasonix"
     sync_capability = SourceSyncCapability(
         mode="file_replace",
+        # Deliberately False: the store's tail path (compute._collect_parser_tail)
+        # hands the parser a temp file holding only the appended bytes, which would
+        # parse them without the corpus, exactly where _parse_all's cross-file copy
+        # dedup needs the corpus. Daily stats files are small, so whole-file
+        # replacement is cheap and keeps a copy of a day file from billing twice.
         append_jsonl=False,
         session_store=True,
+        cross_file_stable_keys=True,
         reason=(
             "Reasonix stats logs are append-only daily JSONL files; entry ids are content-keyed, "
-            "so a changed day file is reparsed whole without rebilling its earlier rows."
+            "so a changed day file is reparsed whole without rebilling its earlier rows. A copy of "
+            "a day file (a sync-client conflict copy, a hand-made *.jsonl duplicate) repeats those "
+            "keys in a second file, so ownership must follow the earliest occurrence across files: "
+            "without the flag the last file written owns the deduplicated row, and deleting that "
+            "copy discards usage the original file still records."
         ),
     )
     # 1: daily stats rows keyed on a content digest plus an occurrence
-    #    counter, prompt split into disjoint input / cacheRead halves.
+    #    counter, prompt split into disjoint input / cacheRead halves. The
+    #    cross-file copy dedup in _parse_all mints no new key, so this stays 1.
     persistent_parser_version = 1
 
     # Reasonix writes up to 9 fractional-second digits. datetime.fromisoformat
@@ -5404,14 +5483,23 @@ class ReasonixParser(BaseParser):
             return None
 
     def _parse_all(self) -> List[Dict[str, Any]]:
-        out: List[Dict[str, Any]] = []
-        # Entry ids are keyed on row content, never on the file path or line
-        # number: a moved REASONIX_HOME or a rewritten day file would otherwise
-        # re-ingest the whole history as new rows. Two byte-identical requests
-        # in one day are indistinguishable by content, so an occurrence counter
-        # keeps them apart; unlike a line number it is stable under appends.
-        seen_digests: Dict[str, int] = {}
+        # winners: {entry_id: (path, entry)} -- one row per entry id over the whole
+        # corpus. Entry ids are keyed on row content, never on the file path or the
+        # line number, so a moved REASONIX_HOME or a rewritten day file cannot
+        # re-ingest the whole history as new rows.
+        winners: Dict[str, Tuple[str, Dict[str, Any]]] = {}
         for path_str, _, _ in self._file_signatures():
+            # The occurrence counter runs per FILE while the merge below spans
+            # files, because the store parses one file per call
+            # (compute._collect_parser_file). A counter that spanned files gave two
+            # copies of one row two different ids, which the store then collapsed
+            # into one row, so the DB-off view billed a copied day file twice while
+            # the DB-backed view billed it once. Within one file the counter still
+            # separates two byte-identical requests, which the single writer did
+            # append one after the other, and unlike a line number it is stable
+            # under appends.
+            seen_digests: Dict[str, int] = {}
+            out: List[Dict[str, Any]] = []
             try:
                 with open(path_str, "r", encoding="utf-8") as f:
                     lines = list(f)
@@ -5496,8 +5584,24 @@ class ReasonixParser(BaseParser):
                         cache_read=cache_hit,
                     ),
                 })
-        out.sort(key=lambda item: int(item.get("timestamp", 0) or 0))
-        return out
+            # One entry id in two files means one file is a copy of the other:
+            # Reasonix appends each request to exactly one day file, under
+            # stats/.append.lock, stamped with nanoseconds, so the same row in a
+            # second file got there by copying rather than by being written. The
+            # copy must not bill again, and the smallest path wins. Every copy of a
+            # key carries the same timestamp, since the timestamp is inside the
+            # digest, so this is the same earliest-(timestamp, file_path) rule
+            # UsageEntryStore.sync_files applies for cross_file_stable_keys sources
+            # and its path tie-break: the two database modes resolve a copy to the
+            # same single row no matter which file parses last.
+            for entry in out:
+                previous = winners.get(entry["entry_id"])
+                if previous is None or path_str < previous[0]:
+                    winners[entry["entry_id"]] = (path_str, entry)
+
+        merged = [entry for _path, entry in winners.values()]
+        merged.sort(key=lambda item: int(item.get("timestamp", 0) or 0))
+        return merged
 
 
 def workbuddy_file_signatures(roots: List[Path]) -> tuple:

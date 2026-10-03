@@ -73,8 +73,21 @@ def test_pricing_lookup_supports_real_antigravity_model_ids():
         "gemini-3-pro-high",
         "gemini-3-pro-low",
         "claude-opus-4-6-thinking",
+        "gemini-3.8-flash-n",
+        "antigravity-gemini-3.8-flash-n",
     ]:
         assert db.get_cost(model, 1000, 2000, 300, 400) > 0.0
+
+
+def test_pricing_lookup_gemini_3_8_flash_n_matches_base():
+    db = PricingDatabase()
+    base = db.get_cost("gemini-3.8-flash", 1000, 2000, 300, 400)
+    variant = db.get_cost("gemini-3.8-flash-n", 1000, 2000, 300, 400)
+    prefixed = db.get_cost("antigravity-gemini-3.8-flash-n", 1000, 2000, 300, 400)
+
+    assert base > 0.0
+    assert abs(base - variant) < 1e-12
+    assert abs(base - prefixed) < 1e-12
 
 
 def test_pricing_lookup_strips_six_digit_date_suffixes():

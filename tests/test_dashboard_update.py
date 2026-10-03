@@ -5,6 +5,7 @@ dir, PyPI discovery is monkeypatched, and nothing here starts systemd, pip, or t
 real updater. The helper is exercised through its injectable ``Runner`` seam.
 """
 import json
+import os
 import sqlite3
 import subprocess
 import time
@@ -30,6 +31,14 @@ from tokdash.onboard import (
 HOST = "127.0.0.1:55423"
 TAILNET_HOST = "wsl.tail76535.ts.net"
 TAILNET_ORIGIN = "https://wsl.tail76535.ts.net"
+
+# The apply path is systemd-user only (Windows installs get manual guidance, which the
+# ineligibility tests cover there). These cases drive it through fake units whose
+# rendered ExecStart cannot match a backslashed Windows tmp path, and through the
+# helper, which refuses to run without fcntl.
+systemd_only = pytest.mark.skipif(
+    os.name == "nt", reason="systemd-user apply path: fake units and the fcntl helper need POSIX"
+)
 
 
 # --- fixtures ---------------------------------------------------------------------
@@ -158,6 +167,7 @@ def test_safe_install_argv():
 # --- eligibility --------------------------------------------------------------------
 
 
+@systemd_only
 def test_eligible_pipx(eligible_env):
     result = update_eligibility.check_eligibility()
     assert result["eligible"] is True, result["reason"]
@@ -234,6 +244,7 @@ def test_launchd_is_manual_for_now(tmp_path, monkeypatch):
     assert "launchd" in result["reason"]
 
 
+@systemd_only
 def test_managed_venv_requires_marker(tmp_path, monkeypatch):
     data, _ = managed_manifest(tmp_path)
     py = Path(data["python_path"])
@@ -254,6 +265,7 @@ def test_managed_venv_requires_marker(tmp_path, monkeypatch):
 # --- eligibility: LOADED service proof (§3 — a manifest-selected file proves nothing) ---
 
 
+@systemd_only
 def test_eligibility_rejects_unrelated_app(eligible_env, monkeypatch):
     data, _ = eligible_env
     py = Path(data["python_path"])
@@ -267,6 +279,7 @@ def test_eligibility_rejects_unrelated_app(eligible_env, monkeypatch):
     assert "Tokdash" in r["reason"]
 
 
+@systemd_only
 def test_eligibility_rejects_foreign_interpreter(eligible_env, monkeypatch):
     monkeypatch.setattr(
         update_eligibility, "_loaded_execstart",
@@ -278,6 +291,7 @@ def test_eligibility_rejects_foreign_interpreter(eligible_env, monkeypatch):
     assert "interpreter" in r["reason"]
 
 
+@systemd_only
 def test_eligibility_requires_running_managed_instance(eligible_env, monkeypatch):
     # A dev run against the same data dir must not drive the managed service.
     monkeypatch.setattr(update_eligibility, "_process_in_service_cgroup", lambda unit: False)
@@ -286,6 +300,7 @@ def test_eligibility_requires_running_managed_instance(eligible_env, monkeypatch
     assert "managed service" in r["reason"]
 
 
+@systemd_only
 def test_eligibility_rejects_base_interpreter_behind_venv_symlink(eligible_env, monkeypatch):
     # venv bin/python is normally a symlink to a shared base interpreter: comparing
     # realpaths would call /usr/bin/python3 and the recorded venv identical. The
@@ -353,6 +368,7 @@ def test_helper_parser_matches_eligibility_parser():
         assert update_helper._parse_execstart_line(sample) == update_eligibility._parse_execstart_line(sample), sample
 
 
+@systemd_only
 def test_eligibility_end_to_end_with_captured_systemd_output(tmp_path, monkeypatch):
     # Full path: captured raw systemctl text -> parser -> checks. No argv stubbing.
     data, _ = managed_manifest(tmp_path)
@@ -370,6 +386,7 @@ def test_eligibility_end_to_end_with_captured_systemd_output(tmp_path, monkeypat
     assert r["eligible"] is True, r["reason"]
 
 
+@systemd_only
 def test_eligibility_requires_loaded_unit(eligible_env, monkeypatch):
     data, _ = eligible_env
     stub_who_runs_the_service(monkeypatch, Path(data["python_path"]), loaded=False)
@@ -378,6 +395,7 @@ def test_eligibility_requires_loaded_unit(eligible_env, monkeypatch):
     assert "not loaded" in r["reason"]
 
 
+@systemd_only
 def test_eligibility_rejects_port_drift(eligible_env, monkeypatch):
     data, _ = eligible_env
     py = Path(data["python_path"])
@@ -621,6 +639,7 @@ def test_csrf_rotation_recovers_after_token_loss(monkeypatch):
 # --- control ------------------------------------------------------------------------------
 
 
+@systemd_only
 def test_capability_shape(eligible_env, monkeypatch):
     monkeypatch.setattr(updatecheck, "is_enabled", lambda: True)
     monkeypatch.setattr(updatecheck, "check", lambda v, **k: {
@@ -638,6 +657,7 @@ def test_start_rejects_ineligible(monkeypatch):
     assert status == 403
 
 
+@systemd_only
 def test_start_rejects_stale_target(eligible_env, monkeypatch):
     monkeypatch.setattr(updatecheck, "is_enabled", lambda: True)
     monkeypatch.setattr(updatecheck, "check", lambda v, **k: {
@@ -649,6 +669,7 @@ def test_start_rejects_stale_target(eligible_env, monkeypatch):
     assert "available release" in body["detail"]
 
 
+@systemd_only
 def test_start_launches_staged_helper(eligible_env, monkeypatch, data_dir):
     monkeypatch.setattr(updatecheck, "is_enabled", lambda: True)
     monkeypatch.setattr(updatecheck, "check", lambda v, **k: {
@@ -675,6 +696,7 @@ def test_start_launches_staged_helper(eligible_env, monkeypatch, data_dir):
     assert "Independent updater helper" in staged.read_text(encoding="utf-8")
 
 
+@systemd_only
 def test_start_launch_failure_records_failed(eligible_env, monkeypatch):
     monkeypatch.setattr(updatecheck, "is_enabled", lambda: True)
     monkeypatch.setattr(updatecheck, "check", lambda v, **k: {
@@ -726,6 +748,7 @@ def _loopback_headers():
     return {"host": HOST, "x-tokdash-token": api._CSRF_TOKEN}
 
 
+@systemd_only
 def test_api_capability_loopback(loopback_app, eligible_env):
     r = _client().get("/api/update/capability", headers={"host": HOST})
     assert r.status_code == 200
@@ -738,6 +761,7 @@ def test_api_capability_rejects_foreign_host(loopback_app):
     assert r.status_code == 403
 
 
+@systemd_only
 def test_api_capability_hides_job_from_unenrolled_remote(loopback_app, eligible_env, tmp_path,
                                                           monkeypatch):
     # Review round 6 #1: the plane classification is Host/Origin-based, and those
@@ -799,6 +823,7 @@ def test_api_start_remote_requires_session(loopback_app, eligible_env, monkeypat
     assert r.status_code == 403  # no cookie
 
 
+@systemd_only
 def test_api_enroll_and_start_remote(loopback_app, eligible_env, monkeypatch):
     monkeypatch.setenv("TOKDASH_UPDATE_ORIGIN", TAILNET_ORIGIN)
     monkeypatch.setattr(updatecheck, "is_enabled", lambda: True)
@@ -910,6 +935,7 @@ def test_api_remote_plane_denied_when_bound_wide(eligible_env, monkeypatch):
         api.app.state.port = None
 
 
+@systemd_only
 def test_api_csrf_recovery_after_token_loss(loopback_app, eligible_env, monkeypatch):
     monkeypatch.setenv("TOKDASH_UPDATE_ORIGIN", TAILNET_ORIGIN)
     monkeypatch.setattr(updatecheck, "is_enabled", lambda: True)
@@ -998,6 +1024,7 @@ def _seed_job(tmp_path, to_version="9.9.9", usage_db=None):
     return job
 
 
+@systemd_only
 def test_helper_happy_path(eligible_env, tmp_path):
     db = tmp_path / "usage.sqlite3"
     conn = sqlite3.connect(db)
@@ -1036,6 +1063,7 @@ def test_helper_happy_path(eligible_env, tmp_path):
     assert stop_i < install_i < start_i
 
 
+@systemd_only
 def test_helper_install_failure_recovers_service(eligible_env, tmp_path):
     job = _seed_job(tmp_path)
     runner = FakeRunner(tmp_path, job["id"], lambda m: None)
@@ -1065,6 +1093,7 @@ def test_helper_refuses_rerun_on_terminal_job(eligible_env, tmp_path):
     assert not [c for c in runner.calls if c[:3] == ["systemctl", "--user", "stop"]]
 
 
+@systemd_only
 def test_helper_rejects_bad_install_argv(eligible_env, tmp_path, monkeypatch):
     job = _seed_job(tmp_path)
     with update_jobs.with_update_lock():
@@ -1079,6 +1108,7 @@ def test_helper_rejects_bad_install_argv(eligible_env, tmp_path, monkeypatch):
     assert not runner.calls  # never touched the service
 
 
+@systemd_only
 def test_helper_readiness_version_mismatch_fails(eligible_env, tmp_path):
     job = _seed_job(tmp_path)
     runner = FakeRunner(tmp_path, job["id"], lambda m: None)
@@ -1101,6 +1131,7 @@ def test_helper_readiness_version_mismatch_fails(eligible_env, tmp_path):
     assert record["failed_phase"] == "starting"
 
 
+@systemd_only
 def test_helper_heartbeat_joined_before_terminal_write(eligible_env, tmp_path, monkeypatch):
     # A heartbeat thread still mid-write when install fails could land its (stale)
     # snapshot AFTER the terminal write and resurrect a non-terminal phase. The runner
@@ -1422,6 +1453,7 @@ def test_readiness_release_lets_rotation_prune_the_old_baseline(eligible_env, tm
     assert (bdir / "pre-update-20200105000000.sqlite3").is_file()
 
 
+@systemd_only
 def test_failed_update_end_to_end_keeps_the_baseline(eligible_env, tmp_path):
     # The reviewer's scenario end to end: a prior success, one snapshot readable by
     # the previously working version, several NEWER-schema snapshots, and another
@@ -1451,6 +1483,7 @@ def test_failed_update_end_to_end_keeps_the_baseline(eligible_env, tmp_path):
     assert not (bdir / "pre-update-20200103000000.sqlite3").is_file()  # rotation still happened
 
 
+@systemd_only
 def test_helper_refuses_sibling_tokdash_process(eligible_env, tmp_path, monkeypatch):
     # An idle co-tenant tokdash on the same data dir would resume writing the DB the
     # replacement migrates; the honest answer is refusal, before any downtime.
@@ -1468,6 +1501,7 @@ def test_helper_refuses_sibling_tokdash_process(eligible_env, tmp_path, monkeypa
     assert not [c for c in runner.calls if c[:3] == ["systemctl", "--user", "stop"]]
 
 
+@systemd_only
 def test_helper_preflight_rejects_unrelated_execstart(eligible_env, tmp_path):
     # Loaded configuration must run the RECORDED tokdash service — an ExecStart that
     # merely starts with our interpreter proves nothing.
@@ -1537,6 +1571,7 @@ def test_sibling_scan_covers_console_scripts_and_shared_db(eligible_env, tmp_pat
 # --- review round 5: recovery, binding precision, budgets, page lifecycle -----------
 
 
+@systemd_only
 def test_slow_or_failed_stop_still_recovers_service(eligible_env, tmp_path):
     # `systemctl stop` is bounded by SERVICE_OP_TIMEOUT; if it times out (or errors)
     # AFTER systemd has walked the unit down, skipping the recovery start strands
@@ -1703,6 +1738,7 @@ def test_update_handlers_are_off_the_event_loop():
         assert not inspect.iscoroutinefunction(fn), f"{path} blocks the event loop"
 
 
+@systemd_only
 def test_retry_after_restart_attaches_to_live_job(eligible_env, tmp_path):
     # Once the NEW version is serving while its job is still verifying readiness,
     # the cached target is no longer "newer" than the runtime. A retried click

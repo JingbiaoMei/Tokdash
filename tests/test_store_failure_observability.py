@@ -53,9 +53,9 @@ def _no_local_usage_logs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     Hermes is the exception, and it is load-bearing: ``hermes_search_dirs()``
     falls back to ``%LOCALAPPDATA%\\hermes`` on Windows rather than the home, so
-    the conftest redirect does not cover it, and an unpinned run read a real
-    16M-token database into the response and made the two payloads stop
-    matching.
+    the conftest redirect does not cover it, and an unpinned run reads the
+    real hermes database off this machine into the response, which makes the
+    two payloads stop matching.
     """
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / ".hermes"))
     coding_tools._sig_cache.clear()

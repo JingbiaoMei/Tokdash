@@ -30,11 +30,6 @@ except ImportError:  # pragma: no cover
     # Allow importing when running this code from the repo by file path.
     from clientpaths import openclaw_agent_sessions_glob
     from pricing import PricingDatabase
-
-    # store_logging has no dependencies of its own, so the same policy applies
-    # here rather than a local stand-in that could drift from it.
-    from store_logging import log_store_failure  # type: ignore
-
     USAGE_ENTRY_FORMAT_VERSION = 1  # type: ignore
 
     class UsageDatabaseSchemaTooNewError(RuntimeError):  # type: ignore

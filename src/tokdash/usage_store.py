@@ -209,23 +209,36 @@ _PRICING_IDENTITY_META_KEY = "usage_pricing_identity_v1"
 # The Stats contribution fetch. Shared verbatim by contribution_days() and
 # contribution_day_rows(), so OpenClaw can read it inside its own snapshot
 # rather than opening a second one that could straddle a racing write.
+#
+# Every sum over a token column uses SQLite's total(), not SUM(). SUM() raises
+# "OperationalError: integer overflow" as soon as one group's integers pass
+# 2**63 - 1, and a row sitting at that ceiling is exactly what the
+# storage-boundary clamp stores for an out-of-range count (and what a build
+# carrying that clamp has already written). total() accumulates in floating
+# point and always returns REAL, so no stored value can take a read path down;
+# callers coerce back with int(), and a total below 2**53 -- every real token
+# count -- round-trips exactly. Cost columns are REAL and cannot overflow, so
+# they keep SUM(). This is the read half of the same invariant the clamp
+# enforces on write: _entry_for_storage bounds what a row may hold, the totals
+# below bound what a query may do with it, and neither needs a guard at a call
+# site.
 _CONTRIBUTION_DAYS_SQL = """
             SELECT
                 date(timestamp / 1000, 'unixepoch', 'localtime') AS day,
                 source,
                 model,
                 provider,
-                SUM(input) AS input_sum,
-                SUM(output) AS output_sum,
-                SUM(cache_read) AS cache_read_sum,
-                SUM(cache_write) AS cache_write_sum,
-                SUM(reasoning) AS reasoning_sum,
+                total(input) AS input_sum,
+                total(output) AS output_sum,
+                total(cache_read) AS cache_read_sum,
+                total(cache_write) AS cache_write_sum,
+                total(reasoning) AS reasoning_sum,
                 COUNT(*) AS row_count,
                 SUM(CASE WHEN cost > 0 THEN cost ELSE 0 END) AS cost_priced_sum,
-                SUM(CASE WHEN cost <= 0 AND cost_authoritative = 0 THEN input ELSE 0 END) AS input_unpriced,
-                SUM(CASE WHEN cost <= 0 AND cost_authoritative = 0 THEN output ELSE 0 END) AS output_unpriced,
-                SUM(CASE WHEN cost <= 0 AND cost_authoritative = 0 THEN cache_read ELSE 0 END) AS cache_read_unpriced,
-                SUM(CASE WHEN cost <= 0 AND cost_authoritative = 0 THEN cache_write ELSE 0 END) AS cache_write_unpriced
+                total(CASE WHEN cost <= 0 AND cost_authoritative = 0 THEN input ELSE 0 END) AS input_unpriced,
+                total(CASE WHEN cost <= 0 AND cost_authoritative = 0 THEN output ELSE 0 END) AS output_unpriced,
+                total(CASE WHEN cost <= 0 AND cost_authoritative = 0 THEN cache_read ELSE 0 END) AS cache_read_unpriced,
+                total(CASE WHEN cost <= 0 AND cost_authoritative = 0 THEN cache_write ELSE 0 END) AS cache_write_unpriced
             FROM usage_entries
         """
 
@@ -245,9 +258,9 @@ _INSIGHT_ROWS_SQL = """
                 source,
                 model,
                 provider,
-                SUM(input + output + cache_read + cache_write + reasoning) AS tokens_sum,
+                total(input + output + cache_read + cache_write + reasoning) AS tokens_sum,
                 SUM(cost) AS cost_sum,
-                SUM(message_count) AS message_count_sum,
+                total(message_count) AS message_count_sum,
                 COUNT(*) AS row_count
             FROM usage_entries
         """
@@ -259,9 +272,25 @@ _INSIGHT_ROWS_SQL = """
 _INSIGHT_PROJECT_SQL = """
             SELECT
                 file_path,
-                SUM(input + output + cache_read + cache_write + reasoning) AS tokens_sum,
+                total(input + output + cache_read + cache_write + reasoning) AS tokens_sum,
                 SUM(cost) AS cost_sum,
-                SUM(message_count) AS message_count_sum
+                total(message_count) AS message_count_sum
+            FROM usage_entries
+        """
+
+# Per-model totals for a source, for the caller that builds its own answer from
+# them (OpenClaw). It lives here, with the table, so the overflow-proof total()
+# rule is written once in the module that owns usage_entries; the caller reads
+# it through model_totals_rows() inside its own snapshot and keeps the fold.
+_MODEL_TOTALS_SQL = """
+            SELECT
+                model,
+                total(input) AS input_sum,
+                total(output) AS output_sum,
+                total(cache_read) AS cache_read_sum,
+                total(cache_write) AS cache_write_sum,
+                SUM(cost) AS cost_sum,
+                total(message_count) AS message_count_sum
             FROM usage_entries
         """
 
@@ -2032,17 +2061,17 @@ class UsageEntryStore:
                 source,
                 model,
                 provider,
-                SUM(input) AS input_sum,
-                SUM(output) AS output_sum,
-                SUM(cache_read) AS cache_read_sum,
-                SUM(cache_write) AS cache_write_sum,
-                SUM(reasoning) AS reasoning_sum,
-                SUM(message_count) AS message_count_sum,
+                total(input) AS input_sum,
+                total(output) AS output_sum,
+                total(cache_read) AS cache_read_sum,
+                total(cache_write) AS cache_write_sum,
+                total(reasoning) AS reasoning_sum,
+                total(message_count) AS message_count_sum,
                 SUM(CASE WHEN cost > 0 THEN cost ELSE 0 END) AS cost_priced_sum,
-                SUM(CASE WHEN cost <= 0 AND cost_authoritative = 0 THEN input ELSE 0 END) AS input_unpriced,
-                SUM(CASE WHEN cost <= 0 AND cost_authoritative = 0 THEN output ELSE 0 END) AS output_unpriced,
-                SUM(CASE WHEN cost <= 0 AND cost_authoritative = 0 THEN cache_read ELSE 0 END) AS cache_read_unpriced,
-                SUM(CASE WHEN cost <= 0 AND cost_authoritative = 0 THEN cache_write ELSE 0 END) AS cache_write_unpriced
+                total(CASE WHEN cost <= 0 AND cost_authoritative = 0 THEN input ELSE 0 END) AS input_unpriced,
+                total(CASE WHEN cost <= 0 AND cost_authoritative = 0 THEN output ELSE 0 END) AS output_unpriced,
+                total(CASE WHEN cost <= 0 AND cost_authoritative = 0 THEN cache_read ELSE 0 END) AS cache_read_unpriced,
+                total(CASE WHEN cost <= 0 AND cost_authoritative = 0 THEN cache_write ELSE 0 END) AS cache_write_unpriced
             FROM usage_entries
         """
         if where:
@@ -2183,6 +2212,27 @@ class UsageEntryStore:
         if where:
             query += " WHERE " + " AND ".join(where)
         query += " GROUP BY day, source, provider, model ORDER BY day ASC"
+        return conn.execute(query, args).fetchall()
+
+    def model_totals_rows(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        sources: Optional[Iterable[str]] = None,
+        since: Optional[datetime] = None,
+        until: Optional[datetime] = None,
+    ) -> list[sqlite3.Row]:
+        """The per-model totals fetch, for a caller reading inside its own snapshot.
+
+        Same arrangement as :meth:`contribution_day_rows`: the SQL lives with the
+        table, and the caller supplies the connection so its two fetches share a
+        single snapshot instead of straddling a racing write.
+        """
+        where, args = self._where(sources=sources, since=since, until=until)
+        query = _MODEL_TOTALS_SQL
+        if where:
+            query += " WHERE " + " AND ".join(where)
+        query += " GROUP BY model"
         return conn.execute(query, args).fetchall()
 
     def _contribution_days_from_rows(self, rows: Iterable[sqlite3.Row]) -> list[dict[str, Any]]:

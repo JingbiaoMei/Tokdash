@@ -622,30 +622,20 @@ def _openclaw_usage_from_store(
     since_date: Optional[datetime],
     until_date: Optional[datetime],
 ) -> Dict[str, Any]:
-    where, args = store._where(sources=["openclaw"], since=since_date, until=until_date)  # type: ignore[attr-defined]
-    query = """
-        SELECT
-            model,
-            SUM(input) AS input_sum,
-            SUM(output) AS output_sum,
-            SUM(cache_read) AS cache_read_sum,
-            SUM(cache_write) AS cache_write_sum,
-            SUM(cost) AS cost_sum,
-            SUM(message_count) AS message_count_sum
-        FROM usage_entries
-    """
-    if where:
-        query += " WHERE " + " AND ".join(where)
-    query += " GROUP BY model"
-
     # Both fetches share ONE snapshot. Read separately, they could straddle a
     # write that lands under superseded pricing, and the model totals would then
     # disagree with the contribution grid built from the other side of it.
     # _read_priced also guarantees the snapshot carries a single pricing
     # generation (see UsageEntryStore._read_priced).
+    #
+    # Both queries live in usage_store, with the table they read: it is the only
+    # module that writes SQL against usage_entries, so the overflow-proof total()
+    # form is written once rather than copied per reader.
     def _read(conn):
         return (
-            conn.execute(query, args).fetchall(),
+            store.model_totals_rows(
+                conn, sources=["openclaw"], since=since_date, until=until_date
+            ),
             store.contribution_day_rows(
                 conn, sources=["openclaw"], since=since_date, until=until_date
             ),

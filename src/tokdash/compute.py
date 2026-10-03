@@ -11,8 +11,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-logger = logging.getLogger(__name__)
-
 from .dateutil import parse_date_range
 from .model_normalization import normalize_model_name
 from .pricing import PricingDatabase
@@ -21,6 +19,7 @@ from .sources.openclaw import get_usage_for_month as get_session_usage_month
 from .sources.openclaw import get_usage_for_range as get_session_usage_range
 from .sources.openclaw import get_usage_for_year as get_session_usage_year
 from .sources.coding_tools import CodingToolsUsageTracker
+from .store_logging import log_store_failure
 from .usage_store import (
     UsageDatabaseSchemaTooNewError,
     UsageEntryStore,
@@ -31,6 +30,8 @@ from .usage_store import (
     persistent_usage_db_enabled,
     public_usage_entry,
 )
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================
@@ -394,17 +395,13 @@ def run_local_coding_tools_json(period_args: list[str]) -> Dict[str, Any]:
     """Collect coding-tool entries using the in-process local parsers."""
     since, until = _date_range_from_args(period_args)
     tracker = CodingToolsUsageTracker()
-    db_error: Optional[str] = None
     if persistent_usage_db_enabled():
         try:
             store, stored_sources = _sync_usage_store(tracker)
             entries = store.query_entries(sources=stored_sources, since=since, until=until)
             entries.extend(_collect_live_coding_entries(tracker, since, until, _usage_store_live_sources(tracker)))
             entries.sort(key=lambda e: int(e.get("timestamp", 0) or 0))
-            return {
-                "entries": entries,
-                "source_errors": tracker.source_errors,
-            }
+            return {"entries": entries}
         except UsageDatabaseSchemaTooNewError:
             # A newer database is terminal for this build; reparsing the logs
             # instead would hide the skew behind a permanent full-history reparse.
@@ -413,16 +410,15 @@ def run_local_coding_tools_json(period_args: list[str]) -> Dict[str, Any]:
             # The persistent DB is a cache. If it is corrupt or temporarily
             # unavailable, preserve current behavior by falling back to the live
             # parsers for this request.
-            logger.warning(
+            log_store_failure(
+                logger,
                 "tokdash persistent usage cache failed; falling back to live parsers",
-                exc_info=True,
+                exc,
+                site="compute.run_local_coding_tools_json",
             )
-            db_error = str(exc)
     tracker.collect(since, until)
     data = tracker.to_json()
     data["entries"] = [public_usage_entry(entry) for entry in data.get("entries", [])]
-    if db_error is not None:
-        data.setdefault("source_errors", []).append({"source": "usage-db", "error": db_error})
     return data
 
 
@@ -847,7 +843,6 @@ def get_tools_data_for_range(
     """
     if USE_LOCAL_CODING_TOOLS_BACKEND:
         tracker = CodingToolsUsageTracker()
-        db_error: Optional[str] = None
         if persistent_usage_db_enabled():
             try:
                 if sync:
@@ -870,18 +865,23 @@ def get_tools_data_for_range(
                 raise
             except Exception as exc:
                 # Keep the DB fail-open: serving correctness should not depend on
-                # cache health while this backend is still evolving.
-                logger.warning(
+                # cache health while this backend is still evolving. The answer is
+                # complete either way, so it must not be marked incomplete.
+                # `source_errors` is the channel for sources that could not answer,
+                # and the dashboard treats a non-empty list as "this server's answer
+                # is unusable": it falls back to that server's last complete
+                # snapshot, or marks the row partial when there is none. Reporting
+                # a failed cache there would pin the view to stale numbers for as
+                # long as usage.db stays broken. The failure goes to the log.
+                log_store_failure(
+                    logger,
                     "tokdash persistent usage cache failed; falling back to live parsers",
-                    exc_info=True,
+                    exc,
+                    site="compute.get_tools_data_for_range",
                 )
-                db_error = str(exc)
         tracker.collect(since, until)
         result = parse_entries_json(tracker.to_json())
-        errors = [e["source"] for e in tracker.source_errors]
-        if db_error is not None and "usage-db" not in errors:
-            errors.append("usage-db")
-        result["source_errors"] = errors
+        result["source_errors"] = [e["source"] for e in tracker.source_errors]
         return result
 
     since_str = since.astimezone().strftime("%Y-%m-%d")
@@ -907,10 +907,12 @@ def get_tools_contributions_for_range(since: Optional[datetime], until: Optional
                 return _merge_contribution_days([store_days, live_days])
             except UsageDatabaseSchemaTooNewError:
                 raise
-            except Exception:
-                logger.warning(
+            except Exception as exc:
+                log_store_failure(
+                    logger,
                     "tokdash persistent usage cache failed for contributions; falling back to live parsers",
-                    exc_info=True,
+                    exc,
+                    site="compute.get_tools_contributions_for_range",
                 )
         tracker.collect(since, until)
         return _contributions_from_entries(tracker.to_json().get("entries", []))

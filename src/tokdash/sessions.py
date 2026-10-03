@@ -69,6 +69,7 @@ from .sources.dsh_log import (
     dsh_file_signatures,
     fold_dsh_usage_samples,
 )
+from .store_logging import log_store_failure
 from .usage_store import (
     UsageDatabaseSchemaTooNewError,
     UsageEntryStore,
@@ -6207,11 +6208,18 @@ def _raw_sessions_for_tool(
             # on every request for as long as the version skew lasts, which is
             # vastly worse than surfacing the error once.
             raise
-        except Exception:
-            logger.warning(
-                "tokdash persistent session cache failed tool=%s; falling back to source files",
-                key,
-                exc_info=True,
+        except Exception as exc:
+            # Reported once per tool for the life of the process rather than on
+            # every request. One Overview refresh asks for sessions across five
+            # tools and reads each more than once, so with the database broken
+            # this site alone put 45 tracebacks in the journal per refresh. The
+            # tool is part of `site` rather than left to the message, so the five
+            # unreadable stores stay five lines.
+            log_store_failure(
+                logger,
+                f"tokdash persistent session cache failed tool={key}; falling back to source files",
+                exc,
+                site=f"sessions._raw_sessions_for_tool:{key}",
             )
     try:
         if key == "codex":

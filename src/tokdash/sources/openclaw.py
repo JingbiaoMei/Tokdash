@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 try:
     from ..clientpaths import openclaw_agent_sessions_glob
     from ..pricing import PricingDatabase
+    from ..store_logging import log_store_failure
     from ..usage_store import (
         USAGE_ENTRY_FORMAT_VERSION,
         UsageDatabaseSchemaTooNewError,
@@ -29,6 +30,11 @@ except ImportError:  # pragma: no cover
     # Allow importing when running this code from the repo by file path.
     from clientpaths import openclaw_agent_sessions_glob
     from pricing import PricingDatabase
+
+    # store_logging has no dependencies of its own, so the same policy applies
+    # here rather than a local stand-in that could drift from it.
+    from store_logging import log_store_failure  # type: ignore
+
     USAGE_ENTRY_FORMAT_VERSION = 1  # type: ignore
 
     class UsageDatabaseSchemaTooNewError(RuntimeError):  # type: ignore
@@ -532,10 +538,12 @@ def _collect_normalized_entries(
             # database readable, and doing so on every request is what turns a
             # version skew into a pinned server.
             raise
-        except Exception:
-            logger.warning(
+        except Exception as exc:
+            log_store_failure(
+                logger,
                 "tokdash persistent openclaw cache failed; falling back to session logs",
-                exc_info=True,
+                exc,
+                site="openclaw._collect_normalized_entries",
             )
 
     return [_normalized_entry(e, pricing_db) for e in _collect_entries(session_dirs)]
@@ -752,10 +760,12 @@ def get_session_usage(
             return _openclaw_usage_from_store(_sync_openclaw_store(session_dirs, pricing_db), since_date, until_date)
         except UsageDatabaseSchemaTooNewError:
             raise
-        except Exception:
-            logger.warning(
+        except Exception as exc:
+            log_store_failure(
+                logger,
                 "tokdash persistent openclaw cache failed; falling back to session logs",
-                exc_info=True,
+                exc,
+                site="openclaw.get_session_usage",
             )
 
     entries = _collect_normalized_entries(session_dirs, pricing_db, since_date, until_date)

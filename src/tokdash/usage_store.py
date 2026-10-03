@@ -68,6 +68,10 @@ def read_stored_schema_version(conn: sqlite3.Connection) -> Optional[int]:
         return None
 
 
+# The report-a-store-failure-once policy lives in ``store_logging``, which has
+# no dependencies on this module so every caller can import it unconditionally.
+
+
 def raise_if_usage_db_incompatible(db_path: Optional[Path] = None) -> None:
     """Cheap pre-flight: refuse a too-new database before any source discovery.
 

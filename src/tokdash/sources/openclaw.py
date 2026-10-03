@@ -29,11 +29,7 @@ try:
 except ImportError:  # pragma: no cover
     # Allow importing when running this code from the repo by file path.
     from clientpaths import openclaw_agent_sessions_glob
-    try:
-        from dateutil import local_midnight
-    except ImportError:
-        def local_midnight(dt: datetime, tz=None) -> datetime:
-            return dt.astimezone() if tz is None else dt.replace(tzinfo=tz)
+    from dateutil import local_midnight
     from pricing import PricingDatabase
     USAGE_ENTRY_FORMAT_VERSION = 1  # type: ignore
 
@@ -889,10 +885,8 @@ def get_usage_for_days(days: int) -> Dict[str, Any]:
     sessions_dir = glob.glob(openclaw_agent_sessions_glob())
 
     now_local = datetime.now().astimezone()
-    today_local_midnight = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
-    start_local = today_local_midnight - timedelta(days=max(days, 1) - 1)
-
-    since = start_local.astimezone(timezone.utc)
+    start_date = now_local.date() - timedelta(days=max(days, 1) - 1)
+    since = local_midnight(datetime.combine(start_date, datetime.min.time())).astimezone(timezone.utc)
     until = datetime.now(timezone.utc)
 
     return get_session_usage(sessions_dir, since_date=since, until_date=until)
@@ -903,8 +897,8 @@ def get_usage_for_month() -> Dict[str, Any]:
     sessions_dir = glob.glob(openclaw_agent_sessions_glob())
 
     now_local = datetime.now().astimezone()
-    start_of_month_local = now_local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    since = start_of_month_local.astimezone(timezone.utc)
+    first_of_month = now_local.date().replace(day=1)
+    since = local_midnight(datetime.combine(first_of_month, datetime.min.time())).astimezone(timezone.utc)
     until = datetime.now(timezone.utc)
 
     return get_session_usage(sessions_dir, since_date=since, until_date=until)

@@ -548,26 +548,27 @@ def _period_to_days(period: str) -> int:
 
 
 def _period_range(period: str) -> tuple[int, int]:
-    """Return [since_ms, until_ms) in local time."""
+    """Return [since_ms, until_ms) in local time.
+
+    Both ends are built from their date and resolved once, so each boundary
+    carries the offset that *that* date has. Anchoring them to today's offset
+    (now_local.replace(...)) or adding a day after converting to UTC both made
+    this tab's window differ from Overview's, and the first hour of a month was
+    counted on one tab and not the other (#145).
+    """
     now_local = datetime.now().astimezone()
-    local_tz = now_local.tzinfo or timezone.utc
+    today = now_local.date()
 
     if period == "month":
-        since = now_local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        until = now_local.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
-        return _dt_to_ms(since.astimezone(timezone.utc)), _dt_to_ms(until.astimezone(timezone.utc))
+        start_date = today.replace(day=1)
+    else:
+        days = _period_to_days(period)
+        start_date = today - timedelta(days=days - 1)
+    end_date = today + timedelta(days=1)
 
-    days = _period_to_days(period)
-    if days == 1:
-        since = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
-        until = since + timedelta(days=1)
-        return _dt_to_ms(since.astimezone(timezone.utc)), _dt_to_ms(until.astimezone(timezone.utc))
-
-    end_date = now_local.date()
-    start_date = end_date - timedelta(days=days - 1)
-    since = local_midnight(datetime.combine(start_date, datetime.min.time())).astimezone(timezone.utc)
-    until = local_midnight(datetime.combine(end_date, datetime.min.time())).astimezone(timezone.utc) + timedelta(days=1)
-    return _dt_to_ms(since), _dt_to_ms(until)
+    since = local_midnight(datetime.combine(start_date, datetime.min.time()))
+    until = local_midnight(datetime.combine(end_date, datetime.min.time()))
+    return _dt_to_ms(since.astimezone(timezone.utc)), _dt_to_ms(until.astimezone(timezone.utc))
 
 
 def _dt_to_ms(dt: datetime) -> int:

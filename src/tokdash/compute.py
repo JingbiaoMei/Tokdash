@@ -55,8 +55,13 @@ def run_tokscale_json(period_args: list[str]) -> Dict[str, Any]:
 
 def _date_range_from_args(period_args: list[str]) -> tuple[Optional[datetime], Optional[datetime]]:
     if "--today" in period_args:
-        start = local_midnight(datetime.now().replace(hour=0, minute=0, second=0, microsecond=0))
-        return start, start + timedelta(days=1)
+        # Both ends are resolved from their own date: adding a day to an aware
+        # midnight would keep today's offset, which is an hour out whenever
+        # tomorrow is on the other side of a clock change.
+        today = datetime.now().date()
+        start = local_midnight(datetime.combine(today, datetime.min.time()))
+        until = local_midnight(datetime.combine(today + timedelta(days=1), datetime.min.time()))
+        return start, until
 
     since = None
     until = None
@@ -1039,13 +1044,11 @@ def _current_period_range(period: str) -> tuple[datetime, datetime]:
     now_local = datetime.now().astimezone()
 
     if period == "month":
-        first_of_month = datetime.combine(now_local.date().replace(day=1), datetime.min.time())
-        since_local = local_midnight(first_of_month)
+        start_date = now_local.date().replace(day=1)
     else:
         days = period_to_days(period)
-        today_midnight = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
-        start_date = today_midnight.date() - timedelta(days=days - 1)
-        since_local = local_midnight(datetime.combine(start_date, datetime.min.time()))
+        start_date = now_local.date() - timedelta(days=days - 1)
+    since_local = local_midnight(datetime.combine(start_date, datetime.min.time()))
 
     return since_local.astimezone(timezone.utc), now_local.astimezone(timezone.utc)
 
@@ -1054,9 +1057,12 @@ def previous_period_range(period: str) -> tuple[datetime, datetime]:
     current_since, current_until = _current_period_range(period)
     if period == "month":
         prev_until = current_since
-        prev_until_local = prev_until.astimezone()
-        prev_month_anchor = prev_until_local - timedelta(days=1)
-        prev_since_local = prev_month_anchor.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        # The 1st of the previous month, resolved as a date first: reaching it
+        # by .replace(day=1) on an aware datetime would carry that instant's
+        # offset onto a date that may not share it (October's 1st is BST, and
+        # this runs in November).
+        prev_month_start = (prev_until.astimezone().date() - timedelta(days=1)).replace(day=1)
+        prev_since_local = local_midnight(datetime.combine(prev_month_start, datetime.min.time()))
         return prev_since_local.astimezone(timezone.utc), prev_until
 
     if period_to_days(period) == 1:

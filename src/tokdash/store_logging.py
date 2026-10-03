@@ -55,3 +55,13 @@ def log_store_failure(
         return
     _REPORTED_STORE_FAILURES.add(key)
     logger.warning(message, exc_info=exc)
+
+
+def reset_store_failure_reports() -> None:
+    """Forget every failure this process has already reported.
+
+    The report-once policy is deliberately process-wide, so a test that exercises
+    it needs a way back to a process that has reported nothing. Clearing the set
+    is the whole of that: the next occurrence of a given failure warns again.
+    """
+    _REPORTED_STORE_FAILURES.clear()

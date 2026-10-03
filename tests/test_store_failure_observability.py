@@ -30,7 +30,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from tokdash import api, compute, sessions, store_logging
+from tokdash import compute, sessions, store_logging
 from tokdash.api import app
 from tokdash.sources import coding_tools, openclaw
 from tokdash.usage_store import SCHEMA_VERSION, UsageDatabaseSchemaTooNewError, UsageEntryStore
@@ -91,18 +91,6 @@ def _write_claude_session(home: Path, stem: str = "s1") -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
     return path
-
-
-@pytest.fixture(autouse=True)
-def _no_store_failure_reported_yet():
-    """Each test starts as if the process had just started.
-
-    The report is once per process by design, so without this a test would see
-    whichever call happened to come first in the session.
-    """
-    store_logging._REPORTED_STORE_FAILURES.clear()
-    yield
-    store_logging._REPORTED_STORE_FAILURES.clear()
 
 
 @pytest.fixture

@@ -24,7 +24,7 @@ from pathlib import Path
 import pytest
 
 import tokdash
-from tokdash import compute, store_logging
+from tokdash import compute
 
 INDEX_HTML = Path(tokdash.__file__).parent / "static" / "index.html"
 
@@ -110,16 +110,6 @@ def corrupt_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("TOKDASH_USAGE_DB_PATH", str(db_file))
     monkeypatch.setenv("TOKDASH_USAGE_DB", "1")
     return db_file
-
-
-@pytest.fixture(autouse=True)
-def _no_store_failure_reported_yet():
-    """Each test starts as if the process had just started: the report about a
-    broken store is once per process by design.
-    """
-    store_logging._REPORTED_STORE_FAILURES.clear()
-    yield
-    store_logging._REPORTED_STORE_FAILURES.clear()
 
 
 def _stamped(payload: dict, tokens: int) -> dict:

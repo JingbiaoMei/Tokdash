@@ -73,34 +73,48 @@ def test_period_to_range_args_month_is_calendar_month():
 
 
 def test_previous_period_range_today_uses_full_yesterday(monkeypatch):
-    current_since = datetime(2026, 3, 31, 0, 0, tzinfo=timezone.utc)
-    current_until = datetime(2026, 3, 31, 8, 20, tzinfo=timezone.utc)
+    current_since = datetime(2026, 3, 31, 0, 0).astimezone()
+    current_until = datetime(2026, 3, 31, 8, 20).astimezone()
 
-    monkeypatch.setattr(compute, "_current_period_range", lambda period: (current_since, current_until))
+    monkeypatch.setattr(
+        compute,
+        "_current_period_range",
+        lambda period: (current_since.astimezone(timezone.utc), current_until.astimezone(timezone.utc)),
+    )
 
     prev_since, prev_until = compute.previous_period_range("today")
 
-    assert prev_since == current_since - timedelta(days=1)
-    assert prev_until == current_since
+    local_yesterday = datetime(2026, 3, 30, 0, 0).astimezone()
+    assert prev_since == local_yesterday.astimezone(timezone.utc)
+    assert prev_until == current_since.astimezone(timezone.utc)
 
 
 def test_previous_period_range_three_days_uses_full_previous_three_days(monkeypatch):
-    current_since = datetime(2026, 3, 29, 0, 0, tzinfo=timezone.utc)
-    current_until = datetime(2026, 3, 31, 8, 20, tzinfo=timezone.utc)
+    current_since = datetime(2026, 3, 29, 0, 0).astimezone()
+    current_until = datetime(2026, 3, 31, 8, 20).astimezone()
 
-    monkeypatch.setattr(compute, "_current_period_range", lambda period: (current_since, current_until))
+    monkeypatch.setattr(
+        compute,
+        "_current_period_range",
+        lambda period: (current_since.astimezone(timezone.utc), current_until.astimezone(timezone.utc)),
+    )
 
     prev_since, prev_until = compute.previous_period_range("3days")
 
-    assert prev_since == datetime(2026, 3, 26, 0, 0, tzinfo=timezone.utc)
-    assert prev_until == current_since
+    local_three_days_ago = datetime(2026, 3, 26, 0, 0).astimezone()
+    assert prev_since == local_three_days_ago.astimezone(timezone.utc)
+    assert prev_until == current_since.astimezone(timezone.utc)
 
 
 def test_previous_period_range_month_uses_full_previous_calendar_month(monkeypatch):
-    current_since = datetime(2026, 3, 1, 0, 0, tzinfo=timezone.utc)
-    current_until = datetime(2026, 3, 31, 8, 20, tzinfo=timezone.utc)
+    current_since = datetime(2026, 3, 1, 0, 0).astimezone()
+    current_until = datetime(2026, 3, 31, 8, 20).astimezone()
 
-    monkeypatch.setattr(compute, "_current_period_range", lambda period: (current_since, current_until))
+    monkeypatch.setattr(
+        compute,
+        "_current_period_range",
+        lambda period: (current_since.astimezone(timezone.utc), current_until.astimezone(timezone.utc)),
+    )
 
     prev_since, prev_until = compute.previous_period_range("month")
 
@@ -109,4 +123,4 @@ def test_previous_period_range_month_uses_full_previous_calendar_month(monkeypat
     # the local zone instead of assuming UTC (CI) everywhere.
     local_first = datetime(2026, 2, 1, 0, 0).astimezone()
     assert prev_since == local_first.astimezone(timezone.utc)
-    assert prev_until == current_since
+    assert prev_until == current_since.astimezone(timezone.utc)

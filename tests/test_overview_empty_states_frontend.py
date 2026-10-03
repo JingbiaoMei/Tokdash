@@ -81,13 +81,16 @@ function node(id) {
       _currentValue: undefined,
       setAttribute(name, value) { nodes[id].attrs[name] = value; },
       removeAttribute(name) { delete nodes[id].attrs[name]; },
+      children: [],
+      appendChild(child) { nodes[id].children.push(child); return child; },
+      append(...kids) { nodes[id].children.push(...kids); },
     };
   }
   return nodes[id];
 }
 const document = {
   getElementById: (id) => node(id),
-  createElement: () => ({ style: {}, appendChild() {}, setAttribute() {}, addEventListener() {} }),
+  createElement: () => node('__created_' + Math.random().toString(36).slice(2)),
 };
 
 // --- the browser globals the animation engine expects ------------------------
@@ -101,7 +104,7 @@ if (typeof requestAnimationFrame === 'undefined') {
 let currentLang = 'en';
 const LANG_LOCALES = { en: 'en-US', zh: 'zh-CN', ja: 'ja-JP', ko: 'ko-KR', es: 'es-ES', pt: 'pt-BR' };
 function langLocale(lang = currentLang) { return LANG_LOCALES[lang] || 'en-US'; }
-const LABELS = { noData: 'No data', tokensUnit: 'tokens' };
+const LABELS = { noData: 'No data', tokensUnit: 'tokens', messagesUnit: 'messages' };
 function t(key) { return LABELS[key] || key; }
 let overviewReadableTokens = true;
 let overviewTotalTokensRaw = 0;
@@ -483,6 +486,10 @@ FUNCTIONS_UNDER_TEST = (
     "function overviewRangeIsEmpty(data) {",
     "function setOverviewCounterText(el, text, value) {",
     "function animateOverviewCounter(el, value, duration, format) {",
+    # The six KPI cards now share one readout helper, so the row's renderers reach
+    # it (and the unrounded-value formatter behind two of them) directly.
+    "function setKpiExactReadout(wrapId, valueId, tooltipId, text, note = '') {",
+    "function formatExactCurrency(num) {",
     "function renderOverviewTokenTotal(value = overviewTotalTokensRaw, staticText = null) {",
     "function renderOverviewTab(data) {",
     # A partial read is built here, not asserted from a hand-written flag: these

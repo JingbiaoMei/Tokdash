@@ -373,7 +373,17 @@ def test_the_total_tokens_value_carries_no_unit():
     assert "formatReadableTokenCount" not in source
     # The exact count keeps the unit for the tooltip and the screen reader.
     assert "${formatNumber(overviewTotalTokensRaw)} ${t('tokensUnit')}" in renderer
-    assert "valueElement.setAttribute('aria-label', exact)" in renderer
+    # The readout and the aria-label both come from the shared helper now that all
+    # six cards in the row use one, so this card no longer sets them inline.
+    assert (
+        "setKpiExactReadout('totalTokensWrap', 'totalTokens', 'totalTokensExact'"
+        in renderer
+    )
+    readout = _extract_js_function(
+        source,
+        "function setKpiExactReadout(wrapId, valueId, tooltipId, text, note = '') {",
+    )
+    assert "valueElement.setAttribute('aria-label', text)" in readout
 
 
 def test_the_card_is_rendered_on_every_path_that_can_change_it():
@@ -514,16 +524,24 @@ def test_the_card_says_loading_rather_than_answering_with_a_dash(tmp_path):
 const nodes = {};
 function node(id) {
   if (!nodes[id]) nodes[id] = {
-    id, textContent: '', innerHTML: '', title: '', style: {}, classes: new Set(),
+    id, textContent: '', innerHTML: '', title: '', style: {}, attrs: {}, classes: new Set(),
+    children: [],
     classList: {
       add: (c) => nodes[id].classes.add(c),
       remove: (c) => nodes[id].classes.delete(c),
       contains: (c) => nodes[id].classes.has(c),
     },
+    setAttribute(name, value) { nodes[id].attrs[name] = value; },
+    removeAttribute(name) { delete nodes[id].attrs[name]; },
+    appendChild(child) { nodes[id].children.push(child); return child; },
+    append(...kids) { nodes[id].children.push(...kids); },
   };
   return nodes[id];
 }
-const document = { getElementById: node };
+const document = {
+  getElementById: node,
+  createElement: () => node('__created_' + Math.random().toString(36).slice(2)),
+};
 const overviewActiveTimeState = { status: 'idle', data: null, key: null, requestId: 0 };
 function t(key) { return key; }
 function renderDelta() {}
@@ -531,6 +549,15 @@ function formatDuration(ms) { return `dur:${ms}`; }
 function formatToolName(name) { return name; }
 function fitKpiValue() {}
 """
+        # The card's exact-value readout is written by the shared helper all six
+        # KPI cards use, with its own unrounded-duration formatter behind it.
+        + _extract_js_function(
+            source,
+            "function setKpiExactReadout(wrapId, valueId, tooltipId, text, note = '') {",
+        )
+        + "\n"
+        + _extract_js_function(source, "function formatExactDuration(ms) {")
+        + "\n"
         + _extract_js_function(source, "function renderOverviewActiveTime() {")
         + """
 const out = {};

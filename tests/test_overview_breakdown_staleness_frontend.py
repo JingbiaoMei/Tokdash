@@ -52,11 +52,17 @@ function node(id) {
       },
       setAttribute(name, value) { nodes[id].attrs[name] = value; },
       removeAttribute(name) { delete nodes[id].attrs[name]; },
+      children: [],
+      appendChild(child) { nodes[id].children.push(child); return child; },
+      append(...kids) { nodes[id].children.push(...kids); },
     };
   }
   return nodes[id];
 }
-const document = { getElementById: (id) => node(id) };
+const document = {
+  getElementById: (id) => node(id),
+  createElement: () => node('__created_' + Math.random().toString(36).slice(2)),
+};
 
 // Snapshot of what the two breakdown containers are showing right now.
 const breakdowns = () => ({
@@ -383,6 +389,10 @@ def _run(tmp_path: Path, scenario: str) -> dict:
             "function overviewRangeIsEmpty(data) {",
             "function setOverviewCounterText(el, text, value) {",
             "function animateOverviewCounter(el, value, duration, format) {",
+            # The six KPI cards share one exact-value readout helper, which
+            # renderOverviewTab reaches directly for four of them.
+            "function setKpiExactReadout(wrapId, valueId, tooltipId, text, note = '') {",
+            "function formatExactCurrency(num) {",
             "function renderOverviewTab(data) {",
             "async function updateDashboard(customDays = null, dateFrom = null, dateTo = null, options = {}) {",
         )

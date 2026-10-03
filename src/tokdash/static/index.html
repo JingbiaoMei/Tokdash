@@ -833,10 +833,27 @@
     .overview-readable-tokens-toggle[aria-checked="true"] .overview-readable-tokens-track { background: var(--color-primary); }
     .overview-readable-tokens-toggle[aria-checked="true"] .overview-readable-tokens-track::after { transform: translateX(12px); }
     .overview-token-value-wrap { position: relative; width: max-content; max-width: 100%; }
-    .overview-token-exact-tooltip { position: absolute; z-index: 70; left: 0; bottom: calc(100% + 8px); padding: 6px 8px; border-radius: 7px; background: var(--color-text); color: var(--color-bg); font-size: 10px; font-weight: 750; line-height: 1.2; white-space: nowrap; opacity: 0; visibility: hidden; pointer-events: none; transform: translateY(3px); transition: opacity var(--t-fast) ease, transform var(--t-fast) ease, visibility var(--t-fast) ease; box-shadow: 0 8px 22px rgba(15, 23, 42, .22); }
-    .overview-token-exact-tooltip::after { content: ""; position: absolute; left: 18px; top: 100%; border: 4px solid transparent; border-top-color: var(--color-text); }
-    #totalTokens:hover + .overview-token-exact-tooltip,
-    #totalTokens:focus-visible + .overview-token-exact-tooltip { opacity: 1; visibility: visible; transform: translateY(0); }
+    /* Every card in the KPI row keeps its exact figure in a hover readout, not
+       just Tokens. --kpi-tone carries the card value's own colour so the readout
+       mirrors the number it belongs to instead of wearing a foreign one, and the
+       translucent tint over a backdrop blur keeps the card readable through it
+       instead of hiding behind an opaque slab. */
+    .overview-token-exact-tooltip { --kpi-tooltip-tone: var(--kpi-tone, var(--color-primary)); position: absolute; z-index: 70; left: 0; bottom: calc(100% + 3px); max-width: min(320px, calc(100vw - 48px)); padding: 7px 12px; border: 1px solid color-mix(in srgb, var(--kpi-tooltip-tone) 34%, transparent); border-radius: 10px; background: color-mix(in srgb, var(--kpi-tooltip-tone) 14%, color-mix(in srgb, var(--color-surface-glass) 58%, transparent)); color: var(--kpi-tooltip-tone); font-size: 13px; font-weight: 800; line-height: 1.15; letter-spacing: .01em; white-space: nowrap; opacity: 0; visibility: hidden; pointer-events: auto; transform: translateY(4px); transition: opacity var(--t-fast) ease, transform var(--t-fast) ease, visibility var(--t-fast) ease; box-shadow: 0 6px 16px rgba(15, 23, 42, .3); backdrop-filter: blur(14px) saturate(150%); -webkit-backdrop-filter: blur(14px) saturate(150%); }
+    /* A model name has no natural break, so that one readout wraps instead of
+       running off the side of its card. */
+    .overview-token-exact-tooltip[data-wrap="true"] { white-space: normal; overflow-wrap: anywhere; text-align: left; max-width: min(260px, calc(100vw - 48px)); }
+    .overview-token-exact-note { color: var(--color-muted); font-weight: 700; }
+    .overview-token-exact-sep { margin-inline: 5px; opacity: .55; }
+    /* The gap between the value and its readout is dead space the cursor has to
+       cross, and a hover that ends mid-crossing dismisses the readout from under
+       the pointer on its way in. This bridge covers it. */
+    .overview-token-exact-tooltip::before { content: ""; position: absolute; left: 0; right: 0; top: 100%; height: 12px; }
+    .overview-token-exact-tooltip::after { content: ""; position: absolute; left: 18px; top: 100%; border: 5px solid transparent; border-top-color: color-mix(in srgb, var(--kpi-tooltip-tone) 34%, transparent); }
+    /* The wrap is the hover target, not the value: the readout lives inside the
+       same wrap, so arriving on it keeps the readout up instead of pulling it
+       away the moment the cursor reaches it. */
+    .overview-token-value-wrap:hover .overview-token-exact-tooltip,
+    .overview-token-value-wrap:focus-within .overview-token-exact-tooltip { opacity: 1; visibility: visible; transform: translateY(0); }
 
     @media (max-width: 640px) {
       .date-range-control { width: 100%; min-width: 0; }
@@ -2906,10 +2923,10 @@
 
   <!-- Main Viewport -->
   <div class="flex-1 min-w-0 flex flex-col min-h-screen overflow-x-hidden dashboard-main">
-    <div class="w-full max-w-[1680px] p-4 sm:p-6 lg:p-8 space-y-6">
+    <div class="w-full max-w-[1680px] p-4 sm:p-6 lg:p-8 space-y-4">
 
       <!-- Top bar -->
-      <header class="surface p-5 sm:p-6 mb-6">
+      <header class="surface p-5 sm:p-6 mb-4">
       <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
         <div class="flex items-start gap-4">
           <button id="sidebarDrawerBtn" class="btn btn-ghost md:hidden" type="button" aria-label="Menu" data-i18n-title="menu" aria-controls="appSidebar" aria-expanded="false" onclick="toggleSidebarDrawer()">
@@ -3065,7 +3082,7 @@
               <span id="tokensDeltaPulseDot" class="w-2 h-2 rounded-full bg-indigo-400" style="display:none;" title="Live token update"></span>
             </div>
           </div>
-          <div id="totalTokensWrap" class="overview-token-value-wrap" data-readable="true">
+          <div id="totalTokensWrap" class="overview-token-value-wrap" data-readable="true" style="--kpi-tone: #818cf8;">
             <div id="totalTokens" class="text-3xl sm:text-4xl font-extrabold mt-1.5 font-mono text-indigo-400" tabindex="0" aria-describedby="totalTokensExact">-</div>
             <div id="totalTokensExact" class="overview-token-exact-tooltip" role="tooltip">-</div>
           </div>
@@ -3076,7 +3093,10 @@
           <div class="flex items-center justify-between">
             <div class="text-[11px] font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="totalCost">Total Cost</div>
           </div>
-          <div id="totalCost" class="text-3xl sm:text-4xl font-extrabold mt-1.5 font-mono text-emerald-400">$-</div>
+          <div id="totalCostWrap" class="overview-token-value-wrap" style="--kpi-tone: #34d399;">
+            <div id="totalCost" class="text-3xl sm:text-4xl font-extrabold mt-1.5 font-mono text-emerald-400" tabindex="0" aria-describedby="totalCostExact">$-</div>
+            <div id="totalCostExact" class="overview-token-exact-tooltip" role="tooltip">-</div>
+          </div>
           <div id="costDelta" class="text-xs font-semibold mt-1 kpi-delta"></div>
           <svg id="sparklineCost" class="kpi-sparkline text-emerald-400/60" viewBox="0 0 100 35" preserveAspectRatio="none" fill="none"><defs><linearGradient id="kpiG2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="currentColor" stop-opacity="0.25"/><stop offset="100%" stop-color="currentColor" stop-opacity="0.0"/></linearGradient></defs><path id="sparklineCostPath" d="M0 28 L100 28" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/><path id="sparklineCostArea" d="M0 28 L100 28 L100 35 L0 35 Z" fill="url(#kpiG2)"/></svg>
         </div>
@@ -3084,7 +3104,10 @@
           <div class="flex items-center justify-between">
             <div class="text-[11px] font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="totalMessages">Total Messages</div>
           </div>
-          <div id="totalMessages" class="text-3xl sm:text-4xl font-extrabold mt-1.5 font-mono text-purple-400">-</div>
+          <div id="totalMessagesWrap" class="overview-token-value-wrap" style="--kpi-tone: #c084fc;">
+            <div id="totalMessages" class="text-3xl sm:text-4xl font-extrabold mt-1.5 font-mono text-purple-400" tabindex="0" aria-describedby="totalMessagesExact">-</div>
+            <div id="totalMessagesExact" class="overview-token-exact-tooltip" role="tooltip">-</div>
+          </div>
           <div id="messagesDelta" class="text-xs font-semibold mt-1 kpi-delta"></div>
           <svg id="sparklineMessages" class="kpi-sparkline text-purple-400/60" viewBox="0 0 100 35" preserveAspectRatio="none" fill="none"><defs><linearGradient id="kpiG3" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="currentColor" stop-opacity="0.25"/><stop offset="100%" stop-color="currentColor" stop-opacity="0.0"/></linearGradient></defs><path id="sparklineMessagesPath" d="M0 22 Q30 16 50 18 T80 12 T100 8" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/><path id="sparklineMessagesArea" d="M0 22 Q30 16 50 18 T80 12 T100 8 L100 35 L0 35 Z" fill="url(#kpiG3)"/></svg>
         </div>
@@ -3096,7 +3119,10 @@
             </div>
             <span class="text-[9px] px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-400 font-mono font-bold">-61%</span>
           </div>
-          <div id="overviewActiveTime" class="text-3xl sm:text-4xl font-extrabold mt-1.5 font-mono text-sky-400">-</div>
+          <div id="overviewActiveTimeWrap" class="overview-token-value-wrap" style="--kpi-tone: #38bdf8;">
+            <div id="overviewActiveTime" class="text-3xl sm:text-4xl font-extrabold mt-1.5 font-mono text-sky-400" tabindex="0" aria-describedby="overviewActiveTimeExact">-</div>
+            <div id="overviewActiveTimeExact" class="overview-token-exact-tooltip" role="tooltip">-</div>
+          </div>
           <div id="overviewActiveDelta" class="text-xs font-semibold mt-1 kpi-delta"></div>
           <div id="overviewActiveMeta" class="text-xs font-semibold mt-1 kpi-delta"></div>
           <svg id="sparklineActiveTime" class="kpi-sparkline text-sky-400/60" viewBox="0 0 100 35" preserveAspectRatio="none" fill="none"><defs><linearGradient id="kpiG4" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="currentColor" stop-opacity="0.25"/><stop offset="100%" stop-color="currentColor" stop-opacity="0.0"/></linearGradient></defs><path id="sparklineActiveTimePath" d="M0 24 Q25 18 50 16 T75 12 T100 8" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/><path id="sparklineActiveTimeArea" d="M0 24 Q25 18 50 16 T75 12 T100 8 L100 35 L0 35 Z" fill="url(#kpiG4)"/></svg>
@@ -3109,15 +3135,20 @@
             </div>
             <span class="text-[9px] px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-400 font-mono font-bold">92%</span>
           </div>
-          <div id="avgCacheHitRate" class="text-3xl sm:text-4xl font-extrabold mt-1.5 font-mono text-cyan-400">-</div>
-          <div id="avgCacheHitMeta" class="text-xs font-semibold mt-1 kpi-delta"></div>
+          <div id="avgCacheHitRateWrap" class="overview-token-value-wrap" style="--kpi-tone: #22d3ee;">
+            <div id="avgCacheHitRate" class="text-3xl sm:text-4xl font-extrabold mt-1.5 font-mono text-cyan-400" tabindex="0" aria-describedby="avgCacheHitRateExact">-</div>
+            <div id="avgCacheHitRateExact" class="overview-token-exact-tooltip" role="tooltip">-</div>
+          </div>
           <svg id="sparklineCacheRate" class="kpi-sparkline text-cyan-400/60" viewBox="0 0 100 35" preserveAspectRatio="none" fill="none"><defs><linearGradient id="kpiG5" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="currentColor" stop-opacity="0.25"/><stop offset="100%" stop-color="currentColor" stop-opacity="0.0"/></linearGradient></defs><path id="sparklineCacheRatePath" d="M0 20 Q30 18 55 12 T85 10 T100 6" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/><path id="sparklineCacheRateArea" d="M0 20 Q30 18 55 12 T85 10 T100 6 L100 35 L0 35 Z" fill="url(#kpiG5)"/></svg>
         </div>
         <div class="surface p-5">
           <div class="flex items-center justify-between">
             <div class="text-[11px] font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="topModel">Top Model</div>
           </div>
-          <div id="topModel" class="text-lg sm:text-xl font-extrabold mt-1.5 mono break-all text-amber-300" title=""></div>
+          <div id="topModelWrap" class="overview-token-value-wrap" style="--kpi-tone: #fcd34d;">
+            <div id="topModel" class="text-lg sm:text-xl font-extrabold mt-1.5 mono break-all text-amber-300" tabindex="0" aria-describedby="topModelExact"></div>
+            <div id="topModelExact" class="overview-token-exact-tooltip" data-wrap="true" role="tooltip">-</div>
+          </div>
           <div id="topModelMeta" class="text-sm mt-1" style="color: var(--color-muted);">-</div>
           <svg id="sparklineTopModel" class="kpi-sparkline text-amber-400/60" viewBox="0 0 100 35" preserveAspectRatio="none" fill="none"><defs><linearGradient id="kpiG6" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="currentColor" stop-opacity="0.25"/><stop offset="100%" stop-color="currentColor" stop-opacity="0.0"/></linearGradient></defs><path id="sparklineTopModelPath" d="M0 22 Q20 20 40 14 T70 10 T100 6" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/><path id="sparklineTopModelArea" d="M0 22 Q20 20 40 14 T70 10 T100 6 L100 35 L0 35 Z" fill="url(#kpiG6)"/></svg>
         </div>
@@ -3130,8 +3161,6 @@
             <span class="text-sm sm:text-base font-extrabold mono text-slate-200" data-i18n="tokenComposition">Token Composition</span>
           </div>
           <div class="flex items-center gap-3 text-xs font-mono">
-            <span class="text-slate-400"><span data-i18n="cacheSaved">Cache Saved:</span> <strong id="cacheSavingsKpi" class="text-teal-400">—</strong></span>
-            <span style="color: var(--color-muted);">·</span>
             <span class="text-slate-500" id="tokenCompositionTotal">Full Range Distribution</span>
           </div>
         </div>
@@ -4796,7 +4825,7 @@
 
     <!-- Stats Tab -->
     <div id="stats-content" class="tab-content">
-      <section id="statsSummaryCards" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <section id="statsSummaryCards" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-x-4 gap-y-6 mb-6">
         <div class="surface p-4">
           <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="topModelCost">Top Model (Cost)</div>
           <div id="statFavoriteModel" class="tokdash-loading-placeholder mt-2 font-extrabold mono"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
@@ -4831,7 +4860,7 @@
         </div>
       </section>
 
-      <section id="statsInsightCards" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+      <section id="statsInsightCards" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-x-4 gap-y-6 mb-6">
         <div class="surface p-4">
           <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--color-label);" data-i18n="peakDay">Peak Day</div>
           <div id="statPeakDay" class="mt-2 font-extrabold mono">—</div>
@@ -7035,6 +7064,7 @@
         day: 'day',
         days: 'days',
         tokensUnit: 'tokens',
+        messagesUnit: 'messages',
         avgCacheHitRate: 'Avg Cache Hit Rate',
         cacheHitRate: 'Cache Hit Rate',
         hitPct: 'Hit %',
@@ -7592,6 +7622,7 @@
         day: '天',
         days: '天',
         tokensUnit: 'tokens',
+        messagesUnit: '条消息',
         avgCacheHitRate: '平均缓存命中率',
         cacheHitRate: '缓存命中率',
         hitPct: '命中率',
@@ -8150,6 +8181,7 @@
         day: '日',
         days: '日',
         tokensUnit: 'トークン',
+        messagesUnit: 'メッセージ',
         avgCacheHitRate: '平均キャッシュヒット率',
         cacheHitRate: 'キャッシュヒット率',
         hitPct: 'ヒット率',
@@ -8708,6 +8740,7 @@
         day: '일',
         days: '일',
         tokensUnit: '토큰',
+        messagesUnit: '메시지',
         avgCacheHitRate: '평균 캐시 적중률',
         cacheHitRate: '캐시 적중률',
         hitPct: '적중률',
@@ -9266,6 +9299,7 @@
         day: 'día',
         days: 'días',
         tokensUnit: 'tokens',
+        messagesUnit: 'mensajes',
         avgCacheHitRate: 'Tasa media de acierto de caché',
         cacheHitRate: 'Tasa de acierto de caché',
         hitPct: 'Acierto %',
@@ -9824,6 +9858,7 @@
         day: 'dia',
         days: 'dias',
         tokensUnit: 'tokens',
+        messagesUnit: 'mensagens',
         avgCacheHitRate: 'Taxa média de acerto de cache',
         cacheHitRate: 'Taxa de acerto de cache',
         hitPct: 'Acerto %',
@@ -10152,6 +10187,66 @@
       animations.animateNumber(el, value, duration, format);
     }
 
+    // Every card in the Overview KPI row carries its exact figure in the same
+    // hover readout, so they are written through one helper instead of each
+    // growing its own ad-hoc wiring. An empty text clears it: a card with nothing
+    // exact to say drops its focus target and its aria wiring rather than keeping
+    // a readout that contradicts the number printed beside it. The text is written
+    // as text, never as markup — a model name is whatever the backend returned.
+    function setKpiExactReadout(wrapId, valueId, tooltipId, text, note = '') {
+      const wrapper = document.getElementById(wrapId);
+      const valueElement = document.getElementById(valueId);
+      const tooltip = document.getElementById(tooltipId);
+      if (!wrapper || !valueElement || !tooltip) return;
+      tooltip.textContent = '';
+      if (!text) {
+        tooltip.hidden = true;
+        valueElement.removeAttribute('tabindex');
+        valueElement.removeAttribute('aria-describedby');
+        valueElement.removeAttribute('aria-label');
+        return;
+      }
+      const exact = document.createElement('span');
+      exact.textContent = text;
+      tooltip.appendChild(exact);
+      if (note) {
+        const separator = document.createElement('span');
+        separator.className = 'overview-token-exact-sep';
+        separator.textContent = '·';
+        const detail = document.createElement('span');
+        detail.className = 'overview-token-exact-note';
+        detail.textContent = note;
+        tooltip.append(separator, detail);
+      }
+      tooltip.hidden = false;
+      valueElement.tabIndex = 0;
+      valueElement.setAttribute('aria-describedby', tooltipId);
+      valueElement.setAttribute('aria-label', text);
+    }
+
+    // The Cost card rounds to cents; the readout carries the fraction that was
+    // actually summed, which is the figure anyone reconciling a bill wants.
+    function formatExactCurrency(num) {
+      const n = Number(num ?? 0);
+      return '$' + n.toLocaleString(langLocale(), {
+        minimumFractionDigits: 4,
+        maximumFractionDigits: 4,
+      });
+    }
+
+    // The agent-time card stops at hours and minutes; the readout keeps the
+    // seconds those two units round away.
+    function formatExactDuration(ms) {
+      const totalSeconds = Math.max(0, Math.round(Number(ms || 0) / 1000));
+      const pad = (value) => String(value).padStart(2, '0');
+      const hours = Math.floor(totalSeconds / 3600);
+      const minutes = Math.floor((totalSeconds % 3600) / 60);
+      const seconds = totalSeconds % 60;
+      if (hours) return `${hours}h ${pad(minutes)}m ${pad(seconds)}s`;
+      if (minutes) return `${minutes}m ${pad(seconds)}s`;
+      return `${seconds}s`;
+    }
+
     // staticText is what the range wants shown instead of the number itself -
     // "No data" for an empty range. It is passed in rather than written over the
     // top afterwards, so the card is written once instead of being told "0" and
@@ -10161,15 +10256,9 @@
       const wrapper = document.getElementById('totalTokensWrap');
       const tooltip = document.getElementById('totalTokensExact');
       if (!valueElement || !wrapper || !tooltip) return;
-      // A zero or a null total has no exact count worth a tooltip, and nothing
+      // A zero or a null total has no exact count worth a readout, and nothing
       // to drill into, so the card drops its focus target and its aria wiring.
-      const clearExact = () => {
-        valueElement.removeAttribute('tabindex');
-        valueElement.removeAttribute('aria-describedby');
-        valueElement.removeAttribute('aria-label');
-        tooltip.textContent = '-';
-        tooltip.hidden = true;
-      };
+      const clearExact = () => setKpiExactReadout('totalTokensWrap', 'totalTokens', 'totalTokensExact', '');
       if (value === null) {
         // Cleared, not left alone: a stale total left here is what the Tokens
         // count-up would otherwise animate from after a null payload. The counter
@@ -10200,17 +10289,9 @@
         ? formatCompactTokenCount(overviewTotalTokensRaw)
         : formatNumber(overviewTotalTokensRaw);
       wrapper.dataset.readable = String(overviewReadableTokens);
-      tooltip.textContent = exact;
-      tooltip.hidden = !overviewReadableTokens;
-      if (overviewReadableTokens) {
-        valueElement.tabIndex = 0;
-        valueElement.setAttribute('aria-describedby', 'totalTokensExact');
-        valueElement.setAttribute('aria-label', exact);
-      } else {
-        valueElement.removeAttribute('tabindex');
-        valueElement.removeAttribute('aria-describedby');
-        valueElement.removeAttribute('aria-label');
-      }
+      // With readable tokens off, the card already prints the full count, so a
+      // readout that repeated it would be noise rather than added detail.
+      setKpiExactReadout('totalTokensWrap', 'totalTokens', 'totalTokensExact', overviewReadableTokens ? exact : '');
       fitKpiValue(valueElement);
     }
 
@@ -11965,6 +12046,10 @@
         toolChart = null;
       }
       if (lastUsageResponse && isOverviewActive()) renderOverviewTab(lastUsageResponse);
+      // The agent-time card is fetched on its own and so is not rewritten by the
+      // call above. Its readout carries a translated note, which would otherwise
+      // stay in the previous language until the next refresh.
+      renderOverviewActiveTime();
       if (isSessionsActive()) renderSessionsTab();
       if (isServersActive()) renderServersTab();
 
@@ -12728,6 +12813,14 @@
         // the old range's value while Tokens shows the new one.
         totalCostEl.textContent = formatCurrency(costVal);
         totalMessagesEl.textContent = formatNumber(msgVal);
+        // An unpriced range is $0, and "$0.0000" is not a figure anyone hovers a
+        // card to learn — so the Cost readout stands down with the zero, the same
+        // rule the Tokens card follows.
+        setKpiExactReadout('totalCostWrap', 'totalCost', 'totalCostExact', costVal > 0 ? formatExactCurrency(costVal) : '');
+        // The Messages card is already exact, so its readout earns its keep the
+        // same way the Tokens one does: it carries the unit the narrow card has no
+        // room to print.
+        setKpiExactReadout('totalMessagesWrap', 'totalMessages', 'totalMessagesExact', msgVal > 0 ? `${formatNumber(msgVal)} ${t('messagesUnit')}` : '');
         // Unpriced models keep the $0 "FREE" state, and a zero target still
         // animates so a later range counts from 0 rather than a stale value.
         // The frames are whole numbers: a mid-animation "74,745,113.682" is wider
@@ -12744,6 +12837,15 @@
         // of it and the card shows a number in a row that says "n/a".
         if (hasHitRate) hitEl.textContent = formatHitRate(data.cache_hit_rate);
         else setOverviewCounterText(hitEl, formatHitRate(data.cache_hit_rate), 0);
+        // The card rounds to one decimal; the readout shows the second one the
+        // card had to drop, which is the digit that moves when the rate is close
+        // to a boundary and a user is deciding whether it moved.
+        setKpiExactReadout(
+          'avgCacheHitRateWrap',
+          'avgCacheHitRate',
+          'avgCacheHitRateExact',
+          hasHitRate ? `${(Number(data.cache_hit_rate) * 100).toFixed(2)}%` : '',
+        );
       }
 
       // Tokens and Hit % animate over what was just written, and neither animates
@@ -12772,8 +12874,6 @@
         }
       }
       fitOverviewKpis();
-      const hitMeta = document.getElementById('avgCacheHitMeta');
-      if (hitMeta) hitMeta.textContent = (data.cache_hit_rate === null || data.cache_hit_rate === undefined) ? '' : t('cacheHitRate');
       renderOverviewActiveTime();
       updateComparisonDeltas(data);
 
@@ -12781,12 +12881,15 @@
       if (data.top_models && data.top_models.length > 0) {
         const top = data.top_models[0];
         topModelEl.textContent = top.name;
-        topModelEl.title = top.name;
         document.getElementById('topModelMeta').textContent = `${formatCurrency(top.cost)} · ${formatTokenCount(top.tokens, true)}`;
+        // The card wraps the name across whatever lines it needs, so the readout
+        // gives it back unbroken on one hover instead of leaving it to be read
+        // off a wrapped line.
+        setKpiExactReadout('topModelWrap', 'topModel', 'topModelExact', String(top.name || ''));
       } else {
         topModelEl.textContent = '—';
-        topModelEl.title = '';
         document.getElementById('topModelMeta').textContent = '—';
+        setKpiExactReadout('topModelWrap', 'topModel', 'topModelExact', '');
       }
 
       updateToolChart(data.by_tool || {});
@@ -13331,12 +13434,22 @@
           valueElement.textContent = '—';
         }
         valueElement.title = '';
+        setKpiExactReadout('overviewActiveTimeWrap', 'overviewActiveTime', 'overviewActiveTimeExact', '');
         renderDelta('overviewActiveDelta', null);
         metaElement.textContent = overviewActiveTimeState.status === 'error' ? t('loadFailed') : '';
         return;
       }
       valueElement.textContent = formatDuration(data.active_ms_sum);
-      valueElement.title = data.active_gap_cap_ms ? `${t('idleCap')}: ${formatDuration(data.active_gap_cap_ms)}` : '';
+      // The idle cap used to ride on a native `title` tooltip. Two tooltips on
+      // one card is one too many, so the readout takes it over — and gains the
+      // seconds the card rounds away along the way.
+      setKpiExactReadout(
+        'overviewActiveTimeWrap',
+        'overviewActiveTime',
+        'overviewActiveTimeExact',
+        data.active_ms_sum > 0 ? formatExactDuration(data.active_ms_sum) : '',
+        data.active_gap_cap_ms ? `${t('idleCap')}: ${formatDuration(data.active_gap_cap_ms)}` : '',
+      );
       renderDelta('overviewActiveDelta', data.comparison?.active_ms_sum_pct ?? null);
       metaElement.textContent = data.unavailable_tools.length
         ? t('activeTimeToolsUnavailable').replace('{tools}', data.unavailable_tools.map(formatToolName).join(', '))
@@ -19803,8 +19916,6 @@
         const cell = document.getElementById(id);
         if (cell) cell.textContent = '—';
       });
-      const cacheKpi = document.getElementById('cacheSavingsKpi');
-      if (cacheKpi) cacheKpi.textContent = '—';
     }
 
     function updateTokenCompositionBar(data) {
@@ -19860,9 +19971,6 @@
         if (vCache) vCache.textContent = `${formatTokenCount(cacheTok)} (${cachePctStr}%)`;
         if (vOut) vOut.textContent = `${formatTokenCount(outTok)} (${outPctStr}%)`;
         if (vReason) vReason.textContent = `${formatTokenCount(reasonTok)} (${reasonPctStr}%)`;
-
-        const cacheKpi = document.getElementById('cacheSavingsKpi');
-        if (cacheKpi) cacheKpi.textContent = formatTokenCount(cacheTok);
       } else {
         // Empty period: without this the seeded bar widths (and the previous
         // period's numbers) survive into a window that has no tokens at all.

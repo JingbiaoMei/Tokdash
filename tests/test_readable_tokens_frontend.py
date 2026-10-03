@@ -180,8 +180,9 @@ def test_readable_token_switch_markup_and_tooltip_contract() -> None:
     panel_start = source.index('id="settingsPanel"')
     panel_end = source.index("theme-config.js")  # panel markup ends right before the app scripts
     assert panel_start < source.index('id="readableTokensToggle"') < panel_end
-    assert "#totalTokens:hover+.overview-token-exact-tooltip" in compact
-    assert "#totalTokens:focus-visible+.overview-token-exact-tooltip" in compact
+    assert "#totalTokens:hover+.overview-token-exact-tooltip" not in compact
+    assert ".overview-token-value-wrap:hover.overview-token-exact-tooltip" in compact
+    assert ".overview-token-value-wrap:focus-within.overview-token-exact-tooltip" in compact
     assert source.count("readableTokens: '") == 6
 
 
@@ -202,7 +203,18 @@ def test_readable_token_render_and_toggle_do_not_refetch() -> None:
     assert "formatCompactTokenCount(overviewTotalTokensRaw)" in renderer
     assert "formatNumber(overviewTotalTokensRaw)" in renderer
     assert "totalTokensExact" in renderer
-    assert "aria-describedby" in renderer
+    # The readout and its aria wiring are the shared helper's job now that all six
+    # cards in the row use one, so the Tokens card goes through that helper rather
+    # than hand-rolling its own copy of the same wiring.
+    assert (
+        "setKpiExactReadout('totalTokensWrap', 'totalTokens', 'totalTokensExact'"
+        in renderer
+    )
+    readout = _extract_js_function(
+        source, "function setKpiExactReadout(wrapId, valueId, tooltipId, text, note = '') {"
+    )
+    assert "aria-describedby" in readout
+    assert "aria-label" in readout
     assert "saveOverviewReadableTokensPreference" in setter
     assert "rerenderTokenPresentation();" in setter
     assert "fetch(" not in setter

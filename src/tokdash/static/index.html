@@ -2510,7 +2510,11 @@
     html:not(.dark) .btn-ghost:not([aria-pressed="true"]):hover { background: color-mix(in srgb, var(--color-text) 8%, transparent) !important; border-color: transparent !important; }
 
     @media (min-width: 768px) {
-      nav[aria-label="Dashboard sections"] {
+      /* The sidebar already carries these tabs above 768px, so the header row is
+         redundant there. Key the rule on the element id, not on the aria-label:
+         the label is translated, so a value-based selector would stop matching
+         in the other five languages. */
+      #dashboardSectionNav {
         display: none !important;
       }
     }
@@ -2783,7 +2787,7 @@
   </script>
   <!-- TokDash v4 SVG Hero Loader -->
   <div id="tokdash-loader" class="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-md transition-opacity duration-300" style="position:fixed !important; top:0 !important; left:0 !important; width:100vw !important; height:100vh !important; pointer-events:none; background: var(--color-bg);">
-    <svg xmlns="http://www.w3.org/2000/svg" class="ap" viewBox="0 0 64 64" width="96" height="96" fill="none" role="img" aria-label="Loading">
+    <svg xmlns="http://www.w3.org/2000/svg" class="ap" viewBox="0 0 64 64" width="96" height="96" fill="none" role="img" data-i18n-aria="loading" aria-label="Loading…">
       <style>
         /* Must stay id-scoped: a <style> inside inline SVG is NOT scoped — a bare
            `svg` selector here leaked to the whole page, and since the SVG's own
@@ -2847,7 +2851,7 @@
     </div>
 
     <!-- Navigation Menu Items with Clean SVGs -->
-    <nav class="flex-1 px-2.5 py-3 space-y-1 overflow-y-auto" aria-label="Main sidebar navigation">
+    <nav class="flex-1 px-2.5 py-3 space-y-1 overflow-y-auto" data-i18n-aria="navMainSidebar" aria-label="Main sidebar navigation">
       <div class="text-[11.5px] font-bold uppercase tracking-wider px-3 pt-2 pb-1" style="color: var(--color-muted);" data-i18n="navTelemetry">Telemetry</div>
       <a class="sidebar-nav-item active" data-tab-target="overview" onclick="activateDashboardTab('overview')">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-indigo-400"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>
@@ -2887,12 +2891,12 @@
 
     <!-- Sidebar Footer Quick Actions -->
     <div class="px-2.5 py-2.5 border-t space-y-1 relative" style="border-color: var(--color-border); background: var(--color-surface-glass, transparent);">
-      <button id="releaseNotesToggle" class="sidebar-nav-item w-full !text-left" type="button" aria-controls="releaseNotesDialog" aria-expanded="false" title="View what's new and release notes">
+      <button id="releaseNotesToggle" class="sidebar-nav-item w-full !text-left" type="button" aria-controls="releaseNotesDialog" aria-expanded="false" data-i18n-title="viewWhatsNew" title="View what's new and release notes">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-indigo-400"><path d="M6.5 4.5h11a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2Z"/><path d="M8 9h8M8 12h8M8 15h5"/></svg>
-        <span data-i18n="whatsNew">What's New</span>
+        <span data-i18n="whatsNew">What's new</span>
         <span id="releaseNotesVersion" class="ml-auto text-[10px] mono" style="color: var(--color-muted); font-weight:700;">v—</span>
       </button>
-      <button id="sidebarSettingsBtn" class="sidebar-nav-item w-full !text-left" type="button" onclick="openSettingsModal()" title="Configure Tokdash settings and servers" aria-controls="settingsPanel" aria-expanded="false">
+      <button id="sidebarSettingsBtn" class="sidebar-nav-item w-full !text-left" type="button" onclick="openSettingsModal()" data-i18n-title="configureSettings" title="Configure Tokdash settings and servers" aria-controls="settingsPanel" aria-expanded="false">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-purple-400"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l-2.86 2.86A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1.4 1.6H9.55a1.7 1.7 0 0 0-1.08-1.66 1.7 1.7 0 0 0-1.88.34l-2.86-2.86A1.7 1.7 0 0 0 4.07 15a1.7 1.7 0 0 0-1.77-1.4V9.55a1.7 1.7 0 0 0 1.66-1.08 1.7 1.7 0 0 0-.34-1.88l2.86-2.86A1.7 1.7 0 0 0 8.36 4.07 1.7 1.7 0 0 0 9.76 2.3h4.05a1.7 1.7 0 0 0 1.08 1.66 1.7 1.7 0 0 0 1.88-.34l2.86 2.86a1.7 1.7 0 0 0-.34 1.88 1.7 1.7 0 0 0 1.77 1.4v4.05A1.7 1.7 0 0 0 19.4 15Z"/></svg>
         <span data-i18n="settings">Settings</span>
         <span id="updateDot" class="update-dot" hidden aria-hidden="true"></span>
@@ -2912,7 +2916,7 @@
       <header class="surface p-5 sm:p-6 mb-6">
       <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
         <div class="flex items-start gap-4">
-          <button id="sidebarDrawerBtn" class="btn btn-ghost md:hidden" type="button" aria-label="Menu" data-i18n-title="menu" aria-controls="appSidebar" aria-expanded="false" onclick="toggleSidebarDrawer()">
+          <button id="sidebarDrawerBtn" class="btn btn-ghost md:hidden" type="button" data-i18n-aria="menu" aria-label="Menu" data-i18n-title="menu" aria-controls="appSidebar" aria-expanded="false" onclick="toggleSidebarDrawer()">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" stroke-linecap="round"/></svg>
           </button>
           <div class="h-11 w-11 flex items-center justify-center">
@@ -2957,7 +2961,7 @@
           <!-- Report window chips: the quick ranges step aside on the Report
                tab, where the window is a period (week/month/year), and these
                chips walk it backwards. Filled by usageReportRenderPeriodChips. -->
-          <div class="quick-range-panel" id="reportPeriodChips" role="toolbar" aria-label="Report window" hidden></div>
+          <div class="quick-range-panel" id="reportPeriodChips" role="toolbar" data-i18n-aria="reportWindow" aria-label="Report window" hidden></div>
 
           <div class="topbar-actions">
             <!-- Top action row: Refresh + 1-Click Light/Dark Theme Switch -->
@@ -2981,7 +2985,7 @@
                       <h2 id="refreshReportTitle" class="refresh-report-title">Refresh complete</h2>
                       <p id="refreshReportMeta" class="refresh-report-meta"></p>
                     </div>
-                    <button id="refreshReportClose" class="refresh-report-close" type="button" aria-label="Close">
+                    <button id="refreshReportClose" class="refresh-report-close" type="button" aria-label="Close refresh report">
                       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
                     </button>
                   </div>
@@ -3001,15 +3005,15 @@
               <!-- Mobile-only entry points: the sidebar (and with it Settings and
                    What's New) is display:none below 768px, so these mirror it in the
                    top action row. Hidden at md+ where the sidebar carries them. -->
-              <button id="mobileSettingsBtn" class="btn btn-ghost compact-control rounded-lg md:hidden" type="button" aria-label="Settings" title="Settings" data-i18n-title="settings" onclick="openSettingsModal()">
+              <button id="mobileSettingsBtn" class="btn btn-ghost compact-control rounded-lg md:hidden" type="button" data-i18n-aria="settings" aria-label="Settings" title="Settings" data-i18n-title="settings" onclick="openSettingsModal()">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-purple-400" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l-2.86 2.86A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1.4 1.6H9.55a1.7 1.7 0 0 0-1.08-1.66 1.7 1.7 0 0 0-1.88.34l-2.86-2.86A1.7 1.7 0 0 0 4.07 15a1.7 1.7 0 0 0-1.77-1.4V9.55a1.7 1.7 0 0 0 1.66-1.08 1.7 1.7 0 0 0-.34-1.88l2.86-2.86A1.7 1.7 0 0 0 8.36 4.07 1.7 1.7 0 0 0 9.76 2.3h4.05a1.7 1.7 0 0 0 1.08 1.66 1.7 1.7 0 0 0 1.88-.34l2.86 2.86a1.7 1.7 0 0 0-.34 1.88 1.7 1.7 0 0 0 1.77 1.4v4.05A1.7 1.7 0 0 0 19.4 15Z"/></svg>
               </button>
-              <button id="mobileReleaseNotesBtn" class="btn btn-ghost compact-control rounded-lg md:hidden" type="button" aria-label="What's New" title="What's New" data-i18n-title="whatsNew" onclick="openReleaseNotesModal()">
+              <button id="mobileReleaseNotesBtn" class="btn btn-ghost compact-control rounded-lg md:hidden" type="button" data-i18n-aria="whatsNew" aria-label="What's new" title="What's new" data-i18n-title="whatsNew" onclick="openReleaseNotesModal()">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-indigo-400" aria-hidden="true"><path d="M6.5 4.5h11a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2Z"/><path d="M8 9h8M8 12h8M8 15h5"/></svg>
               </button>
 
               <!-- Quick Theme Mode Toggle (Sun/Moon) -->
-              <button id="themeToggleQuick" class="btn btn-ghost compact-control rounded-lg" type="button" aria-label="Toggle light or dark theme" title="Toggle Light / Dark mode" onclick="toggleThemeQuick()">
+              <button id="themeToggleQuick" class="btn btn-ghost compact-control rounded-lg" type="button" data-i18n-aria="toggleLightDark" aria-label="Toggle Light / Dark mode" data-i18n-title="toggleLightDark" title="Toggle Light / Dark mode" onclick="toggleThemeQuick()">
                 <svg id="themeQuickSun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-amber-500" style="display:none;"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
                 <svg id="themeQuickMoon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-indigo-400"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
               </button>
@@ -3042,7 +3046,7 @@
       </div>
 
       <!-- Tabs -->
-      <nav class="mt-5 flex flex-wrap gap-2" aria-label="Dashboard sections">
+      <nav id="dashboardSectionNav" class="mt-5 flex flex-wrap gap-2" data-i18n-aria="dashboardSections" aria-label="Dashboard sections">
         <button class="tab-btn" data-tab="overview" aria-selected="true" data-i18n="overview">Overview</button>
         <button class="tab-btn" data-tab="sessions" aria-selected="false" data-i18n="sessionsPage">Sessions</button>
         <button class="tab-btn" data-tab="stats" aria-selected="false" data-i18n="stats">Stats</button>
@@ -3062,7 +3066,7 @@
           <div class="flex items-center justify-between">
             <div class="text-[11px] font-semibold uppercase tracking-wider flex items-center gap-1.5" style="color: var(--color-label);">
               <span data-i18n="totalTokens">Total Tokens</span>
-              <span id="tokensDeltaPulseDot" class="w-2 h-2 rounded-full bg-indigo-400" style="display:none;" title="Live token update"></span>
+              <span id="tokensDeltaPulseDot" class="w-2 h-2 rounded-full bg-indigo-400" style="display:none;" data-i18n-title="liveTokenUpdate" title="Live token update"></span>
             </div>
           </div>
           <div id="totalTokensWrap" class="overview-token-value-wrap" data-readable="true">
@@ -3105,7 +3109,7 @@
           <div class="flex items-center justify-between">
             <div class="text-[11px] font-semibold uppercase tracking-wider flex items-center gap-1" style="color: var(--color-label);">
               <span data-i18n="avgCacheHitRate">Avg Cache Hit Rate</span>
-              <span class="cursor-help select-none" style="opacity:0.6;" data-i18n-title="cacheHitRateHint" title="Share of prompt input served from cache (cache reads ÷ all prompt input). Cache writes count as misses; output excluded.">ⓘ</span>
+              <span class="cursor-help select-none" style="opacity:0.6;" data-i18n-title="cacheHitRateHint" title="Share of prompt input served from cache (cache reads ÷ all prompt input). Cache writes count as misses; output excluded. Sources without cache data show n/a.">ⓘ</span>
             </div>
             <span class="text-[9px] px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-400 font-mono font-bold">92%</span>
           </div>
@@ -3137,10 +3141,10 @@
         </div>
         <!-- Segmented bar -->
         <div class="h-2.5 w-full rounded-full overflow-hidden flex mb-3.5 shadow-inner" id="tokenCompositionBar">
-          <div id="compPromptBar" class="h-full bg-indigo-500 transition-all duration-500" style="width: 50%;" title="Prompt Tokens"></div>
-          <div id="compCacheBar" class="h-full bg-emerald-500 transition-all duration-500" style="width: 25%;" title="Cache Read Tokens"></div>
-          <div id="compOutputBar" class="h-full bg-amber-500 transition-all duration-500" style="width: 15%;" title="Output Tokens"></div>
-          <div id="compReasoningBar" class="h-full bg-purple-500 transition-all duration-500" style="width: 10%;" title="Reasoning Tokens"></div>
+          <div id="compPromptBar" class="h-full bg-indigo-500 transition-all duration-500" style="width: 50%;" data-i18n-title="input" title="Input"></div>
+          <div id="compCacheBar" class="h-full bg-emerald-500 transition-all duration-500" style="width: 25%;" data-i18n-title="cacheRead" title="Cache Read"></div>
+          <div id="compOutputBar" class="h-full bg-amber-500 transition-all duration-500" style="width: 15%;" data-i18n-title="output" title="Output"></div>
+          <div id="compReasoningBar" class="h-full bg-purple-500 transition-all duration-500" style="width: 10%;" data-i18n-title="reasoning" title="Reasoning"></div>
         </div>
         <!-- Legend pills with counts -->
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
@@ -3184,9 +3188,9 @@
           </div>
           <div class="tool-chart-shell">
             <div class="tool-chart-canvas">
-              <canvas id="toolChart" aria-label="Usage by tool chart" role="img"></canvas>
+              <canvas id="toolChart" data-i18n-aria="usageByTool" aria-label="Usage by Tool" role="img"></canvas>
             </div>
-            <div id="toolChartLegend" class="tool-chart-legend" role="list" aria-label="Tool chart legend"></div>
+            <div id="toolChartLegend" class="tool-chart-legend" role="list" data-i18n-aria="toolChartLegend" aria-label="Tool chart legend"></div>
           </div>
         </div>
 
@@ -3196,7 +3200,7 @@
             <div class="text-xs" style="color: var(--color-muted);" data-i18n="usd">USD</div>
           </div>
           <div class="h-[280px]">
-            <canvas id="modelChart" aria-label="Top models by cost chart" role="img"></canvas>
+            <canvas id="modelChart" data-i18n-aria="topModelsByCost" aria-label="Top Models by Cost" role="img"></canvas>
           </div>
         </div>
       </section>
@@ -3234,7 +3238,7 @@
             </div>
             <div id="overviewProfileScroller" class="overview-profile-scroll">
               <div id="overviewProfileGridWrap" class="overview-profile-grid-wrap">
-                <div id="overviewProfileGrid" class="overview-profile-grid" role="grid" aria-label="Token activity"></div>
+                <div id="overviewProfileGrid" class="overview-profile-grid" role="grid" data-i18n-aria="tokenActivity" aria-label="Token activity"></div>
                 <div id="overviewProfileWeekHits" class="profile-activity-week-hits overview-profile-week-hits" hidden></div>
               </div>
               <div id="overviewProfileLegend" class="profile-activity-legend overview-profile-legend"></div>
@@ -3251,7 +3255,7 @@
       <section class="surface p-5 mb-6">
         <h2 class="text-base font-extrabold mono mb-4" data-i18n="toolsBreakdown">Tools Breakdown</h2>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm" aria-label="Tools breakdown table">
+          <table class="w-full text-sm" data-i18n-aria="toolsBreakdown" aria-label="Tools Breakdown">
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
                 <th class="text-left py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="tool" data-sortable="tool">Tool</th>
@@ -3282,7 +3286,7 @@
           <button id="combinedModelsToggle" class="btn btn-ghost" type="button" style="min-height: 36px; padding: 6px 10px; font-size: 12px; display:none;" data-i18n="showAll">Show all</button>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm" aria-label="Combined models table">
+          <table class="w-full text-sm" data-i18n-aria="combinedModels" aria-label="Combined Models">
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
                 <th class="text-left py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="model" data-sortable="name">Model</th>
@@ -3310,7 +3314,7 @@
           <button class="modern-tool-pill active" type="button" data-tool="all" onclick="filterSessionPanels('all', this)" data-i18n="allTools">All Tools</button>
         </div>
         <div class="flex items-center gap-2 flex-shrink-0">
-          <input type="text" id="sessionSearchInput" class="ui-input text-xs py-1.5 px-3 rounded-lg" placeholder="Search sessions/projects..." oninput="filterSessionsBySearch(this.value)" />
+          <input type="text" id="sessionSearchInput" class="ui-input text-xs py-1.5 px-3 rounded-lg" data-i18n-placeholder="searchSessions" placeholder="Search sessions/projects..." oninput="filterSessionsBySearch(this.value)" />
           <button id="sessionsExpandAll" class="btn btn-ghost" type="button" data-i18n="sessionsExpandAll">Expand all</button>
           <button id="sessionsCollapseAll" class="btn btn-ghost" type="button" data-i18n="sessionsCollapseAll">Collapse all</button>
         </div>
@@ -3367,7 +3371,7 @@
           </div>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm session-table" aria-label="Codex sessions table" data-panel="codex">
+          <table class="w-full text-sm session-table" data-i18n-aria="codexSessions" aria-label="Codex Sessions" data-panel="codex">
             <colgroup><col style="width:16%"><col style="width:10%"><col style="width:9%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:10%"><col style="width:8%"><col style="width:9%"><col style="width:12%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
@@ -3379,7 +3383,7 @@
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="output" data-sortable="tokens_out">Output</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="total" data-sortable="tokens">Total</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cost" data-sortable="cost">Cost</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="activeTimeColumn" data-i18n-title="activeTimeHint" data-sortable="active_ms" title="Estimated from gaps between token events, each counted up to the idle cap (5 min by default).">Active (est.)</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="activeTimeColumn" data-i18n-title="activeTimeHint" data-sortable="active_ms" title="Estimate from the gaps between token events: each gap counts up to the idle cap (5 min by default). A short pause reads the same as work, one long operation is truncated at the cap, and a session with a single event measures zero.">Active (est.)</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="lastUpdated" data-sortable="last_seen_at">Last updated</th>
               </tr>
             </thead>
@@ -3437,7 +3441,7 @@
           </div>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm session-table" aria-label="Claude Code sessions table" data-panel="claude">
+          <table class="w-full text-sm session-table" data-i18n-aria="claudeSessions" aria-label="Claude Code Sessions" data-panel="claude">
             <colgroup><col style="width:16%"><col style="width:10%"><col style="width:9%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:10%"><col style="width:8%"><col style="width:9%"><col style="width:12%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
@@ -3449,7 +3453,7 @@
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="output" data-sortable="tokens_out">Output</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="total" data-sortable="tokens">Total</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cost" data-sortable="cost">Cost</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="activeTimeColumn" data-i18n-title="activeTimeHint" data-sortable="active_ms" title="Estimated from gaps between token events, each counted up to the idle cap (5 min by default).">Active (est.)</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="activeTimeColumn" data-i18n-title="activeTimeHint" data-sortable="active_ms" title="Estimate from the gaps between token events: each gap counts up to the idle cap (5 min by default). A short pause reads the same as work, one long operation is truncated at the cap, and a session with a single event measures zero.">Active (est.)</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="lastUpdated" data-sortable="last_seen_at">Last updated</th>
               </tr>
             </thead>
@@ -3507,7 +3511,7 @@
           </div>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm session-table" aria-label="OpenCode sessions table" data-panel="opencode">
+          <table class="w-full text-sm session-table" data-i18n-aria="opencodeSessions" aria-label="OpenCode Sessions" data-panel="opencode">
             <colgroup><col style="width:16%"><col style="width:10%"><col style="width:9%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:10%"><col style="width:8%"><col style="width:9%"><col style="width:12%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
@@ -3519,7 +3523,7 @@
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="output" data-sortable="tokens_out">Output</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="total" data-sortable="tokens">Total</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cost" data-sortable="cost">Cost</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="activeTimeColumn" data-i18n-title="activeTimeHint" data-sortable="active_ms" title="Estimated from gaps between token events, each counted up to the idle cap (5 min by default).">Active (est.)</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="activeTimeColumn" data-i18n-title="activeTimeHint" data-sortable="active_ms" title="Estimate from the gaps between token events: each gap counts up to the idle cap (5 min by default). A short pause reads the same as work, one long operation is truncated at the cap, and a session with a single event measures zero.">Active (est.)</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="lastUpdated" data-sortable="last_seen_at">Last updated</th>
               </tr>
             </thead>
@@ -3577,7 +3581,7 @@
           </div>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm session-table" aria-label="Pi sessions table" data-panel="pi_agent">
+          <table class="w-full text-sm session-table" data-i18n-aria="piSessions" aria-label="Pi Sessions" data-panel="pi_agent">
             <colgroup><col style="width:16%"><col style="width:10%"><col style="width:9%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:10%"><col style="width:8%"><col style="width:9%"><col style="width:12%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
@@ -3589,7 +3593,7 @@
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="output" data-sortable="tokens_out">Output</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="total" data-sortable="tokens">Total</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cost" data-sortable="cost">Cost</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="activeTimeColumn" data-i18n-title="activeTimeHint" data-sortable="active_ms" title="Estimated from gaps between token events, each counted up to the idle cap (5 min by default).">Active (est.)</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="activeTimeColumn" data-i18n-title="activeTimeHint" data-sortable="active_ms" title="Estimate from the gaps between token events: each gap counts up to the idle cap (5 min by default). A short pause reads the same as work, one long operation is truncated at the cap, and a session with a single event measures zero.">Active (est.)</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="lastUpdated" data-sortable="last_seen_at">Last updated</th>
               </tr>
             </thead>
@@ -3647,7 +3651,7 @@
           </div>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm session-table" aria-label="Mimo sessions table" data-panel="mimo">
+          <table class="w-full text-sm session-table" data-i18n-aria="mimoSessions" aria-label="Mimo Sessions" data-panel="mimo">
             <colgroup><col style="width:16%"><col style="width:10%"><col style="width:9%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:10%"><col style="width:8%"><col style="width:9%"><col style="width:12%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
@@ -3659,7 +3663,7 @@
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="output" data-sortable="tokens_out">Output</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="total" data-sortable="tokens">Total</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cost" data-sortable="cost">Cost</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="activeTimeColumn" data-i18n-title="activeTimeHint" data-sortable="active_ms" title="Estimated from gaps between token events, each counted up to the idle cap (5 min by default).">Active (est.)</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="activeTimeColumn" data-i18n-title="activeTimeHint" data-sortable="active_ms" title="Estimate from the gaps between token events: each gap counts up to the idle cap (5 min by default). A short pause reads the same as work, one long operation is truncated at the cap, and a session with a single event measures zero.">Active (est.)</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="lastUpdated" data-sortable="last_seen_at">Last updated</th>
               </tr>
             </thead>
@@ -3717,7 +3721,7 @@
           </div>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm session-table" aria-label="Kimi sessions table" data-panel="kimi">
+          <table class="w-full text-sm session-table" data-i18n-aria="kimiSessions" aria-label="Kimi Sessions" data-panel="kimi">
             <colgroup><col style="width:16%"><col style="width:10%"><col style="width:9%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:10%"><col style="width:8%"><col style="width:9%"><col style="width:12%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
@@ -3729,7 +3733,7 @@
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="output" data-sortable="tokens_out">Output</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="total" data-sortable="tokens">Total</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cost" data-sortable="cost">Cost</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="activeTimeColumn" data-i18n-title="activeTimeHint" data-sortable="active_ms" title="Estimated from gaps between token events, each counted up to the idle cap (5 min by default).">Active (est.)</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="activeTimeColumn" data-i18n-title="activeTimeHint" data-sortable="active_ms" title="Estimate from the gaps between token events: each gap counts up to the idle cap (5 min by default). A short pause reads the same as work, one long operation is truncated at the cap, and a session with a single event measures zero.">Active (est.)</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="lastUpdated" data-sortable="last_seen_at">Last updated</th>
               </tr>
             </thead>
@@ -3787,7 +3791,7 @@
           </div>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm session-table" aria-label="DeepSeek Harness sessions table" data-panel="dsh">
+          <table class="w-full text-sm session-table" data-i18n-aria="dshSessions" aria-label="DeepSeek Harness Sessions" data-panel="dsh">
             <colgroup><col style="width:16%"><col style="width:10%"><col style="width:9%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:10%"><col style="width:8%"><col style="width:9%"><col style="width:12%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
@@ -3799,7 +3803,7 @@
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="output" data-sortable="tokens_out">Output</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="total" data-sortable="tokens">Total</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cost" data-sortable="cost">Cost</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="activeTimeColumn" data-i18n-title="activeTimeHint" data-sortable="active_ms" title="Estimated from gaps between token events, each counted up to the idle cap (5 min by default).">Active (est.)</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="activeTimeColumn" data-i18n-title="activeTimeHint" data-sortable="active_ms" title="Estimate from the gaps between token events: each gap counts up to the idle cap (5 min by default). A short pause reads the same as work, one long operation is truncated at the cap, and a session with a single event measures zero.">Active (est.)</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="lastUpdated" data-sortable="last_seen_at">Last updated</th>
               </tr>
             </thead>
@@ -3857,7 +3861,7 @@
           </div>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm session-table" aria-label="Reasonix sessions table" data-panel="reasonix">
+          <table class="w-full text-sm session-table" data-i18n-aria="reasonixSessions" aria-label="Reasonix Sessions" data-panel="reasonix">
             <colgroup><col style="width:16%"><col style="width:10%"><col style="width:9%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:10%"><col style="width:8%"><col style="width:9%"><col style="width:12%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
@@ -3869,7 +3873,7 @@
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="output" data-sortable="tokens_out">Output</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="total" data-sortable="tokens">Total</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cost" data-sortable="cost">Cost</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="activeTimeColumn" data-i18n-title="activeTimeHint" data-sortable="active_ms" title="Estimated from gaps between token events, each counted up to the idle cap (5 min by default).">Active (est.)</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="activeTimeColumn" data-i18n-title="activeTimeHint" data-sortable="active_ms" title="Estimate from the gaps between token events: each gap counts up to the idle cap (5 min by default). A short pause reads the same as work, one long operation is truncated at the cap, and a session with a single event measures zero.">Active (est.)</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="lastUpdated" data-sortable="last_seen_at">Last updated</th>
               </tr>
             </thead>
@@ -3927,7 +3931,7 @@
           </div>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm session-table" aria-label="ZCode sessions table" data-panel="zcode">
+          <table class="w-full text-sm session-table" data-i18n-aria="zcodeSessions" aria-label="ZCode Sessions" data-panel="zcode">
             <colgroup><col style="width:16%"><col style="width:10%"><col style="width:9%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:10%"><col style="width:8%"><col style="width:9%"><col style="width:12%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
@@ -3939,7 +3943,7 @@
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="output" data-sortable="tokens_out">Output</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="total" data-sortable="tokens">Total</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cost" data-sortable="cost">Cost</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="activeTimeColumn" data-i18n-title="activeTimeHint" data-sortable="active_ms" title="Estimated from gaps between token events, each counted up to the idle cap (5 min by default).">Active (est.)</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="activeTimeColumn" data-i18n-title="activeTimeHint" data-sortable="active_ms" title="Estimate from the gaps between token events: each gap counts up to the idle cap (5 min by default). A short pause reads the same as work, one long operation is truncated at the cap, and a session with a single event measures zero.">Active (est.)</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="lastUpdated" data-sortable="last_seen_at">Last updated</th>
               </tr>
             </thead>
@@ -3997,7 +4001,7 @@
           </div>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm session-table" aria-label="Kilo Code sessions table" data-panel="kilocode">
+          <table class="w-full text-sm session-table" data-i18n-aria="kilocodeSessions" aria-label="Kilo Code Sessions" data-panel="kilocode">
             <colgroup><col style="width:16%"><col style="width:10%"><col style="width:9%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:10%"><col style="width:8%"><col style="width:9%"><col style="width:12%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
@@ -4009,7 +4013,7 @@
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="output" data-sortable="tokens_out">Output</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="total" data-sortable="tokens">Total</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cost" data-sortable="cost">Cost</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="activeTimeColumn" data-i18n-title="activeTimeHint" data-sortable="active_ms" title="Estimated from gaps between token events, each counted up to the idle cap (5 min by default).">Active (est.)</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="activeTimeColumn" data-i18n-title="activeTimeHint" data-sortable="active_ms" title="Estimate from the gaps between token events: each gap counts up to the idle cap (5 min by default). A short pause reads the same as work, one long operation is truncated at the cap, and a session with a single event measures zero.">Active (est.)</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="lastUpdated" data-sortable="last_seen_at">Last updated</th>
               </tr>
             </thead>
@@ -4067,7 +4071,7 @@
           </div>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm session-table" aria-label="omp sessions table" data-panel="omp">
+          <table class="w-full text-sm session-table" data-i18n-aria="ompSessions" aria-label="OMP Sessions" data-panel="omp">
             <colgroup><col style="width:16%"><col style="width:10%"><col style="width:9%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:10%"><col style="width:8%"><col style="width:9%"><col style="width:12%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
@@ -4079,7 +4083,7 @@
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="output" data-sortable="tokens_out">Output</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="total" data-sortable="tokens">Total</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cost" data-sortable="cost">Cost</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="activeTimeColumn" data-i18n-title="activeTimeHint" data-sortable="active_ms" title="Estimated from gaps between token events, each counted up to the idle cap (5 min by default).">Active (est.)</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="activeTimeColumn" data-i18n-title="activeTimeHint" data-sortable="active_ms" title="Estimate from the gaps between token events: each gap counts up to the idle cap (5 min by default). A short pause reads the same as work, one long operation is truncated at the cap, and a session with a single event measures zero.">Active (est.)</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="lastUpdated" data-sortable="last_seen_at">Last updated</th>
               </tr>
             </thead>
@@ -4137,7 +4141,7 @@
           </div>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm session-table" aria-label="Grok Build sessions table" data-panel="grok">
+          <table class="w-full text-sm session-table" data-i18n-aria="grokSessions" aria-label="Grok Build Sessions" data-panel="grok">
             <colgroup><col style="width:16%"><col style="width:10%"><col style="width:9%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:10%"><col style="width:8%"><col style="width:9%"><col style="width:12%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
@@ -4149,7 +4153,7 @@
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="output" data-sortable="tokens_out">Output</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="total" data-sortable="tokens">Total</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cost" data-sortable="cost">Cost</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="activeTimeColumn" data-i18n-title="activeTimeHint" data-sortable="active_ms" title="Estimated from gaps between token events, each counted up to the idle cap (5 min by default).">Active (est.)</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="activeTimeColumn" data-i18n-title="activeTimeHint" data-sortable="active_ms" title="Estimate from the gaps between token events: each gap counts up to the idle cap (5 min by default). A short pause reads the same as work, one long operation is truncated at the cap, and a session with a single event measures zero.">Active (est.)</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="lastUpdated" data-sortable="last_seen_at">Last updated</th>
               </tr>
             </thead>
@@ -4207,7 +4211,7 @@
           </div>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm session-table" aria-label="Hermes sessions table" data-panel="hermes">
+          <table class="w-full text-sm session-table" data-i18n-aria="hermesSessions" aria-label="Hermes Sessions" data-panel="hermes">
             <colgroup><col style="width:16%"><col style="width:10%"><col style="width:9%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:10%"><col style="width:8%"><col style="width:9%"><col style="width:12%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
@@ -4219,7 +4223,7 @@
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="output" data-sortable="tokens_out">Output</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="total" data-sortable="tokens">Total</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cost" data-sortable="cost">Cost</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="activeTimeColumn" data-i18n-title="activeTimeHint" data-sortable="active_ms" title="Estimated from gaps between token events, each counted up to the idle cap (5 min by default).">Active (est.)</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="activeTimeColumn" data-i18n-title="activeTimeHint" data-sortable="active_ms" title="Estimate from the gaps between token events: each gap counts up to the idle cap (5 min by default). A short pause reads the same as work, one long operation is truncated at the cap, and a session with a single event measures zero.">Active (est.)</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="lastUpdated" data-sortable="last_seen_at">Last updated</th>
               </tr>
             </thead>
@@ -4277,7 +4281,7 @@
           </div>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm session-table" aria-label="Antigravity sessions table" data-panel="antigravity_cli">
+          <table class="w-full text-sm session-table" data-i18n-aria="antigravityCliSessions" aria-label="Antigravity Sessions" data-panel="antigravity_cli">
             <colgroup><col style="width:16%"><col style="width:10%"><col style="width:9%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:10%"><col style="width:8%"><col style="width:9%"><col style="width:12%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
@@ -4289,7 +4293,7 @@
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="output" data-sortable="tokens_out">Output</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="total" data-sortable="tokens">Total</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cost" data-sortable="cost">Cost</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="activeTimeColumn" data-i18n-title="activeTimeHint" data-sortable="active_ms" title="Estimated from gaps between token events, each counted up to the idle cap (5 min by default).">Active (est.)</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="activeTimeColumn" data-i18n-title="activeTimeHint" data-sortable="active_ms" title="Estimate from the gaps between token events: each gap counts up to the idle cap (5 min by default). A short pause reads the same as work, one long operation is truncated at the cap, and a session with a single event measures zero.">Active (est.)</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="lastUpdated" data-sortable="last_seen_at">Last updated</th>
               </tr>
             </thead>
@@ -4347,7 +4351,7 @@
           </div>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm session-table" aria-label="Cline sessions table" data-panel="cline">
+          <table class="w-full text-sm session-table" data-i18n-aria="clineSessions" aria-label="Cline Sessions" data-panel="cline">
             <colgroup><col style="width:16%"><col style="width:10%"><col style="width:9%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:10%"><col style="width:8%"><col style="width:9%"><col style="width:12%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
@@ -4359,7 +4363,7 @@
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="output" data-sortable="tokens_out">Output</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="total" data-sortable="tokens">Total</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cost" data-sortable="cost">Cost</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="activeTimeColumn" data-i18n-title="activeTimeHint" data-sortable="active_ms" title="Estimated from gaps between token events, each counted up to the idle cap (5 min by default).">Active (est.)</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="activeTimeColumn" data-i18n-title="activeTimeHint" data-sortable="active_ms" title="Estimate from the gaps between token events: each gap counts up to the idle cap (5 min by default). A short pause reads the same as work, one long operation is truncated at the cap, and a session with a single event measures zero.">Active (est.)</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="lastUpdated" data-sortable="last_seen_at">Last updated</th>
               </tr>
             </thead>
@@ -4417,7 +4421,7 @@
           </div>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm session-table" aria-label="WorkBuddy sessions table" data-panel="workbuddy">
+          <table class="w-full text-sm session-table" data-i18n-aria="workbuddySessions" aria-label="WorkBuddy Sessions" data-panel="workbuddy">
             <colgroup><col style="width:16%"><col style="width:10%"><col style="width:9%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:10%"><col style="width:8%"><col style="width:9%"><col style="width:12%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
@@ -4429,7 +4433,7 @@
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="output" data-sortable="tokens_out">Output</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="total" data-sortable="tokens">Total</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cost" data-sortable="cost">Cost</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="activeTimeColumn" data-i18n-title="activeTimeHint" data-sortable="active_ms" title="Estimated from gaps between token events, each counted up to the idle cap (5 min by default).">Active (est.)</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="activeTimeColumn" data-i18n-title="activeTimeHint" data-sortable="active_ms" title="Estimate from the gaps between token events: each gap counts up to the idle cap (5 min by default). A short pause reads the same as work, one long operation is truncated at the cap, and a session with a single event measures zero.">Active (est.)</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="lastUpdated" data-sortable="last_seen_at">Last updated</th>
               </tr>
             </thead>
@@ -4487,7 +4491,7 @@
           </div>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm session-table" aria-label="Qoder IDE sessions table" data-panel="qoder">
+          <table class="w-full text-sm session-table" data-i18n-aria="qoderSessions" aria-label="Qoder IDE Sessions" data-panel="qoder">
             <colgroup><col style="width:16%"><col style="width:10%"><col style="width:9%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:10%"><col style="width:8%"><col style="width:9%"><col style="width:12%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
@@ -4499,7 +4503,7 @@
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="output" data-sortable="tokens_out">Output</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="total" data-sortable="tokens">Total</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cost" data-sortable="cost">Cost</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="activeTimeColumn" data-i18n-title="activeTimeHint" data-sortable="active_ms" title="Estimated from gaps between token events, each counted up to the idle cap (5 min by default).">Active (est.)</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="activeTimeColumn" data-i18n-title="activeTimeHint" data-sortable="active_ms" title="Estimate from the gaps between token events: each gap counts up to the idle cap (5 min by default). A short pause reads the same as work, one long operation is truncated at the cap, and a session with a single event measures zero.">Active (est.)</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="lastUpdated" data-sortable="last_seen_at">Last updated</th>
               </tr>
             </thead>
@@ -4557,7 +4561,7 @@
           </div>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm session-table" aria-label="Qwen Code sessions table" data-panel="qwen_code">
+          <table class="w-full text-sm session-table" data-i18n-aria="qwenCodeSessions" aria-label="Qwen Code Sessions" data-panel="qwen_code">
             <colgroup><col style="width:16%"><col style="width:10%"><col style="width:9%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:10%"><col style="width:8%"><col style="width:9%"><col style="width:12%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
@@ -4569,7 +4573,7 @@
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="output" data-sortable="tokens_out">Output</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="total" data-sortable="tokens">Total</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cost" data-sortable="cost">Cost</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="activeTimeColumn" data-i18n-title="activeTimeHint" data-sortable="active_ms" title="Estimated from gaps between token events, each counted up to the idle cap (5 min by default).">Active (est.)</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="activeTimeColumn" data-i18n-title="activeTimeHint" data-sortable="active_ms" title="Estimate from the gaps between token events: each gap counts up to the idle cap (5 min by default). A short pause reads the same as work, one long operation is truncated at the cap, and a session with a single event measures zero.">Active (est.)</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="lastUpdated" data-sortable="last_seen_at">Last updated</th>
               </tr>
             </thead>
@@ -4627,7 +4631,7 @@
           </div>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm session-table" aria-label="OpenClaw sessions table" data-panel="openclaw">
+          <table class="w-full text-sm session-table" data-i18n-aria="openclawSessions" aria-label="OpenClaw Sessions" data-panel="openclaw">
             <colgroup><col style="width:16%"><col style="width:10%"><col style="width:9%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:10%"><col style="width:8%"><col style="width:9%"><col style="width:12%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
@@ -4639,7 +4643,7 @@
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="output" data-sortable="tokens_out">Output</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="total" data-sortable="tokens">Total</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cost" data-sortable="cost">Cost</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="activeTimeColumn" data-i18n-title="activeTimeHint" data-sortable="active_ms" title="Estimated from gaps between token events, each counted up to the idle cap (5 min by default).">Active (est.)</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="activeTimeColumn" data-i18n-title="activeTimeHint" data-sortable="active_ms" title="Estimate from the gaps between token events: each gap counts up to the idle cap (5 min by default). A short pause reads the same as work, one long operation is truncated at the cap, and a session with a single event measures zero.">Active (est.)</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="lastUpdated" data-sortable="last_seen_at">Last updated</th>
               </tr>
             </thead>
@@ -4697,7 +4701,7 @@
           </div>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm session-table" aria-label="Qoder CLI sessions table" data-panel="qoder_cli">
+          <table class="w-full text-sm session-table" data-i18n-aria="qoderCliSessions" aria-label="Qoder CLI Sessions" data-panel="qoder_cli">
             <colgroup><col style="width:16%"><col style="width:10%"><col style="width:9%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:10%"><col style="width:8%"><col style="width:9%"><col style="width:12%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
@@ -4709,7 +4713,7 @@
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="output" data-sortable="tokens_out">Output</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="total" data-sortable="tokens">Total</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cost" data-sortable="cost">Cost</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="activeTimeColumn" data-i18n-title="activeTimeHint" data-sortable="active_ms" title="Estimated from gaps between token events, each counted up to the idle cap (5 min by default).">Active (est.)</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="activeTimeColumn" data-i18n-title="activeTimeHint" data-sortable="active_ms" title="Estimate from the gaps between token events: each gap counts up to the idle cap (5 min by default). A short pause reads the same as work, one long operation is truncated at the cap, and a session with a single event measures zero.">Active (est.)</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="lastUpdated" data-sortable="last_seen_at">Last updated</th>
               </tr>
             </thead>
@@ -4767,7 +4771,7 @@
           </div>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm session-table" aria-label="Combined sessions table" data-panel="combined">
+          <table class="w-full text-sm session-table" data-i18n-aria="combinedSessions" aria-label="Combined Sessions" data-panel="combined">
             <colgroup><col style="width:15%"><col style="width:8%"><col style="width:9%"><col style="width:8%"><col style="width:8%"><col style="width:7%"><col style="width:8%"><col style="width:9%"><col style="width:8%"><col style="width:8%"><col style="width:12%"></colgroup>
             <thead>
               <tr class="border-b" style="border-color: var(--color-border);">
@@ -4780,7 +4784,7 @@
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="output" data-sortable="tokens_out">Output</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="total" data-sortable="tokens">Total</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="cost" data-sortable="cost">Cost</th>
-                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="activeTimeColumn" data-i18n-title="activeTimeHint" data-sortable="active_ms" title="Estimated from gaps between token events, each counted up to the idle cap (5 min by default).">Active (est.)</th>
+                <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="activeTimeColumn" data-i18n-title="activeTimeHint" data-sortable="active_ms" title="Estimate from the gaps between token events: each gap counts up to the idle cap (5 min by default). A short pause reads the same as work, one long operation is truncated at the cap, and a session with a single event measures zero.">Active (est.)</th>
                 <th class="text-right py-3 px-4 font-semibold" style="color: var(--color-muted);" data-i18n="lastUpdated" data-sortable="last_seen_at">Last updated</th>
               </tr>
             </thead>
@@ -4899,7 +4903,7 @@
             </div>
             <div id="profileActivityScroller" class="profile-activity-scroll">
               <div class="profile-activity-grid-wrap">
-                <div id="profileActivityGrid" class="profile-activity-grid" role="grid" aria-label="Token activity"></div>
+                <div id="profileActivityGrid" class="profile-activity-grid" role="grid" data-i18n-aria="tokenActivity" aria-label="Token activity"></div>
                 <div id="profileActivityWeekHits" class="profile-activity-week-hits" hidden></div>
               </div>
               <div id="profileActivityMonths" class="profile-activity-months" aria-hidden="true"></div>
@@ -4919,9 +4923,9 @@
         <!-- Month view -->
         <div id="calendarMonthView">
           <div class="flex items-center gap-3 mb-4">
-            <button id="prevMonth" class="btn btn-ghost px-3" type="button" aria-label="Previous month">←</button>
+            <button id="prevMonth" class="btn btn-ghost px-3" type="button" data-i18n-aria="previousMonth" aria-label="Previous month">←</button>
             <h3 id="monthTitle" class="text-lg font-extrabold mono mx-auto">—</h3>
-            <button id="nextMonth" class="btn btn-ghost px-3" type="button" aria-label="Next month">→</button>
+            <button id="nextMonth" class="btn btn-ghost px-3" type="button" data-i18n-aria="nextMonth" aria-label="Next month">→</button>
           </div>
 
           <div class="grid grid-cols-1 lg:grid-cols-[1fr,auto] gap-6">
@@ -4995,9 +4999,9 @@
         <!-- Year view -->
         <div id="calendarYearView" style="display:none;">
           <div class="flex items-center gap-3 mb-4">
-            <button id="prevYear" class="btn btn-ghost px-3" type="button" aria-label="Previous year">←</button>
+            <button id="prevYear" class="btn btn-ghost px-3" type="button" data-i18n-aria="previousYear" aria-label="Previous year">←</button>
             <h3 id="yearTitle" class="text-lg font-extrabold mono mx-auto">—</h3>
-            <button id="nextYear" class="btn btn-ghost px-3" type="button" aria-label="Next year">→</button>
+            <button id="nextYear" class="btn btn-ghost px-3" type="button" data-i18n-aria="nextYear" aria-label="Next year">→</button>
           </div>
 
           <div class="flex items-center justify-between gap-4 mb-3">
@@ -5018,7 +5022,7 @@
           <div class="surface p-5 mt-6">
             <h4 class="text-sm font-extrabold uppercase tracking-wider mb-4" style="color: var(--color-label);" data-i18n="monthlyTotals">Monthly Totals</h4>
             <div class="overflow-x-auto">
-              <table class="w-full text-sm" aria-label="Monthly totals table">
+              <table class="w-full text-sm" data-i18n-aria="monthlyTotals" aria-label="Monthly Totals">
                 <thead>
                   <tr class="border-b" style="border-color: var(--color-border);">
                     <th class="text-left py-2 px-3 font-semibold" style="color: var(--color-muted);" data-i18n="month">Month</th>
@@ -5082,7 +5086,7 @@
           <div class="surface p-5">
             <div class="flex items-center justify-between mb-3">
               <h3 class="text-base font-extrabold mono" data-i18n="dayDetails">Day Details</h3>
-              <button id="closeDayDetails" class="btn btn-ghost" type="button" aria-label="Close day details" data-i18n="close">Close</button>
+              <button id="closeDayDetails" class="btn btn-ghost" type="button" data-i18n-aria="closeDayDetails" aria-label="Close day details" data-i18n="close">Close</button>
             </div>
             <div id="dayDetailsContent"></div>
           </div>
@@ -5106,7 +5110,7 @@
               <span data-i18n="usageReportServerLabel">Server</span>
               <select id="usageReportServer" class="ui-input compact-control"></select>
             </label>
-            <div class="usage-report-seg" id="usageReportPeriod" role="group" aria-label="Report period">
+            <div class="usage-report-seg" id="usageReportPeriod" role="group" data-i18n-aria="usageReportPeriod" aria-label="Report period">
               <button type="button" data-period="week" data-i18n="usageReportPeriodWeek">Week</button>
               <button type="button" data-period="month" data-i18n="usageReportPeriodMonth">Month</button>
               <button type="button" data-period="year" data-i18n="usageReportPeriodYear">Year</button>
@@ -5252,7 +5256,7 @@
     <!-- Quota Tab -->
     <div id="quota-content" class="tab-content">
       <div id="quotaGlobalControls" class="flex flex-wrap items-center justify-end gap-2 mb-4">
-        <select id="quotaRangeSelect" class="ui-input compact-control" aria-label="Quota history range">
+        <select id="quotaRangeSelect" class="ui-input compact-control" data-i18n-aria="quotaHistoryRange" aria-label="Quota history range">
           <option value="24h" data-i18n="quotaRange24h">Last 24 Hours</option>
           <option value="7d" data-i18n="quotaRange7d">Last 7 Days</option>
           <option value="30d" data-i18n="quotaRange30d">Last 30 Days</option>
@@ -5276,7 +5280,7 @@
             </label>
             <label class="flex items-center gap-2 text-sm" for="quotaIntervalSelect">
               <span style="color: var(--color-muted);" data-i18n="pollInterval">Poll every</span>
-              <select id="quotaIntervalSelect" class="ui-input compact-control" aria-label="Quota poll interval">
+              <select id="quotaIntervalSelect" class="ui-input compact-control" data-i18n-aria="pollInterval" aria-label="Poll every">
                 <option value="15">15 min</option>
                 <option value="30">30 min</option>
                 <option value="60">60 min</option>
@@ -5305,7 +5309,7 @@
             <div class="text-xs" style="color: var(--color-muted);">%</div>
           </div>
           <div class="h-[280px]">
-            <canvas id="quotaUtilizationChart" aria-label="Quota utilization history chart" role="img"></canvas>
+            <canvas id="quotaUtilizationChart" data-i18n-aria="utilizationHistory" aria-label="Remaining History" role="img"></canvas>
           </div>
         </div>
         <div class="surface p-5">
@@ -5315,7 +5319,7 @@
           </div>
           <div id="quotaConsumptionEstimatedBanner" class="text-xs mb-2 hidden" style="color: var(--color-muted);" data-i18n="quotaConsumptionEstimated">Estimated from local session logs — approximate and may be wrong. Enable Codex API polling for accurate quota.</div>
           <div class="h-[280px]">
-            <canvas id="quotaConsumptionChart" aria-label="Quota consumption history chart" role="img"></canvas>
+            <canvas id="quotaConsumptionChart" data-i18n-aria="consumptionHistory" aria-label="Consumption History" role="img"></canvas>
           </div>
         </div>
       </section>
@@ -5356,7 +5360,7 @@
             <div id="pricingDbJsonState" class="tokdash-loading-placeholder mt-2 font-extrabold" style="color: var(--color-muted);"><span class="tokdash-loading-label" data-i18n="loading">Loading…</span></div>
           </div>
         </div>
-        <textarea id="pricingDbEditor" class="pricing-editor mono" spellcheck="false" aria-label="pricing_db.json editor"></textarea>
+        <textarea id="pricingDbEditor" class="pricing-editor mono" spellcheck="false" data-i18n-aria="pricingDbEditor" aria-label="pricing_db.json editor"></textarea>
       </section>
     </div>
   </div>
@@ -5392,7 +5396,7 @@
                 </span>
               </button>
             </div>
-            <button id="sessionModalClose" class="btn btn-ghost !p-2 rounded-xl text-slate-400 hover:text-white" type="button" data-i18n="close" title="Close dialog">
+            <button id="sessionModalClose" class="btn btn-ghost !p-2 rounded-xl text-slate-400 hover:text-white" type="button" data-i18n-aria="closeDialog" data-i18n-title="closeDialog" aria-label="Close dialog" title="Close dialog">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
             </button>
           </div>
@@ -5467,18 +5471,18 @@
                 <div>
                   <div class="flex items-center gap-1.5">
                     <h4 class="text-sm font-extrabold mono text-slate-200" data-i18n="turnTrend">Turn Trend</h4>
-                    <span class="cursor-help text-slate-400 hover:text-indigo-400 transition" title="Turn Trend shows the breakdown of input, cache reads, output, and reasoning tokens consumed during each sequential turn.">
+                    <span class="cursor-help text-slate-400 hover:text-indigo-400 transition" data-i18n-title="turnTrendDesc" title="Turn Trend shows the breakdown of input, cache reads, output, and reasoning tokens consumed during each sequential turn.">
                       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
                     </span>
                   </div>
                   <div class="text-[11px] text-slate-500 mt-0.5">Tokens per turn</div>
                 </div>
-                <button type="button" class="p-1.5 rounded-lg bg-slate-800/60 hover:bg-slate-700 text-slate-400 hover:text-white transition opacity-60 group-hover:opacity-100" onclick="expandSessionChart('perTurn')" title="Expand full screen">
+                <button type="button" class="p-1.5 rounded-lg bg-slate-800/60 hover:bg-slate-700 text-slate-400 hover:text-white transition opacity-60 group-hover:opacity-100" onclick="expandSessionChart('perTurn')" data-i18n-title="expandFullScreen" title="Expand full screen">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
                 </button>
               </div>
               <div class="h-[280px]">
-                <canvas id="sessionPerTurnChart" aria-label="Session per-turn trend chart" role="img"></canvas>
+                <canvas id="sessionPerTurnChart" data-i18n-aria="turnTrend" aria-label="Turn Trend" role="img"></canvas>
               </div>
             </div>
 
@@ -5488,18 +5492,18 @@
                 <div>
                   <div class="flex items-center gap-1.5">
                     <h4 class="text-sm font-extrabold mono text-slate-200" data-i18n="cumulativeTurnTrend">Cumulative Turn Trend</h4>
-                    <span class="cursor-help text-slate-400 hover:text-indigo-400 transition" title="Cumulative Turn Trend illustrates how tokens accumulate across conversation turns over the course of the session.">
+                    <span class="cursor-help text-slate-400 hover:text-indigo-400 transition" data-i18n-title="cumulativeTurnTrendDesc" title="Cumulative Turn Trend illustrates how tokens accumulate across conversation turns over the course of the session.">
                       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
                     </span>
                   </div>
                   <div class="text-[11px] text-slate-500 mt-0.5">Total tokens accumulated by turn</div>
                 </div>
-                <button type="button" class="p-1.5 rounded-lg bg-slate-800/60 hover:bg-slate-700 text-slate-400 hover:text-white transition opacity-60 group-hover:opacity-100" onclick="expandSessionChart('cumulative')" title="Expand full screen">
+                <button type="button" class="p-1.5 rounded-lg bg-slate-800/60 hover:bg-slate-700 text-slate-400 hover:text-white transition opacity-60 group-hover:opacity-100" onclick="expandSessionChart('cumulative')" data-i18n-title="expandFullScreen" title="Expand full screen">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
                 </button>
               </div>
               <div class="h-[280px]">
-                <canvas id="sessionCumulativeChart" aria-label="Session cumulative turn trend chart" role="img"></canvas>
+                <canvas id="sessionCumulativeChart" data-i18n-aria="cumulativeTurnTrend" aria-label="Cumulative Turn Trend" role="img"></canvas>
               </div>
             </div>
 
@@ -5509,18 +5513,18 @@
                 <div>
                   <div class="flex items-center gap-1.5">
                     <h4 class="text-sm font-extrabold mono text-slate-200" data-i18n="cumulativeTrendByTime">Cumulative Trend by Time</h4>
-                    <span class="cursor-help text-slate-400 hover:text-indigo-400 transition" title="Cumulative Trend by Time charts token velocity along the session's actual wall-clock timeline.">
+                    <span class="cursor-help text-slate-400 hover:text-indigo-400 transition" data-i18n-title="cumulativeTrendByTimeDesc" title="Cumulative Trend by Time charts token velocity along the session's actual wall-clock timeline.">
                       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
                     </span>
                   </div>
                   <div class="text-[11px] text-slate-500 mt-0.5">Tokens accumulated over time</div>
                 </div>
-                <button type="button" class="p-1.5 rounded-lg bg-slate-800/60 hover:bg-slate-700 text-slate-400 hover:text-white transition opacity-60 group-hover:opacity-100" onclick="expandSessionChart('timeCumulative')" title="Expand full screen">
+                <button type="button" class="p-1.5 rounded-lg bg-slate-800/60 hover:bg-slate-700 text-slate-400 hover:text-white transition opacity-60 group-hover:opacity-100" onclick="expandSessionChart('timeCumulative')" data-i18n-title="expandFullScreen" title="Expand full screen">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
                 </button>
               </div>
               <div class="h-[280px]">
-                <canvas id="sessionTimeCumulativeChart" aria-label="Session cumulative time trend chart" role="img"></canvas>
+                <canvas id="sessionTimeCumulativeChart" data-i18n-aria="cumulativeTrendByTime" aria-label="Cumulative Trend by Time" role="img"></canvas>
               </div>
             </div>
           </div>
@@ -5552,7 +5556,7 @@
           <h3 id="graphExpandTitle" class="text-lg font-extrabold mono text-white">Expanded Chart</h3>
           <p id="graphExpandSubtitle" class="text-xs text-slate-400 mt-0.5">High-resolution interactive view</p>
         </div>
-        <button type="button" class="btn btn-ghost !p-2 rounded-xl text-slate-400 hover:text-white" onclick="closeGraphExpandModal()" title="Close full screen view">
+        <button type="button" class="btn btn-ghost !p-2 rounded-xl text-slate-400 hover:text-white" onclick="closeGraphExpandModal()" data-i18n-title="closeFullScreen" title="Close full screen view">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
         </button>
       </div>
@@ -5576,7 +5580,7 @@
           </div>
           <p id="drawerMeta" class="text-xs text-slate-400 mt-1 mono">Loading session telemetry...</p>
         </div>
-        <button onclick="closeSessionDrawer()" class="p-2 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition" aria-label="Close session inspector">
+        <button onclick="closeSessionDrawer()" class="p-2 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition" data-i18n-aria="closeSessionInspector" aria-label="Close session inspector">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
         </button>
       </div>
@@ -5617,7 +5621,7 @@
               <h4 class="text-base font-extrabold mono">Per Turn Token Usage</h4>
             </div>
             <div class="h-[260px]">
-              <canvas id="drawerTurnChartCanvas" aria-label="Turn chart" role="img"></canvas>
+              <canvas id="drawerTurnChartCanvas" data-i18n-aria="turnTrend" aria-label="Turn Trend" role="img"></canvas>
             </div>
           </div>
         </div>
@@ -5659,7 +5663,7 @@
                 <div class="settings-panel-head">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l-2.86 2.86A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1.4 1.6H9.55a1.7 1.7 0 0 0-1.08-1.66 1.7 1.7 0 0 0-1.88.34l-2.86-2.86A1.7 1.7 0 0 0 4.07 15a1.7 1.7 0 0 0-1.77-1.4V9.55a1.7 1.7 0 0 0 1.66-1.08 1.7 1.7 0 0 0-.34-1.88l2.86-2.86A1.7 1.7 0 0 0 8.36 4.07 1.7 1.7 0 0 0 9.76 2.3h4.05a1.7 1.7 0 0 0 1.08 1.66 1.7 1.7 0 0 0 1.88-.34l2.86 2.86a1.7 1.7 0 0 0-.34 1.88 1.7 1.7 0 0 0 1.77 1.4v4.05A1.7 1.7 0 0 0 19.4 15Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
                   <h2 id="settingsPanelTitle" data-i18n="settings">Settings</h2>
-                  <button type="button" class="settings-panel-close" onclick="setSettingsPanelOpen(false, true)" aria-label="Close settings">
+                  <button type="button" class="settings-panel-close" onclick="setSettingsPanelOpen(false, true)" data-i18n-aria="closeSettings" aria-label="Close settings">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
                   </button>
                 </div>
@@ -5696,7 +5700,7 @@
                   <div class="settings-preferences">
                     <div class="settings-row">
                       <span class="settings-label" data-i18n="language">Language</span>
-                      <select id="langToggle" class="ui-input settings-select" aria-label="Language">
+                      <select id="langToggle" class="ui-input settings-select" data-i18n-aria="language" aria-label="Language">
                         <option value="system" data-i18n="langSystem">System</option>
                         <option value="en">English</option>
                         <option value="zh">中文</option>
@@ -5716,7 +5720,7 @@
                     </div>
                     <label class="settings-row" for="styleThemeSelect">
                       <span class="settings-label" data-i18n="styleTheme">Style</span>
-                      <select id="styleThemeSelect" class="ui-input style-select settings-select" aria-label="Style theme">
+                      <select id="styleThemeSelect" class="ui-input style-select settings-select" data-i18n-aria="styleTheme" aria-label="Style">
                         <option value="classic" data-i18n="styleClassic">Classic</option>
                         <option value="elevated" data-i18n="styleElevated">Elevated</option>
                         <option value="paper" data-i18n="stylePaper">Paper</option>
@@ -5743,7 +5747,7 @@
                       </button>
                     </div>
                   </div>
-                  <button id="installBtn" class="btn btn-ghost settings-install" type="button" style="display:none;" data-i18n-title="installApp" aria-label="Install app">
+                  <button id="installBtn" class="btn btn-ghost settings-install" type="button" style="display:none;" data-i18n-title="installApp" data-i18n-aria="installApp" aria-label="Install Tokdash as an app">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     <span data-i18n="install">Install</span>
                   </button>
@@ -6843,6 +6847,7 @@
         quotaVisibilityAll: 'Show: All',
         quotaVisibilityNone: 'Show: None',
         quotaVisibilityPrefix: 'Show:',
+        quotaVisibilityMenu: 'Show providers',
         quotaAllHidden: 'All providers hidden — enable one from the Show menu.',
         consumptionUnitDay: '% of window consumed per day',
         consumptionUnitHour: '% of window consumed per hour',
@@ -7162,6 +7167,31 @@
         cdnThreeFailed: 'Three.js failed to load. The 3D stats view will not be available.',
         cdnFlatpickrFailed: 'Flatpickr failed to load, so the date picker is unavailable. The quick range buttons still work.',
         cdnFontsFailed: 'Google Fonts failed to load. Using system fonts.',
+        usageReportPeriod: 'Report period',
+        navMainSidebar: 'Main sidebar navigation',
+        reportWindow: 'Report window',
+        dashboardSections: 'Dashboard sections',
+        toolChartLegend: 'Tool chart legend',
+        previousMonth: 'Previous month',
+        nextMonth: 'Next month',
+        previousYear: 'Previous year',
+        nextYear: 'Next year',
+        quotaHistoryRange: 'Quota history range',
+        closeSessionInspector: 'Close session inspector',
+        closeSettings: 'Close settings',
+        viewWhatsNew: "View what's new and release notes",
+        configureSettings: 'Configure Tokdash settings and servers',
+        toggleLightDark: 'Toggle Light / Dark mode',
+        liveTokenUpdate: 'Live token update',
+        turnTrendDesc: 'Turn Trend shows the breakdown of input, cache reads, output, and reasoning tokens consumed during each sequential turn.',
+        expandFullScreen: 'Expand full screen',
+        cumulativeTurnTrendDesc: 'Cumulative Turn Trend illustrates how tokens accumulate across conversation turns over the course of the session.',
+        cumulativeTrendByTimeDesc: "Cumulative Trend by Time charts token velocity along the session's actual wall-clock timeline.",
+        closeFullScreen: 'Close full screen view',
+        closeDayDetails: 'Close day details',
+        closeDialog: 'Close dialog',
+        pricingDbEditor: 'pricing_db.json editor',
+        searchSessions: 'Search sessions/projects...',
       },
       zh: {
         updateAvailable: '有新版本',
@@ -7400,6 +7430,7 @@
         quotaVisibilityAll: '显示：全部',
         quotaVisibilityNone: '显示：无',
         quotaVisibilityPrefix: '显示：',
+        quotaVisibilityMenu: '显示提供商',
         quotaAllHidden: '已隐藏全部提供方 — 从“显示”菜单启用。',
         consumptionUnitDay: '每天消耗的窗口百分比',
         consumptionUnitHour: '每小时消耗的窗口百分比',
@@ -7719,6 +7750,31 @@
         cdnThreeFailed: 'Three.js 加载失败，3D 统计视图将不可用。',
         cdnFlatpickrFailed: 'Flatpickr 加载失败，日期选择器不可用。快捷范围按钮仍可使用。',
         cdnFontsFailed: 'Google Fonts 加载失败，正在使用系统字体。',
+        usageReportPeriod: '报告周期',
+        navMainSidebar: '主侧边栏导航',
+        reportWindow: '报告窗口',
+        dashboardSections: '仪表板分区',
+        toolChartLegend: '工具图表图例',
+        previousMonth: '上个月',
+        nextMonth: '下个月',
+        previousYear: '上一年',
+        nextYear: '下一年',
+        quotaHistoryRange: '配额历史范围',
+        closeSessionInspector: '关闭会话检查器',
+        closeSettings: '关闭设置',
+        viewWhatsNew: '查看新功能和发布说明',
+        configureSettings: '配置 Tokdash 设置和服务器',
+        toggleLightDark: '切换浅色/深色模式',
+        liveTokenUpdate: '实时 token 更新',
+        turnTrendDesc: '轮次趋势显示每个顺序轮次中消耗的输入、缓存读取、输出和推理 token 的细分。',
+        expandFullScreen: '全屏展开',
+        cumulativeTurnTrendDesc: '累计轮次趋势展示了 token 在会话过程中如何跨对话轮次累积。',
+        cumulativeTrendByTimeDesc: '按时间累计趋势绘制了 token 在会话实际时间线上的速度。',
+        closeFullScreen: '关闭全屏视图',
+        closeDayDetails: '关闭当日详情',
+        closeDialog: '关闭对话框',
+        pricingDbEditor: 'pricing_db.json 编辑器',
+        searchSessions: '搜索会话/项目...',
       },
 
       ja: {
@@ -7958,6 +8014,7 @@
         quotaVisibilityAll: '表示: すべて',
         quotaVisibilityNone: '表示: なし',
         quotaVisibilityPrefix: '表示:',
+        quotaVisibilityMenu: 'プロバイダーを表示',
         quotaAllHidden: 'すべてのプロバイダーが非表示です — 「表示」メニューで有効にしてください。',
         consumptionUnitDay: 'ウィンドウ消費率（1 日あたり %）',
         consumptionUnitHour: 'ウィンドウ消費率（1 時間あたり %）',
@@ -8277,6 +8334,31 @@
         cdnThreeFailed: 'Three.js の読み込みに失敗しました。3D 統計ビューは利用できません。',
         cdnFlatpickrFailed: 'Flatpickr の読み込みに失敗したため、日付ピッカーは利用できません。クイックレンジボタンは引き続き利用できます。',
         cdnFontsFailed: 'Google Fonts の読み込みに失敗しました。システムフォントを使用しています。',
+        usageReportPeriod: 'レポート期間',
+        navMainSidebar: 'メインサイドバーナビゲーション',
+        reportWindow: 'レポートウィンドウ',
+        dashboardSections: 'ダッシュボードセクション',
+        toolChartLegend: 'ツールチャートの凡例',
+        previousMonth: '前月',
+        nextMonth: '翌月',
+        previousYear: '前年',
+        nextYear: '翌年',
+        quotaHistoryRange: 'クォータ履歴範囲',
+        closeSessionInspector: 'セッションインスペクターを閉じる',
+        closeSettings: '設定を閉じる',
+        viewWhatsNew: '新機能とリリースノートを表示',
+        configureSettings: 'Tokdash の設定とサーバーを構成',
+        toggleLightDark: 'ライト/ダークモードを切り替える',
+        liveTokenUpdate: 'ライブトークン更新',
+        turnTrendDesc: 'ターン推移は、各シーケンシャルターンで消費された入力、キャッシュ読み取り、出力、推論トークンの内訳を示します。',
+        expandFullScreen: '全画面に展開',
+        cumulativeTurnTrendDesc: '累計ターン推移は、セッション中にトークンが会話ターンごとにどのように蓄積されるかを示します。',
+        cumulativeTrendByTimeDesc: '時間別累計推移は、セッションの実際のタイムラインに沿ったトークン速度をチャート化します。',
+        closeFullScreen: '全画面表示を閉じる',
+        closeDayDetails: '日付の詳細を閉じる',
+        closeDialog: 'ダイアログを閉じる',
+        pricingDbEditor: 'pricing_db.json エディタ',
+        searchSessions: 'セッション/プロジェクトを検索...',
       },
 
       ko: {
@@ -8516,6 +8598,7 @@
         quotaVisibilityAll: '표시: 전체',
         quotaVisibilityNone: '표시: 없음',
         quotaVisibilityPrefix: '표시:',
+        quotaVisibilityMenu: '제공업체 표시',
         quotaAllHidden: '모든 제공자가 숨겨짐 — "표시" 메뉴에서 하나를 활성화하세요.',
         consumptionUnitDay: '1일당 창 소비 비율(%)',
         consumptionUnitHour: '1시간당 창 소비 비율(%)',
@@ -8835,6 +8918,31 @@
         cdnThreeFailed: 'Three.js를 불러오지 못했습니다. 3D 통계 보기를 사용할 수 없습니다.',
         cdnFlatpickrFailed: 'Flatpickr를 불러오지 못해 날짜 선택기를 사용할 수 없습니다. 빠른 기간 버튼은 계속 사용할 수 있습니다.',
         cdnFontsFailed: 'Google Fonts를 불러오지 못했습니다. 시스템 폰트를 사용합니다.',
+        usageReportPeriod: '보고서 기간',
+        navMainSidebar: '메인 사이드바 네비게이션',
+        reportWindow: '보고서 창',
+        dashboardSections: '대시보드 섹션',
+        toolChartLegend: '도구 차트 범례',
+        previousMonth: '이전 달',
+        nextMonth: '다음 달',
+        previousYear: '이전 해',
+        nextYear: '다음 해',
+        quotaHistoryRange: '할당량 기록 범위',
+        closeSessionInspector: '세션 인스펙터 닫기',
+        closeSettings: '설정 닫기',
+        viewWhatsNew: '새 기능 및 릴리스 노트 보기',
+        configureSettings: 'Tokdash 설정 및 서버 구성',
+        toggleLightDark: '라이트/다크 모드 전환',
+        liveTokenUpdate: '실시간 토큰 업데이트',
+        turnTrendDesc: '턴 추이는 각 순차 턴에서 소비된 입력, 캐시 읽기, 출력 및 추론 토큰의 분석을 보여줍니다.',
+        expandFullScreen: '전체 화면 확장',
+        cumulativeTurnTrendDesc: '누적 턴 추이는 세션 중에 토큰이 대화 턴에 걸쳐 어떻게 누적되는지 보여줍니다.',
+        cumulativeTrendByTimeDesc: '시간별 누적 추이는 세션의 실제 타임라인을 따른 토큰 속도를 차트로 보여줍니다.',
+        closeFullScreen: '전체 화면 보기 닫기',
+        closeDayDetails: '일일 세부정보 닫기',
+        closeDialog: '대화상자 닫기',
+        pricingDbEditor: 'pricing_db.json 편집기',
+        searchSessions: '세션/프로젝트 검색...',
       },
 
       es: {
@@ -9074,6 +9182,7 @@
         quotaVisibilityAll: 'Mostrar: todo',
         quotaVisibilityNone: 'Mostrar: nada',
         quotaVisibilityPrefix: 'Mostrar:',
+        quotaVisibilityMenu: 'Mostrar proveedores',
         quotaAllHidden: 'Todos los proveedores ocultos — activa uno desde el menú Mostrar.',
         consumptionUnitDay: '% de la ventana consumido por día',
         consumptionUnitHour: '% de la ventana consumido por hora',
@@ -9393,6 +9502,31 @@
         cdnThreeFailed: 'Three.js no se pudo cargar. La vista de estadísticas 3D no estará disponible.',
         cdnFlatpickrFailed: 'Flatpickr no se pudo cargar, así que el selector de fechas no está disponible. Los botones de rango rápido siguen funcionando.',
         cdnFontsFailed: 'Google Fonts no se pudo cargar. Usando fuentes del sistema.',
+        usageReportPeriod: 'Período del informe',
+        navMainSidebar: 'Navegación principal de la barra lateral',
+        reportWindow: 'Ventana de informe',
+        dashboardSections: 'Secciones del panel',
+        toolChartLegend: 'Leyenda del gráfico de herramientas',
+        previousMonth: 'Mes anterior',
+        nextMonth: 'Mes siguiente',
+        previousYear: 'Año anterior',
+        nextYear: 'Año siguiente',
+        quotaHistoryRange: 'Rango de historial de cuota',
+        closeSessionInspector: 'Cerrar inspector de sesiones',
+        closeSettings: 'Cerrar ajustes',
+        viewWhatsNew: 'Ver novedades y notas de la versión',
+        configureSettings: 'Configurar ajustes y servidores de Tokdash',
+        toggleLightDark: 'Cambiar modo claro / oscuro',
+        liveTokenUpdate: 'Actualización de tokens en vivo',
+        turnTrendDesc: 'Tendencia de turnos muestra el desglose de tokens de entrada, lecturas de caché, salida y razonamiento consumidos en cada turno secuencial.',
+        expandFullScreen: 'Expandir a pantalla completa',
+        cumulativeTurnTrendDesc: 'Tendencia de turnos acumulada ilustra cómo los tokens se acumulan a lo largo de los turnos de conversación durante la sesión.',
+        cumulativeTrendByTimeDesc: 'Tendencia acumulada por tiempo grafica la velocidad de los tokens a lo largo de la línea de tiempo real de la sesión.',
+        closeFullScreen: 'Cerrar vista de pantalla completa',
+        closeDayDetails: 'Cerrar detalles del día',
+        closeDialog: 'Cerrar diálogo',
+        pricingDbEditor: 'Editor de pricing_db.json',
+        searchSessions: 'Buscar sesiones/proyectos...',
       },
 
       pt: {
@@ -9632,6 +9766,7 @@
         quotaVisibilityAll: 'Mostrar: todos',
         quotaVisibilityNone: 'Mostrar: nenhum',
         quotaVisibilityPrefix: 'Mostrar:',
+        quotaVisibilityMenu: 'Mostrar provedores',
         quotaAllHidden: 'Todos os provedores ocultos — ative um pelo menu Mostrar.',
         consumptionUnitDay: '% da janela consumido por dia',
         consumptionUnitHour: '% da janela consumido por hora',
@@ -9951,6 +10086,31 @@
         cdnThreeFailed: 'Three.js não pôde ser carregado. A visualização de estatísticas 3D não estará disponível.',
         cdnFlatpickrFailed: 'Flatpickr não pôde ser carregado, então o seletor de datas não está disponível. Os botões de intervalo rápido continuam funcionando.',
         cdnFontsFailed: 'Google Fonts não pôde ser carregado. Usando fontes do sistema.',
+        usageReportPeriod: 'Período do relatório',
+        navMainSidebar: 'Navegação principal da barra lateral',
+        reportWindow: 'Janela de relatório',
+        dashboardSections: 'Seções do painel',
+        toolChartLegend: 'Legenda do gráfico de ferramentas',
+        previousMonth: 'Mês anterior',
+        nextMonth: 'Próximo mês',
+        previousYear: 'Ano anterior',
+        nextYear: 'Próximo ano',
+        quotaHistoryRange: 'Intervalo de histórico de cota',
+        closeSessionInspector: 'Fechar inspetor de sessões',
+        closeSettings: 'Fechar configurações',
+        viewWhatsNew: 'Ver novidades e notas de versão',
+        configureSettings: 'Configurar configurações e servidores do Tokdash',
+        toggleLightDark: 'Alternar modo claro / escuro',
+        liveTokenUpdate: 'Atualização de tokens ao vivo',
+        turnTrendDesc: 'Tendência de turnos mostra o detalhamento de tokens de entrada, leituras de cache, saída e raciocínio consumidos em cada turno sequencial.',
+        expandFullScreen: 'Expandir para tela cheia',
+        cumulativeTurnTrendDesc: 'Tendência de turnos cumulativa ilustra como os tokens se acumulam ao longo dos turnos de conversa durante a sessão.',
+        cumulativeTrendByTimeDesc: 'Tendência cumulativa por tempo traça a velocidade dos tokens ao longo da linha do tempo real da sessão.',
+        closeFullScreen: 'Fechar visualização em tela cheia',
+        closeDayDetails: 'Fechar detalhes do dia',
+        closeDialog: 'Fechar diálogo',
+        pricingDbEditor: 'Editor do pricing_db.json',
+        searchSessions: 'Pesquisar sessões/projetos...',
       },
     };
 
@@ -11831,19 +11991,25 @@
       toggle.checked = includeCodexReviewSessions === null ? codexReviewDefault : includeCodexReviewSessions;
     }
 
+    // data-i18n-<suffix> holds a flat dictionary key; the table says which
+    // attribute each suffix writes. Keep them in one place so a new translatable
+    // attribute is a single row rather than a fourth copy of the same loop.
+    const I18N_ATTR_TARGETS = {
+      'data-i18n-placeholder': 'placeholder',
+      'data-i18n-title': 'title',
+      'data-i18n-aria': 'aria-label',
+    };
+
     function applyI18n() {
       document.documentElement.lang = LANG_HTML_ATTRS[currentLang] || 'en';
       document.querySelectorAll('[data-i18n]').forEach((el) => {
         const key = el.getAttribute('data-i18n');
         el.textContent = t(key);
       });
-      document.querySelectorAll('[data-i18n-placeholder]').forEach((el) => {
-        const key = el.getAttribute('data-i18n-placeholder');
-        el.setAttribute('placeholder', t(key));
-      });
-      document.querySelectorAll('[data-i18n-title]').forEach((el) => {
-        const key = el.getAttribute('data-i18n-title');
-        el.setAttribute('title', t(key));
+      Object.entries(I18N_ATTR_TARGETS).forEach(([marker, attribute]) => {
+        document.querySelectorAll(`[${marker}]`).forEach((el) => {
+          el.setAttribute(attribute, t(el.getAttribute(marker)));
+        });
       });
       // Re-translating data-i18n headers above replaces their textContent, which
       // drops the child sort-arrow span; restore the active-sort indicator on the
@@ -16060,7 +16226,7 @@
       const panel = document.createElement('div');
       panel.className = 'quota-visibility-panel hidden';
       panel.setAttribute('role', 'menu');
-      panel.setAttribute('aria-label', 'Show providers');
+      panel.setAttribute('aria-label', t('quotaVisibilityMenu'));
       QUOTA_PROVIDERS.forEach((provider) => {
         if (!present.has(provider)) return;
         panel.appendChild(buildQuotaVisibilityRow(provider, wrap.dataset.hostKey));

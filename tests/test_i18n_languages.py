@@ -105,8 +105,10 @@ def test_i18n_language_parity(tmp_path: Path) -> None:
             f"{lang} key set differs from en"
         )
 
+    # Every attribute form the dashboard uses, so a typo in a data-i18n-aria
+    # key fails here instead of reaching a screen reader as a raw key.
     referenced = set(
-        re.findall(r'data-i18n(?:-placeholder|-title)?="([^"]+)"', source)
+        re.findall(r'data-i18n(?:-placeholder|-title|-aria)?="([^"]+)"', source)
     )
     referenced.update(re.findall(r"\bt\('([^']+)'\)", source))
     missing = referenced - set(reference)

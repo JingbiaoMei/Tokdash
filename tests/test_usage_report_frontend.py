@@ -104,7 +104,10 @@ def _run_node(tmp_path: Path, name: str, body: str, *argv: str) -> str:
 
 def test_report_tab_is_registered_between_stats_and_quota() -> None:
     source = _source()
-    nav = source[source.index('<nav class="mt-5 flex flex-wrap gap-2"') :]
+    # Slice from the tab nav by its stable id rather than its class list, so
+    # adding an attribute (the aria hook, or the id the desktop hide rule
+    # keys on) does not break the lookup.
+    nav = source[source.index('<nav id="dashboardSectionNav"') :]
     tabs = re.findall(r'<button class="tab-btn" data-tab="([^"]+)"', nav)
     assert "report" in tabs
     assert tabs.index("report") == tabs.index("stats") + 1

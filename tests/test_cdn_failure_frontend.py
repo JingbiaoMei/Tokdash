@@ -1,9 +1,9 @@
-"""Behaviour of the CDN-failure handling in the dashboard.
+"""Behaviour of library-load failure handling in the dashboard.
 
-The page loads Tailwind, Chart.js, Three.js, Flatpickr and Google Fonts from
-CDNs with no local copy, so "the CDN is blocked or down" is a normal operating
-condition rather than a theoretical one. These tests pin the behaviour that
-makes that condition survivable, because every one of them was a bug:
+The page loads Tailwind, Chart.js, Three.js and Flatpickr from local vendor
+assets, while Google Fonts stays remote. A missing or unreadable asset is a
+possible operating condition rather than a theoretical one. These tests pin
+the behaviour that makes that condition survivable, because every one of them was a bug:
 
 - a missing Chart.js used to throw inside the render and take the tables, the
   session modal, the Quota tab and the language switch down with it;
@@ -187,7 +187,7 @@ def _run_banner(tmp_path: Path, name: str, setup: str) -> dict:
 
 def _flatpickr_css_onload(source: str) -> str:
     """The code the Flatpickr stylesheet link runs when it loads."""
-    link = re.search(r"<link[^>]*flatpickr\.min\.css[^>]*>", source)
+    link = re.search(r"<link[^>]*flatpickr-4\.6\.13\.min\.css[^>]*>", source)
     assert link, "the Flatpickr stylesheet link not found"
     onload = re.search(r'onload="([^"]+)"', link.group(0))
     assert onload, (

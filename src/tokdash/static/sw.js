@@ -18,6 +18,11 @@ const CORE_ASSETS = [
   BASE_PATH ? `${appPath("/manifest.webmanifest")}?base=${encodeURIComponent(BASE_PATH)}` : appPath("/manifest.webmanifest"),
   appPath("/static/icons/icon-192.png"),
   appPath("/static/icons/icon-512.png"),
+  appPath("/static/vendor/tailwindcss-3.4.17.js"),
+  appPath("/static/vendor/chart-4.4.0.umd.min.js"),
+  appPath("/static/vendor/three-0.160.0.min.js"),
+  appPath("/static/vendor/flatpickr-4.6.13.min.css"),
+  appPath("/static/vendor/flatpickr-4.6.13.min.js"),
 ];
 
 self.addEventListener("install", (event) => {

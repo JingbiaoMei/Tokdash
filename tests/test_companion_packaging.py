@@ -4,6 +4,7 @@ The native macOS/Windows companion apps live under ``companion/`` but the Python
 package is built from ``src/``. ``MANIFEST.in`` has ``prune companion``; this
 test builds both distributions and asserts no companion path leaked in.
 """
+import re
 import subprocess
 import sys
 import zipfile
@@ -55,6 +56,13 @@ def test_wheel_excludes_companion(tmp_path: Path) -> None:
     wheel, _ = _build_dists(tmp_path)
     names = _wheel_names(wheel)
     _assert_no_companion(names, "wheel")
+    with zipfile.ZipFile(wheel) as zf:
+        source = zf.read("tokdash/static/index.html").decode("utf-8")
+    paths = re.findall(r"/static/vendor/[^'\"\s)]+", source)
+    assert len(paths) == 5
+    for path in paths:
+        assert f"tokdash{path}" in names, f"wheel missing {path}"
+    assert "tokdash/static/vendor/NOTICE.txt" in names
 
 
 def test_sdist_excludes_companion(tmp_path: Path) -> None:

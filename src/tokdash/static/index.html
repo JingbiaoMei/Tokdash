@@ -29,18 +29,18 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700;800&family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
 
-  <script src="https://cdn.tailwindcss.com"></script>
+  <script>document.write(`<script src="${window.tokdashPath('/static/vendor/tailwindcss-3.4.17.js')}"><\/script>`);</script>
   <script>if (window.tailwind) tailwind.config = { darkMode: 'class' }</script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+  <script>document.write(`<script src="${window.tokdashPath('/static/vendor/chart-4.4.0.umd.min.js')}"><\/script>`);</script>
+  <script>document.write(`<script src="${window.tokdashPath('/static/vendor/three-0.160.0.min.js')}"><\/script>`);</script>
 
   <!-- Flatpickr Date Picker. The stylesheet link sets a flag when it loads:
        a link that fails to load still appears in document.styleSheets with its
-       href, so the CDN banner cannot detect the failure by inspecting sheets.
+       href, so the failure banner cannot detect the failure by inspecting sheets.
        The load event is the only positive evidence the CSS arrived, and it has
        always fired by the time the banner checks at DOMContentLoaded. -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css" onload="window.__tokdashFlatpickrCssLoaded = true">
-  <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.js"></script>
+  <script>document.write(`<link rel="stylesheet" href="${window.tokdashPath('/static/vendor/flatpickr-4.6.13.min.css')}" onload="window.__tokdashFlatpickrCssLoaded = true">`);</script>
+  <script>document.write(`<script src="${window.tokdashPath('/static/vendor/flatpickr-4.6.13.min.js')}"><\/script>`);</script>
 
   <style>
     :root {
@@ -1432,7 +1432,7 @@
     html.dark .border-b { border-color: #334155; }
 
     /* Without flatpickr.min.css the calendar loses its position:absolute and its
-       closed-state hiding, and sits static in the body's flex row. The CDN
+       closed-state hiding, and sits static in the body's flex row. The failure
        banner sets this class when the stylesheet (or the script) failed. */
     .tokdash-datepicker-unavailable .flatpickr-calendar {
       display: none !important;
@@ -2238,8 +2238,8 @@
       border-color: rgba(99, 102, 241, 0.35);
       background: rgba(255, 255, 255, 0.06);
     }
-    /* Flatpickr failed to load (script or stylesheet), so the CDN banner has
-       disabled the trigger. It still shows the selected range; hovering it
+    /* Flatpickr failed to load (script or stylesheet), so the failure banner
+       has disabled the trigger. It still shows the selected range; hovering it
        shows why it cannot open rather than inviting a click. */
     .date-range-trigger:disabled,
     .date-range-trigger:disabled:hover {
@@ -2686,7 +2686,7 @@
 </head>
 
 <body class="flex min-h-screen font-sans selection:bg-indigo-500 selection:text-white transition-colors duration-200 relative">
-  <!-- CDN failure banner. The live region exists in the markup from the start
+  <!-- Library failure banner. The live region exists in the markup from the start
        (content inserted into a region that already exists is what screen
        readers announce), and it is filled with t() at DOMContentLoaded, when
        the translations are defined.
@@ -2696,7 +2696,7 @@
 
        Bottom-right, not top-right: the top-right corner holds Refresh, the
        theme toggle and the date-range trigger, which are exactly the controls
-       a broken CDN leaves unusable. The max-width keeps a 16px gutter on both
+       a missing library leaves unusable. The max-width keeps a 16px gutter on both
        sides at 360px. The region is never display:none - a live region that is
        hidden when its cards are appended is not announced. Its box spans the
        widest card, so it takes no pointer events itself and each card opts back
@@ -2832,7 +2832,7 @@
           // A probe that throws is not evidence of a load failure.
           try { failed = isFailed(); } catch (err) { return; }
           if (!failed) return;
-          console.error(`[Tokdash] Failed to load ${key.replace(/^cdn/, '').replace(/Failed$/, '')} from its CDN`);
+          console.error(`[Tokdash] Failed to load ${key.replace(/^cdn/, '').replace(/Failed$/, '')} from local assets`);
           // One notice that cannot be built must not cost the user the rest.
           try { addCdnFailure(key, severity); }
           catch (err) { console.error(`[Tokdash] Could not show the ${key} notice`, err); }
@@ -2848,7 +2848,7 @@
         // the Google Fonts stylesheet never arrived.
         if (document.fonts && typeof document.fonts.load === 'function') {
           const reportFontsFailure = () => {
-            console.error('[Tokdash] Failed to load Fonts from its CDN');
+            console.error('[Tokdash] Failed to load Google Fonts');
             try { addCdnFailure('cdnFontsFailed', 'warning'); }
             catch (err) { console.error('[Tokdash] Could not show the cdnFontsFailed notice', err); }
           };
@@ -6693,7 +6693,7 @@
       return [...(dark ? entry.dark : entry.light)];
     }
 
-    // Chart.js comes from a CDN, so `new Chart` is not always there. Every call
+    // Chart.js can fail to load, so `new Chart` is not always there. Every call
     // site goes through this: without Chart.js the rest of the render survives
     // instead of the throw taking down whatever ran after it (the tools and
     // model tables, the session modal's chat, the Quota tab's status line, the
@@ -12586,7 +12586,7 @@
       const presetKey = activeQuickRange || 'customRange';
       preset.textContent = t(presetKey);
       exact.textContent = formatDateRangeTriggerText(currentStartDate, currentEndDate);
-      // A trigger the CDN banner disabled keeps saying why, through every
+      // A trigger the failure banner disabled keeps saying why, through every
       // range change and language switch, instead of inviting a click.
       trigger.setAttribute('title', t(trigger.disabled ? 'cdnFlatpickrFailed' : 'selectRange'));
       let isSecondaryActive = false;
@@ -12686,7 +12686,7 @@
       if (!dateInput || !dateTrigger) return;
       dateTrigger.addEventListener('click', () => flatpickrInstance?.open());
 
-      // flatpickr comes from a CDN; without it this top-level call used to
+      // Flatpickr is loaded locally; without it this top-level call used to
       // throw and take the rest of the main script (including the initial
       // updateDashboardByDateRange) down with it.
       if (typeof flatpickr !== 'function') {
@@ -12887,7 +12887,7 @@
         // the two picker-only steps when the picker is missing, so wrapping this
         // used to leave the quick ranges doing nothing at all - no fetch, label
         // stuck on "Today" - which is the one date control that still works
-        // without the CDN.
+        // without the library.
         commitDateSelection(startDate, endDate, {
           closePicker: true,
           triggerUpdate: true,
@@ -22266,7 +22266,7 @@
     function render3DCalendar(contributions) {
       const container = document.getElementById('calendar3D');
       if (!container) return;
-      // Three.js comes from a CDN and there is no scene to build without it, so
+      // Three.js is loaded locally and there is no scene to build without it, so
       // say so in the view itself: the corner banner's warning has usually faded
       // by the time anyone opens Stats -> 3D, and a blank box reads as "no
       // activity" rather than as a failure.

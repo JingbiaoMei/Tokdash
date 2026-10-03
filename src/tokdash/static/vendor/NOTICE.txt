@@ -1,0 +1,38 @@
+Vendored dashboard libraries (MIT licensed)
+
+The files are unmodified downloads. Their pinned source URLs are recorded in
+scripts/update_vendor_assets.sh. Existing license banners are preserved.
+
+Tailwind CSS 3.4.17 (tailwindcss-3.4.17.js has no Tailwind license banner):
+Copyright (c) Tailwind Labs, Inc.
+https://github.com/tailwindlabs/tailwindcss/blob/v3.4.17/LICENSE
+
+Chart.js 4.4.0:
+Copyright (c) 2023 Chart.js Contributors
+
+Three.js 0.160.0:
+Copyright 2010-2023 Three.js Authors
+
+Flatpickr 4.6.13 (flatpickr-4.6.13.min.css has no license banner):
+Copyright (c) 2017 Gregory Petrosyan
+https://github.com/flatpickr/flatpickr/blob/v4.6.13/LICENSE.md
+
+MIT License
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

@@ -269,14 +269,12 @@ proxy is the only thing to clean up.
 ### Subpath deployment (optional)
 
 Tokdash's generated URLs support exactly one path prefix, `/tokdash` — the same support
-Tailscale Serve uses — but the proxy must strip the prefix before forwarding. Tokdash's
-internal routing handles `/tokdash` for the HTML shell and API routes, but the static file
-mount resolves assets from the request path relative to that prefix and 404s under a
-preserved prefix. Verified behavior: `GET /tokdash/`, `/tokdash/api/*`, `/tokdash/sw.js`,
-and `/tokdash/manifest.webmanifest` work unchanged, but `GET /tokdash/static/*` fails. The
-proxy must also pass `X-Forwarded-Prefix` so generated manifest and service-worker URLs
-keep the prefix. The dashboard also detects `/tokdash` in `window.location` for page and
-API URLs.
+Tailscale Serve uses. The proxy can strip the prefix before forwarding, as the snippets
+below do, or forward it intact: Tokdash answers under `/tokdash` for the HTML shell,
+`/tokdash/api/*`, `/tokdash/sw.js`, `/tokdash/manifest.webmanifest` and `/tokdash/static/*`
+alike. The proxy must also pass `X-Forwarded-Prefix` so generated manifest and
+service-worker URLs keep the prefix. The dashboard also detects `/tokdash` in
+`window.location` for page and API URLs.
 
 These snippets belong **inside** the authenticated TLS site config from the parent section
 — they are location blocks, not standalone sites.

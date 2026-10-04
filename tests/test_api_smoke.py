@@ -299,6 +299,26 @@ def test_public_base_path_rendering():
     assert "__TOKDASH_BASE_PATH__" not in sw
 
 
+def test_static_assets_resolve_under_a_preserved_prefix():
+    """A proxy that forwards /tokdash intact must reach the static mount too.
+
+    BasePathMiddleware used to extend root_path while stripping the path, so
+    Starlette looked up /tokdash/static/themes.css as static/static/themes.css
+    and every asset behind such a proxy 404'd. The stripped path must also
+    keep the vendor files' long-lived cache header.
+    """
+    from fastapi.testclient import TestClient
+
+    client = TestClient(api.app)
+    vendor = next((api.STATIC_DIR / "vendor").glob("*.js")).name
+    for path in ("/static/themes.css", "/tokdash/static/themes.css", "/tokdash/static/icons/icon-192.png"):
+        assert client.get(path).status_code == 200, path
+    response = client.get(f"/tokdash/static/vendor/{vendor}")
+    assert response.status_code == 200
+    assert "immutable" in response.headers["cache-control"]
+    assert client.get("/tokdash/static/no-such-file.css").status_code == 404
+
+
 def test_dashboard_refresh_status_copy_and_auto_success_reset():
     html = api._render_dashboard_html("")
 

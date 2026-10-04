@@ -175,7 +175,9 @@ class BasePathMiddleware:
                 new_scope = dict(scope)
                 stripped = path[len(base_path):] or "/"
                 new_scope["path"] = stripped
-                new_scope["root_path"] = (scope.get("root_path") or "") + base_path
+                # Leave root_path alone. Starlette expects `path` to start with
+                # `root_path`; a stripped path under an extended root_path made
+                # the /static mount look up static/<file> and 404 every asset.
                 await self.app(new_scope, receive, send)
                 return
         await self.app(scope, receive, send)

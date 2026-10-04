@@ -3194,7 +3194,6 @@
             <span class="text-[9px] px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-400 font-mono font-bold">92%</span>
           </div>
           <div id="avgCacheHitRate" class="text-3xl sm:text-4xl font-extrabold mt-1.5 font-mono text-cyan-400">-</div>
-          <div id="avgCacheHitMeta" class="text-xs font-semibold mt-1 kpi-delta"></div>
           <svg id="sparklineCacheRate" class="kpi-sparkline text-cyan-400/60" viewBox="0 0 100 35" preserveAspectRatio="none" fill="none"><defs><linearGradient id="kpiG5" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="currentColor" stop-opacity="0.25"/><stop offset="100%" stop-color="currentColor" stop-opacity="0.0"/></linearGradient></defs><path id="sparklineCacheRatePath" d="M0 20 Q30 18 55 12 T85 10 T100 6" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/><path id="sparklineCacheRateArea" d="M0 20 Q30 18 55 12 T85 10 T100 6 L100 35 L0 35 Z" fill="url(#kpiG5)"/></svg>
         </div>
         <div class="surface p-5">
@@ -13021,8 +13020,6 @@
         }
       }
       fitOverviewKpis();
-      const hitMeta = document.getElementById('avgCacheHitMeta');
-      if (hitMeta) hitMeta.textContent = (data.cache_hit_rate === null || data.cache_hit_rate === undefined) ? '' : t('cacheHitRate');
       renderOverviewActiveTime();
       updateComparisonDeltas(data);
 

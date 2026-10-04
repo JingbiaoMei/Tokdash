@@ -12,6 +12,13 @@ NO_CACHE_HEADERS = {
     "Expires": "0",
 }
 
+# Vendored libraries carry their version in the filename, so a URL under
+# /static/vendor/ never changes content and the browser can keep it, as it did
+# when the same files came from the CDNs.
+VENDOR_CACHE_HEADERS = {
+    "Cache-Control": "public, max-age=31536000, immutable",
+}
+
 SW_CACHE_NAME_PLACEHOLDER = "__TOKDASH_CACHE_NAME__"
 
 _static_cache_name: Optional[str] = None

@@ -32,6 +32,7 @@ from .assets import (
     NO_CACHE_HEADERS,
     STATIC_DIR,
     SW_CACHE_NAME_PLACEHOLDER,
+    VENDOR_CACHE_HEADERS,
     get_static_cache_name,
 )
 from .compute import (
@@ -129,7 +130,12 @@ def _validate_date_params(date_from: Optional[str], date_to: Optional[str]) -> N
 
 
 class NoCacheMiddleware:
-    """ASGI middleware that adds no-cache headers to /static/ responses."""
+    """ASGI middleware that adds no-cache headers to /static/ responses.
+
+    Vendored libraries are the exception: their versioned filenames make them
+    safe to cache for good. Only a successful response gets that, so a missing
+    file is never remembered as missing after an upgrade adds it.
+    """
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
@@ -138,11 +144,13 @@ class NoCacheMiddleware:
         if scope["type"] != "http" or not scope["path"].startswith("/static/"):
             await self.app(scope, receive, send)
             return
+        vendor = scope["path"].startswith("/static/vendor/")
 
         async def send_with_no_cache(message):
             if message["type"] == "http.response.start":
                 headers = dict(message.get("headers", []))
-                for k, v in NO_CACHE_HEADERS.items():
+                cacheable = vendor and message.get("status") in (200, 304)
+                for k, v in (VENDOR_CACHE_HEADERS if cacheable else NO_CACHE_HEADERS).items():
                     headers[k.lower().encode()] = v.encode()
                 message["headers"] = list(headers.items())
             await send(message)

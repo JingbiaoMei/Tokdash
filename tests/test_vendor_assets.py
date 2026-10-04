@@ -2,7 +2,10 @@
 import re
 from pathlib import Path
 
+from fastapi.testclient import TestClient
+
 import tokdash
+import tokdash.api as api
 
 STATIC = Path(tokdash.__file__).parent / "static"
 VENDOR_PATHS = [
@@ -41,3 +44,18 @@ def test_library_failure_notices_do_not_blame_a_cdn():
     source = (STATIC / "index.html").read_text(encoding="utf-8")
     assert "from its CDN" not in source
     assert (STATIC / "vendor/NOTICE.txt").is_file()
+
+
+def test_vendor_assets_are_cached_and_other_static_files_are_not():
+    """Versioned vendor files may stay in the browser cache, as they did from the
+    CDNs; the rest of /static/ is still revalidated so an upgrade shows up, and a
+    missing vendor file is not remembered as missing."""
+    client = TestClient(api.app)
+    vendor = client.get(VENDOR_PATHS[2])
+    assert vendor.status_code == 200
+    assert vendor.headers["cache-control"] == "public, max-age=31536000, immutable"
+    assert "pragma" not in vendor.headers
+
+    for path in ("/static/themes.css", "/static/vendor/no-such-library.js"):
+        response = client.get(path)
+        assert "no-store" in response.headers["cache-control"], path

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Run from the repository root. Keep these versions and filenames in sync with
 # index.html, sw.js, and static/vendor/NOTICE.txt when updating dependencies.
+# The server tells browsers to cache /static/vendor/ for a year, so a new
+# library version needs a new filename; never change a file under an old name.
 set -euo pipefail
 
 vendor_dir=src/tokdash/static/vendor
@@ -8,7 +10,11 @@ mkdir -p "$vendor_dir"
 
 download() {
   local url=$1 filename=$2
-  curl --fail --location --retry 3 --output "$vendor_dir/$filename.tmp" "$url"
+  # static/**/* is packaged, so a failed download must not leave a .tmp behind.
+  if ! curl --fail --location --retry 3 --output "$vendor_dir/$filename.tmp" "$url"; then
+    rm -f "$vendor_dir/$filename.tmp"
+    return 1
+  fi
   mv "$vendor_dir/$filename.tmp" "$vendor_dir/$filename"
 }
 

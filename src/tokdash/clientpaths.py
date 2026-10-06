@@ -30,22 +30,45 @@ from . import osinfo
 
 
 def opencode_data_dir() -> Path:
+    """Return the OpenCode data directory.
+
+    Returns:
+        Path to the OpenCode data directory, honoring $XDG_DATA_HOME
+        or defaulting to ~/.local/share/opencode.
+    """
     explicit = os.environ.get("XDG_DATA_HOME", "").strip()
     base = Path(explicit).expanduser() if explicit else Path.home() / ".local/share"
     return base / "opencode"
 
 
 def opencode_config_dir() -> Path:
+    """Return the OpenCode configuration directory.
+
+    Returns:
+        Path to the OpenCode configuration directory, honoring $XDG_CONFIG_HOME
+        or defaulting to ~/.config/opencode.
+    """
     explicit = os.environ.get("XDG_CONFIG_HOME", "").strip()
     base = Path(explicit).expanduser() if explicit else Path.home() / ".config"
     return base / "opencode"
 
 
 def opencode_auth_path() -> Path:
+    """Return the path to OpenCode's authentication file.
+
+    Returns:
+        Path to auth.json in the OpenCode data directory.
+    """
     return opencode_data_dir() / "auth.json"
 
 
 def opencode_config_paths() -> List[Path]:
+    """Return candidate OpenCode configuration file paths.
+
+    Returns:
+        List containing the path from $OPENCODE_CONFIG if set, otherwise
+        paths to opencode.json and opencode.jsonc in the OpenCode config directory.
+    """
     explicit = os.environ.get("OPENCODE_CONFIG", "").strip()
     if explicit:
         return [Path(explicit).expanduser()]
@@ -54,10 +77,20 @@ def opencode_config_paths() -> List[Path]:
 
 
 def opencode_messages_dir() -> Path:
+    """Return the directory containing OpenCode stored messages.
+
+    Returns:
+        Path to storage/message under the OpenCode data directory.
+    """
     return opencode_data_dir() / "storage/message"
 
 
 def opencode_db_path() -> Path:
+    """Return the path to the OpenCode SQLite database.
+
+    Returns:
+        Path to opencode.db in the OpenCode data directory.
+    """
     return opencode_data_dir() / "opencode.db"
 
 
@@ -83,6 +116,12 @@ def commandcode_auth_path() -> Path:
 
 
 def kilo_data_dir() -> Path:
+    """Return the Kilo Code data directory.
+
+    Returns:
+        Path to the Kilo data directory, honoring $XDG_DATA_HOME
+        or defaulting to ~/.local/share/kilo.
+    """
     explicit = os.environ.get("XDG_DATA_HOME", "").strip()
     base = Path(explicit).expanduser() if explicit else Path.home() / ".local/share"
     return base / "kilo"
@@ -125,6 +164,11 @@ def cline_data_dir() -> Path:
 
 
 def mimocode_db_path() -> Path:
+    """Return the path to the Mimo/Mimocode SQLite database.
+
+    Returns:
+        Path to mimocode.db under ~/.local/share/mimocode/.
+    """
     return Path.home() / ".local/share/mimocode/mimocode.db"
 
 
@@ -138,6 +182,11 @@ def codex_home() -> Path:
 
 
 def codex_sessions_dir() -> Path:
+    """Return the Codex active sessions directory.
+
+    Returns:
+        Path to the sessions directory under $CODEX_HOME or ~/.codex.
+    """
     return codex_home() / "sessions"
 
 
@@ -151,6 +200,11 @@ def codex_archived_sessions_dir() -> Path:
 
 
 def codex_state_db_path() -> Path:
+    """Return the path to the Codex SQLite state database.
+
+    Returns:
+        Path to state_5.sqlite under $CODEX_HOME or ~/.codex.
+    """
     return codex_home() / "state_5.sqlite"
 
 
@@ -176,6 +230,15 @@ def _resolve(path: Path) -> str:
 
 
 def _sanitize_profile_slug(text: str) -> str:
+    """Sanitize a profile name into an account slug identifier.
+
+    Args:
+        text: Raw profile name or directory string to sanitize.
+
+    Returns:
+        Sanitized slug retaining alphanumeric characters, '.', '_', and '-',
+        with leading and trailing hyphens and dots stripped.
+    """
     return "".join(ch if ch.isalnum() or ch in "._-" else "-" for ch in text).strip("-.")
 
 
@@ -266,6 +329,11 @@ def claude_project_dirs() -> List[Path]:
 
 
 def gemini_root() -> Path:
+    """Return the root directory for Gemini CLI and Antigravity data.
+
+    Returns:
+        Path to ~/.gemini.
+    """
     return Path.home() / ".gemini"
 
 
@@ -281,6 +349,11 @@ ANTIGRAVITY_SIBLING_DIR_NAMES = ("antigravity", "antigravity-acp", "antigravity-
 
 
 def antigravity_cli_dir() -> Path:
+    """Return the Antigravity CLI directory.
+
+    Returns:
+        Path to antigravity-cli under ~/.gemini.
+    """
     return gemini_root() / "antigravity-cli"
 
 
@@ -341,10 +414,22 @@ def antigravity_product_dirs() -> List[Path]:
 
 
 def antigravity_conversation_dirs() -> List[Path]:
+    """Return existing conversation directories across all Antigravity products.
+
+    Returns:
+        List of existing conversations directories found under discovered
+        Antigravity product roots.
+    """
     return [d for d in (root / "conversations" for root in antigravity_product_dirs()) if d.is_dir()]
 
 
 def antigravity_conversation_globs() -> List[str]:
+    """Return glob patterns matching conversation databases for Antigravity.
+
+    Returns:
+        List of glob strings for matching *.db files across all existing
+        Antigravity conversation directories.
+    """
     return [str(d / "*.db") for d in antigravity_conversation_dirs()]
 
 
@@ -355,11 +440,27 @@ def antigravity_summary_db_paths() -> List[Path]:
 
 
 def gemini_chats_json_glob(root: Optional[Path] = None) -> str:
+    """Return glob pattern matching Gemini CLI JSON chat session files.
+
+    Args:
+        root: Optional root directory override. Defaults to ~/.gemini.
+
+    Returns:
+        Glob pattern matching tmp/*/chats/session-*.json under root.
+    """
     root = root if root is not None else gemini_root()
     return str(root / "tmp" / "*" / "chats" / "session-*.json")
 
 
 def gemini_chats_jsonl_glob(root: Optional[Path] = None) -> str:
+    """Return glob pattern matching Gemini CLI JSONL chat session files.
+
+    Args:
+        root: Optional root directory override. Defaults to ~/.gemini.
+
+    Returns:
+        Glob pattern matching tmp/*/chats/session-*.jsonl under root.
+    """
     root = root if root is not None else gemini_root()
     return str(root / "tmp" / "*" / "chats" / "session-*.jsonl")
 
@@ -368,6 +469,11 @@ def gemini_chats_jsonl_glob(root: Optional[Path] = None) -> str:
 
 
 def amp_root() -> Path:
+    """Return the Amp CLI root directory.
+
+    Returns:
+        Path to ~/.amp.
+    """
     return Path.home() / ".amp"
 
 
@@ -483,6 +589,11 @@ def grok_home() -> Path:
 
 
 def grok_sessions_dir() -> Path:
+    """Return the Grok Build sessions directory.
+
+    Returns:
+        Path to the sessions directory under $GROK_HOME or ~/.grok.
+    """
     return grok_home() / "sessions"
 
 
@@ -499,6 +610,11 @@ def dsh_home() -> Path:
 
 
 def dsh_sessions_dir() -> Path:
+    """Return the DeepSeek Harness (dsh) sessions directory.
+
+    Returns:
+        Path to the sessions directory under $DSH_HOME or ~/.dsh.
+    """
     return dsh_home() / "sessions"
 
 
@@ -506,11 +622,22 @@ def dsh_sessions_dir() -> Path:
 
 
 def cc_switch_root() -> Path:
+    """Return the CC Switch configuration root directory.
+
+    Returns:
+        Path to the CC Switch root directory, honoring $CC_SWITCH_CONFIG_DIR
+        or defaulting to ~/.cc-switch.
+    """
     explicit = os.environ.get("CC_SWITCH_CONFIG_DIR", "").strip()
     return Path(explicit).expanduser() if explicit else Path.home() / ".cc-switch"
 
 
 def cc_switch_db_path() -> Path:
+    """Return the path to the CC Switch SQLite database.
+
+    Returns:
+        Path to cc-switch.db under the CC Switch root ($CC_SWITCH_CONFIG_DIR or ~/.cc-switch).
+    """
     return cc_switch_root() / "cc-switch.db"
 
 
@@ -596,10 +723,20 @@ def omp_agent_search_dirs() -> List[Path]:
 
 
 def copilot_otel_dir() -> Path:
+    """Return the GitHub Copilot CLI OpenTelemetry directory.
+
+    Returns:
+        Path to ~/.copilot/otel.
+    """
     return Path.home() / ".copilot" / "otel"
 
 
 def copilot_events_glob() -> str:
+    """Return glob pattern matching GitHub Copilot CLI session event files.
+
+    Returns:
+        Glob pattern matching ~/.copilot/session-state/*/events.jsonl.
+    """
     return str(Path.home() / ".copilot" / "session-state" / "*" / "events.jsonl")
 
 
@@ -673,10 +810,20 @@ def reasonix_home() -> Path:
 
 
 def reasonix_stats_dir() -> Path:
+    """Return the Reasonix stats directory.
+
+    Returns:
+        Path to the stats directory under $REASONIX_HOME or ~/.reasonix.
+    """
     return reasonix_home() / "stats"
 
 
 def reasonix_projects_dir() -> Path:
+    """Return the Reasonix projects directory.
+
+    Returns:
+        Path to the projects directory under $REASONIX_HOME or ~/.reasonix.
+    """
     return reasonix_home() / "projects"
 
 

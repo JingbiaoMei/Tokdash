@@ -462,6 +462,8 @@ def _pb_text(value: Any) -> str:
 
 
 class BaseParser(ABC):
+    """Abstract base class for all coding tool usage parsers."""
+
     source_name: str
     sync_capability = SourceSyncCapability()
 
@@ -486,6 +488,11 @@ class BaseParser(ABC):
     _entry_cache: ClassVar[Dict[str, Tuple[tuple, List[Dict[str, Any]]]]] = {}
 
     def __init__(self, pricing_db: PricingDatabase):
+        """Initialize the parser with the pricing database.
+
+        Args:
+            pricing_db: Database used to calculate usage costs.
+        """
         self.pricing_db = pricing_db
 
     def _file_signatures(self) -> tuple:
@@ -582,6 +589,14 @@ class BaseParser(ABC):
 
     @staticmethod
     def _to_utc(dt: Optional[datetime]) -> Optional[datetime]:
+        """Convert a datetime to UTC, treating naive values as UTC.
+
+        Args:
+            dt: Datetime to convert, or None.
+
+        Returns:
+            The UTC datetime, or None when ``dt`` is None.
+        """
         if dt is None:
             return None
         if dt.tzinfo is None:
@@ -590,6 +605,16 @@ class BaseParser(ABC):
 
     @classmethod
     def _in_range(cls, ts: datetime, since_date: Optional[datetime], until_date: Optional[datetime]) -> bool:
+        """Check whether a timestamp falls in the optional half-open range.
+
+        Args:
+            ts: Timestamp to check.
+            since_date: Inclusive lower bound, or None.
+            until_date: Exclusive upper bound, or None.
+
+        Returns:
+            True when ``ts`` is within the range; otherwise False.
+        """
         s = cls._to_utc(since_date)
         u = cls._to_utc(until_date)
         t = cls._to_utc(ts)
@@ -603,6 +628,14 @@ class BaseParser(ABC):
 
     @staticmethod
     def _i(v: Any) -> int:
+        """Convert a value to an integer, using zero for invalid values.
+
+        Args:
+            v: Value to convert.
+
+        Returns:
+            The integer value, or zero if conversion fails.
+        """
         try:
             return int(v or 0)
         except Exception:
@@ -630,6 +663,8 @@ def _opencode_model_identity(data: Dict[str, Any]) -> tuple[str, str]:
 
 
 class OpenCodeParser(BaseParser):
+    """Parse token usage from OpenCode's local session database."""
+
     source_name = "opencode"
     sync_capability = SourceSyncCapability(
         mode="source_native_db",
@@ -646,10 +681,26 @@ class OpenCodeParser(BaseParser):
     _query_cache_sig: ClassVar[tuple] = ()
 
     def __init__(self, pricing_db: PricingDatabase):
+        """Initialize the parser and locate the OpenCode database.
+
+        Args:
+            pricing_db: Database used to calculate usage costs.
+        """
         super().__init__(pricing_db)
         self.db_path = clientpaths.opencode_db_path()
 
     def _build_entry(self, model: str, provider: str, tokens: Dict[str, Any], ts_ms: int) -> Dict[str, Any]:
+        """Convert an OpenCode token payload to a normalized usage entry.
+
+        Args:
+            model: Model identifier.
+            provider: Provider identifier.
+            tokens: Token counts and optional cache counts.
+            ts_ms: Entry timestamp in epoch milliseconds.
+
+        Returns:
+            A normalized usage entry with token counts, cost, and timestamp.
+        """
         cache = tokens.get("cache") if isinstance(tokens.get("cache"), dict) else {}
         input_t = self._i(tokens.get("input"))
         output_t = self._i(tokens.get("output"))
@@ -670,6 +721,11 @@ class OpenCodeParser(BaseParser):
         }
 
     def _file_signatures(self) -> tuple:
+        """Return filesystem signatures for the database and SQLite sidecars.
+
+        Returns:
+            A tuple of path, modification-time, and size signatures.
+        """
         if not self.db_path.exists():
             return ()
         out: list[tuple[str, int, int]] = []
@@ -689,6 +745,16 @@ class OpenCodeParser(BaseParser):
         return []
 
     def _query_db(self, db_path: Path, s_ms: int, u_ms: int) -> List[Dict[str, Any]]:
+        """Query assistant usage rows from one OpenCode database.
+
+        Args:
+            db_path: SQLite database to read.
+            s_ms: Inclusive start timestamp in epoch milliseconds.
+            u_ms: Exclusive end timestamp in epoch milliseconds.
+
+        Returns:
+            Normalized usage entries found in the requested time window.
+        """
         try:
             conn = connect_sqlite_readonly(db_path)
         except Exception:
@@ -729,6 +795,11 @@ class OpenCodeParser(BaseParser):
         return out
 
     def _parse_all(self) -> List[Dict[str, Any]]:
+        """Return all entries; collection is implemented with date-filtered SQL.
+
+        Returns:
+            An empty list because :meth:`collect` queries the source database.
+        """
         return []  # collect() is overridden; this satisfies the ABC contract
 
     def collect(self, since_date: Optional[datetime] = None, until_date: Optional[datetime] = None) -> List[Dict[str, Any]]:
@@ -1062,6 +1133,8 @@ class ClineParser(BaseParser):
 
 
 class CodexParser(BaseParser):
+    """Parse token usage from Codex session and archived session files."""
+
     source_name = "codex"
     sync_capability = SourceSyncCapability(
         mode="file_replace",
@@ -1078,6 +1151,11 @@ class CodexParser(BaseParser):
     persistent_parser_version = 1
 
     def __init__(self, pricing_db: PricingDatabase):
+        """Initialize the parser and locate Codex session directories.
+
+        Args:
+            pricing_db: Database used to calculate usage costs.
+        """
         super().__init__(pricing_db)
         self.sessions_dir = clientpaths.codex_sessions_dir()
         self.archived_sessions_dir = clientpaths.codex_archived_sessions_dir()
@@ -1085,6 +1163,15 @@ class CodexParser(BaseParser):
 
     @staticmethod
     def _infer_provider(model: str, fallback: str = "openai") -> str:
+        """Infer a provider from a model name.
+
+        Args:
+            model: Model identifier to inspect.
+            fallback: Provider to use when the name is unrecognized.
+
+        Returns:
+            The inferred provider or the fallback value.
+        """
         m = (model or "").lower()
         if m.startswith("claude"):
             return "anthropic"
@@ -1095,6 +1182,11 @@ class CodexParser(BaseParser):
         return fallback
 
     def _file_signatures(self) -> tuple:
+        """Return signatures for current and archived Codex session files.
+
+        Returns:
+            A tuple of path, modification-time, and size signatures.
+        """
         # Both roots: archived rollouts keep their content, so stable event keys
         # collapse any overlap with sessions/ instead of double-counting.
         def _scan() -> tuple:
@@ -1105,6 +1197,11 @@ class CodexParser(BaseParser):
         return _timed_sigs(f"codex:{self.sessions_dir}:{self.archived_sessions_dir}", _scan)
 
     def _parse_all(self) -> List[Dict[str, Any]]:
+        """Parse Codex session logs into deduplicated usage entries.
+
+        Returns:
+            Normalized usage entries from current and archived session files.
+        """
         out: List[Dict[str, Any]] = []
         self.replay_events_skipped = 0
         event_index_by_key: dict[str, int] = {}
@@ -1354,6 +1451,8 @@ def claude_usage_supersedes(
 
 
 class ClaudeParser(BaseParser):
+    """Parse token usage from Claude Code project session files."""
+
     source_name = "claude"
     sync_capability = SourceSyncCapability(
         mode="file_replace",
@@ -1371,11 +1470,24 @@ class ClaudeParser(BaseParser):
     persistent_parser_version = 2
 
     def __init__(self, pricing_db: PricingDatabase):
+        """Initialize the parser and locate Claude Code project directories.
+
+        Args:
+            pricing_db: Database used to calculate usage costs.
+        """
         super().__init__(pricing_db)
         self.projects_dirs = clientpaths.claude_project_dirs()
 
     @staticmethod
     def _infer_provider(model: str) -> str:
+        """Infer a provider from a model name.
+
+        Args:
+            model: Model identifier to inspect.
+
+        Returns:
+            The inferred provider, or an empty string when unrecognized.
+        """
         m = (model or "").lower()
         if m.startswith("claude"):
             return "anthropic"
@@ -1386,6 +1498,11 @@ class ClaudeParser(BaseParser):
         return ""
 
     def _file_signatures(self) -> tuple:
+        """Return signatures for files under Claude Code project directories.
+
+        Returns:
+            A tuple of path, modification-time, and size signatures.
+        """
         all_sigs = []
         for projects_dir in self.projects_dirs:
             all_sigs.extend(
@@ -1397,6 +1514,12 @@ class ClaudeParser(BaseParser):
         return tuple(sorted(all_sigs))
 
     def _parse_all(self) -> List[Dict[str, Any]]:
+        """Parse Claude Code logs and retain the authoritative usage snapshot.
+
+        Returns:
+            Normalized usage entries, with streamed snapshots deduplicated by
+            assistant message identifier.
+        """
         out: List[Dict[str, Any]] = []
         # Claude Code rewrites one assistant turn once per streamed content
         # block, every write sharing the message id, and streamed usage counts
@@ -1958,6 +2081,8 @@ class AntigravityCLIParser(BaseParser):
 
 
 class AmpParser(BaseParser):
+    """Placeholder parser for Amp, pending a stable local usage schema."""
+
     source_name = "amp"
     sync_capability = SourceSyncCapability(
         mode="source_replace",
@@ -1967,10 +2092,20 @@ class AmpParser(BaseParser):
     persistent_parser_version = 1
 
     def __init__(self, pricing_db: PricingDatabase):
+        """Initialize the placeholder parser and locate the Amp data root.
+
+        Args:
+            pricing_db: Database used to calculate usage costs.
+        """
         super().__init__(pricing_db)
         self.amp_root = clientpaths.amp_root()
 
     def _parse_all(self) -> List[Dict[str, Any]]:
+        """Return no entries while Amp parsing remains a placeholder.
+
+        Returns:
+            An empty list.
+        """
         # TODO(coding_tools): Amp parser placeholder.
         # Keep fail-soft until we have schema + fixtures.
         return []

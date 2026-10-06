@@ -336,6 +336,15 @@ def codex_fork_ancestry(payload: Any) -> Tuple[bool, Optional[str]]:
 
 
 def _sqlite_table_exists(conn: sqlite3.Connection, table: str) -> bool:
+    """Check whether a named table exists in a SQLite database.
+
+    Args:
+        conn: Connection to the database to inspect.
+        table: Table name to look up.
+
+    Returns:
+        True if the table exists; False if it does not or the query fails.
+    """
     try:
         cur = conn.cursor()
         cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,))
@@ -364,6 +373,14 @@ def _opencode_message_table(conn: sqlite3.Connection) -> str:
 
 
 def _mimo_imported_message_ids(conn: sqlite3.Connection) -> set[str]:
+    """Collect message IDs already recorded by Mimo import tables.
+
+    Args:
+        conn: Connection to the Mimo database.
+
+    Returns:
+        A set of stringified IDs from readable external and Claude imports.
+    """
     imported: set[str] = set()
     for table in ("external_import", "claude_import"):
         if not _sqlite_table_exists(conn, table):
@@ -386,6 +403,18 @@ def _mimo_imported_message_ids(conn: sqlite3.Connection) -> set[str]:
 
 
 def _pb_read_varint(buf: bytes, pos: int) -> tuple[int, int]:
+    """Decode a protobuf varint starting at a byte offset.
+
+    Args:
+        buf: Encoded protobuf bytes.
+        pos: Offset of the first varint byte.
+
+    Returns:
+        The decoded integer and the offset immediately after it.
+
+    Raises:
+        ValueError: If the varint is truncated or exceeds the supported length.
+    """
     value = 0
     shift = 0
     while True:
@@ -436,6 +465,16 @@ def _pb_parse_message(buf: bytes) -> Dict[int, list[Any]]:
 
 
 def _pb_get_path(msg: Dict[int, list[Any]], path: tuple[int, ...]) -> Any:
+    """Retrieve a nested protobuf field by its sequence of field numbers.
+
+    Args:
+        msg: Parsed protobuf message, bucketed by field number.
+        path: Field numbers to follow through nested messages.
+
+    Returns:
+        The last value for the requested field, or None if the path is absent
+        or contains a value that cannot be parsed as a nested message.
+    """
     cur: Any = msg
     for index, field in enumerate(path):
         if not isinstance(cur, dict):
@@ -453,6 +492,14 @@ def _pb_get_path(msg: Dict[int, list[Any]], path: tuple[int, ...]) -> Any:
 
 
 def _pb_text(value: Any) -> str:
+    """Decode a byte value as UTF-8, returning an empty string on failure.
+
+    Args:
+        value: Value expected to contain UTF-8 encoded bytes.
+
+    Returns:
+        Decoded text, or an empty string for non-bytes or invalid UTF-8.
+    """
     if not isinstance(value, bytes):
         return ""
     try:
@@ -3610,6 +3657,15 @@ class _ZCodeSnapshot:
 
 
 def zcode_snapshot_signatures(db_path: Path) -> tuple:
+    """Return signatures for the ZCode database and its optional WAL file.
+
+    Args:
+        db_path: Path to the main SQLite database.
+
+    Returns:
+        A tuple of path, modification-time, and size records. Missing or
+        unreadable files are represented with None metadata.
+    """
     # (path, mtime_ns, size) of exactly the files the snapshot copies:
     # the main DB and, while present, the -wal. The live -shm is
     # excluded on purpose: it is not copied (SQLite rebuilds the WAL
@@ -3626,6 +3682,15 @@ def zcode_snapshot_signatures(db_path: Path) -> tuple:
 
 
 def _zcode_open_snapshot(db_path: Path) -> Optional[Tuple[sqlite3.Connection, Path]]:
+    """Open a coherent temporary copy of a ZCode database and its WAL.
+
+    Args:
+        db_path: Path to the live SQLite database.
+
+    Returns:
+        The copied database connection and temporary directory, or None if
+        copying/opening fails or every attempt races a source change.
+    """
     # Open a private temp-dir copy, never the source file. A ?mode=ro
     # open of a WAL database is still not side-effect free: when the
     # -shm file is missing, SQLite creates it in the source directory
@@ -4631,6 +4696,20 @@ def qoder_cli_transcript_candidate(
     unattributed: Optional[set] = None,
     session_window: Optional[int] = None,
 ) -> Optional[Tuple[str, Dict[str, Any]]]:
+    """Extract attributable usage from a Qoder CLI transcript record.
+
+    Args:
+        d: Decoded transcript record.
+        window: Configured context window override, if any.
+        windows: Per-model context window overrides.
+        unattributed: Optional set receiving models whose credit usage could
+            not be attributed, paired with the cause.
+        session_window: Context window inferred for the session.
+
+    Returns:
+        A request ID and normalized usage candidate, or None if the record
+        lacks usage or cannot be attributed.
+    """
     msg = d.get("message")
     if not isinstance(msg, dict):
         return None
@@ -4687,6 +4766,15 @@ def qoder_cli_transcript_candidate(
 def qoder_cli_segment_candidate(
     d: Dict[str, Any]
 ) -> Optional[Tuple[str, Dict[str, Any]]]:
+    """Extract nonzero usage from a completed Qoder CLI response segment.
+
+    Args:
+        d: Decoded segment event.
+
+    Returns:
+        Its request ID and normalized usage candidate, or None when the event
+        is not a completed response with attributable token usage.
+    """
     if d.get("type") != "model.response.completed":
         return None
     data = d.get("data")
@@ -4716,6 +4804,14 @@ def qoder_cli_segment_candidate(
 
 
 def qoder_cli_discovered_files(roots: List[Path]) -> List[Path]:
+    """Find Qoder CLI transcript and response-segment JSONL files.
+
+    Args:
+        roots: Qoder data roots to search.
+
+    Returns:
+        Sorted-by-root discovered files, with duplicates removed.
+    """
     out: List[Path] = []
     seen = set()
     for root in roots:
@@ -4844,6 +4940,19 @@ def qoder_cli_merged_entry(
     scand: Optional[Dict[str, Any]],
     rate: float,
 ) -> Optional[Dict[str, Any]]:
+    """Merge transcript and segment usage into one priced entry.
+
+    Args:
+        pricing_db: Pricing database used to calculate estimated cost.
+        source_name: Name assigned to the resulting usage source.
+        rid: Stable request ID shared by the candidate records.
+        tcand: Transcript candidate, when available.
+        scand: Segment candidate, when available.
+        rate: Conversion rate for provider-reported credits.
+
+    Returns:
+        A normalized usage entry, or None when merged token counts are zero.
+    """
     base = tcand if tcand is not None else scand
     model = base["model"]
     ts = base["ts"]
@@ -5892,6 +6001,14 @@ _ZED_DECODE_CACHE_MAX = 4096
 
 
 def _zstd_decompress(blob: bytes) -> bytes:
+    """Decompress a Zstandard blob, including frames without size metadata.
+
+    Args:
+        blob: Zstandard data, possibly containing multiple frames.
+
+    Returns:
+        Decompressed bytes.
+    """
     # stream_reader, not the one-shot decompress(): that form requires the
     # content size in the frame header and raises ZstdError on a valid
     # frame written without it. Same call as dsh_log.py's zstd read;
@@ -6193,6 +6310,14 @@ def qwen_file_signatures(base: Path) -> tuple:
 
 
 def _qwen_is_int(v: Any) -> bool:
+    """Check for an integer value while excluding booleans.
+
+    Args:
+        v: Value to inspect.
+
+    Returns:
+        True for integers other than bool; otherwise False.
+    """
     return isinstance(v, int) and not isinstance(v, bool)
 
 
@@ -8894,6 +9019,15 @@ class CodingToolsUsageTracker:
 
 
 def _date_range(args: argparse.Namespace) -> Tuple[Optional[datetime], Optional[datetime]]:
+    """Convert CLI date options to a half-open datetime range.
+
+    Args:
+        args: Parsed command-line options containing today, since, and until.
+
+    Returns:
+        Start and exclusive end datetimes; either bound may be None. The
+        today option takes precedence and spans the current local calendar day.
+    """
     if args.today:
         start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
         return start, start + timedelta(days=1)
@@ -8903,6 +9037,7 @@ def _date_range(args: argparse.Namespace) -> Tuple[Optional[datetime], Optional[
 
 
 def main():
+    """Run the coding tools usage tracker command-line interface."""
     parser = argparse.ArgumentParser(description="Coding tools token usage tracker")
     parser.add_argument("--today", action="store_true")
     parser.add_argument("--since", type=str)

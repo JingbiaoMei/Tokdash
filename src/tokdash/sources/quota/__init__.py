@@ -183,6 +183,8 @@ def _boundary_candidate_details(
     a candidate that close to `now` is treated as the one already handled.
     """
     candidates: list[tuple[int, str, str]] = []
+    # Jitter-aware horizon: anything at or before now + RESET_JITTER_SECONDS is
+    # discarded below, not just anything at or before now.
     horizon = now + RESET_JITTER_SECONDS
     for row in latest_snapshots:
         resets_at = row.get("resets_at")
@@ -190,6 +192,7 @@ def _boundary_candidate_details(
             continue
         provider = str(row.get("provider") or "")
         bucket = str(row.get("bucket") or "")
+        # Rolling/reset-less windows have no single boundary to pre-arm against.
         if _quota_history_uses_adjacent_deltas(provider, bucket, resets_at):
             continue
         try:
@@ -197,10 +200,16 @@ def _boundary_candidate_details(
         except (TypeError, ValueError, OverflowError):
             continue
         pre_candidate = resets_at - cfg.pre_seconds
+        # A candidate this close to now is the one already handled — skip it
+        # to avoid re-arming a poll that just fired (resets_at jitters +/-1s
+        # poll-to-poll, so the same physical boundary reappears just ahead of
+        # `now` right after we fire on it).
         if pre_candidate > horizon:
             candidates.append((pre_candidate, "pre", provider))
         if cfg.post_reset_enabled:
             post_candidate = resets_at + cfg.post_seconds
+            # Same jitter-window filter as pre: a post candidate inside the
+            # horizon belongs to a reset we have already polled past.
             if post_candidate > horizon:
                 candidates.append((post_candidate, "post", provider))
     return candidates
@@ -250,12 +259,21 @@ def plan_boundary_poll(
             # An anchor remains owed until its provider is actually sampled. If another
             # provider's scoped boundary poll let it become overdue, schedule it at the
             # next call floor instead of silently discarding the old reset epoch.
+            # Overdue is fine here: this is a provider that was supposed to reset but
+            # has not been polled yet, so the post-reset sample is still missing.
+            # `max(..., horizon + 1)` also keeps the anchor out of the jitter window
+            # that filters fresh candidates, so it is never mistaken for one already
+            # handled.
             candidates.append((max(target, horizon + 1), "post", str(provider or "")))
     if not candidates:
         return None
 
     earliest = min(target for target, _kind, _provider in candidates)
     scheduled_at = max(earliest, now + max(0, int(minimum_delay_seconds)))
+    # Stretch the due window by one jitter constant: candidates that land within
+    # RESET_JITTER_SECONDS of the scheduled time describe the same physical reset
+    # (providers round the wall clock differently each poll), so folding them into
+    # this poll fires one boundary once instead of one poll per near-identical hit.
     coalesce_until = scheduled_at + RESET_JITTER_SECONDS
     due = [candidate for candidate in candidates if candidate[0] <= coalesce_until]
     return BoundaryPollTarget(

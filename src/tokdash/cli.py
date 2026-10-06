@@ -578,7 +578,8 @@ def _verify_usage_database(period: str) -> dict:
         result["guidance"] = (
             "The stored usage database does not match the live source data. "
             "Run `tokdash db resync` to rebuild the database from source files. "
-            "If the database is corrupted, run `tokdash db repair` instead."
+            "If the database is corrupted, run `tokdash db resync` after "
+            "backing up the database file."
         )
         return result
     finally:

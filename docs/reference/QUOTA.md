@@ -138,6 +138,41 @@ poller does not run, and the tab only shows in-memory results from a manual
 server process. Keep the usage DB enabled (the default) for normal quota
 tracking.
 
+## Background poll and reset-boundary sequence
+
+The daemon in `cli.py` schedules regular polls and consults the quota boundary planner for earlier provider-scoped samples. Credential readers use the disclosed local CLI configuration and auth files; successful collection is persisted as quota snapshots in the usage database.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Daemon as Quota poll daemon (cli.py)
+    participant Planner as _plan_next_quota_poll
+    participant Boundary as Boundary planner (quota/__init__.py)
+    participant Store as UsageEntryStore (SQLite)
+    participant Paths as clientpaths.py
+    participant Config as Local CLI configs and auth stores
+    participant Providers as Provider quota APIs
+
+    Daemon->>Store: Read latest quota snapshots
+    Store-->>Daemon: Current fixed-window reset timestamps
+    Daemon->>Planner: Plan next wake with current time and snapshots
+    Planner->>Planner: Calculate jittered regular interval
+    Note over Planner: RESET_JITTER_SECONDS filters near-now candidates
+    Planner->>Boundary: plan_boundary_poll(..., minimum 300-second delay)
+    Boundary->>Boundary: _boundary_candidate_details computes pre-reset and post-reset candidates
+    Boundary-->>Planner: Earliest coalesced boundary and provider set, if sooner
+    Planner-->>Daemon: Sleep duration and optional boundary target
+    Daemon->>Daemon: Sleep, then recheck tracking and consent
+    Daemon->>Paths: Resolve disclosed credential locations
+    Paths->>Config: Read local CLI credential/config files
+    Config-->>Paths: Credentials and provider settings
+    Paths-->>Daemon: Credential-backed provider sources
+    Daemon->>Providers: Request quota for enabled providers
+    Providers-->>Daemon: Quota windows and reset timestamps
+    Daemon->>Store: Insert quota snapshots and update poll metadata
+    Note over Store: Snapshot writes use SQLite transactions; local Codex snapshots and their watermarks commit atomically
+```
+
 ---
 
 ← Back to the [README](../../README.md) · [中文 README](../../README_CN.md)

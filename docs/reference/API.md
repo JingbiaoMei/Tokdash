@@ -4,8 +4,10 @@ Tokdash exposes a local HTTP API (FastAPI) for querying token usage, costs, and 
 
 - **Default bind:** `127.0.0.1:55423`
 - **Start:** `tokdash serve --bind 127.0.0.1 --port 55423`
-- **OpenAPI schema:** `GET /openapi.json`
-- **Interactive docs:** `GET /docs` (Swagger UI), `GET /redoc`
+- **OpenAPI schema:** `GET /openapi.json` (feed it to any OpenAPI viewer or client generator)
+- **Interactive docs:** none. Tokdash doesn't serve `/docs` (Swagger UI) or `/redoc`, because
+  both load their scripts from a third-party CDN onto the dashboard's origin. This page is
+  the reference.
 
 All endpoints return JSON. The API is unauthenticated and intended to bind to loopback
 only. **State-changing requests are gated** (loopback bind + Host/Origin allowlist +

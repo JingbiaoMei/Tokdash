@@ -319,6 +319,21 @@ def test_static_assets_resolve_under_a_preserved_prefix():
     assert client.get("/tokdash/static/no-such-file.css").status_code == 404
 
 
+def test_api_docs_pages_are_off_but_the_schema_is_served():
+    """Swagger UI and ReDoc load their scripts from a CDN onto this origin, where
+    they could read the write token; the schema itself is plain JSON and stays."""
+    from fastapi.testclient import TestClient
+
+    client = TestClient(api.app)
+    for path in ("/docs", "/redoc", "/docs/oauth2-redirect"):
+        response = client.get(path)
+        assert response.status_code == 404, path
+        assert "swagger" not in response.text.lower() and "redoc" not in response.text.lower(), path
+    schema = client.get("/openapi.json")
+    assert schema.status_code == 200
+    assert "/api/usage" in schema.json()["paths"]
+
+
 def test_dashboard_refresh_status_copy_and_auto_success_reset():
     html = api._render_dashboard_html("")
 

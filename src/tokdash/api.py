@@ -668,7 +668,11 @@ async def _lifespan(app: "FastAPI"):
             app.state.identity_warm.cancel()
 
 
-app = FastAPI(title="Tokdash", lifespan=_lifespan)
+# No Swagger UI or ReDoc pages. FastAPI loads both from cdn.jsdelivr.net (pinned to a
+# major version only, no integrity check), and a script served on this origin can read
+# the write token from /api/csrf-token like the dashboard does. /openapi.json stays: it
+# is plain JSON with no third-party code, and API.md is the human-readable reference.
+app = FastAPI(title="Tokdash", lifespan=_lifespan, docs_url=None, redoc_url=None)
 # follow_symlink=True: pipx/uv installs the packaged static assets as symlinks into
 # the uv cache. Starlette defaults to follow_symlink=False, where lookup_path()
 # realpath-resolves each request out of STATIC_DIR, fails the commonpath guard, and

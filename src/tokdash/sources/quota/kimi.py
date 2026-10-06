@@ -1,3 +1,11 @@
+"""Kimi Code quota tracking provider.
+
+Extracts Moonshot AI / Kimi Code credentials from environment variables,
+local TOML configuration files, and OAuth credential caches. Queries the
+Kimi Code usage API to monitor rolling 5-hour, weekly, and membership plan
+quota utilization.
+"""
+
 from __future__ import annotations
 
 import ast
@@ -23,6 +31,15 @@ _ALLOWED_HOSTS = frozenset({"api.kimi.com"})
 
 @dataclass(frozen=True)
 class _Credential:
+    """Credential container for Kimi API authentication.
+
+    Attributes:
+        token: Bearer token or API key for Kimi Code API calls.
+        base_url: Target base URL for API requests.
+        source: Origin or configuration file reference for the credential.
+        expires_at: Optional Unix epoch timestamp in seconds when the token expires.
+    """
+
     token: str
     base_url: str
     source: str
@@ -30,6 +47,17 @@ class _Credential:
 
 
 def _unquote_toml(value: str) -> str:
+    """Parse a TOML-quoted string literal into a plain string.
+
+    Uses ``ast.literal_eval`` to handle escaping without requiring
+    an external TOML parser library.
+
+    Args:
+        value: Raw TOML string value to unquote.
+
+    Returns:
+        Unquoted and stripped string value.
+    """
     value = value.strip()
     try:
         parsed = ast.literal_eval(value)
@@ -39,7 +67,18 @@ def _unquote_toml(value: str) -> str:
 
 
 def _static_config_credentials(path: Path) -> list[_Credential]:
-    """Read only Kimi provider blocks from config.toml without adding a TOML dependency."""
+    """Read only Kimi provider blocks from config.toml without adding a TOML dependency.
+
+    Parses ``[providers.*]`` sections from the specified configuration file
+    without adding an external TOML dependency. Filters for providers of type
+    'kimi' or with base URLs pointing to Kimi coding endpoints.
+
+    Args:
+        path: Filesystem path to the config.toml file.
+
+    Returns:
+        List of extracted ``_Credential`` objects.
+    """
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except Exception:
@@ -71,6 +110,17 @@ def _static_config_credentials(path: Path) -> list[_Credential]:
 
 
 def _oauth_credential(root: Path) -> _Credential | None:
+    """Extract an OAuth credential from a Kimi configuration root directory.
+
+    Reads ``credentials/kimi-code.json`` beneath the given root path to retrieve
+    the cached access token and expiration timestamp.
+
+    Args:
+        root: Base path to a Kimi configuration directory.
+
+    Returns:
+        A ``_Credential`` object if valid OAuth token is found, or None.
+    """
     path = root / "credentials" / "kimi-code.json"
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -85,6 +135,15 @@ def _oauth_credential(root: Path) -> _Credential | None:
 
 
 def _credentials() -> list[_Credential]:
+    """Discover and deduplicate all available Kimi Code credentials.
+
+    Gathers credentials from ``KIMI_API_KEY`` environment variables, static
+    provider blocks in ``config.toml`` files across Kimi root paths, OAuth
+    token caches in ``kimi-code.json``, and external credential scanners.
+
+    Returns:
+        List of unique ``_Credential`` instances deduplicated by (token, base_url).
+    """
     out: list[_Credential] = []
     env_token = os.environ.get("KIMI_API_KEY", "").strip()
     if env_token:
@@ -110,6 +169,19 @@ def _credentials() -> list[_Credential]:
 
 
 def _status_snapshot(status: str, captured_at: int, credential: _Credential | None, raw: dict[str, Any]) -> QuotaSnapshot:
+    """Create a fallback or error QuotaSnapshot for Kimi Code.
+
+    Args:
+        status: Status string indicating availability or failure
+            (e.g., 'unavailable', 'stale_token', 'fetch_error').
+        captured_at: Unix epoch timestamp in seconds when captured.
+        credential: The credential instance that produced this status, if any.
+        raw: Additional diagnostic or error metadata dictionary.
+
+    Returns:
+        A QuotaSnapshot initialized with provider 'kimi', label 'Kimi Code API',
+        source 'kimi_api', and the given status and metadata.
+    """
     return QuotaSnapshot(
         "kimi", "default", "api", "Kimi Code API", None, None, None,
         captured_at, "kimi_api", status,
@@ -118,6 +190,14 @@ def _status_snapshot(status: str, captured_at: int, credential: _Credential | No
 
 
 def _number(value: Any) -> float | None:
+    """Safely convert a value to a float.
+
+    Args:
+        value: Any input value to parse as float.
+
+    Returns:
+        Parsed float value, or None if conversion fails.
+    """
     try:
         return float(value)
     except Exception:
@@ -125,11 +205,34 @@ def _number(value: Any) -> float | None:
 
 
 def _usage_url(base_url: str) -> str:
+    """Construct the usage API endpoint URL from a base URL.
+
+    Appends ``/v1/usages`` if the base URL ends with ``/coding``,
+    otherwise appends ``/usages``.
+
+    Args:
+        base_url: Base URL string for the Kimi service.
+
+    Returns:
+        Full URL to the Kimi Code usage API endpoint.
+    """
     base = base_url.rstrip("/")
     return f"{base}/v1/usages" if base.endswith("/coding") else f"{base}/usages"
 
 
 def _membership_plan(user: dict[str, Any]) -> str | None:
+    """Map internal Kimi membership level enums to user-facing plan names.
+
+    Converts internal levels (e.g., LEVEL_FREE, LEVEL_STANDARD, LEVEL_ADVANCED)
+    and regional variations (such as CN region mapping LEVEL_BASIC to Andante)
+    into standard tempo-named plan tiers (Free, Moderato, Allegretto, Allegro, Vivace).
+
+    Args:
+        user: User profile dictionary from the API payload.
+
+    Returns:
+        Human-readable plan name, or None if membership information is missing.
+    """
     membership = user.get("membership") if isinstance(user.get("membership"), dict) else {}
     plan_value = membership.get("level") or membership.get("name")
     if not plan_value:
@@ -153,6 +256,19 @@ def _membership_plan(user: dict[str, Any]) -> str | None:
 
 
 def _window_bucket(item: dict[str, Any], index: int) -> tuple[str, str]:
+    """Map a quota limit window to a Tokdash bucket identifier and display label.
+
+    Parses window duration and time units (seconds, minutes, hours, days),
+    mapping 4-6 hour windows to ('5h', '5-hour window') and 6-8 day windows
+    to ('7d', 'Weekly').
+
+    Args:
+        item: Dictionary describing a rate limit window.
+        index: Positional index of the limit item in the payload.
+
+    Returns:
+        Tuple of ``(bucket_id, bucket_label)``.
+    """
     window = item.get("window") if isinstance(item.get("window"), dict) else {}
     duration = _number(window.get("duration") or item.get("duration"))
     unit = str(window.get("timeUnit") or window.get("time_unit") or item.get("timeUnit") or "").upper()
@@ -174,6 +290,21 @@ def _window_bucket(item: dict[str, Any], index: int) -> tuple[str, str]:
 
 
 def _usage_snapshot(detail: dict[str, Any], bucket: str, label: str, captured_at: int, plan: str | None) -> QuotaSnapshot | None:
+    """Convert an individual usage detail dictionary into a QuotaSnapshot.
+
+    Calculates used quota percentage from limit, used, and remaining fields,
+    and extracts reset timestamps.
+
+    Args:
+        detail: Dictionary containing limit, used/remaining, and reset values.
+        bucket: Quota bucket identifier (e.g., '5h', '7d', 'plan').
+        label: Human-readable bucket label (e.g., '5-hour window', 'Weekly').
+        captured_at: Unix epoch timestamp in seconds when the snapshot was taken.
+        plan: Optional subscription or membership plan name.
+
+    Returns:
+        A populated QuotaSnapshot with status 'ok', or None if limit is missing or non-positive.
+    """
     limit = _number(detail.get("limit"))
     if limit is None or limit <= 0:
         return None
@@ -192,6 +323,18 @@ def _usage_snapshot(detail: dict[str, Any], bucket: str, label: str, captured_at
 
 
 def _snapshots_from_payload(payload: dict[str, Any], captured_at: int) -> list[QuotaSnapshot]:
+    """Extract quota snapshots from a Kimi Code usage API response payload.
+
+    Parses limit items in the ``limits`` array and the top-level ``usage``
+    allowance, deduplicating equivalent windows to prevent duplicate rows.
+
+    Args:
+        payload: Decoded JSON response payload from the Kimi usage API.
+        captured_at: Unix epoch timestamp in seconds when captured.
+
+    Returns:
+        List of QuotaSnapshot objects for each distinct quota window.
+    """
     user = payload.get("user") if isinstance(payload.get("user"), dict) else {}
     plan = _membership_plan(user)
 
@@ -227,6 +370,21 @@ def _snapshots_from_payload(payload: dict[str, Any], captured_at: int) -> list[Q
 
 
 def collect_kimi_api_snapshots(*, opener=urllib.request.urlopen, now: int | None = None, timeout: float = 15.0) -> list[QuotaSnapshot]:
+    """Fetch Kimi Code quota usage snapshots from the API.
+
+    Queries the Kimi Code usage endpoint using discovered credentials.
+    Verifies that the target host is in ``_ALLOWED_HOSTS`` (``api.kimi.com``)
+    and has a ``/coding`` path prefix before attaching the bearer token.
+
+    Args:
+        opener: Callable used to execute HTTP requests (defaults to ``urllib.request.urlopen``).
+        now: Optional Unix epoch timestamp in seconds overriding current time.
+        timeout: Request timeout in seconds (defaults to 15.0).
+
+    Returns:
+        List of QuotaSnapshot objects for active limits, or a list with a single
+        error/fallback snapshot if queries fail or credentials are unavailable.
+    """
     captured_at = int(now if now is not None else datetime.now(timezone.utc).timestamp())
     credentials = _credentials()
     if not credentials:

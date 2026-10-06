@@ -1,3 +1,11 @@
+"""MiniMax Token Plan quota tracking provider.
+
+Extracts MiniMax (Hailuo) credentials for both global and mainland-China
+regions from environment variables, mmx CLI configuration files, and
+external credential discovery sources. Queries the MiniMax Token Plan
+remains API to monitor 5-hour and weekly model token allowances.
+"""
+
 from __future__ import annotations
 
 import json
@@ -21,6 +29,16 @@ _ALLOWED_HOSTS = frozenset({"api.minimax.io", "api.minimaxi.com", "www.minimax.i
 
 @dataclass(frozen=True)
 class _Credential:
+    """Credential container for MiniMax API authentication.
+
+    Attributes:
+        token: Bearer token or API key for MiniMax API calls.
+        region: Operating region ('global' or 'cn').
+        base_url: Target base URL for API requests.
+        source: Origin or configuration file reference for the credential.
+        expires_at: Optional Unix epoch timestamp in seconds when the token expires.
+    """
+
     token: str
     region: str
     base_url: str
@@ -35,10 +53,21 @@ _REGION_BASE_URLS = {
 
 
 def _config_path():
+    """Return the filesystem path to the MiniMax CLI configuration file.
+
+    Returns:
+        Path to ``config.json`` in the MiniMax CLI root directory.
+    """
     return clientpaths.minimax_cli_root() / "config.json"
 
 
 def _read_config() -> dict[str, Any]:
+    """Read and parse the MiniMax CLI configuration file.
+
+    Returns:
+        Decoded JSON configuration dictionary, or an empty dictionary
+        if the file does not exist or fails to parse.
+    """
     try:
         data = json.loads(_config_path().read_text(encoding="utf-8"))
     except Exception:
@@ -47,6 +76,14 @@ def _read_config() -> dict[str, Any]:
 
 
 def _oauth_expiry(value: Any) -> int | None:
+    """Parse an OAuth expiry timestamp into Unix epoch seconds.
+
+    Args:
+        value: Raw expiration string or numeric value from configuration.
+
+    Returns:
+        Unix timestamp in seconds, or None if parsing fails.
+    """
     return _parse_time(value)
 
 
@@ -56,6 +93,9 @@ def _credentials() -> list[_Credential]:
     MiniMax runs separate global and mainland-China backends. Region-specific
     environment variables may therefore intentionally produce two accounts.
     The generic ``MINIMAX_API_KEY`` follows mmx's selected/configured region.
+
+    Returns:
+        List of credential objects for API authentication.
     """
     cfg = _read_config()
     configured_region = str(os.environ.get("MINIMAX_REGION") or cfg.get("region") or "global").lower()
@@ -132,6 +172,19 @@ def _credentials() -> list[_Credential]:
 
 
 def _status_snapshot(status: str, captured_at: int, credential: _Credential | None, raw: dict[str, Any]) -> QuotaSnapshot:
+    """Create a fallback or error QuotaSnapshot for MiniMax.
+
+    Args:
+        status: Status code indicating the result (e.g., 'unavailable',
+            'stale_token', 'fetch_error').
+        captured_at: Unix epoch timestamp in seconds when captured.
+        credential: The credential instance that produced this status, if any.
+        raw: Additional diagnostic or error metadata dictionary.
+
+    Returns:
+        A QuotaSnapshot initialized with provider 'minimax', region account,
+        source 'minimax_api', and the given status and metadata.
+    """
     region = credential.region if credential else "default"
     meta = {
         "region": region,
@@ -145,6 +198,17 @@ def _status_snapshot(status: str, captured_at: int, credential: _Credential | No
 
 
 def _percent(remaining: Any) -> float | None:
+    """Calculate the used percentage from a remaining percentage value.
+
+    Inverts remaining percentage (``100.0 - remaining``) and clamps
+    the result to [0.0, 100.0] rounded to 4 decimal places.
+
+    Args:
+        remaining: Numeric or string representation of remaining percentage.
+
+    Returns:
+        Calculated used percentage, or None if conversion fails.
+    """
     # The live endpoint provides an explicit remaining percentage even when both count
     # fields are 0/0. Keep Tokdash's normalized utilization bounded to 0–100; MiniMax's
     # separate weekly_boost_permille presentation is not a second utilization scale.
@@ -157,15 +221,52 @@ def _percent(remaining: Any) -> float | None:
 
 
 def _quota_url(base_url: str) -> str:
+    """Construct the Token Plan remains API endpoint URL from a base URL.
+
+    Appends ``/token_plan/remains`` if base URL ends with ``/v1``,
+    otherwise appends ``/v1/token_plan/remains``.
+
+    Args:
+        base_url: Base URL string for the MiniMax API.
+
+    Returns:
+        Full URL to the token plan remains endpoint.
+    """
     base = base_url.rstrip("/")
     return f"{base}/token_plan/remains" if base.endswith("/v1") else f"{base}/v1/token_plan/remains"
 
 
 def _bucket_label(name: str, label: str, window: str) -> str:
+    """Generate a display label for a quota bucket.
+
+    Formats the bucket label as either the window name alone (for general models)
+    or combining the model title with the window name (e.g. 'MiniMax-Text · Weekly').
+
+    Args:
+        name: Raw model identifier.
+        label: Formatted model title.
+        window: Window duration description (e.g., '5-hour', 'Weekly').
+
+    Returns:
+        Human-readable bucket label string.
+    """
     return window if name.strip().lower() == "general" else f"{label} · {window}"
 
 
 def _snapshots_from_payload(payload: dict[str, Any], credential: _Credential, captured_at: int) -> list[QuotaSnapshot]:
+    """Parse a MiniMax remains API response payload into QuotaSnapshot objects.
+
+    Extracts model usage records from ``model_remains``, generating snapshots
+    for 5-hour intervals, weekly allowances, and unlimited plan indicators.
+
+    Args:
+        payload: Decoded JSON response dictionary from the MiniMax API.
+        credential: The credential used to make the request.
+        captured_at: Unix epoch timestamp in seconds when captured.
+
+    Returns:
+        List of QuotaSnapshot instances for each active model quota window.
+    """
     remains = payload.get("model_remains")
     if not isinstance(remains, list):
         data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
@@ -223,6 +324,22 @@ def _snapshots_from_payload(payload: dict[str, Any], credential: _Credential, ca
 
 
 def collect_minimax_api_snapshots(*, opener=urllib.request.urlopen, now: int | None = None, timeout: float = 15.0) -> list[QuotaSnapshot]:
+    """Collect quota snapshots from the MiniMax Token Plan remains API.
+
+    Queries the token plan endpoint for all discovered credentials. Verifies
+    that destination hosts are in ``_ALLOWED_HOSTS`` before sending the bearer
+    token. Handles token expiration, API base response error codes (mapping 1004
+    to stale_token), and HTTP errors.
+
+    Args:
+        opener: Callable used to execute HTTP requests (defaults to ``urllib.request.urlopen``).
+        now: Optional Unix epoch timestamp in seconds overriding current time.
+        timeout: Request timeout in seconds (defaults to 15.0).
+
+    Returns:
+        List of QuotaSnapshot objects for all active model quotas across credentials,
+        or error snapshots if requests fail.
+    """
     captured_at = int(now if now is not None else datetime.now(timezone.utc).timestamp())
     credentials = _credentials()
     if not credentials:

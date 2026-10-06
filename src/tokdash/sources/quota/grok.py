@@ -1,3 +1,10 @@
+"""Grok Build quota and credit tracking provider.
+
+Extracts OAuth credentials from local Grok CLI configuration files
+and queries the Grok Build billing API to track credit usage, subscription
+tiers, and billing period reset windows.
+"""
+
 from __future__ import annotations
 
 import json
@@ -15,6 +22,19 @@ GROK_BILLING_URL = "https://cli-chat-proxy.grok.com/v1/billing?format=credits"
 
 
 def _read_auth() -> tuple[str | None, dict[str, Any]]:
+    """Extract Grok CLI OAuth credentials from local storage.
+
+    Reads authentication details from ``auth.json`` in the Grok CLI home
+    directory (``~/.grok/auth.json`` via ``clientpaths.grok_home()``), filtering
+    for xAI OIDC credentials where ``oidc_issuer`` is ``https://auth.x.ai``
+    and ``auth_mode`` is ``oidc`` or ``external``. Plain API keys are rejected.
+
+    Returns:
+        A tuple of ``(token, metadata)`` if valid credentials are found,
+        or ``(None, error_metadata)`` if credentials are missing or invalid.
+        Metadata includes credential path, user ID, expiration timestamp,
+        and authentication mode.
+    """
     path = clientpaths.grok_home() / "auth.json"
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -50,6 +70,18 @@ def _read_auth() -> tuple[str | None, dict[str, Any]]:
 
 
 def _status_snapshot(status: str, captured_at: int, meta: dict[str, Any]) -> QuotaSnapshot:
+    """Create a fallback or error QuotaSnapshot for Grok Build.
+
+    Args:
+        status: Status string indicating availability or error state
+            (e.g., 'unavailable', 'stale_token', 'fetch_error').
+        captured_at: Unix epoch timestamp in seconds when the snapshot was recorded.
+        meta: Metadata dictionary containing path, error, and expiry details.
+
+    Returns:
+        A QuotaSnapshot instance with provider 'grok', account user_id or 'default',
+        source 'grok_api', the specified status, and sanitized metadata.
+    """
     safe = {
         key: meta.get(key)
         for key in ("path", "expires_at", "auth_mode", "error")
@@ -62,6 +94,14 @@ def _status_snapshot(status: str, captured_at: int, meta: dict[str, Any]) -> Quo
 
 
 def _cent_value(value: Any) -> float | None:
+    """Extract a numeric cent value from a scalar or dictionary wrapper.
+
+    Args:
+        value: Direct numeric value or mapping with 'val' or 'value' key.
+
+    Returns:
+        Extracted float value in cents, or None if conversion fails.
+    """
     if isinstance(value, dict):
         value = value.get("val", value.get("value"))
     try:
@@ -71,6 +111,21 @@ def _cent_value(value: Any) -> float | None:
 
 
 def _billing_snapshot(payload: dict[str, Any], meta: dict[str, Any], captured_at: int) -> QuotaSnapshot | None:
+    """Parse a Grok billing API response into a QuotaSnapshot.
+
+    Handles proto3-JSON responses where zero-valued usage fields are omitted,
+    determines the quota bucket ('7d' weekly, 'month' monthly, or 'credits'),
+    and extracts subscription tier, reset timestamps, and raw metadata.
+
+    Args:
+        payload: JSON dictionary decoded from the Grok billing endpoint.
+        meta: Credential and source metadata from ``_read_auth``.
+        captured_at: Unix epoch timestamp in seconds when the snapshot was captured.
+
+    Returns:
+        A populated QuotaSnapshot with status 'ok', or None if payload structure
+        does not match expected billing formats.
+    """
     config = payload.get("config") if isinstance(payload.get("config"), dict) else {}
     period = config.get("currentPeriod") if isinstance(config.get("currentPeriod"), dict) else {}
     period_type = str(period.get("type") or "")
@@ -122,6 +177,23 @@ def _billing_snapshot(payload: dict[str, Any], meta: dict[str, Any], captured_at
 
 
 def collect_grok_api_snapshots(*, opener=urllib.request.urlopen, now: int | None = None, timeout: float = 15.0) -> list[QuotaSnapshot]:
+    """Fetch current Grok Build quota and credit usage from the billing API.
+
+    Queries ``GROK_BILLING_URL`` (``https://cli-chat-proxy.grok.com/v1/billing?format=credits``)
+    using OAuth credentials discovered from the local Grok CLI configuration.
+    Sets headers including Bearer authorization, ``X-XAI-Token-Auth: xai-grok-cli``,
+    ``x-userid``, and client identification.
+
+    Args:
+        opener: Callable used to issue the HTTP request (defaults to ``urllib.request.urlopen``).
+        now: Optional Unix epoch timestamp in seconds overriding current time.
+        timeout: Network request timeout in seconds (defaults to 15.0).
+
+    Returns:
+        List containing a QuotaSnapshot with current usage and status 'ok',
+        or a single error snapshot with status 'unavailable', 'stale_token',
+        or 'fetch_error'.
+    """
     captured_at = int(now if now is not None else datetime.now(timezone.utc).timestamp())
     token, meta = _read_auth()
     if not token:

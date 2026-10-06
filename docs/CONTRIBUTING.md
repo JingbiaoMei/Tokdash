@@ -1,3 +1,5 @@
+> **Note:** This file has moved to [`.github/CONTRIBUTING.md`](../.github/CONTRIBUTING.md). GitHub automatically surfaces that version to contributors.
+
 # Contributing
 
 Thanks for considering a contribution!
